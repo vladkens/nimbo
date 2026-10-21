@@ -85,9 +85,22 @@ const SCAN: [(u16, u16); 63] = [
   (0x49, 92),
 ];
 
-/// The macOS virtual key code of a key: named keys by virtual key (so a posted message with no
-/// extended bit maps too), the rest by scan code; unknown keys `0x100 + vk`.
+/// The keypad's scan codes that send navigation virtual keys with Num Lock off (7 8 9, 4 5 6,
+/// 1 2 3, 0 and .), never with the extended bit the dedicated keys have.
+fn keypad_scan(scan: u16, extended: bool) -> bool {
+  !extended && matches!(scan, 0x47..=0x49 | 0x4B..=0x4D | 0x4F..=0x53)
+}
+
+/// The macOS virtual key code of a key: the keypad by its scan code whatever Num Lock makes it
+/// send, other named keys by virtual key (so a posted message with no scan code maps too), the
+/// rest by scan code; unknown keys `0x100 + vk`.
 pub fn code(vk: u16, scan: u16, extended: bool) -> u16 {
+  if keypad_scan(scan, extended)
+    && let Some(&(_, c)) = SCAN.iter().find(|(s, _)| *s == scan)
+  {
+    return c;
+  }
+
   let named = match vk {
     VK_RETURN if extended => Some(76), // keypad
     VK_RETURN => Key::Enter.code(),
@@ -163,24 +176,47 @@ pub fn mod_key(vk: u16, scan: u16, extended: bool) -> Option<ModKey> {
 }
 
 /// What a key types on the current layout with the key state `state`, without touching the
-/// layout's dead-key state; `None` for nothing or more than one character.
-fn typed(vk: u16, scan: u16, state: &[u8; 256]) -> Option<char> {
+/// layout's dead-key state, and whether it is a dead key; `None` for nothing or more than one
+/// character.
+fn typed(vk: u16, scan: u16, state: &[u8; 256]) -> Option<(char, bool)> {
   let mut buf = [0u16; 8];
   // Flag 4: keep the keyboard state (dead keys) as it is (Windows 10 1607).
   let layout = unsafe { GetKeyboardLayout(0) };
   let n =
     unsafe { ToUnicodeEx(vk as u32, scan as u32, state.as_ptr(), buf.as_mut_ptr(), 8, 4, layout) };
-  let units = &buf[..n.unsigned_abs().min(8) as usize];
+  decoded(n, &buf)
+}
+
+/// ToUnicodeEx's result: `n` units of `buf`, a negative `n` for a dead key (its spacing form).
+fn decoded(n: i32, buf: &[u16]) -> Option<(char, bool)> {
+  let units = &buf[..(n.unsigned_abs() as usize).min(buf.len())];
   let mut cs = char::decode_utf16(units.iter().copied());
   match (cs.next(), cs.next()) {
-    (Some(Ok(c)), None) => Some(c),
+    (Some(Ok(c)), None) => Some((c, n < 0)),
     _ => None,
   }
 }
 
-/// A key press: named keys by code, the rest by the character the key types with Shift alone
-/// (with Ctrl or Windows, a non-ASCII one is the US layout's, so shortcuts work on any layout);
-/// `text` what it types with every modifier, unless Ctrl or Windows is held.
+/// The key a navigation virtual key names wherever it is: the keypad's with Num Lock off too.
+fn navigation(vk: u16) -> Option<Key> {
+  Some(match vk {
+    VK_LEFT => Key::Left,
+    VK_RIGHT => Key::Right,
+    VK_UP => Key::Up,
+    VK_DOWN => Key::Down,
+    VK_HOME => Key::Home,
+    VK_END => Key::End,
+    VK_PRIOR => Key::PageUp,
+    VK_NEXT => Key::PageDown,
+    VK_DELETE => Key::Delete,
+    _ => return None,
+  })
+}
+
+/// A key press: named keys by code (the keypad's navigation keys by virtual key), the rest by
+/// the character the key types with Shift alone (with Ctrl or Windows, a non-ASCII one is the US
+/// layout's, so shortcuts work on any layout); `text` what it types with every modifier, unless
+/// Ctrl or Windows is held or it is a dead key.
 pub fn key_event(vk: u16, scan: u16, extended: bool, repeat: bool) -> KeyEvent {
   let (code, mods) = (code(vk, scan, extended), mods());
   let mut state = [0u8; 256];
@@ -188,7 +224,8 @@ pub fn key_event(vk: u16, scan: u16, extended: bool, repeat: bool) -> KeyEvent {
     state[VK_SHIFT as usize] = 0x80;
   }
 
-  let key = Key::named(code).unwrap_or_else(|| match typed(vk, scan, &state) {
+  let named = Key::named(code).or_else(|| navigation(vk));
+  let key = named.unwrap_or_else(|| match typed(vk, scan, &state).map(|t| t.0) {
     Some(c) if (mods.cmd || mods.ctrl) && !c.is_ascii() => {
       keys::us_char(code, mods.shift).map_or(Key::Char(c), Key::Char)
     }
@@ -198,7 +235,8 @@ pub fn key_event(vk: u16, scan: u16, extended: bool, repeat: bool) -> KeyEvent {
   let text = match key {
     Key::Char(_) if !(mods.cmd || mods.ctrl) => {
       unsafe { GetKeyboardState(state.as_mut_ptr()) };
-      typed(vk, scan, &state).filter(|c| keys::printable(c.encode_utf8(&mut [0; 4])))
+      let typed = typed(vk, scan, &state).filter(|t| !t.1).map(|t| t.0);
+      typed.filter(|c| keys::printable(c.encode_utf8(&mut [0; 4])))
     }
     _ => None,
   };
@@ -263,13 +301,34 @@ mod tests {
       (VK_RETURN, 0x1C, false, 36),
       (VK_RETURN, 0x1C, true, 76),
       (VK_LEFT, 0x4B, true, 123),
-      (VK_LEFT, 0x4B, false, 123),
+      (VK_LEFT, 0, false, 123),   // posted, no scan code
+      (VK_LEFT, 0x4B, false, 86), // keypad 4, Num Lock off
+      (0x64, 0x4B, false, 86),    // keypad 4, Num Lock on
+      (VK_DELETE, 0x53, true, 117),
+      (VK_DELETE, 0x53, false, 65), // keypad .
       (VK_F1 + 11, 0x58, false, 111),
       (VK_SPACE, 0x39, false, 49),
     ];
     for (vk, scan, ext, want) in cases {
       assert_eq!(code(vk, scan, ext), want, "vk {vk:#x}");
     }
+  }
+
+  #[test]
+  fn keypad_keys_keep_their_place() {
+    let k = key_event(VK_LEFT, 0x4B, false, false);
+    assert_eq!((k.key, k.code, k.text), (Key::Left, 86, None), "keypad 4, Num Lock off");
+    let k = key_event(VK_LEFT, 0x4B, true, false);
+    assert_eq!((k.key, k.code), (Key::Left, 123));
+  }
+
+  #[test]
+  fn dead_keys_type_nothing() {
+    // `^` as ToUnicodeEx gives a dead key (-1) and a typed one (1).
+    assert_eq!(decoded(-1, &[0x5E, 0]), Some(('^', true)));
+    assert_eq!(decoded(1, &[0x5E, 0]), Some(('^', false)));
+    assert_eq!(decoded(0, &[0x5E, 0]), None);
+    assert_eq!(decoded(2, &[0x61, 0x62]), None, "two characters");
   }
 
   #[test]
