@@ -84,7 +84,11 @@ impl Dib {
     Some(Self { dc, bmp, bits: bits.cast(), w, h, tiles: Vec::new() })
   }
 
+  /// The pixels to draw into, once GDI is done with them: it may batch the last frame's
+  /// `BitBlt` reads from the section (`GdiFlush`, as `CreateDIBSection` asks before the bits are
+  /// touched).
   fn pixels(&mut self) -> &mut [u32] {
+    unsafe { GdiFlush() };
     // SAFETY: the section holds `w * h` pixels, written only through this borrow.
     unsafe { std::slice::from_raw_parts_mut(self.bits, self.w * self.h) }
   }
