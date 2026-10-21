@@ -181,6 +181,8 @@ struct Window {
   held: Vec<MouseButton>,
   /// A high surrogate from WM_CHAR, waiting for its low one.
   high: Option<u16>,
+  /// The text field the input method is on for; off without one.
+  ime: Option<crate::ui::Id>,
   /// The cursor last set.
   cursor: Cursor,
   /// The least content size in points ([Config::min]) and the window's style, for
@@ -396,7 +398,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
 }
 
 fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-  if let Some(r) = input::handle(msg, wp, lp) {
+  if let Some(r) = input::handle(hwnd, msg, wp, lp) {
     return r;
   }
 
@@ -593,6 +595,8 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
     )
   };
   assert!(!hwnd.is_null(), "nimbo: CreateWindowExW failed");
+  // No input method until a text field takes it.
+  input::ime_off(hwnd);
 
   let scale = unsafe { GetDpiForWindow(hwnd) } as f32 / 96.0;
   let mut rt = Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(WinClipboard::new(hwnd)));
@@ -626,6 +630,7 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
     clicks: input::Clicks::default(),
     held: Vec::new(),
     high: None,
+    ime: None,
     cursor: Cursor::Arrow,
     min: cfg.min(),
     style,

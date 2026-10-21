@@ -3,22 +3,30 @@
 //! Input on the window: the mouse (moves, buttons with click counts, leaving through
 //! TrackMouseEvent), the wheel and precision touchpads, keys ([keyboard]: a key nobody used
 //! goes on to TranslateMessage, whose WM_CHAR is typed text, and to [keyboard::standard] for
-//! its command), and cursors.
+//! its command), the IMM32 input method while a text field that takes it has focus (the
+//! composition drawn in the field as marked text, the candidate window under the caret), and
+//! cursors.
 
 use std::ptr::null_mut;
 
-use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
+use windows_sys::Win32::UI::Input::Ime::{
+  CANDIDATEFORM, CFS_EXCLUDE, CFS_POINT, COMPOSITIONFORM, CPS_CANCEL, CPS_COMPLETE, GCS_COMPSTR,
+  GCS_CURSORPOS, GCS_RESULTSTR, IACE_DEFAULT, IME_COMPOSITION_STRING, ISC_SHOWUICOMPOSITIONWINDOW,
+  ImmAssociateContextEx, ImmGetCompositionStringW, ImmGetContext, ImmNotifyIME, ImmReleaseContext,
+  ImmSetCandidateWindow, ImmSetCompositionWindow, NI_COMPOSITIONSTR,
+};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
   GetDoubleClickTime, ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
-  VK_PROCESSKEY,
+  VK_PROCESSKEY, VK_RETURN,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use super::{Window, keyboard, with};
-use crate::app::{Event, MouseButton, Phase, WHEEL_LINE};
+use crate::app::{Event, Ime, MouseButton, Phase, WHEEL_LINE};
 use crate::keys::KeyEvent;
-use crate::scene::Point;
+use crate::scene::{Point, Rect};
 use crate::ui::Cursor;
 
 /// `WM_MOUSELEAVE` (CommCtrl.h, in windows-sys' Controls).
@@ -61,10 +69,12 @@ impl Window {
     (0..w).contains(&x) && (0..h).contains(&y)
   }
 
-  /// Feeds an event to the runtime, then shows its cursor.
+  /// Feeds an event to the runtime, then shows its cursor and turns the input method on or
+  /// off with the field's focus.
   pub(super) fn send(&mut self, ev: Event) -> bool {
     let used = self.rt.event(ev);
     self.sync_cursor(false);
+    self.sync_ime();
     used
   }
 
@@ -265,6 +275,131 @@ impl Window {
       self.send(Event::Text(s));
     }
   }
+
+  // MARK: Input method
+
+  /// The input method only while a field that takes it has focus: without it keys stay plain.
+  /// A composition left in the input method as the focus moves on is cancelled: the field kept
+  /// it as typed.
+  fn sync_ime(&mut self) {
+    let on = self.rt.ui.text_input().and(self.rt.ui.focus());
+    if on == self.ime {
+      return;
+    }
+
+    // Its messages find the window busy and go: the field kept the composition.
+    if self.ime.is_some() {
+      ime_notify(self.hwnd, CPS_CANCEL);
+    }
+
+    match (self.ime.is_some(), on.is_some()) {
+      (false, true) => unsafe { _ = ImmAssociateContextEx(self.hwnd, null_mut(), IACE_DEFAULT) },
+      (true, false) => ime_off(self.hwnd),
+      _ => {}
+    }
+
+    self.ime = on;
+  }
+
+  /// Whether an input method has marked text in the focused field.
+  fn composing(&self) -> bool {
+    self.rt.ui.text_input().is_some_and(|t| t.marked().is_some())
+  }
+
+  /// Puts the composition and candidate windows at the caret, the candidates under it.
+  fn place_ime(&mut self) {
+    let Some(rect) = self.rt.text_input().and_then(|t| t.caret_rect()) else { return };
+    let s = self.scale;
+    let px = |r: Rect| RECT {
+      left: (r.x * s) as i32,
+      top: (r.y * s) as i32,
+      right: ((r.x + r.w.max(1.0)) * s) as i32,
+      bottom: ((r.y + r.h) * s) as i32,
+    };
+    let area = px(rect);
+    let at = POINT { x: area.left, y: area.bottom };
+    let cx = unsafe { ImmGetContext(self.hwnd) };
+    if cx.is_null() {
+      return;
+    }
+
+    let comp = COMPOSITIONFORM { dwStyle: CFS_POINT, ptCurrentPos: at, rcArea: area };
+    let cand = CANDIDATEFORM { dwIndex: 0, dwStyle: CFS_EXCLUDE, ptCurrentPos: at, rcArea: area };
+    unsafe {
+      ImmSetCompositionWindow(cx, &comp);
+      ImmSetCandidateWindow(cx, &cand);
+      ImmReleaseContext(self.hwnd, cx);
+    }
+  }
+
+  /// The composition changed: committed text, then the text being composed as marked text with
+  /// the input method's caret. Both in one message are an end and a new start.
+  fn composition(&mut self, lp: LPARAM) {
+    let flags = lp as u32;
+    let cx = unsafe { ImmGetContext(self.hwnd) };
+    if cx.is_null() {
+      return;
+    }
+
+    let get = |kind: IME_COMPOSITION_STRING| {
+      let n = unsafe { ImmGetCompositionStringW(cx, kind, null_mut(), 0) };
+      let mut buf = vec![0u16; n.max(0) as usize / 2];
+      let bytes = (buf.len() * 2) as u32;
+      unsafe { ImmGetCompositionStringW(cx, kind, buf.as_mut_ptr().cast(), bytes) };
+      String::from_utf16_lossy(&buf)
+    };
+    let result = (flags & GCS_RESULTSTR != 0).then(|| get(GCS_RESULTSTR));
+    // A move of the input method's caret alone comes without the string: read it again.
+    let comp = (flags & (GCS_COMPSTR | GCS_CURSORPOS) != 0).then(|| {
+      let text = get(GCS_COMPSTR);
+      let n = text.encode_utf16().count();
+      let at = match flags & GCS_CURSORPOS != 0 {
+        true => unsafe { ImmGetCompositionStringW(cx, GCS_CURSORPOS, null_mut(), 0) },
+        false => n as i32,
+      };
+
+      (text, (at.max(0) as usize).min(n))
+    });
+    unsafe { ImmReleaseContext(self.hwnd, cx) };
+    if let Some(text) = result {
+      self.send(Event::Ime(Ime::Commit { text, replace: None }));
+    }
+
+    if let Some((text, at)) = comp.filter(|(t, _)| !t.is_empty() || self.composing()) {
+      self.send(Event::Ime(Ime::Mark { text, sel: at..at, replace: None }));
+    }
+
+    self.place_ime();
+  }
+
+  /// Composing ended: marked text left over (a cancel) goes.
+  fn end_composition(&mut self) {
+    if self.composing() {
+      self.send(Event::Ime(Ime::Mark { text: String::new(), sel: 0..0, replace: None }));
+    }
+  }
+}
+
+/// Tells the input method to complete or cancel its composition (`CPS_COMPLETE`, `CPS_CANCEL`).
+/// Outside the window's borrow when what it sends back matters: its messages come at once.
+fn ime_notify(hwnd: HWND, action: u32) {
+  let cx = unsafe { ImmGetContext(hwnd) };
+  if !cx.is_null() {
+    unsafe {
+      ImmNotifyIME(cx, NI_COMPOSITIONSTR, action, 0);
+      ImmReleaseContext(hwnd, cx);
+    }
+  }
+}
+
+/// Whether the window's field has a composition under way.
+fn composing() -> bool {
+  with(|w| w.composing()).unwrap_or(false)
+}
+
+/// Takes the input method off the window: keys stay plain.
+pub(super) fn ime_off(hwnd: HWND) {
+  unsafe { ImmAssociateContextEx(hwnd, null_mut(), 0) };
 }
 
 fn key(vk: u16, lp: LPARAM) -> KeyEvent {
@@ -278,6 +413,12 @@ fn key(vk: u16, lp: LPARAM) -> KeyEvent {
 pub(super) fn key_message(msg: &MSG) -> bool {
   let (wp, lp) = (msg.wParam, msg.lParam);
   match msg.message {
+    // Enter that reaches us while a composition is pending only completes it; its result comes
+    // back at once as WM_IME_COMPOSITION.
+    WM_KEYDOWN if wp as u16 == VK_RETURN && composing() => {
+      ime_notify(msg.hwnd, CPS_COMPLETE);
+      true
+    }
     WM_KEYDOWN | WM_SYSKEYDOWN => {
       if with(|w| w.key_down(wp, lp)).unwrap_or(false) {
         return true;
@@ -297,8 +438,15 @@ pub(super) fn key_message(msg: &MSG) -> bool {
 }
 
 /// The window's input messages; `None` for others.
-pub(super) fn handle(msg: u32, wp: WPARAM, lp: LPARAM) -> Option<LRESULT> {
+pub(super) fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> Option<LRESULT> {
   let button = |b| move |w: &mut Window, down| w.button(b, down, wp, lp);
+  // A click ends a composition as typed; the input method lets go of it.
+  let downs = [WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MBUTTONDOWN, WM_XBUTTONDOWN];
+  if downs.contains(&msg) && composing() {
+    with(|w| w.send(Event::Ime(Ime::Unmark)));
+    ime_notify(hwnd, CPS_CANCEL);
+  }
+
   match msg {
     WM_MOUSEMOVE => _ = with(|w| w.mouse_move(lp)),
     WM_MOUSELEAVE => {
@@ -331,6 +479,14 @@ pub(super) fn handle(msg: u32, wp: WPARAM, lp: LPARAM) -> Option<LRESULT> {
     // Alt with a key: no menu to open, no beep; Alt-Space still opens the window menu.
     WM_SYSCHAR if wp != ' ' as usize => {}
     WM_SYSCOMMAND if wp & 0xFFF0 == SC_KEYMENU as usize && lp == 0 => {}
+    WM_IME_SETCONTEXT => {
+      // The composition shows in the field, not in the input method's window.
+      let lp = lp & !(ISC_SHOWUICOMPOSITIONWINDOW as LPARAM);
+      return Some(unsafe { DefWindowProcW(hwnd, msg, wp, lp) });
+    }
+    WM_IME_STARTCOMPOSITION => _ = with(|w| w.place_ime()),
+    WM_IME_COMPOSITION => _ = with(|w| w.composition(lp)),
+    WM_IME_ENDCOMPOSITION => _ = with(|w| w.end_composition()),
     _ => return None,
   }
 
