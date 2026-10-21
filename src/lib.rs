@@ -2,6 +2,8 @@
 
 //! nimbo: a small custom-drawn UI toolkit, with its own CPU renderer for drawing.
 
+pub mod cpu;
+mod png;
 pub mod scene;
 
 pub use scene::{
