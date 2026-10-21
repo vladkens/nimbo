@@ -783,6 +783,28 @@ mod tests {
   }
 
   #[test]
+  fn tab_focus_in_a_window_overlay_leaves_the_scroll_under_it() {
+    // A popup on the window, built in a 50-high list, scrolling two items in one's height.
+    let list = |ui: &mut Ui| {
+      ui.id("list").col(Style::new().w(px(50.0)).h(px(50.0)).scroll_y(), |ui| {
+        ui.el(Style::new().w(px(50.0)).h(px(1000.0)));
+        let pop = Style::new().w(px(50.0)).h(px(20.0)).scroll_y();
+        ui.id("pop").float(Float::window().offset(100.0, 70.0)).col(pop, |ui| {
+          for i in 0..2 {
+            ui.id(("item", i)).el(Style::new().w(px(50.0)).h(px(20.0)).focusable());
+          }
+        });
+      });
+    };
+    let mut st = frame(UiState::default(), list);
+    st.focus_next(true);
+    st.focus_next(true);
+    st = frame(st, list);
+    assert_eq!(st.focus(), Some(Id::of(("item", 1))));
+    assert_eq!((offset(&st, "list"), offset(&st, "pop")), (0.0, 20.0));
+  }
+
+  #[test]
   fn reveal_scrolls_the_least() {
     let list = |ui: &mut Ui| {
       ui.id("list").col(Style::new().w(px(50.0)).h(px(100.0)).scroll_y(), |ui| {
