@@ -198,10 +198,15 @@ fn row_spans(
 
 // MARK: Quads
 
-/// The pixel rect a quad's geometry covers: its rect padded as `quad_vs` does.
+/// The pixel rect a quad's geometry covers: its rect padded as `quad_vs` does; none for an empty
+/// rect (an intersection that missed), which the padding would turn into a faint stripe.
 pub fn quad_bounds(q: &Quad, scale: f32) -> IRect {
-  let pad = q.blur * 2.0 + 1.0 / scale;
   let r = q.rect;
+  if !(r.w > 0.0 && r.h > 0.0) {
+    return IRect::default();
+  }
+
+  let pad = q.blur * 2.0 + 1.0 / scale;
   IRect::centres(
     (r.x - pad) * scale,
     (r.y - pad) * scale,
@@ -567,6 +572,19 @@ mod tests {
     for (y, row) in px.chunks(20).enumerate().take(4) {
       assert!(row[9..].iter().all(|p| p & 0xff == 0), "row {y}: {:08x?}", &row[9..]);
     }
+  }
+
+  #[test]
+  fn empty_quads_draw_nothing() {
+    // A plain one would cover the pixels at its edge by half; a shadow would spread.
+    let mut px = [0u32; 25];
+    for rect in [Rect::new(1.5, 1.0, 0.0, 4.0), Rect::new(1.0, 1.5, 4.0, 0.0)] {
+      let q = Quad::new(rect, [1.0; 4]);
+      quad(&mut Target { px: &mut px, stride: 5, y0: 0 }, &q, IRect::new(0, 0, 5, 5), 1.0);
+      assert!(quad_bounds(&q.blur(1.0), 1.0).is_empty());
+    }
+
+    assert_eq!(px, [0; 25]);
   }
 
   #[test]
