@@ -122,9 +122,10 @@ pub fn hit(t: &Tree, p: Point, out: &mut Vec<Id>) {
   }
 }
 
-/// The topmost interactive node under `p`: overlays from the top by z, then the tree.
+/// The topmost interactive node under `p`: overlays from the top by z, then the tree; none
+/// outside the window (a release after a drag out of it), where nothing shows.
 fn top(t: &Tree, p: Point) -> Option<u32> {
-  if t.nodes.len() <= 1 {
+  if t.nodes.len() <= 1 || !t.nodes[0].rect.contains(p) {
     return None;
   }
 
@@ -495,6 +496,27 @@ mod tests {
     assert_eq!(at(&st, 110.0, 5.0), []);
     assert_eq!(at(&st, 45.0, 5.0), [pop]);
     assert_eq!(at(&st, 45.0, 15.0), [a, panel]);
+  }
+
+  #[test]
+  fn nothing_hits_outside_the_window() {
+    // A button and an overlay running past the 200-wide window's right edge.
+    let mut st = frame(UiState::default(), |ui| {
+      ui.id("b").el(Style::new().w(px(300.0)).h(px(20.0)));
+      ui.id("pop")
+        .float(Float::window().offset(190.0, 50.0))
+        .el(Style::new().w(px(50.0)).h(px(20.0)));
+    });
+    assert_eq!(st.last.rect(Id::of("b")).unwrap().w, 300.0);
+    assert_eq!(
+      (at(&st, 195.0, 5.0), at(&st, 195.0, 55.0)),
+      (vec![Id::of("b")], vec![Id::of("pop")])
+    );
+    assert_eq!((at(&st, 220.0, 5.0), at(&st, 220.0, 55.0)), (vec![], vec![]));
+    // Pressed inside, released outside (a captured release): no click.
+    ev(&mut st, down(195.0, 5.0));
+    ev(&mut st, up(220.0, 5.0));
+    assert_eq!(st.input.click, None);
   }
 
   #[test]
