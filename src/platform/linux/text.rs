@@ -924,8 +924,10 @@ pub fn rasterize(
   color: bool,
 ) -> Option<Vec<u8>> {
   let key = rendered(face, id, raster.scale, subpixel);
-  // A colour glyph is drawn again in the text's colour; [glyph_box]'s was in black.
-  let last = LAST.with(|l| l.borrow_mut().take()).filter(|(k, _)| *k == key && !color);
+  // [glyph_box]'s render, unless layers in the text's colour take another than its black: a
+  // strike's pixels and a palette's colours are the same in any.
+  let tinted = color && raster.text != [0; 3] && color_glyph(face, id) == Some(true);
+  let last = LAST.with(|l| l.borrow_mut().take()).filter(|(k, _)| *k == key && !tinted);
   let n = if color { 4 } else { 1 };
   let mut out = vec![0u8; b.w * b.h * n];
   let g = match last {
@@ -984,6 +986,23 @@ mod tests {
     let px = rasterize(&f, id, 1, &b, raster, false).unwrap();
     assert_eq!(RENDERS.with(Cell::get), 1);
     assert!(px == alone, "the same pixels from the kept render");
+
+    // An emoji's colours take no tint: its box's render is kept too (CBDT, or COLR in its
+    // palette's colours).
+    let mut ts = crate::text::TextSystem::new(2.0);
+    let g = ts.layout("😀\u{fe0f}", Font::ui(13.0)).glyphs[0];
+    let f = ts.faces[g.face as usize].clone();
+    if !f.file.color || color_glyph(&f, g.id) == Some(true) {
+      println!("no untinted colour emoji: skipped");
+      return;
+    }
+
+    let raster = Raster { text: [200, 30, 30], ..raster };
+    RENDERS.with(|n| n.set(0));
+    let b = glyph_box(&f, g.id, 2.0, 0).unwrap();
+    let px = rasterize(&f, g.id, 0, &b, raster, true).unwrap();
+    assert_eq!(RENDERS.with(Cell::get), 1, "an emoji renders once");
+    assert!(px.chunks(4).any(|p| p[3] > 0));
   }
 
   /// Laying text out renders no glyph (its ink comes from the outlines' boxes); the atlas
