@@ -10,12 +10,17 @@
 //! redraw.
 
 use std::os::fd::OwnedFd;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use rustix::fs::{MemfdFlags, ftruncate, memfd_create};
 use rustix::mm::{MapFlags, ProtFlags, mmap, munmap};
+use x11rb::connection::{Connection, RequestConnection};
+use x11rb::errors::ReplyOrIdError;
+use x11rb::protocol::shm::{self, ConnectionExt as _};
+use x11rb::protocol::xproto::{ConnectionExt as _, CreateGCAux, ImageFormat};
+use x11rb::rust_connection::RustConnection;
 
-use super::xcb::X;
 use crate::cpu::raster::IRect;
 use crate::cpu::{Pixels, Renderer};
 use crate::scene::{Scene, Size};
@@ -38,12 +43,12 @@ enum Mem {
 
 pub struct Presenter {
   pub renderer: Renderer,
-  x: X,
+  x: Rc<RustConnection>,
   win: u32,
   gc: u32,
   depth: u8,
-  /// MIT-SHM's completion event code; `None` once it failed or without it.
-  shm: Option<u8>,
+  /// Presents use MIT-SHM; false once it failed or without it.
+  shm: bool,
   mem: Option<Mem>,
   w: usize,
   h: usize,
@@ -56,12 +61,14 @@ pub struct Presenter {
 }
 
 impl Presenter {
-  pub fn new(x: X, win: u32, depth: u8) -> Self {
-    let shm = x.shm();
-    let gc = x.create_gc(win);
+  pub fn new(x: Rc<RustConnection>, win: u32, depth: u8) -> Result<Self, ReplyOrIdError> {
+    let shm = has_shm(&x);
+    let gc = x.generate_id()?;
+    // No GraphicsExpose events.
+    x.create_gc(gc, win, &CreateGCAux::new().graphics_exposures(0))?;
     let (mem, w, h, tiles) = (None, 0, 0, Vec::new());
     let (reads, since) = (0, None);
-    Self { renderer: Renderer::new(), x, win, gc, depth, shm, mem, w, h, tiles, reads, since }
+    Ok(Self { renderer: Renderer::new(), x, win, gc, depth, shm, mem, w, h, tiles, reads, since })
   }
 
   /// Makes the buffer for frames of `w` × `h` pixels ahead of the first (its segment's attach
@@ -72,8 +79,8 @@ impl Presenter {
     }
   }
 
-  /// `ShmCompletion`'s response type, while presents use MIT-SHM.
-  pub fn completion(&self) -> Option<u8> {
+  /// Presents use MIT-SHM: each put's `ShmCompletion` is waited for.
+  pub fn shm(&self) -> bool {
     self.shm
   }
 
@@ -161,9 +168,13 @@ impl Presenter {
     let (rw, rh) = ((rc.x1 - rc.x0) as usize, (rc.y1 - rc.y0) as usize);
     match &self.mem {
       Some(Mem::Shm(s)) => {
-        let rect = [x0 as u16, y0 as u16, rw as u16, rh as u16];
-        let total = (self.w as u16, self.h as u16);
-        self.x.shm_put_image(self.win, self.gc, total, rect, self.depth, notify, s.id);
+        let (x, y, w, h) = (x0 as u16, y0 as u16, rw as u16, rh as u16);
+        let (tw, th) = (self.w as u16, self.h as u16);
+        let z = ImageFormat::Z_PIXMAP.into();
+        let (win, gc, depth) = (self.win, self.gc, self.depth);
+        let _ = self.x.shm_put_image(
+          win, gc, tw, th, x, y, w, h, x as i16, y as i16, depth, z, notify, s.id, 0,
+        );
         if notify {
           self.reads += 1;
           self.since.get_or_insert_with(Instant::now);
@@ -171,7 +182,7 @@ impl Presenter {
       }
       Some(Mem::Local(v)) => {
         // Bands of whole rows that fit a request (its header is 24 bytes).
-        let rows = ((self.x.max_request() - 64) / (rw * 4)).max(1);
+        let rows = ((self.x.maximum_request_bytes() - 64) / (rw * 4)).max(1);
         let mut y = y0;
         while y < y0 + rh {
           let n = rows.min(y0 + rh - y);
@@ -179,9 +190,9 @@ impl Presenter {
             .flat_map(|row| &v[row * self.w + x0..row * self.w + x0 + rw])
             .flat_map(|p| p.to_ne_bytes())
             .collect();
-          self.x.put_image(
-            self.win, self.gc, x0 as i16, y as i16, rw as u16, n as u16, self.depth, &band,
-          );
+          let (z, w, h) = (ImageFormat::Z_PIXMAP, rw as u16, n as u16);
+          let (win, gc, depth) = (self.win, self.gc, self.depth);
+          let _ = self.x.put_image(z, win, gc, w, h, x0 as i16, y as i16, 0, depth, &band);
           y += n;
         }
       }
@@ -198,7 +209,7 @@ impl Presenter {
       return;
     }
 
-    if self.shm.is_some() {
+    if self.shm {
       match self.segment(w * h * 4) {
         Some(s) => {
           self.mem = Some(Mem::Shm(s));
@@ -206,7 +217,7 @@ impl Presenter {
         }
         None => {
           eprintln!("nimbo: MIT-SHM unavailable, frames go through the socket");
-          self.shm = None;
+          self.shm = false;
         }
       }
     }
@@ -220,11 +231,13 @@ impl Presenter {
     let flags = ProtFlags::READ | ProtFlags::WRITE;
     // SAFETY: a fresh shared mapping of the whole memfd, unmapped in `free`.
     let ptr = unsafe { mmap(std::ptr::null_mut(), len, flags, MapFlags::SHARED, &fd, 0) }.ok()?;
-    let id = self.x.id();
-    // The server maps its own copy of the fd; XCB closes the one it sends.
-    match self.x.shm_attach(id, fd) {
-      true => Some(Seg { id, ptr: ptr.cast(), len }),
-      false => {
+    // The server maps its own copy of the fd; ours closes once it is sent. A remote display
+    // refuses it.
+    let id = self.x.generate_id().ok();
+    let attached = id.and_then(|id| self.x.shm_attach_fd(id, fd, false).ok()?.check().ok());
+    match (id, attached) {
+      (Some(id), Some(())) => Some(Seg { id, ptr: ptr.cast(), len }),
+      _ => {
         let _ = unsafe { munmap(ptr, len) };
         None
       }
@@ -235,7 +248,7 @@ impl Presenter {
   /// requests in order) and unmapped here; the server keeps its own mapping until then.
   fn free(&mut self) {
     if let Some(Mem::Shm(s)) = self.mem.take() {
-      self.x.shm_detach(s.id);
+      let _ = self.x.shm_detach(s.id);
       let _ = unsafe { munmap(s.ptr.cast(), s.len) };
     }
 
@@ -254,6 +267,13 @@ impl Presenter {
   }
 }
 
+/// MIT-SHM 1.2 or later: segments passed as file descriptors.
+fn has_shm(x: &RustConnection) -> bool {
+  let ext = x.extension_information(shm::X11_EXTENSION_NAME).ok().flatten();
+  let version = ext.and_then(|_| x.shm_query_version().ok()?.reply().ok());
+  version.is_some_and(|v| (v.major_version, v.minor_version) >= (1, 2))
+}
+
 impl Drop for Presenter {
   fn drop(&mut self) {
     self.free();
@@ -262,7 +282,9 @@ impl Drop for Presenter {
 
 #[cfg(test)]
 mod tests {
-  use super::super::xcb::{Screen, ShmCompletionEv};
+  use x11rb::protocol::Event;
+  use x11rb::protocol::xproto::{CreateWindowAux, WindowClass};
+
   use super::*;
   use crate::scene::{Quad, Rect};
 
@@ -274,13 +296,12 @@ mod tests {
   }
 
   /// Hands the completions that came to the presenter until it isn't busy; false after a second.
-  fn drain(x: &X, p: &mut Presenter) -> bool {
-    let first = p.completion().unwrap();
+  fn drain(x: &RustConnection, p: &mut Presenter) -> bool {
     let until = Instant::now() + Duration::from_secs(1);
     while p.busy() && Instant::now() < until {
-      x.flush();
-      match x.poll_event() {
-        Some(ev) if ev.kind() == first => p.completed(ev.get::<ShmCompletionEv>().shmseg),
+      x.flush().unwrap();
+      match x.poll_for_event().unwrap() {
+        Some(Event::ShmCompletion(e)) => p.completed(e.shmseg),
         Some(_) => {}
         None => std::thread::sleep(Duration::from_millis(1)),
       }
@@ -298,12 +319,18 @@ mod tests {
       return;
     }
 
-    let (x, screen, _) = X::connect().unwrap();
-    // SAFETY: the setup's screen, valid while the connection is open.
-    let sc: &Screen = unsafe { &*screen };
-    let win = x.create_window(sc, 64, 48, 0);
-    let mut p = Presenter::new(x, win, sc.root_depth);
-    if p.completion().is_none() {
+    let (x, n) = x11rb::connect(None).unwrap();
+    let x = Rc::new(x);
+    let (root, visual, depth) = {
+      let sc = &x.setup().roots[n];
+      (sc.root, sc.root_visual, sc.root_depth)
+    };
+    let win = x.generate_id().unwrap();
+    let class = WindowClass::INPUT_OUTPUT;
+    let aux = CreateWindowAux::new();
+    x.create_window(0, win, root, 0, 0, 64, 48, 0, class, visual, &aux).unwrap();
+    let mut p = Presenter::new(x.clone(), win, depth).unwrap();
+    if !p.shm() {
       eprintln!("no MIT-SHM: skipped");
       return;
     }
@@ -343,8 +370,7 @@ mod tests {
     assert!(drain(&x, &mut p));
 
     drop(p);
-    x.destroy_window(win);
-    x.flush();
-    x.disconnect();
+    x.destroy_window(win).unwrap();
+    x.flush().unwrap();
   }
 }

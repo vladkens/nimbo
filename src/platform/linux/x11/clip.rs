@@ -12,33 +12,27 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::time::Duration;
 
-use super::xcb::{
-  ATOM_ATOM, ATOM_STRING, Ev, PROPERTY_NOTIFY, PropertyEv, SELECTION_NOTIFY, SelectionClearEv,
-  SelectionNotifyEv, SelectionRequestEv, X,
+use x11rb::connection::{Connection, RequestConnection};
+use x11rb::protocol::Event;
+use x11rb::protocol::xproto::{
+  AtomEnum, ConnectionExt as _, EventMask, PropMode, Property, SelectionClearEvent,
+  SelectionNotifyEvent, SelectionRequestEvent,
 };
+use x11rb::rust_connection::RustConnection;
+use x11rb::wrapper::ConnectionExt as _;
+use x11rb::{CURRENT_TIME, NONE};
+
+use super::{Atoms, property, selection_owner, wait_event};
 
 /// How long a paste waits for the owner, and for each INCR chunk.
 const WAIT: Duration = Duration::from_secs(1);
 
-/// The atoms selections need.
-#[derive(Clone, Copy)]
-pub struct Atoms {
-  pub clipboard: u32,
-  pub targets: u32,
-  pub utf8: u32,
-  pub text: u32,
-  pub mime: u32,
-  pub incr: u32,
-  /// The property pasted text arrives in.
-  pub prop: u32,
-}
-
 pub struct Clip {
-  pub x: X,
+  pub x: Rc<RustConnection>,
   pub win: u32,
   pub atoms: Atoms,
   /// Events read while waiting for the owner, for the loop.
-  pub stash: Rc<RefCell<VecDeque<Ev>>>,
+  pub stash: Rc<RefCell<VecDeque<Event>>>,
   /// The server time of the last key or button press, which taking the selection uses.
   pub time: u32,
   /// Our selection's text, while we own it.
@@ -48,97 +42,110 @@ pub struct Clip {
 impl Clip {
   /// Another client asks for our selection: the text (or the targets) in its property, then a
   /// `SelectionNotify`, with no property when refused.
-  pub fn request(&self, ev: &SelectionRequestEv) {
+  pub fn request(&self, ev: &SelectionRequestEvent) {
     let a = &self.atoms;
     // An obsolete client gives no property: the target's name is used.
-    let prop = if ev.property == 0 { ev.target } else { ev.property };
-    let ok = match (&self.ours, ev.selection == a.clipboard) {
+    let prop = if ev.property == NONE { ev.target } else { ev.property };
+    let ok = match (&self.ours, ev.selection == a.CLIPBOARD) {
       (Some(text), true) => self.answer(ev.requestor, prop, ev.target, text),
       _ => false,
     };
 
-    let mut out = [0u8; 32];
-    out[0] = SELECTION_NOTIFY;
-    let fields = [ev.time, ev.requestor, ev.selection, ev.target, if ok { prop } else { 0 }];
-    for (i, v) in fields.iter().enumerate() {
-      out[4 + i * 4..8 + i * 4].copy_from_slice(&v.to_ne_bytes());
-    }
-
-    self.x.send_event(ev.requestor, 0, &out);
-    self.x.flush();
+    let out = SelectionNotifyEvent {
+      response_type: x11rb::protocol::xproto::SELECTION_NOTIFY_EVENT,
+      sequence: 0,
+      time: ev.time,
+      requestor: ev.requestor,
+      selection: ev.selection,
+      target: ev.target,
+      property: if ok { prop } else { NONE },
+    };
+    let _ = self.x.send_event(false, ev.requestor, EventMask::NO_EVENT, out);
+    let _ = self.x.flush();
   }
 
   fn answer(&self, win: u32, prop: u32, target: u32, text: &str) -> bool {
-    let a = &self.atoms;
-    if target == a.targets {
-      let list = [a.targets, a.utf8, a.mime, a.text, ATOM_STRING];
-      self.x.set_property32(win, prop, ATOM_ATOM, &list);
+    let (a, string) = (&self.atoms, AtomEnum::STRING.into());
+    if target == a.TARGETS {
+      let list = [a.TARGETS, a.UTF8_STRING, a.MIME, a.TEXT, string];
+      let _ = self.x.change_property32(PropMode::REPLACE, win, prop, AtomEnum::ATOM, &list);
       return true;
     }
 
     let (ty, bytes) = match target {
-      t if t == a.utf8 || t == a.mime || t == a.text => (a.utf8, text.as_bytes().to_vec()),
+      t if t == a.UTF8_STRING || t == a.MIME || t == a.TEXT => {
+        (a.UTF8_STRING, text.as_bytes().to_vec())
+      }
       // Latin-1, `?` for the rest.
-      ATOM_STRING => (ATOM_STRING, text.chars().map(|c| u8::try_from(c).unwrap_or(b'?')).collect()),
+      t if t == string => (string, text.chars().map(|c| u8::try_from(c).unwrap_or(b'?')).collect()),
       _ => return false,
     };
 
-    if bytes.len() + 64 > self.x.max_request() {
+    if bytes.len() + 64 > self.x.maximum_request_bytes() {
       return false;
     }
 
-    self.x.set_property(win, prop, ty, 8, &bytes);
+    let _ = self.x.change_property8(PropMode::REPLACE, win, prop, ty, &bytes);
     true
   }
 
   /// `SelectionClear`: another client took the selection. One read after we took it back (a
   /// copy handled before it) is stale, so the server says who owns it now.
-  pub fn cleared(&mut self, ev: &SelectionClearEv) {
-    let a = self.atoms;
-    if ev.selection == a.clipboard && self.x.selection_owner(a.clipboard) != self.win {
+  pub fn cleared(&mut self, ev: &SelectionClearEvent) {
+    let a = &self.atoms;
+    if ev.selection == a.CLIPBOARD && selection_owner(&self.x, a.CLIPBOARD) != self.win {
       self.ours = None;
     }
   }
 
+  /// Takes our window's paste property, deleting it: its type and bytes.
+  fn take(&self) -> Option<(u32, Vec<u8>)> {
+    let r = property(&self.x, self.win, self.atoms.NIMBO_CLIPBOARD, AtomEnum::ANY, true)?;
+    (r.type_ != NONE).then_some((r.type_, r.value))
+  }
+
   /// Converts the owner's selection to `target` and reads it.
   fn convert(&self, target: u32) -> Option<Vec<u8>> {
-    let (x, a, win) = (self.x, self.atoms, self.win);
-    x.convert_selection(win, a.clipboard, target, a.prop);
+    let (x, a, win) = (&self.x, self.atoms, self.win);
+    x.convert_selection(win, a.CLIPBOARD, target, a.NIMBO_CLIPBOARD, CURRENT_TIME).ok()?;
     let mut stash = self.stash.borrow_mut();
     // This conversion's answer: a late one to an earlier conversion (UTF8_STRING, given up on
     // for STRING) has another target.
-    let is_ours = |ev: &Ev| {
-      let n = ev.get::<SelectionNotifyEv>();
-      let to = n.requestor == win && n.selection == a.clipboard && n.target == target;
-      ev.kind() == SELECTION_NOTIFY && to
+    let is_ours = |ev: &Event| match ev {
+      Event::SelectionNotify(n) => {
+        n.requestor == win && n.selection == a.CLIPBOARD && n.target == target
+      }
+      _ => false,
     };
-    let ev = x.wait_event(WAIT, &mut stash, is_ours)?;
-    if ev.get::<SelectionNotifyEv>().property == 0 {
+    let Event::SelectionNotify(n) = wait_event(x, WAIT, &mut stash, is_ours)? else { return None };
+    if n.property == NONE {
       return None;
     }
 
-    let p = x.property(win, a.prop, 0, true)?;
-    if p.ty != a.incr {
-      return Some(p.data);
+    let (ty, data) = self.take()?;
+    if ty != a.INCR {
+      return Some(data);
     }
 
     // INCR: each chunk comes as a new value of the property, which we delete; an empty one
     // ends it.
-    x.flush();
+    x.flush().ok()?;
     let mut out = Vec::new();
     loop {
-      let chunk = |ev: &Ev| {
-        let p = ev.get::<PropertyEv>();
-        ev.kind() == PROPERTY_NOTIFY && p.window == win && p.atom == a.prop && p.state == 0
+      let chunk = |ev: &Event| match ev {
+        Event::PropertyNotify(p) => {
+          p.window == win && p.atom == a.NIMBO_CLIPBOARD && p.state == Property::NEW_VALUE
+        }
+        _ => false,
       };
-      x.wait_event(WAIT, &mut stash, chunk)?;
-      let p = x.property(win, a.prop, 0, true)?;
-      if p.data.is_empty() {
+      wait_event(x, WAIT, &mut stash, chunk)?;
+      let (_, data) = self.take()?;
+      if data.is_empty() {
         return Some(out);
       }
 
-      out.extend_from_slice(&p.data);
-      x.flush();
+      out.extend_from_slice(&data);
+      x.flush().ok()?;
     }
   }
 }
@@ -153,29 +160,40 @@ impl crate::Clipboard for Clipboard {
       return Some(text.clone());
     }
 
-    if c.x.selection_owner(c.atoms.clipboard) == 0 {
+    if selection_owner(&c.x, c.atoms.CLIPBOARD) == NONE {
       return None;
     }
 
-    match c.convert(c.atoms.utf8) {
+    match c.convert(c.atoms.UTF8_STRING) {
       Some(bytes) => String::from_utf8(bytes).ok(),
       // STRING is Latin-1.
-      None => Some(c.convert(ATOM_STRING)?.into_iter().map(char::from).collect()),
+      None => Some(c.convert(AtomEnum::STRING.into())?.into_iter().map(char::from).collect()),
     }
   }
 
   fn write(&mut self, s: &str) {
     let mut c = self.0.borrow_mut();
-    c.x.set_selection_owner(c.win, c.atoms.clipboard, c.time);
-    c.ours = (c.x.selection_owner(c.atoms.clipboard) == c.win).then(|| s.to_owned());
+    let _ = c.x.set_selection_owner(c.win, c.atoms.CLIPBOARD, c.time);
+    c.ours = (selection_owner(&c.x, c.atoms.CLIPBOARD) == c.win).then(|| s.to_owned());
   }
 }
 
 #[cfg(test)]
 mod tests {
-  use super::super::xcb::{SELECTION_CLEAR, Screen};
+  use x11rb::protocol::xproto::{CreateWindowAux, WindowClass};
+
   use super::*;
   use crate::Clipboard as _;
+
+  /// A client of its own with an 8 × 8 window, never mapped.
+  fn client() -> (Rc<RustConnection>, u32) {
+    let (x, n) = x11rb::connect(None).unwrap();
+    let (root, visual) = (x.setup().roots[n].root, x.setup().roots[n].root_visual);
+    let win = x.generate_id().unwrap();
+    let (class, aux) = (WindowClass::INPUT_OUTPUT, CreateWindowAux::new());
+    x.create_window(0, win, root, 0, 0, 8, 8, 0, class, visual, &aux).unwrap();
+    (Rc::new(x), win)
+  }
 
   /// Another client takes the selection, and we copy again before its `SelectionClear` is
   /// handled: the stale clear leaves the new text ours. A selection of the test's own, not the
@@ -187,45 +205,36 @@ mod tests {
       return;
     }
 
-    let (x, screen, _) = X::connect().unwrap();
-    // SAFETY: the setup's screen, valid while the connection is open.
-    let sc: &Screen = unsafe { &*screen };
-    let win = x.create_window(sc, 8, 8, 0);
+    let (x, win) = client();
     // Another client: the server sends no clear when the owner stays the same client.
-    let (y, screen, _) = X::connect().unwrap();
-    // SAFETY: as above.
-    let other = y.create_window(unsafe { &*screen }, 8, 8, 0);
-    let [clipboard, targets, utf8, text, mime, incr, prop] = x.atoms([
-      "NIMBO_TEST_SELECTION",
-      "TARGETS",
-      "UTF8_STRING",
-      "TEXT",
-      "text/plain;charset=utf-8",
-      "INCR",
-      "NIMBO_CLIPBOARD",
-    ]);
-    let atoms = Atoms { clipboard, targets, utf8, text, mime, incr, prop };
+    let (y, other) = client();
+    let mut atoms = Atoms::new(&*x).unwrap().reply().unwrap();
+    let own = x.intern_atom(false, b"NIMBO_TEST_SELECTION").unwrap().reply().unwrap().atom;
+    atoms.CLIPBOARD = own;
     let stash = Rc::new(RefCell::new(VecDeque::new()));
-    let clip = Clip { x, win, atoms, stash: stash.clone(), time: 0, ours: None };
+    let clip = Clip { x: x.clone(), win, atoms, stash: stash.clone(), time: 0, ours: None };
     let clip = Rc::new(RefCell::new(clip));
     let mut board = Clipboard(clip.clone());
-    board.write("old");
-    y.set_selection_owner(other, clipboard, 0);
-    assert_eq!(y.selection_owner(clipboard), other);
-    board.write("new");
+    let take = || {
+      y.set_selection_owner(other, atoms.CLIPBOARD, CURRENT_TIME).unwrap();
+      assert_eq!(selection_owner(&y, atoms.CLIPBOARD), other);
+    };
+    let clear = || {
+      let ev =
+        wait_event(&x, WAIT, &mut stash.borrow_mut(), |e| matches!(e, Event::SelectionClear(_)));
+      let Some(Event::SelectionClear(e)) = ev else { panic!("no SelectionClear") };
+      clip.borrow_mut().cleared(&e);
+    };
 
-    let clear = |ev: &Ev| ev.kind() == SELECTION_CLEAR;
-    let ev = x.wait_event(WAIT, &mut stash.borrow_mut(), clear).expect("a SelectionClear");
-    clip.borrow_mut().cleared(ev.get());
+    board.write("old");
+    take();
+    board.write("new");
+    clear();
     assert_eq!(board.read().as_deref(), Some("new"));
 
     // A clear while another client owns it is not stale.
-    y.set_selection_owner(other, clipboard, 0);
-    assert_eq!(y.selection_owner(clipboard), other);
-    let ev = x.wait_event(WAIT, &mut stash.borrow_mut(), clear).expect("a SelectionClear");
-    clip.borrow_mut().cleared(ev.get());
+    take();
+    clear();
     assert!(clip.borrow().ours.is_none());
-    x.disconnect();
-    y.disconnect();
   }
 }

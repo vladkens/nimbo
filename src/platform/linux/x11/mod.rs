@@ -1,16 +1,15 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The Linux platform on X11, for sessions without Wayland (X11 desktops, remote displays):
-//! XCB loaded at run time ([xcb]), one top-level window the window manager
+//! the protocol through x11rb's pure-Rust connection, one top-level window the window manager
 //! decorates, CPU frames through MIT-SHM or the socket ([present]) paced at [REFRESH], the scale
 //! from `Xft.dpi` in the resources ([settings]; the size hints follow it), the keyboard through
-//! xkbcommon ([super::xkb]: the server's keymap with libxkbcommon-x11, else its rules names; the
-//! state from each event's modifiers and group), the server's key repeat (detectable: presses
-//! alone), cursors from the theme (libxcb-cursor) or the cursor font ([cursor]), the CLIPBOARD
-//! selection ([clip]), light or dark from XSETTINGS' `Net/ThemeName`, its manager followed as it
-//! starts, quits or restarts. No frames while the window is unmapped or fully covered
-//! (`VisibilityNotify`; under a compositing manager it never is). One thread: the loop polls the
-//! connection and a wake eventfd with the next timer as the timeout.
+//! xkbcommon ([super::xkb]: the server's keymap with libxkbcommon-x11 over a connection of
+//! libxcb's own, else its rules names; the state from each event's modifiers and group), the
+//! server's key repeat (detectable: presses alone), cursors from the theme or the cursor
+//! font ([cursor]), the CLIPBOARD selection ([clip]), light or dark from XSETTINGS'
+//! `Net/ThemeName`, its manager followed as it starts, quits or restarts. One thread: the loop
+//! polls the connection and a wake eventfd with the next timer as the timeout.
 //!
 //! Not yet: input methods (XIM or IBus: typing goes through xkbcommon's compose only), smooth
 //! and touchpad scrolling (XInput2: wheels come as clicks), pinch, `_NET_WM_SYNC_REQUEST`
@@ -21,7 +20,6 @@ mod clip;
 mod cursor;
 mod present;
 mod settings;
-mod xcb;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -33,12 +31,24 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rustix::event::{EventfdFlags, PollFd, PollFlags, Timespec, eventfd, poll};
+use x11rb::connection::Connection;
+use x11rb::cursor::Handle as CursorTheme;
+use x11rb::properties::WmSizeHints;
+use x11rb::protocol::Event as XEvent;
+use x11rb::protocol::xkb::{self, ConnectionExt as _};
+use x11rb::protocol::xproto::{
+  AtomEnum, ChangeWindowAttributesAux, ConfigureWindowAux, ConnectionExt as _, CreateWindowAux,
+  EventMask, GetPropertyReply, Gravity, Mapping, NotifyDetail, NotifyMode, PropMode, Visibility,
+  WindowClass,
+};
+use x11rb::rust_connection::RustConnection;
+use x11rb::wrapper::ConnectionExt as _;
+use x11rb::{COPY_DEPTH_FROM_PARENT, NONE};
 
-use self::clip::{Atoms as ClipAtoms, Clip, Clipboard};
+use self::clip::{Clip, Clipboard};
 use self::cursor::Cursors;
 use self::present::{Presenter, STUCK};
-use self::settings::{appearance, dpi_scale};
-use self::xcb::*;
+use self::settings::{appearance, dpi_scale, resources};
 use super::xkb::{Keyboard, Typed};
 use super::{Click, Res, clicks};
 use crate::Config;
@@ -55,39 +65,39 @@ const REFRESH: Duration = Duration::from_micros(16_667);
 /// How long a key release waits for the press that would make it a repeat, without detectable
 /// autorepeat: the server sends both at once.
 const PAIR_WAIT: Duration = Duration::from_millis(2);
-/// `WM_NORMAL_HINTS` flags (ICCCM): the least and largest sizes are set.
-const P_MIN_SIZE: u32 = 1 << 4;
-const P_MAX_SIZE: u32 = 1 << 5;
-/// `FocusIn` / `LeaveNotify` details and modes to skip: the pointer's own focus, a child's,
-/// and the keyboard grabs of the window manager.
-const NOTIFY_INFERIOR: u8 = 2;
-const NOTIFY_POINTER: u8 = 5;
-const NOTIFY_MODE_GRAB: u8 = 1;
-const NOTIFY_MODE_UNGRAB: u8 = 2;
-/// What the XSETTINGS manager's window is watched for: its settings, and its destruction.
-const XSETTINGS_EVENTS: u32 = EM_PROPERTY_CHANGE | EM_STRUCTURE_NOTIFY;
 /// Buttons 1–5 held, in an event's state.
 const BUTTONS_MASK: u16 = 0x1f00;
-const MAPPING_KEYBOARD: u8 = 1;
 
-struct Atoms {
-  protocols: u32,
-  delete: u32,
-  ping: u32,
-  net_name: u32,
-  pid: u32,
-  machine: u32,
-  xsettings: u32,
-  xsettings_settings: u32,
-  manager: u32,
-  rules: u32,
+x11rb::atom_manager! {
+  /// The atoms the window and the clipboard use, interned in one round trip; pasted text
+  /// arrives in `NIMBO_CLIPBOARD`.
+  pub Atoms: AtomsCookie {
+    WM_PROTOCOLS,
+    WM_DELETE_WINDOW,
+    _NET_WM_PING,
+    _NET_WM_NAME,
+    _NET_WM_PID,
+    WM_CLIENT_MACHINE,
+    _XSETTINGS_SETTINGS,
+    _XKB_RULES_NAMES,
+    MANAGER,
+    CLIPBOARD,
+    TARGETS,
+    UTF8_STRING,
+    TEXT,
+    MIME: b"text/plain;charset=utf-8",
+    INCR,
+    NIMBO_CLIPBOARD,
+  }
 }
 
 struct Win {
-  x: X,
+  x: Rc<RustConnection>,
   win: u32,
   root: u32,
   atoms: Atoms,
+  /// `_XSETTINGS_S<screen>`, the XSETTINGS manager's selection.
+  xsettings_sel: u32,
   rt: Runtime<Box<dyn App>>,
   present: Presenter,
   scale: f32,
@@ -122,20 +132,23 @@ struct Win {
   /// Keys down (by X keycode); with detectable autorepeat a press of one is a repeat.
   held: [u64; 4],
   detectable: bool,
-  /// XKB's event code, for its keymap events (the keymap is read again after a batch of them)
-  /// and state events, which keep the modifiers once they come ([Keyboard::state_notify]).
-  xkb_event: Option<u8>,
+  /// XKB's state events come ([Win::setup_keyboard]): they keep the modifiers
+  /// ([Keyboard::state_notify]).
+  xkb_state: bool,
   /// The keyboard state wasn't read from the server (a keymap from the rules names): events'
   /// core states set it until the server's state events follow.
   kb_fresh: bool,
   /// Modifier keys that went down or up, held for the state event the server sends after
   /// them: [Event::Modifier] comes after the [Event::Mods] it changed.
   mod_keys: Vec<(ModKey, bool)>,
+  /// A keymap change came (`MappingNotify`, XKB's): the keymap is read again after the batch.
   reload_keymap: bool,
   focused: bool,
   clip: Rc<RefCell<Clip>>,
   /// Events read ahead (a paste waiting for its owner, a key release looking for its repeat).
-  stash: Rc<RefCell<VecDeque<Ev>>>,
+  stash: Rc<RefCell<VecDeque<XEvent>>>,
+  /// The connection failed (a read or a write): the loop ends.
+  broken: bool,
   /// The XSETTINGS manager's window, watched for changes of the theme and for its end.
   xsettings: u32,
   /// The least content size in points, and the largest of a fixed window: the size hints at
@@ -147,91 +160,70 @@ struct Win {
 /// Opens the app's window on `$DISPLAY` and runs the loop until it closes or quits.
 pub fn run(cfg: &Config, app: Box<dyn App>) -> Res<()> {
   let started = Instant::now();
-  let (x, screen, n) = X::connect()?;
-  let res = run_on(x, screen, n, cfg, app, started);
-  x.disconnect();
-  res
+  let (x, n) = x11rb::connect(None).map_err(|e| {
+    let d = std::env::var("DISPLAY").unwrap_or_default();
+    format!("can't connect to the X server (DISPLAY={d:?}): {e}")
+  })?;
+  run_on(Rc::new(x), n, cfg, app, started)
 }
 
 fn run_on(
-  x: X,
-  screen: *mut Screen,
-  n: i32,
+  x: Rc<RustConnection>,
+  n: usize,
   cfg: &Config,
   app: Box<dyn App>,
   started: Instant,
 ) -> Res<()> {
-  // SAFETY: the setup's screen, valid while the connection is open.
-  let sc = unsafe { &*screen };
-  if !matches!(sc.root_depth, 24 | 32) {
-    return Err(format!("the X screen has depth {}, 24 or 32 needed", sc.root_depth).into());
+  let sc = &x.setup().roots[n];
+  let (root, visual, depth) = (sc.root, sc.root_visual, sc.root_depth);
+  if !matches!(depth, 24 | 32) {
+    return Err(format!("the X screen has depth {depth}, 24 or 32 needed").into());
   }
 
-  let xs_name = format!("_XSETTINGS_S{n}");
-  let [protocols, delete, ping, net_name, pid, machine, xsettings, xs_settings, rules] = x.atoms([
-    "WM_PROTOCOLS",
-    "WM_DELETE_WINDOW",
-    "_NET_WM_PING",
-    "_NET_WM_NAME",
-    "_NET_WM_PID",
-    "WM_CLIENT_MACHINE",
-    xs_name.as_str(),
-    "_XSETTINGS_SETTINGS",
-    "_XKB_RULES_NAMES",
-  ]);
-  let [clipboard, targets, utf8, text, mime, incr, prop, manager] = x.atoms([
-    "CLIPBOARD",
-    "TARGETS",
-    "UTF8_STRING",
-    "TEXT",
-    "text/plain;charset=utf-8",
-    "INCR",
-    "NIMBO_CLIPBOARD",
-    "MANAGER",
-  ]);
-  let clip_atoms = ClipAtoms { clipboard, targets, utf8, text, mime, incr, prop };
-  let atoms = Atoms {
-    protocols,
-    delete,
-    ping,
-    net_name,
-    pid,
-    machine,
-    xsettings,
-    xsettings_settings: xs_settings,
-    manager,
-    rules,
-  };
+  let atoms = Atoms::new(&*x)?;
+  let xsettings_sel = x.intern_atom(false, format!("_XSETTINGS_S{n}").as_bytes())?;
+  let (atoms, xsettings_sel) = (atoms.reply()?, xsettings_sel.reply()?.atom);
 
-  let scale = dpi_scale(&x, sc.root);
+  let db = resources(&x);
+  let scale = dpi_scale(&db);
   let px = (px(cfg.size.w, scale), px(cfg.size.h, scale));
-  let events = EM_KEY_PRESS
-    | EM_KEY_RELEASE
-    | EM_BUTTON_PRESS
-    | EM_BUTTON_RELEASE
-    | EM_ENTER_WINDOW
-    | EM_LEAVE_WINDOW
-    | EM_POINTER_MOTION
-    | EM_EXPOSURE
-    | EM_VISIBILITY_CHANGE
-    | EM_STRUCTURE_NOTIFY
-    | EM_FOCUS_CHANGE
-    | EM_PROPERTY_CHANGE;
-  let win = x.create_window(sc, px.0 as u16, px.1 as u16, events);
+  let events = EventMask::KEY_PRESS
+    | EventMask::KEY_RELEASE
+    | EventMask::BUTTON_PRESS
+    | EventMask::BUTTON_RELEASE
+    | EventMask::ENTER_WINDOW
+    | EventMask::LEAVE_WINDOW
+    | EventMask::POINTER_MOTION
+    | EventMask::EXPOSURE
+    | EventMask::VISIBILITY_CHANGE
+    | EventMask::STRUCTURE_NOTIFY
+    | EventMask::FOCUS_CHANGE
+    | EventMask::PROPERTY_CHANGE;
+  // No background (nothing is cleared before our frame), the content kept at the top left as
+  // it resizes.
+  let aux = CreateWindowAux::new()
+    .background_pixmap(NONE)
+    .bit_gravity(Gravity::NORTH_WEST)
+    .event_mask(events);
+  let win = x.generate_id()?;
+  let (w, h, class) = (px.0 as u16, px.1 as u16, WindowClass::INPUT_OUTPUT);
+  x.create_window(COPY_DEPTH_FROM_PARENT, win, root, 0, 0, w, h, 0, class, visual, &aux)?;
 
   // Title, class, protocols, the process for `_NET_WM_PING`, sizes.
   let title = cfg.title;
   let latin1: Vec<u8> = title.chars().map(|c| u8::try_from(c).unwrap_or(b'?')).collect();
-  x.set_property(win, ATOM_WM_NAME, ATOM_STRING, 8, &latin1);
-  x.set_property(win, atoms.net_name, utf8, 8, title.as_bytes());
+  let (replace, string) = (PropMode::REPLACE, AtomEnum::STRING);
+  x.change_property8(replace, win, AtomEnum::WM_NAME, string, &latin1)?;
+  x.change_property8(replace, win, atoms._NET_WM_NAME, atoms.UTF8_STRING, title.as_bytes())?;
   let exe = std::env::current_exe().ok();
   let id = exe.as_ref().and_then(|p| p.file_stem()?.to_str()).unwrap_or("nimbo");
   let class = format!("{id}\0{}\0", capitalized(id));
-  x.set_property(win, ATOM_WM_CLASS, ATOM_STRING, 8, class.as_bytes());
-  x.set_property32(win, atoms.protocols, ATOM_ATOM, &[atoms.delete, atoms.ping]);
-  x.set_property32(win, atoms.pid, ATOM_CARDINAL, &[std::process::id()]);
+  x.change_property8(replace, win, AtomEnum::WM_CLASS, string, class.as_bytes())?;
+  let protocols = [atoms.WM_DELETE_WINDOW, atoms._NET_WM_PING];
+  x.change_property32(replace, win, atoms.WM_PROTOCOLS, AtomEnum::ATOM, &protocols)?;
+  x.change_property32(replace, win, atoms._NET_WM_PID, AtomEnum::CARDINAL, &[std::process::id()])?;
   if let Ok(host) = std::fs::read_to_string("/proc/sys/kernel/hostname") {
-    x.set_property(win, atoms.machine, ATOM_STRING, 8, host.trim().as_bytes());
+    x.change_property8(replace, win, atoms.WM_CLIENT_MACHINE, string, host.trim().as_bytes())?;
   }
 
   let (min, max) = match cfg.resizable {
@@ -243,23 +235,23 @@ fn run_on(
 
   // Changes of the resources (Xft.dpi), a new XSETTINGS manager (`MANAGER` on the root), and the
   // manager's settings and end.
-  x.select_events(sc.root, EM_PROPERTY_CHANGE | EM_STRUCTURE_NOTIFY);
-  let xs_owner = x.selection_owner(atoms.xsettings);
-  if xs_owner != 0 {
-    x.select_events(xs_owner, XSETTINGS_EVENTS);
+  watch(&x, root);
+  let xs_owner = selection_owner(&x, xsettings_sel);
+  if xs_owner != NONE {
+    watch(&x, xs_owner);
   }
 
   let stash = Rc::new(RefCell::new(VecDeque::new()));
   let clip = Rc::new(RefCell::new(Clip {
-    x,
+    x: x.clone(),
     win,
-    atoms: clip_atoms,
+    atoms,
     stash: stash.clone(),
     time: 0,
     ours: None,
   }));
   let mut rt = Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(Clipboard(clip.clone())));
-  rt.event(Event::Appearance(appearance(&x, xs_owner, xs_settings)));
+  rt.event(Event::Appearance(appearance(&x, xs_owner, atoms._XSETTINGS_SETTINGS)));
 
   // A wake from any thread writes the eventfd the loop polls.
   let wake: Arc<OwnedFd> = Arc::new(eventfd(0, EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK)?);
@@ -269,14 +261,15 @@ fn run_on(
   }));
 
   // Every round trip before the map: after it they wait for the window manager's work.
-  let theme = x.cursor_context(screen);
-  let mut present = Presenter::new(x, win, sc.root_depth);
+  let theme = CursorTheme::new(&*x, n, &db).ok().and_then(|c| c.reply().ok());
+  let mut present = Presenter::new(x.clone(), win, depth)?;
   present.reserve(px.0 as usize, px.1 as usize);
   let mut win = Win {
-    x,
+    x: x.clone(),
     win,
-    root: sc.root,
+    root,
     atoms,
+    xsettings_sel,
     rt,
     present,
     scale,
@@ -302,26 +295,27 @@ fn run_on(
     mods: Mods::NONE,
     held: [0; 4],
     detectable: false,
-    xkb_event: None,
+    xkb_state: false,
     kb_fresh: true,
     mod_keys: Vec::new(),
     reload_keymap: false,
     focused: false,
     clip,
     stash,
+    broken: false,
     xsettings: xs_owner,
     min,
     max,
   };
   if win.trace {
-    let shm = if win.present.completion().is_some() { "MIT-SHM" } else { "PutImage" };
+    let shm = if win.present.shm() { "MIT-SHM" } else { "PutImage" };
     let cursors = if win.cursors.themed() { "themed" } else { "font" };
     eprintln!("nimbo: x11, scale {scale}, frames by {shm}, {cursors} cursors");
   }
   // The window manager maps it while we draw the first frame, which the first expose puts;
   // the keyboard (8–10 ms: the server's keymap, the compose table) comes after that frame.
-  x.map_window(win.win);
-  x.flush();
+  x.map_window(win.win)?;
+  x.flush()?;
 
   loop {
     while let Some(ev) = win.next_event() {
@@ -333,7 +327,7 @@ fn run_on(
 
     win.apply_keymap();
 
-    if x.has_error() {
+    if win.broken {
       return Err("the X connection broke".into());
     }
 
@@ -361,18 +355,16 @@ fn run_on(
       win.setup_keyboard();
     }
 
-    x.flush();
+    win.broken |= x.flush().is_err();
 
-    // Events XCB read while waiting for a reply aren't on the socket any more.
-    if let Some(ev) = x.queued_event() {
+    // Events read while waiting for a reply aren't on the socket any more.
+    if let Some(ev) = win.next_event() {
       win.stash.borrow_mut().push_back(ev);
       continue;
     }
 
-    let timeout =
-      win.timeout().map(|d| Timespec { tv_sec: d.as_secs() as _, tv_nsec: d.subsec_nanos() as _ });
-    let fd = x.fd();
-    let mut fds = [PollFd::new(&fd, PollFlags::IN), PollFd::new(&*wake, PollFlags::IN)];
+    let timeout = win.timeout().map(timespec);
+    let mut fds = [PollFd::new(x.stream(), PollFlags::IN), PollFd::new(&*wake, PollFlags::IN)];
     match poll(&mut fds, timeout.as_ref()) {
       Ok(_) | Err(rustix::io::Errno::INTR) => {}
       Err(e) => return Err(e.into()),
@@ -395,24 +387,73 @@ fn run_on(
   }
 
   drop(win.present);
-  x.destroy_window(win.win);
-  x.flush();
+  x.destroy_window(win.win)?;
+  x.flush()?;
   Ok(())
 }
 
+fn timespec(d: Duration) -> Timespec {
+  Timespec { tv_sec: d.as_secs() as _, tv_nsec: d.subsec_nanos() as _ }
+}
+
+/// Waits up to `limit` for an event `want` accepts; the others go to `stash` in order. None
+/// when none came or the connection broke.
+fn wait_event(
+  x: &RustConnection,
+  limit: Duration,
+  stash: &mut VecDeque<XEvent>,
+  want: impl Fn(&XEvent) -> bool,
+) -> Option<XEvent> {
+  let end = Instant::now() + limit;
+  x.flush().ok()?;
+  loop {
+    while let Some(ev) = x.poll_for_event().ok()? {
+      match want(&ev) {
+        true => return Some(ev),
+        false => stash.push_back(ev),
+      }
+    }
+
+    let left = end.checked_duration_since(Instant::now()).filter(|d| !d.is_zero())?;
+    let mut fds = [PollFd::new(x.stream(), PollFlags::IN)];
+    let _ = poll(&mut fds, Some(&timespec(left)));
+  }
+}
+
+/// A window's property of type `ty` (any with `AtomEnum::ANY`), whole; deleted after it is read
+/// when `delete`. None when the request fails.
+fn property(
+  x: &RustConnection,
+  win: u32,
+  prop: u32,
+  ty: impl Into<u32>,
+  delete: bool,
+) -> Option<GetPropertyReply> {
+  x.get_property(delete, win, prop, ty, 0, u32::MAX / 4).ok()?.reply().ok()
+}
+
+/// A selection's owner; none when it has none or the request fails.
+fn selection_owner(x: &RustConnection, selection: u32) -> u32 {
+  let r = x.get_selection_owner(selection).ok().and_then(|c| c.reply().ok());
+  r.map_or(NONE, |r| r.owner)
+}
+
+/// Selects a window's property changes and structure events, one that isn't ours (the root:
+/// the resources, a new XSETTINGS manager; the manager's window: its settings and its end).
+fn watch(x: &RustConnection, w: u32) {
+  let events = EventMask::PROPERTY_CHANGE | EventMask::STRUCTURE_NOTIFY;
+  let _ = x.change_window_attributes(w, &ChangeWindowAttributesAux::new().event_mask(events));
+}
+
 /// The keyboard: the server's keymap through libxkbcommon-x11, else one from the server's
-/// rules names (`_XKB_RULES_NAMES`: rules, model, layout, variant, options) with the extension
-/// set up through libxcb-xkb.
-fn keyboard(x: &X, root: u32, rules: u32) -> Option<Keyboard> {
-  if let Some(kb) = Keyboard::from_x11(x.raw()) {
+/// rules names (`_XKB_RULES_NAMES`: rules, model, layout, variant, options).
+fn keyboard(x: &RustConnection, root: u32, rules: u32) -> Option<Keyboard> {
+  if let Some(kb) = Keyboard::from_x11() {
     return Some(kb);
   }
 
-  if !Keyboard::use_xkb_extension(x.raw()) {
-    eprintln!("nimbo: no XKB extension: the layout group is not followed");
-  }
-
-  let names = x.property(root, rules, ATOM_STRING, false).map(|p| p.data).unwrap_or_default();
+  let names = property(x, root, rules, AtomEnum::STRING, false).map(|r| r.value);
+  let names = names.unwrap_or_default();
   let parts: Vec<CString> =
     names.split(|&b| b == 0).take(5).map(|s| CString::new(s).unwrap_or_default()).collect();
   let get = |i: usize| parts.get(i).filter(|s| !s.is_empty()).map(|s| s.as_c_str());
@@ -429,21 +470,49 @@ fn capitalized(s: &str) -> String {
 }
 
 /// `WM_NORMAL_HINTS`: the least size, and the largest for a fixed window.
-fn set_size_hints(x: &X, win: u32, min: Size, max: Option<Size>, scale: f32) {
-  let mut h = [0u32; 18];
-  h[0] = P_MIN_SIZE | max.map_or(0, |_| P_MAX_SIZE);
-  (h[5], h[6]) = (px(min.w, scale), px(min.h, scale));
-  if let Some(m) = max {
-    (h[7], h[8]) = (px(m.w, scale), px(m.h, scale));
-  }
+fn set_size_hints(x: &RustConnection, win: u32, min: Size, max: Option<Size>, scale: f32) {
+  let size = |s: Size| (px(s.w, scale) as i32, px(s.h, scale) as i32);
+  let hints =
+    WmSizeHints { min_size: Some(size(min)), max_size: max.map(size), ..Default::default() };
+  let _ = hints.set_normal_hints(x, win);
+}
 
-  x.set_property32(win, ATOM_WM_NORMAL_HINTS, ATOM_WM_SIZE_HINTS, &h);
+/// XKB for the connection, so core events carry the layout group; false without it.
+fn use_xkb(x: &RustConnection) -> bool {
+  let r = x.xkb_use_extension(1, 0).ok().and_then(|c| c.reply().ok());
+  r.is_some_and(|r| r.supported)
+}
+
+/// Asks the server (XKB set up) to repeat a held key as presses alone, without the release
+/// before each: a press of a key that is down is a repeat. False when it can't.
+fn detectable_repeat(x: &RustConnection) -> bool {
+  let (kbd, flag, none) =
+    (xkb::ID::USE_CORE_KBD.into(), xkb::PerClientFlag::DETECTABLE_AUTO_REPEAT, 0u32);
+  let r = x.xkb_per_client_flags(kbd, flag, flag, none.into(), none.into(), none.into());
+  r.ok().and_then(|c| c.reply().ok()).is_some_and(|r| r.value.contains(flag))
+}
+
+/// Asks the server for XKB's keymap events (`XkbNewKeyboardNotify`, `XkbMapNotify`: an
+/// XKB-aware client gets no core `MappingNotify` when the keymap changes, `setxkbmap`) and its
+/// state events (`XkbStateNotify`, [Keyboard::state_notify]).
+fn select_events(x: &RustConnection) {
+  let ev =
+    xkb::EventType::NEW_KEYBOARD_NOTIFY | xkb::EventType::MAP_NOTIFY | xkb::EventType::STATE_NOTIFY;
+  let parts = xkb::MapPart::from(0xffu16);
+  let (kbd, aux) = (xkb::ID::USE_CORE_KBD.into(), xkb::SelectEventsAux::new());
+  let _ = x.xkb_select_events(kbd, 0u16.into(), ev, parts, parts, &aux);
 }
 
 impl Win {
-  fn next_event(&self) -> Option<Ev> {
-    let stashed = self.stash.borrow_mut().pop_front();
-    stashed.or_else(|| self.x.poll_event())
+  /// The next event read ahead, else from the connection, without waiting.
+  fn next_event(&mut self) -> Option<XEvent> {
+    if let Some(ev) = self.stash.borrow_mut().pop_front() {
+      return Some(ev);
+    }
+
+    let ev = self.x.poll_for_event();
+    self.broken |= ev.is_err();
+    ev.ok().flatten()
   }
 
   /// Whether the window shows: mapped, and not fully covered.
@@ -524,7 +593,8 @@ impl Win {
       }
     }
 
-    self.x.resize_window(self.win, px(size.w, self.scale), px(size.h, self.scale));
+    let (w, h) = (px(size.w, self.scale), px(size.h, self.scale));
+    let _ = self.x.configure_window(self.win, &ConfigureWindowAux::new().width(w).height(h));
   }
 
   /// Feeds an event to the runtime; returns whether it was used.
@@ -548,18 +618,23 @@ impl Win {
 
     self.cursor = c;
     let id = self.cursors.get(&self.x, c);
-    self.x.set_cursor(self.win, id);
+    let _ = self.x.change_window_attributes(self.win, &ChangeWindowAttributesAux::new().cursor(id));
   }
 
   fn point(&self, x: i16, y: i16) -> Point {
     Point::new(x as f32 / self.scale, y as f32 / self.scale)
   }
 
-  /// The keyboard: its keymap, detectable autorepeat, the keymap events.
+  /// The keyboard: XKB for the connection, its keymap, detectable autorepeat, the keymap
+  /// events.
   fn setup_keyboard(&mut self) {
-    let x = self.x.raw();
     self.kb_ready = true;
-    self.kb = keyboard(&self.x, self.root, self.atoms.rules);
+    let xkb = use_xkb(&self.x);
+    if !xkb {
+      eprintln!("nimbo: no XKB extension: the layout group is not followed");
+    }
+
+    self.kb = keyboard(&self.x, self.root, self.atoms._XKB_RULES_NAMES);
     if self.kb.is_none() {
       eprintln!("nimbo: no keyboard: libxkbcommon.so.0 is missing or has no keymap");
     }
@@ -568,9 +643,12 @@ impl Win {
     self.kb_fresh = !self.kb.as_ref().is_some_and(|kb| kb.from_server);
     self.sync_mods();
 
-    self.detectable = Keyboard::detectable_repeat(x);
-    let ev = self.x.extension_event("XKEYBOARD");
-    self.xkb_event = ev.filter(|_| Keyboard::select_events(x));
+    self.detectable = xkb && detectable_repeat(&self.x);
+    if xkb {
+      select_events(&self.x);
+    }
+
+    self.xkb_state = xkb;
     if self.trace {
       let repeat = if self.detectable { "detectable" } else { "paired" };
       let keymap = if Keyboard::has_x11() { "the server's" } else { "the rules names'" };
@@ -589,7 +667,7 @@ impl Win {
   /// the server's state events keep it (or its state came from the server).
   fn core_state(&mut self, state: u16) {
     if let Some(kb) = &mut self.kb
-      && (self.kb_fresh || self.xkb_event.is_none())
+      && (self.kb_fresh || !self.xkb_state)
     {
       kb.set_core_state(state);
     }
@@ -616,7 +694,7 @@ impl Win {
   /// read with it; changes in a row are read once.
   fn apply_keymap(&mut self) {
     if std::mem::take(&mut self.reload_keymap)
-      && let Some(kb) = keyboard(&self.x, self.root, self.atoms.rules)
+      && let Some(kb) = keyboard(&self.x, self.root, self.atoms._XKB_RULES_NAMES)
     {
       self.kb_fresh = !kb.from_server;
       self.kb = Some(kb);
@@ -624,8 +702,8 @@ impl Win {
     }
   }
 
-  fn handle(&mut self, ev: Ev) {
-    if matches!(ev.kind(), KEY_PRESS | KEY_RELEASE) {
+  fn handle(&mut self, ev: XEvent) {
+    if matches!(ev, XEvent::KeyPress(_) | XEvent::KeyRelease(_)) {
       if !self.kb_ready {
         self.setup_keyboard();
       }
@@ -633,86 +711,82 @@ impl Win {
       self.apply_keymap();
     }
 
-    match ev.kind() {
-      KEY_PRESS => {
-        let e = ev.get::<InputEv>();
+    // A button's press, the focus coming.
+    let on = matches!(ev, XEvent::ButtonPress(_) | XEvent::FocusIn(_));
+    match ev {
+      XEvent::KeyPress(e) => {
         self.clip.borrow_mut().time = e.time;
         let (i, bit) = (e.detail as usize / 64, 1u64 << (e.detail % 64));
         let repeat = self.detectable && self.held[i] & bit != 0;
         self.held[i] |= bit;
-        self.key(e.detail, e.state, true, repeat);
+        self.key(e.detail, e.state.into(), true, repeat);
       }
-      KEY_RELEASE => {
-        let e = ev.get::<InputEv>();
+      XEvent::KeyRelease(e) => {
         self.held[e.detail as usize / 64] &= !(1u64 << (e.detail % 64));
         // Without detectable autorepeat the server repeats a held key as a release and a press
         // at the same time; the press may still be on its way (a read can end between them).
-        let all = |_: &Ev| true;
+        let all = |_: &XEvent| true;
         if !self.detectable
           && let Some(next) = self
             .next_event()
-            .or_else(|| self.x.wait_event(PAIR_WAIT, &mut self.stash.borrow_mut(), all))
+            .or_else(|| wait_event(&self.x, PAIR_WAIT, &mut self.stash.borrow_mut(), all))
         {
-          let n = next.get::<InputEv>();
-          if next.kind() == KEY_PRESS && n.detail == e.detail && n.time == e.time {
-            self.key(n.detail, n.state, true, true);
+          if let XEvent::KeyPress(n) = &next
+            && n.detail == e.detail
+            && n.time == e.time
+          {
+            self.key(n.detail, n.state.into(), true, true);
             return;
           }
 
           self.stash.borrow_mut().push_front(next);
         }
 
-        self.key(e.detail, e.state, false, false);
+        self.key(e.detail, e.state.into(), false, false);
       }
-      BUTTON_PRESS | BUTTON_RELEASE => {
-        let e = ev.get::<InputEv>();
-        let down = ev.kind() == BUTTON_PRESS;
+      XEvent::ButtonPress(e) | XEvent::ButtonRelease(e) => {
+        let down = on;
         if down {
           self.clip.borrow_mut().time = e.time;
         }
 
-        self.core_state(e.state);
+        self.core_state(e.state.into());
         self.mouse = self.point(e.event_x, e.event_y);
-        self.button(e.detail, down, e.state, e.time);
+        self.button(e.detail, down, e.state.into(), e.time);
       }
-      MOTION_NOTIFY => {
-        let e = ev.get::<InputEv>();
-        self.core_state(e.state);
+      XEvent::MotionNotify(e) => {
+        self.core_state(e.state.into());
         self.mouse = self.point(e.event_x, e.event_y);
         let (pos, mods) = (self.mouse, self.kb_mods());
         self.send(Event::MouseMove { pos, mods });
       }
-      ENTER_NOTIFY => {
-        let e = ev.get::<CrossingEv>();
-        self.core_state(e.state);
+      XEvent::EnterNotify(e) => {
+        self.core_state(e.state.into());
         self.inside = true;
         self.mouse = self.point(e.event_x, e.event_y);
         let (pos, mods) = (self.mouse, self.kb_mods());
         self.send(Event::MouseMove { pos, mods });
       }
-      LEAVE_NOTIFY => {
-        let e = ev.get::<CrossingEv>();
-        if e.detail == NOTIFY_INFERIOR {
+      XEvent::LeaveNotify(e) => {
+        if e.detail == NotifyDetail::INFERIOR {
           return;
         }
 
         self.inside = false;
         // A drag keeps the pointer (an implicit grab): it exits when the button is released.
-        if e.state & BUTTONS_MASK == 0 {
+        if u16::from(e.state) & BUTTONS_MASK == 0 {
           self.send(Event::MouseExit);
         }
       }
-      FOCUS_IN | FOCUS_OUT => {
-        let e = ev.get::<FocusEv>();
-        let grab = matches!(e.mode, NOTIFY_MODE_GRAB | NOTIFY_MODE_UNGRAB);
-        if grab || e.detail == NOTIFY_POINTER || e.detail == NOTIFY_INFERIOR {
+      XEvent::FocusIn(e) | XEvent::FocusOut(e) => {
+        let grab = matches!(e.mode, NotifyMode::GRAB | NotifyMode::UNGRAB);
+        if grab || matches!(e.detail, NotifyDetail::POINTER | NotifyDetail::INFERIOR) {
           return;
         }
 
-        self.focus(ev.kind() == FOCUS_IN);
+        self.focus(on);
       }
-      EXPOSE => {
-        let e = ev.get::<ExposeEv>();
+      XEvent::Expose(e) => {
         let (x, y) = (e.x as i32, e.y as i32);
         let rc = IRect::new(x, y, x + e.width as i32, y + e.height as i32);
         if !self.present.expose(rc) {
@@ -725,8 +799,7 @@ impl Win {
 
         self.exposed = true;
       }
-      CONFIGURE_NOTIFY => {
-        let e = ev.get::<ConfigureEv>();
+      XEvent::ConfigureNotify(e) => {
         if e.window == self.win && (e.width as u32, e.height as u32) != self.px {
           self.px = (e.width as u32, e.height as u32);
           let (w, h) = (points(e.width as u32, self.scale), points(e.height as u32, self.scale));
@@ -736,53 +809,48 @@ impl Win {
         }
       }
       // The root's and the XSETTINGS manager's structure events come too: only ours count.
-      MAP_NOTIFY if ev.get::<WindowEv>().window == self.win => {
+      XEvent::MapNotify(e) if e.window == self.win => {
         self.mapped = true;
         self.force = true;
         self.rt.redraw();
       }
-      UNMAP_NOTIFY if ev.get::<WindowEv>().window == self.win => self.mapped = false,
+      XEvent::UnmapNotify(e) if e.window == self.win => self.mapped = false,
       // Covered frames wait; uncovered, the frame due is drawn and the exposes put back the rest.
-      VISIBILITY_NOTIFY => {
-        let e = ev.get::<VisibilityEv>();
-        if e.window == self.win {
-          self.obscured = e.state == VISIBILITY_FULLY_OBSCURED;
-        }
+      XEvent::VisibilityNotify(e) if e.window == self.win => {
+        self.obscured = e.state == Visibility::FULLY_OBSCURED;
       }
-      DESTROY_NOTIFY => {
-        let w = ev.get::<WindowEv>().window;
-        if w == self.win {
+      XEvent::DestroyNotify(e) => {
+        if e.window == self.win {
           self.closed = true;
-        } else if w != 0 && w == self.xsettings {
+        } else if e.window != NONE && e.window == self.xsettings {
           // The manager quit: none until another announces itself.
           self.watch_xsettings();
         }
       }
-      CLIENT_MESSAGE => {
-        let e = ev.get::<ClientMessageEv>();
+      XEvent::ClientMessage(mut e) => {
+        let data = e.data.as_data32();
         // A manager took the XSETTINGS selection (it started, or replaced the last).
-        if e.ty == self.atoms.manager && e.data[1] == self.atoms.xsettings {
+        if e.type_ == self.atoms.MANAGER && data[1] == self.xsettings_sel {
           self.watch_xsettings();
           return;
         }
 
-        if e.ty != self.atoms.protocols {
+        if e.type_ != self.atoms.WM_PROTOCOLS {
           return;
         }
 
-        if e.data[0] == self.atoms.delete {
+        if data[0] == self.atoms.WM_DELETE_WINDOW {
           self.closed = true;
-        } else if e.data[0] == self.atoms.ping {
+        } else if data[0] == self.atoms._NET_WM_PING {
           // Back to the root: the window manager sees we're alive.
-          let mut out = ev.bytes();
-          out[4..8].copy_from_slice(&self.root.to_ne_bytes());
-          self.x.send_event(self.root, EM_SUBSTRUCTURE_NOTIFY | EM_SUBSTRUCTURE_REDIRECT, &out);
+          e.window = self.root;
+          let mask = EventMask::SUBSTRUCTURE_NOTIFY | EventMask::SUBSTRUCTURE_REDIRECT;
+          let _ = self.x.send_event(false, self.root, mask, e);
         }
       }
-      PROPERTY_NOTIFY => {
-        let e = ev.get::<PropertyEv>();
-        if e.window == self.root && e.atom == ATOM_RESOURCE_MANAGER {
-          let scale = dpi_scale(&self.x, self.root);
+      XEvent::PropertyNotify(e) => {
+        if e.window == self.root && e.atom == u32::from(AtomEnum::RESOURCE_MANAGER) {
+          let scale = dpi_scale(&resources(&self.x));
           if scale != self.scale {
             self.scale = scale;
             // The hints are in pixels: the same points need others at the new scale.
@@ -791,40 +859,31 @@ impl Win {
             self.force = true;
             self.rt.redraw();
           }
-        } else if e.window == self.xsettings && e.atom == self.atoms.xsettings_settings {
-          let a = appearance(&self.x, self.xsettings, self.atoms.xsettings_settings);
+        } else if e.window == self.xsettings && e.atom == self.atoms._XSETTINGS_SETTINGS {
+          let a = appearance(&self.x, self.xsettings, self.atoms._XSETTINGS_SETTINGS);
           self.send(Event::Appearance(a));
         }
       }
-      SELECTION_REQUEST => self.clip.borrow().request(ev.get::<SelectionRequestEv>()),
-      SELECTION_CLEAR => self.clip.borrow_mut().cleared(ev.get::<SelectionClearEv>()),
-      MAPPING_NOTIFY => self.reload_keymap |= ev.get::<MappingEv>().request == MAPPING_KEYBOARD,
-      // XkbNewKeyboardNotify, XkbMapNotify, XkbStateNotify (the XKB event type is the second
-      // byte).
-      k if Some(k) == self.xkb_event => match ev.bytes()[1] {
-        0 | 1 => self.reload_keymap = true,
-        2 => {
-          if let Some(kb) = &mut self.kb {
-            kb.state_notify(&ev.bytes());
-          }
-
-          self.kb_fresh = false;
-          self.sync_mods();
-          self.modifier_keys();
+      XEvent::SelectionRequest(e) => self.clip.borrow().request(&e),
+      XEvent::SelectionClear(e) => self.clip.borrow_mut().cleared(&e),
+      XEvent::MappingNotify(e) => self.reload_keymap |= e.request == Mapping::KEYBOARD,
+      XEvent::XkbNewKeyboardNotify(_) | XEvent::XkbMapNotify(_) => self.reload_keymap = true,
+      XEvent::XkbStateNotify(e) => {
+        if let Some(kb) = &mut self.kb {
+          let mods = [e.base_mods, e.latched_mods, e.locked_mods].map(u32::from);
+          let groups =
+            [e.base_group as i32 as u32, e.latched_group as i32 as u32, e.locked_group.into()];
+          kb.state_notify(mods, groups);
         }
-        _ => {}
-      },
-      0 if self.trace => {
-        let b = ev.bytes();
-        eprintln!(
-          "nimbo: X error {} (request {}.{})",
-          b[1],
-          b[10],
-          u16::from_ne_bytes([b[8], b[9]])
-        );
+
+        self.kb_fresh = false;
+        self.sync_mods();
+        self.modifier_keys();
       }
-      k if Some(k) == self.present.completion() => {
-        self.present.completed(ev.get::<ShmCompletionEv>().shmseg);
+      XEvent::ShmCompletion(e) => self.present.completed(e.shmseg),
+      XEvent::Error(e) if self.trace => {
+        let (kind, major, minor) = (e.error_kind, e.major_opcode, e.minor_opcode);
+        eprintln!("nimbo: X error {kind:?} (request {major}.{minor})");
       }
       _ => {}
     }
@@ -833,13 +892,13 @@ impl Win {
   /// Watches the XSETTINGS selection's owner now (none when it has none) and sends the
   /// appearance it sets.
   fn watch_xsettings(&mut self) {
-    let owner = self.x.selection_owner(self.atoms.xsettings);
-    if owner != 0 && owner != self.xsettings {
-      self.x.select_events(owner, XSETTINGS_EVENTS);
+    let owner = selection_owner(&self.x, self.xsettings_sel);
+    if owner != NONE && owner != self.xsettings {
+      watch(&self.x, owner);
     }
 
     self.xsettings = owner;
-    let a = appearance(&self.x, owner, self.atoms.xsettings_settings);
+    let a = appearance(&self.x, owner, self.atoms._XSETTINGS_SETTINGS);
     self.send(Event::Appearance(a));
   }
 
@@ -858,8 +917,9 @@ impl Win {
 
     // Modifiers pressed or let go in another window: those held now.
     self.send(Event::Focus(true));
-    match self.x.pointer_state(self.root) {
-      Some(state) => self.core_state(state),
+    let pointer = self.x.query_pointer(self.root).ok().and_then(|c| c.reply().ok());
+    match pointer {
+      Some(p) => self.core_state(p.mask.into()),
       None => self.sync_mods(),
     }
   }
@@ -873,7 +933,7 @@ impl Win {
     let key = (keycode as u32).saturating_sub(8);
     let Some(kb) = &mut self.kb else { return };
     // Without the server's state events, the state from the event's and the key's own change.
-    let own = self.kb_fresh || self.xkb_event.is_none();
+    let own = self.kb_fresh || !self.xkb_state;
     if own {
       kb.set_core_state(state);
     }

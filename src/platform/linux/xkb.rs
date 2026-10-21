@@ -45,7 +45,7 @@ fns!(Xkb {
   fn xkb_compose_state_reset(state: P);
 });
 
-// libxkbcommon-x11: the X server's keymap through the XKB extension.
+// libxkbcommon-x11: the X server's keymap through the XKB extension, over an XCB connection.
 fns!(XkbX11 {
   fn xkb_x11_setup_xkb_extension(c: P, major: u16, minor: u16, flags: c_int, major_out: *mut u16,
     minor_out: *mut u16, base_event: *mut u8, base_error: *mut u8) -> c_int;
@@ -54,24 +54,12 @@ fns!(XkbX11 {
   fn xkb_x11_state_new_from_device(keymap: P, c: P, device: i32) -> P;
 });
 
-// libxcb-xkb: XkbUseExtension without libxkbcommon-x11, so core events carry the group, and
-// detectable autorepeat.
-fns!(XcbXkb {
-  fn xcb_xkb_use_extension(c: P, major: u16, minor: u16) -> u32;
-  fn xcb_xkb_use_extension_reply(c: P, cookie: u32, e: *mut P) -> P;
-  fn xcb_xkb_per_client_flags(c: P, device: u16, change: u32, value: u32, ctrls: u32,
-    auto_ctrls: u32, auto_values: u32) -> u32;
-  fn xcb_xkb_per_client_flags_reply(c: P, cookie: u32, e: *mut P) -> P;
-  fn xcb_xkb_select_events(c: P, device: u16, affect: u16, clear: u16, all: u16, affect_map: u16,
-    map: u16, details: *const c_void) -> u32;
+// libxcb, for the connection libxkbcommon-x11 reads the keymap over (the window's is x11rb's).
+fns!(Xcb {
+  fn xcb_connect(name: *const c_char, screen: *mut c_int) -> P;
+  fn xcb_connection_has_error(c: P) -> c_int;
+  fn xcb_disconnect(c: P);
 });
-
-/// `XCB_XKB_ID_USE_CORE_KBD`, `XCB_XKB_PER_CLIENT_FLAG_DETECTABLE_AUTO_REPEAT`.
-const XKB_CORE_KBD: u16 = 0x100;
-const DETECTABLE_AUTO_REPEAT: u32 = 1;
-/// `XCB_XKB_EVENT_TYPE_NEW_KEYBOARD_NOTIFY | _MAP_NOTIFY | _STATE_NOTIFY`; every map part.
-const XKB_EVENTS: u16 = 1 | 2 | 4;
-const MAP_PARTS: u16 = 0xff;
 
 /// `struct xkb_rule_names`.
 #[repr(C)]
@@ -93,18 +81,15 @@ struct Sys {
   f: Xkb,
 }
 
-/// The X11 libraries, loaded on first use: the keymap from the server, else XkbUseExtension.
-fn sys_x11() -> &'static (Option<XkbX11>, Option<XcbXkb>) {
-  static SYS: OnceLock<(Option<XkbX11>, Option<XcbXkb>)> = OnceLock::new();
-  SYS.get_or_init(|| {
-    let x11 = Lib::open(&[c"libxkbcommon-x11.so.0"]).and_then(|l| XkbX11::load(&l));
-    let xkb = Lib::open(&[c"libxcb-xkb.so.1"]).and_then(|l| XcbXkb::load(&l));
-    (x11, xkb)
-  })
-}
-
-unsafe extern "C" {
-  fn free(p: P);
+/// The X11 libraries, loaded on first use, both or none: the keymap from the server.
+fn sys_x11() -> Option<&'static (XkbX11, Xcb)> {
+  static SYS: OnceLock<Option<(XkbX11, Xcb)>> = OnceLock::new();
+  SYS
+    .get_or_init(|| {
+      let x11 = XkbX11::load(&Lib::open(&[c"libxkbcommon-x11.so.0"])?)?;
+      Some((x11, Xcb::load(&Lib::open(&[c"libxcb.so.1"])?)?))
+    })
+    .as_ref()
 }
 
 /// The library's functions; each [Keyboard] has its own context (xkbcommon's objects are not
@@ -170,17 +155,30 @@ impl Keyboard {
     Self::new(|s, ctx| unsafe { (s.f.xkb_keymap_new_from_names)(ctx, &names, 0) })
   }
 
-  /// The X server's keymap of the core keyboard (an XCB connection `c`), through
-  /// libxkbcommon-x11, and its state now: a modifier held as the window opens is down. It sets
-  /// the XKB extension up for the connection, so core events carry the layout group
-  /// ([Keyboard::set_core_state]). `None` without the library.
-  pub fn from_x11(c: P) -> Option<Self> {
-    let f = sys_x11().0.as_ref()?;
-    let (mut major, mut minor, mut event, mut error) = (0, 0, 0, 0);
-    let ok = unsafe {
-      (f.xkb_x11_setup_xkb_extension)(c, 1, 0, 0, &mut major, &mut minor, &mut event, &mut error)
+  /// The X server's keymap of the core keyboard (`$DISPLAY`), through libxkbcommon-x11 over a
+  /// connection of its own, closed after. `None` without the libraries or the XKB extension.
+  pub fn from_x11() -> Option<Self> {
+    let (f, xcb) = sys_x11()?;
+    let c = unsafe { (xcb.xcb_connect)(std::ptr::null(), std::ptr::null_mut()) };
+    if c.is_null() {
+      return None;
+    }
+
+    let kb = match unsafe { (xcb.xcb_connection_has_error)(c) } {
+      0 => Self::from_device(f, c),
+      _ => None,
     };
-    if ok == 0 {
+
+    unsafe { (xcb.xcb_disconnect)(c) };
+    kb
+  }
+
+  /// The core keyboard's keymap over an XCB connection `c`, the XKB extension set up for it,
+  /// and its state now: a modifier held as the window opens is down.
+  fn from_device(f: &XkbX11, c: P) -> Option<Self> {
+    let (mut major, mut minor, mut event, mut error) = (0, 0, 0, 0);
+    let (m, n, e, r) = (&mut major, &mut minor, &mut event, &mut error);
+    if unsafe { (f.xkb_x11_setup_xkb_extension)(c, 1, 0, 0, m, n, e, r) } == 0 {
       return None;
     }
 
@@ -202,25 +200,10 @@ impl Keyboard {
     Some(kb)
   }
 
-  /// Whether libxkbcommon-x11 is there, so [Keyboard::from_x11] reads the server's keymap.
+  /// Whether libxkbcommon-x11 and libxcb are there, so [Keyboard::from_x11] reads the server's
+  /// keymap.
   pub fn has_x11() -> bool {
-    sys_x11().0.is_some()
-  }
-
-  /// Makes an XCB connection `c` XKB-aware without libxkbcommon-x11 (libxcb-xkb's
-  /// XkbUseExtension), so core events carry the group; false when that fails too.
-  pub fn use_xkb_extension(c: P) -> bool {
-    let Some(f) = sys_x11().1.as_ref() else { return false };
-    let cookie = unsafe { (f.xcb_xkb_use_extension)(c, 1, 0) };
-    let r = unsafe { (f.xcb_xkb_use_extension_reply)(c, cookie, std::ptr::null_mut()) };
-    if r.is_null() {
-      return false;
-    }
-
-    // `xcb_xkb_use_extension_reply_t`: response type, `supported`, ...
-    let supported = unsafe { *r.cast::<u8>().add(1) } != 0;
-    unsafe { free(r) };
-    supported
+    sys_x11().is_some()
   }
 
   fn new(keymap: impl FnOnce(&Sys, P) -> P) -> Option<Self> {
@@ -250,35 +233,6 @@ impl Keyboard {
     unsafe { (s.f.xkb_state_update_mask)(self.state, dep, lat, lock, 0, 0, group) };
   }
 
-  /// Asks the X server (an XCB connection `c`, XKB set up) to repeat a held key as presses
-  /// alone, without the release before each: a press of a key that is down is a repeat. False
-  /// when it can't.
-  pub fn detectable_repeat(c: P) -> bool {
-    let Some(f) = sys_x11().1.as_ref() else { return false };
-    let flag = DETECTABLE_AUTO_REPEAT;
-    let cookie = unsafe { (f.xcb_xkb_per_client_flags)(c, XKB_CORE_KBD, flag, flag, 0, 0, 0) };
-    let r = unsafe { (f.xcb_xkb_per_client_flags_reply)(c, cookie, std::ptr::null_mut()) };
-    if r.is_null() {
-      return false;
-    }
-
-    // `xcb_xkb_per_client_flags_reply_t`: 8 bytes of header, `supported`, `value`, ...
-    let value = unsafe { r.cast::<u8>().add(12).cast::<u32>().read_unaligned() };
-    unsafe { free(r) };
-    value & flag != 0
-  }
-
-  /// Asks the X server for XKB's keymap events (`XkbNewKeyboardNotify`, `XkbMapNotify`: an
-  /// XKB-aware client gets no core `MappingNotify` when the keymap changes, `setxkbmap`) and
-  /// its state events (`XkbStateNotify`, [Keyboard::state_notify]).
-  pub fn select_events(c: P) -> bool {
-    let Some(f) = sys_x11().1.as_ref() else { return false };
-    let (ev, parts) = (XKB_EVENTS, MAP_PARTS);
-    let null = std::ptr::null();
-    unsafe { (f.xcb_xkb_select_events)(c, XKB_CORE_KBD, ev, 0, ev, parts, parts, null) };
-    true
-  }
-
   /// An X core event's `state`: the modifiers (Shift, Lock, Control, Mod1–5 are xkbcommon's
   /// first eight) and the group in bits 13–14, as the state before that event.
   pub fn set_core_state(&mut self, state: u16) {
@@ -290,11 +244,10 @@ impl Keyboard {
   /// An `XkbStateNotify` event's modifiers and groups (base, latched, locked), as
   /// xkbcommon's X11 guide keeps the state: the server sends one for every change, whichever
   /// window has the focus, so a key let go in another window doesn't stay down here.
-  pub fn state_notify(&mut self, ev: &[u8; 32]) {
+  pub fn state_notify(&mut self, mods: [u32; 3], groups: [u32; 3]) {
     let Some(s) = sys() else { return };
-    let [dep, lat, lock, base_group, lat_group, lock_group] = state_mask(ev);
-    let st = self.state;
-    unsafe { (s.f.xkb_state_update_mask)(st, dep, lat, lock, base_group, lat_group, lock_group) };
+    let ([dep, lat, lock], [base, latched, locked]) = (mods, groups);
+    unsafe { (s.f.xkb_state_update_mask)(self.state, dep, lat, lock, base, latched, locked) };
   }
 
   /// A key (evdev code) going down or up, for the modifiers it changes.
@@ -436,13 +389,6 @@ impl Keyboard {
       (c.is_ascii() && !c.is_ascii_control()).then_some(c)
     })
   }
-}
-
-/// `xcb_xkb_state_notify_event_t`'s base, latched and locked modifiers (bytes 10–12) and
-/// groups (signed 16-bit at 14 and 16, then a byte at 18), for `xkb_state_update_mask`.
-fn state_mask(ev: &[u8; 32]) -> [u32; 6] {
-  let group = |i: usize| i16::from_ne_bytes([ev[i], ev[i + 1]]) as i32 as u32;
-  [ev[10] as u32, ev[11] as u32, ev[12] as u32, group(14), group(16), ev[18] as u32]
 }
 
 /// Ctrl, Super or Alt: a key with them types nothing (GTK).
@@ -661,19 +607,11 @@ mod tests {
       eprintln!("no xkbcommon: skipped");
       return;
     };
-    let notify = |base: u8, locked: u8, group: i16| {
-      let mut ev = [0u8; 32];
-      (ev[1], ev[10], ev[12]) = (2, base, locked);
-      ev[14..16].copy_from_slice(&group.to_ne_bytes());
-      ev
-    };
-    assert_eq!(state_mask(&notify(1, 2, 1)), [1, 0, 2, 1, 0, 0]);
-
-    kb.state_notify(&notify(SHIFT as u8, 0, 0));
+    kb.state_notify([SHIFT, 0, 0], [0; 3]);
     assert_eq!(kb.mods(), Mods::SHIFT);
     // Let go while unfocused, then tapped again: the server's state after each.
-    for base in [0, SHIFT as u8, 0] {
-      kb.state_notify(&notify(base, 0, 0));
+    for base in [0, SHIFT, 0] {
+      kb.state_notify([base, 0, 0], [0; 3]);
     }
 
     assert_eq!(kb.mods(), Mods::NONE);

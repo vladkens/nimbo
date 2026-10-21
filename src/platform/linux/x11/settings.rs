@@ -1,37 +1,37 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The desktop's settings: the scale from `Xft.dpi` in the resources, light or dark from
-//! XSETTINGS' `Net/ThemeName`.
+//! The desktop's settings: the resources (`RESOURCE_MANAGER` on the root, as `xrdb` sets them)
+//! for the scale from `Xft.dpi` and the cursor theme, light or dark from XSETTINGS'
+//! `Net/ThemeName`.
 
-use super::xcb::*;
+use x11rb::NONE;
+use x11rb::resource_manager::{self, Database};
+use x11rb::rust_connection::RustConnection;
+
+use super::property;
 use crate::app::Appearance;
 
-/// `Xft.dpi` in the root window's resources over 96, at least 1.
-pub(super) fn dpi_scale(x: &X, root: u32) -> f32 {
-  let res = x.property(root, ATOM_RESOURCE_MANAGER, ATOM_STRING, false);
-  let text = res.map(|p| String::from_utf8_lossy(&p.data).into_owned()).unwrap_or_default();
-  resource(&text, "Xft.dpi")
-    .and_then(|v| v.parse::<f32>().ok())
-    .map_or(1.0, |d| (d / 96.0).max(1.0))
+/// The root window's resources; none when it has none or the request fails.
+pub(super) fn resources(x: &RustConnection) -> Database {
+  let db = resource_manager::new_from_resource_manager(x).ok().flatten();
+  db.unwrap_or_else(|| Database::new_from_data(b""))
 }
 
-/// A resource's value in `xrdb` text (`name:\tvalue` lines).
-fn resource<'a>(text: &'a str, name: &str) -> Option<&'a str> {
-  text.lines().find_map(|l| {
-    let (k, v) = l.split_once(':')?;
-    (k.trim() == name).then(|| v.trim())
-  })
+/// `Xft.dpi` in the resources over 96, at least 1.
+pub(super) fn dpi_scale(db: &Database) -> f32 {
+  let dpi = db.get_value::<f32>("Xft.dpi", "").ok().flatten();
+  dpi.map_or(1.0, |d| (d / 96.0).max(1.0))
 }
 
 /// Dark when the XSETTINGS manager's `Net/ThemeName` is a dark theme (`Adwaita-dark`,
 /// `Breeze-Dark`); light without one.
-pub(super) fn appearance(x: &X, owner: u32, prop: u32) -> Appearance {
+pub(super) fn appearance(x: &RustConnection, owner: u32, prop: u32) -> Appearance {
   let data = match owner {
-    0 => None,
-    w => x.property(w, prop, prop, false).map(|p| p.data),
+    NONE => None,
+    w => property(x, w, prop, prop, false),
   };
 
-  let theme = data.and_then(|d| xsettings_string(&d, "Net/ThemeName"));
+  let theme = data.and_then(|d| xsettings_string(&d.value, "Net/ThemeName"));
   match theme {
     Some(t) if t.to_lowercase().contains("dark") => Appearance::DARK,
     _ => Appearance::LIGHT,
@@ -87,9 +87,10 @@ mod tests {
 
   #[test]
   fn resources_give_the_dpi() {
-    let text = "Xcursor.theme:\tbreeze_cursors\nXft.dpi:\t144\nXft.hinting:\t1\n";
-    assert_eq!(resource(text, "Xft.dpi"), Some("144"));
-    assert_eq!(resource(text, "Xft.rgba"), None);
+    let db = Database::new_from_data(b"Xcursor.theme:\tbreeze_cursors\nXft.dpi:\t144\n");
+    assert_eq!(dpi_scale(&db), 1.5);
+    assert_eq!(dpi_scale(&Database::new_from_data(b"Xft.dpi: 72\n")), 1.0, "at least 1");
+    assert_eq!(dpi_scale(&Database::new_from_data(b"")), 1.0);
   }
 
   #[test]
