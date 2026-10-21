@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use super::{Align, Dim, Float, Id, Style, TextStyle};
 use crate::keys::Binding;
 use crate::scene::{ImageId, Point, Rect, Size};
-use crate::text::edit::next_grapheme;
+use crate::text::edit::graphemes;
 use crate::text::{Font, FxHasher, Ink, Metrics};
 
 /// Slack for float sums when comparing sizes, in points.
@@ -380,11 +380,8 @@ fn text_width(s: &str, style: TextStyle, m: &mut dyn Measure) -> (f32, f32) {
 
     // Every word's: a narrow word can hold the widest one ("iiii W").
     for word in line.split(' ') {
-      let mut i = 0;
-      while i < word.len() {
-        let j = next_grapheme(word, i);
-        least = least.max(m.width(&word[i..j], style.font));
-        i = j;
+      for g in graphemes(word) {
+        least = least.max(m.width(&word[g], style.font));
       }
     }
   }
@@ -588,10 +585,7 @@ fn wrap(t: &mut Tree, m: &mut dyn Measure) {
 /// an emoji sequence or a syllable stays whole.
 fn ellipsize(s: &str, font: Font, width: f32, m: &mut dyn Measure) -> (usize, f32) {
   let dots = m.width(ELLIPSIS, font);
-  let mut bounds = vec![0];
-  while let Some(&i) = bounds.last().filter(|&&i| i < s.len()) {
-    bounds.push(next_grapheme(s, i));
-  }
+  let bounds: Vec<usize> = std::iter::once(0).chain(graphemes(s).map(|g| g.end)).collect();
 
   // Binary search over the graphemes: `lo` fits, `hi` doesn't.
   let (mut lo, mut hi) = (0, bounds.len());
@@ -680,10 +674,7 @@ fn wrap_text(
 /// start to one that doesn't fit, then halves between: about its own length, not the rest of the
 /// word's.
 fn breaks(word: &str, font: Font, width: f32, m: &mut dyn Measure) -> Vec<usize> {
-  let mut bounds = vec![0];
-  while let Some(&i) = bounds.last().filter(|&&i| i < word.len()) {
-    bounds.push(next_grapheme(word, i));
-  }
+  let bounds: Vec<usize> = std::iter::once(0).chain(graphemes(word).map(|g| g.end)).collect();
 
   let (mut cuts, mut from, last) = (Vec::new(), 0, bounds.len() - 1);
   let fits = |m: &mut dyn Measure, a: usize, b: usize| {
