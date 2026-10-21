@@ -715,8 +715,11 @@ fn breaks(word: &str, font: Font, width: f32, m: &mut dyn Measure) -> Vec<usize>
 fn place(t: &mut Tree, win: Size, scale: f32) {
   t.nodes[0].pos = [0.0; 2];
   for i in 0..t.nodes.len() {
-    let n = &t.nodes[i];
+    let n = &mut t.nodes[i];
     if n.end as usize == i + 1 {
+      // No children (a list emptied): its offset is clamped to what it has, and kept so.
+      let (content, size) = (n.content, n.size);
+      n.scroll = clamp_scroll(n.scroll, n.style.scroll, content, size);
       continue;
     }
 
@@ -744,13 +747,8 @@ fn place(t: &mut Tree, win: Size, scale: f32) {
     // The content at its final size; a scroll container's offset is clamped to it.
     let n = &mut t.nodes[i];
     (n.content[ax], n.content[cr]) = (used + a + b, across + ca + cb);
-    let mut scroll = [n.scroll.x, n.scroll.y];
-    for k in 0..2 {
-      let max = (n.content[k] - size[k]).max(0.0);
-      scroll[k] = if style.scroll[k] { scroll[k].clamp(0.0, max) } else { 0.0 };
-    }
-
-    n.scroll = Point::new(scroll[0], scroll[1]);
+    n.scroll = clamp_scroll(n.scroll, style.scroll, n.content, size);
+    let scroll = [n.scroll.x, n.scroll.y];
     let mut cur = pos[ax] + a + offset(align[ax], inner.0 - used) - scroll[ax];
     each(t, i, |c| {
       if let Some(f) = c.float {
@@ -770,6 +768,15 @@ fn place(t: &mut Tree, win: Size, scale: f32) {
     let (r, b) = (snap(n.pos[0] + n.size[0]), snap(n.pos[1] + n.size[1]));
     n.rect = Rect::new(x, y, r - x, b - y);
   }
+}
+
+/// A scroll offset within `content` seen through `size`, 0 along an axis that doesn't scroll.
+fn clamp_scroll(off: Point, scrolls: [bool; 2], content: [f32; 2], size: [f32; 2]) -> Point {
+  let at = |k: usize, v: f32| match scrolls[k] {
+    true => v.clamp(0.0, (content[k] - size[k]).max(0.0)),
+    false => 0.0,
+  };
+  Point::new(at(0, off.x), at(1, off.y))
 }
 
 /// Places overlay `c` on its target: the parent at `pos` of `size`, or the window.
