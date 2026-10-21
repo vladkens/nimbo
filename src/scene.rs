@@ -483,7 +483,8 @@ impl Frame<'_> {
     let dark = 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2] < 0.5;
     for g in &line.glyphs {
       let px = (x + g.x) * scale;
-      let subpixel = ((px.fract() * 4.0) as u8).min(3);
+      // Quarters right of the pixel the glyph starts in: left of the origin too.
+      let subpixel = (((px - px.floor()) * 4.0) as u8).min(3);
       let Some(a) = self.text.glyph(g.face, g.id, subpixel, dark) else { continue };
       let left = if a.color { px.round() } else { px.floor() };
       let rect = Rect::new(
@@ -505,6 +506,31 @@ impl Frame<'_> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn text_left_of_the_origin_keeps_its_subpixel_offset() {
+    let (mut scene, mut text, mut images) =
+      (Scene::default(), TextSystem::new(2.0), Images::default());
+    let mut f = Frame {
+      size: Size::new(100.0, 50.0),
+      scale: 2.0,
+      mouse: None,
+      now: Duration::ZERO,
+      scene: &mut scene,
+      text: &mut text,
+      images: &mut images,
+      animate: false,
+    };
+    let mut at = |x: f32| {
+      f.scene.clear();
+      f.text(x, 20.0, "H", Font::ui(13.0), [1.0; 4]);
+      f.scene.layers()[0].glyphs[0]
+    };
+    // -0.25 and 0.75 pixels: the same quarter, a pixel apart.
+    let (a, b) = (at(-0.125), at(0.375));
+    assert_eq!(a.uv, b.uv);
+    assert_eq!(b.rect.x - a.rect.x, 0.5);
+  }
 
   #[test]
   fn text_at_anchors_to_x() {
