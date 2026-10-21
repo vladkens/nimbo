@@ -22,7 +22,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rustix::event::{EventfdFlags, PollFd, PollFlags, Timespec, eventfd, poll};
 
-use self::present::Presenter;
+use self::present::{Presenter, STUCK};
 use self::xcb::*;
 use super::Res;
 use crate::Config;
@@ -33,8 +33,6 @@ use crate::scene::Size;
 
 /// The frame interval while the runtime animates: 60 Hz (the display's rate isn't read).
 const REFRESH: Duration = Duration::from_micros(16_667);
-/// A completion that never came (an error on the put) stops holding frames back after this.
-const STUCK: Duration = Duration::from_millis(500);
 
 /// `WM_NORMAL_HINTS` flags (ICCCM): the least and largest sizes are set.
 const P_MIN_SIZE: u32 = 1 << 4;
@@ -225,8 +223,12 @@ fn run_on(
     }
 
     let now = Instant::now();
-    if win.present.pending && win.last_frame.is_some_and(|t| now - t > STUCK) {
-      win.present.pending = false;
+    if win.present.unstick(now) {
+      // The put likely failed: the whole frame again, into the new segment.
+      win.rt.redraw();
+      if win.trace {
+        eprintln!("nimbo: no MIT-SHM completion in {STUCK:?}, a new segment");
+      }
     }
 
     if win.frame_due(now) {
@@ -378,7 +380,7 @@ impl Win {
   /// the server has read the last one, and a tick passed since it (at once after a resize).
   fn frame_due(&mut self, now: Instant) -> bool {
     let hidden = !self.mapped && self.frames > 0;
-    if hidden || self.present.pending || !self.rt.needs_frame() {
+    if hidden || self.present.busy() || !self.rt.needs_frame() {
       return false;
     }
 
@@ -389,7 +391,7 @@ impl Win {
   /// while the server reads the last frame (its completion wakes us).
   fn timeout(&mut self) -> Option<Duration> {
     let now = Instant::now();
-    if self.present.pending {
+    if self.present.busy() {
       return Some(STUCK);
     }
 
