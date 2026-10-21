@@ -25,6 +25,8 @@ use crate::ui::Cursor;
 const WM_MOUSELEAVE: u32 = 0x2A3;
 /// One wheel notch.
 const NOTCH: f32 = 120.0;
+/// The wheel scrolls a screen per notch (WinUser.h, not in windows-sys).
+const WHEEL_PAGESCROLL: u32 = u32::MAX;
 
 /// The last press, to count clicks: its button, time (ms), position (pixels) and count.
 #[derive(Default)]
@@ -33,6 +35,15 @@ pub(super) struct Clicks {
   time: u32,
   at: (i32, i32),
   count: u32,
+}
+
+/// Points a notch scrolls: the system's `lines` (or characters), or a `page` (the client's
+/// extent) for "one screen at a time".
+fn notch_step(lines: u32, page: f32) -> f32 {
+  match lines {
+    WHEEL_PAGESCROLL => page,
+    n => n.min(100) as f32 * WHEEL_LINE,
+  }
 }
 
 fn xy(lp: LPARAM) -> (i32, i32) {
@@ -159,7 +170,7 @@ impl Window {
   }
 
   /// A wheel or touchpad scroll: notches of 120 scroll the system's lines (or characters) per
-  /// notch; a precision touchpad sends fractions of one.
+  /// notch, or a screen; a precision touchpad sends fractions of one.
   fn wheel(&mut self, wp: WPARAM, lp: LPARAM, horizontal: bool) {
     let notches = (wp >> 16) as u16 as i16;
     let (x, y) = xy(lp);
@@ -168,7 +179,9 @@ impl Window {
     let action = if horizontal { SPI_GETWHEELSCROLLCHARS } else { SPI_GETWHEELSCROLLLINES };
     let mut lines = 3u32;
     unsafe { SystemParametersInfoW(action, 0, (&raw mut lines).cast(), 0) };
-    let k = notches as f32 / NOTCH * lines.min(100) as f32 * WHEEL_LINE;
+    let (w, h) = self.client();
+    let page = if horizontal { w } else { h } as f32 / self.scale;
+    let k = notches as f32 / NOTCH * notch_step(lines, page);
     // Content follows the wheel: up moves it down; a tilt right moves it left.
     let delta = if horizontal { Point::new(-k, 0.0) } else { Point::new(0.0, k) };
     self.send(Event::Scroll {
@@ -320,4 +333,16 @@ pub(super) fn handle(msg: u32, wp: WPARAM, lp: LPARAM) -> Option<LRESULT> {
   }
 
   Some(0)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn a_notch_scrolls_lines_or_a_page() {
+    assert_eq!(notch_step(3, 400.0), 3.0 * WHEEL_LINE);
+    assert_eq!(notch_step(500, 400.0), 100.0 * WHEEL_LINE);
+    assert_eq!(notch_step(WHEEL_PAGESCROLL, 400.0), 400.0);
+  }
 }
