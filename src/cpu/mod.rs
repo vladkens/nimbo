@@ -15,6 +15,7 @@ use std::sync::Mutex;
 use self::pool::Pool;
 use self::raster::{IRect, Target, Tex};
 use crate::scene::{Images, Rect, Scene, Size};
+use crate::text::{ATLAS_SIZE, COLOR_ATLAS_SIZE, TextSystem, Upload};
 
 /// Side of a damage tile in pixels.
 pub const TILE: i32 = 64;
@@ -34,6 +35,8 @@ enum Kind {
   Quad,
   Image,
   Line,
+  Glyph,
+  Emoji,
 }
 
 /// One primitive to draw: its layer, its index there, the pixels it may touch (its geometry
@@ -61,12 +64,17 @@ struct Image {
 }
 
 pub struct Renderer {
+  /// The coverage and colour atlases, allocated on their first glyph.
+  atlas: Vec<u8>,
+  color_atlas: Vec<u8>,
   images: Vec<Option<Image>>,
   /// Threads to draw a big frame with (the calling thread and the pool's); 1 draws on the
   /// calling thread.
   pub threads: usize,
-  /// Bumped when image pixels change under the same coordinates (an image id reused): every
-  /// tile hash differs.
+  /// The atlas epoch each atlas holds: coverage, colour.
+  epochs: [u32; 2],
+  /// Bumped when atlas or image pixels change under the same coordinates (an atlas reset, an
+  /// image id reused): every tile hash differs.
   generation: u64,
   // The prepared frame.
   size: (usize, usize),
@@ -89,8 +97,11 @@ impl Renderer {
   pub fn new() -> Self {
     let threads = pool::threads();
     Self {
+      atlas: Vec::new(),
+      color_atlas: Vec::new(),
       images: Vec::new(),
       threads,
+      epochs: [0; 2],
       generation: 0,
       size: (0, 0),
       scale: 1.0,
@@ -101,15 +112,39 @@ impl Renderer {
     }
   }
 
-  /// Adds or drops images, draining the queues.
-  pub fn sync(&mut self, images: &mut Images) {
-    self.sync_pending(images);
+  /// Copies new glyph bitmaps into the atlases and adds or drops images, draining both queues.
+  pub fn sync(&mut self, text: &mut TextSystem, images: &mut Images) {
+    self.sync_pending(text.pending(), images);
+    text.uploads().for_each(drop);
     images.added.clear();
     images.removed.clear();
   }
 
   /// [Self::sync] without draining.
-  fn sync_pending(&mut self, images: &Images) {
+  fn sync_pending(&mut self, uploads: &[Upload], images: &Images) {
+    for u in uploads {
+      let (atlas, size, bpp) = match u.color {
+        true => (&mut self.color_atlas, COLOR_ATLAS_SIZE, 4),
+        false => (&mut self.atlas, ATLAS_SIZE, 1),
+      };
+
+      if atlas.is_empty() {
+        // Zeroed pages are mapped lazily: untouched rows cost nothing.
+        *atlas = vec![0; size * size * bpp];
+      }
+
+      let n = u.w * bpp;
+      for row in 0..u.h {
+        let at = ((u.y + row) * size + u.x) * bpp;
+        atlas[at..at + n].copy_from_slice(&u.data[row * n..(row + 1) * n]);
+      }
+      // Slots are reused only after a reset: frames drawn before show other glyphs there.
+      if u.epoch != self.epochs[u.color as usize] {
+        self.epochs[u.color as usize] = u.epoch;
+        self.generation += 1;
+      }
+    }
+
     for id in &images.removed {
       if let Some(t) = self.images.get_mut(id.0 as usize) {
         *t = None;
@@ -167,6 +202,14 @@ impl Renderer {
 
       for (i, s) in layer.lines.iter().enumerate() {
         add(Kind::Line, i, raster::line_bounds(s, scale), none);
+      }
+
+      for (i, s) in layer.glyphs.iter().enumerate() {
+        add(Kind::Glyph, i, raster::sprite_bounds(s, scale), none);
+      }
+
+      for (i, s) in layer.emoji.iter().enumerate() {
+        add(Kind::Emoji, i, raster::sprite_bounds(s, scale), none);
       }
     }
 
@@ -259,7 +302,10 @@ impl Renderer {
   pub fn draw(&mut self, scene: &Scene, px: &mut [u32], stride: usize, rects: &[IRect]) {
     let (w, h) = self.size;
     assert!(stride >= w && px.len() >= stride * (h - 1) + w, "frame buffer too small");
-    let job = Job { scene, items: &self.items, images: &self.images, scale: self.scale };
+    let atlas = Tex { data: &self.atlas, w: ATLAS_SIZE, h: ATLAS_SIZE };
+    let color = Tex { data: &self.color_atlas, w: COLOR_ATLAS_SIZE, h: COLOR_ATLAS_SIZE };
+    let job =
+      Job { scene, items: &self.items, images: &self.images, atlas, color, scale: self.scale };
     let rows = BAND as usize * stride;
     let px = &mut px[..stride * (h - 1) + w];
     let bands: Vec<(usize, &mut [u32])> = px.chunks_mut(rows).enumerate().collect();
@@ -357,6 +403,8 @@ struct Job<'a> {
   scene: &'a Scene,
   items: &'a [Item],
   images: &'a [Option<Image>],
+  atlas: Tex<'a>,
+  color: Tex<'a>,
   scale: f32,
 }
 
@@ -381,11 +429,18 @@ impl Job<'_> {
       match it.kind {
         Kind::Quad => raster::quad(t, &l.quads[i], r, self.scale),
         Kind::Line => raster::line(t, &l.lines[i], r, self.scale),
+        Kind::Glyph if !self.atlas.data.is_empty() => {
+          raster::glyph(t, &l.glyphs[i], self.atlas, r, self.scale)
+        }
+        Kind::Emoji if !self.color.data.is_empty() => {
+          raster::image(t, &l.emoji[i], self.color, r, self.scale)
+        }
         Kind::Image => {
           let Some(Some(img)) = self.images.get(l.image_ids[i].0 as usize) else { continue };
           let tex = Tex { data: &img.data, w: img.w, h: img.h };
           raster::image(t, &l.images[i], tex, r, self.scale)
         }
+        Kind::Glyph | Kind::Emoji => {}
       }
     }
   }
@@ -443,6 +498,10 @@ fn item_hash(scene: &Scene, it: &Item) -> u64 {
     Kind::Image => {
       let s = &l.images[i];
       h.add(l.image_ids[i].0 as u64).floats(&rect(s.rect)).floats(&rect(s.uv)).floats(&s.color)
+    }
+    Kind::Glyph | Kind::Emoji => {
+      let s = if it.kind == Kind::Glyph { &l.glyphs[i] } else { &l.emoji[i] };
+      h.floats(&rect(s.rect)).floats(&rect(s.uv)).floats(&s.color)
     }
   };
 

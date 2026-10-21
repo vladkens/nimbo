@@ -130,7 +130,7 @@ impl<A: App> Harness<A> {
     }
 
     self.rt.frame();
-    self.cpu.sync(&mut self.rt.images);
+    self.cpu.sync(&mut self.rt.text, &mut self.rt.images);
     true
   }
 

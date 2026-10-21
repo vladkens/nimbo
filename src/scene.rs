@@ -4,7 +4,10 @@
 //! renderer scales them to pixels. Buffers are kept across frames, so a steady frame allocates
 //! nothing.
 
+use std::fmt::{Display, Write};
 use std::time::Duration;
+
+use crate::text::{Font, TextSystem};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -140,8 +143,8 @@ impl Quad {
   }
 }
 
-/// A rect on screen in points and its source rect in a texture in pixels. Images use `color` as
-/// a tint.
+/// A rect on screen in points and its source rect in a texture in pixels. Glyphs use `color` as
+/// their colour, images and emoji as a tint.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Sprite {
@@ -168,7 +171,7 @@ pub struct Segment {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ImageId(pub u32);
 
-/// What a layer draws, in this order: quads, images, lines.
+/// What a layer draws, in this order: quads, images, lines, glyphs, colour emoji.
 #[derive(Default)]
 pub struct Layer {
   pub clip: Option<Rect>,
@@ -177,6 +180,8 @@ pub struct Layer {
   /// The image of each sprite in `images`.
   pub image_ids: Vec<ImageId>,
   pub lines: Vec<Segment>,
+  pub glyphs: Vec<Sprite>,
+  pub emoji: Vec<Sprite>,
 }
 
 impl Layer {
@@ -185,10 +190,16 @@ impl Layer {
     self.images.clear();
     self.image_ids.clear();
     self.lines.clear();
+    self.glyphs.clear();
+    self.emoji.clear();
   }
 
   fn is_empty(&self) -> bool {
-    self.quads.is_empty() && self.images.is_empty() && self.lines.is_empty()
+    self.quads.is_empty()
+      && self.images.is_empty()
+      && self.lines.is_empty()
+      && self.glyphs.is_empty()
+      && self.emoji.is_empty()
   }
 }
 
@@ -198,6 +209,7 @@ pub struct Counts {
   pub quads: usize,
   pub images: usize,
   pub lines: usize,
+  pub glyphs: usize,
 }
 
 /// The layers of one frame and the clip stack. Cleared, not dropped, between frames: `layers`
@@ -278,12 +290,21 @@ impl Scene {
     self.top().lines.push(s);
   }
 
+  pub fn glyph(&mut self, s: Sprite) {
+    self.top().glyphs.push(s);
+  }
+
+  pub fn emoji(&mut self, s: Sprite) {
+    self.top().emoji.push(s);
+  }
+
   pub fn counts(&self) -> Counts {
     let sum = |f: fn(&Layer) -> usize| self.layers().iter().map(f).sum();
     Counts {
       quads: sum(|l| l.quads.len()),
       images: sum(|l| l.images.len()),
       lines: sum(|l| l.lines.len()),
+      glyphs: sum(|l| l.glyphs.len() + l.emoji.len()),
     }
   }
 }
@@ -350,7 +371,8 @@ impl Images {
 
 // MARK: Paint API
 
-/// What `App::paint` draws with: the scene, the images and the frame's inputs.
+/// What `App::paint` draws with: the scene, the text system, the images and the frame's
+/// inputs.
 pub struct Frame<'a> {
   pub size: Size,
   /// Pixels per point.
@@ -360,6 +382,7 @@ pub struct Frame<'a> {
   /// Time from the runtime's clock: real in a window, virtual in the harness.
   pub now: Duration,
   pub scene: &'a mut Scene,
+  pub text: &'a mut TextSystem,
   pub images: &'a mut Images,
   pub(crate) animate: bool,
 }
@@ -375,8 +398,8 @@ impl Frame<'_> {
   }
 
   /// Starts a new layer over everything drawn so far. Within a layer each kind draws in a fixed
-  /// order, not the order of the calls: quads, images, lines ([Layer]); so a quad drawn after a
-  /// line (a label over a plot's lines) needs a layer of its own.
+  /// order, not the order of the calls: quads, images, lines, glyphs, colour emoji ([Layer]);
+  /// so a quad drawn after a line (a label over a plot's lines) needs a layer of its own.
   pub fn layer(&mut self) {
     self.scene.layer();
   }
@@ -422,11 +445,115 @@ impl Frame<'_> {
     let uv = Rect::new(0.0, 0.0, w as f32, h as f32);
     self.scene.image(id, Sprite { rect, uv, color: [1.0, 1.0, 1.0, opacity] });
   }
+
+  /// The advance width of `s` in points.
+  pub fn measure(&mut self, s: &str, font: Font) -> f32 {
+    self.text.measure(s, font)
+  }
+
+  /// Draws `s`, anything `Display` (formatted into a buffer the frame keeps), with its baseline
+  /// at `y`, placed by `anchor`: 0 starts it at `x`, 0.5 centres it there, 1 ends it there
+  /// (numbers right-aligned in a column, an axis label). Returns the advance width in points.
+  pub fn text_at(
+    &mut self,
+    x: f32,
+    y: f32,
+    s: impl Display,
+    font: Font,
+    color: Color,
+    anchor: f32,
+  ) -> f32 {
+    let mut buf = std::mem::take(&mut self.text.scratch);
+    buf.clear();
+    _ = write!(buf, "{s}");
+    let w = if anchor == 0.0 { 0.0 } else { self.text.measure(&buf, font) };
+    let w = self.text(x - w * anchor, y, &buf, font, color);
+    self.text.scratch = buf;
+    w
+  }
+
+  /// Draws `s` with its baseline at `y`; returns the advance width in points. Glyphs snap to
+  /// the pixel grid vertically and to a quarter pixel horizontally; colour glyphs (emoji) to
+  /// whole pixels, drawn with `color`'s alpha only.
+  pub fn text(&mut self, x: f32, y: f32, s: &str, font: Font, color: Color) -> f32 {
+    let scale = self.scale;
+    let line = self.text.layout(s, font);
+    let baseline = (y * scale).round();
+    // Rec. 709 luma of the sRGB colour: dark text gets the glyphs smoothed for light grounds.
+    let dark = 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2] < 0.5;
+    for g in &line.glyphs {
+      let px = (x + g.x) * scale;
+      let subpixel = ((px.fract() * 4.0) as u8).min(3);
+      let Some(a) = self.text.glyph(g.face, g.id, subpixel, dark) else { continue };
+      let left = if a.color { px.round() } else { px.floor() };
+      let rect = Rect::new(
+        (left + a.left) / scale,
+        (baseline - a.top) / scale,
+        a.uv.w / scale,
+        a.uv.h / scale,
+      );
+      match a.color {
+        true => self.scene.emoji(Sprite { rect, uv: a.uv, color: [1.0, 1.0, 1.0, color[3]] }),
+        false => self.scene.glyph(Sprite { rect, uv: a.uv, color }),
+      }
+    }
+
+    line.width
+  }
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn text_at_anchors_to_x() {
+    let (mut scene, mut text, mut images) =
+      (Scene::default(), TextSystem::new(1.0), Images::default());
+    let mut f = Frame {
+      size: Size::new(200.0, 50.0),
+      scale: 1.0,
+      mouse: None,
+      now: Duration::ZERO,
+      scene: &mut scene,
+      text: &mut text,
+      images: &mut images,
+      animate: false,
+    };
+    let font = Font::ui(13.0);
+    let w = f.measure("12.50", font);
+    for (anchor, left) in [(0.0, 100.0), (0.5, 100.0 - w / 2.0), (1.0, 100.0 - w)] {
+      f.scene.clear();
+      assert_eq!(f.text_at(100.0, 30.0, format_args!("{:.2}", 12.5), font, [1.0; 4], anchor), w);
+      let g = &f.scene.layers()[0].glyphs;
+      let (lo, hi) = g
+        .iter()
+        .fold((f32::MAX, 0.0f32), |(a, b), s| (a.min(s.rect.x), b.max(s.rect.x + s.rect.w)));
+      // The glyphs' bitmaps (with a pixel of margin) start at the left edge and end at the
+      // advance.
+      assert!((lo - left).abs() < 2.0, "{anchor}: {lo} vs {left}");
+      assert!((hi - (left + w)).abs() < 2.0, "{anchor}: {hi} vs {}", left + w);
+    }
+  }
+
+  #[test]
+  fn scene_reuses_layers() {
+    let mut s = Scene::default();
+    s.layer();
+    s.quad(Quad::default());
+    s.push_clip(Rect::new(0.0, 0.0, 10.0, 10.0));
+    s.glyph(Sprite::default());
+    assert_eq!(s.counts(), Counts { quads: 1, glyphs: 1, ..Counts::default() });
+    let cap = s.layers[0].quads.capacity();
+
+    s.clear();
+    assert_eq!(s.layers().len(), 0);
+    s.quad(Quad::default());
+    assert_eq!(s.layers().len(), 1);
+    assert_eq!(s.layers()[0].clip, None);
+    assert_eq!(s.counts(), Counts { quads: 1, ..Counts::default() });
+    assert_eq!(s.layers[0].quads.capacity(), cap);
+  }
 
   #[test]
   fn clips_nest_and_restore() {
