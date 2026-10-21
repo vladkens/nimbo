@@ -128,11 +128,7 @@ pub fn run<A: App + 'static>(cfg: Config, app: A, script: impl FnOnce(&mut Harne
     std::process::exit(2);
   };
 
-  let mut h = Harness::new(app, args.size.unwrap_or(cfg.size), args.scale);
-  if let Some(a) = args.appearance {
-    h.event(Event::Appearance(a));
-  }
-
+  let mut h = harness(&cfg, app, &args);
   script(&mut h);
   if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
     std::fs::create_dir_all(dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
@@ -142,9 +138,37 @@ pub fn run<A: App + 'static>(cfg: Config, app: A, script: impl FnOnce(&mut Harne
   println!("{}: wrote {}", cfg.title, path.display());
 }
 
+/// The harness [run] shoots in, at the size and scale of `args`; the app first hears the
+/// appearance, dark unless `--appearance` says otherwise, as a window tells it the OS's.
+fn harness<A: App>(cfg: &Config, app: A, args: &Args) -> Harness<A> {
+  let mut h = Harness::new(app, args.size.unwrap_or(cfg.size), args.scale);
+  h.event(Event::Appearance(args.appearance.unwrap_or(Appearance::DARK)));
+  h
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn shots_tell_the_appearance() {
+    #[derive(Default)]
+    struct Seen(Option<Appearance>);
+    impl App for Seen {
+      fn event(&mut self, _cx: &mut Cx, ev: &Event) -> bool {
+        if let Event::Appearance(a) = ev {
+          self.0 = Some(*a);
+        }
+
+        true
+      }
+    }
+
+    let cfg = Config::new("a", 100.0, 100.0);
+    let seen = |s: &str| harness(&cfg, Seen::default(), &parse(s).unwrap()).app().0;
+    assert_eq!(seen(""), Some(Appearance::DARK));
+    assert_eq!(seen("--appearance light"), Some(Appearance::LIGHT));
+  }
 
   fn parse(s: &str) -> Result<Args, String> {
     Args::parse(&s.split_whitespace().map(String::from).collect::<Vec<_>>())
