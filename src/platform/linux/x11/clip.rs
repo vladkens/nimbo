@@ -103,9 +103,12 @@ impl Clip {
     let (x, a, win) = (self.x, self.atoms, self.win);
     x.convert_selection(win, a.clipboard, target, a.prop);
     let mut stash = self.stash.borrow_mut();
+    // This conversion's answer: a late one to an earlier conversion (UTF8_STRING, given up on
+    // for STRING) has another target.
     let is_ours = |ev: &Ev| {
       let n = ev.get::<SelectionNotifyEv>();
-      ev.kind() == SELECTION_NOTIFY && n.requestor == win && n.selection == a.clipboard
+      let to = n.requestor == win && n.selection == a.clipboard && n.target == target;
+      ev.kind() == SELECTION_NOTIFY && to
     };
     let ev = x.wait_event(WAIT, &mut stash, is_ours)?;
     if ev.get::<SelectionNotifyEv>().property == 0 {
