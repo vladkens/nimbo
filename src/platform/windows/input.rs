@@ -44,6 +44,12 @@ impl Window {
     Point::new(x as f32 / self.scale, y as f32 / self.scale)
   }
 
+  /// Whether client pixel `(x, y)` is in the client area.
+  fn inside(&self, (x, y): (i32, i32)) -> bool {
+    let (w, h) = self.client();
+    (0..w).contains(&x) && (0..h).contains(&y)
+  }
+
   /// Feeds an event to the runtime, then shows its cursor.
   pub(super) fn send(&mut self, ev: Event) -> bool {
     let used = self.rt.event(ev);
@@ -51,10 +57,12 @@ impl Window {
     used
   }
 
-  /// Sets the runtime's cursor when it changed (or `force`) and the pointer is in the window.
+  /// Sets the runtime's cursor when it changed and the pointer is in the window, or when
+  /// `force`d (WM_SETCURSOR: the pointer is over the client area, maybe before its first move).
   fn sync_cursor(&mut self, force: bool) {
     let c = self.rt.cursor();
-    if (c != std::mem::replace(&mut self.cursor, c) || force) && self.rt.mouse.is_some() {
+    let changed = c != std::mem::replace(&mut self.cursor, c);
+    if force || (changed && self.rt.mouse.is_some()) {
       let id = match c {
         Cursor::Inherit | Cursor::Arrow => IDC_ARROW,
         Cursor::Text => IDC_IBEAM,
@@ -92,11 +100,18 @@ impl Window {
     let pos = self.point(at);
     if !down {
       // MK_* buttons still held after this one went up.
-      if wp & 0x73 == 0 {
+      let last = wp & 0x73 == 0;
+      if last {
         unsafe { ReleaseCapture() };
       }
 
       self.send(Event::MouseUp { pos, button, mods });
+      // The last button of a drag that left the window: its leave may have come while captured.
+      if last && !self.inside(at) {
+        self.tracking = false;
+        self.send(Event::MouseExit);
+      }
+
       return;
     }
 
