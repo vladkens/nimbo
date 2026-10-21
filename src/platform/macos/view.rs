@@ -469,10 +469,19 @@ impl View {
       n => MouseButton::Other(n as u8),
     };
 
-    self.send(match down {
-      true => Event::MouseDown { pos, button, clicks: event.clickCount() as u32, mods },
-      false => Event::MouseUp { pos, button, mods },
-    });
+    if down {
+      self.send(Event::MouseDown { pos, button, clicks: event.clickCount() as u32, mods });
+      return;
+    }
+
+    self.send(Event::MouseUp { pos, button, mods });
+    // The last button of a drag let go outside: AppKit sent the exit during the drag, and the
+    // release put the pointer back in.
+    let held = NSEvent::pressedMouseButtons() & !(1 << event.buttonNumber());
+    let bounds = self.bounds().size;
+    if released_outside(pos, Size::new(bounds.width as f32, bounds.height as f32), held) {
+      self.send(Event::MouseExit);
+    }
   }
 
   fn location(&self, event: &NSEvent) -> Point {
@@ -590,9 +599,27 @@ fn ns_cursor(c: Cursor) -> Retained<NSCursor> {
   }
 }
 
+/// Whether a release at `pos` ends a drag outside the view of `size`: no button `held` any
+/// more, and the pointer off it.
+fn released_outside(pos: Point, size: Size, held: usize) -> bool {
+  let inside = (0.0..size.w).contains(&pos.x) && (0.0..size.h).contains(&pos.y);
+  held == 0 && !inside
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// The last button let go outside the view takes the pointer out; one let go inside, or with
+  /// another still held, doesn't.
+  #[test]
+  fn a_drag_released_outside_exits() {
+    let size = Size::new(100.0, 80.0);
+    assert!(released_outside(Point::new(120.0, 40.0), size, 0));
+    assert!(released_outside(Point::new(50.0, -1.0), size, 0));
+    assert!(!released_outside(Point::new(50.0, 40.0), size, 0));
+    assert!(!released_outside(Point::new(120.0, 40.0), size, 0b10));
+  }
 
   /// A crosshair asked for while the pointer is outside: set as it comes in, not again while it
   /// stays, and again after it left and came back.
