@@ -58,10 +58,10 @@ impl Ui<'_> {
   // MARK: Keys
 
   /// Whether Space was pressed on `id` (focused), which flashes it pressed; another key goes on
-  /// unused.
+  /// unused, Space with Cmd, Ctrl or Alt too (Alt-Space opens the window menu on Windows).
   pub(super) fn activated(&mut self, id: Id) -> bool {
     match self.key_down(id) {
-      Some(k) if k.key == Key::Char(' ') && !(k.mods.cmd || k.mods.ctrl) => {
+      Some(k) if k.key == Key::Char(' ') && !(k.mods.cmd || k.mods.ctrl || k.mods.alt) => {
         self.flash(id);
         true
       }
@@ -176,6 +176,9 @@ mod tests {
     assert_eq!(px(&mut h), [255, 0, 0, 255]);
     h.wait(Duration::from_millis(100));
     assert_eq!((px(&mut h), h.app().plays), ([51, 51, 51, 255], 3));
+    // Alt-Space is the window menu's on Windows: it goes on unused.
+    assert!(!h.key(Key::Char(' '), Mods { alt: true, ..Mods::NONE }));
+    assert_eq!(h.app().plays, 3);
     // Disabled while focused: focus goes, no input, and Tab passes it by.
     h.app_mut().off = true;
     h.rt.redraw();
