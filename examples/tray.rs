@@ -118,6 +118,12 @@ fn start(main: &mut Main) {
     eprintln!("hotkey: {e}");
   }
 
+  // No listener (Linux without the portal): no hotkey to show.
+  if let Some(e) = hotkeys.status().listener_error {
+    eprintln!("hotkey: {e}");
+    state.borrow_mut().hotkey.clear();
+  }
+
   let refresh = |t: &Tray, state: &Shared| t.set_menu(&menu(&shown(state)));
   refresh(&tray, &state);
   let s = state.clone();
