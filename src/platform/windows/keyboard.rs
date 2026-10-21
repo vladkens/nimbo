@@ -9,9 +9,9 @@
 
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
   GetAsyncKeyState, GetKeyState, GetKeyboardLayout, GetKeyboardState, ToUnicodeEx, VK_BACK,
-  VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F12, VK_HOME, VK_INSERT, VK_LEFT,
-  VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RWIN, VK_SHIFT, VK_SPACE, VK_TAB,
-  VK_UP,
+  VK_CONTROL, VK_DELETE, VK_DIVIDE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F12, VK_HOME, VK_INSERT,
+  VK_LEFT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RWIN, VK_SHIFT, VK_SPACE,
+  VK_TAB, VK_UP,
 };
 
 use crate::app::Mods;
@@ -104,6 +104,7 @@ pub fn code(vk: u16, scan: u16, extended: bool) -> u16 {
   let named = match vk {
     VK_RETURN if extended => Some(76), // keypad
     VK_RETURN => Key::Enter.code(),
+    VK_DIVIDE => Some(75), // keypad /, extended: not by scan code
     VK_TAB => Key::Tab.code(),
     VK_BACK => Key::Backspace.code(),
     VK_DELETE => Key::Delete.code(),
@@ -209,6 +210,8 @@ fn navigation(vk: u16) -> Option<Key> {
     VK_PRIOR => Key::PageUp,
     VK_NEXT => Key::PageDown,
     VK_DELETE => Key::Delete,
+    // Insert is kVK_Help's place, as in [code]: keypad 0 with Num Lock off.
+    VK_INSERT => Key::Other(114),
     _ => return None,
   })
 }
@@ -306,6 +309,8 @@ mod tests {
       (0x64, 0x4B, false, 86),    // keypad 4, Num Lock on
       (VK_DELETE, 0x53, true, 117),
       (VK_DELETE, 0x53, false, 65), // keypad .
+      (VK_DIVIDE, 0x35, true, 75),
+      (0xBF, 0x35, false, 44), // /
       (VK_F1 + 11, 0x58, false, 111),
       (VK_SPACE, 0x39, false, 49),
     ];
@@ -320,6 +325,10 @@ mod tests {
     assert_eq!((k.key, k.code, k.text), (Key::Left, 86, None), "keypad 4, Num Lock off");
     let k = key_event(VK_LEFT, 0x4B, true, false);
     assert_eq!((k.key, k.code), (Key::Left, 123));
+    let k = key_event(VK_INSERT, 0x52, false, false);
+    assert_eq!((k.key, k.code), (Key::Other(114), 82), "keypad 0 is Insert, at its place");
+    let ctrl = KeyEvent { mods: Mods::CMD, ..k };
+    assert_eq!(standard(&ctrl), Some(Command::Copy));
   }
 
   #[test]

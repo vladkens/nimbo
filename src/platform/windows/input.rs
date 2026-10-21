@@ -7,7 +7,7 @@
 
 use std::ptr::null_mut;
 
-use windows_sys::Win32::Foundation::{LPARAM, LRESULT, POINT, WPARAM};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
   GetDoubleClickTime, ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
@@ -101,7 +101,9 @@ impl Window {
     if !down {
       // MK_* buttons still held after this one went up.
       let last = wp & 0x73 == 0;
+      self.held.retain(|&b| b != button);
       if last {
+        self.held.clear();
         unsafe { ReleaseCapture() };
       }
 
@@ -116,6 +118,10 @@ impl Window {
     }
 
     unsafe { SetCapture(self.hwnd) };
+    if !self.held.contains(&button) {
+      self.held.push(button);
+    }
+
     let time = unsafe { GetMessageTime() } as u32;
     let c = &mut self.clicks;
     let (dx, dy) = unsafe { (GetSystemMetrics(SM_CXDOUBLECLK), GetSystemMetrics(SM_CYDOUBLECLK)) };
@@ -126,6 +132,30 @@ impl Window {
     *c = Clicks { button: Some(button), time, at, count: if again { c.count + 1 } else { 1 } };
     let clicks = c.count;
     self.send(Event::MouseDown { pos, button, clicks, mods });
+  }
+
+  /// The capture went to another window (another app took the mouse mid-drag): no button-up
+  /// will come, so the buttons held are let go here, where the pointer is now.
+  fn capture_lost(&mut self, to: HWND) {
+    if to == self.hwnd || self.held.is_empty() {
+      return;
+    }
+
+    let mut p = POINT { x: 0, y: 0 };
+    unsafe {
+      GetCursorPos(&mut p);
+      ScreenToClient(self.hwnd, &mut p);
+    }
+
+    let (pos, mods) = (self.point((p.x, p.y)), keyboard::mods());
+    for button in std::mem::take(&mut self.held) {
+      self.send(Event::MouseUp { pos, button, mods });
+    }
+
+    if !self.inside((p.x, p.y)) {
+      self.tracking = false;
+      self.send(Event::MouseExit);
+    }
   }
 
   /// A wheel or touchpad scroll: notches of 120 scroll the system's lines (or characters) per
@@ -278,6 +308,7 @@ pub(super) fn handle(msg: u32, wp: WPARAM, lp: LPARAM) -> Option<LRESULT> {
       return Some(1);
     }
     WM_MOUSEWHEEL | WM_MOUSEHWHEEL => _ = with(|w| w.wheel(wp, lp, msg == WM_MOUSEHWHEEL)),
+    WM_CAPTURECHANGED => _ = with(|w| w.capture_lost(lp as HWND)),
     WM_SETCURSOR if (lp & 0xFFFF) as u32 == HTCLIENT => {
       return with(|w| w.sync_cursor(true)).map(|_| 1);
     }
