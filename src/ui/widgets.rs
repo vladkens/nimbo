@@ -121,7 +121,7 @@ impl Ui<'_> {
   /// ([Behavior::style]), or dimmed when disabled.
   fn control(&self, s: Style, b: &Behavior) -> Style {
     match b.disabled {
-      true => s.opacity(self.theme().disabled),
+      true => b.style(s).opacity(self.theme().disabled),
       false => b.style(s),
     }
   }
