@@ -438,10 +438,11 @@ impl Ui<'_> {
 
 #[cfg(test)]
 mod tests {
+  use keyboard_types::{Modifiers, NamedKey};
+
   use super::*;
-  use crate::app::{App, Event, Mods, Phase};
+  use crate::app::{App, Event, Phase};
   use crate::harness::Harness;
-  use crate::keys::Key;
   use crate::scene::Size;
 
   /// A menu inside a scroll area over tall content; its items count their runs.
@@ -473,7 +474,7 @@ mod tests {
     h.frame();
     let (menu, area) = (Id::of("menu"), Id::of("area"));
     let wheel = |h: &mut Harness<Menus>, x: f32, y: f32| {
-      let (pos, delta, mods) = (Point::new(x, y), Point::new(0.0, -100.0), Mods::NONE);
+      let (pos, delta, mods) = (Point::new(x, y), Point::new(0.0, -100.0), Modifiers::empty());
       h.event(Event::Scroll {
         pos,
         delta,
@@ -500,8 +501,8 @@ mod tests {
     // The pointer highlights an item; Down skips the disabled one; Enter runs it.
     h.move_to(r.x + 5.0, r.y + 5.0);
     h.frame();
-    h.key(Key::Down, Mods::NONE);
-    h.key(Key::Enter, Mods::NONE);
+    h.key(NamedKey::ArrowDown, Modifiers::empty());
+    h.key(NamedKey::Enter, Modifiers::empty());
     h.frame();
     assert_eq!(h.app().runs, [0, 0, 1]);
     assert!(h.rect(menu.key("menu")).is_none() && h.focused().is_none());
@@ -557,7 +558,7 @@ mod tests {
     h.frame();
     assert!(h.rect(menu).is_some() && h.rt.ui.scroll(list).unwrap().offset.y > 0.0);
     // Tab leaves focus in it.
-    h.key(Key::Tab, Mods::NONE);
+    h.key(NamedKey::Tab, Modifiers::empty());
     assert_eq!(h.focused(), Some(menu));
     // The pointer on an item, Down past it, then the pointer moving within it: it takes the
     // highlight back, and Enter runs it.
@@ -569,9 +570,9 @@ mod tests {
     let (k, rr) = under.expect("an item in view");
     h.move_to(rr.x + 10.0, rr.y + 5.0);
     h.frame();
-    h.key(Key::Down, Mods::NONE);
+    h.key(NamedKey::ArrowDown, Modifiers::empty());
     assert!(h.move_to(rr.x + 20.0, rr.y + 6.0), "a move within an item draws");
-    h.key(Key::Enter, Mods::NONE);
+    h.key(NamedKey::Enter, Modifiers::empty());
     assert_eq!(h.app().ran, Some(k));
     h.frame();
     // A click on an item: the call that sees it says closed.

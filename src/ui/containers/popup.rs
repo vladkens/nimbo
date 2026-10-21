@@ -201,8 +201,10 @@ impl Ui<'_> {
 
 #[cfg(test)]
 mod tests {
+  use keyboard_types::{Modifiers, NamedKey};
+
   use super::*;
-  use crate::app::{App, Mods};
+  use crate::app::App;
   use crate::harness::Harness;
   use crate::keys::Key;
   use crate::scene::Size;
@@ -226,10 +228,10 @@ mod tests {
     let pick = Id::of("pick");
     h.frame();
     h.rt.ui.set_focus(Some(pick));
-    h.key(Key::Char('b'), Mods::NONE);
+    h.key(Key::Char('b'), Modifiers::empty());
     assert_eq!(h.app().cur, 2);
     // Down opens it on the current option, checked.
-    h.key(Key::Down, Mods::NONE);
+    h.key(NamedKey::ArrowDown, Modifiers::empty());
     h.frame();
     h.frame();
     assert!(h.rect(pick.key("menu")).is_some() && h.rect(pick.key(("item", 2usize))).is_some());
@@ -238,7 +240,7 @@ mod tests {
     h.frame();
     h.frame();
     assert!(h.rect(pick.key("menu")).is_none());
-    h.key(Key::Enter, Mods::NONE);
+    h.key(NamedKey::Enter, Modifiers::empty());
     assert_eq!(h.app().cur, 2);
   }
 }

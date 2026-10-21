@@ -13,7 +13,7 @@
 use std::time::Duration;
 
 use nimbo::{
-  Align, App, Config, Id, List, Mods, Selection, Split, Style, Tabs, TextStyle, Ui, grow,
+  Align, App, Config, Id, List, Modifiers, Selection, Split, Style, Tabs, TextStyle, Ui, grow,
 };
 
 pub const ROWS: usize = 100_000;
@@ -179,7 +179,7 @@ fn main() {
     let r = row(h, 2);
     h.click(r.x + 20.0, r.y + r.h / 2.0);
     let r = row(h, 5);
-    h.press_with(r.x + 20.0, r.y + r.h / 2.0, 1, Mods::SHIFT);
+    h.press_with(r.x + 20.0, r.y + r.h / 2.0, 1, Modifiers::SHIFT);
     h.release(r.x + 20.0, r.y + r.h / 2.0);
     h.wait(Duration::from_millis(300));
   });

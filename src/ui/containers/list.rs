@@ -45,7 +45,7 @@ use crate::ui::{Align, Cursor, Id, Style, Ui, grow, px};
 const OVERSCAN: usize = 2;
 
 /// Cmd-A selects every row of a multi-select list.
-const MULTI_KEYS: &[Binding] = &[bind("cmd-a", Command::SelectAll)];
+const MULTI_KEYS: &[Binding] = &[bind("cmd+a", Command::SelectAll)];
 
 type KeySet = HashSet<u64, BuildHasherDefault<FxHasher>>;
 
@@ -478,7 +478,7 @@ impl<'a> Ui<'a> {
     let Some(at) = st.shown.iter().position(|&k| id.key(("row", k)) == at) else { return };
     let k = st.shown[at];
     let Some(i) = find((k, st.from + at), n, key) else { return };
-    match (multi, mods.cmd, mods.shift) {
+    match (multi, mods.contains(crate::keys::CMD), mods.shift()) {
       (true, true, _) => sel.toggle(k, i),
       (true, _, true) => sel.extend(i, n, key),
       _ => sel.select(k, i),
@@ -610,7 +610,7 @@ mod tests {
     h.move_to(250.0, 250.0);
     h.release(250.0, 250.0);
     h.move_to(b.x + 5.0, b.y + 5.0);
-    h.press_with(b.x + 5.0, b.y + 5.0, 1, crate::app::Mods::CMD);
+    h.press_with(b.x + 5.0, b.y + 5.0, 1, crate::keys::CMD);
     h.release(b.x + 5.0, b.y + 5.0);
     assert!(h.app().sel.is_empty());
     h.click(b.x + 5.0, b.y + 5.0);

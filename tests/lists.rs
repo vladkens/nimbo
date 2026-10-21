@@ -14,7 +14,7 @@ mod lists;
 use std::time::Duration;
 
 use lists::*;
-use nimbo::{Event, Harness, Id, Key, Mods, Phase, Point, Rect, Size};
+use nimbo::{Event, Harness, Id, Key, Modifiers, NamedKey, Phase, Point, Rect, Size};
 
 type H = Harness<Lists>;
 
@@ -29,7 +29,7 @@ fn row(k: u64) -> Id {
 /// A trackpad's scroll of `dy` points at `at`.
 fn swipe(h: &mut H, at: (f32, f32), dy: f32) -> bool {
   let (pos, delta) = (Point::new(at.0, at.1), Point::new(0.0, dy));
-  let (phase, momentum, mods) = (Phase::Changed, Phase::None, Mods::NONE);
+  let (phase, momentum, mods) = (Phase::Changed, Phase::None, Modifiers::empty());
   h.event(Event::Scroll { pos, delta, precise: true, phase, momentum, mods })
 }
 
@@ -37,7 +37,7 @@ fn offset(h: &H, id: Id) -> f32 {
   h.rt.ui.scroll(id).unwrap().offset.y
 }
 
-fn click_with(h: &mut H, id: Id, mods: Mods) {
+fn click_with(h: &mut H, id: Id, mods: Modifiers) {
   let (x, y) = mid(h.rect(id).unwrap());
   h.move_to(x, y);
   h.press_with(x, y, 1, mods);
@@ -50,7 +50,7 @@ fn selected(h: &H) -> Vec<u64> {
   v
 }
 
-const CMD: Mods = Mods { cmd: true, ..Mods::NONE };
+use nimbo::keys::CMD;
 
 fn main() {
   let mut h = Harness::new(Lists::new(), Size::new(760.0, 480.0), 2.0);
@@ -74,28 +74,28 @@ fn main() {
   // Click, Shift-click and Cmd-click select; the status shows the count.
   h.click_id(row(101));
   assert_eq!(selected(&h), [101]);
-  click_with(&mut h, row(104), Mods::SHIFT);
+  click_with(&mut h, row(104), Modifiers::SHIFT);
   assert_eq!(selected(&h), [101, 102, 103, 104]);
   click_with(&mut h, row(102), CMD);
   assert_eq!(selected(&h), [101, 103, 104]);
   assert_eq!(h.focused(), Some(list));
 
   // Down moves the cursor from the last row clicked; Shift-Down extends; Enter opens.
-  h.key(Key::Down, Mods::NONE);
+  h.key(NamedKey::ArrowDown, Modifiers::empty());
   assert_eq!((selected(&h), h.app().sel.cursor()), (vec![103], Some(103)));
-  h.key(Key::Down, Mods::SHIFT);
-  h.key(Key::Down, Mods::SHIFT);
+  h.key(NamedKey::ArrowDown, Modifiers::SHIFT);
+  h.key(NamedKey::ArrowDown, Modifiers::SHIFT);
   assert_eq!(selected(&h), [103, 104, 105]);
-  h.key(Key::Enter, Mods::NONE);
+  h.key(NamedKey::Enter, Modifiers::empty());
   assert_eq!(h.app().opened, Some(105));
 
   // End goes to the last row, scrolled into view; Home back to the first.
-  h.key(Key::End, Mods::NONE);
+  h.key(NamedKey::End, Modifiers::empty());
   h.frame();
   assert_eq!(selected(&h), [ROWS as u64 - 1]);
   let (v, last) = (h.rt.ui.scroll(list).unwrap().viewport, h.rect(row(ROWS as u64 - 1)).unwrap());
   assert!(last.y >= v.y && last.y + last.h <= v.y + v.h + 0.5, "{last:?} in {v:?}");
-  h.key(Key::Up, CMD);
+  h.key(NamedKey::ArrowUp, CMD);
   h.frame();
   assert_eq!((selected(&h), offset(&h, list)), (vec![0], 0.0));
 
@@ -114,23 +114,23 @@ fn main() {
   };
   open(&mut h, menu);
   assert_eq!(h.focused(), Some(popup));
-  h.key(Key::Down, Mods::NONE);
-  h.key(Key::Down, Mods::NONE);
-  h.key(Key::Down, Mods::NONE);
-  h.key(Key::Enter, Mods::NONE);
+  h.key(NamedKey::ArrowDown, Modifiers::empty());
+  h.key(NamedKey::ArrowDown, Modifiers::empty());
+  h.key(NamedKey::ArrowDown, Modifiers::empty());
+  h.key(NamedKey::Enter, Modifiers::empty());
   h.frame();
   assert_eq!(h.app().ran, [2]);
   assert!(h.rect(popup).is_none() && h.app().sel.is_empty());
   // Nothing selected: Up from nothing wraps past the disabled "Open" to "Select None".
   open(&mut h, menu);
-  h.key(Key::Up, Mods::NONE);
-  h.key(Key::Char(' '), Mods::NONE);
+  h.key(NamedKey::ArrowUp, Modifiers::empty());
+  h.key(Key::Char(' '), Modifiers::empty());
   h.frame();
   assert_eq!(h.app().ran, [2, 2]);
   // Escape closes it, a click outside too, running nothing; letters typed highlight the item
   // they start.
   open(&mut h, menu);
-  h.key(Key::Escape, Mods::NONE);
+  h.key(NamedKey::Escape, Modifiers::empty());
   h.frame();
   assert!(h.rect(popup).is_none());
   open(&mut h, menu);
@@ -138,10 +138,10 @@ fn main() {
   h.frame();
   assert!(h.rect(popup).is_none() && h.app().ran == [2, 2]);
   open(&mut h, menu);
-  h.key(Key::Char('g'), Mods::NONE);
+  h.key(Key::Char('g'), Modifiers::empty());
   h.advance(Duration::from_millis(300));
-  h.key(Key::Char('o'), Mods::NONE);
-  h.key(Key::Char(' '), Mods::NONE);
+  h.key(Key::Char('o'), Modifiers::empty());
+  h.key(Key::Char(' '), Modifiers::empty());
   h.frame();
   // "go" highlights the first, Space runs it: the first row selected and shown.
   assert_eq!((h.app().ran.as_slice(), selected(&h)), ([2, 2, 0].as_slice(), vec![0]));
@@ -149,23 +149,23 @@ fn main() {
   // The pop-up button, focused: letters typed choose an option at once, closed.
   let sort = Id::of(SORT);
   h.rt.ui.set_focus(Some(sort));
-  h.key(Key::Char('k'), Mods::NONE);
+  h.key(Key::Char('k'), Modifiers::empty());
   assert_eq!(h.app().sort, 2, "k: Kind");
   h.advance(Duration::from_millis(1100));
-  h.key(Key::Char('S'), Mods::SHIFT);
+  h.key(Key::Char('S'), Modifiers::SHIFT);
   assert_eq!(h.app().sort, 1, "s: Size, whatever the case");
   // Open on Space; "d" highlights Date Modified, Enter
   // picks it and gives focus back.
   h.advance(Duration::from_millis(1100));
-  h.key(Key::Char(' '), Mods::NONE);
+  h.key(Key::Char(' '), Modifiers::empty());
   h.frame();
   h.frame();
   assert_eq!(h.focused(), Some(sort.key("menu")));
   // Over the button, as near as the window lets it: the button sits by the window's top.
   let (b, m) = (h.rect(sort).unwrap(), h.rect(sort.key("menu")).unwrap());
   assert!(m.x < b.x && m.y < b.y + b.h && m.y >= 6.0, "{m:?} over {b:?}");
-  h.key(Key::Char('d'), Mods::NONE);
-  h.key(Key::Enter, Mods::NONE);
+  h.key(Key::Char('d'), Modifiers::empty());
+  h.key(NamedKey::Enter, Modifiers::empty());
   h.frame();
   assert_eq!((h.app().sort, h.focused()), (3, Some(sort)));
 
@@ -184,7 +184,7 @@ fn main() {
   assert!(h.rect(notes).is_none());
   // Tab focuses the strip; the arrows switch.
   h.rt.ui.set_focus(Some(tabs));
-  h.key(Key::Right, Mods::NONE);
+  h.key(NamedKey::ArrowRight, Modifiers::empty());
   h.frame();
   assert_eq!((h.app().tab, offset(&h, notes)), (1, 60.0));
 
