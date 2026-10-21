@@ -376,6 +376,9 @@ pub struct Runtime<A> {
   /// The last frame is drawn again because its layout shifted from the one before
   /// ([Ui::shifted]); a shift again right after waits for an event.
   settled: bool,
+  /// Something outside the frame asked for this one (an event, a redraw, a wake, a resize): a
+  /// shift in it settles again, though the frame before was a settling one.
+  asked: bool,
   /// The app heard an appearance: the first one reaches it even when it equals the default.
   told: bool,
   quit: bool,
@@ -405,6 +408,7 @@ impl<A: App> Runtime<A> {
       animating: false,
       rehovered: false,
       settled: false,
+      asked: false,
       told: false,
       quit: false,
     }
@@ -438,8 +442,14 @@ impl<A: App> Runtime<A> {
   }
 
   pub fn redraw(&mut self) {
-    self.dirty = true;
+    self.ask(true);
     self.stale = true;
+  }
+
+  /// A frame asked for from outside the last one, when `yes`.
+  fn ask(&mut self, yes: bool) {
+    self.dirty |= yes;
+    self.asked |= yes;
   }
 
   /// The content size the app asked the window for ([Ui::set_window_size]), once: the platform
@@ -456,7 +466,7 @@ impl<A: App> Runtime<A> {
 
     (self.size, self.scale) = (size, scale);
     self.text.set_scale(scale);
-    self.dirty = true;
+    self.ask(true);
   }
 
   /// Feeds one event to the app, routed through the last frame's tree first; returns whether
@@ -481,7 +491,7 @@ impl<A: App> Runtime<A> {
     };
 
     let used = used | (self.ui.focus() != focus);
-    self.dirty |= used;
+    self.ask(used);
     self.stale |= used;
     used
   }
@@ -595,8 +605,9 @@ impl<A: App> Runtime<A> {
       ui: &mut self.ui,
     };
     let used = self.app.event(&mut cx, ev);
-    self.dirty |= cx.redraw;
-    self.stale |= cx.redraw;
+    let redraw = cx.redraw;
+    self.ask(redraw);
+    self.stale |= redraw;
     used
   }
 
@@ -606,7 +617,7 @@ impl<A: App> Runtime<A> {
     self.ui.deliver(id, ev);
     self.pass();
     let (used, seen) = self.ui.delivered();
-    self.dirty |= seen;
+    self.ask(seen);
     self.stale |= seen;
     used
   }
@@ -621,7 +632,8 @@ impl<A: App> Runtime<A> {
   /// Whether the next display refresh should draw: an event changed something, an animation
   /// runs, a timer is due or a waker fired.
   pub fn needs_frame(&mut self) -> bool {
-    self.dirty |= self.waker.take();
+    let woken = self.waker.take();
+    self.ask(woken);
     self.dirty || self.animating || self.ui.next_due().is_some_and(|d| self.clock.now() >= d)
   }
 
@@ -701,8 +713,9 @@ impl<A: App> Runtime<A> {
     // over and over.
     let again = moved && !self.rehovered;
     self.rehovered = again;
-    let settle = shifted && !self.settled;
+    let settle = shifted && (!self.settled || self.asked);
     self.settled = settle;
+    self.asked = false;
     let glyphs = self.text.end_frame();
     self.dirty = glyphs || again || settle;
     glyphs
@@ -868,6 +881,18 @@ mod tests {
     assert!(rt.needs_frame(), "resized");
     rt.frame();
     assert!(!rt.needs_frame());
+
+    // Opened and closed again before the settling frame: the closing frame settles too.
+    for open in [true, false] {
+      rt.app.open = open;
+      rt.redraw();
+      rt.frame();
+    }
+
+    assert!(rt.needs_frame(), "the closing frame read the open one");
+    rt.frame();
+    assert!(!rt.needs_frame());
+    assert_eq!(rt.app.seen.last(), Some(&false));
   }
 
   /// An app's own theme: the default dark one with its own ground and accent.
