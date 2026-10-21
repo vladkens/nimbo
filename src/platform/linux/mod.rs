@@ -718,8 +718,9 @@ impl Win {
     self.send(Event::MouseDown { pos, button, clicks, mods });
   }
 
-  /// The pointer device went away (its seat lost the capability): the buttons it held are let
-  /// go, and it leaves the surface it was over.
+  /// The pointer left the surface or went away (its seat lost the capability): it leaves the
+  /// surface it was over, and the buttons it held are let go first. A leave mid-drag ends the
+  /// grab (the window minimized, a compositor's own grab), and no release follows.
   fn pointer_gone(&mut self) {
     let over = std::mem::take(&mut self.enter_serial).is_some();
     let (pos, mods) = (self.mouse, self.mods);

@@ -311,10 +311,7 @@ impl Dispatch<WlPointer, ()> for Win {
 
         win.send(Event::MouseMove { pos: win.mouse, mods });
       }
-      wl_pointer::Event::Leave { .. } => {
-        win.enter_serial = None;
-        win.send(Event::MouseExit);
-      }
+      wl_pointer::Event::Leave { .. } => win.pointer_gone(),
       wl_pointer::Event::Motion { surface_x, surface_y, .. } => {
         win.mouse = Point::new(surface_x as f32, surface_y as f32);
         win.send(Event::MouseMove { pos: win.mouse, mods });
