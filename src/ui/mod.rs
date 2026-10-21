@@ -519,6 +519,7 @@ impl<'a> Ui<'a> {
     st.stack.clear();
     st.stack.push((0, 0));
     st.animating = false;
+    st.input.moves = false;
     st.input.now = now;
     let (next_id, next_float, next_keymap) = (None, None, None);
     let canvases = Vec::new();
@@ -947,6 +948,26 @@ impl<'a> Ui<'a> {
     self.st.clicked(id)
   }
 
+  /// The press on `id` a release ended since the view last ran, the pointer where it was
+  /// released ([Ui::mouse]): a drag's last move, which no view saw held.
+  pub fn released(&self, id: Id) -> Option<Press> {
+    self.st.input.ended.filter(|p| p.id == id)
+  }
+
+  /// Builds a frame on every pointer move until the next frame, though the hover doesn't
+  /// change: an open menu, whose highlight follows the pointer within an item.
+  pub fn track_moves(&mut self) {
+    self.st.input.moves = true;
+  }
+
+  /// Runs the view again before this frame is painted if the layout moves or resizes `id` or
+  /// its content from what [Ui::rect] and [Ui::scroll] read of the last frame, or `id` wasn't
+  /// laid out then: a split's panes fitted to its size, a scrollbar's thumb to its content.
+  pub fn settle(&mut self, id: Id) {
+    let seen = self.st.last.get(id).map(|n| (n.rect, n.content));
+    self.st.tree.settle.push((id, seen));
+  }
+
   /// Shows `id` pressed for a moment ([UiState::flash]).
   pub fn flash(&mut self, id: Id) {
     self.st.flash(id, self.now);
@@ -1126,14 +1147,16 @@ impl<'a> Ui<'a> {
   }
 
   /// Whether content built only in part ([Tree::partial]) doesn't cover what the layout just
-  /// showed of it (its viewport grew, its offset was clamped): the view should run again before
-  /// this frame is painted.
+  /// showed of it (its viewport grew, its offset was clamped), or the layout moved what the view
+  /// drew from ([Ui::settle]): the view should run again before this frame is painted.
   pub fn partial_short(&self) -> bool {
     let t = &self.st.tree;
-    t.partial.iter().any(|&(i, lo, hi)| {
-      let n = &t.nodes[i as usize];
-      lo > n.scroll.y + 0.5 || hi < n.scroll.y + n.rect.h - 0.5
-    })
+    let moved = t.settle.iter().any(|&(id, seen)| t.get(id).map(|n| (n.rect, n.content)) != seen);
+    moved
+      || t.partial.iter().any(|&(i, lo, hi)| {
+        let n = &t.nodes[i as usize];
+        lo > n.scroll.y + 0.5 || hi < n.scroll.y + n.rect.h - 0.5
+      })
   }
 
   /// Hit tests the pointer on the tree just laid out; returns whether the hover changed, so
@@ -1176,6 +1199,7 @@ impl<'a> Ui<'a> {
   /// Ends the frame without painting; the tree becomes the last frame's and the store drops
   /// what the frame did not use. Focus on an element the frame did not build clears.
   pub fn finish(mut self) -> UiState {
+    self.st.input.ended = None;
     std::mem::swap(&mut self.st.tree, &mut self.st.last);
     self.st.store.gc(&self.st.last);
     if self.st.input.focus.is_some_and(|f| self.st.last.find(f).is_none()) {
@@ -1187,7 +1211,8 @@ impl<'a> Ui<'a> {
 
   /// Drops this tree, keeping the last frame's: a pass that only delivers input to the view,
   /// or one run again.
-  pub fn discard(self) -> UiState {
+  pub fn discard(mut self) -> UiState {
+    self.st.input.ended = None;
     self.st
   }
 }
