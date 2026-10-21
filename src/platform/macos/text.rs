@@ -135,8 +135,6 @@ fn ns_font(font: Retained<NSFont>) -> CFRetained<CTFont> {
   unsafe { CFRetained::from_raw(ptr) }
 }
 
-// MARK: Glyph raster
-
 /// The pixel box of glyph `id` at `scale`, drawn `subpixel` quarters of a pixel to the right:
 /// its ink bounds rounded out, with one pixel of padding on each side for antialiasing (and
 /// font smoothing's dilation). `None` for a glyph with no ink (a space).

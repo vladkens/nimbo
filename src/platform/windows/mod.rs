@@ -3,11 +3,11 @@
 //! The Windows platform: one Win32 window, per-monitor DPI aware (v2), its frames drawn by the
 //! CPU renderer into a DIB section and copied to the window with BitBlt, only the tiles that
 //! changed ([Dib]). The message loop sleeps in MsgWaitForMultipleObjectsEx until input, a wake
-//! (the waker posts a message) or a high-resolution waitable timer: while the runtime animates,
-//! the next frame slot at the refresh rate of the display it is on, followed as it moves to
-//! another or the mode changes. No frames while the window is minimized; one when it shows again.
-//! Input and cursors are in [input], keys in [keyboard]; then the clipboard, the performance
-//! cores, and the DirectWrite text backend ([text]).
+//! (the waker posts a message) or a high-resolution waitable timer: the runtime's next timer, or
+//! while it animates the next frame slot at the refresh rate of the display it is on, followed as
+//! it moves to another or the mode changes. No frames while the window is minimized; one when it
+//! shows again. Input and cursors are in [input], keys in [keyboard]; then the clipboard, the
+//! performance cores, and the DirectWrite text backend ([text]).
 
 mod input;
 mod keyboard;
@@ -158,10 +158,11 @@ struct Window {
   /// While animating, frames come a refresh of the display apart: the display it is on.
   pace: Pace,
   monitor: HMONITOR,
-  /// How many modal loops run the messages (a live move or resize, a menu's), and whether their
-  /// frame timer runs: only while frames are due.
+  /// How many modal loops run the messages (a live move or resize, a menu's), and their frame
+  /// timer's period in milliseconds: a refresh while frames are due, the app's next timer when
+  /// one is set, else none.
   modal: u8,
-  armed: bool,
+  armed: Option<u32>,
   /// The window a wake posts to: none once it is destroyed, so a waker kept by another thread
   /// never posts to a window that took the handle over.
   target: Arc<Mutex<isize>>,
@@ -213,6 +214,8 @@ impl Window {
     let size = Size::new(points(w as u32, self.scale), points(h as u32, self.scale));
     self.rt.resize(size, self.scale);
     self.rt.frame();
+    // The new tree's element under the pointer may want another cursor.
+    self.sync_cursor(false);
     let r = &mut self.renderer;
     r.sync(&mut self.rt.text, &mut self.rt.images);
     r.prepare(&self.rt.scene, size, self.scale);
@@ -246,43 +249,40 @@ impl Window {
     }
   }
 
-  /// Runs the live move or resize's frame timer while frames are due and stops it when idle;
-  /// after each message, so a wake or an input that needs a frame starts it again.
+  /// Runs the live move or resize's frame timer while frames are due or a timer is set, and
+  /// stops it when idle; after each message, so a wake or an input that needs a frame starts it
+  /// again.
   fn sync_modal(&mut self) {
-    let due = self.modal > 0 && !self.hidden && self.rt.needs_frame();
-    if due == self.armed {
+    // Every refresh while a frame is due, else at the app's next timer.
+    let wait = match self.modal > 0 && !self.hidden {
+      false => None,
+      true if self.rt.needs_frame() => Some(self.pace.interval),
+      true => self.rt.due_in(),
+    };
+
+    let ms = wait.map(|d| (d.as_millis() as u32).max(1));
+    if ms == self.armed {
       return;
     }
 
-    match due {
-      true => self.arm(),
-      false => unsafe {
+    match ms {
+      Some(ms) => unsafe {
+        SetTimer(self.hwnd, TIMER_MODAL, ms, None);
+      },
+      None => unsafe {
         KillTimer(self.hwnd, TIMER_MODAL);
       },
     }
 
-    self.armed = due;
-  }
-
-  /// Starts the live move's frame timer at the refresh interval, or sets a running one again.
-  fn arm(&self) {
-    let ms = self.pace.interval.as_millis() as u32;
-    unsafe { SetTimer(self.hwnd, TIMER_MODAL, ms.max(1), None) };
+    self.armed = ms;
   }
 
   /// Follows the refresh rate of the window's display: another monitor, or another mode. The
-  /// live move's timer, when it runs, goes on at the new interval.
+  /// live move's timer, when it runs, goes on at the new interval ([Window::sync_modal] after
+  /// the message).
   fn retime(&mut self) {
     self.monitor = unsafe { MonitorFromWindow(self.hwnd, MONITOR_DEFAULTTONEAREST) };
-    let interval = refresh(self.hwnd);
-    if interval == self.pace.interval {
-      return;
-    }
-
-    self.pace.interval = interval;
-    if self.armed {
-      self.arm();
-    }
+    self.pace.interval = refresh(self.hwnd);
   }
 
   /// Wakes post nowhere from now on: the window is going.
@@ -308,8 +308,21 @@ impl Window {
       self.render();
     }
 
-    // The rest of the interval: the time spent drawing is part of it.
-    self.rt.needs_frame().then(|| self.pace.left(Instant::now()))
+    self.wait()
+  }
+
+  /// How long the loop may sleep after the last frame (`None`: until a message): the rest of
+  /// the interval while frames are wanted (the time spent drawing is part of it), else until the
+  /// app's next timer.
+  fn wait(&mut self) -> Option<Duration> {
+    if self.hidden {
+      return None;
+    }
+
+    match self.rt.needs_frame() {
+      true => Some(self.pace.left(Instant::now())),
+      false => self.rt.due_in(),
+    }
   }
 }
 
@@ -353,6 +366,9 @@ fn refresh(hwnd: HWND) -> Duration {
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
   let res = handle(hwnd, msg, wp, lp);
+  // A size the app asked for in the live move or resize loop (a timer's frame) is applied now,
+  // not when the loop ends; outside the window's borrow, as SetWindowPos sends WM_SIZE.
+  apply_resize(hwnd);
   with(|w| w.sync_modal());
   res
 }
@@ -585,11 +601,45 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
     min: cfg.min(),
     style,
     modal: 0,
-    armed: false,
+    armed: None,
     target,
   };
   WINDOW.with(|w| *w.borrow_mut() = Some(window));
   hwnd
+}
+
+/// Resizes the client area to the size the app asked for ([Runtime::take_resize]) at the
+/// window's DPI, keeping its top-left corner; the least size comes down with it first, as
+/// WM_GETMINMAXINFO holds SetWindowPos to it too. Outside the window's borrow: WM_SIZE draws.
+fn apply_resize(hwnd: HWND) -> bool {
+  let want = with(|w| {
+    let size = w.rt.take_resize()?;
+    w.min = Size::new(w.min.w.min(size.w), w.min.h.min(size.h));
+    Some((size, w.style))
+  });
+  let Some((size, style)) = want.flatten() else { return false };
+  let dpi = unsafe { GetDpiForWindow(hwnd) };
+  let k = dpi as f32 / 96.0;
+  let (w, h) = ((size.w * k).round() as i32, (size.h * k).round() as i32);
+  let mut rc = RECT { left: 0, top: 0, right: w, bottom: h };
+  unsafe { AdjustWindowRectExForDpi(&mut rc, style, 0, 0, dpi) };
+  let flags = SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE;
+  let (cx, cy) = (rc.right - rc.left, rc.bottom - rc.top);
+  unsafe { SetWindowPos(hwnd, null_mut(), 0, 0, cx, cy, flags) };
+  true
+}
+
+/// Draws the frame due and applies a size the app asked for, before it and in it; returns how
+/// long the loop may sleep (`None`: until a message). A size asked for in the frame draws
+/// another through WM_SIZE, and the sleep follows that one: what it wants (an animation, a
+/// timer) would otherwise wait for the next message.
+fn settle(hwnd: HWND) -> Option<Duration> {
+  apply_resize(hwnd);
+  let wait = with(|w| w.tick()).flatten();
+  match apply_resize(hwnd) {
+    true => with(|w| w.wait()).flatten(),
+    false => wait,
+  }
 }
 
 /// Handles messages until WM_QUIT; between them draws the frames due and sleeps until the next
@@ -617,7 +667,7 @@ fn run_loop(hwnd: HWND, timer: &Timer) {
       continue;
     }
 
-    let wait = with(|w| w.tick()).flatten();
+    let wait = settle(hwnd);
     let n = match wait {
       // Relative due times are negative, in 100 ns units.
       Some(d) if !timer.0.is_null() => {
@@ -702,8 +752,6 @@ fn utf16_text(units: &[u16]) -> String {
   let n = units.iter().position(|&u| u == 0).unwrap_or(units.len());
   String::from_utf16_lossy(&units[..n])
 }
-
-// MARK: System
 
 /// The OS's light or dark setting and accent: light until ported. TODO: `AppsUseLightTheme`
 /// (registry, re-read on `WM_SETTINGCHANGE` "ImmersiveColorSet"), the accent from `UISettings`
@@ -966,6 +1014,80 @@ mod tests {
     assert_eq!(*target.lock().unwrap(), 0);
 
     waker.wake();
+    WINDOW.with(|w| w.borrow_mut().take());
+  }
+
+  /// An app's timer comes due while the title bar is held still: the live move's timer
+  /// draws it, then stops.
+  #[test]
+  fn a_live_move_draws_a_timer_when_due() {
+    #[derive(Default)]
+    struct Later(bool);
+    impl App for Later {
+      fn view(&mut self, ui: &mut crate::Ui) {
+        if !std::mem::replace(&mut self.0, true) {
+          ui.request_frame_in(Duration::from_millis(60));
+        }
+      }
+    }
+
+    let cfg = Config::new("modal timer", 200.0, 100.0);
+    let hwnd = create(&cfg, Box::new(Later::default()));
+    let ticks = || timer_ticks(hwnd, 120);
+    unsafe { SendMessageW(hwnd, WM_ENTERSIZEMOVE, 0, 0) };
+    assert!(ticks() > 0, "the first frame is due");
+    assert!(ticks() > 0, "the timer draws");
+    assert_eq!(ticks(), 0, "idle");
+    unsafe {
+      SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0);
+      DestroyWindow(hwnd);
+    }
+    WINDOW.with(|w| w.borrow_mut().take());
+  }
+
+  /// A size the app asks for in a frame draws another through WM_SIZE: the loop's sleep follows
+  /// that one, so the timer it sets wakes the loop, not the next message. The window is never
+  /// shown.
+  #[test]
+  fn a_frame_after_an_asked_size_keeps_its_timer() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    struct Grow(Rc<Cell<bool>>);
+    impl App for Grow {
+      fn view(&mut self, ui: &mut crate::Ui) {
+        if !self.0.get() {
+          return;
+        }
+
+        match ui.size().w > 250.0 {
+          true => ui.request_frame_in(Duration::from_millis(50)),
+          false => ui.set_window_size(300.0, 200.0),
+        }
+      }
+    }
+
+    let grow = Rc::new(Cell::new(false));
+    let hwnd = create(&Config::new("grow", 200.0, 100.0), Box::new(Grow(grow.clone())));
+    for _ in 0..10 {
+      if settle(hwnd).is_none() {
+        break;
+      }
+
+      std::thread::sleep(Duration::from_millis(20));
+    }
+
+    assert_eq!(settle(hwnd), None, "idle");
+
+    // A refresh later: the frame is due at once.
+    std::thread::sleep(Duration::from_millis(50));
+    grow.set(true);
+    with(|w| w.rt.redraw());
+    let wait = settle(hwnd);
+    assert!(with(|w| w.rt.size.w).is_some_and(|w| w > 250.0), "resized");
+    assert!(wait.is_some_and(|d| d <= Duration::from_millis(50)), "{wait:?}");
+
+    unsafe { DestroyWindow(hwnd) };
     WINDOW.with(|w| w.borrow_mut().take());
   }
 

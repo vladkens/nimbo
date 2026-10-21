@@ -279,8 +279,6 @@ fn match_face(dw: &Dwrite, family: &str, weight: u32) -> Option<Com> {
   out(|p| unsafe { call!(font, FONT_CREATE_FACE, (*mut *mut c_void) -> HRESULT; p) })
 }
 
-// MARK: Alpha correction
-
 /// DirectWrite's gamma ratios for a target that blends in sRGB space ("gamma incorrect"), for
 /// gamma 1.0 to 2.2 by 0.1. From src/dwrite.cpp of
 /// https://github.com/lhecker/dwrite-hlsl (MIT License, Copyright (c) Microsoft Corporation),

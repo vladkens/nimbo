@@ -68,12 +68,14 @@ fn main() {
   h.render();
 
   // A drag: grabbed off its centre, the square follows the pointer by the same offset, under a
-  // closed hand.
+  // closed hand. The cursor is the element's under the pointer, as the next frame builds it.
   assert!(h.press(x - 10.0, y + 5.0));
+  assert!(h.frame());
   assert_eq!(h.rt.cursor(), Cursor::Grabbing);
   assert!(h.move_to(x + 90.0, y + 45.0));
   assert!(h.release(x + 90.0, y + 45.0));
   assert_eq!(h.app().pos, Point::new(START.x + 100.0, START.y + 40.0));
+  assert!(h.frame());
   assert_eq!(h.rt.cursor(), Cursor::Grab);
   check_square(&h.render(), h.app(), BLUE);
 
@@ -126,26 +128,30 @@ fn main() {
   wheel(&mut h, at, SIDE - SIDES.0);
   assert_eq!(h.app().side, SIDE);
 
-  // The square moving or shrinking under a pointer that stays: the hover and the cursor follow
-  // it at once, without a move of the mouse.
+  // The square moving or shrinking under a pointer that stays: the hover follows it at once,
+  // without a move of the mouse, and the cursor with the frame that shows it.
   h.app_mut().pos = START;
   let edge = (START.x + SIDE - 4.0, START.y + SIDE / 2.0);
   h.move_to(edge.0, edge.1);
+  h.frame();
   assert!(h.app().hover && h.rt.cursor() == Cursor::Grab);
   assert!(h.key(Key::Left, Mods::NONE));
   assert!(!h.app().hover, "moved away by an arrow");
-  assert_eq!(h.rt.cursor(), Cursor::Arrow);
   let img = h.render();
+  assert_eq!(h.rt.cursor(), Cursor::Arrow);
   assert_eq!(img.pixel(h.app().pos.x + 0.5, edge.1), px(BLUE), "no hover border");
   assert!(h.key(Key::Right, Mods::NONE));
+  h.frame();
   assert!(h.app().hover && h.rt.cursor() == Cursor::Grab, "back under the pointer");
   h.rt.clipboard().write("300,200");
   assert!(h.key(Key::Char('v'), Mods::CMD));
+  h.frame();
   assert!(!h.app().hover && h.rt.cursor() == Cursor::Arrow, "pasted away");
   h.rt.clipboard().write(&format!("{},{}", START.x, START.y));
   assert!(h.key(Key::Char('v'), Mods::CMD));
   assert!(h.app().hover);
   assert!(wheel(&mut h, edge, -20.0));
+  h.frame();
   assert!(!h.app().hover && h.rt.cursor() == Cursor::Arrow, "shrunk away by the wheel");
   wheel(&mut h, edge, 20.0);
   h.leave();

@@ -6,11 +6,11 @@
 //! from `Xft.dpi` in the resources ([settings]; the size hints follow it), the keyboard through
 //! xkbcommon ([super::xkb]: the server's keymap with libxkbcommon-x11, else its rules names; the
 //! state from each event's modifiers and group), the server's key repeat (detectable: presses
-//! alone), cursors from the theme (libxcb-cursor) or the cursor font, the CLIPBOARD selection
-//! ([clip]), light or dark from XSETTINGS' `Net/ThemeName`, its manager followed as it starts,
-//! quits or restarts. No frames while the window is unmapped or fully covered
+//! alone), cursors from the theme (libxcb-cursor) or the cursor font ([cursors]), the CLIPBOARD
+//! selection ([clip]), light or dark from XSETTINGS' `Net/ThemeName`, its manager followed as it
+//! starts, quits or restarts. No frames while the window is unmapped or fully covered
 //! (`VisibilityNotify`; under a compositing manager it never is). One thread: the loop polls the
-//! connection and a wake eventfd.
+//! connection and a wake eventfd with the next timer as the timeout.
 //!
 //! Not yet: input methods (XIM or IBus: typing goes through xkbcommon's compose only), smooth
 //! and touchpad scrolling (XInput2: wheels come as clicks), pinch, `_NET_WM_SYNC_REQUEST`
@@ -19,13 +19,14 @@
 //! VNC server: refused at the start, [present::check_format]).
 
 mod clip;
+mod cursors;
 mod present;
 mod settings;
 mod xcb;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 use std::os::fd::OwnedFd;
 use std::path::Path;
 use std::rc::Rc;
@@ -35,6 +36,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use rustix::event::{EventfdFlags, PollFd, PollFlags, Timespec, eventfd, poll};
 
 use self::clip::{Atoms as ClipAtoms, Clip, Clipboard};
+use self::cursors::Cursors;
 use self::present::{Presenter, STUCK};
 use self::settings::{appearance, dpi_scale};
 use self::xcb::*;
@@ -80,13 +82,6 @@ struct Atoms {
   xsettings_settings: u32,
   manager: u32,
   rules: u32,
-}
-
-/// Cursors made on first use: the theme's, else the cursor font's.
-struct Cursors {
-  theme: Option<CursorContext>,
-  font: u32,
-  made: Vec<(Cursor, u32)>,
 }
 
 struct Win {
@@ -304,7 +299,7 @@ fn run_on(
     started,
     exposed: false,
     cursor: Cursor::Arrow,
-    cursors: Cursors { theme, font: 0, made: Vec::new() },
+    cursors: Cursors::new(theme),
     mouse: Point::new(0.0, 0.0),
     inside: false,
     last_click: None,
@@ -327,7 +322,7 @@ fn run_on(
   };
   if win.trace {
     let shm = if win.present.completion().is_some() { "MIT-SHM" } else { "PutImage" };
-    let cursors = if win.cursors.theme.is_some() { "themed" } else { "font" };
+    let cursors = if win.cursors.themed() { "themed" } else { "font" };
     eprintln!("nimbo: x11, scale {scale}, frames by {shm}, {cursors} cursors");
   }
   // The window manager maps it while we draw the first frame, which the first expose puts;
@@ -353,6 +348,7 @@ fn run_on(
       break;
     }
 
+    win.apply_resize();
     let now = Instant::now();
     if win.present.unstick(now) {
       // The put likely failed: the whole frame again, into the new segment.
@@ -364,6 +360,8 @@ fn run_on(
 
     if win.frame_due(now) {
       win.render();
+      // A size the frame asked for, before the loop sleeps.
+      win.apply_resize();
     }
 
     if !win.kb_ready && win.frames > 0 {
@@ -472,8 +470,10 @@ impl Win {
     self.force || self.pace.left(now).is_zero()
   }
 
-  /// Until the loop must run again without input: the next tick while a frame is wanted; none
-  /// while the server reads the last frame (its completion wakes us).
+  /// Until the loop must run again without input: the next tick while a frame is wanted, else
+  /// the next timer; none while the server reads the last frame (its completion wakes us), nor
+  /// for a timer while the window is unmapped or covered (`MapNotify` or `VisibilityNotify` draws
+  /// again).
   fn timeout(&mut self) -> Option<Duration> {
     let now = Instant::now();
     if self.present.busy() {
@@ -482,6 +482,7 @@ impl Win {
 
     match self.visible() && self.rt.needs_frame() {
       true => Some(self.pace.left(now)),
+      false if self.visible() => self.rt.due_in(),
       false => None,
     }
   }
@@ -511,6 +512,26 @@ impl Win {
     }
 
     self.sync_cursor();
+  }
+
+  /// Asks the server for the size the app asked for ([Runtime::take_resize]); a fixed window
+  /// gets it as its least and largest size too. The size changes when `ConfigureNotify` says
+  /// so: a window manager may refuse it (a tiled window).
+  fn apply_resize(&mut self) {
+    let Some(size) = self.rt.take_resize() else { return };
+    match self.max {
+      None if self.min.w > size.w || self.min.h > size.h => {
+        self.min = Size::new(self.min.w.min(size.w), self.min.h.min(size.h));
+        set_size_hints(&self.x, self.win, self.min, None, self.scale);
+      }
+      None => {}
+      Some(_) => {
+        (self.min, self.max) = (size, Some(size));
+        set_size_hints(&self.x, self.win, size, Some(size), self.scale);
+      }
+    }
+
+    self.x.resize_window(self.win, px(size.w, self.scale), px(size.h, self.scale));
   }
 
   /// Feeds an event to the runtime; returns whether it was used.
@@ -853,8 +874,6 @@ impl Win {
     }
   }
 
-  // MARK: Keys
-
   /// A key pressed or released (X keycode: evdev + 8, `state` before it): to the app as a key
   /// event, then, unused, through the keyboard's compose state and the Linux editing keys into
   /// text or a command.
@@ -903,8 +922,6 @@ impl Win {
       Typed::None => {}
     }
   }
-
-  // MARK: Pointer
 
   /// Buttons 1–3 click, 4–7 scroll a wheel click up, down, left, right, 8 and 9 are back and
   /// forward (as evdev's side and extra buttons on Wayland).
@@ -959,11 +976,17 @@ impl Win {
   }
 
   /// The window was unmapped (minimized, hidden): the server ended the pointer's grab with it,
-  /// so the buttons held let go where the pointer was last seen and it is out of the window.
+  /// so the buttons held let go where the pointer was last seen, without a click, and it is out
+  /// of the window.
   fn let_go(&mut self) {
     let (pos, mods) = (self.mouse, self.kb_mods());
     let held = std::mem::take(&mut self.pressed);
     let out = self.inside || !held.is_empty();
+    // Not the user's release: no click, though the app's drags end with it.
+    if !held.is_empty() {
+      self.rt.cancel_press();
+    }
+
     for button in held {
       self.send(Event::MouseUp { pos, button, mods });
     }
@@ -972,36 +995,5 @@ impl Win {
       self.inside = false;
       self.send(Event::MouseExit);
     }
-  }
-}
-
-impl Cursors {
-  /// The X cursor for ours: the theme's by its CSS name or the legacy one, else the cursor
-  /// font's glyph; the arrow is the parent's (the desktop's) without a theme.
-  fn get(&mut self, x: &X, c: Cursor) -> u32 {
-    if let Some(&(_, id)) = self.made.iter().find(|m| m.0 == c) {
-      return id;
-    }
-
-    let (names, glyph): (&[&CStr], u16) = match c {
-      Cursor::Inherit | Cursor::Arrow => (&[c"default", c"left_ptr"], 68),
-      Cursor::Text => (&[c"text", c"xterm"], 152),
-      Cursor::Pointer => (&[c"pointer", c"hand2"], 60),
-      Cursor::ResizeX => (&[c"col-resize", c"sb_h_double_arrow"], 108),
-      Cursor::ResizeY => (&[c"row-resize", c"sb_v_double_arrow"], 116),
-      Cursor::Crosshair => (&[c"crosshair"], 34),
-      Cursor::Grab => (&[c"grab", c"openhand", c"hand1"], 58),
-      Cursor::Grabbing => (&[c"grabbing", c"closedhand", c"fleur"], 52),
-      Cursor::NotAllowed => (&[c"not-allowed", c"crossed_circle"], 0),
-    };
-
-    let id = match (&self.theme, c) {
-      (Some(t), _) => t.load(names).unwrap_or_else(|| x.font_cursor(&mut self.font, glyph)),
-      (None, Cursor::Inherit | Cursor::Arrow) => 0,
-      (None, _) => x.font_cursor(&mut self.font, glyph),
-    };
-
-    self.made.push((c, id));
-    id
   }
 }

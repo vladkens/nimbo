@@ -47,6 +47,7 @@ fns!(Xcb {
     border: u16, class: u16, visual: u32, mask: u32, values: *const u32) -> u32;
   fn xcb_map_window(c: C, w: u32) -> u32;
   fn xcb_destroy_window(c: C, w: u32) -> u32;
+  fn xcb_configure_window(c: C, w: u32, mask: u16, values: *const u32) -> u32;
   fn xcb_change_window_attributes(c: C, w: u32, mask: u32, values: *const u32) -> u32;
   fn xcb_change_property(c: C, mode: u8, w: u32, prop: u32, ty: u32, format: u8, len: u32,
     data: *const c_void) -> u32;
@@ -449,6 +450,8 @@ const CW_EVENT_MASK: u32 = 2048;
 const CW_CURSOR: u32 = 16384;
 const GRAVITY_NORTH_WEST: u32 = 1;
 const WINDOW_CLASS_INPUT_OUTPUT: u16 = 1;
+const CONFIG_WIDTH: u16 = 4;
+const CONFIG_HEIGHT: u16 = 8;
 const PROP_MODE_REPLACE: u8 = 0;
 const IMAGE_FORMAT_Z_PIXMAP: u8 = 2;
 const GC_GRAPHICS_EXPOSURES: u32 = 65536;
@@ -727,6 +730,12 @@ impl X {
     unsafe { (self.l.xcb.xcb_destroy_window)(self.c, w) };
   }
 
+  pub fn resize_window(&self, w: u32, width: u32, height: u32) {
+    let values = [width.max(1), height.max(1)];
+    let mask = CONFIG_WIDTH | CONFIG_HEIGHT;
+    unsafe { (self.l.xcb.xcb_configure_window)(self.c, w, mask, values.as_ptr()) };
+  }
+
   /// Selects `events` on a window that isn't ours (the root, the XSETTINGS owner).
   pub fn select_events(&self, w: u32, events: u32) {
     unsafe { (self.l.xcb.xcb_change_window_attributes)(self.c, w, CW_EVENT_MASK, &events) };
@@ -791,8 +800,6 @@ impl X {
     let f = &self.l.xcb;
     unsafe { (f.xcb_convert_selection)(self.c, requestor, selection, target, prop, 0) };
   }
-
-  // MARK: Cursors
 
   /// A cursor of the core cursor font (`<X11/cursorfont.h>`), black on white.
   pub fn font_cursor(&self, font: &mut u32, glyph: u16) -> u32 {

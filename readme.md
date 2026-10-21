@@ -8,7 +8,7 @@ It runs on macOS 14 or later; an app built with it sets `MACOSX_DEPLOYMENT_TARGE
 
 On Windows an app built with it sets `#![cfg_attr(windows, windows_subsystem = "windows")]` in its `main.rs`, as the examples do, so that no console opens next to its window.
 
-Run an example with `cargo run --example shapes` (every shape the renderer draws), `cargo run --example input` (a square to drag, move with the arrows, resize with the wheel, copy and paste) or `cargo run --example text` (the system fonts in sizes, weights and scripts, emoji, subpixel positions), or render it without a window: `cargo run --example shapes -- --shot shapes.png`, or with `--appearance light`.
+Run an example with `cargo run --example counter` (a count with buttons on the element tree: hover, press, Tab focus, the theme), `cargo run --example shapes` (every shape the renderer draws), `cargo run --example input` (a square to drag, move with the arrows, resize with the wheel, copy and paste) or `cargo run --example text` (the system fonts in sizes, weights and scripts, emoji, subpixel positions), or render it without a window: `cargo run --example shapes -- --shot shapes.png`, or with `--appearance light`.
 
 ## License
 

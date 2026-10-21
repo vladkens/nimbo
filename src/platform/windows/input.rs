@@ -70,7 +70,7 @@ impl Window {
 
   /// Sets the runtime's cursor when it changed and the pointer is in the window, or when
   /// `force`d (WM_SETCURSOR: the pointer is over the client area, maybe before its first move).
-  fn sync_cursor(&mut self, force: bool) {
+  pub(super) fn sync_cursor(&mut self, force: bool) {
     let c = self.rt.cursor();
     let changed = c != std::mem::replace(&mut self.cursor, c);
     if force || (changed && self.rt.mouse.is_some()) {
@@ -146,7 +146,7 @@ impl Window {
   }
 
   /// The capture went to another window (another app took the mouse mid-drag): no button-up
-  /// will come, so the buttons held are let go here, where the pointer is now.
+  /// will come, so the buttons held are let go here, where the pointer is now, without a click.
   fn capture_lost(&mut self, to: HWND) {
     if to == self.hwnd || self.held.is_empty() {
       return;
@@ -158,6 +158,8 @@ impl Window {
       ScreenToClient(self.hwnd, &mut p);
     }
 
+    // Not the user's release: no click, though the app's drags end with it.
+    self.rt.cancel_press();
     let (pos, mods) = (self.point((p.x, p.y)), keyboard::mods());
     for button in std::mem::take(&mut self.held) {
       self.send(Event::MouseUp { pos, button, mods });

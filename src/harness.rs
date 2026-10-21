@@ -10,7 +10,8 @@ use std::time::Duration;
 use crate::app::{App, Clock, Event, MemClipboard, Mods, MouseButton, Runtime};
 use crate::cpu::{self, Pixels};
 use crate::keys::{self, Key, KeyEvent};
-use crate::scene::{Point, Size};
+use crate::scene::{Point, Rect, Size};
+use crate::ui::{Id, Kind};
 
 /// A display refresh at 120 Hz, the step of [Harness::wait].
 pub const TICK: Duration = Duration::from_nanos(8_333_333);
@@ -75,6 +76,12 @@ impl<A: App> Harness<A> {
     })
   }
 
+  /// Clicks the centre of an element of the last frame; panics when it isn't there.
+  pub fn click_id(&mut self, id: Id) -> bool {
+    let r = self.rect(id).unwrap_or_else(|| panic!("no element {id:?}"));
+    self.click(r.x + r.w / 2.0, r.y + r.h / 2.0)
+  }
+
   /// Presses and releases `key` with `mods` as on a US keyboard (Shift-1 is `'!'`, Shift-A
   /// `'A'`); returns whether the press was used. Unused, it goes through text input as in a
   /// window: [Self::key_event].
@@ -110,7 +117,8 @@ impl<A: App> Harness<A> {
   }
 
   /// Lets `dt` of virtual time pass as a window would: a display refresh every [TICK], each
-  /// building a frame when one is needed (an animation). Returns the frames built.
+  /// building a frame when one is needed (animations, momentum, timers). Returns the frames
+  /// built.
   pub fn wait(&mut self, dt: Duration) -> usize {
     let (end, mut frames) = (self.rt.now() + dt, 0);
     while self.rt.now() < end {
@@ -121,10 +129,32 @@ impl<A: App> Harness<A> {
     frames
   }
 
+  /// The focused element.
+  pub fn focused(&self) -> Option<Id> {
+    self.rt.ui.focus()
+  }
+
+  /// An element's rect in the last frame built.
+  pub fn rect(&self, id: Id) -> Option<Rect> {
+    self.rt.ui.last.rect(id)
+  }
+
+  /// The text of a text element in the last frame built.
+  pub fn text(&self, id: Id) -> Option<&str> {
+    let t = &self.rt.ui.last;
+    match t.get(id)?.kind {
+      Kind::Text { range, .. } => Some(t.str(range.0, range.1)),
+      _ => None,
+    }
+  }
+
   // MARK: Output
 
-  /// Builds a frame if anything asked for one; returns whether it did.
+  /// Builds a frame if anything asked for one; returns whether it did. A window size the app
+  /// asked for ([crate::Ui::set_window_size]) applies first, as a window would resize, and
+  /// again after a frame that asked for one, which is then built again at the new size.
   pub fn frame(&mut self) -> bool {
+    self.apply_resize();
     if !self.rt.needs_frame() {
       return false;
     }
@@ -133,17 +163,32 @@ impl<A: App> Harness<A> {
     true
   }
 
-  /// Builds a frame; returns whether it dropped glyphs (a full atlas) and must be built again.
+  /// Builds a frame, and again at the size it asked for if it did; returns whether the last one
+  /// dropped glyphs (a full atlas) and must be built again.
   fn build(&mut self) -> bool {
-    let again = self.rt.frame();
+    let mut again = self.rt.frame();
     self.cpu.sync(&mut self.rt.text, &mut self.rt.images);
+    if self.apply_resize() {
+      again = self.rt.frame();
+      self.cpu.sync(&mut self.rt.text, &mut self.rt.images);
+    }
+
     again
+  }
+
+  /// Resizes the view to the size the app asked for, if it did; returns whether it did.
+  fn apply_resize(&mut self) -> bool {
+    let Some(size) = self.rt.take_resize() else { return false };
+    let scale = self.rt.scale;
+    self.rt.resize(size, scale);
+    true
   }
 
   /// Renders the current state offscreen and reads the pixels back. A frame that dropped glyphs
   /// is built once more first, as a window's next refresh would (never more: an animation
   /// isn't run on).
   pub fn render(&mut self) -> Image {
+    self.apply_resize();
     if self.rt.needs_frame() && self.build() {
       self.build();
     }

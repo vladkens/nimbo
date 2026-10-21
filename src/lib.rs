@@ -4,10 +4,11 @@
 //! window, input and text behind [platform] (AppKit and CoreText on macOS, Win32 and DirectWrite
 //! on Windows, Wayland or X11 with fontconfig, FreeType and HarfBuzz on Linux), nothing else.
 //!
-//! An [App] gets [Event]s and paints a [Scene] and [text] through a [Frame]; a [Runtime] drives
-//! it, fed by the window ([platform]) or by the headless [Harness], both drawing with the CPU
-//! renderer ([cpu]). Examples start with [run], which opens a window, or with `--shot <file.png>`
-//! runs the harness instead (in the dark appearance unless `--appearance light`).
+//! An [App] gets [Event]s and builds each frame as an element tree on a [Ui] (laid out and painted
+//! by [ui]) and/or paints a [Scene] and [text] through a [Frame]; a [Runtime] drives it, fed by
+//! the window ([platform]) or by the headless [Harness], both drawing with the CPU renderer
+//! ([cpu]). Examples start with [run], which opens a window, or with `--shot <file.png>` runs the
+//! harness instead (in the dark appearance unless `--appearance light`).
 //!
 //! macOS 14 is the least it runs on (`NSApplication`'s `activate`, `NSView`'s display link): build
 //! apps with `MACOSX_DEPLOYMENT_TARGET=14.0`.
@@ -37,7 +38,11 @@ pub use scene::{
   Color, Frame, ImageId, Images, Point, Quad, Rect, Scene, Segment, Size, alpha, mix, rgb,
 };
 pub use text::{Font, Weight};
-pub use ui::Cursor;
+pub use ui::{
+  Align, Behavior, Button, ButtonStyle, Click, ControlSize, Cursor, Dim, Ease, Float, Focus,
+  FocusRing, Id, Press, Response, Scroll, Shadow, Sizes, Style, TextStyle, Theme, Transition, Ui,
+  Variant, grow, pct, px, rigid,
+};
 
 /// A window's title and initial content size in points; the harness renders at this size.
 pub struct Config {
@@ -178,10 +183,14 @@ mod tests {
       }
     }
 
+    // The app hears the first one, the default dark too, and the theme follows it.
     let cfg = Config::new("a", 100.0, 100.0);
-    let seen = |s: &str| harness(&cfg, Seen::default(), &parse(s).unwrap()).app().0;
-    assert_eq!(seen(""), Some(Appearance::DARK));
-    assert_eq!(seen("--appearance light"), Some(Appearance::LIGHT));
+    let seen = |s: &str| {
+      let h = harness(&cfg, Seen::default(), &parse(s).unwrap());
+      (h.app().0, h.rt.ui.appearance())
+    };
+    assert_eq!(seen(""), (Some(Appearance::DARK), Appearance::DARK));
+    assert_eq!(seen("--appearance light"), (Some(Appearance::LIGHT), Appearance::LIGHT));
   }
 
   fn parse(s: &str) -> Result<Args, String> {

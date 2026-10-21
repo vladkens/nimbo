@@ -14,6 +14,10 @@ keywords = ["gui", "ui", "desktop", "widgets", "toolkit"]
 categories = ["gui"]
 
 [[test]]
+name = "counter"
+harness = false
+
+[[test]]
 name = "input"
 harness = false
 
@@ -29,7 +33,7 @@ harness = false
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = { version = "0.6.2", default-features = false, features = ["std"] }
-dispatch2 = { version = "0.3.1", default-features = false, features = ["std", "objc2"] }
+dispatch2 = { version = "0.3.1", default-features = false, features = ["std", "objc2", "block2"] }
 objc2 = { version = "0.6.5", default-features = false, features = ["std"] }
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSApplication", "NSResponder", "NSView", "NSWindow", "NSEvent", "NSGraphics", "NSRunningApplication", "NSMenu", "NSMenuItem", "NSGraphicsContext", "NSAppearance", "NSColor", "NSColorSpace", "block2", "NSTrackingArea", "NSCursor", "NSPasteboard", "NSFont", "NSFontDescriptor"] }
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFString", "CFDictionary", "CFNumber", "CFCGTypes", "CFAttributedString", "CFArray"] }

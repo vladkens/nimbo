@@ -2,9 +2,9 @@
 
 //! The platform seam: everything that depends on the OS, one module per OS, picked by
 //! `target_os` (no trait objects: one implementation per build). The rest of the crate (scene,
-//! the CPU renderer, the harness) is portable and reaches the OS only through the items below.
-//! `macos/` is AppKit + CoreText, `windows/` Win32 + DirectWrite, `linux/` Wayland or X11 (picked
-//! at start) + fontconfig, FreeType and HarfBuzz (loaded at run time).
+//! layout, widgets, the CPU renderer, the harness) is portable and reaches the OS only through
+//! the items below. `macos/` is AppKit + CoreText, `windows/` Win32 + DirectWrite, `linux/`
+//! Wayland or X11 (picked at start) + fontconfig, FreeType and HarfBuzz (loaded at run time).
 //!
 //! What a platform module provides (the `use` below fails to build when one is missing):
 //!
@@ -16,6 +16,11 @@
 //!     size `cfg.min()` (macOS: `contentMinSize`, Windows: `WM_GETMINMAXINFO`, Linux:
 //!     `xdg_toplevel.set_min_size`, X11 `WM_NORMAL_HINTS`); minimal app menu where the OS has one
 //!     (macOS: Quit);
+//!   - window size from the app: after each event and frame, [crate::Runtime::take_resize] is a
+//!     content size the app asked for ([crate::Ui::set_window_size]); resize the window to it,
+//!     resizable or not, lowering the least size with it (macOS: `setFrame:display:` keeping the
+//!     top edge; Windows: `SetWindowPos` keeping the top-left corner; Linux: the buffers' size, and
+//!     a fixed window's least and largest sizes);
 //!   - input: OS events to [crate::Event] in points, y down from the view's top left: mouse (moves,
 //!     buttons with click counts, exit), scroll (`precise` and phases for trackpads, wheel lines ×
 //!     [crate::WHEEL_LINE]), pinch, modifiers (none once the focus goes: their changes then go to
@@ -32,9 +37,9 @@
 //!   - cursors: show [crate::Runtime::cursor] (a [crate::Cursor]) while the pointer is in the view;
 //!   - clipboard: plain text, an [crate::Clipboard]; a reader of ours never blocks the loop;
 //!   - frames: draw only while [crate::Runtime::needs_frame], paced by the display (≤ 120 Hz);
-//!     idle, sleep until a wake: set `rt.waker().set_notify(f)`, `f` called from any thread to wake
-//!     the loop; no frames while the window is hidden (minimized, covered), one when it shows
-//!     again;
+//!     idle, sleep until the next timer ([crate::Runtime::due_in]) or a wake: set
+//!     `rt.waker().set_notify(f)`, `f` called from any thread to wake the loop; no frames while the
+//!     window is hidden (minimized, covered), one when it shows again;
 //!   - scale: the backing scale factor, given to [crate::Runtime::resize] with the size before each
 //!     frame (a change refills the glyph atlas);
 //!   - present: [crate::Runtime::frame], then `cpu::Renderer::sync(&mut rt.text, &mut rt.images)`
@@ -46,7 +51,8 @@
 //!   - appearance: send `Event::Appearance(appearance())` ([crate::Event::Appearance]) to the
 //!     runtime right after making it, before the first frame, and again whenever the OS's light or
 //!     dark setting or accent colour changes (macOS: `viewDidChangeEffectiveAppearance`,
-//!     `NSSystemColorsDidChangeNotification`).
+//!     `NSSystemColorsDidChangeNotification`); the runtime drops repeats. The theme follows it
+//!     unless the app set one.
 //! - `pub fn appearance() -> Appearance` ([crate::Appearance]): `dark`, and `accent` in sRGB or
 //!   `None` when the OS has none or the user left it to apps (macOS: `effectiveAppearance` matched
 //!   against Aqua / DarkAqua, `controlAccentColor` unless Multicolor). Stubs return

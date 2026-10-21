@@ -1,16 +1,22 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The NSView subclass: a layer we draw with the CPU renderer (IOSurfaces as its contents),
-//! NSEvents converted to [Event], and a display link that runs only while the runtime needs
-//! frames (input, animations). While the window is hidden (minimized, covered, on another space)
-//! frames wait until it shows again. Keys nobody used go through `interpretKeyEvents:`, which
-//! calls back `insertText:` and `doCommandBySelector:` (see [crate::keys]); the pointer's cursor
-//! follows the runtime's.
+//! NSEvents converted to [Event], and a display link that runs only while the runtime needs frames
+//! (input, animations); a timer the app asked for sleeps on the main queue until it is due (a
+//! refresh after the last frame at the soonest) and draws its frame there, leaving the display link
+//! paused. While the window is hidden (minimized, covered, on another space) frames wait until it
+//! shows again. Keys nobody used go through `interpretKeyEvents:`, which calls back `insertText:`
+//! and `doCommandBySelector:` (see [crate::keys]); the pointer's cursor follows the runtime's.
 
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
+use std::time::Duration;
 
-use dispatch2::{DispatchQueue, MainThreadBound};
+use block2::RcBlock;
+use dispatch2::{
+  _dispatch_source_type_timer, DispatchObject, DispatchQueue, DispatchRetained, DispatchSource,
+  DispatchTime, MainThreadBound,
+};
 use objc2::rc::{Retained, Weak};
 use objc2::runtime::{AnyObject, Sel};
 use objc2::{
@@ -41,6 +47,8 @@ pub struct State {
   /// The CPU renderer's frames, presented as the layer's contents.
   presenter: Presenter,
   link: Retained<CADisplayLink>,
+  /// The timer wake: one, set again for each new deadline.
+  wake: Wake,
 }
 
 #[derive(Default)]
@@ -49,6 +57,11 @@ pub struct Ivars {
   /// Timestamp of the last key event offered through `performKeyEquivalent:`, which AppKit
   /// sends again as `keyDown:` when neither we nor the menu used it.
   key_equivalent: Cell<f64>,
+  /// When the scheduled timer wake fires, on the runtime's clock.
+  timer: Cell<Option<Duration>>,
+  /// When the last frame started, on the runtime's clock: a timer frame comes a refresh later at
+  /// the soonest.
+  last_frame: Cell<Option<Duration>>,
   /// `interpretKeyEvents:` runs for a key with Cmd: what it would type is dropped.
   cmd_key: Cell<bool>,
   /// The cursor set while the pointer is in the view; none outside it.
@@ -276,9 +289,12 @@ define_class!(
         let Some(st) = state.as_mut() else { return };
         let idle = !st.rt.needs_frame() || !self.visible();
         if idle {
-          // Nothing changed since the last frame: stop until the next event or wake. Hidden:
+          // Nothing changed since the last frame: stop until the next event, wake or timer. Hidden:
           // until the window shows again.
           st.link.setPaused(true);
+          if self.visible() {
+            self.schedule(st);
+          }
         }
 
         idle
@@ -337,7 +353,14 @@ impl View {
         }
       });
     }));
-    *view.ivars().state.borrow_mut() = Some(State { rt, presenter, link });
+    let weak = view.weak();
+    let wake = Wake::new(DispatchQueue::main(), move || {
+      let mtm = MainThreadMarker::new().unwrap();
+      if let Some(view) = weak.get(mtm).load() {
+        view.timer_fired();
+      }
+    });
+    *view.ivars().state.borrow_mut() = Some(State { rt, presenter, link, wake });
     view
   }
 
@@ -392,8 +415,9 @@ impl View {
       let mut state = self.ivars().state.borrow_mut();
       let Some(st) = state.as_mut() else { return false };
       let used = st.rt.event(ev);
-      if st.rt.needs_frame() {
-        st.link.setPaused(false);
+      match st.rt.needs_frame() {
+        true => st.link.setPaused(false),
+        false => self.schedule(st),
       }
 
       self.sync_cursor(st);
@@ -403,7 +427,26 @@ impl View {
       super::shell::quit();
     }
 
+    self.apply_resize();
     used
+  }
+
+  /// Resizes the window's content to the size the app asked for ([Runtime::take_resize]),
+  /// keeping its top edge where it is, as preferences windows do when their tab changes. The
+  /// least content size comes down with it; a fixed window stays fixed for the user. Outside the
+  /// runtime's borrow: the new frame size draws at once ([Self::render]).
+  fn apply_resize(&self) {
+    let want = self.ivars().state.borrow_mut().as_mut().and_then(|st| st.rt.take_resize());
+    let (Some(size), Some(window)) = (want, self.window()) else { return };
+    let old = window.frame();
+    let content = window.contentRectForFrameRect(old);
+    let rect = NSRect::new(content.origin, NSSize::new(size.w as f64, size.h as f64));
+    let mut frame = window.frameRectForContentRect(rect);
+    frame.origin.y = old.origin.y + old.size.height - frame.size.height;
+    let min = window.contentMinSize();
+    let (w, h) = (min.width.min(size.w as f64), min.height.min(size.h as f64));
+    window.setContentMinSize(NSSize::new(w, h));
+    window.setFrame_display(frame, true);
   }
 
   /// Typed text, unless it came with Cmd or is a control character.
@@ -456,12 +499,61 @@ impl View {
     Arc::new(MainThreadBound::new(Weak::new(self), self.mtm()))
   }
 
+  /// Sleeps until the runtime's next timer, unless an earlier wake is already set.
+  fn schedule(&self, st: &mut State) {
+    let Some(left) = st.rt.due_in() else { return };
+    let since = self.ivars().last_frame.get().map(|t| st.rt.now().saturating_sub(t));
+    let left = paced(left, since, refresh(&st.link));
+    let at = st.rt.now() + left;
+    if self.ivars().timer.get().is_some_and(|t| t <= at) {
+      return;
+    }
+
+    self.ivars().timer.set(Some(at));
+    st.wake.arm(left);
+  }
+
+  /// The timer wake's deadline came: its frame draws at once, without waking the display link
+  /// (unpausing it for one frame cost ~100 wakeups a second at 10 Hz). Hidden, it waits for the
+  /// window to show ([Self::occlusion_changed]).
+  fn timer_fired(&self) {
+    self.ivars().timer.set(None);
+    if !self.visible() {
+      return;
+    }
+
+    let due = {
+      let mut state = self.ivars().state.borrow_mut();
+      let Some(st) = state.as_mut() else { return };
+      match st.rt.needs_frame() {
+        true => st.link.isPaused(),
+        false => {
+          self.schedule(st);
+          false
+        }
+      }
+    };
+    if due {
+      self.render();
+      self.after_frame();
+    }
+  }
+
   /// After a frame: the display link runs on while the runtime needs frames (animations, drags),
-  /// else it stops at once, not a refresh later.
+  /// else it stops at once, not a refresh later, and the view sleeps until the next timer.
   fn after_frame(&self) {
-    let mut state = self.ivars().state.borrow_mut();
-    let Some(st) = state.as_mut() else { return };
-    st.link.setPaused(!st.rt.needs_frame());
+    {
+      let mut state = self.ivars().state.borrow_mut();
+      let Some(st) = state.as_mut() else { return };
+      match st.rt.needs_frame() {
+        true => st.link.setPaused(false),
+        false => {
+          st.link.setPaused(true);
+          self.schedule(st);
+        }
+      }
+    }
+    self.apply_resize();
   }
 
   fn button(&self, event: &NSEvent, down: bool) {
@@ -501,6 +593,11 @@ impl View {
     let size = Size::new(bounds.width as f32, bounds.height as f32);
     let mut state = self.ivars().state.borrow_mut();
     let Some(st) = state.as_mut() else { return };
+    self.ivars().last_frame.set(Some(st.rt.now()));
+    // A wake set before this frame is let go: [Self::after_frame] sets the next, a refresh after
+    // this one at the soonest.
+    self.ivars().timer.set(None);
+    st.wake.disarm();
     st.rt.resize(size, scale);
     st.rt.frame();
     st.presenter.renderer.sync(&mut st.rt.text, &mut st.rt.images);
@@ -511,6 +608,58 @@ impl View {
     }
 
     self.sync_cursor(st);
+  }
+}
+
+/// How long a timer due in `left` waits, `since` the last frame started: until a refresh after
+/// it at the soonest, as the display link would pace it (a timer every 2 ms draws at the
+/// display's rate, not 500 times a second).
+fn paced(left: Duration, since: Option<Duration>, refresh: Duration) -> Duration {
+  since.map_or(left, |s| left.max(refresh.saturating_sub(s)))
+}
+
+/// The display's refresh interval from its link (a 120 Hz one's until it has run).
+fn refresh(link: &CADisplayLink) -> Duration {
+  let d = link.duration();
+  let d = if d > 0.0 { d.clamp(1.0 / 120.0, 1.0 / 24.0) } else { 1.0 / 120.0 };
+  Duration::from_secs_f64(d)
+}
+
+/// One timer on a queue, set again for each new deadline: it fires only at the last one, and
+/// not at all once disarmed. `dispatch_after` blocks can't be taken back: each superseded one
+/// would still wake the process when its time came.
+struct Wake(DispatchRetained<DispatchSource>);
+
+impl Wake {
+  fn new(queue: &DispatchQueue, fired: impl Fn() + 'static) -> Self {
+    let ty = (&raw const _dispatch_source_type_timer).cast_mut();
+    // SAFETY: a timer source takes no handle or mask.
+    let source = unsafe { DispatchSource::new(ty, 0, 0, Some(queue)) };
+    let block = RcBlock::new(fired);
+    // SAFETY: dispatch copies the block; it runs on `queue`, the thread `fired` was made for.
+    unsafe { source.set_event_handler_with_block(RcBlock::as_ptr(&block)) };
+    let wake = Self(source);
+    wake.disarm();
+    wake.0.activate();
+    wake
+  }
+
+  /// Fires once, `after` from now (with dispatch_after's leeway: a tenth, within 1 ms and 60 s),
+  /// instead of at any deadline set before.
+  fn arm(&self, after: Duration) {
+    let at = DispatchTime::try_from(after).unwrap_or(DispatchTime::NOW);
+    let leeway = (after / 10).clamp(Duration::from_millis(1), Duration::from_secs(60));
+    self.0.set_timer(at, DispatchTime::FOREVER.0, leeway.as_nanos() as u64);
+  }
+
+  fn disarm(&self) {
+    self.0.set_timer(DispatchTime::FOREVER, DispatchTime::FOREVER.0, 0);
+  }
+}
+
+impl Drop for Wake {
+  fn drop(&mut self) {
+    self.0.cancel();
   }
 }
 
@@ -644,6 +793,44 @@ mod tests {
     assert_eq!(buttons(both, 0, false), 0b10);
     assert_eq!(buttons(both, 70, true), both);
     assert_eq!(buttons(both, -1, false), both);
+  }
+
+  #[test]
+  fn timer_frames_come_a_refresh_apart() {
+    let ms = Duration::from_millis;
+    let hz60 = Duration::from_micros(16_667);
+    // Due in 2 ms, 1 ms after the last frame: at the next refresh.
+    assert_eq!(paced(ms(2), Some(ms(1)), hz60), Duration::from_micros(15_667));
+    // Due later than a refresh, or long after the last frame: when due.
+    assert_eq!(paced(ms(100), Some(ms(1)), hz60), ms(100));
+    assert_eq!(paced(ms(2), Some(ms(500)), hz60), ms(2));
+    assert_eq!(paced(ms(2), None, hz60), ms(2));
+  }
+
+  /// A timer wake set again fires only at its last deadline, and not at all once disarmed: a
+  /// superseded deadline wakes nothing.
+  #[test]
+  fn a_wake_set_again_fires_once() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let fired = Arc::new(AtomicUsize::new(0));
+    let n = fired.clone();
+    let queue = DispatchQueue::new("nimbo.wake", None);
+    let wake = Wake::new(&queue, move || {
+      n.fetch_add(1, Ordering::SeqCst);
+    });
+    let ms = Duration::from_millis;
+    for t in [20, 40, 60] {
+      wake.arm(ms(t));
+    }
+
+    std::thread::sleep(ms(250));
+    assert_eq!(fired.load(Ordering::SeqCst), 1);
+
+    wake.arm(ms(20));
+    wake.disarm();
+    std::thread::sleep(ms(100));
+    assert_eq!(fired.load(Ordering::SeqCst), 1);
   }
 
   /// A crosshair asked for while the pointer is outside: set as it comes in, not again while it

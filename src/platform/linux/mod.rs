@@ -11,7 +11,7 @@
 //! from `wl_seat` (pointer, axis, pinch gestures, keyboard through xkbcommon in [xkb]),
 //! cursor-shape-v1 for cursors (else the Xcursor theme's, [cursor]), the clipboard on
 //! `wl_data_device` ([clip]); the objects' events in [dispatch]. One thread: the loop polls the
-//! display and a wake eventfd with the next key repeat as the timeout.
+//! display and a wake eventfd with the next timer (or key repeat) as the timeout.
 //!
 //! No client-side decorations: sway and other wlroots compositors (and KDE) draw their own;
 //! GNOME (Mutter) draws none for clients, so a window there has no title bar yet (CSD is to
@@ -59,6 +59,7 @@ use wayland_protocols::wp::pointer_gestures::zv1::client::zwp_pointer_gestures_v
 use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 use wayland_protocols::xdg::shell::client::xdg_surface::XdgSurface;
+use wayland_protocols::xdg::shell::client::xdg_toplevel::XdgToplevel;
 use wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase;
 
 use self::clip::{Clip, Clipboard, Transfers};
@@ -230,6 +231,11 @@ pub struct Win {
   rt: Runtime<Box<dyn App>>,
   surface: WlSurface,
   _xdg: XdgSurface,
+  top: XdgToplevel,
+  /// The user can resize it ([Config::resizable]) down to `min`; a fixed one gets its new size
+  /// as its least and largest.
+  resizable: bool,
+  min: Size,
   viewport: Option<WpViewport>,
   _fractional: Option<WpFractionalScaleV1>,
   present: Presenter,
@@ -243,6 +249,11 @@ pub struct Win {
   /// Logical size (points), from the last configure.
   size: Size,
   pending_size: Option<Size>,
+  /// Maximized, fullscreen or tiled: the window keeps the compositor's size, and a size the app
+  /// asks for meanwhile waits in `asked` until it floats again. The pending configure's too.
+  held: bool,
+  pending_held: bool,
+  asked: Option<Size>,
   /// Fractional scale in 120ths, when the compositor sends one.
   scale120: Option<u32>,
   /// `wl_surface.preferred_buffer_scale` (v6).
@@ -371,6 +382,9 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
     rt,
     surface,
     _xdg: xdg,
+    top,
+    resizable: cfg.resizable,
+    min: cfg.min(),
     viewport,
     _fractional: fractional,
     present: Presenter::new(shm),
@@ -380,6 +394,9 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
     started,
     size,
     pending_size: None,
+    held: false,
+    pending_held: false,
+    asked: None,
     scale120: None,
     preferred: None,
     outputs,
@@ -428,6 +445,7 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
     }
 
     win.key_repeat();
+    win.apply_resize();
 
     // A configure's frame comes at once: its ack is committed with a buffer of its size.
     let now = Instant::now();
@@ -436,6 +454,8 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
       win.render();
     }
 
+    // A size the frame asked for, before the loop sleeps.
+    win.apply_resize();
     let was = std::mem::replace(&mut unsent, backed_up(queue.flush())?);
     if was && !unsent {
       // Drained: the frame that waited for it is drawn before the loop sleeps.
@@ -508,7 +528,7 @@ impl Win {
   }
 
   /// Until the loop must run again without input: the next key repeat, the next idle reader of
-  /// our text let go, and the next paced tick when no frame callback is due.
+  /// our text let go, and the next paced tick or timer when no frame callback is due.
   fn timeout(&mut self) -> Option<Duration> {
     let now = Instant::now();
     let repeat = self.repeat.as_ref().map(|r| r.at);
@@ -519,11 +539,7 @@ impl Win {
     };
 
     if self.configured && !self.frame_pending {
-      let next = match self.rt.needs_frame() {
-        true => self.next_tick,
-        false => None,
-      };
-
+      let next = frame_wake(now, self.rt.needs_frame(), self.next_tick, self.rt.due_in());
       at = match (at, next) {
         (Some(a), Some(b)) => Some(a.min(b)),
         (a, b) => a.or(b),
@@ -559,11 +575,9 @@ impl Win {
     let shown = self.present.present(&self.rt.scene, size, scale, &self.surface, &self.qh);
     let fits = self.present.fits();
     self.next_tick = None;
-    // An unchanged frame that animates on asks for a callback too, committed with no buffer: the
-    // compositor paces it, and sends none while the window is hidden. One waiting for a buffer
-    // ticks instead.
     let waits = self.present.starved || (self.acked && !fits);
-    let callback = shown || (self.rt.needs_frame() && !waits);
+    let timer = self.rt.due_in().is_some();
+    let callback = wants_callback(shown, self.rt.needs_frame(), timer, waits);
     if callback {
       self.surface.frame(&self.qh, ());
       self.frame_pending = true;
@@ -592,6 +606,34 @@ impl Win {
     }
 
     self.sync_cursor();
+  }
+
+  /// Takes the size the app asked for ([Runtime::take_resize]) as the surface's: a floating
+  /// window takes the size its buffers have; a fixed one gets it as its least and largest too,
+  /// so the compositor configures it so. A maximized, fullscreen or tiled window keeps the
+  /// compositor's size and takes the app's when it floats again.
+  fn apply_resize(&mut self) {
+    let Some(size) = self.rt.take_resize() else { return };
+    // In whole surface coordinates, as the first size ([whole]).
+    let size = whole(size);
+    let (w, h) = (size.w as i32, size.h as i32);
+    match self.resizable {
+      true if self.min.w > size.w || self.min.h > size.h => {
+        self.min = Size::new(self.min.w.min(size.w), self.min.h.min(size.h));
+        self.top.set_min_size(self.min.w.ceil() as i32, self.min.h.ceil() as i32);
+      }
+      true => {}
+      false => {
+        // Lowered first, so the least size never passes the largest.
+        self.top.set_min_size(0, 0);
+        self.top.set_max_size(w, h);
+        self.top.set_min_size(w, h);
+      }
+    }
+
+    let Some(size) = dispatch::asked_size(size, self.held, &mut self.asked) else { return };
+    self.size = size;
+    self.rt.redraw();
   }
 
   /// Feeds an event to the runtime; returns whether it was used.
@@ -720,11 +762,17 @@ impl Win {
   }
 
   /// The pointer left the surface or went away (its seat lost the capability): it leaves the
-  /// surface it was over, and the buttons it held are let go first. A leave mid-drag ends the
-  /// grab (the window minimized, a compositor's own grab), and no release follows.
+  /// surface it was over, and the buttons it held are let go first, without a click. A leave
+  /// mid-drag ends the grab (the window minimized, a compositor's own grab), and no release
+  /// follows.
   fn pointer_gone(&mut self) {
     let over = std::mem::take(&mut self.enter_serial).is_some();
     let (pos, mods) = (self.mouse, self.mods);
+    // Not the user's release: no click, though the app's drags end with it.
+    if !self.buttons.is_empty() {
+      self.rt.cancel_press();
+    }
+
     for e in let_go(std::mem::take(&mut self.buttons), over, pos, mods) {
       self.send(e);
     }
@@ -804,6 +852,29 @@ fn let_go(held: Vec<MouseButton>, over: bool, pos: Point, mods: Mods) -> Vec<Eve
 fn buffer_px(size: Size, scale: f32) -> (u32, u32) {
   let px = |p: f32| (p * scale).round().max(1.0) as u32;
   (px(size.w), px(size.h))
+}
+
+/// Whether a frame asks for a frame callback: a new one shown, or an unchanged one while frames
+/// are wanted or a timer waits, committed with no buffer: the compositor paces the next (a timer
+/// every 2 ms draws at its rate), and sends none while the window is hidden. One waiting for a
+/// buffer ticks instead.
+fn wants_callback(shown: bool, wanted: bool, timer: bool, waits: bool) -> bool {
+  shown || ((wanted || timer) && !waits)
+}
+
+/// When the loop wakes for a frame while no frame callback is due: the paced tick while a frame
+/// is `wanted`, at once without one (a timer came due after the loop checked), else the next
+/// timer.
+fn frame_wake(
+  now: Instant,
+  wanted: bool,
+  tick: Option<Instant>,
+  due_in: Option<Duration>,
+) -> Option<Instant> {
+  match wanted {
+    true => Some(tick.unwrap_or(now)),
+    false => due_in.map(|d| now + d),
+  }
 }
 
 /// `s` in whole surface coordinates, as configures give them: at an integer buffer scale a
@@ -913,6 +984,28 @@ mod tests {
     assert_eq!(clicks(Some((left, u32::MAX - 100, at, 2)), left, 100, at), 3);
     assert_eq!(clicks(first, MouseButton::Right, 1300, at), 1);
     assert_eq!(clicks(first, left, 1300, Point::new(20.0, 10.0)), 1);
+  }
+
+  #[test]
+  fn a_frame_wanted_without_a_tick_wakes_at_once() {
+    let (now, second) = (Instant::now(), Duration::from_secs(1));
+    // A timer that came due after the loop's check: no tick was set, the loop must not sleep.
+    assert_eq!(frame_wake(now, true, None, None), Some(now));
+    assert_eq!(frame_wake(now, true, Some(now + TICK), None), Some(now + TICK));
+    assert_eq!(frame_wake(now, false, None, Some(second)), Some(now + second));
+    assert_eq!(frame_wake(now, false, None, None), None);
+  }
+
+  /// An unchanged frame with a timer waiting asks for a callback: the compositor paces the
+  /// timer's frames and holds them while the window is hidden.
+  #[test]
+  fn an_unchanged_frame_with_a_timer_waits_for_a_callback() {
+    assert!(wants_callback(false, false, true, false));
+    assert!(wants_callback(true, false, false, false));
+    assert!(wants_callback(false, true, false, false));
+    // Waiting for a buffer: the tick paces it.
+    assert!(!wants_callback(false, true, true, true));
+    assert!(!wants_callback(false, false, false, false));
   }
 
   #[test]
