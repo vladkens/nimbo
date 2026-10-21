@@ -82,8 +82,11 @@ pub struct Ivars {
   /// each release to the view that got the press, while `pressedMouseButtons` is the mouse's
   /// state now, ahead of the events queued and with presses in other windows.
   held: Cell<u64>,
-  /// The field input methods work for, as of the last event.
+  /// The field input methods work for and whether it had marked text, as of the last event or
+  /// frame; whether the input method's own call is under way.
   ime_field: Cell<Option<Id>>,
+  ime_marked: Cell<bool>,
+  ime_call: Cell<bool>,
 }
 
 define_class!(
@@ -186,12 +189,9 @@ define_class!(
 
     #[unsafe(method(mouseDown:))]
     fn mouse_down(&self, event: &NSEvent) {
-      // A click ends composing: the marked text stays as typed.
+      // A click ends composing: the marked text stays as typed, the input method lets go.
       if self.composing() {
         self.send(Event::Ime(Ime::Unmark));
-        if let Some(cx) = self.inputContext() {
-          cx.discardMarkedText();
-        }
       }
 
       self.button(event, true);
@@ -336,7 +336,7 @@ define_class!(
       let Some(s) = ns_text(text) else { return };
       match to_range(range) {
         None if !self.composing() => self.typed(s),
-        replace => _ = self.send(Event::Ime(Ime::Commit { text: s, replace })),
+        replace => self.send_ime(Ime::Commit { text: s, replace }),
       }
     }
 
@@ -354,12 +354,12 @@ define_class!(
       let Some(s) = ns_text(text) else { return };
       let n = utf16_len(&s);
       let sel = to_range(sel).map_or(n..n, |r| r.start.min(n)..r.end.min(n));
-      self.send(Event::Ime(Ime::Mark { text: s, sel, replace: to_range(range) }));
+      self.send_ime(Ime::Mark { text: s, sel, replace: to_range(range) });
     }
 
     #[unsafe(method(unmarkText))]
     fn unmark_text(&self) {
-      self.send(Event::Ime(Ime::Unmark));
+      self.send_ime(Ime::Unmark);
     }
 
     #[unsafe(method(selectedRange))]
@@ -514,7 +514,7 @@ impl View {
 
   /// Feeds an event to the runtime and restarts the display link if it needs a frame.
   pub fn send(&self, ev: Event) -> bool {
-    let (used, quit, field) = {
+    let (used, quit) = {
       let mut state = self.ivars().state.borrow_mut();
       let Some(st) = state.as_mut() else { return false };
       let used = st.rt.event(ev);
@@ -524,19 +524,9 @@ impl View {
       }
 
       self.sync_cursor(st);
-      let field = st.rt.ui.text_input().and(st.rt.ui.focus());
-      (used, st.rt.quit_requested(), field)
+      (used, st.rt.quit_requested())
     };
-    // The focus left the field: what the input method still composes goes (the field kept it
-    // as typed).
-    if self.ivars().ime_field.replace(field).is_some_and(|f| Some(f) != field) {
-      let cx: Option<Retained<NSTextInputContext>> =
-        unsafe { msg_send![super(self), inputContext] };
-      if let Some(cx) = cx {
-        cx.discardMarkedText();
-      }
-    }
-
+    self.sync_ime();
     if quit {
       super::shell::quit();
     }
@@ -699,7 +689,36 @@ impl View {
         }
       }
     }
+    self.sync_ime();
     self.apply_resize();
+  }
+
+  /// Lets the input method's composition go when the field ended it by itself (a click, a
+  /// command, the focus moved on, by an event or the view): the field kept it as typed.
+  fn sync_ime(&self) {
+    let now = {
+      let Ok(state) = self.ivars().state.try_borrow() else { return };
+      let ui = state.as_ref().map(|st| &st.rt.ui);
+      let t = ui.and_then(|ui| ui.text_input().map(|t| (ui.focus(), t.marked().is_some())));
+      t.unwrap_or((None, false))
+    };
+    let (iv, own) = (self.ivars(), self.ivars().ime_call.get());
+    let (was, had) = (iv.ime_field.replace(now.0), iv.ime_marked.replace(now.1));
+    let moved = was.is_some_and(|f| Some(f) != now.0);
+    if moved || had && !now.1 && !own {
+      let cx: Option<Retained<NSTextInputContext>> =
+        unsafe { msg_send![super(self), inputContext] };
+      if let Some(cx) = cx {
+        cx.discardMarkedText();
+      }
+    }
+  }
+
+  /// Sends an input method's own event: its end is no reason to discard its composition.
+  fn send_ime(&self, ime: Ime) {
+    self.ivars().ime_call.set(true);
+    self.send(Event::Ime(ime));
+    self.ivars().ime_call.set(false);
   }
 
   fn button(&self, event: &NSEvent, down: bool) {

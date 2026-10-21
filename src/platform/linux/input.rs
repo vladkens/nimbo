@@ -214,6 +214,10 @@ pub struct Input {
   caret: Option<GdkRect>,
   /// The area's GdkWindow, which the input contexts work for.
   window: P,
+  /// The field had marked text after the last callback; the input method's own events came
+  /// since ([Win::drain_ime]).
+  ime_marked: bool,
+  ime_call: bool,
   /// The window has the keyboard focus: the keymap's modifiers are ours.
   focused: bool,
 }
@@ -239,6 +243,8 @@ impl Input {
       ime_on: None,
       caret: None,
       window: null_mut(),
+      ime_marked: false,
+      ime_call: false,
       focused: false,
     }
   }
@@ -479,13 +485,9 @@ impl Win {
       return;
     }
 
-    // A click ends a composition as typed; the input method lets go of it.
+    // A click ends a composition as typed; the input method lets go of it ([Win::sync_ime]).
     if self.rt.ui.text_input().is_some_and(|t| t.marked().is_some()) {
       self.send(Event::Ime(Ime::Unmark));
-      self.input.fresh_ime();
-      if self.input.focused {
-        unsafe { (gdk().gtk_im_context_focus_in)(self.input.ime) };
-      }
     }
 
     let i = &mut self.input;
@@ -598,17 +600,22 @@ impl Win {
     while let Some(ime) = IME.with_borrow_mut(next) {
       let empty = matches!(&ime, Ime::Mark { text, .. } if text.is_empty());
       if !empty || self.rt.ui.text_input().is_some_and(|t| t.marked().is_some()) {
+        self.input.ime_call = true;
         self.send(Event::Ime(ime));
       }
     }
   }
 
   /// The input method only while a field that takes it has focus, told where the caret is; a
-  /// composition left in it as the focus moves on is dropped (the field kept it as typed).
+  /// composition the field ended by itself (the focus moved on, a click, a command) is dropped
+  /// from it, the field having kept it as typed.
   pub(super) fn sync_ime(&mut self) {
     let g = gdk();
     let on = self.rt.ui.text_input().and(self.rt.ui.focus());
-    if on != self.input.ime_on {
+    let marked = self.rt.ui.text_input().is_some_and(|t| t.marked().is_some());
+    let ended = std::mem::replace(&mut self.input.ime_marked, marked) && !marked;
+    let ended = ended && !std::mem::take(&mut self.input.ime_call);
+    if on != self.input.ime_on || ended && on.is_some() {
       if self.input.ime_on.is_some() {
         self.input.fresh_ime();
       }

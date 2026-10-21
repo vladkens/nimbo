@@ -389,6 +389,11 @@ mod tests {
       Rect::new(10.0, 40.0, 6.0, 10.0),
     ];
     assert_eq!(rects, want);
+    // Leading spaces count toward the first line's width.
+    let st = laid("      ab cd", 56.0);
+    let l = TextLayout::of(&st.last, Id::of("t")).unwrap();
+    let lines: Vec<_> = (0..l.len()).map(|k| l.range(k)).collect();
+    assert_eq!(lines, [0..9, 9..11]);
     // A word wider than a line breaks between characters, the lines still covering the text.
     let st = laid("ab cdefghijklmnop q", 56.0);
     let l = TextLayout::of(&st.last, Id::of("t")).unwrap();

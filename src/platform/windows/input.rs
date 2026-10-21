@@ -279,15 +279,20 @@ impl Window {
   // MARK: Input method
 
   /// The input method only while a field that takes it has focus: without it keys stay plain.
-  /// A composition left in the input method as the focus moves on is cancelled: the field kept
-  /// it as typed.
+  /// A composition the field ended by itself (the focus moved on, a command) is cancelled in
+  /// the input method too: the field kept it as typed.
   pub(super) fn sync_ime(&mut self) {
-    let on = self.rt.ui.text_input().and(self.rt.ui.focus());
+    let (on, marked) = (self.rt.ui.text_input().and(self.rt.ui.focus()), self.composing());
+    let ended = std::mem::replace(&mut self.ime_marked, marked) && !marked && !self.ime_call;
+    // Its messages find the window busy and go.
     if on == self.ime {
+      if ended {
+        ime_notify(self.hwnd, CPS_CANCEL);
+      }
+
       return;
     }
 
-    // Its messages find the window busy and go: the field kept the composition.
     if self.ime.is_some() {
       ime_notify(self.hwnd, CPS_CANCEL);
     }
@@ -335,6 +340,14 @@ impl Window {
   /// The composition changed: committed text, then the text being composed as marked text with
   /// the input method's caret. Both in one message are an end and a new start.
   fn composition(&mut self, lp: LPARAM) {
+    self.ime_call = true;
+    self.compose(lp);
+    self.ime_call = false;
+    self.place_ime();
+  }
+
+  /// [Self::composition]'s work, its events the input method's own.
+  fn compose(&mut self, lp: LPARAM) {
     let flags = lp as u32;
     let cx = unsafe { ImmGetContext(self.hwnd) };
     if cx.is_null() {
@@ -368,14 +381,14 @@ impl Window {
     if let Some((text, at)) = comp.filter(|(t, _)| !t.is_empty() || self.composing()) {
       self.send(Event::Ime(Ime::Mark { text, sel: at..at, replace: None }));
     }
-
-    self.place_ime();
   }
 
   /// Composing ended: marked text left over (a cancel) goes.
   fn end_composition(&mut self) {
     if self.composing() {
+      self.ime_call = true;
       self.send(Event::Ime(Ime::Mark { text: String::new(), sel: 0..0, replace: None }));
+      self.ime_call = false;
     }
   }
 }
@@ -440,11 +453,10 @@ pub(super) fn key_message(msg: &MSG) -> bool {
 /// The window's input messages; `None` for others.
 pub(super) fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> Option<LRESULT> {
   let button = |b| move |w: &mut Window, down| w.button(b, down, wp, lp);
-  // A click ends a composition as typed; the input method lets go of it.
+  // A click ends a composition as typed; the input method lets go of it ([Window::sync_ime]).
   let downs = [WM_LBUTTONDOWN, WM_RBUTTONDOWN, WM_MBUTTONDOWN, WM_XBUTTONDOWN];
   if downs.contains(&msg) && composing() {
     with(|w| w.send(Event::Ime(Ime::Unmark)));
-    ime_notify(hwnd, CPS_CANCEL);
   }
 
   match msg {

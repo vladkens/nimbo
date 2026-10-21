@@ -745,10 +745,19 @@ fn wrap_text(
         push(m, start, if cover { a } else { end });
       }
 
-      // Covering, the first line starts at the line break, with the spaces after it.
-      let from = if cover && cur.is_none() { 0 } else { a };
-      cur = Some(match ww <= width + EPS {
-        true => (from, b, ww),
+      // Covering, the first line starts at the line break with the spaces after it: they count,
+      // and stay on a line of their own when the word doesn't fit after them.
+      let (mut from, mut w) = (a, ww);
+      if cover && cur.is_none() && a > 0 {
+        let pw = m.width(&line[..b], font);
+        match pw <= width + EPS {
+          true => (from, w) = (0, pw),
+          false => push(m, 0, a),
+        }
+      }
+
+      cur = Some(match w <= width + EPS {
+        true => (from, b, w),
         // Too wide for a line: its pieces, the last one going on with the words after it.
         false => {
           let mut from = from;

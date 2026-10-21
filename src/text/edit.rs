@@ -197,32 +197,33 @@ fn word_at(s: &str, i: usize) -> bool {
     && alnum(s[i + c.len_utf8()..].chars().next())
 }
 
-/// The end of the word at or after `i`, past what separates them (Option-Right).
+/// The end of the word at or after `i`, past what separates them (Option-Right); by
+/// graphemes, each one a word's by its first character, so an emoji sequence is passed whole.
 pub fn word_right(s: &str, i: usize) -> usize {
-  let mut j = i;
+  let mut j = snap(s, i);
   while j < s.len() && !word_at(s, j) {
-    j = next_char(s, j);
+    j = next_grapheme(s, j);
   }
 
   while j < s.len() && word_at(s, j) {
-    j = next_char(s, j);
+    j = next_grapheme(s, j);
   }
 
-  snap(s, j)
+  j
 }
 
 /// The start of the word at or before `i` (Option-Left).
 pub fn word_left(s: &str, i: usize) -> usize {
-  let mut j = i;
-  while j > 0 && !word_at(s, prev_char(s, j)) {
-    j = prev_char(s, j);
+  let mut j = snap(s, i);
+  while j > 0 && !word_at(s, prev_grapheme(s, j)) {
+    j = prev_grapheme(s, j);
   }
 
-  while j > 0 && word_at(s, prev_char(s, j)) {
-    j = prev_char(s, j);
+  while j > 0 && word_at(s, prev_grapheme(s, j)) {
+    j = prev_grapheme(s, j);
   }
 
-  snap(s, j)
+  j
 }
 
 /// The start of the line between line breaks holding `i`.
@@ -744,8 +745,10 @@ impl Editor {
   /// Keeps the marked text as it is (`unmarkText`).
   pub fn unmark(&mut self) {
     if let Some(m) = &self.marked {
-      let s = self.text[m.range.clone()].to_owned();
+      // The input method's selection in it stays: a cut or a paste then acts on it.
+      let (s, sel) = (self.text[m.range.clone()].to_owned(), self.sel);
       self.commit(&s, None);
+      self.sel = Sel::new(snap(&self.text, sel.anchor), snap(&self.text, sel.head));
     }
   }
 
@@ -1310,6 +1313,23 @@ mod tests {
     e.select(Sel::caret(5));
     assert!(e.delete(Delete::Backward, &Mono::PLAIN));
     assert_eq!((e.text(), e.caret()), ("🇺🇸", 8));
+  }
+
+  #[test]
+  fn keeping_marked_text_keeps_its_selection() {
+    let mut cb = MemClipboard::default();
+    let mut e = Editor::new("");
+    e.set_marked("abc", 0..2, None);
+    assert!(e.cut(&mut cb));
+    assert_eq!((e.text(), cb.0.as_deref()), ("c", Some("ab")));
+  }
+
+  #[test]
+  fn word_moves_pass_emoji_sequences_whole() {
+    let s = "👩\u{200d}💻 test";
+    assert_eq!(word_right(s, 0), s.len());
+    assert_eq!(word_left(s, s.len()), 12);
+    assert_eq!(word_left(s, 12), 0);
   }
 
   #[test]

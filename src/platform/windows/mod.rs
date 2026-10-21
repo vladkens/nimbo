@@ -181,8 +181,11 @@ struct Window {
   held: Vec<MouseButton>,
   /// A high surrogate from WM_CHAR, waiting for its low one.
   high: Option<u16>,
-  /// The text field the input method is on for; off without one.
+  /// The text field the input method is on for (off without one), whether it had marked text,
+  /// and whether the input method's own message is under way.
   ime: Option<crate::ui::Id>,
+  ime_marked: bool,
+  ime_call: bool,
   /// The cursor last set.
   cursor: Cursor,
   /// The least content size in points ([Config::min]) and the window's style, for
@@ -633,6 +636,8 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
     held: Vec::new(),
     high: None,
     ime: None,
+    ime_marked: false,
+    ime_call: false,
     cursor: Cursor::Arrow,
     min: cfg.min(),
     style,
