@@ -3,8 +3,9 @@
 //! The Linux platform on X11, for sessions without Wayland (X11 desktops, remote displays):
 //! XCB loaded at run time ([xcb]), one top-level window the window manager
 //! decorates, CPU frames through MIT-SHM or the socket ([present]) paced at [REFRESH], the scale
-//! from `Xft.dpi` in the resources, light or dark from XSETTINGS' `Net/ThemeName`. One thread:
-//! the loop polls the connection and a wake eventfd.
+//! from `Xft.dpi` in the resources (the size hints follow it), light or dark from XSETTINGS'
+//! `Net/ThemeName`, its manager followed as it starts, quits or restarts. One thread: the loop
+//! polls the connection and a wake eventfd.
 //!
 //! Not yet: `_NET_WM_SYNC_REQUEST` (the window manager doesn't wait for our frame as it
 //! resizes), the display's refresh rate (RandR), per-monitor scale.
@@ -43,6 +44,8 @@ const NOTIFY_INFERIOR: u8 = 2;
 const NOTIFY_POINTER: u8 = 5;
 const NOTIFY_MODE_GRAB: u8 = 1;
 const NOTIFY_MODE_UNGRAB: u8 = 2;
+/// What the XSETTINGS manager's window is watched for: its settings, and its destruction.
+const XSETTINGS_EVENTS: u32 = EM_PROPERTY_CHANGE | EM_STRUCTURE_NOTIFY;
 
 struct Atoms {
   protocols: u32,
@@ -53,6 +56,7 @@ struct Atoms {
   machine: u32,
   xsettings: u32,
   xsettings_settings: u32,
+  manager: u32,
 }
 
 struct Win {
@@ -82,8 +86,12 @@ struct Win {
   focused: bool,
   /// Events read ahead.
   stash: Rc<RefCell<VecDeque<Ev>>>,
-  /// The XSETTINGS manager's window, watched for changes of the theme.
+  /// The XSETTINGS manager's window, watched for changes of the theme and for its end.
   xsettings: u32,
+  /// The least content size in points, and the largest of a fixed window: the size hints at
+  /// each scale.
+  min: Size,
+  max: Option<Size>,
 }
 
 /// Opens the app's window on `$DISPLAY` and runs the loop until it closes or quits.
@@ -120,7 +128,7 @@ fn run_on(
     xs_name.as_str(),
     "_XSETTINGS_SETTINGS",
   ]);
-  let [utf8] = x.atoms(["UTF8_STRING"]);
+  let [utf8, manager] = x.atoms(["UTF8_STRING", "MANAGER"]);
   let atoms = Atoms {
     protocols,
     delete,
@@ -130,6 +138,7 @@ fn run_on(
     machine,
     xsettings,
     xsettings_settings: xs_settings,
+    manager,
   };
 
   let scale = dpi_scale(&x, sc.root);
@@ -152,16 +161,19 @@ fn run_on(
     x.set_property(win, atoms.machine, ATOM_STRING, 8, host.trim().as_bytes());
   }
 
-  match cfg.resizable {
-    true => set_size_hints(&x, win, cfg.min(), None, scale),
-    false => set_size_hints(&x, win, cfg.size, Some(cfg.size), scale),
-  }
+  let (min, max) = match cfg.resizable {
+    true => (cfg.min(), None),
+    false => (cfg.size, Some(cfg.size)),
+  };
 
-  // Changes of the resources (Xft.dpi) and of the XSETTINGS manager's settings.
-  x.select_events(sc.root, EM_PROPERTY_CHANGE);
+  set_size_hints(&x, win, min, max, scale);
+
+  // Changes of the resources (Xft.dpi), a new XSETTINGS manager (`MANAGER` on the root), and the
+  // manager's settings and end.
+  x.select_events(sc.root, EM_PROPERTY_CHANGE | EM_STRUCTURE_NOTIFY);
   let xs_owner = x.selection_owner(atoms.xsettings);
   if xs_owner != 0 {
-    x.select_events(xs_owner, EM_PROPERTY_CHANGE);
+    x.select_events(xs_owner, XSETTINGS_EVENTS);
   }
 
   let stash = Rc::new(RefCell::new(VecDeque::new()));
@@ -200,6 +212,8 @@ fn run_on(
     focused: false,
     stash,
     xsettings: xs_owner,
+    min,
+    max,
   };
   if win.trace {
     let shm = if win.present.completion().is_some() { "MIT-SHM" } else { "PutImage" };
@@ -472,15 +486,30 @@ impl Win {
           self.rt.redraw();
         }
       }
-      MAP_NOTIFY => {
+      // The root's and the XSETTINGS manager's structure events come too: only ours count.
+      MAP_NOTIFY if ev.get::<WindowEv>().window == self.win => {
         self.mapped = true;
         self.force = true;
         self.rt.redraw();
       }
-      UNMAP_NOTIFY => self.mapped = false,
-      DESTROY_NOTIFY => self.closed = true,
+      UNMAP_NOTIFY if ev.get::<WindowEv>().window == self.win => self.mapped = false,
+      DESTROY_NOTIFY => {
+        let w = ev.get::<WindowEv>().window;
+        if w == self.win {
+          self.closed = true;
+        } else if w != 0 && w == self.xsettings {
+          // The manager quit: none until another announces itself.
+          self.watch_xsettings();
+        }
+      }
       CLIENT_MESSAGE => {
         let e = ev.get::<ClientMessageEv>();
+        // A manager took the XSETTINGS selection (it started, or replaced the last).
+        if e.ty == self.atoms.manager && e.data[1] == self.atoms.xsettings {
+          self.watch_xsettings();
+          return;
+        }
+
         if e.ty != self.atoms.protocols {
           return;
         }
@@ -500,6 +529,8 @@ impl Win {
           let scale = dpi_scale(&self.x, self.root);
           if scale != self.scale {
             self.scale = scale;
+            // The hints are in pixels: the same points need others at the new scale.
+            set_size_hints(&self.x, self.win, self.min, self.max, scale);
             self.size = Size::new(points(self.px.0, scale), points(self.px.1, scale));
             self.force = true;
             self.rt.redraw();
@@ -523,6 +554,19 @@ impl Win {
       }
       _ => {}
     }
+  }
+
+  /// Watches the XSETTINGS selection's owner now (none when it has none) and sends the
+  /// appearance it sets.
+  fn watch_xsettings(&mut self) {
+    let owner = self.x.selection_owner(self.atoms.xsettings);
+    if owner != 0 && owner != self.xsettings {
+      self.x.select_events(owner, XSETTINGS_EVENTS);
+    }
+
+    self.xsettings = owner;
+    let a = appearance(&self.x, owner, self.atoms.xsettings_settings);
+    self.send(Event::Appearance(a));
   }
 
   fn focus(&mut self, on: bool) {

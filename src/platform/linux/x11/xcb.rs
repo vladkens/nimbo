@@ -229,6 +229,16 @@ pub struct ConfigureEv {
   pad1: u8,
 }
 
+/// What `DestroyNotify`, `MapNotify` and `UnmapNotify` start with: the window they are about.
+#[repr(C)]
+pub struct WindowEv {
+  pub response_type: u8,
+  pad: u8,
+  pub sequence: u16,
+  pub event: u32,
+  pub window: u32,
+}
+
 #[repr(C)]
 pub struct ClientMessageEv {
   pub response_type: u8,
