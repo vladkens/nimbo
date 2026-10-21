@@ -277,6 +277,8 @@ pub struct Win {
   /// The scale of the theme's image last shown: another needs the image again.
   cursor_scale: i32,
   mouse: Point,
+  /// The buttons down: let go when the pointer goes away mid-drag.
+  buttons: Vec<MouseButton>,
   last_click: Option<Click>,
   axes: Axes,
   /// The axes a finger scroll in progress moves: the next frame continues it.
@@ -401,6 +403,7 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
     cursor: Cursor::Arrow,
     cursor_scale: 0,
     mouse: Point::new(0.0, 0.0),
+    buttons: Vec::new(),
     last_click: None,
     axes: Axes::default(),
     scrolling: [false; 2],
@@ -703,14 +706,26 @@ impl Win {
     };
 
     let (pos, mods) = (self.mouse, self.mods);
+    self.buttons.retain(|&b| b != button);
     if !down {
       self.send(Event::MouseUp { pos, button, mods });
       return;
     }
 
+    self.buttons.push(button);
     let clicks = clicks(self.last_click, button, time, pos);
     self.last_click = Some((button, time, pos, clicks));
     self.send(Event::MouseDown { pos, button, clicks, mods });
+  }
+
+  /// The pointer device went away (its seat lost the capability): the buttons it held are let
+  /// go, and it leaves the surface it was over.
+  fn pointer_gone(&mut self) {
+    let over = std::mem::take(&mut self.enter_serial).is_some();
+    let (pos, mods) = (self.mouse, self.mods);
+    for e in let_go(std::mem::take(&mut self.buttons), over, pos, mods) {
+      self.send(e);
+    }
   }
 
   /// `wl_pointer.frame`: the axis events since the last one as one scroll.
@@ -774,6 +789,13 @@ fn backed_up(flushed: Result<(), WaylandError>) -> Res<bool> {
   }
 }
 
+/// What a pointer that goes away sends: a release of each button it held, then its exit when
+/// it was over the surface.
+fn let_go(held: Vec<MouseButton>, over: bool, pos: Point, mods: Mods) -> Vec<Event> {
+  let ups = held.into_iter().map(|button| Event::MouseUp { pos, button, mods });
+  ups.chain(over.then_some(Event::MouseExit)).collect()
+}
+
 /// The buffer's pixels for `size` points at `scale`, rounded half away from zero as
 /// fractional-scale-v1 asks: 481 points at 1.5 are 722 pixels, where the renderer's cut-down
 /// size would make 721 that the viewport stretches.
@@ -797,6 +819,19 @@ impl Output {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// A pointer removed mid-drag lets its buttons go and leaves: the app's drag ends, and the
+  /// next pointer starts with none held.
+  #[test]
+  fn a_pointer_gone_mid_drag_lets_go() {
+    let (pos, mods) = (Point::new(4.0, 2.0), Mods::NONE);
+    let held = vec![MouseButton::Left, MouseButton::Right];
+    let up = |button| Event::MouseUp { pos, button, mods };
+    let all = vec![up(MouseButton::Left), up(MouseButton::Right), Event::MouseExit];
+    assert_eq!(let_go(held, true, pos, mods), all);
+    assert_eq!(let_go(vec![MouseButton::Left], false, pos, mods), vec![up(MouseButton::Left)]);
+    assert_eq!(let_go(Vec::new(), false, pos, mods), vec![]);
+  }
 
   #[test]
   fn sizes_are_whole() {
