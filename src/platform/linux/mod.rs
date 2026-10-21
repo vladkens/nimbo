@@ -238,7 +238,11 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
       win.render();
     }
 
-    unsent = backed_up(queue.flush())?;
+    let was = std::mem::replace(&mut unsent, backed_up(queue.flush())?);
+    if was && !unsent {
+      // Drained: the frame that waited for it is drawn before the loop sleeps.
+      continue;
+    }
 
     let Some(guard) = queue.prepare_read() else { continue };
     // Requests the socket couldn't take yet go out once it is writable again; no tick until
