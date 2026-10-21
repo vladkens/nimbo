@@ -614,8 +614,8 @@ impl Win {
     let (k, utf8) = kb.key(key, repeat);
     // Modifier keys reach the app as [Event::Mods] (from the compositor's modifiers) and, by
     // their side, [Event::Modifier], as on macOS (`flagsChanged:`).
-    if (54..=63).contains(&k.code) {
-      if let Some(key) = ModKey::of_mac(k.code).filter(|_| !repeat) {
+    if let Some(side) = kb.modifier(key, k.code) {
+      if let Some(key) = side.filter(|_| !repeat) {
         self.mod_keys.push((key, down));
       }
 
