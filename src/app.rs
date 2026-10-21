@@ -647,11 +647,9 @@ impl<A: App> Runtime<A> {
       self.ui.after = None;
     }
 
-    // A flash restarted since its frame was asked for asks again for the one that ends it.
-    if let Some((_, until)) = self.ui.input.flash
-      && until > now
-    {
-      self.ui.after = Some(self.ui.after.map_or(until, |d| d.min(until)));
+    // A flash that ended asks for no more frames.
+    if self.ui.input.flash.is_some_and(|(_, until)| until <= now) {
+      self.ui.input.flash = None;
     }
 
     self.ui.tick(now);

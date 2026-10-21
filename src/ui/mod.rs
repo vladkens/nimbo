@@ -293,11 +293,10 @@ impl UiState {
   }
 
   /// Shows `id` pressed for a moment from `now`, as a click would: a key on a keypad typed on
-  /// the keyboard, a button activated by Space. A frame follows when it ends.
+  /// the keyboard, a button activated by Space. A frame follows when it ends, beside the
+  /// timers ([UiState::next_due]).
   pub fn flash(&mut self, id: Id, now: Duration) {
-    let until = now + FLASH;
-    self.input.flash = Some((id, until));
-    self.after = Some(self.after.map_or(until, |d| d.min(until)));
+    self.input.flash = Some((id, now + FLASH));
   }
 
   /// Whether a button went down on `id` and is held, wherever the pointer is now (drags).
@@ -430,12 +429,10 @@ impl UiState {
     self.due = Some(self.due.map_or(at, |d| d.min(at)));
   }
 
-  /// The next frame a timer asked for.
+  /// The next frame a timer asked for, or the end of a flash: the earliest.
   pub(crate) fn next_due(&self) -> Option<Duration> {
-    match (self.due, self.after) {
-      (Some(a), Some(b)) => Some(a.min(b)),
-      (a, b) => a.or(b),
-    }
+    let flash = self.input.flash.map(|(_, until)| until);
+    [self.due, self.after, flash].into_iter().flatten().min()
   }
 
   fn response(&self, id: Id) -> Response {
