@@ -1110,7 +1110,11 @@ impl<'a> Ui<'a> {
     layout::layout(tree, self.size, scale, m);
     for &i in &tree.scrolls {
       let n = &tree.nodes[i as usize];
-      store.raw::<ScrollState>(n.id).offset = n.scroll;
+      let (s, max) = (store.raw::<ScrollState>(n.id), input::max_scroll(n));
+      // Wheel momentum still to run stops at the new ends too.
+      let to = |off: f32, pend: f32, max: f32| (off + pend).clamp(0.0, max) - off;
+      let (x, y) = (to(n.scroll.x, s.pending.x, max[0]), to(n.scroll.y, s.pending.y, max[1]));
+      (s.offset, s.pending) = (n.scroll, Point::new(x, y));
     }
   }
 
