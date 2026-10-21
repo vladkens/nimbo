@@ -634,6 +634,26 @@ mod tests {
   }
 
   #[test]
+  fn a_grid_scrolls() {
+    let grid = |st| {
+      frame(st, |ui| {
+        ui.id("g").grid(2, Style::new().w(px(100.0)).h(px(50.0)).scroll_y(), |ui| {
+          for k in 0..6 {
+            ui.id(("c", k)).el(Style::new().w(px(50.0)).h(px(20.0)));
+          }
+        });
+      })
+    };
+    // Three rows of 20 in 50: 10 to scroll, past it clamped.
+    let mut st = grid(UiState::default());
+    assert!(ev(&mut st, wheel(10.0, 10.0, 0.0, -30.0, true, Phase::None)));
+    let st = grid(st);
+    assert_eq!(offset(&st, "g"), 10.0);
+    assert_eq!(st.last.rect(Id::of(("c", 0))).unwrap().y, -10.0);
+    assert_eq!(st.last.rect(Id::of(("c", 5))).unwrap().y, 30.0);
+  }
+
+  #[test]
   fn wheel_momentum_runs_on_ticks() {
     let mut st = nested(UiState::default());
     ev(&mut st, wheel(10.0, 80.0, 0.0, -36.0, false, Phase::None));
