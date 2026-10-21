@@ -155,6 +155,11 @@ fn the_caret_stays_in_view(h: &mut Harness<Fields>) {
   h.key(NamedKey::ArrowLeft, CMD);
   h.frame();
   assert_eq!(off(h), 0.0, "the start in view");
+  // A long value from the app puts the caret at its end, in view.
+  h.app_mut().name = "set by the app, a name far too long for the field to show".into();
+  h.frame();
+  h.frame();
+  assert!(off(h) > 0.0, "the app's value's end in view");
 }
 
 fn input_methods(h: &mut Harness<Fields>) {

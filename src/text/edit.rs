@@ -724,6 +724,16 @@ impl Editor {
       return;
     };
     if let Some(r) = replace.filter(|r| *r != m.range) {
+      // Part of the marked text: spliced in at its characters, the whole committed in one step.
+      if m.range.start <= r.start && r.end <= m.range.end {
+        let t = &self.text;
+        let (a, b) = (t.floor_char_boundary(r.start), t.floor_char_boundary(r.end.max(r.start)));
+        let mut all = t[m.range.clone()].to_owned();
+        all.replace_range(a - m.range.start..b - m.range.start, s);
+        self.marked = Some(m);
+        return self.commit(&all, None);
+      }
+
       self.marked = Some(m);
       self.unmark();
       return self.replace(r, s);
@@ -1313,6 +1323,16 @@ mod tests {
     e.select(Sel::caret(5));
     assert!(e.delete(Delete::Backward, &Mono::PLAIN));
     assert_eq!((e.text(), e.caret()), ("🇺🇸", 8));
+  }
+
+  #[test]
+  fn a_commit_over_part_of_the_marked_text_keeps_the_rest() {
+    let mut e = Editor::new("e");
+    e.set_marked("\u{301}\u{302}", 4..4, None);
+    e.commit("\u{303}", Some(3..5));
+    assert_eq!((e.text(), e.marked()), ("e\u{301}\u{303}", None));
+    assert!(e.undo());
+    assert_eq!(e.text(), "e");
   }
 
   #[test]

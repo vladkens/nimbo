@@ -239,16 +239,10 @@ impl Ui<'_> {
     let mut st = std::mem::take(self.state::<FieldState>(id));
     (st.text_id, st.editable, st.secure) = (id.key("text"), true, password);
     st.ed.multiline = multiline && !password;
-    // A reveal asked for stays until a laid-out frame had it (a view pass that only delivers
-    // input is not laid out); a later one waits for its own.
-    let t = &self.st.last;
-    let laid = t.find(st.text_id).and_then(|i| t.edit(i)).map(|k| t.edits[k].reveal);
-    if laid.is_some_and(|r| r == st.reveal) {
-      st.reveal = 0;
-    }
-
-    take_value(&mut st, text);
+    self.revealed(&mut st);
+    // A value from the app that moves the caret reveals it too.
     let sel = st.ed.sel();
+    take_value(&mut st, text);
     let (submitted, cancelled) = match disabled {
       true => (false, false),
       false => self.edit_input(id, &mut st),
@@ -262,8 +256,8 @@ impl Ui<'_> {
     let changed = write_back(&mut st, text);
     let blurred = st.focused && !focused;
     if changed || st.ed.sel() != sel || focused && !st.focused {
-      st.reveals = st.reveals.wrapping_add(1).max(1);
-      (st.blink, st.reveal) = (self.now, st.reveals);
+      st.blink = self.now;
+      reveal(&mut st);
     }
 
     st.focused = focused;
@@ -289,15 +283,33 @@ impl Ui<'_> {
       synced(&mut st, text);
     }
 
+    self.revealed(&mut st);
+    let sel = st.ed.sel();
     let (submitted, cancelled) = match disabled {
       true => (false, false),
       false => self.edit_input(id, &mut st),
     };
 
+    // The selection's head in view, as it moves (Shift-Down in a scrolled page).
+    if st.ed.sel() != sel {
+      reveal(&mut st);
+    }
+
     let mut b = self.field_state(id, id, disabled);
     (b.submitted, b.cancelled, b.edit) = (submitted, cancelled, shown_edit(&st));
+    b.edit.reveal = st.reveal;
     *self.state::<FieldState>(id) = st;
     b
+  }
+
+  /// A reveal asked for stays until a laid-out frame had it (a view pass that only delivers
+  /// input is not laid out); a later one waits for its own.
+  fn revealed(&self, st: &mut FieldState) {
+    let t = &self.st.last;
+    let laid = t.find(st.text_id).and_then(|i| t.edit(i)).map(|k| t.edits[k].reveal);
+    if laid.is_some_and(|r| r == st.reveal) {
+      st.reveal = 0;
+    }
   }
 
   /// A text behaviour's pointer and focus, for `id` drawing its text in `text_id`.
@@ -443,10 +455,18 @@ impl UiState {
   }
 }
 
+/// Asks the next layout to show the caret, as a new request.
+fn reveal(st: &mut FieldState) {
+  st.reveals = st.reveals.wrapping_add(1).max(1);
+  st.reveal = st.reveals;
+}
+
 /// The app's `text` into the editor when the app changed it: at once, or held while an input
 /// method composes.
 fn take_value(st: &mut FieldState, text: &str) {
+  // Back to the value the field has: a value held meanwhile is no more.
   if text == st.app {
+    st.held = None;
     return;
   }
 
@@ -612,7 +632,7 @@ fn real(st: &FieldState, i: usize) -> usize {
 /// The selection and marked text to draw, in the text shown.
 fn shown_edit(st: &FieldState) -> Edit {
   let sel = st.ed.sel();
-  let mut e = Edit::new((shown(st, sel.anchor), shown(st, sel.head)), [0.0; 4], [0.0; 4]);
+  let mut e = Edit { sel: (shown(st, sel.anchor), shown(st, sel.head)), ..Edit::default() };
   if let Some(m) = st.ed.marked() {
     e.marked = (shown(st, m.start), shown(st, m.end));
   }
@@ -883,6 +903,15 @@ mod tests {
     st.ed.set_marked("", 0..0, None);
     assert!(!write_back(&mut st, &mut text));
     assert_eq!((st.ed.text(), st.held.as_deref()), ("app", None));
+    // Set, then set back: nothing waits.
+    st.ed.set_marked("z", 1..1, None);
+    text = "other".into();
+    take_value(&mut st, &text);
+    text = "app".into();
+    take_value(&mut st, &text);
+    st.ed.set_marked("", 0..0, None);
+    assert!(!write_back(&mut st, &mut text));
+    assert_eq!((st.ed.text(), text.as_str()), ("app", "app"));
     // Held again, then committed: the commit wins.
     st.ed.set_marked("y", 1..1, None);
     text = "other".into();

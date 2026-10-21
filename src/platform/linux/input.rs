@@ -613,8 +613,8 @@ impl Win {
     let g = gdk();
     let on = self.rt.ui.text_input().and(self.rt.ui.focus());
     let marked = self.rt.ui.text_input().is_some_and(|t| t.marked().is_some());
-    let ended = std::mem::replace(&mut self.input.ime_marked, marked) && !marked;
-    let ended = ended && !std::mem::take(&mut self.input.ime_call);
+    let own = std::mem::take(&mut self.input.ime_call);
+    let ended = std::mem::replace(&mut self.input.ime_marked, marked) && !marked && !own;
     if on != self.input.ime_on || ended && on.is_some() {
       if self.input.ime_on.is_some() {
         self.input.fresh_ime();

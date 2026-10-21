@@ -299,6 +299,29 @@ mod tests {
     }
   }
 
+  /// Lines of selectable text in a scrolled page 40 high.
+  struct Page;
+
+  impl App for Page {
+    fn view(&mut self, ui: &mut Ui) {
+      let page = crate::ui::Style::new().w(crate::ui::px(200.0)).h(crate::ui::px(40.0)).scroll_y();
+      ui.id("page").col(page, |ui| _ = ui.id("t").selectable(&"line\n".repeat(20)));
+    }
+  }
+
+  #[test]
+  fn a_selection_moved_by_keys_scrolls_into_view() {
+    let mut h = Harness::new(Page, Size::new(300.0, 200.0), 1.0);
+    h.frame();
+    h.click(10.0, 5.0);
+    for _ in 0..8 {
+      h.key(crate::NamedKey::ArrowDown, crate::Modifiers::SHIFT);
+    }
+
+    h.frame();
+    assert!(h.rt.ui.last.get(Id::of("page")).unwrap().scroll.y > 0.0);
+  }
+
   #[test]
   fn disabled_selectable_text_is_plain_and_keeps_the_flag_to_itself() {
     let mut h = Harness::new(Off::default(), Size::new(300.0, 200.0), 1.0);

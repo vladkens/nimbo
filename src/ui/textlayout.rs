@@ -51,23 +51,6 @@ pub struct Edit {
   pub stops: (u32, u32),
 }
 
-impl Edit {
-  /// A selection (anchor, head) drawn with `sel_color`; no caret.
-  pub const fn new(sel: (u32, u32), sel_color: Color, caret_color: Color) -> Self {
-    Self {
-      sel,
-      caret: false,
-      reveal: 0,
-      marked: (0, 0),
-      sel_color,
-      caret_color,
-      placeholder: false,
-      node: 0,
-      stops: (0, 0),
-    }
-  }
-}
-
 impl Ui<'_> {
   /// Text with a selection, caret and marked text ([Edit]), laid out over its whole text with
   /// caret stops ([TextLayout]); `node` styles the element (cursor, focus, input). What text
@@ -350,7 +333,7 @@ mod tests {
     let mut ui = Ui::new(UiState::default(), Size::new(400.0, 300.0), None, Duration::ZERO);
     ui.col(Style::new().pad(10.0).pads([20.0, 0.0, 0.0, 10.0]), |ui| {
       ui.col(Style::new().w(px(w)), |ui| {
-        let edit = Edit::new((0, 0), [0.0; 4], [0.0; 4]);
+        let edit = Edit::default();
         ui.id("t").edit_text(s, T, edit, Style::new());
       });
     });

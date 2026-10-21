@@ -87,6 +87,9 @@ pub struct Ivars {
   ime_field: Cell<Option<Id>>,
   ime_marked: Cell<bool>,
   ime_call: Cell<bool>,
+  /// Where the composition was as the input method last saw it: when the text moves under it
+  /// (scrolled), its windows are told.
+  ime_at: Cell<Option<Rect>>,
 }
 
 define_class!(
@@ -696,21 +699,27 @@ impl View {
   /// Lets the input method's composition go when the field ended it by itself (a click, a
   /// command, the focus moved on, by an event or the view): the field kept it as typed.
   fn sync_ime(&self) {
-    let now = {
+    let (now, at) = {
       let Ok(state) = self.ivars().state.try_borrow() else { return };
       let ui = state.as_ref().map(|st| &st.rt.ui);
-      let t = ui.and_then(|ui| ui.text_input().map(|t| (ui.focus(), t.marked().is_some())));
-      t.unwrap_or((None, false))
+      let t = ui.and_then(|ui| ui.text_input().map(|t| (ui.focus(), t)));
+      let at = t.as_ref().filter(|(_, t)| t.marked().is_some()).and_then(|(_, t)| t.caret_rect());
+      (t.map_or((None, false), |(f, t)| (f, t.marked().is_some())), at)
     };
     let (iv, own) = (self.ivars(), self.ivars().ime_call.get());
     let (was, had) = (iv.ime_field.replace(now.0), iv.ime_marked.replace(now.1));
     let moved = was.is_some_and(|f| Some(f) != now.0);
-    if moved || had && !now.1 && !own {
-      let cx: Option<Retained<NSTextInputContext>> =
-        unsafe { msg_send![super(self), inputContext] };
-      if let Some(cx) = cx {
-        cx.discardMarkedText();
-      }
+    let shifted = at.is_some() && iv.ime_at.replace(at) != at;
+    let cx: Option<Retained<NSTextInputContext>> = match moved || had && !now.1 && !own {
+      true => unsafe { msg_send![super(self), inputContext] },
+      false if shifted => self.inputContext(),
+      false => None,
+    };
+
+    match (cx, shifted && !moved) {
+      (Some(cx), true) => cx.invalidateCharacterCoordinates(),
+      (Some(cx), false) => cx.discardMarkedText(),
+      (None, _) => {}
     }
   }
 
