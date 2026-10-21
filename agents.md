@@ -38,6 +38,7 @@ A small, fast, custom-drawn desktop UI toolkit in Rust, in the spirit of Sublime
 - `make check` (nightly fmt, the blank-line check, clippy with `-D warnings`, and clippy for Windows and Linux) and `make test` pass before a commit; `make prepare` formats, adds the blank lines and applies clippy fixes.
 - Harness scenarios are `harness = false` test targets in `tests/` that include their example with `#[path]` and assert app state and pixels headless; pure logic gets inline unit tests. Tests never show a window, a status item or start an event tap.
 - Verify every visual change by opening its harness shot with Read, cropped for text detail; compare with the macOS references at the same scale when the look is meant to match.
+- A PR that touches a platform's event loop or present path runs `scripts/pace.sh` (`make pace`) on each backend it touches: Wayland, X11, Windows; CI runs it on X11 under Xvfb.
 - Real windows on the developer's machine open only with their permission, one example, 1–3 launches, never in a loop.
 - Never run Instruments or `xcrun xctrace`: they can freeze the window server.
 
