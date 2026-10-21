@@ -474,26 +474,25 @@ impl Frame<'_> {
 
   /// Draws `s` with its baseline at `y`; returns the advance width in points. Glyphs snap to
   /// the pixel grid vertically and to a quarter pixel horizontally; colour glyphs (emoji) to
-  /// whole pixels, drawn with `color`'s alpha only. Glyphs wholly outside the frame and the
-  /// clip are skipped before they take an atlas slot (a long line scrolled sideways).
+  /// whole pixels, drawn with `color`'s alpha only. Glyphs whose ink can't reach the frame and
+  /// the clip are skipped before they take an atlas slot (a long line scrolled sideways).
   pub fn text(&mut self, x: f32, y: f32, s: &str, font: Font, color: Color) -> f32 {
     let scale = self.scale;
     let line = self.text.layout(s, font);
     let baseline = (y * scale).round();
     // Rec. 709 luma of the sRGB colour: dark text gets the glyphs smoothed for light grounds.
     let dark = 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2] < 0.5;
-    // Ink is taken to stay within 2 em of the pen across and 3 em of the baseline: generous
-    // for any face, so a glyph is never dropped that would show.
+    // The line's ink bounds, and a pixel more each way for the snapping below.
     let frame = Rect::new(0.0, 0.0, self.size.w, self.size.h);
     let view = self.scene.clip().map_or(frame, |c| c.intersect(frame));
-    let em = font.size;
-    if y + 3.0 * em < view.y || y - 3.0 * em > view.y + view.h {
+    let (ink, pad) = (line.ink, 1.0 / scale);
+    if y + ink.down + pad < view.y || y - ink.up - pad > view.y + view.h {
       return line.width;
     }
 
     for g in &line.glyphs {
       let pen = x + g.x;
-      if pen + 2.0 * em < view.x || pen - 2.0 * em > view.x + view.w {
+      if pen + ink.right + pad < view.x || pen - ink.left - pad > view.x + view.w {
         continue;
       }
 
@@ -573,6 +572,41 @@ mod tests {
     f.text(40.0, 40.0, "Z", font, [1.0; 4]);
     f.pop_clip();
     assert_eq!(f.text.uploads().count(), 0);
+  }
+
+  /// Ink far from its pen or baseline still draws when only it shows: the bismillah ligature
+  /// reaches some 3 em right of its origin, stacked accents several em above the baseline.
+  #[test]
+  fn ink_far_from_the_pen_is_drawn() {
+    let (mut scene, mut text, mut images) =
+      (Scene::default(), TextSystem::new(1.0), Images::default());
+    let mut f = Frame {
+      size: Size::new(100.0, 50.0),
+      scale: 1.0,
+      mouse: None,
+      now: Duration::ZERO,
+      scene: &mut scene,
+      text: &mut text,
+      images: &mut images,
+      animate: false,
+    };
+    let font = Font::ui(13.0);
+    let wide = f.text.layout("\u{FDFD}", font);
+    if wide.ink.right > 2.5 * font.size {
+      // Its pen 2.2 em left of the frame, its ink the rest of the way.
+      f.text(-2.2 * font.size, 20.0, "\u{FDFD}", font, [1.0; 4]);
+      assert_eq!(f.scene.counts().glyphs, 1, "ink to {} pt", wide.ink.right);
+    } else {
+      println!("no face here draws U+FDFD wider than 2.5 em: skipped");
+    }
+
+    let tall = format!("e{}", "\u{301}".repeat(24));
+    let up = f.text.layout(&tall, font).ink.up;
+    assert!(up > 4.0 * font.size, "the accents stack {up} pt high");
+    // The baseline 3.5 em below the frame; the top accents inside it.
+    f.scene.clear();
+    f.text(0.0, 50.0 + 3.5 * font.size, &tall, font, [1.0; 4]);
+    assert!(f.scene.counts().glyphs > 0);
   }
 
   #[test]

@@ -18,7 +18,7 @@ use std::sync::OnceLock;
 use windows_sys::Win32::Foundation::RECT;
 use windows_sys::core::{BOOL, GUID, HRESULT};
 
-use crate::text::{Font, Glyph, GlyphBox, Line, Metrics, Raster, Weight};
+use crate::text::{Font, Glyph, GlyphBox, Ink, Line, Metrics, Raster, Weight};
 
 // MARK: COM
 
@@ -619,7 +619,8 @@ unsafe extern "system" fn collector_glyph_run(
 /// text system's index of each run's font.
 pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {
   let dw = dwrite();
-  let empty = Line { glyphs: Vec::new(), clusters: Vec::new(), width: 0.0, epoch: 0 };
+  let empty =
+    Line { glyphs: Vec::new(), clusters: Vec::new(), width: 0.0, ink: Ink::default(), epoch: 0 };
   let Some(format) = &face.format else { return empty };
   let text: Vec<u16> = s.encode_utf16().collect();
   let layout = out(|p| unsafe {
@@ -671,7 +672,7 @@ pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {
   }
 
   let clusters = c.clusters.iter().map(|&u| at(u)).collect();
-  Line { glyphs, clusters, width: m.width_trailing, epoch: 0 }
+  Line { glyphs, clusters, width: m.width_trailing, ink: Ink::default(), epoch: 0 }
 }
 
 // MARK: Glyph raster

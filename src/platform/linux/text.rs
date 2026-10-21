@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use super::dl::{Lib, fns};
 use crate::text::edit::is_extend;
-use crate::text::{Font, Glyph, GlyphBox, Line, Metrics, Raster};
+use crate::text::{Font, Glyph, GlyphBox, Ink, Line, Metrics, Raster};
 
 // MARK: FFI
 
@@ -589,7 +589,7 @@ pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {
     }
   }
 
-  Line { glyphs, clusters, width: pen, epoch: 0 }
+  Line { glyphs, clusters, width: pen, ink: Ink::default(), epoch: 0 }
 }
 
 // MARK: Glyph raster

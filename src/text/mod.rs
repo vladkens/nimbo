@@ -107,6 +107,17 @@ pub struct Glyph {
   pub y: f32,
 }
 
+/// How far a line's ink reaches, in points: `left` and `right` of any of its glyphs' pen
+/// positions, `up` above and `down` below the baseline (a glyph the shaper raised included).
+/// Drawing culls the glyphs out of view by it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Ink {
+  pub left: f32,
+  pub right: f32,
+  pub up: f32,
+  pub down: f32,
+}
+
 #[derive(Debug)]
 pub struct Line {
   pub glyphs: Vec<Glyph>,
@@ -115,6 +126,8 @@ pub struct Line {
   pub clusters: Vec<u32>,
   /// Advance width in points.
   pub width: f32,
+  /// Its glyphs' ink bounds: [TextSystem::layout] fills them in.
+  pub ink: Ink,
   /// The faces its glyphs index: they start over past [FACE_CAP], and a line kept from before
   /// is no longer [TextSystem::is_current].
   pub epoch: u32,
@@ -138,6 +151,9 @@ pub struct TextSystem {
   metrics: Vec<Metrics>,
   /// Per face: its glyphs are colour bitmaps (Apple Color Emoji).
   color_faces: Vec<bool>,
+  /// Per glyph (face, id): its ink box in points (left, right, top, bottom; y up), from the
+  /// backend's pixel box at the scale it was first asked at, padding included.
+  ink: HashMap<(u16, u16), Option<[f32; 4]>, BuildHasherDefault<FxHasher>>,
   /// Keyed by a hash of (face, text); the entry keeps the text to rule out collisions, so a hit
   /// allocates nothing.
   lines: HashMap<u64, Entry, BuildHasherDefault<FxHasher>>,
@@ -165,6 +181,7 @@ impl TextSystem {
       faces: Vec::new(),
       metrics: Vec::new(),
       color_faces: Vec::new(),
+      ink: HashMap::default(),
       lines: HashMap::default(),
       line_cap: LINE_CAP,
       atlas: Atlas::new(ATLAS_SIZE, false),
@@ -239,6 +256,7 @@ impl TextSystem {
       self.faces.clear();
       self.metrics.clear();
       self.color_faces.clear();
+      self.ink.clear();
       self.lines.clear();
       self.atlas.reset();
       self.color_atlas.reset();
@@ -341,7 +359,36 @@ impl TextSystem {
   fn shape(&mut self, s: &str, face: u16) -> Line {
     let base = self.faces[face as usize].clone();
     let line = sys::shape(&base, s, |f| self.face_index(f));
-    Line { epoch: self.epoch, ..line }
+    let ink = self.ink_of(&line.glyphs);
+    Line { epoch: self.epoch, ink, ..line }
+  }
+
+  /// The ink bounds of `glyphs` from each one's box, their shaping offsets applied.
+  fn ink_of(&mut self, glyphs: &[Glyph]) -> Ink {
+    let mut ink = Ink::default();
+    for g in glyphs {
+      let Some([l, r, t, b]) = self.glyph_ink(g.face, g.id) else { continue };
+      ink.left = ink.left.max(-l);
+      ink.right = ink.right.max(r);
+      ink.up = ink.up.max(t + g.y);
+      ink.down = ink.down.max(-b - g.y);
+    }
+
+    ink
+  }
+
+  fn glyph_ink(&mut self, face: u16, id: u16) -> Option<[f32; 4]> {
+    if let Some(&b) = self.ink.get(&(face, id)) {
+      return b;
+    }
+
+    let s = self.scale;
+    let b = sys::glyph_box(&self.faces[face as usize], id, s, 0).map(|b| {
+      let (l, bottom) = (b.left as f32, b.bottom as f32);
+      [l / s, (l + b.w as f32) / s, (bottom + b.h as f32) / s, bottom / s]
+    });
+    self.ink.insert((face, id), b);
+    b
   }
 }
 
