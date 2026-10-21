@@ -108,6 +108,7 @@ fn disc() -> Vec<u8> {
       px.extend(alpha(c, a).map(|v| (v * 255.0).round() as u8));
     }
   }
+
   px
 }
 
@@ -117,6 +118,7 @@ impl App for Shapes {
       Event::Appearance(a) => self.light = !a.dark,
       _ => return false,
     }
+
     true
   }
 

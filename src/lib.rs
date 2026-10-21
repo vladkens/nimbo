@@ -96,6 +96,7 @@ impl Args {
         _ => return Err(format!("unknown argument {arg}")),
       }
     }
+
     Ok(out)
   }
 }
@@ -119,10 +120,12 @@ pub fn run<A: App + 'static>(cfg: Config, app: A, script: impl FnOnce(&mut Harne
   if let Some(a) = args.appearance {
     h.event(Event::Appearance(a));
   }
+
   script(&mut h);
   if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
     std::fs::create_dir_all(dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
   }
+
   h.shot(path).unwrap_or_else(|e| panic!("{e}"));
   println!("{}: wrote {}", cfg.title, path.display());
 }

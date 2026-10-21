@@ -34,6 +34,7 @@ pub fn encode(px: &Pixels) -> Vec<u8> {
         std::mem::swap(&mut best, &mut cand);
       }
     }
+
     raw.push(kind);
     raw.extend_from_slice(&best);
     prev.copy_from_slice(row);
@@ -64,6 +65,7 @@ fn rgba_rows(px: &Pixels) -> Vec<u8> {
     };
     out.extend([un(r), un(g), un(b), a]);
   }
+
   out
 }
 
@@ -80,6 +82,7 @@ fn filter(kind: u8, row: &[u8], prev: &[u8], out: &mut Vec<u8>) {
       3 => ((a as u16 + b as u16) / 2) as u8,
       _ => paeth(a, b, c),
     };
+
     out.push(row[i].wrapping_sub(pred));
   }
 }
@@ -136,6 +139,7 @@ fn zlib(data: &[u8]) -> Vec<u8> {
         dist = i - cand;
       }
     }
+
     if len >= 4 {
       w.length(len);
       w.distance(dist);
@@ -143,12 +147,14 @@ fn zlib(data: &[u8]) -> Vec<u8> {
       for j in i + 1..(i + len).min(data.len().saturating_sub(3)) {
         head[hash(j)] = j as u32;
       }
+
       i += len;
     } else {
       w.literal(data[i] as u16);
       i += 1;
     }
   }
+
   w.literal(256);
   let mut out = w.finish();
   out.extend(adler32(data).to_be_bytes());
@@ -205,6 +211,7 @@ impl Bits {
     if self.n > 0 {
       self.out.push(self.acc as u8);
     }
+
     self.out
   }
 }
@@ -300,8 +307,10 @@ fn adler32(data: &[u8]) -> u32 {
       a += x as u32;
       b += a;
     }
+
     (a, b) = (a % 65521, b % 65521);
   }
+
   (b << 16) | a
 }
 
@@ -319,6 +328,7 @@ mod tests {
         v |= ((data[pos / 8] >> (pos % 8)) as u32 & 1) << k;
         pos += 1;
       }
+
       v
     };
     let mut out: Vec<u8> = Vec::new();
@@ -338,6 +348,7 @@ mod tests {
           }
         }
       };
+
       match sym {
         0..=255 => out.push(sym as u8),
         256 => break,
@@ -352,6 +363,7 @@ mod tests {
         }
       }
     }
+
     assert_eq!(adler32(&out).to_be_bytes(), z[z.len() - 4..]);
     out
   }
@@ -372,6 +384,7 @@ mod tests {
       let z = zlib(data);
       assert_eq!(inflate(&z), data);
     }
+
     assert!(zlib(&flat).len() < 1000);
   }
 
@@ -386,6 +399,7 @@ mod tests {
         data.extend(if x == 4 { [64, 32, 16, 128] } else { [v, 255 - v, 30, 255] });
       }
     }
+
     let px = Pixels { w, h, data };
     let file = encode(&px);
     assert_eq!(&file[..8], b"\x89PNG\r\n\x1a\n");
@@ -402,8 +416,10 @@ mod tests {
       if &body[..4] == b"IDAT" {
         idat.extend_from_slice(&body[4..]);
       }
+
       at += 12 + n;
     }
+
     assert_eq!(kinds, ["IHDR", "sRGB", "IDAT", "IEND"]);
     let raw = inflate(&idat);
     let mut prev = vec![0u8; w * 4];
@@ -420,8 +436,10 @@ mod tests {
           3 => ((a as u16 + b as u16) / 2) as u8,
           _ => paeth(a, b, c),
         };
+
         row[i] = line[1 + i].wrapping_add(pred);
       }
+
       assert_eq!(row, want[y * w * 4..(y + 1) * w * 4], "row {y}");
       prev = row;
     }

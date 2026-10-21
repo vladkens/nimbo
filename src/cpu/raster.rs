@@ -126,12 +126,14 @@ fn blend_span(row: &mut [u32], s: [f32; 4]) {
   if s[3] >= 1.0 {
     return row.fill(pack(s));
   }
+
   let (mut last, mut out) = (!row.first().copied().unwrap_or(0), 0);
   for p in row {
     if *p != last {
       last = *p;
       out = blend(last, s);
     }
+
     *p = out;
   }
 }
@@ -184,9 +186,11 @@ fn row_spans(
   for (k, p) in left.iter_mut().enumerate() {
     px(r.x0 + k as i32, p);
   }
+
   if !mid.is_empty() {
     blend_span(mid, color);
   }
+
   for (k, p) in right.iter_mut().enumerate() {
     px(s1 + k as i32, p);
   }
@@ -230,15 +234,18 @@ fn shade_quad(q: &Quad, p: (f32, f32), scale: f32, fill: [f32; 4], border: [f32;
     let e = (c.0.abs() - half.0, c.1.abs() - half.1);
     return scaled(fill, saturate(0.5 - e.0.max(e.1) * scale));
   }
+
   let r = pick_radius(c, q.radii).min(half.0.min(half.1));
   let d = rounded_rect(c, half, r);
   if q.blur > 0.0 {
     return scaled(fill, 1.0 - smoothstep(-q.blur, q.blur, d));
   }
+
   let outer = saturate(0.5 - d * scale);
   if q.borders == [0.0; 4] {
     return scaled(fill, outer);
   }
+
   let b = q.borders.map(|v| if v == 0.0 { -1.0 / scale } else { v });
   let lo = (q.rect.x + b[3], q.rect.y + b[0]);
   let hi = (q.rect.x + q.rect.w - b[1], q.rect.y + q.rect.h - b[2]);
@@ -276,6 +283,7 @@ fn chord(cx: f32, cy: f32, half: (f32, f32), rl: f32, rr: f32, m: f32) -> Option
   if h <= 0.0 || cy > v {
     return None;
   }
+
   let side = |r: f32| {
     let r = (r + m).max(0.0);
     let a = cy - (v - r);
@@ -290,9 +298,11 @@ pub fn quad(t: &mut Target, q: &Quad, clip: IRect, scale: f32) {
   if r.is_empty() || fill[3] == 0.0 && border[3] == 0.0 {
     return;
   }
+
   if q.gradient > 0.0 {
     return gradient(t, q, r, scale, fill, border);
   }
+
   let px = 1.0 / scale;
   let half = (q.rect.w * 0.5, q.rect.h * 0.5);
   let (cx, cy) = (q.rect.x + half.0, q.rect.y + half.1);
@@ -312,8 +322,10 @@ pub fn quad(t: &mut Target, q: &Quad, clip: IRect, scale: f32) {
       let inner = y >= solid.y0 && y < solid.y1 || span.0 >= span.1;
       row_spans(t, y, r, span, if inner { fill } else { shade(span.0) }, shade);
     }
+
     return;
   }
+
   let to_px = |(a, b): (f32, f32)| IRect::centres(a * scale, 0.0, b * scale, 0.0);
   for y in r.y0..r.y1 {
     let py = centre(y, scale);
@@ -324,6 +336,7 @@ pub fn quad(t: &mut Target, q: &Quad, clip: IRect, scale: f32) {
     if row.is_empty() {
       continue;
     }
+
     let shade = |x| shade_quad(q, (centre(x, scale), py), scale, fill, border);
     let (span, color) = match chord(cx, py - cy, half, rl, rr, -inside).map(to_px) {
       Some(c) if c.x0 < c.x1 => ((c.x0.max(row.x0), c.x1.min(row.x1)), fill),
@@ -331,6 +344,7 @@ pub fn quad(t: &mut Target, q: &Quad, clip: IRect, scale: f32) {
       _ if span.0 < span.1 && (y < solid.y0 || y >= solid.y1) => (span, shade(span.0)),
       _ => ((0, 0), fill),
     };
+
     row_spans(t, y, row, span, color, shade);
   }
 }
@@ -385,6 +399,7 @@ fn shade_line(s: &Segment, p: (f32, f32), scale: f32, color: [f32; 4]) -> [f32; 
     let n = (pa.0 * -dir.1 + pa.1 * dir.0).abs();
     (-t).max(t - len).max(n - w * 0.5)
   };
+
   scaled(color, saturate(0.5 - d * scale) * faint)
 }
 
@@ -393,6 +408,7 @@ fn band(a: f32, b: f32, h: f32) -> (f32, f32) {
   if a.abs() < 1e-6 {
     return if b.abs() <= h { (f32::MIN, f32::MAX) } else { (1.0, 0.0) };
   }
+
   let (u, v) = ((-h - b) / a, (h - b) / a);
   (u.min(v), u.max(v))
 }
@@ -402,6 +418,7 @@ pub fn line(t: &mut Target, s: &Segment, clip: IRect, scale: f32) {
   if r.is_empty() || s.color[3] == 0.0 {
     return;
   }
+
   let color = premul(s.color);
   // The rotated quad: centre, direction, half its length and half its width, in points.
   let ab = (s.b.x - s.a.x, s.b.y - s.a.y);
@@ -424,6 +441,7 @@ pub fn line(t: &mut Target, s: &Segment, clip: IRect, scale: f32) {
     if x0 >= x1 {
       continue;
     }
+
     let py = centre(y, scale);
     let span = IRect::new(x0, y, x1, y + 1);
     row_spans(t, y, span, (0, 0), color, |x| shade_line(s, (centre(x, scale), py), scale, color));
@@ -483,6 +501,7 @@ fn sample(tex: Tex, u: f32, v: f32) -> [f32; 4] {
   if wu == 0.0 && wv == 0.0 {
     return fetch(tex, x0, y0);
   }
+
   let (a, b) = (fetch(tex, x0, y0), fetch(tex, x1, y0));
   let (c, d) = (fetch(tex, x0, y1), fetch(tex, x1, y1));
   let top = mix(a, b, wu);
@@ -496,6 +515,7 @@ pub fn image(t: &mut Target, s: &Sprite, tex: Tex, clip: IRect, scale: f32) {
   if r.is_empty() || s.color[3] == 0.0 || tex.w == 0 || tex.h == 0 {
     return;
   }
+
   let tint = premul(s.color);
   let mu = Map::new(s.rect.x, s.rect.w, s.uv.x, s.uv.w, scale);
   let mv = Map::new(s.rect.y, s.rect.h, s.uv.y, s.uv.h, scale);
@@ -507,6 +527,7 @@ pub fn image(t: &mut Target, s: &Sprite, tex: Tex, clip: IRect, scale: f32) {
       if c[3] == 0.0 && c[0] == 0.0 && c[1] == 0.0 && c[2] == 0.0 {
         continue;
       }
+
       *p = blend(*p, [0, 1, 2, 3].map(|i| c[i] * tint[i]));
     }
   }

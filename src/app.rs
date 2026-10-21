@@ -191,6 +191,7 @@ impl<A: App> Runtime<A> {
     if size == self.size && scale == self.scale {
       return;
     }
+
     (self.size, self.scale) = (size, scale);
     self.dirty = true;
   }
@@ -201,6 +202,7 @@ impl<A: App> Runtime<A> {
     if let Event::Appearance(a) = ev {
       return self.appearance(a);
     }
+
     let used = self.app_event(&ev);
     self.dirty |= used;
     used

@@ -2,10 +2,12 @@
 
 prepare:
 	cargo +nightly fmt
+	uv run scripts/blank-lines.py --fix
 	cargo clippy --all-targets --fix --allow-dirty --allow-staged
 
 check: check-targets
 	cargo +nightly fmt --check
+	uv run scripts/blank-lines.py
 	cargo clippy --all-targets -- -D warnings
 
 test:

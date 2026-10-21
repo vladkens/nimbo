@@ -50,6 +50,7 @@ impl Pool {
     if helpers == 0 {
       return f();
     }
+
     let Ok(_gate) = self.gate.try_lock() else { return f() };
 
     let mut st = self.state.lock().unwrap();
@@ -59,6 +60,7 @@ impl Pool {
       if spawned.is_err() {
         break;
       }
+
       st.threads += 1;
     }
     // SAFETY: only the lifetime is erased; the task is cleared below, after every helper that
@@ -69,6 +71,7 @@ impl Pool {
     for _ in 0..st.open {
       self.start.notify_one();
     }
+
     drop(st);
 
     let mine = panic::catch_unwind(AssertUnwindSafe(f));
@@ -78,6 +81,7 @@ impl Pool {
     while st.busy > 0 {
       st = self.done.wait(st).unwrap();
     }
+
     st.task = None;
     let theirs = std::mem::take(&mut st.panicked);
     drop(st);
@@ -85,6 +89,7 @@ impl Pool {
     if let Err(e) = mine {
       panic::resume_unwind(e);
     }
+
     assert!(!theirs, "a drawing thread panicked");
   }
 
@@ -96,6 +101,7 @@ impl Pool {
         st = self.start.wait(st).unwrap();
         continue;
       }
+
       st.open -= 1;
       st.busy += 1;
       let Some(Task(task)) = st.task else { unreachable!("open without a task") };
@@ -142,6 +148,7 @@ mod tests {
           if i >= 1000 {
             break;
           }
+
           sum.fetch_add(i, Ordering::Relaxed);
         }
       });
@@ -165,6 +172,7 @@ mod tests {
           if started.load(Ordering::Relaxed) > 0 {
             break;
           }
+
           std::thread::sleep(std::time::Duration::from_millis(1));
         }
       })

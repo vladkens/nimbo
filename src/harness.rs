@@ -53,6 +53,7 @@ impl<A: App> Harness<A> {
       self.advance(TICK.min(end - self.rt.now()));
       frames += self.frame() as usize;
     }
+
     frames
   }
 

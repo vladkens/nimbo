@@ -114,14 +114,17 @@ impl Renderer {
       if let Some(t) = self.images.get_mut(id.0 as usize) {
         *t = None;
       }
+
       self.generation += 1;
     }
+
     for u in &images.added {
       let i = u.id.0 as usize;
       match self.images.len() <= i {
         true => self.images.resize_with(i + 1, || None),
         false => self.generation += 1,
       }
+
       self.images[i] = Some(Image { w: u.w, h: u.h, data: u.data.clone() });
     }
   }
@@ -143,6 +146,7 @@ impl Renderer {
       if clip.is_empty() {
         continue;
       }
+
       let mut add = |kind, idx: usize, r: IRect, opaque: IRect| {
         let rect = r.intersect(clip);
         if !rect.is_empty() {
@@ -156,9 +160,11 @@ impl Renderer {
         let opaque = if solid { raster::quad_solid(q, scale) } else { none };
         add(Kind::Quad, i, raster::quad_bounds(q, scale), opaque);
       }
+
       for (i, s) in layer.images.iter().enumerate() {
         add(Kind::Image, i, raster::sprite_bounds(s, scale), none);
       }
+
       for (i, s) in layer.lines.iter().enumerate() {
         add(Kind::Line, i, raster::line_bounds(s, scale), none);
       }
@@ -177,6 +183,7 @@ impl Renderer {
       for b in &mut self.bins[(r.y0 / BAND) as usize..=((r.y1 - 1) / BAND) as usize] {
         b.push(n as u32);
       }
+
       let k = item_hash(scene, it);
       for ty in (r.y0 / TILE) as usize..=((r.y1 - 1) / TILE) as usize {
         for t in
@@ -205,6 +212,7 @@ impl Renderer {
     if shown.len() != self.tiles.len() {
       return vec![IRect::new(0, 0, w, h)];
     }
+
     let tw = self.tiles_w;
     let mut out: Vec<IRect> = Vec::new();
     // Runs of dirty tiles per tile row; a run under one of the same columns extends it.
@@ -219,10 +227,12 @@ impl Renderer {
           tx += 1;
           continue;
         }
+
         let start = tx;
         while tx < tw && dirty(tx) {
           tx += 1;
         }
+
         let (x0, x1) = (start as i32 * TILE, (tx as i32 * TILE).min(w));
         match open.iter().find(|&&i| out[i].x0 == x0 && out[i].x1 == x1 && out[i].y1 == y0) {
           Some(&i) => {
@@ -235,8 +245,10 @@ impl Renderer {
           }
         }
       }
+
       open = next;
     }
+
     out
   }
 
@@ -269,6 +281,7 @@ impl Renderer {
     if threads <= 1 {
       return bands.into_iter().for_each(run);
     }
+
     let queue = Mutex::new(bands.into_iter());
     Pool::get().run(threads - 1, &|| {
       loop {
@@ -318,10 +331,12 @@ impl Canvas {
       (self.w, self.h, self.px) = (w, h, vec![0; w * h]);
       self.tiles.clear();
     }
+
     let rects = match damage {
       true => r.damage(&self.tiles),
       false => vec![IRect::new(0, 0, w as i32, h as i32)],
     };
+
     r.draw(scene, &mut self.px, w, &rects);
     self.tiles.clear();
     self.tiles.extend_from_slice(r.tiles());
@@ -358,6 +373,7 @@ impl Job<'_> {
       if r.is_empty() {
         continue;
       }
+
       let (l, i) = (&layers[it.layer as usize], it.idx as usize);
       match it.kind {
         Kind::Quad => raster::quad(t, &l.quads[i], r, self.scale),
@@ -426,6 +442,7 @@ fn item_hash(scene: &Scene, it: &Item) -> u64 {
       h.add(l.image_ids[i].0 as u64).floats(&rect(s.rect)).floats(&rect(s.uv)).floats(&s.color)
     }
   };
+
   h.0
 }
 
@@ -496,6 +513,7 @@ mod tests {
     for i in [1, 2, 6, 7, 19] {
       shown[i] ^= 1;
     }
+
     let got = r.damage(&shown);
     let want = [IRect::new(64, 0, 192, 128), IRect::new(256, 192, 300, 200)];
     assert_eq!(got, want);

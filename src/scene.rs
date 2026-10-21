@@ -232,9 +232,11 @@ impl Scene {
       self.layers[self.len - 1].clip = clip;
       return;
     }
+
     if self.len == self.layers.len() {
       self.layers.push(Layer::default());
     }
+
     let layer = &mut self.layers[self.len];
     layer.clip = clip;
     layer.clear();
@@ -258,6 +260,7 @@ impl Scene {
     if self.len == 0 {
       self.layer();
     }
+
     &mut self.layers[self.len - 1]
   }
 
@@ -321,6 +324,7 @@ impl Images {
         ImageId(self.sizes.len() as u32 - 1)
       }
     };
+
     let premultiply = |p: &[u8; 4]| {
       let a = p[3] as u32;
       [0, 1, 2].map(|i| ((p[i] as u32 * a + 127) / 255) as u8).into_iter().chain([p[3]])

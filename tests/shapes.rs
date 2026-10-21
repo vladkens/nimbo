@@ -99,6 +99,7 @@ fn check(img: &Image, p: &Palette) {
     assert_eq!(at(x, *y), px(p.ink), "{w} wide");
     assert_eq!(at(x, y + w / 2.0 + 0.5), bg, "{w} wide");
   }
+
   let thin = at(x, LINES[0].0);
   assert!(thin != bg && thin != px(p.ink), "{thin:?}");
 
