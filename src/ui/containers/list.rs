@@ -178,8 +178,9 @@ struct ListState {
   reveal: Option<usize>,
   /// The element the press going on is on, once a pass saw it.
   pressed: Option<Id>,
-  /// The rows built last time, keyed as then: what a press can be on.
+  /// The rows built last time, keyed as then, from index `from`: what a press can be on.
   shown: Vec<u64>,
+  from: usize,
 }
 
 /// A virtualized list ([Ui::list] for the simple case); see the module's docs.
@@ -325,6 +326,7 @@ impl<'s> List<'s> {
       };
       ui.el(Style::new().h(px(shown.start as f32 * h)));
       st.shown.extend(shown.clone().map(key));
+      st.from = shown.start;
       for (i, &k) in shown.clone().zip(&st.shown) {
         let rid = id.key(("row", k));
         let selected = sel.contains(k);
@@ -473,8 +475,10 @@ impl<'a> Ui<'a> {
 
     st.pressed = press.map(|p| p.id);
     let Some((at, mods, clicks)) = hit else { return };
-    let Some(&k) = st.shown.iter().find(|&&k| id.key(("row", k)) == at) else { return };
-    let Some(i) = find((k, 0), n, key) else { return };
+    // Its index as built, a hint that saves a scan unless the rows moved since.
+    let Some(at) = st.shown.iter().position(|&k| id.key(("row", k)) == at) else { return };
+    let k = st.shown[at];
+    let Some(i) = find((k, st.from + at), n, key) else { return };
     match (multi, mods.cmd, mods.shift) {
       (true, true, _) => sel.toggle(k, i),
       (true, _, true) => sel.extend(i, n, key),
@@ -604,6 +608,40 @@ mod tests {
     assert_eq!((h.app().sel.cursor(), h.focused()), (Some(497), None));
     assert!(h.click_id(Id::of("b")));
     assert_eq!(h.app().clicks, 1);
+  }
+
+  /// 100k rows keyed by a function that counts its calls.
+  #[derive(Default)]
+  struct Counted {
+    calls: std::cell::Cell<usize>,
+  }
+
+  impl crate::App for Counted {
+    fn view(&mut self, ui: &mut Ui) {
+      let calls = &self.calls;
+      let key = move |i: usize| {
+        calls.set(calls.get() + 1);
+        i as u64 * 7
+      };
+      List::new(100_000, 20.0).key(&key).show(ui.id("list"), |ui, _| ui.label("row"));
+    }
+  }
+
+  #[test]
+  fn a_press_near_the_end_finds_its_row_without_a_scan() {
+    use crate::harness::Harness;
+    let mut h = Harness::new(Counted::default(), Size::new(200.0, 200.0), 1.0);
+    h.frame();
+    h.rt.ui.store.raw::<crate::ui::input::ScrollState>(Id::of("list")).offset.y = 1_999_000.0;
+    h.rt.redraw();
+    h.frame();
+    let row = Id::of("list").key(("row", 99_955u64 * 7));
+    let r = h.rect(row).expect("row 99955 built");
+    h.app().calls.set(0);
+    h.click(r.x + 5.0, r.y + 5.0);
+    let calls = h.app().calls.get();
+    assert_eq!(h.focused(), Some(Id::of("list")));
+    assert!(calls < 100, "{calls} key calls for one press");
   }
 
   #[test]
