@@ -307,6 +307,11 @@ fn busy() -> bool {
   current().is_some_and(|w| w.try_borrow_mut().is_err())
 }
 
+/// Whether window `id` is in use up the stack (none is when it is gone).
+fn window_busy(id: u64) -> bool {
+  slot(id, |s| s.win.try_borrow_mut().is_err()).unwrap_or(false)
+}
+
 /// Window `id`'s slot field `f`.
 fn slot<R>(id: u64, f: impl FnOnce(&mut Slot) -> R) -> Option<R> {
   WINS.with_borrow_mut(|ws| ws.iter_mut().find(|s| s.id == id).map(f))

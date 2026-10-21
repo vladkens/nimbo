@@ -1,7 +1,8 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The hotkey on Windows, on a "hotkey" thread with a message queue of its own, where the app's
-//! callback runs too. A chord is `RegisterHotKey`'s (for the thread, no window): its presses and
+//! The hotkey on Windows, on a "hotkey" thread with a message queue of its own; the app's
+//! callback runs on another ("hotkey-edges"), so a slow one never holds up the hook or a
+//! registration. A chord is `RegisterHotKey`'s (for the thread, no window): its presses and
 //! autorepeats come as `WM_HOTKEY`, its release, which Windows doesn't report, is found by
 //! polling the key's state every [POLL] after the press. A modifier key alone is a low-level
 //! keyboard hook's (`WH_KEYBOARD_LL`, installed by `start` on the same thread): [Lone] sees the
@@ -84,9 +85,14 @@ impl Hotkeys {
     let (cmds, rx) = channel();
     let (ready, id) = sync_channel(1);
     let s = shared.clone();
+    let (edges, heard) = channel::<Edge>();
+    std::thread::Builder::new()
+      .name("hotkey-edges".into())
+      .spawn(move || heard.into_iter().for_each(on))
+      .expect("spawn the hotkey edges thread");
     std::thread::Builder::new()
       .name("hotkey".into())
-      .spawn(move || run(on, &s, &rx, &ready))
+      .spawn(move || run(&edges, &s, &rx, &ready))
       .expect("spawn the hotkey thread");
     let thread = id.recv().expect("the hotkey thread starts");
     Self { thread, cmds, shared }
@@ -107,7 +113,8 @@ impl Hotkeys {
 
     let (tx, rx) = sync_channel(1);
     self.send(Cmd::Set(target, tx));
-    let taken = rx.recv_timeout(Duration::from_secs(2)).unwrap_or(Ok(()));
+    let answer = rx.recv_timeout(Duration::from_secs(2));
+    let taken = answer.unwrap_or_else(|_| Err("the hotkey thread did not answer".into()));
     err.map_or(taken, Err)
   }
 
@@ -169,7 +176,8 @@ struct Chord {
   hook: HHOOK,
 }
 
-fn run(on: OnEdge, shared: &Shared, cmds: &Receiver<Cmd>, ready: &SyncSender<u32>) {
+fn run(edges: &Sender<Edge>, shared: &Shared, cmds: &Receiver<Cmd>, ready: &SyncSender<u32>) {
+  let on = |e| _ = edges.send(e);
   let mut msg: MSG = unsafe { std::mem::zeroed() };
   // The thread's message queue exists once it asked for a message.
   unsafe { PeekMessageW(&mut msg, null_mut(), WM_USER, WM_USER, PM_NOREMOVE) };

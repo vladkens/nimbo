@@ -204,8 +204,10 @@ impl Tray {
     self.run(self.id_of(cmd));
   }
 
+  /// Runs `on_item` with `id`; nothing for none (the menu dismissed), the callback kept.
   fn run(&self, id: Option<String>) {
-    let (Some(id), Some(mut f)) = (id, self.0.on_item.take()) else { return };
+    let Some(id) = id else { return };
+    let Some(mut f) = self.0.on_item.take() else { return };
     f(&mut Main::here(), &crate::tray::Tray(self.clone()), &id);
     self.0.on_item.borrow_mut().get_or_insert(f);
   }
@@ -455,5 +457,18 @@ mod tests {
     );
     assert_eq!(flags(&Item::separator()), MF_SEPARATOR);
     assert_eq!(flags(&Item::new("s", "S").submenu(Menu::default())), MF_STRING | MF_POPUP);
+  }
+
+  /// A menu dismissed (Escape, a click outside) chooses nothing and keeps the callback.
+  #[test]
+  fn a_dismissed_menu_keeps_the_callback() {
+    let tray = Tray::detached(crate::tray::TrayIcon::path(4.0, "M0 0H4V4Z"), "t");
+    tray.set_menu(&Menu::new(vec![Item::new("a", "A")]));
+    let got = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let g = got.clone();
+    tray.on_item(Box::new(move |_, _, id| g.borrow_mut().push(id.to_owned())));
+    tray.run(None);
+    tray.choose(&[0]);
+    assert_eq!(*got.borrow(), ["a"]);
   }
 }

@@ -19,7 +19,9 @@ use std::sync::OnceLock;
 use keyboard_types::Modifiers;
 
 use super::dl::fns;
-use super::{CURRENT, Fp, P, TRUE, Win, as_window, busy, connect, gtk, keys, lib, with};
+use super::{
+  CURRENT, Fp, P, TRUE, Win, as_window, busy, connect, gtk, keys, lib, window_busy, with,
+};
 use crate::app::{Event, Ime, MouseButton, Phase, WHEEL_LINE};
 use crate::scene::{Point, Rect};
 use crate::ui::Id;
@@ -298,19 +300,36 @@ impl Drop for Input {
   }
 }
 
-/// Runs the events that waited for the window, oldest first, unless they already run further
-/// up the stack.
+/// Runs the events that waited for their window, oldest first, unless they already run further
+/// up the stack; stops at one whose window is still busy (another window's callback ran during
+/// its paste), which the window's own call runs once it returns.
 pub fn replay() {
   if REPLAYING.replace(true) {
     return;
   }
 
-  while let Some((id, ev)) = STASH.with_borrow_mut(|s| s.pop_front()) {
+  drain(&STASH, window_busy, |id, ev| {
     as_window(id, || unsafe { on_event(null_mut(), ev, null_mut()) });
     unsafe { (gdk().gdk_event_free)(ev) };
-  }
-
+  });
   REPLAYING.set(false);
+}
+
+/// Runs `queue`'s items in order, each with its window's id, while that window isn't `busy`:
+/// the first one that is stays first.
+fn drain<T: Copy>(
+  queue: &'static std::thread::LocalKey<RefCell<VecDeque<(u64, T)>>>,
+  busy: impl Fn(u64) -> bool,
+  mut run: impl FnMut(u64, T),
+) {
+  while let Some((id, item)) = queue.with_borrow(|q| q.front().copied()) {
+    if busy(id) {
+      break;
+    }
+
+    queue.with_borrow_mut(|q| q.pop_front());
+    run(id, item);
+  }
 }
 
 /// The default display's keymap.
@@ -795,6 +814,22 @@ fn phase(scrolling: &mut bool, precise: bool, stop: bool, gap: u32) -> Phase {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  thread_local! {
+    static QUEUE: RefCell<VecDeque<(u64, u32)>> = RefCell::new(VecDeque::from([(1, 10), (2, 20), (1, 11)]));
+  }
+
+  /// Window 2 is busy (waiting for a paste): window 1's first event runs, then the replay stops
+  /// at window 2's, in order, rather than queuing it again forever.
+  #[test]
+  fn replay_stops_at_a_busy_window() {
+    let mut ran = Vec::new();
+    drain(&QUEUE, |id| id == 2, |id, ev| ran.push((id, ev)));
+    assert_eq!(ran, [(1, 10)]);
+    assert_eq!(QUEUE.with_borrow(|q| q.clone()), [(2, 20), (1, 11)]);
+    drain(&QUEUE, |_| false, |id, ev| ran.push((id, ev)));
+    assert_eq!(ran, [(1, 10), (2, 20), (1, 11)]);
+  }
 
   /// Presses 600 ms apart are two clicks even when handled together; a second within 400 ms is
   /// a double click, across the clock's wrap too.
