@@ -129,6 +129,13 @@ define_class!(
       self.moved(event);
     }
 
+    /// The pointer came in, maybe without moving (the window moved or resized under it): a
+    /// move there, so the hover and the cursor follow.
+    #[unsafe(method(mouseEntered:))]
+    fn mouse_entered(&self, event: &NSEvent) {
+      self.moved(event);
+    }
+
     #[unsafe(method(mouseDragged:))]
     fn mouse_dragged(&self, event: &NSEvent) {
       self.moved(event);
