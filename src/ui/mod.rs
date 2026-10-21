@@ -27,8 +27,8 @@
 //! ```
 //!
 //! Widgets ([widgets]: label, button) and containers ([containers]: scroll area, list, menu,
-//! pop-up button) do this for an app in the look of the [Theme] set with [Ui::set_theme]: `if
-//! ui.id("plus").button("+").clicked { .. }`.
+//! pop-up button, tabs, split) do this for an app in the look of the [Theme] set with
+//! [Ui::set_theme]: `if ui.id("plus").button("+").clicked { .. }`.
 //!
 //! The rule for every widget: a headless behaviour ([behavior]: `ui.button_behavior(id)` and
 //! the like, hover, press, click, focus, keys and the value edited) plus drawing from the
@@ -50,7 +50,9 @@ use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
 pub use behavior::Behavior;
-pub use containers::{List, ListResponse, PopUp, Row, Selection, TypeSelect};
+pub use containers::{
+  List, ListResponse, PopUp, Row, Selection, Split, SplitBehavior, Tabs, TypeSelect,
+};
 pub use input::{Click, Press, Scroll, hit};
 pub use layout::{Kind, Line, Measure, Node, Tree};
 pub use store::{Ease, Transition};

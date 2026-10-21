@@ -1,0 +1,197 @@
+// Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
+
+//! The split: two panes with a divider to drag between them.
+//!
+//! ```ignore
+//! Split::row().ratio(&mut self.side).min(160.0, 320.0).show(ui.id("split"), |ui, pane| match pane {
+//!   0 => self.sidebar(ui),
+//!   _ => self.main(ui),
+//! });
+//! ```
+//!
+//! The split keeps its ratio in the app or in its own state; dragging the divider honours both
+//! panes' minimum sizes. The behaviour is [Ui::split_behavior].
+
+use crate::ui::{Behavior, Cursor, Float, Id, Response, Style, Ui, grow, pct, px};
+
+/// A split's divider ([Ui::split_behavior]): its handle's input, and the first pane's share
+/// to show and the panes' minimums, both fitted to the split's size.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SplitBehavior {
+  pub handle: Behavior,
+  pub shown: f32,
+  pub min: [f32; 2],
+}
+
+/// Two panes side by side ([Split::row]) or stacked ([Split::col]) with a divider to drag
+/// (`id.key("handle")`).
+pub struct Split<'s> {
+  axis: u8,
+  ratio: Option<&'s mut f32>,
+  init: f32,
+  min: [f32; 2],
+}
+
+impl<'s> Split<'s> {
+  /// Panes left and right of a vertical divider.
+  pub fn row() -> Self {
+    Self { axis: 0, ratio: None, init: 0.5, min: [0.0; 2] }
+  }
+
+  /// Panes above and below a horizontal divider.
+  pub fn col() -> Self {
+    Self { axis: 1, ..Self::row() }
+  }
+
+  /// The first pane's share of the split, kept by the app; without it the split keeps its
+  /// own, from [Split::initial].
+  pub fn ratio(self, ratio: &'s mut f32) -> Self {
+    Self { ratio: Some(ratio), ..self }
+  }
+
+  pub fn initial(self, ratio: f32) -> Self {
+    Self { init: ratio, ..self }
+  }
+
+  /// The least size of each pane along the split, in points.
+  pub fn min(self, first: f32, second: f32) -> Self {
+    Self { min: [first, second], ..self }
+  }
+
+  /// Builds the panes with `pane(ui, 0)` and `pane(ui, 1)`; `changed` when a drag moved the
+  /// divider.
+  pub fn show<'a>(self, ui: &mut Ui<'a>, mut pane: impl FnMut(&mut Ui<'a>, usize)) -> Response {
+    /// The ratio, when the app doesn't hold it.
+    #[derive(Default)]
+    struct Own(Option<f32>);
+
+    let t = ui.theme();
+    let (id, ax) = (ui.take_id(), self.axis as usize);
+    let handle = id.key("handle");
+    let own = ui.state::<Own>(id).0;
+    let mut r = self.ratio.as_deref().copied().unwrap_or(own.unwrap_or(self.init));
+    let b = ui.split_behavior(id, handle, self.axis, &mut r, self.min);
+    let (held, min) = (b.handle.held, b.min);
+    match self.ratio {
+      Some(x) => *x = r,
+      None => ui.state::<Own>(id).0 = Some(r),
+    }
+
+    // Shown within the minimums; the ratio kept is the one asked, for when there is room again.
+    // The split clips, so a window narrower than both minimums shrinks it, and them next frame.
+    let p = pct(b.shown * 100.0);
+    let (first, second, divider, grip) = match ax {
+      0 => (
+        Style::new().w(p).min_w(min[0]).h(grow()),
+        Style::new().grow().min_w(min[1]),
+        Style::new().w(px(1.0)).h(grow()),
+        Style::new().w(px(7.0)).h(grow()).cursor(Cursor::ResizeX),
+      ),
+      _ => (
+        Style::new().h(p).min_h(min[0]).w(grow()),
+        Style::new().grow().min_h(min[1]),
+        Style::new().h(px(1.0)).w(grow()),
+        Style::new().h(px(7.0)).w(grow()).cursor(Cursor::ResizeY),
+      ),
+    };
+    // The line takes the accent while dragged, fading in and out.
+    let hot = ui.hot(handle, held || b.handle.hovered);
+    let line = crate::scene::mix(t.line, t.accent, hot);
+    let mut resp = ui.with_id(id).container(self.axis, Style::new().grow().clip(), |ui| {
+      ui.col(first.clip(), |ui| pane(ui, 0));
+      ui.row(divider.bg(line), |ui| {
+        let at = Float::parent().attach(0.5, 0.5).anchor(0.5, 0.5).clip();
+        ui.with_id(handle).float(at).el(grip);
+      });
+      ui.col(second.clip(), |ui| pane(ui, 1));
+    });
+    resp.changed = b.handle.changed;
+    resp
+  }
+}
+
+impl Ui<'_> {
+  /// A split `id` along `axis` (0: panes side by side) with its divider's handle `handle`:
+  /// dragging the handle sets `ratio`, the first pane's share, keeping the pane under the
+  /// pointer where it was grabbed. The fitted share and minimums come from the last frame's
+  /// size: narrower than both minimums, each pane gets its share of what there is.
+  pub fn split_behavior(
+    &mut self,
+    id: Id,
+    handle: Id,
+    axis: u8,
+    ratio: &mut f32,
+    min: [f32; 2],
+  ) -> SplitBehavior {
+    /// The pointer's distance from the divider when the drag began.
+    #[derive(Default)]
+    struct Grab(Option<f32>);
+
+    let ax = axis as usize;
+    let b = self.begin(handle).unwrap_or_else(|| self.pointer_state(handle));
+    let span = self.rect(id).map(|rect| if ax == 0 { (rect.x, rect.w) } else { (rect.y, rect.h) });
+    let min = match span {
+      Some((_, len)) if min[0] + min[1] > (len - 1.0).max(0.0) => {
+        let k = (len - 1.0).max(0.0) / (min[0] + min[1]);
+        [min[0] * k, min[1] * k]
+      }
+      _ => min,
+    };
+
+    let fit = |r: f32| match span {
+      Some((_, len)) if len > 0.0 => {
+        let lo = min[0] / len;
+        r.clamp(lo, ((len - 1.0 - min[1]) / len).max(lo))
+      }
+      _ => r,
+    };
+    let was = *ratio;
+    let mut grab = std::mem::take(&mut self.state::<Grab>(id).0);
+    let along = |p: crate::scene::Point| if ax == 0 { p.x } else { p.y };
+    match (b.held, span, self.mouse(), self.press()) {
+      (true, Some((lo, len)), Some(m), Some(p)) => {
+        // From where it was pressed, though no frame came between the press and this move.
+        let (at, from) = (along(m), along(p.pos));
+        let g = *grab.get_or_insert(from - (lo + *ratio * len));
+        *ratio = fit((at - g - lo) / len.max(1.0));
+      }
+      _ => grab = None,
+    }
+
+    self.state::<Grab>(id).0 = grab;
+    let handle = Behavior { changed: *ratio != was, ..b };
+    SplitBehavior { handle, shown: fit(*ratio), min }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::app::App;
+  use crate::harness::Harness;
+  use crate::scene::{Rect, Size};
+
+  /// A split with minimums wider than the window.
+  struct Narrow;
+
+  impl App for Narrow {
+    fn view(&mut self, ui: &mut Ui) {
+      Split::row().min(100.0, 100.0).show(ui.id("split"), |ui, _| {
+        ui.el(Style::new().grow());
+      });
+    }
+  }
+
+  #[test]
+  fn a_split_narrower_than_its_minimums_shrinks_both_panes() {
+    let mut h = Harness::new(Narrow, Size::new(150.0, 200.0), 1.0);
+    h.frame();
+    h.rt.redraw();
+    h.frame();
+    let split = h.rect(Id::of("split")).unwrap();
+    let kids: Vec<Rect> =
+      h.rt.ui.last.nodes.iter().filter(|n| n.parent != 0).map(|n| n.rect).collect();
+    assert!(split.w <= 150.0, "{split:?}");
+    assert!(kids.iter().all(|r| r.x + r.w <= split.x + split.w + 0.5), "{kids:?}");
+  }
+}

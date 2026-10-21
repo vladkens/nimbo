@@ -22,6 +22,8 @@
 //! [super::Ui::hot]. What each one covers:
 //!
 //! - [Ui::button_behavior]: click, Space while focused (flashes it pressed);
+//! - [Ui::pick_behavior] (tabs): one of `n` items by a click, the arrows step;
+//! - [Ui::split_behavior]: a divider's drag within both panes' minimums;
 //! - [Ui::menu_popup] and [Ui::menu_item_behavior]: a menu's open state, keys and items;
 //! - [Ui::pop_up_behavior]: a pop-up button, opened by a click, Space, Enter or the arrows, letters
 //!   typed choosing an option ([super::containers::TypeSelect]);

@@ -44,7 +44,7 @@ pub use text::{Font, Weight};
 pub use ui::{
   Align, Behavior, Button, ButtonStyle, Click, ControlSize, Cursor, Dim, Ease, Float, Focus,
   FocusRing, Id, List, ListResponse, PopUp, Press, Response, Row, Scroll, Selection, Shadow, Sizes,
-  Style, TextStyle, Theme, Transition, TypeSelect, Ui, Variant, grow, pct, px, rigid,
+  Split, Style, Tabs, TextStyle, Theme, Transition, TypeSelect, Ui, Variant, grow, pct, px, rigid,
 };
 
 /// A window's title and initial content size in points; the harness renders at this size.
