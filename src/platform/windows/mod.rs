@@ -25,7 +25,9 @@ use windows_sys::Win32::System::DataExchange::{
   CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
+use windows_sys::Win32::System::Memory::{
+  GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock,
+};
 use windows_sys::Win32::System::SystemInformation::{
   GetLogicalProcessorInformationEx, GetSystemTimePreciseAsFileTime, PROCESSOR_RELATIONSHIP,
   RelationProcessorCore, SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
@@ -41,7 +43,7 @@ use windows_sys::Win32::UI::HiDpi::{
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::Config;
-use crate::app::{App, Appearance, Clipboard, Clock, Event, Runtime};
+use crate::app::{App, Appearance, Clipboard, Clock, Event, Mods, Runtime};
 use crate::cpu::Renderer;
 use crate::cpu::raster::IRect;
 use crate::platform::{Pace, points};
@@ -436,8 +438,20 @@ fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
       });
       0
     }
-    WM_SETFOCUS | WM_KILLFOCUS => {
-      with(|w| w.send(Event::Focus(msg == WM_SETFOCUS)));
+    // Modifiers that went up or down in another window never reach this one: none held while
+    // away, those held now on return.
+    WM_SETFOCUS => {
+      with(|w| {
+        w.send(Event::Focus(true));
+        w.send(Event::Mods(keyboard::mods_held()));
+      });
+      0
+    }
+    WM_KILLFOCUS => {
+      with(|w| {
+        w.send(Event::Mods(Mods::NONE));
+        w.send(Event::Focus(false));
+      });
       0
     }
     WM_DESTROY => {
@@ -506,7 +520,7 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
   assert!(!hwnd.is_null(), "nimbo: CreateWindowExW failed");
 
   let scale = unsafe { GetDpiForWindow(hwnd) } as f32 / 96.0;
-  let mut rt = Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(WinClipboard));
+  let mut rt = Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(WinClipboard::new(hwnd)));
   rt.event(Event::Appearance(appearance()));
   // A wake from any thread posts a message; the window handle crosses threads as a number.
   let target = hwnd as isize;
@@ -584,12 +598,22 @@ fn run_loop(hwnd: HWND, timer: &Timer) {
 
 // MARK: Clipboard
 
-/// The system clipboard, plain text (`CF_UNICODETEXT`).
-pub struct WinClipboard;
+/// The system clipboard, plain text (`CF_UNICODETEXT`), opened for the window: one opened for
+/// no window has no owner once emptied, and `SetClipboardData` fails then (its docs).
+pub struct WinClipboard {
+  /// The window's handle, as a number (it never leaves the thread).
+  owner: isize,
+}
+
+impl WinClipboard {
+  fn new(owner: HWND) -> Self {
+    Self { owner: owner as isize }
+  }
+}
 
 impl Clipboard for WinClipboard {
   fn read(&self) -> Option<String> {
-    if unsafe { OpenClipboard(null_mut()) } == 0 {
+    if unsafe { OpenClipboard(self.owner as HWND) } == 0 {
       return None;
     }
 
@@ -597,9 +621,10 @@ impl Clipboard for WinClipboard {
     let data = unsafe { GetClipboardData(CF_TEXT_UTF16) };
     let p = unsafe { GlobalLock(data) }.cast::<u16>();
     if !p.is_null() {
-      // SAFETY: CF_UNICODETEXT is NUL-terminated UTF-16, readable while locked.
-      let n = (0..).take_while(|&i| unsafe { *p.add(i) } != 0).count();
-      out = Some(String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(p, n) }));
+      // SAFETY: the locked allocation holds `GlobalSize` bytes; another process wrote them, so
+      // the NUL that ends CF_UNICODETEXT is looked for only within them.
+      let units = unsafe { std::slice::from_raw_parts(p, GlobalSize(data) / 2) };
+      out = Some(utf16_text(units));
       unsafe { GlobalUnlock(data) };
     }
 
@@ -608,7 +633,7 @@ impl Clipboard for WinClipboard {
   }
 
   fn write(&mut self, s: &str) {
-    if unsafe { OpenClipboard(null_mut()) } == 0 {
+    if unsafe { OpenClipboard(self.owner as HWND) } == 0 {
       return;
     }
 
@@ -629,6 +654,12 @@ impl Clipboard for WinClipboard {
 
     unsafe { CloseClipboard() };
   }
+}
+
+/// The text of UTF-16 `units` up to the first NUL, or all of them without one.
+fn utf16_text(units: &[u16]) -> String {
+  let n = units.iter().position(|&u| u == 0).unwrap_or(units.len());
+  String::from_utf16_lossy(&units[..n])
 }
 
 // MARK: System
@@ -674,6 +705,8 @@ pub fn perf_cores() -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+  use windows_sys::Win32::System::DataExchange::GetClipboardOwner;
+
   use super::*;
 
   #[test]
@@ -683,11 +716,40 @@ mod tests {
 
   #[test]
   fn clipboard_round_trips() {
-    let mut c = WinClipboard;
+    // A message-only window owns it, as the app's window does: never shown.
+    let class = wide("STATIC");
+    let hwnd = unsafe {
+      CreateWindowExW(
+        0,
+        class.as_ptr(),
+        null(),
+        0,
+        0,
+        0,
+        0,
+        0,
+        HWND_MESSAGE,
+        null_mut(),
+        null_mut(),
+        null(),
+      )
+    };
+    assert!(!hwnd.is_null());
+    let mut c = WinClipboard::new(hwnd);
     let old = c.read();
     c.write("nimbo ✓ 👍");
     assert_eq!(c.read().as_deref(), Some("nimbo ✓ 👍"));
+    assert_eq!(unsafe { GetClipboardOwner() }, hwnd, "the window owns what it wrote");
     c.write(old.as_deref().unwrap_or(""));
+    unsafe { DestroyWindow(hwnd) };
+  }
+
+  #[test]
+  fn clipboard_text_ends_within_its_memory() {
+    let ab: Vec<u16> = "ab".encode_utf16().collect();
+    assert_eq!(utf16_text(&ab), "ab", "no NUL: the allocation's end");
+    assert_eq!(utf16_text(&[0x61, 0, 0x62]), "a");
+    assert_eq!(utf16_text(&[]), "");
   }
 
   #[test]

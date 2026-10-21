@@ -8,9 +8,10 @@
 //! and the Windows key sets [Mods::ctrl]. Alt is Alt.
 
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-  GetKeyState, GetKeyboardLayout, GetKeyboardState, ToUnicodeEx, VK_BACK, VK_CONTROL, VK_DELETE,
-  VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F12, VK_HOME, VK_INSERT, VK_LEFT, VK_LWIN, VK_MENU,
-  VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RWIN, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
+  GetAsyncKeyState, GetKeyState, GetKeyboardLayout, GetKeyboardState, ToUnicodeEx, VK_BACK,
+  VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F12, VK_HOME, VK_INSERT, VK_LEFT,
+  VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RWIN, VK_SHIFT, VK_SPACE, VK_TAB,
+  VK_UP,
 };
 
 use crate::app::Mods;
@@ -118,6 +119,16 @@ fn down(vk: u16) -> bool {
 
 /// The modifiers held now (as of the message being handled): Ctrl as `cmd`, Windows as `ctrl`.
 pub fn mods() -> Mods {
+  mods_by(down)
+}
+
+/// The modifiers held on the keyboard at this moment, whatever messages wait: on gaining the
+/// focus, after keys went up or down in another window.
+pub fn mods_held() -> Mods {
+  mods_by(|vk| unsafe { GetAsyncKeyState(vk as i32) as u16 & 0x8000 != 0 })
+}
+
+fn mods_by(down: impl Fn(u16) -> bool) -> Mods {
   Mods {
     shift: down(VK_SHIFT),
     ctrl: down(VK_LWIN) || down(VK_RWIN),
