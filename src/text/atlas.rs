@@ -78,7 +78,9 @@ impl Atlas {
       return *g;
     }
 
-    let g = self.rasterize(face, raster, key.1, key.2, uploads);
+    // The variant's low 2 bits are the subpixel offset; the bit above, the text's polarity
+    // ([super::TextSystem::glyph]), only picks the raster.
+    let g = self.rasterize(face, raster, key.1, key.2 & 3, uploads);
     // A glyph skipped for lack of room is not cached: the reset gives it a slot next frame.
     if g.is_some() || !self.full {
       self.glyphs.insert(key, g);

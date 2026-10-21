@@ -431,6 +431,16 @@ mod tests {
   }
 
   #[test]
+  fn polarity_keeps_the_glyph_in_place() {
+    let mut ts = TextSystem::new(2.0);
+    let g = ts.layout("H", Font::ui(13.0)).glyphs[0];
+    let at = |a: AtlasGlyph| (a.left, a.top, a.uv.w, a.uv.h);
+    let light = ts.glyph(g.face, g.id, 1, false).unwrap();
+    let dark = ts.glyph(g.face, g.id, 1, true).unwrap();
+    assert_eq!(at(light), at(dark));
+  }
+
+  #[test]
   fn emoji_go_to_the_color_atlas() {
     let mut ts = TextSystem::new(2.0);
     let line = ts.layout("a\u{1F680}", Font::ui(13.0));
