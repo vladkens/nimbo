@@ -449,7 +449,8 @@ impl Win {
       held.push((hw, sym));
     }
 
-    if let Some(side) = keys::modifier(sym) {
+    let code = kvk(hw.saturating_sub(8) as u32).unwrap_or(0xffff);
+    if let Some(side) = keys::modifier(sym, code) {
       let syms: Vec<u32> = held.iter().map(|&(_, s)| s).collect();
       self.mods(keys::after(keys::mods(state), sym, down, &syms));
       if let Some(key) = side.filter(|_| !repeat) {
@@ -461,7 +462,6 @@ impl Win {
 
     let mods = keys::mods(state);
     self.mods(mods);
-    let code = kvk(hw.saturating_sub(8) as u32).unwrap_or(0xffff);
     let ch = char::from_u32(unsafe { (g.gdk_keyval_to_unicode)(sym) }).filter(|&c| c != '\0');
     let k = keys::key_event(sym, ch, code, mods, repeat, || latin(hw, mods.shift));
     if !down {

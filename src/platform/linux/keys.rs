@@ -30,7 +30,8 @@ pub fn types(mods: Mods) -> bool {
 }
 
 /// The modifiers after modifier key `sym` went down or up, from those before (`mods`) and the
-/// keys still `held`: a Shift let go while the other is down keeps Shift.
+/// keyvals of the keys still `held` (with it while it is down): a Shift let go while the other
+/// is down keeps Shift, as does a Control while Caps Lock is a Control too (`ctrl:nocaps`).
 pub fn after(mods: Mods, sym: u32, down: bool, held: &[u32]) -> Mods {
   // Shift, Control, Meta and Alt, Super and Hyper.
   let group = |s: u32| match s {
@@ -41,7 +42,7 @@ pub fn after(mods: Mods, sym: u32, down: bool, held: &[u32]) -> Mods {
     _ => None,
   };
   let Some(g) = group(sym) else { return mods };
-  let on = down || held.iter().any(|&h| h != sym && group(h) == Some(g));
+  let on = down || held.iter().any(|&h| group(h) == Some(g));
   let mut m = mods;
   match g {
     0 => m.shift = on,
@@ -113,8 +114,14 @@ fn named(sym: u32) -> Option<Key> {
 }
 
 /// Whether a keysym is a modifier's (Shift, Control, Caps and Shift Lock, Meta, Alt, Super,
-/// Hyper; the ISO level, latch, lock and group keys), and the [ModKey] it names by its side.
-pub fn modifier(sym: u32) -> Option<Option<ModKey>> {
+/// Hyper; the ISO level, latch, lock and group keys), and the [ModKey] it names: by its side,
+/// else by the place of the key (virtual key code `code`): AltGr's `ISO_Level3_Shift` at the
+/// right Alt is that key.
+pub fn modifier(sym: u32, code: u16) -> Option<Option<ModKey>> {
+  side(sym).map(|side| side.or_else(|| ModKey::of_mac(code)))
+}
+
+fn side(sym: u32) -> Option<Option<ModKey>> {
   Some(match sym {
     0xffe1 => Some(ModKey::LeftShift),
     0xffe2 => Some(ModKey::RightShift),
@@ -312,10 +319,12 @@ mod tests {
     const CAPS: u16 = 57;
     let k = key(0xff1b, CAPS, Mods::NONE);
     assert_eq!((k.key, k.code), (Key::Escape, CAPS));
-    assert_eq!(modifier(0xff1b), None);
-    assert_eq!(modifier(0xffe1), Some(Some(ModKey::LeftShift)));
-    assert_eq!(modifier(0xffe3), Some(Some(ModKey::LeftCtrl)));
-    assert_eq!(modifier(0xffe5), Some(None), "Caps Lock: a modifier with no side");
+    assert_eq!(modifier(0xff1b, CAPS), None);
+    assert_eq!(modifier(0xffe1, 56), Some(Some(ModKey::LeftShift)));
+    assert_eq!(modifier(0xffe3, CAPS), Some(Some(ModKey::LeftCtrl)));
+    assert_eq!(modifier(0xffe5, CAPS), Some(None), "Caps Lock: a modifier with no side");
+    // AltGr: ISO_Level3_Shift at the right Alt.
+    assert_eq!(modifier(0xfe03, 61), Some(Some(ModKey::RightAlt)));
   }
 
   #[test]
@@ -327,6 +336,9 @@ mod tests {
     assert_eq!(shift, Mods::SHIFT);
     assert_eq!(after(shift, 0xffe1, false, &[0xffe2]), Mods::SHIFT);
     assert_eq!(after(shift, 0xffe1, false, &[]), Mods::NONE);
+    // Caps Lock as a second Control_L: letting go of one keeps Control.
+    let ctrl = Mods { cmd: true, ..Mods::NONE };
+    assert_eq!(after(ctrl, 0xffe3, false, &[0xffe3]), ctrl);
     assert_eq!(after(Mods::NONE, 0xffeb, true, &[]), Mods { ctrl: true, ..Mods::NONE });
     assert_eq!(after(shift, 0xffe5, true, &[]), shift, "Caps Lock");
   }
