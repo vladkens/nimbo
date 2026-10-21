@@ -253,7 +253,12 @@ fn shade_quad(q: &Quad, p: (f32, f32), scale: f32, fill: [f32; 4], border: [f32;
   let ci = (p.0 - (lo.0 + hi.0) * 0.5, p.1 - (lo.1 + hi.1) * 0.5);
   let side = (if c.0 < 0.0 { b[3] } else { b[1] }, if c.1 < 0.0 { b[0] } else { b[2] });
   let ri = (r - side.0.max(side.1)).max(0.0).min(inner_half.0.min(inner_half.1));
-  let inner = saturate(0.5 - rounded_rect(ci, inner_half, ri) * scale);
+  // Borders that meet or cross leave no fill.
+  let inner = match hi.0 > lo.0 && hi.1 > lo.1 {
+    true => saturate(0.5 - rounded_rect(ci, inner_half, ri) * scale),
+    false => 0.0,
+  };
+
   scaled(mix(border, fill, inner), outer)
 }
 
@@ -536,6 +541,17 @@ pub fn image(t: &mut Target, s: &Sprite, tex: Tex, clip: IRect, scale: f32) {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::scene::Rect;
+
+  #[test]
+  fn borders_that_meet_leave_no_fill() {
+    // 5x5 with a 3-point border: the centre pixel is the border's, none of the fill.
+    let (fill, border) = ([1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0]);
+    let q = Quad::new(Rect::new(0.0, 0.0, 5.0, 5.0), fill).border(3.0, border);
+    let mut px = [0u32; 25];
+    quad(&mut Target { px: &mut px, stride: 5, y0: 0 }, &q, IRect::new(0, 0, 5, 5), 1.0);
+    assert_eq!(px[12], pack(premul(border)));
+  }
 
   #[test]
   fn centres_pick_pixels() {
