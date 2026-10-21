@@ -414,25 +414,15 @@ impl Cache {
     self.chains.len() - 1
   }
 
-  /// Splits `s` into runs of one font: the chain's first font while it has the characters,
-  /// else the first fallback that has one (the first font when none does); marks and joiners
-  /// stay with the character before.
+  /// Splits `s` into runs of one font ([runs]): the chain's first font, else its fallbacks in
+  /// order.
   fn itemize(&mut self, chain: usize, s: &str) -> Vec<(Range<usize>, Arc<FontFile>)> {
-    let mut runs: Vec<(Range<usize>, usize)> = Vec::new();
-    for (i, c) in s.char_indices() {
-      let ch = &self.chains[chain];
-      let pick = match runs.last() {
-        Some(r) if joins(c) => r.1,
-        _ if c.is_control() || has_char(ch.primary_charset, c) => 0,
-        _ => ch.fallbacks.iter().position(|f| has_char(charset(f.0), c)).map_or(0, |k| k + 1),
-      };
-
-      let end = i + c.len_utf8();
-      match runs.last_mut() {
-        Some(r) if r.1 == pick => r.0.end = end,
-        _ => runs.push((i..end, pick)),
-      }
-    }
+    let ch = &self.chains[chain];
+    let has = |font: usize, c: char| match font {
+      0 => has_char(ch.primary_charset, c),
+      k => has_char(charset(ch.fallbacks[k - 1].0), c),
+    };
+    let runs = runs(s, ch.fallbacks.len() + 1, has);
 
     let mut out = Vec::with_capacity(runs.len());
     for (range, pick) in runs {
@@ -456,6 +446,63 @@ impl Cache {
     self.chains[chain].fallbacks[k].1 = Some(f.clone());
     Some(f)
   }
+}
+
+/// Runs of one font for `s` from fonts `0..fonts` (`has(font, c)`: whether it has `c`), by
+/// cluster (a character with the marks, joiners and selectors after it, what a joiner links,
+/// a pair of regional indicators): the first font with the whole cluster, else the first with
+/// its first character, else font 0. A joined emoji or a letter with its mark is shaped in one
+/// font.
+fn runs(s: &str, fonts: usize, has: impl Fn(usize, char) -> bool) -> Vec<(Range<usize>, usize)> {
+  let mut out: Vec<(Range<usize>, usize)> = Vec::new();
+  for cluster in clusters(s) {
+    let text = &s[cluster.clone()];
+    let first = text.chars().next().unwrap_or(' ');
+    let pick = match first.is_control() {
+      true => 0,
+      false => {
+        let all = |f: &usize| text.chars().filter(|&c| !ignorable(c)).all(|c| has(*f, c));
+        let any = |f: &usize| has(*f, first);
+        (0..fonts).find(all).or_else(|| (0..fonts).find(any)).unwrap_or(0)
+      }
+    };
+
+    match out.last_mut() {
+      Some(r) if r.1 == pick => r.0.end = cluster.end,
+      _ => out.push((cluster, pick)),
+    }
+  }
+
+  out
+}
+
+/// The clusters of `s` for picking fonts, as byte ranges.
+fn clusters(s: &str) -> Vec<Range<usize>> {
+  let regional = |c: char| matches!(c as u32, 0x1f1e6..=0x1f1ff);
+  let mut out: Vec<Range<usize>> = Vec::new();
+  let (mut prev, mut indicators) = (None, 0);
+  for (i, c) in s.char_indices() {
+    let end = i + c.len_utf8();
+    let linked = prev == Some('\u{200d}') || (regional(c) && indicators % 2 == 1);
+    match out.last_mut() {
+      Some(r) if joins(c) || linked => r.end = end,
+      _ => {
+        out.push(i..end);
+        indicators = 0;
+      }
+    }
+
+    indicators += regional(c) as usize;
+    prev = Some(c);
+  }
+
+  out
+}
+
+/// Characters a font needn't have for a cluster: joiners, variation selectors and tags draw
+/// nothing of their own.
+fn ignorable(c: char) -> bool {
+  matches!(c as u32, 0x200c..=0x200d | 0xfe00..=0xfe0f | 0xe0020..=0xe007f | 0xe0100..=0xe01ef)
 }
 
 /// Characters that belong to the cluster before them: combining marks, joiners, variation
@@ -713,4 +760,37 @@ pub fn rasterize(
   }
 
   Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  /// Two fonts: a text one (Latin letters, ❤) and an emoji one (people, ❤, the acute accent).
+  fn has(font: usize, c: char) -> bool {
+    match font {
+      0 => c.is_ascii_alphabetic() || c == '❤',
+      _ => matches!(c, '👩' | '👨' | '❤' | '\u{301}' | 'e' | '🇺' | '🇦'),
+    }
+  }
+
+  fn picks(s: &str) -> Vec<(&str, usize)> {
+    runs(s, 2, has).into_iter().map(|(r, f)| (&s[r], f)).collect()
+  }
+
+  #[test]
+  fn clusters_keep_one_font() {
+    // A joined emoji whose heart the text font has too: one run in the emoji font.
+    assert_eq!(
+      picks("a👩\u{200d}❤\u{fe0f}\u{200d}👨b"),
+      [("a", 0), ("👩\u{200d}❤\u{fe0f}\u{200d}👨", 1), ("b", 0)]
+    );
+    // A letter with a mark only the other font has: both there.
+    assert_eq!(picks("ae\u{301}"), [("a", 0), ("e\u{301}", 1)]);
+    // Neither has the whole cluster: the font of its first character.
+    assert_eq!(picks("a\u{302}b"), [("a\u{302}b", 0)]);
+    // A heart alone stays in the text font; flags pair up.
+    assert_eq!(picks("❤🇺🇦"), [("❤", 0), ("🇺🇦", 1)]);
+    assert_eq!(clusters("🇺🇦🇺🇦").len(), 2);
+  }
 }
