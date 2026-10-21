@@ -239,7 +239,9 @@ impl Ui<'_> {
     }
 
     (st.mouse, st.offset) = (self.mouse(), self.scroll(list).map_or(0.0, |s| s.offset.y));
-    let pop = style.hit().focusable_quiet().gap(0.0);
+    // No wider than the window: its labels end in "…" instead.
+    let w = (self.size().w - 2.0 * EDGE).max(0.0);
+    let pop = style.hit().focusable_quiet().gap(0.0).max_w(w).min_w(style.min[0].min(w));
     let fl = match placed {
       true => Float::window().anchor(0.0, ay).offset(x, y).z(MENU_Z + 1),
       // Out of sight; seen from the next frame, placed and scrolled, its scrollbar showing when
@@ -585,6 +587,30 @@ mod tests {
     h.frame();
     h.frame();
     assert!(h.rect(menu).is_none() && !h.app().open);
+  }
+
+  /// A menu with a label longer than its window is wide.
+  struct Wide;
+
+  impl App for Wide {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.id("m").menu("Menu", |ui| {
+        ui.menu_item(
+          "A label far longer than this narrow window is wide, which ends in an ellipsis",
+        );
+      });
+    }
+  }
+
+  #[test]
+  fn a_menu_is_no_wider_than_its_window() {
+    let mut h = Harness::new(Wide, Size::new(200.0, 200.0), 1.0);
+    h.frame();
+    h.click_id(Id::of("m"));
+    h.frame();
+    h.frame();
+    let m = h.rect(Id::of("m").key("menu")).unwrap();
+    assert!(m.x >= 0.0 && m.x + m.w <= 200.0, "{m:?}");
   }
 
   #[test]
