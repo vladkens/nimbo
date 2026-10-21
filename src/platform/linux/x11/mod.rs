@@ -40,7 +40,6 @@ use super::{CLICK_DIST, CLICK_TIME, Res};
 use crate::Config;
 use crate::app::{App, Appearance, Clock, Event, Mods, MouseButton, Phase, Runtime, WHEEL_LINE};
 use crate::cpu::raster::IRect;
-use crate::hotkey::ModKey;
 use crate::platform::{Pace, points};
 use crate::scene::{Point, Size};
 use crate::ui::Cursor;
@@ -908,6 +907,7 @@ impl Win {
     }
 
     let (k, utf8) = kb.key(key, repeat);
+    let modifier = kb.modifier(key, k.code);
     if own && !repeat {
       kb.update_key(key, down);
     }
@@ -916,8 +916,8 @@ impl Win {
 
     // Modifier keys reach the app as [Event::Mods] and, by their side, [Event::Modifier], as on
     // macOS (`flagsChanged:`).
-    if (54..=63).contains(&k.code) {
-      if let Some(key) = ModKey::of_mac(k.code).filter(|_| !repeat) {
+    if let Some(side) = modifier {
+      if let Some(key) = side.filter(|_| !repeat) {
         self.send(Event::Modifier { key, down });
       }
 

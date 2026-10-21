@@ -11,6 +11,7 @@ use std::sync::OnceLock;
 
 use super::dl::{Lib, fns};
 use crate::app::Mods;
+use crate::hotkey::ModKey;
 use crate::keys::{self, Key, KeyEvent};
 
 type P = *mut c_void;
@@ -313,8 +314,13 @@ impl Keyboard {
     let sym = unsafe { (s.f.xkb_state_key_get_one_sym)(self.state, key + 8) };
     let ch = char::from_u32(unsafe { (s.f.xkb_keysym_to_utf32)(sym) }).filter(|&c| c != '\0');
     let shortcut = mods.cmd || mods.ctrl;
-    // The keypad's keys by what they do now (Num Lock off: arrows), else by their place.
-    let named = keypad(sym).or_else(|| kvk(key).and_then(Key::named));
+    // Named keys by what the keymap makes of them now (the keypad's arrows with Num Lock off,
+    // Caps Lock remapped to Escape); by their place only when the key has no symbol.
+    let named = match sym {
+      0 => kvk(key).and_then(Key::named),
+      sym => named(sym),
+    };
+
     let k = named.unwrap_or_else(|| match ch {
       Some(c) if shortcut && !c.is_ascii() => self
         .ascii(key, mods.shift)
@@ -332,6 +338,20 @@ impl Keyboard {
     };
 
     (KeyEvent { key: k, text, code, mods, repeat }, utf8)
+  }
+
+  /// The key (evdev code `key`, at virtual key code `code`) as a modifier, by what its keysym
+  /// does now: `Some` for the modifier keys, with the [ModKey] its keysym names, else its
+  /// place's (none for Caps Lock). A modifier's place remapped to another key (`caps:escape`)
+  /// is that key; a key remapped to a modifier (`ctrl:swapcaps`) is one. A key without a
+  /// symbol goes by its place.
+  pub fn modifier(&self, key: u32, code: u16) -> Option<Option<ModKey>> {
+    let by_place = || (54..=63).contains(&code).then(|| ModKey::of_mac(code));
+    let Some(s) = sys() else { return by_place() };
+    match unsafe { (s.f.xkb_state_key_get_one_sym)(self.state, key + 8) } {
+      0 => by_place(),
+      sym => modifier(sym).map(|side| side.or_else(|| ModKey::of_mac(code))),
+    }
   }
 
   /// What a key nobody used does: a dead key or compose sequence goes to the compose state,
@@ -416,20 +436,43 @@ fn shortcut_mods(m: Mods) -> bool {
   m.cmd || m.ctrl || m.alt
 }
 
-/// The keypad's navigation keysyms (<xkbcommon/xkbcommon-keysyms.h>, `XKB_KEY_KP_*`): what its
-/// keys are with Num Lock off, or Enter.
-fn keypad(sym: u32) -> Option<Key> {
+/// The named key a keysym is (<xkbcommon/xkbcommon-keysyms.h>): what the layout and its options
+/// make of the key, wherever it is (Caps Lock as Escape with `caps:escape`), and the keypad's
+/// keys with Num Lock off (`XKB_KEY_KP_*`).
+fn named(sym: u32) -> Option<Key> {
   Some(match sym {
-    0xff8d => Key::Enter,
-    0xff95 => Key::Home,
-    0xff96 => Key::Left,
-    0xff97 => Key::Up,
-    0xff98 => Key::Right,
-    0xff99 => Key::Down,
-    0xff9a => Key::PageUp,
-    0xff9b => Key::PageDown,
-    0xff9c => Key::End,
-    0xff9f => Key::Delete,
+    0xff0d | 0xff8d => Key::Enter,
+    // Tab, and ISO_Left_Tab: Shift-Tab.
+    0xff09 | 0xfe20 => Key::Tab,
+    0xff08 => Key::Backspace,
+    0xffff | 0xff9f => Key::Delete,
+    0xff1b => Key::Escape,
+    0xff51 | 0xff96 => Key::Left,
+    0xff52 | 0xff97 => Key::Up,
+    0xff53 | 0xff98 => Key::Right,
+    0xff54 | 0xff99 => Key::Down,
+    0xff50 | 0xff95 => Key::Home,
+    0xff57 | 0xff9c => Key::End,
+    0xff55 | 0xff9a => Key::PageUp,
+    0xff56 | 0xff9b => Key::PageDown,
+    0xffbe..=0xffc9 => Key::F((sym - 0xffbe) as u8 + 1),
+    _ => return None,
+  })
+}
+
+/// Whether a keysym is a modifier's (Shift, Control, Caps and Shift Lock, Meta, Alt, Super,
+/// Hyper; the ISO level, latch, lock and group keys), and the [ModKey] it names by its side.
+fn modifier(sym: u32) -> Option<Option<ModKey>> {
+  Some(match sym {
+    0xffe1 => Some(ModKey::LeftShift),
+    0xffe2 => Some(ModKey::RightShift),
+    0xffe3 => Some(ModKey::LeftCtrl),
+    0xffe4 => Some(ModKey::RightCtrl),
+    0xffe9 => Some(ModKey::LeftAlt),
+    0xffea => Some(ModKey::RightAlt),
+    0xffeb | 0xffed => Some(ModKey::LeftMeta),
+    0xffec | 0xffee => Some(ModKey::RightMeta),
+    0xffe5..=0xffe8 | 0xfe01..=0xfe0f => None,
     _ => return None,
   })
 }
@@ -693,6 +736,31 @@ mod tests {
     let (k, text) = kb.key(KP_4, false);
     assert_eq!((k.key, k.text, text.as_str()), (Key::Char('4'), Some('4'), "4"));
     assert_eq!(kb.interpret(KP_4, &k, &text), Typed::Text("4".into()));
+  }
+
+  /// Caps Lock remapped by the layout's options: Escape and Backspace are those keys at Caps
+  /// Lock's place, Control (swapped with Caps Lock) the left Control there.
+  #[test]
+  fn remapped_keys_go_by_their_keysym() {
+    const CAPS: u32 = 58;
+    const SHIFT_L: u32 = 42;
+    let with =
+      |options: &CStr| Keyboard::from_names([None, None, Some(c"us"), None, Some(options)]);
+    let Some(kb) = with(c"caps:escape") else {
+      eprintln!("no xkbcommon: skipped");
+      return;
+    };
+    let (k, _) = kb.key(CAPS, false);
+    assert_eq!((k.key, k.code), (Key::Escape, 57));
+    assert_eq!(kb.modifier(CAPS, k.code), None);
+    assert_eq!(kb.modifier(SHIFT_L, 56), Some(Some(ModKey::LeftShift)));
+
+    let kb = with(c"caps:backspace").unwrap();
+    assert_eq!(kb.key(CAPS, false).0.key, Key::Backspace);
+    let kb = with(c"ctrl:swapcaps").unwrap();
+    assert_eq!(kb.modifier(CAPS, 57), Some(Some(ModKey::LeftCtrl)));
+    let kb = with(c"").unwrap();
+    assert_eq!(kb.modifier(CAPS, 57), Some(None), "Caps Lock: a modifier with no side");
   }
 
   #[test]
