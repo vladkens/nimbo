@@ -28,6 +28,7 @@ use super::Res;
 use crate::Config;
 use crate::app::{App, Appearance, Clock, Event, Runtime};
 use crate::cpu::raster::IRect;
+use crate::platform::points;
 use crate::scene::Size;
 
 /// The frame interval while the runtime animates: 60 Hz (the display's rate isn't read).
@@ -292,17 +293,6 @@ fn px(points: f32, scale: f32) -> u32 {
   (points * scale).round().max(1.0) as u32
 }
 
-/// The points of `px` pixels, the least that the renderer's pixels (`points × scale`, cut
-/// down) give back whole at a fractional scale.
-fn points(px: u32, scale: f32) -> f32 {
-  let mut p = px as f32 / scale;
-  while ((p * scale) as u32) < px {
-    p = p.next_up();
-  }
-
-  p
-}
-
 fn capitalized(s: &str) -> String {
   let mut cs = s.chars();
   cs.next().map(|c| c.to_uppercase().chain(cs).collect()).unwrap_or_default()
@@ -546,16 +536,6 @@ impl Win {
 #[cfg(test)]
 mod tests {
   use super::*;
-
-  #[test]
-  fn points_give_their_pixels_back() {
-    for scale in [1.0, 1.25, 1.5, 1.75, 2.0, 2.5] {
-      for px in 1..2000 {
-        let p = points(px, scale);
-        assert_eq!(crate::cpu::Renderer::pixel_size(Size::new(p, p), scale).0, px as usize);
-      }
-    }
-  }
 
   #[test]
   fn resources_give_the_dpi() {

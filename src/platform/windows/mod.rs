@@ -32,6 +32,7 @@ use crate::Config;
 use crate::app::{App, Appearance, Clock, Event, Runtime};
 use crate::cpu::Renderer;
 use crate::cpu::raster::IRect;
+use crate::platform::points;
 use crate::scene::Size;
 
 /// Posted by the waker: something changed on another thread.
@@ -148,7 +149,7 @@ impl Window {
       return;
     }
 
-    let size = Size::new(w as f32 / self.scale, h as f32 / self.scale);
+    let size = Size::new(points(w as u32, self.scale), points(h as u32, self.scale));
     self.rt.resize(size, self.scale);
     self.rt.frame();
     self.last = Some(Instant::now());

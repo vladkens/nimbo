@@ -64,3 +64,32 @@ compile_error!("nimbo runs on macOS, Windows and Linux");
 
 pub(crate) use imp::perf_cores;
 pub use imp::{appearance, run};
+
+/// The points of `px` pixels at `scale`: the least that the renderer's pixels (`points × scale`,
+/// cut down: [crate::cpu::Renderer::pixel_size]) give back whole at a fractional scale, where
+/// `px / scale` alone can lose the last row (454 px at 1.75).
+#[cfg(any(test, not(target_os = "macos")))]
+pub(crate) fn points(px: u32, scale: f32) -> f32 {
+  let mut p = px as f32 / scale;
+  while ((p * scale) as u32) < px {
+    p = p.next_up();
+  }
+
+  p
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::scene::Size;
+
+  #[test]
+  fn points_give_their_pixels_back() {
+    for scale in [1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 3.0] {
+      for px in 1..4000 {
+        let p = points(px, scale);
+        assert_eq!(crate::cpu::Renderer::pixel_size(Size::new(p, p), scale).0, px as usize);
+      }
+    }
+  }
+}
