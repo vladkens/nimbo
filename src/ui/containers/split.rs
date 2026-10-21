@@ -113,8 +113,9 @@ impl<'s> Split<'s> {
 impl Ui<'_> {
   /// A split `id` along `axis` (0: panes side by side) with its divider's handle `handle`:
   /// dragging the handle sets `ratio`, the first pane's share, keeping the pane under the
-  /// pointer where it was grabbed. The fitted share and minimums come from the last frame's
-  /// size: narrower than both minimums, each pane gets its share of what there is.
+  /// pointer where it was grabbed, to where it was released. The fitted share and minimums come
+  /// from the last frame's size, the view running again when the layout changes it ([Ui::settle]):
+  /// narrower than both minimums, each pane gets its share of what there is.
   pub fn split_behavior(
     &mut self,
     id: Id,
@@ -130,10 +131,8 @@ impl Ui<'_> {
     let ax = axis as usize;
     let b = self.begin(handle).unwrap_or_else(|| self.pointer_state(handle));
     let span = self.rect(id).map(|rect| if ax == 0 { (rect.x, rect.w) } else { (rect.y, rect.h) });
-    // Not laid out yet: its minimums fit its size from the next frame, which comes at once.
-    if span.is_none() {
-      self.st.animating = true;
-    }
+    // Fitted to the last frame's size: the view runs again if the layout changes it.
+    self.settle(id);
 
     let min = match span {
       Some((_, len)) if min[0] + min[1] > (len - 1.0).max(0.0) => {
@@ -153,8 +152,10 @@ impl Ui<'_> {
     let was = *ratio;
     let mut grab = std::mem::take(&mut self.state::<Grab>(id).0);
     let along = |p: crate::scene::Point| if ax == 0 { p.x } else { p.y };
-    match (b.held, span, self.mouse(), self.press()) {
-      (true, Some((lo, len)), Some(m), Some(p)) => {
+    // Held, or released since the view last ran: its last move counts.
+    let press = self.press().filter(|_| b.held).or(self.released(handle));
+    match (span, self.mouse(), press.filter(|_| !b.disabled)) {
+      (Some((lo, len)), Some(m), Some(p)) => {
         // From where it was pressed, though no frame came between the press and this move, to
         // the divider where it shows.
         let (at, from) = (along(m), along(p.pos));
@@ -164,7 +165,7 @@ impl Ui<'_> {
       _ => grab = None,
     }
 
-    self.state::<Grab>(id).0 = grab;
+    self.state::<Grab>(id).0 = grab.filter(|_| b.held);
     let handle = Behavior { changed: *ratio != was, ..b };
     SplitBehavior { handle, shown: fit(*ratio), min }
   }
@@ -191,9 +192,8 @@ mod tests {
   #[test]
   fn a_split_narrower_than_its_minimums_shrinks_both_panes() {
     let mut h = Harness::new(Narrow, Size::new(150.0, 200.0), 1.0);
-    // The first frame asks for the one that fits it.
+    // The first frame fits it, its view run again on its layout.
     h.frame();
-    assert!(h.frame());
     let split = h.rect(Id::of("split")).unwrap();
     let kids: Vec<Rect> =
       h.rt.ui.last.nodes.iter().filter(|n| n.parent != 0).map(|n| n.rect).collect();
@@ -227,5 +227,38 @@ mod tests {
     h.frame();
     h.release(x + 10.0, y);
     assert!((h.app().0 - 0.42).abs() < 0.005, "{}", h.app().0);
+    // A drag no frame saw held: pressed, moved and released between frames.
+    h.frame();
+    let x = x + 10.0;
+    h.press(x, y);
+    h.move_to(x + 20.0, y);
+    h.release(x + 20.0, y);
+    h.frame();
+    assert!((h.app().0 - 0.46).abs() < 0.005, "{}", h.app().0);
+  }
+
+  /// A split asked for 10% with a first pane of 200 at least, in a box the app sizes.
+  struct Boxed(f32);
+
+  impl App for Boxed {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.col(Style::new().w(px(self.0)).h(px(200.0)), |ui| {
+        Split::row().initial(0.1).min(200.0, 100.0).show(ui.id("split"), |ui, _| {
+          ui.el(Style::new().grow());
+        });
+      });
+    }
+  }
+
+  #[test]
+  fn a_split_refits_in_the_frame_its_box_grows() {
+    let mut h = Harness::new(Boxed(500.0), Size::new(1000.0, 200.0), 1.0);
+    h.frame();
+    let at = |h: &Harness<Boxed>| h.rect(Id::of("split").key("handle")).unwrap().x + 3.5;
+    assert!((at(&h) - 200.5).abs() < 1.0, "{}", at(&h));
+    // Twice as wide: the first pane keeps its 200, not 40% of the new width.
+    h.app_mut().0 = 1000.0;
+    h.frame();
+    assert!((at(&h) - 200.5).abs() < 1.0, "{}", at(&h));
   }
 }

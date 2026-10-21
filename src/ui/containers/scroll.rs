@@ -117,6 +117,11 @@ impl Ui<'_> {
     };
 
     let BarsState { geos, fade, shown, drag } = self.scroll_bars(id, style.scroll);
+    // Drawn from the last frame's content and viewport: again if the layout changes them.
+    if fade > 0.0 || shown {
+      self.settle(id);
+    }
+
     self.with_id(id).container(1, style, |ui| {
       f(ui);
       // The fades over the content, under the scrollbars, out of the pointer's way: the paint
@@ -194,15 +199,19 @@ impl Ui<'_> {
 
         let Some(first) = geo(&sc, ax, axis(off, ax), both) else { continue };
         let (thumb, track) = (id.key(("thumb", ax)), id.key(("track", ax)));
-        if self.held(thumb)
-          && let (Some(p), Some(m)) = (self.press(), self.mouse())
-        {
+        // Held, or released since the view last ran: its last move counts.
+        let held = self.held(thumb);
+        let press = self.press().filter(|_| held).or(self.released(thumb));
+        if let (Some(p), Some(m)) = (press, mouse) {
           let start = *bars.drag[ax].get_or_insert(axis(off, ax));
           off = with_axis(off, ax, start + (axis(m, ax) - axis(p.pos, ax)) * first.ratio);
-          pinned = true;
-        } else {
+        }
+
+        if !held {
           bars.drag[ax] = None;
         }
+
+        pinned |= held;
 
         if let Some(c) = self.click(track).filter(|c| c.button == MouseButton::Left) {
           let start = axis(Point::new(sc.viewport.x, sc.viewport.y), ax) + BAR_INSET + first.pos;
@@ -262,20 +271,20 @@ mod tests {
   use crate::ui::{Id, Style, Ui, px};
 
   /// A scroll area 200 high over 1000 points of content, fading into red.
-  struct Tall;
+  struct Tall(f32);
 
   impl App for Tall {
     fn view(&mut self, ui: &mut Ui) {
       let s = Style::new().w(px(200.0)).h(px(200.0));
       ui.id("area").fade_edges(rgb(0xff0000), 20.0).scroll_area(s, |ui| {
-        ui.el(Style::new().w(px(200.0)).h(px(1000.0)).bg(rgb(0x0000ff)));
+        ui.el(Style::new().w(px(200.0)).h(px(self.0)).bg(rgb(0x0000ff)));
       });
     }
   }
 
   #[test]
   fn edges_fade_as_the_content_scrolls_away_and_the_thumb_drags() {
-    let mut h = Harness::new(Tall, Size::new(200.0, 200.0), 1.0);
+    let mut h = Harness::new(Tall(1000.0), Size::new(200.0, 200.0), 1.0);
     let area = Id::of("area");
     // At the top: no fade above, the full one below.
     let img = h.render();
@@ -298,6 +307,17 @@ mod tests {
     let off = h.rt.ui.scroll(area).unwrap().offset.y;
     assert!((off - (10.0 + 10.0 * 800.0 / 156.0)).abs() < 0.5, "{off}");
     h.release(x, y + 10.0);
+    // A drag no frame saw held: its last move counts.
+    h.frame();
+    let thumb = h.rect(area.key(("thumb", 1usize))).unwrap();
+    let (x, y) = (thumb.x + thumb.w / 2.0, thumb.y + thumb.h / 2.0);
+    h.press(x, y);
+    h.move_to(x, y + 10.0);
+    h.release(x, y + 10.0);
+    h.frame();
+    let now = h.rt.ui.scroll(area).unwrap().offset.y;
+    assert!((now - off - 10.0 * 800.0 / 156.0).abs() < 0.5, "{off} → {now}");
+    let off = now;
     // A click on the track below the thumb pages down.
     h.click(195.0, 190.0);
     h.frame();
@@ -307,6 +327,11 @@ mod tests {
     h.wait(Duration::from_millis(300));
     assert!(h.wait(Duration::from_millis(3000)) == 0 && h.rt.due_in().is_none());
     assert!(h.rect(area.key(("thumb", 1usize))).is_some());
+    // The content twice as tall: the thumb fits it in the frame that shows it.
+    h.app_mut().0 = 2000.0;
+    h.frame();
+    let thumb = h.rect(area.key(("thumb", 1usize))).unwrap();
+    assert!((thumb.h - 24.0).abs() < 0.5, "{thumb:?}");
     // Left alone, the bars fade out and the frames stop.
     h.leave();
     h.wait(Duration::from_millis(2000));
