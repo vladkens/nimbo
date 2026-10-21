@@ -486,9 +486,11 @@ pub struct Face {
   chain: usize,
 }
 
+/// The same file at the same size from another request is another face: its fallbacks may
+/// differ (Medium falling back to Regular has a chain of its own).
 impl PartialEq for Face {
   fn eq(&self, other: &Self) -> bool {
-    Arc::ptr_eq(&self.file, &other.file) && self.size == other.size
+    Arc::ptr_eq(&self.file, &other.file) && self.size == other.size && self.chain == other.chain
   }
 }
 
