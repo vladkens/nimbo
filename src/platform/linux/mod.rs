@@ -452,6 +452,9 @@ fn front(id: u64) {
       connect_id(clock, c"layout", on_layout as Fp, AFTER, id);
       connect_id(clock, c"after-paint", on_after_paint as Fp, 0, id);
       as_window(id, || with((), |w| w.input.realized((g.gtk_widget_get_window)(area))));
+      // Shown for the first time, it comes in front as any new window: presenting it as well
+      // has Wayland compositors (sway) place it twice, the pointer losing it.
+      return;
     }
 
     (g.gtk_window_present)(window);
