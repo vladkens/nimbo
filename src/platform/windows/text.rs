@@ -739,6 +739,14 @@ fn color_layers(face: &Face, id: u16, em: f32) -> Option<Vec<(u16, Option<[f32; 
   Some(layers)
 }
 
+/// How glyph `id` of a colour face draws: `None` a monochrome one (no colour layers:
+/// `DWRITE_E_NOCOLOR`), coverage tinted like text; `Some(true)` colour with layers in the text's
+/// colour (palette index 0xFFFF), `Some(false)` colour alone.
+pub fn color_glyph(face: &Face, id: u16) -> Option<bool> {
+  let layers = face.color.then(|| color_layers(face, id, face.size)).flatten()?;
+  Some(layers.iter().any(|(_, c)| c.is_none()))
+}
+
 /// The glyphs drawn for `id`: its colour layers in a colour face, else itself.
 fn layers(face: &Face, id: u16, em: f32) -> Vec<(u16, Option<[f32; 4]>)> {
   let layers = face.color.then(|| color_layers(face, id, em)).flatten();
@@ -765,8 +773,8 @@ pub fn glyph_box(face: &Face, id: u16, scale: f32, subpixel: u8) -> Option<Glyph
 
 /// Draws glyph `id` into the pixels of `b` (from [glyph_box] with the same `subpixel`), rows
 /// top-down: coverage, one byte per pixel (with smoothing, corrected as DirectWrite draws it for
-/// the text's polarity: [alpha_tables]), or premultiplied sRGB RGBA for a colour face (`color`):
-/// its layers one over another, those in the text's colour black.
+/// the text's polarity: [alpha_tables]), or premultiplied sRGB RGBA for a colour glyph (`color`):
+/// its layers one over another, those in the text's colour in `raster.text`.
 pub fn rasterize(
   face: &Face,
   id: u16,
@@ -793,7 +801,8 @@ pub fn rasterize(
     let Some(cov) = analysis(&face.face, em, id, x).and_then(|a| coverage(&a, &r)) else {
       continue;
     };
-    let [cr, cg, cb, ca] = c.unwrap_or([0.0, 0.0, 0.0, 1.0]);
+    let [r, g, b] = raster.text.map(|v| v as f32 / 255.0);
+    let [cr, cg, cb, ca] = c.unwrap_or([r, g, b, 1.0]);
     for (px, &k) in rgba.as_chunks_mut::<4>().0.iter_mut().zip(&cov) {
       let a = k as f32 / 255.0 * ca;
       if a <= 0.0 {
@@ -812,6 +821,7 @@ pub fn rasterize(
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::text::TextSystem;
 
   #[test]
   fn requests_keep_their_format() {
@@ -819,5 +829,42 @@ mod tests {
     let medium = face(Font { weight: Weight::Medium, ..Font::ui(13.0) });
     assert!(regular == regular.clone(), "a clone shares the format");
     assert!(regular != medium, "another weight keeps its own format, even on the same face");
+  }
+
+  /// The colour emoji font (where 😀 falls back to) and how its first 20000 glyphs with ink draw.
+  fn emoji_font_glyphs(ts: &mut TextSystem) -> Vec<(Glyph, Option<bool>)> {
+    let g = ts.layout("😀", Font::ui(13.0)).glyphs[0];
+    let f = ts.faces[g.face as usize].clone();
+    assert!(f.color, "no colour emoji font");
+    let ink = |id| glyph_box(&f, id, 1.0, 0).is_some();
+    let glyph = |id| Glyph { id, ..g };
+    (1..20000).filter(|&id| ink(id)).map(|id| (glyph(id), color_glyph(&f, id))).collect()
+  }
+
+  /// A monochrome glyph of the colour emoji font is coverage, tinted like text: white on dark
+  /// stays white. A colour one with layers in the text's colour takes it.
+  #[test]
+  fn colour_fonts_draw_mono_glyphs_as_text() {
+    let mut ts = TextSystem::new(2.0);
+    let glyphs = emoji_font_glyphs(&mut ts);
+    assert!(glyphs.iter().any(|g| g.1 == Some(false)), "no colour glyphs");
+
+    let Some(&(mono, _)) = glyphs.iter().find(|g| g.1.is_none()) else {
+      println!("no monochrome glyph in the colour emoji font: skipped");
+      return;
+    };
+    let a = ts.glyph(mono.face, mono.id, 0, [1.0; 4]).unwrap();
+    assert!(!a.color, "glyph {} in the coverage atlas", mono.id);
+
+    let Some(&(fg, _)) = glyphs.iter().find(|g| g.1 == Some(true)) else {
+      println!("no glyph with layers in the text's colour: skipped");
+      return;
+    };
+    let pixels = |ts: &mut TextSystem, color| {
+      ts.glyph(fg.face, fg.id, 0, color).unwrap();
+      ts.uploads().next_back().unwrap().data
+    };
+    let (white, black) = (pixels(&mut ts, [1.0; 4]), pixels(&mut ts, [0.0, 0.0, 0.0, 1.0]));
+    assert!(white != black, "glyph {} takes the text's colour", fg.id);
   }
 }

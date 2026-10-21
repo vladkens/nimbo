@@ -480,8 +480,6 @@ impl Frame<'_> {
     let scale = self.scale;
     let line = self.text.layout(s, font);
     let baseline = (y * scale).round();
-    // Rec. 709 luma of the sRGB colour: dark text gets the glyphs smoothed for light grounds.
-    let dark = 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2] < 0.5;
     // The line's ink bounds, and a pixel more each way for the snapping below.
     let frame = Rect::new(0.0, 0.0, self.size.w, self.size.h);
     let view = self.scene.clip().map_or(frame, |c| c.intersect(frame));
@@ -499,7 +497,7 @@ impl Frame<'_> {
       let px = pen * scale;
       // Quarters right of the pixel the glyph starts in: left of the origin too.
       let subpixel = (((px - px.floor()) * 4.0) as u8).min(3);
-      let Some(a) = self.text.glyph(g.face, g.id, subpixel, dark) else { continue };
+      let Some(a) = self.text.glyph(g.face, g.id, subpixel, color) else { continue };
       let left = if a.color { px.round() } else { px.floor() };
       // A mark the shaper raised, by whole pixels like the baseline.
       let top = baseline - (g.y * scale).round() - a.top;

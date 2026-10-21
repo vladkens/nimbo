@@ -153,7 +153,7 @@ fn check(h: &mut Harness<Text>, p: &Palette) {
   // About an em wide, in any font: a colour one, or the missing glyph's box.
   let em = SCRIPTS[2].font.size;
   assert!((0.5 * em..2.0 * em).contains(&(next.x - g.x)), "{g:?} {next:?}");
-  let color = h.rt.text.glyph(g.face, g.id, 0, false).is_some_and(|a| a.color);
+  let color = h.rt.text.glyph(g.face, g.id, 0, [1.0; 4]).is_some_and(|a| a.color);
   if cfg!(target_os = "linux") && !color {
     eprintln!("no colour emoji font: skipped");
   } else {

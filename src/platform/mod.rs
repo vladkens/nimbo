@@ -65,6 +65,10 @@
 //!     weight.
 //!   - `pub fn metrics(face: &Face) -> Metrics`: ascent, descent, leading in points.
 //!   - `pub fn is_color(face: &Face) -> bool`: colour glyphs (emoji), drawn as RGBA.
+//!   - `pub fn color_glyph(face: &Face, id: u16) -> Option<bool>`: how a colour face's glyph draws:
+//!     `None` as coverage (a monochrome glyph, tinted like text), `Some(true)` as colour with
+//!     layers in the text's colour (`raster.text`, so a bitmap per colour), `Some(false)` as colour
+//!     alone.
 //!   - `pub fn shape(face: &Face, s: &str, index: impl FnMut(Face) -> u16) -> Line`: shapes one
 //!     line with kerning, ligatures and font fallback; each run's face (after fallback) is given to
 //!     `index` for its number; glyph ids, pen x and the offset up from the baseline in points, and
@@ -75,7 +79,7 @@
 //!   - `pub fn rasterize(face: &Face, id: u16, subpixel: u8, b: &GlyphBox, raster: Raster, color:
 //!     bool) -> Option<Vec<u8>>`: the glyph's pixels in that box, rows top-down: coverage (1 byte,
 //!     with `raster.smooth` / `raster.dark` where the OS smooths) or premultiplied sRGB RGBA for a
-//!     colour face.
+//!     colour glyph.
 //!
 //!   Process-wide state (a DirectWrite factory, a FreeType library) lives in the backend:
 //!   [crate::text::TextSystem] is made often and must stay cheap.

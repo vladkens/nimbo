@@ -66,6 +66,11 @@ pub fn is_color(face: &Face) -> bool {
   traits.contains(CTFontSymbolicTraits::TraitColorGlyphs)
 }
 
+/// How a glyph of a colour face draws: every one is a colour bitmap, none in the text's colour.
+pub fn color_glyph(face: &Face, _id: u16) -> Option<bool> {
+  is_color(face).then_some(false)
+}
+
 /// Shapes `s` with CoreText (kerning, ligatures, font fallback); `index` gives the text
 /// system's index of each run's font.
 pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {

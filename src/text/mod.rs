@@ -16,6 +16,7 @@ pub use atlas::{ATLAS_SIZE, AtlasGlyph, COLOR_ATLAS_SIZE, Upload};
 
 use self::atlas::Atlas;
 use crate::platform::text::{self as sys, Face};
+use crate::scene::Color;
 
 /// Shaped lines kept before eviction starts dropping those not drawn in the last frame.
 const LINE_CAP: usize = 4096;
@@ -85,7 +86,7 @@ pub struct GlyphBox {
   pub h: usize,
 }
 
-/// How coverage glyphs are rasterized.
+/// How glyphs are rasterized.
 #[derive(Clone, Copy, Debug)]
 pub struct Raster {
   pub scale: f32,
@@ -94,6 +95,8 @@ pub struct Raster {
   /// With smoothing: rasterize for dark text on a light background, which CoreGraphics
   /// darkens less than light text on dark.
   pub dark: bool,
+  /// The text's sRGB colour, for a colour glyph's layers drawn in it ([sys::color_glyph]).
+  pub text: [u8; 3],
 }
 
 /// A shaped glyph: `face` indexes the text system's faces (the run's font after fallback), `x`
@@ -146,11 +149,13 @@ pub struct TextSystem {
   /// Requested fonts and the face each resolved to: a few, searched in order (a hash lookup
   /// cost more per text element); bounded by [FACE_CAP].
   fonts: Vec<(Font, u16)>,
-  faces: Vec<Face>,
+  pub(crate) faces: Vec<Face>,
   /// Per face.
   metrics: Vec<Metrics>,
   /// Per face: its glyphs are colour bitmaps (Apple Color Emoji).
   color_faces: Vec<bool>,
+  /// Per glyph of a colour face: how it draws ([sys::color_glyph]).
+  color_glyphs: HashMap<(u16, u16), Option<bool>, BuildHasherDefault<FxHasher>>,
   /// Per glyph (face, id): its ink box in points (left, right, top, bottom; y up), from the
   /// backend's pixel box at the scale it was first asked at, padding included.
   ink: HashMap<(u16, u16), Option<[f32; 4]>, BuildHasherDefault<FxHasher>>,
@@ -181,6 +186,7 @@ impl TextSystem {
       faces: Vec::new(),
       metrics: Vec::new(),
       color_faces: Vec::new(),
+      color_glyphs: HashMap::default(),
       ink: HashMap::default(),
       lines: HashMap::default(),
       line_cap: LINE_CAP,
@@ -256,6 +262,7 @@ impl TextSystem {
       self.faces.clear();
       self.metrics.clear();
       self.color_faces.clear();
+      self.color_glyphs.clear();
       self.ink.clear();
       self.lines.clear();
       self.atlas.reset();
@@ -317,18 +324,35 @@ impl TextSystem {
   }
 
   /// The atlas slot of a glyph at one of 4 horizontal subpixel offsets (colour glyphs have
-  /// one), rasterized on first use for `dark` text (on a light background) or light text;
+  /// one), rasterized on first use for text of `color`: dark text (on a light background) or
+  /// light gets its own coverage, and a colour glyph with layers in the text's colour its own
+  /// bitmap per colour. A colour face's monochrome glyph is a coverage one, tinted like text.
   /// `None` for glyphs with no pixels (spaces), when the atlas is full, or for a face there is
   /// no more (a stale line's: [Self::is_current]).
-  pub fn glyph(&mut self, face: u16, id: u16, subpixel: u8, dark: bool) -> Option<AtlasGlyph> {
+  pub fn glyph(&mut self, face: u16, id: u16, subpixel: u8, color: Color) -> Option<AtlasGlyph> {
     let font = self.faces.get(face as usize)?;
+    // Rec. 709 luma of the sRGB colour: dark text gets the glyphs smoothed for light grounds.
     // Only smoothing depends on the text's polarity.
-    let dark = dark && self.smooth;
-    let raster = Raster { scale: self.scale, smooth: self.smooth, dark };
-    match self.color_faces[face as usize] {
-      true => self.color_atlas.glyph(font, raster, (face, id, 0), &mut self.uploads),
-      false => {
-        let key = (face, id, subpixel | (dark as u8) << 2);
+    let dark = 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2] < 0.5 && self.smooth;
+    let text = [0, 1, 2].map(|i| (color[i].clamp(0.0, 1.0) * 255.0).round() as u8);
+    let raster = Raster { scale: self.scale, smooth: self.smooth, dark, text };
+    let paint = match self.color_faces[face as usize] {
+      true => *self.color_glyphs.entry((face, id)).or_insert_with(|| sys::color_glyph(font, id)),
+      false => None,
+    };
+
+    match paint {
+      Some(tinted) => {
+        let [r, g, b] = text;
+        let variant = match tinted {
+          true => 1 << 24 | (r as u32) << 16 | (g as u32) << 8 | b as u32,
+          false => 0,
+        };
+
+        self.color_atlas.glyph(font, raster, (face, id, variant), &mut self.uploads)
+      }
+      None => {
+        let key = (face, id, (subpixel | (dark as u8) << 2) as u32);
         self.atlas.glyph(font, raster, key, &mut self.uploads)
       }
     }
@@ -490,12 +514,12 @@ mod tests {
     let line = ts.layout("ab ", Font::ui(13.0));
     assert_eq!(line.glyphs.len(), 3);
     let g = line.glyphs[0];
-    let a = ts.glyph(g.face, g.id, 0, false).unwrap();
+    let a = ts.glyph(g.face, g.id, 0, [1.0; 4]).unwrap();
     assert_eq!(ts.uploads().count(), 1);
-    assert_eq!(ts.glyph(g.face, g.id, 0, false).unwrap().uv, a.uv);
+    assert_eq!(ts.glyph(g.face, g.id, 0, [1.0; 4]).unwrap().uv, a.uv);
     assert_eq!(ts.uploads().count(), 0);
     let space = line.glyphs[2];
-    assert!(ts.glyph(space.face, space.id, 0, false).is_none());
+    assert!(ts.glyph(space.face, space.id, 0, [1.0; 4]).is_none());
   }
 
   #[test]
@@ -503,8 +527,8 @@ mod tests {
     let mut ts = TextSystem::new(2.0);
     let g = ts.layout("H", Font::ui(13.0)).glyphs[0];
     let at = |a: AtlasGlyph| (a.left, a.top, a.uv.w, a.uv.h);
-    let light = ts.glyph(g.face, g.id, 1, false).unwrap();
-    let dark = ts.glyph(g.face, g.id, 1, true).unwrap();
+    let light = ts.glyph(g.face, g.id, 1, [1.0; 4]).unwrap();
+    let dark = ts.glyph(g.face, g.id, 1, [0.0, 0.0, 0.0, 1.0]).unwrap();
     assert_eq!(at(light), at(dark));
   }
 
@@ -519,8 +543,8 @@ mod tests {
     }
 
     assert_ne!(a.face, rocket.face);
-    assert!(!ts.glyph(a.face, a.id, 1, false).unwrap().color);
-    let g = ts.glyph(rocket.face, rocket.id, 3, false).unwrap();
+    assert!(!ts.glyph(a.face, a.id, 1, [1.0; 4]).unwrap().color);
+    let g = ts.glyph(rocket.face, rocket.id, 3, [1.0; 4]).unwrap();
     assert!(g.color);
     let ups: Vec<_> = ts.uploads().collect();
     assert_eq!(ups.len(), 2);
@@ -530,17 +554,17 @@ mod tests {
     let colorful = up.data.as_chunks::<4>().0.iter().any(|p| p[0].abs_diff(p[2]) > 64);
     assert!(colorful);
     // One variant for every subpixel offset.
-    assert_eq!(ts.glyph(rocket.face, rocket.id, 0, false).unwrap().uv, g.uv);
+    assert_eq!(ts.glyph(rocket.face, rocket.id, 0, [1.0; 4]).unwrap().uv, g.uv);
   }
 
   #[test]
   fn atlas_reset_bumps_epoch() {
     let mut ts = TextSystem::new(2.0);
     let g = ts.layout("x", Font::ui(13.0)).glyphs[0];
-    ts.glyph(g.face, g.id, 0, false);
+    ts.glyph(g.face, g.id, 0, [1.0; 4]);
     assert_eq!(ts.uploads().next().unwrap().epoch, 0);
     ts.set_smoothing(!ts.smoothing());
-    ts.glyph(g.face, g.id, 0, false);
+    ts.glyph(g.face, g.id, 0, [1.0; 4]);
     assert_eq!(ts.uploads().next().unwrap().epoch, 1);
   }
 
@@ -551,7 +575,7 @@ mod tests {
     let line = ts.layout("abcdefghijklmnop", Font::ui(13.0));
     let frame = |ts: &mut TextSystem| {
       for g in &line.glyphs {
-        ts.glyph(g.face, g.id, 0, false);
+        ts.glyph(g.face, g.id, 0, [1.0; 4]);
       }
 
       ts.end_frame()
@@ -563,7 +587,7 @@ mod tests {
     // A glyph larger than the atlas is left out without filling it.
     let big = ts.layout("W", Font::ui(200.0)).glyphs[0];
     ts.atlas.reset();
-    assert!(ts.glyph(big.face, big.id, 0, false).is_none());
+    assert!(ts.glyph(big.face, big.id, 0, [1.0; 4]).is_none());
     assert!(!ts.atlas.full && !ts.end_frame());
   }
 
@@ -585,7 +609,7 @@ mod tests {
     assert!(!ts.end_frame());
     assert!(ts.faces.is_empty());
     let g = ts.layout("x", Font::ui(13.0)).glyphs[0];
-    assert!(ts.glyph(g.face, g.id, 0, false).is_some());
+    assert!(ts.glyph(g.face, g.id, 0, [1.0; 4]).is_some());
     assert!(!ts.end_frame());
   }
 
@@ -603,11 +627,11 @@ mod tests {
     assert!(ts.end_frame(), "past the cap: the faces start over");
     assert!(!ts.is_current(&kept));
     let g = kept.glyphs[0];
-    assert!(ts.glyph(g.face, g.id, 0, false).is_none(), "no panic on a face gone");
+    assert!(ts.glyph(g.face, g.id, 0, [1.0; 4]).is_none(), "no panic on a face gone");
     let fresh = ts.layout("kept", Font::ui(100.0));
     assert!(ts.is_current(&fresh));
     let g = fresh.glyphs[0];
-    assert!(ts.glyph(g.face, g.id, 0, false).is_some());
+    assert!(ts.glyph(g.face, g.id, 0, [1.0; 4]).is_some());
   }
 
   #[test]
@@ -615,10 +639,10 @@ mod tests {
     let mut ts = TextSystem::new(1.0);
     let line = ts.layout("scale", Font::ui(13.0));
     let g = line.glyphs[0];
-    let small = ts.glyph(g.face, g.id, 0, false).unwrap();
+    let small = ts.glyph(g.face, g.id, 0, [1.0; 4]).unwrap();
     ts.set_scale(2.0);
     assert!(Rc::ptr_eq(&line, &ts.layout("scale", Font::ui(13.0))));
-    let big = ts.glyph(g.face, g.id, 0, false).unwrap();
+    let big = ts.glyph(g.face, g.id, 0, [1.0; 4]).unwrap();
     assert!(big.uv.h > small.uv.h * 1.5, "{big:?} vs {small:?}");
   }
 }
