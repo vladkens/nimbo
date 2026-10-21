@@ -62,7 +62,7 @@ use self::store::{Anim, Store};
 use crate::app::{Appearance, Clipboard, Event, MouseButton, Waker};
 use crate::keys::{Binding, Command, KeyEvent};
 use crate::scene::{Frame, ImageId, Images, Point, Rect, Size};
-use crate::text::{Font, FxHasher, Metrics, TextSystem};
+use crate::text::{Font, FxHasher, Ink, Metrics, TextSystem};
 
 /// How long [UiState::flash] shows an element pressed.
 const FLASH: Duration = Duration::from_millis(120);
@@ -1193,6 +1193,11 @@ pub(crate) struct Sys<'a> {
 impl Measure for Sys<'_> {
   fn width(&mut self, s: &str, font: Font) -> f32 {
     self.text.measure(s, font)
+  }
+
+  fn line(&mut self, s: &str, font: Font) -> (f32, Ink) {
+    let line = self.text.layout(s, font);
+    (line.width, line.ink)
   }
 
   fn metrics(&mut self, font: Font) -> Metrics {

@@ -3,11 +3,12 @@
 //! The paint pass: walks the laid-out tree into the frame's scene. Each box draws its shadow,
 //! background and border, then its content (text lines, an image, a canvas callback), then its
 //! children, clipped when it clips. Overlays follow, each in a new layer, by z. Elements outside
-//! the window or their clip are skipped.
+//! the window or their clip are skipped; text by where its ink reaches, not its box.
 
 use super::layout::{ELLIPSIS, Kind, Tree};
 use super::{Canvas, FocusRing, Style};
 use crate::scene::{Color, Frame, Quad, Rect};
+use crate::text::Ink;
 
 /// Paints `t`; `ring` rings node `.0`, the focused one.
 pub(super) fn paint(
@@ -84,7 +85,14 @@ fn node(
   let alpha = alpha * s.opacity;
   let leaf = n.end as usize == i + 1;
   let own = ring.filter(|&(k, _)| k == i).map(|(_, ring)| ring);
-  if alpha <= 0.0 || (leaf || s.clip) && !visible(outer(s, r, own), clip) {
+  let shown = |out: Rect| match n.kind {
+    // Its ink can reach past its box: stacked accents, a line height less than the font's.
+    Kind::Text { lines, baseline, line_h, .. } if !visible(out, clip) => {
+      visible(ink_rect(t, lines, r, baseline, line_h), clip)
+    }
+    _ => visible(out, clip),
+  };
+  if alpha <= 0.0 || (leaf || s.clip) && !shown(outer(s, r, own)) {
     return;
   }
 
@@ -104,10 +112,12 @@ fn node(
       let color = fade(style.color, alpha);
       let (mut first, mut last) = lines;
       if last - first > 1 {
-        // Only the lines inside the clip.
-        let n = (last - first) as f32;
-        first += ((clip.y - r.y) / line_h).floor().clamp(0.0, n) as u32;
-        last = lines.0 + ((clip.y + clip.h - r.y) / line_h).ceil().clamp(0.0, n) as u32;
+        // Only the lines whose ink reaches into the clip, from their baselines.
+        let ink = reach(t, lines);
+        let (n, top) = ((last - first) as f32, r.y + baseline);
+        first += ((clip.y - ink.down - top) / line_h).floor().clamp(0.0, n) as u32;
+        last =
+          lines.0 + ((clip.y + clip.h + ink.up - top) / line_h + 1.0).floor().clamp(0.0, n) as u32;
       }
 
       for k in first..last {
@@ -157,6 +167,27 @@ fn node(
   if s.clip {
     f.pop_clip();
   }
+}
+
+/// The farthest the ink of lines `lines` of [Tree::lines] reaches past their pens: `right` past
+/// their ends; a point more each way for the pixel snapping.
+fn reach(t: &Tree, lines: (u32, u32)) -> Ink {
+  let mut r = Ink::default();
+  for l in &t.lines[lines.0 as usize..lines.1 as usize] {
+    let i = l.ink;
+    (r.left, r.right) = (r.left.max(i.left), r.right.max(l.width + i.right));
+    (r.up, r.down) = (r.up.max(i.up), r.down.max(i.down));
+  }
+
+  Ink { left: r.left + 1.0, right: r.right + 1.0, up: r.up + 1.0, down: r.down + 1.0 }
+}
+
+/// Where a text box at `r` draws its lines' ink.
+fn ink_rect(t: &Tree, lines: (u32, u32), r: Rect, baseline: f32, line_h: f32) -> Rect {
+  let ink = reach(t, lines);
+  let (top, n) = (r.y + baseline, lines.1.saturating_sub(lines.0).max(1) as f32);
+  let bottom = top + (n - 1.0) * line_h;
+  Rect::new(r.x - ink.left, top - ink.up, ink.left + ink.right, bottom + ink.down - top + ink.up)
 }
 
 /// A strikethrough `w` wide from `x` over a line with its baseline at `y`: at half the
@@ -238,6 +269,47 @@ mod tests {
     assert_eq!((layers[2].clip, layers[2].quads.len(), layers[2].glyphs.len()), (None, 1, 3));
     assert_eq!(layers[2].quads[0].color[3], 0.5);
     assert_eq!(scene.counts().quads + scene.counts().glyphs, 8);
+  }
+
+  /// The glyphs painted of `body(ui)` in a 100 × 50 window.
+  fn glyphs(body: impl FnOnce(&mut Ui)) -> usize {
+    let (size, scale) = (Size::new(100.0, 50.0), 1.0);
+    let (mut scene, mut text, mut images) =
+      (Scene::default(), TextSystem::new(scale), Images::default());
+    let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
+    body(&mut ui);
+    let mut sys = Sys { text: &mut text, images: &images, scale };
+    ui.layout(&mut sys, scale);
+    let mut f = Frame {
+      size,
+      scale,
+      mouse: None,
+      now: Duration::ZERO,
+      scene: &mut scene,
+      text: &mut text,
+      images: &mut images,
+      animate: false,
+    };
+    ui.paint(&mut f);
+    scene.counts().glyphs
+  }
+
+  #[test]
+  fn ink_above_its_box_paints() {
+    let font = Font::ui(13.0);
+    let tall = format!("e{}", "\u{301}".repeat(24));
+    let up = TextSystem::new(1.0).layout(&tall, font).ink.up;
+    assert!(up > 4.0 * font.size, "the accents stack {up} pt high");
+    let style = TextStyle::new(font, [1.0; 4]).nowrap();
+    // The box 2 em below the window, its accents up in it.
+    let below =
+      glyphs(|ui| ui.float(Float::window().offset(0.0, 50.0 + 2.0 * 13.0)).text(&tall, style));
+    assert!(below > 0);
+    // The paragraph's first line in the window, the second's box below it, its accents up in it.
+    let tight = style.line_h(13.0);
+    let text = format!("a\n{tall}");
+    let lines = glyphs(|ui| ui.float(Float::window().offset(0.0, 40.0)).text(&text, tight));
+    assert!(lines > 1, "{lines} glyphs");
   }
 
   #[test]
