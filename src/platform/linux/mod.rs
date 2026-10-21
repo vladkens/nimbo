@@ -1,142 +1,142 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The Linux platform: Wayland when the session has it, else X11 ([x11], for X sessions). [run]
-//! picks it: `NIMBO_BACKEND=wayland|x11` forces one; otherwise Wayland when `WAYLAND_DISPLAY`
-//! (or `WAYLAND_SOCKET`) is set and the connection works, else X11 on `DISPLAY`. The text stack
-//! ([text]) and the keyboard ([xkb]) are shared.
+//! The Linux platform on GTK 3, loaded at run time as Sublime Text does ([dl]: no build-time C,
+//! no binding crates). GTK opens the window on Wayland or X11 (GDK picks, `GDK_BACKEND` forces
+//! one) with the title bar the desktop draws, or GTK's own where it draws none (GNOME on
+//! Wayland); every pixel inside is ours. One GtkDrawingArea fills the window: the CPU frame is
+//! drawn into a cairo image surface where its tiles changed, and only those rects go to GTK
+//! (`queue_draw_area`), which paints them in its frame.
 //!
-//! On Wayland (pure-Rust `wayland-client`, no libwayland): an xdg-shell toplevel, CPU frames
-//! presented through `wl_shm` buffers ([shm]) paced by frame callbacks, the scale from
-//! fractional-scale-v1 (with a viewport), else the preferred buffer scale or the outputs'; input
-//! from `wl_seat` (pointer, axis, pinch gestures, keyboard through xkbcommon in [xkb]),
-//! cursor-shape-v1 for cursors (else the Xcursor theme's, [cursor]), the clipboard on
-//! `wl_data_device` ([clip]); the objects' events in [dispatch]. One thread: the loop polls the
-//! display and a wake eventfd with the next timer (or key repeat) as the timeout.
-//!
-//! No client-side decorations: sway and other wlroots compositors (and KDE) draw their own;
-//! GNOME (Mutter) draws none for clients, so a window there has no title bar yet (CSD is to
-//! do).
+//! Frames follow the GdkFrameClock: while the runtime wants frames a tick callback asks for the
+//! layout phase, and the frame is built after GTK's layout, at the size it just gave the area,
+//! so a live resize never stretches. Nothing runs while idle or minimized: timers are GLib
+//! timeouts, a wake from another thread an idle source. Input is in [input] (keys in [keys]),
+//! light or dark in [settings], the text stack in [text] (fontconfig, FreeType, HarfBuzz).
+//! GTK 3 scales by whole numbers only.
 
-mod clip;
-mod cursor;
-mod dispatch;
 mod dl;
-mod shm;
+mod input;
+mod keys;
+mod settings;
 pub mod text;
-mod x11;
-mod xkb;
 
-use std::cell::RefCell;
-use std::ffi::CStr;
-use std::os::fd::OwnedFd;
+use std::cell::{Cell, RefCell};
+use std::ffi::{CStr, CString, c_char, c_int, c_uint, c_ulong, c_void};
 use std::path::Path;
-use std::rc::Rc;
-use std::sync::Arc;
+use std::ptr::{null, null_mut};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use rustix::event::{EventfdFlags, PollFd, PollFlags, Timespec, eventfd, poll};
-use rustix::mm::{MapFlags, ProtFlags, mmap, munmap};
-use wayland_client::backend::WaylandError;
-use wayland_client::globals::registry_queue_init;
-use wayland_client::protocol::wl_compositor::WlCompositor;
-use wayland_client::protocol::wl_data_device_manager::WlDataDeviceManager;
-use wayland_client::protocol::wl_keyboard::WlKeyboard;
-use wayland_client::protocol::wl_output::WlOutput;
-use wayland_client::protocol::wl_pointer::{AxisSource, WlPointer};
-use wayland_client::protocol::wl_registry::WlRegistry;
-use wayland_client::protocol::wl_seat::WlSeat;
-use wayland_client::protocol::wl_shm::WlShm;
-use wayland_client::protocol::wl_surface::WlSurface;
-use wayland_client::{Connection, EventQueue, QueueHandle};
-use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::{
-  Shape, WpCursorShapeDeviceV1,
-};
-use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_manager_v1::WpCursorShapeManagerV1;
-use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
-use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_v1::WpFractionalScaleV1;
-use wayland_protocols::wp::pointer_gestures::zv1::client::zwp_pointer_gesture_pinch_v1::ZwpPointerGesturePinchV1;
-use wayland_protocols::wp::pointer_gestures::zv1::client::zwp_pointer_gestures_v1::ZwpPointerGesturesV1;
-use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
-use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
-use wayland_protocols::xdg::shell::client::xdg_surface::XdgSurface;
-use wayland_protocols::xdg::shell::client::xdg_toplevel::XdgToplevel;
-use wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase;
-
-use self::clip::{Clip, Clipboard, Transfers};
-use self::cursor::Cursors;
-use self::shm::Presenter;
-use self::xkb::{Keyboard, Typed};
+use self::dl::{Lib, fns};
+use self::input::Input;
+pub use self::settings::appearance;
 use crate::Config;
-use crate::app::{App, Appearance, Clock, Event, Mods, MouseButton, Phase, Runtime, WHEEL_LINE};
-use crate::hotkey::ModKey;
-use crate::platform::points;
-use crate::scene::{Point, Size};
+use crate::app::{App, Clipboard, Clock, Event, Runtime};
+use crate::cpu::{Pixels, Renderer};
+use crate::scene::Size;
 use crate::ui::Cursor;
 
+type P = *mut c_void;
+type S = *const c_char;
+/// A callback: an `extern "C" fn` of the signal's real signature, cast.
+type Fp = *const c_void;
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
-/// The longest gap between clicks that counts them as one double (triple) click, in
-/// milliseconds, and how far apart they may be: GTK's defaults (400 ms, 5 px).
-const CLICK_TIME: u32 = 400;
-const CLICK_DIST: f32 = 5.0;
+const TRUE: c_int = 1;
+const FALSE: c_int = 0;
+/// `G_CONNECT_AFTER`: the handler runs after the signal's other ones.
+const AFTER: c_int = 1;
+const WINDOW_TOPLEVEL: c_int = 0;
+/// `CAIRO_FORMAT_RGB24` (32 bits, B G R x in memory, as the CPU renderer writes) and
+/// `CAIRO_OPERATOR_SOURCE`.
+const RGB24: c_int = 1;
+const SOURCE: c_int = 1;
+/// `GDK_FRAME_CLOCK_PHASE_LAYOUT`.
+const LAYOUT: c_int = 1 << 3;
+/// `GDK_WINDOW_STATE_WITHDRAWN | GDK_WINDOW_STATE_ICONIFIED`: not shown.
+const HIDDEN: c_uint = 1 | 2;
+/// `GDK_SELECTION_CLIPBOARD`, a predefined atom.
+const CLIPBOARD: usize = 69;
+/// Frames while animating come at most this often, in µs (120 Hz), give or take [JITTER_US]
+/// of the clock's jitter, which the next deadline makes up.
+const FRAME_US: i64 = 8_333;
+const JITTER_US: i64 = 1_500;
 
-/// The last press: its button, the event's time (milliseconds, wrapping), place and click count.
-type Click = (MouseButton, u32, Point, u32);
+// GTK 3.24's headers; GTK 3's ABI is frozen. A symbol looked up in `libgtk-3.so.0` is found in
+// what it links too: GDK, GLib, GObject, GIO, cairo.
+fns!(Gtk {
+  fn g_set_prgname(name: S);
+  fn g_free(p: P);
+  fn g_signal_connect_data(obj: P, signal: S, cb: Fp, data: P, free: Fp, flags: c_int)
+    -> c_ulong;
+  fn g_idle_add(f: Fp, data: P) -> c_uint;
+  fn g_timeout_add(ms: c_uint, f: Fp, data: P) -> c_uint;
+  fn g_source_remove(id: c_uint) -> c_int;
+  fn g_object_unref(obj: P);
+  fn gdk_display_get_default() -> P;
+  fn gdk_cursor_new_from_name(display: P, name: S) -> P;
+  fn gdk_window_set_cursor(w: P, cursor: P);
+  fn gdk_window_get_state(w: P) -> c_uint;
+  fn gdk_frame_clock_request_phase(clock: P, phase: c_int);
+  fn gdk_frame_clock_get_frame_time(clock: P) -> i64;
+  fn cairo_image_surface_create(format: c_int, w: c_int, h: c_int) -> P;
+  fn cairo_image_surface_get_data(s: P) -> *mut u8;
+  fn cairo_image_surface_get_stride(s: P) -> c_int;
+  fn cairo_surface_status(s: P) -> c_int;
+  fn cairo_surface_flush(s: P);
+  fn cairo_surface_mark_dirty(s: P);
+  fn cairo_surface_set_device_scale(s: P, x: f64, y: f64);
+  fn cairo_surface_destroy(s: P);
+  fn cairo_set_source_surface(cr: P, s: P, x: f64, y: f64);
+  fn cairo_set_operator(cr: P, op: c_int);
+  fn cairo_paint(cr: P);
+  fn gtk_init_check(argc: *mut c_int, argv: P) -> c_int;
+  fn gtk_main();
+  fn gtk_main_level() -> c_uint;
+  fn gtk_main_quit();
+  fn gtk_window_new(kind: c_int) -> P;
+  fn gtk_window_set_title(w: P, title: S);
+  fn gtk_window_set_default_size(w: P, width: c_int, height: c_int);
+  fn gtk_window_set_resizable(w: P, on: c_int);
+  fn gtk_window_resize(w: P, width: c_int, height: c_int);
+  fn gtk_drawing_area_new() -> P;
+  fn gtk_container_add(c: P, w: P);
+  fn gtk_widget_set_size_request(w: P, width: c_int, height: c_int);
+  fn gtk_widget_set_can_focus(w: P, on: c_int);
+  fn gtk_widget_grab_focus(w: P);
+  fn gtk_widget_add_events(w: P, mask: c_int);
+  fn gtk_widget_show_all(w: P);
+  fn gtk_widget_destroy(w: P);
+  fn gtk_widget_queue_draw_area(w: P, x: c_int, y: c_int, width: c_int, height: c_int);
+  fn gtk_widget_add_tick_callback(w: P, cb: Fp, data: P, free: Fp) -> c_uint;
+  fn gtk_widget_get_allocated_width(w: P) -> c_int;
+  fn gtk_widget_get_allocated_height(w: P) -> c_int;
+  fn gtk_widget_get_scale_factor(w: P) -> c_int;
+  fn gtk_widget_get_window(w: P) -> P;
+  fn gtk_widget_get_frame_clock(w: P) -> P;
+  fn gtk_clipboard_get(selection: usize) -> P;
+  fn gtk_clipboard_set_text(c: P, text: S, len: c_int);
+  fn gtk_clipboard_wait_for_text(c: P) -> *mut c_char;
+});
 
-/// A press's click count after the `last` one: one more for the same button within
-/// [CLICK_TIME] and [CLICK_DIST], else 1. By the events' own times, not when they are handled:
-/// presses queued behind a slow paste don't make a double click.
-fn clicks(last: Option<Click>, button: MouseButton, time: u32, pos: Point) -> u32 {
-  match last {
-    Some((b, t, p, n))
-      if b == button
-        && time.wrapping_sub(t) < CLICK_TIME
-        && (p.x - pos.x).abs() < CLICK_DIST
-        && (p.y - pos.y).abs() < CLICK_DIST =>
-    {
-      n + 1
-    }
-    _ => 1,
-  }
+/// `libgtk-3.so.0`, opened by each module for its own functions (the same handle each time).
+fn lib() -> Option<Lib> {
+  Lib::open(&[c"libgtk-3.so.0"])
 }
-/// Frames paced by a timer while a frame waits for a buffer (all held by the compositor, or a
-/// configure's ack that needs one of its size): 120 Hz.
-const TICK: Duration = Duration::from_micros(8333);
 
-/// Opens the app's window and runs the event loop until it closes or quits, on Wayland or X11.
-pub fn run(cfg: &Config, app: Box<dyn App>) {
-  let forced = std::env::var("NIMBO_BACKEND").ok();
-  let wayland =
-    std::env::var_os("WAYLAND_DISPLAY").is_some() || std::env::var_os("WAYLAND_SOCKET").is_some();
-  let res = match forced.as_deref() {
-    Some("x11") => x11::run(cfg, app),
-    Some("wayland") => {
-      Connection::connect_to_env().map_err(Into::into).and_then(|c| run_loop(c, cfg, app))
-    }
-    Some(b) => Err(format!("NIMBO_BACKEND={b:?}: wayland or x11").into()),
-    None if wayland => match Connection::connect_to_env() {
-      Ok(c) => run_loop(c, cfg, app),
-      Err(e) if std::env::var_os("DISPLAY").is_some() => {
-        eprintln!("nimbo: Wayland: {e}; X11 instead");
-        x11::run(cfg, app)
-      }
-      Err(e) => Err(e.into()),
-    },
-    None => x11::run(cfg, app),
-  };
-
-  if let Err(e) = res {
-    eprintln!("nimbo: {e}");
-    std::process::exit(1);
-  }
+fn load() -> Option<&'static Gtk> {
+  static GTK: OnceLock<Option<Gtk>> = OnceLock::new();
+  GTK.get_or_init(|| Gtk::load(&lib()?)).as_ref()
 }
 
-/// The OS's light or dark setting and accent: light until ported (X11 windows follow
-/// XSETTINGS' theme name, [x11]). TODO: the XDG portal's `org.freedesktop.appearance`
-/// `color-scheme` and `accent-color` (`Settings.Read`, the `SettingChanged` signal); light
-/// without a portal.
-pub fn appearance() -> Appearance {
-  Appearance::LIGHT
+/// GTK's functions, once [run] loaded them.
+fn gtk() -> &'static Gtk {
+  load().expect("GTK is loaded before its callbacks run")
+}
+
+/// Connects `cb` to `obj`'s `signal`, with no data: the callbacks find the window in [WIN].
+unsafe fn connect(obj: P, signal: &CStr, cb: Fp, flags: c_int) {
+  unsafe { (gtk().g_signal_connect_data)(obj, signal.as_ptr(), cb, null_mut(), null(), flags) };
 }
 
 /// The performance cores: Intel hybrid CPUs list theirs in `/sys/devices/cpu_core/cpus`
@@ -154,486 +154,244 @@ pub fn perf_cores() -> Option<usize> {
   (n > 0).then_some(n)
 }
 
-// MARK: Window state
+// MARK: Window
 
-/// A `wl_output`: its registry name (to see it go) and its scale.
-pub struct Output {
-  name: u32,
-  obj: WlOutput,
-  scale: i32,
-}
-
-/// A held key that repeats: its evdev code and when it fires next.
-struct Repeat {
-  key: u32,
-  at: Instant,
-}
-
-impl Repeat {
-  /// The repeat after `key` went down or up: a key that repeats takes over at `at`; one that
-  /// doesn't (a modifier) leaves the held key repeating, with the new modifiers; the held key's
-  /// release ends it.
-  fn after(held: Option<Repeat>, key: u32, down: bool, repeats: bool, at: Instant) -> Option<Self> {
-    match (down, held) {
-      (true, _) if repeats => Some(Repeat { key, at }),
-      (false, Some(r)) if r.key == key => None,
-      (_, held) => held,
-    }
-  }
-}
-
-/// The pointer's axis events of one `wl_pointer.frame`; index 0 vertical, 1 horizontal.
-#[derive(Default)]
-struct Axes {
-  source: Option<AxisSource>,
-  value: [f64; 2],
-  /// Wheel clicks in 120ths (`axis_value120`, or `axis_discrete` × 120).
-  v120: [i32; 2],
-  /// The axes that stopped (`axis_stop`).
-  stop: [bool; 2],
-  any: bool,
-}
-
-impl Axes {
-  /// Whether this frame is a touchpad's (a finger, or continuous), and its phase, given the
-  /// axes a finger scroll moves (`scrolling`), which it updates; `None` when it has nothing to
-  /// report. A frame with no source (an `axis_stop` alone) goes on with the scroll under way;
-  /// the scroll ends when every axis it moved stopped, not the first.
-  fn phase(&self, scrolling: &mut [bool; 2]) -> Option<(bool, Phase)> {
-    let was = scrolling.contains(&true);
-    let precise = match self.source {
-      Some(s) => matches!(s, AxisSource::Finger | AxisSource::Continuous),
-      None => was,
-    };
-
-    if !precise {
-      *scrolling = [false; 2];
-      return Some((false, Phase::None));
-    }
-
-    for (i, on) in scrolling.iter_mut().enumerate() {
-      *on = (*on || self.value[i] != 0.0) && !self.stop[i];
-    }
-
-    let phase = match (was, scrolling.contains(&true)) {
-      (false, true) => Phase::Began,
-      (true, true) => Phase::Changed,
-      (true, false) => Phase::Ended,
-      (false, false) => return None,
-    };
-
-    Some((true, phase))
-  }
-}
-
-pub struct Win {
-  qh: QueueHandle<Win>,
+/// The window and everything its callbacks share, in [WIN].
+struct Win {
   rt: Runtime<Box<dyn App>>,
-  surface: WlSurface,
-  _xdg: XdgSurface,
-  top: XdgToplevel,
-  /// The user can resize it ([Config::resizable]) down to `min`; a fixed one gets its new size
-  /// as its least and largest.
+  renderer: Renderer,
+  window: P,
+  area: P,
+  /// The tile hashes of the frame in [SURFACE], its size in pixels and its scale.
+  tiles: Vec<u64>,
+  shown: (usize, usize),
+  shown_scale: f32,
+  /// A tick callback is on: frames are wanted. The frame clock's time the next frame is due
+  /// ([paced]), µs.
+  ticking: bool,
+  next_tick: i64,
+  /// The GLib timeout for the runtime's next timer, and when it fires.
+  timer: Option<(c_uint, Instant)>,
+  /// The user can resize it ([Config::resizable]) down to `min`, which a size the app asks for
+  /// lowers.
   resizable: bool,
   min: Size,
-  viewport: Option<WpViewport>,
-  _fractional: Option<WpFractionalScaleV1>,
-  present: Presenter,
-  /// Logs every frame presented (`NIMBO_TRACE`), and every event with whether it was used
-  /// (`NIMBO_TRACE=2`).
-  trace: bool,
-  trace_events: bool,
+  input: Input,
+  cursor: Option<Cursor>,
+  cursors: Vec<(Cursor, P)>,
+  /// GTK painted our surface in this frame: logged after it.
+  painted: bool,
   frames: u64,
   started: Instant,
-
-  /// Logical size (points), from the last configure.
-  size: Size,
-  pending_size: Option<Size>,
-  /// Maximized, fullscreen or tiled: the window keeps the compositor's size, and a size the app
-  /// asks for meanwhile waits in `asked` until it floats again. The pending configure's too.
-  held: bool,
-  pending_held: bool,
-  asked: Option<Size>,
-  /// Fractional scale in 120ths, when the compositor sends one.
-  scale120: Option<u32>,
-  /// `wl_surface.preferred_buffer_scale` (v6).
-  preferred: Option<i32>,
-  /// Every output, followed as they come and go (the registry), and those the surface is on.
-  outputs: Vec<Output>,
-  entered: Vec<WlOutput>,
-  /// The scale and size the surface was last set up for (buffer scale or viewport).
-  set_scale: f32,
-  set_size: Size,
-  configured: bool,
-  /// A configure was acked: the next commit carries it, with a buffer of its size. Its frame is
-  /// drawn at once, not paced.
-  acked: bool,
-  closed: bool,
-  /// The window has the focus (the toplevel is activated, or the keyboard is ours).
-  focused: bool,
-  frame_pending: bool,
-  next_tick: Option<Instant>,
-
-  pointer: Option<WlPointer>,
-  keyboard: Option<WlKeyboard>,
-  shapes: Option<WpCursorShapeManagerV1>,
-  shape_device: Option<WpCursorShapeDeviceV1>,
-  /// The theme's cursors on a surface of ours, without cursor-shape-v1.
-  cursors: Option<Cursors>,
-  gestures: Option<ZwpPointerGesturesV1>,
-  _pinch: Option<ZwpPointerGesturePinchV1>,
-  pinch_scale: f64,
-  /// The pointer's enter serial while it is over the surface (cursors need it).
-  enter_serial: Option<u32>,
-  cursor: Cursor,
-  /// The scale of the theme's image last shown: another needs the image again.
-  cursor_scale: i32,
-  mouse: Point,
-  /// The buttons down: let go when the pointer goes away mid-drag.
-  buttons: Vec<MouseButton>,
-  last_click: Option<Click>,
-  axes: Axes,
-  /// The axes a finger scroll in progress moves: the next frame continues it.
-  scrolling: [bool; 2],
-
-  kb: Option<Keyboard>,
-  mods: Mods,
-  /// Keys per second and the delay before the first repeat, ms.
-  repeat_info: (i32, i32),
-  repeat: Option<Repeat>,
-  /// Modifier keys that went down or up, held for the `modifiers` event the compositor sends
-  /// after them: [Event::Modifier] comes after the [Event::Mods] it changed.
-  mod_keys: Vec<(ModKey, bool)>,
-  clip: Rc<RefCell<Clip>>,
+  /// Logs every frame presented (`NIMBO_TRACE`), and every event (`NIMBO_TRACE=2`).
+  trace: bool,
+  trace_events: bool,
 }
 
-fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
-  let started = Instant::now();
-  let (globals, mut queue): (_, EventQueue<Win>) = registry_queue_init(&conn)?;
-  let qh = queue.handle();
-  let compositor: WlCompositor = globals.bind(&qh, 4..=6, ())?;
-  let wm: XdgWmBase = globals.bind(&qh, 1..=6, ())?;
-  let shm: WlShm = globals.bind(&qh, 1..=1, ())?;
-  let viewporter: Option<WpViewporter> = globals.bind(&qh, 1..=1, ()).ok();
-  let fractions: Option<WpFractionalScaleManagerV1> = globals.bind(&qh, 1..=1, ()).ok();
-  let seat: Option<WlSeat> = globals.bind(&qh, 1..=8, ()).ok();
-  let data: Option<WlDataDeviceManager> = globals.bind(&qh, 1..=3, ()).ok();
-  let shapes: Option<WpCursorShapeManagerV1> = globals.bind(&qh, 1..=1, ()).ok();
-  let gestures: Option<ZwpPointerGesturesV1> = globals.bind(&qh, 1..=3, ()).ok();
-  let outputs: Vec<Output> = globals.contents().with_list(|list| {
-    let outputs = list.iter().filter(|g| g.interface == "wl_output");
-    outputs.map(|g| Output::bind(globals.registry(), g.name, g.version, &qh)).collect()
+impl Drop for Win {
+  /// Lets go of what GTK gave the window: its timeout, cursors and the last frame's surface.
+  fn drop(&mut self) {
+    let g = gtk();
+    self.arm(None);
+    for (_, c) in self.cursors.drain(..).filter(|(_, c)| !c.is_null()) {
+      unsafe { (g.g_object_unref)(c) };
+    }
+
+    let s = SURFACE.replace(null_mut());
+    if !s.is_null() {
+      unsafe { (g.cairo_surface_destroy)(s) };
+    }
+  }
+}
+
+thread_local! {
+  static WIN: RefCell<Option<Win>> = const { RefCell::new(None) };
+  /// The frame shown, a cairo image surface: painted even while [WIN] is busy.
+  static SURFACE: Cell<P> = const { Cell::new(null_mut()) };
+  /// The loop ends (the window closed, or the app quit), set without the window.
+  static QUITTING: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Runs `f` on the window, then [Win::sync]; `none` when there is no window or it is busy (a
+/// GTK call of ours ran a nested main loop, as a paste waiting for its owner does, and that
+/// dispatched this callback). Input that came meanwhile runs after ([input::replay]).
+fn with<R>(none: R, f: impl FnOnce(&mut Win) -> R) -> R {
+  let r = WIN.with(|c| {
+    let mut g = c.try_borrow_mut().ok()?;
+    let w = g.as_mut()?;
+    let r = f(w);
+    w.sync();
+    Some(r)
   });
 
-  let surface = compositor.create_surface(&qh, ());
-  let cursors = shapes.is_none().then(|| Cursors::new(&compositor, shm.clone(), &qh));
-  let (viewport, fractional) = match (&viewporter, &fractions) {
-    (Some(v), Some(f)) => {
-      (Some(v.get_viewport(&surface, &qh, ())), Some(f.get_fractional_scale(&surface, &qh, ())))
+  match r {
+    Some(r) => {
+      input::replay();
+      r
     }
-    _ => (None, None),
-  };
+    None => none,
+  }
+}
 
-  let xdg = wm.get_xdg_surface(&surface, &qh, ());
-  let top = xdg.get_toplevel(&qh, ());
-  top.set_title(cfg.title.into());
+/// Whether [WIN] is in use further up the stack.
+fn busy() -> bool {
+  WIN.with(|c| c.try_borrow_mut().is_err())
+}
+
+/// Ends the main loop once, or keeps it from starting.
+fn quit() {
+  let g = gtk();
+  if !QUITTING.replace(true) && unsafe { (g.gtk_main_level)() } > 0 {
+    unsafe { (g.gtk_main_quit)() };
+  }
+}
+
+/// Opens the app's window and runs GTK's main loop until it closes or the app quits.
+pub fn run(cfg: &Config, app: Box<dyn App>) {
+  if let Err(e) = open(cfg, app) {
+    eprintln!("nimbo: {e}");
+    std::process::exit(1);
+  }
+}
+
+fn open(cfg: &Config, app: Box<dyn App>) -> Res<()> {
+  let started = Instant::now();
+  let g = load().ok_or("GTK 3 is needed: libgtk-3.so.0 did not load")?;
+  QUITTING.set(false);
+  // GDK's X11 backend probes GLX as it opens the display, loading Mesa (and LLVM with
+  // llvmpipe): about 34 MB more for nothing, every pixel being ours.
+  if std::env::var_os("GDK_GL").is_none() {
+    // SAFETY: before GTK, GIO and the renderer start their threads; an app that reads the
+    // environment from threads of its own sets `GDK_GL` itself before `run` (then left alone).
+    unsafe { std::env::set_var("GDK_GL", "disable") };
+  }
+
   let exe = std::env::current_exe().ok();
-  let app_id = exe.as_ref().and_then(|p| p.file_stem()?.to_str()).unwrap_or("nimbo");
-  top.set_app_id(app_id.into());
-  let size = whole(cfg.size);
-  match cfg.resizable {
-    true => top.set_min_size(cfg.min().w.ceil() as i32, cfg.min().h.ceil() as i32),
-    false => {
-      let (w, h) = (size.w as i32, size.h as i32);
-      top.set_min_size(w, h);
-      top.set_max_size(w, h);
+  let id = exe.as_ref().and_then(|p| p.file_stem()?.to_str()).unwrap_or("nimbo");
+  let (id, title) = (CString::new(id)?, CString::new(cfg.title)?);
+  let size = Size::new(cfg.size.w.round().max(1.0), cfg.size.h.round().max(1.0));
+  let (w, h) = (size.w as c_int, size.h as c_int);
+  let min = cfg.min();
+  // SAFETY: GTK's calls, on the thread that runs its loop; each callback has its signal's
+  // signature.
+  unsafe {
+    // The Wayland app id and the X11 WM_CLASS.
+    (g.g_set_prgname)(id.as_ptr());
+    if (g.gtk_init_check)(null_mut(), null_mut()) == FALSE {
+      return Err("GTK cannot open a display (WAYLAND_DISPLAY or DISPLAY)".into());
+    }
+
+    let window = (g.gtk_window_new)(WINDOW_TOPLEVEL);
+    let area = (g.gtk_drawing_area_new)();
+    (g.gtk_window_set_title)(window, title.as_ptr());
+    match cfg.resizable {
+      true => {
+        (g.gtk_window_set_default_size)(window, w, h);
+        (g.gtk_widget_set_size_request)(area, min.w.ceil() as c_int, min.h.ceil() as c_int);
+      }
+      false => {
+        (g.gtk_window_set_resizable)(window, FALSE);
+        (g.gtk_widget_set_size_request)(area, w, h);
+      }
+    }
+
+    (g.gtk_widget_set_can_focus)(area, TRUE);
+    (g.gtk_widget_add_events)(area, input::EVENTS);
+    (g.gtk_container_add)(window, area);
+    (g.gtk_widget_grab_focus)(area);
+    connect(window, c"delete-event", on_delete as Fp, 0);
+    connect(window, c"window-state-event", on_state as Fp, 0);
+    connect(area, c"draw", on_draw as Fp, 0);
+    connect(area, c"event", input::on_event as Fp, 0);
+
+    let clip = Box::new(Clip((g.gtk_clipboard_get)(CLIPBOARD)));
+    let mut rt = Runtime::new(app, size, 1.0, Clock::real(), clip);
+    rt.event(Event::Appearance(appearance()));
+    // A wake from any thread: an idle source on the main context, which GLib wakes.
+    rt.waker().set_notify(Box::new(|| {
+      (gtk().g_idle_add)(on_wake as Fp, null_mut());
+    }));
+
+    let trace = std::env::var("NIMBO_TRACE").ok();
+    WIN.set(Some(Win {
+      rt,
+      renderer: Renderer::new(),
+      window,
+      area,
+      tiles: Vec::new(),
+      shown: (0, 0),
+      shown_scale: 0.0,
+      ticking: false,
+      next_tick: 0,
+      timer: None,
+      resizable: cfg.resizable,
+      min,
+      input: Input::new(),
+      cursor: None,
+      cursors: Vec::new(),
+      painted: false,
+      frames: 0,
+      started,
+      trace: trace.is_some(),
+      trace_events: trace.as_deref() == Some("2"),
+    }));
+
+    // Shown, the window is realized: its frame clock and the area's GdkWindow exist.
+    (g.gtk_widget_show_all)(window);
+    let clock = (g.gtk_widget_get_frame_clock)(window);
+    connect(clock, c"layout", on_layout as Fp, AFTER);
+    connect(clock, c"after-paint", on_after_paint as Fp, 0);
+    with((), |w| w.input.realized((g.gtk_widget_get_window)(area)));
+    settings::watch();
+    // The app may have quit before the loop starts (on the first appearance).
+    if !QUITTING.get() {
+      (g.gtk_main)();
     }
   }
 
-  surface.commit();
-
-  let device = match (&data, &seat) {
-    (Some(m), Some(s)) => Some(m.get_data_device(s, &qh, ())),
-    _ => None,
-  };
-
-  let clip = Rc::new(RefCell::new(Clip {
-    conn: conn.clone(),
-    qh: qh.clone(),
-    manager: data,
-    device,
-    offers: Default::default(),
-    source: None,
-    serial: 0,
-    transfers: Transfers::default(),
-  }));
-  let mut rt = Runtime::new(app, cfg.size, 1.0, Clock::real(), Box::new(Clipboard(clip.clone())));
-  rt.event(Event::Appearance(appearance()));
-
-  // A wake from any thread writes the eventfd the loop polls.
-  let wake: Arc<OwnedFd> = Arc::new(eventfd(0, EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK)?);
-  let notify = wake.clone();
-  rt.waker().set_notify(Box::new(move || {
-    let _ = rustix::io::write(&*notify, &1u64.to_ne_bytes());
-  }));
-
-  let mut win = Win {
-    qh: qh.clone(),
-    rt,
-    surface,
-    _xdg: xdg,
-    top,
-    resizable: cfg.resizable,
-    min: cfg.min(),
-    viewport,
-    _fractional: fractional,
-    present: Presenter::new(shm),
-    trace: std::env::var_os("NIMBO_TRACE").is_some(),
-    trace_events: std::env::var("NIMBO_TRACE").is_ok_and(|v| v == "2"),
-    frames: 0,
-    started,
-    size,
-    pending_size: None,
-    held: false,
-    pending_held: false,
-    asked: None,
-    scale120: None,
-    preferred: None,
-    outputs,
-    entered: Vec::new(),
-    set_scale: 0.0,
-    set_size: Size::new(0.0, 0.0),
-    configured: false,
-    acked: false,
-    closed: false,
-    focused: false,
-    frame_pending: false,
-    next_tick: None,
-    pointer: None,
-    keyboard: None,
-    shapes,
-    shape_device: None,
-    cursors,
-    gestures,
-    _pinch: None,
-    pinch_scale: 1.0,
-    enter_serial: None,
-    cursor: Cursor::Arrow,
-    cursor_scale: 0,
-    mouse: Point::new(0.0, 0.0),
-    buttons: Vec::new(),
-    last_click: None,
-    axes: Axes::default(),
-    scrolling: [false; 2],
-    kb: None,
-    mods: Mods::NONE,
-    repeat_info: (25, 600),
-    repeat: None,
-    mod_keys: Vec::new(),
-    clip,
-  };
-
-  // Requests wait in the connection's buffer for the socket to drain: no frame is drawn
-  // meanwhile.
-  let mut unsent = false;
-  loop {
-    queue.dispatch_pending(&mut win)?;
-    // A modifier key that left the modifiers as they were (the other Shift) has no `modifiers`.
-    win.modifier_keys();
-    if win.closed || win.rt.quit_requested() {
-      break;
-    }
-
-    win.key_repeat();
-    win.apply_resize();
-
-    // A configure's frame comes at once: its ack is committed with a buffer of its size.
-    let now = Instant::now();
-    let paced = !win.frame_pending && win.next_tick.is_none_or(|t| t <= now);
-    if win.configured && win.rt.needs_frame() && (paced || win.acked) && !unsent {
-      win.render();
-    }
-
-    // A size the frame asked for, before the loop sleeps.
-    win.apply_resize();
-    let was = std::mem::replace(&mut unsent, backed_up(queue.flush())?);
-    if was && !unsent {
-      // Drained: the frame that waited for it is drawn before the loop sleeps.
-      continue;
-    }
-
-    let Some(guard) = queue.prepare_read() else { continue };
-    // Requests the socket couldn't take yet go out once it is writable again; no tick until
-    // then.
-    let timeout = win.timeout().filter(|_| !unsent);
-    let timeout =
-      timeout.map(|d| Timespec { tv_sec: d.as_secs() as _, tv_nsec: d.subsec_nanos() as _ });
-    let display = guard.connection_fd();
-    let clip = win.clip.borrow();
-    // The display, a wake, and the pipes our copied text goes into.
-    let flags = if unsent { PollFlags::IN | PollFlags::OUT } else { PollFlags::IN };
-    let mut fds = vec![PollFd::new(&display, flags), PollFd::new(&*wake, PollFlags::IN)];
-    fds.extend(clip.transfers.fds().map(|fd| PollFd::from_borrowed_fd(fd, PollFlags::OUT)));
-    match poll(&mut fds, timeout.as_ref()) {
-      Ok(_) | Err(rustix::io::Errno::INTR) => {}
-      Err(e) => return Err(e.into()),
-    }
-
-    let ready = !fds[0].revents().difference(PollFlags::OUT).is_empty();
-    let woken = !fds[1].revents().is_empty();
-    drop(fds);
-    drop(clip);
-    win.clip.borrow_mut().transfers.pump(Instant::now());
-    if woken {
-      let mut buf = [0u8; 8];
-      let _ = rustix::io::read(&*wake, &mut buf);
-    }
-
-    match ready {
-      true => match guard.read() {
-        Ok(_) => {}
-        Err(WaylandError::Io(e)) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-        Err(e) => return Err(e.into()),
-      },
-      false => drop(guard),
-    }
-  }
-
+  let Some(win) = WIN.take() else { return Ok(()) };
+  let window = win.window;
   if win.trace {
     eprintln!("nimbo: closed after {} frames", win.frames);
   }
+
   // The last frame shown, as a PNG (`NIMBO_SHOT=<file>`): to check a window run.
   if let Some(path) = std::env::var_os("NIMBO_SHOT")
-    && let Some(px) = win.present.shown()
+    && let Some(px) = pixels(win.shown)
   {
     crate::png::write(Path::new(&path), &px)?;
   }
+
+  drop(win);
+  unsafe { (g.gtk_widget_destroy)(window) };
   Ok(())
 }
 
 impl Win {
-  /// The scale frames are drawn at: fractional, else the preferred buffer scale, else the
-  /// largest of the outputs the surface is on; before it is on one (the first frame), the
-  /// largest of all.
-  fn scale(&self) -> f32 {
-    if let Some(n) = self.scale120
-      && self.viewport.is_some()
-    {
-      return n as f32 / 120.0;
-    }
-    let on = self.entered.iter().filter_map(|o| self.outputs.iter().find(|x| x.obj == *o));
-    let on = on.map(|x| x.scale).max();
-    let any = self.outputs.iter().map(|x| x.scale).max();
-    self.preferred.or(on).or(any).unwrap_or(1).max(1) as f32
-  }
-
-  /// Until the loop must run again without input: the next key repeat, the next idle reader of
-  /// our text let go, and the next paced tick or timer when no frame callback is due.
-  fn timeout(&mut self) -> Option<Duration> {
-    let now = Instant::now();
-    let repeat = self.repeat.as_ref().map(|r| r.at);
-    let transfer = self.clip.borrow().transfers.deadline();
-    let mut at = match (repeat, transfer) {
-      (Some(a), Some(b)) => Some(a.min(b)),
-      (a, b) => a.or(b),
+  /// The area's size in points, and the scale.
+  fn size(&self) -> (Size, f32) {
+    let g = gtk();
+    let (w, h, scale) = unsafe {
+      let w = (g.gtk_widget_get_allocated_width)(self.area);
+      let h = (g.gtk_widget_get_allocated_height)(self.area);
+      (w, h, (g.gtk_widget_get_scale_factor)(self.area).max(1))
     };
 
-    if self.configured && !self.frame_pending {
-      let next = frame_wake(now, self.rt.needs_frame(), self.next_tick, self.rt.due_in());
-      at = match (at, next) {
-        (Some(a), Some(b)) => Some(a.min(b)),
-        (a, b) => a.or(b),
-      };
-    }
-
-    at.map(|t| t.saturating_duration_since(now))
+    (Size::new(w.max(1) as f32, h.max(1) as f32), scale as f32)
   }
 
-  /// Builds a frame and presents it if it changed; a presented frame asks for a frame callback,
-  /// which paces the next.
-  fn render(&mut self) {
-    let t0 = Instant::now();
-    let (scale, logical) = (self.scale(), self.size);
-    if scale != self.set_scale || logical != self.set_size {
-      match (&self.viewport, self.scale120.is_some()) {
-        (Some(v), true) => {
-          self.surface.set_buffer_scale(1);
-          v.set_destination(logical.w as i32, logical.h as i32);
-        }
-        _ => self.surface.set_buffer_scale(scale as i32),
-      }
-
-      (self.set_scale, self.set_size) = (scale, logical);
-    }
-
-    // Drawn at the points that fill the buffer's whole pixels.
-    let (w, h) = buffer_px(logical, scale);
-    let size = Size::new(points(w, scale), points(h, scale));
-    self.rt.resize(size, scale);
-    self.rt.frame();
-    self.present.renderer.sync(&mut self.rt.text, &mut self.rt.images);
-    let shown = self.present.present(&self.rt.scene, size, scale, &self.surface, &self.qh);
-    let fits = self.present.fits();
-    self.next_tick = None;
-    let waits = self.present.starved || (self.acked && !fits);
-    let timer = self.rt.due_in().is_some();
-    let callback = wants_callback(shown, self.rt.needs_frame(), timer, waits);
-    if callback {
-      self.surface.frame(&self.qh, ());
-      self.frame_pending = true;
-    } else if self.rt.needs_frame() {
-      // From the frame's start: the time spent building it is part of the tick.
-      self.next_tick = Some(t0 + TICK);
-    }
-
-    if shown {
-      self.frames += 1;
-      if self.trace {
-        let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
-        let since = self.started.elapsed().as_secs_f64() * 1e3;
-        let (w, h) = self.present.renderer.size();
-        eprintln!("nimbo: presented {:.3} (+{since:.1} ms) {w}x{h}", t.as_secs_f64() * 1e3);
-      }
-    }
-
-    // An ack goes with the buffer of its size: a new one, or the one shown when that has it (an
-    // unchanged frame, or one waiting for a buffer at the same size).
-    if callback || (self.acked && fits) {
-      self.acked = false;
-      self.surface.commit();
-    } else if self.acked && self.trace {
-      eprintln!("nimbo: a configure waits for a buffer of its size");
-    }
-
-    self.sync_cursor();
+  /// The surface shown is not of the area's size and scale, or there is none.
+  fn stale(&self) -> bool {
+    let (size, scale) = self.size();
+    let px = Renderer::pixel_size(size, scale);
+    SURFACE.get().is_null() || (px, scale) != (self.shown, self.shown_scale)
   }
 
-  /// Takes the size the app asked for ([Runtime::take_resize]) as the surface's: a floating
-  /// window takes the size its buffers have; a fixed one gets it as its least and largest too,
-  /// so the compositor configures it so. A maximized, fullscreen or tiled window keeps the
-  /// compositor's size and takes the app's when it floats again.
-  fn apply_resize(&mut self) {
-    let Some(size) = self.rt.take_resize() else { return };
-    // In whole surface coordinates, as the first size ([whole]).
-    let size = whole(size);
-    let (w, h) = (size.w as i32, size.h as i32);
-    match self.resizable {
-      true if self.min.w > size.w || self.min.h > size.h => {
-        self.min = Size::new(self.min.w.min(size.w), self.min.h.min(size.h));
-        self.top.set_min_size(self.min.w.ceil() as i32, self.min.h.ceil() as i32);
-      }
-      true => {}
-      false => {
-        // Lowered first, so the least size never passes the largest.
-        self.top.set_min_size(0, 0);
-        self.top.set_max_size(w, h);
-        self.top.set_min_size(w, h);
-      }
-    }
-
-    let Some(size) = dispatch::asked_size(size, self.held, &mut self.asked) else { return };
-    self.size = size;
-    self.rt.redraw();
+  /// Not minimized or withdrawn (as X11 tells; on Wayland the compositor holds the clock).
+  fn visible(&self) -> bool {
+    let g = gtk();
+    let win = unsafe { (g.gtk_widget_get_window)(self.window) };
+    !win.is_null() && unsafe { (g.gdk_window_get_state)(win) } & HIDDEN == 0
   }
 
   /// Feeds an event to the runtime; returns whether it was used.
@@ -642,250 +400,346 @@ impl Win {
       eprintln!("nimbo: {ev:?}");
     }
 
-    // A configure in the same batch already counts for the input after it.
-    self.rt.resize(self.size, self.scale());
-    let used = self.rt.event(ev);
+    let (size, scale) = self.size();
+    self.rt.resize(size, scale);
+    self.rt.event(ev)
+  }
+
+  /// After every callback: the size the app asked for, the cursor, quitting, and what runs the
+  /// loop next ([next]).
+  fn sync(&mut self) {
+    let g = gtk();
+    self.apply_resize();
     self.sync_cursor();
-    used
-  }
-
-  /// The window took or lost the focus (the keyboard's, or the toplevel's activated state):
-  /// the app hears of each change once.
-  fn focus(&mut self, on: bool) {
-    if on != self.focused {
-      self.focused = on;
-      self.send(Event::Focus(on));
+    if self.rt.quit_requested() {
+      quit();
     }
+
+    let visible = self.visible();
+    let (tick, timer) = next(visible, visible && self.rt.needs_frame(), self.rt.due_in());
+    if tick && !self.ticking {
+      self.ticking = true;
+      unsafe { (g.gtk_widget_add_tick_callback)(self.area, on_tick as Fp, null_mut(), null()) };
+    }
+
+    self.arm(timer.map(|d| Instant::now() + d));
   }
 
+  /// Sets the timeout to fire `at`, unless it already does within a millisecond.
+  fn arm(&mut self, at: Option<Instant>) {
+    let near = |a: Instant, b: Instant| a.max(b) - a.min(b) < Duration::from_millis(1);
+    if let (Some((_, t)), Some(a)) = (self.timer, at)
+      && near(t, a)
+    {
+      return;
+    }
+
+    let g = gtk();
+    if let Some((id, _)) = self.timer.take() {
+      unsafe { (g.g_source_remove)(id) };
+    }
+
+    let Some(at) = at else { return };
+    let ms = at.saturating_duration_since(Instant::now()).as_micros().div_ceil(1000);
+    let id = unsafe { (g.g_timeout_add)(ms as c_uint, on_timer as Fp, null_mut()) };
+    self.timer = Some((id, at));
+  }
+
+  /// Builds a frame at the area's size and draws the tiles that changed into the surface;
+  /// `queue` hands their rects to GTK for its paint (not from the paint itself).
+  fn render(&mut self, queue: bool) {
+    let g = gtk();
+    let (size, scale) = self.size();
+    self.rt.resize(size, scale);
+    self.rt.frame();
+    let r = &mut self.renderer;
+    r.sync(&mut self.rt.text, &mut self.rt.images);
+    r.prepare(&self.rt.scene, size, scale);
+    let (w, h) = r.size();
+    if ((w, h), scale) != (self.shown, self.shown_scale) || SURFACE.get().is_null() {
+      // Out of memory: the frame waits for the next.
+      if !new_surface(w, h, scale) {
+        return;
+      }
+
+      (self.shown, self.shown_scale) = ((w, h), scale);
+      self.tiles.clear();
+    }
+
+    let rects = r.damage(&self.tiles);
+    if !rects.is_empty() {
+      let s = SURFACE.get();
+      // SAFETY: our surface's pixels, `stride × h` of them, B G R x as the renderer writes.
+      unsafe {
+        (g.cairo_surface_flush)(s);
+        let stride = (g.cairo_image_surface_get_stride)(s) as usize / 4;
+        let data = (g.cairo_image_surface_get_data)(s).cast::<u32>();
+        r.draw(&self.rt.scene, std::slice::from_raw_parts_mut(data, stride * h), stride, &rects);
+        (g.cairo_surface_mark_dirty)(s);
+      }
+
+      self.tiles.clear();
+      self.tiles.extend_from_slice(r.tiles());
+    }
+
+    if queue {
+      for rc in &rects {
+        let (x, y) = ((rc.x0 as f32 / scale) as c_int, (rc.y0 as f32 / scale) as c_int);
+        let x1 = (rc.x1 as f32 / scale).ceil() as c_int;
+        let y1 = (rc.y1 as f32 / scale).ceil() as c_int;
+        unsafe { (g.gtk_widget_queue_draw_area)(self.area, x, y, x1 - x, y1 - y) };
+      }
+    }
+
+    self.apply_resize();
+  }
+
+  /// Takes the size the app asked for ([Runtime::take_resize]): a resizable window is resized
+  /// to it (GTK leaves its own title bar out of the size), its least size lowered with it; a
+  /// fixed one gets it as the area's size, which GTK fits the window to.
+  fn apply_resize(&mut self) {
+    let Some(size) = self.rt.take_resize() else { return };
+    let g = gtk();
+    let (w, h) = (size.w.round().max(1.0) as c_int, size.h.round().max(1.0) as c_int);
+    unsafe {
+      match self.resizable {
+        true => {
+          if self.min.w > size.w || self.min.h > size.h {
+            self.min = Size::new(self.min.w.min(size.w), self.min.h.min(size.h));
+            let (mw, mh) = (self.min.w.ceil() as c_int, self.min.h.ceil() as c_int);
+            (g.gtk_widget_set_size_request)(self.area, mw, mh);
+          }
+
+          (g.gtk_window_resize)(self.window, w, h);
+        }
+        false => (g.gtk_widget_set_size_request)(self.area, w, h),
+      }
+    }
+
+    self.rt.redraw();
+  }
+
+  /// Shows the runtime's cursor over the area: the theme's, by its CSS name.
   fn sync_cursor(&mut self) {
     let c = self.rt.cursor();
-    let rescaled = self.cursors.is_some() && self.scale().ceil() as i32 != self.cursor_scale;
-    if c == self.cursor && !rescaled {
+    let g = gtk();
+    let win = unsafe { (g.gtk_widget_get_window)(self.area) };
+    if self.cursor == Some(c) || win.is_null() {
       return;
     }
 
-    self.cursor = c;
-    if let Some(serial) = self.enter_serial {
-      self.show_cursor(serial);
-    }
-  }
-
-  /// Shows the cursor for the pointer's enter `serial`: by its shape, else the theme's image.
-  fn show_cursor(&mut self, serial: u32) {
-    let scale = self.scale().ceil() as i32;
-    if let Some(dev) = &self.shape_device {
-      dev.set_shape(serial, shape(self.cursor));
-    } else if let (Some(cursors), Some(pointer)) = (&mut self.cursors, &self.pointer) {
-      cursors.set(pointer, serial, self.cursor, scale, &self.qh);
-      self.cursor_scale = scale;
-    }
-  }
-
-  // MARK: Keys
-
-  /// A key pressed or released (evdev code): to the app as a key event, then, unused, through
-  /// the keyboard's compose state and the Linux editing keys into text or a command.
-  fn key(&mut self, key: u32, down: bool, repeat: bool) {
-    let Some(kb) = &self.kb else { return };
-    let (k, utf8) = kb.key(key, repeat);
-    // Modifier keys reach the app as [Event::Mods] (from the compositor's modifiers) and, by
-    // their side, [Event::Modifier], as on macOS (`flagsChanged:`).
-    if let Some(side) = kb.modifier(key, k.code) {
-      if let Some(key) = side.filter(|_| !repeat) {
-        self.mod_keys.push((key, down));
-      }
-
-      return;
-    }
-
-    if !down {
-      self.send(Event::KeyUp(k));
-      return;
-    }
-
-    if self.send(Event::KeyDown(k)) {
-      return;
-    }
-
-    let typed = self.kb.as_mut().map_or(Typed::None, |kb| kb.interpret(key, &k, &utf8));
-    match typed {
-      Typed::Text(s) => _ = self.send(Event::Text(s)),
-      Typed::Command(c) => _ = self.send(Event::Command(c)),
-      Typed::None => {}
-    }
-  }
-
-  /// Sends the modifier keys held back for their `modifiers` event.
-  fn modifier_keys(&mut self) {
-    for (key, down) in std::mem::take(&mut self.mod_keys) {
-      self.send(Event::Modifier { key, down });
-    }
-  }
-
-  /// Fires the held key's repeat when it is due.
-  fn key_repeat(&mut self) {
-    let Some(r) = &mut self.repeat else { return };
-    let now = Instant::now();
-    if r.at > now {
-      return;
-    }
-
-    r.at = now + Duration::from_secs(1) / self.repeat_info.0.max(1) as u32;
-    let key = r.key;
-    self.key(key, true, true);
-  }
-
-  // MARK: Pointer
-
-  /// A button (evdev code) going down or up at the event's `time`.
-  fn button(&mut self, button: u32, down: bool, time: u32) {
-    // <linux/input-event-codes.h>: BTN_LEFT, BTN_RIGHT, BTN_MIDDLE.
-    let button = match button {
-      0x110 => MouseButton::Left,
-      0x111 => MouseButton::Right,
-      0x112 => MouseButton::Middle,
-      b => MouseButton::Other(b.saturating_sub(0x110).min(255) as u8),
-    };
-
-    let (pos, mods) = (self.mouse, self.mods);
-    self.buttons.retain(|&b| b != button);
-    if !down {
-      self.send(Event::MouseUp { pos, button, mods });
-      return;
-    }
-
-    self.buttons.push(button);
-    let clicks = clicks(self.last_click, button, time, pos);
-    self.last_click = Some((button, time, pos, clicks));
-    self.send(Event::MouseDown { pos, button, clicks, mods });
-  }
-
-  /// The pointer left the surface or went away (its seat lost the capability): it leaves the
-  /// surface it was over, and the buttons it held are let go first, without a click. A leave
-  /// mid-drag ends the grab (the window minimized, a compositor's own grab), and no release
-  /// follows.
-  fn pointer_gone(&mut self) {
-    let over = std::mem::take(&mut self.enter_serial).is_some();
-    let (pos, mods) = (self.mouse, self.mods);
-    // Not the user's release: no click, though the app's drags end with it.
-    if !self.buttons.is_empty() {
-      self.rt.cancel_press();
-    }
-
-    for e in let_go(std::mem::take(&mut self.buttons), over, pos, mods) {
-      self.send(e);
-    }
-  }
-
-  /// `wl_pointer.frame`: the axis events since the last one as one scroll.
-  fn scroll(&mut self) {
-    let a = std::mem::take(&mut self.axes);
-    if !a.any {
-      return;
-    }
-
-    let Some((precise, phase)) = a.phase(&mut self.scrolling) else { return };
-    let (pos, mods) = (self.mouse, self.mods);
-    let delta = match precise {
-      true => Point::new(-a.value[1] as f32, -a.value[0] as f32),
-      false => {
-        // A wheel click is 15 units of `axis` in libinput when no click count came.
-        let lines = |i: usize| match a.v120[i] {
-          0 => -a.value[i] as f32 / 15.0,
-          v => -v as f32 / 120.0,
-        };
-        Point::new(lines(1) * WHEEL_LINE, lines(0) * WHEEL_LINE)
+    self.cursor = Some(c);
+    let cursor = match self.cursors.iter().find(|(k, _)| *k == c) {
+      Some((_, p)) => *p,
+      None => {
+        let p = unsafe { (g.gdk_cursor_new_from_name)((g.gdk_display_get_default)(), name(c)) };
+        self.cursors.push((c, p));
+        p
       }
     };
 
-    self.send(Event::Scroll { pos, delta, precise, phase, momentum: Phase::None, mods });
+    unsafe { (g.gdk_window_set_cursor)(win, cursor) };
   }
 }
 
-/// The cursor-shape-v1 shape for ours.
-fn shape(c: Cursor) -> Shape {
-  match c {
-    Cursor::Inherit | Cursor::Arrow => Shape::Default,
-    Cursor::Text => Shape::Text,
-    Cursor::Pointer => Shape::Pointer,
-    Cursor::ResizeX => Shape::ColResize,
-    Cursor::ResizeY => Shape::RowResize,
-    Cursor::Crosshair => Shape::Crosshair,
-    Cursor::Grab => Shape::Grab,
-    Cursor::Grabbing => Shape::Grabbing,
-    Cursor::NotAllowed => Shape::NotAllowed,
+/// A cursor's CSS name, as GDK finds it in the theme.
+fn name(c: Cursor) -> S {
+  let n = match c {
+    Cursor::Inherit | Cursor::Arrow => c"default",
+    Cursor::Text => c"text",
+    Cursor::Pointer => c"pointer",
+    Cursor::ResizeX => c"col-resize",
+    Cursor::ResizeY => c"row-resize",
+    Cursor::Crosshair => c"crosshair",
+    Cursor::Grab => c"grab",
+    Cursor::Grabbing => c"grabbing",
+    Cursor::NotAllowed => c"not-allowed",
+  };
+
+  n.as_ptr()
+}
+
+/// A new surface of `w × h` pixels at `scale` as [SURFACE], the old one dropped; false when
+/// cairo couldn't make one (its error surface has no pixels).
+fn new_surface(w: usize, h: usize, scale: f32) -> bool {
+  let g = gtk();
+  // SAFETY: a new surface, ours until the next one.
+  unsafe {
+    let s = (g.cairo_image_surface_create)(RGB24, w as c_int, h as c_int);
+    if (g.cairo_surface_status)(s) != 0 {
+      (g.cairo_surface_destroy)(s);
+      return false;
+    }
+
+    (g.cairo_surface_set_device_scale)(s, scale as f64, scale as f64);
+    let old = SURFACE.replace(s);
+    if !old.is_null() {
+      (g.cairo_surface_destroy)(old);
+    }
   }
+
+  true
 }
 
-/// The keymap text the compositor shares through `fd`.
-fn keymap(fd: OwnedFd, size: usize) -> Option<Keyboard> {
-  // SAFETY: a private read-only mapping of the keymap the compositor sent, unmapped below.
-  let flags = (ProtFlags::READ, MapFlags::PRIVATE);
-  let ptr = unsafe { mmap(std::ptr::null_mut(), size, flags.0, flags.1, &fd, 0) }.ok()?;
-  let bytes = unsafe { std::slice::from_raw_parts(ptr.cast::<u8>(), size) };
-  let kb = CStr::from_bytes_until_nul(bytes).ok().and_then(Keyboard::from_string);
-  let _ = unsafe { munmap(ptr, size) };
-  kb
-}
-
-/// Whether a flush left requests waiting for the socket to drain: `WouldBlock` while the
-/// compositor isn't reading is backpressure, not an error, and they stay buffered.
-fn backed_up(flushed: Result<(), WaylandError>) -> Res<bool> {
-  match flushed {
-    Ok(()) => Ok(false),
-    Err(WaylandError::Io(e)) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(true),
-    Err(e) => Err(e.into()),
+/// Whether a frame at `now` (µs) keeps to 120 Hz: due at `next` give or take the clock's
+/// jitter, the next one due a frame later, so frames slightly early on a faster display are
+/// made up by one left out; after a pause the schedule starts again from `now`.
+fn paced(now: i64, next: &mut i64) -> bool {
+  if now < *next - JITTER_US {
+    return false;
   }
+
+  *next = if now > *next + FRAME_US { now + FRAME_US } else { *next + FRAME_US };
+  true
 }
 
-/// What a pointer that goes away sends: a release of each button it held, then its exit when
-/// it was over the surface.
-fn let_go(held: Vec<MouseButton>, over: bool, pos: Point, mods: Mods) -> Vec<Event> {
-  let ups = held.into_iter().map(|button| Event::MouseUp { pos, button, mods });
-  ups.chain(over.then_some(Event::MouseExit)).collect()
+/// What runs the loop next: the tick while frames are `wanted`, else a timeout for the next
+/// timer; neither while the window is hidden, where a timer that came due couldn't draw (it
+/// would fire again at once) and the window's showing again syncs.
+fn next(visible: bool, wanted: bool, due_in: Option<Duration>) -> (bool, Option<Duration>) {
+  (wanted, due_in.filter(|_| visible && !wanted))
 }
 
-/// The buffer's pixels for `size` points at `scale`, rounded half away from zero as
-/// fractional-scale-v1 asks: 481 points at 1.5 are 722 pixels, where the renderer's cut-down
-/// size would make 721 that the viewport stretches.
-fn buffer_px(size: Size, scale: f32) -> (u32, u32) {
-  let px = |p: f32| (p * scale).round().max(1.0) as u32;
-  (px(size.w), px(size.h))
-}
-
-/// Whether a frame asks for a frame callback: a new one shown, or an unchanged one while frames
-/// are wanted or a timer waits, committed with no buffer: the compositor paces the next (a timer
-/// every 2 ms draws at its rate), and sends none while the window is hidden. One waiting for a
-/// buffer ticks instead.
-fn wants_callback(shown: bool, wanted: bool, timer: bool, waits: bool) -> bool {
-  shown || ((wanted || timer) && !waits)
-}
-
-/// When the loop wakes for a frame while no frame callback is due: the paced tick while a frame
-/// is `wanted`, at once without one (a timer came due after the loop checked), else the next
-/// timer.
-fn frame_wake(
-  now: Instant,
-  wanted: bool,
-  tick: Option<Instant>,
-  due_in: Option<Duration>,
-) -> Option<Instant> {
-  match wanted {
-    true => Some(tick.unwrap_or(now)),
-    false => due_in.map(|d| now + d),
+/// The pixels of the frame shown, `w × h`.
+fn pixels((w, h): (usize, usize)) -> Option<Pixels> {
+  let (g, s) = (gtk(), SURFACE.get());
+  if s.is_null() {
+    return None;
   }
+
+  // SAFETY: the surface holds `stride × h` pixels.
+  let (data, stride) = unsafe {
+    (g.cairo_surface_flush)(s);
+    let stride = (g.cairo_image_surface_get_stride)(s) as usize / 4;
+    let data = (g.cairo_image_surface_get_data)(s).cast::<u32>();
+    (std::slice::from_raw_parts(data, stride * h), stride)
+  };
+  let rows = data.chunks(stride).flat_map(|row| &row[..w]);
+  let data = rows.flat_map(|p| (p | 0xff00_0000).to_le_bytes()).collect();
+  Some(Pixels { w, h, data })
 }
 
-/// `s` in whole surface coordinates, as configures give them: at an integer buffer scale a
-/// fractional size would make a buffer that isn't a multiple of it (`invalid_size`).
-fn whole(s: Size) -> Size {
-  Size::new(s.w.round().max(1.0), s.h.round().max(1.0))
+// MARK: Callbacks
+
+/// The frame clock's update phase while frames are wanted: asks for the layout phase, after
+/// which the frame is built ([on_layout]), at most at 120 Hz ([paced]); removed once none are.
+unsafe extern "C" fn on_tick(_: P, clock: P, _: P) -> c_int {
+  with(TRUE, |w| {
+    let g = gtk();
+    w.ticking = w.rt.needs_frame() && w.visible();
+    let now = unsafe { (g.gdk_frame_clock_get_frame_time)(clock) };
+    if w.ticking && paced(now, &mut w.next_tick) {
+      unsafe { (g.gdk_frame_clock_request_phase)(clock, LAYOUT) };
+    }
+
+    w.ticking as c_int
+  })
 }
 
-impl Output {
-  fn bind(registry: &WlRegistry, name: u32, version: u32, qh: &QueueHandle<Win>) -> Self {
-    Self { name, obj: registry.bind(name, version.min(4), qh, ()), scale: 1 }
+/// After GTK's layout: the frame, at the size GTK just gave the area, when one is wanted or
+/// that size is new.
+unsafe extern "C" fn on_layout(_: P, _: P) {
+  with((), |w| {
+    if w.rt.needs_frame() || w.stale() {
+      w.render(true);
+    }
+  });
+}
+
+/// GTK's paint: our surface where GTK repaints (the rects queued, or all of it after an expose
+/// or a resize), built first if it is stale (the first frame).
+unsafe extern "C" fn on_draw(_: P, cr: P, _: P) -> c_int {
+  with((), |w| {
+    if w.stale() {
+      w.render(false);
+    }
+
+    w.painted = true;
+  });
+
+  let (g, s) = (gtk(), SURFACE.get());
+  if s.is_null() {
+    return FALSE;
+  }
+
+  // SAFETY: GTK's context for this paint, clipped to what it repaints; our surface.
+  unsafe {
+    (g.cairo_set_operator)(cr, SOURCE);
+    (g.cairo_set_source_surface)(cr, s, 0.0, 0.0);
+    (g.cairo_paint)(cr);
+  }
+
+  TRUE
+}
+
+/// After GDK painted (and on Wayland committed) the frame: counted, and logged with
+/// `NIMBO_TRACE` as `nimbo: presented <unix ms> (+<ms since start>) <w>x<h>`.
+unsafe extern "C" fn on_after_paint(_: P, _: P) {
+  with((), |w| {
+    if !std::mem::take(&mut w.painted) {
+      return;
+    }
+
+    w.frames += 1;
+    if w.trace {
+      let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+      let since = w.started.elapsed().as_secs_f64() * 1e3;
+      let (pw, ph) = w.shown;
+      eprintln!("nimbo: presented {:.3} (+{since:.1} ms) {pw}x{ph}", t.as_secs_f64() * 1e3);
+    }
+  });
+}
+
+/// The runtime's next timer is due; while the window is busy, it fires again after its delay.
+unsafe extern "C" fn on_timer(_: P) -> c_int {
+  with(busy() as c_int, |w| {
+    w.timer = None;
+    FALSE
+  })
+}
+
+/// A wake from another thread; while the window is busy, the sync after the call that holds it
+/// sees the wake.
+unsafe extern "C" fn on_wake(_: P) -> c_int {
+  with((), |_| {});
+  FALSE
+}
+
+/// Minimized or shown again: frames stop or go on.
+unsafe extern "C" fn on_state(_: P, _: P, _: P) -> c_int {
+  with((), |_| {});
+  FALSE
+}
+
+/// The window's close button: the loop ends, and the window is destroyed after it, so a
+/// callback further up the stack (a paste's) never meets it gone.
+unsafe extern "C" fn on_delete(_: P, _: P, _: P) -> c_int {
+  quit();
+  TRUE
+}
+
+// MARK: Clipboard
+
+/// The CLIPBOARD selection as GTK keeps it: GTK serves our text to readers; a paste waits for
+/// the owner in a nested main loop, whose callbacks find the window busy.
+struct Clip(P);
+
+impl Clipboard for Clip {
+  fn read(&self) -> Option<String> {
+    let g = gtk();
+    let s = unsafe { (g.gtk_clipboard_wait_for_text)(self.0) };
+    if s.is_null() {
+      return None;
+    }
+
+    let text = unsafe { CStr::from_ptr(s) }.to_string_lossy().into_owned();
+    unsafe { (g.g_free)(s.cast()) };
+    Some(text)
+  }
+
+  fn write(&mut self, s: &str) {
+    let len = s.len().min(c_int::MAX as usize) as c_int;
+    unsafe { (gtk().gtk_clipboard_set_text)(self.0, s.as_ptr().cast(), len) };
   }
 }
 
@@ -893,119 +747,32 @@ impl Output {
 mod tests {
   use super::*;
 
-  /// A pointer removed mid-drag lets its buttons go and leaves: the app's drag ends, and the
-  /// next pointer starts with none held.
+  /// Hidden, a timer that came due waits for the window to show (no timeout firing at once
+  /// again and again); shown, frames tick, else the timer wakes the loop.
   #[test]
-  fn a_pointer_gone_mid_drag_lets_go() {
-    let (pos, mods) = (Point::new(4.0, 2.0), Mods::NONE);
-    let held = vec![MouseButton::Left, MouseButton::Right];
-    let up = |button| Event::MouseUp { pos, button, mods };
-    let all = vec![up(MouseButton::Left), up(MouseButton::Right), Event::MouseExit];
-    assert_eq!(let_go(held, true, pos, mods), all);
-    assert_eq!(let_go(vec![MouseButton::Left], false, pos, mods), vec![up(MouseButton::Left)]);
-    assert_eq!(let_go(Vec::new(), false, pos, mods), vec![]);
+  fn nothing_runs_while_hidden() {
+    let (due, later) = (Some(Duration::ZERO), Some(Duration::from_millis(500)));
+    assert_eq!(next(false, false, due), (false, None));
+    assert_eq!(next(true, true, due), (true, None));
+    assert_eq!(next(true, false, later), (false, later));
+    assert_eq!(next(true, false, None), (false, None));
   }
 
+  /// A second of a display's ticks: 120 Hz keeps every one (with jitter too), faster ones at
+  /// most 120.
   #[test]
-  fn sizes_are_whole() {
-    assert_eq!(whole(Size::new(480.5, 320.4)), Size::new(481.0, 320.0));
-    assert_eq!(whole(Size::new(0.2, 64.0)), Size::new(1.0, 64.0));
-  }
-
-  #[test]
-  fn fractional_buffers_round() {
-    assert_eq!(buffer_px(Size::new(481.0, 320.0), 1.5), (722, 480));
-    assert_eq!(buffer_px(Size::new(481.0, 321.0), 1.25), (601, 401));
-    assert_eq!(buffer_px(Size::new(480.0, 320.0), 2.0), (960, 640));
-
-    // The renderer draws that many.
-    let (w, h) = buffer_px(Size::new(481.0, 333.0), 1.75);
-    let size = Size::new(points(w, 1.75), points(h, 1.75));
-    let px = crate::cpu::Renderer::pixel_size(size, 1.75);
-    assert_eq!(px, (w as usize, h as usize));
-  }
-
-  #[test]
-  fn a_full_socket_waits() {
-    let err = |k: std::io::ErrorKind| Err(WaylandError::Io(k.into()));
-    assert!(!backed_up(Ok(())).unwrap());
-    assert!(backed_up(err(std::io::ErrorKind::WouldBlock)).unwrap());
-    assert!(backed_up(err(std::io::ErrorKind::BrokenPipe)).is_err());
-  }
-
-  #[test]
-  fn a_finger_scroll_ends_when_every_axis_stops() {
-    let finger = Some(AxisSource::Finger);
-    let frame =
-      |source, value: [f64; 2], stop| Axes { source, value, stop, any: true, ..Default::default() };
-    let mut on = [false; 2];
-    // Diagonal, then the vertical axis stops while the horizontal goes on, then that stops too.
-    assert_eq!(frame(finger, [1.0, 1.0], [false; 2]).phase(&mut on), Some((true, Phase::Began)));
-    assert_eq!(
-      frame(finger, [0.0, 2.0], [true, false]).phase(&mut on),
-      Some((true, Phase::Changed))
-    );
-    assert_eq!(on, [false, true]);
-    // A stop with no source still ends the touchpad's scroll.
-    assert_eq!(frame(None, [0.0; 2], [false, true]).phase(&mut on), Some((true, Phase::Ended)));
-    assert_eq!(on, [false; 2]);
-    // A wheel: no phases.
-    let wheel = Some(AxisSource::Wheel);
-    assert_eq!(frame(wheel, [10.0, 0.0], [false; 2]).phase(&mut on), Some((false, Phase::None)));
-    assert_eq!(frame(None, [0.0; 2], [false; 2]).phase(&mut on), Some((false, Phase::None)));
-  }
-
-  #[test]
-  fn a_modifier_keeps_the_held_key_repeating() {
-    const LEFT: u32 = 105;
-    const SHIFT: u32 = 42;
-    const A: u32 = 30;
-    let t = Instant::now();
-    let held = Repeat::after(None, LEFT, true, true, t);
-    let held = Repeat::after(held, SHIFT, true, false, t);
-    assert_eq!(held.as_ref().map(|r| r.key), Some(LEFT), "Shift down");
-    let held = Repeat::after(held, SHIFT, false, false, t);
-    assert_eq!(held.as_ref().map(|r| r.key), Some(LEFT), "Shift up");
-    let held = Repeat::after(held, A, true, true, t);
-    assert_eq!(held.as_ref().map(|r| r.key), Some(A), "another key takes over");
-    let held = Repeat::after(held, LEFT, false, true, t);
-    assert_eq!(held.as_ref().map(|r| r.key), Some(A), "not the held key's release");
-    assert!(Repeat::after(held, A, false, true, t).is_none());
-  }
-
-  /// Presses 600 ms apart are two clicks even when handled together; a second within 400 ms is
-  /// a double click, across the clock's wrap too.
-  #[test]
-  fn clicks_count_by_the_events_time() {
-    let (left, at) = (MouseButton::Left, Point::new(10.0, 10.0));
-    let first = Some((left, 1000, at, 1));
-    assert_eq!(clicks(first, left, 1600, at), 1);
-    assert_eq!(clicks(first, left, 1300, at), 2);
-    assert_eq!(clicks(Some((left, u32::MAX - 100, at, 2)), left, 100, at), 3);
-    assert_eq!(clicks(first, MouseButton::Right, 1300, at), 1);
-    assert_eq!(clicks(first, left, 1300, Point::new(20.0, 10.0)), 1);
-  }
-
-  #[test]
-  fn a_frame_wanted_without_a_tick_wakes_at_once() {
-    let (now, second) = (Instant::now(), Duration::from_secs(1));
-    // A timer that came due after the loop's check: no tick was set, the loop must not sleep.
-    assert_eq!(frame_wake(now, true, None, None), Some(now));
-    assert_eq!(frame_wake(now, true, Some(now + TICK), None), Some(now + TICK));
-    assert_eq!(frame_wake(now, false, None, Some(second)), Some(now + second));
-    assert_eq!(frame_wake(now, false, None, None), None);
-  }
-
-  /// An unchanged frame with a timer waiting asks for a callback: the compositor paces the
-  /// timer's frames and holds them while the window is hidden.
-  #[test]
-  fn an_unchanged_frame_with_a_timer_waits_for_a_callback() {
-    assert!(wants_callback(false, false, true, false));
-    assert!(wants_callback(true, false, false, false));
-    assert!(wants_callback(false, true, false, false));
-    // Waiting for a buffer: the tick paces it.
-    assert!(!wants_callback(false, true, true, true));
-    assert!(!wants_callback(false, false, false, false));
+  fn frames_keep_to_120_hz() {
+    let frames = |hz: i64, jitter: i64| {
+      let mut next = 0;
+      let ticks = (0..hz).map(|i| i * 1_000_000 / hz + if i % 2 == 0 { jitter } else { -jitter });
+      ticks.filter(|&t| paced(t, &mut next)).count()
+    };
+    assert_eq!(frames(120, 0), 120);
+    assert_eq!(frames(120, 800), 120);
+    assert_eq!(frames(60, 0), 60);
+    for hz in [125, 144, 165, 240, 280] {
+      assert!((100..=121).contains(&frames(hz, 0)), "{hz} Hz: {}", frames(hz, 0));
+    }
   }
 
   #[test]

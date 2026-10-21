@@ -8,8 +8,9 @@ A module is a directory under src/ (platform/<os> each on its own) or a top-leve
 examples/ and tests/ are one row each. Code is every line that is not blank, a comment, a doc
 comment or inside a `#[cfg(test)]` item. With a git ref, a column shows how code moved since it.
 `--map` lists the files with the first sentence of each one's module doc (`//!`): what it does.
+`--check` sums the code per part against its budget (BUDGETS) and fails when one is over.
 
-uv run scripts/size.py [--files | --map] [--vs <ref>]
+uv run scripts/size.py [--files | --map | --check] [--vs <ref>]
 """
 
 import argparse
@@ -22,6 +23,9 @@ ROOT = Path(__file__).resolve().parent.parent
 DIRS = ("src", "examples", "tests")
 EXTS = (".rs", ".metal")
 KINDS = ("code", "docs", "comments", "tests", "blank")
+# The code lines each part may have: a platform, the widgets (ui/) and the core (the rest of
+# src/). Raising one is a decision recorded in its PR.
+BUDGETS = {"platform/macos": 1500, "platform/windows": 2000, "platform/linux": 2500, "ui": 3500, "core": 4000}
 
 
 def module(path: str, files: bool) -> str:
@@ -39,6 +43,34 @@ def module(path: str, files: bool) -> str:
     return f"platform/{parts[2]}"
 
   return parts[1]
+
+
+def part(module: str) -> str | None:
+  """The budget a module's code counts against; examples and tests have none.
+
+  >>> [part(m) for m in ("platform/linux", "ui", "cpu", "platform", "tests")]
+  ['platform/linux', 'ui', 'core', 'core', None]
+  """
+  if module in BUDGETS:
+    return module
+
+  return None if module in ("examples", "tests") else "core"
+
+
+def check(rows: dict[str, dict[str, int]]) -> bool:
+  """Prints each part's code against its budget; whether all are within."""
+  used = defaultdict(int)
+  for m, r in rows.items():
+    if (p := part(m)) is not None:
+      used[p] += r["code"]
+
+  ok = True
+  for p, limit in BUDGETS.items():
+    over = used[p] > limit
+    print(f"{p:<18} {used[p]:>6} / {limit:<6} {'over' if over else 'ok'}")
+    ok &= not over
+
+  return ok
 
 
 def braces(line: str) -> int:
@@ -125,9 +157,13 @@ def main():
   ap.add_argument("--files", action="store_true", help="one row per file")
   ap.add_argument("--map", action="store_true", help="one row per file with what it does")
   ap.add_argument("--vs", metavar="REF", help="show the code change since this git ref")
+  ap.add_argument("--check", action="store_true", help="fail when a part is over its budget")
   args = ap.parse_args()
 
   files = files_now()
+  if args.check:
+    raise SystemExit(0 if check(table(files, False)) else 1)
+
   if args.map:
     for path in sorted(files, key=lambda p: (p.count("/"), p)):
       print(f"{path:<36} {count(files[path])['code']:>5}  {summary(files[path])}")
