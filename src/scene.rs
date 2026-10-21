@@ -487,12 +487,9 @@ impl Frame<'_> {
       let subpixel = (((px - px.floor()) * 4.0) as u8).min(3);
       let Some(a) = self.text.glyph(g.face, g.id, subpixel, dark) else { continue };
       let left = if a.color { px.round() } else { px.floor() };
-      let rect = Rect::new(
-        (left + a.left) / scale,
-        (baseline - a.top) / scale,
-        a.uv.w / scale,
-        a.uv.h / scale,
-      );
+      // A mark the shaper raised, by whole pixels like the baseline.
+      let top = baseline - (g.y * scale).round() - a.top;
+      let rect = Rect::new((left + a.left) / scale, top / scale, a.uv.w / scale, a.uv.h / scale);
       match a.color {
         true => self.scene.emoji(Sprite { rect, uv: a.uv, color: [1.0, 1.0, 1.0, color[3]] }),
         false => self.scene.glyph(Sprite { rect, uv: a.uv, color }),

@@ -542,8 +542,8 @@ pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {
       let pos = (hb.hb_buffer_get_glyph_positions)(buf, &mut n);
       let pos = std::slice::from_raw_parts(pos, n as usize);
       for (g, p) in infos.iter().zip(pos) {
-        let x = pen + p.x_offset as f32 * k;
-        glyphs.push(Glyph { face: id, id: g.codepoint as u16, x });
+        let (x, y) = (pen + p.x_offset as f32 * k, p.y_offset as f32 * k);
+        glyphs.push(Glyph { face: id, id: g.codepoint as u16, x, y });
         clusters.push(g.cluster);
         pen += p.x_advance as f32 * k;
       }
