@@ -91,9 +91,11 @@ impl Clip {
     true
   }
 
-  /// `SelectionClear`: another client took the selection.
+  /// `SelectionClear`: another client took the selection. One read after we took it back (a
+  /// copy handled before it) is stale, so the server says who owns it now.
   pub fn cleared(&mut self, ev: &SelectionClearEv) {
-    if ev.selection == self.atoms.clipboard {
+    let a = self.atoms;
+    if ev.selection == a.clipboard && self.x.selection_owner(a.clipboard) != self.win {
       self.ours = None;
     }
   }
@@ -166,5 +168,63 @@ impl crate::Clipboard for Clipboard {
     let mut c = self.0.borrow_mut();
     c.x.set_selection_owner(c.win, c.atoms.clipboard, c.time);
     c.ours = (c.x.selection_owner(c.atoms.clipboard) == c.win).then(|| s.to_owned());
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::super::xcb::{SELECTION_CLEAR, Screen};
+  use super::*;
+  use crate::Clipboard as _;
+
+  /// Another client takes the selection, and we copy again before its `SelectionClear` is
+  /// handled: the stale clear leaves the new text ours. Skipped without `DISPLAY`.
+  #[test]
+  fn a_stale_clear_keeps_the_new_copy() {
+    if std::env::var_os("DISPLAY").is_none() {
+      eprintln!("no DISPLAY: skipped");
+      return;
+    }
+
+    let (x, screen, _) = X::connect().unwrap();
+    // SAFETY: the setup's screen, valid while the connection is open.
+    let sc: &Screen = unsafe { &*screen };
+    let win = x.create_window(sc, 8, 8, 0);
+    // Another client: the server sends no clear when the owner stays the same client.
+    let (y, screen, _) = X::connect().unwrap();
+    // SAFETY: as above.
+    let other = y.create_window(unsafe { &*screen }, 8, 8, 0);
+    let [clipboard, targets, utf8, text, mime, incr, prop] = x.atoms([
+      "CLIPBOARD",
+      "TARGETS",
+      "UTF8_STRING",
+      "TEXT",
+      "text/plain;charset=utf-8",
+      "INCR",
+      "NIMBO_CLIPBOARD",
+    ]);
+    let atoms = Atoms { clipboard, targets, utf8, text, mime, incr, prop };
+    let stash = Rc::new(RefCell::new(VecDeque::new()));
+    let clip = Clip { x, win, atoms, stash: stash.clone(), time: 0, ours: None };
+    let clip = Rc::new(RefCell::new(clip));
+    let mut board = Clipboard(clip.clone());
+    board.write("old");
+    y.set_selection_owner(other, clipboard, 0);
+    assert_eq!(y.selection_owner(clipboard), other);
+    board.write("new");
+
+    let clear = |ev: &Ev| ev.kind() == SELECTION_CLEAR;
+    let ev = x.wait_event(WAIT, &mut stash.borrow_mut(), clear).expect("a SelectionClear");
+    clip.borrow_mut().cleared(ev.get());
+    assert_eq!(board.read().as_deref(), Some("new"));
+
+    // A clear while another client owns it is not stale.
+    y.set_selection_owner(other, clipboard, 0);
+    assert_eq!(y.selection_owner(clipboard), other);
+    let ev = x.wait_event(WAIT, &mut stash.borrow_mut(), clear).expect("a SelectionClear");
+    clip.borrow_mut().cleared(ev.get());
+    assert!(clip.borrow().ours.is_none());
+    x.disconnect();
+    y.disconnect();
   }
 }
