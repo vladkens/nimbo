@@ -13,7 +13,7 @@ use super::{Align, Dim, Float, Id, Style, TextStyle};
 use crate::keys::Binding;
 use crate::scene::{ImageId, Point, Rect, Size};
 use crate::text::edit::next_grapheme;
-use crate::text::{Font, FxHasher, Metrics};
+use crate::text::{Font, FxHasher, Ink, Metrics};
 
 /// Slack for float sums when comparing sizes, in points.
 const EPS: f32 = 0.01;
@@ -25,6 +25,12 @@ pub const ELLIPSIS: &str = "…";
 pub trait Measure {
   /// Advance width of `s` in points.
   fn width(&mut self, s: &str, font: Font) -> f32;
+  /// The advance width of `s` as a line and how far its ink reaches, which the paint pass culls
+  /// by; none past its pen and baseline unless told.
+  fn line(&mut self, s: &str, font: Font) -> (f32, Ink) {
+    (self.width(s, font), Ink::default())
+  }
+
   fn metrics(&mut self, font: Font) -> Metrics;
   /// An image's natural size in points.
   fn image(&mut self, id: ImageId) -> Size;
@@ -48,12 +54,13 @@ pub enum Kind {
   Canvas(u32),
 }
 
-/// A wrapped line of a text element: a byte range of [Tree::text] and its width.
+/// A wrapped line of a text element: a byte range of [Tree::text], its width and its ink.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Line {
   pub start: u32,
   pub end: u32,
   pub width: f32,
+  pub ink: Ink,
 }
 
 #[derive(Clone, Debug)]
@@ -568,9 +575,13 @@ fn wrap(t: &mut Tree, m: &mut dyn Measure) {
       // Paint adds the ellipsis after a line that ends before its text does.
       true if cut => {
         let (end, w) = ellipsize(s, style.font, width, m);
-        t.lines.push(Line { start: range.0, end: range.0 + end as u32, width: w })
+        let ink = m.line(&s[..end], style.font).1;
+        t.lines.push(Line { start: range.0, end: range.0 + end as u32, width: w, ink })
       }
-      true => t.lines.push(Line { start: range.0, end: range.1, width: n.content[0] }),
+      true => {
+        let ink = m.line(s, style.font).1;
+        t.lines.push(Line { start: range.0, end: range.1, width: n.content[0], ink })
+      }
       false => wrap_text(&t.text, *range, *style, width, m, &mut t.lines),
     }
 
@@ -618,16 +629,16 @@ fn wrap_text(
   for line in text[at..range.1 as usize].split('\n') {
     let base = at;
     at += line.len() + 1;
-    let w = m.width(line, font);
+    let (w, ink) = m.line(line, font);
     if !style.wrap || w <= width + EPS {
-      out.push(Line { start: base as u32, end: (base + line.len()) as u32, width: w });
+      out.push(Line { start: base as u32, end: (base + line.len()) as u32, width: w, ink });
       continue;
     }
 
     let space = m.width(" ", font);
     let mut push = |m: &mut dyn Measure, a: usize, b: usize| {
-      let width = m.width(&line[a..b], font);
-      out.push(Line { start: (base + a) as u32, end: (base + b) as u32, width });
+      let (width, ink) = m.line(&line[a..b], font);
+      out.push(Line { start: (base + a) as u32, end: (base + b) as u32, width, ink });
     };
     // The line so far: start, end and width.
     let mut cur: Option<(usize, usize, f32)> = None;
