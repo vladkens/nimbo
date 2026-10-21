@@ -51,6 +51,8 @@ impl<'s> Tabs<'s> {
     let strip = strip.borders([0.0, 0.0, 1.0, 0.0], t.line).scroll_x();
     let strip = if b.disabled { strip } else { strip.tab_focusable_quiet() };
     let mut r = Response::default();
+    // The box of strip and page keyed apart from the strip, which has the id.
+    ui.next_id = Some((id.key("box"), false));
     ui.col(Style::new().grow(), |ui| {
       r = ui.with_id(id).row(strip, |ui| {
         for (i, title) in titles.iter().enumerate() {
@@ -157,6 +159,26 @@ mod tests {
         });
       });
     }
+  }
+
+  /// Tabs with no name: the strip takes the id by place, its box another.
+  struct Plain(usize);
+
+  impl App for Plain {
+    fn view(&mut self, ui: &mut Ui) {
+      Tabs::new(&mut self.0, &["A", "B"]).show(ui, |ui, _| _ = ui.el(Style::new().grow()));
+    }
+  }
+
+  #[test]
+  fn unnamed_tabs_build_without_duplicate_ids() {
+    // Duplicate ids panic in a debug build's layout.
+    let mut h = Harness::new(Plain(0), Size::new(300.0, 200.0), 1.0);
+    h.frame();
+    let strip = Id::ROOT.nth(0);
+    h.click_id(strip.key(("tab", "B")));
+    h.frame();
+    assert_eq!(h.app().0, 1);
   }
 
   #[test]
