@@ -128,6 +128,11 @@ fn node(
       if let Some(paint) = canvases[k as usize].take() {
         paint(f, r);
       }
+
+      // Its children over all it drew: a layer draws its glyphs and lines over its quads.
+      if !leaf {
+        f.layer();
+      }
     }
   }
 
@@ -308,7 +313,10 @@ mod tests {
     let (mut scene, mut text, mut images) =
       (Scene::default(), TextSystem::new(scale), Images::default());
     let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
-    let paint = |f: &mut Frame, r: Rect| f.rect(r, [0.0, 0.0, 1.0, 1.0], 0.0);
+    let paint = |f: &mut Frame, r: Rect| {
+      f.rect(r, [0.0, 0.0, 1.0, 1.0], 0.0);
+      f.text(r.x + 12.0, r.y + 24.0, "chart", Font::ui(13.0), [1.0; 4]);
+    };
     ui.id("chart").canvas_row(Style::new().w(px(120.0)).h(px(80.0)).pad(10.0), paint, |ui| {
       ui.id("plot").el(Style::new().w(crate::ui::grow()).h(crate::ui::grow()).bg([1.0; 4]));
       ui.id("axis").el(Style::new().w(px(30.0)).h(crate::ui::grow()));
@@ -328,14 +336,17 @@ mod tests {
     let st = ui.paint(&mut f);
     assert_eq!(st.last.rect(Id::of("plot")), Some(Rect::new(10.0, 10.0, 70.0, 60.0)));
     assert_eq!(st.last.rect(Id::of("axis")), Some(Rect::new(80.0, 10.0, 30.0, 60.0)));
-    // The canvas first, over its whole box, then the child over it.
-    let quads = &scene.layers()[0].quads;
-    assert_eq!(quads.len(), 2);
+    // The canvas first, over its whole box, its text with it; then the children in a layer over
+    // it, so the plot's ground covers the canvas's text too.
+    let layers = scene.layers();
+    let (quads, glyphs) = (&layers[0].quads, layers[0].glyphs.len());
+    assert_eq!(quads.len(), 1);
+    assert!(glyphs > 0);
     assert_eq!(
       (quads[0].rect, quads[0].color),
       (Rect::new(0.0, 0.0, 120.0, 80.0), [0.0, 0.0, 1.0, 1.0])
     );
-    assert_eq!(quads[1].color, [1.0; 4]);
+    assert_eq!((layers[1].quads.len(), layers[1].quads[0].color), (1, [1.0; 4]));
     // Children take the pointer, innermost first.
     let mut hits = Vec::new();
     crate::ui::hit(&st.last, crate::scene::Point::new(20.0, 20.0), &mut hits);
