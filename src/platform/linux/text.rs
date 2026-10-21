@@ -17,6 +17,7 @@ use std::ops::Range;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use super::dl::{Lib, fns};
+use crate::text::edit::is_extend;
 use crate::text::{Font, Glyph, GlyphBox, Line, Metrics, Raster};
 
 // MARK: FFI
@@ -449,10 +450,10 @@ impl Cache {
 }
 
 /// Runs of one font for `s` from fonts `0..fonts` (`has(font, c)`: whether it has `c`), by
-/// cluster (a character with the marks, joiners and selectors after it, what a joiner links,
-/// a pair of regional indicators): the first font with the whole cluster, else the first with
-/// its first character, else font 0. A joined emoji or a letter with its mark is shaped in one
-/// font.
+/// cluster (a character with what extends it in the editor's clusters: marks, vowel signs,
+/// joiners and selectors; what a joiner links; a pair of regional indicators): the first font
+/// with the whole cluster, else the first with its first character, else font 0. A joined
+/// emoji or a letter with its mark is shaped in one font.
 fn runs(s: &str, fonts: usize, has: impl Fn(usize, char) -> bool) -> Vec<(Range<usize>, usize)> {
   let mut out: Vec<(Range<usize>, usize)> = Vec::new();
   for cluster in clusters(s) {
@@ -485,7 +486,7 @@ fn clusters(s: &str) -> Vec<Range<usize>> {
     let end = i + c.len_utf8();
     let linked = prev == Some('\u{200d}') || (regional(c) && indicators % 2 == 1);
     match out.last_mut() {
-      Some(r) if joins(c) || linked => r.end = end,
+      Some(r) if is_extend(c) || linked => r.end = end,
       _ => {
         out.push(i..end);
         indicators = 0;
@@ -503,24 +504,6 @@ fn clusters(s: &str) -> Vec<Range<usize>> {
 /// nothing of their own.
 fn ignorable(c: char) -> bool {
   matches!(c as u32, 0x200c..=0x200d | 0xfe00..=0xfe0f | 0xe0020..=0xe007f | 0xe0100..=0xe01ef)
-}
-
-/// Characters that belong to the cluster before them: combining marks, joiners, variation
-/// selectors, emoji modifiers and tags.
-fn joins(c: char) -> bool {
-  matches!(
-    c as u32,
-    0x300..=0x36f
-      | 0x1ab0..=0x1aff
-      | 0x1dc0..=0x1dff
-      | 0x200c..=0x200d
-      | 0x20d0..=0x20ff
-      | 0xfe00..=0xfe0f
-      | 0xfe20..=0xfe2f
-      | 0x1f3fb..=0x1f3ff
-      | 0xe0020..=0xe007f
-      | 0xe0100..=0xe01ef
-  )
 }
 
 // MARK: Faces
@@ -815,11 +798,11 @@ mod tests {
     assert!(px == alone, "the same pixels from the kept render");
   }
 
-  /// Two fonts: a text one (Latin letters, ❤) and an emoji one (people, ❤, the acute accent).
+  /// Two fonts: a text one (Latin letters, ❤, क) and another (people, ❤, the acute accent, कि).
   fn has(font: usize, c: char) -> bool {
     match font {
-      0 => c.is_ascii_alphabetic() || c == '❤',
-      _ => matches!(c, '👩' | '👨' | '❤' | '\u{301}' | 'e' | '🇺' | '🇦'),
+      0 => c.is_ascii_alphabetic() || matches!(c, '❤' | 'क'),
+      _ => matches!(c, '👩' | '👨' | '❤' | '\u{301}' | 'e' | '🇺' | '🇦' | 'क' | '\u{93f}'),
     }
   }
 
@@ -836,6 +819,8 @@ mod tests {
     );
     // A letter with a mark only the other font has: both there.
     assert_eq!(picks("ae\u{301}"), [("a", 0), ("e\u{301}", 1)]);
+    // A consonant with a vowel sign only the other font has: both there (कि).
+    assert_eq!(picks("a\u{915}\u{93f}"), [("a", 0), ("\u{915}\u{93f}", 1)]);
     // Neither has the whole cluster: the font of its first character.
     assert_eq!(picks("a\u{302}b"), [("a\u{302}b", 0)]);
     // A heart alone stays in the text font; flags pair up.
