@@ -484,7 +484,8 @@ impl Frame<'_> {
     let frame = Rect::new(0.0, 0.0, self.size.w, self.size.h);
     let view = self.scene.clip().map_or(frame, |c| c.intersect(frame));
     let (ink, pad) = (line.ink, 1.0 / scale);
-    if y + ink.down + pad < view.y || y - ink.up - pad > view.y + view.h {
+    let empty = view.w <= 0.0 || view.h <= 0.0;
+    if empty || y + ink.down + pad < view.y || y - ink.up - pad > view.y + view.h {
       return line.width;
     }
 
@@ -568,6 +569,10 @@ mod tests {
     f.text(0.0, 200.0, s, font, [1.0; 4]);
     f.push_clip(Rect::new(0.0, 0.0, 10.0, 10.0));
     f.text(40.0, 40.0, "Z", font, [1.0; 4]);
+    f.pop_clip();
+    // Across a clip with no height: none either.
+    f.push_clip(Rect::new(0.0, 20.0, 100.0, 0.0));
+    f.text(0.0, 20.0, "Z", font, [1.0; 4]);
     f.pop_clip();
     assert_eq!(f.text.uploads().count(), 0);
   }
