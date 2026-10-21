@@ -177,7 +177,9 @@ impl Renderer {
     let (tw, th) = (w.div_ceil(TILE as usize), h.div_ceil(TILE as usize));
     self.tiles_w = tw;
     self.tiles.clear();
-    self.tiles.resize(tw * th, hash(&[w as u64, h as u64, self.generation]));
+    // Items hash their geometry in points and pixels; the scale maps one to the other.
+    let seed = hash(&[w as u64, h as u64, scale.to_bits() as u64, self.generation]);
+    self.tiles.resize(tw * th, seed);
     for (n, it) in self.items.iter().enumerate() {
       let r = it.rect;
       for b in &mut self.bins[(r.y0 / BAND) as usize..=((r.y1 - 1) / BAND) as usize] {
@@ -253,13 +255,14 @@ impl Renderer {
   }
 
   /// Clears and draws `rects` (disjoint) of the prepared frame into `px`, rows of `stride`
-  /// pixels holding the whole frame.
+  /// pixels holding the whole frame; the last row needs no padding.
   pub fn draw(&mut self, scene: &Scene, px: &mut [u32], stride: usize, rects: &[IRect]) {
     let (w, h) = self.size;
     assert!(stride >= w && px.len() >= stride * (h - 1) + w, "frame buffer too small");
     let job = Job { scene, items: &self.items, images: &self.images, scale: self.scale };
     let rows = BAND as usize * stride;
-    let bands: Vec<(usize, &mut [u32])> = px[..stride * h].chunks_mut(rows).enumerate().collect();
+    let px = &mut px[..stride * (h - 1) + w];
+    let bands: Vec<(usize, &mut [u32])> = px.chunks_mut(rows).enumerate().collect();
     let todo = |b: usize| {
       let band = IRect::new(0, b as i32 * BAND, w as i32, ((b as i32 + 1) * BAND).min(h as i32));
       rects.iter().any(|r| r.overlaps(band))
@@ -518,5 +521,30 @@ mod tests {
     let want = [IRect::new(64, 0, 192, 128), IRect::new(256, 192, 300, 200)];
     assert_eq!(got, want);
     assert_eq!(r.damage(&[]), [IRect::new(0, 0, 300, 200)]);
+  }
+
+  #[test]
+  fn damage_redraws_on_a_new_scale() {
+    // The same pixel size, items and bounds, but the gradient spans twice the pixels.
+    let mut s = Scene::default();
+    let q = Quad::new(Rect::new(0.0, 0.0, 128.0, 128.0), [1.0, 0.0, 0.0, 1.0]);
+    s.quad(q.gradient([0.0, 0.0, 1.0, 1.0], true));
+    let mut r = Renderer::new();
+    let mut c = Canvas::default();
+    c.draw(&mut r, &s, Size::new(64.0, 64.0), 1.0, false);
+    let (size, scale) = (Size::new(32.0, 32.0), 2.0);
+    assert!(c.draw(&mut r, &s, size, scale, true) > 0);
+    assert_eq!(c.pixels().data, r.snapshot(&s, size, scale).data);
+  }
+
+  #[test]
+  fn draw_needs_no_padding_after_the_last_row() {
+    let mut s = Scene::default();
+    s.quad(Quad::new(Rect::new(0.0, 0.0, 2.0, 2.0), [1.0, 1.0, 1.0, 1.0]));
+    let mut r = Renderer::new();
+    r.prepare(&s, Size::new(2.0, 2.0), 1.0);
+    let mut px = [0u32; 5];
+    r.draw_full(&s, &mut px, 3);
+    assert_eq!(px, [!0, !0, 0, !0, !0]);
   }
 }
