@@ -193,7 +193,7 @@ fn scrolls(n: &Node) -> bool {
 }
 
 /// How far a scroll container can scroll on each axis.
-fn max_scroll(n: &Node) -> [f32; 2] {
+pub(super) fn max_scroll(n: &Node) -> [f32; 2] {
   let m = |ax: usize, view: f32| match n.style.scroll[ax] {
     true => (n.content[ax] - view).max(0.0),
     false => 0.0,
@@ -673,6 +673,33 @@ mod tests {
     assert_eq!(offset(&st, "g"), 10.0);
     assert_eq!(st.last.rect(Id::of(("c", 0))).unwrap().y, -10.0);
     assert_eq!(st.last.rect(Id::of(("c", 5))).unwrap().y, 30.0);
+  }
+
+  #[test]
+  fn wheel_momentum_stops_at_the_end_of_shrunk_content() {
+    let rows = |n: usize| {
+      move |st| {
+        frame(st, |ui| {
+          ui.id("outer").col(Style::new().w(px(100.0)).h(px(100.0)).scroll_y(), |ui| {
+            ui.id("inner").col(Style::new().w(px(100.0)).h(px(50.0)).scroll_y(), |ui| {
+              for _ in 0..n {
+                ui.el(Style::new().w(px(100.0)).h(px(25.0)));
+              }
+            });
+            ui.el(Style::new().w(px(100.0)).h(px(300.0)));
+          });
+        })
+      }
+    };
+    // The inner column at 10 with 40 of the wheel to run, then its end moves from 50 to 25.
+    let mut st = rows(4)(UiState::default());
+    ev(&mut st, wheel(10.0, 10.0, 0.0, -10.0, true, Phase::None));
+    ev(&mut st, wheel(10.0, 10.0, 0.0, -40.0, false, Phase::None));
+    st = rows(3)(st);
+    // 5 more: the inner one has none to take, the outer one gets the 5 alone.
+    ev(&mut st, wheel(10.0, 10.0, 0.0, -5.0, false, Phase::None));
+    st.tick(Duration::from_secs(1));
+    assert_eq!((offset(&st, "inner"), offset(&st, "outer")), (25.0, 5.0));
   }
 
   #[test]
