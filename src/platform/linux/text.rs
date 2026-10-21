@@ -225,6 +225,8 @@ struct FontFile {
   color: bool,
   /// For a font of bitmap strikes only (CBDT emoji): the largest strike and its pixel size.
   strike: Option<(c_int, f32)>,
+  /// Whether fontconfig asked for hinting; `load` follows it unless the font is colour.
+  hinting: bool,
   load: i32,
 }
 
@@ -302,6 +304,7 @@ impl FontFile {
       x,
       color,
       strike,
+      hinting,
       load,
     })
   }
@@ -361,9 +364,13 @@ fn has_char(cs: P, c: char) -> bool {
 }
 
 impl Cache {
-  /// The file at `path` and `index`, opened on first use.
+  /// The file at `path` and `index` with `hinting`, opened on first use; a colour font, which
+  /// never hints, is one for both.
   fn file(&mut self, path: &CStr, index: c_int, hinting: bool) -> Option<Arc<FontFile>> {
-    if let Some(f) = self.files.iter().find(|f| *f.path == *path && f.index == index) {
+    let same = |f: &&Arc<FontFile>| {
+      *f.path == *path && f.index == index && (f.color || f.hinting == hinting)
+    };
+    if let Some(f) = self.files.iter().find(same) {
       return Some(f.clone());
     }
 
@@ -796,6 +803,19 @@ mod tests {
     let px = rasterize(&f, id, 1, &b, raster, false).unwrap();
     assert_eq!(RENDERS.with(Cell::get), 1);
     assert!(px == alone, "the same pixels from the kept render");
+  }
+
+  #[test]
+  fn files_keep_their_hinting() {
+    let primary = face(Font::ui(13.0)).file;
+    assert!(!primary.color);
+    let other = cache().file(&primary.path, primary.index, !primary.hinting).unwrap();
+    assert!(!Arc::ptr_eq(&primary, &other), "another hinting opens the file again");
+    assert_eq!(other.hinting, !primary.hinting);
+    assert_ne!(other.load, primary.load);
+
+    let again = cache().file(&primary.path, primary.index, primary.hinting).unwrap();
+    assert!(Arc::ptr_eq(&primary, &again));
   }
 
   /// Two fonts: a text one (Latin letters, ❤, क) and another (people, ❤, the acute accent, कि).
