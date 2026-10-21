@@ -286,7 +286,7 @@ fn run_on(
     started,
     exposed: false,
     cursor: Cursor::Arrow,
-    cursors: Cursors::new(theme),
+    cursors: Cursors::new(theme, &db),
     mouse: Point::new(0.0, 0.0),
     inside: false,
     last_click: None,
