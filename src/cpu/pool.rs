@@ -125,8 +125,7 @@ impl Pool {
 pub fn threads() -> usize {
   // Unknown, no more than 4: past that the cores are likely efficiency ones or busy.
   let cores = || std::thread::available_parallelism().map_or(1, |n| n.get().min(4));
-  // The platform's count of performance cores comes with the platforms.
-  cores()
+  crate::platform::perf_cores().unwrap_or_else(cores)
 }
 
 #[cfg(test)]
