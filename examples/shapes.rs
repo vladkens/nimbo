@@ -5,7 +5,8 @@
 //! shadow, gradients down and across, an image scaled up, lines of four widths, a polyline and
 //! a clip.
 //!
-//! `cargo run --release --example shapes -- --shot shapes.png [--appearance light]`
+//! `cargo run --release --example shapes` opens it in a window, which follows the OS's light or
+//! dark setting; `-- --shot shapes.png [--appearance light]` renders it without one.
 
 use std::f32::consts::TAU;
 

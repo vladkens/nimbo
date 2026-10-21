@@ -13,7 +13,8 @@ A small, fast, custom-drawn desktop UI toolkit in Rust, in the spirit of Sublime
 
 - The library starts small and grows when an app needs more: widgets, containers and platforms come as add-ons over the core, not baked into it.
 - `src/app.rs` the seams an app sees (`App`, `Event`, `Runtime`, clock); `src/scene.rs` the draw list and paint API; `src/cpu/` the CPU renderer; `src/harness.rs` the headless runner.
-- Examples are `examples/<name>.rs` and start through `nimbo::run`, which with `--shot <file.png>` renders in the harness (`--appearance light|dark`).
+- `src/platform/<os>/` everything OS-dependent, its contract in the docs of `src/platform/mod.rs`: AppKit, Win32, Wayland or X11 (XCB, loaded at run time).
+- Examples are `examples/<name>.rs` and start through `nimbo::run`, which opens a window, or with `--shot <file.png>` renders in the harness instead (`--appearance light|dark`).
 
 ## Code
 
