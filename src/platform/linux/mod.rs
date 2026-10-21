@@ -252,6 +252,8 @@ pub struct Win {
   /// The pointer's enter serial while it is over the surface (cursors need it).
   enter_serial: Option<u32>,
   cursor: Cursor,
+  /// The scale of the theme's image last shown: another needs the image again.
+  cursor_scale: i32,
   mouse: Point,
   last_click: Option<(MouseButton, Instant, Point, u32)>,
   axes: Axes,
@@ -375,6 +377,7 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
     pinch_scale: 1.0,
     enter_serial: None,
     cursor: Cursor::Arrow,
+    cursor_scale: 0,
     mouse: Point::new(0.0, 0.0),
     last_click: None,
     axes: Axes::default(),
@@ -580,7 +583,8 @@ impl Win {
 
   fn sync_cursor(&mut self) {
     let c = self.rt.cursor();
-    if c == self.cursor {
+    let rescaled = self.cursors.is_some() && self.scale().ceil() as i32 != self.cursor_scale;
+    if c == self.cursor && !rescaled {
       return;
     }
 
@@ -597,6 +601,7 @@ impl Win {
       dev.set_shape(serial, shape(self.cursor));
     } else if let (Some(cursors), Some(pointer)) = (&mut self.cursors, &self.pointer) {
       cursors.set(pointer, serial, self.cursor, scale, &self.qh);
+      self.cursor_scale = scale;
     }
   }
 
