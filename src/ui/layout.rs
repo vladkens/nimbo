@@ -890,15 +890,21 @@ fn grid_place(t: &mut Tree, i: usize, win: Size) {
       place_float(c, f, pos, size, win);
     }
   });
+  // Each cell holds its row's height and top until placed.
+  each_cell(t, i, |c, _, _, _| bottom = bottom.max(c.pos[1] + c.pos[0]));
+  // The columns fit the width; the rows may overflow it, and a vertical scroll's offset is
+  // clamped to them.
+  let n = &mut t.nodes[i];
+  n.content = [size[0], bottom + ca + cb];
+  let max = (n.content[1] - size[1]).max(0.0);
+  let dy = if n.style.scroll[1] { n.scroll.y.clamp(0.0, max) } else { 0.0 };
+  n.scroll = Point::new(0.0, dy);
   each_cell(t, i, |c, col, _, s| {
     let (h, top) = (c.pos[0], c.pos[1]);
     let w = cw * s as f32 + gap * (s - 1) as f32;
     c.pos[0] = pos[0] + a + (cw + gap) * col as f32 + offset(align[0], w - c.size[0]);
-    c.pos[1] = pos[1] + ca + top + offset(align[1], h - c.size[1]);
-    bottom = bottom.max(top + h);
+    c.pos[1] = pos[1] + ca + top + offset(align[1], h - c.size[1]) - dy;
   });
-  let n = &mut t.nodes[i];
-  (n.content, n.scroll) = ([size[0], bottom + ca + cb], Point::default());
 }
 
 fn offset(align: Align, free: f32) -> f32 {
