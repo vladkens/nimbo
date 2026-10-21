@@ -268,7 +268,8 @@ impl<'s> List<'s> {
       None => own.insert(std::mem::take(&mut st.sel)),
     };
 
-    let focused = ui.focused(id);
+    // Its selection in the accent while it has focus in the key window.
+    let focused = ui.focus_visible(id);
     let mut out = ListResponse { id, focused, ..Default::default() };
     let sc = ui.scroll(id);
     let view_h = sc.map_or(ui.size().h, |s| s.viewport.h);
@@ -596,6 +597,13 @@ mod tests {
     h.release(250.0, 250.0);
     h.click(b.x + 5.0, b.y + 5.0);
     assert_eq!(h.app().sel.cursor(), Some(497));
+    // The window losing the keys: the selection turns from the accent to grey.
+    let px = |h: &mut Harness<Rows>| h.render().pixel(b.x + 150.0, b.y + 10.0);
+    let active = px(&mut h);
+    h.event(crate::app::Event::Focus(false));
+    let inactive = px(&mut h);
+    assert_ne!(active, inactive);
+    h.event(crate::app::Event::Focus(true));
     // The same again on one row: its press selects it, then the quick Cmd-click's toggles it.
     h.press(b.x + 5.0, b.y + 5.0);
     h.frame();
