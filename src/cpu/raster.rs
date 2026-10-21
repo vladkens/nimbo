@@ -386,8 +386,13 @@ fn gradient(t: &mut Target, q: &Quad, r: IRect, scale: f32, from: [f32; 4], to: 
 
 // MARK: Lines
 
-/// The pixel rect around a segment's geometry (the rotated quad of `line_vs`).
+/// The pixel rect around a segment's geometry (the rotated quad of `line_vs`); none for a
+/// butt-capped one of no length, which has no area (a round-capped one is a dot).
 pub fn line_bounds(s: &Segment, scale: f32) -> IRect {
+  if s.round <= 0.0 && s.a.x == s.b.x && s.a.y == s.b.y {
+    return IRect::default();
+  }
+
   let ext = s.width.max(1.0 / scale) * 0.5 + 1.0 / scale;
   let (x0, x1) = (s.a.x.min(s.b.x) - ext, s.a.x.max(s.b.x) + ext);
   let (y0, y1) = (s.a.y.min(s.b.y) - ext, s.a.y.max(s.b.y) + ext);
@@ -549,7 +554,7 @@ pub fn image(t: &mut Target, s: &Sprite, tex: Tex, clip: IRect, scale: f32) {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::scene::Rect;
+  use crate::scene::{Point, Rect};
 
   #[test]
   fn borders_that_meet_leave_no_fill() {
@@ -585,6 +590,20 @@ mod tests {
     }
 
     assert_eq!(px, [0; 25]);
+  }
+
+  #[test]
+  fn a_point_draws_only_with_round_caps() {
+    let a = Point::new(2.5, 2.5);
+    let seg = |round| Segment { a, b: a, color: [1.0; 4], width: 2.0, round, _pad: [0.0; 2] };
+    let draw = |s: &Segment| {
+      let mut px = [0u32; 25];
+      line(&mut Target { px: &mut px, stride: 5, y0: 0 }, s, IRect::new(0, 0, 5, 5), 1.0);
+      px
+    };
+    assert!(line_bounds(&seg(0.0), 1.0).is_empty());
+    assert_eq!(draw(&seg(0.0)), [0; 25]);
+    assert_eq!(draw(&seg(1.0))[12], !0);
   }
 
   #[test]
