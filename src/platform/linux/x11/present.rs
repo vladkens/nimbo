@@ -97,6 +97,7 @@ impl Presenter {
       Some(Mem::Local(v)) => v.as_mut_slice(),
       None => return false,
     };
+
     self.renderer.draw(scene, px, w, &rects);
     self.tiles.clear();
     self.tiles.extend_from_slice(self.renderer.tiles());
@@ -211,6 +212,7 @@ impl Presenter {
       Mem::Shm(s) => unsafe { std::slice::from_raw_parts(s.ptr, self.w * self.h) },
       Mem::Local(v) => v.as_slice(),
     };
+
     let data = px.iter().flat_map(|p| (p | 0xff00_0000).to_le_bytes()).collect();
     Some(Pixels { w: self.w, h: self.h, data })
   }

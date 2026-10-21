@@ -327,6 +327,7 @@ fn appearance(x: &X, owner: u32, prop: u32) -> Appearance {
     0 => None,
     w => x.property(w, prop, prop, false).map(|p| p.data),
   };
+
   let theme = data.and_then(|d| xsettings_string(&d, "Net/ThemeName"));
   match theme {
     Some(t) if t.to_lowercase().contains("dark") => Appearance::DARK,

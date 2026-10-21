@@ -50,6 +50,7 @@ pub fn appearance() -> Appearance {
     });
     look.performAsCurrentDrawingAppearance(&resolve);
   }
+
   Appearance { dark, accent: accent.get() }
 }
 

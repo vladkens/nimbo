@@ -98,6 +98,7 @@ impl Presenter {
     if size.w <= 0.0 || size.h <= 0.0 {
       return false;
     }
+
     let r = &mut self.renderer;
     r.prepare(scene, size, scale);
     let (w, h) = r.size();
@@ -105,6 +106,7 @@ impl Presenter {
       self.surfaces.clear();
       self.front = None;
     }
+
     if let Some(f) = self.front
       && r.damage(&self.surfaces[f].tiles).is_empty()
     {
@@ -124,6 +126,7 @@ impl Presenter {
       // Every surface is busy: draw into the one after the shown one anyway.
       None => self.front.map_or(0, |f| (f + 1) % self.surfaces.len()),
     };
+
     let s = &mut self.surfaces[i];
     let rects = r.damage(&s.tiles);
     s.with_pixels(|px, stride| r.draw(scene, px, stride, &rects));
@@ -141,6 +144,7 @@ impl Presenter {
       let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
       eprintln!("nimbo: presented {:.3}", t.as_secs_f64() * 1e3);
     }
+
     true
   }
 }
@@ -180,6 +184,7 @@ mod tests {
       let want = p.renderer.snapshot(&s, size, scale).data;
       assert!(shown(&mut p) == want, "x = {x}");
     }
+
     assert!(!p.present(&scene(61.0), size, scale), "an unchanged frame is shown again");
   }
 }

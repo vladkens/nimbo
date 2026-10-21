@@ -77,6 +77,7 @@ impl Dispatch<XdgSurface, ()> for Win {
       if let Some(s) = win.pending_size.take() {
         win.size = s;
       }
+
       win.configured = true;
       win.acked = true;
       win.rt.redraw();
@@ -119,6 +120,7 @@ impl Dispatch<WlSurface, ()> for Win {
       wl_surface::Event::PreferredBufferScale { factor } => win.preferred = Some(factor),
       _ => return,
     }
+
     win.rt.redraw();
   }
 }

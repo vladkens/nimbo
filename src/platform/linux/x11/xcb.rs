@@ -429,6 +429,7 @@ impl X {
         0 => Vec::new(),
         n => unsafe { std::slice::from_raw_parts(p, n) }.to_vec(),
       };
+
       Prop { ty: r.ty, data }
     })
     .filter(|p| p.ty != 0)

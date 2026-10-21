@@ -69,6 +69,7 @@ pub fn run(cfg: &Config, app: Box<dyn App>) {
     },
     None => x11::run(cfg, app),
   };
+
   if let Err(e) = res {
     eprintln!("nimbo: {e}");
     std::process::exit(1);
@@ -154,6 +155,7 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
     }
     _ => (None, None),
   };
+
   let xdg = wm.get_xdg_surface(&surface, &qh, ());
   let top = xdg.get_toplevel(&qh, ());
   top.set_title(cfg.title.into());
@@ -168,6 +170,7 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
       top.set_max_size(w, h);
     }
   }
+
   surface.commit();
 
   let mut rt = Runtime::new(app, cfg.size, 1.0, Clock::real());
@@ -234,11 +237,13 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
       Ok(_) | Err(rustix::io::Errno::INTR) => {}
       Err(e) => return Err(e.into()),
     }
+
     let (ready, woken) = (!fds[0].revents().is_empty(), !fds[1].revents().is_empty());
     if woken {
       let mut buf = [0u8; 8];
       let _ = rustix::io::read(&*wake, &mut buf);
     }
+
     match ready {
       true => match guard.read() {
         Ok(_) => {}
@@ -299,6 +304,7 @@ impl Win {
         }
         _ => self.surface.set_buffer_scale(scale as i32),
       }
+
       (self.set_scale, self.set_size) = (scale, size);
     }
 
@@ -320,6 +326,7 @@ impl Win {
     } else if self.rt.needs_frame() {
       self.next_tick = Some(Instant::now() + TICK);
     }
+
     if shown || self.acked {
       self.acked = false;
       self.surface.commit();

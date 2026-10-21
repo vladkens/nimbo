@@ -106,6 +106,7 @@ impl Presenter {
       self.bufs.clear();
       self.front = None;
     }
+
     if let Some(f) = self.front
       && r.damage(&self.bufs[f].tiles).is_empty()
     {
@@ -142,6 +143,7 @@ impl Presenter {
     for rc in rects.iter().chain(shown.iter().flatten()) {
       surface.damage_buffer(rc.x0, rc.y0, rc.x1 - rc.x0, rc.y1 - rc.y0);
     }
+
     b.busy.store(true, Ordering::Release);
     self.front = Some(i);
     true

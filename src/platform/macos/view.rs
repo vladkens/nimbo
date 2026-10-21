@@ -73,6 +73,7 @@ define_class!(
         if let Some(st) = self.ivars().state.borrow_mut().as_mut() {
           st.link = link;
         }
+
         self.wake();
       }
     }
@@ -99,6 +100,7 @@ define_class!(
           // until the window shows again.
           st.link.setPaused(true);
         }
+
         idle
       };
       if !pause {
@@ -179,6 +181,7 @@ impl View {
       if st.rt.needs_frame() {
         st.link.setPaused(false);
       }
+
       (used, st.rt.quit_requested())
     };
     if quit {

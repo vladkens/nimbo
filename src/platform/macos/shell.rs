@@ -87,10 +87,12 @@ define_class!(
       if shell(|s| std::mem::replace(&mut s.terminating, true)) {
         return NSApplicationTerminateReply::TerminateLater;
       }
+
       defer(|| {
         if !shell(|s| s.terminating) {
           return;
         }
+
         finish();
         NSApplication::sharedApplication(mtm()).replyToApplicationShouldTerminate(true);
       });
@@ -297,6 +299,7 @@ pub fn open(cfg: &Config, app: Box<dyn App>) -> u64 {
   if cfg.resizable {
     style |= NSWindowStyleMask::Resizable;
   }
+
   let window = unsafe {
     NSWindow::initWithContentRect_styleMask_backing_defer(
       NSWindow::alloc(mtm),
@@ -339,6 +342,7 @@ pub fn front(id: u64) {
   if window.isMiniaturized() {
     window.deminiaturize(None);
   }
+
   window.makeKeyAndOrderFront(None);
   NSApplication::sharedApplication(mtm).activate();
 }

@@ -159,6 +159,7 @@ impl Window {
     if self.dib.as_ref().is_none_or(|d| (d.w, d.h) != (pw, ph)) {
       self.dib = Dib::new(pw, ph);
     }
+
     let Some(dib) = &mut self.dib else { return };
     let rects = r.damage(&dib.tiles);
     if rects.is_empty() {
@@ -172,6 +173,7 @@ impl Window {
     for &rect in &rects {
       dib.blit(dc, rect);
     }
+
     unsafe { ReleaseDC(self.hwnd, dc) };
     self.frames += 1;
     if self.trace {
@@ -197,6 +199,7 @@ impl Window {
         _ => self.render(),
       }
     }
+
     self.rt.needs_frame().then_some(self.refresh)
   }
 }
@@ -241,6 +244,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
       if shown.flatten().is_none() {
         with(|w| w.rt.redraw());
       }
+
       unsafe { EndPaint(hwnd, &ps) };
       0
     }
@@ -339,6 +343,7 @@ pub fn run(cfg: &Config, app: Box<dyn App>) {
     true => WS_OVERLAPPEDWINDOW,
     false => WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
   };
+
   let dpi = unsafe { GetDpiForSystem() };
   let scale = dpi as f32 / 96.0;
   let (w, h) = ((cfg.size.w * scale).round() as i32, (cfg.size.h * scale).round() as i32);
@@ -406,11 +411,13 @@ fn run_loop(hwnd: HWND, timer: HANDLE) {
       if msg.message == WM_QUIT {
         return;
       }
+
       unsafe {
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
       }
     }
+
     if with(|w| w.rt.quit_requested()).unwrap_or(true) {
       unsafe { DestroyWindow(hwnd) };
       continue;
@@ -426,10 +433,12 @@ fn run_loop(hwnd: HWND, timer: HANDLE) {
       }
       _ => 0,
     };
+
     let ms = match (wait, n) {
       (Some(d), 0) => d.as_millis().max(1) as u32,
       _ => INFINITE,
     };
+
     unsafe { MsgWaitForMultipleObjectsEx(n, &timer, ms, QS_ALLINPUT, MWMO_INPUTAVAILABLE) };
   }
 }
@@ -466,6 +475,7 @@ pub fn perf_cores() -> Option<usize> {
     classes.push(unsafe { rec.Anonymous.Processor.EfficiencyClass });
     at += rec.Size.max(1) as usize;
   }
+
   let top = *classes.iter().max()?;
   Some(classes.iter().filter(|&&c| c == top).count().min(4))
 }
