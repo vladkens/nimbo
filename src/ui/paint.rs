@@ -1,0 +1,297 @@
+// Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
+
+//! The paint pass: walks the laid-out tree into the frame's scene. Each box draws its shadow,
+//! background and border, then its content (text lines, an image, a canvas callback), then its
+//! children, clipped when it clips. Overlays follow, each in a new layer, by z. Elements outside
+//! the window or their clip are skipped.
+
+use super::layout::{ELLIPSIS, Kind, Tree};
+use super::{Canvas, FocusRing, Style};
+use crate::scene::{Color, Frame, Quad, Rect};
+
+/// Paints `t`; `ring` rings node `.0`, the focused one.
+pub(super) fn paint(
+  t: &Tree,
+  canvases: &mut [Option<Canvas>],
+  ring: Option<(usize, FocusRing)>,
+  f: &mut Frame,
+) {
+  if t.nodes.len() <= 1 {
+    return;
+  }
+
+  let window = Rect::new(0.0, 0.0, f.size.w, f.size.h);
+  node(t, 0, 1.0, window, ring, canvases, f);
+  for &i in &t.floats {
+    f.layer();
+    // Overlays keep their ancestors' opacity, not their clips.
+    let mut alpha = 1.0;
+    let mut p = t.nodes[i as usize].parent as usize;
+    while p != 0 {
+      alpha *= t.nodes[p].style.opacity;
+      p = t.nodes[p].parent as usize;
+    }
+
+    match t.float_clip(i) {
+      Some(c) => {
+        f.push_clip(c);
+        node(t, i as usize, alpha, c.intersect(window), ring, canvases, f);
+        f.pop_clip();
+      }
+      None => node(t, i as usize, alpha, window, ring, canvases, f),
+    }
+  }
+}
+
+fn fade(c: Color, alpha: f32) -> Color {
+  [c[0], c[1], c[2], c[3] * alpha]
+}
+
+fn visible(r: Rect, clip: Rect) -> bool {
+  r.x < clip.x + clip.w && clip.x < r.x + r.w && r.y < clip.y + clip.h && clip.y < r.y + r.h
+}
+
+fn node(
+  t: &Tree,
+  i: usize,
+  alpha: f32,
+  clip: Rect,
+  ring: Option<(usize, FocusRing)>,
+  canvases: &mut [Option<Canvas>],
+  f: &mut Frame,
+) {
+  let n = &t.nodes[i];
+  let (s, r) = (&n.style, n.rect);
+  let alpha = alpha * s.opacity;
+  let leaf = n.end as usize == i + 1;
+  if alpha <= 0.0 || (leaf || s.clip) && !visible(r, clip) {
+    return;
+  }
+
+  if let Some((k, ring)) = ring
+    && k == i
+  {
+    // Outside the box, so under it is the same as over it.
+    let o = ring.gap + ring.width;
+    let rect = Rect::new(r.x - o, r.y - o, r.w + 2.0 * o, r.h + 2.0 * o);
+    let q = Quad::new(rect, [0.0; 4]).radii(s.radii.map(|v| v + o));
+    f.quad(q.border(ring.width, fade(ring.color, alpha)));
+  }
+  decorate(s, r, alpha, f);
+
+  match n.kind {
+    Kind::Box => {}
+    Kind::Text { range, style, lines, baseline, line_h } => {
+      let color = fade(style.color, alpha);
+      let (mut first, mut last) = lines;
+      if last - first > 1 {
+        // Only the lines inside the clip.
+        let n = (last - first) as f32;
+        first += ((clip.y - r.y) / line_h).floor().clamp(0.0, n) as u32;
+        last = lines.0 + ((clip.y + clip.h - r.y) / line_h).ceil().clamp(0.0, n) as u32;
+      }
+
+      for k in first..last {
+        let l = &t.lines[k as usize];
+        let y = r.y + (k - lines.0) as f32 * line_h + baseline;
+        let mut w = f.text(r.x, y, t.str(l.start, l.end), style.font, color);
+        if style.ellipsis && lines.1 - lines.0 == 1 && l.end < range.1 {
+          w += f.text(r.x + w, y, ELLIPSIS, style.font, color);
+        }
+
+        if style.strike && w > 0.0 {
+          strike(r.x, y, w, style.font.size, color, f);
+        }
+      }
+    }
+    Kind::Image(id) => f.image(id, r, alpha),
+    Kind::Canvas(k) => {
+      if let Some(paint) = canvases[k as usize].take() {
+        paint(f, r);
+      }
+    }
+  }
+
+  if leaf {
+    return;
+  }
+
+  let clip = match s.clip {
+    true => {
+      f.push_clip(r);
+      clip.intersect(r)
+    }
+    false => clip,
+  };
+
+  for c in t.children(i as u32) {
+    if t.nodes[c as usize].float.is_none() {
+      node(t, c as usize, alpha, clip, ring, canvases, f);
+    }
+  }
+
+  if s.clip {
+    f.pop_clip();
+  }
+}
+
+/// A strikethrough `w` wide from `x` over a line with its baseline at `y`: at half the
+/// x-height (about 0.53 em in SF Pro), a point thick up to 14 points, on whole pixels.
+fn strike(x: f32, y: f32, w: f32, size: f32, color: Color, f: &mut Frame) {
+  let h = (size / 14.0).max(1.0);
+  let top = ((y - size * 0.27 - h / 2.0) * f.scale).round() / f.scale;
+  f.rect(Rect::new(x, top, w, h), color, 0.0);
+}
+
+/// Shadow, background and border.
+fn decorate(s: &Style, r: Rect, alpha: f32, f: &mut Frame) {
+  let sh = s.shadow;
+  if sh.color[3] > 0.0 {
+    let rect = Rect::new(r.x + sh.offset.x, r.y + sh.offset.y, r.w, r.h);
+    f.quad(Quad::new(rect, fade(sh.color, alpha)).radii(s.radii).blur(sh.blur));
+  }
+
+  let border = s.border.iter().any(|&w| w > 0.0) && s.border_color[3] > 0.0;
+  if s.bg[3] > 0.0 || border {
+    let q = Quad::new(r, fade(s.bg, alpha)).radii(s.radii);
+    f.quad(if border { q.borders(s.border, fade(s.border_color, alpha)) } else { q });
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use std::time::Duration;
+
+  use super::*;
+  use crate::scene::{Images, Scene, Size};
+  use crate::text::{Font, TextSystem};
+  use crate::ui::{Float, Id, Sys, TextStyle, Ui, UiState, px};
+
+  #[test]
+  fn paints_tree_then_overlays() {
+    let (size, scale) = (Size::new(200.0, 100.0), 2.0);
+    let (mut scene, mut text, mut images) =
+      (Scene::default(), TextSystem::new(scale), Images::default());
+    let label = TextStyle::new(Font::ui(13.0), [1.0; 4]);
+    let mut drawn = None;
+    let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
+    let panel = Style::new().w(px(100.0)).h(px(50.0)).bg([0.2, 0.2, 0.2, 1.0]);
+    ui.id("panel").col(
+      panel.shadow(crate::ui::Shadow::new(2.0, 4.0, [0.0, 0.0, 0.0, 0.5])).clip(),
+      |ui| {
+        ui.text("hi", label);
+        ui.float(Float::parent().attach(1.0, 0.0)).col(panel.opacity(0.5), |ui| {
+          ui.text("tip", label);
+        });
+        ui.canvas(Style::new().w(px(10.0)).h(px(10.0)), |_, r| drawn = Some(r));
+      },
+    );
+    // Outside the window: not painted.
+    ui.float(Float::window().offset(500.0, 0.0)).text("away", label);
+    let mut sys = Sys { text: &mut text, images: &images, scale };
+    ui.layout(&mut sys, scale);
+    let mut f = Frame {
+      size,
+      scale,
+      mouse: None,
+      now: Duration::ZERO,
+      scene: &mut scene,
+      text: &mut text,
+      images: &mut images,
+      animate: false,
+    };
+    let st = ui.paint(&mut f);
+
+    let canvas = st.last.nodes.iter().find(|n| matches!(n.kind, Kind::Canvas(_))).unwrap();
+    assert_eq!(drawn, Some(canvas.rect));
+    // Layers: the panel, its clipped children, the overlay (reusing the empty layer after the
+    // clip), then the culled one.
+    let layers = scene.layers();
+    assert_eq!(layers.len(), 4);
+    assert_eq!(layers[0].quads.len(), 2);
+    assert_eq!(layers[1].clip, st.last.rect(Id::of("panel")));
+    assert_eq!(layers[1].glyphs.len(), 2);
+    assert_eq!((layers[2].clip, layers[2].quads.len(), layers[2].glyphs.len()), (None, 1, 3));
+    assert_eq!(layers[2].quads[0].color[3], 0.5);
+    assert_eq!(scene.counts().quads + scene.counts().glyphs, 8);
+  }
+
+  #[test]
+  fn struck_text_gets_a_line_per_line() {
+    let (size, scale) = (Size::new(200.0, 100.0), 2.0);
+    let (mut scene, mut text, mut images) =
+      (Scene::default(), TextSystem::new(scale), Images::default());
+    let plain = TextStyle::new(Font::ui(13.0), [1.0, 0.0, 0.0, 1.0]);
+    let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
+    ui.col(Style::new().w(px(60.0)), |ui| {
+      ui.id("plain").text("Buy milk", plain);
+      // Wraps to two lines at 60 points.
+      ui.id("done").text("Buy milk and eggs", plain.strike());
+    });
+    let mut sys = Sys { text: &mut text, images: &images, scale };
+    ui.layout(&mut sys, scale);
+    let mut f = Frame {
+      size,
+      scale,
+      mouse: None,
+      now: Duration::ZERO,
+      scene: &mut scene,
+      text: &mut text,
+      images: &mut images,
+      animate: false,
+    };
+    let st = ui.paint(&mut f);
+    let quads = &scene.layers()[0].quads;
+    assert_eq!(quads.len(), 2);
+    let done = st.last.get(Id::of("done")).unwrap();
+    let Kind::Text { lines, baseline, line_h, .. } = done.kind else { panic!() };
+    assert_eq!(lines.1 - lines.0, 2);
+    for (k, q) in quads.iter().enumerate() {
+      let base = done.rect.y + k as f32 * line_h + baseline;
+      // Above the baseline, under the top of the lowercase letters, in the text's colour.
+      assert!(q.rect.y < base - 2.0 && q.rect.y > base - 7.0, "{:?} over {base}", q.rect);
+      assert_eq!((q.rect.x, q.rect.h, q.color), (done.rect.x, 1.0, plain.color));
+      assert!(q.rect.w > 20.0 && q.rect.w <= 60.0);
+    }
+  }
+
+  #[test]
+  fn canvas_children_lay_out_and_paint_over_it() {
+    let (size, scale) = (Size::new(200.0, 100.0), 1.0);
+    let (mut scene, mut text, mut images) =
+      (Scene::default(), TextSystem::new(scale), Images::default());
+    let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
+    let paint = |f: &mut Frame, r: Rect| f.rect(r, [0.0, 0.0, 1.0, 1.0], 0.0);
+    ui.id("chart").canvas_row(Style::new().w(px(120.0)).h(px(80.0)).pad(10.0), paint, |ui| {
+      ui.id("plot").el(Style::new().w(crate::ui::grow()).h(crate::ui::grow()).bg([1.0; 4]));
+      ui.id("axis").el(Style::new().w(px(30.0)).h(crate::ui::grow()));
+    });
+    let mut sys = Sys { text: &mut text, images: &images, scale };
+    ui.layout(&mut sys, scale);
+    let mut f = Frame {
+      size,
+      scale,
+      mouse: None,
+      now: Duration::ZERO,
+      scene: &mut scene,
+      text: &mut text,
+      images: &mut images,
+      animate: false,
+    };
+    let st = ui.paint(&mut f);
+    assert_eq!(st.last.rect(Id::of("plot")), Some(Rect::new(10.0, 10.0, 70.0, 60.0)));
+    assert_eq!(st.last.rect(Id::of("axis")), Some(Rect::new(80.0, 10.0, 30.0, 60.0)));
+    // The canvas first, over its whole box, then the child over it.
+    let quads = &scene.layers()[0].quads;
+    assert_eq!(quads.len(), 2);
+    assert_eq!(
+      (quads[0].rect, quads[0].color),
+      (Rect::new(0.0, 0.0, 120.0, 80.0), [0.0, 0.0, 1.0, 1.0])
+    );
+    assert_eq!(quads[1].color, [1.0; 4]);
+    // Children take the pointer, innermost first.
+    let mut hits = Vec::new();
+    crate::ui::hit(&st.last, crate::scene::Point::new(20.0, 20.0), &mut hits);
+    assert_eq!(hits, [Id::of("plot"), Id::of("chart")]);
+  }
+}
