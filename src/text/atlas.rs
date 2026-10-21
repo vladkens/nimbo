@@ -81,11 +81,9 @@ impl Atlas {
     // The variant's low 2 bits are the subpixel offset; the bit above, the text's polarity
     // ([super::TextSystem::glyph]), only picks the raster.
     let g = self.rasterize(face, raster, key.1, key.2 & 3, uploads);
-    // A glyph skipped for lack of room is not cached: the reset gives it a slot next frame.
-    if g.is_some() || !self.full {
-      self.glyphs.insert(key, g);
-    }
-
+    // One skipped for lack of room stays out until the reset clears the cache and gives it a
+    // slot, rather than rendering again at every use.
+    self.glyphs.insert(key, g);
     g
   }
 
@@ -135,6 +133,7 @@ impl Atlas {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::text::Font;
 
   #[test]
   fn pack_rows_and_overflow() {
@@ -148,5 +147,20 @@ mod tests {
     assert_eq!((b.pack(65, 5), b.pack(5, 65), b.full), (None, None, false));
     a.reset();
     assert_eq!((a.pack(5, 5), a.epoch), (Some((0, 0)), 1));
+  }
+
+  #[test]
+  fn a_glyph_without_room_waits_for_the_reset() {
+    let face = sys::face(Font::ui(13.0));
+    let id = sys::shape(&face, "W", |_| 0).glyphs[0].id;
+    let raster = Raster { scale: 2.0, smooth: false, dark: true };
+    let (mut a, mut uploads, key) = (Atlas::new(64, false), Vec::new(), (0, id, 0));
+    // Rows for 4 pixels left: a 26-pixel W doesn't fit.
+    a.pack(64, 60);
+    assert!(a.glyph(&face, raster, key, &mut uploads).is_none() && a.full);
+    // Not rendered again at every use until the atlas starts over.
+    assert!(a.glyphs.contains_key(&key));
+    a.reset();
+    assert!(a.glyph(&face, raster, key, &mut uploads).is_some());
   }
 }
