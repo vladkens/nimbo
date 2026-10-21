@@ -403,6 +403,17 @@ impl X {
     Ok((x, it.data, n))
   }
 
+  /// The connection setup as the server sent it (in our byte order), and where `screen` is in
+  /// it: its pixel formats and the screen's visuals.
+  pub fn setup(&self, screen: *const Screen) -> (&[u8], usize) {
+    let p = unsafe { (self.l.xcb.xcb_get_setup)(self.c) }.cast::<u8>();
+    // SAFETY: the setup is 8 bytes and `length` 4-byte units (at byte 6), alive while the
+    // connection is, and holds the screen.
+    let len = 8 + 4 * u16::from_ne_bytes(unsafe { [*p.add(6), *p.add(7)] }) as usize;
+    let setup = unsafe { std::slice::from_raw_parts(p, len) };
+    (setup, screen as usize - p as usize)
+  }
+
   pub fn disconnect(self) {
     unsafe { (self.l.xcb.xcb_disconnect)(self.c) };
   }

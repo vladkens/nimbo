@@ -55,6 +55,56 @@ pub struct Presenter {
   since: Option<Instant>,
 }
 
+/// Whether the server takes the frames' pixels as they are: 32 bits each, `0xRRGGBB` in the
+/// root visual's masks, least significant byte first (`setup` is the connection setup, the
+/// screen at `screen_at`). Others (a BGR VNC server, a big-endian display) aren't converted.
+pub fn check_format(setup: &[u8], screen_at: usize) -> Result<(), String> {
+  let u16_at = |i: usize| Some(u16::from_ne_bytes(setup.get(i..i + 2)?.try_into().ok()?));
+  let u32_at = |i: usize| Some(u32::from_ne_bytes(setup.get(i..i + 4)?.try_into().ok()?));
+  let bad = || "a malformed X connection setup".to_string();
+
+  // The setup: the image byte order at 30, then after the vendor string 8-byte pixel formats
+  // (depth, bits per pixel).
+  let lsb_first = *setup.get(30).ok_or_else(bad)? == 0;
+  let vendor = u16_at(24).ok_or_else(bad)? as usize;
+  let formats = 40 + vendor.next_multiple_of(4);
+  let n = *setup.get(29).ok_or_else(bad)? as usize;
+  // The screen: the root visual at 32, its depth at 38, then its depths (8 bytes each) with
+  // their visuals (24 bytes: the id, then the red, green and blue masks at 8).
+  let visual = u32_at(screen_at + 32).ok_or_else(bad)?;
+  let depth = *setup.get(screen_at + 38).ok_or_else(bad)?;
+  let bpp = (0..n).find_map(|i| {
+    let f = setup.get(formats + 8 * i..formats + 8 * i + 2)?;
+    (f[0] == depth).then_some(f[1])
+  });
+
+  let mut masks = None;
+  let mut at = screen_at + 40;
+  for _ in 0..*setup.get(screen_at + 39).ok_or_else(bad)? {
+    let visuals = u16_at(at + 2).ok_or_else(bad)? as usize;
+    for v in (0..visuals).map(|i| at + 8 + 24 * i) {
+      if u32_at(v) == Some(visual) {
+        masks = Some([u32_at(v + 8), u32_at(v + 12), u32_at(v + 16)]);
+      }
+    }
+
+    at += 8 + 24 * visuals;
+  }
+
+  let rgb = [Some(0xff0000), Some(0xff00), Some(0xff)];
+  if lsb_first && bpp == Some(32) && masks == Some(rgb) {
+    return Ok(());
+  }
+
+  let [r, g, b] = masks.unwrap_or_default().map(Option::unwrap_or_default);
+  let order = if lsb_first { "LSB first" } else { "MSB first" };
+  Err(format!(
+    "the X screen's pixels are {} bits, red {r:#x} green {g:#x} blue {b:#x}, {order}: only \
+     32-bit 0xRRGGBB, LSB first, is drawn",
+    bpp.unwrap_or(0)
+  ))
+}
+
 impl Presenter {
   pub fn new(x: X, win: u32, depth: u8) -> Self {
     let shm = x.shm();
@@ -271,6 +321,61 @@ mod tests {
     s.quad(Quad::new(Rect::new(0.0, 0.0, 64.0, 48.0), [0.1, 0.2, 0.3, 1.0]));
     s.quad(Quad::new(Rect::new(x, 8.0, 16.0, 16.0), [0.9, 0.5, 0.1, 1.0]));
     s
+  }
+
+  /// A connection setup with one pixel format and one screen of one depth with one visual, the
+  /// root's; the screen's offset.
+  fn setup(lsb_first: bool, bpp: u8, masks: [u32; 3]) -> (Vec<u8>, usize) {
+    let mut d = vec![0u8; 40];
+    d[24..26].copy_from_slice(&3u16.to_ne_bytes());
+    (d[28], d[29], d[30]) = (1, 1, if lsb_first { 0 } else { 1 });
+    d.extend(b"Xvf\0");
+    d.extend([24, bpp, 32, 0, 0, 0, 0, 0]);
+    let at = d.len();
+    let mut screen = [0u8; 40];
+    screen[32..36].copy_from_slice(&0x21u32.to_ne_bytes());
+    (screen[38], screen[39]) = (24, 1);
+    d.extend(screen);
+    d.extend([24, 0]);
+    d.extend(1u16.to_ne_bytes());
+    d.extend([0; 4]);
+    d.extend(0x21u32.to_ne_bytes());
+    d.extend([4, 8, 0, 1]);
+    for m in masks {
+      d.extend(m.to_ne_bytes());
+    }
+
+    d.extend([0; 4]);
+    (d, at)
+  }
+
+  #[test]
+  fn only_rgb_pixels_are_taken() {
+    let ok = |(d, at): (Vec<u8>, usize)| check_format(&d, at);
+    let rgb = [0xff0000, 0xff00, 0xff];
+    assert_eq!(ok(setup(true, 32, rgb)), Ok(()));
+
+    let bgr = ok(setup(true, 32, [0xff, 0xff00, 0xff0000])).unwrap_err();
+    assert!(bgr.contains("red 0xff green 0xff00 blue 0xff0000"), "{bgr}");
+    assert!(ok(setup(false, 32, rgb)).unwrap_err().contains("MSB first"));
+    assert!(ok(setup(true, 24, rgb)).unwrap_err().contains("are 24 bits"));
+
+    let (d, at) = setup(true, 32, rgb);
+    assert!(check_format(&d[..d.len() - 8], at).is_err(), "cut short");
+  }
+
+  /// The display's own setup passes (Xvfb, a desktop's server). Skipped without `DISPLAY`.
+  #[test]
+  fn the_display_takes_our_pixels() {
+    if std::env::var_os("DISPLAY").is_none() {
+      eprintln!("no DISPLAY: skipped");
+      return;
+    }
+
+    let (x, screen, _) = X::connect().unwrap();
+    let (setup, at) = x.setup(screen);
+    assert_eq!(check_format(setup, at), Ok(()));
+    x.disconnect();
   }
 
   /// Hands the completions that came to the presenter until it isn't busy; false after a second.

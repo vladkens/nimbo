@@ -9,7 +9,8 @@
 //! is). One thread: the loop polls the connection and a wake eventfd.
 //!
 //! Not yet: `_NET_WM_SYNC_REQUEST` (the window manager doesn't wait for our frame as it
-//! resizes), the display's refresh rate (RandR), per-monitor scale.
+//! resizes), the display's refresh rate (RandR), per-monitor scale, pixel formats other than
+//! 32-bit `0xRRGGBB` (a BGR VNC server: refused at the start, [present::check_format]).
 
 mod present;
 mod xcb;
@@ -120,6 +121,9 @@ fn run_on(
   if !matches!(sc.root_depth, 24 | 32) {
     return Err(format!("the X screen has depth {}, 24 or 32 needed", sc.root_depth).into());
   }
+
+  let (setup, at) = x.setup(screen);
+  present::check_format(setup, at)?;
 
   let xs_name = format!("_XSETTINGS_S{n}");
   let [protocols, delete, ping, net_name, pid, machine, xsettings, xs_settings] = x.atoms([
