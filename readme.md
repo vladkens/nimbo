@@ -4,6 +4,8 @@ A small, fast, custom-drawn desktop UI toolkit for Rust: one look on macOS, Wind
 
 Work in progress: the toolkit is moving here from its research repository.
 
+It runs on macOS 14 or later; an app built with it sets `MACOSX_DEPLOYMENT_TARGET=14.0`, as this repository does in `.cargo/config.toml`.
+
 Run the example with `cargo run --example shapes`, or render it without a window: `cargo run --example shapes -- --shot shapes.png`, or with `--appearance light`.
 
 ## License

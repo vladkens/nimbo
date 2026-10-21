@@ -2,6 +2,7 @@
 
 //! The macOS platform: NSApplication and its windows ([shell]), each window's content our NSView
 //! ([view]: display link, occlusion, present through [surface]) and the performance cores.
+//! macOS 14 or later: the app's activation and the view's display link need it.
 
 mod view;
 

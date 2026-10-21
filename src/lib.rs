@@ -8,6 +8,9 @@
 //! the window ([platform]) or by the headless [Harness], both drawing with the CPU renderer
 //! ([cpu]). Examples start with [run], which opens a window, or with `--shot <file.png>` runs the
 //! harness instead (in the dark appearance unless `--appearance light`).
+//!
+//! macOS 14 is the least it runs on (`NSApplication`'s `activate`, `NSView`'s display link): build
+//! apps with `MACOSX_DEPLOYMENT_TARGET=14.0`.
 
 pub mod app;
 pub mod cpu;

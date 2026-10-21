@@ -4,7 +4,7 @@ A small, fast, custom-drawn desktop UI toolkit in Rust, in the spirit of Sublime
 
 ## Scope
 
-- macOS (Apple Silicon) first, then Windows and Linux. The CPU renderer draws everywhere. OS code lives only in `src/platform/<os>/`.
+- macOS (Apple Silicon) first, then Windows and Linux. macOS 14 is the minimum (`MACOSX_DEPLOYMENT_TARGET` in `.cargo/config.toml`), with no fallbacks for older systems. The CPU renderer draws everywhere. OS code lives only in `src/platform/<os>/`.
 - Every crate needs a reason: the `objc2` family on macOS, `windows-sys` on Windows, a minimal Wayland client on Linux, plus a handful of small crates; report the crate count (`cargo tree --prefix none | sort -u | wc -l`) when it changes. Frameworks with hundreds of crates (GPUI, egui, iced) are references to read, not to build on. Change dependencies only with `cargo add` / `cargo remove` / `cargo upgrade`.
 - Judge changes on feel, measured where possible: input-to-photon latency, frame time while scrolling and resizing, cold start, memory, text quality (shaping, subpixel positioning, IME), build time.
 - The look follows macOS System Settings, measured from screenshots, and must also look right on Windows and Linux.
