@@ -26,8 +26,8 @@
 //! }
 //! ```
 //!
-//! Widgets ([widgets]: label, button) and containers ([containers]: scroll area) do this for an
-//! app in the look of the [Theme] set with [Ui::set_theme]: `if ui.id("plus").button("+")
+//! Widgets ([widgets]: label, button) and containers ([containers]: scroll area, list) do this
+//! for an app in the look of the [Theme] set with [Ui::set_theme]: `if ui.id("plus").button("+")
 //! .clicked { .. }`.
 //!
 //! The rule for every widget: a headless behaviour ([behavior]: `ui.button_behavior(id)` and
@@ -50,6 +50,7 @@ use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
 pub use behavior::Behavior;
+pub use containers::{List, ListResponse, Row, Selection};
 pub use input::{Click, Press, Scroll, hit};
 pub use layout::{Kind, Line, Measure, Node, Tree};
 pub use store::{Ease, Transition};
