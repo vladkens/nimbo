@@ -22,6 +22,7 @@ A small, fast, custom-drawn desktop UI toolkit in Rust, in the spirit of Sublime
 
 - Start every `.rs` file with `// Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo`.
 - A file stays within ~800 lines of code, not counting tests, doc comments, comments and blanks; split it into submodules before it grows past that. `make size` counts them.
+- Each part has a code budget (`BUDGETS` in `scripts/size.py`: macOS 1500, Windows 2000, Linux 2500, `ui/` 3500, the rest of the core 4000), checked by `make size ARGS=--check` (and `make check`); raising one is a decision recorded in the PR.
 - A statement after an `if`, `for`, `while`, `loop` or `match` block starts after a blank line, as do the other logical steps; rustfmt never adds them, `scripts/blank-lines.py` checks it.
 - Every file starts with a `//!` doc whose first sentence says what the file does; `make size ARGS=--map` lists the files by it, and a PR's description carries that list for the files it adds or changes.
 - Every styled widget is a headless behaviour (hover, press, click, focus, keys, the value it edits) plus drawing from the theme, so an app can draw its own look over the same behaviour.
