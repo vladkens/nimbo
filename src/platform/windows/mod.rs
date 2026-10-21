@@ -41,6 +41,7 @@ use windows_sys::Win32::UI::HiDpi::{
   AdjustWindowRectExForDpi, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForSystem,
   GetDpiForWindow, SetProcessDpiAwarenessContext,
 };
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetFocus;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::Config;
@@ -450,8 +451,14 @@ fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
       with(|w| w.modal += 1);
       0
     }
+    // The live move's or the menu's loop took the keys pressed or let go meanwhile: the
+    // modifiers held now.
     WM_EXITSIZEMOVE | WM_EXITMENULOOP => {
-      with(|w| w.modal = w.modal.saturating_sub(1));
+      let focused = unsafe { GetFocus() } == hwnd;
+      with(|w| {
+        w.modal = w.modal.saturating_sub(1);
+        w.send(Event::Mods(if focused { keyboard::mods_held() } else { Mods::NONE }));
+      });
       0
     }
     WM_TIMER if wp == TIMER_MODAL => {
@@ -836,6 +843,34 @@ mod tests {
       SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0);
       DestroyWindow(hwnd);
     }
+    WINDOW.with(|w| w.borrow_mut().take());
+  }
+
+  /// Shift let go during a live resize, whose loop takes its key message: the modifiers come
+  /// again as it ends, none for a window without the focus. The window is never shown.
+  #[test]
+  fn a_live_resize_ends_with_the_modifiers_held() {
+    #[derive(Default)]
+    struct Seen(std::rc::Rc<std::cell::Cell<Option<Mods>>>);
+    impl App for Seen {
+      fn event(&mut self, _: &mut crate::app::Cx, ev: &Event) -> bool {
+        if let Event::Mods(m) = ev {
+          self.0.set(Some(*m));
+        }
+
+        false
+      }
+    }
+
+    let app = Seen::default();
+    let seen = app.0.clone();
+    let hwnd = create(&Config::new("mods", 200.0, 100.0), Box::new(app));
+    with(|w| w.send(Event::Mods(Mods::SHIFT)));
+    unsafe { SendMessageW(hwnd, WM_ENTERSIZEMOVE, 0, 0) };
+    unsafe { SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0) };
+    assert_eq!(seen.get(), Some(Mods::NONE));
+
+    unsafe { DestroyWindow(hwnd) };
     WINDOW.with(|w| w.borrow_mut().take());
   }
 
