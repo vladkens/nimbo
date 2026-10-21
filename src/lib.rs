@@ -2,7 +2,7 @@
 
 //! nimbo: a small custom-drawn UI toolkit. Its own CPU renderer for drawing; the OS for the
 //! window, input and text behind [platform] (AppKit and CoreText on macOS, Win32 and DirectWrite
-//! on Windows, Wayland or X11 with fontconfig, FreeType and HarfBuzz on Linux), nothing else.
+//! on Windows, GTK 3 with fontconfig, FreeType and HarfBuzz on Linux), nothing else.
 //!
 //! An [App] gets [Event]s and builds each frame as an element tree on a [Ui] (laid out and painted
 //! by [ui]) and/or paints a [Scene] and [text] through a [Frame]; a [Runtime] drives it, fed by
