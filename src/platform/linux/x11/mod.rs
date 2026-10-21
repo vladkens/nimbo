@@ -476,7 +476,8 @@ impl Win {
   }
 
   /// Until the loop must run again without input: the next tick while a frame is wanted, else
-  /// the next timer; none while the server reads the last frame (its completion wakes us).
+  /// the next timer; none while the server reads the last frame (its completion wakes us), nor
+  /// for a timer while the window is unmapped (`MAP_NOTIFY` draws again).
   fn timeout(&mut self) -> Option<Duration> {
     let now = Instant::now();
     if self.present.busy() {
@@ -485,7 +486,8 @@ impl Win {
 
     match self.visible() && self.rt.needs_frame() {
       true => Some(self.pace.left(now)),
-      false => self.rt.due_in(),
+      false if self.mapped => self.rt.due_in(),
+      false => None,
     }
   }
 
