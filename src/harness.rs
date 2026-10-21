@@ -7,7 +7,9 @@
 use std::path::Path;
 use std::time::Duration;
 
-use crate::app::{App, Clock, Event, MemClipboard, Mods, MouseButton, Runtime};
+use keyboard_types::{Code, Modifiers};
+
+use crate::app::{App, Clock, Event, MemClipboard, MouseButton, Runtime};
 use crate::cpu::{self, Pixels};
 use crate::keys::{self, Key, KeyEvent};
 use crate::scene::{Point, Rect, Size};
@@ -45,7 +47,7 @@ impl<A: App> Harness<A> {
   }
 
   pub fn move_to(&mut self, x: f32, y: f32) -> bool {
-    self.event(Event::MouseMove { pos: Point::new(x, y), mods: Mods::NONE })
+    self.event(Event::MouseMove { pos: Point::new(x, y), mods: Modifiers::empty() })
   }
 
   /// A left click at (x, y): move, press, release. Returns whether any of them was used.
@@ -58,11 +60,11 @@ impl<A: App> Harness<A> {
 
   /// Presses the left button at (x, y).
   pub fn press(&mut self, x: f32, y: f32) -> bool {
-    self.press_with(x, y, 1, Mods::NONE)
+    self.press_with(x, y, 1, Modifiers::empty())
   }
 
   /// Presses the left button at (x, y) as the `clicks`-th click in a row, with `mods` held.
-  pub fn press_with(&mut self, x: f32, y: f32, clicks: u32, mods: Mods) -> bool {
+  pub fn press_with(&mut self, x: f32, y: f32, clicks: u32, mods: Modifiers) -> bool {
     let (pos, button) = (Point::new(x, y), MouseButton::Left);
     self.event(Event::MouseDown { pos, button, clicks, mods })
   }
@@ -72,7 +74,7 @@ impl<A: App> Harness<A> {
     self.event(Event::MouseUp {
       pos: Point::new(x, y),
       button: MouseButton::Left,
-      mods: Mods::NONE,
+      mods: Modifiers::empty(),
     })
   }
 
@@ -85,8 +87,8 @@ impl<A: App> Harness<A> {
   /// Presses and releases `key` with `mods` as on a US keyboard (Shift-1 is `'!'`, Shift-A
   /// `'A'`); returns whether the press was used. Unused, it goes through text input as in a
   /// window: [Self::key_event].
-  pub fn key(&mut self, key: Key, mods: Mods) -> bool {
-    self.key_event(us_key(key, mods))
+  pub fn key(&mut self, key: impl Into<Key>, mods: Modifiers) -> bool {
+    self.key_event(us_key(key.into(), mods))
   }
 
   /// Presses and releases a key as a window does: the key goes through bindings to the focused
@@ -205,33 +207,23 @@ impl<A: App> Harness<A> {
 
 // MARK: US keyboard
 
-/// The key code typing `c` on a US keyboard and whether it takes Shift.
-fn us_char(c: char) -> Option<(u16, bool)> {
-  if c == '\0' {
-    return None;
-  }
-
-  let at = |s: &str| s.chars().position(|k| k == c).map(|i| i as u16);
-  at(keys::US).map(|i| (i, false)).or_else(|| at(keys::US_SHIFT).map(|i| (i, true)))
-}
-
 /// The event AppKit reports for `key` with `mods` on a US keyboard. A character may be given
 /// shifted or not: `Char('1')` or `Char('!')` with Shift is `'!'`.
-pub fn us_key(key: Key, mods: Mods) -> KeyEvent {
+pub fn us_key(key: Key, mods: Modifiers) -> KeyEvent {
   let (key, code, mods) = match key {
-    Key::Char(c) => match us_char(c) {
+    Key::Char(c) => match keys::us_code(c) {
       Some((code, shifted)) => {
-        let shift = mods.shift || shifted;
-        let c = keys::us_char(code, shift).unwrap_or(c);
-        (Key::Char(c), code, Mods { shift, ..mods })
+        let mods = if shifted { mods | Modifiers::SHIFT } else { mods };
+        let c = keys::us_char(code, mods.shift()).unwrap_or(c);
+        (Key::Char(c), code, mods)
       }
-      None => (key, 0xffff, mods),
+      None => (key, Code::Unidentified, mods),
     },
-    k => (k, k.code().unwrap_or(0xffff), mods),
+    k => (k, k.code().unwrap_or(Code::Unidentified), mods),
   };
 
   let text = match key {
-    Key::Char(c) if !(mods.cmd || mods.ctrl || mods.alt) => Some(c),
+    Key::Char(c) if (mods - Modifiers::SHIFT).is_empty() => Some(c),
     _ => None,
   };
 
@@ -263,7 +255,7 @@ impl Image {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::{App, Font, Frame, Rect};
+  use crate::{App, CMD, Font, Frame, NamedKey, Rect};
 
   /// Lines of text, each at its size.
   struct Lines(Vec<(String, f32)>);
@@ -299,14 +291,18 @@ mod tests {
 
   #[test]
   fn us_keyboard() {
-    let ev = us_key(Key::Char('1'), Mods::SHIFT);
-    assert_eq!((ev.key, ev.text, ev.code, ev.mods), (Key::Char('!'), Some('!'), 18, Mods::SHIFT));
-    let ev = us_key(Key::Char('A'), Mods::NONE);
-    assert_eq!((ev.key, ev.text, ev.code, ev.mods.shift), (Key::Char('A'), Some('A'), 0, true));
-    let ev = us_key(Key::Char('z'), Mods::CMD);
-    assert_eq!((ev.key, ev.text, ev.code), (Key::Char('z'), None, 6));
-    assert_eq!(us_key(Key::Char(' '), Mods::NONE).code, 49);
-    assert_eq!(us_key(Key::Tab, Mods::SHIFT).code, 48);
-    assert_eq!(us_char('é'), None);
+    let ev = us_key(Key::Char('1'), Modifiers::SHIFT);
+    let want = (Key::Char('!'), Some('!'), Code::Digit1, Modifiers::SHIFT);
+    assert_eq!((ev.key, ev.text, ev.code, ev.mods), want);
+    let ev = us_key(Key::Char('A'), Modifiers::empty());
+    assert_eq!(
+      (ev.key, ev.text, ev.code, ev.mods.shift()),
+      (Key::Char('A'), Some('A'), Code::KeyA, true)
+    );
+    let ev = us_key(Key::Char('z'), CMD);
+    assert_eq!((ev.key, ev.text, ev.code), (Key::Char('z'), None, Code::KeyZ));
+    assert_eq!(us_key(Key::Char(' '), Modifiers::empty()).code, Code::Space);
+    assert_eq!(us_key(Key::Named(NamedKey::Tab), Modifiers::SHIFT).code, Code::Tab);
+    assert_eq!(us_key(Key::Char('é'), Modifiers::empty()).code, Code::Unidentified);
   }
 }

@@ -14,10 +14,11 @@ use std::ffi::{CStr, c_char, c_int, c_uint};
 use std::ptr::null_mut;
 use std::sync::OnceLock;
 
+use keyboard_types::Modifiers;
+
 use super::dl::fns;
-use super::keys::{self, kvk};
-use super::{Fp, P, TRUE, Win, busy, connect, lib, with};
-use crate::app::{Event, Mods, MouseButton, Phase, WHEEL_LINE};
+use super::{Fp, P, TRUE, Win, busy, connect, keys, lib, with};
+use crate::app::{Event, MouseButton, Phase, WHEEL_LINE};
 use crate::scene::Point;
 
 /// The events the area asks for (GdkEventMask): motion, buttons, keys, crossing, focus,
@@ -166,7 +167,7 @@ type Click = (MouseButton, u32, Point, u32);
 
 /// The pointer and keyboard as the events left them.
 pub struct Input {
-  mods: Mods,
+  mods: Modifiers,
   mouse: Point,
   /// The buttons down, and whether the pointer left meanwhile: it exits as the last goes up.
   buttons: Vec<MouseButton>,
@@ -192,7 +193,7 @@ impl Input {
     unsafe { connect(im, c"commit", on_commit as Fp, 0) };
 
     Self {
-      mods: Mods::NONE,
+      mods: Modifiers::empty(),
       mouse: Point::new(0.0, 0.0),
       buttons: Vec::new(),
       outside: false,
@@ -316,7 +317,7 @@ impl Win {
     true
   }
 
-  fn button(&mut self, ev: P, down: bool, pos: Point, mods: Mods) {
+  fn button(&mut self, ev: P, down: bool, pos: Point, mods: Modifiers) {
     let mut b = 0;
     unsafe { (gdk().gdk_event_get_button)(ev, &mut b) };
     // 8 and 9 are back and forward, AppKit's buttons 3 and 4.
@@ -365,7 +366,7 @@ impl Win {
     }
   }
 
-  fn scroll(&mut self, ev: P, pos: Point, mods: Mods) {
+  fn scroll(&mut self, ev: P, pos: Point, mods: Modifiers) {
     let g = gdk();
     let (mut dir, mut dx, mut dy) = (0, 0.0, 0.0);
     // Smooth (GDK's unit is a wheel's click), else a click up, down, left or right.
@@ -390,7 +391,7 @@ impl Win {
     self.send(Event::Scroll { pos, delta, precise, phase, momentum: Phase::None, mods });
   }
 
-  fn pinch(&mut self, p: &Pinch, mods: Mods) {
+  fn pinch(&mut self, p: &Pinch, mods: Modifiers) {
     let pos = Point::new(p.x as f32, p.y as f32);
     // GdkTouchpadGesturePhase: begin, update, end, cancel. The scale is the gesture's since it
     // began; the delta is the change since the last update, as a fraction of it (×1.5 then ×2
@@ -427,12 +428,12 @@ impl Win {
       },
     }
 
-    self.mods(if on { keys::mods(state) } else { Mods::NONE });
+    self.mods(if on { keys::mods(state) } else { Modifiers::empty() });
     self.send(Event::Focus(on));
   }
 
   /// Sends the modifiers when they changed.
-  fn mods(&mut self, m: Mods) {
+  fn mods(&mut self, m: Modifiers) {
     if m != self.input.mods {
       self.input.mods = m;
       self.send(Event::Mods(m));
@@ -457,7 +458,7 @@ impl Win {
       held.push((hw, sym));
     }
 
-    let code = kvk(hw.saturating_sub(8) as u32).unwrap_or(0xffff);
+    let code = keys::code(hw.saturating_sub(8) as u32);
     if let Some(side) = keys::modifier(sym, code) {
       let syms: Vec<u32> = held.iter().map(|&(_, s)| s).collect();
       self.mods(keys::after(keys::mods(state), sym, down, &syms));
@@ -473,7 +474,7 @@ impl Win {
     let mods = keys::mods(state);
     self.mods(mods);
     let ch = char::from_u32(unsafe { (g.gdk_keyval_to_unicode)(sym) }).filter(|&c| c != '\0');
-    let k = keys::key_event(sym, ch, code, mods, repeat, || latin(hw, mods.shift));
+    let k = keys::key_event(sym, ch, code, mods, repeat, || latin(hw, mods.shift()));
     if !down {
       self.send(Event::KeyUp(k));
       return;

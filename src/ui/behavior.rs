@@ -23,6 +23,8 @@
 //!
 //! - [Ui::button_behavior]: click, Space while focused (flashes it pressed).
 
+use keyboard_types::Modifiers;
+
 use super::{Cursor, Focus, Id, Style, Ui};
 use crate::keys::Key;
 
@@ -59,7 +61,7 @@ impl Ui<'_> {
   /// unused, Space with Cmd, Ctrl or Alt too (Alt-Space opens the window menu on Windows).
   pub(super) fn activated(&mut self, id: Id) -> bool {
     match self.key_down(id) {
-      Some(k) if k.key == Key::Char(' ') && !(k.mods.cmd || k.mods.ctrl || k.mods.alt) => {
+      Some(k) if k.key == Key::Char(' ') && (k.mods - Modifiers::SHIFT).is_empty() => {
         self.flash(id);
         true
       }
@@ -114,7 +116,8 @@ mod tests {
   use std::time::Duration;
 
   use super::*;
-  use crate::app::{App, Cx, Event, Mods};
+  use crate::NamedKey;
+  use crate::app::{App, Cx, Event};
   use crate::harness::Harness;
   use crate::scene::{Color, Quad, Size};
   use crate::ui::px;
@@ -161,20 +164,20 @@ mod tests {
     assert_eq!(h.app().plays, 1);
     // Tab focuses it, Space plays and flashes it pressed.
     h.leave();
-    h.key(Key::Tab, Mods::NONE);
+    h.key(NamedKey::Tab, Modifiers::empty());
     assert_eq!(h.focused(), Some(Id::of("play")));
-    h.key(Key::Char(' '), Mods::NONE);
+    h.key(Key::Char(' '), Modifiers::empty());
     assert_eq!(h.app().plays, 2);
     assert_eq!(px(&mut h), [255, 0, 0, 255]);
     // Space again before the flash ends: pressed until the second one ends, then at rest.
     h.wait(Duration::from_millis(80));
-    h.key(Key::Char(' '), Mods::NONE);
+    h.key(Key::Char(' '), Modifiers::empty());
     h.wait(Duration::from_millis(60));
     assert_eq!(px(&mut h), [255, 0, 0, 255]);
     h.wait(Duration::from_millis(100));
     assert_eq!((px(&mut h), h.app().plays), ([51, 51, 51, 255], 3));
     // Alt-Space is the window menu's on Windows: it goes on unused.
-    assert!(!h.key(Key::Char(' '), Mods { alt: true, ..Mods::NONE }));
+    assert!(!h.key(Key::Char(' '), Modifiers::ALT));
     assert_eq!(h.app().plays, 3);
     // Disabled while focused: focus goes, no input, and Tab passes it by.
     h.app_mut().off = true;
@@ -183,7 +186,7 @@ mod tests {
     assert_eq!(h.focused(), None);
     h.click(20.0, 20.0);
     assert_eq!(h.app().plays, 3);
-    h.key(Key::Tab, Mods::NONE);
+    h.key(NamedKey::Tab, Modifiers::empty());
     assert_eq!(h.focused(), None);
   }
 
@@ -211,9 +214,9 @@ mod tests {
   fn a_flash_keeps_the_apps_timer() {
     let mut h = Harness::new(Alarm, Size::new(100.0, 100.0), 1.0);
     h.frame();
-    h.key(Key::Tab, Mods::NONE);
-    h.key(Key::Char('t'), Mods::NONE);
-    h.key(Key::Char(' '), Mods::NONE);
+    h.key(NamedKey::Tab, Modifiers::empty());
+    h.key(Key::Char('t'), Modifiers::empty());
+    h.key(Key::Char(' '), Modifiers::empty());
     // The flash's frame comes first, then the timer's, which it did not replace.
     assert_eq!(h.rt.due_in(), Some(Duration::from_millis(120)));
     h.wait(Duration::from_millis(200));
@@ -241,7 +244,7 @@ mod tests {
     h.frame();
     h.move_to(10.0, 10.0);
     assert_eq!(h.rt.cursor(), Cursor::Arrow);
-    h.key(Key::Tab, Mods::NONE);
+    h.key(NamedKey::Tab, Modifiers::empty());
     assert_eq!(h.focused(), Some(Id::of("c")));
   }
 }

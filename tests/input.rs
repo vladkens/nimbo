@@ -13,7 +13,8 @@ mod input;
 use input::*;
 use nimbo::harness::Image;
 use nimbo::{
-  Appearance, Color, Command, Cursor, Event, Harness, Key, KeyEvent, Mods, Phase, Point, Rect, Size,
+  Appearance, CMD, Code, Color, Command, Cursor, Event, Harness, Key, KeyEvent, Modifiers,
+  NamedKey, Phase, Point, Rect, Size,
 };
 
 /// A colour as the frame stores an opaque one.
@@ -41,7 +42,7 @@ fn wheel(h: &mut Harness<Input>, at: (f32, f32), dy: f32) -> bool {
     precise: false,
     phase: Phase::None,
     momentum: Phase::None,
-    mods: Mods::NONE,
+    mods: Modifiers::empty(),
   })
 }
 
@@ -105,15 +106,15 @@ fn main() {
 
   // Arrows move it a step; a key nobody binds or uses is unused, as is the text it types.
   h.app_mut().pos = START;
-  assert!(h.key(Key::Left, Mods::NONE));
-  assert!(h.key(Key::Up, Mods::NONE));
-  assert!(h.key(Key::Right, Mods::NONE));
-  assert!(h.key(Key::Right, Mods::NONE));
-  assert!(h.key(Key::Down, Mods::NONE));
-  assert!(h.key(Key::Down, Mods::NONE));
+  assert!(h.key(NamedKey::ArrowLeft, Modifiers::empty()));
+  assert!(h.key(NamedKey::ArrowUp, Modifiers::empty()));
+  assert!(h.key(NamedKey::ArrowRight, Modifiers::empty()));
+  assert!(h.key(NamedKey::ArrowRight, Modifiers::empty()));
+  assert!(h.key(NamedKey::ArrowDown, Modifiers::empty()));
+  assert!(h.key(NamedKey::ArrowDown, Modifiers::empty()));
   assert_eq!(h.app().pos, Point::new(START.x + STEP, START.y + STEP));
   check_square(&h.render(), h.app(), BLUE);
-  assert!(!h.key(Key::Char('x'), Mods::NONE));
+  assert!(!h.key(Key::Char('x'), Modifiers::empty()));
   assert!(!h.frame());
 
   // The wheel grows it about its centre, down to its least side.
@@ -135,20 +136,20 @@ fn main() {
   h.move_to(edge.0, edge.1);
   h.frame();
   assert!(h.app().hover && h.rt.cursor() == Cursor::Grab);
-  assert!(h.key(Key::Left, Mods::NONE));
+  assert!(h.key(NamedKey::ArrowLeft, Modifiers::empty()));
   assert!(!h.app().hover, "moved away by an arrow");
   let img = h.render();
   assert_eq!(h.rt.cursor(), Cursor::Arrow);
   assert_eq!(img.pixel(h.app().pos.x + 0.5, edge.1), px(BLUE), "no hover border");
-  assert!(h.key(Key::Right, Mods::NONE));
+  assert!(h.key(NamedKey::ArrowRight, Modifiers::empty()));
   h.frame();
   assert!(h.app().hover && h.rt.cursor() == Cursor::Grab, "back under the pointer");
   h.rt.clipboard().write("300,200");
-  assert!(h.key(Key::Char('v'), Mods::CMD));
+  assert!(h.key(Key::Char('v'), CMD));
   h.frame();
   assert!(!h.app().hover && h.rt.cursor() == Cursor::Arrow, "pasted away");
   h.rt.clipboard().write(&format!("{},{}", START.x, START.y));
-  assert!(h.key(Key::Char('v'), Mods::CMD));
+  assert!(h.key(Key::Char('v'), CMD));
   assert!(h.app().hover);
   assert!(wheel(&mut h, edge, -20.0));
   h.frame();
@@ -158,27 +159,27 @@ fn main() {
   assert!(!h.app().hover);
 
   // Shift held: amber, until it is let go.
-  assert!(h.event(Event::Mods(Mods::SHIFT)));
+  assert!(h.event(Event::Mods(Modifiers::SHIFT)));
   check_square(&h.render(), h.app(), AMBER);
-  assert!(!h.event(Event::Mods(Mods::SHIFT)), "the same modifiers again");
-  assert!(h.event(Event::Mods(Mods::NONE)));
+  assert!(!h.event(Event::Mods(Modifiers::SHIFT)), "the same modifiers again");
+  assert!(h.event(Event::Mods(Modifiers::empty())));
   check_square(&h.render(), h.app(), BLUE);
 
   // Cmd-C copies the position through the app's binding; Cmd-V moves the square to a pasted
   // one, and leaves it for text that isn't a position.
   let pos = h.app().pos;
-  assert!(h.key(Key::Char('c'), Mods::CMD));
+  assert!(h.key(Key::Char('c'), CMD));
   let copied = h.rt.clipboard().read();
   assert_eq!(copied, Some(format!("{},{}", pos.x, pos.y)));
   h.rt.clipboard().write(" 200, 120 ");
-  assert!(h.key(Key::Char('v'), Mods::CMD));
+  assert!(h.key(Key::Char('v'), CMD));
   assert_eq!(h.app().pos, Point::new(200.0, 120.0));
   check_square(&h.render(), h.app(), BLUE);
   h.rt.clipboard().write("hello");
-  assert!(!h.key(Key::Char('v'), Mods::CMD));
+  assert!(!h.key(Key::Char('v'), CMD));
   assert_eq!(h.app().pos, Point::new(200.0, 120.0));
   // A binding's command reaches the app as a command, not as the key.
-  let k = KeyEvent { key: Key::Char('v'), text: None, code: 9, mods: Mods::CMD, repeat: false };
+  let k = KeyEvent { key: Key::Char('v'), text: None, code: Code::KeyV, mods: CMD, repeat: false };
   h.rt.clipboard().write("10,50");
   assert!(h.event(Event::KeyDown(k)));
   assert_eq!(h.app().pos, Point::new(10.0, 50.0));

@@ -13,8 +13,8 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 use nimbo::{
-  App, Binding, Color, Command, Config, Cursor, Cx, Event, Float, Frame, Key, MouseButton, Point,
-  Quad, Rect, Size, Style, Ui, bind, mix, px, rgb,
+  App, Binding, Color, Command, Config, Cursor, Cx, Event, Float, Frame, Key, MouseButton,
+  NamedKey, Point, Quad, Rect, Size, Style, Ui, bind, mix, px, rgb,
 };
 
 pub const SIZE: Size = Size::new(480.0, 320.0);
@@ -88,10 +88,10 @@ impl Input {
     match ev {
       Event::KeyDown(k) => {
         let (dx, dy) = match k.key {
-          Key::Left => (-STEP, 0.0),
-          Key::Right => (STEP, 0.0),
-          Key::Up => (0.0, -STEP),
-          Key::Down => (0.0, STEP),
+          Key::Named(NamedKey::ArrowLeft) => (-STEP, 0.0),
+          Key::Named(NamedKey::ArrowRight) => (STEP, 0.0),
+          Key::Named(NamedKey::ArrowUp) => (0.0, -STEP),
+          Key::Named(NamedKey::ArrowDown) => (0.0, STEP),
           _ => return false,
         };
 
@@ -107,8 +107,8 @@ impl Input {
         self.move_to(p, cx.size);
       }
       Event::Mods(m) => {
-        let was = std::mem::replace(&mut self.shift, m.shift);
-        return was != m.shift;
+        let was = std::mem::replace(&mut self.shift, m.shift());
+        return was != m.shift();
       }
       Event::Focus(on) => self.focused = *on,
       Event::Appearance(a) => self.light = !a.dark,

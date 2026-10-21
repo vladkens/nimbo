@@ -23,13 +23,14 @@
 //!   - input: OS events to [crate::Event] in points, y down from the view's top left: mouse (moves,
 //!     buttons with click counts, exit), scroll (`precise` and phases for trackpads, wheel lines ×
 //!     [crate::WHEEL_LINE]), pinch, modifiers (none once the focus goes: their changes then go to
-//!     another window), focus (key window); keys as [crate::KeyEvent] whose `code` is the macOS
-//!     virtual key code (`kVK_*`, [crate::keys]): translate the OS scan code to it, so
-//!     [crate::Key::named] and bindings work unchanged; `key` from the layout (with Cmd/Ctrl, a
-//!     non-Latin layout's character is the ASCII-capable layout's, so shortcuts work: macOS
-//!     `keyboard.rs`), `text` the printable character it types; a modifier key going down or up
-//!     also sends [crate::Event::Modifier] (macOS: `flagsChanged:`, the side from the
-//!     device-dependent flags);
+//!     another window), focus (key window); keys as [crate::KeyEvent] whose `code` is the key's
+//!     place, a W3C [crate::Code] from the OS's own code (macOS `kVK_*`, Windows' virtual keys and
+//!     scan codes, evdev; set 1 `scan_code` is shared), so [crate::Key::named] and bindings work
+//!     unchanged; `mods` the modifier keys as named on the keyboard (Ctrl is `Modifiers::CONTROL`
+//!     everywhere, [crate::CMD] the command key); `key` from the layout (with Cmd/Ctrl, a non-Latin
+//!     layout's character is the ASCII-capable layout's, so shortcuts work: macOS `keyboard.rs`),
+//!     `text` the printable character it types; a modifier key going down or up also sends
+//!     [crate::Event::Modifier] (macOS: `flagsChanged:`, the side from the device-dependent flags);
 //!   - text input: a key nobody used ([crate::Runtime::event] returns false) goes to the OS's text
 //!     input and comes back as [crate::Event::Text] (typed) or [crate::Event::Command] (editing
 //!     keys; [crate::keys::standard] is the US mapping);
@@ -111,6 +112,8 @@ use std::time::{Duration, Instant};
 
 pub use imp::{appearance, run};
 pub(crate) use imp::{perf_cores, text};
+#[cfg(any(test, target_os = "windows", target_os = "linux"))]
+use keyboard_types::Code;
 
 /// The points of `px` pixels at `scale`: the least that the renderer's pixels (`points × scale`,
 /// cut down: [crate::cpu::Renderer::pixel_size]) give back whole at a fractional scale, where
@@ -123,6 +126,29 @@ pub(crate) fn points(px: u32, scale: f32) -> f32 {
   }
 
   p
+}
+
+/// The key at a PC keyboard's scan code `scan` (set 1, as Windows reports it without the extended
+/// bit); evdev codes (<linux/input-event-codes.h>) are the same up to F12's 88.
+#[cfg(any(test, target_os = "windows", target_os = "linux"))]
+pub(crate) fn scan_code(scan: u16) -> Code {
+  use Code::*;
+  #[rustfmt::skip]
+  const SET1: [Code; 89] = [
+    Unidentified, Escape, Digit1, Digit2, Digit3, Digit4, Digit5, Digit6, // 0x00
+    Digit7, Digit8, Digit9, Digit0, Minus, Equal, Backspace, Tab,
+    KeyQ, KeyW, KeyE, KeyR, KeyT, KeyY, KeyU, KeyI, // 0x10
+    KeyO, KeyP, BracketLeft, BracketRight, Enter, ControlLeft, KeyA, KeyS,
+    KeyD, KeyF, KeyG, KeyH, KeyJ, KeyK, KeyL, Semicolon, // 0x20
+    Quote, Backquote, ShiftLeft, Backslash, KeyZ, KeyX, KeyC, KeyV,
+    KeyB, KeyN, KeyM, Comma, Period, Slash, ShiftRight, NumpadMultiply, // 0x30
+    AltLeft, Space, CapsLock, F1, F2, F3, F4, F5,
+    F6, F7, F8, F9, F10, NumLock, ScrollLock, Numpad7, // 0x40
+    Numpad8, Numpad9, NumpadSubtract, Numpad4, Numpad5, Numpad6, NumpadAdd, Numpad1,
+    Numpad2, Numpad3, Numpad0, NumpadDecimal, // 0x50
+    Unidentified, Unidentified, IntlBackslash, F11, F12,
+  ];
+  SET1.get(scan as usize).copied().unwrap_or(Unidentified)
 }
 
 /// Frames an interval apart from the start of each, so the time spent drawing one doesn't add to
@@ -184,6 +210,29 @@ mod tests {
     }
 
     assert_eq!(frames, 60);
+  }
+
+  /// Set 1 as Windows and evdev number it: xev's keycodes on a US layout less 8.
+  #[test]
+  fn scan_codes() {
+    let scans = [0x01, 0x02, 0x10, 0x1E, 0x2C, 0x39, 0x47, 0x53, 0x56, 0x57, 0x58, 0x59];
+    let want = [
+      Code::Escape,
+      Code::Digit1,
+      Code::KeyQ,
+      Code::KeyA,
+      Code::KeyZ,
+      Code::Space,
+      Code::Numpad7,
+      Code::NumpadDecimal,
+      Code::IntlBackslash,
+      Code::F11,
+      Code::F12,
+      Code::Unidentified,
+    ];
+    assert_eq!(scans.map(scan_code), want);
+    let typing = (0..89).filter(|&s| crate::keys::us_char(scan_code(s), false).is_some()).count();
+    assert_eq!(typing, 48);
   }
 
   #[test]

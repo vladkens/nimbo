@@ -17,6 +17,7 @@ use dispatch2::{
   _dispatch_source_type_timer, DispatchObject, DispatchQueue, DispatchRetained, DispatchSource,
   DispatchTime, MainThreadBound,
 };
+use keyboard_types::{Modifiers, NamedKey};
 use objc2::rc::{Retained, Weak};
 use objc2::runtime::{AnyObject, Sel};
 use objc2::{
@@ -34,8 +35,7 @@ use objc2_quartz_core::{CADisplayLink, CAFrameRateRange, CALayer, kCAGravityTopL
 
 use super::keyboard;
 use super::surface::Presenter;
-use crate::app::{App, Event, Mods, MouseButton, Phase, Runtime, WHEEL_LINE};
-use crate::hotkey::ModKey;
+use crate::app::{App, Event, MouseButton, Phase, Runtime, WHEEL_LINE};
 use crate::keys::{self, Command, Key, KeyEvent};
 use crate::scene::{Point, Size};
 use crate::ui::Cursor;
@@ -276,8 +276,9 @@ define_class!(
     fn flags_changed(&self, event: &NSEvent) {
       self.send(Event::Mods(mods(event)));
       // The device-dependent flags (`NX_DEVICE*KEYMASK`) tell whether the key went down.
-      if let Some(key) = ModKey::of_mac(event.keyCode()) {
-        let down = event.modifierFlags().0 as u64 & key.mac_flag() != 0;
+      let key = keyboard::code(event.keyCode());
+      if let Some(flag) = keyboard::device_flag(key) {
+        let down = event.modifierFlags().0 as u64 & flag != 0;
         self.send(Event::Modifier { key, down });
       }
     }
@@ -404,7 +405,7 @@ impl View {
       self.send(Event::Focus(true));
       self.send(Event::Mods(flags_mods(NSEvent::modifierFlags_class())));
     } else {
-      self.send(Event::Mods(Mods::NONE));
+      self.send(Event::Mods(Modifiers::empty()));
       self.send(Event::Focus(false));
     }
   }
@@ -674,17 +675,18 @@ fn ns_text(text: &AnyObject) -> Option<String> {
   }
 }
 
-fn mods(event: &NSEvent) -> Mods {
+fn mods(event: &NSEvent) -> Modifiers {
   flags_mods(event.modifierFlags())
 }
 
-fn flags_mods(f: NSEventModifierFlags) -> Mods {
-  Mods {
-    shift: f.contains(NSEventModifierFlags::Shift),
-    ctrl: f.contains(NSEventModifierFlags::Control),
-    alt: f.contains(NSEventModifierFlags::Option),
-    cmd: f.contains(NSEventModifierFlags::Command),
-  }
+fn flags_mods(f: NSEventModifierFlags) -> Modifiers {
+  let flags = [
+    (NSEventModifierFlags::Shift, Modifiers::SHIFT),
+    (NSEventModifierFlags::Control, Modifiers::CONTROL),
+    (NSEventModifierFlags::Option, Modifiers::ALT),
+    (NSEventModifierFlags::Command, Modifiers::META),
+  ];
+  flags.into_iter().filter(|(ns, _)| f.contains(*ns)).fold(Modifiers::empty(), |m, (_, k)| m | k)
 }
 
 fn phase(p: NSEventPhase) -> Phase {
@@ -698,24 +700,26 @@ fn phase(p: NSEventPhase) -> Phase {
   }
 }
 
-/// A key event: named keys by virtual key code, the rest by the character they type. With Cmd
+/// A key event: named keys by place, the rest by the character they type. With Cmd
 /// or Ctrl a non-Latin character is the ASCII-capable layout's, so shortcuts work on a Russian
 /// layout as AppKit's menus do; with Cmd on a layout that maps keys anew under it ("Dvorak –
 /// QWERTY ⌘"), that mapping's.
 fn key_event(event: &NSEvent) -> KeyEvent {
-  let (code, mods) = (event.keyCode(), mods(event));
+  let (kvk, mods) = (event.keyCode(), mods(event));
+  let (code, shortcut) =
+    (keyboard::code(kvk), mods.intersects(Modifiers::META | Modifiers::CONTROL));
   let first = |s: Option<Retained<NSString>>| s.and_then(|s| s.to_string().chars().next());
-  let cmd = mods.cmd.then(|| keyboard::cmd_char(code, mods.shift)).flatten();
+  let cmd = mods.meta().then(|| keyboard::cmd_char(kvk, mods.shift())).flatten();
   let key = Key::named(code).unwrap_or_else(|| match first(event.charactersIgnoringModifiers()) {
     Some(_) if let Some(c) = cmd => Key::Char(c),
-    Some(c) if (mods.cmd || mods.ctrl) && !c.is_ascii() => {
-      keyboard::ascii_char(code, mods.shift).map_or(Key::Char(c), Key::Char)
+    Some(c) if shortcut && !c.is_ascii() => {
+      keyboard::ascii_char(kvk, mods.shift()).map_or(Key::Char(c), Key::Char)
     }
     Some(c) if !c.is_control() => Key::Char(c),
-    _ => Key::Other(code),
+    _ => Key::Named(NamedKey::Unidentified),
   });
   let text = match key {
-    Key::Char(_) if !(mods.cmd || mods.ctrl) => {
+    Key::Char(_) if !shortcut => {
       let s = event.characters().map(|s| s.to_string()).unwrap_or_default();
       let mut cs = s.chars();
       match (cs.next(), cs.next()) {

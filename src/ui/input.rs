@@ -12,9 +12,11 @@
 use std::cell::Cell;
 use std::time::Duration;
 
+use keyboard_types::Modifiers;
+
 use super::layout::{Node, Tree};
 use super::{Focus, Id, UiState};
-use crate::app::{Event, Mods, MouseButton, Phase};
+use crate::app::{Event, MouseButton, Phase};
 use crate::scene::{Point, Rect, Size};
 
 /// Time constant of wheel momentum: a wheel step's distance is covered exponentially, 95% of it
@@ -30,7 +32,7 @@ pub struct Click {
   pub clicks: u32,
   pub pos: Point,
   /// Held when the button went down (Shift-click, Cmd-click).
-  pub mods: Mods,
+  pub mods: Modifiers,
 }
 
 /// A button held down since it was pressed on `id`.
@@ -41,7 +43,7 @@ pub struct Press {
   pub clicks: u32,
   /// Where it went down: drags measure from here.
   pub pos: Point,
-  pub mods: Mods,
+  pub mods: Modifiers,
 }
 
 /// A scroll container's position, for scrollbars: `offset` of `content` shown in `viewport`.
@@ -431,17 +433,17 @@ mod tests {
       pos: Point::new(x, y),
       button: MouseButton::Left,
       clicks: 1,
-      mods: Mods::NONE,
+      mods: Modifiers::empty(),
     }
   }
 
   fn up(x: f32, y: f32) -> Event {
-    Event::MouseUp { pos: Point::new(x, y), button: MouseButton::Left, mods: Mods::NONE }
+    Event::MouseUp { pos: Point::new(x, y), button: MouseButton::Left, mods: Modifiers::empty() }
   }
 
   fn wheel(x: f32, y: f32, dx: f32, dy: f32, precise: bool, phase: Phase) -> Event {
     let (pos, delta) = (Point::new(x, y), Point::new(dx, dy));
-    Event::Scroll { pos, delta, precise, phase, momentum: Phase::None, mods: Mods::NONE }
+    Event::Scroll { pos, delta, precise, phase, momentum: Phase::None, mods: Modifiers::empty() }
   }
 
   #[test]
@@ -552,7 +554,7 @@ mod tests {
       });
     });
     let (row, btn) = (Id::of("row"), Id::of("btn"));
-    assert!(ev(&mut st, Event::MouseMove { pos: Point::new(5.0, 5.0), mods: Mods::NONE }));
+    assert!(ev(&mut st, Event::MouseMove { pos: Point::new(5.0, 5.0), mods: Modifiers::empty() }));
     assert_eq!(st.input.hover, [btn, row]);
     assert!(ev(&mut st, down(5.0, 5.0)));
     assert!(st.pressed(btn) && !st.pressed(row));
@@ -562,7 +564,7 @@ mod tests {
     ev(&mut st, up(50.0, 5.0));
     assert_eq!(st.input.click, None);
     ev(&mut st, down(5.0, 5.0));
-    ev(&mut st, Event::MouseMove { pos: Point::new(50.0, 5.0), mods: Mods::NONE });
+    ev(&mut st, Event::MouseMove { pos: Point::new(50.0, 5.0), mods: Modifiers::empty() });
     assert!(st.held(btn) && !st.pressed(btn));
     ev(&mut st, up(6.0, 6.0));
     assert_eq!(st.input.click.map(|c| (c.id, c.pos)), Some((btn, Point::new(6.0, 6.0))));
@@ -578,7 +580,7 @@ mod tests {
     let mut st = frame(UiState::default(), |ui| {
       ui.id("btn").el(Style::new().w(px(20.0)).h(px(20.0)));
     });
-    let (pos, mods) = (Point::new(5.0, 5.0), Mods::NONE);
+    let (pos, mods) = (Point::new(5.0, 5.0), Modifiers::empty());
     ev(&mut st, down(5.0, 5.0));
     ev(&mut st, Event::MouseDown { pos, button: MouseButton::Right, clicks: 1, mods });
     ev(&mut st, Event::MouseUp { pos, button: MouseButton::Right, mods });

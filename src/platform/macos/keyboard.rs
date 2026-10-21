@@ -1,7 +1,8 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! What a key types on the ASCII-capable keyboard layout, the one macOS matches Cmd shortcuts
-//! against while a non-Latin layout is active: on a Russian layout Cmd-C reports `'с'`
+//! Keys on macOS: virtual key codes (`kVK_*`) as W3C [Code]s ([code]), and what a key types on
+//! the ASCII-capable keyboard layout, the one macOS matches Cmd shortcuts against while a
+//! non-Latin layout is active: on a Russian layout Cmd-C reports `'с'`
 //! (Cyrillic) in `charactersIgnoringModifiers`, and should still be `"cmd-c"`. A layout that
 //! maps keys anew under Cmd ("Dvorak – QWERTY ⌘" types QWERTY's letters then) gives that
 //! mapping, which `charactersIgnoringModifiers` drops.
@@ -10,6 +11,8 @@
 //! crates don't cover them.
 
 use std::ffi::c_void;
+
+use keyboard_types::Code;
 
 use crate::keys;
 
@@ -48,11 +51,57 @@ const NO_DEAD_KEYS: u32 = 1;
 const CMD: u32 = 0x01;
 const SHIFT: u32 = 0x02;
 
-/// The character key `code` types on the ASCII-capable layout, Shift applied or not; a US
+/// The place of the key at virtual key code `kvk` (Events.h), as Chromium and Firefox map them
+/// (`dom_code_data.inc`): Help is Insert, Keypad Clear is Num Lock.
+pub fn code(kvk: u16) -> Code {
+  use Code::*;
+  #[rustfmt::skip]
+  const KVK: [Code; 128] = [
+    KeyA, KeyS, KeyD, KeyF, KeyH, KeyG, KeyZ, KeyX, // 0x00
+    KeyC, KeyV, IntlBackslash, KeyB, KeyQ, KeyW, KeyE, KeyR,
+    KeyY, KeyT, Digit1, Digit2, Digit3, Digit4, Digit6, Digit5, // 0x10
+    Equal, Digit9, Digit7, Minus, Digit8, Digit0, BracketRight, KeyO,
+    KeyU, BracketLeft, KeyI, KeyP, Enter, KeyL, KeyJ, Quote, // 0x20
+    KeyK, Semicolon, Backslash, Comma, Slash, KeyN, KeyM, Period,
+    Tab, Space, Backquote, Backspace, Unidentified, Escape, MetaRight, MetaLeft, // 0x30
+    ShiftLeft, CapsLock, AltLeft, ControlLeft, ShiftRight, AltRight, ControlRight, Fn,
+    F17, NumpadDecimal, Unidentified, NumpadMultiply, // 0x40
+    Unidentified, NumpadAdd, Unidentified, NumLock,
+    AudioVolumeUp, AudioVolumeDown, AudioVolumeMute, NumpadDivide,
+    NumpadEnter, Unidentified, NumpadSubtract, F18,
+    F19, NumpadEqual, Numpad0, Numpad1, Numpad2, Numpad3, Numpad4, Numpad5, // 0x50
+    Numpad6, Numpad7, F20, Numpad8, Numpad9, IntlYen, IntlRo, NumpadComma,
+    F5, F6, F7, F3, F8, F9, Lang2, F11, // 0x60
+    Lang1, F13, F16, F14, Unidentified, F10, ContextMenu, F12,
+    Unidentified, F15, Insert, Home, PageUp, Delete, F4, End, // 0x70
+    F2, PageDown, F1, ArrowLeft, ArrowRight, ArrowDown, ArrowUp, Unidentified,
+  ];
+  KVK.get(kvk as usize).copied().unwrap_or(Unidentified)
+}
+
+/// The bit of the event flags (`NSEvent`'s and `CGEvent`'s alike) set while modifier key `code`
+/// is down: the device-dependent ones (`NX_DEVICE*KEYMASK`, IOLLEvent.h) tell left from right;
+/// Fn has only its own. `None` for other keys.
+pub fn device_flag(code: Code) -> Option<u64> {
+  Some(match code {
+    Code::ControlLeft => 0x0000_0001,
+    Code::ShiftLeft => 0x0000_0002,
+    Code::ShiftRight => 0x0000_0004,
+    Code::MetaLeft => 0x0000_0008,
+    Code::MetaRight => 0x0000_0010,
+    Code::AltLeft => 0x0000_0020,
+    Code::AltRight => 0x0000_0040,
+    Code::ControlRight => 0x0000_2000,
+    Code::Fn => 0x0080_0000,
+    _ => return None,
+  })
+}
+
+/// The character key `kvk` types on the ASCII-capable layout, Shift applied or not; a US
 /// keyboard's when the layout can't be read. Main thread only (Text Input Sources).
-pub fn ascii_char(code: u16, shift: bool) -> Option<char> {
-  let c = with_layout(|src| translate(src, code, shift, false)).flatten();
-  ascii(c).or_else(|| keys::us_char(code, shift))
+pub fn ascii_char(kvk: u16, shift: bool) -> Option<char> {
+  let c = with_layout(|src| translate(src, kvk, shift, false)).flatten();
+  ascii(c).or_else(|| keys::us_char(code(kvk), shift))
 }
 
 /// The character key `code` types with Cmd held, Shift applied or not, on an ASCII-capable
@@ -154,6 +203,32 @@ mod tests {
       f(CFArrayGetValueAtIndex(list, 0));
       CFRelease(list);
     }
+  }
+
+  /// Codes as the old tables had them: US ANSI places, the keypad, F-keys, the modifiers.
+  #[test]
+  fn virtual_key_codes() {
+    let kvks = [0x00, 0x0C, 0x12, 0x31, 0x6F, 0x35, 0x4C, 0x52, 0x72, 0x3D, 0x3F, 0x7F, 0x200];
+    let want = [
+      Code::KeyA,
+      Code::KeyQ,
+      Code::Digit1,
+      Code::Space,
+      Code::F12,
+      Code::Escape,
+      Code::NumpadEnter,
+      Code::Numpad0,
+      Code::Insert,
+      Code::AltRight,
+      Code::Fn,
+      Code::Unidentified,
+      Code::Unidentified,
+    ];
+    assert_eq!(kvks.map(code), want);
+    // Each US character key at its own code.
+    let typing = (0..128).filter(|&k| keys::us_char(code(k), false).is_some()).count();
+    assert_eq!(typing, 48);
+    assert_eq!((device_flag(Code::AltRight), device_flag(Code::KeyA)), (Some(0x40), None));
   }
 
   /// "Dvorak – QWERTY ⌘" types J at the QWERTY C key (code 8) and C with Cmd held, `]` at `=`
