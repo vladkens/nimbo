@@ -142,6 +142,7 @@ fns!(Gdk {
   fn gtk_im_context_reset(im: P);
   fn g_free(p: P);
   fn g_object_unref(obj: P);
+  fn g_idle_add(f: Fp, data: P) -> c_uint;
 });
 
 fn gdk() -> &'static Gdk {
@@ -185,10 +186,7 @@ impl Input {
   pub fn new() -> Self {
     let g = gdk();
     let im = unsafe { (g.gtk_im_context_simple_new)() };
-    unsafe {
-      connect(im, c"commit", on_commit as Fp, 0);
-      connect(keymap(), c"state-changed", on_keymap as Fp, 0);
-    }
+    unsafe { connect(im, c"commit", on_commit as Fp, 0) };
 
     Self {
       mods: Mods::NONE,
@@ -252,15 +250,19 @@ fn keymap() -> P {
   unsafe { (g.gdk_keymap_get_for_display)((g.gdk_display_get_default)()) }
 }
 
-/// The keyboard's modifiers changed (after a key, or as the window takes the focus while some
-/// are held): they are the window's while it has the focus.
-unsafe extern "C" fn on_keymap(_: P, _: P) {
+/// After a modifier key, once GDK's queued events ran (an idle source comes after them): the
+/// modifiers as GDK's keymap has them, which knows a Shift held since before the focus came
+/// that `held` doesn't (it stays down as the other Shift goes up). Not on the keymap's
+/// `state-changed`: on Wayland that runs ahead of the key events queued before it.
+unsafe extern "C" fn on_settled(_: P) -> c_int {
   with((), |w| {
     if w.input.focused {
       let state = unsafe { (gdk().gdk_keymap_get_modifier_state)(keymap()) };
       w.mods(keys::mods(state));
     }
   });
+
+  0
 }
 
 unsafe extern "C" fn on_commit(_: P, s: *const c_char, _: P) {
@@ -457,6 +459,8 @@ impl Win {
         self.send(Event::Modifier { key, down });
       }
 
+      // GDK's own events go first: an idle source runs after them.
+      unsafe { (g.g_idle_add)(on_settled as Fp, null_mut()) };
       return;
     }
 
