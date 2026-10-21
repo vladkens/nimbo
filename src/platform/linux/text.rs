@@ -733,23 +733,11 @@ impl Bitmap {
   }
 }
 
-/// Draws glyph `id` at the face's size × `scale`, `subpixel` quarters of a pixel right; a
-/// colour face's layers in the text's colour in `text`.
-fn render(face: &Face, id: u16, scale: f32, subpixel: u8, text: [u8; 3]) -> Option<Bitmap> {
-  #[cfg(test)]
-  tests::RENDERS.with(|n| n.set(n.get() + 1));
+/// Sets the FT_Face to `px` pixels per em (a font of strikes: to its strike) unless it is at
+/// it; returns the factor its bitmaps are scaled by to `px` (1 for outlines).
+fn set_size(file: &FontFile, ft: &mut FtFace, px: f32) -> f32 {
   let s = sys();
-  let file = &face.file;
-  let mut ft = file.ft.lock().unwrap_or_else(|e| e.into_inner());
-  // COLR layers in the text's colour take it.
-  if file.color {
-    let [red, green, blue] = text;
-    let fg = FtColor { blue, green, red, alpha: 255 };
-    unsafe { (s.ft.FT_Palette_Set_Foreground_Color)(ft.face, fg) };
-  }
-
-  let px = face.size * scale;
-  let k = match file.strike {
+  match file.strike {
     Some((strike, ppem)) => {
       if ft.px != ppem {
         unsafe { (s.ft.FT_Select_Size)(ft.face, strike) };
@@ -766,7 +754,51 @@ fn render(face: &Face, id: u16, scale: f32, subpixel: u8, text: [u8; 3]) -> Opti
 
       1.0
     }
-  };
+  }
+}
+
+/// The pixel box of glyph `id` of a monochrome face from its outline, loaded but not drawn:
+/// FreeType's metrics are the outline's control box (grid-fitted outward when hinted), which
+/// holds every pixel the renderer covers, here moved by the subpixel offset and padded as
+/// [Bitmap::glyph_box]. `None` for no ink.
+fn outline_box(face: &Face, id: u16, scale: f32, subpixel: u8) -> Option<GlyphBox> {
+  let s = sys();
+  let file = &face.file;
+  let mut ft = file.ft.lock().unwrap_or_else(|e| e.into_inner());
+  set_size(file, &mut ft, face.size * scale);
+  if unsafe { (s.ft.FT_Load_Glyph)(ft.face, id as c_uint, file.load) } != 0 {
+    return None;
+  }
+
+  // FT_Glyph_Metrics in 26.6: width, height, horiBearingX, horiBearingY.
+  let [w, h, x, y, ..] = unsafe { (*(*ft.face).glyph).metrics }.map(|v| v as f32 / 64.0);
+  if w <= 0.0 || h <= 0.0 {
+    return None;
+  }
+
+  let x = x + subpixel as f32 / 4.0;
+  let left = x.floor() as i32 - 1;
+  let bottom = (y - h).floor() as i32 - 1;
+  let (right, top) = ((x + w).ceil() as i32 + 1, y.ceil() as i32 + 1);
+  Some(GlyphBox { left, bottom, w: (right - left) as usize, h: (top - bottom) as usize })
+}
+
+/// Draws glyph `id` at the face's size × `scale`, `subpixel` quarters of a pixel right; a
+/// colour face's layers in the text's colour in `text`.
+fn render(face: &Face, id: u16, scale: f32, subpixel: u8, text: [u8; 3]) -> Option<Bitmap> {
+  #[cfg(test)]
+  tests::RENDERS.with(|n| n.set(n.get() + 1));
+  let s = sys();
+  let file = &face.file;
+  let mut ft = file.ft.lock().unwrap_or_else(|e| e.into_inner());
+  // COLR layers in the text's colour take it.
+  if file.color {
+    let [red, green, blue] = text;
+    let fg = FtColor { blue, green, red, alpha: 255 };
+    unsafe { (s.ft.FT_Palette_Set_Foreground_Color)(ft.face, fg) };
+  }
+
+  let k = set_size(file, &mut ft, face.size * scale);
   // Outlines move by the subpixel offset (26.6 units); a strike is scaled, not shifted.
   let dx = if file.strike.is_some() { 0 } else { subpixel as c_long * 16 };
   let mut delta = [dx, 0];
@@ -808,8 +840,8 @@ fn render(face: &Face, id: u16, scale: f32, subpixel: u8, text: [u8; 3]) -> Opti
 type Rendered = (usize, u32, u16, u32, u8);
 
 thread_local! {
-  /// The glyph [glyph_box] rendered last, kept for [rasterize]: the atlas asks for the box,
-  /// then for the pixels of the same glyph, which FreeType renders once.
+  /// The colour face's glyph [glyph_box] rendered last, kept for [rasterize]: the atlas asks for
+  /// the box, then for the pixels of the same glyph, which FreeType renders once.
   static LAST: std::cell::RefCell<Option<(Rendered, Bitmap)>> = const { std::cell::RefCell::new(None) };
 }
 
@@ -817,9 +849,16 @@ fn rendered(face: &Face, id: u16, scale: f32, subpixel: u8) -> Rendered {
   (Arc::as_ptr(&face.file) as usize, face.size.to_bits(), id, scale.to_bits(), subpixel)
 }
 
-/// The pixel box of glyph `id` at `scale`, drawn `subpixel` quarters of a pixel to the right:
-/// FreeType's bitmap with one pixel of padding on each side. `None` for no ink (a space).
+/// The pixel box of glyph `id` at `scale`, drawn `subpixel` quarters of a pixel to the right,
+/// with one pixel of padding on each side; `None` for no ink (a space). A monochrome face's
+/// from the outline, without drawing it ([outline_box]): laying text out asks for every new
+/// glyph's. A colour face's from its bitmap, drawn once for this and [rasterize] both: COLR
+/// layers and strikes reach past the base glyph's outline.
 pub fn glyph_box(face: &Face, id: u16, scale: f32, subpixel: u8) -> Option<GlyphBox> {
+  if !face.file.color {
+    return outline_box(face, id, scale, subpixel);
+  }
+
   let b = render(face, id, scale, subpixel, [0; 3])?;
   let gb = b.glyph_box();
   LAST.with(|l| *l.borrow_mut() = Some((rendered(face, id, scale, subpixel), b)));
@@ -841,9 +880,15 @@ pub fn rasterize(
   let key = rendered(face, id, raster.scale, subpixel);
   // A colour glyph is drawn again in the text's colour; [glyph_box]'s was in black.
   let last = LAST.with(|l| l.borrow_mut().take()).filter(|(k, _)| *k == key && !color);
+  let n = if color { 4 } else { 1 };
+  let mut out = vec![0u8; b.w * b.h * n];
   let g = match last {
     Some((_, g)) => g,
-    None => render(face, id, raster.scale, subpixel, raster.text)?,
+    // An outline's box came from its metrics: one that draws no pixels at this size is blank.
+    None => match render(face, id, raster.scale, subpixel, raster.text) {
+      Some(g) => g,
+      None => return Some(out),
+    },
   };
 
   let gb = g.glyph_box();
@@ -851,8 +896,6 @@ pub fn rasterize(
   let ox = (gb.left + 1 - b.left).max(0) as usize;
   let oy = ((b.bottom + b.h as i32) - (gb.bottom + gb.h as i32) + 1).max(0) as usize;
   let (w, h) = (gb.w - 2, gb.h - 2);
-  let n = if color { 4 } else { 1 };
-  let mut out = vec![0u8; b.w * b.h * n];
   for y in 0..h.min(b.h.saturating_sub(oy)) {
     for x in 0..w.min(b.w.saturating_sub(ox)) {
       let p = g.sample(x, y, w, h);
@@ -895,6 +938,41 @@ mod tests {
     let px = rasterize(&f, id, 1, &b, raster, false).unwrap();
     assert_eq!(RENDERS.with(Cell::get), 1);
     assert!(px == alone, "the same pixels from the kept render");
+  }
+
+  /// Laying text out renders no glyph (its ink comes from the outlines' boxes); the atlas
+  /// renders each glyph it draws once, and none for a space.
+  #[test]
+  fn layout_renders_no_glyph() {
+    let mut ts = crate::text::TextSystem::new(2.0);
+    RENDERS.with(|n| n.set(0));
+    let line = ts.layout("Wavy jq", Font::ui(13.0));
+    assert!(line.ink.up > 8.0 && line.ink.down > 2.0, "{:?}", line.ink);
+    assert_eq!(RENDERS.with(Cell::get), 0, "renders to lay out");
+    for g in &line.glyphs {
+      ts.glyph(g.face, g.id, 1, [1.0; 4]);
+    }
+
+    assert_eq!(RENDERS.with(Cell::get), 6, "renders to draw");
+  }
+
+  /// An outline's box holds every pixel FreeType draws for it, at any scale and offset.
+  #[test]
+  fn outline_boxes_hold_their_pixels() {
+    let f = face(Font::ui(13.0));
+    let line = shape(&f, "AWgjq@%|/\\fi", |_| 0);
+    for scale in [1.0, 1.25, 1.5, 2.0, 3.0] {
+      for g in &line.glyphs {
+        for sub in 0..4 {
+          let b = glyph_box(&f, g.id, scale, sub).unwrap();
+          let r = render(&f, g.id, scale, sub, [0; 3]).unwrap().glyph_box();
+          let (top, rtop) = (b.bottom + b.h as i32, r.bottom + r.h as i32);
+          let inside = b.left <= r.left && b.bottom <= r.bottom && top >= rtop;
+          let inside = inside && b.left + b.w as i32 >= r.left + r.w as i32;
+          assert!(inside, "glyph {} at {scale} +{sub}/4: {b:?} vs {r:?}", g.id);
+        }
+      }
+    }
   }
 
   #[test]
