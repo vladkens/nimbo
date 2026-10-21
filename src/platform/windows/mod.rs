@@ -12,7 +12,9 @@ use std::mem::offset_of;
 use std::ptr::{null, null_mut};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use windows_sys::Win32::Foundation::{FILETIME, HANDLE, HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows_sys::Win32::Foundation::{
+  CloseHandle, FILETIME, HANDLE, HWND, LPARAM, LRESULT, RECT, WPARAM,
+};
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::SystemInformation::{
@@ -33,7 +35,7 @@ use crate::Config;
 use crate::app::{App, Appearance, Clock, Event, Runtime};
 use crate::cpu::Renderer;
 use crate::cpu::raster::IRect;
-use crate::platform::points;
+use crate::platform::{Pace, points};
 use crate::scene::Size;
 
 /// Posted by the waker: something changed on another thread.
@@ -102,6 +104,25 @@ impl Drop for Dib {
   }
 }
 
+/// A high-resolution waitable timer, closed when dropped; null where the OS has none (before
+/// Windows 10 1803), and the loop falls back to the wait's timeout.
+struct Timer(HANDLE);
+
+impl Timer {
+  fn new() -> Self {
+    let flags = CREATE_WAITABLE_TIMER_HIGH_RESOLUTION;
+    Self(unsafe { CreateWaitableTimerExW(null(), null(), flags, TIMER_ALL_ACCESS) })
+  }
+}
+
+impl Drop for Timer {
+  fn drop(&mut self) {
+    if !self.0.is_null() {
+      unsafe { CloseHandle(self.0) };
+    }
+  }
+}
+
 // MARK: Window
 
 struct Window {
@@ -112,9 +133,8 @@ struct Window {
   scale: f32,
   /// Minimized: frames wait until it shows again.
   hidden: bool,
-  /// When the last frame was drawn: while animating, frames come a refresh apart.
-  last: Option<Instant>,
-  refresh: Duration,
+  /// While animating, frames come a refresh of the display apart.
+  pace: Pace,
   /// Logs each presented frame (`NIMBO_TRACE`): `nimbo: presented <unix ms>` on stderr, and the
   /// first one's time since the process started.
   trace: bool,
@@ -145,6 +165,7 @@ impl Window {
 
   /// Builds a frame at the window's size and scale and presents it.
   fn render(&mut self) {
+    self.pace.start(Instant::now());
     let (w, h) = self.client();
     if w <= 0 || h <= 0 {
       return;
@@ -153,7 +174,6 @@ impl Window {
     let size = Size::new(points(w as u32, self.scale), points(h as u32, self.scale));
     self.rt.resize(size, self.scale);
     self.rt.frame();
-    self.last = Some(Instant::now());
     let r = &mut self.renderer;
     r.sync(&mut self.rt.images);
     r.prepare(&self.rt.scene, size, self.scale);
@@ -195,14 +215,16 @@ impl Window {
     }
 
     if self.rt.needs_frame() {
-      let next = self.last.map(|t| t + self.refresh);
-      match next.and_then(|t| t.checked_duration_since(Instant::now())) {
-        Some(left) if !left.is_zero() => return Some(left),
-        _ => self.render(),
+      let left = self.pace.left(Instant::now());
+      if !left.is_zero() {
+        return Some(left);
       }
+
+      self.render();
     }
 
-    self.rt.needs_frame().then_some(self.refresh)
+    // The rest of the interval: the time spent drawing is part of it.
+    self.rt.needs_frame().then(|| self.pace.left(Instant::now()))
   }
 }
 
@@ -301,7 +323,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
       0
     }
     WM_ENTERSIZEMOVE => {
-      let ms = with(|w| w.refresh.as_millis() as u32).unwrap_or(16);
+      let ms = with(|w| w.pace.interval.as_millis() as u32).unwrap_or(16);
       unsafe { SetTimer(hwnd, TIMER_MODAL, ms.max(1), None) };
       0
     }
@@ -388,8 +410,7 @@ pub fn run(cfg: &Config, app: Box<dyn App>) {
     dib: None,
     scale,
     hidden: false,
-    last: None,
-    refresh: refresh(hwnd),
+    pace: Pace::new(refresh(hwnd)),
     trace: std::env::var_os("NIMBO_TRACE").is_some(),
     frames: 0,
     min: cfg.min(),
@@ -398,15 +419,13 @@ pub fn run(cfg: &Config, app: Box<dyn App>) {
   WINDOW.with(|w| *w.borrow_mut() = Some(window));
   unsafe { ShowWindow(hwnd, SW_SHOW) };
 
-  let flags = CREATE_WAITABLE_TIMER_HIGH_RESOLUTION;
-  let timer = unsafe { CreateWaitableTimerExW(null(), null(), flags, TIMER_ALL_ACCESS) };
-  run_loop(hwnd, timer);
+  run_loop(hwnd, &Timer::new());
   WINDOW.with(|w| w.borrow_mut().take());
 }
 
 /// Handles messages until WM_QUIT; between them draws the frames due and sleeps until the next
 /// message, wake or timer.
-fn run_loop(hwnd: HWND, timer: HANDLE) {
+fn run_loop(hwnd: HWND, timer: &Timer) {
   let mut msg: MSG = unsafe { std::mem::zeroed() };
   loop {
     while unsafe { PeekMessageW(&mut msg, null_mut(), 0, 0, PM_REMOVE) } != 0 {
@@ -428,9 +447,9 @@ fn run_loop(hwnd: HWND, timer: HANDLE) {
     let wait = with(|w| w.tick()).flatten();
     let n = match wait {
       // Relative due times are negative, in 100 ns units.
-      Some(d) if !timer.is_null() => {
+      Some(d) if !timer.0.is_null() => {
         let due = -((d.as_nanos() / 100).max(1) as i64);
-        unsafe { SetWaitableTimer(timer, &due, 0, None, null(), 0) };
+        unsafe { SetWaitableTimer(timer.0, &due, 0, None, null(), 0) };
         1
       }
       _ => 0,
@@ -441,7 +460,7 @@ fn run_loop(hwnd: HWND, timer: HANDLE) {
       _ => INFINITE,
     };
 
-    unsafe { MsgWaitForMultipleObjectsEx(n, &timer, ms, QS_ALLINPUT, MWMO_INPUTAVAILABLE) };
+    unsafe { MsgWaitForMultipleObjectsEx(n, &timer.0, ms, QS_ALLINPUT, MWMO_INPUTAVAILABLE) };
   }
 }
 
@@ -500,5 +519,18 @@ mod tests {
     let mut d = Dib::new(3, 2).unwrap();
     d.pixels().fill(0xff00ff00);
     assert_eq!(d.pixels().len(), 6);
+  }
+
+  #[test]
+  fn timer_closes_its_handle() {
+    use windows_sys::Win32::Foundation::GetHandleInformation;
+
+    let timer = Timer::new();
+    let (h, mut flags) = (timer.0, 0);
+    assert!(!h.is_null());
+    assert_ne!(unsafe { GetHandleInformation(h, &mut flags) }, 0);
+
+    drop(timer);
+    assert_eq!(unsafe { GetHandleInformation(h, &mut flags) }, 0);
   }
 }

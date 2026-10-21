@@ -302,6 +302,7 @@ impl Win {
   /// Builds a frame and presents it if it changed; a presented frame asks for a frame callback,
   /// which paces the next.
   fn render(&mut self) {
+    let t0 = Instant::now();
     let (scale, size) = (self.scale(), self.size);
     if scale != self.set_scale || size != self.set_size {
       match (&self.viewport, self.scale120.is_some()) {
@@ -331,7 +332,8 @@ impl Win {
         eprintln!("nimbo: presented {:.3} (+{since:.1} ms) {w}x{h}", t.as_secs_f64() * 1e3);
       }
     } else if self.rt.needs_frame() {
-      self.next_tick = Some(Instant::now() + TICK);
+      // From the frame's start: the time spent building it is part of the tick.
+      self.next_tick = Some(t0 + TICK);
     }
 
     // An ack goes with the buffer of its size: a new one, or the one shown when that has it (an

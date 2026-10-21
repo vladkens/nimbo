@@ -62,6 +62,9 @@ use linux as imp;
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 compile_error!("nimbo runs on macOS, Windows and Linux");
 
+#[cfg(any(test, not(target_os = "macos")))]
+use std::time::{Duration, Instant};
+
 pub(crate) use imp::perf_cores;
 pub use imp::{appearance, run};
 
@@ -78,10 +81,66 @@ pub(crate) fn points(px: u32, scale: f32) -> f32 {
   p
 }
 
+/// Frames an interval apart from the start of each, so the time spent drawing one doesn't add to
+/// the gap: 8 ms frames at 60 Hz still come every 16.7 ms, not every 25 (40 fps). For the loops
+/// paced by a timer; macOS has its display link.
+#[cfg(any(test, not(target_os = "macos")))]
+pub(crate) struct Pace {
+  pub interval: Duration,
+  /// When the last frame started.
+  last: Option<Instant>,
+}
+
+#[cfg(any(test, not(target_os = "macos")))]
+impl Pace {
+  pub fn new(interval: Duration) -> Self {
+    Self { interval, last: None }
+  }
+
+  /// A frame starts at `now`: call before building it.
+  pub fn start(&mut self, now: Instant) {
+    self.last = Some(now);
+  }
+
+  /// The time from `now` until the next frame is due: zero when it is (or none was drawn yet).
+  pub fn left(&self, now: Instant) -> Duration {
+    let next = self.last.map(|t| t + self.interval);
+    next.map_or(Duration::ZERO, |t| t.saturating_duration_since(now))
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
   use crate::scene::Size;
+
+  /// 8 ms frames at 60 Hz: the next is due 8.7 ms after one ends, and a second holds 60 of them.
+  #[test]
+  fn pace_counts_from_the_frame_start() {
+    let (draw, interval) = (Duration::from_millis(8), Duration::from_micros(16_667));
+    let t0 = Instant::now();
+    let mut pace = Pace::new(interval);
+    assert_eq!(pace.left(t0), Duration::ZERO);
+
+    pace.start(t0);
+    assert_eq!(pace.left(t0 + draw), interval - draw);
+    assert_eq!(pace.left(t0 + interval), Duration::ZERO);
+
+    let (mut now, mut frames) = (t0, 0);
+    pace = Pace::new(interval);
+    while now < t0 + Duration::from_secs(1) {
+      let left = pace.left(now);
+      if left.is_zero() {
+        pace.start(now);
+        now += draw;
+        frames += 1;
+      } else {
+        now += left;
+      }
+    }
+
+    assert_eq!(frames, 60);
+  }
 
   #[test]
   fn points_give_their_pixels_back() {

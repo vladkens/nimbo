@@ -29,7 +29,7 @@ use super::Res;
 use crate::Config;
 use crate::app::{App, Appearance, Clock, Event, Runtime};
 use crate::cpu::raster::IRect;
-use crate::platform::points;
+use crate::platform::{Pace, points};
 use crate::scene::Size;
 
 /// The frame interval while the runtime animates: 60 Hz (the display's rate isn't read).
@@ -74,7 +74,8 @@ struct Win {
   closed: bool,
   /// A new size: drawn at once, not at the next tick.
   force: bool,
-  last_frame: Option<Instant>,
+  /// Frames a [REFRESH] apart while the runtime animates.
+  pace: Pace,
   /// Logs every frame presented (`NIMBO_TRACE`), and every event (`NIMBO_TRACE=2`).
   trace: bool,
   trace_events: bool,
@@ -203,7 +204,7 @@ fn run_on(
     mapped: false,
     closed: false,
     force: false,
-    last_frame: None,
+    pace: Pace::new(REFRESH),
     trace: std::env::var_os("NIMBO_TRACE").is_some(),
     trace_events: std::env::var("NIMBO_TRACE").is_ok_and(|v| v == "2"),
     frames: 0,
@@ -391,14 +392,15 @@ impl Win {
   }
 
   /// A frame is drawn while the runtime wants one, the window shows (the first one before),
-  /// the server has read the last one, and a tick passed since it (at once after a resize).
+  /// the server has read the last one, and a tick passed since it started (at once after a
+  /// resize).
   fn frame_due(&mut self, now: Instant) -> bool {
     let hidden = !self.mapped && self.frames > 0;
     if hidden || self.present.busy() || !self.rt.needs_frame() {
       return false;
     }
 
-    self.force || self.last_frame.is_none_or(|t| now >= t + REFRESH)
+    self.force || self.pace.left(now).is_zero()
   }
 
   /// Until the loop must run again without input: the next tick while a frame is wanted; none
@@ -410,9 +412,7 @@ impl Win {
     }
 
     match self.mapped && self.rt.needs_frame() {
-      true => Some(
-        self.last_frame.map_or(Duration::ZERO, |t| (t + REFRESH).saturating_duration_since(now)),
-      ),
+      true => Some(self.pace.left(now)),
       false => None,
     }
   }
@@ -420,13 +420,13 @@ impl Win {
   /// Builds a frame and puts it in the window if it changed.
   fn render(&mut self) {
     let t0 = Instant::now();
+    self.pace.start(t0);
     let (scale, size) = (self.scale, self.size);
     self.rt.resize(size, scale);
     self.rt.frame();
     self.present.renderer.sync(&mut self.rt.images);
     let shown = self.present.present(&self.rt.scene, size, scale);
     self.force = false;
-    self.last_frame = Some(Instant::now());
     if shown {
       self.frames += 1;
       if self.trace {

@@ -44,9 +44,18 @@ struct Win {
   on_close: Option<OnClose>,
 }
 
+/// What a closed window leaves: let go after AppKit's call that closed it ([release]).
+struct Gone {
+  window: Retained<NSWindow>,
+  _view: Retained<View>,
+  _delegate: Retained<WindowDelegate>,
+}
+
 #[derive(Default)]
 struct Shell {
   windows: Vec<Win>,
+  /// Closed windows not yet let go.
+  gone: Vec<Gone>,
   next: u64,
   /// [quit] ran: the loop ends, or does not start.
   quitting: bool,
@@ -94,6 +103,7 @@ define_class!(
         }
 
         finish();
+        release();
         NSApplication::sharedApplication(mtm()).replyToApplicationShouldTerminate(true);
       });
       NSApplicationTerminateReply::TerminateLater
@@ -181,7 +191,9 @@ pub fn run(name: &str, start: impl FnOnce()) {
     ns_app.run();
   }
 
+  // The main queue isn't served once the loop ends: the closed windows go now.
   finish();
+  release();
   // SAFETY: the observer is the delegate, added above.
   unsafe { center.removeObserver(&delegate) };
   ns_app.setDelegate(None);
@@ -365,8 +377,8 @@ pub fn on_close(id: u64, f: OnClose) {
   });
 }
 
-/// Window `id` closes: its runtime stops and goes (after AppKit's call in progress), then its
-/// close callback runs.
+/// Window `id` closes: its runtime stops and goes (after AppKit's call in progress: [release]),
+/// then its close callback runs.
 fn closed(id: u64) {
   let Some(win) = shell(|s| {
     let i = s.windows.iter().position(|w| w.id == id)?;
@@ -377,11 +389,18 @@ fn closed(id: u64) {
   win.view.stop();
   win.window.setDelegate(None);
   let Win { window, view, _delegate, on_close, .. } = win;
-  defer(move || {
-    window.setContentView(None);
-    drop((window, view, _delegate));
-  });
+  shell(|s| s.gone.push(Gone { window, _view: view, _delegate }));
+  defer(release);
   if let Some(f) = on_close {
     f();
+  }
+}
+
+/// Lets go of the closed windows, their views and runtimes (the apps drop): from the main queue
+/// after AppKit's call that closed them, or as the app ends, whichever comes first.
+fn release() {
+  for gone in shell(|s| std::mem::take(&mut s.gone)) {
+    gone.window.setContentView(None);
+    drop(gone);
   }
 }
