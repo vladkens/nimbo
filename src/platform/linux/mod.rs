@@ -9,15 +9,16 @@
 //! presented through `wl_shm` buffers ([shm]) paced by frame callbacks, the scale from
 //! fractional-scale-v1 (with a viewport), else the preferred buffer scale or the outputs'; input
 //! from `wl_seat` (pointer, axis, pinch gestures, keyboard through xkbcommon in [xkb]),
-//! cursor-shape-v1 for cursors, the clipboard on `wl_data_device` ([clip]); the objects' events
-//! in [dispatch]. One thread: the loop polls the display and a wake eventfd with the next key
-//! repeat as the timeout.
+//! cursor-shape-v1 for cursors (else the Xcursor theme's, [cursor]), the clipboard on
+//! `wl_data_device` ([clip]); the objects' events in [dispatch]. One thread: the loop polls the
+//! display and a wake eventfd with the next key repeat as the timeout.
 //!
 //! No client-side decorations: sway and other wlroots compositors (and KDE) draw their own;
 //! GNOME (Mutter) draws none for clients, so a window there has no title bar yet (CSD is to
 //! do).
 
 mod clip;
+mod cursor;
 mod dispatch;
 mod dl;
 mod shm;
@@ -59,7 +60,8 @@ use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 use wayland_protocols::xdg::shell::client::xdg_surface::XdgSurface;
 use wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase;
 
-use self::clip::{Clip, Clipboard};
+use self::clip::{Clip, Clipboard, Transfers};
+use self::cursor::Cursors;
 use self::shm::Presenter;
 use self::xkb::{Keyboard, Typed};
 use crate::Config;
@@ -145,6 +147,19 @@ struct Repeat {
   at: Instant,
 }
 
+impl Repeat {
+  /// The repeat after `key` went down or up: a key that repeats takes over at `at`; one that
+  /// doesn't (a modifier) leaves the held key repeating, with the new modifiers; the held key's
+  /// release ends it.
+  fn after(held: Option<Repeat>, key: u32, down: bool, repeats: bool, at: Instant) -> Option<Self> {
+    match (down, held) {
+      (true, _) if repeats => Some(Repeat { key, at }),
+      (false, Some(r)) if r.key == key => None,
+      (_, held) => held,
+    }
+  }
+}
+
 /// The pointer's axis events of one `wl_pointer.frame`; index 0 vertical, 1 horizontal.
 #[derive(Default)]
 struct Axes {
@@ -198,6 +213,8 @@ pub struct Win {
   keyboard: Option<WlKeyboard>,
   shapes: Option<WpCursorShapeManagerV1>,
   shape_device: Option<WpCursorShapeDeviceV1>,
+  /// The theme's cursors on a surface of ours, without cursor-shape-v1.
+  cursors: Option<Cursors>,
   gestures: Option<ZwpPointerGesturesV1>,
   _pinch: Option<ZwpPointerGesturePinchV1>,
   pinch_scale: f64,
@@ -215,6 +232,9 @@ pub struct Win {
   /// Keys per second and the delay before the first repeat, ms.
   repeat_info: (i32, i32),
   repeat: Option<Repeat>,
+  /// Modifier keys that went down or up, held for the `modifiers` event the compositor sends
+  /// after them: [Event::Modifier] comes after the [Event::Mods] it changed.
+  mod_keys: Vec<(ModKey, bool)>,
   clip: Rc<RefCell<Clip>>,
 }
 
@@ -237,6 +257,7 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
   });
 
   let surface = compositor.create_surface(&qh, ());
+  let cursors = shapes.is_none().then(|| Cursors::new(&compositor, shm.clone(), &qh));
   let (viewport, fractional) = match (&viewporter, &fractions) {
     (Some(v), Some(f)) => {
       (Some(v.get_viewport(&surface, &qh, ())), Some(f.get_fractional_scale(&surface, &qh, ())))
@@ -276,6 +297,7 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
     selection: None,
     source: None,
     serial: 0,
+    transfers: Transfers::default(),
   }));
   let mut rt = Runtime::new(app, cfg.size, 1.0, Clock::real(), Box::new(Clipboard(clip.clone())));
   rt.event(Event::Appearance(appearance()));
@@ -317,6 +339,7 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
     keyboard: None,
     shapes,
     shape_device: None,
+    cursors,
     gestures,
     _pinch: None,
     pinch_scale: 1.0,
@@ -330,6 +353,7 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
     mods: Mods::NONE,
     repeat_info: (25, 600),
     repeat: None,
+    mod_keys: Vec::new(),
     clip,
   };
 
@@ -338,6 +362,8 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
   let mut unsent = false;
   loop {
     queue.dispatch_pending(&mut win)?;
+    // A modifier key that left the modifiers as they were (the other Shift) has no `modifiers`.
+    win.modifier_keys();
     if win.closed || win.rt.quit_requested() {
       break;
     }
@@ -364,8 +390,11 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
     let timeout =
       timeout.map(|d| Timespec { tv_sec: d.as_secs() as _, tv_nsec: d.subsec_nanos() as _ });
     let display = guard.connection_fd();
+    let clip = win.clip.borrow();
+    // The display, a wake, and the pipes our copied text goes into.
     let flags = if unsent { PollFlags::IN | PollFlags::OUT } else { PollFlags::IN };
-    let mut fds = [PollFd::new(&display, flags), PollFd::new(&*wake, PollFlags::IN)];
+    let mut fds = vec![PollFd::new(&display, flags), PollFd::new(&*wake, PollFlags::IN)];
+    fds.extend(clip.transfers.fds().map(|fd| PollFd::from_borrowed_fd(fd, PollFlags::OUT)));
     match poll(&mut fds, timeout.as_ref()) {
       Ok(_) | Err(rustix::io::Errno::INTR) => {}
       Err(e) => return Err(e.into()),
@@ -373,6 +402,9 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
 
     let ready = !fds[0].revents().difference(PollFlags::OUT).is_empty();
     let woken = !fds[1].revents().is_empty();
+    drop(fds);
+    drop(clip);
+    win.clip.borrow_mut().transfers.pump(Instant::now());
     if woken {
       let mut buf = [0u8; 8];
       let _ = rustix::io::read(&*wake, &mut buf);
@@ -416,11 +448,17 @@ impl Win {
     self.preferred.or(on).or(any).unwrap_or(1).max(1) as f32
   }
 
-  /// Until the loop must run again without input: the next key repeat, and the next paced tick
-  /// when no frame callback is due.
+  /// Until the loop must run again without input: the next key repeat, the next idle reader of
+  /// our text let go, and the next paced tick when no frame callback is due.
   fn timeout(&mut self) -> Option<Duration> {
     let now = Instant::now();
-    let mut at = self.repeat.as_ref().map(|r| r.at);
+    let repeat = self.repeat.as_ref().map(|r| r.at);
+    let transfer = self.clip.borrow().transfers.deadline();
+    let mut at = match (repeat, transfer) {
+      (Some(a), Some(b)) => Some(a.min(b)),
+      (a, b) => a.or(b),
+    };
+
     if self.configured && !self.frame_pending {
       let next = match self.rt.needs_frame() {
         true => self.next_tick,
@@ -524,8 +562,18 @@ impl Win {
     }
 
     self.cursor = c;
-    if let (Some(dev), Some(serial)) = (&self.shape_device, self.enter_serial) {
-      dev.set_shape(serial, shape(c));
+    if let Some(serial) = self.enter_serial {
+      self.show_cursor(serial);
+    }
+  }
+
+  /// Shows the cursor for the pointer's enter `serial`: by its shape, else the theme's image.
+  fn show_cursor(&mut self, serial: u32) {
+    let scale = self.scale().ceil() as i32;
+    if let Some(dev) = &self.shape_device {
+      dev.set_shape(serial, shape(self.cursor));
+    } else if let (Some(cursors), Some(pointer)) = (&mut self.cursors, &self.pointer) {
+      cursors.set(pointer, serial, self.cursor, scale, &self.qh);
     }
   }
 
@@ -540,7 +588,7 @@ impl Win {
     // their side, [Event::Modifier], as on macOS (`flagsChanged:`).
     if (54..=63).contains(&k.code) {
       if let Some(key) = ModKey::of_mac(k.code).filter(|_| !repeat) {
-        self.send(Event::Modifier { key, down });
+        self.mod_keys.push((key, down));
       }
 
       return;
@@ -560,6 +608,13 @@ impl Win {
       Typed::Text(s) => _ = self.send(Event::Text(s)),
       Typed::Command(c) => _ = self.send(Event::Command(c)),
       Typed::None => {}
+    }
+  }
+
+  /// Sends the modifier keys held back for their `modifiers` event.
+  fn modifier_keys(&mut self) {
+    for (key, down) in std::mem::take(&mut self.mod_keys) {
+      self.send(Event::Modifier { key, down });
     }
   }
 
@@ -728,6 +783,24 @@ mod tests {
     assert!(!backed_up(Ok(())).unwrap());
     assert!(backed_up(err(std::io::ErrorKind::WouldBlock)).unwrap());
     assert!(backed_up(err(std::io::ErrorKind::BrokenPipe)).is_err());
+  }
+
+  #[test]
+  fn a_modifier_keeps_the_held_key_repeating() {
+    const LEFT: u32 = 105;
+    const SHIFT: u32 = 42;
+    const A: u32 = 30;
+    let t = Instant::now();
+    let held = Repeat::after(None, LEFT, true, true, t);
+    let held = Repeat::after(held, SHIFT, true, false, t);
+    assert_eq!(held.as_ref().map(|r| r.key), Some(LEFT), "Shift down");
+    let held = Repeat::after(held, SHIFT, false, false, t);
+    assert_eq!(held.as_ref().map(|r| r.key), Some(LEFT), "Shift up");
+    let held = Repeat::after(held, A, true, true, t);
+    assert_eq!(held.as_ref().map(|r| r.key), Some(A), "another key takes over");
+    let held = Repeat::after(held, LEFT, false, true, t);
+    assert_eq!(held.as_ref().map(|r| r.key), Some(A), "not the held key's release");
+    assert!(Repeat::after(held, A, false, true, t).is_none());
   }
 
   #[test]
