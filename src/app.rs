@@ -379,13 +379,13 @@ impl<A: App> Runtime<A> {
     true
   }
 
+  /// The pointer follows the mouse's events; a scroll or pinch carries its own position and
+  /// may come after the pointer left (macOS momentum goes on to the view it started in).
   fn pointer(&mut self, ev: Event) -> bool {
     match ev {
-      Event::MouseMove { pos, .. }
-      | Event::MouseDown { pos, .. }
-      | Event::MouseUp { pos, .. }
-      | Event::Scroll { pos, .. }
-      | Event::Magnify { pos, .. } => self.mouse = Some(pos),
+      Event::MouseMove { pos, .. } | Event::MouseDown { pos, .. } | Event::MouseUp { pos, .. } => {
+        self.mouse = Some(pos)
+      }
       Event::MouseExit => self.mouse = None,
       _ => {}
     }
@@ -506,6 +506,13 @@ mod tests {
     assert_eq!(rt.scene.counts().quads, 1);
 
     rt.event(Event::MouseExit);
+    assert_eq!(rt.mouse, None);
+
+    // Momentum scrolling after the pointer left leaves it out.
+    let (pos, delta) = (Point::new(5.0, 5.0), Point::new(0.0, 3.0));
+    let momentum = Phase::Changed;
+    let (precise, phase, mods) = (true, Phase::None, Mods::NONE);
+    rt.event(Event::Scroll { pos, delta, precise, phase, momentum, mods });
     assert_eq!(rt.mouse, None);
   }
 
