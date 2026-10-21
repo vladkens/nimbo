@@ -3,7 +3,8 @@
 //! The clipboard on `wl_data_device`: plain UTF-8 text. Copying makes a data source that
 //! answers `send` with our text, written into the reader's pipe as it takes it ([Transfers]:
 //! the loop polls the pipes, it never waits on one); pasting reads the selection's offer through
-//! a pipe (our own selection without a round trip).
+//! a pipe (our own selection without a round trip). The device's offers are kept until the
+//! event that uses them, a drag's while it is over the window ([Offers]).
 
 use std::cell::RefCell;
 use std::io::Read;
@@ -33,10 +34,7 @@ pub struct Clip {
   pub qh: QueueHandle<Win>,
   pub manager: Option<WlDataDeviceManager>,
   pub device: Option<WlDataDevice>,
-  /// Offers announced (`data_offer`) and the types each has, until a selection picks one.
-  pub offers: Vec<(WlDataOffer, Vec<String>)>,
-  /// The selection's offer, someone else's.
-  pub selection: Option<(WlDataOffer, Vec<String>)>,
+  pub offers: Offers<WlDataOffer>,
   /// Our selection: its source and text.
   pub source: Option<(WlDataSource, String)>,
   /// The serial of the last key or button press, which `set_selection` needs.
@@ -45,20 +43,80 @@ pub struct Clip {
   pub transfers: Transfers,
 }
 
-impl Clip {
-  /// `wl_data_device.selection`: the new selection's offer, or none.
-  pub fn select(&mut self, offer: Option<WlDataOffer>) {
+/// A data offer as [Offers] keeps it: one goes away with `destroy`.
+pub trait Offer: PartialEq {
+  fn destroy(&self);
+}
+
+impl Offer for WlDataOffer {
+  fn destroy(&self) {
+    WlDataOffer::destroy(self);
+  }
+}
+
+/// The data device's offers, each destroyed once the event it came for is over: the
+/// selection's until the next selection, a drag's until it leaves or drops (we take no drops).
+pub struct Offers<O> {
+  /// Announced (`data_offer`) with the types each has, until a selection or a drag takes one.
+  pending: Vec<(O, Vec<String>)>,
+  /// The selection's offer, someone else's.
+  pub selection: Option<(O, Vec<String>)>,
+  /// The offer of a drag over the window.
+  drag: Option<O>,
+}
+
+impl<O> Default for Offers<O> {
+  fn default() -> Self {
+    Self { pending: Vec::new(), selection: None, drag: None }
+  }
+}
+
+impl<O: Offer> Offers<O> {
+  /// `wl_data_device.data_offer`: a new offer, its types to come.
+  pub fn announce(&mut self, offer: O) {
+    self.pending.push((offer, Vec::new()));
+  }
+
+  /// `wl_data_offer.offer`: one of its types.
+  pub fn add_type(&mut self, offer: &O, mime: String) {
+    if let Some((_, types)) = self.pending.iter_mut().find(|(o, _)| o == offer) {
+      types.push(mime);
+    }
+  }
+
+  /// `wl_data_device.selection`: the new selection's offer, or none; the others announced
+  /// before it go.
+  pub fn select(&mut self, offer: Option<O>) {
     if let Some((old, _)) = self.selection.take() {
       old.destroy();
     }
 
-    let picked = offer.and_then(|o| self.offers.iter().position(|(x, _)| *x == o));
-    self.selection = picked.map(|i| self.offers.swap_remove(i));
-    for (o, _) in self.offers.drain(..) {
+    let picked = offer.and_then(|o| self.pending.iter().position(|(x, _)| *x == o));
+    self.selection = picked.map(|i| self.pending.swap_remove(i));
+    for (o, _) in self.pending.drain(..) {
       o.destroy();
     }
   }
 
+  /// `wl_data_device.enter`: a drag came over the window, with its offer (none for a drag
+  /// without data).
+  pub fn drag_enter(&mut self, offer: Option<O>) {
+    self.drag_end();
+    if let Some(o) = offer {
+      self.pending.retain(|(x, _)| *x != o);
+      self.drag = Some(o);
+    }
+  }
+
+  /// `wl_data_device.leave` or `drop`: the drag's offer is done with.
+  pub fn drag_end(&mut self) {
+    if let Some(o) = self.drag.take() {
+      o.destroy();
+    }
+  }
+}
+
+impl Clip {
   /// `wl_data_source.send`: our text to `fd`, as much as it takes now, the rest as it reads.
   pub fn send(&mut self, source: &WlDataSource, fd: OwnedFd) {
     if let Some((s, text)) = &self.source
@@ -137,7 +195,7 @@ impl crate::Clipboard for Clipboard {
       return Some(text.clone());
     }
 
-    let (offer, types) = c.selection.as_ref()?;
+    let (offer, types) = c.offers.selection.as_ref()?;
     let mime = MIMES.iter().find(|m| types.iter().any(|t| t == *m))?;
     let (rd, wr) = pipe_with(PipeFlags::CLOEXEC).ok()?;
     offer.receive(mime.to_string(), wr.as_fd());
@@ -187,6 +245,47 @@ mod tests {
   fn pipe() -> (std::fs::File, OwnedFd) {
     let (rd, wr) = pipe_with(PipeFlags::CLOEXEC).unwrap();
     (std::fs::File::from(rd), wr)
+  }
+
+  /// An offer that counts its `destroy` calls.
+  #[derive(Debug)]
+  struct Fake(u32, Rc<std::cell::Cell<u32>>);
+
+  impl PartialEq for Fake {
+    fn eq(&self, o: &Self) -> bool {
+      self.0 == o.0
+    }
+  }
+
+  impl Offer for Fake {
+    fn destroy(&self) {
+      self.1.set(self.1.get() + 1);
+    }
+  }
+
+  /// Drags across the window, each with its offer: every one goes when it leaves or drops,
+  /// none waits for a selection; the selection's stays.
+  #[test]
+  fn drag_offers_go_when_the_drag_leaves() {
+    let gone = Rc::new(std::cell::Cell::new(0));
+    let offer = |id| Fake(id, gone.clone());
+    let mut o = Offers::default();
+    o.announce(offer(1));
+    o.add_type(&offer(1), "text/plain".into());
+    o.select(Some(offer(1)));
+    for id in 2..12 {
+      o.announce(offer(id));
+      o.add_type(&offer(id), "text/uri-list".into());
+      o.drag_enter(Some(offer(id)));
+      if id % 2 == 0 {
+        o.drag_end();
+      }
+    }
+
+    o.drag_end();
+    assert_eq!(gone.get(), 10, "every drag's offer destroyed");
+    assert!(o.pending.is_empty() && o.drag.is_none());
+    assert_eq!(o.selection.as_ref().map(|(s, t)| (s.0, t.len())), Some((1, 1)));
   }
 
   #[test]
