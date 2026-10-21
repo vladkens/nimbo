@@ -105,7 +105,13 @@ fn next_char(s: &str, i: usize) -> usize {
 
 /// The next grapheme boundary after `i` (the end at the end).
 pub fn next_grapheme(s: &str, i: usize) -> usize {
-  let mut j = next_char(s, i.min(s.len()));
+  let i = i.min(s.len());
+  // Inside a character: the end of that character, never a slice from the middle of it.
+  let mut j = match s.is_char_boundary(i) {
+    true => next_char(s, i),
+    false => (i + 1..s.len()).find(|&j| s.is_char_boundary(j)).unwrap_or(s.len()),
+  };
+
   while !is_boundary(s, j) {
     j = next_char(s, j);
   }
@@ -161,5 +167,14 @@ mod tests {
     // Inside a char or a cluster: not a boundary.
     let s = "xe\u{301}";
     assert!(!is_boundary(s, 2) && !is_boundary(s, 3) && is_boundary(s, 4) && !is_boundary(s, 9));
+  }
+
+  /// From inside a character: the next boundary after it, without slicing into it.
+  #[test]
+  fn next_grapheme_from_inside_a_char() {
+    assert_eq!(next_grapheme("éx", 1), 2);
+    assert_eq!(next_grapheme("e\u{301}x", 2), 3);
+    assert_eq!(next_grapheme("👍🏽!", 1), 8);
+    assert_eq!(next_grapheme("é", 1), 2);
   }
 }
