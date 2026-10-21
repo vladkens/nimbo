@@ -178,7 +178,8 @@ mod tests {
   use crate::Clipboard as _;
 
   /// Another client takes the selection, and we copy again before its `SelectionClear` is
-  /// handled: the stale clear leaves the new text ours. Skipped without `DISPLAY`.
+  /// handled: the stale clear leaves the new text ours. A selection of the test's own, not the
+  /// desktop's clipboard. Skipped without `DISPLAY`.
   #[test]
   fn a_stale_clear_keeps_the_new_copy() {
     if std::env::var_os("DISPLAY").is_none() {
@@ -195,7 +196,7 @@ mod tests {
     // SAFETY: as above.
     let other = y.create_window(unsafe { &*screen }, 8, 8, 0);
     let [clipboard, targets, utf8, text, mime, incr, prop] = x.atoms([
-      "CLIPBOARD",
+      "NIMBO_TEST_SELECTION",
       "TARGETS",
       "UTF8_STRING",
       "TEXT",
