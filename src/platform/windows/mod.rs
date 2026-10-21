@@ -308,7 +308,17 @@ impl Window {
       self.render();
     }
 
-    // The rest of the interval: the time spent drawing is part of it.
+    self.wait()
+  }
+
+  /// How long the loop may sleep after the last frame (`None`: until a message): the rest of
+  /// the interval while frames are wanted (the time spent drawing is part of it), else until the
+  /// app's next timer.
+  fn wait(&mut self) -> Option<Duration> {
+    if self.hidden {
+      return None;
+    }
+
     match self.rt.needs_frame() {
       true => Some(self.pace.left(Instant::now())),
       false => self.rt.due_in(),
@@ -601,13 +611,13 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
 /// Resizes the client area to the size the app asked for ([Runtime::take_resize]) at the
 /// window's DPI, keeping its top-left corner; the least size comes down with it first, as
 /// WM_GETMINMAXINFO holds SetWindowPos to it too. Outside the window's borrow: WM_SIZE draws.
-fn apply_resize(hwnd: HWND) {
+fn apply_resize(hwnd: HWND) -> bool {
   let want = with(|w| {
     let size = w.rt.take_resize()?;
     w.min = Size::new(w.min.w.min(size.w), w.min.h.min(size.h));
     Some((size, w.style))
   });
-  let Some((size, style)) = want.flatten() else { return };
+  let Some((size, style)) = want.flatten() else { return false };
   let dpi = unsafe { GetDpiForWindow(hwnd) };
   let k = dpi as f32 / 96.0;
   let (w, h) = ((size.w * k).round() as i32, (size.h * k).round() as i32);
@@ -616,6 +626,20 @@ fn apply_resize(hwnd: HWND) {
   let flags = SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE;
   let (cx, cy) = (rc.right - rc.left, rc.bottom - rc.top);
   unsafe { SetWindowPos(hwnd, null_mut(), 0, 0, cx, cy, flags) };
+  true
+}
+
+/// Draws the frame due and applies a size the app asked for, before it and in it; returns how
+/// long the loop may sleep (`None`: until a message). A size asked for in the frame draws
+/// another through WM_SIZE, and the sleep follows that one: what it wants (an animation, a
+/// timer) would otherwise wait for the next message.
+fn settle(hwnd: HWND) -> Option<Duration> {
+  apply_resize(hwnd);
+  let wait = with(|w| w.tick()).flatten();
+  match apply_resize(hwnd) {
+    true => with(|w| w.wait()).flatten(),
+    false => wait,
+  }
 }
 
 /// Handles messages until WM_QUIT; between them draws the frames due and sleeps until the next
@@ -643,9 +667,7 @@ fn run_loop(hwnd: HWND, timer: &Timer) {
       continue;
     }
 
-    apply_resize(hwnd);
-    let wait = with(|w| w.tick()).flatten();
-    apply_resize(hwnd);
+    let wait = settle(hwnd);
     let n = match wait {
       // Relative due times are negative, in 100 ns units.
       Some(d) if !timer.0.is_null() => {
@@ -1022,6 +1044,52 @@ mod tests {
       SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0);
       DestroyWindow(hwnd);
     }
+    WINDOW.with(|w| w.borrow_mut().take());
+  }
+
+  /// A size the app asks for in a frame draws another through WM_SIZE: the loop's sleep follows
+  /// that one, so the timer it sets wakes the loop, not the next message. The window is never
+  /// shown.
+  #[test]
+  fn a_frame_after_an_asked_size_keeps_its_timer() {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    struct Grow(Rc<Cell<bool>>);
+    impl App for Grow {
+      fn view(&mut self, ui: &mut crate::Ui) {
+        if !self.0.get() {
+          return;
+        }
+
+        match ui.size().w > 250.0 {
+          true => ui.request_frame_in(Duration::from_millis(50)),
+          false => ui.set_window_size(300.0, 200.0),
+        }
+      }
+    }
+
+    let grow = Rc::new(Cell::new(false));
+    let hwnd = create(&Config::new("grow", 200.0, 100.0), Box::new(Grow(grow.clone())));
+    for _ in 0..10 {
+      if settle(hwnd).is_none() {
+        break;
+      }
+
+      std::thread::sleep(Duration::from_millis(20));
+    }
+
+    assert_eq!(settle(hwnd), None, "idle");
+
+    // A refresh later: the frame is due at once.
+    std::thread::sleep(Duration::from_millis(50));
+    grow.set(true);
+    with(|w| w.rt.redraw());
+    let wait = settle(hwnd);
+    assert!(with(|w| w.rt.size.w).is_some_and(|w| w > 250.0), "resized");
+    assert!(wait.is_some_and(|d| d <= Duration::from_millis(50)), "{wait:?}");
+
+    unsafe { DestroyWindow(hwnd) };
     WINDOW.with(|w| w.borrow_mut().take());
   }
 
