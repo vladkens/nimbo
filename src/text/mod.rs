@@ -232,8 +232,10 @@ impl TextSystem {
       self.lines.clear();
       self.atlas.reset();
       self.color_atlas.reset();
-      self.refilled = true;
-      return true;
+      // Drawn again once, not over and over when every frame asks for this many.
+      let again = !self.refilled;
+      self.refilled = again;
+      return again;
     }
 
     let full = self.atlas.full || self.color_atlas.full;
@@ -502,14 +504,20 @@ mod tests {
   #[test]
   fn faces_start_over_past_the_cap() {
     let mut ts = TextSystem::new(2.0);
-    for i in 0..=FACE_CAP {
-      ts.metrics(Font::ui(8.0 + i as f32 * 0.25));
-    }
-
+    let fill = |ts: &mut TextSystem| {
+      for i in 0..=FACE_CAP {
+        ts.metrics(Font::ui(8.0 + i as f32 * 0.25));
+      }
+    };
+    fill(&mut ts);
     assert_eq!(ts.metrics(Font::ui(8.0)), ts.metrics(Font::ui(8.0)));
     assert!(ts.faces.len() > FACE_CAP);
     assert!(ts.end_frame());
     assert!(ts.faces.is_empty() && ts.fonts.is_empty() && ts.lines.is_empty());
+    // The frame drawn again asks for as many: it starts over without a third draw.
+    fill(&mut ts);
+    assert!(!ts.end_frame());
+    assert!(ts.faces.is_empty());
     let g = ts.layout("x", Font::ui(13.0)).glyphs[0];
     assert!(ts.glyph(g.face, g.id, 0, false).is_some());
     assert!(!ts.end_frame());
