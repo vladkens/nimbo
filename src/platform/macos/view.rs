@@ -56,6 +56,10 @@ pub struct Ivars {
   /// The display link was invalidated (the view left its window): a new one starts when it
   /// moves to a window again.
   stopped: Cell<bool>,
+  /// The buttons pressed in the view and not let go yet, a bit per button number: AppKit sends
+  /// each release to the view that got the press, while `pressedMouseButtons` is the mouse's
+  /// state now, ahead of the events queued and with presses in other windows.
+  held: Cell<u64>,
 }
 
 define_class!(
@@ -469,6 +473,8 @@ impl View {
       n => MouseButton::Other(n as u8),
     };
 
+    let held = buttons(self.ivars().held.get(), event.buttonNumber(), down);
+    self.ivars().held.set(held);
     if down {
       self.send(Event::MouseDown { pos, button, clicks: event.clickCount() as u32, mods });
       return;
@@ -477,7 +483,6 @@ impl View {
     self.send(Event::MouseUp { pos, button, mods });
     // The last button of a drag let go outside: AppKit sent the exit during the drag, and the
     // release put the pointer back in.
-    let held = NSEvent::pressedMouseButtons() & !(1 << event.buttonNumber());
     let bounds = self.bounds().size;
     if released_outside(pos, Size::new(bounds.width as f32, bounds.height as f32), held) {
       self.send(Event::MouseExit);
@@ -599,9 +604,16 @@ fn ns_cursor(c: Cursor) -> Retained<NSCursor> {
   }
 }
 
+/// The buttons `held` after button `number` went `down` or up; a number past the mask's bits
+/// counts as none.
+fn buttons(held: u64, number: isize, down: bool) -> u64 {
+  let bit = u32::try_from(number).ok().and_then(|n| 1u64.checked_shl(n)).unwrap_or(0);
+  if down { held | bit } else { held & !bit }
+}
+
 /// Whether a release at `pos` ends a drag outside the view of `size`: no button `held` any
 /// more, and the pointer off it.
-fn released_outside(pos: Point, size: Size, held: usize) -> bool {
+fn released_outside(pos: Point, size: Size, held: u64) -> bool {
   let inside = (0.0..size.w).contains(&pos.x) && (0.0..size.h).contains(&pos.y);
   held == 0 && !inside
 }
@@ -619,6 +631,19 @@ mod tests {
     assert!(released_outside(Point::new(50.0, -1.0), size, 0));
     assert!(!released_outside(Point::new(50.0, 40.0), size, 0));
     assert!(!released_outside(Point::new(120.0, 40.0), size, 0b10));
+  }
+
+  /// The buttons held are the view's own presses: the left one let go is the last even while
+  /// the right one is down in another window, the right one pressed here holds the exit back,
+  /// and a button number past the mask is ignored.
+  #[test]
+  fn held_buttons_are_the_views_presses() {
+    let left = buttons(0, 0, true);
+    assert_eq!(buttons(left, 0, false), 0);
+    let both = buttons(left, 1, true);
+    assert_eq!(buttons(both, 0, false), 0b10);
+    assert_eq!(buttons(both, 70, true), both);
+    assert_eq!(buttons(both, -1, false), both);
   }
 
   /// A crosshair asked for while the pointer is outside: set as it comes in, not again while it
