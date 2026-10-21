@@ -1,8 +1,8 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The seams between an app and the world: events in, a scene out, with the clock and waker
-//! injected, so one app runs the same in a window and in the headless harness
-//! ([crate::harness]).
+//! injected, so one app runs the same in a window ([crate::platform]) and in the headless
+//! harness ([crate::harness]).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -102,6 +102,13 @@ impl Waker {
     {
       notify();
     }
+  }
+
+  /// Sets how a wake reaches the event loop (the window hops to the main thread).
+  // Unused by the stub platforms until they are ported.
+  #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+  pub(crate) fn set_notify(&self, f: Notify) {
+    let _ = self.0.notify.set(f);
   }
 
   fn take(&self) -> bool {

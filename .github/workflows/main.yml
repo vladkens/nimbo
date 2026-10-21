@@ -27,6 +27,8 @@ jobs:
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - run: make check
       - run: make test
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb xauth
+      - run: xvfb-run -a make pace
 
   build:
     if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'

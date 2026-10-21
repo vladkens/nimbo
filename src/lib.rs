@@ -1,15 +1,21 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! nimbo: a small custom-drawn UI toolkit, with its own CPU renderer for drawing.
+//! nimbo: a small custom-drawn UI toolkit. Its own CPU renderer for drawing; the OS for the
+//! window behind [platform] (AppKit on macOS, Win32 on Windows, Wayland or X11 on Linux), nothing
+//! else.
 //!
 //! An [App] gets [Event]s and paints a [Scene] through a [Frame]; a [Runtime] drives it, fed by
-//! the headless [Harness] ([harness]), which renders it with the CPU renderer ([cpu]). Examples
-//! start with [run], which with `--shot <file.png>` runs the harness (in the dark appearance
-//! unless `--appearance light`).
+//! the window ([platform]) or by the headless [Harness], both drawing with the CPU renderer
+//! ([cpu]). Examples start with [run], which opens a window, or with `--shot <file.png>` runs the
+//! harness instead (in the dark appearance unless `--appearance light`).
+//!
+//! macOS 14 is the least it runs on (`NSApplication`'s `activate`, `NSView`'s display link): build
+//! apps with `MACOSX_DEPLOYMENT_TARGET=14.0`.
 
 pub mod app;
 pub mod cpu;
 pub mod harness;
+pub mod platform;
 mod png;
 pub mod scene;
 
@@ -113,20 +119,16 @@ fn positive(n: f32) -> bool {
   n.is_finite() && n > 0.0
 }
 
-/// The entry point of every example. With `--shot` it runs the app in the [Harness] at
-/// `cfg.size` and `--scale` (default 2), first applying `script` (the state the shot shows),
-/// then writing the PNG.
+/// The entry point of every example. With no arguments it opens a window; with `--shot` it runs
+/// the app in the [Harness] at `cfg.size` and `--scale` (default 2), first applying `script` (the
+/// state the shot shows), then writing the PNG.
 pub fn run<A: App + 'static>(cfg: Config, app: A, script: impl FnOnce(&mut Harness<A>)) {
   let argv: Vec<String> = std::env::args().skip(1).collect();
   let args = Args::parse(&argv).unwrap_or_else(|e| {
     eprintln!("{e}\n{USAGE}");
     std::process::exit(2);
   });
-  let Some(path) = &args.shot else {
-    // The window comes with the platforms; until then only the harness runs.
-    eprintln!("{}: no window yet, render it with --shot <file.png>\n{USAGE}", cfg.title);
-    std::process::exit(2);
-  };
+  let Some(path) = &args.shot else { return platform::run(&cfg, Box::new(app)) };
 
   let mut h = harness(&cfg, app, &args);
   script(&mut h);

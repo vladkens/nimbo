@@ -1,0 +1,4 @@
+# macOS 14 is the least the toolkit runs on: NSApplication's `activate` and NSView's
+# `displayLinkWithTarget:selector:` came with it.
+[env]
+MACOSX_DEPLOYMENT_TARGET = "14.0"
