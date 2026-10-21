@@ -130,6 +130,11 @@ impl Ui<'_> {
     let ax = axis as usize;
     let b = self.begin(handle).unwrap_or_else(|| self.pointer_state(handle));
     let span = self.rect(id).map(|rect| if ax == 0 { (rect.x, rect.w) } else { (rect.y, rect.h) });
+    // Not laid out yet: its minimums fit its size from the next frame, which comes at once.
+    if span.is_none() {
+      self.st.animating = true;
+    }
+
     let min = match span {
       Some((_, len)) if min[0] + min[1] > (len - 1.0).max(0.0) => {
         let k = (len - 1.0).max(0.0) / (min[0] + min[1]);
@@ -150,9 +155,10 @@ impl Ui<'_> {
     let along = |p: crate::scene::Point| if ax == 0 { p.x } else { p.y };
     match (b.held, span, self.mouse(), self.press()) {
       (true, Some((lo, len)), Some(m), Some(p)) => {
-        // From where it was pressed, though no frame came between the press and this move.
+        // From where it was pressed, though no frame came between the press and this move, to
+        // the divider where it shows.
         let (at, from) = (along(m), along(p.pos));
-        let g = *grab.get_or_insert(from - (lo + *ratio * len));
+        let g = *grab.get_or_insert(from - (lo + fit(*ratio) * len));
         *ratio = fit((at - g - lo) / len.max(1.0));
       }
       _ => grab = None,
@@ -185,13 +191,41 @@ mod tests {
   #[test]
   fn a_split_narrower_than_its_minimums_shrinks_both_panes() {
     let mut h = Harness::new(Narrow, Size::new(150.0, 200.0), 1.0);
+    // The first frame asks for the one that fits it.
     h.frame();
-    h.rt.redraw();
-    h.frame();
+    assert!(h.frame());
     let split = h.rect(Id::of("split")).unwrap();
     let kids: Vec<Rect> =
       h.rt.ui.last.nodes.iter().filter(|n| n.parent != 0).map(|n| n.rect).collect();
     assert!(split.w <= 150.0, "{split:?}");
     assert!(kids.iter().all(|r| r.x + r.w <= split.x + split.w + 0.5), "{kids:?}");
+  }
+
+  /// A split asked for 10% with a first pane of 200 at least.
+  struct Held(f32);
+
+  impl App for Held {
+    fn view(&mut self, ui: &mut Ui) {
+      Split::row().ratio(&mut self.0).min(200.0, 100.0).show(ui.id("split"), |ui, _| {
+        ui.el(Style::new().grow());
+      });
+    }
+  }
+
+  #[test]
+  fn a_drag_starts_from_the_divider_where_it_shows() {
+    let mut h = Harness::new(Held(0.1), Size::new(500.0, 200.0), 1.0);
+    h.frame();
+    h.frame();
+    let handle = h.rect(Id::of("split").key("handle")).unwrap();
+    let (x, y) = (handle.x + handle.w / 2.0, handle.y + 20.0);
+    assert!((x - 200.5).abs() < 1.0, "{handle:?}");
+    // 10 points right moves it 10 points: no dead zone from the ratio asked.
+    h.move_to(x, y);
+    h.press(x, y);
+    h.move_to(x + 10.0, y);
+    h.frame();
+    h.release(x + 10.0, y);
+    assert!((h.app().0 - 0.42).abs() < 0.005, "{}", h.app().0);
   }
 }
