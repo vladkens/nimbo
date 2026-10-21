@@ -577,7 +577,9 @@ pub fn is_color(face: &Face) -> bool {
 
 /// Shapes `s` with HarfBuzz, one run per font of the fallback chain; `index` gives the text
 /// system's index of each run's face. Clusters are byte offsets of `s`, as HarfBuzz gives them
-/// for UTF-8 (each run shaped with the whole line as context).
+/// for UTF-8 (each run shaped with the whole line as context). Not yet: bidi and script runs, so
+/// a font run mixing scripts (Latin and Arabic) shapes in the script and direction HarfBuzz
+/// guesses from its start; Arabic alone shapes right.
 pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {
   let runs = cache().itemize(face.chain, s);
   let hb = &sys().hb;
