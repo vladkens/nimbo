@@ -261,9 +261,10 @@ impl Theme {
       ControlSize::Medium => (z.control_h, self.font),
       ControlSize::Large => (z.control_h + 8.0, Font { size: self.font.size + 2.0, ..self.font }),
     };
-    // Padding grows with the height: 12 at 24, 18 at 36.
+    // Padding grows with the height: 12 at 24, 18 at 36. Its label's width, as AppKit's push
+    // buttons keep theirs: text beside it wraps instead ([ButtonStyle::w] changes it).
     let pad = (h * 0.5).round();
-    let frame = Style::new().h(px(h)).min_w(h).pad_xy(pad, 0.0).gap(5.0).center();
+    let frame = Style::new().w(Dim::Rigid).h(px(h)).min_w(h).pad_xy(pad, 0.0).gap(5.0).center();
     let frame = frame.radius(if h < z.control_h { self.radius - 1.0 } else { self.radius });
     let text = TextStyle::new(font, self.text).ellipsis();
     let (frame, bg, hover, pressed, text) = match v {
