@@ -108,6 +108,7 @@ fn named(sym: u32) -> Option<Key> {
     0xff55 | 0xff9a => PageUp,
     0xff56 | 0xff9b => PageDown,
     0xff63 | 0xff9e => Insert,
+    0xff67 => ContextMenu,
     // F1 to F20.
     0xffbe..=0xffd1 => keys::f_key((sym - 0xffbe) as u8 + 1)?.1,
     _ => return None,
@@ -290,5 +291,6 @@ mod tests {
       (Code::ArrowLeft, Some(Key::Named(NamedKey::F13)))
     );
     assert_eq!(named(0xffd1), Some(Key::Named(NamedKey::F20)));
+    assert_eq!(named(0xff67), Some(Key::Named(NamedKey::ContextMenu)));
   }
 }

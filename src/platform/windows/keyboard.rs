@@ -266,6 +266,8 @@ mod tests {
     assert_eq!((k.key, k.code, k.text), (left, Code::Numpad4, None), "keypad 4, Num Lock off");
     let k = key_event(VK_LEFT, 0x4B, true, false);
     assert_eq!((k.key, k.code), (left, Code::ArrowLeft));
+    let k = key_event(VK_APPS, 0x5D, true, false);
+    assert_eq!((k.key, k.code), (Key::Named(NamedKey::ContextMenu), Code::ContextMenu));
     let k = key_event(VK_INSERT, 0x52, false, false);
     let insert = Key::Named(NamedKey::Insert);
     assert_eq!((k.key, k.code), (insert, Code::Numpad0), "keypad 0 is Insert, at its place");

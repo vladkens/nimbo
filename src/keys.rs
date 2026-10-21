@@ -62,7 +62,7 @@ impl From<NamedKey> for Key {
 
 /// The named keys by place; a key's first place is its own ([Key::code]).
 #[rustfmt::skip]
-const NAMED: [(Code, NamedKey); 15] = [
+const NAMED: [(Code, NamedKey); 16] = [
   (Code::Enter, NamedKey::Enter), (Code::NumpadEnter, NamedKey::Enter),
   (Code::Tab, NamedKey::Tab), (Code::Backspace, NamedKey::Backspace),
   (Code::Delete, NamedKey::Delete), (Code::Escape, NamedKey::Escape),
@@ -70,7 +70,7 @@ const NAMED: [(Code, NamedKey); 15] = [
   (Code::ArrowUp, NamedKey::ArrowUp), (Code::ArrowDown, NamedKey::ArrowDown),
   (Code::Home, NamedKey::Home), (Code::End, NamedKey::End),
   (Code::PageUp, NamedKey::PageUp), (Code::PageDown, NamedKey::PageDown),
-  (Code::Insert, NamedKey::Insert),
+  (Code::Insert, NamedKey::Insert), (Code::ContextMenu, NamedKey::ContextMenu),
 ];
 
 /// F1 to F20, by place and name.
@@ -639,7 +639,8 @@ mod tests {
     assert_eq!(Key::named(Code::NumpadEnter), Some(Key::Named(N::Enter)));
     assert_eq!(Key::named(Code::F12), Some(Key::Named(N::F12)));
     assert_eq!(Key::named(Code::KeyA), None);
-    for n in [N::Enter, N::Tab, N::Escape, N::PageDown, N::Insert, N::F1, N::F12, N::F20] {
+    let some = [N::Enter, N::Tab, N::Escape, N::PageDown, N::Insert, N::ContextMenu, N::F1, N::F20];
+    for n in some {
       assert_eq!(Key::Named(n).code().and_then(Key::named), Some(Key::Named(n)));
     }
 
