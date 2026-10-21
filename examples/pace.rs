@@ -5,7 +5,7 @@
 //! (60 fps at 60 Hz); paced from their end they would come every 16.7 + 8 ms (about 40 fps). Once
 //! still, the loop sleeps until something happens.
 //!
-//! `scripts/pace.sh` (`make pace`) runs it in a window, traced, and counts the frames while it
+//! `scripts/pace.py` (`make pace`) runs it in a window, traced, and counts the frames while it
 //! moves and the wakeups once it is still. `cargo run --release --example pace` opens it;
 //! `-- --shot pace.png` renders its first frame.
 

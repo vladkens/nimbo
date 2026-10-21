@@ -33,7 +33,7 @@ check-targets: # clippy of the library, examples and tests for Windows and Linux
 
 pace: # frame pacing in a window of this session: fps while animating, wakeups when still
 	cargo build --release --example pace
-	sh scripts/pace.sh
+	uv run scripts/pace.py
 
 size: # code, docs and tests per module; ARGS="--files", "--map" (each file and what it does) or "--vs main"
 	uv run scripts/size.py $(ARGS)

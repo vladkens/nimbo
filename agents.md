@@ -24,7 +24,7 @@ A small, fast, custom-drawn desktop UI toolkit in Rust, in the spirit of Sublime
 - Every file starts with a `//!` doc whose first sentence says what the file does; `make size ARGS=--map` lists the files by it, and a PR's description carries that list for the files it adds or changes.
 - Every styled widget is a headless behaviour (hover, press, click, focus, keys, the value it edits) plus drawing from the theme, so an app can draw its own look over the same behaviour.
 - Keep third-party checkouts in `3rd/` (gitignored), never modify them, and name the source file in a comment when porting from one, keeping its license.
-- Helper scripts go in `scripts/`, in kebab-case: `sh`, or Python run with `uv run`.
+- Helper scripts go in `scripts/`, in kebab-case, in Python run with `uv run`.
 
 ## UI rules
 
@@ -38,7 +38,7 @@ A small, fast, custom-drawn desktop UI toolkit in Rust, in the spirit of Sublime
 - `make check` (nightly fmt, the blank-line check, clippy with `-D warnings`, and clippy for Windows and Linux) and `make test` pass before a commit; `make prepare` formats, adds the blank lines and applies clippy fixes.
 - Harness scenarios are `harness = false` test targets in `tests/` that include their example with `#[path]` and assert app state and pixels headless; pure logic gets inline unit tests. Tests never show a window, a status item or start an event tap.
 - Verify every visual change by opening its harness shot with Read, cropped for text detail; compare with the macOS references at the same scale when the look is meant to match.
-- A PR that touches a platform's event loop or present path runs `scripts/pace.sh` (`make pace`) on each backend it touches: Wayland, X11, Windows; CI runs it on X11 under Xvfb.
+- A PR that touches a platform's event loop or present path runs `scripts/pace.py` (`make pace`) on each backend it touches: Wayland, X11, Windows; CI runs it on X11 under Xvfb.
 - Real windows on the developer's machine open only with their permission, one example, 1–3 launches, never in a loop.
 - Never run Instruments or `xcrun xctrace`: they can freeze the window server.
 
