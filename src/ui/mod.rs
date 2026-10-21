@@ -948,26 +948,6 @@ impl<'a> Ui<'a> {
     self.st.clicked(id)
   }
 
-  /// The press on `id` a release ended since the view last ran, the pointer where it was
-  /// released ([Ui::mouse]): a drag's last move, which no view saw held.
-  pub fn released(&self, id: Id) -> Option<Press> {
-    self.st.input.ended.filter(|p| p.id == id)
-  }
-
-  /// Builds a frame on every pointer move until the next frame, though the hover doesn't
-  /// change: an open menu, whose highlight follows the pointer within an item.
-  pub fn track_moves(&mut self) {
-    self.st.input.moves = true;
-  }
-
-  /// Runs the view again before this frame is painted if the layout moves or resizes `id` or
-  /// its content from what [Ui::rect] and [Ui::scroll] read of the last frame, or `id` wasn't
-  /// laid out then: a split's panes fitted to its size, a scrollbar's thumb to its content.
-  pub fn settle(&mut self, id: Id) {
-    let seen = self.st.last.get(id).map(|n| (n.rect, n.content));
-    self.st.tree.settle.push((id, seen));
-  }
-
   /// Shows `id` pressed for a moment ([UiState::flash]).
   pub fn flash(&mut self, id: Id) {
     self.st.flash(id, self.now);
