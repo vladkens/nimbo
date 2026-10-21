@@ -160,6 +160,13 @@ fn the_caret_stays_in_view(h: &mut Harness<Fields>) {
   h.frame();
   h.frame();
   assert!(off(h) > 0.0, "the app's value's end in view");
+  // As long as the last one, but wider: the caret's offset is the same, and still in view.
+  h.app_mut().name = "i".repeat(40);
+  h.frame();
+  assert_eq!(off(h), 0.0);
+  h.app_mut().name = "W".repeat(40);
+  h.frame();
+  assert!(off(h) > 0.0, "the wider value's end in view");
 }
 
 fn input_methods(h: &mut Harness<Fields>) {

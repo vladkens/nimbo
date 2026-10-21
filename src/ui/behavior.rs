@@ -240,9 +240,8 @@ impl Ui<'_> {
     (st.text_id, st.editable, st.secure) = (id.key("text"), true, password);
     st.ed.multiline = multiline && !password;
     self.revealed(&mut st);
-    // A value from the app that moves the caret reveals it too.
-    let sel = st.ed.sel();
-    take_value(&mut st, text);
+    // A value from the app reveals the caret too.
+    let (sel, set) = (st.ed.sel(), take_value(&mut st, text));
     let (submitted, cancelled) = match disabled {
       true => (false, false),
       false => self.edit_input(id, &mut st),
@@ -255,7 +254,7 @@ impl Ui<'_> {
 
     let changed = write_back(&mut st, text);
     let blurred = st.focused && !focused;
-    if changed || st.ed.sel() != sel || focused && !st.focused {
+    if changed || set || st.ed.sel() != sel || focused && !st.focused {
       st.blink = self.now;
       reveal(&mut st);
     }
@@ -461,23 +460,22 @@ fn reveal(st: &mut FieldState) {
   st.reveal = st.reveals;
 }
 
-/// The app's `text` into the editor when the app changed it: at once, or held while an input
-/// method composes.
-fn take_value(st: &mut FieldState, text: &str) {
+/// The app's `text` into the editor when the app changed it: at once (returns true), or held
+/// while an input method composes.
+fn take_value(st: &mut FieldState, text: &str) -> bool {
   // Back to the value the field has: a value held meanwhile is no more.
-  if text == st.app {
-    st.held = None;
-    return;
-  }
-
-  match st.ed.marked() {
-    Some(_) => st.held = Some(text.to_owned()),
-    None => {
+  let (new, composing) = (text != st.app, st.ed.marked().is_some());
+  match (new, composing) {
+    (false, _) => st.held = None,
+    (true, true) => st.held = Some(text.to_owned()),
+    (true, false) => {
       st.ed.set_text(text);
       st.held = None;
       synced(st, text);
     }
   }
+
+  new && !composing
 }
 
 /// The editor and the app agree: on `app`, and the editor's text now.

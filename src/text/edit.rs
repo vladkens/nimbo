@@ -759,7 +759,9 @@ impl Editor {
       // The input method's selection in it stays: a cut or a paste then acts on it.
       let (s, sel) = (self.text[m.range.clone()].to_owned(), self.sel);
       self.commit(&s, None);
-      self.sel = Sel::new(snap(&self.text, sel.anchor), snap(&self.text, sel.head));
+      if !sel.is_empty() {
+        self.sel = Sel::new(snap(&self.text, sel.anchor), snap(&self.text, sel.head));
+      }
     }
   }
 
@@ -1350,6 +1352,15 @@ mod tests {
     let s = "👍🏽test";
     assert_eq!(word_range(s, 9), 8..12);
     assert_eq!(word_range(s, 0), 0..8);
+  }
+
+  #[test]
+  fn keeping_a_joiner_leaves_the_caret_after_the_pair() {
+    let mut e = Editor::new("👩👩");
+    e.select(Sel::caret(4));
+    e.set_marked("\u{200d}", 3..3, None);
+    e.unmark();
+    assert_eq!(e.caret(), 11);
   }
 
   #[test]
