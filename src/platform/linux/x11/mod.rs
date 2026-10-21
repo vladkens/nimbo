@@ -120,6 +120,8 @@ struct Win {
   cursors: Cursors,
   mouse: Point,
   inside: bool,
+  /// Buttons down: the pointer grab that brings their release ends if the window is unmapped.
+  pressed: Vec<MouseButton>,
   last_click: Option<Click>,
   kb: Option<Keyboard>,
   /// The keyboard was set up ([Win::setup_keyboard]).
@@ -310,6 +312,7 @@ fn run_on(
     kb_ready: false,
     mods: Mods::NONE,
     held: [0; 4],
+    pressed: Vec::new(),
     detectable: false,
     xkb_event: None,
     kb_fresh: true,
@@ -724,7 +727,10 @@ impl Win {
         self.force = true;
         self.rt.redraw();
       }
-      UNMAP_NOTIFY if ev.get::<WindowEv>().window == self.win => self.mapped = false,
+      UNMAP_NOTIFY if ev.get::<WindowEv>().window == self.win => {
+        self.mapped = false;
+        self.let_go();
+      }
       // Covered frames wait; uncovered, the frame due is drawn and the exposes put back the rest.
       VISIBILITY_NOTIFY => {
         let e = ev.get::<VisibilityEv>();
@@ -931,6 +937,7 @@ impl Win {
     };
 
     if !down {
+      self.pressed.retain(|&b| b != button);
       self.send(Event::MouseUp { pos, button, mods });
       // The last button of a drag that left the window.
       let this = if (1..=5).contains(&detail) { 0x80 << detail } else { 0 };
@@ -944,7 +951,27 @@ impl Win {
 
     let clicks = clicks(self.last_click, button, time, pos);
     self.last_click = Some((button, time, pos, clicks));
+    if !self.pressed.contains(&button) {
+      self.pressed.push(button);
+    }
+
     self.send(Event::MouseDown { pos, button, clicks, mods });
+  }
+
+  /// The window was unmapped (minimized, hidden): the server ended the pointer's grab with it,
+  /// so the buttons held let go where the pointer was last seen and it is out of the window.
+  fn let_go(&mut self) {
+    let (pos, mods) = (self.mouse, self.kb_mods());
+    let held = std::mem::take(&mut self.pressed);
+    let out = self.inside || !held.is_empty();
+    for button in held {
+      self.send(Event::MouseUp { pos, button, mods });
+    }
+
+    if out {
+      self.inside = false;
+      self.send(Event::MouseExit);
+    }
   }
 }
 
