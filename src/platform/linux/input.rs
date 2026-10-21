@@ -52,6 +52,9 @@ const FOCUS: c_int = 12;
 const SCROLL: c_int = 31;
 const GRAB_BROKEN: c_int = 35;
 const PINCH: c_int = 42;
+/// The state bit of a key an input method gave back unused (ibus' and fcitx's
+/// `IGNORED_MASK`): offered to it already.
+const GIVEN_BACK: c_uint = 1 << 25;
 /// `GDK_NOTIFY_INFERIOR`: a crossing into a child window, still ours.
 const INFERIOR: c_int = 2;
 /// `GDK_SOURCE_TOUCHPAD`, `GDK_SOURCE_TRACKPOINT`.
@@ -645,15 +648,28 @@ impl Win {
       (g.gdk_event_get_keycode)(ev, &mut hw);
     }
 
+    // With a field's input method on, every key goes to it first, as in GTK's own fields, its
+    // shortcuts too (Ctrl+Space, Shift alone); what it takes comes back as its commit or
+    // preedit, what it gives back comes again, marked, as no new press.
+    let again = state & GIVEN_BACK != 0;
+    let ime = self.input.ime_on.is_some() && !again;
+    let taken = ime && unsafe { (g.gtk_im_context_filter_keypress)(self.input.ime, ev) } != 0;
     let held = &mut self.input.held;
-    let repeat = down && held.iter().any(|&(h, _)| h == hw);
-    held.retain(|&(h, _)| h != hw);
-    if down {
-      held.push((hw, sym));
+    let repeat = down && !again && held.iter().any(|&(h, _)| h == hw);
+    if !again {
+      held.retain(|&(h, _)| h != hw);
+      if down {
+        held.push((hw, sym));
+      }
     }
 
     let code = keys::code(hw.saturating_sub(8) as u32);
+    // A modifier counts for ours either way, once.
     if let Some(side) = keys::modifier(sym, code) {
+      if again {
+        return;
+      }
+
       let syms: Vec<u32> = held.iter().map(|&(_, s)| s).collect();
       self.mods(keys::after(keys::mods(state), sym, down, &syms));
       if let Some(key) = side.filter(|_| !repeat) {
@@ -669,10 +685,7 @@ impl Win {
     self.mods(mods);
     let ch = char::from_u32(unsafe { (g.gdk_keyval_to_unicode)(sym) }).filter(|&c| c != '\0');
     let k = keys::key_event(sym, ch, code, mods, repeat, || latin(hw, mods.shift()));
-    // With a field's input method on, a key that types goes to it first, as in GTK's own fields;
-    // what it takes comes back as its commit or preedit.
-    let ime = self.input.ime_on.is_some() && keys::types(mods);
-    if ime && unsafe { (g.gtk_im_context_filter_keypress)(self.input.ime, ev) } != 0 {
+    if taken {
       return;
     }
 

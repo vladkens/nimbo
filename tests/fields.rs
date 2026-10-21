@@ -42,6 +42,7 @@ fn main() {
 
   typing_moves_and_the_clipboard(&mut h);
   the_mouse_selects(&mut h);
+  the_caret_stays_in_view(&mut h);
   input_methods(&mut h);
   password(&mut h);
   placeholder_disabled_and_selectable(&mut h);
@@ -126,12 +127,34 @@ fn the_mouse_selects(h: &mut Harness<Fields>) {
   h.frame();
   h.release(t.x + w + 4.0, y);
   assert_eq!(sel(h, NAME), Sel::new(0, 16));
+  // A drag that comes and goes between frames (press, move, release) selects all the same.
+  h.click(t.x + 1.0, y);
+  h.press(t.x + 1.0, y);
+  h.move_to(mid, y);
+  h.release(mid, y);
+  let s = sel(h, NAME);
+  assert!(s.anchor == 0 && (6..=11).contains(&s.head), "{s:?}");
   // Shift-click extends from the anchor.
   h.click(t.x + 1.0, y);
   h.press_with(mid, y, 1, Modifiers::SHIFT);
   h.release(mid, y);
   let s = sel(h, NAME);
   assert!(s.anchor == 0 && (6..=11).contains(&s.head), "{s:?}");
+}
+
+/// The caret scrolled into view: at the end of a long line, then at its start, the second asked
+/// for by a key between the frames.
+fn the_caret_stays_in_view(h: &mut Harness<Fields>) {
+  let name = Id::of(NAME);
+  h.click_id(name);
+  h.key(Key::Char('a'), CMD);
+  h.type_text(&"a long name that does not fit the field ".repeat(3));
+  h.frame();
+  let off = |h: &Harness<Fields>| h.rt.ui.last.get(name).unwrap().scroll.x;
+  assert!(off(h) > 0.0, "the end in view");
+  h.key(NamedKey::ArrowLeft, CMD);
+  h.frame();
+  assert_eq!(off(h), 0.0, "the start in view");
 }
 
 fn input_methods(h: &mut Harness<Fields>) {

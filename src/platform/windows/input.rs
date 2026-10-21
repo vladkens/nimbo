@@ -281,7 +281,7 @@ impl Window {
   /// The input method only while a field that takes it has focus: without it keys stay plain.
   /// A composition left in the input method as the focus moves on is cancelled: the field kept
   /// it as typed.
-  fn sync_ime(&mut self) {
+  pub(super) fn sync_ime(&mut self) {
     let on = self.rt.ui.text_input().and(self.rt.ui.focus());
     if on == self.ime {
       return;

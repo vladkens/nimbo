@@ -190,14 +190,16 @@ pub(crate) struct FieldState {
   drag: Option<(Range<usize>, u32)>,
   /// When the caret last moved: it shows from then for [BLINK], then blinks.
   blink: Duration,
-  /// Scroll the caret into view in the next layout.
-  reveal: bool,
+  /// Scroll the caret into view in the next layout: the request's number, 0 once laid out.
+  reveal: u32,
+  /// Requests made so far.
+  reveals: u32,
   focused: bool,
 }
 
 /// What a text field or selectable text got this frame, read before it is built; see the
 /// module's docs. [Ui::field_text] draws its text from it.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FieldBehavior {
   pub id: Id,
   /// The text element: `id.key("text")` in a field, `id` itself for selectable text.
@@ -238,10 +240,11 @@ impl Ui<'_> {
     (st.text_id, st.editable, st.secure) = (id.key("text"), true, password);
     st.ed.multiline = multiline && !password;
     // A reveal asked for stays until a laid-out frame had it (a view pass that only delivers
-    // input is not laid out).
+    // input is not laid out); a later one waits for its own.
     let t = &self.st.last;
-    if t.find(st.text_id).and_then(|i| t.edit(i)).is_some_and(|k| t.edits[k].reveal) {
-      st.reveal = false;
+    let laid = t.find(st.text_id).and_then(|i| t.edit(i)).map(|k| t.edits[k].reveal);
+    if laid.is_some_and(|r| r == st.reveal) {
+      st.reveal = 0;
     }
 
     take_value(&mut st, text);
@@ -259,30 +262,18 @@ impl Ui<'_> {
     let changed = write_back(&mut st, text);
     let blurred = st.focused && !focused;
     if changed || st.ed.sel() != sel || focused && !st.focused {
-      (st.blink, st.reveal) = (self.now, true);
+      st.reveals = st.reveals.wrapping_add(1).max(1);
+      (st.blink, st.reveal) = (self.now, st.reveals);
     }
 
     st.focused = focused;
-    let visible = self.focus_visible(id) && !disabled;
-    let mut edit = shown_edit(&st);
-    edit.caret = visible && st.ed.sel().is_empty() && self.blink(st.blink);
-    edit.reveal = st.reveal;
-    let (text_id, hovered) = (st.text_id, self.hovered(id) && !disabled);
+    let mut b = self.field_state(id, st.text_id, disabled);
+    (b.changed, b.submitted, b.cancelled, b.blurred) = (changed, submitted, cancelled, blurred);
+    (b.password, b.edit) = (password, shown_edit(&st));
+    b.edit.caret = b.focused && st.ed.sel().is_empty() && self.blink(st.blink);
+    b.edit.reveal = st.reveal;
     *self.state::<FieldState>(id) = st;
-    let (focused, password) = (visible, password);
-    FieldBehavior {
-      id,
-      text_id,
-      disabled,
-      hovered,
-      focused,
-      changed,
-      submitted,
-      cancelled,
-      blurred,
-      password,
-      edit,
-    }
+    b
   }
 
   /// Text the user selects with the mouse and the keyboard (Shift-arrows) and copies: a double
@@ -303,23 +294,16 @@ impl Ui<'_> {
       false => self.edit_input(id, &mut st),
     };
 
-    let edit = shown_edit(&st);
+    let mut b = self.field_state(id, id, disabled);
+    (b.submitted, b.cancelled, b.edit) = (submitted, cancelled, shown_edit(&st));
     *self.state::<FieldState>(id) = st;
-    let (hovered, focused) = (self.hovered(id) && !disabled, self.focus_visible(id));
-    let (changed, blurred, password) = (false, false, false);
-    FieldBehavior {
-      id,
-      text_id: id,
-      disabled,
-      hovered,
-      focused,
-      changed,
-      submitted,
-      cancelled,
-      blurred,
-      password,
-      edit,
-    }
+    b
+  }
+
+  /// A text behaviour's pointer and focus, for `id` drawing its text in `text_id`.
+  fn field_state(&self, id: Id, text_id: Id, disabled: bool) -> FieldBehavior {
+    let (hovered, focused) = (!disabled && self.hovered(id), !disabled && self.focus_visible(id));
+    FieldBehavior { id, text_id, disabled, hovered, focused, ..FieldBehavior::default() }
   }
 
   /// Whether a caret that last moved at `since` shows now; asks for the frame that toggles it.
@@ -409,6 +393,13 @@ impl Ui<'_> {
     let click = self.st.input.click.filter(|c| c.id == id && c.button == MouseButton::Left);
     let press = press.map(|p| (p.pos, p.clicks, p.mods.shift()));
     let click = click.map(|c| (c.pos, c.clicks, c.mods.shift()));
+    // A press released before a view saw it held: the drag from it to where it went up.
+    let released = self.released(id).filter(|(p, _)| p.button == MouseButton::Left);
+    let click = match released {
+      Some((p, at)) if st.drag.is_none() => Some((p.pos, p.clicks, p.mods.shift())).zip(Some(at)),
+      _ => click.map(|c| (c, c.0)),
+    };
+
     let outside = match lay {
       Some(lay) => drag(st, &lay, press, click, self.mouse, viewport),
       None => {
@@ -502,13 +493,14 @@ fn write_back(st: &mut FieldState, text: &mut String) -> bool {
 }
 
 /// A press (`press`: where, clicks, Shift) placing the caret or selecting a word or line, held
-/// and dragged to `mouse`, or a click (`click`) that came and went between views; returns
-/// whether the drag is past the edges of `viewport`, where frames go on scrolling it.
+/// and dragged to `mouse`, or a press that came and went between views (`click`: the press and
+/// where it was released); returns whether the drag is past the edges of `viewport`, where
+/// frames go on scrolling it.
 fn drag(
   st: &mut FieldState,
   lay: &TextLayout,
   press: Option<(Point, u32, bool)>,
-  click: Option<(Point, u32, bool)>,
+  click: Option<((Point, u32, bool), Point)>,
   mouse: Option<Point>,
   viewport: Option<Rect>,
 ) -> bool {
@@ -526,15 +518,19 @@ fn drag(
       return !v.contains(m);
     }
     (None, true) => {
-      if let Some(p) = click.map(|c| c.0).or(mouse) {
+      if let Some(p) = click.map(|c| c.1).or(mouse) {
         drag_to(st, lay, p);
       }
 
       st.drag = None;
     }
     (None, false) => {
-      if let Some((p, clicks, shift)) = click {
+      if let Some(((p, clicks, shift), at)) = click {
         start_drag(st, lay, p, clicks, shift);
+        if at != p {
+          drag_to(st, lay, at);
+        }
+
         st.drag = None;
       }
     }

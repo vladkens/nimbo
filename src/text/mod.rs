@@ -300,8 +300,9 @@ impl TextSystem {
     let (g, at) = (&line.glyphs, &line.clusters);
     // The first glyph of the cluster after glyph `k`.
     let next = |k: usize| (k + 1..g.len()).find(|&j| at[j] != at[k]);
-    let (mut k, mut b) = (0, 0);
-    loop {
+    let mut k = 0;
+    // The boundaries in one pass: a run of flags isn't counted back at each.
+    for b in std::iter::once(0).chain(edit::graphemes(s).map(|g| g.end)) {
       while let Some(j) = (k < g.len()).then(|| next(k)).flatten()
         && at[j] as usize <= b
       {
@@ -322,16 +323,6 @@ impl TextSystem {
       };
 
       f(b, x);
-      if b >= s.len() {
-        return;
-      }
-
-      // ASCII before ASCII is a cluster of its own; the rest asks the grapheme rules.
-      let bytes = s.as_bytes();
-      b = match bytes[b] {
-        c if c.is_ascii() && c != b'\r' && bytes.get(b + 1).is_none_or(|n| n.is_ascii()) => b + 1,
-        _ => edit::next_grapheme(s, b),
-      };
     }
   }
 
@@ -550,6 +541,11 @@ mod tests {
     assert_eq!(v.iter().map(|p| p.0).collect::<Vec<_>>(), [0, 3, 11, 19, 20]);
     assert!(v.windows(2).all(|w| w[1].1 > w[0].1), "{v:?}");
     assert_eq!(v[4].1, ts.measure(s, font));
+    // A long run of flags in one pass.
+    let s = "🇺🇦".repeat(5_000);
+    let t = std::time::Instant::now();
+    assert_eq!(stops(&mut ts, &s).len(), 5_001);
+    assert!(t.elapsed().as_millis() < 1500, "{:?}", t.elapsed());
   }
 
   #[test]

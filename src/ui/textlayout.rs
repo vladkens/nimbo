@@ -30,14 +30,15 @@ pub struct Stop {
 
 /// The selection, caret and marked text of an editable or selectable text element, as byte
 /// offsets of its text, and how to draw them ([super::Ui::edit_text]).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Edit {
   /// Anchor and head.
   pub sel: (u32, u32),
   /// Draws the caret at the head.
   pub caret: bool,
-  /// Scrolls the nearest scroll container to show the head.
-  pub reveal: bool,
+  /// Scrolls the nearest scroll container to show the head: the request's number, 0 for none
+  /// (a field tells one request from the next by it).
+  pub reveal: u32,
   /// An input method's marked text, underlined; empty when none.
   pub marked: (u32, u32),
   pub sel_color: Color,
@@ -56,7 +57,7 @@ impl Edit {
     Self {
       sel,
       caret: false,
-      reveal: false,
+      reveal: 0,
       marked: (0, 0),
       sel_color,
       caret_color,
@@ -249,7 +250,7 @@ impl<'t> TextLayout<'t> {
 pub(super) fn reveal(t: &mut Tree, scale: f32) {
   for k in 0..t.edits.len() {
     let e = t.edits[k];
-    if !e.reveal {
+    if e.reveal == 0 {
       continue;
     }
 

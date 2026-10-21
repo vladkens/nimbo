@@ -76,8 +76,10 @@ impl App for Fields {
             self.changes.push(id);
           }
 
+          // A password is not shown back.
           if r.submitted {
-            self.submitted = Some((id, text.clone()));
+            let shown = if id == PASSWORD { "•••".to_owned() } else { text.clone() };
+            self.submitted = Some((id, shown));
           }
         });
       }

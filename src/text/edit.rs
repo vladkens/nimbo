@@ -1305,6 +1305,11 @@ mod tests {
     e.set_marked("\u{200d}", 3..3, None);
     e.commit("\u{200d}", None);
     assert_eq!(e.caret(), 11);
+    // A delete that makes a flag of two indicators.
+    let mut e = Editor::new("🇺x🇸");
+    e.select(Sel::caret(5));
+    assert!(e.delete(Delete::Backward, &Mono::PLAIN));
+    assert_eq!((e.text(), e.caret()), ("🇺🇸", 8));
   }
 
   #[test]
