@@ -682,6 +682,9 @@ impl<A: App> Runtime<A> {
     self.ui_passes = passes;
     let count = self.ui.stats.count + 1;
     self.ui.stats = FrameStats { view, layout, paint: self.ui_times[2], passes, count };
+    // In a layer of its own, so the app's paint covers the view's text too (a layer draws its
+    // glyphs over its quads).
+    f.layer();
     self.app.paint(&mut f);
     self.animating = f.animate || self.ui.animating || !self.ui.input.moving.is_empty();
     // Glyphs dropped, the hover moved again, or an overlay opened or closed or the window
@@ -905,6 +908,30 @@ mod tests {
     assert_eq!(ground(&mut h), px(MINE.bg));
     assert_eq!(h.app().seen.last(), Some(&(true, MINE.accent)));
     assert_eq!(h.rt.ui.appearance(), Appearance::LIGHT);
+  }
+
+  #[test]
+  fn paint_covers_the_view() {
+    /// White text from the view under a black box from paint.
+    struct Over;
+    impl App for Over {
+      fn view(&mut self, ui: &mut Ui) {
+        ui.text("Hello", crate::ui::TextStyle::new(crate::Font::ui(20.0), [1.0; 4]));
+      }
+
+      fn paint(&mut self, f: &mut Frame) {
+        f.rect(Rect::new(0.0, 0.0, 80.0, 40.0), [0.0, 0.0, 0.0, 1.0], 0.0);
+      }
+    }
+
+    let mut h = crate::Harness::new(Over, Size::new(80.0, 40.0), 1.0);
+    let img = h.render();
+    assert!(h.rt.ui.last.nodes.len() > 1, "the view built its text");
+    for y in 0..40 {
+      for x in 0..80 {
+        assert_eq!(img.pixel(x as f32, y as f32), [0, 0, 0, 255], "at {x},{y}");
+      }
+    }
   }
 
   #[test]
