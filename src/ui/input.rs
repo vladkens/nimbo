@@ -15,7 +15,7 @@ use std::time::Duration;
 use keyboard_types::Modifiers;
 
 use super::layout::{Node, Tree};
-use super::{Focus, Id, UiState};
+use super::{Focus, Id, Ui, UiState};
 use crate::app::{Event, MouseButton, Phase};
 use crate::scene::{Point, Rect, Size};
 
@@ -33,6 +33,8 @@ pub struct Click {
   pub pos: Point,
   /// Held when the button went down (Shift-click, Cmd-click).
   pub mods: Modifiers,
+  /// Its press's [Press::seq].
+  pub seq: u32,
 }
 
 /// A button held down since it was pressed on `id`.
@@ -44,6 +46,9 @@ pub struct Press {
   /// Where it went down: drags measure from here.
   pub pos: Point,
   pub mods: Modifiers,
+  /// The presses counted so far, this one included: tells one press from the next on the same
+  /// element, and a click from the press it ends.
+  pub seq: u32,
 }
 
 /// A scroll container's position, for scrollbars: `offset` of `content` shown in `viewport`.
@@ -99,6 +104,12 @@ pub(crate) struct Input {
   latch: Vec<Id>,
   /// Scroll containers with wheel distance left.
   pub moving: Vec<Id>,
+  /// Presses so far ([Press::seq]).
+  presses: u32,
+  /// The press a release ended since a view last ran, and where ([super::Ui::released]).
+  pub ended: Option<(Press, Point)>,
+  /// The view asked for every pointer move ([super::Ui::track_moves]).
+  pub moves: bool,
   scratch: Vec<Id>,
 }
 
@@ -203,6 +214,30 @@ pub(super) fn max_scroll(n: &Node) -> [f32; 2] {
   [m(0, n.rect.w), m(1, n.rect.h)]
 }
 
+// MARK: Drags and settling
+
+impl Ui<'_> {
+  /// The press on `id` a release ended since the view last ran, and where it was released: a
+  /// drag's last move, which no view saw held.
+  pub fn released(&self, id: Id) -> Option<(Press, Point)> {
+    self.st.input.ended.filter(|(p, _)| p.id == id)
+  }
+
+  /// Builds a frame on every pointer move until the next frame, though the hover doesn't
+  /// change: an open menu, whose highlight follows the pointer within an item.
+  pub fn track_moves(&mut self) {
+    self.st.input.moves = true;
+  }
+
+  /// Runs the view again before this frame is painted if the layout moves or resizes `id` or
+  /// its content from what [Ui::rect] and [Ui::scroll] read of the last frame, or `id` wasn't
+  /// laid out then: a split's panes fitted to its size, a scrollbar's thumb to its content.
+  pub fn settle(&mut self, id: Id) {
+    let seen = self.st.last.get(id).map(|n| (n.rect, n.content));
+    self.st.tree.settle.push((id, seen));
+  }
+}
+
 // MARK: Routing
 
 impl UiState {
@@ -217,7 +252,9 @@ impl UiState {
   pub(crate) fn pointer(&mut self, ev: &Event, now: Duration) -> bool {
     match *ev {
       // A move with a button held is a drag, which the view follows.
-      Event::MouseMove { pos, .. } => self.hover_at(Some(pos), false) | self.input.press.is_some(),
+      Event::MouseMove { pos, .. } => {
+        self.hover_at(Some(pos), false) | self.input.press.is_some() | self.input.moves
+      }
       Event::Magnify { pos, .. } => self.hover_at(Some(pos), false),
       Event::MouseExit => self.hover_at(None, false),
       Event::MouseDown { pos, button, clicks, mods } => {
@@ -225,7 +262,9 @@ impl UiState {
         let top = self.input.hover.first().copied();
         // Another button pressed meanwhile leaves the press to the first one's release.
         if self.input.press.is_none_or(|p| p.button == button) {
-          self.input.press = top.map(|id| Press { id, button, clicks, pos, mods });
+          self.input.presses += 1;
+          let seq = self.input.presses;
+          self.input.press = top.map(|id| Press { id, button, clicks, pos, mods, seq });
         }
 
         if button == MouseButton::Left {
@@ -249,10 +288,10 @@ impl UiState {
       Event::MouseUp { pos, button, .. } => {
         let changed = self.hover_at(Some(pos), false);
         let Some(p) = self.input.press.filter(|p| p.button == button) else { return changed };
-        self.input.press = None;
+        (self.input.press, self.input.ended) = (None, Some((p, pos)));
         if self.input.hover.contains(&p.id) {
-          let (clicks, mods) = (p.clicks, p.mods);
-          self.input.click = Some(Click { id: p.id, button, clicks, pos, mods });
+          let (clicks, mods, seq) = (p.clicks, p.mods, p.seq);
+          self.input.click = Some(Click { id: p.id, button, clicks, pos, mods, seq });
         }
 
         true
@@ -360,6 +399,16 @@ impl UiState {
     }
 
     changed
+  }
+
+  /// Stops what scrolls now: the trackpad gesture's latch, so its next events go to what is
+  /// under the pointer, and wheel momentum. A menu opening calls it, so the content under it
+  /// stays put.
+  pub(crate) fn halt_scrolling(&mut self) {
+    self.input.latch.clear();
+    for id in std::mem::take(&mut self.input.moving) {
+      self.store.raw::<ScrollState>(id).pending = Point::default();
+    }
   }
 
   /// Moves wheel momentum on to `now`.

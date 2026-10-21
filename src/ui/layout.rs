@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::{Align, Dim, Float, Id, Style, TextStyle};
 use crate::keys::Binding;
-use crate::scene::{ImageId, Point, Rect, Size};
+use crate::scene::{Color, ImageId, Point, Rect, Size};
 use crate::text::edit::graphemes;
 use crate::text::{Font, FxHasher, Ink, Metrics};
 
@@ -52,6 +52,12 @@ pub enum Kind {
   Image(ImageId),
   /// The index of its paint callback.
   Canvas(u32),
+  /// Over a scroll container ([super::Ui::fade_edges]): its content fading into `color` under
+  /// the top and bottom edges, over `len` points, as far as it is scrolled away from them.
+  Fade {
+    color: Color,
+    len: f32,
+  },
 }
 
 /// A wrapped line of a text element: a byte range of [Tree::text], its width and its ink.
@@ -125,6 +131,9 @@ impl Node {
   }
 }
 
+/// A box and its content's size, as a view saw them ([Tree::settle]).
+pub type Seen = (Rect, [f32; 2]);
+
 /// One frame's elements; node 0 is the root, the window.
 #[derive(Default)]
 pub struct Tree {
@@ -143,6 +152,9 @@ pub struct Tree {
   /// Content built only in part (a virtual list's rows in view): its scroll container and the
   /// span of its content built ([super::Ui::partial_short]).
   pub partial: Vec<(u32, f32, f32)>,
+  /// Elements whose last-frame box and content the view drew from, as it saw them
+  /// ([super::Ui::settle]).
+  pub settle: Vec<(Id, Option<Seen>)>,
   index: HashMap<Id, u32, BuildHasherDefault<FxHasher>>,
   /// A grid's row heights while it is laid out.
   rows: Vec<f32>,
@@ -159,6 +171,7 @@ impl Tree {
     self.scrolls.clear();
     self.keymaps.clear();
     self.partial.clear();
+    self.settle.clear();
     self.index.clear();
     let root = Style::new().w(Dim::Px(size.w)).h(Dim::Px(size.h));
     self.nodes.push(Node::new(Id::ROOT, Kind::Box, root, 1, None, 0, 1));
@@ -319,8 +332,8 @@ fn fit(t: &mut Tree, ax: usize, m: &mut dyn Measure) {
         let v = if ax == 0 { s.w } else { s.h };
         (v, v)
       }
-      Kind::Box | Kind::Canvas(_) if t.nodes[i].cols > 0 => grid_fit(t, i, ax),
-      Kind::Box | Kind::Canvas(_) => children_fit(t, i, ax),
+      Kind::Box | Kind::Canvas(_) | Kind::Fade { .. } if t.nodes[i].cols > 0 => grid_fit(t, i, ax),
+      Kind::Box | Kind::Canvas(_) | Kind::Fade { .. } => children_fit(t, i, ax),
     };
 
     let n = &mut t.nodes[i];

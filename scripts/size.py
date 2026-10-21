@@ -4,8 +4,8 @@
 # ///
 """Lines per module: code, docs, comments and inline tests, apart.
 
-A module is a directory under src/ (platform/<os> each on its own) or a top-level file;
-examples/ and tests/ are one row each. Code is every line that is not blank, a comment, a doc
+A module is a directory under src/ (platform/<os>, ui/widgets and ui/containers each on
+their own) or a top-level file; examples/ and tests/ are one row each. Code is every line that is not blank, a comment, a doc
 comment or inside a `#[cfg(test)]` item. With a git ref, a column shows how code moved since it.
 `--map` lists the files with the first sentence of each one's module doc (`//!`): what it does.
 `--check` sums the code per part against its budget (BUDGETS) and fails when one is over.
@@ -23,9 +23,19 @@ ROOT = Path(__file__).resolve().parent.parent
 DIRS = ("src", "examples", "tests")
 EXTS = (".rs", ".metal")
 KINDS = ("code", "docs", "comments", "tests", "blank")
-# The code lines each part may have: a platform, the widgets (ui/) and the core (the rest of
-# src/). Raising one is a decision recorded in its PR.
-BUDGETS = {"platform/macos": 1500, "platform/windows": 2000, "platform/linux": 2500, "ui": 3500, "core": 4000}
+# The code lines each part may have: a platform, the UI core (ui/: the tree, layout, input,
+# paint, theme), its widgets and containers (ui/widgets, ui/containers: add-ons over it) and
+# the core (the rest of src/). Raising one is a decision recorded in its PR.
+BUDGETS = {
+  "platform/macos": 1500,
+  "platform/windows": 2000,
+  "platform/linux": 2500,
+  "ui": 3500,
+  "widgets": 2000,
+  "core": 4000,
+}
+# Modules that count against a budget of another name.
+PARTS = {"ui/widgets": "widgets", "ui/containers": "widgets"}
 
 
 def module(path: str, files: bool) -> str:
@@ -39,8 +49,10 @@ def module(path: str, files: bool) -> str:
   if len(parts) == 2:
     return parts[1].removesuffix(".rs")
 
-  if parts[1] == "platform" and len(parts) > 3:
-    return f"platform/{parts[2]}"
+  if parts[1] in ("platform", "ui") and len(parts) > 3:
+    sub = f"{parts[1]}/{parts[2]}"
+    if parts[1] == "platform" or sub in PARTS:
+      return sub
 
   return parts[1]
 
@@ -48,11 +60,14 @@ def module(path: str, files: bool) -> str:
 def part(module: str) -> str | None:
   """The budget a module's code counts against; examples and tests have none.
 
-  >>> [part(m) for m in ("platform/linux", "ui", "cpu", "platform", "tests")]
-  ['platform/linux', 'ui', 'core', 'core', None]
+  >>> [part(m) for m in ("platform/linux", "ui", "ui/containers", "cpu", "platform", "tests")]
+  ['platform/linux', 'ui', 'widgets', 'core', 'core', None]
   """
   if module in BUDGETS:
     return module
+
+  if module in PARTS:
+    return PARTS[module]
 
   return None if module in ("examples", "tests") else "core"
 

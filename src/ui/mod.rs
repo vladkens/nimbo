@@ -26,7 +26,8 @@
 //! }
 //! ```
 //!
-//! Widgets ([widgets]: label, button) do this for an app in the look of the [Theme] set with
+//! Widgets ([widgets]: label, button) and containers ([containers]: scroll area, list, menu,
+//! pop-up button, tabs, split) do this for an app in the look of the [Theme] set with
 //! [Ui::set_theme]: `if ui.id("plus").button("+").clicked { .. }`.
 //!
 //! The rule for every widget: a headless behaviour ([behavior]: `ui.button_behavior(id)` and
@@ -34,6 +35,7 @@
 //! theme. An app that wants its own look keeps the behaviour and draws the element itself.
 
 pub mod behavior;
+pub mod containers;
 pub mod input;
 mod layout;
 mod paint;
@@ -48,6 +50,9 @@ use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
 pub use behavior::Behavior;
+pub use containers::{
+  List, ListResponse, PopUp, Row, Selection, Split, SplitBehavior, Tabs, TypeSelect,
+};
 pub use input::{Click, Press, Scroll, hit};
 pub use layout::{Kind, Line, Measure, Node, Tree};
 pub use store::{Ease, Transition};
@@ -443,6 +448,7 @@ impl UiState {
       pressed: self.pressed(id),
       focused: self.focused(id),
       clicked: self.clicked(id),
+      changed: false,
     }
   }
 }
@@ -471,6 +477,8 @@ pub struct Response {
   pub focused: bool,
   /// Clicked with the left button; seen once.
   pub clicked: bool,
+  /// The value a widget edits changed: a pop-up's choice, the selected tab, a split's ratio.
+  pub changed: bool,
 }
 
 /// The element tree builder an app's `view` gets each frame it redraws. `'a` lets canvas
@@ -511,6 +519,7 @@ impl<'a> Ui<'a> {
     st.stack.clear();
     st.stack.push((0, 0));
     st.animating = false;
+    st.input.moves = false;
     st.input.now = now;
     let (next_id, next_float, next_keymap) = (None, None, None);
     let canvases = Vec::new();
@@ -1118,14 +1127,16 @@ impl<'a> Ui<'a> {
   }
 
   /// Whether content built only in part ([Tree::partial]) doesn't cover what the layout just
-  /// showed of it (its viewport grew, its offset was clamped): the view should run again before
-  /// this frame is painted.
+  /// showed of it (its viewport grew, its offset was clamped), or the layout moved what the view
+  /// drew from ([Ui::settle]): the view should run again before this frame is painted.
   pub fn partial_short(&self) -> bool {
     let t = &self.st.tree;
-    t.partial.iter().any(|&(i, lo, hi)| {
-      let n = &t.nodes[i as usize];
-      lo > n.scroll.y + 0.5 || hi < n.scroll.y + n.rect.h - 0.5
-    })
+    let moved = t.settle.iter().any(|&(id, seen)| t.get(id).map(|n| (n.rect, n.content)) != seen);
+    moved
+      || t.partial.iter().any(|&(i, lo, hi)| {
+        let n = &t.nodes[i as usize];
+        lo > n.scroll.y + 0.5 || hi < n.scroll.y + n.rect.h - 0.5
+      })
   }
 
   /// Hit tests the pointer on the tree just laid out; returns whether the hover changed, so
@@ -1168,6 +1179,7 @@ impl<'a> Ui<'a> {
   /// Ends the frame without painting; the tree becomes the last frame's and the store drops
   /// what the frame did not use. Focus on an element the frame did not build clears.
   pub fn finish(mut self) -> UiState {
+    self.st.input.ended = None;
     std::mem::swap(&mut self.st.tree, &mut self.st.last);
     self.st.store.gc(&self.st.last);
     if self.st.input.focus.is_some_and(|f| self.st.last.find(f).is_none()) {
@@ -1179,7 +1191,8 @@ impl<'a> Ui<'a> {
 
   /// Drops this tree, keeping the last frame's: a pass that only delivers input to the view,
   /// or one run again.
-  pub fn discard(self) -> UiState {
+  pub fn discard(mut self) -> UiState {
+    self.st.input.ended = None;
     self.st
   }
 }

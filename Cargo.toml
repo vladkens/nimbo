@@ -22,6 +22,10 @@ name = "input"
 harness = false
 
 [[test]]
+name = "lists"
+harness = false
+
+[[test]]
 name = "shapes"
 harness = false
 
