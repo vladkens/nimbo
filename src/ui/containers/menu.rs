@@ -121,8 +121,11 @@ impl Ui<'_> {
   pub fn menu<R>(&mut self, label: &str, items: impl FnOnce(&mut Self) -> R) -> Response {
     let t = self.theme();
     let id = self.take_id();
-    let r = Button::new(label).show(self.with_id(id));
-    self.menu_popup(id, r.clicked, t.popup().min_w(160.0), items);
+    let off = self.take_disabled();
+    let r = Button::new(label).show(self.disabled(off).with_id(id));
+    // Disabled while open, it closes.
+    let toggle = r.clicked || off && self.menu_open(id);
+    self.menu_popup(id, toggle, t.popup().min_w(160.0), items);
     r
   }
 
@@ -135,11 +138,12 @@ impl Ui<'_> {
 
   /// The menu of the control `id` (its trigger, built before), opened and closed by `toggle`
   /// (the trigger's click): while open, `items` ([Ui::menu_item], [Ui::menu_item_behavior])
-  /// in a `style` box under it, as an overlay; returns whether it is open. A click on an item
-  /// or anywhere else closes it. The menu is `id.key("menu")`. Open, it has focus: Up and Down
-  /// move the highlight over the enabled items, letters typed move it to the first one their
-  /// prefix starts ([TypeSelect]), Enter or Space runs the highlighted one, Escape closes it;
-  /// closed, focus goes back where it was.
+  /// in a `style` box under it, as an overlay; returns whether it is open after this frame's
+  /// input. A click on an enabled item or outside the menu closes it. The menu is
+  /// `id.key("menu")`. Open, it has focus, kept from Tab: Up and Down move the highlight over
+  /// the enabled items, letters typed move it to the first one their prefix starts
+  /// ([TypeSelect]), Enter or Space runs the highlighted one, Escape closes it; closed, focus
+  /// goes back where it was. A trigger disabled while its menu is open closes it with `toggle`.
   ///
   /// It stays in the window: under the trigger, or above it when it doesn't fit there and
   /// there is more room above; as high as the room at most, its items then scroll
@@ -235,7 +239,6 @@ impl Ui<'_> {
     }
 
     (st.mouse, st.offset) = (self.mouse(), self.scroll(list).map_or(0.0, |s| s.offset.y));
-    let first = self.st.tree.nodes.len();
     let pop = style.hit().focusable_quiet().gap(0.0);
     let fl = match placed {
       true => Float::window().anchor(0.0, ay).offset(x, y).z(MENU_Z + 1),
@@ -256,9 +259,10 @@ impl Ui<'_> {
     let area = Style::new().w(grow()).max_h((room - frame).max(MIN_THUMB)).gap(style.gap);
     self.float(fl).col(pop, |ui| ui.with_id(list).scroll_area(area, |ui| items(ui)));
     let cx = self.set_slot(outer).unwrap_or_default();
-    let nodes = &self.st.tree.nodes[first + 1..];
-    let clicked =
-      self.st.input.click.is_some_and(|c| c.id == away || nodes.iter().any(|n| n.id == c.id));
+    // A click on an enabled item or around the menu closes it; one on its scrollbar, padding or
+    // a disabled item leaves it open.
+    let on_item = |c: Id| cx.items.iter().any(|&(i, on)| on && i == c);
+    let clicked = self.st.input.click.is_some_and(|c| c.id == away || on_item(c.id));
     (st.items, st.labels) = (cx.items, cx.labels);
     if clicked || cx.ran {
       if self.focus_id().is_none_or(|f| f == menu) {
@@ -268,8 +272,9 @@ impl Ui<'_> {
       st = Open::default();
     }
 
+    let open = st.open;
     *self.state::<Open>(id) = st;
-    true
+    open
   }
 
   /// An open menu's keys and pointer: the pointer moving onto an item highlights it, Up and
@@ -277,11 +282,13 @@ impl Ui<'_> {
   /// to close (Escape), and the item to run (Enter, Space).
   fn menu_keys(&mut self, menu: Id, st: &mut Open) -> (bool, Option<usize>) {
     let offset = self.scroll(menu.key("list")).map_or(0.0, |s| s.offset.y);
-    if self.mouse() != st.mouse || offset != st.offset {
+    let over = st.items.iter().position(|&(i, on)| on && self.hovered(i));
+    // The pointer moving, or the list scrolling under it, takes the highlight back from keys.
+    if st.keyed && (self.mouse() != st.mouse || offset != st.offset) {
       st.keyed = false;
+      st.cur = over.or(st.cur);
     }
 
-    let over = st.items.iter().position(|&(i, on)| on && self.hovered(i));
     if over != st.over && !st.keyed {
       st.cur = over;
     }
@@ -298,6 +305,8 @@ impl Ui<'_> {
       Some(Command::Move(Move::Down, _)) => to = step(st.cur, 1),
       Some(Command::Move(Move::Up, _)) => to = step(st.cur, -1),
       Some(Command::InsertNewline) => return (false, st.cur),
+      // Focus stays in the menu while it is open.
+      Some(Command::InsertTab | Command::InsertBacktab) => {}
       Some(_) => self.pass(menu),
       None => {}
     }
@@ -346,7 +355,9 @@ impl Ui<'_> {
     let (mut y, mut ay, mut room) = if flip { (b.y - 3.0, 1.0, up) } else { (below, 0.0, down) };
     let mut x = if b.x + menu_w > size.w - EDGE { b.x + b.w - menu_w } else { b.x };
     if over && let Some(p) = st.at {
-      (x, y, ay, room) = (p.x, p.y, 0.0, size.h - 2.0 * EDGE);
+      // Where it went, inside the window still when the window shrank.
+      room = size.h - 2.0 * EDGE;
+      (x, y, ay) = (p.x, p.y.min(size.h - EDGE - natural.min(room)).max(EDGE), 0.0);
     } else if over {
       room = size.h - 2.0 * EDGE;
       let h = natural.min(room);
@@ -433,13 +444,14 @@ mod tests {
   #[derive(Default)]
   struct Menus {
     runs: [usize; 3],
+    off: bool,
   }
 
   impl App for Menus {
     fn view(&mut self, ui: &mut Ui) {
       ui.id("area").scroll_area(Style::new().grow(), |ui| {
         ui.el(Style::new().w(px(10.0)).h(px(150.0)));
-        ui.id("menu").menu("Menu", |ui| {
+        ui.disabled(self.off).id("menu").menu("Menu", |ui| {
           for (i, name) in ["one", "two", "three"].into_iter().enumerate() {
             if ui.disabled(i == 1).id(name).menu_item(name).clicked {
               self.runs[i] += 1;
@@ -489,6 +501,90 @@ mod tests {
     h.frame();
     assert_eq!(h.app().runs, [0, 0, 1]);
     assert!(h.rect(menu.key("menu")).is_none() && h.focused().is_none());
+    // Its button disabled while it is open, it closes.
+    h.click_id(menu);
+    h.frame();
+    h.frame();
+    h.app_mut().off = true;
+    h.frame();
+    h.frame();
+    assert!(h.rect(menu.key("menu")).is_none());
+  }
+
+  /// A menu of 30 items, taller than its window, opened by a button the app can disable; the
+  /// item run last and what [Ui::menu_popup] returned last.
+  #[derive(Default)]
+  struct Long {
+    ran: Option<usize>,
+    open: bool,
+    off: bool,
+  }
+
+  impl App for Long {
+    fn view(&mut self, ui: &mut Ui) {
+      let id = Id::of("open");
+      let b = ui.disabled(self.off).with_id(id).button("Open");
+      let toggle = b.clicked || self.off && ui.menu_open(id);
+      let t = ui.theme();
+      self.open = ui.menu_popup(id, toggle, t.popup(), |ui| {
+        for i in 0..30 {
+          if ui.key(i).menu_item("Item").clicked {
+            self.ran = Some(i);
+          }
+        }
+      });
+    }
+  }
+
+  #[test]
+  fn a_tall_menu_scrolls_keeps_focus_and_follows_the_pointer() {
+    let mut h = Harness::new(Long::default(), Size::new(300.0, 240.0), 1.0);
+    h.frame();
+    let open = Id::of("open");
+    let (menu, list) = (open.key("menu"), open.key("menu").key("list"));
+    h.click_id(open);
+    h.frame();
+    h.frame();
+    let m = h.rect(menu).unwrap();
+    assert!(m.y + m.h <= 240.0 && h.app().open, "{m:?}");
+    // A click on its scrollbar's track pages the items and leaves it open.
+    let track = h.rect(list.key(("track", 1usize))).expect("a scrollbar");
+    h.click(track.x + track.w / 2.0, track.y + track.h - 4.0);
+    h.frame();
+    assert!(h.rect(menu).is_some() && h.rt.ui.scroll(list).unwrap().offset.y > 0.0);
+    // Tab leaves focus in it.
+    h.key(Key::Tab, Mods::NONE);
+    assert_eq!(h.focused(), Some(menu));
+    // The pointer on an item, Down past it, then the pointer moving within it: it takes the
+    // highlight back, and Enter runs it.
+    // Items are keyed in the menu's list.
+    let under = (0..30usize).find_map(|k| {
+      let r = h.rect(list.key(k))?;
+      (r.y > m.y + 30.0).then_some((k, r))
+    });
+    let (k, rr) = under.expect("an item in view");
+    h.move_to(rr.x + 10.0, rr.y + 5.0);
+    h.frame();
+    h.key(Key::Down, Mods::NONE);
+    h.move_to(rr.x + 20.0, rr.y + 6.0);
+    h.key(Key::Enter, Mods::NONE);
+    assert_eq!(h.app().ran, Some(k));
+    h.frame();
+    // A click on an item: the call that sees it says closed.
+    h.click_id(open);
+    h.frame();
+    h.frame();
+    let rr = h.rect(list.key(k)).unwrap();
+    h.click(rr.x + 10.0, rr.y + 5.0);
+    assert!(!h.app().open && h.rect(menu).is_some(), "closed in the pass that ran it");
+    // Disabled while open, it closes.
+    h.click_id(open);
+    h.frame();
+    h.frame();
+    h.app_mut().off = true;
+    h.frame();
+    h.frame();
+    assert!(h.rect(menu).is_none() && !h.app().open);
   }
 
   #[test]

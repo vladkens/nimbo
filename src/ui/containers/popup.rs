@@ -84,7 +84,9 @@ impl<'s> PopUp<'s> {
     // At least as wide as the button, or wider.
     let pop_w = ui.rect(id).map_or(0.0, |r| r.w).max(t.sizes.menu_w);
     let mut pick = None;
-    ui.menu_popup_over(id, b.clicked, t.popup().min_w(pop_w), at, |ui| {
+    // Disabled while open, it closes.
+    let toggle = b.clicked || b.disabled && ui.menu_open(id);
+    ui.menu_popup_over(id, toggle, t.popup().min_w(pop_w), at, |ui| {
       for (i, &o) in options.iter().enumerate() {
         let item = id.key(("item", i));
         let ib = ui.menu_item_behavior(item, o);
@@ -194,5 +196,49 @@ impl Ui<'_> {
 
     *self.state::<TypeSelect>(id) = ts;
     b
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::app::{App, Mods};
+  use crate::harness::Harness;
+  use crate::keys::Key;
+  use crate::scene::Size;
+
+  /// A pop-up the app can disable.
+  #[derive(Default)]
+  struct Pick {
+    cur: usize,
+    off: bool,
+  }
+
+  impl App for Pick {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.disabled(self.off).id("pick").pop_up(&mut self.cur, &["Red", "Green", "Blue"]);
+    }
+  }
+
+  #[test]
+  fn a_pop_up_picks_by_letters_and_closes_when_disabled() {
+    let mut h = Harness::new(Pick::default(), Size::new(300.0, 200.0), 1.0);
+    let pick = Id::of("pick");
+    h.frame();
+    h.rt.ui.set_focus(Some(pick));
+    h.key(Key::Char('b'), Mods::NONE);
+    assert_eq!(h.app().cur, 2);
+    // Down opens it on the current option, checked.
+    h.key(Key::Down, Mods::NONE);
+    h.frame();
+    h.frame();
+    assert!(h.rect(pick.key("menu")).is_some() && h.rect(pick.key(("item", 2usize))).is_some());
+    // Disabled while open: it closes and its options can't be picked.
+    h.app_mut().off = true;
+    h.frame();
+    h.frame();
+    assert!(h.rect(pick.key("menu")).is_none());
+    h.key(Key::Enter, Mods::NONE);
+    assert_eq!(h.app().cur, 2);
   }
 }
