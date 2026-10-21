@@ -90,52 +90,8 @@ impl Input {
     }
   }
 
-  fn pointer(&mut self, cx: &mut Cx, ev: &Event) -> bool {
-    let used = match *ev {
-      Event::MouseMove { pos, .. } => {
-        let was = self.hover;
-        self.hover = self.square().contains(pos);
-        match self.grab {
-          Some(g) => {
-            self.move_to(Point::new(pos.x - g.x, pos.y - g.y), cx.size);
-            true
-          }
-          None => self.hover != was,
-        }
-      }
-      Event::MouseDown { pos, button: MouseButton::Left, .. } if self.square().contains(pos) => {
-        self.grab = Some(Point::new(pos.x - self.pos.x, pos.y - self.pos.y));
-        true
-      }
-      Event::MouseUp { pos, button: MouseButton::Left, .. } if self.grab.is_some() => {
-        self.grab = None;
-        self.hover = self.square().contains(pos);
-        true
-      }
-      Event::MouseExit => std::mem::take(&mut self.hover),
-      Event::Scroll { delta, .. } => {
-        let side = (self.side + delta.y).clamp(SIDES.0, SIDES.1);
-        let grow = side - self.side;
-        self.side = side;
-        // Grown or shrunk about its centre.
-        let corner = Point::new(self.pos.x - grow / 2.0, self.pos.y - grow / 2.0);
-        self.move_to(corner, cx.size);
-        grow != 0.0
-      }
-      _ => false,
-    };
-
-    cx.set_cursor(self.cursor());
-    used
-  }
-}
-
-impl App for Input {
-  fn keymap(&self) -> &[Binding] {
-    KEYS
-  }
-
-  fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
+  /// An event, without the hover: the square moved, grown, copied or pasted, Shift, the focus.
+  fn handle(&mut self, cx: &mut Cx, ev: &Event) -> bool {
     match ev {
       Event::KeyDown(k) => {
         let (dx, dy) = match k.key {
@@ -167,6 +123,57 @@ impl App for Input {
     }
 
     true
+  }
+
+  /// The hover and the cursor from where the pointer is: after it moves, and after the square
+  /// moves or grows under a pointer that stays (arrows, a paste, the wheel). Returns whether the
+  /// hover changed.
+  fn track(&mut self, cx: &mut Cx) -> bool {
+    let was = self.hover;
+    self.hover = cx.mouse.is_some_and(|p| self.square().contains(p));
+    cx.set_cursor(self.cursor());
+    self.hover != was
+  }
+
+  fn pointer(&mut self, cx: &mut Cx, ev: &Event) -> bool {
+    match *ev {
+      Event::MouseMove { pos, .. } => match self.grab {
+        Some(g) => {
+          self.move_to(Point::new(pos.x - g.x, pos.y - g.y), cx.size);
+          true
+        }
+        None => false,
+      },
+      Event::MouseDown { pos, button: MouseButton::Left, .. } if self.square().contains(pos) => {
+        self.grab = Some(Point::new(pos.x - self.pos.x, pos.y - self.pos.y));
+        true
+      }
+      Event::MouseUp { button: MouseButton::Left, .. } if self.grab.is_some() => {
+        self.grab = None;
+        true
+      }
+      Event::Scroll { delta, .. } => {
+        let side = (self.side + delta.y).clamp(SIDES.0, SIDES.1);
+        let grow = side - self.side;
+        self.side = side;
+        // Grown or shrunk about its centre.
+        let corner = Point::new(self.pos.x - grow / 2.0, self.pos.y - grow / 2.0);
+        self.move_to(corner, cx.size);
+        grow != 0.0
+      }
+      _ => false,
+    }
+  }
+}
+
+impl App for Input {
+  fn keymap(&self) -> &[Binding] {
+    KEYS
+  }
+
+  fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
+    let used = self.handle(cx, ev);
+    self.track(cx) || used
   }
 
   fn paint(&mut self, f: &mut Frame) {

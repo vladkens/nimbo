@@ -114,6 +114,31 @@ fn main() {
   wheel(&mut h, at, SIDE - SIDES.0);
   assert_eq!(h.app().side, SIDE);
 
+  // The square moving or shrinking under a pointer that stays: the hover and the cursor follow
+  // it at once, without a move of the mouse.
+  h.app_mut().pos = START;
+  let edge = (START.x + SIDE - 4.0, START.y + SIDE / 2.0);
+  h.move_to(edge.0, edge.1);
+  assert!(h.app().hover && h.rt.cursor() == Cursor::Grab);
+  assert!(h.key(Key::Left, Mods::NONE));
+  assert!(!h.app().hover, "moved away by an arrow");
+  assert_eq!(h.rt.cursor(), Cursor::Arrow);
+  let img = h.render();
+  assert_eq!(img.pixel(h.app().pos.x + 0.5, edge.1), px(BLUE), "no hover border");
+  assert!(h.key(Key::Right, Mods::NONE));
+  assert!(h.app().hover && h.rt.cursor() == Cursor::Grab, "back under the pointer");
+  h.rt.clipboard().write("300,200");
+  assert!(h.key(Key::Char('v'), Mods::CMD));
+  assert!(!h.app().hover && h.rt.cursor() == Cursor::Arrow, "pasted away");
+  h.rt.clipboard().write(&format!("{},{}", START.x, START.y));
+  assert!(h.key(Key::Char('v'), Mods::CMD));
+  assert!(h.app().hover);
+  assert!(wheel(&mut h, edge, -20.0));
+  assert!(!h.app().hover && h.rt.cursor() == Cursor::Arrow, "shrunk away by the wheel");
+  wheel(&mut h, edge, 20.0);
+  h.leave();
+  assert!(!h.app().hover);
+
   // Shift held: amber, until it is let go.
   assert!(h.event(Event::Mods(Mods::SHIFT)));
   check_square(&h.render(), h.app(), AMBER);
