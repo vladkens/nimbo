@@ -105,6 +105,8 @@ impl Ui<'_> {
 
 #[cfg(test)]
 mod tests {
+  use std::time::Duration;
+
   use super::*;
   use crate::app::{App, Mods};
   use crate::harness::Harness;
@@ -158,12 +160,19 @@ mod tests {
     h.key(Key::Char(' '), Mods::NONE);
     assert_eq!(h.app().plays, 2);
     assert_eq!(px(&mut h), [255, 0, 0, 255]);
+    // Space again before the flash ends: pressed until the second one ends, then at rest.
+    h.wait(Duration::from_millis(80));
+    h.key(Key::Char(' '), Mods::NONE);
+    h.wait(Duration::from_millis(60));
+    assert_eq!(px(&mut h), [255, 0, 0, 255]);
+    h.wait(Duration::from_millis(100));
+    assert_eq!((px(&mut h), h.app().plays), ([51, 51, 51, 255], 3));
     // Disabled: no input, and Tab passes it by.
     h.app_mut().off = true;
     h.rt.redraw();
     h.frame();
     h.click(20.0, 20.0);
-    assert_eq!(h.app().plays, 2);
+    assert_eq!(h.app().plays, 3);
     h.key(Key::Tab, Mods::NONE);
     assert_eq!(h.focused(), None);
   }
