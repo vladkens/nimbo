@@ -40,6 +40,7 @@ use super::{Click, Res, clicks};
 use crate::Config;
 use crate::app::{App, Appearance, Clock, Event, Mods, MouseButton, Phase, Runtime, WHEEL_LINE};
 use crate::cpu::raster::IRect;
+use crate::hotkey::ModKey;
 use crate::platform::{Pace, points};
 use crate::scene::{Point, Size};
 use crate::ui::Cursor;
@@ -127,6 +128,9 @@ struct Win {
   /// The keyboard state was made from a key event's core state (a new keymap): the next key
   /// sets it from its own until the server's state events follow.
   kb_fresh: bool,
+  /// Modifier keys that went down or up, held for the state event the server sends after
+  /// them: [Event::Modifier] comes after the [Event::Mods] it changed.
+  mod_keys: Vec<(ModKey, bool)>,
   reload_keymap: bool,
   focused: bool,
   clip: Rc<RefCell<Clip>>,
@@ -303,6 +307,7 @@ fn run_on(
     detectable: false,
     xkb_event: None,
     kb_fresh: true,
+    mod_keys: Vec::new(),
     reload_keymap: false,
     focused: false,
     clip,
@@ -325,6 +330,9 @@ fn run_on(
     while let Some(ev) = win.next_event() {
       win.handle(ev);
     }
+
+    // A modifier key that left the state as it was (the other Shift) has no state event.
+    win.modifier_keys();
 
     win.apply_keymap();
 
@@ -618,6 +626,13 @@ impl Win {
     }
   }
 
+  /// Sends the modifier keys held back for their state event.
+  fn modifier_keys(&mut self) {
+    for (key, down) in std::mem::take(&mut self.mod_keys) {
+      self.send(Event::Modifier { key, down });
+    }
+  }
+
   /// An event's modifiers and group, as the state before it: the keyboard's state, unless
   /// the server's state events keep it.
   fn core_state(&mut self, state: u16) {
@@ -839,6 +854,7 @@ impl Win {
 
           self.kb_fresh = false;
           self.sync_mods();
+          self.modifier_keys();
         }
         _ => {}
       },
@@ -917,8 +933,10 @@ impl Win {
     // Modifier keys reach the app as [Event::Mods] and, by their side, [Event::Modifier], as on
     // macOS (`flagsChanged:`).
     if let Some(side) = modifier {
-      if let Some(key) = side.filter(|_| !repeat) {
-        self.send(Event::Modifier { key, down });
+      match side.filter(|_| !repeat) {
+        Some(key) if own => _ = self.send(Event::Modifier { key, down }),
+        Some(key) => self.mod_keys.push((key, down)),
+        None => {}
       }
 
       return;
