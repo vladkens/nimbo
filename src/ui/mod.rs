@@ -363,15 +363,16 @@ impl UiState {
 
   /// Scrolls every scroll container around `id` the least that shows it, innermost first, by
   /// the last frame's rects, up to an overlay placed on the window, which their offsets don't
-  /// move.
+  /// move; an overlay on its parent skips that parent's, which doesn't move it either.
   fn reveal_in_scrolls(&mut self, id: Id) {
     let t = &self.last;
     let Some(mut i) = t.find(id) else { return };
     let mut r = t.nodes[i as usize].rect;
     while i != 0 && !t.nodes[i as usize].float.is_some_and(|f| f.window) {
+      let float = t.nodes[i as usize].float.is_some();
       i = t.nodes[i as usize].parent;
       let n = &t.nodes[i as usize];
-      if !(n.style.scroll[0] || n.style.scroll[1]) {
+      if float || !(n.style.scroll[0] || n.style.scroll[1]) {
         continue;
       }
       // In the container's content, then its offset after showing it.

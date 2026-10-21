@@ -884,6 +884,29 @@ mod tests {
   }
 
   #[test]
+  fn tab_focus_in_a_popup_leaves_its_anchor_scroll() {
+    // A popup below a 100-high scrolling panel, in a 50-high scroll: the panel's offset can't
+    // move it, the outer one shows it.
+    let view = |ui: &mut Ui| {
+      ui.id("outer").col(Style::new().w(px(50.0)).h(px(50.0)).scroll_y(), |ui| {
+        ui.id("panel").col(Style::new().w(px(50.0)).h(px(100.0)).scroll_y(), |ui| {
+          ui.el(Style::new().w(px(50.0)).h(px(1000.0)));
+          let pop = Style::new().w(px(50.0)).h(px(20.0));
+          ui.id("pop").float(Float::parent().attach(0.0, 1.0)).col(pop, |ui| {
+            ui.id("item").el(Style::new().w(px(50.0)).h(px(20.0)).focusable());
+          });
+        });
+        ui.el(Style::new().w(px(50.0)).h(px(100.0)));
+      });
+    };
+    let mut st = frame(UiState::default(), view);
+    st.focus_next(true);
+    st = frame(st, view);
+    assert_eq!(st.focus(), Some(Id::of("item")));
+    assert_eq!((offset(&st, "panel"), offset(&st, "outer")), (0.0, 70.0));
+  }
+
+  #[test]
   fn reveal_scrolls_the_least() {
     let list = |ui: &mut Ui| {
       ui.id("list").col(Style::new().w(px(50.0)).h(px(100.0)).scroll_y(), |ui| {
