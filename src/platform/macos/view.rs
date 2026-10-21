@@ -537,11 +537,14 @@ fn phase(p: NSEventPhase) -> Phase {
 
 /// A key event: named keys by virtual key code, the rest by the character they type. With Cmd
 /// or Ctrl a non-Latin character is the ASCII-capable layout's, so shortcuts work on a Russian
-/// layout as AppKit's menus do.
+/// layout as AppKit's menus do; with Cmd on a layout that maps keys anew under it ("Dvorak –
+/// QWERTY ⌘"), that mapping's.
 fn key_event(event: &NSEvent) -> KeyEvent {
   let (code, mods) = (event.keyCode(), mods(event));
   let first = |s: Option<Retained<NSString>>| s.and_then(|s| s.to_string().chars().next());
+  let cmd = mods.cmd.then(|| keyboard::cmd_char(code, mods.shift)).flatten();
   let key = Key::named(code).unwrap_or_else(|| match first(event.charactersIgnoringModifiers()) {
+    Some(_) if let Some(c) = cmd => Key::Char(c),
     Some(c) if (mods.cmd || mods.ctrl) && !c.is_ascii() => {
       keyboard::ascii_char(code, mods.shift).map_or(Key::Char(c), Key::Char)
     }
