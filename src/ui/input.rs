@@ -352,7 +352,14 @@ impl UiState {
   pub(crate) fn tick(&mut self, now: Duration) {
     let mut moving = std::mem::take(&mut self.input.moving);
     moving.retain(|&id| {
-      let Some(n) = self.last.get(id) else { return false };
+      let Some(n) = self.last.get(id) else {
+        // Hidden (a retained tab): the momentum stops where the content is, not to run later.
+        if let Some(s) = self.store.peek_mut::<ScrollState>(id) {
+          s.pending = Point::default();
+        }
+
+        return false;
+      };
       let max = max_scroll(n);
       let s = self.store.raw::<ScrollState>(id);
       let k = 1.0 - (-now.saturating_sub(s.t).as_secs_f32() / WHEEL_TAU).exp();
@@ -762,6 +769,20 @@ mod tests {
     st = frame(st, tab(false, false));
     st = frame(st, tab(true, false));
     assert_eq!(offset(&st, "list"), 0.0);
+
+    // Hidden while the wheel's momentum runs: it stops where it is, and a later scroll up
+    // doesn't take the rest of it.
+    ev(&mut st, wheel(10.0, 10.0, 0.0, -100.0, false, Phase::None));
+    st.tick(Duration::from_millis(16));
+    let at = offset(&st, "list");
+    assert!(at > 0.0 && at < 100.0, "{at}");
+    st = frame(st, tab(false, true));
+    st.tick(Duration::from_secs(1));
+    st = frame(st, tab(true, false));
+    assert_eq!(offset(&st, "list"), at);
+    ev(&mut st, wheel(10.0, 10.0, 0.0, 10.0, false, Phase::None));
+    st.tick(Duration::from_secs(2));
+    assert_eq!(offset(&st, "list"), (at - 10.0).max(0.0));
   }
 
   #[test]
