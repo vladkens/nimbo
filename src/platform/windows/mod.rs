@@ -8,6 +8,7 @@
 //! one when it shows again. Then the performance cores.
 
 use std::cell::RefCell;
+use std::mem::offset_of;
 use std::ptr::{null, null_mut};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -15,8 +16,8 @@ use windows_sys::Win32::Foundation::{FILETIME, HANDLE, HWND, LPARAM, LRESULT, RE
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::SystemInformation::{
-  GetLogicalProcessorInformationEx, GetSystemTimePreciseAsFileTime, RelationProcessorCore,
-  SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
+  GetLogicalProcessorInformationEx, GetSystemTimePreciseAsFileTime, PROCESSOR_RELATIONSHIP,
+  RelationProcessorCore, SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
 };
 use windows_sys::Win32::System::Threading::{
   CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, CreateWaitableTimerExW, GetCurrentProcess,
@@ -465,16 +466,20 @@ pub fn perf_cores() -> Option<usize> {
     return None;
   }
 
-  // Variable-sized records, each `Size` bytes.
+  // Variable-sized records, each `Size` bytes: a core's is shorter than the whole union, so
+  // only its fields are read, from the bytes, never through a reference to the full record.
+  // SAFETY: the call filled `len` bytes of `buf`, which holds at least that many.
+  let bytes = unsafe { std::slice::from_raw_parts(buf.as_ptr().cast::<u8>(), len as usize) };
+  let size_at = offset_of!(SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX, Size);
+  let class_at = offset_of!(SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX, Anonymous)
+    + offset_of!(PROCESSOR_RELATIONSHIP, EfficiencyClass);
   let mut classes = Vec::new();
   let mut at = 0;
-  while at < len as usize {
-    // SAFETY: a record starts at `at` within the `len` bytes the call filled.
-    let rec = unsafe {
-      &*buf.as_ptr().cast::<u8>().add(at).cast::<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>()
-    };
-    classes.push(unsafe { rec.Anonymous.Processor.EfficiencyClass });
-    at += rec.Size.max(1) as usize;
+  while let (Some(size), Some(&class)) =
+    (bytes.get(at + size_at..at + size_at + 4), bytes.get(at + class_at))
+  {
+    classes.push(class);
+    at += u32::from_ne_bytes(size.try_into().ok()?).max(1) as usize;
   }
 
   let top = *classes.iter().max()?;
