@@ -165,10 +165,11 @@ impl KeyEvent {
 /// (or `-`), in any order and case, spaces allowed around the parts: `cmd+shift+z`,
 /// `option+space`, `ctrl+option+cmd+F12`, `cmd++`, `escape`. Modifiers: `ctrl` (`control`),
 /// `option` (`opt`, `alt`), `shift`, `cmd` (`command`, `super`, `meta`). Keys: a character,
-/// `f1` to `f20`, or a name: `return` (`enter`), `tab`, `delete` (`backspace`, ⌫),
-/// `forwarddelete` (⌦), `escape` (`esc`), `left`, `right`, `up`, `down`, `home`, `end`, `pageup`,
-/// `pagedown`, and `space`, `minus`, `equal`, `bracketleft`, `bracketright`, `backslash`,
-/// `semicolon`, `quote`, `comma`, `period`, `slash`, `grave` for those characters.
+/// `f1` to `f20`, or a name: `return` (`enter`), `tab`, `delete` (`backspace`, ⌫) and
+/// `forwarddelete` (⌦) as Mac keyboards name them, `escape` (`esc`), `left`, `right`, `up`, `down`,
+/// `home`, `end`, `pageup`, `pagedown`, and `space`, `minus`, `equal`, `bracketleft`,
+/// `bracketright`, `backslash`, `semicolon`, `quote`, `comma`, `period`, `slash`, `grave` for those
+/// characters.
 ///
 /// `mods` are the modifier keys held, as a [KeyEvent] has them; where it works decides what `cmd`
 /// and `ctrl` name and how the key matches:
@@ -242,7 +243,7 @@ impl std::error::Error for ShortcutError {}
 impl Shortcut {
   /// A shortcut in the app: `cmd` is the command key [CMD]; see [Shortcut].
   pub fn parse(text: &str) -> Result<Self, ShortcutError> {
-    parse(text, false).map(|(s, _)| s)
+    parse(text, false)
   }
 
   /// Letters match in either case, Shift given by the modifiers: `cmd+shift+z` is Cmd-Shift-Z.
@@ -262,10 +263,7 @@ impl Shortcut {
   /// The key's place, as a global hotkey takes it: a character's on a US keyboard without Shift;
   /// `None` for a character that needs Shift there (`!`) or none.
   pub fn code(&self) -> Option<Code> {
-    match self.key {
-      Key::Char(c) => us_code(lower(c)).filter(|k| !k.1).map(|k| k.0),
-      k => k.code(),
-    }
+    place(self.key)
   }
 
   /// As the platform shows it: [Shortcut::symbols] on macOS, [Shortcut::names] elsewhere.
@@ -285,23 +283,10 @@ impl Shortcut {
   }
 }
 
-/// The parts of `text` between its `+` and `-`; a separator that would leave a part empty is the
-/// key itself: `cmd++`, `cmd+-`, `-`.
-fn parts(text: &str) -> Vec<&str> {
-  let (mut parts, mut start) = (vec![], 0);
-  for (i, c) in text.char_indices() {
-    if matches!(c, '+' | '-') && !text[start..i].trim().is_empty() {
-      parts.push(text[start..i].trim());
-      start = i + 1;
-    }
-  }
-
-  parts.push(text[start..].trim());
-  parts
-}
-
-/// The shortcut `text` writes, in the app or `global`, and the part that named its key.
-fn parse(text: &str, global: bool) -> Result<(Shortcut, String), ShortcutError> {
+/// The shortcut `text` writes, in the app or `global` (where its key needs a place). Its parts are
+/// split at `+` and `-`; a separator that would leave a part empty is the key itself: `cmd++`,
+/// `cmd+-`, `-`. No allocation unless it fails: bindings are parsed on every key press.
+fn parse(text: &str, global: bool) -> Result<Shortcut, ShortcutError> {
   use ShortcutError::*;
   let text = text.trim();
   if text.is_empty() {
@@ -314,19 +299,22 @@ fn parse(text: &str, global: bool) -> Result<(Shortcut, String), ShortcutError> 
 
   let mut mods = Modifiers::empty();
   let mut key: Option<(Key, &str)> = None;
-  for part in parts(text) {
-    let name = part.to_lowercase();
+  let mut take = |from: usize, to: usize| {
+    let part = text[from..to].trim();
+    let mut buf = [0; 16];
+    let name = ascii_lower(part, &mut buf);
     if name == "fn" || name == "function" {
       return Err(Fn);
     }
 
-    match modifier(&name) {
+    match modifier(name) {
       // In the app, the platform's command key and its other one.
       Some(m) if !global && m == Modifiers::META => mods |= CMD,
       Some(m) if !global && m == Modifiers::CONTROL => mods |= CTRL,
       Some(m) => mods |= m,
       None => {
-        let k = parse_key(&name).ok_or_else(|| Unknown(part.to_owned()))?;
+        let k = parse_key(part, name).filter(|&k| !global || place(k).is_some());
+        let k = k.ok_or_else(|| Unknown(part.to_owned()))?;
         if let Some((_, first)) = key {
           return Err(TwoKeys(first.to_owned(), part.to_owned()));
         }
@@ -334,10 +322,37 @@ fn parse(text: &str, global: bool) -> Result<(Shortcut, String), ShortcutError> 
         key = Some((k, part));
       }
     }
+
+    Ok(())
+  };
+
+  let mut start = 0;
+  for (i, c) in text.char_indices() {
+    if matches!(c, '+' | '-') && !text[start..i].trim().is_empty() {
+      take(start, i)?;
+      start = i + 1;
+    }
   }
 
-  let (key, part) = key.ok_or(NoKey)?;
-  Ok((Shortcut { key, mods }, part.to_owned()))
+  take(start, text.len())?;
+  let (key, _) = key.ok_or(NoKey)?;
+  Ok(Shortcut { key, mods })
+}
+
+/// [Shortcut::code] of `key`.
+fn place(key: Key) -> Option<Code> {
+  match key {
+    Key::Char(c) => us_code(lower(c)).filter(|k| !k.1).map(|k| k.0),
+    k => k.code(),
+  }
+}
+
+/// `s` in ASCII lowercase, in `buf`; empty when it is longer or not ASCII, as no name is.
+fn ascii_lower<'a>(s: &str, buf: &'a mut [u8; 16]) -> &'a str {
+  let Some(out) = buf.get_mut(..s.len()).filter(|_| s.is_ascii()) else { return "" };
+  out.copy_from_slice(s.as_bytes());
+  out.make_ascii_lowercase();
+  std::str::from_utf8(out).unwrap_or("")
 }
 
 /// A modifier: as a shortcut writes it, as macOS and the PC show it, and its left and right keys.
@@ -364,11 +379,11 @@ fn modifier(name: &str) -> Option<Modifiers> {
   })
 }
 
-/// The key a lowercase part names: a character, `f1` to `f20`, or a name.
-fn parse_key(name: &str) -> Option<Key> {
-  let mut cs = name.chars();
+/// The key `part` names (`name` in lowercase): a character, `f1` to `f20`, or a name.
+fn parse_key(part: &str, name: &str) -> Option<Key> {
+  let mut cs = part.chars();
   if let (Some(c), None) = (cs.next(), cs.next()) {
-    return Some(Key::Char(c));
+    return Some(Key::Char(c.to_ascii_lowercase()));
   }
 
   let f = name.strip_prefix('f').filter(|n| !n.starts_with('0'));
@@ -466,7 +481,14 @@ fn modifier_key(text: &str) -> Option<Code> {
     return None;
   }
 
-  let name: String = text.to_lowercase().chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+  // Its letters and digits, lowercase: no allocation, as bindings are parsed on each key press.
+  let (mut buf, mut n) = ([0u8; 16], 0);
+  for c in text.bytes().filter(u8::is_ascii_alphanumeric) {
+    *buf.get_mut(n)? = c.to_ascii_lowercase();
+    n += 1;
+  }
+
+  let name = std::str::from_utf8(&buf[..n]).ok()?;
   if name == "fn" || name == "globe" {
     return Some(Code::Fn);
   }
@@ -492,11 +514,7 @@ impl Hotkey {
       return Ok(Hotkey::Modifier(key));
     }
 
-    let (shortcut, part) = parse(text, true)?;
-    match shortcut.code() {
-      Some(_) => Ok(Hotkey::Shortcut(shortcut)),
-      None => Err(ShortcutError::Unknown(part)),
-    }
+    parse(text, true).map(Hotkey::Shortcut)
   }
 
   /// As the platform shows it: `⌃⌥Space`, `Right ⌥`, `fn`; `Ctrl+Alt+Space`, `Right Alt`.
@@ -857,6 +875,14 @@ mod tests {
     assert_eq!(Shortcut::parse("f12"), k(Key::Named(N::F12), Modifiers::empty()));
     assert_eq!(Shortcut::parse("space"), k(Key::Char(' '), Modifiers::empty()));
     assert_eq!(Shortcut::parse("cmd+?"), k(Key::Char('?'), CMD));
+    assert_eq!(Shortcut::parse("shift+İ"), k(Key::Char('İ'), Modifiers::SHIFT));
+    // `delete` is ⌫ in the app too, as in settings; ⌦ is `forwarddelete`.
+    let backspace = Key::Named(N::Backspace);
+    assert_eq!(Shortcut::parse("cmd+delete"), k(backspace, CMD));
+    assert_eq!(Shortcut::parse("backspace"), k(backspace, Modifiers::empty()));
+    assert_eq!(Shortcut::parse("forwarddelete"), k(Key::Named(N::Delete), Modifiers::empty()));
+    assert_eq!(hot("delete").map(|s| s.key), Ok(backspace));
+    assert_eq!(Shortcut::parse("a+!"), Err(ShortcutError::TwoKeys("a".into(), "!".into())));
     for bad in ["", "cmd+", "hyper+a", "ab", "cmd+ab", "f21"] {
       assert!(Shortcut::parse(bad).is_err(), "{bad}");
     }
@@ -1106,6 +1132,7 @@ mod tests {
     assert_eq!(Hotkey::parse("a+b"), Err(TwoKeys("a".into(), "b".into())));
     // Keys with no place without Shift on a US keyboard.
     assert_eq!(Hotkey::parse("ctrl+!"), Err(Unknown("!".into())));
+    assert_eq!(Hotkey::parse("a+!"), Err(Unknown("!".into())));
     for bad in ["f0", "f21", "f012", "ctrl++", "ctrl+", "é"] {
       assert!(Hotkey::parse(bad).is_err(), "{bad}");
     }
