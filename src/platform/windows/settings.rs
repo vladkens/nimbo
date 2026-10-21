@@ -122,11 +122,22 @@ mod tests {
     assert!(changed(WM_DWMCOLORIZATIONCOLORCHANGED, 0));
   }
 
-  /// The system's setting reads back, whichever it is.
+  /// A DWORD reads back from a key of the test's own, deleted after; a missing value or key
+  /// reads as none. The system's own values may be missing on a valid profile.
   #[test]
   fn the_registry_is_read() {
-    assert!(dword(PERSONALIZE, "AppsUseLightTheme").is_some_and(|v| v <= 1));
-    assert!(dword(ACCENT, "AccentColorMenu").is_some());
-    assert_eq!(dword(PERSONALIZE, "NoSuchValue"), None);
+    use windows_sys::Win32::System::Registry::{REG_DWORD, RegDeleteKeyW, RegSetKeyValueW};
+
+    let key = format!(r"Software\nimbo-test-{}", std::process::id());
+    let (k, name, v) = (wide(&key), wide("Value"), 7u32);
+    let p = (&raw const v).cast();
+    let set =
+      unsafe { RegSetKeyValueW(HKEY_CURRENT_USER, k.as_ptr(), name.as_ptr(), REG_DWORD, p, 4) };
+    let (value, missing) = (dword(&key, "Value"), dword(&key, "Missing"));
+    unsafe { RegDeleteKeyW(HKEY_CURRENT_USER, k.as_ptr()) };
+
+    assert_eq!(set, 0);
+    assert_eq!((value, missing), (Some(7), None));
+    assert_eq!(dword(&key, "Value"), None, "the key is gone");
   }
 }
