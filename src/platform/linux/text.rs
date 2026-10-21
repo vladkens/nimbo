@@ -179,6 +179,7 @@ fns!(Hb {
   fn hb_buffer_get_glyph_infos(buf: P, len: *mut c_uint) -> *const HbGlyphInfo;
   fn hb_buffer_get_glyph_positions(buf: P, len: *mut c_uint) -> *const HbGlyphPosition;
   fn hb_ot_metrics_get_position(font: P, tag: u32, position: *mut i32) -> c_int;
+  fn hb_font_get_nominal_glyph(font: P, unicode: u32, glyph: *mut u32) -> c_int;
 });
 
 #[repr(C)]
@@ -622,11 +623,15 @@ pub fn color_glyph(face: &Face, id: u16) -> Option<bool> {
   text
 }
 
+/// Tab stops, in points from the line's start: CoreText's default interval (every 28 pt).
+pub const TAB: f32 = 28.0;
+
 /// Shapes `s` with HarfBuzz, one run per font of the fallback chain; `index` gives the text
 /// system's index of each run's face. Clusters are byte offsets of `s`, as HarfBuzz gives them
-/// for UTF-8 (each run shaped with the whole line as context). Not yet: bidi and script runs, so
-/// a font run mixing scripts (Latin and Arabic) shapes in the script and direction HarfBuzz
-/// guesses from its start; Arabic alone shapes right.
+/// for UTF-8 (each run shaped with the whole line as context). A tab is the font's space glyph
+/// advancing to the next [TAB] stop: fonts have no glyph for it (HarfBuzz gives `.notdef`, a
+/// box). Not yet: bidi and script runs, so a font run mixing scripts (Latin and Arabic) shapes in
+/// the script and direction HarfBuzz guesses from its start; Arabic alone shapes right.
 pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {
   let runs = cache().itemize(face.chain, s);
   let hb = &sys().hb;
@@ -647,11 +652,18 @@ pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {
       let infos = std::slice::from_raw_parts(infos, n as usize);
       let pos = (hb.hb_buffer_get_glyph_positions)(buf, &mut n);
       let pos = std::slice::from_raw_parts(pos, n as usize);
+      let mut space = 0;
+      (hb.hb_font_get_nominal_glyph)(font, ' ' as u32, &mut space);
       for (g, p) in infos.iter().zip(pos) {
+        let tab = s.as_bytes().get(g.cluster as usize) == Some(&b'\t');
         let (x, y) = (pen + p.x_offset as f32 * k, p.y_offset as f32 * k);
-        glyphs.push(Glyph { face: id, id: g.codepoint as u16, x, y });
+        let gid = if tab { space } else { g.codepoint };
+        glyphs.push(Glyph { face: id, id: gid as u16, x, y });
         clusters.push(g.cluster);
-        pen += p.x_advance as f32 * k;
+        pen = match tab {
+          true => (pen / TAB).floor() * TAB + TAB,
+          false => pen + p.x_advance as f32 * k,
+        };
       }
 
       (hb.hb_buffer_destroy)(buf);
@@ -985,6 +997,20 @@ mod tests {
       let white = pixels([1.0; 4]);
       assert!(white != pixels([0.0, 0.0, 0.0, 1.0]), "glyph {fg} takes the text's colour");
     }
+  }
+
+  /// A tab advances to the next stop, as CoreText's default ones, and draws nothing (DejaVu
+  /// Sans has no glyph for it: HarfBuzz gives `.notdef`, a box).
+  #[test]
+  fn tabs_advance_to_stops_without_ink() {
+    let f = face(Font::ui(13.0));
+    let line = shape(&f, "a\tb", |_| 0);
+    assert_eq!(line.glyphs.len(), 3);
+    assert!(glyph_box(&f, line.glyphs[1].id, 2.0, 0).is_none(), "a tab draws nothing");
+    assert_eq!(line.glyphs[2].x, TAB);
+    assert_eq!(shape(&f, "\t\t", |_| 0).width, 2.0 * TAB);
+    let long = shape(&f, "abcdefghijklmnop\t", |_| 0);
+    assert_eq!(long.width, (long.glyphs[16].x / TAB).floor() * TAB + TAB);
   }
 
   #[test]
