@@ -339,6 +339,7 @@ pub fn open(cfg: &Config, app: Box<dyn App>) -> u64 {
   let delegate = WindowDelegate::new(mtm, id);
   window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
   window.center();
+  window.makeFirstResponder(Some(&view));
   let win = Win { id, window, view, _delegate: delegate, on_close: None };
   shell(|s| s.windows.push(win));
   front(id);
