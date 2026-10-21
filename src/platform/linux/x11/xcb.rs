@@ -65,6 +65,8 @@ fns!(Xcb {
   fn xcb_set_selection_owner(c: C, owner: u32, selection: u32, time: u32) -> u32;
   fn xcb_get_selection_owner(c: C, selection: u32) -> u32;
   fn xcb_get_selection_owner_reply(c: C, cookie: u32, e: E) -> *mut OwnerReply;
+  fn xcb_query_pointer(c: C, w: u32) -> u32;
+  fn xcb_query_pointer_reply(c: C, cookie: u32, e: E) -> *mut PointerReply;
   fn xcb_convert_selection(c: C, requestor: u32, selection: u32, target: u32, property: u32,
     time: u32) -> u32;
   fn xcb_open_font(c: C, fid: u32, len: u16, name: *const c_char) -> u32;
@@ -164,6 +166,23 @@ pub struct AtomReply {
   sequence: u16,
   length: u32,
   atom: u32,
+}
+
+/// `xcb_query_pointer_reply_t`.
+#[repr(C)]
+pub struct PointerReply {
+  response_type: u8,
+  same_screen: u8,
+  sequence: u16,
+  length: u32,
+  root: u32,
+  child: u32,
+  root_x: i16,
+  root_y: i16,
+  win_x: i16,
+  win_y: i16,
+  mask: u16,
+  pad: [u8; 2],
 }
 
 #[repr(C)]
@@ -740,6 +759,14 @@ impl X {
 
   pub fn set_selection_owner(&self, owner: u32, selection: u32, time: u32) {
     unsafe { (self.l.xcb.xcb_set_selection_owner)(self.c, owner, selection, time) };
+  }
+
+  /// The modifiers and buttons held now (`QueryPointer`'s mask, as an event's state).
+  pub fn pointer_state(&self, w: u32) -> Option<u16> {
+    let f = &self.l.xcb;
+    let k = unsafe { (f.xcb_query_pointer)(self.c, w) };
+    let r = unsafe { (f.xcb_query_pointer_reply)(self.c, k, std::ptr::null_mut()) };
+    reply(r, |r| r.mask)
   }
 
   pub fn selection_owner(&self, selection: u32) -> u32 {

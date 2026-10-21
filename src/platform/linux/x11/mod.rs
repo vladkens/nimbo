@@ -318,11 +318,7 @@ fn run_on(
       win.handle(ev);
     }
 
-    if std::mem::take(&mut win.reload_keymap)
-      && let Some(kb) = keyboard(&x, win.root, win.atoms.rules)
-    {
-      win.kb = Some(kb);
-    }
+    win.apply_keymap();
 
     if x.has_error() {
       return Err("the X connection broke".into());
@@ -621,17 +617,38 @@ impl Win {
     self.sync_mods();
   }
 
+  /// The keyboard's modifiers, as the last event's state set them.
+  fn kb_mods(&self) -> Mods {
+    self.kb.as_ref().map_or(Mods::NONE, |kb| kb.mods())
+  }
+
+  /// Sends [Event::Mods] when they changed; none while the window lacks the focus (their key
+  /// presses go to another window, the pointer's events still carry them).
   fn sync_mods(&mut self) {
-    let mods = self.kb.as_ref().map_or(Mods::NONE, |kb| kb.mods());
+    let mods = if self.focused { self.kb_mods() } else { Mods::NONE };
     if mods != self.mods {
       self.mods = mods;
       self.send(Event::Mods(mods));
     }
   }
 
+  /// A keymap change seen (`MappingNotify`, XKB's notify): the new one, before the next key is
+  /// read with it; changes in a row are read once.
+  fn apply_keymap(&mut self) {
+    if std::mem::take(&mut self.reload_keymap)
+      && let Some(kb) = keyboard(&self.x, self.root, self.atoms.rules)
+    {
+      self.kb = Some(kb);
+    }
+  }
+
   fn handle(&mut self, ev: Ev) {
-    if matches!(ev.kind(), KEY_PRESS | KEY_RELEASE) && !self.kb_ready {
-      self.setup_keyboard();
+    if matches!(ev.kind(), KEY_PRESS | KEY_RELEASE) {
+      if !self.kb_ready {
+        self.setup_keyboard();
+      }
+
+      self.apply_keymap();
     }
 
     match ev.kind() {
@@ -677,7 +694,7 @@ impl Win {
         let e = ev.get::<InputEv>();
         self.core_state(e.state);
         self.mouse = self.point(e.event_x, e.event_y);
-        let (pos, mods) = (self.mouse, self.mods);
+        let (pos, mods) = (self.mouse, self.kb_mods());
         self.send(Event::MouseMove { pos, mods });
       }
       ENTER_NOTIFY => {
@@ -685,7 +702,7 @@ impl Win {
         self.core_state(e.state);
         self.inside = true;
         self.mouse = self.point(e.event_x, e.event_y);
-        let (pos, mods) = (self.mouse, self.mods);
+        let (pos, mods) = (self.mouse, self.kb_mods());
         self.send(Event::MouseMove { pos, mods });
       }
       LEAVE_NOTIFY => {
@@ -835,12 +852,18 @@ impl Win {
 
     self.focused = on;
     self.held = [0; 4];
-    if !on && self.mods != Mods::NONE {
-      self.mods = Mods::NONE;
-      self.send(Event::Mods(Mods::NONE));
+    if !on {
+      self.sync_mods();
+      self.send(Event::Focus(false));
+      return;
     }
 
-    self.send(Event::Focus(on));
+    // Modifiers pressed or let go in another window: those held now.
+    self.send(Event::Focus(true));
+    match self.x.pointer_state(self.root) {
+      Some(state) => self.core_state(state),
+      None => self.sync_mods(),
+    }
   }
 
   // MARK: Keys
@@ -891,7 +914,7 @@ impl Win {
   /// Buttons 1–3 click, 4–7 scroll a wheel click up, down, left, right, 8 and 9 are back and
   /// forward (as evdev's side and extra buttons on Wayland).
   fn button(&mut self, detail: u8, down: bool, state: u16) {
-    let (pos, mods) = (self.mouse, self.mods);
+    let (pos, mods) = (self.mouse, self.kb_mods());
     let wheel = match detail {
       4 => Some(Point::new(0.0, WHEEL_LINE)),
       5 => Some(Point::new(0.0, -WHEEL_LINE)),
