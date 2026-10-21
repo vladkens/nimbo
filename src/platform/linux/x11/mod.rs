@@ -6,9 +6,9 @@
 //! from `Xft.dpi` in the resources ([settings]; the size hints follow it), the keyboard through
 //! xkbcommon ([super::xkb]: the server's keymap with libxkbcommon-x11, else its rules names; the
 //! state from each event's modifiers and group), the server's key repeat (detectable: presses
-//! alone), cursors from the theme (libxcb-cursor) or the cursor font, the CLIPBOARD selection
-//! ([clip]), light or dark from XSETTINGS' `Net/ThemeName`, its manager followed as it starts,
-//! quits or restarts. No frames while the window is unmapped or fully covered
+//! alone), cursors from the theme (libxcb-cursor) or the cursor font ([cursor]), the CLIPBOARD
+//! selection ([clip]), light or dark from XSETTINGS' `Net/ThemeName`, its manager followed as it
+//! starts, quits or restarts. No frames while the window is unmapped or fully covered
 //! (`VisibilityNotify`; under a compositing manager it never is). One thread: the loop polls the
 //! connection and a wake eventfd with the next timer as the timeout.
 //!
@@ -18,13 +18,14 @@
 //! refresh rate (RandR), per-monitor scale.
 
 mod clip;
+mod cursor;
 mod present;
 mod settings;
 mod xcb;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 use std::os::fd::OwnedFd;
 use std::path::Path;
 use std::rc::Rc;
@@ -34,6 +35,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use rustix::event::{EventfdFlags, PollFd, PollFlags, Timespec, eventfd, poll};
 
 use self::clip::{Atoms as ClipAtoms, Clip, Clipboard};
+use self::cursor::Cursors;
 use self::present::{Presenter, STUCK};
 use self::settings::{appearance, dpi_scale};
 use self::xcb::*;
@@ -79,13 +81,6 @@ struct Atoms {
   xsettings_settings: u32,
   manager: u32,
   rules: u32,
-}
-
-/// Cursors made on first use: the theme's, else the cursor font's.
-struct Cursors {
-  theme: Option<CursorContext>,
-  font: u32,
-  made: Vec<(Cursor, u32)>,
 }
 
 struct Win {
@@ -298,7 +293,7 @@ fn run_on(
     started,
     exposed: false,
     cursor: Cursor::Arrow,
-    cursors: Cursors { theme, font: 0, made: Vec::new() },
+    cursors: Cursors::new(theme),
     mouse: Point::new(0.0, 0.0),
     inside: false,
     last_click: None,
@@ -320,7 +315,7 @@ fn run_on(
   };
   if win.trace {
     let shm = if win.present.completion().is_some() { "MIT-SHM" } else { "PutImage" };
-    let cursors = if win.cursors.theme.is_some() { "themed" } else { "font" };
+    let cursors = if win.cursors.themed() { "themed" } else { "font" };
     eprintln!("nimbo: x11, scale {scale}, frames by {shm}, {cursors} cursors");
   }
   // The window manager maps it while we draw the first frame, which the first expose puts;
@@ -967,36 +962,5 @@ impl Win {
     let clicks = clicks(self.last_click, button, time, pos);
     self.last_click = Some((button, time, pos, clicks));
     self.send(Event::MouseDown { pos, button, clicks, mods });
-  }
-}
-
-impl Cursors {
-  /// The X cursor for ours: the theme's by its CSS name or the legacy one, else the cursor
-  /// font's glyph; the arrow is the parent's (the desktop's) without a theme.
-  fn get(&mut self, x: &X, c: Cursor) -> u32 {
-    if let Some(&(_, id)) = self.made.iter().find(|m| m.0 == c) {
-      return id;
-    }
-
-    let (names, glyph): (&[&CStr], u16) = match c {
-      Cursor::Inherit | Cursor::Arrow => (&[c"default", c"left_ptr"], 68),
-      Cursor::Text => (&[c"text", c"xterm"], 152),
-      Cursor::Pointer => (&[c"pointer", c"hand2"], 60),
-      Cursor::ResizeX => (&[c"col-resize", c"sb_h_double_arrow"], 108),
-      Cursor::ResizeY => (&[c"row-resize", c"sb_v_double_arrow"], 116),
-      Cursor::Crosshair => (&[c"crosshair"], 34),
-      Cursor::Grab => (&[c"grab", c"openhand", c"hand1"], 58),
-      Cursor::Grabbing => (&[c"grabbing", c"closedhand", c"fleur"], 52),
-      Cursor::NotAllowed => (&[c"not-allowed", c"crossed_circle"], 0),
-    };
-
-    let id = match (&self.theme, c) {
-      (Some(t), _) => t.load(names).unwrap_or_else(|| x.font_cursor(&mut self.font, glyph)),
-      (None, Cursor::Inherit | Cursor::Arrow) => 0,
-      (None, _) => x.font_cursor(&mut self.font, glyph),
-    };
-
-    self.made.push((c, id));
-    id
   }
 }
