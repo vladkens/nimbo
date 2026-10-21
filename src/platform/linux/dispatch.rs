@@ -263,7 +263,7 @@ impl Dispatch<WlSeat, ()> for Win {
         pointer.release();
       }
 
-      win.enter_serial = None;
+      win.pointer_gone();
     }
 
     if !caps.contains(Capability::Keyboard)
