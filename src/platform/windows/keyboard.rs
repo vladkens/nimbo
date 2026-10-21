@@ -9,7 +9,7 @@
 
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
   GetAsyncKeyState, GetKeyState, GetKeyboardLayout, GetKeyboardState, ToUnicodeEx, VK_BACK,
-  VK_CONTROL, VK_DELETE, VK_DIVIDE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F12, VK_HOME, VK_INSERT,
+  VK_CONTROL, VK_DELETE, VK_DIVIDE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F20, VK_HOME, VK_INSERT,
   VK_LEFT, VK_LWIN, VK_MENU, VK_NEXT, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RWIN, VK_SHIFT, VK_SPACE,
   VK_TAB, VK_UP,
 };
@@ -119,7 +119,7 @@ pub fn code(vk: u16, scan: u16, extended: bool) -> u16 {
     VK_NEXT => Key::PageDown.code(),
     VK_INSERT => Some(114), // kVK_Help, where Mac keyboards had Insert
     VK_SPACE => Some(49),
-    VK_F1..=VK_F12 => Key::F((vk - VK_F1) as u8 + 1).code(),
+    VK_F1..=VK_F20 => Key::F((vk - VK_F1) as u8 + 1).code(),
     _ => None,
   };
 
@@ -312,6 +312,8 @@ mod tests {
       (VK_DIVIDE, 0x35, true, 75),
       (0xBF, 0x35, false, 44), // /
       (VK_F1 + 11, 0x58, false, 111),
+      (VK_F1 + 12, 0x64, false, 105), // F13
+      (VK_F20, 0x6B, false, 90),
       (VK_SPACE, 0x39, false, 49),
     ];
     for (vk, scan, ext, want) in cases {
