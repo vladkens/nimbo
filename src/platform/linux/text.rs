@@ -61,7 +61,31 @@ fns!(Ft {
   fn FT_Set_Transform(face: *mut FtFaceRec, matrix: P, delta: *mut [c_long; 2]);
   fn FT_Load_Glyph(face: *mut FtFaceRec, glyph: c_uint, flags: i32) -> c_int;
   fn FT_Render_Glyph(slot: *mut FtGlyphSlotRec, mode: c_int) -> c_int;
+  fn FT_Get_Color_Glyph_Layer(face: *mut FtFaceRec, base: c_uint, glyph: *mut c_uint,
+    color: *mut c_uint, it: *mut FtLayerIterator) -> u8;
+  fn FT_Palette_Set_Foreground_Color(face: *mut FtFaceRec, color: FtColor) -> c_int;
 });
+
+/// `FT_LayerIterator`: where [Ft::FT_Get_Color_Glyph_Layer] is in a glyph's COLR layers.
+#[repr(C)]
+struct FtLayerIterator {
+  num_layers: c_uint,
+  layer: c_uint,
+  p: *mut u8,
+}
+
+/// `FT_Color`: BGRA, not premultiplied.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct FtColor {
+  blue: u8,
+  green: u8,
+  red: u8,
+  alpha: u8,
+}
+
+/// A COLR layer's palette index for the text's colour.
+const FOREGROUND: c_uint = 0xffff;
 
 // <freetype/freetype.h>: the public head of FT_FaceRec and FT_GlyphSlotRec, up to the fields
 // read.
@@ -575,11 +599,27 @@ pub fn is_color(face: &Face) -> bool {
   face.file.color
 }
 
-/// How a glyph of a colour face draws: every one as colour, so a COLR layer in the text's colour
-/// and a monochrome glyph come out in FreeType's default foreground, black. TODO: per glyph, as
-/// on Windows.
-pub fn color_glyph(face: &Face, _id: u16) -> Option<bool> {
-  is_color(face).then_some(false)
+/// How glyph `id` of a colour face draws: a font of bitmap strikes (CBDT emoji) all in colour;
+/// one with COLR layers by the glyph's. None (a monochrome glyph, or one FreeType draws no
+/// layers for: COLRv1, SVG) is its outline as coverage, tinted like text (`None`); some in the
+/// text's colour (palette index 0xFFFF) is colour that takes it (`Some(true)`); else colour
+/// alone (`Some(false)`).
+pub fn color_glyph(face: &Face, id: u16) -> Option<bool> {
+  let file = &face.file;
+  if !file.color || file.strike.is_some() {
+    return file.color.then_some(false);
+  }
+
+  let s = sys();
+  let ft = file.ft.lock().unwrap_or_else(|e| e.into_inner());
+  let mut it = FtLayerIterator { num_layers: 0, layer: 0, p: std::ptr::null_mut() };
+  let (mut glyph, mut color, mut text) = (0, 0, None);
+  let get = s.ft.FT_Get_Color_Glyph_Layer;
+  while unsafe { get(ft.face, id as c_uint, &mut glyph, &mut color, &mut it) } != 0 {
+    text = Some(text.unwrap_or(false) || color == FOREGROUND);
+  }
+
+  text
 }
 
 /// Shapes `s` with HarfBuzz, one run per font of the fallback chain; `index` gives the text
@@ -681,13 +721,21 @@ impl Bitmap {
   }
 }
 
-/// Draws glyph `id` at the face's size × `scale`, `subpixel` quarters of a pixel right.
-fn render(face: &Face, id: u16, scale: f32, subpixel: u8) -> Option<Bitmap> {
+/// Draws glyph `id` at the face's size × `scale`, `subpixel` quarters of a pixel right; a
+/// colour face's layers in the text's colour in `text`.
+fn render(face: &Face, id: u16, scale: f32, subpixel: u8, text: [u8; 3]) -> Option<Bitmap> {
   #[cfg(test)]
   tests::RENDERS.with(|n| n.set(n.get() + 1));
   let s = sys();
   let file = &face.file;
   let mut ft = file.ft.lock().unwrap_or_else(|e| e.into_inner());
+  // COLR layers in the text's colour take it.
+  if file.color {
+    let [red, green, blue] = text;
+    let fg = FtColor { blue, green, red, alpha: 255 };
+    unsafe { (s.ft.FT_Palette_Set_Foreground_Color)(ft.face, fg) };
+  }
+
   let px = face.size * scale;
   let k = match file.strike {
     Some((strike, ppem)) => {
@@ -760,14 +808,15 @@ fn rendered(face: &Face, id: u16, scale: f32, subpixel: u8) -> Rendered {
 /// The pixel box of glyph `id` at `scale`, drawn `subpixel` quarters of a pixel to the right:
 /// FreeType's bitmap with one pixel of padding on each side. `None` for no ink (a space).
 pub fn glyph_box(face: &Face, id: u16, scale: f32, subpixel: u8) -> Option<GlyphBox> {
-  let b = render(face, id, scale, subpixel)?;
+  let b = render(face, id, scale, subpixel, [0; 3])?;
   let gb = b.glyph_box();
   LAST.with(|l| *l.borrow_mut() = Some((rendered(face, id, scale, subpixel), b)));
   Some(gb)
 }
 
 /// Draws glyph `id` into the pixels of `b` (from [glyph_box] with the same `subpixel`), rows
-/// top-down: coverage, or premultiplied RGBA for a colour face (`color`). Font smoothing has no
+/// top-down: coverage, or premultiplied RGBA for a colour glyph (`color`), its COLR layers in the
+/// text's colour in `raster.text`. Font smoothing has no
 /// FreeType counterpart: `raster.smooth` is ignored.
 pub fn rasterize(
   face: &Face,
@@ -778,10 +827,11 @@ pub fn rasterize(
   color: bool,
 ) -> Option<Vec<u8>> {
   let key = rendered(face, id, raster.scale, subpixel);
-  let last = LAST.with(|l| l.borrow_mut().take()).filter(|(k, _)| *k == key);
+  // A colour glyph is drawn again in the text's colour; [glyph_box]'s was in black.
+  let last = LAST.with(|l| l.borrow_mut().take()).filter(|(k, _)| *k == key && !color);
   let g = match last {
     Some((_, g)) => g,
-    None => render(face, id, raster.scale, subpixel)?,
+    None => render(face, id, raster.scale, subpixel, raster.text)?,
   };
 
   let gb = g.glyph_box();
@@ -902,6 +952,39 @@ mod tests {
       faces.len() as u16 - 1
     });
     assert!(is_color(&faces[line.glyphs[0].face as usize]));
+  }
+
+  /// A COLR emoji font's glyphs by their layers (Segoe UI Emoji, Twemoji): one with none is
+  /// coverage, tinted like text; one with layers in the text's colour takes it. Skipped without
+  /// such a font (CBDT emoji have no layers).
+  #[test]
+  fn colr_glyphs_draw_by_their_layers() {
+    let mut ts = crate::text::TextSystem::new(2.0);
+    // Asked for as emoji: a colour font, where there is one.
+    let g = ts.layout("😀\u{fe0f}", Font::ui(13.0)).glyphs[0];
+    let f = ts.faces[g.face as usize].clone();
+    if !f.file.color || f.file.strike.is_some() {
+      println!("no COLR emoji font: skipped");
+      return;
+    }
+
+    let ink = |id| glyph_box(&f, id, 1.0, 0).is_some();
+    let glyphs: Vec<_> =
+      (1..20000).filter(|&id| ink(id)).map(|id| (id, color_glyph(&f, id))).collect();
+    assert!(glyphs.iter().any(|g| g.1 == Some(false)), "no colour glyphs");
+    if let Some(&(mono, _)) = glyphs.iter().find(|g| g.1.is_none()) {
+      let a = ts.glyph(g.face, mono, 0, [1.0; 4]).unwrap();
+      assert!(!a.color, "glyph {mono} in the coverage atlas");
+    }
+
+    if let Some(&(fg, _)) = glyphs.iter().find(|g| g.1 == Some(true)) {
+      let mut pixels = |color| {
+        ts.glyph(g.face, fg, 0, color).unwrap();
+        ts.uploads().next_back().unwrap().data
+      };
+      let white = pixels([1.0; 4]);
+      assert!(white != pixels([0.0, 0.0, 0.0, 1.0]), "glyph {fg} takes the text's colour");
+    }
   }
 
   #[test]
