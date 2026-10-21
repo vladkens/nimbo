@@ -47,6 +47,25 @@ fn fade(c: Color, alpha: f32) -> Color {
   [c[0], c[1], c[2], c[3] * alpha]
 }
 
+/// The box with what it draws outside itself: its shadow, and the focus ring when it has one.
+fn outer(s: &Style, r: Rect, ring: Option<FocusRing>) -> Rect {
+  let (mut x0, mut y0, mut x1, mut y1) = (r.x, r.y, r.x + r.w, r.y + r.h);
+  let sh = s.shadow;
+  if sh.color[3] > 0.0 {
+    let b = sh.blur * 2.0;
+    (x0, y0) = (x0.min(r.x + sh.offset.x - b), y0.min(r.y + sh.offset.y - b));
+    (x1, y1) = (x1.max(r.x + r.w + sh.offset.x + b), y1.max(r.y + r.h + sh.offset.y + b));
+  }
+
+  if let Some(ring) = ring {
+    let o = ring.gap + ring.width;
+    (x0, y0, x1, y1) =
+      (x0.min(r.x - o), y0.min(r.y - o), x1.max(r.x + r.w + o), y1.max(r.y + r.h + o));
+  }
+
+  Rect::new(x0, y0, x1 - x0, y1 - y0)
+}
+
 fn visible(r: Rect, clip: Rect) -> bool {
   r.x < clip.x + clip.w && clip.x < r.x + r.w && r.y < clip.y + clip.h && clip.y < r.y + r.h
 }
@@ -64,19 +83,19 @@ fn node(
   let (s, r) = (&n.style, n.rect);
   let alpha = alpha * s.opacity;
   let leaf = n.end as usize == i + 1;
-  if alpha <= 0.0 || (leaf || s.clip) && !visible(r, clip) {
+  let own = ring.filter(|&(k, _)| k == i).map(|(_, ring)| ring);
+  if alpha <= 0.0 || (leaf || s.clip) && !visible(outer(s, r, own), clip) {
     return;
   }
 
-  if let Some((k, ring)) = ring
-    && k == i
-  {
+  if let Some(ring) = own {
     // Outside the box, so under it is the same as over it.
     let o = ring.gap + ring.width;
     let rect = Rect::new(r.x - o, r.y - o, r.w + 2.0 * o, r.h + 2.0 * o);
     let q = Quad::new(rect, [0.0; 4]).radii(s.radii.map(|v| v + o));
     f.quad(q.border(ring.width, fade(ring.color, alpha)));
   }
+
   decorate(s, r, alpha, f);
 
   match n.kind {
@@ -214,6 +233,34 @@ mod tests {
     assert_eq!((layers[2].clip, layers[2].quads.len(), layers[2].glyphs.len()), (None, 1, 3));
     assert_eq!(layers[2].quads[0].color[3], 0.5);
     assert_eq!(scene.counts().quads + scene.counts().glyphs, 8);
+  }
+
+  #[test]
+  fn a_shadow_in_view_paints_though_its_box_is_not() {
+    let (size, scale) = (Size::new(100.0, 50.0), 1.0);
+    let (mut scene, mut text, mut images) =
+      (Scene::default(), TextSystem::new(scale), Images::default());
+    let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
+    // 12 above the window, 10 high, its shadow 4 lower with no blur: 2 rows of it show.
+    let shadow = crate::ui::Shadow::new(4.0, 0.0, [0.0, 0.0, 0.0, 1.0]);
+    let s = Style::new().w(px(20.0)).h(px(10.0)).bg([1.0; 4]).shadow(shadow);
+    ui.float(Float::window().offset(0.0, -12.0)).el(s);
+    ui.float(Float::window().offset(0.0, -40.0)).el(s);
+    let mut sys = Sys { text: &mut text, images: &images, scale };
+    ui.layout(&mut sys, scale);
+    let mut f = Frame {
+      size,
+      scale,
+      mouse: None,
+      now: Duration::ZERO,
+      scene: &mut scene,
+      text: &mut text,
+      images: &mut images,
+      animate: false,
+    };
+    ui.paint(&mut f);
+    // The first one's shadow and box; nothing of the one far above.
+    assert_eq!(scene.counts().quads, 2);
   }
 
   #[test]
