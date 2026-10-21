@@ -430,7 +430,12 @@ impl Cache {
       0 => has_char(ch.primary_charset, c),
       k => has_char(charset(ch.fallbacks[k - 1].0), c),
     };
-    let runs = runs(s, ch.fallbacks.len() + 1, has);
+    // A fallback's colour from fontconfig (`FC_COLOR`), for an emoji presentation selector.
+    let color = |font: usize| match font {
+      0 => ch.primary.color,
+      k => get_bool(ch.fallbacks[k - 1].0, c"color").unwrap_or(false),
+    };
+    let runs = runs(s, ch.fallbacks.len() + 1, has, color);
 
     let mut out = Vec::with_capacity(runs.len());
     for (range, pick) in runs {
@@ -456,12 +461,19 @@ impl Cache {
   }
 }
 
-/// Runs of one font for `s` from fonts `0..fonts` (`has(font, c)`: whether it has `c`), by
-/// cluster (a character with what extends it in the editor's clusters: marks, vowel signs,
-/// joiners and selectors; what a joiner links; a pair of regional indicators): the first font
-/// with the whole cluster, else the first with its first character, else font 0. A joined
-/// emoji or a letter with its mark is shaped in one font.
-fn runs(s: &str, fonts: usize, has: impl Fn(usize, char) -> bool) -> Vec<(Range<usize>, usize)> {
+/// Runs of one font for `s` from fonts `0..fonts` (`has(font, c)`: whether it has `c`;
+/// `color(font)`: whether its glyphs are colour), by cluster (a character with what extends it
+/// in the editor's clusters: marks, vowel signs, joiners and selectors; what a joiner links; a
+/// pair of regional indicators): the first font with the whole cluster in the presentation a
+/// selector asks for (U+FE0F emoji: a colour font; U+FE0E text: another), else the first with
+/// the whole cluster, else the first with its first character, else font 0. A joined emoji or
+/// a letter with its mark is shaped in one font.
+fn runs(
+  s: &str,
+  fonts: usize,
+  has: impl Fn(usize, char) -> bool,
+  color: impl Fn(usize) -> bool,
+) -> Vec<(Range<usize>, usize)> {
   let mut out: Vec<(Range<usize>, usize)> = Vec::new();
   for cluster in clusters(s) {
     let text = &s[cluster.clone()];
@@ -471,7 +483,15 @@ fn runs(s: &str, fonts: usize, has: impl Fn(usize, char) -> bool) -> Vec<(Range<
       false => {
         let all = |f: &usize| text.chars().filter(|&c| !ignorable(c)).all(|c| has(*f, c));
         let any = |f: &usize| has(*f, first);
-        (0..fonts).find(all).or_else(|| (0..fonts).find(any)).unwrap_or(0)
+        let wants = match (text.contains('\u{fe0f}'), text.contains('\u{fe0e}')) {
+          (true, _) => Some(true),
+          (_, true) => Some(false),
+          _ => None,
+        };
+
+        let shown = |f: &usize| all(f) && wants.is_none_or(|c| color(*f) == c);
+        let found = (0..fonts).find(shown).or_else(|| (0..fonts).find(all));
+        found.or_else(|| (0..fonts).find(any)).unwrap_or(0)
       }
     };
 
@@ -826,8 +846,9 @@ mod tests {
     }
   }
 
+  /// The other font is the colour one.
   fn picks(s: &str) -> Vec<(&str, usize)> {
-    runs(s, 2, has).into_iter().map(|(r, f)| (&s[r], f)).collect()
+    runs(s, 2, has, |f| f == 1).into_iter().map(|(r, f)| (&s[r], f)).collect()
   }
 
   #[test]
@@ -846,5 +867,40 @@ mod tests {
     // A heart alone stays in the text font; flags pair up.
     assert_eq!(picks("❤🇺🇦"), [("❤", 0), ("🇺🇦", 1)]);
     assert_eq!(clusters("🇺🇦🇺🇦").len(), 2);
+  }
+
+  /// With a colour font that has the heart in the fallback chain (Noto Color Emoji), a heart
+  /// asked for as emoji is drawn in it, not as the UI font's outline (DejaVu Sans has one).
+  #[test]
+  fn an_emoji_heart_is_drawn_in_colour() {
+    let f = face(Font::ui(13.0));
+    let colour_heart = {
+      let c = cache();
+      let ch = &c.chains[f.chain];
+      ch.fallbacks
+        .iter()
+        .any(|&(p, _)| get_bool(p, c"color") == Some(true) && has_char(charset(p), '\u{2764}'))
+    };
+    if !colour_heart {
+      println!("no colour font with the heart: skipped");
+      return;
+    }
+
+    let mut faces = Vec::new();
+    let line = shape(&f, "\u{2764}\u{fe0f}", |f| {
+      faces.push(f);
+      faces.len() as u16 - 1
+    });
+    assert!(is_color(&faces[line.glyphs[0].face as usize]));
+  }
+
+  #[test]
+  fn presentation_selectors_pick_the_font() {
+    // An emoji heart in the colour font; a text heart, or one asked for as text, in the other.
+    assert_eq!(picks("a❤\u{fe0f}b"), [("a", 0), ("❤\u{fe0f}", 1), ("b", 0)]);
+    assert_eq!(picks("a❤b"), [("a❤b", 0)]);
+    assert_eq!(picks("❤\u{fe0e}"), [("❤\u{fe0e}", 0)]);
+    // No colour font has it: the text font draws it all the same.
+    assert_eq!(picks("a\u{fe0f}"), [("a\u{fe0f}", 0)]);
   }
 }
