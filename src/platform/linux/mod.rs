@@ -172,10 +172,11 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
   let exe = std::env::current_exe().ok();
   let app_id = exe.as_ref().and_then(|p| p.file_stem()?.to_str()).unwrap_or("nimbo");
   top.set_app_id(app_id.into());
+  let size = whole(cfg.size);
   match cfg.resizable {
     true => top.set_min_size(cfg.min().w.ceil() as i32, cfg.min().h.ceil() as i32),
     false => {
-      let (w, h) = (cfg.size.w as i32, cfg.size.h as i32);
+      let (w, h) = (size.w as i32, size.h as i32);
       top.set_min_size(w, h);
       top.set_max_size(w, h);
     }
@@ -204,7 +205,7 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
     trace: std::env::var_os("NIMBO_TRACE").is_some(),
     frames: 0,
     started,
-    size: cfg.size,
+    size,
     pending_size: None,
     scale120: None,
     preferred: None,
@@ -344,6 +345,12 @@ impl Win {
   }
 }
 
+/// `s` in whole surface coordinates, as configures give them: at an integer buffer scale a
+/// fractional size would make a buffer that isn't a multiple of it (`invalid_size`).
+fn whole(s: Size) -> Size {
+  Size::new(s.w.round().max(1.0), s.h.round().max(1.0))
+}
+
 impl Output {
   fn bind(registry: &WlRegistry, name: u32, version: u32, qh: &QueueHandle<Win>) -> Self {
     Self { name, obj: registry.bind(name, version.min(4), qh, ()), scale: 1 }
@@ -353,6 +360,12 @@ impl Output {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn sizes_are_whole() {
+    assert_eq!(whole(Size::new(480.5, 320.4)), Size::new(481.0, 320.0));
+    assert_eq!(whole(Size::new(0.2, 64.0)), Size::new(1.0, 64.0));
+  }
 
   #[test]
   fn perf_cores_count_ranges() {
