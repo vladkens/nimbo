@@ -1,8 +1,8 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The seams between an app and the world: events in, a scene out, with the clock and waker
-//! injected, so one app runs the same in a window ([crate::platform]) and in the headless
-//! harness ([crate::harness]).
+//! The seams between an app and the world: events in, a scene out, with the clock, clipboard
+//! and waker injected, so one app runs the same in a window ([crate::platform]) and in the
+//! headless harness ([crate::harness]).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -164,7 +164,7 @@ impl Appearance {
 /// Points per line for mouse wheels, which report lines rather than points.
 pub const WHEEL_LINE: f32 = 18.0;
 
-// MARK: Clock, waker
+// MARK: Clock, clipboard, waker
 
 /// Real time in a window, virtual time in the harness (moved only by `Runtime::advance`).
 #[derive(Clone, Copy, Debug)]
@@ -183,6 +183,25 @@ impl Clock {
       Self::Real(start) => start.elapsed(),
       Self::Virtual(t) => *t,
     }
+  }
+}
+
+pub trait Clipboard {
+  fn read(&self) -> Option<String>;
+  fn write(&mut self, s: &str);
+}
+
+/// An in-memory clipboard: the harness uses it so tests never touch the real pasteboard.
+#[derive(Default)]
+pub struct MemClipboard(pub Option<String>);
+
+impl Clipboard for MemClipboard {
+  fn read(&self) -> Option<String> {
+    self.0.clone()
+  }
+
+  fn write(&mut self, s: &str) {
+    self.0 = Some(s.to_owned());
   }
 }
 
@@ -222,7 +241,8 @@ impl Waker {
 
 // MARK: Runtime
 
-/// What `App::event` gets besides the event: the window, the pointer, the clock and the waker.
+/// What `App::event` gets besides the event: the window, the pointer, the clock, the clipboard
+/// and the waker.
 pub struct Cx<'a> {
   pub size: Size,
   pub scale: f32,
@@ -231,6 +251,7 @@ pub struct Cx<'a> {
   pub waker: &'a Waker,
   quit: &'a mut bool,
   redraw: bool,
+  clipboard: &'a mut dyn Clipboard,
   cursor: &'a mut Cursor,
 }
 
@@ -243,6 +264,10 @@ impl Cx<'_> {
   /// Redraws the frame though the event goes on as unused (a key shown, then typed).
   pub fn redraw(&mut self) {
     self.redraw = true;
+  }
+
+  pub fn clipboard(&mut self) -> &mut dyn Clipboard {
+    &mut *self.clipboard
   }
 
   /// Sets the pointer's cursor, kept until set again.
@@ -266,11 +291,12 @@ pub struct Runtime<A> {
   dirty: bool,
   animating: bool,
   quit: bool,
+  clipboard: Box<dyn Clipboard>,
   cursor: Cursor,
 }
 
 impl<A: App> Runtime<A> {
-  pub fn new(app: A, size: Size, scale: f32, clock: Clock) -> Self {
+  pub fn new(app: A, size: Size, scale: f32, clock: Clock, clipboard: Box<dyn Clipboard>) -> Self {
     let waker = Waker::default();
     Self {
       app,
@@ -284,6 +310,7 @@ impl<A: App> Runtime<A> {
       dirty: true,
       animating: false,
       quit: false,
+      clipboard,
       cursor: Cursor::Arrow,
     }
   }
@@ -300,6 +327,10 @@ impl<A: App> Runtime<A> {
 
   pub fn waker(&self) -> &Waker {
     &self.waker
+  }
+
+  pub fn clipboard(&mut self) -> &mut dyn Clipboard {
+    &mut *self.clipboard
   }
 
   /// The pointer's cursor, as the app set it.
@@ -381,6 +412,7 @@ impl<A: App> Runtime<A> {
       waker: &self.waker,
       quit: &mut self.quit,
       redraw: false,
+      clipboard: &mut *self.clipboard,
       cursor: &mut self.cursor,
     };
     let used = self.app.event(&mut cx, ev);
@@ -412,5 +444,92 @@ impl<A: App> Runtime<A> {
     self.app.paint(&mut f);
     self.animating = f.animate;
     self.dirty = false;
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::keys::Key;
+  use crate::scene::Rect;
+
+  #[derive(Default)]
+  struct Probe {
+    events: usize,
+    paints: usize,
+    animate: bool,
+  }
+
+  impl App for Probe {
+    fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
+      self.events += 1;
+      if let Event::KeyDown(k) = ev
+        && k.is("c")
+      {
+        cx.clipboard().write("copied");
+      }
+      matches!(ev, Event::KeyDown { .. })
+    }
+
+    fn paint(&mut self, f: &mut Frame) {
+      self.paints += 1;
+      f.rect(Rect::new(0.0, 0.0, 1.0, 1.0), [1.0; 4], 0.0);
+      if self.animate {
+        f.animate();
+      }
+    }
+  }
+
+  fn runtime() -> Runtime<Probe> {
+    let clock = Clock::Virtual(Duration::ZERO);
+    let clipboard = Box::new(MemClipboard::default());
+    Runtime::new(Probe::default(), Size::new(100.0, 100.0), 1.0, clock, clipboard)
+  }
+
+  #[test]
+  fn redraws_only_when_needed() {
+    let mut rt = runtime();
+    assert!(rt.needs_frame());
+    rt.frame();
+    assert!(!rt.needs_frame());
+
+    assert!(!rt.event(Event::MouseMove { pos: Point::new(5.0, 5.0), mods: Mods::NONE }));
+    assert_eq!(rt.mouse, Some(Point::new(5.0, 5.0)));
+    assert!(!rt.needs_frame());
+
+    let key =
+      KeyEvent { key: Key::Char('c'), text: None, code: 8, mods: Mods::NONE, repeat: false };
+    assert!(rt.event(Event::KeyDown(key)));
+    assert!(rt.needs_frame());
+    rt.frame();
+    assert_eq!(rt.clipboard().read().as_deref(), Some("copied"));
+    assert_eq!(rt.scene.counts().quads, 1);
+
+    rt.event(Event::MouseExit);
+    assert_eq!(rt.mouse, None);
+  }
+
+  #[test]
+  fn waker_and_animation() {
+    let mut rt = runtime();
+    rt.frame();
+    let waker = rt.waker().clone();
+    std::thread::spawn(move || waker.wake()).join().unwrap();
+    assert!(rt.needs_frame());
+    rt.frame();
+    assert!(!rt.needs_frame());
+
+    rt.app.animate = true;
+    rt.redraw();
+    rt.frame();
+    assert!(rt.needs_frame());
+    assert_eq!(rt.app.paints, 3);
+  }
+
+  #[test]
+  fn virtual_clock() {
+    let mut rt = runtime();
+    rt.advance(Duration::from_millis(16));
+    assert_eq!(rt.now(), Duration::from_millis(16));
   }
 }

@@ -29,8 +29,8 @@ use objc2_foundation::{
   NSString,
 };
 
-use super::appearance;
 use super::view::View;
+use super::{Pasteboard, appearance};
 use crate::Config;
 use crate::app::{App, Clock, Event, Runtime};
 
@@ -328,7 +328,7 @@ pub fn open(cfg: &Config, app: Box<dyn App>) -> u64 {
   window.setContentMinSize(NSSize::new(min.w as f64, min.h as f64));
 
   let scale = window.backingScaleFactor() as f32;
-  let mut rt = Runtime::new(app, cfg.size, scale, Clock::real());
+  let mut rt = Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(Pasteboard));
   rt.event(Event::Appearance(appearance()));
   let view = View::new(mtm, frame, rt);
   window.setContentView(Some(&view));

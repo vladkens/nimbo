@@ -6,17 +6,18 @@
 //! from `Xft.dpi` in the resources (the size hints follow it), the keyboard through xkbcommon
 //! ([super::xkb]: the server's keymap with libxkbcommon-x11, else its rules names; the state from
 //! each event's modifiers and group), the server's key repeat (detectable: presses alone),
-//! cursors from the theme (libxcb-cursor) or the cursor font, light or dark from XSETTINGS'
-//! `Net/ThemeName`, its manager followed as it starts, quits or restarts. No frames while the
-//! window is unmapped or fully covered (`VisibilityNotify`; under a compositing manager it never
-//! is). One thread: the loop polls the connection and a wake eventfd.
+//! cursors from the theme (libxcb-cursor) or the cursor font, the CLIPBOARD selection ([clip]),
+//! light or dark from XSETTINGS' `Net/ThemeName`, its manager followed as it starts, quits or
+//! restarts. No frames while the window is unmapped or fully covered (`VisibilityNotify`; under a
+//! compositing manager it never is). One thread: the loop polls the connection and a wake eventfd.
 //!
 //! Not yet: input methods (XIM or IBus: typing goes through xkbcommon's compose only), smooth
 //! and touchpad scrolling (XInput2: wheels come as clicks), pinch, `_NET_WM_SYNC_REQUEST`
-//! (the window manager doesn't wait for our frame as it resizes), the display's
+//! (the window manager doesn't wait for our frame as it resizes), PRIMARY, the display's
 //! refresh rate (RandR), per-monitor scale, pixel formats other than 32-bit `0xRRGGBB` (a BGR
 //! VNC server: refused at the start, [present::check_format]).
 
+mod clip;
 mod present;
 mod xcb;
 
@@ -31,6 +32,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rustix::event::{EventfdFlags, PollFd, PollFlags, Timespec, eventfd, poll};
 
+use self::clip::{Atoms as ClipAtoms, Clip, Clipboard};
 use self::present::{Presenter, STUCK};
 use self::xcb::*;
 use super::xkb::{Keyboard, Typed};
@@ -124,7 +126,8 @@ struct Win {
   xkb_event: Option<u8>,
   reload_keymap: bool,
   focused: bool,
-  /// Events read ahead (a key release looking for its repeat).
+  clip: Rc<RefCell<Clip>>,
+  /// Events read ahead (a paste waiting for its owner, a key release looking for its repeat).
   stash: Rc<RefCell<VecDeque<Ev>>>,
   /// The XSETTINGS manager's window, watched for changes of the theme and for its end.
   xsettings: u32,
@@ -172,7 +175,17 @@ fn run_on(
     "_XSETTINGS_SETTINGS",
     "_XKB_RULES_NAMES",
   ]);
-  let [utf8, manager] = x.atoms(["UTF8_STRING", "MANAGER"]);
+  let [clipboard, targets, utf8, text, mime, incr, prop, manager] = x.atoms([
+    "CLIPBOARD",
+    "TARGETS",
+    "UTF8_STRING",
+    "TEXT",
+    "text/plain;charset=utf-8",
+    "INCR",
+    "NIMBO_CLIPBOARD",
+    "MANAGER",
+  ]);
+  let clip_atoms = ClipAtoms { clipboard, targets, utf8, text, mime, incr, prop };
   let atoms = Atoms {
     protocols,
     delete,
@@ -233,7 +246,15 @@ fn run_on(
   }
 
   let stash = Rc::new(RefCell::new(VecDeque::new()));
-  let mut rt = Runtime::new(app, cfg.size, scale, Clock::real());
+  let clip = Rc::new(RefCell::new(Clip {
+    x,
+    win,
+    atoms: clip_atoms,
+    stash: stash.clone(),
+    time: 0,
+    ours: None,
+  }));
+  let mut rt = Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(Clipboard(clip.clone())));
   rt.event(Event::Appearance(appearance(&x, xs_owner, xs_settings)));
 
   // A wake from any thread writes the eventfd the loop polls.
@@ -280,6 +301,7 @@ fn run_on(
     xkb_event: None,
     reload_keymap: false,
     focused: false,
+    clip,
     stash,
     xsettings: xs_owner,
     min,
@@ -619,6 +641,7 @@ impl Win {
     match ev.kind() {
       KEY_PRESS => {
         let e = ev.get::<InputEv>();
+        self.clip.borrow_mut().time = e.time;
         let (i, bit) = (e.detail as usize / 64, 1u64 << (e.detail % 64));
         let repeat = self.detectable && self.held[i] & bit != 0;
         self.held[i] |= bit;
@@ -646,6 +669,10 @@ impl Win {
       BUTTON_PRESS | BUTTON_RELEASE => {
         let e = ev.get::<InputEv>();
         let down = ev.kind() == BUTTON_PRESS;
+        if down {
+          self.clip.borrow_mut().time = e.time;
+        }
+
         self.core_state(e.state);
         self.mouse = self.point(e.event_x, e.event_y);
         self.button(e.detail, down, e.state);
@@ -771,6 +798,8 @@ impl Win {
           self.send(Event::Appearance(a));
         }
       }
+      SELECTION_REQUEST => self.clip.borrow().request(ev.get::<SelectionRequestEv>()),
+      SELECTION_CLEAR => self.clip.borrow_mut().cleared(ev.get::<SelectionClearEv>()),
       MAPPING_NOTIFY => self.reload_keymap |= ev.get::<MappingEv>().request == MAPPING_KEYBOARD,
       // XkbNewKeyboardNotify, XkbMapNotify (the XKB event type is the second byte).
       k if Some(k) == self.xkb_event => self.reload_keymap |= matches!(ev.bytes()[1], 0 | 1),
