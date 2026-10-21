@@ -4,8 +4,9 @@
 //! CPU renderer into a DIB section and copied to the window with BitBlt, only the tiles that
 //! changed ([Dib]). The message loop sleeps in MsgWaitForMultipleObjectsEx until input, a wake
 //! (the waker posts a message) or a high-resolution waitable timer: while the runtime animates,
-//! the next frame slot at the display's refresh rate. No frames while the window is minimized;
-//! one when it shows again. Then the performance cores.
+//! the next frame slot at the refresh rate of the display it is on, followed as it moves to
+//! another or the mode changes. No frames while the window is minimized; one when it shows again.
+//! Then the performance cores.
 
 use std::cell::RefCell;
 use std::mem::offset_of;
@@ -137,8 +138,9 @@ struct Window {
   scale: f32,
   /// Minimized: frames wait until it shows again.
   hidden: bool,
-  /// While animating, frames come a refresh of the display apart.
+  /// While animating, frames come a refresh of the display apart: the display it is on.
   pace: Pace,
+  monitor: HMONITOR,
   /// In a live move or resize (its modal loop), and whether its frame timer runs: only while
   /// frames are due.
   modal: bool,
@@ -224,16 +226,34 @@ impl Window {
     }
 
     match due {
-      true => {
-        let ms = self.pace.interval.as_millis() as u32;
-        unsafe { SetTimer(self.hwnd, TIMER_MODAL, ms.max(1), None) };
-      }
+      true => self.arm(),
       false => unsafe {
         KillTimer(self.hwnd, TIMER_MODAL);
       },
     }
 
     self.armed = due;
+  }
+
+  /// Starts the live move's frame timer at the refresh interval, or sets a running one again.
+  fn arm(&self) {
+    let ms = self.pace.interval.as_millis() as u32;
+    unsafe { SetTimer(self.hwnd, TIMER_MODAL, ms.max(1), None) };
+  }
+
+  /// Follows the refresh rate of the window's display: another monitor, or another mode. The
+  /// live move's timer, when it runs, goes on at the new interval.
+  fn retime(&mut self) {
+    self.monitor = unsafe { MonitorFromWindow(self.hwnd, MONITOR_DEFAULTTONEAREST) };
+    let interval = refresh(self.hwnd);
+    if interval == self.pace.interval {
+      return;
+    }
+
+    self.pace.interval = interval;
+    if self.armed {
+      self.arm();
+    }
   }
 
   /// Draws a frame if one is due; returns how long the loop may sleep (`None`: until a
@@ -269,12 +289,23 @@ fn since_start() -> f64 {
   t(now).saturating_sub(t(created)) as f64 / 1e4
 }
 
-/// The refresh interval of the window's display, 60 Hz when unknown.
+/// The refresh interval of the display the window is on (the one with most of it), 60 Hz when
+/// unknown.
 fn refresh(hwnd: HWND) -> Duration {
-  let dc = unsafe { GetDC(hwnd) };
-  let hz = unsafe { GetDeviceCaps(dc, VREFRESH as i32) };
-  unsafe { ReleaseDC(hwnd, dc) };
-  let hz = if hz > 1 { hz.min(240) } else { 60 };
+  let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
+  let mut info: MONITORINFOEXW = unsafe { std::mem::zeroed() };
+  info.monitorInfo.cbSize = size_of::<MONITORINFOEXW>() as u32;
+  let mut mode: DEVMODEW = unsafe { std::mem::zeroed() };
+  mode.dmSize = size_of::<DEVMODEW>() as u16;
+  let found = unsafe { GetMonitorInfoW(monitor, (&raw mut info).cast()) } != 0
+    && unsafe { EnumDisplaySettingsW(info.szDevice.as_ptr(), ENUM_CURRENT_SETTINGS, &mut mode) }
+      != 0;
+  // 0 and 1 are the hardware's default rate.
+  let hz = match mode.dmDisplayFrequency {
+    hz if found && hz > 1 => hz.min(240),
+    _ => 60,
+  };
+
   Duration::from_secs_f64(1.0 / hz as f64)
 }
 
@@ -355,6 +386,20 @@ fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
       let flags = SWP_NOZORDER | SWP_NOACTIVATE;
       let (x, y, cx, cy) = (r.left, r.top, r.right - r.left, r.bottom - r.top);
       unsafe { SetWindowPos(hwnd, null_mut(), x, y, cx, cy, flags) };
+      with(|w| w.retime());
+      0
+    }
+    WM_DISPLAYCHANGE => {
+      with(|w| w.retime());
+      def()
+    }
+    WM_MOVE => {
+      with(|w| {
+        let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
+        if monitor != w.monitor {
+          w.retime();
+        }
+      });
       0
     }
     WM_ENTERSIZEMOVE | WM_EXITSIZEMOVE => {
@@ -450,6 +495,7 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
     scale,
     hidden: false,
     pace: Pace::new(refresh(hwnd)),
+    monitor: unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) },
     trace: std::env::var_os("NIMBO_TRACE").is_some(),
     frames: 0,
     min: cfg.min(),
@@ -587,6 +633,45 @@ mod tests {
     unsafe { SendMessageW(hwnd, WM_WAKE, 0, 0) };
     assert!(ticks() > 0, "a wake draws");
     assert_eq!(ticks(), 0, "idle again");
+
+    unsafe {
+      SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0);
+      DestroyWindow(hwnd);
+    }
+    WINDOW.with(|w| w.borrow_mut().take());
+  }
+
+  /// A live move's timer follows a new display mode: set at a second's interval, it ticks at the
+  /// display's once WM_DISPLAYCHANGE comes. The window is never shown.
+  #[test]
+  fn a_new_display_mode_sets_the_interval() {
+    struct Busy;
+    impl App for Busy {
+      fn paint(&mut self, f: &mut crate::Frame) {
+        f.animate();
+      }
+    }
+
+    let cfg = Config::new("retime", 200.0, 100.0);
+    let hwnd = create(&cfg, Box::new(Busy));
+    with(|w| w.pace.interval = Duration::from_secs(1));
+    unsafe { SendMessageW(hwnd, WM_ENTERSIZEMOVE, 0, 0) };
+    let ticks = || {
+      std::thread::sleep(Duration::from_millis(150));
+      let mut msg: MSG = unsafe { std::mem::zeroed() };
+      let mut n = 0;
+      while unsafe { PeekMessageW(&mut msg, hwnd, WM_TIMER, WM_TIMER, PM_REMOVE) } != 0 {
+        unsafe { DispatchMessageW(&msg) };
+        n += 1;
+      }
+
+      n
+    };
+    assert_eq!(ticks(), 0, "a second apart");
+
+    unsafe { SendMessageW(hwnd, WM_DISPLAYCHANGE, 32, 0) };
+    assert_eq!(with(|w| w.pace.interval), Some(refresh(hwnd)));
+    assert!(ticks() > 0, "a refresh apart");
 
     unsafe {
       SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0);
