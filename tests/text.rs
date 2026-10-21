@@ -95,6 +95,15 @@ fn check(h: &mut Harness<Text>, p: &Palette) {
     inside_its_box(h, &img, X, s, bg);
   }
 
+  // The circumflex on the Q, raised by the shaper, is drawn above the capital: ink over its
+  // cap height.
+  let marks = &SCRIPTS[1];
+  let q = marks.text.find('Q').unwrap();
+  let x0 = X + h.rt.text.measure(&marks.text[..q], marks.font);
+  let cap = h.rt.text.metrics(marks.font).cap_height;
+  let above = Rect::new(x0, marks.y - cap - 6.0, 16.0, 4.0);
+  assert!(ink_box(&img, above, bg).is_some(), "no circumflex over the Q");
+
   // CJK where a font has it.
   let cjk = &SCRIPTS[3];
   match has_glyphs(h, cjk) {
@@ -174,6 +183,10 @@ fn measures(h: &mut Harness<Text>) {
   // Its glyphs start at the clusters of the text: the accent's cluster is the e's or its own.
   let line = t.layout("cafe\u{301}", ui);
   assert!(line.clusters.iter().all(|&c| "cafe\u{301}".is_char_boundary(c as usize)));
+  // A mark on a capital is raised above the baseline, unlike the base.
+  let q = t.layout("Q\u{302}", ui);
+  assert_eq!(q.glyphs[0].y, 0.0);
+  assert!(q.glyphs.len() == 1 || q.glyphs[1].y > 1.0, "{:?}", q.glyphs);
   let m = t.metrics(ui);
   assert!(m.ascent > 0.0 && m.descent > 0.0 && m.line_height() >= m.ascent + m.descent);
   assert!(m.cap_height > m.x_height && m.x_height > 0.0, "{m:?}");

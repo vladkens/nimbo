@@ -108,7 +108,12 @@ pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {
       true => u as u32,
       false => bytes.get(u as usize).copied().unwrap_or(s.len() as u32),
     };
-    glyphs.extend(ids.iter().zip(&pos).map(|(&id, p)| Glyph { face, id, x: p.x as f32 }));
+    glyphs.extend(ids.iter().zip(&pos).map(|(&id, p)| Glyph {
+      face,
+      id,
+      x: p.x as f32,
+      y: p.y as f32,
+    }));
     clusters.extend(idx.iter().map(at));
   }
 

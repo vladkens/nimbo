@@ -67,8 +67,8 @@
 //!   - `pub fn is_color(face: &Face) -> bool`: colour glyphs (emoji), drawn as RGBA.
 //!   - `pub fn shape(face: &Face, s: &str, index: impl FnMut(Face) -> u16) -> Line`: shapes one
 //!     line with kerning, ligatures and font fallback; each run's face (after fallback) is given to
-//!     `index` for its number; glyph ids, pen x in points, and per glyph the byte offset in `s`
-//!     where its cluster starts; `width` the advance.
+//!     `index` for its number; glyph ids, pen x and the offset up from the baseline in points, and
+//!     per glyph the byte offset in `s` where its cluster starts; `width` the advance.
 //!   - `pub fn glyph_box(face: &Face, id: u16, scale: f32, subpixel: u8) -> Option<GlyphBox>`: the
 //!     pixel box of a glyph at `scale`, drawn `subpixel` quarters of a pixel right of the pen,
 //!     padded one pixel each side; `None` for no ink.

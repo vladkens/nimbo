@@ -444,6 +444,8 @@ struct Collector {
   runs: Vec<Run>,
   ids: Vec<u16>,
   xs: Vec<f32>,
+  /// Per glyph, its offset up from the baseline.
+  ys: Vec<f32>,
   /// Per glyph, the UTF-16 offset where its cluster starts.
   clusters: Vec<u32>,
 }
@@ -605,6 +607,7 @@ unsafe extern "system" fn collector_glyph_run(
     pen += adv;
     c.ids.push(id);
     c.xs.push(gx);
+    c.ys.push(offsets.get(i).map_or(0.0, |o| o.ascender));
   }
 
   c.runs.push(Run { face, size: run.em, glyphs: n });
@@ -629,6 +632,7 @@ pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {
     runs: Vec::new(),
     ids: Vec::new(),
     xs: Vec::new(),
+    ys: Vec::new(),
     clusters: Vec::new(),
   };
   let mut m = TextMetrics::default();
@@ -661,7 +665,7 @@ pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {
     };
 
     let end = start + run.glyphs;
-    glyphs.extend((start..end).map(|i| Glyph { face: id, id: c.ids[i], x: c.xs[i] }));
+    glyphs.extend((start..end).map(|i| Glyph { face: id, id: c.ids[i], x: c.xs[i], y: c.ys[i] }));
     start = end;
   }
 

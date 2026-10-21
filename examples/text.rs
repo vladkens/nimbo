@@ -1,10 +1,10 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! Text in the system fonts, in the light or the dark appearance: lines in a few sizes and
-//! weights and the monospaced font, Latin and Cyrillic with a combining accent, emoji (in colour
-//! where the OS has a colour font), CJK where a font has it, a long line clipped by its panel,
-//! and one word drawn four times, each a quarter pixel right of the one above (subpixel
-//! positioning).
+//! weights and the monospaced font, Latin and Cyrillic, combining accents (stacked, and on a
+//! capital), emoji (in colour where the OS has a colour font), CJK where a font has it, a long line
+//! clipped by its panel, and one word drawn four times, each a quarter pixel right of the one above
+//! (subpixel positioning).
 //!
 //! `cargo run --release --example text` opens it in a window, which follows the OS's light or
 //! dark setting; `-- --shot text.png [--appearance light] [--scale 2]` renders it without one.
@@ -68,10 +68,10 @@ pub const STYLES: [Sample; 6] = [
   sample(170.0, "Mono · let x = [0O, 1lI];", Font::mono(13.0)),
 ];
 
-/// Scripts: Latin and Cyrillic, a combining acute accent, emoji, CJK.
+/// Scripts: Latin and Cyrillic, combining accents (stacked, and on a capital), emoji, CJK.
 pub const SCRIPTS: [Sample; 4] = [
   sample(204.0, "Héllo, naïve · Привет, мир · Ёжик", Font::ui(15.0)),
-  sample(230.0, "cafe\u{301} = café · e\u{301}\u{302}", Font::ui(15.0)),
+  sample(230.0, "cafe\u{301} = café · e\u{301}\u{302} · Q\u{302}", Font::ui(15.0)),
   sample(258.0, "Emoji 🚀 🎨 👍🏽 ❤️", Font::ui(15.0)),
   sample(284.0, "漢字 かな カナ 한글", Font::ui(15.0)),
 ];

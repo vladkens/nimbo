@@ -97,12 +97,14 @@ pub struct Raster {
 }
 
 /// A shaped glyph: `face` indexes the text system's faces (the run's font after fallback), `x`
-/// is the pen position in points from the line start.
+/// is the pen position in points from the line start, `y` how far the shaper raised it above
+/// the baseline (a mark on a capital, or on another mark).
 #[derive(Clone, Copy, Debug)]
 pub struct Glyph {
   pub face: u16,
   pub id: u16,
   pub x: f32,
+  pub y: f32,
 }
 
 #[derive(Debug)]
