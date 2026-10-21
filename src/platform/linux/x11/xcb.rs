@@ -11,9 +11,13 @@
 #[cfg(target_arch = "x86")]
 compile_error!("the X11 backend's XCB declarations need a 64-bit target");
 
+use std::collections::VecDeque;
 use std::ffi::{CStr, c_char, c_int, c_void};
 use std::os::fd::{BorrowedFd, IntoRawFd, OwnedFd};
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
+
+use rustix::event::{PollFd, PollFlags, Timespec, poll};
 
 use crate::platform::linux::dl::{Lib, fns};
 
@@ -58,8 +62,11 @@ fns!(Xcb {
   fn xcb_create_gc(c: C, gc: u32, drawable: u32, mask: u32, values: *const u32) -> u32;
   fn xcb_put_image(c: C, format: u8, drawable: u32, gc: u32, w: u16, h: u16, x: i16, y: i16,
     left_pad: u8, depth: u8, len: u32, data: *const u8) -> u32;
+  fn xcb_set_selection_owner(c: C, owner: u32, selection: u32, time: u32) -> u32;
   fn xcb_get_selection_owner(c: C, selection: u32) -> u32;
   fn xcb_get_selection_owner_reply(c: C, cookie: u32, e: E) -> *mut OwnerReply;
+  fn xcb_convert_selection(c: C, requestor: u32, selection: u32, target: u32, property: u32,
+    time: u32) -> u32;
   fn xcb_open_font(c: C, fid: u32, len: u16, name: *const c_char) -> u32;
   fn xcb_create_glyph_cursor(c: C, cid: u32, source: u32, mask: u32, source_char: u16,
     mask_char: u16, fr: u16, fg: u16, fb: u16, br: u16, bg: u16, bb: u16) -> u32;
@@ -211,6 +218,9 @@ pub const UNMAP_NOTIFY: u8 = 18;
 pub const MAP_NOTIFY: u8 = 19;
 pub const CONFIGURE_NOTIFY: u8 = 22;
 pub const PROPERTY_NOTIFY: u8 = 28;
+pub const SELECTION_CLEAR: u8 = 29;
+pub const SELECTION_REQUEST: u8 = 30;
+pub const SELECTION_NOTIFY: u8 = 31;
 pub const CLIENT_MESSAGE: u8 = 33;
 pub const MAPPING_NOTIFY: u8 = 34;
 
@@ -336,6 +346,41 @@ pub struct PropertyEv {
   pub time: u32,
   pub state: u8,
   pad1: [u8; 3],
+}
+
+#[repr(C)]
+pub struct SelectionClearEv {
+  pub response_type: u8,
+  pad: u8,
+  pub sequence: u16,
+  pub time: u32,
+  pub owner: u32,
+  pub selection: u32,
+}
+
+#[repr(C)]
+pub struct SelectionRequestEv {
+  pub response_type: u8,
+  pad: u8,
+  pub sequence: u16,
+  pub time: u32,
+  pub owner: u32,
+  pub requestor: u32,
+  pub selection: u32,
+  pub target: u32,
+  pub property: u32,
+}
+
+#[repr(C)]
+pub struct SelectionNotifyEv {
+  pub response_type: u8,
+  pad: u8,
+  pub sequence: u16,
+  pub time: u32,
+  pub requestor: u32,
+  pub selection: u32,
+  pub target: u32,
+  pub property: u32,
 }
 
 /// MIT-SHM's `ShmCompletion`, at the extension's first event.
@@ -517,6 +562,35 @@ impl X {
     (!p.is_null()).then(|| Ev(p))
   }
 
+  /// Waits up to `limit` for an event `want` accepts; the others go to `stash` in order.
+  pub fn wait_event(
+    &self,
+    limit: Duration,
+    stash: &mut VecDeque<Ev>,
+    want: impl Fn(&Ev) -> bool,
+  ) -> Option<Ev> {
+    let end = Instant::now() + limit;
+    self.flush();
+    loop {
+      while let Some(ev) = self.poll_event() {
+        match want(&ev) {
+          true => return Some(ev),
+          false => stash.push_back(ev),
+        }
+      }
+
+      let left = end.checked_duration_since(Instant::now()).filter(|d| !d.is_zero())?;
+      if self.has_error() {
+        return None;
+      }
+
+      let ts = Timespec { tv_sec: left.as_secs() as _, tv_nsec: left.subsec_nanos() as _ };
+      let fd = self.fd();
+      let mut fds = [PollFd::new(&fd, PollFlags::IN)];
+      let _ = poll(&mut fds, Some(&ts));
+    }
+  }
+
   /// The atoms of `names`, interned in one round trip.
   pub fn atoms<const N: usize>(&self, names: [&str; N]) -> [u32; N] {
     let f = &self.l.xcb;
@@ -664,11 +738,20 @@ impl X {
 
   // MARK: Selections
 
+  pub fn set_selection_owner(&self, owner: u32, selection: u32, time: u32) {
+    unsafe { (self.l.xcb.xcb_set_selection_owner)(self.c, owner, selection, time) };
+  }
+
   pub fn selection_owner(&self, selection: u32) -> u32 {
     let f = &self.l.xcb;
     let k = unsafe { (f.xcb_get_selection_owner)(self.c, selection) };
     let r = unsafe { (f.xcb_get_selection_owner_reply)(self.c, k, std::ptr::null_mut()) };
     reply(r, |r| r.owner).unwrap_or(0)
+  }
+
+  pub fn convert_selection(&self, requestor: u32, selection: u32, target: u32, prop: u32) {
+    let f = &self.l.xcb;
+    unsafe { (f.xcb_convert_selection)(self.c, requestor, selection, target, prop, 0) };
   }
 
   // MARK: Cursors

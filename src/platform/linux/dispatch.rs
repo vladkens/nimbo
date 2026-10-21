@@ -2,7 +2,7 @@
 
 //! The Wayland objects' events into the window's state: the shell's configures, the surface's
 //! scale and outputs (as they come and go), frame callbacks, buffers coming back, the seat's
-//! pointer, pinch and keyboard.
+//! pointer, pinch and keyboard, and the clipboard's offers.
 
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -11,6 +11,10 @@ use wayland_client::globals::GlobalListContents;
 use wayland_client::protocol::wl_buffer::{self, WlBuffer};
 use wayland_client::protocol::wl_callback::{self, WlCallback};
 use wayland_client::protocol::wl_compositor::WlCompositor;
+use wayland_client::protocol::wl_data_device::{self, WlDataDevice};
+use wayland_client::protocol::wl_data_device_manager::WlDataDeviceManager;
+use wayland_client::protocol::wl_data_offer::{self, WlDataOffer};
+use wayland_client::protocol::wl_data_source::{self, WlDataSource};
 use wayland_client::protocol::wl_keyboard::{self, KeyState, WlKeyboard};
 use wayland_client::protocol::wl_output::{self, WlOutput};
 use wayland_client::protocol::wl_pointer::{self, ButtonState, WlPointer};
@@ -19,7 +23,9 @@ use wayland_client::protocol::wl_seat::{self, Capability, WlSeat};
 use wayland_client::protocol::wl_shm::WlShm;
 use wayland_client::protocol::wl_shm_pool::WlShmPool;
 use wayland_client::protocol::wl_surface::{self, WlSurface};
-use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, WEnum, delegate_noop};
+use wayland_client::{
+  Connection, Dispatch, Proxy, QueueHandle, WEnum, delegate_noop, event_created_child,
+};
 use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::WpCursorShapeDeviceV1;
 use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_manager_v1::WpCursorShapeManagerV1;
 use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
@@ -47,6 +53,7 @@ delegate_noop!(Win: ignore WlShmPool);
 delegate_noop!(Win: ignore WpViewporter);
 delegate_noop!(Win: ignore WpViewport);
 delegate_noop!(Win: ignore WpFractionalScaleManagerV1);
+delegate_noop!(Win: ignore WlDataDeviceManager);
 delegate_noop!(Win: ignore WpCursorShapeManagerV1);
 delegate_noop!(Win: ignore WpCursorShapeDeviceV1);
 delegate_noop!(Win: ignore ZwpPointerGesturesV1);
@@ -307,8 +314,12 @@ impl Dispatch<WlPointer, ()> for Win {
         win.mouse = Point::new(surface_x as f32, surface_y as f32);
         win.send(Event::MouseMove { pos: win.mouse, mods });
       }
-      wl_pointer::Event::Button { button, state, .. } => {
+      wl_pointer::Event::Button { serial, button, state, .. } => {
         let down = state == WEnum::Value(ButtonState::Pressed);
+        if down {
+          win.clip.borrow_mut().serial = serial;
+        }
+
         win.button(button, down);
       }
       wl_pointer::Event::Axis { axis: WEnum::Value(axis), value, .. } => {
@@ -384,9 +395,10 @@ impl Dispatch<WlKeyboard, ()> for Win {
         win.send(Event::Mods(Mods::NONE));
         win.send(Event::Focus(false));
       }
-      wl_keyboard::Event::Key { key, state, .. } => {
+      wl_keyboard::Event::Key { serial, key, state, .. } => {
         let down = state == WEnum::Value(KeyState::Pressed);
         if down {
+          win.clip.borrow_mut().serial = serial;
           let (rate, delay) = win.repeat_info;
           let repeats = rate > 0 && win.kb.as_ref().is_some_and(|kb| kb.repeats(key));
           let at = Instant::now() + Duration::from_millis(delay.max(0) as u64);
@@ -409,6 +421,61 @@ impl Dispatch<WlKeyboard, ()> for Win {
         }
       }
       wl_keyboard::Event::RepeatInfo { rate, delay } => win.repeat_info = (rate, delay),
+      _ => {}
+    }
+  }
+}
+
+impl Dispatch<WlDataDevice, ()> for Win {
+  fn event(
+    win: &mut Self,
+    _: &WlDataDevice,
+    ev: wl_data_device::Event,
+    _: &(),
+    _: &Connection,
+    _: &QueueHandle<Self>,
+  ) {
+    match ev {
+      wl_data_device::Event::DataOffer { id } => win.clip.borrow_mut().offers.push((id, vec![])),
+      wl_data_device::Event::Selection { id } => win.clip.borrow_mut().select(id),
+      _ => {}
+    }
+  }
+
+  event_created_child!(Win, WlDataDevice, [
+    wl_data_device::EVT_DATA_OFFER_OPCODE => (WlDataOffer, ()),
+  ]);
+}
+
+impl Dispatch<WlDataOffer, ()> for Win {
+  fn event(
+    win: &mut Self,
+    offer: &WlDataOffer,
+    ev: wl_data_offer::Event,
+    _: &(),
+    _: &Connection,
+    _: &QueueHandle<Self>,
+  ) {
+    if let wl_data_offer::Event::Offer { mime_type } = ev
+      && let Some((_, types)) = win.clip.borrow_mut().offers.iter_mut().find(|(o, _)| o == offer)
+    {
+      types.push(mime_type);
+    }
+  }
+}
+
+impl Dispatch<WlDataSource, ()> for Win {
+  fn event(
+    win: &mut Self,
+    source: &WlDataSource,
+    ev: wl_data_source::Event,
+    _: &(),
+    _: &Connection,
+    _: &QueueHandle<Self>,
+  ) {
+    match ev {
+      wl_data_source::Event::Send { fd, .. } => win.clip.borrow().send(source, fd),
+      wl_data_source::Event::Cancelled => win.clip.borrow_mut().cancelled(source),
       _ => {}
     }
   }

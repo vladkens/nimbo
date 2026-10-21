@@ -9,22 +9,26 @@
 //! presented through `wl_shm` buffers ([shm]) paced by frame callbacks, the scale from
 //! fractional-scale-v1 (with a viewport), else the preferred buffer scale or the outputs'; input
 //! from `wl_seat` (pointer, axis, pinch gestures, keyboard through xkbcommon in [xkb]),
-//! cursor-shape-v1 for cursors; the objects' events in [dispatch]. One thread: the loop polls the
-//! display and a wake eventfd with the next key repeat as the timeout.
+//! cursor-shape-v1 for cursors, the clipboard on `wl_data_device` ([clip]); the objects' events
+//! in [dispatch]. One thread: the loop polls the display and a wake eventfd with the next key
+//! repeat as the timeout.
 //!
 //! No client-side decorations: sway and other wlroots compositors (and KDE) draw their own;
 //! GNOME (Mutter) draws none for clients, so a window there has no title bar yet (CSD is to
 //! do).
 
+mod clip;
 mod dispatch;
 mod dl;
 mod shm;
 mod x11;
 mod xkb;
 
+use std::cell::RefCell;
 use std::ffi::CStr;
 use std::os::fd::OwnedFd;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -33,6 +37,7 @@ use rustix::mm::{MapFlags, ProtFlags, mmap, munmap};
 use wayland_client::backend::WaylandError;
 use wayland_client::globals::registry_queue_init;
 use wayland_client::protocol::wl_compositor::WlCompositor;
+use wayland_client::protocol::wl_data_device_manager::WlDataDeviceManager;
 use wayland_client::protocol::wl_keyboard::WlKeyboard;
 use wayland_client::protocol::wl_output::WlOutput;
 use wayland_client::protocol::wl_pointer::{AxisSource, WlPointer};
@@ -54,6 +59,7 @@ use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 use wayland_protocols::xdg::shell::client::xdg_surface::XdgSurface;
 use wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase;
 
+use self::clip::{Clip, Clipboard};
 use self::shm::Presenter;
 use self::xkb::{Keyboard, Typed};
 use crate::Config;
@@ -207,6 +213,7 @@ pub struct Win {
   /// Keys per second and the delay before the first repeat, ms.
   repeat_info: (i32, i32),
   repeat: Option<Repeat>,
+  clip: Rc<RefCell<Clip>>,
 }
 
 fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
@@ -218,7 +225,8 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
   let shm: WlShm = globals.bind(&qh, 1..=1, ())?;
   let viewporter: Option<WpViewporter> = globals.bind(&qh, 1..=1, ()).ok();
   let fractions: Option<WpFractionalScaleManagerV1> = globals.bind(&qh, 1..=1, ()).ok();
-  let _seat: Option<WlSeat> = globals.bind(&qh, 1..=8, ()).ok();
+  let seat: Option<WlSeat> = globals.bind(&qh, 1..=8, ()).ok();
+  let data: Option<WlDataDeviceManager> = globals.bind(&qh, 1..=3, ()).ok();
   let shapes: Option<WpCursorShapeManagerV1> = globals.bind(&qh, 1..=1, ()).ok();
   let gestures: Option<ZwpPointerGesturesV1> = globals.bind(&qh, 1..=3, ()).ok();
   let outputs: Vec<Output> = globals.contents().with_list(|list| {
@@ -252,7 +260,22 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
 
   surface.commit();
 
-  let mut rt = Runtime::new(app, cfg.size, 1.0, Clock::real());
+  let device = match (&data, &seat) {
+    (Some(m), Some(s)) => Some(m.get_data_device(s, &qh, ())),
+    _ => None,
+  };
+
+  let clip = Rc::new(RefCell::new(Clip {
+    conn: conn.clone(),
+    qh: qh.clone(),
+    manager: data,
+    device,
+    offers: Vec::new(),
+    selection: None,
+    source: None,
+    serial: 0,
+  }));
+  let mut rt = Runtime::new(app, cfg.size, 1.0, Clock::real(), Box::new(Clipboard(clip.clone())));
   rt.event(Event::Appearance(appearance()));
 
   // A wake from any thread writes the eventfd the loop polls.
@@ -304,6 +327,7 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
     mods: Mods::NONE,
     repeat_info: (25, 600),
     repeat: None,
+    clip,
   };
 
   // Requests wait in the connection's buffer for the socket to drain: no frame is drawn

@@ -1,13 +1,13 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The headless harness: runs an app with no window on the same renderer, offscreen, at a
-//! given size and scale, on virtual time. Scripted events drive it; it renders PNG shots
-//! ([crate::png]).
+//! given size and scale, on virtual time and an in-memory clipboard. Scripted input drives it;
+//! it renders PNG shots ([crate::png]).
 
 use std::path::Path;
 use std::time::Duration;
 
-use crate::app::{App, Clock, Event, Mods, MouseButton, Runtime};
+use crate::app::{App, Clock, Event, MemClipboard, Mods, MouseButton, Runtime};
 use crate::cpu::{self, Pixels};
 use crate::keys::{self, Key, KeyEvent};
 use crate::scene::{Point, Size};
@@ -23,7 +23,7 @@ pub struct Harness<A> {
 impl<A: App> Harness<A> {
   pub fn new(app: A, size: Size, scale: f32) -> Self {
     let clock = Clock::Virtual(Duration::ZERO);
-    let rt = Runtime::new(app, size, scale, clock);
+    let rt = Runtime::new(app, size, scale, clock, Box::new(MemClipboard::default()));
     Self { rt, cpu: cpu::Renderer::new() }
   }
 

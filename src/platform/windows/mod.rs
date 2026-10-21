@@ -6,7 +6,8 @@
 //! (the waker posts a message) or a high-resolution waitable timer: while the runtime animates,
 //! the next frame slot at the refresh rate of the display it is on, followed as it moves to
 //! another or the mode changes. No frames while the window is minimized; one when it shows again.
-//! Input and cursors are in [input], keys in [keyboard]; then the performance cores.
+//! Input and cursors are in [input], keys in [keyboard]; then the clipboard and the performance
+//! cores.
 
 mod input;
 mod keyboard;
@@ -17,10 +18,14 @@ use std::ptr::{null, null_mut};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use windows_sys::Win32::Foundation::{
-  CloseHandle, FILETIME, HANDLE, HWND, LPARAM, LRESULT, RECT, WPARAM,
+  CloseHandle, FILETIME, GlobalFree, HANDLE, HWND, LPARAM, LRESULT, RECT, WPARAM,
 };
 use windows_sys::Win32::Graphics::Gdi::*;
+use windows_sys::Win32::System::DataExchange::{
+  CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
+};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
 use windows_sys::Win32::System::SystemInformation::{
   GetLogicalProcessorInformationEx, GetSystemTimePreciseAsFileTime, PROCESSOR_RELATIONSHIP,
   RelationProcessorCore, SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
@@ -36,7 +41,7 @@ use windows_sys::Win32::UI::HiDpi::{
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::Config;
-use crate::app::{App, Appearance, Clock, Event, Runtime};
+use crate::app::{App, Appearance, Clipboard, Clock, Event, Runtime};
 use crate::cpu::Renderer;
 use crate::cpu::raster::IRect;
 use crate::platform::{Pace, points};
@@ -47,6 +52,8 @@ use crate::ui::Cursor;
 const WM_WAKE: u32 = WM_APP + 1;
 /// Frames during a live resize or move, whose modal loop the message loop doesn't run.
 const TIMER_MODAL: usize = 1;
+/// `CF_UNICODETEXT`.
+const CF_TEXT_UTF16: u32 = 13;
 
 fn wide(s: &str) -> Vec<u16> {
   s.encode_utf16().chain([0]).collect()
@@ -499,7 +506,7 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
   assert!(!hwnd.is_null(), "nimbo: CreateWindowExW failed");
 
   let scale = unsafe { GetDpiForWindow(hwnd) } as f32 / 96.0;
-  let mut rt = Runtime::new(app, cfg.size, scale, Clock::real());
+  let mut rt = Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(WinClipboard));
   rt.event(Event::Appearance(appearance()));
   // A wake from any thread posts a message; the window handle crosses threads as a number.
   let target = hwnd as isize;
@@ -575,6 +582,55 @@ fn run_loop(hwnd: HWND, timer: &Timer) {
   }
 }
 
+// MARK: Clipboard
+
+/// The system clipboard, plain text (`CF_UNICODETEXT`).
+pub struct WinClipboard;
+
+impl Clipboard for WinClipboard {
+  fn read(&self) -> Option<String> {
+    if unsafe { OpenClipboard(null_mut()) } == 0 {
+      return None;
+    }
+
+    let mut out = None;
+    let data = unsafe { GetClipboardData(CF_TEXT_UTF16) };
+    let p = unsafe { GlobalLock(data) }.cast::<u16>();
+    if !p.is_null() {
+      // SAFETY: CF_UNICODETEXT is NUL-terminated UTF-16, readable while locked.
+      let n = (0..).take_while(|&i| unsafe { *p.add(i) } != 0).count();
+      out = Some(String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(p, n) }));
+      unsafe { GlobalUnlock(data) };
+    }
+
+    unsafe { CloseClipboard() };
+    out
+  }
+
+  fn write(&mut self, s: &str) {
+    if unsafe { OpenClipboard(null_mut()) } == 0 {
+      return;
+    }
+
+    let text = wide(s);
+    let mem = unsafe { GlobalAlloc(GMEM_MOVEABLE, text.len() * 2) };
+    let p = unsafe { GlobalLock(mem) }.cast::<u16>();
+    if !p.is_null() {
+      unsafe {
+        std::ptr::copy_nonoverlapping(text.as_ptr(), p, text.len());
+        GlobalUnlock(mem);
+        EmptyClipboard();
+        // The clipboard owns the memory once it takes it.
+        if SetClipboardData(CF_TEXT_UTF16, mem).is_null() {
+          GlobalFree(mem);
+        }
+      }
+    }
+
+    unsafe { CloseClipboard() };
+  }
+}
+
 // MARK: System
 
 /// The OS's light or dark setting and accent: light until ported. TODO: `AppsUseLightTheme`
@@ -623,6 +679,15 @@ mod tests {
   #[test]
   fn perf_cores_are_found() {
     assert!(perf_cores().is_some_and(|n| (1..=4).contains(&n)));
+  }
+
+  #[test]
+  fn clipboard_round_trips() {
+    let mut c = WinClipboard;
+    let old = c.read();
+    c.write("nimbo ✓ 👍");
+    assert_eq!(c.read().as_deref(), Some("nimbo ✓ 👍"));
+    c.write(old.as_deref().unwrap_or(""));
   }
 
   #[test]

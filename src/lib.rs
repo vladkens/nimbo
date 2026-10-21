@@ -25,7 +25,8 @@ pub mod ui;
 use std::path::PathBuf;
 
 pub use app::{
-  App, Appearance, Clock, Cx, Event, Mods, MouseButton, Phase, Runtime, WHEEL_LINE, Waker,
+  App, Appearance, Clipboard, Clock, Cx, Event, MemClipboard, Mods, MouseButton, Phase, Runtime,
+  WHEEL_LINE, Waker,
 };
 pub use harness::Harness;
 pub use keys::{
