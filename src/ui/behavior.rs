@@ -23,7 +23,7 @@
 //!
 //! - [Ui::button_behavior]: click, Space while focused (flashes it pressed).
 
-use super::{Cursor, Id, Style, Ui};
+use super::{Cursor, Focus, Id, Style, Ui};
 use crate::keys::Key;
 
 /// What a control got this frame, read before it is built; see the module's docs.
@@ -44,9 +44,13 @@ pub struct Behavior {
 }
 
 impl Behavior {
-  /// The control's box: takes focus by Tab and shows the pointing hand while enabled.
+  /// The control's box: takes focus by Tab and shows the pointing hand while enabled; disabled,
+  /// neither, whatever `s` asked for, so Tab passes it by.
   pub const fn style(&self, s: Style) -> Style {
-    if self.disabled { s } else { s.tab_focusable().cursor(Cursor::Pointer) }
+    match self.disabled {
+      true => Style { focus: Focus::None, cursor: Cursor::Inherit, ..s },
+      false => s.tab_focusable().cursor(Cursor::Pointer),
+    }
   }
 }
 
@@ -181,5 +185,28 @@ mod tests {
     assert_eq!(h.app().plays, 3);
     h.key(Key::Tab, Mods::NONE);
     assert_eq!(h.focused(), None);
+  }
+
+  /// A disabled control whose own style asks for focus, then an enabled one.
+  struct Pair;
+
+  impl App for Pair {
+    fn view(&mut self, ui: &mut Ui) {
+      let sq = Style::new().w(px(20.0)).h(px(20.0));
+      let a = ui.disabled(true).button_behavior(Id::of("a"));
+      ui.with_id(a.id).el(a.style(sq.tab_focusable().cursor(Cursor::Pointer)));
+      let c = ui.button_behavior(Id::of("c"));
+      ui.with_id(c.id).el(c.style(sq));
+    }
+  }
+
+  #[test]
+  fn tab_passes_a_disabled_control_by_whatever_its_style() {
+    let mut h = Harness::new(Pair, Size::new(100.0, 100.0), 1.0);
+    h.frame();
+    h.move_to(10.0, 10.0);
+    assert_eq!(h.rt.cursor(), Cursor::Arrow);
+    h.key(Key::Tab, Mods::NONE);
+    assert_eq!(h.focused(), Some(Id::of("c")));
   }
 }
