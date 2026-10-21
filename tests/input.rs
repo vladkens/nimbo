@@ -12,7 +12,7 @@ mod input;
 use input::*;
 use nimbo::harness::Image;
 use nimbo::{
-  Appearance, Color, Command, Cursor, Event, Harness, Key, KeyEvent, Mods, Phase, Point, Rect,
+  Appearance, Color, Command, Cursor, Event, Harness, Key, KeyEvent, Mods, Phase, Point, Rect, Size,
 };
 
 /// A colour as the frame stores an opaque one.
@@ -86,6 +86,17 @@ fn main() {
   h.move_to(5000.0, 5000.0);
   h.release(5000.0, 5000.0);
   assert_eq!(h.app().pos, Point::new(SIZE.w - SIDE, SIZE.h - SIDE));
+
+  // The window shrinks under it to its least size: the square comes back inside, off the
+  // pointer, which stayed where the square was.
+  h.move_to(SIZE.w - SIDE / 2.0, SIZE.h - SIDE / 2.0);
+  assert!(h.app().hover);
+  h.rt.resize(Size::new(320.0, 240.0), 2.0);
+  let img = h.render();
+  assert_eq!(h.app().pos, Point::new(320.0 - SIDE, 240.0 - SIDE));
+  assert_eq!(img.pixel(320.0 - SIDE / 2.0, 240.0 - SIDE / 2.0), px(BLUE));
+  assert!(!h.app().hover);
+  h.rt.resize(SIZE, 2.0);
   h.leave();
   assert_eq!(h.rt.mouse, None);
 

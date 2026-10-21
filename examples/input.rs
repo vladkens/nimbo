@@ -172,11 +172,17 @@ impl App for Input {
   }
 
   fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
+    // Back inside a window that shrank since, before the event sees it.
+    self.move_to(self.pos, cx.size);
     let used = self.handle(cx, ev);
     self.track(cx) || used
   }
 
   fn paint(&mut self, f: &mut Frame) {
+    // Kept inside a window that shrank, its hover from where the pointer is now; the cursor
+    // follows at the next event.
+    self.move_to(self.pos, f.size);
+    self.hover = f.hover(self.square());
     f.rect(Rect::new(0.0, 0.0, f.size.w, f.size.h), self.bg(), 0.0);
     if self.focused {
       f.rect(Rect::new(0.0, 0.0, f.size.w, BAR), GREEN, 0.0);
