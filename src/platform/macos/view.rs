@@ -12,7 +12,11 @@ use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use std::time::Duration;
 
-use dispatch2::{DispatchQueue, DispatchTime, MainThreadBound};
+use block2::RcBlock;
+use dispatch2::{
+  _dispatch_source_type_timer, DispatchObject, DispatchQueue, DispatchRetained, DispatchSource,
+  DispatchTime, MainThreadBound,
+};
 use objc2::rc::{Retained, Weak};
 use objc2::runtime::{AnyObject, Sel};
 use objc2::{
@@ -43,6 +47,8 @@ pub struct State {
   /// The CPU renderer's frames, presented as the layer's contents.
   presenter: Presenter,
   link: Retained<CADisplayLink>,
+  /// The timer wake: one, set again for each new deadline.
+  wake: Wake,
 }
 
 #[derive(Default)]
@@ -347,7 +353,14 @@ impl View {
         }
       });
     }));
-    *view.ivars().state.borrow_mut() = Some(State { rt, presenter, link });
+    let weak = view.weak();
+    let wake = Wake::new(DispatchQueue::main(), move || {
+      let mtm = MainThreadMarker::new().unwrap();
+      if let Some(view) = weak.get(mtm).load() {
+        view.timer_fired();
+      }
+    });
+    *view.ivars().state.borrow_mut() = Some(State { rt, presenter, link, wake });
     view
   }
 
@@ -497,40 +510,33 @@ impl View {
     }
 
     self.ivars().timer.set(Some(at));
-    let weak = self.weak();
-    let when = DispatchTime::try_from(left).unwrap_or(DispatchTime::NOW);
-    let _ = DispatchQueue::main().after(when, move || {
-      let mtm = MainThreadMarker::new().unwrap();
-      let Some(view) = weak.get(mtm).load() else { return };
-      // An earlier wake superseded this one: that one runs and sets the next.
-      if view.ivars().timer.get() != Some(at) {
-        return;
-      }
+    st.wake.arm(left);
+  }
 
-      view.ivars().timer.set(None);
-      // A timer frame draws at once, without waking the display link: unpausing it for one
-      // frame cost ~100 wakeups a second at 10 Hz. Hidden, it waits for
-      // the window to show ([Self::occlusion_changed]).
-      if !view.visible() {
-        return;
-      }
+  /// The timer wake's deadline came: its frame draws at once, without waking the display link
+  /// (unpausing it for one frame cost ~100 wakeups a second at 10 Hz). Hidden, it waits for the
+  /// window to show ([Self::occlusion_changed]).
+  fn timer_fired(&self) {
+    self.ivars().timer.set(None);
+    if !self.visible() {
+      return;
+    }
 
-      let due = {
-        let mut state = view.ivars().state.borrow_mut();
-        let Some(st) = state.as_mut() else { return };
-        match st.rt.needs_frame() {
-          true => st.link.isPaused(),
-          false => {
-            view.schedule(st);
-            false
-          }
+    let due = {
+      let mut state = self.ivars().state.borrow_mut();
+      let Some(st) = state.as_mut() else { return };
+      match st.rt.needs_frame() {
+        true => st.link.isPaused(),
+        false => {
+          self.schedule(st);
+          false
         }
-      };
-      if due {
-        view.render();
-        view.after_frame();
       }
-    });
+    };
+    if due {
+      self.render();
+      self.after_frame();
+    }
   }
 
   /// After a frame: the display link runs on while the runtime needs frames (animations, drags),
@@ -589,8 +595,9 @@ impl View {
     let Some(st) = state.as_mut() else { return };
     self.ivars().last_frame.set(Some(st.rt.now()));
     // A wake set before this frame is let go: [Self::after_frame] sets the next, a refresh after
-    // this one at the soonest, and the old one finds itself superseded.
+    // this one at the soonest.
     self.ivars().timer.set(None);
+    st.wake.disarm();
     st.rt.resize(size, scale);
     st.rt.frame();
     st.presenter.renderer.sync(&mut st.rt.text, &mut st.rt.images);
@@ -616,6 +623,44 @@ fn refresh(link: &CADisplayLink) -> Duration {
   let d = link.duration();
   let d = if d > 0.0 { d.clamp(1.0 / 120.0, 1.0 / 24.0) } else { 1.0 / 120.0 };
   Duration::from_secs_f64(d)
+}
+
+/// One timer on a queue, set again for each new deadline: it fires only at the last one, and
+/// not at all once disarmed. `dispatch_after` blocks can't be taken back: each superseded one
+/// would still wake the process when its time came.
+struct Wake(DispatchRetained<DispatchSource>);
+
+impl Wake {
+  fn new(queue: &DispatchQueue, fired: impl Fn() + 'static) -> Self {
+    let ty = (&raw const _dispatch_source_type_timer).cast_mut();
+    // SAFETY: a timer source takes no handle or mask.
+    let source = unsafe { DispatchSource::new(ty, 0, 0, Some(queue)) };
+    let block = RcBlock::new(fired);
+    // SAFETY: dispatch copies the block; it runs on `queue`, the thread `fired` was made for.
+    unsafe { source.set_event_handler_with_block(RcBlock::as_ptr(&block)) };
+    let wake = Self(source);
+    wake.disarm();
+    wake.0.activate();
+    wake
+  }
+
+  /// Fires once, `after` from now (with dispatch_after's leeway: a tenth, within 1 ms and 60 s),
+  /// instead of at any deadline set before.
+  fn arm(&self, after: Duration) {
+    let at = DispatchTime::try_from(after).unwrap_or(DispatchTime::NOW);
+    let leeway = (after / 10).clamp(Duration::from_millis(1), Duration::from_secs(60));
+    self.0.set_timer(at, DispatchTime::FOREVER.0, leeway.as_nanos() as u64);
+  }
+
+  fn disarm(&self) {
+    self.0.set_timer(DispatchTime::FOREVER, DispatchTime::FOREVER.0, 0);
+  }
+}
+
+impl Drop for Wake {
+  fn drop(&mut self) {
+    self.0.cancel();
+  }
 }
 
 // MARK: NSEvent conversion
@@ -760,6 +805,32 @@ mod tests {
     assert_eq!(paced(ms(100), Some(ms(1)), hz60), ms(100));
     assert_eq!(paced(ms(2), Some(ms(500)), hz60), ms(2));
     assert_eq!(paced(ms(2), None, hz60), ms(2));
+  }
+
+  /// A timer wake set again fires only at its last deadline, and not at all once disarmed: a
+  /// superseded deadline wakes nothing.
+  #[test]
+  fn a_wake_set_again_fires_once() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let fired = Arc::new(AtomicUsize::new(0));
+    let n = fired.clone();
+    let queue = DispatchQueue::new("nimbo.wake", None);
+    let wake = Wake::new(&queue, move || {
+      n.fetch_add(1, Ordering::SeqCst);
+    });
+    let ms = Duration::from_millis;
+    for t in [20, 40, 60] {
+      wake.arm(ms(t));
+    }
+
+    std::thread::sleep(ms(250));
+    assert_eq!(fired.load(Ordering::SeqCst), 1);
+
+    wake.arm(ms(20));
+    wake.disarm();
+    std::thread::sleep(ms(100));
+    assert_eq!(fired.load(Ordering::SeqCst), 1);
   }
 
   /// A crosshair asked for while the pointer is outside: set as it comes in, not again while it
