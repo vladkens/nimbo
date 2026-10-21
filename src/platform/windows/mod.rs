@@ -158,10 +158,11 @@ struct Window {
   /// While animating, frames come a refresh of the display apart: the display it is on.
   pace: Pace,
   monitor: HMONITOR,
-  /// How many modal loops run the messages (a live move or resize, a menu's), and whether their
-  /// frame timer runs: only while frames are due.
+  /// How many modal loops run the messages (a live move or resize, a menu's), and their frame
+  /// timer's period in milliseconds: a refresh while frames are due, the app's next timer when
+  /// one is set, else none.
   modal: u8,
-  armed: bool,
+  armed: Option<u32>,
   /// The window a wake posts to: none once it is destroyed, so a waker kept by another thread
   /// never posts to a window that took the handle over.
   target: Arc<Mutex<isize>>,
@@ -248,43 +249,40 @@ impl Window {
     }
   }
 
-  /// Runs the live move or resize's frame timer while frames are due and stops it when idle;
-  /// after each message, so a wake or an input that needs a frame starts it again.
+  /// Runs the live move or resize's frame timer while frames are due or a timer is set, and
+  /// stops it when idle; after each message, so a wake or an input that needs a frame starts it
+  /// again.
   fn sync_modal(&mut self) {
-    let due = self.modal > 0 && !self.hidden && self.rt.needs_frame();
-    if due == self.armed {
+    // Every refresh while a frame is due, else at the app's next timer.
+    let wait = match self.modal > 0 && !self.hidden {
+      false => None,
+      true if self.rt.needs_frame() => Some(self.pace.interval),
+      true => self.rt.due_in(),
+    };
+
+    let ms = wait.map(|d| (d.as_millis() as u32).max(1));
+    if ms == self.armed {
       return;
     }
 
-    match due {
-      true => self.arm(),
-      false => unsafe {
+    match ms {
+      Some(ms) => unsafe {
+        SetTimer(self.hwnd, TIMER_MODAL, ms, None);
+      },
+      None => unsafe {
         KillTimer(self.hwnd, TIMER_MODAL);
       },
     }
 
-    self.armed = due;
-  }
-
-  /// Starts the live move's frame timer at the refresh interval, or sets a running one again.
-  fn arm(&self) {
-    let ms = self.pace.interval.as_millis() as u32;
-    unsafe { SetTimer(self.hwnd, TIMER_MODAL, ms.max(1), None) };
+    self.armed = ms;
   }
 
   /// Follows the refresh rate of the window's display: another monitor, or another mode. The
-  /// live move's timer, when it runs, goes on at the new interval.
+  /// live move's timer, when it runs, goes on at the new interval ([Window::sync_modal] after
+  /// the message).
   fn retime(&mut self) {
     self.monitor = unsafe { MonitorFromWindow(self.hwnd, MONITOR_DEFAULTTONEAREST) };
-    let interval = refresh(self.hwnd);
-    if interval == self.pace.interval {
-      return;
-    }
-
-    self.pace.interval = interval;
-    if self.armed {
-      self.arm();
-    }
+    self.pace.interval = refresh(self.hwnd);
   }
 
   /// Wakes post nowhere from now on: the window is going.
@@ -590,7 +588,7 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
     min: cfg.min(),
     style,
     modal: 0,
-    armed: false,
+    armed: None,
     target,
   };
   WINDOW.with(|w| *w.borrow_mut() = Some(window));
@@ -993,6 +991,34 @@ mod tests {
     assert_eq!(*target.lock().unwrap(), 0);
 
     waker.wake();
+    WINDOW.with(|w| w.borrow_mut().take());
+  }
+
+  /// An app's timer comes due while the title bar is held still: the live move's timer
+  /// draws it, then stops.
+  #[test]
+  fn a_live_move_draws_a_timer_when_due() {
+    #[derive(Default)]
+    struct Later(bool);
+    impl App for Later {
+      fn view(&mut self, ui: &mut crate::Ui) {
+        if !std::mem::replace(&mut self.0, true) {
+          ui.request_frame_in(Duration::from_millis(60));
+        }
+      }
+    }
+
+    let cfg = Config::new("modal timer", 200.0, 100.0);
+    let hwnd = create(&cfg, Box::new(Later::default()));
+    let ticks = || timer_ticks(hwnd, 120);
+    unsafe { SendMessageW(hwnd, WM_ENTERSIZEMOVE, 0, 0) };
+    assert!(ticks() > 0, "the first frame is due");
+    assert!(ticks() > 0, "the timer draws");
+    assert_eq!(ticks(), 0, "idle");
+    unsafe {
+      SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0);
+      DestroyWindow(hwnd);
+    }
     WINDOW.with(|w| w.borrow_mut().take());
   }
 
