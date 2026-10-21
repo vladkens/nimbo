@@ -689,6 +689,29 @@ mod tests {
   }
 
   #[test]
+  fn an_emptied_list_scrolls_back_to_the_top() {
+    let list = |n: usize| {
+      move |st| {
+        frame(st, |ui| {
+          ui.id("list").col(Style::new().w(px(50.0)).h(px(50.0)).scroll_y(), |ui| {
+            for _ in 0..n {
+              ui.el(Style::new().w(px(50.0)).h(px(30.0)));
+            }
+          });
+        })
+      }
+    };
+    let mut st = list(10)(UiState::default());
+    ev(&mut st, wheel(10.0, 10.0, 0.0, -150.0, true, Phase::None));
+    st = list(10)(st);
+    assert_eq!(offset(&st, "list"), 150.0);
+    st = list(0)(st);
+    assert_eq!(offset(&st, "list"), 0.0);
+    st = list(10)(st);
+    assert_eq!(offset(&st, "list"), 0.0);
+  }
+
+  #[test]
   fn wheel_momentum_stops_at_the_end_of_shrunk_content() {
     let rows = |n: usize| {
       move |st| {
