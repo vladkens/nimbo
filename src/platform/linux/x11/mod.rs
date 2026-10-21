@@ -47,6 +47,9 @@ use crate::ui::Cursor;
 /// The frame interval while the runtime animates: 60 Hz (the display's rate isn't read).
 const REFRESH: Duration = Duration::from_micros(16_667);
 
+/// How long a key release waits for the press that would make it a repeat, without detectable
+/// autorepeat: the server sends both at once.
+const PAIR_WAIT: Duration = Duration::from_millis(2);
 /// `WM_NORMAL_HINTS` flags (ICCCM): the least and largest sizes are set.
 const P_MIN_SIZE: u32 = 1 << 4;
 const P_MAX_SIZE: u32 = 1 << 5;
@@ -694,9 +697,12 @@ impl Win {
         let e = ev.get::<InputEv>();
         self.held[e.detail as usize / 64] &= !(1u64 << (e.detail % 64));
         // Without detectable autorepeat the server repeats a held key as a release and a press
-        // at the same time.
+        // at the same time; the press may still be on its way (a read can end between them).
+        let all = |_: &Ev| true;
         if !self.detectable
-          && let Some(next) = self.next_event()
+          && let Some(next) = self
+            .next_event()
+            .or_else(|| self.x.wait_event(PAIR_WAIT, &mut self.stash.borrow_mut(), all))
         {
           let n = next.get::<InputEv>();
           if next.kind() == KEY_PRESS && n.detail == e.detail && n.time == e.time {
