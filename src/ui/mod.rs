@@ -703,9 +703,10 @@ impl<'a> Ui<'a> {
   }
 
   /// Applies [Ui::autofocus] to `id`, for widgets given their id: focuses it when the last
-  /// frame did not have it.
+  /// frame did not have it, unless it is disabled ([Ui::disabled], read without taking it).
   pub fn take_autofocus(&mut self, id: Id) {
-    if std::mem::take(&mut self.next_autofocus) && self.st.last.find(id).is_none() {
+    let off = self.next_disabled || self.scope_off;
+    if std::mem::take(&mut self.next_autofocus) && !off && self.st.last.find(id).is_none() {
       self.st.input.focus = Some(id);
     }
   }

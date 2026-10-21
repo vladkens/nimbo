@@ -440,6 +440,17 @@ mod tests {
       ui.id("a").el(field);
     });
     assert_eq!(st.focus(), None);
+    // A disabled widget doesn't take it, named before its behaviour as a button is: the focus
+    // stays where it was.
+    let mut st = frame(UiState::default(), |ui| _ = ui.id("a").el(field));
+    st.set_focus(Some(a));
+    let st = frame(st, |ui| {
+      ui.id("a").el(field);
+      let id = ui.autofocus().disabled(true).id("b").take_id();
+      let off = ui.button_behavior(id);
+      ui.with_id(id).el(off.style(field));
+    });
+    assert_eq!(st.focus(), Some(a));
   }
 
   #[test]
