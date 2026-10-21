@@ -17,7 +17,7 @@ use std::ops::Range;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use super::dl::{Lib, fns};
-use crate::text::edit::next_grapheme;
+use crate::text::edit::graphemes;
 use crate::text::{Font, Glyph, GlyphBox, Ink, Line, Metrics, Raster};
 
 // MARK: FFI
@@ -591,17 +591,9 @@ const EMOJI_PRESENTATION: [(u32, u32); 81] = [
 ];
 
 /// The clusters of `s` for picking fonts, as byte ranges: the editor's grapheme clusters
-/// ([next_grapheme]), so a Hangul syllable of jamo stays in one font too.
+/// ([graphemes]), so a Hangul syllable of jamo stays in one font too.
 fn clusters(s: &str) -> Vec<Range<usize>> {
-  let mut out = Vec::new();
-  let mut i = 0;
-  while i < s.len() {
-    let end = next_grapheme(s, i);
-    out.push(i..end);
-    i = end;
-  }
-
-  out
+  graphemes(s).collect()
 }
 
 /// Characters a font needn't have for a cluster: joiners, variation selectors and tags draw

@@ -3,6 +3,8 @@
 //! Grapheme cluster boundaries: where the layout breaks a word too wide for its line, between
 //! characters a person reads as one.
 
+use std::ops::Range;
+
 const ZWJ: char = '\u{200d}';
 
 /// Characters that join the cluster before them (Unicode's Grapheme_Extend and SpacingMark,
@@ -54,6 +56,12 @@ fn hangul(c: char) -> Option<Hangul> {
 /// (emoji sequences), inside Hangul syllables, or inside a pair of regional indicators (a
 /// flag).
 pub fn is_boundary(s: &str, i: usize) -> bool {
+  boundary(s, i, || s[..i].chars().rev().take_while(|&c| is_regional(c)).count())
+}
+
+/// [is_boundary], with `run` counting the regional indicators right before `i`: a walk through
+/// the string keeps the count instead of counting back at every step.
+fn boundary(s: &str, i: usize, run: impl FnOnce() -> usize) -> bool {
   if i == 0 || i >= s.len() {
     return i <= s.len();
   }
@@ -92,8 +100,7 @@ pub fn is_boundary(s: &str, i: usize) -> bool {
 
   if is_regional(a) && is_regional(b) {
     // A flag is a pair: break after an even run of indicators.
-    let run = s[..i].chars().rev().take_while(|&c| is_regional(c)).count();
-    return run % 2 == 0;
+    return run().is_multiple_of(2);
   }
 
   true
@@ -119,6 +126,24 @@ pub fn next_grapheme(s: &str, i: usize) -> usize {
   j
 }
 
+/// The grapheme clusters of `s` from the start, as byte ranges: [next_grapheme] in turn, in one
+/// pass (a run of flags isn't counted again at each).
+pub fn graphemes(s: &str) -> impl Iterator<Item = Range<usize>> + '_ {
+  let (mut i, mut run) = (0, 0);
+  std::iter::from_fn(move || {
+    let start = i;
+    while let Some(c) = s[i..].chars().next() {
+      run = if is_regional(c) { run + 1 } else { 0 };
+      i += c.len_utf8();
+      if boundary(s, i, || run) {
+        break;
+      }
+    }
+
+    (i > start).then_some(start..i)
+  })
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -133,6 +158,8 @@ mod tests {
       i = j;
     }
 
+    let walked: Vec<&str> = graphemes(s).map(|r| &s[r]).collect();
+    assert_eq!(walked, out, "{s:?}: one pass, the same clusters");
     out
   }
 
@@ -148,6 +175,7 @@ mod tests {
       (family, &[family]),
       ("🇺🇸🇩🇪", &["🇺🇸", "🇩🇪"]),
       ("🇺🇸🇩", &["🇺🇸", "🇩"]),
+      ("a🇺🇸🇩🇪🇫", &["a", "🇺🇸", "🇩🇪", "🇫"]),
       ("a\r\nb", &["a", "\r\n", "b"]),
       ("\n\u{301}", &["\n", "\u{301}"]),
       ("\u{1100}\u{1161}\u{11a8}가", &["\u{1100}\u{1161}\u{11a8}", "가"]),
@@ -176,5 +204,15 @@ mod tests {
     assert_eq!(next_grapheme("e\u{301}x", 2), 3);
     assert_eq!(next_grapheme("👍🏽!", 1), 8);
     assert_eq!(next_grapheme("é", 1), 2);
+  }
+
+  /// A long run of flags walks in one pass: counted back at each step, 10,000 flags took some
+  /// 200 million steps.
+  #[test]
+  fn graphemes_walk_flags_in_one_pass() {
+    let s = "🇺🇦".repeat(10_000);
+    let t = std::time::Instant::now();
+    assert_eq!(graphemes(&s).count(), 10_000);
+    assert!(t.elapsed().as_millis() < 500, "{:?}", t.elapsed());
   }
 }
