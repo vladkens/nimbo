@@ -1,6 +1,16 @@
 [package]
 name = "nimbo"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
+description = "A small, fast, custom-drawn desktop UI toolkit: one look on macOS, Windows and Linux."
+authors = ["vladkens"]
+license = "MIT"
+repository = "https://github.com/vladkens/nimbo"
+homepage = "https://github.com/vladkens/nimbo"
+documentation = "https://docs.rs/nimbo"
+readme = "readme.md"
+include = ["/src/**/*.rs", "/Cargo.toml", "/Cargo.lock", "/LICENSE", "/readme.md"]
+keywords = ["gui", "ui", "desktop", "widgets", "toolkit"]
+categories = ["gui"]
 
 [dependencies]
