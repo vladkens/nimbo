@@ -717,7 +717,10 @@ mod tests {
     assert!(perf_cores().is_some_and(|n| (1..=4).contains(&n)));
   }
 
+  /// It empties the user's clipboard (every format, not only text), so it runs only when asked:
+  /// `cargo test -- --ignored clipboard_round_trips` on a machine whose clipboard can go.
   #[test]
+  #[ignore = "empties the system clipboard"]
   fn clipboard_round_trips() {
     // A message-only window owns it, as the app's window does: never shown.
     let class = wide("STATIC");
@@ -739,11 +742,9 @@ mod tests {
     };
     assert!(!hwnd.is_null());
     let mut c = WinClipboard::new(hwnd);
-    let old = c.read();
     c.write("nimbo ✓ 👍");
     assert_eq!(c.read().as_deref(), Some("nimbo ✓ 👍"));
     assert_eq!(unsafe { GetClipboardOwner() }, hwnd, "the window owns what it wrote");
-    c.write(old.as_deref().unwrap_or(""));
     unsafe { DestroyWindow(hwnd) };
   }
 
