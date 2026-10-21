@@ -70,9 +70,14 @@ impl Ui<'_> {
   }
 
   /// The disabled flag and autofocus for `id`; a disabled behaviour, or `None` to read input.
+  /// Disabled while focused, it gives focus up: its keys no longer route through it.
   fn begin(&mut self, id: Id) -> Option<Behavior> {
     let off = self.take_disabled();
     self.take_autofocus(id);
+    if off && self.focused(id) {
+      self.focus(None);
+    }
+
     off.then_some(Behavior { id, disabled: true, ..Behavior::default() })
   }
 
@@ -167,10 +172,11 @@ mod tests {
     assert_eq!(px(&mut h), [255, 0, 0, 255]);
     h.wait(Duration::from_millis(100));
     assert_eq!((px(&mut h), h.app().plays), ([51, 51, 51, 255], 3));
-    // Disabled: no input, and Tab passes it by.
+    // Disabled while focused: focus goes, no input, and Tab passes it by.
     h.app_mut().off = true;
     h.rt.redraw();
     h.frame();
+    assert_eq!(h.focused(), None);
     h.click(20.0, 20.0);
     assert_eq!(h.app().plays, 3);
     h.key(Key::Tab, Mods::NONE);
