@@ -2,11 +2,11 @@
 
 //! The text backend on the system's libraries, loaded at run time ([super::dl]): fontconfig
 //! picks the UI font (`sans-serif`) and the monospaced one (`monospace`) and the fallback chain
-//! (`FcFontSort`, by charset per character), HarfBuzz shapes (its own OpenType functions, at the
-//! font's units per em: unhinted advances, scaled to points), FreeType gives metrics and draws
-//! glyphs: grayscale coverage with light hinting (vertical only, so subpixel x positions stay;
-//! none when fontconfig turns hinting off), colour glyphs (CBDT strikes scaled to the size, COLR
-//! layers) as RGBA.
+//! (`FcFontSort`, untrimmed, by charset per cluster), HarfBuzz shapes (its own OpenType
+//! functions, at the font's units per em: unhinted advances, scaled to points), FreeType gives
+//! metrics and draws glyphs: grayscale coverage with light hinting (vertical only, so subpixel x
+//! positions stay; none when fontconfig turns hinting off), colour glyphs (CBDT strikes scaled to
+//! the size, COLR layers) as RGBA.
 //!
 //! Process-wide state: the libraries, fontconfig's config, one FreeType library, and every font
 //! file opened once (`Arc`, shared across text systems and threads), each FT_Face behind its
@@ -422,7 +422,10 @@ impl Cache {
       (fc.FcDefaultSubstitute)(pat);
       let mut res = 0;
       let matched = (fc.FcFontMatch)(s.config, pat, &mut res);
-      let set = (fc.FcFontSort)(s.config, pat, 1, std::ptr::null_mut(), &mut res);
+      // Untrimmed: trimming drops a font whose characters earlier ones cover, which may be the
+      // one font with a whole cluster ([runs]). Every installed font is in the list, looked at
+      // only as far as a character needs.
+      let set = (fc.FcFontSort)(s.config, pat, 0, std::ptr::null_mut(), &mut res);
       (fc.FcPatternDestroy)(pat);
       (matched, set)
     };
@@ -977,6 +980,27 @@ mod tests {
         }
       }
     }
+  }
+
+  /// Every font fontconfig sorts for the request is a fallback, those whose characters earlier
+  /// ones cover too (trimmed, they would be gone): one may hold a whole cluster (a base and its
+  /// mark) that earlier fonts only hold apart.
+  #[test]
+  fn fallbacks_are_untrimmed() {
+    let chain = face(Font::ui(13.0)).chain;
+    let s = sys();
+    let all = unsafe {
+      let pat = (s.fc.FcPatternCreate)();
+      (s.fc.FcPatternAddString)(pat, c"family".as_ptr(), c"sans-serif".as_ptr());
+      (s.fc.FcPatternAddInteger)(pat, c"weight".as_ptr(), FC_WEIGHTS[0]);
+      (s.fc.FcConfigSubstitute)(s.config, pat, FC_MATCH_PATTERN);
+      (s.fc.FcDefaultSubstitute)(pat);
+      let mut res = 0;
+      let set = (s.fc.FcFontSort)(s.config, pat, 0, std::ptr::null_mut(), &mut res);
+      (s.fc.FcPatternDestroy)(pat);
+      (*set).nfont as usize
+    };
+    assert_eq!(cache().chains[chain].fallbacks.len(), all);
   }
 
   #[test]
