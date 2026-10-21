@@ -161,9 +161,10 @@ struct Win {
   renderer: Renderer,
   window: P,
   area: P,
-  /// The tile hashes of the frame in [SURFACE], and its size in pixels.
+  /// The tile hashes of the frame in [SURFACE], its size in pixels and its scale.
   tiles: Vec<u64>,
   shown: (usize, usize),
+  shown_scale: f32,
   /// A tick callback is on: frames are wanted. The frame clock's time of the last frame it
   /// asked for, µs.
   ticking: bool,
@@ -317,6 +318,7 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Res<()> {
       area,
       tiles: Vec::new(),
       shown: (0, 0),
+      shown_scale: 0.0,
       ticking: false,
       last_tick: 0,
       timer: None,
@@ -379,7 +381,8 @@ impl Win {
   /// The surface shown is not of the area's size and scale, or there is none.
   fn stale(&self) -> bool {
     let (size, scale) = self.size();
-    SURFACE.get().is_null() || Renderer::pixel_size(size, scale) != self.shown
+    let px = Renderer::pixel_size(size, scale);
+    SURFACE.get().is_null() || (px, scale) != (self.shown, self.shown_scale)
   }
 
   /// Not minimized or withdrawn (as X11 tells; on Wayland the compositor holds the clock).
@@ -451,13 +454,13 @@ impl Win {
     r.sync(&mut self.rt.text, &mut self.rt.images);
     r.prepare(&self.rt.scene, size, scale);
     let (w, h) = r.size();
-    if (w, h) != self.shown || SURFACE.get().is_null() {
+    if ((w, h), scale) != (self.shown, self.shown_scale) || SURFACE.get().is_null() {
       // Out of memory: the frame waits for the next.
       if !new_surface(w, h, scale) {
         return;
       }
 
-      self.shown = (w, h);
+      (self.shown, self.shown_scale) = ((w, h), scale);
       self.tiles.clear();
     }
 
