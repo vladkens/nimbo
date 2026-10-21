@@ -376,6 +376,8 @@ pub struct Runtime<A> {
   /// The last frame is drawn again because its layout shifted from the one before
   /// ([Ui::shifted]); a shift again right after waits for an event.
   settled: bool,
+  /// The app heard an appearance: the first one reaches it even when it equals the default.
+  told: bool,
   quit: bool,
 }
 
@@ -403,6 +405,7 @@ impl<A: App> Runtime<A> {
       animating: false,
       rehovered: false,
       settled: false,
+      told: false,
       quit: false,
     }
   }
@@ -484,12 +487,13 @@ impl<A: App> Runtime<A> {
   }
 
   /// A new appearance: the theme follows (unless the app set one) and the app hears of it;
-  /// redraws when it differs from the last.
+  /// redraws when it is the first or differs from the last.
   fn appearance(&mut self, a: Appearance) -> bool {
-    if a == self.ui.appearance() {
+    if self.told && a == self.ui.appearance() {
       return false;
     }
 
+    self.told = true;
     self.ui.set_appearance(a);
     self.app_event(&Event::Appearance(a));
     self.redraw();

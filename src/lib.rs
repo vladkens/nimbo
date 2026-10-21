@@ -157,8 +157,8 @@ pub fn run<A: App + 'static>(cfg: Config, app: A, script: impl FnOnce(&mut Harne
   println!("{}: wrote {}", cfg.title, path.display());
 }
 
-/// The harness [run] shoots in, at the size and scale of `args`, told the appearance (dark
-/// unless `--appearance` says otherwise) as a window tells the OS's; the app hears a change.
+/// The harness [run] shoots in, at the size and scale of `args`; the app first hears the
+/// appearance, dark unless `--appearance` says otherwise, as a window tells it the OS's.
 fn harness<A: App>(cfg: &Config, app: A, args: &Args) -> Harness<A> {
   let mut h = Harness::new(app, args.size.unwrap_or(cfg.size), args.scale);
   h.event(Event::Appearance(args.appearance.unwrap_or(Appearance::DARK)));
@@ -171,13 +171,26 @@ mod tests {
 
   #[test]
   fn shots_tell_the_appearance() {
-    struct Blank;
-    impl App for Blank {}
+    #[derive(Default)]
+    struct Seen(Option<Appearance>);
+    impl App for Seen {
+      fn event(&mut self, _cx: &mut Cx, ev: &Event) -> bool {
+        if let Event::Appearance(a) = ev {
+          self.0 = Some(*a);
+        }
 
+        true
+      }
+    }
+
+    // The app hears the first one, the default dark too, and the theme follows it.
     let cfg = Config::new("a", 100.0, 100.0);
-    let seen = |s: &str| harness(&cfg, Blank, &parse(s).unwrap()).rt.ui.appearance();
-    assert_eq!(seen(""), Appearance::DARK);
-    assert_eq!(seen("--appearance light"), Appearance::LIGHT);
+    let seen = |s: &str| {
+      let h = harness(&cfg, Seen::default(), &parse(s).unwrap());
+      (h.app().0, h.rt.ui.appearance())
+    };
+    assert_eq!(seen(""), (Some(Appearance::DARK), Appearance::DARK));
+    assert_eq!(seen("--appearance light"), (Some(Appearance::LIGHT), Appearance::LIGHT));
   }
 
   fn parse(s: &str) -> Result<Args, String> {
