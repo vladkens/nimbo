@@ -1,17 +1,22 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The Linux platform on Wayland (pure-Rust `wayland-client`, no libwayland): an xdg-shell
-//! toplevel, CPU frames presented through `wl_shm` buffers ([shm]) paced by frame callbacks, the
-//! scale from fractional-scale-v1 (with a viewport), else the preferred buffer scale or the
-//! outputs'; the objects' events in [dispatch]. One thread: the loop polls the display and a wake
-//! eventfd.
+//! The Linux platform: Wayland when the session has it, else X11 ([x11], for X sessions). [run]
+//! picks it: `NIMBO_BACKEND=wayland|x11` forces one; otherwise Wayland when `WAYLAND_DISPLAY`
+//! (or `WAYLAND_SOCKET`) is set and the connection works, else X11 on `DISPLAY`.
+//!
+//! On Wayland (pure-Rust `wayland-client`, no libwayland): an xdg-shell toplevel, CPU frames
+//! presented through `wl_shm` buffers ([shm]) paced by frame callbacks, the scale from
+//! fractional-scale-v1 (with a viewport), else the preferred buffer scale or the outputs'; the
+//! objects' events in [dispatch]. One thread: the loop polls the display and a wake eventfd.
 //!
 //! No client-side decorations: sway and other wlroots compositors (and KDE) draw their own;
 //! GNOME (Mutter) draws none for clients, so a window there has no title bar yet (CSD is to
 //! do).
 
 mod dispatch;
+mod dl;
 mod shm;
+mod x11;
 
 use std::os::fd::OwnedFd;
 use std::path::Path;
@@ -43,18 +48,37 @@ type Res<T> = Result<T, Box<dyn std::error::Error>>;
 /// no frame callback): 120 Hz.
 const TICK: Duration = Duration::from_micros(8333);
 
-/// Opens the app's window and runs the event loop until it closes or quits.
+/// Opens the app's window and runs the event loop until it closes or quits, on Wayland or X11.
 pub fn run(cfg: &Config, app: Box<dyn App>) {
-  let res = Connection::connect_to_env().map_err(Into::into).and_then(|c| run_loop(c, cfg, app));
+  let forced = std::env::var("NIMBO_BACKEND").ok();
+  let wayland =
+    std::env::var_os("WAYLAND_DISPLAY").is_some() || std::env::var_os("WAYLAND_SOCKET").is_some();
+  let res = match forced.as_deref() {
+    Some("x11") => x11::run(cfg, app),
+    Some("wayland") => {
+      Connection::connect_to_env().map_err(Into::into).and_then(|c| run_loop(c, cfg, app))
+    }
+    Some(b) => Err(format!("NIMBO_BACKEND={b:?}: wayland or x11").into()),
+    None if wayland => match Connection::connect_to_env() {
+      Ok(c) => run_loop(c, cfg, app),
+      Err(e) if std::env::var_os("DISPLAY").is_some() => {
+        eprintln!("nimbo: Wayland: {e}; X11 instead");
+        x11::run(cfg, app)
+      }
+      Err(e) => Err(e.into()),
+    },
+    None => x11::run(cfg, app),
+  };
   if let Err(e) = res {
     eprintln!("nimbo: {e}");
     std::process::exit(1);
   }
 }
 
-/// The OS's light or dark setting and accent: light until ported. TODO: the XDG portal's
-/// `org.freedesktop.appearance` `color-scheme` and `accent-color` (`Settings.Read`, the
-/// `SettingChanged` signal); light without a portal.
+/// The OS's light or dark setting and accent: light until ported (X11 windows follow
+/// XSETTINGS' theme name, [x11]). TODO: the XDG portal's `org.freedesktop.appearance`
+/// `color-scheme` and `accent-color` (`Settings.Read`, the `SettingChanged` signal); light
+/// without a portal.
 pub fn appearance() -> Appearance {
   Appearance::LIGHT
 }
