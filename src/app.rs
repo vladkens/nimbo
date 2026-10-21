@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use crate::keys::{self, Binding, Command, KeyEvent};
 use crate::scene::{Color, Frame, Images, Point, Scene, Size};
+use crate::text::TextSystem;
 use crate::ui::Cursor;
 
 /// An application: owns its state, reacts to events and draws the frame from it. A frame is
@@ -285,6 +286,7 @@ pub struct Runtime<A> {
   pub scale: f32,
   pub mouse: Option<Point>,
   pub scene: Scene,
+  pub text: TextSystem,
   pub images: Images,
   clock: Clock,
   waker: Waker,
@@ -304,6 +306,7 @@ impl<A: App> Runtime<A> {
       scale,
       mouse: None,
       scene: Scene::default(),
+      text: TextSystem::new(scale),
       images: Images::default(),
       clock,
       waker,
@@ -352,6 +355,7 @@ impl<A: App> Runtime<A> {
     }
 
     (self.size, self.scale) = (size, scale);
+    self.text.set_scale(scale);
     self.dirty = true;
   }
 
@@ -427,9 +431,10 @@ impl<A: App> Runtime<A> {
     self.dirty || self.animating
   }
 
-  /// Builds the scene from the app's paint; the caller syncs `images` to the renderer and draws
-  /// `scene`.
-  pub fn frame(&mut self) {
+  /// Builds the scene from the app's paint; the caller syncs `text` glyphs and `images` to the
+  /// renderer and draws `scene`. When glyphs were dropped (a full atlas), the next refresh draws
+  /// once more: returns whether this frame must be.
+  pub fn frame(&mut self) -> bool {
     self.scene.clear();
     let (size, scale, now) = (self.size, self.scale, self.clock.now());
     let mut f = Frame {
@@ -438,12 +443,14 @@ impl<A: App> Runtime<A> {
       mouse: self.mouse,
       now,
       scene: &mut self.scene,
+      text: &mut self.text,
       images: &mut self.images,
       animate: false,
     };
     self.app.paint(&mut f);
     self.animating = f.animate;
-    self.dirty = false;
+    self.dirty = self.text.end_frame();
+    self.dirty
   }
 }
 

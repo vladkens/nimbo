@@ -8,6 +8,9 @@
 //! `cargo run --release --example shapes` opens it in a window, which follows the OS's light or
 //! dark setting; `-- --shot shapes.png [--appearance light]` renders it without one.
 
+// A Windows app, not a console one: no terminal opens with its window.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use std::f32::consts::TAU;
 
 use nimbo::{

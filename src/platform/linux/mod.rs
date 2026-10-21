@@ -2,8 +2,8 @@
 
 //! The Linux platform: Wayland when the session has it, else X11 ([x11], for X sessions). [run]
 //! picks it: `NIMBO_BACKEND=wayland|x11` forces one; otherwise Wayland when `WAYLAND_DISPLAY`
-//! (or `WAYLAND_SOCKET`) is set and the connection works, else X11 on `DISPLAY`. The keyboard
-//! ([xkb]) is shared.
+//! (or `WAYLAND_SOCKET`) is set and the connection works, else X11 on `DISPLAY`. The text stack
+//! ([text]) and the keyboard ([xkb]) are shared.
 //!
 //! On Wayland (pure-Rust `wayland-client`, no libwayland): an xdg-shell toplevel, CPU frames
 //! presented through `wl_shm` buffers ([shm]) paced by frame callbacks, the scale from
@@ -22,6 +22,7 @@ mod cursor;
 mod dispatch;
 mod dl;
 mod shm;
+pub mod text;
 mod x11;
 mod xkb;
 
@@ -554,7 +555,7 @@ impl Win {
     let size = Size::new(points(w, scale), points(h, scale));
     self.rt.resize(size, scale);
     self.rt.frame();
-    self.present.renderer.sync(&mut self.rt.images);
+    self.present.renderer.sync(&mut self.rt.text, &mut self.rt.images);
     let shown = self.present.present(&self.rt.scene, size, scale, &self.surface, &self.qh);
     let fits = self.present.fits();
     self.next_tick = None;

@@ -6,11 +6,12 @@
 //! (the waker posts a message) or a high-resolution waitable timer: while the runtime animates,
 //! the next frame slot at the refresh rate of the display it is on, followed as it moves to
 //! another or the mode changes. No frames while the window is minimized; one when it shows again.
-//! Input and cursors are in [input], keys in [keyboard]; then the clipboard and the performance
-//! cores.
+//! Input and cursors are in [input], keys in [keyboard]; then the clipboard, the performance
+//! cores, and the DirectWrite text backend ([text]).
 
 mod input;
 mod keyboard;
+pub mod text;
 
 use std::cell::RefCell;
 use std::mem::offset_of;
@@ -213,7 +214,7 @@ impl Window {
     self.rt.resize(size, self.scale);
     self.rt.frame();
     let r = &mut self.renderer;
-    r.sync(&mut self.rt.images);
+    r.sync(&mut self.rt.text, &mut self.rt.images);
     r.prepare(&self.rt.scene, size, self.scale);
     let (pw, ph) = r.size();
     if self.dib.as_ref().is_none_or(|d| (d.w, d.h) != (pw, ph)) {

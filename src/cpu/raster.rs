@@ -500,6 +500,46 @@ impl Map {
   }
 }
 
+/// `glyph_fs`: coverage from the R8 atlas, nearest texel, times the colour.
+pub fn glyph(t: &mut Target, s: &Sprite, atlas: Tex, clip: IRect, scale: f32) {
+  let r = sprite_bounds(s, scale).intersect(clip);
+  if r.is_empty() || s.color[3] == 0.0 {
+    return;
+  }
+
+  let color = premul(s.color);
+  let solid = pack(color);
+  let mu = Map::new(s.rect.x, s.rect.w, s.uv.x, s.uv.w, scale);
+  let mv = Map::new(s.rect.y, s.rect.h, s.uv.y, s.uv.h, scale);
+  let texel = |v: f32, n: usize| (v.floor().max(0.0) as usize).min(n - 1);
+  // Columns map to the same texels on every row: look them up once.
+  let mut cols = [0usize; 256];
+  let n = (r.x1 - r.x0) as usize;
+  let cols = if n <= cols.len() {
+    for (k, c) in cols[..n].iter_mut().enumerate() {
+      *c = texel(mu.at(r.x0 + k as i32), atlas.w);
+    }
+
+    Some(&cols[..n])
+  } else {
+    None
+  };
+
+  for y in r.y0..r.y1 {
+    let ty = texel(mv.at(y), atlas.h);
+    let src = &atlas.data[ty * atlas.w..(ty + 1) * atlas.w];
+    let row = t.row(y, r.x0, r.x1);
+    for (k, p) in row.iter_mut().enumerate() {
+      let tx = cols.map_or_else(|| texel(mu.at(r.x0 + k as i32), atlas.w), |c| c[k]);
+      match src[tx] {
+        0 => {}
+        255 if color[3] >= 1.0 => *p = solid,
+        a => *p = blend(*p, scaled(color, a as f32 * (1.0 / 255.0))),
+      }
+    }
+  }
+}
+
 /// A texel of an RGBA texture as BGRA floats 0..1.
 #[inline]
 fn fetch(tex: Tex, x: usize, y: usize) -> [f32; 4] {

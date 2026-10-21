@@ -6,7 +6,8 @@
 //! frames built only when the input changed something.
 
 #[path = "../examples/input.rs"]
-#[allow(dead_code)]
+// The example sets the Windows subsystem, an attribute of its own crate, not of this module.
+#[allow(dead_code, unused_attributes)]
 mod input;
 
 use input::*;

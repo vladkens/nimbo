@@ -493,7 +493,7 @@ impl Win {
     let (scale, size) = (self.scale, self.size);
     self.rt.resize(size, scale);
     self.rt.frame();
-    self.present.renderer.sync(&mut self.rt.images);
+    self.present.renderer.sync(&mut self.rt.text, &mut self.rt.images);
     let shown = self.present.present(&self.rt.scene, size, scale);
     self.force = false;
     if shown {

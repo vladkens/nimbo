@@ -124,7 +124,7 @@ define_class!(
 
     #[unsafe(method(viewDidChangeBackingProperties))]
     fn backing_changed(&self) {
-      // `render` picks up the new scale.
+      // `render` picks up the new scale and rebuilds the glyph cache at it.
       self.wake();
     }
 
@@ -503,7 +503,7 @@ impl View {
     let Some(st) = state.as_mut() else { return };
     st.rt.resize(size, scale);
     st.rt.frame();
-    st.presenter.renderer.sync(&mut st.rt.images);
+    st.presenter.renderer.sync(&mut st.rt.text, &mut st.rt.images);
     st.presenter.present(&st.rt.scene, size, scale);
     // Every surface busy: the frame is drawn again at the next tick.
     if st.presenter.starved {
