@@ -18,3 +18,11 @@ name = "shapes"
 harness = false
 
 [dependencies]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+dispatch2 = { version = "0.3.1", default-features = false, features = ["std", "objc2"] }
+objc2 = { version = "0.6.5", default-features = false, features = ["std"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSApplication", "NSResponder", "NSView", "NSWindow", "NSEvent", "NSGraphics", "NSRunningApplication", "NSMenu", "NSMenuItem", "NSGraphicsContext"] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFString", "CFDictionary", "CFNumber", "CFCGTypes"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSGeometry", "NSRunLoop", "NSObject", "NSNotification"] }
+objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["std", "objc2-core-foundation", "CALayer", "CADisplayLink", "CAFrameRateRange", "CATransaction"] }
