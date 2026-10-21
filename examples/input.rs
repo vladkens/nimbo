@@ -10,8 +10,8 @@
 //! without one.
 
 use nimbo::{
-  App, Binding, Color, Command, Config, Cursor, Cx, Event, Frame, Key, MouseButton, Point, Quad,
-  Rect, Size, bind, mix, rgb,
+  App, Binding, Color, Command, Config, Cursor, Cx, Event, Float, Frame, Key, MouseButton, Point,
+  Quad, Rect, Size, Style, Ui, bind, mix, px, rgb,
 };
 
 pub const SIZE: Size = Size::new(480.0, 320.0);
@@ -80,16 +80,6 @@ impl Input {
     self.pos = Point::new(x, y);
   }
 
-  /// The cursor for where the pointer is: a closed hand while dragging, an open one over the
-  /// square.
-  fn cursor(&self) -> Cursor {
-    match (self.grab, self.hover) {
-      (Some(_), _) => Cursor::Grabbing,
-      (None, true) => Cursor::Grab,
-      (None, false) => Cursor::Arrow,
-    }
-  }
-
   /// An event, without the hover: the square moved, grown, copied or pasted, Shift, the focus.
   fn handle(&mut self, cx: &mut Cx, ev: &Event) -> bool {
     match ev {
@@ -125,13 +115,11 @@ impl Input {
     true
   }
 
-  /// The hover and the cursor from where the pointer is: after it moves, and after the square
-  /// moves or grows under a pointer that stays (arrows, a paste, the wheel). Returns whether the
-  /// hover changed.
+  /// The hover from where the pointer is: after it moves, and after the square moves or grows
+  /// under a pointer that stays (arrows, a paste, the wheel). Returns whether it changed.
   fn track(&mut self, cx: &mut Cx) -> bool {
     let was = self.hover;
     self.hover = cx.mouse.is_some_and(|p| self.square().contains(p));
-    cx.set_cursor(self.cursor());
     self.hover != was
   }
 
@@ -174,6 +162,15 @@ impl App for Input {
   fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
     let used = self.handle(cx, ev);
     self.track(cx) || used
+  }
+
+  /// An element over the square for its cursor, out of the flow: an open hand, a closed one
+  /// while dragging; the arrow elsewhere.
+  fn view(&mut self, ui: &mut Ui) {
+    let sq = self.square();
+    let cursor = if self.grab.is_some() { Cursor::Grabbing } else { Cursor::Grab };
+    let style = Style::new().w(px(sq.w)).h(px(sq.h)).cursor(cursor);
+    ui.float(Float::window().offset(sq.x, sq.y)).el(style);
   }
 
   fn paint(&mut self, f: &mut Frame) {
