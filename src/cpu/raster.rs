@@ -251,8 +251,11 @@ fn shade_quad(q: &Quad, p: (f32, f32), scale: f32, fill: [f32; 4], border: [f32;
   let hi = (q.rect.x + q.rect.w - b[1], q.rect.y + q.rect.h - b[2]);
   let inner_half = (((hi.0 - lo.0) * 0.5).max(0.0), ((hi.1 - lo.1) * 0.5).max(0.0));
   let ci = (p.0 - (lo.0 + hi.0) * 0.5, p.1 - (lo.1 + hi.1) * 0.5);
-  let side = (if c.0 < 0.0 { b[3] } else { b[1] }, if c.1 < 0.0 { b[0] } else { b[2] });
-  let ri = (r - side.0.max(side.1)).max(0.0).min(inner_half.0.min(inner_half.1));
+  // The inner corner is the one of the quadrant around the inner centre, which uneven borders
+  // move off the outer one.
+  let ro = pick_radius(ci, q.radii).min(half.0.min(half.1));
+  let side = (if ci.0 < 0.0 { b[3] } else { b[1] }, if ci.1 < 0.0 { b[0] } else { b[2] });
+  let ri = (ro - side.0.max(side.1)).max(0.0).min(inner_half.0.min(inner_half.1));
   // Borders that meet or cross leave no fill.
   let inner = match hi.0 > lo.0 && hi.1 > lo.1 {
     true => saturate(0.5 - rounded_rect(ci, inner_half, ri) * scale),
@@ -551,6 +554,19 @@ mod tests {
     let mut px = [0u32; 25];
     quad(&mut Target { px: &mut px, stride: 5, y0: 0 }, &q, IRect::new(0, 0, 5, 5), 1.0);
     assert_eq!(px[12], pack(premul(border)));
+  }
+
+  #[test]
+  fn uneven_borders_round_the_inner_corner_they_border() {
+    // A circle with only a left border: right of it the top edge shows no border colour.
+    let (fill, border) = ([1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0]);
+    let q = Quad::new(Rect::new(0.0, 0.0, 20.0, 20.0), fill).radius(10.0);
+    let q = q.borders([0.0, 0.0, 0.0, 8.0], border);
+    let mut px = [0u32; 400];
+    quad(&mut Target { px: &mut px, stride: 20, y0: 0 }, &q, IRect::new(0, 0, 20, 20), 1.0);
+    for (y, row) in px.chunks(20).enumerate().take(4) {
+      assert!(row[9..].iter().all(|p| p & 0xff == 0), "row {y}: {:08x?}", &row[9..]);
+    }
   }
 
   #[test]
