@@ -17,9 +17,10 @@ pub(super) fn resources(x: &RustConnection) -> Database {
   db.unwrap_or_else(|| Database::new_from_data(b""))
 }
 
-/// `Xft.dpi` in the resources over 96, at least 1.
+/// `Xft.dpi` in the resources over 96, at least 1. Read as text and trimmed: a value keeps the
+/// spaces after it (`Xft.dpi: 192 `), which a number parsed as is would reject.
 pub(super) fn dpi_scale(db: &Database) -> f32 {
-  let dpi = db.get_value::<f32>("Xft.dpi", "").ok().flatten();
+  let dpi = db.get_string("Xft.dpi", "").and_then(|v| v.trim().parse::<f32>().ok());
   dpi.map_or(1.0, |d| (d / 96.0).max(1.0))
 }
 
@@ -89,6 +90,7 @@ mod tests {
   fn resources_give_the_dpi() {
     let db = Database::new_from_data(b"Xcursor.theme:\tbreeze_cursors\nXft.dpi:\t144\n");
     assert_eq!(dpi_scale(&db), 1.5);
+    assert_eq!(dpi_scale(&Database::new_from_data(b"Xft.dpi: 192 \n")), 2.0, "trailing space");
     assert_eq!(dpi_scale(&Database::new_from_data(b"Xft.dpi: 72\n")), 1.0, "at least 1");
     assert_eq!(dpi_scale(&Database::new_from_data(b"")), 1.0);
   }
