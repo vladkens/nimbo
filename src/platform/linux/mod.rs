@@ -528,11 +528,7 @@ impl Win {
     };
 
     if self.configured && !self.frame_pending {
-      let next = match self.rt.needs_frame() {
-        true => self.next_tick,
-        false => self.rt.due_in().map(|d| now + d),
-      };
-
+      let next = frame_wake(now, self.rt.needs_frame(), self.next_tick, self.rt.due_in());
       at = match (at, next) {
         (Some(a), Some(b)) => Some(a.min(b)),
         (a, b) => a.or(b),
@@ -832,6 +828,21 @@ fn buffer_px(size: Size, scale: f32) -> (u32, u32) {
   (px(size.w), px(size.h))
 }
 
+/// When the loop wakes for a frame while no frame callback is due: the paced tick while a frame
+/// is `wanted`, at once without one (a timer came due after the loop checked), else the next
+/// timer.
+fn frame_wake(
+  now: Instant,
+  wanted: bool,
+  tick: Option<Instant>,
+  due_in: Option<Duration>,
+) -> Option<Instant> {
+  match wanted {
+    true => Some(tick.unwrap_or(now)),
+    false => due_in.map(|d| now + d),
+  }
+}
+
 /// `s` in whole surface coordinates, as configures give them: at an integer buffer scale a
 /// fractional size would make a buffer that isn't a multiple of it (`invalid_size`).
 fn whole(s: Size) -> Size {
@@ -939,6 +950,16 @@ mod tests {
     assert_eq!(clicks(Some((left, u32::MAX - 100, at, 2)), left, 100, at), 3);
     assert_eq!(clicks(first, MouseButton::Right, 1300, at), 1);
     assert_eq!(clicks(first, left, 1300, Point::new(20.0, 10.0)), 1);
+  }
+
+  #[test]
+  fn a_frame_wanted_without_a_tick_wakes_at_once() {
+    let (now, second) = (Instant::now(), Duration::from_secs(1));
+    // A timer that came due after the loop's check: no tick was set, the loop must not sleep.
+    assert_eq!(frame_wake(now, true, None, None), Some(now));
+    assert_eq!(frame_wake(now, true, Some(now + TICK), None), Some(now + TICK));
+    assert_eq!(frame_wake(now, false, None, Some(second)), Some(now + second));
+    assert_eq!(frame_wake(now, false, None, None), None);
   }
 
   #[test]
