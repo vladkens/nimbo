@@ -4,8 +4,9 @@
 //! XCB loaded at run time ([xcb]), one top-level window the window manager
 //! decorates, CPU frames through MIT-SHM or the socket ([present]) paced at [REFRESH], the scale
 //! from `Xft.dpi` in the resources (the size hints follow it), light or dark from XSETTINGS'
-//! `Net/ThemeName`, its manager followed as it starts, quits or restarts. One thread: the loop
-//! polls the connection and a wake eventfd.
+//! `Net/ThemeName`, its manager followed as it starts, quits or restarts. No frames while the
+//! window is unmapped or fully covered (`VisibilityNotify`; under a compositing manager it never
+//! is). One thread: the loop polls the connection and a wake eventfd.
 //!
 //! Not yet: `_NET_WM_SYNC_REQUEST` (the window manager doesn't wait for our frame as it
 //! resizes), the display's refresh rate (RandR), per-monitor scale.
@@ -71,6 +72,8 @@ struct Win {
   size: Size,
   px: (u32, u32),
   mapped: bool,
+  /// Nothing of the window shows: other windows cover it all.
+  obscured: bool,
   closed: bool,
   /// A new size: drawn at once, not at the next tick.
   force: bool,
@@ -144,7 +147,8 @@ fn run_on(
 
   let scale = dpi_scale(&x, sc.root);
   let px = (px(cfg.size.w, scale), px(cfg.size.h, scale));
-  let events = EM_EXPOSURE | EM_STRUCTURE_NOTIFY | EM_FOCUS_CHANGE | EM_PROPERTY_CHANGE;
+  let events =
+    EM_EXPOSURE | EM_VISIBILITY_CHANGE | EM_STRUCTURE_NOTIFY | EM_FOCUS_CHANGE | EM_PROPERTY_CHANGE;
   let win = x.create_window(sc, px.0 as u16, px.1 as u16, events);
 
   // Title, class, protocols, the process for `_NET_WM_PING`, sizes.
@@ -202,6 +206,7 @@ fn run_on(
     size: Size::new(points(px.0, scale), points(px.1, scale)),
     px,
     mapped: false,
+    obscured: false,
     closed: false,
     force: false,
     pace: Pace::new(REFRESH),
@@ -391,11 +396,16 @@ impl Win {
     stashed.or_else(|| self.x.poll_event())
   }
 
+  /// Whether the window shows: mapped, and not fully covered.
+  fn visible(&self) -> bool {
+    self.mapped && !self.obscured
+  }
+
   /// A frame is drawn while the runtime wants one, the window shows (the first one before),
   /// the server has read the last one, and a tick passed since it started (at once after a
   /// resize).
   fn frame_due(&mut self, now: Instant) -> bool {
-    let hidden = !self.mapped && self.frames > 0;
+    let hidden = !self.visible() && self.frames > 0;
     if hidden || self.present.busy() || !self.rt.needs_frame() {
       return false;
     }
@@ -411,7 +421,7 @@ impl Win {
       return Some(STUCK);
     }
 
-    match self.mapped && self.rt.needs_frame() {
+    match self.visible() && self.rt.needs_frame() {
       true => Some(self.pace.left(now)),
       false => None,
     }
@@ -493,6 +503,13 @@ impl Win {
         self.rt.redraw();
       }
       UNMAP_NOTIFY if ev.get::<WindowEv>().window == self.win => self.mapped = false,
+      // Covered frames wait; uncovered, the frame due is drawn and the exposes put back the rest.
+      VISIBILITY_NOTIFY => {
+        let e = ev.get::<VisibilityEv>();
+        if e.window == self.win {
+          self.obscured = e.state == VISIBILITY_FULLY_OBSCURED;
+        }
+      }
       DESTROY_NOTIFY => {
         let w = ev.get::<WindowEv>().window;
         if w == self.win {

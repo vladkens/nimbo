@@ -3,7 +3,13 @@
 //! XCB, loaded at run time ([super::super::dl]): `libxcb.so.1` for the core protocol and
 //! `libxcb-shm.so.0` for MIT-SHM presents when it is there. The functions are declared by hand
 //! from `<xcb/xproto.h>` and `<xcb/shm.h>`; [X] wraps the few requests the window needs. Cookies
-//! are passed as `u32` (a struct of one `unsigned int`, the same in the C ABI).
+//! are passed as `u32` (a struct of one `unsigned int`, the same in the x86_64 and aarch64 C
+//! ABIs).
+
+// i386 returns even a one-field struct through a hidden pointer, so the `u32` cookies above
+// don't hold there. 32-bit Linux isn't built; x11rb replaces these declarations.
+#[cfg(target_arch = "x86")]
+compile_error!("the X11 backend's XCB declarations need a 64-bit target");
 
 use std::ffi::{c_char, c_int, c_void};
 use std::os::fd::{BorrowedFd, IntoRawFd, OwnedFd};
@@ -181,6 +187,7 @@ pub struct ShmVersionReply {
 pub const FOCUS_IN: u8 = 9;
 pub const FOCUS_OUT: u8 = 10;
 pub const EXPOSE: u8 = 12;
+pub const VISIBILITY_NOTIFY: u8 = 15;
 pub const DESTROY_NOTIFY: u8 = 17;
 pub const UNMAP_NOTIFY: u8 = 18;
 pub const MAP_NOTIFY: u8 = 19;
@@ -228,6 +235,19 @@ pub struct ConfigureEv {
   pub override_redirect: u8,
   pad1: u8,
 }
+
+#[repr(C)]
+pub struct VisibilityEv {
+  pub response_type: u8,
+  pad: u8,
+  pub sequence: u16,
+  pub window: u32,
+  pub state: u8,
+  pad1: [u8; 3],
+}
+
+/// `VisibilityNotify`'s state when nothing of the window shows.
+pub const VISIBILITY_FULLY_OBSCURED: u8 = 2;
 
 /// What `DestroyNotify`, `MapNotify` and `UnmapNotify` start with: the window they are about.
 #[repr(C)]
@@ -277,6 +297,7 @@ pub struct ShmCompletionEv {
 
 // Event masks, window attributes and the rest of the constants used.
 pub const EM_EXPOSURE: u32 = 32768;
+pub const EM_VISIBILITY_CHANGE: u32 = 65536;
 pub const EM_STRUCTURE_NOTIFY: u32 = 131072;
 pub const EM_SUBSTRUCTURE_NOTIFY: u32 = 524288;
 pub const EM_SUBSTRUCTURE_REDIRECT: u32 = 1048576;
