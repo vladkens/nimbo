@@ -664,6 +664,8 @@ impl Bitmap {
 
 /// Draws glyph `id` at the face's size × `scale`, `subpixel` quarters of a pixel right.
 fn render(face: &Face, id: u16, scale: f32, subpixel: u8) -> Option<Bitmap> {
+  #[cfg(test)]
+  tests::RENDERS.with(|n| n.set(n.get() + 1));
   let s = sys();
   let file = &face.file;
   let mut ft = file.ft.lock().unwrap_or_else(|e| e.into_inner());
@@ -723,10 +725,26 @@ fn render(face: &Face, id: u16, scale: f32, subpixel: u8) -> Option<Bitmap> {
   Some(Bitmap { left: g.bitmap_left, top: g.bitmap_top, w, h, bgra, data, k })
 }
 
+/// A rendered glyph's file, size, id, scale and subpixel offset.
+type Rendered = (usize, u32, u16, u32, u8);
+
+thread_local! {
+  /// The glyph [glyph_box] rendered last, kept for [rasterize]: the atlas asks for the box,
+  /// then for the pixels of the same glyph, which FreeType renders once.
+  static LAST: std::cell::RefCell<Option<(Rendered, Bitmap)>> = const { std::cell::RefCell::new(None) };
+}
+
+fn rendered(face: &Face, id: u16, scale: f32, subpixel: u8) -> Rendered {
+  (Arc::as_ptr(&face.file) as usize, face.size.to_bits(), id, scale.to_bits(), subpixel)
+}
+
 /// The pixel box of glyph `id` at `scale`, drawn `subpixel` quarters of a pixel to the right:
 /// FreeType's bitmap with one pixel of padding on each side. `None` for no ink (a space).
 pub fn glyph_box(face: &Face, id: u16, scale: f32, subpixel: u8) -> Option<GlyphBox> {
-  render(face, id, scale, subpixel).map(|b| b.glyph_box())
+  let b = render(face, id, scale, subpixel)?;
+  let gb = b.glyph_box();
+  LAST.with(|l| *l.borrow_mut() = Some((rendered(face, id, scale, subpixel), b)));
+  Some(gb)
 }
 
 /// Draws glyph `id` into the pixels of `b` (from [glyph_box] with the same `subpixel`), rows
@@ -740,7 +758,13 @@ pub fn rasterize(
   raster: Raster,
   color: bool,
 ) -> Option<Vec<u8>> {
-  let g = render(face, id, raster.scale, subpixel)?;
+  let key = rendered(face, id, raster.scale, subpixel);
+  let last = LAST.with(|l| l.borrow_mut().take()).filter(|(k, _)| *k == key);
+  let g = match last {
+    Some((_, g)) => g,
+    None => render(face, id, raster.scale, subpixel)?,
+  };
+
   let gb = g.glyph_box();
   // Where the glyph's pixels (inside its padding) start in `b`, from the top left.
   let ox = (gb.left + 1 - b.left).max(0) as usize;
@@ -764,7 +788,32 @@ pub fn rasterize(
 
 #[cfg(test)]
 mod tests {
+  use std::cell::Cell;
+
   use super::*;
+  use crate::text::Font;
+
+  thread_local! {
+    /// FreeType renders on this thread.
+    pub static RENDERS: Cell<usize> = const { Cell::new(0) };
+  }
+
+  #[test]
+  fn an_atlas_miss_renders_once() {
+    let f = face(Font::ui(13.0));
+    let line = shape(&f, "g", |_| 0);
+    let (id, raster) = (line.glyphs[0].id, Raster { scale: 2.0, smooth: false, dark: true });
+    let alone = {
+      let b = glyph_box(&f, id, 2.0, 1).unwrap();
+      LAST.with(|l| l.borrow_mut().take());
+      rasterize(&f, id, 1, &b, raster, false).unwrap()
+    };
+    RENDERS.with(|n| n.set(0));
+    let b = glyph_box(&f, id, 2.0, 1).unwrap();
+    let px = rasterize(&f, id, 1, &b, raster, false).unwrap();
+    assert_eq!(RENDERS.with(Cell::get), 1);
+    assert!(px == alone, "the same pixels from the kept render");
+  }
 
   /// Two fonts: a text one (Latin letters, ❤) and an emoji one (people, ❤, the acute accent).
   fn has(font: usize, c: char) -> bool {
