@@ -21,7 +21,7 @@
 //! accent, switching live when they change; [super::Ui::follow_system] goes back to it.
 
 use super::store::Transition;
-use super::{Dim, FocusRing, Style, TextStyle, px};
+use super::{Dim, FocusRing, Shadow, Style, TextStyle, px};
 use crate::app::Appearance;
 use crate::scene::{Color, alpha, mix, rgb};
 use crate::text::{Font, Weight};
@@ -35,6 +35,8 @@ pub struct Theme {
   pub dark: bool,
   /// The window's ground.
   pub bg: Color,
+  /// Sidebars, toolbars, tab strips.
+  pub panel: Color,
   /// Controls: buttons.
   pub raised: Color,
   /// A raised control under the pointer.
@@ -50,10 +52,19 @@ pub struct Theme {
   /// Text and marks on the accent (or another tone's fill).
   pub on_accent: Color,
   pub danger: Color,
+  /// Selected rows of a list with focus.
+  pub selection: Color,
   /// The focus ring.
   pub focus: Color,
   /// A translucent tile under the pointer: ghost buttons.
   pub ghost: Color,
+  /// Under menus.
+  pub shadow: Color,
+  /// Menus, and their edge ([Sizes::menu_edge] wide).
+  pub menu: Color,
+  pub menu_line: Color,
+  /// Overlay scrollbars' thumbs.
+  pub thumb: Color,
   /// The border of push buttons: 0 on plates, where a grey fill is the button.
   pub border: f32,
   /// Corners of controls.
@@ -93,11 +104,29 @@ pub struct Sizes {
   pub control_h: f32,
   /// Small buttons ([ControlSize::Small]): dense rows, inline actions.
   pub small_h: f32,
+  /// A menu's items.
+  pub item_h: f32,
+  /// A tab strip.
+  pub tab_h: f32,
+  /// The least width of a pop-up button's menu.
+  pub menu_w: f32,
+  /// The corners of menus ([Theme::popup]) and the width of their edge.
+  pub menu_radius: f32,
+  pub menu_edge: f32,
 }
 
 impl Sizes {
-  /// macOS 26 System Settings': 24-point buttons in 13-point text, small ones 20 high.
-  pub const PLATES: Self = Self { control_h: 24.0, small_h: 20.0 };
+  /// macOS 26 System Settings': 24-point buttons in 13-point text, small ones 20 high; menus
+  /// of 24-point items in corners of 13 with a half-point edge, a pop-up's 220 wide at least.
+  pub const PLATES: Self = Self {
+    control_h: 24.0,
+    small_h: 20.0,
+    item_h: 24.0,
+    tab_h: 30.0,
+    menu_w: 220.0,
+    menu_radius: 13.0,
+    menu_edge: 0.5,
+  };
 }
 
 /// How big a control is ([super::Button::small], [Theme::button_sized]): its height, font and
@@ -172,6 +201,7 @@ impl Theme {
   pub const PLATES_LIGHT: Self = Self {
     dark: false,
     bg: WHITE,
+    panel: rgb(0xf8f8f8),
     raised: alpha(BLACK, 0.065),
     hover: alpha(BLACK, 0.09),
     pressed: alpha(BLACK, 0.145),
@@ -181,8 +211,13 @@ impl Theme {
     accent: rgb(0x007aff),
     on_accent: WHITE,
     danger: rgb(0xd70015),
+    selection: alpha(rgb(0x007aff), 0.22),
     focus: alpha(rgb(0x0067f4), 0.45),
     ghost: alpha(BLACK, 0.05),
+    shadow: alpha(BLACK, 0.2),
+    menu: WHITE,
+    menu_line: alpha(BLACK, 0.25),
+    thumb: alpha(BLACK, 0.24),
     border: 0.0,
     radius: 6.0,
     sizes: Sizes::PLATES,
@@ -198,6 +233,7 @@ impl Theme {
   pub const PLATES_DARK: Self = Self {
     dark: true,
     bg: rgb(0x1e1e1e),
+    panel: rgb(0x272727),
     raised: alpha(WHITE, 0.09),
     hover: alpha(WHITE, 0.12),
     pressed: alpha(WHITE, 0.2),
@@ -206,15 +242,20 @@ impl Theme {
     muted: rgb(0xa6a6a6),
     accent: rgb(0x0a84ff),
     danger: rgb(0xff453a),
+    selection: alpha(rgb(0x0a84ff), 0.30),
     focus: alpha(rgb(0x1aa9ff), 0.5),
     ghost: alpha(WHITE, 0.07),
+    shadow: alpha(BLACK, 0.5),
+    menu: rgb(0x1a1a1a),
+    menu_line: alpha(WHITE, 0.25),
+    thumb: alpha(WHITE, 0.26),
     ..Self::PLATES_LIGHT
   };
 
-  /// This theme with another accent, and the focus ring made from it.
+  /// This theme with another accent, and the selection and the focus ring made from it.
   pub const fn with_accent(self, accent: Color) -> Self {
-    let focus = if self.dark { 0.55 } else { 0.45 };
-    Self { accent, focus: alpha(accent, focus), ..self }
+    let (selection, focus) = if self.dark { (0.30, 0.55) } else { (0.22, 0.45) };
+    Self { accent, selection: alpha(accent, selection), focus: alpha(accent, focus), ..self }
   }
 
   /// The theme for the OS's appearance: [Theme::PLATES_LIGHT] or [Theme::PLATES_DARK], with the
@@ -239,6 +280,21 @@ impl Theme {
   /// One line of text, cut with "…" when it doesn't fit.
   pub const fn label(&self) -> TextStyle {
     TextStyle::new(self.font, self.text).ellipsis()
+  }
+
+  /// Secondary text on one line: an unselected tab, a hint.
+  pub const fn muted(&self) -> TextStyle {
+    TextStyle::new(self.font, self.muted).ellipsis()
+  }
+
+  /// A menu's box: the menu fill in its corners and edge, padded 5, over a soft shadow.
+  pub const fn popup(&self) -> Style {
+    Style::new()
+      .pad(5.0)
+      .bg(self.menu)
+      .radius(self.sizes.menu_radius)
+      .border(self.sizes.menu_edge, self.menu_line)
+      .shadow(Shadow::new(4.0, 24.0, self.shadow))
   }
 
   /// A small semibold section title (write it in capitals): "LOCATIONS".
