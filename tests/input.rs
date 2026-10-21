@@ -178,5 +178,7 @@ fn main() {
 
   assert_eq!(parse_point("3,4"), Some(Point::new(3.0, 4.0)));
   assert_eq!(parse_point("3;4"), None);
+  assert_eq!(parse_point("NaN,60"), None);
+  assert_eq!(parse_point("10,inf"), None);
   println!("input: ok");
 }
