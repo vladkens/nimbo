@@ -73,10 +73,30 @@ use crate::ui::Cursor;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
-/// The longest gap between clicks that counts them as one double (triple) click, and how far
-/// apart they may be: GTK's defaults (400 ms, 5 px).
-const CLICK_TIME: Duration = Duration::from_millis(400);
+/// The longest gap between clicks that counts them as one double (triple) click, in
+/// milliseconds, and how far apart they may be: GTK's defaults (400 ms, 5 px).
+const CLICK_TIME: u32 = 400;
 const CLICK_DIST: f32 = 5.0;
+
+/// The last press: its button, the event's time (milliseconds, wrapping), place and click count.
+type Click = (MouseButton, u32, Point, u32);
+
+/// A press's click count after the `last` one: one more for the same button within
+/// [CLICK_TIME] and [CLICK_DIST], else 1. By the events' own times, not when they are handled:
+/// presses queued behind a slow paste don't make a double click.
+fn clicks(last: Option<Click>, button: MouseButton, time: u32, pos: Point) -> u32 {
+  match last {
+    Some((b, t, p, n))
+      if b == button
+        && time.wrapping_sub(t) < CLICK_TIME
+        && (p.x - pos.x).abs() < CLICK_DIST
+        && (p.y - pos.y).abs() < CLICK_DIST =>
+    {
+      n + 1
+    }
+    _ => 1,
+  }
+}
 /// Frames paced by a timer while a frame waits for a buffer (all held by the compositor, or a
 /// configure's ack that needs one of its size): 120 Hz.
 const TICK: Duration = Duration::from_micros(8333);
@@ -257,7 +277,7 @@ pub struct Win {
   /// The scale of the theme's image last shown: another needs the image again.
   cursor_scale: i32,
   mouse: Point,
-  last_click: Option<(MouseButton, Instant, Point, u32)>,
+  last_click: Option<Click>,
   axes: Axes,
   /// The axes a finger scroll in progress moves: the next frame continues it.
   scrolling: [bool; 2],
@@ -672,7 +692,8 @@ impl Win {
 
   // MARK: Pointer
 
-  fn button(&mut self, button: u32, down: bool) {
+  /// A button (evdev code) going down or up at the event's `time`.
+  fn button(&mut self, button: u32, down: bool, time: u32) {
     // <linux/input-event-codes.h>: BTN_LEFT, BTN_RIGHT, BTN_MIDDLE.
     let button = match button {
       0x110 => MouseButton::Left,
@@ -687,20 +708,8 @@ impl Win {
       return;
     }
 
-    let now = Instant::now();
-    let clicks = match self.last_click {
-      Some((b, t, p, n))
-        if b == button
-          && now - t < CLICK_TIME
-          && (p.x - pos.x).abs() < CLICK_DIST
-          && (p.y - pos.y).abs() < CLICK_DIST =>
-      {
-        n + 1
-      }
-      _ => 1,
-    };
-
-    self.last_click = Some((button, now, pos, clicks));
+    let clicks = clicks(self.last_click, button, time, pos);
+    self.last_click = Some((button, time, pos, clicks));
     self.send(Event::MouseDown { pos, button, clicks, mods });
   }
 
@@ -854,6 +863,19 @@ mod tests {
     let held = Repeat::after(held, LEFT, false, true, t);
     assert_eq!(held.as_ref().map(|r| r.key), Some(A), "not the held key's release");
     assert!(Repeat::after(held, A, false, true, t).is_none());
+  }
+
+  /// Presses 600 ms apart are two clicks even when handled together; a second within 400 ms is
+  /// a double click, across the clock's wrap too.
+  #[test]
+  fn clicks_count_by_the_events_time() {
+    let (left, at) = (MouseButton::Left, Point::new(10.0, 10.0));
+    let first = Some((left, 1000, at, 1));
+    assert_eq!(clicks(first, left, 1600, at), 1);
+    assert_eq!(clicks(first, left, 1300, at), 2);
+    assert_eq!(clicks(Some((left, u32::MAX - 100, at, 2)), left, 100, at), 3);
+    assert_eq!(clicks(first, MouseButton::Right, 1300, at), 1);
+    assert_eq!(clicks(first, left, 1300, Point::new(20.0, 10.0)), 1);
   }
 
   #[test]

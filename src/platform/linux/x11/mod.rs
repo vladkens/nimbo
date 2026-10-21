@@ -36,7 +36,7 @@ use self::clip::{Atoms as ClipAtoms, Clip, Clipboard};
 use self::present::{Presenter, STUCK};
 use self::xcb::*;
 use super::xkb::{Keyboard, Typed};
-use super::{CLICK_DIST, CLICK_TIME, Res};
+use super::{Click, Res, clicks};
 use crate::Config;
 use crate::app::{App, Appearance, Clock, Event, Mods, MouseButton, Phase, Runtime, WHEEL_LINE};
 use crate::cpu::raster::IRect;
@@ -113,7 +113,7 @@ struct Win {
   cursors: Cursors,
   mouse: Point,
   inside: bool,
-  last_click: Option<(MouseButton, Instant, Point, u32)>,
+  last_click: Option<Click>,
   kb: Option<Keyboard>,
   /// The keyboard was set up ([Win::setup_keyboard]).
   kb_ready: bool,
@@ -702,7 +702,7 @@ impl Win {
 
         self.core_state(e.state);
         self.mouse = self.point(e.event_x, e.event_y);
-        self.button(e.detail, down, e.state);
+        self.button(e.detail, down, e.state, e.time);
       }
       MOTION_NOTIFY => {
         let e = ev.get::<InputEv>();
@@ -945,7 +945,7 @@ impl Win {
 
   /// Buttons 1–3 click, 4–7 scroll a wheel click up, down, left, right, 8 and 9 are back and
   /// forward (as evdev's side and extra buttons on Wayland).
-  fn button(&mut self, detail: u8, down: bool, state: u16) {
+  fn button(&mut self, detail: u8, down: bool, state: u16, time: u32) {
     let (pos, mods) = (self.mouse, self.kb_mods());
     let wheel = match detail {
       4 => Some(Point::new(0.0, WHEEL_LINE)),
@@ -985,20 +985,8 @@ impl Win {
       return;
     }
 
-    let now = Instant::now();
-    let clicks = match self.last_click {
-      Some((b, t, p, n))
-        if b == button
-          && now - t < CLICK_TIME
-          && (p.x - pos.x).abs() < CLICK_DIST
-          && (p.y - pos.y).abs() < CLICK_DIST =>
-      {
-        n + 1
-      }
-      _ => 1,
-    };
-
-    self.last_click = Some((button, now, pos, clicks));
+    let clicks = clicks(self.last_click, button, time, pos);
+    self.last_click = Some((button, time, pos, clicks));
     self.send(Event::MouseDown { pos, button, clicks, mods });
   }
 }
