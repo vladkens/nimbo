@@ -76,8 +76,9 @@ impl Ui<'_> {
   /// The disabled flag and autofocus for `id`; a disabled behaviour, or `None` to read input.
   /// Disabled while focused, it gives focus up: its keys no longer route through it.
   fn begin(&mut self, id: Id) -> Option<Behavior> {
-    let off = self.take_disabled();
+    // Autofocus reads the disabled flag, so before it is taken.
     self.take_autofocus(id);
+    let off = self.take_disabled();
     if off && self.focused(id) {
       self.focus(None);
     }
