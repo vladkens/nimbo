@@ -55,8 +55,6 @@ impl Behavior {
 }
 
 impl Ui<'_> {
-  // MARK: Keys
-
   /// Whether Space was pressed on `id` (focused), which flashes it pressed; another key goes on
   /// unused, Space with Cmd, Ctrl or Alt too (Alt-Space opens the window menu on Windows).
   pub(super) fn activated(&mut self, id: Id) -> bool {
@@ -98,8 +96,6 @@ impl Ui<'_> {
       ..Behavior::default()
     }
   }
-
-  // MARK: Behaviours
 
   /// A button: hover, press, and a click or Space while focused.
   pub fn button_behavior(&mut self, id: Id) -> Behavior {

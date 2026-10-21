@@ -510,8 +510,6 @@ fn read_utf8(f: impl Fn(*mut c_char, usize) -> c_int) -> String {
   String::from_utf8_lossy(&buf[..n]).into_owned()
 }
 
-// MARK: Key codes
-
 /// Evdev key codes (<linux/input-event-codes.h>) to macOS virtual key codes (`kVK_*`): US ANSI
 /// positions, as [crate::keys] names them.
 const KVK: &[(u16, u16)] = &[

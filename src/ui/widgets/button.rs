@@ -1,27 +1,10 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Widgets drawn from the theme ([Ui::theme]): label and button (variants, sizes). Each control
-//! is its behaviour ([super::behavior]) plus drawing from the theme: an app that wants its own
-//! look draws over the same behaviour.
-//!
-//! ```ignore
-//! if ui.button("Refresh").clicked { self.refresh() }
-//! if Button::new("Save").primary().show(ui).clicked { self.save() }
-//! ui.disabled(!self.dirty).button("Revert");
-//! ```
-//!
-//! Each widget takes the id set by [Ui::id] or [Ui::key], else one by its position, and returns
-//! a [Response] with `clicked`. Hover fades in and out ([super::Theme::fade]) where the theme
-//! hovers that control ([super::Theme::hover_all]), and every control shows the pointing hand;
-//! [Ui::disabled] dims a widget and ignores its input (no hover, no hand). Controls take focus
-//! by Tab only, as AppKit's do; a focused one is ringed ([super::Theme::focus_ring]) and Space
-//! activates it.
+//! The button: a label over the button behaviour, drawn from the theme's variants and sizes.
 
-use std::fmt::Display;
-
-use super::theme::{ButtonStyle, ControlSize, Variant};
-use super::{Behavior, Id, Response, Style, Ui};
 use crate::scene::mix;
+use crate::ui::theme::{ButtonStyle, ControlSize, Variant};
+use crate::ui::{Response, Ui};
 
 /// A button with a label.
 #[derive(Clone, Copy, Debug)]
@@ -68,7 +51,7 @@ impl<'s> Button<'s> {
     self.size(ControlSize::Large)
   }
 
-  /// Shows it selected or toggled on ([super::Theme::selected]) when `on`: a sidebar's toggle,
+  /// Shows it selected or toggled on ([crate::ui::Theme::selected]) when `on`: a sidebar's toggle,
   /// the current choice among buttons.
   pub fn selected(self, on: bool) -> Self {
     Self { selected: on, ..self }
@@ -106,44 +89,6 @@ impl<'s> Button<'s> {
 }
 
 impl Ui<'_> {
-  // MARK: Helpers
-
-  /// A hover fade for `id`, 0 to 1, on the theme's transition: `on` while hovered. Its state
-  /// is `id.key("hot")`.
-  pub fn hot(&mut self, id: Id, on: bool) -> f32 {
-    let fade = self.theme().fade;
-    self.animate(id.key("hot"), on as u8 as f32, fade)
-  }
-
-  /// [Ui::hot] for a control macOS draws no hover on (a push button, a switch): the fade while
-  /// hovered when the theme hovers every control ([super::Theme::hover_all]), else 0.
-  pub fn ctl_hot(&mut self, id: Id, on: bool) -> f32 {
-    let all = self.theme().hover_all;
-    self.hot(id, on && all)
-  }
-
-  /// A control's box over its behaviour: focusable by Tab with the pointing hand
-  /// ([Behavior::style]), or dimmed when disabled.
-  fn control(&self, s: Style, b: &Behavior) -> Style {
-    match b.disabled {
-      true => b.style(s).opacity(self.theme().disabled),
-      false => b.style(s),
-    }
-  }
-
-  // MARK: Widgets
-
-  /// One line of text in the theme's colour, cut with "…" when it doesn't fit; dimmed when
-  /// disabled ([Ui::disabled], [Ui::disabled_scope]).
-  pub fn label(&mut self, s: impl Display) {
-    let mut style = self.theme().label();
-    if self.take_disabled() {
-      style.color[3] *= self.theme().disabled;
-    }
-
-    self.text(s, style);
-  }
-
   /// A [Button] with the normal look.
   pub fn button(&mut self, label: &str) -> Response {
     Button::new(label).show(self)
@@ -156,33 +101,7 @@ mod tests {
   use crate::harness::Harness;
   use crate::scene::Size;
   use crate::text::Font;
-  use crate::ui::{Id, Kind, Response, Style, TextStyle, Ui, px};
-
-  /// A disabled note above a button.
-  #[derive(Default)]
-  struct Note {
-    clicks: u32,
-  }
-
-  impl App for Note {
-    fn view(&mut self, ui: &mut Ui) {
-      ui.disabled(true).id("note").label("Note");
-      if ui.id("b").button("B").clicked {
-        self.clicks += 1;
-      }
-    }
-  }
-
-  #[test]
-  fn a_disabled_label_dims_and_leaves_the_next_button_enabled() {
-    let mut h = Harness::new(Note::default(), Size::new(200.0, 100.0), 1.0);
-    h.frame();
-    let t = h.rt.ui.theme;
-    let Kind::Text { style, .. } = h.rt.ui.last.get(Id::of("note")).unwrap().kind else { panic!() };
-    assert_eq!(style.color[3], t.label().color[3] * t.disabled);
-    assert!(h.click_id(Id::of("b")));
-    assert_eq!(h.app().clicks, 1);
-  }
+  use crate::ui::{Id, Response, Style, TextStyle, Ui, px};
 
   /// A disabled button, its last response kept.
   #[derive(Default)]

@@ -801,8 +801,6 @@ impl X {
     unsafe { (f.xcb_convert_selection)(self.c, requestor, selection, target, prop, 0) };
   }
 
-  // MARK: Cursors
-
   /// A cursor of the core cursor font (`<X11/cursorfont.h>`), black on white.
   pub fn font_cursor(&self, font: &mut u32, glyph: u16) -> u32 {
     let f = &self.l.xcb;

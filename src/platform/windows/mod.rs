@@ -753,8 +753,6 @@ fn utf16_text(units: &[u16]) -> String {
   String::from_utf16_lossy(&units[..n])
 }
 
-// MARK: System
-
 /// The OS's light or dark setting and accent: light until ported. TODO: `AppsUseLightTheme`
 /// (registry, re-read on `WM_SETTINGCHANGE` "ImmersiveColorSet"), the accent from `UISettings`
 /// or `DwmGetColorizationColor`, a dark title bar with `DWMWA_USE_IMMERSIVE_DARK_MODE`.

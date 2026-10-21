@@ -90,8 +90,6 @@ impl Store {
   }
 }
 
-// MARK: Animation
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Ease {
   #[default]

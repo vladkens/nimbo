@@ -236,8 +236,6 @@ impl Theme {
     mix(self.accent, if self.dark { WHITE } else { BLACK }, 0.12)
   }
 
-  // MARK: Text
-
   /// One line of text, cut with "…" when it doesn't fit.
   pub const fn label(&self) -> TextStyle {
     TextStyle::new(self.font, self.text).ellipsis()
@@ -247,8 +245,6 @@ impl Theme {
   pub const fn section(&self) -> TextStyle {
     TextStyle::new(self.small.weight(Weight::Semibold), self.muted).ellipsis()
   }
-
-  // MARK: Controls
 
   pub const fn button(&self, v: Variant) -> ButtonStyle {
     self.button_sized(v, ControlSize::Medium)

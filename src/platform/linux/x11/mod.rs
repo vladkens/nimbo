@@ -874,8 +874,6 @@ impl Win {
     }
   }
 
-  // MARK: Keys
-
   /// A key pressed or released (X keycode: evdev + 8, `state` before it): to the app as a key
   /// event, then, unused, through the keyboard's compose state and the Linux editing keys into
   /// text or a command.
@@ -924,8 +922,6 @@ impl Win {
       Typed::None => {}
     }
   }
-
-  // MARK: Pointer
 
   /// Buttons 1–3 click, 4–7 scroll a wheel click up, down, left, right, 8 and 9 are back and
   /// forward (as evdev's side and extra buttons on Wayland).
