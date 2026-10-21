@@ -337,6 +337,9 @@ fn refresh(hwnd: HWND) -> Duration {
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
   let res = handle(hwnd, msg, wp, lp);
+  // A size the app asked for in the live move or resize loop (a timer's frame) is applied now,
+  // not when the loop ends; outside the window's borrow, as SetWindowPos sends WM_SIZE.
+  apply_resize(hwnd);
   with(|w| w.sync_modal());
   res
 }
