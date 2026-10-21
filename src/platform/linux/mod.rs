@@ -10,10 +10,13 @@
 //! Frames follow the GdkFrameClock: while the runtime wants frames a tick callback asks for the
 //! layout phase, and the frame is built after GTK's layout, at the size it just gave the area,
 //! so a live resize never stretches. Nothing runs while idle or minimized: timers are GLib
-//! timeouts, a wake from another thread an idle source. The text stack is in [text]
-//! (fontconfig, FreeType, HarfBuzz). GTK 3 scales by whole numbers only.
+//! timeouts, a wake from another thread an idle source. Input is in [input] (keys in [keys]),
+//! the text stack in [text] (fontconfig, FreeType, HarfBuzz). GTK 3 scales by whole numbers
+//! only.
 
 mod dl;
+mod input;
+mod keys;
 pub mod text;
 
 use std::cell::{Cell, RefCell};
@@ -24,6 +27,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use self::dl::{Lib, fns};
+use self::input::Input;
 use crate::Config;
 use crate::app::{App, Appearance, Clipboard, Clock, Event, Runtime};
 use crate::cpu::{Pixels, Renderer};
@@ -164,14 +168,16 @@ struct Win {
   /// lowers.
   resizable: bool,
   min: Size,
+  input: Input,
   cursor: Option<Cursor>,
   cursors: Vec<(Cursor, P)>,
   /// GTK painted our surface in this frame: logged after it.
   painted: bool,
   frames: u64,
   started: Instant,
-  /// Logs every frame presented (`NIMBO_TRACE`).
+  /// Logs every frame presented (`NIMBO_TRACE`), and every event (`NIMBO_TRACE=2`).
   trace: bool,
+  trace_events: bool,
   quit: bool,
   destroyed: bool,
 }
@@ -184,7 +190,7 @@ thread_local! {
 
 /// Runs `f` on the window, then [Win::sync]; `none` when there is no window or it is busy (a
 /// GTK call of ours ran a nested main loop, as a paste waiting for its owner does, and that
-/// dispatched this callback).
+/// dispatched this callback). Input that came meanwhile runs after ([input::replay]).
 fn with<R>(none: R, f: impl FnOnce(&mut Win) -> R) -> R {
   let r = WIN.with(|c| {
     let mut g = c.try_borrow_mut().ok()?;
@@ -194,7 +200,18 @@ fn with<R>(none: R, f: impl FnOnce(&mut Win) -> R) -> R {
     Some(r)
   });
 
-  r.unwrap_or(none)
+  match r {
+    Some(r) => {
+      input::replay();
+      r
+    }
+    None => none,
+  }
+}
+
+/// Whether [WIN] is in use further up the stack.
+fn busy() -> bool {
+  WIN.with(|c| c.try_borrow_mut().is_err())
 }
 
 /// Opens the app's window and runs GTK's main loop until it closes or the app quits.
@@ -245,11 +262,13 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Res<()> {
     }
 
     (g.gtk_widget_set_can_focus)(area, TRUE);
+    (g.gtk_widget_add_events)(area, input::EVENTS);
     (g.gtk_container_add)(window, area);
     (g.gtk_widget_grab_focus)(area);
     connect(window, c"destroy", on_destroy as Fp, 0);
     connect(window, c"window-state-event", on_state as Fp, 0);
     connect(area, c"draw", on_draw as Fp, 0);
+    connect(area, c"event", input::on_event as Fp, 0);
 
     let clip = Box::new(Clip((g.gtk_clipboard_get)(CLIPBOARD)));
     let mut rt = Runtime::new(app, size, 1.0, Clock::real(), clip);
@@ -259,6 +278,7 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Res<()> {
       (gtk().g_idle_add)(on_wake as Fp, null_mut());
     }));
 
+    let trace = std::env::var("NIMBO_TRACE").ok();
     WIN.set(Some(Win {
       rt,
       renderer: Renderer::new(),
@@ -270,12 +290,14 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Res<()> {
       timer: None,
       resizable: cfg.resizable,
       min,
+      input: Input::new(),
       cursor: None,
       cursors: Vec::new(),
       painted: false,
       frames: 0,
       started,
-      trace: std::env::var_os("NIMBO_TRACE").is_some(),
+      trace: trace.is_some(),
+      trace_events: trace.as_deref() == Some("2"),
       quit: false,
       destroyed: false,
     }));
@@ -285,6 +307,7 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Res<()> {
     let clock = (g.gtk_widget_get_frame_clock)(window);
     connect(clock, c"layout", on_layout as Fp, AFTER);
     connect(clock, c"after-paint", on_after_paint as Fp, 0);
+    with((), |w| w.input.realized((g.gtk_widget_get_window)(area)));
     (g.gtk_main)();
   }
 
@@ -331,6 +354,17 @@ impl Win {
     let g = gtk();
     let win = unsafe { (g.gtk_widget_get_window)(self.window) };
     !win.is_null() && unsafe { (g.gdk_window_get_state)(win) } & HIDDEN == 0
+  }
+
+  /// Feeds an event to the runtime; returns whether it was used.
+  fn send(&mut self, ev: Event) -> bool {
+    if self.trace_events {
+      eprintln!("nimbo: {ev:?}");
+    }
+
+    let (size, scale) = self.size();
+    self.rt.resize(size, scale);
+    self.rt.event(ev)
   }
 
   /// After every callback: the size the app asked for, the cursor, quitting, and what runs the
