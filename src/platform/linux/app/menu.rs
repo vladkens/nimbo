@@ -44,7 +44,7 @@ pub fn at(nodes: &[Node], path: &[usize]) -> Option<usize> {
 }
 
 /// Item `id`'s dbusmenu properties: `label` (its `_` doubled, a single one being a mnemonic),
-/// `enabled`, `type` for a separator, `toggle-type` and `toggle-state` when checked,
+/// `enabled`, `type` for a separator, `toggle-type` and `toggle-state` when checkable,
 /// `children-display` for a submenu, `shortcut`.
 pub fn props(node: &Node) -> V {
   let Some(it) = node.item else { return V::dict(vec![("children-display", V::s("submenu"))]) };
@@ -53,8 +53,8 @@ pub fn props(node: &Node) -> V {
   }
 
   let mut p = vec![("label", V::S(it.label.replace('_', "__"))), ("enabled", V::B(it.enabled))];
-  if it.checked {
-    p.extend([("toggle-type", V::s("checkmark")), ("toggle-state", V::I(1))]);
+  if it.checkable || it.checked {
+    p.extend([("toggle-type", V::s("checkmark")), ("toggle-state", V::I(it.checked as i32))]);
   }
 
   if !node.children.is_empty() {
@@ -118,7 +118,8 @@ mod tests {
   use super::*;
 
   fn menu() -> Menu {
-    let sub = Menu::new(vec![Item::new("a", "A_1").checked(true), Item::new("b", "B")]);
+    let sub =
+      Menu::new(vec![Item::new("a", "A_1").checked(true), Item::new("b", "B").checked(false)]);
     Menu::new(vec![
       Item::new("head", "Head").enabled(false),
       Item::separator(),
@@ -147,6 +148,12 @@ mod tests {
     let V::Array(_, a) = props(&n[4]) else { panic!() };
     assert!(a.contains(&entry("label", V::s("A__1"))));
     assert!(a.contains(&entry("toggle-state", V::I(1))));
+    // Checkable but off: the box shows empty, and turns on in place when it changes.
+    let V::Array(_, b) = props(&n[5]) else { panic!() };
+    assert!(b.contains(&entry("toggle-type", V::s("checkmark"))));
+    assert!(b.contains(&entry("toggle-state", V::I(0))));
+    let V::Array(_, head) = props(&n[1]) else { panic!() };
+    assert!(!head.iter().any(|e| matches!(e, V::Entry(k, _) if **k == V::s("toggle-type"))));
     let V::Array(_, quit) = props(&n[6]) else { panic!() };
     let keys = V::Array("as", vec![V::Array("s", vec![V::s("Control"), V::s("q")])]);
     assert!(quit.contains(&entry("shortcut", keys)));

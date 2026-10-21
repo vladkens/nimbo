@@ -328,6 +328,11 @@ impl Tray {
   fn call(&self, iface: &str, method: &str, args: &Gv, inv: P) {
     let ints = |v: Gv| (0..v.len()).map(|i| v.child(i).i32()).collect::<Vec<_>>();
     let out = match (iface, method) {
+      // A host shows the menu itself when the item can't do these (Plasma calls `Activate` on
+      // a click whatever `ItemIsMenu` says, and opens the menu when it fails).
+      (SNI, "Activate" | "ContextMenu") => {
+        return dbus::fail(inv, "org.freedesktop.DBus.Error.NotSupported", "the menu opens");
+      }
       (SNI, _) => V::Tuple(Vec::new()),
       (MENU, "GetLayout") => {
         let (parent, depth) = (args.child(0).i32(), args.child(1).i32());

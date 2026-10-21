@@ -72,6 +72,9 @@ pub struct Item {
   pub enabled: bool,
   /// Shows a check mark when on.
   pub checked: bool,
+  /// Can be checked ([Item::checked] sets it): Linux panels show an empty box while it is off,
+  /// and a host adds the box to an item only as it builds it.
+  pub checkable: bool,
   pub submenu: Option<Menu>,
   /// Its shortcut as [crate::Shortcut::parse] spells it (`cmd+comma`, `cmd+q`), shown beside it
   /// and, on macOS, working while the menu is open.
@@ -87,6 +90,7 @@ impl Item {
       label: label.into(),
       enabled: true,
       checked: false,
+      checkable: false,
       submenu: None,
       key: None,
       separator: false,
@@ -101,8 +105,9 @@ impl Item {
     Self { enabled: on, ..self }
   }
 
+  /// A check mark, shown when `on`.
   pub fn checked(self, on: bool) -> Self {
-    Self { checked: on, ..self }
+    Self { checked: on, checkable: true, ..self }
   }
 
   pub fn submenu(self, menu: Menu) -> Self {
