@@ -18,6 +18,10 @@ name = "counter"
 harness = false
 
 [[test]]
+name = "fields"
+harness = false
+
+[[test]]
 name = "input"
 harness = false
 
