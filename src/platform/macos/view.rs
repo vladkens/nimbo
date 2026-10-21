@@ -1,12 +1,12 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The NSView subclass: a layer we draw with the CPU renderer (IOSurfaces as its contents),
-//! NSEvents converted to [Event], and a display link that runs only while the
-//! runtime needs frames (input, animations); a timer the app asked for sleeps on the main queue
-//! until it is due and draws its frame there, leaving the display link paused. While the window is
-//! hidden (minimized, covered, on another space) frames wait until it shows again. Keys nobody used
-//! go through `interpretKeyEvents:`, which calls back `insertText:` and `doCommandBySelector:` (see
-//! [crate::keys]); the pointer's cursor follows the runtime's.
+//! NSEvents converted to [Event], and a display link that runs only while the runtime needs frames
+//! (input, animations); a timer the app asked for sleeps on the main queue until it is due (a
+//! refresh after the last frame at the soonest) and draws its frame there, leaving the display link
+//! paused. While the window is hidden (minimized, covered, on another space) frames wait until it
+//! shows again. Keys nobody used go through `interpretKeyEvents:`, which calls back `insertText:`
+//! and `doCommandBySelector:` (see [crate::keys]); the pointer's cursor follows the runtime's.
 
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
@@ -53,6 +53,9 @@ pub struct Ivars {
   key_equivalent: Cell<f64>,
   /// When the scheduled timer wake fires, on the runtime's clock.
   timer: Cell<Option<Duration>>,
+  /// When the last frame started, on the runtime's clock: a timer frame comes a refresh later at
+  /// the soonest.
+  last_frame: Cell<Option<Duration>>,
   /// `interpretKeyEvents:` runs for a key with Cmd: what it would type is dropped.
   cmd_key: Cell<bool>,
   /// The cursor set while the pointer is in the view; none outside it.
@@ -486,6 +489,8 @@ impl View {
   /// Sleeps until the runtime's next timer, unless an earlier wake is already set.
   fn schedule(&self, st: &mut State) {
     let Some(left) = st.rt.due_in() else { return };
+    let since = self.ivars().last_frame.get().map(|t| st.rt.now().saturating_sub(t));
+    let left = paced(left, since, refresh(&st.link));
     let at = st.rt.now() + left;
     if self.ivars().timer.get().is_some_and(|t| t <= at) {
       return;
@@ -582,6 +587,7 @@ impl View {
     let size = Size::new(bounds.width as f32, bounds.height as f32);
     let mut state = self.ivars().state.borrow_mut();
     let Some(st) = state.as_mut() else { return };
+    self.ivars().last_frame.set(Some(st.rt.now()));
     st.rt.resize(size, scale);
     st.rt.frame();
     st.presenter.renderer.sync(&mut st.rt.text, &mut st.rt.images);
@@ -593,6 +599,20 @@ impl View {
 
     self.sync_cursor(st);
   }
+}
+
+/// How long a timer due in `left` waits, `since` the last frame started: until a refresh after
+/// it at the soonest, as the display link would pace it (a timer every 2 ms draws at the
+/// display's rate, not 500 times a second).
+fn paced(left: Duration, since: Option<Duration>, refresh: Duration) -> Duration {
+  since.map_or(left, |s| left.max(refresh.saturating_sub(s)))
+}
+
+/// The display's refresh interval from its link (a 120 Hz one's until it has run).
+fn refresh(link: &CADisplayLink) -> Duration {
+  let d = link.duration();
+  let d = if d > 0.0 { d.clamp(1.0 / 120.0, 1.0 / 24.0) } else { 1.0 / 120.0 };
+  Duration::from_secs_f64(d)
 }
 
 // MARK: NSEvent conversion
@@ -725,6 +745,18 @@ mod tests {
     assert_eq!(buttons(both, 0, false), 0b10);
     assert_eq!(buttons(both, 70, true), both);
     assert_eq!(buttons(both, -1, false), both);
+  }
+
+  #[test]
+  fn timer_frames_come_a_refresh_apart() {
+    let ms = Duration::from_millis;
+    let hz60 = Duration::from_micros(16_667);
+    // Due in 2 ms, 1 ms after the last frame: at the next refresh.
+    assert_eq!(paced(ms(2), Some(ms(1)), hz60), Duration::from_micros(15_667));
+    // Due later than a refresh, or long after the last frame: when due.
+    assert_eq!(paced(ms(100), Some(ms(1)), hz60), ms(100));
+    assert_eq!(paced(ms(2), Some(ms(500)), hz60), ms(2));
+    assert_eq!(paced(ms(2), None, hz60), ms(2));
   }
 
   /// A crosshair asked for while the pointer is outside: set as it comes in, not again while it
