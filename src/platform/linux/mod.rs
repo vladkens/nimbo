@@ -249,6 +249,11 @@ pub struct Win {
   /// Logical size (points), from the last configure.
   size: Size,
   pending_size: Option<Size>,
+  /// Maximized, fullscreen or tiled: the window keeps the compositor's size, and a size the app
+  /// asks for meanwhile waits in `asked` until it floats again. The pending configure's too.
+  held: bool,
+  pending_held: bool,
+  asked: Option<Size>,
   /// Fractional scale in 120ths, when the compositor sends one.
   scale120: Option<u32>,
   /// `wl_surface.preferred_buffer_scale` (v6).
@@ -389,6 +394,9 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
     started,
     size,
     pending_size: None,
+    held: false,
+    pending_held: false,
+    asked: None,
     scale120: None,
     preferred: None,
     outputs,
@@ -604,7 +612,8 @@ impl Win {
 
   /// Takes the size the app asked for ([Runtime::take_resize]) as the surface's: a floating
   /// window takes the size its buffers have; a fixed one gets it as its least and largest too,
-  /// so the compositor configures it so.
+  /// so the compositor configures it so. A maximized, fullscreen or tiled window keeps the
+  /// compositor's size and takes the app's when it floats again.
   fn apply_resize(&mut self) {
     let Some(size) = self.rt.take_resize() else { return };
     // In whole surface coordinates, as the first size ([whole]).
@@ -624,6 +633,7 @@ impl Win {
       }
     }
 
+    let Some(size) = dispatch::asked_size(size, self.held, &mut self.asked) else { return };
     self.size = size;
     self.rt.redraw();
   }
