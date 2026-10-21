@@ -14,10 +14,6 @@ keywords = ["gui", "ui", "desktop", "widgets", "toolkit"]
 categories = ["gui"]
 
 [[test]]
-name = "pace"
-harness = false
-
-[[test]]
 name = "shapes"
 harness = false
 
