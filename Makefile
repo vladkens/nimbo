@@ -8,6 +8,7 @@ prepare:
 check: check-targets
 	cargo +nightly fmt --check
 	uv run scripts/blank-lines.py
+	uv run --no-project python -m doctest scripts/pace.py
 	cargo clippy --all-targets -- -D warnings
 
 test:

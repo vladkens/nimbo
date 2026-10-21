@@ -52,10 +52,21 @@ def switches(pid: int) -> int:
   return int(out.stdout.strip() or 0)
 
 
+# The measured part of the run, in ms after the first frame: the bar moves for 3 s.
+WINDOW = (500, 2950)
+
+
 def fps(log: str) -> str:
-  """Frames per second from half a second after the first to the end of the run: the start's
-  settled."""
-  t0, a, b, n = None, None, None, 0
+  """Frames per second from half a second after the first to the end of the run (the start's
+  settled), counted over that whole window: an animation that stops early comes out slow.
+
+  >>> trace = lambda ms: chr(10).join(f"nimbo: presented {k * 1000 / 60:.3f}" for k in range(ms * 60 // 1000))
+  >>> fps(trace(3000))
+  '60.0'
+  >>> fps(trace(750))
+  '6.1'
+  """
+  t0, n = None, 0
   for line in log.splitlines():
     f = line.split()
     if len(f) < 3 or f[1] != "presented":
@@ -63,11 +74,10 @@ def fps(log: str) -> str:
 
     t = float(f[2])
     t0 = t if t0 is None else t0
-    if t0 + 500 <= t <= t0 + 2950:
-      a = t if a is None else a
-      b, n = t, n + 1
+    if WINDOW[0] <= t - t0 < WINDOW[1]:
+      n += 1
 
-  return f"{(n - 1) * 1000 / (b - a):.1f}" if n > 1 else "0"
+  return f"{n * 1000 / (WINDOW[1] - WINDOW[0]):.1f}"
 
 
 def main() -> int:
