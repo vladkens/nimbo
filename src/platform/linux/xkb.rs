@@ -455,7 +455,8 @@ fn named(sym: u32) -> Option<Key> {
     0xff57 | 0xff9c => Key::End,
     0xff55 | 0xff9a => Key::PageUp,
     0xff56 | 0xff9b => Key::PageDown,
-    0xffbe..=0xffc9 => Key::F((sym - 0xffbe) as u8 + 1),
+    // F1 to F20.
+    0xffbe..=0xffd1 => Key::F((sym - 0xffbe) as u8 + 1),
     _ => return None,
   })
 }
@@ -585,6 +586,14 @@ const KVK: &[(u16, u16)] = &[
   (86, 10),   // 102nd key: ISO section
   (87, 103),  // F11
   (88, 111),  // F12
+  (183, 105), // F13
+  (184, 107), // F14
+  (185, 113), // F15
+  (186, 106), // F16
+  (187, 64),  // F17
+  (188, 79),  // F18
+  (189, 80),  // F19
+  (190, 90),  // F20
   (96, 76),   // Keypad Enter
   (97, 62),   // Right Ctrl
   (98, 75),   // Keypad /
@@ -768,6 +777,8 @@ mod tests {
     assert_eq!(kvk(LEFT).and_then(Key::named), Some(Key::Left));
     assert_eq!(kvk(28).and_then(Key::named), Some(Key::Enter));
     assert_eq!(kvk(88).and_then(Key::named), Some(Key::F(12)));
+    assert_eq!(kvk(183).and_then(Key::named), Some(Key::F(13)));
+    assert_eq!(named(0xffd1), Some(Key::F(20)));
     assert_eq!(kvk(A), Some(0));
   }
 }

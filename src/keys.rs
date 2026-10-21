@@ -69,8 +69,9 @@ const NAMED: [(u16, Key); 14] = [
   (121, Key::PageDown),
 ];
 
-/// Virtual key codes of F1 to F12.
-const F_KEYS: [u16; 12] = [122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111];
+/// Virtual key codes of F1 to F20, as a keystroke names them (`f1` to `f20`).
+const F_KEYS: [u16; 20] =
+  [122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111, 105, 107, 113, 106, 64, 79, 80, 90];
 
 impl Key {
   /// The named key at virtual key code `code`, if it is one.
@@ -622,11 +623,12 @@ mod tests {
     assert_eq!(Key::named(76), Some(Key::Enter));
     assert_eq!(Key::named(111), Some(Key::F(12)));
     assert_eq!(Key::named(0), None);
-    for k in [Key::Enter, Key::Tab, Key::Escape, Key::PageDown, Key::F(1), Key::F(12)] {
+    for k in [Key::Enter, Key::Tab, Key::Escape, Key::PageDown, Key::F(1), Key::F(12), Key::F(20)] {
       assert_eq!(k.code().and_then(Key::named), Some(k));
     }
 
-    assert_eq!(Key::F(13).code(), None);
+    assert_eq!(Key::F(13).code(), Some(105));
+    assert_eq!(Key::F(21).code(), None);
   }
 
   #[test]
