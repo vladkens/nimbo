@@ -32,8 +32,9 @@ pub(super) struct Bars {
   seen: Point,
   /// When they were last asked to show.
   pub shown: Option<Duration>,
-  /// The pointer was over the area last frame.
+  /// The pointer was over the area last frame, and where.
   over: bool,
+  mouse: Option<Point>,
   /// The offset when a thumb drag began, per axis.
   drag: [Option<f32>; 2],
 }
@@ -167,12 +168,15 @@ impl Ui<'_> {
 
   /// The scrollbars' behaviour of scroll area `id` scrolling along `axes`: a thumb dragged from
   /// where it was pressed, a click on the track paging toward it, the bars shown while the
-  /// content moves, the pointer comes in or rests in a track's strip, then fading out.
+  /// content moves, the pointer comes in or moves in a track's strip, then fading out; they
+  /// stay while a thumb is held or the pointer is on a track.
   fn scroll_bars(&mut self, id: Id, axes: [bool; 2]) -> BarsState {
     let now = self.now();
     let mut bars = std::mem::take(self.state::<Bars>(id));
     let mut geos: [Option<Geo>; 2] = [None, None];
-    let mut active = false;
+    // A thumb held or a track under the pointer keep the bars, with no timer running.
+    let mut pinned = false;
+    let mouse = self.mouse();
     if let Some(sc) = self.scroll(id) {
       let over = self.hovered(id);
       if sc.offset != bars.seen || over && !bars.over {
@@ -195,7 +199,7 @@ impl Ui<'_> {
         {
           let start = *bars.drag[ax].get_or_insert(axis(off, ax));
           off = with_axis(off, ax, start + (axis(m, ax) - axis(p.pos, ax)) * first.ratio);
-          active = true;
+          pinned = true;
         } else {
           bars.drag[ax] = None;
         }
@@ -207,13 +211,18 @@ impl Ui<'_> {
           off = with_axis(off, ax, axis(off, ax) + dir * page);
         }
 
-        // The pointer in the track's strip shows the bars, though hidden ones take no clicks.
+        // The pointer moving in the track's strip shows the bars, though hidden ones take no
+        // clicks.
         let vp = sc.viewport;
         let strip = |m: Point| match ax {
           0 => m.y >= vp.y + vp.h - BAR,
           _ => m.x >= vp.x + vp.w - BAR,
         };
-        active |= self.hovered(track) || over && self.mouse().is_some_and(strip);
+        if over && mouse != bars.mouse && mouse.is_some_and(strip) {
+          bars.shown = Some(now);
+        }
+
+        pinned |= self.hovered(track);
         let max = sc.max();
         off = Point::new(off.x.clamp(0.0, max.x), off.y.clamp(0.0, max.y));
         *g = geo(&sc, ax, axis(off, ax), both);
@@ -225,12 +234,14 @@ impl Ui<'_> {
       }
     }
 
-    if active {
+    bars.mouse = mouse;
+    if pinned {
       bars.shown = Some(now);
     }
 
+    // Pinned, they wait for the pointer to leave, a frame of its own (the hover changes).
     let until = bars.shown.map(|s| s + BAR_SHOW).filter(|&u| u > now);
-    if let Some(u) = until {
+    if let Some(u) = until.filter(|_| !pinned) {
       self.request_frame_in(u - now);
     }
 
@@ -291,6 +302,11 @@ mod tests {
     h.click(195.0, 190.0);
     h.frame();
     assert!(h.rt.ui.scroll(area).unwrap().offset.y > off + 150.0);
+    // The pointer resting on the track keeps the bars, with no frames.
+    h.move_to(195.0, 100.0);
+    h.wait(Duration::from_millis(300));
+    assert!(h.wait(Duration::from_millis(3000)) == 0 && h.rt.due_in().is_none());
+    assert!(h.rect(area.key(("thumb", 1usize))).is_some());
     // Left alone, the bars fade out and the frames stop.
     h.leave();
     h.wait(Duration::from_millis(2000));
