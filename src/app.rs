@@ -8,15 +8,25 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use crate::scene::{Color, Frame, Images, Scene, Size};
+use crate::keys::{self, Binding, Command, KeyEvent};
+use crate::scene::{Color, Frame, Images, Point, Scene, Size};
+use crate::ui::Cursor;
 
 /// An application: owns its state, reacts to events and draws the frame from it. A frame is
 /// built only when something changed.
 pub trait App {
-  /// Handles one event. Returns true when the event was used, which redraws the frame.
+  /// Handles one event. Keys come here after the app's bindings ([App::keymap]) found no
+  /// command for them (see [crate::keys] for the order). Returns true when the event was used,
+  /// which redraws the frame; a key with Cmd that returns false goes on to the menu (Cmd-Q), an
+  /// unused key on to text input.
   fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
     let _ = (cx, ev);
     false
+  }
+
+  /// The app's key bindings: a match comes to [App::event] as [Event::Command].
+  fn keymap(&self) -> &[Binding] {
+    &[]
   }
 
   /// Paints the frame.
@@ -30,6 +40,10 @@ impl<A: App + ?Sized> App for Box<A> {
     (**self).event(cx, ev)
   }
 
+  fn keymap(&self) -> &[Binding] {
+    (**self).keymap()
+  }
+
   fn paint(&mut self, f: &mut Frame) {
     (**self).paint(f)
   }
@@ -37,9 +51,96 @@ impl<A: App + ?Sized> App for Box<A> {
 
 // MARK: Events
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Mods {
+  pub shift: bool,
+  pub ctrl: bool,
+  pub alt: bool,
+  pub cmd: bool,
+}
+
+impl Mods {
+  pub const NONE: Self = Self { shift: false, ctrl: false, alt: false, cmd: false };
+  pub const CMD: Self = Self { cmd: true, ..Self::NONE };
+  pub const SHIFT: Self = Self { shift: true, ..Self::NONE };
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MouseButton {
+  Left,
+  Right,
+  Middle,
+  Other(u8),
+}
+
+/// A gesture phase, as AppKit reports it for trackpad scrolls and their momentum.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Phase {
+  /// A mouse wheel, or no gesture.
+  #[default]
+  None,
+  MayBegin,
+  Began,
+  Changed,
+  Ended,
+  Cancelled,
+}
+
 /// Input in view coordinates (points, y down), independent of NSEvent.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Event {
+  /// Pointer moved, with or without a button held (drag).
+  MouseMove {
+    pos: Point,
+    mods: Mods,
+  },
+  MouseDown {
+    pos: Point,
+    button: MouseButton,
+    clicks: u32,
+    mods: Mods,
+  },
+  MouseUp {
+    pos: Point,
+    button: MouseButton,
+    mods: Mods,
+  },
+  /// The pointer left the view.
+  MouseExit,
+  /// `delta` in points, positive y when content should move down (toward the top of the
+  /// document). Trackpads set `precise` and report `phase`, then `momentum` after lift-off.
+  Scroll {
+    pos: Point,
+    delta: Point,
+    precise: bool,
+    phase: Phase,
+    momentum: Phase,
+    mods: Mods,
+  },
+  KeyDown(KeyEvent),
+  KeyUp(KeyEvent),
+  /// Text typed: a key no one used, as AppKit's text input turns it into text (`insertText:`,
+  /// dead keys composed). Never empty, no control characters.
+  Text(String),
+  /// A key's command: from a binding, or a key no one used as AppKit's text input turns it into
+  /// one (`doCommandBySelector:`: arrows, Backspace, Enter, Ctrl-A).
+  Command(Command),
+  /// Modifier keys changed.
+  Mods(Mods),
+  /// A modifier key went down or up, by its place (left or right, fn): what a shortcut recorder
+  /// needs to take one alone (`right_option`). After the [Event::Mods] it changed; to the
+  /// focused element first ([Ui::modifier_key]), then the app. Autorepeats send none.
+  Modifier {
+    key: crate::hotkey::ModKey,
+    down: bool,
+  },
+  /// A trackpad pinch: `delta` is the change in magnification (0.1 is 10% larger).
+  Magnify {
+    pos: Point,
+    delta: f32,
+    phase: Phase,
+    mods: Mods,
+  },
   /// The window became or stopped being the key window.
   Focus(bool),
   /// The OS's light or dark setting or accent colour changed, or is first known (before the
@@ -59,6 +160,9 @@ impl Appearance {
   pub const LIGHT: Self = Self { dark: false, accent: None };
   pub const DARK: Self = Self { dark: true, accent: None };
 }
+
+/// Points per line for mouse wheels, which report lines rather than points.
+pub const WHEEL_LINE: f32 = 18.0;
 
 // MARK: Clock, waker
 
@@ -118,14 +222,16 @@ impl Waker {
 
 // MARK: Runtime
 
-/// What `App::event` gets besides the event: the window, the clock and the waker.
+/// What `App::event` gets besides the event: the window, the pointer, the clock and the waker.
 pub struct Cx<'a> {
   pub size: Size,
   pub scale: f32,
+  pub mouse: Option<Point>,
   pub now: Duration,
   pub waker: &'a Waker,
   quit: &'a mut bool,
   redraw: bool,
+  cursor: &'a mut Cursor,
 }
 
 impl Cx<'_> {
@@ -138,14 +244,21 @@ impl Cx<'_> {
   pub fn redraw(&mut self) {
     self.redraw = true;
   }
+
+  /// Sets the pointer's cursor, kept until set again.
+  // Temporary: the element under the pointer sets it once the element tree comes.
+  pub fn set_cursor(&mut self, c: Cursor) {
+    *self.cursor = c;
+  }
 }
 
-/// Drives an app: feeds it events, tracks the size, and builds a scene when something
-/// changed. The window and the harness both own one.
+/// Drives an app: feeds it events, tracks the pointer and size, and builds a scene when
+/// something changed. The window and the harness both own one.
 pub struct Runtime<A> {
   pub app: A,
   pub size: Size,
   pub scale: f32,
+  pub mouse: Option<Point>,
   pub scene: Scene,
   pub images: Images,
   clock: Clock,
@@ -153,6 +266,7 @@ pub struct Runtime<A> {
   dirty: bool,
   animating: bool,
   quit: bool,
+  cursor: Cursor,
 }
 
 impl<A: App> Runtime<A> {
@@ -162,6 +276,7 @@ impl<A: App> Runtime<A> {
       app,
       size,
       scale,
+      mouse: None,
       scene: Scene::default(),
       images: Images::default(),
       clock,
@@ -169,6 +284,7 @@ impl<A: App> Runtime<A> {
       dirty: true,
       animating: false,
       quit: false,
+      cursor: Cursor::Arrow,
     }
   }
 
@@ -184,6 +300,11 @@ impl<A: App> Runtime<A> {
 
   pub fn waker(&self) -> &Waker {
     &self.waker
+  }
+
+  /// The pointer's cursor, as the app set it.
+  pub fn cursor(&self) -> Cursor {
+    self.cursor
   }
 
   pub fn quit_requested(&self) -> bool {
@@ -204,13 +325,18 @@ impl<A: App> Runtime<A> {
   }
 
   /// Feeds one event to the app; returns whether it was used or changed what the view shows
-  /// (and so redraws).
+  /// (and so redraws). A key goes through the app's bindings first (see [crate::keys] for the
+  /// order).
   pub fn event(&mut self, ev: Event) -> bool {
     if let Event::Appearance(a) = ev {
       return self.appearance(a);
     }
 
-    let used = self.app_event(&ev);
+    let used = match ev {
+      Event::KeyDown(k) => self.key_down(k),
+      ev => self.pointer(ev),
+    };
+
     self.dirty |= used;
     used
   }
@@ -222,14 +348,40 @@ impl<A: App> Runtime<A> {
     true
   }
 
+  fn pointer(&mut self, ev: Event) -> bool {
+    match ev {
+      Event::MouseMove { pos, .. }
+      | Event::MouseDown { pos, .. }
+      | Event::MouseUp { pos, .. }
+      | Event::Scroll { pos, .. }
+      | Event::Magnify { pos, .. } => self.mouse = Some(pos),
+      Event::MouseExit => self.mouse = None,
+      _ => {}
+    }
+
+    self.app_event(&ev)
+  }
+
+  /// The app's bindings, then the key itself to the app.
+  fn key_down(&mut self, k: KeyEvent) -> bool {
+    if let Some(cmd) = keys::lookup(self.app.keymap(), &k)
+      && self.app_event(&Event::Command(cmd))
+    {
+      return true;
+    }
+    self.app_event(&Event::KeyDown(k))
+  }
+
   fn app_event(&mut self, ev: &Event) -> bool {
     let mut cx = Cx {
       size: self.size,
       scale: self.scale,
+      mouse: self.mouse,
       now: self.clock.now(),
       waker: &self.waker,
       quit: &mut self.quit,
       redraw: false,
+      cursor: &mut self.cursor,
     };
     let used = self.app.event(&mut cx, ev);
     self.dirty |= cx.redraw;
@@ -248,8 +400,15 @@ impl<A: App> Runtime<A> {
   pub fn frame(&mut self) {
     self.scene.clear();
     let (size, scale, now) = (self.size, self.scale, self.clock.now());
-    let mut f =
-      Frame { size, scale, now, scene: &mut self.scene, images: &mut self.images, animate: false };
+    let mut f = Frame {
+      size,
+      scale,
+      mouse: self.mouse,
+      now,
+      scene: &mut self.scene,
+      images: &mut self.images,
+      animate: false,
+    };
     self.app.paint(&mut f);
     self.animating = f.animate;
     self.dirty = false;

@@ -355,6 +355,8 @@ pub struct Frame<'a> {
   pub size: Size,
   /// Pixels per point.
   pub scale: f32,
+  /// The pointer in points, `None` when it is outside the view.
+  pub mouse: Option<Point>,
   /// Time from the runtime's clock: real in a window, virtual in the harness.
   pub now: Duration,
   pub scene: &'a mut Scene,
@@ -366,6 +368,10 @@ impl Frame<'_> {
   /// Asks for another frame after this one (a running animation).
   pub fn animate(&mut self) {
     self.animate = true;
+  }
+
+  pub fn hover(&self, r: Rect) -> bool {
+    self.mouse.is_some_and(|m| r.contains(m))
   }
 
   /// Starts a new layer over everything drawn so far. Within a layer each kind draws in a fixed

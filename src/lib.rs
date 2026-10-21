@@ -1,8 +1,8 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! nimbo: a small custom-drawn UI toolkit. Its own CPU renderer for drawing; the OS for the
-//! window behind [platform] (AppKit on macOS, Win32 on Windows, Wayland or X11 on Linux), nothing
-//! else.
+//! window and input behind [platform] (AppKit on macOS, Win32 on Windows, Wayland or X11 on
+//! Linux), nothing else.
 //!
 //! An [App] gets [Event]s and paints a [Scene] through a [Frame]; a [Runtime] drives it, fed by
 //! the window ([platform]) or by the headless [Harness], both drawing with the CPU renderer
@@ -15,17 +15,26 @@
 pub mod app;
 pub mod cpu;
 pub mod harness;
+pub mod hotkey;
+pub mod keys;
 pub mod platform;
 mod png;
 pub mod scene;
+pub mod ui;
 
 use std::path::PathBuf;
 
-pub use app::{App, Appearance, Clock, Cx, Event, Runtime, Waker};
+pub use app::{
+  App, Appearance, Clock, Cx, Event, Mods, MouseButton, Phase, Runtime, WHEEL_LINE, Waker,
+};
 pub use harness::Harness;
+pub use keys::{
+  Binding, Command, Delete, EDIT_KEYS, Key, KeyEvent, Keystroke, Move, SELECT_KEYS, bind, shortcut,
+};
 pub use scene::{
   Color, Frame, ImageId, Images, Point, Quad, Rect, Scene, Segment, Size, alpha, mix, rgb,
 };
+pub use ui::Cursor;
 
 /// A window's title and initial content size in points; the harness renders at this size.
 pub struct Config {
