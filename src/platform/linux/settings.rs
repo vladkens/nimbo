@@ -13,7 +13,7 @@ use std::ptr::{null, null_mut};
 use std::sync::OnceLock;
 
 use super::dl::fns;
-use super::{Fp, P, S, connect, lib, with};
+use super::{Fp, P, S, busy, connect, lib, with};
 use crate::app::{Appearance, Event};
 
 const PORTAL: &CStr = c"org.freedesktop.portal.Desktop";
@@ -44,6 +44,7 @@ fns!(Gio {
   fn g_error_free(e: P);
   fn g_object_unref(obj: P);
   fn g_free(p: P);
+  fn g_timeout_add(ms: c_uint, f: Fp, data: P) -> c_uint;
   fn gtk_settings_get_default() -> P;
 });
 
@@ -99,13 +100,28 @@ pub fn watch() {
 }
 
 unsafe extern "C" fn on_changed(_: P, _: P, _: P) {
-  with((), |w| _ = w.send(Event::Appearance(appearance())));
+  unsafe { deliver(null_mut()) };
 }
 
 /// `SettingChanged(namespace, key, value)` in the appearance namespace (the subscription's
 /// first argument).
 unsafe extern "C" fn on_portal(_: P, _: S, _: S, _: S, _: S, _: P, _: P) {
-  with((), |w| _ = w.send(Event::Appearance(appearance())));
+  unsafe { deliver(null_mut()) };
+}
+
+/// Sends the appearance now; while the window is busy (a paste waits), again in a moment.
+unsafe extern "C" fn deliver(_: P) -> c_int {
+  let sent = with(false, |w| {
+    w.send(Event::Appearance(appearance()));
+    true
+  });
+
+  if !sent && busy() {
+    let f = &api().expect("loaded before its callbacks").f;
+    unsafe { (f.g_timeout_add)(100, deliver as Fp, null_mut()) };
+  }
+
+  0
 }
 
 /// The session bus, a new reference; null without one.
