@@ -13,6 +13,8 @@ A small, fast, custom-drawn desktop UI toolkit in Rust, in the spirit of Sublime
 
 - The library starts small and grows when an app needs more: widgets, containers and platforms come as add-ons over the core, not baked into it.
 - `src/app.rs` the seams an app sees (`App`, `Event`, `Runtime`, clock, clipboard); `src/keys.rs` key events, bindings and commands; `src/scene.rs` the draw list and paint API; `src/cpu/` the CPU renderer; `src/text/` portable text over the platform's backend; `src/harness.rs` the headless runner.
+- `src/ui/` the element tree: layout, paint, input, focus, the per-id store, headless behaviours, the theme and the widgets. Add-ons keep their build-time state in `Ui::slot` and content built in part in `Tree::partial`, so the core never names them.
+- `Theme` is a plain value: an app edits the default plates look (`Theme::PLATES_LIGHT` / `PLATES_DARK`) or builds its own and sets it with `Ui::set_theme`.
 - `src/platform/<os>/` everything OS-dependent, its contract in the docs of `src/platform/mod.rs`: AppKit and CoreText, Win32 and DirectWrite, Wayland or X11 (XCB) with fontconfig, FreeType and HarfBuzz, all loaded at run time on Linux.
 - Examples are `examples/<name>.rs` and start through `nimbo::run`, which opens a window, or with `--shot <file.png>` renders in the harness instead (`--appearance light|dark`).
 
