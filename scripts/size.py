@@ -4,9 +4,11 @@
 # ///
 """Lines per module: code, docs, comments and inline tests, apart.
 
-A module is a directory under src/ (platform/<os>, ui/widgets and ui/containers each on
-their own, and so are the add-on files ui/form.rs and ui/dialog.rs) or a top-level file; examples/ and tests/ are one row each. Code is every line that is not blank, a comment, a doc
-comment or inside a `#[cfg(test)]` item. With a git ref, a column shows how code moved since it.
+A module is a directory under src/ (platform/<os>, platform/<os>/app, ui/widgets and
+ui/containers each on their own, and so are the add-on files ui/form.rs and ui/dialog.rs) or a
+top-level file; examples/ and tests/ are one row each. Code is every line that is not blank, a
+comment, a doc comment or inside a `#[cfg(test)]` item. With a git ref, a column shows how code
+moved since it.
 `--map` lists the files with the first sentence of each one's module doc (`//!`): what it does.
 `--check` sums the code per part against its budget (BUDGETS) and fails when one is over.
 
@@ -25,8 +27,10 @@ EXTS = (".rs", ".metal")
 KINDS = ("code", "docs", "comments", "tests", "blank")
 # The code lines each part may have: a platform, the UI core (ui/: the tree, layout, input,
 # paint, theme), its widgets and containers (ui/widgets, ui/containers: add-ons over it), the
-# text system (text/: shaping, the glyph atlas, the editing model) and the core (the rest of
-# src/). Raising one is a decision recorded in its PR.
+# text system (text/: shaping, the glyph atlas, the editing model), the app platform (its
+# portable part: the shell, tray, hotkeys, paths, launch at login; and each OS's
+# platform/<os>/app) and the core (the rest of src/). Raising one is a decision recorded in its
+# PR.
 BUDGETS = {
   "platform/macos": 1600,
   "platform/windows": 2000,
@@ -35,14 +39,19 @@ BUDGETS = {
   "widgets": 3100,
   "text": 1500,
   "core": 3500,
+  "app/shared": 900,
+  "app/macos": 1200,
+  "app/windows": 1200,
+  "app/linux": 1500,
 }
-# Modules that count against a budget of another name.
+# Modules that count against a budget of another name ("app", src/app.rs, is the core's seams).
 # The settings form and the dialog are add-ons over the widgets, as the containers are.
 PARTS = {
   "ui/widgets": "widgets",
   "ui/containers": "widgets",
   "ui/form": "widgets",
   "ui/dialog": "widgets",
+  **{m: "app/shared" for m in ("shell", "tray", "hotkey", "paths", "autostart")},
 }
 
 
@@ -62,6 +71,9 @@ def module(path: str, files: bool) -> str:
   if len(parts) == 2:
     return parts[1].removesuffix(".rs")
 
+  if parts[1] == "platform" and len(parts) > 4 and parts[3] == "app":
+    return f"app/{parts[2]}"
+
   if parts[1] in ("platform", "ui") and len(parts) > 2:
     sub = f"{parts[1]}/{parts[2].removesuffix('.rs')}"
     if parts[1] == "platform" and len(parts) > 3 or sub in PARTS:
@@ -75,6 +87,8 @@ def part(module: str) -> str | None:
 
   >>> [part(m) for m in ("platform/linux", "ui", "ui/containers", "text", "cpu", "tests")]
   ['platform/linux', 'ui', 'widgets', 'text', 'core', None]
+  >>> [part(m) for m in ("app", "tray", "app/linux")]
+  ['core', 'app/shared', 'app/linux']
   """
   if module in BUDGETS:
     return module
