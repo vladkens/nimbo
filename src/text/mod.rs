@@ -558,6 +558,21 @@ mod tests {
   }
 
   #[test]
+  fn color_faces_monochrome_glyphs_take_the_text_colour() {
+    // Apple Color Emoji draws "1\u{FE0F}" from an outline: white text must not come out black.
+    let mut ts = TextSystem::new(2.0);
+    let one = ts.layout("1\u{FE0F}", Font::ui(13.0)).glyphs[0];
+    let Some(g) = ts.glyph(one.face, one.id, 0, [1.0; 4]) else { return };
+    let up = ts.uploads().next().unwrap();
+    let lit = match g.color {
+      true => up.data.as_chunks::<4>().0.iter().any(|p| p[0].max(p[1]).max(p[2]) > 128),
+      false => up.data.iter().any(|&a| a > 128),
+    };
+
+    assert!(lit, "drawn black: color {}", g.color);
+  }
+
+  #[test]
   fn atlas_reset_bumps_epoch() {
     let mut ts = TextSystem::new(2.0);
     let g = ts.layout("x", Font::ui(13.0)).glyphs[0];

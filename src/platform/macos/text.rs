@@ -66,9 +66,13 @@ pub fn is_color(face: &Face) -> bool {
   traits.contains(CTFontSymbolicTraits::TraitColorGlyphs)
 }
 
-/// How a glyph of a colour face draws: every one is a colour bitmap, none in the text's colour.
-pub fn color_glyph(face: &Face, _id: u16) -> Option<bool> {
-  is_color(face).then_some(false)
+/// How a glyph of a colour face draws: a colour bitmap (`Some(false)`, none in the text's colour)
+/// unless it has an outline, which a colour face keeps for its monochrome glyphs (Apple Color
+/// Emoji's digits, `#` and `*`, which "1\u{FE0F}" picks): those are coverage, tinted like text
+/// (`None`). The bitmaps (`sbix`) have no outline.
+pub fn color_glyph(face: &Face, id: u16) -> Option<bool> {
+  let outline = unsafe { face.0.path_for_glyph(id, std::ptr::null()) }.is_some();
+  (is_color(face) && !outline).then_some(false)
 }
 
 /// Shapes `s` with CoreText (kerning, ligatures, font fallback); `index` gives the text
