@@ -116,6 +116,7 @@ fns!(Gtk {
   fn gtk_window_present(w: P);
   fn gtk_window_is_active(w: P) -> c_int;
   fn gtk_widget_destroy(w: P);
+  fn gtk_widget_hide(w: P);
   fn gtk_widget_queue_draw_area(w: P, x: c_int, y: c_int, width: c_int, height: c_int);
   fn gtk_widget_add_tick_callback(w: P, cb: Fp, data: P, free: Fp) -> c_uint;
   fn gtk_widget_get_allocated_width(w: P) -> c_int;
@@ -236,6 +237,8 @@ struct Slot {
 
 thread_local! {
   static WINS: RefCell<Vec<Slot>> = const { RefCell::new(Vec::new()) };
+  /// Closed windows still in use up the stack ([close]).
+  static DYING: RefCell<Vec<Slot>> = const { RefCell::new(Vec::new()) };
   /// The window the callback running is for; 0 outside one (an idle source of input's).
   static CURRENT: Cell<u64> = const { Cell::new(0) };
   static NEXT: Cell<u64> = const { Cell::new(0) };
@@ -455,8 +458,9 @@ fn front(id: u64) {
   }
 }
 
-/// Window `id` goes: its runtime once no call up the stack has it, the GTK window after the
-/// callback in progress (`defer`, so one further up never meets it gone) or at once. With
+/// Window `id` goes: hidden at once; its runtime and GTK window once no call up the stack has
+/// them (`defer`: a callback further up, or one waiting in a nested main loop for a paste,
+/// never meets them gone; [on_destroy]) or at once. With
 /// `NIMBO_SHOT=<file>`, its last frame is written as a PNG first (to check a window run).
 fn close(id: u64, defer: bool) -> bool {
   let Some(s) = WINS.with_borrow_mut(|ws| Some(ws.remove(ws.iter().position(|s| s.id == id)?)))
@@ -478,15 +482,18 @@ fn close(id: u64, defer: bool) -> bool {
   }
 
   let g = gtk();
-  let window = s.window;
-  drop(s);
   match defer {
-    true => unsafe { (g.g_idle_add)(on_destroy as Fp, window) },
-    false => unsafe {
-      (g.gtk_widget_destroy)(window);
-      0
-    },
-  };
+    true => {
+      unsafe { (g.gtk_widget_hide)(s.window) };
+      DYING.with_borrow_mut(|d| d.push(s));
+      unsafe { (g.g_idle_add)(on_destroy as Fp, null_mut()) };
+    }
+    false => {
+      let window = s.window;
+      drop(s);
+      unsafe { (g.gtk_widget_destroy)(window) };
+    }
+  }
 
   true
 }
@@ -862,9 +869,30 @@ unsafe extern "C" fn on_delete(_: P, _: P, data: P) -> c_int {
   TRUE
 }
 
-/// A closed window's GTK window goes, after the callback that closed it.
-unsafe extern "C" fn on_destroy(window: P) -> c_int {
-  unsafe { (gtk().gtk_widget_destroy)(window) };
+/// The closed windows still waiting go now: the loop has ended, nothing holds them.
+fn reap() {
+  for s in DYING.take() {
+    let window = s.window;
+    drop(s);
+    unsafe { (gtk().gtk_widget_destroy)(window) };
+  }
+}
+
+/// Closed windows go once nothing up the stack holds them: their runtime, then their GTK
+/// window; the rest are tried again a moment later.
+unsafe extern "C" fn on_destroy(_: P) -> c_int {
+  let free = |s: &Slot| Rc::strong_count(&s.win) == 1 && s.win.try_borrow_mut().is_ok();
+  let done: Vec<Slot> = DYING.with_borrow_mut(|d| d.extract_if(.., |s| free(s)).collect());
+  for s in done {
+    let window = s.window;
+    drop(s);
+    unsafe { (gtk().gtk_widget_destroy)(window) };
+  }
+
+  if DYING.with_borrow(|d| !d.is_empty()) {
+    unsafe { (gtk().g_timeout_add)(50, on_destroy as Fp, null_mut()) };
+  }
+
   FALSE
 }
 

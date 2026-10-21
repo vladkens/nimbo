@@ -75,6 +75,7 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
     closed(id, false);
   }
 
+  super::super::reap();
   shell(|s| s.info = None);
 }
 

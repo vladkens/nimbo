@@ -27,6 +27,8 @@ fns!(Gio {
     data: P, free: Fp) -> c_uint;
   fn g_bus_unwatch_name(id: c_uint);
   fn g_dbus_connection_get_unique_name(c: P) -> S;
+  fn g_dbus_connection_close_sync(c: P, cancel: P, err: *mut P) -> c_int;
+  fn g_object_unref(obj: P);
   fn g_dbus_connection_call_sync(c: P, name: S, path: S, iface: S, method: S, args: P,
     reply: P, flags: c_int, ms: c_int, cancel: P, err: *mut P) -> P;
   fn g_dbus_connection_signal_subscribe(c: P, sender: S, iface: S, member: S, path: S, arg0: S,
@@ -150,6 +152,18 @@ pub fn private_session() -> Result<P, String> {
     true => Err(format!("no session bus: {}", error(err))),
     false => Ok(bus),
   }
+}
+
+/// Closes a connection of [private_session]'s and lets it go.
+pub fn close(bus: P) {
+  if bus.is_null() {
+    return;
+  }
+
+  let mut err = null_mut();
+  unsafe { (f().g_dbus_connection_close_sync)(bus, null_mut(), &mut err) };
+  let _ = error(err);
+  unsafe { (f().g_object_unref)(bus) };
 }
 
 /// This connection's unique name (`:1.42`).

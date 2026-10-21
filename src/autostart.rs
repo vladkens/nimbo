@@ -61,8 +61,10 @@ pub(crate) fn desktop_entry(app: &AppInfo, exe: &str) -> String {
   let mut arg = String::from("\"");
   for c in exe.chars() {
     match c {
-      // Escaped inside the quotes, then the backslash itself escaped for the string value.
-      '"' | '`' | '$' | '\\' => arg.extend(['\\', '\\', c]),
+      // Escaped inside the quotes (`\\` for `\`), then every backslash escaped again for the
+      // string value: `\\\\` for a backslash, `\\$` for a dollar.
+      '\\' => arg.push_str("\\\\\\\\"),
+      '"' | '`' | '$' => arg.extend(['\\', '\\', c]),
       '%' => arg.push_str("%%"),
       '\n' | '\r' => arg.push(' '),
       c => arg.push(c),
@@ -90,9 +92,10 @@ mod tests {
   #[test]
   fn desktop_entries_quote_the_path() {
     let app = AppInfo { id: "com.example.app", name: "Example", presence: Default::default() };
-    let e = desktop_entry(&app, "/opt/My App/run$1 \"x\" 100%");
+    let e = desktop_entry(&app, "/opt/My App/run$1 \"x\" 100% a\\b");
     assert!(e.contains("Name=Example\n"));
-    assert!(e.contains("Exec=\"/opt/My App/run\\\\$1 \\\\\"x\\\\\" 100%%\"\n"), "{e}");
+    let want = r#"Exec="/opt/My App/run\\$1 \\"x\\" 100%% a\\\\b""#;
+    assert!(e.contains(&format!("{want}\n")), "{e}");
     assert!(entry_runs(&e));
     assert!(!entry_runs(&(e.clone() + "Hidden=true\n")));
     assert!(!entry_runs(&e.replace("enabled=true", "enabled=false")));

@@ -569,8 +569,13 @@ fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     }
     WM_DESTROY => {
       with(|w| w.revoke());
-      // Dropped here unless a call up the stack holds it; its close callback runs after.
-      WINDOWS.with_borrow_mut(|ws| ws.retain(|(h, _)| *h != hwnd));
+      // Dropped here unless a call up the stack holds it, outside the list's borrow (the app's
+      // drop may open or close windows); its close callback runs after.
+      let gone = WINDOWS.with_borrow_mut(|ws| {
+        let i = ws.iter().position(|(h, _)| *h == hwnd)?;
+        Some(ws.remove(i))
+      });
+      drop(gone);
       app::shell::destroyed(hwnd);
       0
     }

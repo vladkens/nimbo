@@ -529,7 +529,18 @@ impl View {
   /// Feeds an event to the runtime and restarts the display link if it needs a frame.
   pub fn send(&self, ev: Event) -> bool {
     let (used, quit) = {
-      let mut state = self.ivars().state.borrow_mut();
+      let Ok(mut state) = self.ivars().state.try_borrow_mut() else {
+        // The runtime is busy up the stack (an app changed through `Window::with` fronts
+        // another window, and AppKit tells this one it lost the keys): sent once it is done.
+        let weak = self.weak();
+        DispatchQueue::main().exec_async(move || {
+          let mtm = MainThreadMarker::new().unwrap();
+          if let Some(view) = weak.get(mtm).load() {
+            view.send(ev);
+          }
+        });
+        return false;
+      };
       let Some(st) = state.as_mut() else { return false };
       let used = st.rt.event(ev);
       match st.rt.needs_frame() {

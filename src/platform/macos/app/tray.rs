@@ -4,13 +4,16 @@
 //! app as it opens (`menuNeedsUpdate:`) and taking the chosen item (`chosen:`, by tag); the icon
 //! a template NSImage, from RGBA through CoreGraphics, or path data filled whenever AppKit draws
 //! it. A menu set while the menu is open (`menuWillOpen:` to `menuDidClose:`) waits for it to
-//! close: rebuilding an open NSMenu closes its open submenus.
+//! close: rebuilding an open NSMenu closes its open submenus. It is built from the main queue
+//! after `menuDidClose:`, where AppKit forbids changing the menu, and after the chosen item's
+//! action, which still finds its id.
 
 use std::cell::{Cell, RefCell};
 use std::ptr::null_mut;
 use std::rc::{Rc, Weak};
 
 use block2::RcBlock;
+use dispatch2::{DispatchQueue, MainThreadBound};
 use keyboard_types::{Modifiers, NamedKey};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool, ProtocolObject};
@@ -22,6 +25,7 @@ use objc2_app_kit::{
   NSImage, NSMenu, NSMenuDelegate, NSMenuItem, NSStatusBar, NSStatusItem,
   NSVariableStatusItemLength, NSWindingRule,
 };
+use objc2_core_foundation::CFRunLoop;
 use objc2_core_graphics::{
   CGBitmapContextCreate, CGBitmapContextCreateImage, CGBitmapContextGetBytesPerRow,
   CGBitmapContextGetData, CGColorSpace, CGImageAlphaInfo, kCGColorSpaceSRGB,
@@ -93,9 +97,16 @@ define_class!(
     fn menu_did_close(&self, _menu: &NSMenu) {
       let Some(tray) = self.tray() else { return };
       tray.0.open.set(false);
-      if let Some(menu) = tray.0.pending.take() {
-        tray.build(&menu);
-      }
+      let weak = MainThreadBound::new(Rc::downgrade(&tray.0), tray.0.mtm);
+      DispatchQueue::main().exec_async(move || {
+        let mtm = MainThreadMarker::new().unwrap();
+        let Some(tray) = weak.into_inner(mtm).upgrade().map(Tray) else { return };
+        if !tray.0.open.get()
+          && let Some(menu) = tray.0.pending.take()
+        {
+          tray.build(&menu);
+        }
+      });
     }
   }
 
@@ -263,8 +274,12 @@ impl Tray {
     let _: () = unsafe { msg_send![delegate, menuWillOpen: menu] };
   }
 
+  /// `menuDidClose:`, then the main queue's work it left (the menu set meanwhile).
   pub fn closing(&self) {
     let _: () = unsafe { msg_send![&*self.0.delegate, menuDidClose: &*self.0.menu] };
+    // SAFETY: a static of the CoreFoundation framework.
+    let mode = unsafe { objc2_core_foundation::kCFRunLoopDefaultMode };
+    CFRunLoop::run_in_mode(mode, 0.0, true);
   }
 
   pub fn choose(&self, path: &[usize]) {

@@ -17,9 +17,8 @@
 
 use std::any::TypeId;
 use std::cell::{Cell, RefCell};
-use std::time::Duration;
 
-use dispatch2::{DispatchQueue, DispatchTime, MainThreadBound};
+use dispatch2::{DispatchQueue, MainThreadBound};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
@@ -33,6 +32,7 @@ use objc2_foundation::{
   NSString,
 };
 
+pub use super::app::{is_main, post};
 use super::view::View;
 use super::{Pasteboard, appearance};
 use crate::Config;
@@ -86,10 +86,6 @@ fn shell<R>(f: impl FnOnce(&mut Shell) -> R) -> R {
 
 fn mtm() -> MainThreadMarker {
   MainThreadMarker::new().expect("nimbo: the app and its windows are main thread only")
-}
-
-pub fn is_main() -> bool {
-  MainThreadMarker::new().is_some()
 }
 
 // MARK: The app
@@ -294,16 +290,6 @@ fn sync_presence(mtm: MainThreadMarker) {
   if ns_app.activationPolicy() != policy {
     ns_app.setActivationPolicy(policy);
   }
-}
-
-/// Runs `f` on the main queue after `delay`: in every run-loop mode, menu tracking included.
-pub fn post(delay: Duration, f: Box<dyn FnOnce() + Send>) {
-  if delay.is_zero() {
-    return DispatchQueue::main().exec_async(f);
-  }
-
-  let when = DispatchTime::try_from(delay).unwrap_or(DispatchTime::NOW);
-  let _ = DispatchQueue::main().after(when, f);
 }
 
 /// Runs `f` on the main queue, after what AppKit is doing now.

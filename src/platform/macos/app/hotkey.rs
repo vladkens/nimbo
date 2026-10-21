@@ -269,7 +269,7 @@ fn mod_key(kvk: u16) -> Option<Code> {
 fn route(rx: &Receiver<Raw>, on: &OnEdge, shared: &Shared) {
   let mut dedupe = Dedupe::default();
   let mut carbon_down = false;
-  for raw in rx {
+  for mut raw in rx {
     let counter = match raw.source {
       Source::Tap => &shared.tap_events,
       Source::Carbon => &shared.carbon_events,
@@ -278,8 +278,10 @@ fn route(rx: &Receiver<Raw>, on: &OnEdge, shared: &Shared) {
     counter.fetch_add(1, Ordering::Relaxed);
     if raw.source == Source::Carbon {
       match raw.edge {
+        // Carbon repeats the press while the key is held: an autorepeat.
         Hit::Down { .. } if carbon_down => {
-          _ = shared.carbon_repeats.fetch_add(1, Ordering::Relaxed)
+          shared.carbon_repeats.fetch_add(1, Ordering::Relaxed);
+          raw.edge = Hit::Down { repeat: true };
         }
         Hit::Down { .. } => carbon_down = true,
         Hit::Up => carbon_down = false,
@@ -589,8 +591,8 @@ mod tests {
     assert!(d.accept(Source::Carbon, Hit::Abort, ms(1_275)));
   }
 
-  /// The hotkey thread: the tap's press, Carbon's copy of it (dropped), Carbon repeating it and
-  /// the release, as the app hears them.
+  /// The hotkey thread: the tap's press, Carbon's copy of it (dropped), Carbon repeating it (an
+  /// autorepeat) and the release, as the app hears them.
   #[test]
   fn the_thread_dedupes_and_hands_edges_over() {
     let shared = Shared::default();
@@ -615,7 +617,7 @@ mod tests {
     let got: Vec<Edge> = got.try_iter().collect();
     let want = [
       Edge::Down { at: ms(0), repeat: false },
-      Edge::Down { at: ms(400), repeat: false },
+      Edge::Down { at: ms(400), repeat: true },
       Edge::Up { at: ms(600) },
     ];
     assert_eq!(got, want);

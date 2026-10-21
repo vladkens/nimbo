@@ -111,6 +111,7 @@ impl Drop for Inner {
 
     dbus::unown(b.own);
     dbus::unwatch(b.watch);
+    dbus::close(b.conn);
   }
 }
 
@@ -120,7 +121,8 @@ pub struct Tray(Rc<Inner>);
 impl Tray {
   pub fn new(icon: TrayIcon, tooltip: &str) -> Self {
     let tray = Self::detached(icon, tooltip);
-    match dbus::session() {
+    // A connection of its own: two trays' objects would share the paths on one.
+    match dbus::private_session() {
       Ok(conn) => *tray.0.bus.borrow_mut() = Some(tray.connect(conn)),
       Err(e) => eprintln!("nimbo: the tray shows nothing: {e}"),
     }

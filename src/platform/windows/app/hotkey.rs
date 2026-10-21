@@ -293,14 +293,15 @@ fn start(shared: &Shared, chord: &mut Chord) {
 
 /// Every key in the session: [Lone] judges it, an edge is queued for the thread's loop.
 unsafe extern "system" fn hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-  if code == HC_ACTION as i32 {
-    // SAFETY: for HC_ACTION, lParam points to the event's KBDLLHOOKSTRUCT.
-    let k = unsafe { &*(lp as *const KBDLLHOOKSTRUCT) };
+  // SAFETY: for HC_ACTION, lParam points to the event's KBDLLHOOKSTRUCT.
+  let k = (code == HC_ACTION as i32).then(|| unsafe { &*(lp as *const KBDLLHOOKSTRUCT) });
+  let fake = k.is_some_and(|k| k.vkCode == VK_LCONTROL as u32 && k.scanCode == ALTGR_CTRL);
+  if let Some(k) = k.filter(|_| !fake) {
+    // AltGr's Left Ctrl, filtered, is no key of the user's: Right Alt stays alone.
     let down = matches!(wp as u32, WM_KEYDOWN | WM_SYSKEYDOWN);
-    let fake = k.vkCode == VK_LCONTROL as u32 && k.scanCode == ALTGR_CTRL;
     let now = Instant::now();
     HOOK.with_borrow_mut(|h| {
-      let Some(hit) = h.lone.key(k.vkCode, down, now).filter(|_| !fake) else { return };
+      let Some(hit) = h.lone.key(k.vkCode, down, now) else { return };
       h.queue.push(match hit {
         Hit::Down => Edge::Down { at: now, repeat: false },
         Hit::Up => Edge::Up { at: now },

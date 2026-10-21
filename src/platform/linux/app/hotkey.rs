@@ -156,6 +156,8 @@ impl Drop for Hotkeys {
     for id in s.signals.take() {
       dbus::unsubscribe(s.bus.get(), id);
     }
+
+    dbus::close(s.bus.replace(std::ptr::null_mut()));
   }
 }
 
@@ -171,6 +173,7 @@ fn connect(s: &Rc<State>) -> Result<P, String> {
   let args = V::Tuple(vec![V::s(SHORTCUTS), V::s("version")]);
   if let Err(e) = dbus::call(bus, PORTAL, PATH, "org.freedesktop.DBus.Properties", "Get", args, MS)
   {
+    dbus::close(bus);
     return Err(format!(
       "no GlobalShortcuts portal (KDE Plasma 6 and GNOME 48+ have one; not X11 desktops): {e}"
     ));

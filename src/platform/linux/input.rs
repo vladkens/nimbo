@@ -19,7 +19,7 @@ use std::sync::OnceLock;
 use keyboard_types::Modifiers;
 
 use super::dl::fns;
-use super::{Fp, P, TRUE, Win, busy, connect, gtk, keys, lib, with};
+use super::{CURRENT, Fp, P, TRUE, Win, as_window, busy, connect, gtk, keys, lib, with};
 use crate::app::{Event, Ime, MouseButton, Phase, WHEEL_LINE};
 use crate::scene::{Point, Rect};
 use crate::ui::Id;
@@ -174,8 +174,9 @@ fn gdk() -> &'static Gdk {
 
 thread_local! {
   /// Events that came while the window was busy, copied, to run after it in order; set while
-  /// they run, so a callback among them adds to the queue rather than running it again.
-  static STASH: RefCell<VecDeque<P>> = const { RefCell::new(VecDeque::new()) };
+  /// they run, so a callback among them adds to the queue rather than running it again. Each
+  /// with the window it came to.
+  static STASH: RefCell<VecDeque<(u64, P)>> = const { RefCell::new(VecDeque::new()) };
   static REPLAYING: Cell<bool> = const { Cell::new(false) };
   /// Text the input context committed during a key press.
   static TYPED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
@@ -281,7 +282,8 @@ pub unsafe extern "C" fn on_event(_: P, ev: P, _: P) -> c_int {
   match with(None, |w| Some(w.event(ev))) {
     Some(used) => used as c_int,
     None if busy() => {
-      STASH.with_borrow_mut(|s| s.push_back(unsafe { (gdk().gdk_event_copy)(ev) }));
+      let copy = unsafe { (gdk().gdk_event_copy)(ev) };
+      STASH.with_borrow_mut(|s| s.push_back((CURRENT.get(), copy)));
       TRUE
     }
     None => 0,
@@ -303,11 +305,9 @@ pub fn replay() {
     return;
   }
 
-  while let Some(ev) = STASH.with_borrow_mut(|s| s.pop_front()) {
-    unsafe {
-      on_event(null_mut(), ev, null_mut());
-      (gdk().gdk_event_free)(ev);
-    }
+  while let Some((id, ev)) = STASH.with_borrow_mut(|s| s.pop_front()) {
+    as_window(id, || unsafe { on_event(null_mut(), ev, null_mut()) });
+    unsafe { (gdk().gdk_event_free)(ev) };
   }
 
   REPLAYING.set(false);

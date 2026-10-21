@@ -194,9 +194,17 @@ impl Tray {
     }
   }
 
+  /// The id of command `cmd` in the menu built now.
+  fn id_of(&self, cmd: u32) -> Option<String> {
+    self.0.ids.borrow().get((cmd as usize).wrapping_sub(1)).cloned()
+  }
+
   /// Runs `on_item` with the id of command `cmd`.
   fn chosen(&self, cmd: u32) {
-    let id = self.0.ids.borrow().get((cmd as usize).wrapping_sub(1)).cloned();
+    self.run(self.id_of(cmd));
+  }
+
+  fn run(&self, id: Option<String>) {
     let (Some(id), Some(mut f)) = (id, self.0.on_item.take()) else { return };
     f(&mut Main::here(), &crate::tray::Tray(self.clone()), &id);
     self.0.on_item.borrow_mut().get_or_insert(f);
@@ -231,10 +239,10 @@ impl Tray {
       PostMessageW(host, WM_NULL, 0, 0);
       cmd
     };
+    // The item chosen in the menu shown, before a menu set meanwhile replaces it.
+    let id = (cmd > 0).then(|| self.id_of(cmd as u32)).flatten();
     self.closing();
-    if cmd > 0 {
-      self.chosen(cmd as u32);
-    }
+    self.run(id);
   }
 
   pub fn describe(&self) -> Vec<String> {
