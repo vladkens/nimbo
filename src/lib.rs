@@ -1,13 +1,13 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! nimbo: a small custom-drawn UI toolkit. Its own CPU renderer for drawing; the OS for the
-//! window and input behind [platform] (AppKit on macOS, Win32 on Windows, Wayland or X11 on
-//! Linux), nothing else.
+//! window, input and text behind [platform] (AppKit and CoreText on macOS, Win32 and DirectWrite
+//! on Windows, Wayland or X11 with fontconfig, FreeType and HarfBuzz on Linux), nothing else.
 //!
-//! An [App] gets [Event]s and paints a [Scene] through a [Frame]; a [Runtime] drives it, fed by
-//! the window ([platform]) or by the headless [Harness], both drawing with the CPU renderer
-//! ([cpu]). Examples start with [run], which opens a window, or with `--shot <file.png>` runs the
-//! harness instead (in the dark appearance unless `--appearance light`).
+//! An [App] gets [Event]s and paints a [Scene] and [text] through a [Frame]; a [Runtime] drives
+//! it, fed by the window ([platform]) or by the headless [Harness], both drawing with the CPU
+//! renderer ([cpu]). Examples start with [run], which opens a window, or with `--shot <file.png>`
+//! runs the harness instead (in the dark appearance unless `--appearance light`).
 //!
 //! macOS 14 is the least it runs on (`NSApplication`'s `activate`, `NSView`'s display link): build
 //! apps with `MACOSX_DEPLOYMENT_TARGET=14.0`.
@@ -20,6 +20,7 @@ pub mod keys;
 pub mod platform;
 mod png;
 pub mod scene;
+pub mod text;
 pub mod ui;
 
 use std::path::PathBuf;
@@ -35,6 +36,7 @@ pub use keys::{
 pub use scene::{
   Color, Frame, ImageId, Images, Point, Quad, Rect, Scene, Segment, Size, alpha, mix, rgb,
 };
+pub use text::{Font, Weight};
 pub use ui::Cursor;
 
 /// A window's title and initial content size in points; the harness renders at this size.
