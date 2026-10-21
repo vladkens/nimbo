@@ -2,7 +2,8 @@
 
 //! The Linux platform: Wayland when the session has it, else X11 ([x11], for X sessions). [run]
 //! picks it: `NIMBO_BACKEND=wayland|x11` forces one; otherwise Wayland when `WAYLAND_DISPLAY`
-//! (or `WAYLAND_SOCKET`) is set and the connection works, else X11 on `DISPLAY`.
+//! (or `WAYLAND_SOCKET`) is set and the connection works, else X11 on `DISPLAY`. The keyboard
+//! ([xkb]) is shared.
 //!
 //! On Wayland (pure-Rust `wayland-client`, no libwayland): an xdg-shell toplevel, CPU frames
 //! presented through `wl_shm` buffers ([shm]) paced by frame callbacks, the scale from

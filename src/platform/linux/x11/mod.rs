@@ -3,20 +3,26 @@
 //! The Linux platform on X11, for sessions without Wayland (X11 desktops, remote displays):
 //! XCB loaded at run time ([xcb]), one top-level window the window manager
 //! decorates, CPU frames through MIT-SHM or the socket ([present]) paced at [REFRESH], the scale
-//! from `Xft.dpi` in the resources (the size hints follow it), light or dark from XSETTINGS'
+//! from `Xft.dpi` in the resources (the size hints follow it), the keyboard through xkbcommon
+//! ([super::xkb]: the server's keymap with libxkbcommon-x11, else its rules names; the state from
+//! each event's modifiers and group), the server's key repeat (detectable: presses alone),
+//! cursors from the theme (libxcb-cursor) or the cursor font, light or dark from XSETTINGS'
 //! `Net/ThemeName`, its manager followed as it starts, quits or restarts. No frames while the
 //! window is unmapped or fully covered (`VisibilityNotify`; under a compositing manager it never
 //! is). One thread: the loop polls the connection and a wake eventfd.
 //!
-//! Not yet: `_NET_WM_SYNC_REQUEST` (the window manager doesn't wait for our frame as it
-//! resizes), the display's refresh rate (RandR), per-monitor scale, pixel formats other than
-//! 32-bit `0xRRGGBB` (a BGR VNC server: refused at the start, [present::check_format]).
+//! Not yet: input methods (XIM or IBus: typing goes through xkbcommon's compose only), smooth
+//! and touchpad scrolling (XInput2: wheels come as clicks), pinch, `_NET_WM_SYNC_REQUEST`
+//! (the window manager doesn't wait for our frame as it resizes), the display's
+//! refresh rate (RandR), per-monitor scale, pixel formats other than 32-bit `0xRRGGBB` (a BGR
+//! VNC server: refused at the start, [present::check_format]).
 
 mod present;
 mod xcb;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
+use std::ffi::{CStr, CString};
 use std::os::fd::OwnedFd;
 use std::path::Path;
 use std::rc::Rc;
@@ -27,12 +33,15 @@ use rustix::event::{EventfdFlags, PollFd, PollFlags, Timespec, eventfd, poll};
 
 use self::present::{Presenter, STUCK};
 use self::xcb::*;
-use super::Res;
+use super::xkb::{Keyboard, Typed};
+use super::{CLICK_DIST, CLICK_TIME, Res};
 use crate::Config;
-use crate::app::{App, Appearance, Clock, Event, Runtime};
+use crate::app::{App, Appearance, Clock, Event, Mods, MouseButton, Phase, Runtime, WHEEL_LINE};
 use crate::cpu::raster::IRect;
+use crate::hotkey::ModKey;
 use crate::platform::{Pace, points};
-use crate::scene::Size;
+use crate::scene::{Point, Size};
+use crate::ui::Cursor;
 
 /// The frame interval while the runtime animates: 60 Hz (the display's rate isn't read).
 const REFRESH: Duration = Duration::from_micros(16_667);
@@ -48,6 +57,9 @@ const NOTIFY_MODE_GRAB: u8 = 1;
 const NOTIFY_MODE_UNGRAB: u8 = 2;
 /// What the XSETTINGS manager's window is watched for: its settings, and its destruction.
 const XSETTINGS_EVENTS: u32 = EM_PROPERTY_CHANGE | EM_STRUCTURE_NOTIFY;
+/// Buttons 1–5 held, in an event's state.
+const BUTTONS_MASK: u16 = 0x1f00;
+const MAPPING_KEYBOARD: u8 = 1;
 
 struct Atoms {
   protocols: u32,
@@ -59,6 +71,14 @@ struct Atoms {
   xsettings: u32,
   xsettings_settings: u32,
   manager: u32,
+  rules: u32,
+}
+
+/// Cursors made on first use: the theme's, else the cursor font's.
+struct Cursors {
+  theme: Option<CursorContext>,
+  font: u32,
+  made: Vec<(Cursor, u32)>,
 }
 
 struct Win {
@@ -88,8 +108,23 @@ struct Win {
   /// The first expose came (the first frame shows).
   exposed: bool,
 
+  cursor: Cursor,
+  cursors: Cursors,
+  mouse: Point,
+  inside: bool,
+  last_click: Option<(MouseButton, Instant, Point, u32)>,
+  kb: Option<Keyboard>,
+  /// The keyboard was set up ([Win::setup_keyboard]).
+  kb_ready: bool,
+  mods: Mods,
+  /// Keys down (by X keycode); with detectable autorepeat a press of one is a repeat.
+  held: [u64; 4],
+  detectable: bool,
+  /// XKB's event code, for its keymap events; the keymap is read again after a batch of them.
+  xkb_event: Option<u8>,
+  reload_keymap: bool,
   focused: bool,
-  /// Events read ahead.
+  /// Events read ahead (a key release looking for its repeat).
   stash: Rc<RefCell<VecDeque<Ev>>>,
   /// The XSETTINGS manager's window, watched for changes of the theme and for its end.
   xsettings: u32,
@@ -126,7 +161,7 @@ fn run_on(
   present::check_format(setup, at)?;
 
   let xs_name = format!("_XSETTINGS_S{n}");
-  let [protocols, delete, ping, net_name, pid, machine, xsettings, xs_settings] = x.atoms([
+  let [protocols, delete, ping, net_name, pid, machine, xsettings, xs_settings, rules] = x.atoms([
     "WM_PROTOCOLS",
     "WM_DELETE_WINDOW",
     "_NET_WM_PING",
@@ -135,6 +170,7 @@ fn run_on(
     "WM_CLIENT_MACHINE",
     xs_name.as_str(),
     "_XSETTINGS_SETTINGS",
+    "_XKB_RULES_NAMES",
   ]);
   let [utf8, manager] = x.atoms(["UTF8_STRING", "MANAGER"]);
   let atoms = Atoms {
@@ -147,12 +183,23 @@ fn run_on(
     xsettings,
     xsettings_settings: xs_settings,
     manager,
+    rules,
   };
 
   let scale = dpi_scale(&x, sc.root);
   let px = (px(cfg.size.w, scale), px(cfg.size.h, scale));
-  let events =
-    EM_EXPOSURE | EM_VISIBILITY_CHANGE | EM_STRUCTURE_NOTIFY | EM_FOCUS_CHANGE | EM_PROPERTY_CHANGE;
+  let events = EM_KEY_PRESS
+    | EM_KEY_RELEASE
+    | EM_BUTTON_PRESS
+    | EM_BUTTON_RELEASE
+    | EM_ENTER_WINDOW
+    | EM_LEAVE_WINDOW
+    | EM_POINTER_MOTION
+    | EM_EXPOSURE
+    | EM_VISIBILITY_CHANGE
+    | EM_STRUCTURE_NOTIFY
+    | EM_FOCUS_CHANGE
+    | EM_PROPERTY_CHANGE;
   let win = x.create_window(sc, px.0 as u16, px.1 as u16, events);
 
   // Title, class, protocols, the process for `_NET_WM_PING`, sizes.
@@ -197,6 +244,7 @@ fn run_on(
   }));
 
   // Every round trip before the map: after it they wait for the window manager's work.
+  let theme = x.cursor_context(screen);
   let mut present = Presenter::new(x, win, sc.root_depth);
   present.reserve(px.0 as usize, px.1 as usize);
   let mut win = Win {
@@ -219,6 +267,18 @@ fn run_on(
     frames: 0,
     started,
     exposed: false,
+    cursor: Cursor::Arrow,
+    cursors: Cursors { theme, font: 0, made: Vec::new() },
+    mouse: Point::new(0.0, 0.0),
+    inside: false,
+    last_click: None,
+    kb: None,
+    kb_ready: false,
+    mods: Mods::NONE,
+    held: [0; 4],
+    detectable: false,
+    xkb_event: None,
+    reload_keymap: false,
     focused: false,
     stash,
     xsettings: xs_owner,
@@ -227,15 +287,23 @@ fn run_on(
   };
   if win.trace {
     let shm = if win.present.completion().is_some() { "MIT-SHM" } else { "PutImage" };
-    eprintln!("nimbo: x11, scale {scale}, frames by {shm}");
+    let cursors = if win.cursors.theme.is_some() { "themed" } else { "font" };
+    eprintln!("nimbo: x11, scale {scale}, frames by {shm}, {cursors} cursors");
   }
-  // The window manager maps it while we draw the first frame, which the first expose puts.
+  // The window manager maps it while we draw the first frame, which the first expose puts;
+  // the keyboard (8–10 ms: the server's keymap, the compose table) comes after that frame.
   x.map_window(win.win);
   x.flush();
 
   loop {
     while let Some(ev) = win.next_event() {
       win.handle(ev);
+    }
+
+    if std::mem::take(&mut win.reload_keymap)
+      && let Some(kb) = keyboard(&x, win.root, win.atoms.rules)
+    {
+      win.kb = Some(kb);
     }
 
     if x.has_error() {
@@ -257,6 +325,10 @@ fn run_on(
 
     if win.frame_due(now) {
       win.render();
+    }
+
+    if !win.kb_ready && win.frames > 0 {
+      win.setup_keyboard();
     }
 
     x.flush();
@@ -296,6 +368,25 @@ fn run_on(
   x.destroy_window(win.win);
   x.flush();
   Ok(())
+}
+
+/// The keyboard: the server's keymap through libxkbcommon-x11, else one from the server's
+/// rules names (`_XKB_RULES_NAMES`: rules, model, layout, variant, options) with the extension
+/// set up through libxcb-xkb.
+fn keyboard(x: &X, root: u32, rules: u32) -> Option<Keyboard> {
+  if let Some(kb) = Keyboard::from_x11(x.raw()) {
+    return Some(kb);
+  }
+
+  if !Keyboard::use_xkb_extension(x.raw()) {
+    eprintln!("nimbo: no XKB extension: the layout group is not followed");
+  }
+
+  let names = x.property(root, rules, ATOM_STRING, false).map(|p| p.data).unwrap_or_default();
+  let parts: Vec<CString> =
+    names.split(|&b| b == 0).take(5).map(|s| CString::new(s).unwrap_or_default()).collect();
+  let get = |i: usize| parts.get(i).filter(|s| !s.is_empty()).map(|s| s.as_c_str());
+  Keyboard::from_names([get(0), get(1), get(2), get(3), get(4)])
 }
 
 /// `Xft.dpi` in the root window's resources over 96, at least 1.
@@ -454,6 +545,8 @@ impl Win {
         );
       }
     }
+
+    self.sync_cursor();
   }
 
   /// Feeds an event to the runtime; returns whether it was used.
@@ -462,11 +555,128 @@ impl Win {
       eprintln!("nimbo: {ev:?}");
     }
 
-    self.rt.event(ev)
+    let used = self.rt.event(ev);
+    self.sync_cursor();
+    used
+  }
+
+  fn sync_cursor(&mut self) {
+    let c = self.rt.cursor();
+    if c == self.cursor {
+      return;
+    }
+
+    self.cursor = c;
+    let id = self.cursors.get(&self.x, c);
+    self.x.set_cursor(self.win, id);
+  }
+
+  fn point(&self, x: i16, y: i16) -> Point {
+    Point::new(x as f32 / self.scale, y as f32 / self.scale)
+  }
+
+  /// The keyboard: its keymap, detectable autorepeat, the keymap events.
+  fn setup_keyboard(&mut self) {
+    let x = self.x.raw();
+    self.kb_ready = true;
+    self.kb = keyboard(&self.x, self.root, self.atoms.rules);
+    if self.kb.is_none() {
+      eprintln!("nimbo: no keyboard: libxkbcommon.so.0 is missing or has no keymap");
+    }
+
+    self.detectable = Keyboard::detectable_repeat(x);
+    let ev = self.x.extension_event("XKEYBOARD");
+    self.xkb_event = ev.filter(|_| Keyboard::select_keymap_events(x));
+    if self.trace {
+      let repeat = if self.detectable { "detectable" } else { "paired" };
+      let keymap = if Keyboard::has_x11() { "the server's" } else { "the rules names'" };
+      eprintln!("nimbo: {keymap} keymap, {repeat} repeat");
+    }
+  }
+
+  /// An event's modifiers and group, as the state before it.
+  fn core_state(&mut self, state: u16) {
+    if let Some(kb) = &mut self.kb {
+      kb.set_core_state(state);
+    }
+
+    self.sync_mods();
+  }
+
+  fn sync_mods(&mut self) {
+    let mods = self.kb.as_ref().map_or(Mods::NONE, |kb| kb.mods());
+    if mods != self.mods {
+      self.mods = mods;
+      self.send(Event::Mods(mods));
+    }
   }
 
   fn handle(&mut self, ev: Ev) {
+    if matches!(ev.kind(), KEY_PRESS | KEY_RELEASE) && !self.kb_ready {
+      self.setup_keyboard();
+    }
+
     match ev.kind() {
+      KEY_PRESS => {
+        let e = ev.get::<InputEv>();
+        let (i, bit) = (e.detail as usize / 64, 1u64 << (e.detail % 64));
+        let repeat = self.detectable && self.held[i] & bit != 0;
+        self.held[i] |= bit;
+        self.key(e.detail, e.state, true, repeat);
+      }
+      KEY_RELEASE => {
+        let e = ev.get::<InputEv>();
+        self.held[e.detail as usize / 64] &= !(1u64 << (e.detail % 64));
+        // Without detectable autorepeat the server repeats a held key as a release and a press
+        // at the same time.
+        if !self.detectable
+          && let Some(next) = self.next_event()
+        {
+          let n = next.get::<InputEv>();
+          if next.kind() == KEY_PRESS && n.detail == e.detail && n.time == e.time {
+            self.key(n.detail, n.state, true, true);
+            return;
+          }
+
+          self.stash.borrow_mut().push_front(next);
+        }
+
+        self.key(e.detail, e.state, false, false);
+      }
+      BUTTON_PRESS | BUTTON_RELEASE => {
+        let e = ev.get::<InputEv>();
+        let down = ev.kind() == BUTTON_PRESS;
+        self.core_state(e.state);
+        self.mouse = self.point(e.event_x, e.event_y);
+        self.button(e.detail, down, e.state);
+      }
+      MOTION_NOTIFY => {
+        let e = ev.get::<InputEv>();
+        self.core_state(e.state);
+        self.mouse = self.point(e.event_x, e.event_y);
+        let (pos, mods) = (self.mouse, self.mods);
+        self.send(Event::MouseMove { pos, mods });
+      }
+      ENTER_NOTIFY => {
+        let e = ev.get::<CrossingEv>();
+        self.core_state(e.state);
+        self.inside = true;
+        self.mouse = self.point(e.event_x, e.event_y);
+        let (pos, mods) = (self.mouse, self.mods);
+        self.send(Event::MouseMove { pos, mods });
+      }
+      LEAVE_NOTIFY => {
+        let e = ev.get::<CrossingEv>();
+        if e.detail == NOTIFY_INFERIOR {
+          return;
+        }
+
+        self.inside = false;
+        // A drag keeps the pointer (an implicit grab): it exits when the button is released.
+        if e.state & BUTTONS_MASK == 0 {
+          self.send(Event::MouseExit);
+        }
+      }
       FOCUS_IN | FOCUS_OUT => {
         let e = ev.get::<FocusEv>();
         let grab = matches!(e.mode, NOTIFY_MODE_GRAB | NOTIFY_MODE_UNGRAB);
@@ -561,6 +771,9 @@ impl Win {
           self.send(Event::Appearance(a));
         }
       }
+      MAPPING_NOTIFY => self.reload_keymap |= ev.get::<MappingEv>().request == MAPPING_KEYBOARD,
+      // XkbNewKeyboardNotify, XkbMapNotify (the XKB event type is the second byte).
+      k if Some(k) == self.xkb_event => self.reload_keymap |= matches!(ev.bytes()[1], 0 | 1),
       0 if self.trace => {
         let b = ev.bytes();
         eprintln!(
@@ -596,7 +809,148 @@ impl Win {
     }
 
     self.focused = on;
+    self.held = [0; 4];
+    if !on && self.mods != Mods::NONE {
+      self.mods = Mods::NONE;
+      self.send(Event::Mods(Mods::NONE));
+    }
+
     self.send(Event::Focus(on));
+  }
+
+  // MARK: Keys
+
+  /// A key pressed or released (X keycode: evdev + 8, `state` before it): to the app as a key
+  /// event, then, unused, through the keyboard's compose state and the Linux editing keys into
+  /// text or a command.
+  fn key(&mut self, keycode: u8, state: u16, down: bool, repeat: bool) {
+    let key = (keycode as u32).saturating_sub(8);
+    let Some(kb) = &mut self.kb else { return };
+    kb.set_core_state(state);
+    let (k, utf8) = kb.key(key, repeat);
+    if !repeat {
+      kb.update_key(key, down);
+    }
+
+    self.sync_mods();
+
+    // Modifier keys reach the app as [Event::Mods] and, by their side, [Event::Modifier], as on
+    // macOS (`flagsChanged:`).
+    if (54..=63).contains(&k.code) {
+      if let Some(key) = ModKey::of_mac(k.code).filter(|_| !repeat) {
+        self.send(Event::Modifier { key, down });
+      }
+
+      return;
+    }
+
+    if !down {
+      self.send(Event::KeyUp(k));
+      return;
+    }
+
+    if self.send(Event::KeyDown(k)) {
+      return;
+    }
+
+    let typed = self.kb.as_mut().map_or(Typed::None, |kb| kb.interpret(key, &k, &utf8));
+    match typed {
+      Typed::Text(s) => _ = self.send(Event::Text(s)),
+      Typed::Command(c) => _ = self.send(Event::Command(c)),
+      Typed::None => {}
+    }
+  }
+
+  // MARK: Pointer
+
+  /// Buttons 1–3 click, 4–7 scroll a wheel click up, down, left, right, 8 and 9 are back and
+  /// forward (as evdev's side and extra buttons on Wayland).
+  fn button(&mut self, detail: u8, down: bool, state: u16) {
+    let (pos, mods) = (self.mouse, self.mods);
+    let wheel = match detail {
+      4 => Some(Point::new(0.0, WHEEL_LINE)),
+      5 => Some(Point::new(0.0, -WHEEL_LINE)),
+      6 => Some(Point::new(WHEEL_LINE, 0.0)),
+      7 => Some(Point::new(-WHEEL_LINE, 0.0)),
+      _ => None,
+    };
+
+    if let Some(delta) = wheel {
+      if down {
+        let (precise, phase, momentum) = (false, Phase::None, Phase::None);
+        self.send(Event::Scroll { pos, delta, precise, phase, momentum, mods });
+      }
+
+      return;
+    }
+
+    let button = match detail {
+      1 => MouseButton::Left,
+      2 => MouseButton::Middle,
+      3 => MouseButton::Right,
+      8 => MouseButton::Other(3),
+      9 => MouseButton::Other(4),
+      b => MouseButton::Other(b),
+    };
+
+    if !down {
+      self.send(Event::MouseUp { pos, button, mods });
+      // The last button of a drag that left the window.
+      let this = if (1..=5).contains(&detail) { 0x80 << detail } else { 0 };
+      let held = state & BUTTONS_MASK & !this;
+      if !self.inside && held == 0 {
+        self.send(Event::MouseExit);
+      }
+
+      return;
+    }
+
+    let now = Instant::now();
+    let clicks = match self.last_click {
+      Some((b, t, p, n))
+        if b == button
+          && now - t < CLICK_TIME
+          && (p.x - pos.x).abs() < CLICK_DIST
+          && (p.y - pos.y).abs() < CLICK_DIST =>
+      {
+        n + 1
+      }
+      _ => 1,
+    };
+
+    self.last_click = Some((button, now, pos, clicks));
+    self.send(Event::MouseDown { pos, button, clicks, mods });
+  }
+}
+
+impl Cursors {
+  /// The X cursor for ours: the theme's by its CSS name or the legacy one, else the cursor
+  /// font's glyph; the arrow is the parent's (the desktop's) without a theme.
+  fn get(&mut self, x: &X, c: Cursor) -> u32 {
+    if let Some(&(_, id)) = self.made.iter().find(|m| m.0 == c) {
+      return id;
+    }
+
+    let (names, glyph): (&[&CStr], u16) = match c {
+      Cursor::Inherit | Cursor::Arrow => (&[c"default", c"left_ptr"], 68),
+      Cursor::Text => (&[c"text", c"xterm"], 152),
+      Cursor::Pointer => (&[c"pointer", c"hand2"], 60),
+      Cursor::ResizeX => (&[c"col-resize", c"sb_h_double_arrow"], 108),
+      Cursor::ResizeY => (&[c"row-resize", c"sb_v_double_arrow"], 116),
+      Cursor::Crosshair => (&[c"crosshair"], 34),
+      Cursor::Grab => (&[c"grab", c"openhand", c"hand1"], 58),
+      Cursor::Grabbing => (&[c"grabbing", c"closedhand", c"fleur"], 52),
+      Cursor::NotAllowed => (&[c"not-allowed", c"crossed_circle"], 0),
+    };
+
+    let id = match (&self.theme, c) {
+      (Some(t), _) => t.load(names).unwrap_or_else(|| x.font_cursor(&mut self.font, glyph)),
+      (None, Cursor::Inherit | Cursor::Arrow) => 0,
+      (None, _) => x.font_cursor(&mut self.font, glyph),
+    };
+
+    self.made.push((c, id));
+    id
   }
 }
 
