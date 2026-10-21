@@ -6,8 +6,10 @@
 //!
 //! On Wayland (pure-Rust `wayland-client`, no libwayland): an xdg-shell toplevel, CPU frames
 //! presented through `wl_shm` buffers ([shm]) paced by frame callbacks, the scale from
-//! fractional-scale-v1 (with a viewport), else the preferred buffer scale or the outputs'; the
-//! objects' events in [dispatch]. One thread: the loop polls the display and a wake eventfd.
+//! fractional-scale-v1 (with a viewport), else the preferred buffer scale or the outputs'; input
+//! from `wl_seat` (pointer, axis, pinch gestures, keyboard through xkbcommon in [xkb]),
+//! cursor-shape-v1 for cursors; the objects' events in [dispatch]. One thread: the loop polls the
+//! display and a wake eventfd with the next key repeat as the timeout.
 //!
 //! No client-side decorations: sway and other wlroots compositors (and KDE) draw their own;
 //! GNOME (Mutter) draws none for clients, so a window there has no title bar yet (CSD is to
@@ -17,36 +19,55 @@ mod dispatch;
 mod dl;
 mod shm;
 mod x11;
+mod xkb;
 
+use std::ffi::CStr;
 use std::os::fd::OwnedFd;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rustix::event::{EventfdFlags, PollFd, PollFlags, Timespec, eventfd, poll};
+use rustix::mm::{MapFlags, ProtFlags, mmap, munmap};
 use wayland_client::backend::WaylandError;
 use wayland_client::globals::registry_queue_init;
 use wayland_client::protocol::wl_compositor::WlCompositor;
+use wayland_client::protocol::wl_keyboard::WlKeyboard;
 use wayland_client::protocol::wl_output::WlOutput;
+use wayland_client::protocol::wl_pointer::{AxisSource, WlPointer};
 use wayland_client::protocol::wl_registry::WlRegistry;
+use wayland_client::protocol::wl_seat::WlSeat;
 use wayland_client::protocol::wl_shm::WlShm;
 use wayland_client::protocol::wl_surface::WlSurface;
 use wayland_client::{Connection, EventQueue, QueueHandle};
+use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::{
+  Shape, WpCursorShapeDeviceV1,
+};
+use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_manager_v1::WpCursorShapeManagerV1;
 use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
 use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_v1::WpFractionalScaleV1;
+use wayland_protocols::wp::pointer_gestures::zv1::client::zwp_pointer_gesture_pinch_v1::ZwpPointerGesturePinchV1;
+use wayland_protocols::wp::pointer_gestures::zv1::client::zwp_pointer_gestures_v1::ZwpPointerGesturesV1;
 use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 use wayland_protocols::xdg::shell::client::xdg_surface::XdgSurface;
 use wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase;
 
 use self::shm::Presenter;
+use self::xkb::{Keyboard, Typed};
 use crate::Config;
-use crate::app::{App, Appearance, Clock, Event, Runtime};
+use crate::app::{App, Appearance, Clock, Event, Mods, MouseButton, Phase, Runtime, WHEEL_LINE};
+use crate::hotkey::ModKey;
 use crate::platform::points;
-use crate::scene::Size;
+use crate::scene::{Point, Size};
+use crate::ui::Cursor;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
+/// The longest gap between clicks that counts them as one double (triple) click, and how far
+/// apart they may be: GTK's defaults (400 ms, 5 px).
+const CLICK_TIME: Duration = Duration::from_millis(400);
+const CLICK_DIST: f32 = 5.0;
 /// Frames paced by a timer while a frame waits for a buffer (all held by the compositor, or a
 /// configure's ack that needs one of its size): 120 Hz.
 const TICK: Duration = Duration::from_micros(8333);
@@ -111,6 +132,23 @@ pub struct Output {
   scale: i32,
 }
 
+/// A held key that repeats: its evdev code and when it fires next.
+struct Repeat {
+  key: u32,
+  at: Instant,
+}
+
+/// The pointer's axis events of one `wl_pointer.frame`; index 0 vertical, 1 horizontal.
+#[derive(Default)]
+struct Axes {
+  source: Option<AxisSource>,
+  value: [f64; 2],
+  /// Wheel clicks in 120ths (`axis_value120`, or `axis_discrete` × 120).
+  v120: [i32; 2],
+  stop: bool,
+  any: bool,
+}
+
 pub struct Win {
   qh: QueueHandle<Win>,
   rt: Runtime<Box<dyn App>>,
@@ -119,8 +157,10 @@ pub struct Win {
   viewport: Option<WpViewport>,
   _fractional: Option<WpFractionalScaleV1>,
   present: Presenter,
-  /// Logs every frame presented (`NIMBO_TRACE`).
+  /// Logs every frame presented (`NIMBO_TRACE`), and every event with whether it was used
+  /// (`NIMBO_TRACE=2`).
   trace: bool,
+  trace_events: bool,
   frames: u64,
   started: Instant,
 
@@ -144,6 +184,28 @@ pub struct Win {
   closed: bool,
   frame_pending: bool,
   next_tick: Option<Instant>,
+
+  pointer: Option<WlPointer>,
+  keyboard: Option<WlKeyboard>,
+  shapes: Option<WpCursorShapeManagerV1>,
+  shape_device: Option<WpCursorShapeDeviceV1>,
+  gestures: Option<ZwpPointerGesturesV1>,
+  _pinch: Option<ZwpPointerGesturePinchV1>,
+  pinch_scale: f64,
+  /// The pointer's enter serial while it is over the surface (cursors need it).
+  enter_serial: Option<u32>,
+  cursor: Cursor,
+  mouse: Point,
+  last_click: Option<(MouseButton, Instant, Point, u32)>,
+  axes: Axes,
+  /// A finger scroll is in progress: the next one continues it.
+  scrolling: bool,
+
+  kb: Option<Keyboard>,
+  mods: Mods,
+  /// Keys per second and the delay before the first repeat, ms.
+  repeat_info: (i32, i32),
+  repeat: Option<Repeat>,
 }
 
 fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
@@ -155,6 +217,9 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
   let shm: WlShm = globals.bind(&qh, 1..=1, ())?;
   let viewporter: Option<WpViewporter> = globals.bind(&qh, 1..=1, ()).ok();
   let fractions: Option<WpFractionalScaleManagerV1> = globals.bind(&qh, 1..=1, ()).ok();
+  let _seat: Option<WlSeat> = globals.bind(&qh, 1..=8, ()).ok();
+  let shapes: Option<WpCursorShapeManagerV1> = globals.bind(&qh, 1..=1, ()).ok();
+  let gestures: Option<ZwpPointerGesturesV1> = globals.bind(&qh, 1..=3, ()).ok();
   let outputs: Vec<Output> = globals.contents().with_list(|list| {
     let outputs = list.iter().filter(|g| g.interface == "wl_output");
     outputs.map(|g| Output::bind(globals.registry(), g.name, g.version, &qh)).collect()
@@ -205,6 +270,7 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
     _fractional: fractional,
     present: Presenter::new(shm),
     trace: std::env::var_os("NIMBO_TRACE").is_some(),
+    trace_events: std::env::var("NIMBO_TRACE").is_ok_and(|v| v == "2"),
     frames: 0,
     started,
     size,
@@ -220,6 +286,23 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
     closed: false,
     frame_pending: false,
     next_tick: None,
+    pointer: None,
+    keyboard: None,
+    shapes,
+    shape_device: None,
+    gestures,
+    _pinch: None,
+    pinch_scale: 1.0,
+    enter_serial: None,
+    cursor: Cursor::Arrow,
+    mouse: Point::new(0.0, 0.0),
+    last_click: None,
+    axes: Axes::default(),
+    scrolling: false,
+    kb: None,
+    mods: Mods::NONE,
+    repeat_info: (25, 600),
+    repeat: None,
   };
 
   // Requests wait in the connection's buffer for the socket to drain: no frame is drawn
@@ -230,6 +313,8 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
     if win.closed || win.rt.quit_requested() {
       break;
     }
+
+    win.key_repeat();
 
     // A configure's frame comes at once: its ack is committed with a buffer of its size.
     let now = Instant::now();
@@ -303,12 +388,23 @@ impl Win {
     self.preferred.or(on).or(any).unwrap_or(1).max(1) as f32
   }
 
-  /// Until the loop must run again without input: the next paced tick when no frame callback
-  /// is due.
+  /// Until the loop must run again without input: the next key repeat, and the next paced tick
+  /// when no frame callback is due.
   fn timeout(&mut self) -> Option<Duration> {
     let now = Instant::now();
-    let paced = self.configured && !self.frame_pending && self.rt.needs_frame();
-    let at = self.next_tick.filter(|_| paced);
+    let mut at = self.repeat.as_ref().map(|r| r.at);
+    if self.configured && !self.frame_pending {
+      let next = match self.rt.needs_frame() {
+        true => self.next_tick,
+        false => None,
+      };
+
+      at = match (at, next) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+      };
+    }
+
     at.map(|t| t.saturating_duration_since(now))
   }
 
@@ -369,7 +465,171 @@ impl Win {
     } else if self.acked && self.trace {
       eprintln!("nimbo: a configure waits for a buffer of its size");
     }
+
+    self.sync_cursor();
   }
+
+  /// Feeds an event to the runtime; returns whether it was used.
+  fn send(&mut self, ev: Event) -> bool {
+    if self.trace_events {
+      eprintln!("nimbo: {ev:?}");
+    }
+
+    let used = self.rt.event(ev);
+    self.sync_cursor();
+    used
+  }
+
+  fn sync_cursor(&mut self) {
+    let c = self.rt.cursor();
+    if c == self.cursor {
+      return;
+    }
+
+    self.cursor = c;
+    if let (Some(dev), Some(serial)) = (&self.shape_device, self.enter_serial) {
+      dev.set_shape(serial, shape(c));
+    }
+  }
+
+  // MARK: Keys
+
+  /// A key pressed or released (evdev code): to the app as a key event, then, unused, through
+  /// the keyboard's compose state and the Linux editing keys into text or a command.
+  fn key(&mut self, key: u32, down: bool, repeat: bool) {
+    let Some(kb) = &self.kb else { return };
+    let (k, utf8) = kb.key(key, repeat);
+    // Modifier keys reach the app as [Event::Mods] (from the compositor's modifiers) and, by
+    // their side, [Event::Modifier], as on macOS (`flagsChanged:`).
+    if (54..=63).contains(&k.code) {
+      if let Some(key) = ModKey::of_mac(k.code).filter(|_| !repeat) {
+        self.send(Event::Modifier { key, down });
+      }
+
+      return;
+    }
+
+    if !down {
+      self.send(Event::KeyUp(k));
+      return;
+    }
+
+    if self.send(Event::KeyDown(k)) {
+      return;
+    }
+
+    let typed = self.kb.as_mut().map_or(Typed::None, |kb| kb.interpret(key, &k, &utf8));
+    match typed {
+      Typed::Text(s) => _ = self.send(Event::Text(s)),
+      Typed::Command(c) => _ = self.send(Event::Command(c)),
+      Typed::None => {}
+    }
+  }
+
+  /// Fires the held key's repeat when it is due.
+  fn key_repeat(&mut self) {
+    let Some(r) = &mut self.repeat else { return };
+    let now = Instant::now();
+    if r.at > now {
+      return;
+    }
+
+    r.at = now + Duration::from_secs(1) / self.repeat_info.0.max(1) as u32;
+    let key = r.key;
+    self.key(key, true, true);
+  }
+
+  // MARK: Pointer
+
+  fn button(&mut self, button: u32, down: bool) {
+    // <linux/input-event-codes.h>: BTN_LEFT, BTN_RIGHT, BTN_MIDDLE.
+    let button = match button {
+      0x110 => MouseButton::Left,
+      0x111 => MouseButton::Right,
+      0x112 => MouseButton::Middle,
+      b => MouseButton::Other(b.saturating_sub(0x110).min(255) as u8),
+    };
+
+    let (pos, mods) = (self.mouse, self.mods);
+    if !down {
+      self.send(Event::MouseUp { pos, button, mods });
+      return;
+    }
+
+    let now = Instant::now();
+    let clicks = match self.last_click {
+      Some((b, t, p, n))
+        if b == button
+          && now - t < CLICK_TIME
+          && (p.x - pos.x).abs() < CLICK_DIST
+          && (p.y - pos.y).abs() < CLICK_DIST =>
+      {
+        n + 1
+      }
+      _ => 1,
+    };
+
+    self.last_click = Some((button, now, pos, clicks));
+    self.send(Event::MouseDown { pos, button, clicks, mods });
+  }
+
+  /// `wl_pointer.frame`: the axis events since the last one as one scroll.
+  fn scroll(&mut self) {
+    let a = std::mem::take(&mut self.axes);
+    if !a.any {
+      return;
+    }
+
+    let precise = matches!(a.source, Some(AxisSource::Finger | AxisSource::Continuous));
+    let (pos, mods) = (self.mouse, self.mods);
+    let delta = match precise {
+      true => Point::new(-a.value[1] as f32, -a.value[0] as f32),
+      false => {
+        // A wheel click is 15 units of `axis` in libinput when no click count came.
+        let lines = |i: usize| match a.v120[i] {
+          0 => -a.value[i] as f32 / 15.0,
+          v => -v as f32 / 120.0,
+        };
+        Point::new(lines(1) * WHEEL_LINE, lines(0) * WHEEL_LINE)
+      }
+    };
+
+    let phase = match (precise, a.stop, self.scrolling) {
+      (false, _, _) => Phase::None,
+      (true, true, _) => Phase::Ended,
+      (true, false, false) => Phase::Began,
+      (true, false, true) => Phase::Changed,
+    };
+
+    self.scrolling = precise && !a.stop;
+    self.send(Event::Scroll { pos, delta, precise, phase, momentum: Phase::None, mods });
+  }
+}
+
+/// The cursor-shape-v1 shape for ours.
+fn shape(c: Cursor) -> Shape {
+  match c {
+    Cursor::Inherit | Cursor::Arrow => Shape::Default,
+    Cursor::Text => Shape::Text,
+    Cursor::Pointer => Shape::Pointer,
+    Cursor::ResizeX => Shape::ColResize,
+    Cursor::ResizeY => Shape::RowResize,
+    Cursor::Crosshair => Shape::Crosshair,
+    Cursor::Grab => Shape::Grab,
+    Cursor::Grabbing => Shape::Grabbing,
+    Cursor::NotAllowed => Shape::NotAllowed,
+  }
+}
+
+/// The keymap text the compositor shares through `fd`.
+fn keymap(fd: OwnedFd, size: usize) -> Option<Keyboard> {
+  // SAFETY: a private read-only mapping of the keymap the compositor sent, unmapped below.
+  let flags = (ProtFlags::READ, MapFlags::PRIVATE);
+  let ptr = unsafe { mmap(std::ptr::null_mut(), size, flags.0, flags.1, &fd, 0) }.ok()?;
+  let bytes = unsafe { std::slice::from_raw_parts(ptr.cast::<u8>(), size) };
+  let kb = CStr::from_bytes_until_nul(bytes).ok().and_then(Keyboard::from_string);
+  let _ = unsafe { munmap(ptr, size) };
+  kb
 }
 
 /// Whether a flush left requests waiting for the socket to drain: `WouldBlock` while the
