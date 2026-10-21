@@ -475,7 +475,8 @@ impl Frame<'_> {
   /// Draws `s` with its baseline at `y`; returns the advance width in points. Glyphs snap to
   /// the pixel grid vertically and to a quarter pixel horizontally; colour glyphs (emoji) to
   /// whole pixels, drawn with `color`'s alpha only. Glyphs whose ink can't reach the frame and
-  /// the clip are skipped before they take an atlas slot (a long line scrolled sideways).
+  /// the clip are skipped before they take an atlas slot (a long line scrolled sideways), as is
+  /// fully transparent text.
   pub fn text(&mut self, x: f32, y: f32, s: &str, font: Font, color: Color) -> f32 {
     let scale = self.scale;
     let line = self.text.layout(s, font);
@@ -484,7 +485,8 @@ impl Frame<'_> {
     let frame = Rect::new(0.0, 0.0, self.size.w, self.size.h);
     let view = self.scene.clip().map_or(frame, |c| c.intersect(frame));
     let (ink, pad) = (line.ink, 1.0 / scale);
-    let empty = view.w <= 0.0 || view.h <= 0.0;
+    // Fully transparent text draws nothing: no atlas slots either.
+    let empty = view.w <= 0.0 || view.h <= 0.0 || color[3] <= 0.0;
     if empty || y + ink.down + pad < view.y || y - ink.up - pad > view.y + view.h {
       return line.width;
     }
@@ -575,6 +577,27 @@ mod tests {
     f.text(0.0, 20.0, "Z", font, [1.0; 4]);
     f.pop_clip();
     assert_eq!(f.text.uploads().count(), 0);
+  }
+
+  #[test]
+  fn transparent_text_takes_no_atlas_slots() {
+    let (mut scene, mut text, mut images) =
+      (Scene::default(), TextSystem::new(1.0), Images::default());
+    let mut f = Frame {
+      size: Size::new(100.0, 50.0),
+      scale: 1.0,
+      mouse: None,
+      now: Duration::ZERO,
+      scene: &mut scene,
+      text: &mut text,
+      images: &mut images,
+      animate: false,
+    };
+    let font = Font::ui(13.0);
+    let w = f.text(0.0, 20.0, "Hidden \u{1F600}", font, [0.2, 0.4, 0.6, 0.0]);
+    assert_eq!(w, f.measure("Hidden \u{1F600}", font), "the line's width");
+    assert_eq!(f.text.uploads().count(), 0);
+    assert!(f.scene.layers().iter().all(|l| l.glyphs.is_empty()));
   }
 
   /// Ink far from its pen or baseline still draws when only it shows: the bismillah ligature
