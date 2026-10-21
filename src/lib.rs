@@ -79,11 +79,18 @@ impl Args {
         "--scale" => {
           let v = it.next().ok_or("--scale needs a number")?;
           out.scale = v.parse().map_err(|e| format!("--scale: {e}"))?;
+          if !positive(out.scale) {
+            return Err(format!("--scale: {v} is not a positive number"));
+          }
         }
         "--size" => {
           let v = it.next().ok_or("--size needs <w>x<h>")?;
           let (w, h) = v.split_once('x').ok_or("--size needs <w>x<h>")?;
-          let num = |s: &str| s.parse::<f32>().map_err(|e| format!("--size: {e}"));
+          let num = |s: &str| match s.parse::<f32>() {
+            Ok(n) if positive(n) => Ok(n),
+            Ok(_) => Err(format!("--size: {s} is not a positive number")),
+            Err(e) => Err(format!("--size: {e}")),
+          };
           out.size = Some(Size::new(num(w)?, num(h)?));
         }
         "--appearance" => {
@@ -99,6 +106,11 @@ impl Args {
 
     Ok(out)
   }
+}
+
+/// A finite number above zero: a scale or a size the harness can render.
+fn positive(n: f32) -> bool {
+  n.is_finite() && n > 0.0
 }
 
 /// The entry point of every example. With `--shot` it runs the app in the [Harness] at
@@ -147,6 +159,12 @@ mod tests {
     assert_eq!(parse("--appearance light").unwrap().appearance, Some(Appearance::LIGHT));
     assert!(parse("--appearance blue").is_err());
     assert!(parse("--size 10").is_err());
+    for bad in ["0", "-1", "inf", "NaN"] {
+      assert!(parse(&format!("--scale {bad}")).is_err(), "--scale {bad}");
+      assert!(parse(&format!("--size {bad}x10")).is_err(), "--size {bad}x10");
+      assert!(parse(&format!("--size 10x{bad}")).is_err(), "--size 10x{bad}");
+    }
+
     assert!(parse("--shot").is_err());
     assert!(parse("--what").is_err());
   }
