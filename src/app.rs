@@ -466,7 +466,8 @@ impl<A: App> Runtime<A> {
 
     (self.size, self.scale) = (size, scale);
     self.text.set_scale(scale);
-    self.ask(true);
+    // The tree is laid out again before the next key: its bindings may follow the size.
+    self.redraw();
   }
 
   /// Feeds one event to the app, routed through the last frame's tree first; returns whether
@@ -1249,6 +1250,40 @@ mod tests {
     assert_eq!(rt.ui.focus(), Some(Id::of("item")));
     assert!(rt.event(Event::Command(Command::InsertBacktab)));
     assert_eq!(rt.ui.focus(), Some(Id::of("item")));
+  }
+
+  /// A focusable item in a panel that binds keys only when the window is wide.
+  #[derive(Default)]
+  struct Wide(Vec<String>);
+
+  impl App for Wide {
+    fn view(&mut self, ui: &mut Ui) {
+      let panel = Id::of("panel");
+      if ui.size().w > 150.0 {
+        ui.keymap(PANEL_KEYS);
+      }
+
+      ui.with_id(panel).col(Style::new(), |ui| {
+        ui.id("item").el(Style::new().w(px(20.0)).h(px(20.0)).focusable());
+      });
+      if let Some(c) = ui.command(panel) {
+        self.0.push(format!("{c:?}"));
+      }
+    }
+  }
+
+  #[test]
+  fn a_key_after_a_resize_sees_its_layout() {
+    let clock = Clock::Virtual(Duration::ZERO);
+    let (size, clip) = (Size::new(100.0, 100.0), Box::new(MemClipboard::default()));
+    let mut rt = Runtime::new(Wide::default(), size, 1.0, clock, clip);
+    rt.frame();
+    rt.ui.set_focus(Some(Id::of("item")));
+    // Laid out wide, with the panel's bindings, before the key goes to it.
+    rt.resize(Size::new(200.0, 100.0), 1.0);
+    let k = KeyEvent { key: Key::Char('p'), text: None, code: 0, mods: Mods::CMD, repeat: false };
+    assert!(rt.event(Event::KeyDown(k)));
+    assert_eq!(rt.app.0, ["Action(\"panel\")"]);
   }
 
   #[test]
