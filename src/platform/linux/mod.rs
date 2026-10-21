@@ -57,6 +57,9 @@ const LAYOUT: c_int = 1 << 3;
 const HIDDEN: c_uint = 1 | 2;
 /// `GDK_SELECTION_CLIPBOARD`, a predefined atom.
 const CLIPBOARD: usize = 69;
+/// The shortest gap between frames while animating, in µs: 120 Hz with room for the clock's
+/// jitter (a 144 Hz display gets every other frame).
+const MIN_GAP_US: i64 = 7_000;
 
 // GTK 3.24's headers; GTK 3's ABI is frozen. A symbol looked up in `libgtk-3.so.0` is found in
 // what it links too: GDK, GLib, GObject, GIO, cairo.
@@ -68,14 +71,17 @@ fns!(Gtk {
   fn g_idle_add(f: Fp, data: P) -> c_uint;
   fn g_timeout_add(ms: c_uint, f: Fp, data: P) -> c_uint;
   fn g_source_remove(id: c_uint) -> c_int;
+  fn g_object_unref(obj: P);
   fn gdk_display_get_default() -> P;
   fn gdk_cursor_new_from_name(display: P, name: S) -> P;
   fn gdk_window_set_cursor(w: P, cursor: P);
   fn gdk_window_get_state(w: P) -> c_uint;
   fn gdk_frame_clock_request_phase(clock: P, phase: c_int);
+  fn gdk_frame_clock_get_frame_time(clock: P) -> i64;
   fn cairo_image_surface_create(format: c_int, w: c_int, h: c_int) -> P;
   fn cairo_image_surface_get_data(s: P) -> *mut u8;
   fn cairo_image_surface_get_stride(s: P) -> c_int;
+  fn cairo_surface_status(s: P) -> c_int;
   fn cairo_surface_flush(s: P);
   fn cairo_surface_mark_dirty(s: P);
   fn cairo_surface_set_device_scale(s: P, x: f64, y: f64);
@@ -85,6 +91,7 @@ fns!(Gtk {
   fn cairo_paint(cr: P);
   fn gtk_init_check(argc: *mut c_int, argv: P) -> c_int;
   fn gtk_main();
+  fn gtk_main_level() -> c_uint;
   fn gtk_main_quit();
   fn gtk_window_new(kind: c_int) -> P;
   fn gtk_window_set_title(w: P, title: S);
@@ -157,8 +164,10 @@ struct Win {
   /// The tile hashes of the frame in [SURFACE], and its size in pixels.
   tiles: Vec<u64>,
   shown: (usize, usize),
-  /// A tick callback is on: frames are wanted.
+  /// A tick callback is on: frames are wanted. The frame clock's time of the last frame it
+  /// asked for, µs.
   ticking: bool,
+  last_tick: i64,
   /// The GLib timeout for the runtime's next timer, and when it fires.
   timer: Option<(c_uint, Instant)>,
   /// The user can resize it ([Config::resizable]) down to `min`, which a size the app asks for
@@ -175,14 +184,30 @@ struct Win {
   /// Logs every frame presented (`NIMBO_TRACE`), and every event (`NIMBO_TRACE=2`).
   trace: bool,
   trace_events: bool,
-  quit: bool,
-  destroyed: bool,
+}
+
+impl Drop for Win {
+  /// Lets go of what GTK gave the window: its timeout, cursors and the last frame's surface.
+  fn drop(&mut self) {
+    let g = gtk();
+    self.arm(None);
+    for (_, c) in self.cursors.drain(..).filter(|(_, c)| !c.is_null()) {
+      unsafe { (g.g_object_unref)(c) };
+    }
+
+    let s = SURFACE.replace(null_mut());
+    if !s.is_null() {
+      unsafe { (g.cairo_surface_destroy)(s) };
+    }
+  }
 }
 
 thread_local! {
   static WIN: RefCell<Option<Win>> = const { RefCell::new(None) };
   /// The frame shown, a cairo image surface: painted even while [WIN] is busy.
   static SURFACE: Cell<P> = const { Cell::new(null_mut()) };
+  /// The loop ends (the window closed, or the app quit), set without the window.
+  static QUITTING: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Runs `f` on the window, then [Win::sync]; `none` when there is no window or it is busy (a
@@ -211,6 +236,14 @@ fn busy() -> bool {
   WIN.with(|c| c.try_borrow_mut().is_err())
 }
 
+/// Ends the main loop once, or keeps it from starting.
+fn quit() {
+  let g = gtk();
+  if !QUITTING.replace(true) && unsafe { (g.gtk_main_level)() } > 0 {
+    unsafe { (g.gtk_main_quit)() };
+  }
+}
+
 /// Opens the app's window and runs GTK's main loop until it closes or the app quits.
 pub fn run(cfg: &Config, app: Box<dyn App>) {
   if let Err(e) = open(cfg, app) {
@@ -222,6 +255,7 @@ pub fn run(cfg: &Config, app: Box<dyn App>) {
 fn open(cfg: &Config, app: Box<dyn App>) -> Res<()> {
   let started = Instant::now();
   let g = load().ok_or("GTK 3 is needed: libgtk-3.so.0 did not load")?;
+  QUITTING.set(false);
   // GDK's X11 backend probes GLX as it opens the display, loading Mesa (and LLVM with
   // llvmpipe): about 34 MB more for nothing, every pixel being ours.
   if std::env::var_os("GDK_GL").is_none() {
@@ -262,7 +296,7 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Res<()> {
     (g.gtk_widget_add_events)(area, input::EVENTS);
     (g.gtk_container_add)(window, area);
     (g.gtk_widget_grab_focus)(area);
-    connect(window, c"destroy", on_destroy as Fp, 0);
+    connect(window, c"delete-event", on_delete as Fp, 0);
     connect(window, c"window-state-event", on_state as Fp, 0);
     connect(area, c"draw", on_draw as Fp, 0);
     connect(area, c"event", input::on_event as Fp, 0);
@@ -284,6 +318,7 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Res<()> {
       tiles: Vec::new(),
       shown: (0, 0),
       ticking: false,
+      last_tick: 0,
       timer: None,
       resizable: cfg.resizable,
       min,
@@ -295,8 +330,6 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Res<()> {
       started,
       trace: trace.is_some(),
       trace_events: trace.as_deref() == Some("2"),
-      quit: false,
-      destroyed: false,
     }));
 
     // Shown, the window is realized: its frame clock and the area's GdkWindow exist.
@@ -306,10 +339,14 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Res<()> {
     connect(clock, c"after-paint", on_after_paint as Fp, 0);
     with((), |w| w.input.realized((g.gtk_widget_get_window)(area)));
     settings::watch();
-    (g.gtk_main)();
+    // The app may have quit before the loop starts (on the first appearance).
+    if !QUITTING.get() {
+      (g.gtk_main)();
+    }
   }
 
   let Some(win) = WIN.take() else { return Ok(()) };
+  let window = win.window;
   if win.trace {
     eprintln!("nimbo: closed after {} frames", win.frames);
   }
@@ -321,10 +358,8 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Res<()> {
     crate::png::write(Path::new(&path), &px)?;
   }
 
-  if !win.destroyed {
-    unsafe { (g.gtk_widget_destroy)(win.window) };
-  }
-
+  drop(win);
+  unsafe { (g.gtk_widget_destroy)(window) };
   Ok(())
 }
 
@@ -366,24 +401,23 @@ impl Win {
   }
 
   /// After every callback: the size the app asked for, the cursor, quitting, and what runs the
-  /// loop next: the tick callback while frames are wanted, else a timeout for the next timer.
+  /// loop next ([next]).
   fn sync(&mut self) {
     let g = gtk();
     self.apply_resize();
     self.sync_cursor();
-    if self.rt.quit_requested() && !self.quit {
-      self.quit = true;
-      unsafe { (g.gtk_main_quit)() };
+    if self.rt.quit_requested() {
+      quit();
     }
 
-    let wanted = self.rt.needs_frame() && self.visible();
-    if wanted && !self.ticking {
+    let visible = self.visible();
+    let (tick, timer) = next(visible, visible && self.rt.needs_frame(), self.rt.due_in());
+    if tick && !self.ticking {
       self.ticking = true;
       unsafe { (g.gtk_widget_add_tick_callback)(self.area, on_tick as Fp, null_mut(), null()) };
     }
 
-    let at = self.rt.due_in().filter(|_| !wanted).map(|d| Instant::now() + d);
-    self.arm(at);
+    self.arm(timer.map(|d| Instant::now() + d));
   }
 
   /// Sets the timeout to fire `at`, unless it already does within a millisecond.
@@ -418,7 +452,11 @@ impl Win {
     r.prepare(&self.rt.scene, size, scale);
     let (w, h) = r.size();
     if (w, h) != self.shown || SURFACE.get().is_null() {
-      new_surface(w, h, scale);
+      // Out of memory: the frame waits for the next.
+      if !new_surface(w, h, scale) {
+        return;
+      }
+
       self.shown = (w, h);
       self.tiles.clear();
     }
@@ -516,18 +554,33 @@ fn name(c: Cursor) -> S {
   n.as_ptr()
 }
 
-/// A new surface of `w × h` pixels at `scale` as [SURFACE], the old one dropped.
-fn new_surface(w: usize, h: usize, scale: f32) {
+/// A new surface of `w × h` pixels at `scale` as [SURFACE], the old one dropped; false when
+/// cairo couldn't make one (its error surface has no pixels).
+fn new_surface(w: usize, h: usize, scale: f32) -> bool {
   let g = gtk();
   // SAFETY: a new surface, ours until the next one.
   unsafe {
     let s = (g.cairo_image_surface_create)(RGB24, w as c_int, h as c_int);
+    if (g.cairo_surface_status)(s) != 0 {
+      (g.cairo_surface_destroy)(s);
+      return false;
+    }
+
     (g.cairo_surface_set_device_scale)(s, scale as f64, scale as f64);
     let old = SURFACE.replace(s);
     if !old.is_null() {
       (g.cairo_surface_destroy)(old);
     }
   }
+
+  true
+}
+
+/// What runs the loop next: the tick while frames are `wanted`, else a timeout for the next
+/// timer; neither while the window is hidden, where a timer that came due couldn't draw (it
+/// would fire again at once) and the window's showing again syncs.
+fn next(visible: bool, wanted: bool, due_in: Option<Duration>) -> (bool, Option<Duration>) {
+  (wanted, due_in.filter(|_| visible && !wanted))
 }
 
 /// The pixels of the frame shown, `w × h`.
@@ -552,12 +605,15 @@ fn pixels((w, h): (usize, usize)) -> Option<Pixels> {
 // MARK: Callbacks
 
 /// The frame clock's update phase while frames are wanted: asks for the layout phase, after
-/// which the frame is built ([on_layout]); removed once none are.
+/// which the frame is built ([on_layout]), at most every [MIN_GAP_US]; removed once none are.
 unsafe extern "C" fn on_tick(_: P, clock: P, _: P) -> c_int {
   with(TRUE, |w| {
+    let g = gtk();
     w.ticking = w.rt.needs_frame() && w.visible();
-    if w.ticking {
-      unsafe { (gtk().gdk_frame_clock_request_phase)(clock, LAYOUT) };
+    let now = unsafe { (g.gdk_frame_clock_get_frame_time)(clock) };
+    if w.ticking && now - w.last_tick >= MIN_GAP_US {
+      w.last_tick = now;
+      unsafe { (g.gdk_frame_clock_request_phase)(clock, LAYOUT) };
     }
 
     w.ticking as c_int
@@ -620,7 +676,7 @@ unsafe extern "C" fn on_after_paint(_: P, _: P) {
 
 /// The runtime's next timer is due; while the window is busy, it fires again after its delay.
 unsafe extern "C" fn on_timer(_: P) -> c_int {
-  with(TRUE, |w| {
+  with(busy() as c_int, |w| {
     w.timer = None;
     FALSE
   })
@@ -639,16 +695,11 @@ unsafe extern "C" fn on_state(_: P, _: P, _: P) -> c_int {
   FALSE
 }
 
-/// The window closed: the loop ends, unless it already did (the app quit).
-unsafe extern "C" fn on_destroy(_: P, _: P) {
-  let running = with(false, |w| {
-    w.destroyed = true;
-    !std::mem::replace(&mut w.quit, true)
-  });
-
-  if running {
-    unsafe { (gtk().gtk_main_quit)() };
-  }
+/// The window's close button: the loop ends, and the window is destroyed after it, so a
+/// callback further up the stack (a paste's) never meets it gone.
+unsafe extern "C" fn on_delete(_: P, _: P, _: P) -> c_int {
+  quit();
+  TRUE
 }
 
 // MARK: Clipboard
@@ -679,6 +730,17 @@ impl Clipboard for Clip {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// Hidden, a timer that came due waits for the window to show (no timeout firing at once
+  /// again and again); shown, frames tick, else the timer wakes the loop.
+  #[test]
+  fn nothing_runs_while_hidden() {
+    let (due, later) = (Some(Duration::ZERO), Some(Duration::from_millis(500)));
+    assert_eq!(next(false, false, due), (false, None));
+    assert_eq!(next(true, true, due), (true, None));
+    assert_eq!(next(true, false, later), (false, later));
+    assert_eq!(next(true, false, None), (false, None));
+  }
 
   #[test]
   fn perf_cores_count_ranges() {
