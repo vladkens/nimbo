@@ -43,7 +43,7 @@ use wayland_protocols::xdg::shell::client::xdg_toplevel::{self, XdgToplevel};
 use wayland_protocols::xdg::shell::client::xdg_wm_base::{self, XdgWmBase};
 
 use super::shm::Busy;
-use super::{Output, Repeat, Win, keymap, shape};
+use super::{Output, Repeat, Win, keymap};
 use crate::app::{Event, Mods, Phase};
 use crate::scene::{Point, Size};
 
@@ -147,12 +147,17 @@ impl Dispatch<XdgToplevel, ()> for Win {
 impl Dispatch<WlSurface, ()> for Win {
   fn event(
     win: &mut Self,
-    _: &WlSurface,
+    surface: &WlSurface,
     ev: wl_surface::Event,
     _: &(),
     _: &Connection,
     _: &QueueHandle<Self>,
   ) {
+    // The cursor's surface ([super::cursor]) has its own outputs: only the window's count.
+    if *surface != win.surface {
+      return;
+    }
+
     match ev {
       wl_surface::Event::Enter { output } => win.entered.push(output),
       wl_surface::Event::Leave { output } => win.entered.retain(|o| *o != output),
@@ -300,9 +305,7 @@ impl Dispatch<WlPointer, ()> for Win {
       wl_pointer::Event::Enter { serial, surface_x, surface_y, .. } => {
         win.enter_serial = Some(serial);
         win.mouse = Point::new(surface_x as f32, surface_y as f32);
-        if let Some(dev) = &win.shape_device {
-          dev.set_shape(serial, shape(win.cursor));
-        }
+        win.show_cursor(serial);
 
         win.send(Event::MouseMove { pos: win.mouse, mods });
       }
@@ -399,14 +402,12 @@ impl Dispatch<WlKeyboard, ()> for Win {
         let down = state == WEnum::Value(KeyState::Pressed);
         if down {
           win.clip.borrow_mut().serial = serial;
-          let (rate, delay) = win.repeat_info;
-          let repeats = rate > 0 && win.kb.as_ref().is_some_and(|kb| kb.repeats(key));
-          let at = Instant::now() + Duration::from_millis(delay.max(0) as u64);
-          win.repeat = repeats.then_some(Repeat { key, at });
-        } else if win.repeat.as_ref().is_some_and(|r| r.key == key) {
-          win.repeat = None;
         }
 
+        let (rate, delay) = win.repeat_info;
+        let repeats = rate > 0 && win.kb.as_ref().is_some_and(|kb| kb.repeats(key));
+        let at = Instant::now() + Duration::from_millis(delay.max(0) as u64);
+        win.repeat = Repeat::after(win.repeat.take(), key, down, repeats, at);
         win.key(key, down, false);
       }
       wl_keyboard::Event::Modifiers {
@@ -419,6 +420,9 @@ impl Dispatch<WlKeyboard, ()> for Win {
           win.mods = mods;
           win.send(Event::Mods(mods));
         }
+
+        // The modifier keys that changed them come after.
+        win.modifier_keys();
       }
       wl_keyboard::Event::RepeatInfo { rate, delay } => win.repeat_info = (rate, delay),
       _ => {}
@@ -474,7 +478,7 @@ impl Dispatch<WlDataSource, ()> for Win {
     _: &QueueHandle<Self>,
   ) {
     match ev {
-      wl_data_source::Event::Send { fd, .. } => win.clip.borrow().send(source, fd),
+      wl_data_source::Event::Send { fd, .. } => win.clip.borrow_mut().send(source, fd),
       wl_data_source::Event::Cancelled => win.clip.borrow_mut().cancelled(source),
       _ => {}
     }
