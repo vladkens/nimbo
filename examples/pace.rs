@@ -9,6 +9,9 @@
 //! moves and the wakeups once it is still. `cargo run --release --example pace` opens it;
 //! `-- --shot pace.png` renders its first frame.
 
+// A Windows app, not a console one: no terminal opens with its window.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use std::time::{Duration, Instant};
 
 use nimbo::{App, Config, Frame, Rect, Size, rgb};

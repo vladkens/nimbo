@@ -9,6 +9,9 @@
 //! `cargo run --release --example input` opens it in a window; `-- --shot input.png` renders it
 //! without one.
 
+// A Windows app, not a console one: no terminal opens with its window.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use nimbo::{
   App, Binding, Color, Command, Config, Cursor, Cx, Event, Frame, Key, MouseButton, Point, Quad,
   Rect, Size, bind, mix, rgb,

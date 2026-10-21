@@ -9,6 +9,9 @@
 //! `cargo run --release --example text` opens it in a window, which follows the OS's light or
 //! dark setting; `-- --shot text.png [--appearance light] [--scale 2]` renders it without one.
 
+// A Windows app, not a console one: no terminal opens with its window.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use nimbo::{App, Color, Config, Cx, Event, Font, Frame, Quad, Rect, Size, Weight, rgb};
 
 pub const SIZE: Size = Size::new(520.0, 400.0);

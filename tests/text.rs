@@ -7,7 +7,8 @@
 //! and the emoji in colour where the OS has a colour font. CJK is checked where a font has it.
 
 #[path = "../examples/text.rs"]
-#[allow(dead_code)]
+// The example sets the Windows subsystem, an attribute of its own crate, not of this module.
+#[allow(dead_code, unused_attributes)]
 mod text;
 
 use nimbo::harness::Image;
