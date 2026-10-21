@@ -302,7 +302,8 @@ impl Keyboard {
     let sym = unsafe { (s.f.xkb_state_key_get_one_sym)(self.state, key + 8) };
     let ch = char::from_u32(unsafe { (s.f.xkb_keysym_to_utf32)(sym) }).filter(|&c| c != '\0');
     let shortcut = mods.cmd || mods.ctrl;
-    let named = kvk(key).and_then(Key::named);
+    // The keypad's keys by what they do now (Num Lock off: arrows), else by their place.
+    let named = keypad(sym).or_else(|| kvk(key).and_then(Key::named));
     let k = named.unwrap_or_else(|| match ch {
       Some(c) if shortcut && !c.is_ascii() => self
         .ascii(key, mods.shift)
@@ -337,7 +338,8 @@ impl Keyboard {
         COMPOSE_COMPOSED => {
           let text = read_utf8(|buf, n| unsafe { (s.f.xkb_compose_state_get_utf8)(cs, buf, n) });
           unsafe { (s.f.xkb_compose_state_reset)(cs) };
-          return match keys::printable(&text) {
+          // A shortcut ends the sequence but types nothing, as below.
+          return match !shortcut_mods(k.mods) && keys::printable(&text) {
             true => Typed::Text(text),
             false => Typed::None,
           };
@@ -354,8 +356,7 @@ impl Keyboard {
       return Typed::Command(cmd);
     }
 
-    let m = k.mods;
-    match !(m.cmd || m.ctrl || m.alt) && keys::printable(utf8) {
+    match !shortcut_mods(k.mods) && keys::printable(utf8) {
       true => Typed::Text(utf8.to_owned()),
       false => Typed::None,
     }
@@ -390,6 +391,29 @@ impl Keyboard {
       (c.is_ascii() && !c.is_ascii_control()).then_some(c)
     })
   }
+}
+
+/// Ctrl, Super or Alt: a key with them types nothing (GTK).
+fn shortcut_mods(m: Mods) -> bool {
+  m.cmd || m.ctrl || m.alt
+}
+
+/// The keypad's navigation keysyms (<xkbcommon/xkbcommon-keysyms.h>, `XKB_KEY_KP_*`): what its
+/// keys are with Num Lock off, or Enter.
+fn keypad(sym: u32) -> Option<Key> {
+  Some(match sym {
+    0xff8d => Key::Enter,
+    0xff95 => Key::Home,
+    0xff96 => Key::Left,
+    0xff97 => Key::Up,
+    0xff98 => Key::Right,
+    0xff99 => Key::Down,
+    0xff9a => Key::PageUp,
+    0xff9b => Key::PageDown,
+    0xff9c => Key::End,
+    0xff9f => Key::Delete,
+    _ => return None,
+  })
 }
 
 fn compose_table(s: &Sys, ctx: P) -> Option<P> {
@@ -537,9 +561,13 @@ mod tests {
   const APOSTROPHE: u32 = 40;
   const E: u32 = 18;
 
-  /// Modifier masks of the default keymaps: Shift, Control, Mod1 (Alt).
+  const KP_4: u32 = 75;
+  const KP_DOT: u32 = 83;
+
+  /// Modifier masks of the default keymaps: Shift, Control, Mod2 (Num Lock).
   const SHIFT: u32 = 1;
   const CTRL: u32 = 4;
+  const NUM_LOCK: u32 = 16;
 
   #[test]
   fn keys_type_and_name_like_appkit() {
@@ -592,6 +620,35 @@ mod tests {
     assert_eq!(kb.interpret(APOSTROPHE, &k, &text), Typed::None);
     let (k, text) = kb.key(E, false);
     assert_eq!(kb.interpret(E, &k, &text), Typed::Text("é".into()));
+
+    // A shortcut ends the sequence without typing it: ' then Ctrl-E.
+    let (k, text) = kb.key(APOSTROPHE, false);
+    assert_eq!(kb.interpret(APOSTROPHE, &k, &text), Typed::None);
+    kb.modifiers(CTRL, 0, 0, 0);
+    let (k, text) = kb.key(E, false);
+    assert_eq!(kb.interpret(E, &k, &text), Typed::None);
+    kb.modifiers(0, 0, 0, 0);
+    let (k, text) = kb.key(E, false);
+    assert_eq!(kb.interpret(E, &k, &text), Typed::Text("e".into()), "no sequence left");
+  }
+
+  #[test]
+  fn keypad_keys_follow_num_lock() {
+    let Some(mut kb) = Keyboard::from_layout(c"us") else {
+      eprintln!("no xkbcommon: skipped");
+      return;
+    };
+    // Num Lock off: keypad 4 is Left and moves, keypad . deletes; the code stays the key's.
+    let (k, text) = kb.key(KP_4, false);
+    assert_eq!((k.key, k.text, k.code), (Key::Left, None, 86));
+    assert_eq!(kb.interpret(KP_4, &k, &text), Typed::Command(Command::Move(Move::Left, false)));
+    assert_eq!(kb.key(KP_DOT, false).0.key, Key::Delete);
+
+    // Num Lock on: digits.
+    kb.modifiers(0, 0, NUM_LOCK, 0);
+    let (k, text) = kb.key(KP_4, false);
+    assert_eq!((k.key, k.text, text.as_str()), (Key::Char('4'), Some('4'), "4"));
+    assert_eq!(kb.interpret(KP_4, &k, &text), Typed::Text("4".into()));
   }
 
   #[test]
