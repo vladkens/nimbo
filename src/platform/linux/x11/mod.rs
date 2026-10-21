@@ -582,8 +582,9 @@ impl Win {
     self.sync_cursor();
   }
 
-  /// Takes the size the app asked for ([Runtime::take_resize]) as the window's; a fixed one
-  /// gets it as its least and largest size too.
+  /// Asks the server for the size the app asked for ([Runtime::take_resize]); a fixed window
+  /// gets it as its least and largest size too. The size changes when `ConfigureNotify` says
+  /// so: a window manager may refuse it (a tiled window).
   fn apply_resize(&mut self) {
     let Some(size) = self.rt.take_resize() else { return };
     match self.max {
@@ -599,9 +600,6 @@ impl Win {
     }
 
     self.x.resize_window(self.win, px(size.w, self.scale), px(size.h, self.scale));
-    self.size = size;
-    self.force = true;
-    self.rt.redraw();
   }
 
   /// Feeds an event to the runtime; returns whether it was used.
