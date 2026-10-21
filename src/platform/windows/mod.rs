@@ -3,11 +3,11 @@
 //! The Windows platform: one Win32 window, per-monitor DPI aware (v2), its frames drawn by the
 //! CPU renderer into a DIB section and copied to the window with BitBlt, only the tiles that
 //! changed ([Dib]). The message loop sleeps in MsgWaitForMultipleObjectsEx until input, a wake
-//! (the waker posts a message) or a high-resolution waitable timer: while the runtime animates,
-//! the next frame slot at the refresh rate of the display it is on, followed as it moves to
-//! another or the mode changes. No frames while the window is minimized; one when it shows again.
-//! Input and cursors are in [input], keys in [keyboard]; then the clipboard, the performance
-//! cores, and the DirectWrite text backend ([text]).
+//! (the waker posts a message) or a high-resolution waitable timer: the runtime's next timer, or
+//! while it animates the next frame slot at the refresh rate of the display it is on, followed as
+//! it moves to another or the mode changes. No frames while the window is minimized; one when it
+//! shows again. Input and cursors are in [input], keys in [keyboard]; then the clipboard, the
+//! performance cores, and the DirectWrite text backend ([text]).
 
 mod input;
 mod keyboard;
@@ -309,7 +309,10 @@ impl Window {
     }
 
     // The rest of the interval: the time spent drawing is part of it.
-    self.rt.needs_frame().then(|| self.pace.left(Instant::now()))
+    match self.rt.needs_frame() {
+      true => Some(self.pace.left(Instant::now())),
+      false => self.rt.due_in(),
+    }
   }
 }
 
@@ -592,6 +595,26 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
   hwnd
 }
 
+/// Resizes the client area to the size the app asked for ([Runtime::take_resize]) at the
+/// window's DPI, keeping its top-left corner; the least size comes down with it first, as
+/// WM_GETMINMAXINFO holds SetWindowPos to it too. Outside the window's borrow: WM_SIZE draws.
+fn apply_resize(hwnd: HWND) {
+  let want = with(|w| {
+    let size = w.rt.take_resize()?;
+    w.min = Size::new(w.min.w.min(size.w), w.min.h.min(size.h));
+    Some((size, w.style))
+  });
+  let Some((size, style)) = want.flatten() else { return };
+  let dpi = unsafe { GetDpiForWindow(hwnd) };
+  let k = dpi as f32 / 96.0;
+  let (w, h) = ((size.w * k).round() as i32, (size.h * k).round() as i32);
+  let mut rc = RECT { left: 0, top: 0, right: w, bottom: h };
+  unsafe { AdjustWindowRectExForDpi(&mut rc, style, 0, 0, dpi) };
+  let flags = SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE;
+  let (cx, cy) = (rc.right - rc.left, rc.bottom - rc.top);
+  unsafe { SetWindowPos(hwnd, null_mut(), 0, 0, cx, cy, flags) };
+}
+
 /// Handles messages until WM_QUIT; between them draws the frames due and sleeps until the next
 /// message, wake or timer.
 fn run_loop(hwnd: HWND, timer: &Timer) {
@@ -617,7 +640,9 @@ fn run_loop(hwnd: HWND, timer: &Timer) {
       continue;
     }
 
+    apply_resize(hwnd);
     let wait = with(|w| w.tick()).flatten();
+    apply_resize(hwnd);
     let n = match wait {
       // Relative due times are negative, in 100 ns units.
       Some(d) if !timer.0.is_null() => {

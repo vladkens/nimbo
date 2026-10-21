@@ -1,16 +1,18 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The NSView subclass: a layer we draw with the CPU renderer (IOSurfaces as its contents),
-//! NSEvents converted to [Event], and a display link that runs only while the runtime needs
-//! frames (input, animations). While the window is hidden (minimized, covered, on another space)
-//! frames wait until it shows again. Keys nobody used go through `interpretKeyEvents:`, which
-//! calls back `insertText:` and `doCommandBySelector:` (see [crate::keys]); the pointer's cursor
-//! follows the runtime's.
+//! NSEvents converted to [Event], and a display link that runs only while the
+//! runtime needs frames (input, animations); a timer the app asked for sleeps on the main queue
+//! until it is due and draws its frame there, leaving the display link paused. While the window is
+//! hidden (minimized, covered, on another space) frames wait until it shows again. Keys nobody used
+//! go through `interpretKeyEvents:`, which calls back `insertText:` and `doCommandBySelector:` (see
+//! [crate::keys]); the pointer's cursor follows the runtime's.
 
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
+use std::time::Duration;
 
-use dispatch2::{DispatchQueue, MainThreadBound};
+use dispatch2::{DispatchQueue, DispatchTime, MainThreadBound};
 use objc2::rc::{Retained, Weak};
 use objc2::runtime::{AnyObject, Sel};
 use objc2::{
@@ -49,6 +51,8 @@ pub struct Ivars {
   /// Timestamp of the last key event offered through `performKeyEquivalent:`, which AppKit
   /// sends again as `keyDown:` when neither we nor the menu used it.
   key_equivalent: Cell<f64>,
+  /// When the scheduled timer wake fires, on the runtime's clock.
+  timer: Cell<Option<Duration>>,
   /// `interpretKeyEvents:` runs for a key with Cmd: what it would type is dropped.
   cmd_key: Cell<bool>,
   /// The cursor set while the pointer is in the view; none outside it.
@@ -276,9 +280,12 @@ define_class!(
         let Some(st) = state.as_mut() else { return };
         let idle = !st.rt.needs_frame() || !self.visible();
         if idle {
-          // Nothing changed since the last frame: stop until the next event or wake. Hidden:
+          // Nothing changed since the last frame: stop until the next event, wake or timer. Hidden:
           // until the window shows again.
           st.link.setPaused(true);
+          if self.visible() {
+            self.schedule(st);
+          }
         }
 
         idle
@@ -392,8 +399,9 @@ impl View {
       let mut state = self.ivars().state.borrow_mut();
       let Some(st) = state.as_mut() else { return false };
       let used = st.rt.event(ev);
-      if st.rt.needs_frame() {
-        st.link.setPaused(false);
+      match st.rt.needs_frame() {
+        true => st.link.setPaused(false),
+        false => self.schedule(st),
       }
 
       self.sync_cursor(st);
@@ -403,7 +411,26 @@ impl View {
       super::shell::quit();
     }
 
+    self.apply_resize();
     used
+  }
+
+  /// Resizes the window's content to the size the app asked for ([Runtime::take_resize]),
+  /// keeping its top edge where it is, as preferences windows do when their tab changes. The
+  /// least content size comes down with it; a fixed window stays fixed for the user. Outside the
+  /// runtime's borrow: the new frame size draws at once ([Self::render]).
+  fn apply_resize(&self) {
+    let want = self.ivars().state.borrow_mut().as_mut().and_then(|st| st.rt.take_resize());
+    let (Some(size), Some(window)) = (want, self.window()) else { return };
+    let old = window.frame();
+    let content = window.contentRectForFrameRect(old);
+    let rect = NSRect::new(content.origin, NSSize::new(size.w as f64, size.h as f64));
+    let mut frame = window.frameRectForContentRect(rect);
+    frame.origin.y = old.origin.y + old.size.height - frame.size.height;
+    let min = window.contentMinSize();
+    let (w, h) = (min.width.min(size.w as f64), min.height.min(size.h as f64));
+    window.setContentMinSize(NSSize::new(w, h));
+    window.setFrame_display(frame, true);
   }
 
   /// Typed text, unless it came with Cmd or is a control character.
@@ -456,12 +483,61 @@ impl View {
     Arc::new(MainThreadBound::new(Weak::new(self), self.mtm()))
   }
 
+  /// Sleeps until the runtime's next timer, unless an earlier wake is already set.
+  fn schedule(&self, st: &mut State) {
+    let Some(left) = st.rt.due_in() else { return };
+    let at = st.rt.now() + left;
+    if self.ivars().timer.get().is_some_and(|t| t <= at) {
+      return;
+    }
+
+    self.ivars().timer.set(Some(at));
+    let weak = self.weak();
+    let when = DispatchTime::try_from(left).unwrap_or(DispatchTime::NOW);
+    let _ = DispatchQueue::main().after(when, move || {
+      let mtm = MainThreadMarker::new().unwrap();
+      let Some(view) = weak.get(mtm).load() else { return };
+      view.ivars().timer.set(None);
+      // A timer frame draws at once, without waking the display link: unpausing it for one
+      // frame cost ~100 wakeups a second at 10 Hz. Hidden, it waits for
+      // the window to show ([Self::occlusion_changed]).
+      if !view.visible() {
+        return;
+      }
+
+      let due = {
+        let mut state = view.ivars().state.borrow_mut();
+        let Some(st) = state.as_mut() else { return };
+        match st.rt.needs_frame() {
+          true => st.link.isPaused(),
+          false => {
+            view.schedule(st);
+            false
+          }
+        }
+      };
+      if due {
+        view.render();
+        view.after_frame();
+      }
+    });
+  }
+
   /// After a frame: the display link runs on while the runtime needs frames (animations, drags),
-  /// else it stops at once, not a refresh later.
+  /// else it stops at once, not a refresh later, and the view sleeps until the next timer.
   fn after_frame(&self) {
-    let mut state = self.ivars().state.borrow_mut();
-    let Some(st) = state.as_mut() else { return };
-    st.link.setPaused(!st.rt.needs_frame());
+    {
+      let mut state = self.ivars().state.borrow_mut();
+      let Some(st) = state.as_mut() else { return };
+      match st.rt.needs_frame() {
+        true => st.link.setPaused(false),
+        false => {
+          st.link.setPaused(true);
+          self.schedule(st);
+        }
+      }
+    }
+    self.apply_resize();
   }
 
   fn button(&self, event: &NSEvent, down: bool) {

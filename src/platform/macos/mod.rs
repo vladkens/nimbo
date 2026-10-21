@@ -1,9 +1,9 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The macOS platform: NSApplication and its windows ([shell]), each window's content our NSView
-//! ([view]: input, cursors, display link, occlusion, present through [surface]), the keyboard
-//! layout ([keyboard]), the clipboard on NSPasteboard, the CoreText text backend ([text]) and the
-//! performance cores.
+//! ([view]: input, cursors, display link and timers, occlusion, present through [surface]), the
+//! keyboard layout ([keyboard]), the clipboard on NSPasteboard, the CoreText text backend
+//! ([text]) and the performance cores.
 //! macOS 14 or later: the app's activation and the view's display link need it.
 
 mod view;

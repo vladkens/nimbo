@@ -4,10 +4,11 @@
 //! window, input and text behind [platform] (AppKit and CoreText on macOS, Win32 and DirectWrite
 //! on Windows, Wayland or X11 with fontconfig, FreeType and HarfBuzz on Linux), nothing else.
 //!
-//! An [App] gets [Event]s and paints a [Scene] and [text] through a [Frame]; a [Runtime] drives
-//! it, fed by the window ([platform]) or by the headless [Harness], both drawing with the CPU
-//! renderer ([cpu]). Examples start with [run], which opens a window, or with `--shot <file.png>`
-//! runs the harness instead (in the dark appearance unless `--appearance light`).
+//! An [App] gets [Event]s and builds each frame as an element tree on a [Ui] (laid out and painted
+//! by [ui]) and/or paints a [Scene] and [text] through a [Frame]; a [Runtime] drives it, fed by
+//! the window ([platform]) or by the headless [Harness], both drawing with the CPU renderer
+//! ([cpu]). Examples start with [run], which opens a window, or with `--shot <file.png>` runs the
+//! harness instead (in the dark appearance unless `--appearance light`).
 //!
 //! macOS 14 is the least it runs on (`NSApplication`'s `activate`, `NSView`'s display link): build
 //! apps with `MACOSX_DEPLOYMENT_TARGET=14.0`.
@@ -37,7 +38,11 @@ pub use scene::{
   Color, Frame, ImageId, Images, Point, Quad, Rect, Scene, Segment, Size, alpha, mix, rgb,
 };
 pub use text::{Font, Weight};
-pub use ui::Cursor;
+pub use ui::{
+  Align, Behavior, Button, ButtonStyle, Click, ControlSize, Cursor, Dim, Ease, Float, Focus,
+  FocusRing, Id, Press, Response, Scroll, Shadow, Sizes, Style, TextStyle, Theme, Transition, Ui,
+  Variant, grow, pct, px, rigid,
+};
 
 /// A window's title and initial content size in points; the harness renders at this size.
 pub struct Config {
@@ -152,8 +157,8 @@ pub fn run<A: App + 'static>(cfg: Config, app: A, script: impl FnOnce(&mut Harne
   println!("{}: wrote {}", cfg.title, path.display());
 }
 
-/// The harness [run] shoots in, at the size and scale of `args`; the app first hears the
-/// appearance, dark unless `--appearance` says otherwise, as a window tells it the OS's.
+/// The harness [run] shoots in, at the size and scale of `args`, told the appearance (dark
+/// unless `--appearance` says otherwise) as a window tells the OS's; the app hears a change.
 fn harness<A: App>(cfg: &Config, app: A, args: &Args) -> Harness<A> {
   let mut h = Harness::new(app, args.size.unwrap_or(cfg.size), args.scale);
   h.event(Event::Appearance(args.appearance.unwrap_or(Appearance::DARK)));
@@ -166,22 +171,13 @@ mod tests {
 
   #[test]
   fn shots_tell_the_appearance() {
-    #[derive(Default)]
-    struct Seen(Option<Appearance>);
-    impl App for Seen {
-      fn event(&mut self, _cx: &mut Cx, ev: &Event) -> bool {
-        if let Event::Appearance(a) = ev {
-          self.0 = Some(*a);
-        }
-
-        true
-      }
-    }
+    struct Blank;
+    impl App for Blank {}
 
     let cfg = Config::new("a", 100.0, 100.0);
-    let seen = |s: &str| harness(&cfg, Seen::default(), &parse(s).unwrap()).app().0;
-    assert_eq!(seen(""), Some(Appearance::DARK));
-    assert_eq!(seen("--appearance light"), Some(Appearance::LIGHT));
+    let seen = |s: &str| harness(&cfg, Blank, &parse(s).unwrap()).rt.ui.appearance();
+    assert_eq!(seen(""), Appearance::DARK);
+    assert_eq!(seen("--appearance light"), Appearance::LIGHT);
   }
 
   fn parse(s: &str) -> Result<Args, String> {
