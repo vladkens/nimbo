@@ -575,6 +575,13 @@ pub fn is_color(face: &Face) -> bool {
   face.file.color
 }
 
+/// How a glyph of a colour face draws: every one as colour, so a COLR layer in the text's colour
+/// and a monochrome glyph come out in FreeType's default foreground, black. TODO: per glyph, as
+/// on Windows.
+pub fn color_glyph(face: &Face, _id: u16) -> Option<bool> {
+  is_color(face).then_some(false)
+}
+
 /// Shapes `s` with HarfBuzz, one run per font of the fallback chain; `index` gives the text
 /// system's index of each run's face. Clusters are byte offsets of `s`, as HarfBuzz gives them
 /// for UTF-8 (each run shaped with the whole line as context). Not yet: bidi and script runs, so
@@ -814,7 +821,8 @@ mod tests {
   fn an_atlas_miss_renders_once() {
     let f = face(Font::ui(13.0));
     let line = shape(&f, "g", |_| 0);
-    let (id, raster) = (line.glyphs[0].id, Raster { scale: 2.0, smooth: false, dark: true });
+    let (id, raster) =
+      (line.glyphs[0].id, Raster { scale: 2.0, smooth: false, dark: true, text: [0; 3] });
     let alone = {
       let b = glyph_box(&f, id, 2.0, 1).unwrap();
       LAST.with(|l| l.borrow_mut().take());

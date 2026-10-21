@@ -44,7 +44,7 @@ pub struct Upload {
 pub(super) struct Atlas {
   size: usize,
   color: bool,
-  glyphs: HashMap<(u16, u16, u8), Option<AtlasGlyph>, BuildHasherDefault<FxHasher>>,
+  glyphs: HashMap<(u16, u16, u32), Option<AtlasGlyph>, BuildHasherDefault<FxHasher>>,
   /// Shelf packing cursor: x, y and the height of the current row.
   shelf: (usize, usize, usize),
   /// A glyph didn't fit this frame; the text system resets the atlas at the frame's end.
@@ -71,16 +71,18 @@ impl Atlas {
     &mut self,
     face: &Face,
     raster: Raster,
-    key: (u16, u16, u8),
+    key: (u16, u16, u32),
     uploads: &mut Vec<Upload>,
   ) -> Option<AtlasGlyph> {
     if let Some(g) = self.glyphs.get(&key) {
       return *g;
     }
 
-    // The variant's low 2 bits are the subpixel offset; the bit above, the text's polarity
-    // ([super::TextSystem::glyph]), only picks the raster.
-    let g = self.rasterize(face, raster, key.1, key.2 & 3, uploads);
+    // A coverage variant's low 2 bits are the subpixel offset; the bit above, the text's
+    // polarity ([super::TextSystem::glyph]), only picks the raster. A colour glyph's variant is
+    // the text colour its layers take, if any (in `raster`): drawn at no offset.
+    let subpixel = if self.color { 0 } else { key.2 as u8 & 3 };
+    let g = self.rasterize(face, raster, key.1, subpixel, uploads);
     // One skipped for lack of room stays out until the reset clears the cache and gives it a
     // slot, rather than rendering again at every use.
     self.glyphs.insert(key, g);
@@ -153,7 +155,7 @@ mod tests {
   fn a_glyph_without_room_waits_for_the_reset() {
     let face = sys::face(Font::ui(13.0));
     let id = sys::shape(&face, "W", |_| 0).glyphs[0].id;
-    let raster = Raster { scale: 2.0, smooth: false, dark: true };
+    let raster = Raster { scale: 2.0, smooth: false, dark: true, text: [0; 3] };
     let (mut a, mut uploads, key) = (Atlas::new(64, false), Vec::new(), (0, id, 0));
     // Rows for 4 pixels left: a 26-pixel W doesn't fit.
     a.pack(64, 60);
