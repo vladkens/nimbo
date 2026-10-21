@@ -213,7 +213,7 @@ impl Window {
     self.rt.resize(size, self.scale);
     self.rt.frame();
     let r = &mut self.renderer;
-    r.sync(&mut self.rt.images);
+    r.sync(&mut self.rt.text, &mut self.rt.images);
     r.prepare(&self.rt.scene, size, self.scale);
     let (pw, ph) = r.size();
     if self.dib.as_ref().is_none_or(|d| (d.w, d.h) != (pw, ph)) {

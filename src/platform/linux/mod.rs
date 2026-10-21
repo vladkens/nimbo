@@ -554,7 +554,7 @@ impl Win {
     let size = Size::new(points(w, scale), points(h, scale));
     self.rt.resize(size, scale);
     self.rt.frame();
-    self.present.renderer.sync(&mut self.rt.images);
+    self.present.renderer.sync(&mut self.rt.text, &mut self.rt.images);
     let shown = self.present.present(&self.rt.scene, size, scale, &self.surface, &self.qh);
     let fits = self.present.fits();
     self.next_tick = None;
