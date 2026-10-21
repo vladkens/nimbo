@@ -575,11 +575,9 @@ impl Win {
     let shown = self.present.present(&self.rt.scene, size, scale, &self.surface, &self.qh);
     let fits = self.present.fits();
     self.next_tick = None;
-    // An unchanged frame that animates on asks for a callback too, committed with no buffer: the
-    // compositor paces it, and sends none while the window is hidden. One waiting for a buffer
-    // ticks instead.
     let waits = self.present.starved || (self.acked && !fits);
-    let callback = shown || (self.rt.needs_frame() && !waits);
+    let timer = self.rt.due_in().is_some();
+    let callback = wants_callback(shown, self.rt.needs_frame(), timer, waits);
     if callback {
       self.surface.frame(&self.qh, ());
       self.frame_pending = true;
@@ -850,6 +848,14 @@ fn buffer_px(size: Size, scale: f32) -> (u32, u32) {
   (px(size.w), px(size.h))
 }
 
+/// Whether a frame asks for a frame callback: a new one shown, or an unchanged one while frames
+/// are wanted or a timer waits, committed with no buffer: the compositor paces the next (a timer
+/// every 2 ms draws at its rate), and sends none while the window is hidden. One waiting for a
+/// buffer ticks instead.
+fn wants_callback(shown: bool, wanted: bool, timer: bool, waits: bool) -> bool {
+  shown || ((wanted || timer) && !waits)
+}
+
 /// When the loop wakes for a frame while no frame callback is due: the paced tick while a frame
 /// is `wanted`, at once without one (a timer came due after the loop checked), else the next
 /// timer.
@@ -982,6 +988,18 @@ mod tests {
     assert_eq!(frame_wake(now, true, Some(now + TICK), None), Some(now + TICK));
     assert_eq!(frame_wake(now, false, None, Some(second)), Some(now + second));
     assert_eq!(frame_wake(now, false, None, None), None);
+  }
+
+  /// An unchanged frame with a timer waiting asks for a callback: the compositor paces the
+  /// timer's frames and holds them while the window is hidden.
+  #[test]
+  fn an_unchanged_frame_with_a_timer_waits_for_a_callback() {
+    assert!(wants_callback(false, false, true, false));
+    assert!(wants_callback(true, false, false, false));
+    assert!(wants_callback(false, true, false, false));
+    // Waiting for a buffer: the tick paces it.
+    assert!(!wants_callback(false, true, true, true));
+    assert!(!wants_callback(false, false, false, false));
   }
 
   #[test]
