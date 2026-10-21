@@ -11,6 +11,7 @@
 use std::cell::RefCell;
 use std::mem::offset_of;
 use std::ptr::{null, null_mut};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use windows_sys::Win32::Foundation::{
@@ -41,7 +42,8 @@ use crate::scene::Size;
 
 /// Posted by the waker: something changed on another thread.
 const WM_WAKE: u32 = WM_APP + 1;
-/// Frames during a live resize or move, whose modal loop the message loop doesn't run.
+/// Frames during a live resize or move, or while a menu is open: modal loops the message loop
+/// doesn't run.
 const TIMER_MODAL: usize = 1;
 
 fn wide(s: &str) -> Vec<u16> {
@@ -141,10 +143,13 @@ struct Window {
   /// While animating, frames come a refresh of the display apart: the display it is on.
   pace: Pace,
   monitor: HMONITOR,
-  /// In a live move or resize (its modal loop), and whether its frame timer runs: only while
-  /// frames are due.
-  modal: bool,
+  /// How many modal loops run the messages (a live move or resize, a menu's), and whether their
+  /// frame timer runs: only while frames are due.
+  modal: u8,
   armed: bool,
+  /// The window a wake posts to: none once it is destroyed, so a waker kept by another thread
+  /// never posts to a window that took the handle over.
+  target: Arc<Mutex<isize>>,
   /// Logs each presented frame (`NIMBO_TRACE`): `nimbo: presented <unix ms>` on stderr, and the
   /// first one's time since the process started.
   trace: bool,
@@ -220,7 +225,7 @@ impl Window {
   /// Runs the live move or resize's frame timer while frames are due and stops it when idle;
   /// after each message, so a wake or an input that needs a frame starts it again.
   fn sync_modal(&mut self) {
-    let due = self.modal && !self.hidden && self.rt.needs_frame();
+    let due = self.modal > 0 && !self.hidden && self.rt.needs_frame();
     if due == self.armed {
       return;
     }
@@ -256,6 +261,13 @@ impl Window {
     }
   }
 
+  /// Wakes post nowhere from now on: the window is going.
+  fn revoke(&self) {
+    if let Ok(mut hwnd) = self.target.lock() {
+      *hwnd = 0;
+    }
+  }
+
   /// Draws a frame if one is due; returns how long the loop may sleep (`None`: until a
   /// message).
   fn tick(&mut self) -> Option<Duration> {
@@ -274,6 +286,12 @@ impl Window {
 
     // The rest of the interval: the time spent drawing is part of it.
     self.rt.needs_frame().then(|| self.pace.left(Instant::now()))
+  }
+}
+
+impl Drop for Window {
+  fn drop(&mut self) {
+    self.revoke();
   }
 }
 
@@ -402,8 +420,12 @@ fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
       });
       0
     }
-    WM_ENTERSIZEMOVE | WM_EXITSIZEMOVE => {
-      with(|w| w.modal = msg == WM_ENTERSIZEMOVE);
+    WM_ENTERSIZEMOVE | WM_ENTERMENULOOP => {
+      with(|w| w.modal += 1);
+      0
+    }
+    WM_EXITSIZEMOVE | WM_EXITMENULOOP => {
+      with(|w| w.modal = w.modal.saturating_sub(1));
       0
     }
     WM_TIMER if wp == TIMER_MODAL => {
@@ -414,7 +436,12 @@ fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
       });
       0
     }
+    WM_SETFOCUS | WM_KILLFOCUS => {
+      with(|w| w.rt.event(Event::Focus(msg == WM_SETFOCUS)));
+      0
+    }
     WM_DESTROY => {
+      with(|w| w.revoke());
       unsafe { PostQuitMessage(0) };
       0
     }
@@ -482,10 +509,16 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
   let scale = unsafe { GetDpiForWindow(hwnd) } as f32 / 96.0;
   let mut rt = Runtime::new(app, cfg.size, scale, Clock::real());
   rt.event(Event::Appearance(appearance()));
-  // A wake from any thread posts a message; the window handle crosses threads as a number.
-  let target = hwnd as isize;
-  rt.waker().set_notify(Box::new(move || unsafe {
-    PostMessageW(target as HWND, WM_WAKE, 0, 0);
+  // A wake from any thread posts a message; the window handle crosses threads as a number, held
+  // while posting so the window's end waits for a post under way.
+  let target = Arc::new(Mutex::new(hwnd as isize));
+  let notify = target.clone();
+  rt.waker().set_notify(Box::new(move || {
+    if let Ok(hwnd) = notify.lock()
+      && *hwnd != 0
+    {
+      unsafe { PostMessageW(*hwnd as HWND, WM_WAKE, 0, 0) };
+    }
   }));
   let window = Window {
     hwnd,
@@ -500,8 +533,9 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
     frames: 0,
     min: cfg.min(),
     style,
-    modal: false,
+    modal: 0,
     armed: false,
+    target,
   };
   WINDOW.with(|w| *w.borrow_mut() = Some(window));
   hwnd
@@ -593,6 +627,26 @@ pub fn perf_cores() -> Option<usize> {
 mod tests {
   use super::*;
 
+  /// The modal loop's timer messages handled after waiting `ms`: how many came.
+  fn timer_ticks(hwnd: HWND, ms: u64) -> usize {
+    std::thread::sleep(Duration::from_millis(ms));
+    let mut msg: MSG = unsafe { std::mem::zeroed() };
+    let mut n = 0;
+    while unsafe { PeekMessageW(&mut msg, hwnd, WM_TIMER, WM_TIMER, PM_REMOVE) } != 0 {
+      unsafe { DispatchMessageW(&msg) };
+      n += 1;
+    }
+
+    n
+  }
+
+  struct Busy;
+  impl App for Busy {
+    fn paint(&mut self, f: &mut crate::Frame) {
+      f.animate();
+    }
+  }
+
   #[test]
   fn perf_cores_are_found() {
     assert!(perf_cores().is_some_and(|n| (1..=4).contains(&n)));
@@ -614,17 +668,7 @@ mod tests {
 
     let cfg = Config::new("modal", 200.0, 100.0);
     let hwnd = create(&cfg, Box::new(Still));
-    let ticks = || {
-      std::thread::sleep(Duration::from_millis(120));
-      let mut msg: MSG = unsafe { std::mem::zeroed() };
-      let mut n = 0;
-      while unsafe { PeekMessageW(&mut msg, hwnd, WM_TIMER, WM_TIMER, PM_REMOVE) } != 0 {
-        unsafe { DispatchMessageW(&msg) };
-        n += 1;
-      }
-
-      n
-    };
+    let ticks = || timer_ticks(hwnd, 120);
 
     unsafe { SendMessageW(hwnd, WM_ENTERSIZEMOVE, 0, 0) };
     assert!(ticks() > 0, "the first frame is due");
@@ -645,28 +689,11 @@ mod tests {
   /// display's once WM_DISPLAYCHANGE comes. The window is never shown.
   #[test]
   fn a_new_display_mode_sets_the_interval() {
-    struct Busy;
-    impl App for Busy {
-      fn paint(&mut self, f: &mut crate::Frame) {
-        f.animate();
-      }
-    }
-
     let cfg = Config::new("retime", 200.0, 100.0);
     let hwnd = create(&cfg, Box::new(Busy));
     with(|w| w.pace.interval = Duration::from_secs(1));
     unsafe { SendMessageW(hwnd, WM_ENTERSIZEMOVE, 0, 0) };
-    let ticks = || {
-      std::thread::sleep(Duration::from_millis(150));
-      let mut msg: MSG = unsafe { std::mem::zeroed() };
-      let mut n = 0;
-      while unsafe { PeekMessageW(&mut msg, hwnd, WM_TIMER, WM_TIMER, PM_REMOVE) } != 0 {
-        unsafe { DispatchMessageW(&msg) };
-        n += 1;
-      }
-
-      n
-    };
+    let ticks = || timer_ticks(hwnd, 150);
     assert_eq!(ticks(), 0, "a second apart");
 
     unsafe { SendMessageW(hwnd, WM_DISPLAYCHANGE, 32, 0) };
@@ -677,6 +704,78 @@ mod tests {
       SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0);
       DestroyWindow(hwnd);
     }
+    WINDOW.with(|w| w.borrow_mut().take());
+  }
+
+  /// An open menu (the system menu, a context menu) runs a modal loop too: an animation goes on
+  /// under it, and under a live move started from it, until the last one ends. The window is
+  /// never shown.
+  #[test]
+  fn a_menu_keeps_animating() {
+    let cfg = Config::new("menu", 200.0, 100.0);
+    let hwnd = create(&cfg, Box::new(Busy));
+    assert_eq!(timer_ticks(hwnd, 120), 0, "the message loop draws");
+
+    unsafe { SendMessageW(hwnd, WM_ENTERMENULOOP, 0, 0) };
+    assert!(timer_ticks(hwnd, 120) > 0, "a menu");
+
+    unsafe {
+      SendMessageW(hwnd, WM_ENTERSIZEMOVE, 0, 0);
+      SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0);
+    }
+    assert!(timer_ticks(hwnd, 120) > 0, "the menu still open");
+
+    unsafe { SendMessageW(hwnd, WM_EXITMENULOOP, 0, 0) };
+    timer_ticks(hwnd, 0);
+    assert_eq!(timer_ticks(hwnd, 120), 0, "closed");
+
+    unsafe { DestroyWindow(hwnd) };
+    WINDOW.with(|w| w.borrow_mut().take());
+  }
+
+  /// The keyboard focus coming and going reaches the app.
+  #[test]
+  fn focus_reaches_the_app() {
+    use std::rc::Rc;
+
+    struct Seen(Rc<RefCell<Vec<bool>>>);
+    impl App for Seen {
+      fn event(&mut self, _: &mut crate::app::Cx, ev: &Event) -> bool {
+        if let Event::Focus(on) = ev {
+          self.0.borrow_mut().push(*on);
+        }
+
+        false
+      }
+    }
+
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let hwnd = create(&Config::new("focus", 200.0, 100.0), Box::new(Seen(seen.clone())));
+    unsafe {
+      SendMessageW(hwnd, WM_SETFOCUS, 0, 0);
+      SendMessageW(hwnd, WM_KILLFOCUS, 0, 0);
+    }
+    assert_eq!(*seen.borrow(), [true, false]);
+
+    unsafe { DestroyWindow(hwnd) };
+    WINDOW.with(|w| w.borrow_mut().take());
+  }
+
+  /// A waker another thread keeps past the window's end posts to no window: its handle may be
+  /// another's by then.
+  #[test]
+  fn a_waker_outliving_its_window_posts_nowhere() {
+    struct Still;
+    impl App for Still {}
+
+    let hwnd = create(&Config::new("waker", 200.0, 100.0), Box::new(Still));
+    let (waker, target) = with(|w| (w.rt.waker().clone(), w.target.clone())).unwrap();
+    assert_eq!(*target.lock().unwrap(), hwnd as isize);
+
+    unsafe { DestroyWindow(hwnd) };
+    assert_eq!(*target.lock().unwrap(), 0);
+
+    waker.wake();
     WINDOW.with(|w| w.borrow_mut().take());
   }
 
