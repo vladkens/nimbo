@@ -493,6 +493,11 @@ impl View {
     let _ = DispatchQueue::main().after(when, move || {
       let mtm = MainThreadMarker::new().unwrap();
       let Some(view) = weak.get(mtm).load() else { return };
+      // An earlier wake superseded this one: that one runs and sets the next.
+      if view.ivars().timer.get() != Some(at) {
+        return;
+      }
+
       view.ivars().timer.set(None);
       // A timer frame draws at once, without waking the display link: unpausing it for one
       // frame cost ~100 wakeups a second at 10 Hz. Hidden, it waits for
