@@ -51,8 +51,8 @@ pub struct Ivars {
   key_equivalent: Cell<f64>,
   /// `interpretKeyEvents:` runs for a key with Cmd: what it would type is dropped.
   cmd_key: Cell<bool>,
-  /// The cursor last set.
-  cursor: Cell<Cursor>,
+  /// The cursor set while the pointer is in the view; none outside it.
+  cursor: Cell<Option<Cursor>>,
   /// The display link was invalidated (the view left its window): a new one starts when it
   /// moves to a window again.
   stopped: Cell<bool>,
@@ -242,7 +242,10 @@ define_class!(
 
     #[unsafe(method(cursorUpdate:))]
     fn cursor_update(&self, _event: &NSEvent) {
-      ns_cursor(self.ivars().cursor.get()).set();
+      let state = self.ivars().state.try_borrow();
+      let c = state.ok().and_then(|s| Some(s.as_ref()?.rt.cursor())).unwrap_or(Cursor::Arrow);
+      ns_cursor(c).set();
+      self.ivars().cursor.set(Some(c));
     }
 
     #[unsafe(method(flagsChanged:))]
@@ -288,22 +291,27 @@ impl View {
     let mut presenter = Presenter::new(layer);
     presenter.trace = std::env::var_os("NIMBO_TRACE").is_some();
 
-    // Mouse moves and exits for the visible rect, which AppKit keeps up to date.
+    // Mouse moves and exits for the visible rect, which AppKit keeps up to date, in an inactive
+    // app too; `cursorUpdate:` in an area of its own, as AppKit sends none with `ActiveAlways`.
     let opts = NSTrackingAreaOptions::MouseEnteredAndExited
       | NSTrackingAreaOptions::MouseMoved
-      | NSTrackingAreaOptions::CursorUpdate
       | NSTrackingAreaOptions::ActiveAlways
       | NSTrackingAreaOptions::InVisibleRect;
-    let area = unsafe {
-      NSTrackingArea::initWithRect_options_owner_userInfo(
-        NSTrackingArea::alloc(),
-        NSRect::ZERO,
-        opts,
-        Some(&view),
-        None,
-      )
-    };
-    view.addTrackingArea(&area);
+    let cursors = NSTrackingAreaOptions::CursorUpdate
+      | NSTrackingAreaOptions::ActiveInActiveApp
+      | NSTrackingAreaOptions::InVisibleRect;
+    for opts in [opts, cursors] {
+      let area = unsafe {
+        NSTrackingArea::initWithRect_options_owner_userInfo(
+          NSTrackingArea::alloc(),
+          NSRect::ZERO,
+          opts,
+          Some(&view),
+          None,
+        )
+      };
+      view.addTrackingArea(&area);
+    }
 
     let link = view.display_link();
 
@@ -417,10 +425,11 @@ impl View {
     self.ivars().cmd_key.set(false);
   }
 
-  /// Shows the runtime's cursor when it changed and the pointer is in the view.
+  /// Shows the runtime's cursor when the pointer is in the view and it isn't the one shown: one
+  /// asked for while the pointer was outside shows as it comes in.
   fn sync_cursor(&self, st: &State) {
-    let c = st.rt.cursor();
-    if c != self.ivars().cursor.replace(c) && st.rt.mouse.is_some() {
+    let want = st.rt.mouse.map(|_| st.rt.cursor());
+    if let Some(c) = cursor_change(self.ivars().cursor.replace(want), want) {
       ns_cursor(c).set();
     }
   }
@@ -547,6 +556,12 @@ fn key_event(event: &NSEvent) -> KeyEvent {
   KeyEvent { key, text, code, mods, repeat: event.isARepeat() }
 }
 
+/// The cursor to set, going from the one shown in the view to the one wanted there (none: the
+/// pointer is outside).
+fn cursor_change(shown: Option<Cursor>, want: Option<Cursor>) -> Option<Cursor> {
+  want.filter(|_| want != shown)
+}
+
 /// The system cursor for ours.
 fn ns_cursor(c: Cursor) -> Retained<NSCursor> {
   match c {
@@ -562,5 +577,22 @@ fn ns_cursor(c: Cursor) -> Retained<NSCursor> {
     Cursor::Grab => NSCursor::openHandCursor(),
     Cursor::Grabbing => NSCursor::closedHandCursor(),
     Cursor::NotAllowed => NSCursor::operationNotAllowedCursor(),
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  /// A crosshair asked for while the pointer is outside: set as it comes in, not again while it
+  /// stays, and again after it left and came back.
+  #[test]
+  fn a_cursor_asked_for_outside_shows_as_the_pointer_enters() {
+    let cross = Some(Cursor::Crosshair);
+    assert_eq!(cursor_change(None, None), None);
+    assert_eq!(cursor_change(None, cross), cross);
+    assert_eq!(cursor_change(cross, cross), None);
+    assert_eq!(cursor_change(cross, None), None);
+    assert_eq!(cursor_change(cross, Some(Cursor::Arrow)), Some(Cursor::Arrow));
   }
 }
