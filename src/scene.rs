@@ -474,15 +474,30 @@ impl Frame<'_> {
 
   /// Draws `s` with its baseline at `y`; returns the advance width in points. Glyphs snap to
   /// the pixel grid vertically and to a quarter pixel horizontally; colour glyphs (emoji) to
-  /// whole pixels, drawn with `color`'s alpha only.
+  /// whole pixels, drawn with `color`'s alpha only. Glyphs wholly outside the frame and the
+  /// clip are skipped before they take an atlas slot (a long line scrolled sideways).
   pub fn text(&mut self, x: f32, y: f32, s: &str, font: Font, color: Color) -> f32 {
     let scale = self.scale;
     let line = self.text.layout(s, font);
     let baseline = (y * scale).round();
     // Rec. 709 luma of the sRGB colour: dark text gets the glyphs smoothed for light grounds.
     let dark = 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2] < 0.5;
+    // Ink is taken to stay within 2 em of the pen across and 3 em of the baseline: generous
+    // for any face, so a glyph is never dropped that would show.
+    let frame = Rect::new(0.0, 0.0, self.size.w, self.size.h);
+    let view = self.scene.clip().map_or(frame, |c| c.intersect(frame));
+    let em = font.size;
+    if y + 3.0 * em < view.y || y - 3.0 * em > view.y + view.h {
+      return line.width;
+    }
+
     for g in &line.glyphs {
-      let px = (x + g.x) * scale;
+      let pen = x + g.x;
+      if pen + 2.0 * em < view.x || pen - 2.0 * em > view.x + view.w {
+        continue;
+      }
+
+      let px = pen * scale;
       // Quarters right of the pixel the glyph starts in: left of the origin too.
       let subpixel = (((px - px.floor()) * 4.0) as u8).min(3);
       let Some(a) = self.text.glyph(g.face, g.id, subpixel, dark) else { continue };
@@ -527,6 +542,37 @@ mod tests {
     let (a, b) = (at(-0.125), at(0.375));
     assert_eq!(a.uv, b.uv);
     assert_eq!(b.rect.x - a.rect.x, 0.5);
+  }
+
+  #[test]
+  fn clipped_glyphs_take_no_atlas_slots() {
+    let (mut scene, mut text, mut images) =
+      (Scene::default(), TextSystem::new(1.0), Images::default());
+    let mut f = Frame {
+      size: Size::new(100.0, 50.0),
+      scale: 1.0,
+      mouse: None,
+      now: Duration::ZERO,
+      scene: &mut scene,
+      text: &mut text,
+      images: &mut images,
+      animate: false,
+    };
+    let font = Font::ui(13.0);
+    // A line scrolled far left: its hidden start takes no slots, its visible end does.
+    let s = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 OK";
+    let w = f.measure(s, font);
+    let width = f.text(60.0 - w, 20.0, s, font, [1.0; 4]);
+    assert_eq!(width, w, "the whole line's width");
+    let drawn = f.scene.layers()[0].glyphs.len();
+    assert!((1..=12).contains(&drawn), "{drawn} of {} glyphs", s.len());
+    assert_eq!(f.text.uploads().count(), drawn);
+    // Below the frame, and outside a clip: none.
+    f.text(0.0, 200.0, s, font, [1.0; 4]);
+    f.push_clip(Rect::new(0.0, 0.0, 10.0, 10.0));
+    f.text(40.0, 40.0, "Z", font, [1.0; 4]);
+    f.pop_clip();
+    assert_eq!(f.text.uploads().count(), 0);
   }
 
   #[test]
