@@ -3,7 +3,8 @@
 //! The platform seam: everything that depends on the OS, one module per OS, picked by
 //! `target_os` (no trait objects: one implementation per build). The rest of the crate (scene,
 //! the CPU renderer, the harness) is portable and reaches the OS only through the items below.
-//! `macos/` is AppKit, `windows/` Win32, `linux/` Wayland or X11 (picked at start).
+//! `macos/` is AppKit + CoreText, `windows/` Win32 + DirectWrite, `linux/` Wayland or X11 (picked
+//! at start) + fontconfig, FreeType and HarfBuzz (loaded at run time).
 //!
 //! What a platform module provides (the `use` below fails to build when one is missing):
 //!
@@ -35,13 +36,13 @@
 //!     the loop; no frames while the window is hidden (minimized, covered), one when it shows
 //!     again;
 //!   - scale: the backing scale factor, given to [crate::Runtime::resize] with the size before each
-//!     frame;
-//!   - present: [crate::Runtime::frame], then `cpu::Renderer::sync(&mut rt.images)` and the CPU
-//!     frame into the window: `prepare(scene, size, scale)`, `damage(&shown_tiles)`, `draw(scene,
-//!     px, stride, &rects)` into a buffer the OS shows, keeping `tiles()` with each buffer (macOS:
-//!     IOSurfaces as the layer's contents, `surface.rs`; Windows: a DIB section and BitBlt; Linux:
-//!     `wl_shm` buffers, on X11 a MIT-SHM segment). Draw synchronously during a live resize so the
-//!     content never stretches.
+//!     frame (a change refills the glyph atlas);
+//!   - present: [crate::Runtime::frame], then `cpu::Renderer::sync(&mut rt.text, &mut rt.images)`
+//!     and the CPU frame into the window: `prepare(scene, size, scale)`, `damage(&shown_tiles)`,
+//!     `draw(scene, px, stride, &rects)` into a buffer the OS shows, keeping `tiles()` with each
+//!     buffer (macOS: IOSurfaces as the layer's contents, `surface.rs`; Windows: a DIB section and
+//!     BitBlt; Linux: `wl_shm` buffers, on X11 a MIT-SHM segment). Draw synchronously during a live
+//!     resize so the content never stretches.
 //!   - appearance: send `Event::Appearance(appearance())` ([crate::Event::Appearance]) to the
 //!     runtime right after making it, before the first frame, and again whenever the OS's light or
 //!     dark setting or accent colour changes (macOS: `viewDidChangeEffectiveAppearance`,
@@ -58,6 +59,26 @@
 //!   a portal.
 //! - `pub fn perf_cores() -> Option<usize>`: the performance cores, to size the CPU renderer's
 //!   threads ([crate::cpu::pool]); `None` falls back to `available_parallelism` capped at 4.
+//! - `pub mod text`, the text backend under [crate::text] (its atlas and line cache are portable):
+//!   - `pub struct Face: Clone + PartialEq`: a font at a point size; equal faces are one.
+//!   - `pub fn face(font: Font) -> Face`: the system UI font or its monospaced one, at the size and
+//!     weight.
+//!   - `pub fn metrics(face: &Face) -> Metrics`: ascent, descent, leading in points.
+//!   - `pub fn is_color(face: &Face) -> bool`: colour glyphs (emoji), drawn as RGBA.
+//!   - `pub fn shape(face: &Face, s: &str, index: impl FnMut(Face) -> u16) -> Line`: shapes one
+//!     line with kerning, ligatures and font fallback; each run's face (after fallback) is given to
+//!     `index` for its number; glyph ids, pen x in points, and per glyph the byte offset in `s`
+//!     where its cluster starts; `width` the advance.
+//!   - `pub fn glyph_box(face: &Face, id: u16, scale: f32, subpixel: u8) -> Option<GlyphBox>`: the
+//!     pixel box of a glyph at `scale`, drawn `subpixel` quarters of a pixel right of the pen,
+//!     padded one pixel each side; `None` for no ink.
+//!   - `pub fn rasterize(face: &Face, id: u16, subpixel: u8, b: &GlyphBox, raster: Raster, color:
+//!     bool) -> Option<Vec<u8>>`: the glyph's pixels in that box, rows top-down: coverage (1 byte,
+//!     with `raster.smooth` / `raster.dark` where the OS smooths) or premultiplied sRGB RGBA for a
+//!     colour face.
+//!
+//!   Process-wide state (a DirectWrite factory, a FreeType library) lives in the backend:
+//!   [crate::text::TextSystem] is made often and must stay cheap.
 
 #[cfg(target_os = "macos")]
 mod macos;
@@ -80,8 +101,8 @@ compile_error!("nimbo runs on macOS, Windows and Linux");
 #[cfg(any(test, not(target_os = "macos")))]
 use std::time::{Duration, Instant};
 
-pub(crate) use imp::perf_cores;
 pub use imp::{appearance, run};
+pub(crate) use imp::{perf_cores, text};
 
 /// The points of `px` pixels at `scale`: the least that the renderer's pixels (`points × scale`,
 /// cut down: [crate::cpu::Renderer::pixel_size]) give back whole at a fractional scale, where
