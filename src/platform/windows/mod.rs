@@ -1,0 +1,480 @@
+// Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
+
+//! The Windows platform: one Win32 window, per-monitor DPI aware (v2), its frames drawn by the
+//! CPU renderer into a DIB section and copied to the window with BitBlt, only the tiles that
+//! changed ([Dib]). The message loop sleeps in MsgWaitForMultipleObjectsEx until input, a wake
+//! (the waker posts a message) or a high-resolution waitable timer: while the runtime animates,
+//! the next frame slot at the display's refresh rate. No frames while the window is minimized;
+//! one when it shows again. Then the performance cores.
+
+use std::cell::RefCell;
+use std::ptr::{null, null_mut};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use windows_sys::Win32::Foundation::{FILETIME, HANDLE, HWND, LPARAM, LRESULT, RECT, WPARAM};
+use windows_sys::Win32::Graphics::Gdi::*;
+use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::System::SystemInformation::{
+  GetLogicalProcessorInformationEx, GetSystemTimePreciseAsFileTime, RelationProcessorCore,
+  SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
+};
+use windows_sys::Win32::System::Threading::{
+  CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, CreateWaitableTimerExW, GetCurrentProcess,
+  GetProcessTimes, INFINITE, SetWaitableTimer, TIMER_ALL_ACCESS,
+};
+use windows_sys::Win32::UI::HiDpi::{
+  AdjustWindowRectExForDpi, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForSystem,
+  GetDpiForWindow, SetProcessDpiAwarenessContext,
+};
+use windows_sys::Win32::UI::WindowsAndMessaging::*;
+
+use crate::Config;
+use crate::app::{App, Clock, Runtime};
+use crate::cpu::Renderer;
+use crate::cpu::raster::IRect;
+use crate::scene::Size;
+
+/// Posted by the waker: something changed on another thread.
+const WM_WAKE: u32 = WM_APP + 1;
+/// Frames during a live resize or move, whose modal loop the message loop doesn't run.
+const TIMER_MODAL: usize = 1;
+
+fn wide(s: &str) -> Vec<u16> {
+  s.encode_utf16().chain([0]).collect()
+}
+
+// MARK: Present
+
+/// A top-down 32-bit DIB section the CPU renderer draws into, selected into a memory DC to copy
+/// from; it keeps the tile hashes of the frame it holds.
+struct Dib {
+  dc: HDC,
+  bmp: HBITMAP,
+  bits: *mut u32,
+  w: usize,
+  h: usize,
+  tiles: Vec<u64>,
+}
+
+impl Dib {
+  fn new(w: usize, h: usize) -> Option<Self> {
+    let mut info: BITMAPINFO = unsafe { std::mem::zeroed() };
+    info.bmiHeader = BITMAPINFOHEADER {
+      biSize: size_of::<BITMAPINFOHEADER>() as u32,
+      biWidth: w as i32,
+      biHeight: -(h as i32),
+      biPlanes: 1,
+      biBitCount: 32,
+      biCompression: BI_RGB,
+      ..unsafe { std::mem::zeroed() }
+    };
+    let mut bits = null_mut();
+    let bmp =
+      unsafe { CreateDIBSection(null_mut(), &info, DIB_RGB_COLORS, &mut bits, null_mut(), 0) };
+    if bmp.is_null() {
+      return None;
+    }
+
+    let dc = unsafe { CreateCompatibleDC(null_mut()) };
+    unsafe { SelectObject(dc, bmp) };
+    Some(Self { dc, bmp, bits: bits.cast(), w, h, tiles: Vec::new() })
+  }
+
+  fn pixels(&mut self) -> &mut [u32] {
+    // SAFETY: the section holds `w * h` pixels, written only through this borrow.
+    unsafe { std::slice::from_raw_parts_mut(self.bits, self.w * self.h) }
+  }
+
+  fn blit(&self, dst: HDC, r: IRect) {
+    let (w, h) = (r.x1 - r.x0, r.y1 - r.y0);
+    unsafe { BitBlt(dst, r.x0, r.y0, w, h, self.dc, r.x0, r.y0, SRCCOPY) };
+  }
+}
+
+impl Drop for Dib {
+  fn drop(&mut self) {
+    unsafe {
+      DeleteDC(self.dc);
+      DeleteObject(self.bmp);
+    }
+  }
+}
+
+// MARK: Window
+
+struct Window {
+  hwnd: HWND,
+  rt: Runtime<Box<dyn App>>,
+  renderer: Renderer,
+  dib: Option<Dib>,
+  scale: f32,
+  /// Minimized: frames wait until it shows again.
+  hidden: bool,
+  /// When the last frame was drawn: while animating, frames come a refresh apart.
+  last: Option<Instant>,
+  refresh: Duration,
+  /// Logs each presented frame (`NIMBO_TRACE`): `nimbo: presented <unix ms>` on stderr, and the
+  /// first one's time since the process started.
+  trace: bool,
+  frames: u64,
+  /// The least content size in points ([Config::min]) and the window's style, for
+  /// WM_GETMINMAXINFO.
+  min: Size,
+  style: WINDOW_STYLE,
+}
+
+thread_local! {
+  static WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
+}
+
+/// Runs `f` on the window, unless a call up the stack has it (a message sent while handling
+/// another) or it is gone.
+fn with<R>(f: impl FnOnce(&mut Window) -> R) -> Option<R> {
+  WINDOW.with(|w| w.try_borrow_mut().ok()?.as_mut().map(f))
+}
+
+impl Window {
+  /// The client area in pixels.
+  fn client(&self) -> (i32, i32) {
+    let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    unsafe { GetClientRect(self.hwnd, &mut r) };
+    (r.right - r.left, r.bottom - r.top)
+  }
+
+  /// Builds a frame at the window's size and scale and presents it.
+  fn render(&mut self) {
+    let (w, h) = self.client();
+    if w <= 0 || h <= 0 {
+      return;
+    }
+
+    let size = Size::new(w as f32 / self.scale, h as f32 / self.scale);
+    self.rt.resize(size, self.scale);
+    self.rt.frame();
+    self.last = Some(Instant::now());
+    let r = &mut self.renderer;
+    r.sync(&mut self.rt.images);
+    r.prepare(&self.rt.scene, size, self.scale);
+    let (pw, ph) = r.size();
+    if self.dib.as_ref().is_none_or(|d| (d.w, d.h) != (pw, ph)) {
+      self.dib = Dib::new(pw, ph);
+    }
+    let Some(dib) = &mut self.dib else { return };
+    let rects = r.damage(&dib.tiles);
+    if rects.is_empty() {
+      return;
+    }
+
+    r.draw(&self.rt.scene, dib.pixels(), pw, &rects);
+    dib.tiles.clear();
+    dib.tiles.extend_from_slice(r.tiles());
+    let dc = unsafe { GetDC(self.hwnd) };
+    for &rect in &rects {
+      dib.blit(dc, rect);
+    }
+    unsafe { ReleaseDC(self.hwnd, dc) };
+    self.frames += 1;
+    if self.trace {
+      let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+      eprintln!("nimbo: presented {:.3}", t.as_secs_f64() * 1e3);
+      if self.frames == 1 {
+        eprintln!("nimbo: first frame {:.1} ms after start", since_start());
+      }
+    }
+  }
+
+  /// Draws a frame if one is due; returns how long the loop may sleep (`None`: until a
+  /// message).
+  fn tick(&mut self) -> Option<Duration> {
+    if self.hidden {
+      return None;
+    }
+
+    if self.rt.needs_frame() {
+      let next = self.last.map(|t| t + self.refresh);
+      match next.and_then(|t| t.checked_duration_since(Instant::now())) {
+        Some(left) if !left.is_zero() => return Some(left),
+        _ => self.render(),
+      }
+    }
+    self.rt.needs_frame().then_some(self.refresh)
+  }
+}
+
+/// Milliseconds since the process was created, loader time included.
+fn since_start() -> f64 {
+  let z = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+  let (mut created, mut e, mut k, mut u, mut now) = (z, z, z, z, z);
+  unsafe {
+    GetProcessTimes(GetCurrentProcess(), &mut created, &mut e, &mut k, &mut u);
+    GetSystemTimePreciseAsFileTime(&mut now);
+  }
+  let t = |f: FILETIME| (f.dwHighDateTime as u64) << 32 | f.dwLowDateTime as u64;
+  t(now).saturating_sub(t(created)) as f64 / 1e4
+}
+
+/// The refresh interval of the window's display, 60 Hz when unknown.
+fn refresh(hwnd: HWND) -> Duration {
+  let dc = unsafe { GetDC(hwnd) };
+  let hz = unsafe { GetDeviceCaps(dc, VREFRESH as i32) };
+  unsafe { ReleaseDC(hwnd, dc) };
+  let hz = if hz > 1 { hz.min(240) } else { 60 };
+  Duration::from_secs_f64(1.0 / hz as f64)
+}
+
+unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+  let def = || unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
+  match msg {
+    WM_WAKE => {
+      with(|w| w.rt.redraw());
+      0
+    }
+    WM_PAINT => {
+      // Shows the frame held; the loop draws a new one when the runtime needs it.
+      let mut ps: PAINTSTRUCT = unsafe { std::mem::zeroed() };
+      let dc = unsafe { BeginPaint(hwnd, &mut ps) };
+      let shown = with(|w| {
+        let dib = w.dib.as_ref()?;
+        dib.blit(dc, IRect::new(0, 0, dib.w as i32, dib.h as i32));
+        Some(())
+      });
+      if shown.flatten().is_none() {
+        with(|w| w.rt.redraw());
+      }
+      unsafe { EndPaint(hwnd, &ps) };
+      0
+    }
+    WM_PRINTCLIENT => {
+      // PrintWindow: the frame held, into its DC.
+      with(|w| {
+        if let Some(dib) = &w.dib {
+          dib.blit(wp as HDC, IRect::new(0, 0, dib.w as i32, dib.h as i32));
+        }
+      });
+      0
+    }
+    WM_ERASEBKGND => 1,
+    WM_GETMINMAXINFO => {
+      // The least window size: the content's at the window's DPI, plus the frame. Sent before
+      // the window is stored too, when it has none yet.
+      let Some((min, style)) = with(|w| (w.min, w.style)) else { return def() };
+      let dpi = unsafe { GetDpiForWindow(hwnd) };
+      let k = dpi as f32 / 96.0;
+      let (w, h) = ((min.w * k).ceil() as i32, (min.h * k).ceil() as i32);
+      let mut rc = RECT { left: 0, top: 0, right: w, bottom: h };
+      unsafe { AdjustWindowRectExForDpi(&mut rc, style, 0, 0, dpi) };
+      // SAFETY: lParam points to the MINMAXINFO to fill.
+      let info = unsafe { &mut *(lp as *mut MINMAXINFO) };
+      info.ptMinTrackSize.x = rc.right - rc.left;
+      info.ptMinTrackSize.y = rc.bottom - rc.top;
+      0
+    }
+    WM_SIZE => {
+      let minimized = wp == SIZE_MINIMIZED as usize;
+      with(|w| {
+        let shown = w.hidden && !minimized;
+        w.hidden = minimized;
+        if shown {
+          w.rt.redraw();
+        }
+        // Draw right away, so a live resize never shows a stretched or stale frame.
+        if !minimized {
+          w.render();
+        }
+      });
+      0
+    }
+    WM_DPICHANGED => {
+      let dpi = (wp & 0xFFFF) as f32;
+      with(|w| w.scale = dpi / 96.0);
+      // SAFETY: lParam is the suggested window rect.
+      let r = unsafe { &*(lp as *const RECT) };
+      let flags = SWP_NOZORDER | SWP_NOACTIVATE;
+      let (x, y, cx, cy) = (r.left, r.top, r.right - r.left, r.bottom - r.top);
+      unsafe { SetWindowPos(hwnd, null_mut(), x, y, cx, cy, flags) };
+      0
+    }
+    WM_ENTERSIZEMOVE => {
+      let ms = with(|w| w.refresh.as_millis() as u32).unwrap_or(16);
+      unsafe { SetTimer(hwnd, TIMER_MODAL, ms.max(1), None) };
+      0
+    }
+    WM_EXITSIZEMOVE => {
+      unsafe { KillTimer(hwnd, TIMER_MODAL) };
+      0
+    }
+    WM_TIMER if wp == TIMER_MODAL => {
+      with(|w| {
+        if w.rt.needs_frame() {
+          w.render();
+        }
+      });
+      0
+    }
+    WM_DESTROY => {
+      unsafe { PostQuitMessage(0) };
+      0
+    }
+    _ => def(),
+  }
+}
+
+/// Opens the app's window and runs the Win32 message loop until it closes or the app quits.
+pub fn run(cfg: &Config, app: Box<dyn App>) {
+  unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
+  let hinstance = unsafe { GetModuleHandleW(null()) };
+  let class = wide("nimbo");
+  let wc = WNDCLASSW {
+    lpfnWndProc: Some(wndproc),
+    hInstance: hinstance,
+    hCursor: unsafe { LoadCursorW(null_mut(), IDC_ARROW) },
+    lpszClassName: class.as_ptr(),
+    ..unsafe { std::mem::zeroed() }
+  };
+  unsafe { RegisterClassW(&wc) };
+
+  // The content area at the system DPI, centred on the primary screen; a window on another
+  // monitor gets WM_DPICHANGED.
+  let style = match cfg.resizable {
+    true => WS_OVERLAPPEDWINDOW,
+    false => WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+  };
+  let dpi = unsafe { GetDpiForSystem() };
+  let scale = dpi as f32 / 96.0;
+  let (w, h) = ((cfg.size.w * scale).round() as i32, (cfg.size.h * scale).round() as i32);
+  let mut rc = RECT { left: 0, top: 0, right: w, bottom: h };
+  unsafe { AdjustWindowRectExForDpi(&mut rc, style, 0, 0, dpi) };
+  let (ww, wh) = (rc.right - rc.left, rc.bottom - rc.top);
+  let (sw, sh) = unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) };
+  let (x, y) = (((sw - ww) / 2).max(0), ((sh - wh) / 2).max(0));
+  let title = wide(cfg.title);
+  let hwnd = unsafe {
+    CreateWindowExW(
+      0,
+      class.as_ptr(),
+      title.as_ptr(),
+      style,
+      x,
+      y,
+      ww,
+      wh,
+      null_mut(),
+      null_mut(),
+      hinstance,
+      null(),
+    )
+  };
+  assert!(!hwnd.is_null(), "nimbo: CreateWindowExW failed");
+
+  let scale = unsafe { GetDpiForWindow(hwnd) } as f32 / 96.0;
+  let rt = Runtime::new(app, cfg.size, scale, Clock::real());
+  // A wake from any thread posts a message; the window handle crosses threads as a number.
+  let target = hwnd as isize;
+  rt.waker().set_notify(Box::new(move || unsafe {
+    PostMessageW(target as HWND, WM_WAKE, 0, 0);
+  }));
+  let window = Window {
+    hwnd,
+    rt,
+    renderer: Renderer::new(),
+    dib: None,
+    scale,
+    hidden: false,
+    last: None,
+    refresh: refresh(hwnd),
+    trace: std::env::var_os("NIMBO_TRACE").is_some(),
+    frames: 0,
+    min: cfg.min(),
+    style,
+  };
+  WINDOW.with(|w| *w.borrow_mut() = Some(window));
+  unsafe { ShowWindow(hwnd, SW_SHOW) };
+
+  let flags = CREATE_WAITABLE_TIMER_HIGH_RESOLUTION;
+  let timer = unsafe { CreateWaitableTimerExW(null(), null(), flags, TIMER_ALL_ACCESS) };
+  run_loop(hwnd, timer);
+  WINDOW.with(|w| w.borrow_mut().take());
+}
+
+/// Handles messages until WM_QUIT; between them draws the frames due and sleeps until the next
+/// message, wake or timer.
+fn run_loop(hwnd: HWND, timer: HANDLE) {
+  let mut msg: MSG = unsafe { std::mem::zeroed() };
+  loop {
+    while unsafe { PeekMessageW(&mut msg, null_mut(), 0, 0, PM_REMOVE) } != 0 {
+      if msg.message == WM_QUIT {
+        return;
+      }
+      unsafe {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+      }
+    }
+    if with(|w| w.rt.quit_requested()).unwrap_or(true) {
+      unsafe { DestroyWindow(hwnd) };
+      continue;
+    }
+
+    let wait = with(|w| w.tick()).flatten();
+    let n = match wait {
+      // Relative due times are negative, in 100 ns units.
+      Some(d) if !timer.is_null() => {
+        let due = -((d.as_nanos() / 100).max(1) as i64);
+        unsafe { SetWaitableTimer(timer, &due, 0, None, null(), 0) };
+        1
+      }
+      _ => 0,
+    };
+    let ms = match (wait, n) {
+      (Some(d), 0) => d.as_millis().max(1) as u32,
+      _ => INFINITE,
+    };
+    unsafe { MsgWaitForMultipleObjectsEx(n, &timer, ms, QS_ALLINPUT, MWMO_INPUTAVAILABLE) };
+  }
+}
+
+// MARK: System
+
+/// The cores of the highest efficiency class (a hybrid CPU's performance cores, every core of
+/// another), at most 4: past that, more threads cost CPU time for little wall time
+/// (as measured on a hybrid CPU).
+pub fn perf_cores() -> Option<usize> {
+  let mut len = 0u32;
+  unsafe { GetLogicalProcessorInformationEx(RelationProcessorCore, null_mut(), &mut len) };
+  let mut buf = vec![0u64; (len as usize).div_ceil(8)];
+  let p = buf.as_mut_ptr().cast::<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>();
+  if unsafe { GetLogicalProcessorInformationEx(RelationProcessorCore, p, &mut len) } == 0 {
+    return None;
+  }
+
+  // Variable-sized records, each `Size` bytes.
+  let mut classes = Vec::new();
+  let mut at = 0;
+  while at < len as usize {
+    // SAFETY: a record starts at `at` within the `len` bytes the call filled.
+    let rec = unsafe {
+      &*buf.as_ptr().cast::<u8>().add(at).cast::<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>()
+    };
+    classes.push(unsafe { rec.Anonymous.Processor.EfficiencyClass });
+    at += rec.Size.max(1) as usize;
+  }
+  let top = *classes.iter().max()?;
+  Some(classes.iter().filter(|&&c| c == top).count().min(4))
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn perf_cores_are_found() {
+    assert!(perf_cores().is_some_and(|n| (1..=4).contains(&n)));
+  }
+
+  #[test]
+  fn dib_holds_pixels() {
+    let mut d = Dib::new(3, 2).unwrap();
+    d.pixels().fill(0xff00ff00);
+    assert_eq!(d.pixels().len(), 6);
+  }
+}
