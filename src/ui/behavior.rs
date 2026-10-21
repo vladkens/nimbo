@@ -117,7 +117,7 @@ mod tests {
   use std::time::Duration;
 
   use super::*;
-  use crate::app::{App, Mods};
+  use crate::app::{App, Cx, Event, Mods};
   use crate::harness::Harness;
   use crate::scene::{Color, Quad, Size};
   use crate::ui::px;
@@ -188,6 +188,41 @@ mod tests {
     assert_eq!(h.app().plays, 3);
     h.key(Key::Tab, Mods::NONE);
     assert_eq!(h.focused(), None);
+  }
+
+  /// A button, and a timer a second away that the app sets on T.
+  struct Alarm;
+
+  impl App for Alarm {
+    fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
+      let Event::KeyDown(k) = ev else { return false };
+      if k.key != Key::Char('t') {
+        return false;
+      }
+
+      cx.after(Duration::from_secs(1));
+      true
+    }
+
+    fn view(&mut self, ui: &mut Ui) {
+      let b = ui.button_behavior(Id::of("ok"));
+      ui.with_id(b.id).el(b.style(Style::new().w(px(20.0)).h(px(20.0))));
+    }
+  }
+
+  #[test]
+  fn a_flash_keeps_the_apps_timer() {
+    let mut h = Harness::new(Alarm, Size::new(100.0, 100.0), 1.0);
+    h.frame();
+    h.key(Key::Tab, Mods::NONE);
+    h.key(Key::Char('t'), Mods::NONE);
+    h.key(Key::Char(' '), Mods::NONE);
+    // The flash's frame comes first, then the timer's, which it did not replace.
+    assert_eq!(h.rt.due_in(), Some(Duration::from_millis(120)));
+    h.wait(Duration::from_millis(200));
+    assert_eq!(h.rt.due_in(), Some(Duration::from_millis(800)));
+    assert!(h.wait(Duration::from_millis(800)) > 0);
+    assert!(!h.rt.needs_frame() && h.rt.due_in().is_none());
   }
 
   /// A disabled control whose own style asks for focus, then an enabled one.
