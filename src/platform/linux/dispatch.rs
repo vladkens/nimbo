@@ -330,8 +330,8 @@ impl Dispatch<WlPointer, ()> for Win {
         win.axes.any = true;
       }
       wl_pointer::Event::AxisSource { axis_source: WEnum::Value(s) } => win.axes.source = Some(s),
-      wl_pointer::Event::AxisStop { .. } => {
-        win.axes.stop = true;
+      wl_pointer::Event::AxisStop { axis: WEnum::Value(axis), .. } => {
+        win.axes.stop[(axis as usize).min(1)] = true;
         win.axes.any = true;
       }
       wl_pointer::Event::AxisDiscrete { axis: WEnum::Value(axis), discrete } => {
@@ -365,8 +365,10 @@ impl Dispatch<ZwpPointerGesturePinchV1, ()> for Win {
         win.pinch_scale = 1.0;
         (0.0, Phase::Began)
       }
+      // The scale is the gesture's since it began; the delta is the change since the last
+      // update, as a fraction of it (×1.5 then ×2 is +50%, then +33%).
       zwp_pointer_gesture_pinch_v1::Event::Update { scale, .. } => {
-        let d = scale - win.pinch_scale;
+        let d = if win.pinch_scale > 0.0 { scale / win.pinch_scale - 1.0 } else { 0.0 };
         win.pinch_scale = scale;
         (d as f32, Phase::Changed)
       }
@@ -424,7 +426,13 @@ impl Dispatch<WlKeyboard, ()> for Win {
         // The modifier keys that changed them come after.
         win.modifier_keys();
       }
-      wl_keyboard::Event::RepeatInfo { rate, delay } => win.repeat_info = (rate, delay),
+      wl_keyboard::Event::RepeatInfo { rate, delay } => {
+        win.repeat_info = (rate, delay);
+        // A rate of 0 turns repeat off, for the key held now too.
+        if rate <= 0 {
+          win.repeat = None;
+        }
+      }
       _ => {}
     }
   }

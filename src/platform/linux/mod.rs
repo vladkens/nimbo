@@ -167,8 +167,41 @@ struct Axes {
   value: [f64; 2],
   /// Wheel clicks in 120ths (`axis_value120`, or `axis_discrete` × 120).
   v120: [i32; 2],
-  stop: bool,
+  /// The axes that stopped (`axis_stop`).
+  stop: [bool; 2],
   any: bool,
+}
+
+impl Axes {
+  /// Whether this frame is a touchpad's (a finger, or continuous), and its phase, given the
+  /// axes a finger scroll moves (`scrolling`), which it updates; `None` when it has nothing to
+  /// report. A frame with no source (an `axis_stop` alone) goes on with the scroll under way;
+  /// the scroll ends when every axis it moved stopped, not the first.
+  fn phase(&self, scrolling: &mut [bool; 2]) -> Option<(bool, Phase)> {
+    let was = scrolling.contains(&true);
+    let precise = match self.source {
+      Some(s) => matches!(s, AxisSource::Finger | AxisSource::Continuous),
+      None => was,
+    };
+
+    if !precise {
+      *scrolling = [false; 2];
+      return Some((false, Phase::None));
+    }
+
+    for (i, on) in scrolling.iter_mut().enumerate() {
+      *on = (*on || self.value[i] != 0.0) && !self.stop[i];
+    }
+
+    let phase = match (was, scrolling.contains(&true)) {
+      (false, true) => Phase::Began,
+      (true, true) => Phase::Changed,
+      (true, false) => Phase::Ended,
+      (false, false) => return None,
+    };
+
+    Some((true, phase))
+  }
 }
 
 pub struct Win {
@@ -222,8 +255,8 @@ pub struct Win {
   mouse: Point,
   last_click: Option<(MouseButton, Instant, Point, u32)>,
   axes: Axes,
-  /// A finger scroll is in progress: the next one continues it.
-  scrolling: bool,
+  /// The axes a finger scroll in progress moves: the next frame continues it.
+  scrolling: [bool; 2],
 
   kb: Option<Keyboard>,
   mods: Mods,
@@ -345,7 +378,7 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
     mouse: Point::new(0.0, 0.0),
     last_click: None,
     axes: Axes::default(),
-    scrolling: false,
+    scrolling: [false; 2],
     kb: None,
     mods: Mods::NONE,
     repeat_info: (25, 600),
@@ -660,12 +693,7 @@ impl Win {
       return;
     }
 
-    // A frame with no source (an `axis_stop` alone) goes on with the finger scroll under way.
-    let precise = match a.source {
-      Some(s) => matches!(s, AxisSource::Finger | AxisSource::Continuous),
-      None => self.scrolling,
-    };
-
+    let Some((precise, phase)) = a.phase(&mut self.scrolling) else { return };
     let (pos, mods) = (self.mouse, self.mods);
     let delta = match precise {
       true => Point::new(-a.value[1] as f32, -a.value[0] as f32),
@@ -679,14 +707,6 @@ impl Win {
       }
     };
 
-    let phase = match (precise, a.stop, self.scrolling) {
-      (false, _, _) => Phase::None,
-      (true, true, _) => Phase::Ended,
-      (true, false, false) => Phase::Began,
-      (true, false, true) => Phase::Changed,
-    };
-
-    self.scrolling = precise && !a.stop;
     self.send(Event::Scroll { pos, delta, precise, phase, momentum: Phase::None, mods });
   }
 }
@@ -776,6 +796,28 @@ mod tests {
     assert!(!backed_up(Ok(())).unwrap());
     assert!(backed_up(err(std::io::ErrorKind::WouldBlock)).unwrap());
     assert!(backed_up(err(std::io::ErrorKind::BrokenPipe)).is_err());
+  }
+
+  #[test]
+  fn a_finger_scroll_ends_when_every_axis_stops() {
+    let finger = Some(AxisSource::Finger);
+    let frame =
+      |source, value: [f64; 2], stop| Axes { source, value, stop, any: true, ..Default::default() };
+    let mut on = [false; 2];
+    // Diagonal, then the vertical axis stops while the horizontal goes on, then that stops too.
+    assert_eq!(frame(finger, [1.0, 1.0], [false; 2]).phase(&mut on), Some((true, Phase::Began)));
+    assert_eq!(
+      frame(finger, [0.0, 2.0], [true, false]).phase(&mut on),
+      Some((true, Phase::Changed))
+    );
+    assert_eq!(on, [false, true]);
+    // A stop with no source still ends the touchpad's scroll.
+    assert_eq!(frame(None, [0.0; 2], [false, true]).phase(&mut on), Some((true, Phase::Ended)));
+    assert_eq!(on, [false; 2]);
+    // A wheel: no phases.
+    let wheel = Some(AxisSource::Wheel);
+    assert_eq!(frame(wheel, [10.0, 0.0], [false; 2]).phase(&mut on), Some((false, Phase::None)));
+    assert_eq!(frame(None, [0.0; 2], [false; 2]).phase(&mut on), Some((false, Phase::None)));
   }
 
   #[test]
