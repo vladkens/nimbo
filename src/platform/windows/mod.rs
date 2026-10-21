@@ -208,6 +208,8 @@ impl Window {
     let size = Size::new(points(w as u32, self.scale), points(h as u32, self.scale));
     self.rt.resize(size, self.scale);
     self.rt.frame();
+    // The new tree's element under the pointer may want another cursor.
+    self.sync_cursor(false);
     let r = &mut self.renderer;
     r.sync(&mut self.rt.text, &mut self.rt.images);
     r.prepare(&self.rt.scene, size, self.scale);
