@@ -124,8 +124,8 @@ struct Win {
   /// XKB's event code, for its keymap events (the keymap is read again after a batch of them)
   /// and state events, which keep the modifiers once they come ([Keyboard::state_notify]).
   xkb_event: Option<u8>,
-  /// The keyboard state was made from a key event's core state (a new keymap): the next key
-  /// sets it from its own until the server's state events follow.
+  /// The keyboard state wasn't read from the server (a keymap from the rules names): events'
+  /// core states set it until the server's state events follow.
   kb_fresh: bool,
   /// Modifier keys that went down or up, held for the state event the server sends after
   /// them: [Event::Modifier] comes after the [Event::Mods] it changed.
@@ -612,6 +612,10 @@ impl Win {
       eprintln!("nimbo: no keyboard: libxkbcommon.so.0 is missing or has no keymap");
     }
 
+    // Modifiers held as the window opened.
+    self.kb_fresh = !self.kb.as_ref().is_some_and(|kb| kb.from_server);
+    self.sync_mods();
+
     self.detectable = Keyboard::detectable_repeat(x);
     let ev = self.x.extension_event("XKEYBOARD");
     self.xkb_event = ev.filter(|_| Keyboard::select_events(x));
@@ -630,10 +634,10 @@ impl Win {
   }
 
   /// An event's modifiers and group, as the state before it: the keyboard's state, unless
-  /// the server's state events keep it.
+  /// the server's state events keep it (or its state came from the server).
   fn core_state(&mut self, state: u16) {
     if let Some(kb) = &mut self.kb
-      && self.xkb_event.is_none()
+      && (self.kb_fresh || self.xkb_event.is_none())
     {
       kb.set_core_state(state);
     }
@@ -662,8 +666,9 @@ impl Win {
     if std::mem::take(&mut self.reload_keymap)
       && let Some(kb) = keyboard(&self.x, self.root, self.atoms.rules)
     {
+      self.kb_fresh = !kb.from_server;
       self.kb = Some(kb);
-      self.kb_fresh = true;
+      self.sync_mods();
     }
   }
 

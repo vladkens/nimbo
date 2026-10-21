@@ -51,6 +51,7 @@ fns!(XkbX11 {
     minor_out: *mut u16, base_event: *mut u8, base_error: *mut u8) -> c_int;
   fn xkb_x11_get_core_keyboard_device_id(c: P) -> i32;
   fn xkb_x11_keymap_new_from_device(ctx: P, c: P, device: i32, flags: c_int) -> P;
+  fn xkb_x11_state_new_from_device(keymap: P, c: P, device: i32) -> P;
 });
 
 // libxcb-xkb: XkbUseExtension without libxkbcommon-x11, so core events carry the group, and
@@ -128,6 +129,8 @@ pub struct Keyboard {
   keymap: P,
   state: P,
   compose: Option<(P, P)>,
+  /// The state was read from the X server: the modifiers and group held as it was made.
+  pub from_server: bool,
 }
 
 impl Drop for Keyboard {
@@ -168,8 +171,9 @@ impl Keyboard {
   }
 
   /// The X server's keymap of the core keyboard (an XCB connection `c`), through
-  /// libxkbcommon-x11. It sets the XKB extension up for the connection, so core events carry
-  /// the layout group ([Keyboard::set_core_state]). `None` without the library.
+  /// libxkbcommon-x11, and its state now: a modifier held as the window opens is down. It sets
+  /// the XKB extension up for the connection, so core events carry the layout group
+  /// ([Keyboard::set_core_state]). `None` without the library.
   pub fn from_x11(c: P) -> Option<Self> {
     let f = sys_x11().0.as_ref()?;
     let (mut major, mut minor, mut event, mut error) = (0, 0, 0, 0);
@@ -185,7 +189,17 @@ impl Keyboard {
       return None;
     }
 
-    Self::new(|_, ctx| unsafe { (f.xkb_x11_keymap_new_from_device)(ctx, c, device, 0) })
+    let mut kb =
+      Self::new(|_, ctx| unsafe { (f.xkb_x11_keymap_new_from_device)(ctx, c, device, 0) })?;
+    let state = unsafe { (f.xkb_x11_state_new_from_device)(kb.keymap, c, device) };
+    if let Some(s) = sys()
+      && !state.is_null()
+    {
+      unsafe { (s.f.xkb_state_unref)(kb.state) };
+      (kb.state, kb.from_server) = (state, true);
+    }
+
+    Some(kb)
   }
 
   /// Whether libxkbcommon-x11 is there, so [Keyboard::from_x11] reads the server's keymap.
@@ -227,7 +241,7 @@ impl Keyboard {
       let st = unsafe { (s.f.xkb_compose_state_new)(table, 0) };
       (!st.is_null()).then_some((table, st))
     });
-    Some(Self { ctx, keymap, state, compose })
+    Some(Self { ctx, keymap, state, compose, from_server: false })
   }
 
   /// `wl_keyboard.modifiers`.
