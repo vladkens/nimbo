@@ -1,17 +1,17 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! XCB, loaded at run time ([super::super::dl]): `libxcb.so.1` for the core protocol and
-//! `libxcb-shm.so.0` for MIT-SHM presents when it is there. The functions are declared by hand
-//! from `<xcb/xproto.h>` and `<xcb/shm.h>`; [X] wraps the few requests the window needs. Cookies
-//! are passed as `u32` (a struct of one `unsigned int`, the same in the x86_64 and aarch64 C
-//! ABIs).
+//! XCB, loaded at run time ([super::super::dl]): `libxcb.so.1` for the core protocol,
+//! `libxcb-shm.so.0` for MIT-SHM presents and `libxcb-cursor.so.0` for themed cursors when they
+//! are there. The functions are declared by hand from `<xcb/xproto.h>`, `<xcb/shm.h>` and
+//! `<xcb/xcb_cursor.h>`; [X] wraps the few requests the window needs. Cookies are passed as
+//! `u32` (a struct of one `unsigned int`, the same in the x86_64 and aarch64 C ABIs).
 
 // i386 returns even a one-field struct through a hidden pointer, so the `u32` cookies above
 // don't hold there. 32-bit Linux isn't built; x11rb replaces these declarations.
 #[cfg(target_arch = "x86")]
 compile_error!("the X11 backend's XCB declarations need a 64-bit target");
 
-use std::ffi::{c_char, c_int, c_void};
+use std::ffi::{CStr, c_char, c_int, c_void};
 use std::os::fd::{BorrowedFd, IntoRawFd, OwnedFd};
 use std::sync::OnceLock;
 
@@ -60,6 +60,9 @@ fns!(Xcb {
     left_pad: u8, depth: u8, len: u32, data: *const u8) -> u32;
   fn xcb_get_selection_owner(c: C, selection: u32) -> u32;
   fn xcb_get_selection_owner_reply(c: C, cookie: u32, e: E) -> *mut OwnerReply;
+  fn xcb_open_font(c: C, fid: u32, len: u16, name: *const c_char) -> u32;
+  fn xcb_create_glyph_cursor(c: C, cid: u32, source: u32, mask: u32, source_char: u16,
+    mask_char: u16, fr: u16, fg: u16, fb: u16, br: u16, bg: u16, bb: u16) -> u32;
 });
 
 fns!(XcbShm {
@@ -72,9 +75,16 @@ fns!(XcbShm {
     send_event: u8, seg: u32, offset: u32) -> u32;
 });
 
+fns!(XcbCursor {
+  fn xcb_cursor_context_new(c: C, screen: *mut Screen, ctx: *mut C) -> c_int;
+  fn xcb_cursor_load_cursor(ctx: C, name: *const c_char) -> u32;
+  fn xcb_cursor_context_free(ctx: C);
+});
+
 struct Libs {
   xcb: Xcb,
   shm: Option<XcbShm>,
+  cursor: Option<XcbCursor>,
 }
 
 fn libs() -> Option<&'static Libs> {
@@ -83,7 +93,8 @@ fn libs() -> Option<&'static Libs> {
     .get_or_init(|| {
       let xcb = Xcb::load(&Lib::open(&[c"libxcb.so.1"])?)?;
       let shm = Lib::open(&[c"libxcb-shm.so.0"]).and_then(|l| XcbShm::load(&l));
-      Some(Libs { xcb, shm })
+      let cursor = Lib::open(&[c"libxcb-cursor.so.0"]).and_then(|l| XcbCursor::load(&l));
+      Some(Libs { xcb, shm, cursor })
     })
     .as_ref()
 }
@@ -184,6 +195,13 @@ pub struct ShmVersionReply {
 }
 
 // Events, `<xcb/xproto.h>`: the response types and their layouts.
+pub const KEY_PRESS: u8 = 2;
+pub const KEY_RELEASE: u8 = 3;
+pub const BUTTON_PRESS: u8 = 4;
+pub const BUTTON_RELEASE: u8 = 5;
+pub const MOTION_NOTIFY: u8 = 6;
+pub const ENTER_NOTIFY: u8 = 7;
+pub const LEAVE_NOTIFY: u8 = 8;
 pub const FOCUS_IN: u8 = 9;
 pub const FOCUS_OUT: u8 = 10;
 pub const EXPOSE: u8 = 12;
@@ -194,6 +212,45 @@ pub const MAP_NOTIFY: u8 = 19;
 pub const CONFIGURE_NOTIFY: u8 = 22;
 pub const PROPERTY_NOTIFY: u8 = 28;
 pub const CLIENT_MESSAGE: u8 = 33;
+pub const MAPPING_NOTIFY: u8 = 34;
+
+/// Key, button and motion events.
+#[repr(C)]
+pub struct InputEv {
+  pub response_type: u8,
+  pub detail: u8,
+  pub sequence: u16,
+  pub time: u32,
+  pub root: u32,
+  pub event: u32,
+  pub child: u32,
+  pub root_x: i16,
+  pub root_y: i16,
+  pub event_x: i16,
+  pub event_y: i16,
+  pub state: u16,
+  pub same_screen: u8,
+  pad: u8,
+}
+
+/// Enter and leave.
+#[repr(C)]
+pub struct CrossingEv {
+  pub response_type: u8,
+  pub detail: u8,
+  pub sequence: u16,
+  pub time: u32,
+  pub root: u32,
+  pub event: u32,
+  pub child: u32,
+  pub root_x: i16,
+  pub root_y: i16,
+  pub event_x: i16,
+  pub event_y: i16,
+  pub state: u16,
+  pub mode: u8,
+  pub same_screen_focus: u8,
+}
 
 #[repr(C)]
 pub struct FocusEv {
@@ -295,7 +352,25 @@ pub struct ShmCompletionEv {
   pub offset: u32,
 }
 
+#[repr(C)]
+pub struct MappingEv {
+  pub response_type: u8,
+  pad: u8,
+  pub sequence: u16,
+  pub request: u8,
+  pub first_keycode: u8,
+  pub count: u8,
+  pad1: u8,
+}
+
 // Event masks, window attributes and the rest of the constants used.
+pub const EM_KEY_PRESS: u32 = 1;
+pub const EM_KEY_RELEASE: u32 = 2;
+pub const EM_BUTTON_PRESS: u32 = 4;
+pub const EM_BUTTON_RELEASE: u32 = 8;
+pub const EM_ENTER_WINDOW: u32 = 16;
+pub const EM_LEAVE_WINDOW: u32 = 32;
+pub const EM_POINTER_MOTION: u32 = 64;
 pub const EM_EXPOSURE: u32 = 32768;
 pub const EM_VISIBILITY_CHANGE: u32 = 65536;
 pub const EM_STRUCTURE_NOTIFY: u32 = 131072;
@@ -307,6 +382,7 @@ pub const EM_PROPERTY_CHANGE: u32 = 4194304;
 const CW_BACK_PIXMAP: u32 = 1;
 const CW_BIT_GRAVITY: u32 = 16;
 const CW_EVENT_MASK: u32 = 2048;
+const CW_CURSOR: u32 = 16384;
 const GRAVITY_NORTH_WEST: u32 = 1;
 const WINDOW_CLASS_INPUT_OUTPUT: u16 = 1;
 const PROP_MODE_REPLACE: u8 = 0;
@@ -405,6 +481,11 @@ impl X {
 
   pub fn disconnect(self) {
     unsafe { (self.l.xcb.xcb_disconnect)(self.c) };
+  }
+
+  /// The handle, for xkbcommon-x11.
+  pub fn raw(&self) -> *mut c_void {
+    self.c
   }
 
   pub fn has_error(&self) -> bool {
@@ -547,6 +628,10 @@ impl X {
     unsafe { (self.l.xcb.xcb_change_window_attributes)(self.c, w, CW_EVENT_MASK, &events) };
   }
 
+  pub fn set_cursor(&self, w: u32, cursor: u32) {
+    unsafe { (self.l.xcb.xcb_change_window_attributes)(self.c, w, CW_CURSOR, &cursor) };
+  }
+
   /// A graphics context for images, no GraphicsExpose events.
   pub fn create_gc(&self, drawable: u32) -> u32 {
     let id = self.id();
@@ -584,6 +669,34 @@ impl X {
     let k = unsafe { (f.xcb_get_selection_owner)(self.c, selection) };
     let r = unsafe { (f.xcb_get_selection_owner_reply)(self.c, k, std::ptr::null_mut()) };
     reply(r, |r| r.owner).unwrap_or(0)
+  }
+
+  // MARK: Cursors
+
+  /// A cursor of the core cursor font (`<X11/cursorfont.h>`), black on white.
+  pub fn font_cursor(&self, font: &mut u32, glyph: u16) -> u32 {
+    let f = &self.l.xcb;
+    if *font == 0 {
+      *font = self.id();
+      let name = "cursor";
+      unsafe { (f.xcb_open_font)(self.c, *font, name.len() as u16, name.as_ptr().cast()) };
+    }
+
+    let id = self.id();
+    let (s, m) = (*font, *font);
+    let w = u16::MAX;
+    unsafe { (f.xcb_create_glyph_cursor)(self.c, id, s, m, glyph, glyph + 1, 0, 0, 0, w, w, w) };
+    id
+  }
+
+  /// libxcb-cursor's context (the theme and size from `Xcursor.*` resources), if it is there.
+  pub fn cursor_context(&self, screen: *mut Screen) -> Option<CursorContext> {
+    let f = self.l.cursor.as_ref()?;
+    let mut ctx = std::ptr::null_mut();
+    match unsafe { (f.xcb_cursor_context_new)(self.c, screen, &mut ctx) } {
+      0 if !ctx.is_null() => Some(CursorContext { ctx, f }),
+      _ => None,
+    }
   }
 
   // MARK: MIT-SHM
@@ -653,5 +766,27 @@ impl X {
         0,
       )
     };
+  }
+}
+
+/// A themed cursor loader; cursors it made live as long as the connection.
+pub struct CursorContext {
+  ctx: C,
+  f: &'static XcbCursor,
+}
+
+impl CursorContext {
+  /// The theme's cursor of the first of `names` it has, or none.
+  pub fn load(&self, names: &[&CStr]) -> Option<u32> {
+    names.iter().find_map(|n| {
+      let id = unsafe { (self.f.xcb_cursor_load_cursor)(self.ctx, n.as_ptr()) };
+      (id != 0).then_some(id)
+    })
+  }
+}
+
+impl Drop for CursorContext {
+  fn drop(&mut self) {
+    unsafe { (self.f.xcb_cursor_context_free)(self.ctx) };
   }
 }
