@@ -140,7 +140,8 @@ fn check(h: &mut Harness<Text>, p: &Palette) {
     })
     .collect();
   let steps: Vec<f32> = rows.windows(2).map(|w| w[1] - w[0]).collect();
-  if std::ptr::eq(p, &LIGHT) || !cfg!(target_os = "windows") {
+  // By value: each `&LIGHT` of a const may be its own address.
+  if p.bg == LIGHT.bg || !cfg!(target_os = "windows") {
     assert!(steps.iter().all(|d| (0.1..0.4).contains(d)), "{steps:?}");
   }
 
