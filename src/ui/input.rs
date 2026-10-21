@@ -689,6 +689,29 @@ mod tests {
   }
 
   #[test]
+  fn a_grid_scrolls_sideways() {
+    let grid = |st| {
+      frame(st, |ui| {
+        ui.id("g").grid(1, Style::new().w(px(100.0)).h(px(50.0)).scroll_x(), |ui| {
+          ui.id("wide").el(Style::new().w(px(300.0)).h(px(20.0)));
+        });
+      })
+    };
+    let mut st = grid(UiState::default());
+    let g = st.scroll(Id::of("g")).unwrap();
+    assert_eq!((g.content.w, g.max().x), (300.0, 200.0));
+    // A wheel moves it, and the layout applies it; past the end clamped.
+    ev(&mut st, wheel(10.0, 10.0, -50.0, 0.0, true, Phase::None));
+    st = grid(st);
+    assert_eq!(st.scroll(Id::of("g")).unwrap().offset.x, 50.0);
+    assert_eq!(st.last.rect(Id::of("wide")).unwrap().x, -50.0);
+    st = frame(st, |ui| ui.scroll_to(Id::of("g"), Point::new(500.0, 0.0)));
+    st = grid(grid(st));
+    assert_eq!(st.scroll(Id::of("g")).unwrap().offset.x, 200.0);
+    assert_eq!(st.last.rect(Id::of("wide")).unwrap().x, -200.0);
+  }
+
+  #[test]
   fn an_emptied_list_scrolls_back_to_the_top() {
     let list = |n: usize| {
       move |st| {
