@@ -479,16 +479,20 @@ impl<A: App> Runtime<A> {
   }
 
   /// Feeds one event to the app, routed through the last frame's tree first; returns whether
-  /// it was used or changed what the view shows (and so redraws). A click runs the view once
-  /// at once, without drawing, so the app sees it before the next frame is built; so does a
-  /// key, text or command for the focused element (see [crate::keys] for their order).
+  /// it was used or, for the pointer, changed what the view shows. Either redraws, as does a
+  /// focus moved by it. A key that only moved the focus is unused: the platform's text input
+  /// still gets it (an app focusing a search field on the first letter typed). A click runs
+  /// the view once at once, without drawing, so the app sees it before the next frame is
+  /// built; so does a key, text or command for the focused element (see [crate::keys] for
+  /// their order).
   pub fn event(&mut self, ev: Event) -> bool {
     if let Event::Appearance(a) = ev {
       return self.appearance(a);
     }
 
-    let keys = matches!(ev, Event::Text(_) | Event::Command(_));
-    if keys || matches!(ev, Event::KeyDown(_) | Event::Modifier { .. }) {
+    let keys = matches!(ev, Event::KeyDown(_) | Event::Text(_) | Event::Command(_));
+    let keys = keys || matches!(ev, Event::Modifier { .. });
+    if keys {
       self.fresh();
     }
 
@@ -499,10 +503,10 @@ impl<A: App> Runtime<A> {
       ev => self.pointer(ev),
     };
 
-    let used = used | (self.ui.focus() != focus);
-    self.ask(used);
-    self.stale |= used;
-    used
+    let changed = used | (self.ui.focus() != focus);
+    self.ask(changed);
+    self.stale |= changed;
+    if keys { used } else { changed }
   }
 
   /// A new appearance: the theme follows (unless the app set one) and the app hears of it;
@@ -1280,6 +1284,40 @@ mod tests {
     assert_eq!(rt.ui.focus(), Some(Id::of("item")));
     assert!(rt.event(Event::Command(Command::InsertBacktab)));
     assert_eq!(rt.ui.focus(), Some(Id::of("item")));
+  }
+
+  /// An app that focuses its field on a letter and leaves the key unused.
+  #[derive(Default)]
+  struct Search;
+
+  impl App for Search {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.id("field").el(Style::new().w(px(20.0)).h(px(20.0)).focusable());
+    }
+
+    fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
+      if let Event::KeyDown(k) = ev
+        && k.is("a")
+      {
+        cx.focus(Some(Id::of("field")));
+      }
+
+      false
+    }
+  }
+
+  /// A key that only moved the focus is unused, so the platform's text input still types it;
+  /// the new focus draws.
+  #[test]
+  fn a_key_that_only_moves_focus_is_unused() {
+    let clock = Clock::Virtual(Duration::ZERO);
+    let size = Size::new(100.0, 100.0);
+    let mut rt = Runtime::new(Search, size, 1.0, clock, Box::new(MemClipboard::default()));
+    rt.frame();
+    let k = KeyEvent { key: Key::Char('a'), text: None, code: 0, mods: Mods::NONE, repeat: false };
+    assert!(!rt.event(Event::KeyDown(k)));
+    assert_eq!(rt.ui.focus(), Some(Id::of("field")));
+    assert!(rt.needs_frame());
   }
 
   /// A focusable item in a panel that binds keys only when the window is wide.
