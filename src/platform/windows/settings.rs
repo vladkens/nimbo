@@ -46,7 +46,7 @@ fn read(apps_light: Option<u32>, accent: Option<u32>) -> Appearance {
 }
 
 /// A DWORD value under HKCU; `None` when it or its key is missing.
-fn dword(key: &str, name: &str) -> Option<u32> {
+pub(super) fn dword(key: &str, name: &str) -> Option<u32> {
   let (key, name) = (wide(key), wide(name));
   let (mut v, mut size) = (0u32, size_of::<u32>() as u32);
   let p = (&raw mut v).cast();

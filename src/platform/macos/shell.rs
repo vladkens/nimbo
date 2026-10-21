@@ -1,21 +1,25 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The app on AppKit: NSApplication with a minimal app menu and its delegate, and the windows by
-//! id (an NSWindow each, its content our [View] with its own runtime, its own delegate).
+//! The app on AppKit: NSApplication with a minimal app menu and its delegate, the windows by id
+//! (an NSWindow each, its content our [View] with its own runtime, its own delegate), the
+//! activation policy that follows [Presence], and the main dispatch queue for [crate::Proxy].
 //!
-//! The app ends one of two ways. [quit] stops the loop and `run` returns. A quit asked by the
-//! system (the Dock's Quit, logout, Activity Monitor, AppleScript `quit`) comes as `terminate:`,
-//! which never returns to `run`: it asks `applicationShouldTerminate:`, which answers «later»,
-//! and spins the run loop in the modal panel mode, the main queue included, until
-//! `replyToApplicationShouldTerminate:`; a yes there ends the process. So the windows' close runs
-//! from that queue, then the reply.
+//! The app ends one of two ways, its quit hook ([Main::on_quit]) running in both. [quit] stops
+//! the loop and `run` returns. A quit asked by the system (the Dock's Quit, logout, Activity
+//! Monitor, AppleScript `quit`) comes as `terminate:`, which never returns to `run`: it asks
+//! `applicationShouldTerminate:`, which answers «later», and spins the run loop in the modal
+//! panel mode, the main queue included, until
+//! `replyToApplicationShouldTerminate:`; a yes there ends the process. So the hook and the
+//! windows' close run from that queue, then the reply.
 //!
 //! All of it is in a thread local of the main thread. No borrow of it is held while app code
-//! runs (a callback), so that code may open, close and front windows.
+//! runs (a callback, an app's `with`), so that code may open, close and front windows.
 
+use std::any::TypeId;
 use std::cell::{Cell, RefCell};
+use std::time::Duration;
 
-use dispatch2::{DispatchQueue, MainThreadBound};
+use dispatch2::{DispatchQueue, DispatchTime, MainThreadBound};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
@@ -33,15 +37,20 @@ use super::view::View;
 use super::{Pasteboard, appearance};
 use crate::Config;
 use crate::app::{App, Clock, Event, Runtime};
+use crate::shell::{AppInfo, Main, Presence};
 
-type OnClose = Box<dyn FnOnce()>;
+type OnMain = Box<dyn FnOnce(&mut Main)>;
+type OnReopen = Box<dyn FnMut(&mut Main)>;
 
 struct Win {
   id: u64,
+  ty: TypeId,
   window: Retained<NSWindow>,
   view: Retained<View>,
   _delegate: Retained<WindowDelegate>,
-  on_close: Option<OnClose>,
+  on_close: Option<OnMain>,
+  /// Shown at least once: it counts for the Dock while open.
+  shown: bool,
 }
 
 /// What a closed window leaves: let go after AppKit's call that closed it ([release]).
@@ -53,10 +62,13 @@ struct Gone {
 
 #[derive(Default)]
 struct Shell {
+  presence: Presence,
   windows: Vec<Win>,
   /// Closed windows not yet let go.
   gone: Vec<Gone>,
   next: u64,
+  reopen: Option<OnReopen>,
+  on_quit: Option<OnMain>,
   /// [quit] ran: the loop ends, or does not start.
   quitting: bool,
   /// The system asked to quit (`applicationShouldTerminate:` answered «later»): the process ends
@@ -74,6 +86,10 @@ fn shell<R>(f: impl FnOnce(&mut Shell) -> R) -> R {
 
 fn mtm() -> MainThreadMarker {
   MainThreadMarker::new().expect("nimbo: the app and its windows are main thread only")
+}
+
+pub fn is_main() -> bool {
+  MainThreadMarker::new().is_some()
 }
 
 // MARK: The app
@@ -113,6 +129,19 @@ define_class!(
     /// closes).
     #[unsafe(method(applicationShouldTerminateAfterLastWindowClosed:))]
     fn should_terminate_after_last(&self, _app: &NSApplication) -> bool {
+      false
+    }
+
+    /// Opened again while it runs: LaunchServices starts no second process but tells.
+    #[unsafe(method(applicationShouldHandleReopen:hasVisibleWindows:))]
+    fn should_handle_reopen(&self, _app: &NSApplication, _visible: bool) -> bool {
+      defer(|| {
+        let Some(mut f) = shell(|s| s.reopen.take()) else { return };
+        f(&mut Main::here());
+        shell(|s| {
+          s.reopen.get_or_insert(f);
+        });
+      });
       false
     }
   }
@@ -166,12 +195,12 @@ fn main_menu(mtm: MainThreadMarker, name: &str, delegate: &Delegate) -> Retained
 }
 
 /// Sets the app up, runs `start`, then the AppKit loop until [quit].
-pub fn run(name: &str, start: impl FnOnce()) {
+pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
   let mtm = mtm();
   let ns_app = NSApplication::sharedApplication(mtm);
   let delegate = Delegate::new(mtm);
   ns_app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
-  ns_app.setMainMenu(Some(&main_menu(mtm, name, &delegate)));
+  ns_app.setMainMenu(Some(&main_menu(mtm, info.name, &delegate)));
   let center = NSNotificationCenter::defaultCenter();
   // SAFETY: the delegate lives until the app ends and has the selector, taking a notification.
   unsafe {
@@ -182,11 +211,13 @@ pub fn run(name: &str, start: impl FnOnce()) {
       None,
     )
   };
-  shell(|s| *s = Shell::default());
-  ns_app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
-  ns_app.activate();
+  shell(|s| *s = Shell { presence: info.presence, ..Shell::default() });
+  sync_presence(mtm);
+  if info.presence == Presence::Regular {
+    ns_app.activate();
+  }
 
-  start();
+  start(&mut Main::here());
   if !shell(|s| s.quitting) {
     ns_app.run();
   }
@@ -200,8 +231,12 @@ pub fn run(name: &str, start: impl FnOnce()) {
   SHELL.take();
 }
 
-/// The app ends: the windows close.
+/// The app ends: its quit hook runs (once), then the windows close.
 fn finish() {
+  if let Some(f) = shell(|s| s.on_quit.take()) {
+    f(&mut Main::here());
+  }
+
   for id in shell(|s| s.windows.iter().map(|w| w.id).collect::<Vec<_>>()) {
     close(id);
   }
@@ -228,6 +263,47 @@ pub fn quit() {
   if let Some(event) = event {
     ns_app.postEvent_atStart(&event, false);
   }
+}
+
+pub fn set_presence(p: Presence) {
+  shell(|s| s.presence = p);
+  sync_presence(mtm());
+}
+
+pub fn on_reopen(f: OnReopen) {
+  shell(|s| s.reopen = Some(f));
+}
+
+pub fn on_quit(f: OnMain) {
+  shell(|s| s.on_quit = Some(f));
+}
+
+pub fn terminating() -> bool {
+  shell(|s| s.terminating)
+}
+
+/// Regular while the app is or a window is shown, else accessory (no Dock icon, no ⌘Tab).
+fn sync_presence(mtm: MainThreadMarker) {
+  let regular = shell(|s| s.presence == Presence::Regular || s.windows.iter().any(|w| w.shown));
+  let policy = match regular {
+    true => NSApplicationActivationPolicy::Regular,
+    false => NSApplicationActivationPolicy::Accessory,
+  };
+
+  let ns_app = NSApplication::sharedApplication(mtm);
+  if ns_app.activationPolicy() != policy {
+    ns_app.setActivationPolicy(policy);
+  }
+}
+
+/// Runs `f` on the main queue after `delay`: in every run-loop mode, menu tracking included.
+pub fn post(delay: Duration, f: Box<dyn FnOnce() + Send>) {
+  if delay.is_zero() {
+    return DispatchQueue::main().exec_async(f);
+  }
+
+  let when = DispatchTime::try_from(delay).unwrap_or(DispatchTime::NOW);
+  let _ = DispatchQueue::main().after(when, f);
 }
 
 /// Runs `f` on the main queue, after what AppKit is doing now.
@@ -301,8 +377,8 @@ fn views() -> Vec<Retained<View>> {
   shell(|s| s.windows.iter().map(|w| w.view.clone()).collect())
 }
 
-/// Opens a window running `app`, in front.
-pub fn open(cfg: &Config, app: Box<dyn App>) -> u64 {
+/// Opens a window running `app` (an app of type `ty`), in front unless `cfg.hidden`.
+pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
   let mtm = mtm();
   let size = NSSize::new(cfg.size.w as f64, cfg.size.h as f64);
   let frame = NSRect::new(NSPoint::new(0.0, 0.0), size);
@@ -340,18 +416,30 @@ pub fn open(cfg: &Config, app: Box<dyn App>) -> u64 {
   window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
   window.center();
   window.makeFirstResponder(Some(&view));
-  let win = Win { id, window, view, _delegate: delegate, on_close: None };
+  let win = Win { id, ty, window, view, _delegate: delegate, on_close: None, shown: false };
   shell(|s| s.windows.push(win));
-  front(id);
+  if !cfg.hidden {
+    front(id);
+  }
+
   id
+}
+
+/// The type of the app of window `id`; `None` once it closed.
+pub fn type_of(id: u64) -> Option<TypeId> {
+  shell(|s| s.windows.iter().find(|w| w.id == id).map(|w| w.ty))
 }
 
 pub fn front(id: u64) {
   let mtm = mtm();
-  let Some(window) = shell(|s| s.windows.iter().find(|w| w.id == id).map(|w| w.window.clone()))
-  else {
+  let Some(window) = shell(|s| {
+    let w = s.windows.iter_mut().find(|w| w.id == id)?;
+    w.shown = true;
+    Some(w.window.clone())
+  }) else {
     return;
   };
+  sync_presence(mtm);
   if window.isMiniaturized() {
     window.deminiaturize(None);
   }
@@ -370,7 +458,7 @@ pub fn close(id: u64) {
   window.close();
 }
 
-pub fn on_close(id: u64, f: OnClose) {
+pub fn on_close(id: u64, f: OnMain) {
   shell(|s| {
     if let Some(w) = s.windows.iter_mut().find(|w| w.id == id) {
       w.on_close = Some(f);
@@ -379,7 +467,7 @@ pub fn on_close(id: u64, f: OnClose) {
 }
 
 /// Window `id` closes: its runtime stops and goes (after AppKit's call in progress: [release]),
-/// then its close callback runs.
+/// the Dock follows, then its close callback runs.
 fn closed(id: u64) {
   let Some(win) = shell(|s| {
     let i = s.windows.iter().position(|w| w.id == id)?;
@@ -392,9 +480,16 @@ fn closed(id: u64) {
   let Win { window, view, _delegate, on_close, .. } = win;
   shell(|s| s.gone.push(Gone { window, _view: view, _delegate }));
   defer(release);
+  sync_presence(mtm());
   if let Some(f) = on_close {
-    f();
+    f(&mut Main::here());
   }
+}
+
+/// Runs `f` on window `id`'s app if it is of type `ty` and not busy, then redraws the window.
+pub fn with_app(id: u64, ty: TypeId, f: &mut dyn FnMut(&mut dyn App)) -> bool {
+  let Some(view) = view(id).filter(|_| type_of(id) == Some(ty)) else { return false };
+  view.try_runtime(|rt| f(&mut *rt.app)).is_some()
 }
 
 /// Lets go of the closed windows, their views and runtimes (the apps drop): from the main queue

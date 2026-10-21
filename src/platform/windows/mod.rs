@@ -1,26 +1,31 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The Windows platform: one Win32 window, per-monitor DPI aware (v2), its frames drawn by the
-//! CPU renderer into a DIB section and copied to the window with BitBlt, only the tiles that
+//! The Windows platform: Win32 windows, per-monitor DPI aware (v2), each one's frames drawn by
+//! the CPU renderer into a DIB section and copied to the window with BitBlt, only the tiles that
 //! changed ([Dib]). The message loop sleeps in MsgWaitForMultipleObjectsEx until input, a wake
-//! (the waker posts a message) or a high-resolution waitable timer: the runtime's next timer, or
-//! while it animates the next frame slot at the refresh rate of the display it is on, followed as
-//! it moves to another or the mode changes. No frames while the window is minimized; one when it
-//! shows again. Input and cursors are in [input], keys in [keyboard], light or dark and the
-//! accent in [settings]; then the clipboard, the performance cores, and the DirectWrite text
-//! backend ([text]).
+//! (the waker posts a message) or a high-resolution waitable timer: the earliest of the windows'
+//! next timers, or while one animates its next frame slot at the refresh rate of the display it
+//! is on, followed as it moves to another or the mode changes. No frames while a window is
+//! minimized; one when it shows again. The windows are kept by handle; a message's handler finds
+//! its own through [CURRENT] ([with]). Input and cursors are in [input], keys in [keyboard],
+//! light or dark and the accent in [settings], the app shell, tray, hotkeys and launch at login
+//! in [app]; then the clipboard, the performance cores, and the DirectWrite text backend
+//! ([text]).
 
+mod app;
 mod input;
 mod keyboard;
 mod settings;
 pub mod text;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::mem::offset_of;
 use std::ptr::{null, null_mut};
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+pub use app::{autostart, hotkey, shell, tray};
 use keyboard_types::Modifiers;
 pub use settings::appearance;
 use windows_sys::Win32::Foundation::{
@@ -199,13 +204,36 @@ struct Window {
 }
 
 thread_local! {
-  static WINDOW: RefCell<Option<Window>> = const { RefCell::new(None) };
+  /// The open windows by handle; each borrowed only while its message is handled.
+  static WINDOWS: RefCell<Vec<(HWND, Rc<RefCell<Window>>)>> = const { RefCell::new(Vec::new()) };
+  /// The window whose message is being handled: [with]'s.
+  static CURRENT: Cell<HWND> = const { Cell::new(null_mut()) };
 }
 
-/// Runs `f` on the window, unless a call up the stack has it (a message sent while handling
-/// another) or it is gone.
+/// Runs `f` on the current window ([CURRENT]), unless a call up the stack has it (a message sent
+/// while handling another) or it is gone.
 fn with<R>(f: impl FnOnce(&mut Window) -> R) -> Option<R> {
-  WINDOW.with(|w| w.try_borrow_mut().ok()?.as_mut().map(f))
+  with_window(CURRENT.get(), f)
+}
+
+/// Runs `f` on window `hwnd`, as [with].
+fn with_window<R>(hwnd: HWND, f: impl FnOnce(&mut Window) -> R) -> Option<R> {
+  let w = WINDOWS.with_borrow(|ws| ws.iter().find(|(h, _)| *h == hwnd).map(|(_, w)| w.clone()))?;
+  let mut w = w.try_borrow_mut().ok()?;
+  Some(f(&mut w))
+}
+
+/// Runs `f` with `hwnd` the [CURRENT] window, then the one before again.
+fn current<R>(hwnd: HWND, f: impl FnOnce() -> R) -> R {
+  let before = CURRENT.replace(hwnd);
+  let r = f();
+  CURRENT.set(before);
+  r
+}
+
+/// The open windows' handles.
+fn handles() -> Vec<HWND> {
+  WINDOWS.with_borrow(|ws| ws.iter().map(|(h, _)| *h).collect())
 }
 
 impl Window {
@@ -396,12 +424,14 @@ fn refresh(hwnd: HWND) -> Duration {
 }
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-  let res = handle(hwnd, msg, wp, lp);
-  // A size the app asked for in the live move or resize loop (a timer's frame) is applied now,
-  // not when the loop ends; outside the window's borrow, as SetWindowPos sends WM_SIZE.
-  apply_resize(hwnd);
-  with(|w| w.sync_modal());
-  res
+  current(hwnd, || {
+    let res = handle(hwnd, msg, wp, lp);
+    // A size the app asked for in the live move or resize loop (a timer's frame) is applied
+    // now, not when the loop ends; outside the window's borrow, as SetWindowPos sends WM_SIZE.
+    apply_resize(hwnd);
+    with(|w| w.sync_modal());
+    res
+  })
 }
 
 fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -539,23 +569,16 @@ fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     }
     WM_DESTROY => {
       with(|w| w.revoke());
-      unsafe { PostQuitMessage(0) };
+      // Dropped here unless a call up the stack holds it; its close callback runs after.
+      WINDOWS.with_borrow_mut(|ws| ws.retain(|(h, _)| *h != hwnd));
+      app::shell::destroyed(hwnd);
       0
     }
     _ => def(),
   }
 }
 
-/// Opens the app's window and runs the Win32 message loop until it closes or the app quits.
-pub fn run(cfg: &Config, app: Box<dyn App>) {
-  let hwnd = create(cfg, app);
-  unsafe { ShowWindow(hwnd, SW_SHOW) };
-
-  run_loop(hwnd, &Timer::new());
-  WINDOW.with(|w| w.borrow_mut().take());
-}
-
-/// Makes the app's window, hidden, and keeps it as this thread's [WINDOW].
+/// Makes a window running `app`, hidden, and keeps it in [WINDOWS].
 fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
   unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
   let hinstance = unsafe { GetModuleHandleW(null()) };
@@ -649,7 +672,7 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
     armed: None,
     target,
   };
-  WINDOW.with(|w| *w.borrow_mut() = Some(window));
+  WINDOWS.with_borrow_mut(|ws| ws.push((hwnd, Rc::new(RefCell::new(window)))));
   hwnd
 }
 
@@ -687,9 +710,9 @@ fn settle(hwnd: HWND) -> Option<Duration> {
   }
 }
 
-/// Handles messages until WM_QUIT; between them draws the frames due and sleeps until the next
-/// message, wake or timer.
-fn run_loop(hwnd: HWND, timer: &Timer) {
+/// Handles messages until WM_QUIT; between them draws each window's frame due and sleeps until
+/// the next message, wake or timer.
+fn run_loop(timer: &Timer) {
   let mut msg: MSG = unsafe { std::mem::zeroed() };
   loop {
     while unsafe { PeekMessageW(&mut msg, null_mut(), 0, 0, PM_REMOVE) } != 0 {
@@ -697,7 +720,8 @@ fn run_loop(hwnd: HWND, timer: &Timer) {
         return;
       }
 
-      if input::key_message(&msg) {
+      let root = unsafe { GetAncestor(msg.hwnd, GA_ROOT) };
+      if current(root, || input::key_message(&msg)) {
         continue;
       }
 
@@ -707,12 +731,14 @@ fn run_loop(hwnd: HWND, timer: &Timer) {
       }
     }
 
-    if with(|w| w.rt.quit_requested()).unwrap_or(true) {
-      unsafe { DestroyWindow(hwnd) };
+    let windows = handles();
+    if windows.iter().any(|&h| with_window(h, |w| w.rt.quit_requested()).unwrap_or(false)) {
+      app::shell::quit();
       continue;
     }
 
-    let wait = settle(hwnd);
+    let waits = windows.iter().map(|&h| current(h, || settle(h)));
+    let wait = waits.flatten().min();
     let n = match wait {
       // Relative due times are negative, in 100 ns units.
       Some(d) if !timer.0.is_null() => {
@@ -849,6 +875,13 @@ mod tests {
     n
   }
 
+  /// A window made as the shell makes it, hidden, and the current one for [with].
+  fn open(cfg: &Config, app: Box<dyn App>) -> HWND {
+    let hwnd = create(cfg, app);
+    CURRENT.set(hwnd);
+    hwnd
+  }
+
   struct Busy;
   impl App for Busy {
     fn paint(&mut self, f: &mut crate::Frame) {
@@ -915,7 +948,7 @@ mod tests {
     impl App for Still {}
 
     let cfg = Config::new("modal", 200.0, 100.0);
-    let hwnd = create(&cfg, Box::new(Still));
+    let hwnd = open(&cfg, Box::new(Still));
     let ticks = || timer_ticks(hwnd, 120);
 
     unsafe { SendMessageW(hwnd, WM_ENTERSIZEMOVE, 0, 0) };
@@ -930,7 +963,6 @@ mod tests {
       SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0);
       DestroyWindow(hwnd);
     }
-    WINDOW.with(|w| w.borrow_mut().take());
   }
 
   /// Shift let go during a live resize, whose loop takes its key message: the modifiers come
@@ -951,14 +983,13 @@ mod tests {
 
     let app = Seen::default();
     let seen = app.0.clone();
-    let hwnd = create(&Config::new("mods", 200.0, 100.0), Box::new(app));
+    let hwnd = open(&Config::new("mods", 200.0, 100.0), Box::new(app));
     with(|w| w.send(Event::Mods(Modifiers::SHIFT)));
     unsafe { SendMessageW(hwnd, WM_ENTERSIZEMOVE, 0, 0) };
     unsafe { SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0) };
     assert_eq!(seen.get(), Some(Modifiers::empty()));
 
     unsafe { DestroyWindow(hwnd) };
-    WINDOW.with(|w| w.borrow_mut().take());
   }
 
   /// A live move's timer follows a new display mode: set at a second's interval, it ticks at the
@@ -966,7 +997,7 @@ mod tests {
   #[test]
   fn a_new_display_mode_sets_the_interval() {
     let cfg = Config::new("retime", 200.0, 100.0);
-    let hwnd = create(&cfg, Box::new(Busy));
+    let hwnd = open(&cfg, Box::new(Busy));
     with(|w| w.pace.interval = Duration::from_secs(1));
     unsafe { SendMessageW(hwnd, WM_ENTERSIZEMOVE, 0, 0) };
     let ticks = || timer_ticks(hwnd, 150);
@@ -980,7 +1011,6 @@ mod tests {
       SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0);
       DestroyWindow(hwnd);
     }
-    WINDOW.with(|w| w.borrow_mut().take());
   }
 
   /// An open menu (the system menu, a context menu) runs a modal loop too: an animation goes on
@@ -989,7 +1019,7 @@ mod tests {
   #[test]
   fn a_menu_keeps_animating() {
     let cfg = Config::new("menu", 200.0, 100.0);
-    let hwnd = create(&cfg, Box::new(Busy));
+    let hwnd = open(&cfg, Box::new(Busy));
     assert_eq!(timer_ticks(hwnd, 120), 0, "the message loop draws");
 
     unsafe { SendMessageW(hwnd, WM_ENTERMENULOOP, 0, 0) };
@@ -1006,7 +1036,6 @@ mod tests {
     assert_eq!(timer_ticks(hwnd, 120), 0, "closed");
 
     unsafe { DestroyWindow(hwnd) };
-    WINDOW.with(|w| w.borrow_mut().take());
   }
 
   /// The keyboard focus coming and going reaches the app.
@@ -1026,7 +1055,7 @@ mod tests {
     }
 
     let seen = Rc::new(RefCell::new(Vec::new()));
-    let hwnd = create(&Config::new("focus", 200.0, 100.0), Box::new(Seen(seen.clone())));
+    let hwnd = open(&Config::new("focus", 200.0, 100.0), Box::new(Seen(seen.clone())));
     unsafe {
       SendMessageW(hwnd, WM_SETFOCUS, 0, 0);
       SendMessageW(hwnd, WM_KILLFOCUS, 0, 0);
@@ -1034,7 +1063,6 @@ mod tests {
     assert_eq!(*seen.borrow(), [true, false]);
 
     unsafe { DestroyWindow(hwnd) };
-    WINDOW.with(|w| w.borrow_mut().take());
   }
 
   /// The app hears the system's appearance before the first frame, and again on a colour-set
@@ -1055,7 +1083,7 @@ mod tests {
     }
 
     let seen = Rc::new(RefCell::new(Vec::new()));
-    let hwnd = create(&Config::new("look", 200.0, 100.0), Box::new(Seen(seen.clone())));
+    let hwnd = open(&Config::new("look", 200.0, 100.0), Box::new(Seen(seen.clone())));
     let now = appearance();
     assert_eq!(*seen.borrow(), [now]);
 
@@ -1075,7 +1103,6 @@ mod tests {
     assert_eq!(with(|w| w.look), Some(now));
 
     unsafe { DestroyWindow(hwnd) };
-    WINDOW.with(|w| w.borrow_mut().take());
   }
 
   /// A waker another thread keeps past the window's end posts to no window: its handle may be
@@ -1085,7 +1112,7 @@ mod tests {
     struct Still;
     impl App for Still {}
 
-    let hwnd = create(&Config::new("waker", 200.0, 100.0), Box::new(Still));
+    let hwnd = open(&Config::new("waker", 200.0, 100.0), Box::new(Still));
     let (waker, target) = with(|w| (w.rt.waker().clone(), w.target.clone())).unwrap();
     assert_eq!(*target.lock().unwrap(), hwnd as isize);
 
@@ -1093,7 +1120,6 @@ mod tests {
     assert_eq!(*target.lock().unwrap(), 0);
 
     waker.wake();
-    WINDOW.with(|w| w.borrow_mut().take());
   }
 
   /// An app's timer comes due while the title bar is held still: the live move's timer
@@ -1111,7 +1137,7 @@ mod tests {
     }
 
     let cfg = Config::new("modal timer", 200.0, 100.0);
-    let hwnd = create(&cfg, Box::new(Later::default()));
+    let hwnd = open(&cfg, Box::new(Later::default()));
     let ticks = || timer_ticks(hwnd, 120);
     unsafe { SendMessageW(hwnd, WM_ENTERSIZEMOVE, 0, 0) };
     assert!(ticks() > 0, "the first frame is due");
@@ -1121,7 +1147,6 @@ mod tests {
       SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0);
       DestroyWindow(hwnd);
     }
-    WINDOW.with(|w| w.borrow_mut().take());
   }
 
   /// A size the app asks for in a frame draws another through WM_SIZE: the loop's sleep follows
@@ -1147,7 +1172,7 @@ mod tests {
     }
 
     let grow = Rc::new(Cell::new(false));
-    let hwnd = create(&Config::new("grow", 200.0, 100.0), Box::new(Grow(grow.clone())));
+    let hwnd = open(&Config::new("grow", 200.0, 100.0), Box::new(Grow(grow.clone())));
     for _ in 0..10 {
       if settle(hwnd).is_none() {
         break;
@@ -1167,7 +1192,6 @@ mod tests {
     assert!(wait.is_some_and(|d| d <= Duration::from_millis(50)), "{wait:?}");
 
     unsafe { DestroyWindow(hwnd) };
-    WINDOW.with(|w| w.borrow_mut().take());
   }
 
   #[test]

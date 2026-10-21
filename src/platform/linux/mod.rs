@@ -13,7 +13,12 @@
 //! timeouts, a wake from another thread an idle source. Input is in [input] (keys in [keys]),
 //! light or dark in [settings], the text stack in [text] (fontconfig, FreeType, HarfBuzz).
 //! GTK 3 scales by whole numbers only.
+//!
+//! Windows open and close on demand while GTK's main loop runs ([app] has the loop, the tray,
+//! the hotkeys and launch at login): each callback carries its window's id, set as the current
+//! window for [with] while it runs.
 
+mod app;
 mod dl;
 mod input;
 mod keys;
@@ -24,9 +29,11 @@ use std::cell::{Cell, RefCell};
 use std::ffi::{CStr, CString, c_char, c_int, c_uint, c_ulong, c_void};
 use std::path::Path;
 use std::ptr::{null, null_mut};
+use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+pub use self::app::{autostart, hotkey, shell, tray};
 use self::dl::{Lib, fns};
 use self::input::Input;
 pub use self::settings::appearance;
@@ -106,6 +113,8 @@ fns!(Gtk {
   fn gtk_widget_grab_focus(w: P);
   fn gtk_widget_add_events(w: P, mask: c_int);
   fn gtk_widget_show_all(w: P);
+  fn gtk_window_present(w: P);
+  fn gtk_window_is_active(w: P) -> c_int;
   fn gtk_widget_destroy(w: P);
   fn gtk_widget_queue_draw_area(w: P, x: c_int, y: c_int, width: c_int, height: c_int);
   fn gtk_widget_add_tick_callback(w: P, cb: Fp, data: P, free: Fp) -> c_uint;
@@ -134,9 +143,15 @@ fn gtk() -> &'static Gtk {
   load().expect("GTK is loaded before its callbacks run")
 }
 
-/// Connects `cb` to `obj`'s `signal`, with no data: the callbacks find the window in [WIN].
+/// Connects `cb` to `obj`'s `signal`, with no data: [with] finds the window the event is for.
 unsafe fn connect(obj: P, signal: &CStr, cb: Fp, flags: c_int) {
-  unsafe { (gtk().g_signal_connect_data)(obj, signal.as_ptr(), cb, null_mut(), null(), flags) };
+  unsafe { connect_id(obj, signal, cb, flags, 0) };
+}
+
+/// Connects `cb` to `obj`'s `signal` with window `id` as its data ([as_window]).
+unsafe fn connect_id(obj: P, signal: &CStr, cb: Fp, flags: c_int, id: u64) {
+  let data = id as usize as P;
+  unsafe { (gtk().g_signal_connect_data)(obj, signal.as_ptr(), cb, data, null(), flags) };
 }
 
 /// The performance cores: Intel hybrid CPUs list theirs in `/sys/devices/cpu_core/cpus`
@@ -156,13 +171,17 @@ pub fn perf_cores() -> Option<usize> {
 
 // MARK: Window
 
-/// The window and everything its callbacks share, in [WIN].
+/// A window and everything its callbacks share, in [WINS].
 struct Win {
+  id: u64,
   rt: Runtime<Box<dyn App>>,
   renderer: Renderer,
   window: P,
   area: P,
-  /// The tile hashes of the frame in [SURFACE], its size in pixels and its scale.
+  /// The frame shown, a cairo image surface, also in the window's [Slot]: painted even while
+  /// the window is busy.
+  surface: Rc<Cell<P>>,
+  /// The tile hashes of the frame in `surface`, its size in pixels and its scale.
   tiles: Vec<u64>,
   shown: (usize, usize),
   shown_scale: f32,
@@ -197,45 +216,97 @@ impl Drop for Win {
       unsafe { (g.g_object_unref)(c) };
     }
 
-    let s = SURFACE.replace(null_mut());
+    let s = self.surface.replace(null_mut());
     if !s.is_null() {
       unsafe { (g.cairo_surface_destroy)(s) };
     }
   }
 }
 
+/// An open window: its GTK window and area, its state, and the frame it shows.
+struct Slot {
+  id: u64,
+  window: P,
+  area: P,
+  win: Rc<RefCell<Win>>,
+  surface: Rc<Cell<P>>,
+  /// Shown once: its frame clock is followed and its input set up.
+  shown: bool,
+}
+
 thread_local! {
-  static WIN: RefCell<Option<Win>> = const { RefCell::new(None) };
-  /// The frame shown, a cairo image surface: painted even while [WIN] is busy.
-  static SURFACE: Cell<P> = const { Cell::new(null_mut()) };
-  /// The loop ends (the window closed, or the app quit), set without the window.
+  static WINS: RefCell<Vec<Slot>> = const { RefCell::new(Vec::new()) };
+  /// The window the callback running is for; 0 outside one (an idle source of input's).
+  static CURRENT: Cell<u64> = const { Cell::new(0) };
+  static NEXT: Cell<u64> = const { Cell::new(0) };
+  /// The loop ends (the app quit), set without a window.
   static QUITTING: Cell<bool> = const { Cell::new(false) };
 }
 
-/// Runs `f` on the window, then [Win::sync]; `none` when there is no window or it is busy (a
+/// Runs `f` with window `id` as the current one ([with]).
+fn as_window<R>(id: u64, f: impl FnOnce() -> R) -> R {
+  let prev = CURRENT.replace(id);
+  let r = f();
+  CURRENT.set(prev);
+  r
+}
+
+/// The window id a callback got as its data.
+fn id_of(data: P) -> u64 {
+  data as usize as u64
+}
+
+/// The current window: the callback's, or outside one the active window (else the first).
+fn current() -> Option<Rc<RefCell<Win>>> {
+  let g = gtk();
+  WINS.with_borrow(|ws| {
+    let slot = match CURRENT.get() {
+      0 => ws.iter().find(|s| unsafe { (g.gtk_window_is_active)(s.window) } != 0).or(ws.first()),
+      id => ws.iter().find(|s| s.id == id),
+    };
+
+    slot.map(|s| s.win.clone())
+  })
+}
+
+/// Runs `f` on the current window, then [Win::sync]; `none` when there is none or it is busy (a
 /// GTK call of ours ran a nested main loop, as a paste waiting for its owner does, and that
 /// dispatched this callback). Input that came meanwhile runs after ([input::replay]).
 fn with<R>(none: R, f: impl FnOnce(&mut Win) -> R) -> R {
-  let r = WIN.with(|c| {
-    let mut g = c.try_borrow_mut().ok()?;
-    let w = g.as_mut()?;
-    let r = f(w);
-    w.sync();
-    Some(r)
-  });
-
-  match r {
-    Some(r) => {
-      input::replay();
-      r
-    }
-    None => none,
-  }
+  let Some(win) = current() else { return none };
+  let Ok(mut w) = win.try_borrow_mut() else { return none };
+  let r = f(&mut w);
+  w.sync();
+  drop(w);
+  input::replay();
+  r
 }
 
-/// Whether [WIN] is in use further up the stack.
+/// Runs `f` on every window not busy; whether one was.
+fn each(mut f: impl FnMut(&mut Win)) -> bool {
+  let all: Vec<_> = WINS.with_borrow(|ws| ws.iter().map(|s| (s.id, s.win.clone())).collect());
+  let mut missed = false;
+  for (id, win) in all {
+    as_window(id, || match win.try_borrow_mut() {
+      Ok(mut w) => {
+        f(&mut w);
+        w.sync();
+      }
+      Err(_) => missed = true,
+    });
+  }
+
+  missed
+}
+
+/// Whether the current window is in use further up the stack.
 fn busy() -> bool {
-  WIN.with(|c| c.try_borrow_mut().is_err())
+  current().is_some_and(|w| w.try_borrow_mut().is_err())
+}
+
+/// Window `id`'s slot field `f`.
+fn slot<R>(id: u64, f: impl FnOnce(&mut Slot) -> R) -> Option<R> {
+  WINS.with_borrow_mut(|ws| ws.iter_mut().find(|s| s.id == id).map(f))
 }
 
 /// Ends the main loop once, or keeps it from starting.
@@ -246,16 +317,9 @@ fn quit() {
   }
 }
 
-/// Opens the app's window and runs GTK's main loop until it closes or the app quits.
-pub fn run(cfg: &Config, app: Box<dyn App>) {
-  if let Err(e) = open(cfg, app) {
-    eprintln!("nimbo: {e}");
-    std::process::exit(1);
-  }
-}
-
-fn open(cfg: &Config, app: Box<dyn App>) -> Res<()> {
-  let started = Instant::now();
+/// Loads GTK and opens the display, before any window: `id` is the Wayland app id and the X11
+/// `WM_CLASS`; then follows the OS's light or dark.
+fn init(id: &str) -> Res<()> {
   let g = load().ok_or("GTK 3 is needed: libgtk-3.so.0 did not load")?;
   QUITTING.set(false);
   // GDK's X11 backend probes GLX as it opens the display, loading Mesa (and LLVM with
@@ -266,21 +330,39 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Res<()> {
     unsafe { std::env::set_var("GDK_GL", "disable") };
   }
 
-  let exe = std::env::current_exe().ok();
-  let id = exe.as_ref().and_then(|p| p.file_stem()?.to_str()).unwrap_or("nimbo");
-  let (id, title) = (CString::new(id)?, CString::new(cfg.title)?);
+  let id = CString::new(id)?;
+  // SAFETY: GTK's calls, on the thread that runs its loop.
+  unsafe {
+    (g.g_set_prgname)(id.as_ptr());
+    if (g.gtk_init_check)(null_mut(), null_mut()) == FALSE {
+      return Err("GTK cannot open a display (WAYLAND_DISPLAY or DISPLAY)".into());
+    }
+  }
+
+  settings::watch();
+  Ok(())
+}
+
+/// Runs GTK's main loop until [quit], unless it was asked for already.
+fn main_loop() {
+  if !QUITTING.get() {
+    unsafe { (gtk().gtk_main)() };
+  }
+}
+
+/// Opens a window running `app`, shown unless `cfg.hidden`; its id.
+fn open(cfg: &Config, app: Box<dyn App>) -> Result<u64, std::ffi::NulError> {
+  let started = Instant::now();
+  let g = gtk();
+  let id = NEXT.get() + 1;
+  NEXT.set(id);
+  let title = CString::new(cfg.title)?;
   let size = Size::new(cfg.size.w.round().max(1.0), cfg.size.h.round().max(1.0));
   let (w, h) = (size.w as c_int, size.h as c_int);
   let min = cfg.min();
   // SAFETY: GTK's calls, on the thread that runs its loop; each callback has its signal's
   // signature.
-  unsafe {
-    // The Wayland app id and the X11 WM_CLASS.
-    (g.g_set_prgname)(id.as_ptr());
-    if (g.gtk_init_check)(null_mut(), null_mut()) == FALSE {
-      return Err("GTK cannot open a display (WAYLAND_DISPLAY or DISPLAY)".into());
-    }
-
+  let (window, area) = unsafe {
     let window = (g.gtk_window_new)(WINDOW_TOPLEVEL);
     let area = (g.gtk_drawing_area_new)();
     (g.gtk_window_set_title)(window, title.as_ptr());
@@ -299,72 +381,114 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Res<()> {
     (g.gtk_widget_add_events)(area, input::EVENTS);
     (g.gtk_container_add)(window, area);
     (g.gtk_widget_grab_focus)(area);
-    connect(window, c"delete-event", on_delete as Fp, 0);
-    connect(window, c"window-state-event", on_state as Fp, 0);
-    connect(area, c"draw", on_draw as Fp, 0);
-    connect(area, c"event", input::on_event as Fp, 0);
+    connect_id(window, c"delete-event", on_delete as Fp, 0, id);
+    connect_id(window, c"window-state-event", on_state as Fp, 0, id);
+    connect_id(area, c"draw", on_draw as Fp, 0, id);
+    connect_id(area, c"event", on_event as Fp, 0, id);
+    (window, area)
+  };
 
-    let clip = Box::new(Clip((g.gtk_clipboard_get)(CLIPBOARD)));
-    let mut rt = Runtime::new(app, size, 1.0, Clock::real(), clip);
-    rt.event(Event::Appearance(appearance()));
-    // A wake from any thread: an idle source on the main context, which GLib wakes.
-    rt.waker().set_notify(Box::new(|| {
-      (gtk().g_idle_add)(on_wake as Fp, null_mut());
-    }));
+  let clip = Box::new(Clip(unsafe { (g.gtk_clipboard_get)(CLIPBOARD) }));
+  let mut rt = Runtime::new(app, size, 1.0, Clock::real(), clip);
+  rt.event(Event::Appearance(appearance()));
+  // A wake from any thread: an idle source on the main context, which GLib wakes.
+  rt.waker().set_notify(Box::new(move || {
+    unsafe { (gtk().g_idle_add)(on_wake as Fp, id as usize as P) };
+  }));
 
-    let trace = std::env::var("NIMBO_TRACE").ok();
-    WIN.set(Some(Win {
-      rt,
-      renderer: Renderer::new(),
-      window,
-      area,
-      tiles: Vec::new(),
-      shown: (0, 0),
-      shown_scale: 0.0,
-      ticking: false,
-      next_tick: 0,
-      timer: None,
-      resizable: cfg.resizable,
-      min,
-      input: Input::new(),
-      cursor: None,
-      cursors: Vec::new(),
-      painted: false,
-      frames: 0,
-      started,
-      trace: trace.is_some(),
-      trace_events: trace.as_deref() == Some("2"),
-    }));
+  let trace = std::env::var("NIMBO_TRACE").ok();
+  let surface = Rc::new(Cell::new(null_mut()));
+  let win = Win {
+    id,
+    rt,
+    renderer: Renderer::new(),
+    window,
+    area,
+    surface: surface.clone(),
+    tiles: Vec::new(),
+    shown: (0, 0),
+    shown_scale: 0.0,
+    ticking: false,
+    next_tick: 0,
+    timer: None,
+    resizable: cfg.resizable,
+    min,
+    input: Input::new(),
+    cursor: None,
+    cursors: Vec::new(),
+    painted: false,
+    frames: 0,
+    started,
+    trace: trace.is_some(),
+    trace_events: trace.as_deref() == Some("2"),
+  };
+  let win = Rc::new(RefCell::new(win));
+  WINS.with_borrow_mut(|ws| ws.push(Slot { id, window, area, win, surface, shown: false }));
+  if !cfg.hidden {
+    front(id);
+  }
 
-    // Shown, the window is realized: its frame clock and the area's GdkWindow exist.
-    (g.gtk_widget_show_all)(window);
-    let clock = (g.gtk_widget_get_frame_clock)(window);
-    connect(clock, c"layout", on_layout as Fp, AFTER);
-    connect(clock, c"after-paint", on_after_paint as Fp, 0);
-    with((), |w| w.input.realized((g.gtk_widget_get_window)(area)));
-    settings::watch();
-    // The app may have quit before the loop starts (on the first appearance).
-    if !QUITTING.get() {
-      (g.gtk_main)();
+  Ok(id)
+}
+
+/// Shows window `id` in front; the first time, follows its frame clock and sets its input up
+/// (shown, the window is realized: its frame clock and the area's GdkWindow exist).
+fn front(id: u64) {
+  let g = gtk();
+  let Some((window, area, first)) =
+    slot(id, |s| (s.window, s.area, !std::mem::replace(&mut s.shown, true)))
+  else {
+    return;
+  };
+
+  // SAFETY: GTK's calls on a window of ours.
+  unsafe {
+    if first {
+      (g.gtk_widget_show_all)(window);
+      let clock = (g.gtk_widget_get_frame_clock)(window);
+      connect_id(clock, c"layout", on_layout as Fp, AFTER, id);
+      connect_id(clock, c"after-paint", on_after_paint as Fp, 0, id);
+      as_window(id, || with((), |w| w.input.realized((g.gtk_widget_get_window)(area))));
+    }
+
+    (g.gtk_window_present)(window);
+  }
+}
+
+/// Window `id` goes: its runtime once no call up the stack has it, the GTK window after the
+/// callback in progress (`defer`, so one further up never meets it gone) or at once. With
+/// `NIMBO_SHOT=<file>`, its last frame is written as a PNG first (to check a window run).
+fn close(id: u64, defer: bool) -> bool {
+  let Some(s) = WINS.with_borrow_mut(|ws| Some(ws.remove(ws.iter().position(|s| s.id == id)?)))
+  else {
+    return false;
+  };
+
+  if let Ok(w) = s.win.try_borrow() {
+    if w.trace {
+      eprintln!("nimbo: closed after {} frames", w.frames);
+    }
+
+    if let Some(path) = std::env::var_os("NIMBO_SHOT")
+      && let Some(px) = pixels(s.surface.get(), w.shown)
+      && let Err(e) = crate::png::write(Path::new(&path), &px)
+    {
+      eprintln!("nimbo: {e}");
     }
   }
 
-  let Some(win) = WIN.take() else { return Ok(()) };
-  let window = win.window;
-  if win.trace {
-    eprintln!("nimbo: closed after {} frames", win.frames);
-  }
+  let g = gtk();
+  let window = s.window;
+  drop(s);
+  match defer {
+    true => unsafe { (g.g_idle_add)(on_destroy as Fp, window) },
+    false => unsafe {
+      (g.gtk_widget_destroy)(window);
+      0
+    },
+  };
 
-  // The last frame shown, as a PNG (`NIMBO_SHOT=<file>`): to check a window run.
-  if let Some(path) = std::env::var_os("NIMBO_SHOT")
-    && let Some(px) = pixels(win.shown)
-  {
-    crate::png::write(Path::new(&path), &px)?;
-  }
-
-  drop(win);
-  unsafe { (g.gtk_widget_destroy)(window) };
-  Ok(())
+  true
 }
 
 impl Win {
@@ -384,7 +508,7 @@ impl Win {
   fn stale(&self) -> bool {
     let (size, scale) = self.size();
     let px = Renderer::pixel_size(size, scale);
-    SURFACE.get().is_null() || (px, scale) != (self.shown, self.shown_scale)
+    self.surface.get().is_null() || (px, scale) != (self.shown, self.shown_scale)
   }
 
   /// Not minimized or withdrawn (as X11 tells; on Wayland the compositor holds the clock).
@@ -421,7 +545,8 @@ impl Win {
     let (tick, timer) = next(visible, visible && self.rt.needs_frame(), self.rt.due_in());
     if tick && !self.ticking {
       self.ticking = true;
-      unsafe { (g.gtk_widget_add_tick_callback)(self.area, on_tick as Fp, null_mut(), null()) };
+      let (area, data) = (self.area, self.id as usize as P);
+      unsafe { (g.gtk_widget_add_tick_callback)(area, on_tick as Fp, data, null()) };
     }
 
     self.arm(timer.map(|d| Instant::now() + d));
@@ -443,7 +568,8 @@ impl Win {
 
     let Some(at) = at else { return };
     let ms = at.saturating_duration_since(Instant::now()).as_micros().div_ceil(1000);
-    let id = unsafe { (g.g_timeout_add)(ms as c_uint, on_timer as Fp, null_mut()) };
+    let data = self.id as usize as P;
+    let id = unsafe { (g.g_timeout_add)(ms as c_uint, on_timer as Fp, data) };
     self.timer = Some((id, at));
   }
 
@@ -458,9 +584,9 @@ impl Win {
     r.sync(&mut self.rt.text, &mut self.rt.images);
     r.prepare(&self.rt.scene, size, scale);
     let (w, h) = r.size();
-    if ((w, h), scale) != (self.shown, self.shown_scale) || SURFACE.get().is_null() {
+    if ((w, h), scale) != (self.shown, self.shown_scale) || self.surface.get().is_null() {
       // Out of memory: the frame waits for the next.
-      if !new_surface(w, h, scale) {
+      if !new_surface(&self.surface, w, h, scale) {
         return;
       }
 
@@ -470,7 +596,7 @@ impl Win {
 
     let rects = r.damage(&self.tiles);
     if !rects.is_empty() {
-      let s = SURFACE.get();
+      let s = self.surface.get();
       // SAFETY: our surface's pixels, `stride × h` of them, B G R x as the renderer writes.
       unsafe {
         (g.cairo_surface_flush)(s);
@@ -561,9 +687,9 @@ fn name(c: Cursor) -> S {
   n.as_ptr()
 }
 
-/// A new surface of `w × h` pixels at `scale` as [SURFACE], the old one dropped; false when
-/// cairo couldn't make one (its error surface has no pixels).
-fn new_surface(w: usize, h: usize, scale: f32) -> bool {
+/// A new surface of `w × h` pixels at `scale` in `cell`, the old one dropped; false when cairo
+/// couldn't make one (its error surface has no pixels).
+fn new_surface(cell: &Cell<P>, w: usize, h: usize, scale: f32) -> bool {
   let g = gtk();
   // SAFETY: a new surface, ours until the next one.
   unsafe {
@@ -574,7 +700,7 @@ fn new_surface(w: usize, h: usize, scale: f32) -> bool {
     }
 
     (g.cairo_surface_set_device_scale)(s, scale as f64, scale as f64);
-    let old = SURFACE.replace(s);
+    let old = cell.replace(s);
     if !old.is_null() {
       (g.cairo_surface_destroy)(old);
     }
@@ -602,9 +728,9 @@ fn next(visible: bool, wanted: bool, due_in: Option<Duration>) -> (bool, Option<
   (wanted, due_in.filter(|_| visible && !wanted))
 }
 
-/// The pixels of the frame shown, `w × h`.
-fn pixels((w, h): (usize, usize)) -> Option<Pixels> {
-  let (g, s) = (gtk(), SURFACE.get());
+/// The pixels of surface `s`, `w × h`.
+fn pixels(s: P, (w, h): (usize, usize)) -> Option<Pixels> {
+  let g = gtk();
   if s.is_null() {
     return None;
   }
@@ -625,41 +751,48 @@ fn pixels((w, h): (usize, usize)) -> Option<Pixels> {
 
 /// The frame clock's update phase while frames are wanted: asks for the layout phase, after
 /// which the frame is built ([on_layout]), at most at 120 Hz ([paced]); removed once none are.
-unsafe extern "C" fn on_tick(_: P, clock: P, _: P) -> c_int {
-  with(TRUE, |w| {
-    let g = gtk();
-    w.ticking = w.rt.needs_frame() && w.visible();
-    let now = unsafe { (g.gdk_frame_clock_get_frame_time)(clock) };
-    if w.ticking && paced(now, &mut w.next_tick) {
-      unsafe { (g.gdk_frame_clock_request_phase)(clock, LAYOUT) };
-    }
+unsafe extern "C" fn on_tick(_: P, clock: P, data: P) -> c_int {
+  as_window(id_of(data), || {
+    with(TRUE, |w| {
+      let g = gtk();
+      w.ticking = w.rt.needs_frame() && w.visible();
+      let now = unsafe { (g.gdk_frame_clock_get_frame_time)(clock) };
+      if w.ticking && paced(now, &mut w.next_tick) {
+        unsafe { (g.gdk_frame_clock_request_phase)(clock, LAYOUT) };
+      }
 
-    w.ticking as c_int
+      w.ticking as c_int
+    })
   })
 }
 
 /// After GTK's layout: the frame, at the size GTK just gave the area, when one is wanted or
 /// that size is new.
-unsafe extern "C" fn on_layout(_: P, _: P) {
-  with((), |w| {
-    if w.rt.needs_frame() || w.stale() {
-      w.render(true);
-    }
+unsafe extern "C" fn on_layout(_: P, data: P) {
+  as_window(id_of(data), || {
+    with((), |w| {
+      if w.rt.needs_frame() || w.stale() {
+        w.render(true);
+      }
+    })
   });
 }
 
 /// GTK's paint: our surface where GTK repaints (the rects queued, or all of it after an expose
 /// or a resize), built first if it is stale (the first frame).
-unsafe extern "C" fn on_draw(_: P, cr: P, _: P) -> c_int {
-  with((), |w| {
-    if w.stale() {
-      w.render(false);
-    }
+unsafe extern "C" fn on_draw(_: P, cr: P, data: P) -> c_int {
+  let id = id_of(data);
+  as_window(id, || {
+    with((), |w| {
+      if w.stale() {
+        w.render(false);
+      }
 
-    w.painted = true;
+      w.painted = true;
+    })
   });
 
-  let (g, s) = (gtk(), SURFACE.get());
+  let (g, s) = (gtk(), slot(id, |s| s.surface.get()).unwrap_or(null_mut()));
   if s.is_null() {
     return FALSE;
   }
@@ -676,48 +809,63 @@ unsafe extern "C" fn on_draw(_: P, cr: P, _: P) -> c_int {
 
 /// After GDK painted (and on Wayland committed) the frame: counted, and logged with
 /// `NIMBO_TRACE` as `nimbo: presented <unix ms> (+<ms since start>) <w>x<h>`.
-unsafe extern "C" fn on_after_paint(_: P, _: P) {
-  with((), |w| {
-    if !std::mem::take(&mut w.painted) {
-      return;
-    }
+unsafe extern "C" fn on_after_paint(_: P, data: P) {
+  as_window(id_of(data), || {
+    with((), |w| {
+      if !std::mem::take(&mut w.painted) {
+        return;
+      }
 
-    w.frames += 1;
-    if w.trace {
-      let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
-      let since = w.started.elapsed().as_secs_f64() * 1e3;
-      let (pw, ph) = w.shown;
-      eprintln!("nimbo: presented {:.3} (+{since:.1} ms) {pw}x{ph}", t.as_secs_f64() * 1e3);
-    }
+      w.frames += 1;
+      if w.trace {
+        let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+        let since = w.started.elapsed().as_secs_f64() * 1e3;
+        let (pw, ph) = w.shown;
+        eprintln!("nimbo: presented {:.3} (+{since:.1} ms) {pw}x{ph}", t.as_secs_f64() * 1e3);
+      }
+    })
   });
 }
 
 /// The runtime's next timer is due; while the window is busy, it fires again after its delay.
-unsafe extern "C" fn on_timer(_: P) -> c_int {
-  with(busy() as c_int, |w| {
-    w.timer = None;
-    FALSE
+unsafe extern "C" fn on_timer(data: P) -> c_int {
+  as_window(id_of(data), || {
+    with(busy() as c_int, |w| {
+      w.timer = None;
+      FALSE
+    })
   })
 }
 
 /// A wake from another thread; while the window is busy, the sync after the call that holds it
 /// sees the wake.
-unsafe extern "C" fn on_wake(_: P) -> c_int {
-  with((), |_| {});
+unsafe extern "C" fn on_wake(data: P) -> c_int {
+  as_window(id_of(data), || with((), |_| {}));
   FALSE
 }
 
 /// Minimized or shown again: frames stop or go on.
-unsafe extern "C" fn on_state(_: P, _: P, _: P) -> c_int {
-  with((), |_| {});
+unsafe extern "C" fn on_state(_: P, _: P, data: P) -> c_int {
+  as_window(id_of(data), || with((), |_| {}));
   FALSE
 }
 
-/// The window's close button: the loop ends, and the window is destroyed after it, so a
-/// callback further up the stack (a paste's) never meets it gone.
-unsafe extern "C" fn on_delete(_: P, _: P, _: P) -> c_int {
-  quit();
+/// The area's input, to [input] as the window's.
+unsafe extern "C" fn on_event(area: P, ev: P, data: P) -> c_int {
+  as_window(id_of(data), || unsafe { input::on_event(area, ev, null_mut()) })
+}
+
+/// The window's close button: it closes through the shell (its close callback runs), destroyed
+/// after this callback.
+unsafe extern "C" fn on_delete(_: P, _: P, data: P) -> c_int {
+  shell::close(id_of(data));
   TRUE
+}
+
+/// A closed window's GTK window goes, after the callback that closed it.
+unsafe extern "C" fn on_destroy(window: P) -> c_int {
+  unsafe { (gtk().gtk_widget_destroy)(window) };
+  FALSE
 }
 
 // MARK: Clipboard

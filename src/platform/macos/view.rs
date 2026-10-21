@@ -488,6 +488,17 @@ impl View {
     }
   }
 
+  /// Runs `f` on the runtime unless a call up the stack has it, then redraws: an app changed
+  /// from outside its window ([crate::Window::with]).
+  pub fn try_runtime<R>(&self, f: impl FnOnce(&mut Runtime<Box<dyn App>>) -> R) -> Option<R> {
+    let mut state = self.ivars().state.try_borrow_mut().ok()?;
+    let st = state.as_mut()?;
+    let out = f(&mut st.rt);
+    st.rt.redraw();
+    st.link.setPaused(false);
+    Some(out)
+  }
+
   /// Whether any of the window is on screen (not minimized, covered or on another space); a
   /// view with no window counts as shown.
   fn visible(&self) -> bool {
