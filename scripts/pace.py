@@ -49,7 +49,10 @@ def switches(pid: int) -> int:
   )
   ps = ["powershell", "-NoProfile", "-Command", query]
   out = subprocess.run(ps, capture_output=True, text=True)
-  return int(out.stdout.strip() or 0)
+  if out.returncode != 0 or not out.stdout.strip().isdigit():
+    raise SystemExit(f"pace: no context switches for pid {pid}: {out.stderr.strip() or out.stdout.strip()}")
+
+  return int(out.stdout.strip())
 
 
 # The measured part of the run, in ms after the first frame: the bar moves for 3 s.
