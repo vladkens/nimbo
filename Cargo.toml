@@ -13,4 +13,8 @@ include = ["/src/**/*.rs", "/Cargo.toml", "/Cargo.lock", "/LICENSE", "/readme.md
 keywords = ["gui", "ui", "desktop", "widgets", "toolkit"]
 categories = ["gui"]
 
+[[test]]
+name = "shapes"
+harness = false
+
 [dependencies]
