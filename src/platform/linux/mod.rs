@@ -762,11 +762,17 @@ impl Win {
   }
 
   /// The pointer left the surface or went away (its seat lost the capability): it leaves the
-  /// surface it was over, and the buttons it held are let go first. A leave mid-drag ends the
-  /// grab (the window minimized, a compositor's own grab), and no release follows.
+  /// surface it was over, and the buttons it held are let go first, without a click. A leave
+  /// mid-drag ends the grab (the window minimized, a compositor's own grab), and no release
+  /// follows.
   fn pointer_gone(&mut self) {
     let over = std::mem::take(&mut self.enter_serial).is_some();
     let (pos, mods) = (self.mouse, self.mods);
+    // Not the user's release: no click, though the app's drags end with it.
+    if !self.buttons.is_empty() {
+      self.rt.cancel_press();
+    }
+
     for e in let_go(std::mem::take(&mut self.buttons), over, pos, mods) {
       self.send(e);
     }

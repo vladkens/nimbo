@@ -985,11 +985,17 @@ impl Win {
   }
 
   /// The window was unmapped (minimized, hidden): the server ended the pointer's grab with it,
-  /// so the buttons held let go where the pointer was last seen and it is out of the window.
+  /// so the buttons held let go where the pointer was last seen, without a click, and it is out
+  /// of the window.
   fn let_go(&mut self) {
     let (pos, mods) = (self.mouse, self.kb_mods());
     let held = std::mem::take(&mut self.pressed);
     let out = self.inside || !held.is_empty();
+    // Not the user's release: no click, though the app's drags end with it.
+    if !held.is_empty() {
+      self.rt.cancel_press();
+    }
+
     for button in held {
       self.send(Event::MouseUp { pos, button, mods });
     }
