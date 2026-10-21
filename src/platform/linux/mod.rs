@@ -24,6 +24,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use rustix::event::{EventfdFlags, PollFd, PollFlags, Timespec, eventfd, poll};
+use wayland_client::backend::WaylandError;
 use wayland_client::globals::registry_queue_init;
 use wayland_client::protocol::wl_compositor::WlCompositor;
 use wayland_client::protocol::wl_output::WlOutput;
@@ -41,6 +42,7 @@ use wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase;
 use self::shm::Presenter;
 use crate::Config;
 use crate::app::{App, Appearance, Clock, Event, Runtime};
+use crate::platform::points;
 use crate::scene::Size;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
@@ -220,6 +222,9 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
     next_tick: None,
   };
 
+  // Requests wait in the connection's buffer for the socket to drain: no frame is drawn
+  // meanwhile.
+  let mut unsent = false;
   loop {
     queue.dispatch_pending(&mut win)?;
     if win.closed || win.rt.quit_requested() {
@@ -229,23 +234,28 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
     // A configure's frame comes at once: its ack is committed with a buffer of its size.
     let now = Instant::now();
     let paced = !win.frame_pending && win.next_tick.is_none_or(|t| t <= now);
-    if win.configured && win.rt.needs_frame() && (paced || win.acked) {
+    if win.configured && win.rt.needs_frame() && (paced || win.acked) && !unsent {
       win.render();
     }
 
-    queue.flush()?;
+    unsent = backed_up(queue.flush())?;
 
     let Some(guard) = queue.prepare_read() else { continue };
+    // Requests the socket couldn't take yet go out once it is writable again; no tick until
+    // then.
+    let timeout = win.timeout().filter(|_| !unsent);
     let timeout =
-      win.timeout().map(|d| Timespec { tv_sec: d.as_secs() as _, tv_nsec: d.subsec_nanos() as _ });
+      timeout.map(|d| Timespec { tv_sec: d.as_secs() as _, tv_nsec: d.subsec_nanos() as _ });
     let display = guard.connection_fd();
-    let mut fds = [PollFd::new(&display, PollFlags::IN), PollFd::new(&*wake, PollFlags::IN)];
+    let flags = if unsent { PollFlags::IN | PollFlags::OUT } else { PollFlags::IN };
+    let mut fds = [PollFd::new(&display, flags), PollFd::new(&*wake, PollFlags::IN)];
     match poll(&mut fds, timeout.as_ref()) {
       Ok(_) | Err(rustix::io::Errno::INTR) => {}
       Err(e) => return Err(e.into()),
     }
 
-    let (ready, woken) = (!fds[0].revents().is_empty(), !fds[1].revents().is_empty());
+    let ready = !fds[0].revents().difference(PollFlags::OUT).is_empty();
+    let woken = !fds[1].revents().is_empty();
     if woken {
       let mut buf = [0u8; 8];
       let _ = rustix::io::read(&*wake, &mut buf);
@@ -254,8 +264,7 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
     match ready {
       true => match guard.read() {
         Ok(_) => {}
-        Err(wayland_client::backend::WaylandError::Io(e))
-          if e.kind() == std::io::ErrorKind::WouldBlock => {}
+        Err(WaylandError::Io(e)) if e.kind() == std::io::ErrorKind::WouldBlock => {}
         Err(e) => return Err(e.into()),
       },
       false => drop(guard),
@@ -303,19 +312,22 @@ impl Win {
   /// which paces the next.
   fn render(&mut self) {
     let t0 = Instant::now();
-    let (scale, size) = (self.scale(), self.size);
-    if scale != self.set_scale || size != self.set_size {
+    let (scale, logical) = (self.scale(), self.size);
+    if scale != self.set_scale || logical != self.set_size {
       match (&self.viewport, self.scale120.is_some()) {
         (Some(v), true) => {
           self.surface.set_buffer_scale(1);
-          v.set_destination(size.w as i32, size.h as i32);
+          v.set_destination(logical.w as i32, logical.h as i32);
         }
         _ => self.surface.set_buffer_scale(scale as i32),
       }
 
-      (self.set_scale, self.set_size) = (scale, size);
+      (self.set_scale, self.set_size) = (scale, logical);
     }
 
+    // Drawn at the points that fill the buffer's whole pixels.
+    let (w, h) = buffer_px(logical, scale);
+    let size = Size::new(points(w, scale), points(h, scale));
     self.rt.resize(size, scale);
     self.rt.frame();
     self.present.renderer.sync(&mut self.rt.images);
@@ -347,6 +359,24 @@ impl Win {
   }
 }
 
+/// Whether a flush left requests waiting for the socket to drain: `WouldBlock` while the
+/// compositor isn't reading is backpressure, not an error, and they stay buffered.
+fn backed_up(flushed: Result<(), WaylandError>) -> Res<bool> {
+  match flushed {
+    Ok(()) => Ok(false),
+    Err(WaylandError::Io(e)) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(true),
+    Err(e) => Err(e.into()),
+  }
+}
+
+/// The buffer's pixels for `size` points at `scale`, rounded half away from zero as
+/// fractional-scale-v1 asks: 481 points at 1.5 are 722 pixels, where the renderer's cut-down
+/// size would make 721 that the viewport stretches.
+fn buffer_px(size: Size, scale: f32) -> (u32, u32) {
+  let px = |p: f32| (p * scale).round().max(1.0) as u32;
+  (px(size.w), px(size.h))
+}
+
 /// `s` in whole surface coordinates, as configures give them: at an integer buffer scale a
 /// fractional size would make a buffer that isn't a multiple of it (`invalid_size`).
 fn whole(s: Size) -> Size {
@@ -367,6 +397,27 @@ mod tests {
   fn sizes_are_whole() {
     assert_eq!(whole(Size::new(480.5, 320.4)), Size::new(481.0, 320.0));
     assert_eq!(whole(Size::new(0.2, 64.0)), Size::new(1.0, 64.0));
+  }
+
+  #[test]
+  fn fractional_buffers_round() {
+    assert_eq!(buffer_px(Size::new(481.0, 320.0), 1.5), (722, 480));
+    assert_eq!(buffer_px(Size::new(481.0, 321.0), 1.25), (601, 401));
+    assert_eq!(buffer_px(Size::new(480.0, 320.0), 2.0), (960, 640));
+
+    // The renderer draws that many.
+    let (w, h) = buffer_px(Size::new(481.0, 333.0), 1.75);
+    let size = Size::new(points(w, 1.75), points(h, 1.75));
+    let px = crate::cpu::Renderer::pixel_size(size, 1.75);
+    assert_eq!(px, (w as usize, h as usize));
+  }
+
+  #[test]
+  fn a_full_socket_waits() {
+    let err = |k: std::io::ErrorKind| Err(WaylandError::Io(k.into()));
+    assert!(!backed_up(Ok(())).unwrap());
+    assert!(backed_up(err(std::io::ErrorKind::WouldBlock)).unwrap());
+    assert!(backed_up(err(std::io::ErrorKind::BrokenPipe)).is_err());
   }
 
   #[test]
