@@ -355,6 +355,18 @@ impl View {
     }
   }
 
+  /// The window became key or resigned: modifiers that changed while another window had the
+  /// keys never came here, so none while away, and those held now on return.
+  pub fn focus(&self, on: bool) {
+    if on {
+      self.send(Event::Focus(true));
+      self.send(Event::Mods(flags_mods(NSEvent::modifierFlags_class())));
+    } else {
+      self.send(Event::Mods(Mods::NONE));
+      self.send(Event::Focus(false));
+    }
+  }
+
   /// Feeds an event to the runtime and restarts the display link if it needs a frame.
   pub fn send(&self, ev: Event) -> bool {
     let (used, quit) = {
@@ -484,7 +496,10 @@ fn ns_text(text: &AnyObject) -> Option<String> {
 }
 
 fn mods(event: &NSEvent) -> Mods {
-  let f = event.modifierFlags();
+  flags_mods(event.modifierFlags())
+}
+
+fn flags_mods(f: NSEventModifierFlags) -> Mods {
   Mods {
     shift: f.contains(NSEventModifierFlags::Shift),
     ctrl: f.contains(NSEventModifierFlags::Control),
