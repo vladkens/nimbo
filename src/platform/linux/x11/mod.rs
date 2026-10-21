@@ -357,9 +357,10 @@ fn run_on(
 
     win.broken |= x.flush().is_err();
 
-    // Events read while waiting for a reply aren't on the socket any more.
+    // Events read while waiting for a reply, or stashed after the loop drained them (a paste in
+    // the view), aren't on the socket any more: back at the front, so they keep their order.
     if let Some(ev) = win.next_event() {
-      win.stash.borrow_mut().push_back(ev);
+      win.stash.borrow_mut().push_front(ev);
       continue;
     }
 
