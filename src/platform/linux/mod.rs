@@ -142,6 +142,8 @@ pub struct Win {
   /// drawn at once, not paced.
   acked: bool,
   closed: bool,
+  /// The toplevel is activated: the window has the focus.
+  focused: bool,
   frame_pending: bool,
   next_tick: Option<Instant>,
 }
@@ -218,6 +220,7 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
     configured: false,
     acked: false,
     closed: false,
+    focused: false,
     frame_pending: false,
     next_tick: None,
   };

@@ -1,7 +1,8 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The Wayland objects' events into the window's state: the shell's configures, the surface's
-//! scale and outputs (as they come and go), frame callbacks and buffers coming back.
+//! The Wayland objects' events into the window's state: the shell's configures (size, and focus
+//! from the activated state), the surface's scale and outputs (as they come and go), frame
+//! callbacks and buffers coming back.
 
 use std::sync::atomic::Ordering;
 
@@ -27,6 +28,7 @@ use wayland_protocols::xdg::shell::client::xdg_wm_base::{self, XdgWmBase};
 
 use super::shm::Busy;
 use super::{Output, Win};
+use crate::app::Event;
 use crate::scene::Size;
 
 delegate_noop!(Win: ignore WlCompositor);
@@ -112,9 +114,14 @@ impl Dispatch<XdgToplevel, ()> for Win {
     _: &QueueHandle<Self>,
   ) {
     match ev {
-      xdg_toplevel::Event::Configure { width, height, .. } => {
+      xdg_toplevel::Event::Configure { width, height, states } => {
         let last = win.pending_size.unwrap_or(win.size);
         win.pending_size = Some(configured(width, height, last));
+        let on = activated(&states);
+        if on != win.focused {
+          win.focused = on;
+          win.rt.event(Event::Focus(on));
+        }
       }
       xdg_toplevel::Event::Close => win.closed = true,
       _ => {}
@@ -215,6 +222,13 @@ fn configured(width: i32, height: i32, last: Size) -> Size {
   Size::new(side(width, last.w), side(height, last.h))
 }
 
+/// Whether a configure's states (native-endian `u32`s) hold `activated`: the window has the
+/// focus.
+fn activated(states: &[u8]) -> bool {
+  let activated = xdg_toplevel::State::Activated as u32;
+  states.as_chunks::<4>().0.iter().any(|s| u32::from_ne_bytes(*s) == activated)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -226,5 +240,13 @@ mod tests {
     assert_eq!(configured(640, 0, last), Size::new(640.0, 320.0));
     assert_eq!(configured(0, 200, last), Size::new(480.0, 200.0));
     assert_eq!(configured(800, 600, last), Size::new(800.0, 600.0));
+  }
+
+  #[test]
+  fn activated_is_the_focus() {
+    let states = |s: &[u32]| s.iter().flat_map(|n| n.to_ne_bytes()).collect::<Vec<u8>>();
+    assert!(!activated(&[]));
+    assert!(!activated(&states(&[1, 3])));
+    assert!(activated(&states(&[1, 4])));
   }
 }
