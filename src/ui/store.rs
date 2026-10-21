@@ -64,6 +64,10 @@ impl Store {
     self.map.get(&(id, TypeId::of::<T>())).and_then(|e| e.val.downcast_ref())
   }
 
+  pub fn peek_mut<T: 'static>(&mut self, id: Id) -> Option<&mut T> {
+    self.map.get_mut(&(id, TypeId::of::<T>())).and_then(|e| e.val.downcast_mut())
+  }
+
   pub fn retain(&mut self, id: Id) {
     self.retained.push(id);
   }
