@@ -106,8 +106,8 @@ pub(crate) struct Input {
   pub moving: Vec<Id>,
   /// Presses so far ([Press::seq]).
   presses: u32,
-  /// The press a release ended since a view last ran ([super::Ui::released]).
-  pub ended: Option<Press>,
+  /// The press a release ended since a view last ran, and where ([super::Ui::released]).
+  pub ended: Option<(Press, Point)>,
   /// The view asked for every pointer move ([super::Ui::track_moves]).
   pub moves: bool,
   scratch: Vec<Id>,
@@ -217,10 +217,10 @@ pub(super) fn max_scroll(n: &Node) -> [f32; 2] {
 // MARK: Drags and settling
 
 impl Ui<'_> {
-  /// The press on `id` a release ended since the view last ran, the pointer where it was
-  /// released ([Ui::mouse]): a drag's last move, which no view saw held.
-  pub fn released(&self, id: Id) -> Option<Press> {
-    self.st.input.ended.filter(|p| p.id == id)
+  /// The press on `id` a release ended since the view last ran, and where it was released: a
+  /// drag's last move, which no view saw held.
+  pub fn released(&self, id: Id) -> Option<(Press, Point)> {
+    self.st.input.ended.filter(|(p, _)| p.id == id)
   }
 
   /// Builds a frame on every pointer move until the next frame, though the hover doesn't
@@ -288,7 +288,7 @@ impl UiState {
       Event::MouseUp { pos, button, .. } => {
         let changed = self.hover_at(Some(pos), false);
         let Some(p) = self.input.press.filter(|p| p.button == button) else { return changed };
-        (self.input.press, self.input.ended) = (None, Some(p));
+        (self.input.press, self.input.ended) = (None, Some((p, pos)));
         if self.input.hover.contains(&p.id) {
           let (clicks, mods, seq) = (p.clicks, p.mods, p.seq);
           self.input.click = Some(Click { id: p.id, button, clicks, pos, mods, seq });

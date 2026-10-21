@@ -153,9 +153,9 @@ impl Ui<'_> {
     let mut grab = std::mem::take(&mut self.state::<Grab>(id).0);
     let along = |p: crate::scene::Point| if ax == 0 { p.x } else { p.y };
     // Held, or released since the view last ran: its last move counts.
-    let press = self.press().filter(|_| b.held).or(self.released(handle));
-    match (span, self.mouse(), press.filter(|_| !b.disabled)) {
-      (Some((lo, len)), Some(m), Some(p)) => {
+    let held = self.press().zip(self.mouse()).filter(|_| b.held);
+    match (span, held.or(self.released(handle)).filter(|_| !b.disabled)) {
+      (Some((lo, len)), Some((p, m))) => {
         // From where it was pressed, though no frame came between the press and this move, to
         // the divider where it shows.
         let (at, from) = (along(m), along(p.pos));
@@ -233,6 +233,8 @@ mod tests {
     h.press(x, y);
     h.move_to(x + 20.0, y);
     h.release(x + 20.0, y);
+    // The pointer moves on before the frame: the drag ends where it was released.
+    h.move_to(x + 120.0, y);
     h.frame();
     assert!((h.app().0 - 0.46).abs() < 0.005, "{}", h.app().0);
   }

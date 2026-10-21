@@ -201,8 +201,8 @@ impl Ui<'_> {
         let (thumb, track) = (id.key(("thumb", ax)), id.key(("track", ax)));
         // Held, or released since the view last ran: its last move counts.
         let held = self.held(thumb);
-        let press = self.press().filter(|_| held).or(self.released(thumb));
-        if let (Some(p), Some(m)) = (press, mouse) {
+        let press = self.press().zip(mouse).filter(|_| held).or(self.released(thumb));
+        if let Some((p, m)) = press {
           let start = *bars.drag[ax].get_or_insert(axis(off, ax));
           off = with_axis(off, ax, start + (axis(m, ax) - axis(p.pos, ax)) * first.ratio);
         }
