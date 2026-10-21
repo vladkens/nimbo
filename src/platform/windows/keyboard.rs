@@ -9,10 +9,10 @@
 
 use keyboard_types::{Code, Modifiers, NamedKey};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-  GetAsyncKeyState, GetKeyState, GetKeyboardLayout, GetKeyboardState, ToUnicodeEx, VK_BACK,
-  VK_CONTROL, VK_DELETE, VK_DIVIDE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F20, VK_HOME, VK_INSERT,
-  VK_LEFT, VK_LWIN, VK_MENU, VK_NEXT, VK_NUMLOCK, VK_PAUSE, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_RWIN,
-  VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
+  GetAsyncKeyState, GetKeyState, GetKeyboardLayout, GetKeyboardState, ToUnicodeEx, VK_APPS,
+  VK_BACK, VK_CONTROL, VK_DELETE, VK_DIVIDE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F20, VK_HOME,
+  VK_INSERT, VK_LEFT, VK_LWIN, VK_MENU, VK_NEXT, VK_NUMLOCK, VK_PAUSE, VK_PRIOR, VK_RETURN,
+  VK_RIGHT, VK_RWIN, VK_SHIFT, VK_SNAPSHOT, VK_SPACE, VK_TAB, VK_UP,
 };
 
 use crate::keys::{self, Command, Delete, Key, KeyEvent, Move};
@@ -34,6 +34,8 @@ pub fn code(vk: u16, scan: u16, extended: bool) -> Code {
     VK_DIVIDE => Code::NumpadDivide, // extended: not by scan code
     VK_NUMLOCK => Code::NumLock,     // extended; Pause has its scan code
     VK_PAUSE => Code::Pause,
+    VK_APPS => Code::ContextMenu,
+    VK_SNAPSHOT => Code::PrintScreen,
     VK_SPACE => Code::Space,
     _ if let Some(code) = named => code,
     _ if extended => Code::Unidentified,
@@ -248,7 +250,9 @@ mod tests {
       (VK_SPACE, 0x39, false, Code::Space),
       (VK_PAUSE, 0x45, false, Code::Pause),
       (VK_NUMLOCK, 0x45, true, Code::NumLock),
-      (0x5D, 0x5D, true, Code::Unidentified), // the menu key
+      (VK_APPS, 0x5D, true, Code::ContextMenu),
+      (VK_SNAPSHOT, 0x37, true, Code::PrintScreen),
+      (0xAD, 0x20, true, Code::Unidentified), // volume mute
     ];
     for (vk, scan, ext, want) in cases {
       assert_eq!(code(vk, scan, ext), want, "vk {vk:#x}");

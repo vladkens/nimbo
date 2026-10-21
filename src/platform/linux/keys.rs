@@ -144,6 +144,7 @@ pub fn code(key: u32) -> Code {
     96 => Code::NumpadEnter,
     97 => Code::ControlRight,
     98 => Code::NumpadDivide,
+    99 => Code::PrintScreen,
     100 => Code::AltRight,
     102 => Code::Home,
     103 => Code::ArrowUp,
@@ -156,6 +157,7 @@ pub fn code(key: u32) -> Code {
     110 => Code::Insert,
     111 => Code::Delete,
     117 => Code::NumpadEqual,
+    119 => Code::Pause,
     125 => Code::MetaLeft,
     126 => Code::MetaRight,
     127 => Code::ContextMenu,
@@ -264,7 +266,7 @@ mod tests {
 
   #[test]
   fn evdev_codes_by_place() {
-    let evdev = [30, 105, 28, 96, 88, 183, 190, 110, 125, 126, 69, 86, 99];
+    let evdev = [30, 105, 28, 96, 88, 183, 190, 110, 125, 126, 69, 86, 99, 127, 120];
     let want = [
       Code::KeyA,
       Code::ArrowLeft,
@@ -278,6 +280,8 @@ mod tests {
       Code::MetaRight,
       Code::NumLock,
       Code::IntlBackslash,
+      Code::PrintScreen,
+      Code::ContextMenu,
       Code::Unidentified,
     ];
     assert_eq!(evdev.map(code), want);
