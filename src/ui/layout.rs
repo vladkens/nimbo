@@ -353,8 +353,8 @@ fn children_fit(t: &Tree, i: usize, ax: usize) -> (f32, f32) {
   (size + gaps + a + b, least + gaps + a + b)
 }
 
-/// The preferred width of a text (its widest line) and its least: when it wraps, the widest
-/// character of its widest word, as a word that doesn't fit a line breaks between characters
+/// The preferred width of a text (its widest line) and its least: when it wraps, its widest
+/// character (grapheme), as a word that doesn't fit a line breaks between characters
 /// ([wrap_text]).
 fn text_width(s: &str, style: TextStyle, m: &mut dyn Measure) -> (f32, f32) {
   if style.ellipsis && !s.contains('\n') {
@@ -371,19 +371,14 @@ fn text_width(s: &str, style: TextStyle, m: &mut dyn Measure) -> (f32, f32) {
       continue;
     }
 
-    let mut widest = ("", 0.0f32);
-    for word in line.split(' ').filter(|w| !w.is_empty()) {
-      let w = m.width(word, style.font);
-      if w > widest.1 {
-        widest = (word, w);
+    // Every word's: a narrow word can hold the widest one ("iiii W").
+    for word in line.split(' ') {
+      let mut i = 0;
+      while i < word.len() {
+        let j = next_grapheme(word, i);
+        least = least.max(m.width(&word[i..j], style.font));
+        i = j;
       }
-    }
-
-    let mut i = 0;
-    while i < widest.0.len() {
-      let j = next_grapheme(widest.0, i);
-      least = least.max(m.width(&widest.0[i..j], style.font));
-      i = j;
     }
   }
 
@@ -584,31 +579,26 @@ fn wrap(t: &mut Tree, m: &mut dyn Measure) {
 }
 
 /// The longest prefix of `s` that fits `width` with an ellipsis after it (trailing spaces
-/// dropped), as its length in bytes and its width with the ellipsis.
+/// dropped), as its length in bytes and its width with the ellipsis. It ends between graphemes:
+/// an emoji sequence or a syllable stays whole.
 fn ellipsize(s: &str, font: Font, width: f32, m: &mut dyn Measure) -> (usize, f32) {
   let dots = m.width(ELLIPSIS, font);
-  // Binary search over byte offsets snapped to characters: `lo` fits, `hi` doesn't.
-  let (mut lo, mut hi) = (0, s.len());
+  let mut bounds = vec![0];
+  while let Some(&i) = bounds.last().filter(|&&i| i < s.len()) {
+    bounds.push(next_grapheme(s, i));
+  }
+
+  // Binary search over the graphemes: `lo` fits, `hi` doesn't.
+  let (mut lo, mut hi) = (0, bounds.len());
   while hi - lo > 1 {
-    let mut mid = (lo + hi) / 2;
-    while !s.is_char_boundary(mid) {
-      mid -= 1;
-    }
-
-    if mid <= lo {
-      mid = lo + s[lo..].chars().next().map_or(1, char::len_utf8);
-      if mid >= hi {
-        break;
-      }
-    }
-
-    match m.width(&s[..mid], font) + dots <= width + EPS {
+    let mid = (lo + hi) / 2;
+    match m.width(&s[..bounds[mid]], font) + dots <= width + EPS {
       true => lo = mid,
       false => hi = mid,
     }
   }
 
-  let end = s[..lo].trim_end().len();
+  let end = s[..bounds[lo]].trim_end().len();
   (end, m.width(&s[..end], font) + dots)
 }
 
@@ -681,7 +671,9 @@ fn wrap_text(
 }
 
 /// Where `word`, wider than `width`, breaks: after the longest runs of whole graphemes that fit,
-/// each at least one, as offsets in it; not at its end.
+/// each at least one, as offsets in it; not at its end. Each line measures runs doubling from its
+/// start to one that doesn't fit, then halves between: about its own length, not the rest of the
+/// word's.
 fn breaks(word: &str, font: Font, width: f32, m: &mut dyn Measure) -> Vec<usize> {
   let mut bounds = vec![0];
   while let Some(&i) = bounds.last().filter(|&&i| i < word.len()) {
@@ -689,13 +681,27 @@ fn breaks(word: &str, font: Font, width: f32, m: &mut dyn Measure) -> Vec<usize>
   }
 
   let (mut cuts, mut from, last) = (Vec::new(), 0, bounds.len() - 1);
-  // While what is left is more than a grapheme and doesn't fit.
-  while from + 1 < last && m.width(&word[bounds[from]..], font) > width + EPS {
-    // `lo` fits (or is the one grapheme a line takes anyway), `hi` doesn't.
-    let (mut lo, mut hi) = (from + 1, last);
+  let fits = |m: &mut dyn Measure, a: usize, b: usize| {
+    m.width(&word[bounds[a]..bounds[b]], font) <= width + EPS
+  };
+  loop {
+    // `lo` fits (or is the one grapheme a line takes anyway), `hi` doesn't; none when the rest
+    // fits.
+    let (mut lo, mut hi, mut step) = (from + 1, None, 1);
+    while lo < last {
+      let probe = (lo + step).min(last);
+      if !fits(m, from, probe) {
+        hi = Some(probe);
+        break;
+      }
+
+      (lo, step) = (probe, step * 2);
+    }
+
+    let Some(mut hi) = hi else { break };
     while hi - lo > 1 {
       let mid = (lo + hi) / 2;
-      match m.width(&word[bounds[from]..bounds[mid]], font) <= width + EPS {
+      match fits(m, from, mid) {
         true => lo = mid,
         false => hi = mid,
       }
@@ -1164,6 +1170,80 @@ pub(crate) mod tests {
     let t = build(7.0);
     assert_eq!(lines(&t, "t")[..3], ["a", "a", "a"]);
     assert_eq!(rect(&t, "t").2, 6.0);
+  }
+
+  /// [Fake], counting the characters it measures.
+  struct Counted(usize);
+
+  impl Measure for Counted {
+    fn width(&mut self, s: &str, font: Font) -> f32 {
+      self.0 += s.chars().count();
+      Fake.width(s, font)
+    }
+
+    fn metrics(&mut self, font: Font) -> Metrics {
+      Fake.metrics(font)
+    }
+
+    fn image(&mut self, id: ImageId) -> Size {
+      Fake.image(id)
+    }
+  }
+
+  #[test]
+  fn a_long_word_wraps_in_linear_work() {
+    // 10 characters a line: each line measures about its own, not the rest of the word.
+    let measured = |n: usize| {
+      let text = "a".repeat(n);
+      let (mut m, mut out) = (Counted(0), Vec::new());
+      wrap_text(&text, (0, n as u32), T, 60.0, &mut m, &mut out);
+      assert_eq!(out.len(), n.div_ceil(10));
+      assert!(out.iter().all(|l| l.end - l.start == 10 || l.end == n as u32));
+      m.0
+    };
+    let (a, b) = (measured(1000), measured(4000));
+    assert!(b < 30 * 4000, "{b} characters measured for 4000");
+    assert!(b < 5 * a, "{a} for 1000, {b} for 4000");
+  }
+
+  /// 'W' is 12 points wide, 'i' 2, the rest 6.
+  struct Narrow;
+
+  impl Measure for Narrow {
+    fn width(&mut self, s: &str, _: Font) -> f32 {
+      s.chars()
+        .map(|c| {
+          if c == 'W' {
+            12.0
+          } else if c == 'i' {
+            2.0
+          } else {
+            6.0
+          }
+        })
+        .sum()
+    }
+
+    fn metrics(&mut self, font: Font) -> Metrics {
+      Fake.metrics(font)
+    }
+
+    fn image(&mut self, id: ImageId) -> Size {
+      Fake.image(id)
+    }
+  }
+
+  #[test]
+  fn wrapped_text_is_never_narrower_than_its_widest_character() {
+    // The widest word is "iiiiiiii" (16), its widest character 2; "W" is 12.
+    assert_eq!(text_width("iiiiiiii W", T, &mut Narrow), (34.0, 12.0));
+  }
+
+  #[test]
+  fn an_ellipsis_keeps_graphemes_whole() {
+    // "ae" and the ellipsis fit 18, but the accent belongs to the "e": only "a" stays.
+    assert_eq!(ellipsize("ae\u{301}bc", T.font, 18.0, &mut Fake), (1, 12.0));
+    assert_eq!(ellipsize("ae\u{301}bc", T.font, 24.0, &mut Fake), (4, 24.0));
   }
 
   #[test]
