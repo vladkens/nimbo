@@ -96,15 +96,14 @@ fn node(
     return;
   }
 
+  decorate(s, r, alpha, f);
+  // Outside the box, over its shadow.
   if let Some(ring) = own {
-    // Outside the box, so under it is the same as over it.
     let o = ring.gap + ring.width;
     let rect = Rect::new(r.x - o, r.y - o, r.w + 2.0 * o, r.h + 2.0 * o);
     let q = Quad::new(rect, [0.0; 4]).radii(s.radii.map(|v| v + o));
     f.quad(q.border(ring.width, fade(ring.color, alpha)));
   }
-
-  decorate(s, r, alpha, f);
 
   match n.kind {
     Kind::Box => {}
@@ -338,6 +337,38 @@ mod tests {
     ui.paint(&mut f);
     // The first one's shadow and box; nothing of the one far above.
     assert_eq!(scene.counts().quads, 2);
+  }
+
+  /// The focus ring paints over the element's shadow, which reaches past its box as the ring
+  /// does.
+  #[test]
+  fn the_focus_ring_paints_over_the_shadow() {
+    let (size, scale) = (Size::new(100.0, 50.0), 1.0);
+    let (mut scene, mut text, mut images) =
+      (Scene::default(), TextSystem::new(scale), Images::default());
+    let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
+    let black = [0.0, 0.0, 0.0, 1.0];
+    let shadow = crate::ui::Shadow::new(4.0, 0.0, black);
+    ui.id("box").el(Style::new().w(px(20.0)).h(px(10.0)).bg([1.0; 4]).shadow(shadow));
+    let mut sys = Sys { text: &mut text, images: &images, scale };
+    ui.layout(&mut sys, scale);
+    let mut f = Frame {
+      size,
+      scale,
+      mouse: None,
+      now: Duration::ZERO,
+      scene: &mut scene,
+      text: &mut text,
+      images: &mut images,
+      animate: false,
+    };
+    let i = ui.st.tree.find(Id::of("box")).unwrap() as usize;
+    let ring = FocusRing::new([1.0, 0.0, 0.0, 1.0]);
+    paint(&ui.st.tree, &mut ui.canvases, Some((i, ring)), &mut f);
+    let quads = &scene.layers()[0].quads;
+    let shadow = quads.iter().position(|q| q.color == black).unwrap();
+    let ring = quads.iter().position(|q| q.border_color == [1.0, 0.0, 0.0, 1.0]).unwrap();
+    assert!(ring > shadow, "the ring {ring}, the shadow {shadow}");
   }
 
   #[test]
