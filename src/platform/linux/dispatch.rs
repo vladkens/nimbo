@@ -317,13 +317,13 @@ impl Dispatch<WlPointer, ()> for Win {
         win.mouse = Point::new(surface_x as f32, surface_y as f32);
         win.send(Event::MouseMove { pos: win.mouse, mods });
       }
-      wl_pointer::Event::Button { serial, button, state, .. } => {
+      wl_pointer::Event::Button { serial, time, button, state } => {
         let down = state == WEnum::Value(ButtonState::Pressed);
         if down {
           win.clip.borrow_mut().serial = serial;
         }
 
-        win.button(button, down);
+        win.button(button, down, time);
       }
       wl_pointer::Event::Axis { axis: WEnum::Value(axis), value, .. } => {
         win.axes.value[(axis as usize).min(1)] += value;
