@@ -443,6 +443,8 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
       win.render();
     }
 
+    // A size the frame asked for, before the loop sleeps.
+    win.apply_resize();
     let was = std::mem::replace(&mut unsent, backed_up(queue.flush())?);
     if was && !unsent {
       // Drained: the frame that waited for it is drawn before the loop sleeps.

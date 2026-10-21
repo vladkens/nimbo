@@ -356,6 +356,8 @@ fn run_on(
 
     if win.frame_due(now) {
       win.render();
+      // A size the frame asked for, before the loop sleeps.
+      win.apply_resize();
     }
 
     if !win.kb_ready && win.frames > 0 {
