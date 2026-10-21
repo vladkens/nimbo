@@ -11,7 +11,7 @@
 //! from `wl_seat` (pointer, axis, pinch gestures, keyboard through xkbcommon in [xkb]),
 //! cursor-shape-v1 for cursors (else the Xcursor theme's, [cursor]), the clipboard on
 //! `wl_data_device` ([clip]); the objects' events in [dispatch]. One thread: the loop polls the
-//! display and a wake eventfd with the next key repeat as the timeout.
+//! display and a wake eventfd with the next timer (or key repeat) as the timeout.
 //!
 //! No client-side decorations: sway and other wlroots compositors (and KDE) draw their own;
 //! GNOME (Mutter) draws none for clients, so a window there has no title bar yet (CSD is to
@@ -59,6 +59,7 @@ use wayland_protocols::wp::pointer_gestures::zv1::client::zwp_pointer_gestures_v
 use wayland_protocols::wp::viewporter::client::wp_viewport::WpViewport;
 use wayland_protocols::wp::viewporter::client::wp_viewporter::WpViewporter;
 use wayland_protocols::xdg::shell::client::xdg_surface::XdgSurface;
+use wayland_protocols::xdg::shell::client::xdg_toplevel::XdgToplevel;
 use wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase;
 
 use self::clip::{Clip, Clipboard, Transfers};
@@ -230,6 +231,11 @@ pub struct Win {
   rt: Runtime<Box<dyn App>>,
   surface: WlSurface,
   _xdg: XdgSurface,
+  top: XdgToplevel,
+  /// The user can resize it ([Config::resizable]) down to `min`; a fixed one gets its new size
+  /// as its least and largest.
+  resizable: bool,
+  min: Size,
   viewport: Option<WpViewport>,
   _fractional: Option<WpFractionalScaleV1>,
   present: Presenter,
@@ -369,6 +375,9 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
     rt,
     surface,
     _xdg: xdg,
+    top,
+    resizable: cfg.resizable,
+    min: cfg.min(),
     viewport,
     _fractional: fractional,
     present: Presenter::new(shm),
@@ -425,6 +434,7 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
     }
 
     win.key_repeat();
+    win.apply_resize();
 
     // A configure's frame comes at once: its ack is committed with a buffer of its size.
     let now = Instant::now();
@@ -505,7 +515,7 @@ impl Win {
   }
 
   /// Until the loop must run again without input: the next key repeat, the next idle reader of
-  /// our text let go, and the next paced tick when no frame callback is due.
+  /// our text let go, and the next paced tick or timer when no frame callback is due.
   fn timeout(&mut self) -> Option<Duration> {
     let now = Instant::now();
     let repeat = self.repeat.as_ref().map(|r| r.at);
@@ -518,7 +528,7 @@ impl Win {
     if self.configured && !self.frame_pending {
       let next = match self.rt.needs_frame() {
         true => self.next_tick,
-        false => None,
+        false => self.rt.due_in().map(|d| now + d),
       };
 
       at = match (at, next) {
@@ -589,6 +599,30 @@ impl Win {
     }
 
     self.sync_cursor();
+  }
+
+  /// Takes the size the app asked for ([Runtime::take_resize]) as the surface's: a floating
+  /// window takes the size its buffers have; a fixed one gets it as its least and largest too,
+  /// so the compositor configures it so.
+  fn apply_resize(&mut self) {
+    let Some(size) = self.rt.take_resize() else { return };
+    let (w, h) = (size.w.ceil() as i32, size.h.ceil() as i32);
+    match self.resizable {
+      true if self.min.w > size.w || self.min.h > size.h => {
+        self.min = Size::new(self.min.w.min(size.w), self.min.h.min(size.h));
+        self.top.set_min_size(self.min.w.ceil() as i32, self.min.h.ceil() as i32);
+      }
+      true => {}
+      false => {
+        // Lowered first, so the least size never passes the largest.
+        self.top.set_min_size(0, 0);
+        self.top.set_max_size(w, h);
+        self.top.set_min_size(w, h);
+      }
+    }
+
+    self.size = size;
+    self.rt.redraw();
   }
 
   /// Feeds an event to the runtime; returns whether it was used.

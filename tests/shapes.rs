@@ -118,7 +118,7 @@ fn main() {
   assert!(!h.frame(), "a frame without changes");
 
   // An event the app doesn't use builds no frame; a wake from another thread builds one.
-  assert!(!h.event(Event::Focus(false)));
+  assert!(!h.move_to(5.0, 5.0));
   assert!(!h.frame());
   let waker = h.rt.waker().clone();
   std::thread::spawn(move || waker.wake()).join().unwrap();

@@ -9,7 +9,8 @@
 //! cursors from the theme (libxcb-cursor) or the cursor font, the CLIPBOARD selection ([clip]),
 //! light or dark from XSETTINGS' `Net/ThemeName`, its manager followed as it starts, quits or
 //! restarts. No frames while the window is unmapped or fully covered (`VisibilityNotify`; under a
-//! compositing manager it never is). One thread: the loop polls the connection and a wake eventfd.
+//! compositing manager it never is). One thread: the loop polls the connection and a wake eventfd
+//! with the next timer as the timeout.
 //!
 //! Not yet: input methods (XIM or IBus: typing goes through xkbcommon's compose only), smooth
 //! and touchpad scrolling (XInput2: wheels come as clicks), pinch, `_NET_WM_SYNC_REQUEST`
@@ -343,6 +344,7 @@ fn run_on(
       break;
     }
 
+    win.apply_resize();
     let now = Instant::now();
     if win.present.unstick(now) {
       // The put likely failed: the whole frame again, into the new segment.
@@ -537,8 +539,8 @@ impl Win {
     self.force || self.pace.left(now).is_zero()
   }
 
-  /// Until the loop must run again without input: the next tick while a frame is wanted; none
-  /// while the server reads the last frame (its completion wakes us).
+  /// Until the loop must run again without input: the next tick while a frame is wanted, else
+  /// the next timer; none while the server reads the last frame (its completion wakes us).
   fn timeout(&mut self) -> Option<Duration> {
     let now = Instant::now();
     if self.present.busy() {
@@ -547,7 +549,7 @@ impl Win {
 
     match self.visible() && self.rt.needs_frame() {
       true => Some(self.pace.left(now)),
-      false => None,
+      false => self.rt.due_in(),
     }
   }
 
@@ -576,6 +578,28 @@ impl Win {
     }
 
     self.sync_cursor();
+  }
+
+  /// Takes the size the app asked for ([Runtime::take_resize]) as the window's; a fixed one
+  /// gets it as its least and largest size too.
+  fn apply_resize(&mut self) {
+    let Some(size) = self.rt.take_resize() else { return };
+    match self.max {
+      None if self.min.w > size.w || self.min.h > size.h => {
+        self.min = Size::new(self.min.w.min(size.w), self.min.h.min(size.h));
+        set_size_hints(&self.x, self.win, self.min, None, self.scale);
+      }
+      None => {}
+      Some(_) => {
+        (self.min, self.max) = (size, Some(size));
+        set_size_hints(&self.x, self.win, size, Some(size), self.scale);
+      }
+    }
+
+    self.x.resize_window(self.win, px(size.w, self.scale), px(size.h, self.scale));
+    self.size = size;
+    self.force = true;
+    self.rt.redraw();
   }
 
   /// Feeds an event to the runtime; returns whether it was used.
