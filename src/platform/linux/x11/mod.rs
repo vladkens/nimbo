@@ -569,6 +569,8 @@ impl Win {
       eprintln!("nimbo: {ev:?}");
     }
 
+    // A ConfigureNotify in the same batch already counts for the input after it.
+    self.rt.resize(self.size, self.scale);
     let used = self.rt.event(ev);
     self.sync_cursor();
     used
