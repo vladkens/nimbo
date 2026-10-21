@@ -8,7 +8,7 @@ const ZWJ: char = '\u{200d}';
 /// Characters that join the cluster before them (Unicode's Grapheme_Extend and SpacingMark,
 /// the common ranges): combining marks, Indic and Thai vowel signs, variation selectors, emoji
 /// skin tones and tags, ZWNJ and ZWJ.
-fn is_extend(c: char) -> bool {
+pub(crate) fn is_extend(c: char) -> bool {
   matches!(c as u32,
     0x0300..=0x036f | 0x0483..=0x0489 | 0x0591..=0x05bd | 0x05bf | 0x05c1..=0x05c2
     | 0x05c4..=0x05c5 | 0x05c7 | 0x0610..=0x061a | 0x064b..=0x065f | 0x0670 | 0x06d6..=0x06dc
