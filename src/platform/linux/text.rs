@@ -492,7 +492,8 @@ impl Cache {
 /// pair of regional indicators): the first font with the whole cluster in the presentation a
 /// selector asks for (U+FE0F emoji: a colour font; U+FE0E text: another), else the first with
 /// the whole cluster, else the first with its first character, else font 0. A joined emoji or
-/// a letter with its mark is shaped in one font.
+/// a letter with its mark is shaped in one font. A digit, `#` or `*` asks for emoji only with
+/// the keycap mark (U+20E3).
 fn runs(
   s: &str,
   fonts: usize,
@@ -508,7 +509,10 @@ fn runs(
       false => {
         let all = |f: &usize| text.chars().filter(|&c| !ignorable(c)).all(|c| has(*f, c));
         let any = |f: &usize| has(*f, first);
-        let wants = match (text.contains('\u{fe0f}'), text.contains('\u{fe0e}')) {
+        // A digit, `#` or `*` is an emoji only as a keycap: alone it stays text (a colour font's
+        // is a black bitmap for the keycap to hold), as on macOS.
+        let keycap = !matches!(first, '0'..='9' | '#' | '*') || text.contains('\u{20e3}');
+        let wants = match (text.contains('\u{fe0f}') && keycap, text.contains('\u{fe0e}')) {
           (true, _) => Some(true),
           (_, true) => Some(false),
           _ => None,
@@ -988,11 +992,12 @@ mod tests {
     assert!(Arc::ptr_eq(&primary, &again));
   }
 
-  /// Two fonts: a text one (Latin letters, ❤, क) and another (people, ❤, the acute accent, कि).
+  /// Two fonts: a text one (Latin letters, digits, ❤, क) and another (people, ❤, the acute
+  /// accent, कि, 1 and the keycap mark).
   fn has(font: usize, c: char) -> bool {
     match font {
-      0 => c.is_ascii_alphabetic() || matches!(c, '❤' | 'क'),
-      _ => matches!(c, '👩' | '👨' | '❤' | '\u{301}' | 'e' | '🇺' | '🇦' | 'क' | '\u{93f}'),
+      0 => c.is_ascii_alphanumeric() || matches!(c, '❤' | 'क'),
+      _ => "👩👨❤\u{301}e🇺🇦क\u{93f}1\u{20e3}".contains(c),
     }
   }
 
@@ -1099,5 +1104,8 @@ mod tests {
     assert_eq!(picks("❤\u{fe0e}"), [("❤\u{fe0e}", 0)]);
     // No colour font has it: the text font draws it all the same.
     assert_eq!(picks("a\u{fe0f}"), [("a\u{fe0f}", 0)]);
+    // A digit is an emoji as a keycap; alone it is text, whatever the selector.
+    assert_eq!(picks("1\u{fe0f}\u{20e3}"), [("1\u{fe0f}\u{20e3}", 1)]);
+    assert_eq!(picks("1\u{fe0f}"), [("1\u{fe0f}", 0)]);
   }
 }
