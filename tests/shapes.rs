@@ -137,5 +137,9 @@ fn main() {
   assert_eq!(img.pixel(5.0, 5.0), px(LIGHT.bg));
   assert_eq!(img.pixel(mid(SQUARE).0, mid(SQUARE).1), px(RED));
 
+  // State changed through `app_mut` redraws.
+  h.app_mut().light = false;
+  check(&h.render(), &DARK);
+
   println!("shapes scenario: ok");
 }

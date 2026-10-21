@@ -30,7 +30,9 @@ impl<A: App> Harness<A> {
     &self.rt.app
   }
 
+  /// The app to change directly; the next [Self::frame] builds a frame.
   pub fn app_mut(&mut self) -> &mut A {
+    self.rt.redraw();
     &mut self.rt.app
   }
 
