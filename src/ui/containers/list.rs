@@ -176,8 +176,8 @@ struct ListState {
   sel: Selection,
   /// A row to scroll into view once the list knows its viewport.
   reveal: Option<usize>,
-  /// The element the press going on is on, once a pass saw it.
-  pressed: Option<Id>,
+  /// The press a pass saw last ([crate::ui::Press::seq]).
+  pressed: Option<u32>,
   /// The rows built last time, keyed as then, from index `from`: what a press can be on.
   shown: Vec<u64>,
   from: usize,
@@ -464,16 +464,14 @@ impl<'a> Ui<'a> {
   ) {
     let press = self.press().filter(|p| p.button == MouseButton::Left);
     // A press is seen once; a click whose press no pass saw (a quick one) stands for it.
-    let hit = match (press, st.pressed) {
-      (Some(p), seen) if seen != Some(p.id) => Some((p.id, p.mods, p.clicks)),
-      (Some(_), _) => None,
-      (None, seen) => {
-        let c = self.st.input.click.filter(|c| c.button == MouseButton::Left && seen != Some(c.id));
-        c.map(|c| (c.id, c.mods, c.clicks))
-      }
+    let click = self.st.input.click.filter(|c| c.button == MouseButton::Left);
+    let hit = match (press, click) {
+      (Some(p), _) if st.pressed != Some(p.seq) => Some((p.id, p.mods, p.clicks)),
+      (None, Some(c)) if st.pressed != Some(c.seq) => Some((c.id, c.mods, c.clicks)),
+      _ => None,
     };
 
-    st.pressed = press.map(|p| p.id);
+    st.pressed = press.map(|p| p.seq).or(click.map(|c| c.seq)).or(st.pressed);
     let Some((at, mods, clicks)) = hit else { return };
     // Its index as built, a hint that saves a scan unless the rows moved since.
     let Some(at) = st.shown.iter().position(|&k| id.key(("row", k)) == at) else { return };
@@ -570,7 +568,8 @@ mod tests {
       }
 
       ui.col(Style::new().w(px(200.0)).h(px(200.0)), |ui| {
-        let list = List::new(1000, 20.0).selection(&mut self.sel).style(Style::new().grow());
+        let list =
+          List::new(1000, 20.0).multi().selection(&mut self.sel).style(Style::new().grow());
         list.show(ui.disabled(self.off).id("list"), |ui, _| ui.label("row"));
       });
       if ui.id("b").button("B").clicked {
@@ -597,6 +596,16 @@ mod tests {
     h.release(250.0, 250.0);
     h.click(b.x + 5.0, b.y + 5.0);
     assert_eq!(h.app().sel.cursor(), Some(497));
+    // The same again on one row: its press selects it, then the quick Cmd-click's toggles it.
+    h.press(b.x + 5.0, b.y + 5.0);
+    h.frame();
+    h.move_to(250.0, 250.0);
+    h.release(250.0, 250.0);
+    h.move_to(b.x + 5.0, b.y + 5.0);
+    h.press_with(b.x + 5.0, b.y + 5.0, 1, crate::app::Mods::CMD);
+    h.release(b.x + 5.0, b.y + 5.0);
+    assert!(h.app().sel.is_empty());
+    h.click(b.x + 5.0, b.y + 5.0);
     // Disabled: no selection by click, no focus, and the button after it still works.
     h.frame();
     h.app_mut().off = true;
@@ -659,9 +668,10 @@ mod tests {
     assert!(st.last.rect(id.key(("row", 99_999u64))).is_some());
     assert!(st.last.rect(id.key(("row", 99_988u64))).is_some());
     assert!(st.last.rect(id.key(("row", 99_987u64))).is_none());
-    // The count drops under the offset: clamped in the view too, rows shown from the top.
+    // The count drops under the offset: clamped in the view too, rows shown from the top; the
+    // scrollbar, showing since the offset moved, drew from the old content: the view runs again.
     let (st, shown, short) = frame(st, 5, -1.0);
-    assert_eq!((shown, short), (5, false));
+    assert_eq!((shown, short), (5, true));
     assert_eq!(st.scroll(id).unwrap().offset.y, 0.0);
   }
 }
