@@ -2,11 +2,11 @@
 
 //! The text backend on the system's libraries, loaded at run time ([super::dl]): fontconfig
 //! picks the UI font (`sans-serif`) and the monospaced one (`monospace`) and the fallback chain
-//! (`FcFontSort`, untrimmed, by charset per cluster), HarfBuzz shapes (its own OpenType
-//! functions, at the font's units per em: unhinted advances, scaled to points), FreeType gives
-//! metrics and draws glyphs: grayscale coverage with light hinting (vertical only, so subpixel x
-//! positions stay; none when fontconfig turns hinting off), colour glyphs (CBDT strikes scaled to
-//! the size, COLR layers) as RGBA.
+//! (`FcFontSort`, untrimmed, OpenType fonts only, by charset per cluster), HarfBuzz shapes (its own
+//! OpenType functions, at the font's units per em: unhinted advances, scaled to points), FreeType
+//! gives metrics and draws glyphs: grayscale coverage with light hinting (vertical only, so
+//! subpixel x positions stay; none when fontconfig turns hinting off), colour glyphs (CBDT strikes
+//! scaled to the size, COLR layers) as RGBA.
 //!
 //! Process-wide state: the libraries, fontconfig's config, one FreeType library, and every font
 //! file opened once (`Arc`, shared across text systems and threads), each FT_Face behind its
@@ -388,6 +388,13 @@ fn has_char(cs: P, c: char) -> bool {
   !cs.is_null() && unsafe { (sys().fc.FcCharSetHasChar)(cs, c as u32) } != 0
 }
 
+/// Whether HarfBuzz can shape a font of fontconfig's `fontformat`: OpenType's (TrueType and
+/// CFF outlines, colour ones too), not Type 1, PCF or BDF, whose tables it can't read (every
+/// glyph would be `.notdef`, drawn blank).
+fn shapeable(format: Option<&CStr>) -> bool {
+  format.is_none_or(|f| f == c"TrueType" || f == c"CFF")
+}
+
 impl Cache {
   /// The file at `path` and `index` with `hinting`, opened on first use; a colour font, which
   /// never hints, is one for both.
@@ -433,19 +440,27 @@ impl Cache {
 
     let hinting = get_bool(matched, c"hinting").unwrap_or(true)
       && get_int(matched, c"hintstyle").is_none_or(|h| h > 0);
-    let path = get_string(matched, c"file").expect("nimbo: a font without a file");
-    let index = get_int(matched, c"index").unwrap_or(0);
-    let primary = self.file(path, index, hinting).expect("nimbo: FreeType can't open the UI font");
-    let fallbacks = match set.is_null() {
+    let fallbacks: Vec<(P, Option<Arc<FontFile>>)> = match set.is_null() {
       true => Vec::new(),
       false => {
         let set = unsafe { &*set };
         let fonts = unsafe { std::slice::from_raw_parts(set.fonts, set.nfont as usize) };
-        fonts.iter().map(|&p| (p, None)).collect()
+        let fonts = fonts.iter().filter(|&&p| shapeable(get_string(p, c"fontformat")));
+        fonts.map(|&p| (p, None)).collect()
       }
     };
 
-    let primary_charset = charset(matched);
+    // A match HarfBuzz can't shape (a bitmap or Type 1 font set as the family) gives way to the
+    // first font of the list it can.
+    let first = match shapeable(get_string(matched, c"fontformat")) {
+      true => matched,
+      false => fallbacks.first().map(|f| f.0).expect("nimbo: no OpenType font for the UI"),
+    };
+
+    let path = get_string(first, c"file").expect("nimbo: a font without a file");
+    let index = get_int(first, c"index").unwrap_or(0);
+    let primary = self.file(path, index, hinting).expect("nimbo: FreeType can't open the UI font");
+    let primary_charset = charset(first);
     self.chains.push(Chain { font: key, primary, primary_charset, fallbacks, hinting });
     self.chains.len() - 1
   }
@@ -1056,9 +1071,24 @@ mod tests {
       let mut res = 0;
       let set = (s.fc.FcFontSort)(s.config, pat, 0, std::ptr::null_mut(), &mut res);
       (s.fc.FcPatternDestroy)(pat);
-      (*set).nfont as usize
+      let fonts = std::slice::from_raw_parts((*set).fonts, (*set).nfont as usize);
+      fonts.iter().filter(|&&p| shapeable(get_string(p, c"fontformat"))).count()
     };
     assert_eq!(cache().chains[chain].fallbacks.len(), all);
+  }
+
+  /// No font in a chain is one HarfBuzz can't shape: a Type 1 font fontconfig sorts in
+  /// (Standard Symbols PS on Ubuntu) would draw its characters blank.
+  #[test]
+  fn chains_hold_only_shapeable_fonts() {
+    let chain = face(Font::ui(13.0)).chain;
+    let c = cache();
+    let formats = c.chains[chain].fallbacks.iter().map(|f| get_string(f.0, c"fontformat"));
+    let bad: Vec<_> = formats.filter(|&f| !shapeable(f)).collect();
+    assert!(bad.is_empty(), "{bad:?}");
+
+    assert!(shapeable(Some(c"TrueType")) && shapeable(Some(c"CFF")) && shapeable(None));
+    assert!(!shapeable(Some(c"Type 1")) && !shapeable(Some(c"PCF")) && !shapeable(Some(c"BDF")));
   }
 
   #[test]
