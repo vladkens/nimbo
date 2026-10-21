@@ -115,6 +115,9 @@ pub struct Line {
   pub clusters: Vec<u32>,
   /// Advance width in points.
   pub width: f32,
+  /// The faces its glyphs index: they start over past [FACE_CAP], and a line kept from before
+  /// is no longer [TextSystem::is_current].
+  pub epoch: u32,
 }
 
 struct Entry {
@@ -150,6 +153,8 @@ pub struct TextSystem {
   /// Text formatted for drawing ([crate::Frame::text_at]), kept so a steady frame allocates
   /// nothing.
   pub(crate) scratch: String,
+  /// Bumped each time the faces start over: [Line::epoch].
+  epoch: u32,
 }
 
 impl TextSystem {
@@ -169,6 +174,7 @@ impl TextSystem {
       frame: 0,
       refilled: false,
       scratch: String::new(),
+      epoch: 0,
     }
   }
 
@@ -226,7 +232,9 @@ impl TextSystem {
 
     self.frame += 1;
     if self.faces.len() > FACE_CAP {
-      // Lines and atlas slots name faces by index: they go too.
+      // Lines and atlas slots name faces by index: they go too, and lines kept elsewhere are
+      // stale.
+      self.epoch += 1;
       self.fonts.clear();
       self.faces.clear();
       self.metrics.clear();
@@ -264,7 +272,9 @@ impl TextSystem {
     self.metrics[face as usize]
   }
 
-  /// Shapes `s` (kerning, ligatures, font fallback), cached per (font, text).
+  /// Shapes `s` (kerning, ligatures, font fallback), cached per (font, text). A line kept past
+  /// [Self::end_frame] is laid out again when it is no longer [Self::is_current]: its faces
+  /// may have started over.
   pub fn layout(&mut self, s: &str, font: Font) -> Rc<Line> {
     let face = self.face(font);
     let mut h = FxHasher::default();
@@ -283,11 +293,17 @@ impl TextSystem {
     line
   }
 
+  /// Whether `line`'s glyphs index the faces there are now.
+  pub fn is_current(&self, line: &Line) -> bool {
+    line.epoch == self.epoch
+  }
+
   /// The atlas slot of a glyph at one of 4 horizontal subpixel offsets (colour glyphs have
   /// one), rasterized on first use for `dark` text (on a light background) or light text;
-  /// `None` for glyphs with no pixels (spaces) or when the atlas is full.
+  /// `None` for glyphs with no pixels (spaces), when the atlas is full, or for a face there is
+  /// no more (a stale line's: [Self::is_current]).
   pub fn glyph(&mut self, face: u16, id: u16, subpixel: u8, dark: bool) -> Option<AtlasGlyph> {
-    let font = &self.faces[face as usize];
+    let font = self.faces.get(face as usize)?;
     // Only smoothing depends on the text's polarity.
     let dark = dark && self.smooth;
     let raster = Raster { scale: self.scale, smooth: self.smooth, dark };
@@ -324,7 +340,8 @@ impl TextSystem {
 
   fn shape(&mut self, s: &str, face: u16) -> Line {
     let base = self.faces[face as usize].clone();
-    sys::shape(&base, s, |f| self.face_index(f))
+    let line = sys::shape(&base, s, |f| self.face_index(f));
+    Line { epoch: self.epoch, ..line }
   }
 }
 
@@ -523,6 +540,27 @@ mod tests {
     let g = ts.layout("x", Font::ui(13.0)).glyphs[0];
     assert!(ts.glyph(g.face, g.id, 0, false).is_some());
     assert!(!ts.end_frame());
+  }
+
+  #[test]
+  fn kept_lines_go_stale_when_faces_start_over() {
+    let mut ts = TextSystem::new(2.0);
+    // A line far into the faces, kept by its caller.
+    for i in 0..FACE_CAP {
+      ts.metrics(Font::ui(8.0 + i as f32 * 0.25));
+    }
+
+    let kept = ts.layout("kept", Font::ui(100.0));
+    assert!(ts.is_current(&kept));
+    ts.metrics(Font::ui(101.0));
+    assert!(ts.end_frame(), "past the cap: the faces start over");
+    assert!(!ts.is_current(&kept));
+    let g = kept.glyphs[0];
+    assert!(ts.glyph(g.face, g.id, 0, false).is_none(), "no panic on a face gone");
+    let fresh = ts.layout("kept", Font::ui(100.0));
+    assert!(ts.is_current(&fresh));
+    let g = fresh.glyphs[0];
+    assert!(ts.glyph(g.face, g.id, 0, false).is_some());
   }
 
   #[test]

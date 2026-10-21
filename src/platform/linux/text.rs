@@ -599,7 +599,7 @@ pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {
     }
   }
 
-  Line { glyphs, clusters, width: pen }
+  Line { glyphs, clusters, width: pen, epoch: 0 }
 }
 
 // MARK: Glyph raster
