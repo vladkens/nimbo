@@ -221,7 +221,11 @@ impl UiState {
       Event::MouseDown { pos, button, clicks, mods } => {
         let mut changed = self.hover_at(Some(pos), false);
         let top = self.input.hover.first().copied();
-        self.input.press = top.map(|id| Press { id, button, clicks, pos, mods });
+        // Another button pressed meanwhile leaves the press to the first one's release.
+        if self.input.press.is_none_or(|p| p.button == button) {
+          self.input.press = top.map(|id| Press { id, button, clicks, pos, mods });
+        }
+
         if button == MouseButton::Left {
           // The innermost focusable element under the pointer takes focus, unless it takes it
           // by Tab only; none clears it.
@@ -563,6 +567,22 @@ mod tests {
     // Outside: hover clears, focus goes.
     ev(&mut st, down(150.0, 80.0));
     assert_eq!((st.input.hover.len(), st.input.focus), (0, None));
+  }
+
+  /// Another button pressed and let go while the left one is held leaves its press: the left
+  /// one's release still clicks.
+  #[test]
+  fn a_second_button_keeps_the_first_press() {
+    let mut st = frame(UiState::default(), |ui| {
+      ui.id("btn").el(Style::new().w(px(20.0)).h(px(20.0)));
+    });
+    let (pos, mods) = (Point::new(5.0, 5.0), Mods::NONE);
+    ev(&mut st, down(5.0, 5.0));
+    ev(&mut st, Event::MouseDown { pos, button: MouseButton::Right, clicks: 1, mods });
+    ev(&mut st, Event::MouseUp { pos, button: MouseButton::Right, mods });
+    assert!(st.pressed(Id::of("btn")), "still held");
+    ev(&mut st, up(5.0, 5.0));
+    assert_eq!(st.input.click.map(|c| (c.id, c.button)), Some((Id::of("btn"), MouseButton::Left)));
   }
 
   #[test]
