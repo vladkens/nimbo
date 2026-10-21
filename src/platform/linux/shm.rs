@@ -149,6 +149,13 @@ impl Presenter {
     true
   }
 
+  /// Whether the buffer shown has the size of the last frame presented: a configure's ack may
+  /// be committed with it.
+  pub fn fits(&self) -> bool {
+    let f = self.front.map(|f| &self.bufs[f]);
+    f.is_some_and(|b| (b.w, b.h) == self.renderer.size())
+  }
+
   /// The pixels of the buffer shown.
   pub fn shown(&self) -> Option<Pixels> {
     let b = &self.bufs[self.front?];

@@ -27,6 +27,7 @@ use rustix::event::{EventfdFlags, PollFd, PollFlags, Timespec, eventfd, poll};
 use wayland_client::globals::registry_queue_init;
 use wayland_client::protocol::wl_compositor::WlCompositor;
 use wayland_client::protocol::wl_output::WlOutput;
+use wayland_client::protocol::wl_registry::WlRegistry;
 use wayland_client::protocol::wl_shm::WlShm;
 use wayland_client::protocol::wl_surface::WlSurface;
 use wayland_client::{Connection, EventQueue, QueueHandle};
@@ -101,6 +102,13 @@ pub fn perf_cores() -> Option<usize> {
 
 // MARK: Window state
 
+/// A `wl_output`: its registry name (to see it go) and its scale.
+pub struct Output {
+  name: u32,
+  obj: WlOutput,
+  scale: i32,
+}
+
 pub struct Win {
   qh: QueueHandle<Win>,
   rt: Runtime<Box<dyn App>>,
@@ -121,13 +129,15 @@ pub struct Win {
   scale120: Option<u32>,
   /// `wl_surface.preferred_buffer_scale` (v6).
   preferred: Option<i32>,
-  outputs: Vec<(WlOutput, i32)>,
+  /// Every output, followed as they come and go (the registry), and those the surface is on.
+  outputs: Vec<Output>,
   entered: Vec<WlOutput>,
   /// The scale and size the surface was last set up for (buffer scale or viewport).
   set_scale: f32,
   set_size: Size,
   configured: bool,
-  /// A configure was acked: the next commit carries it.
+  /// A configure was acked: the next commit carries it, with a buffer of its size. Its frame is
+  /// drawn at once, not paced.
   acked: bool,
   closed: bool,
   frame_pending: bool,
@@ -143,9 +153,9 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
   let shm: WlShm = globals.bind(&qh, 1..=1, ())?;
   let viewporter: Option<WpViewporter> = globals.bind(&qh, 1..=1, ()).ok();
   let fractions: Option<WpFractionalScaleManagerV1> = globals.bind(&qh, 1..=1, ()).ok();
-  let outputs: Vec<(WlOutput, i32)> = globals.contents().with_list(|list| {
+  let outputs: Vec<Output> = globals.contents().with_list(|list| {
     let outputs = list.iter().filter(|g| g.interface == "wl_output");
-    outputs.map(|g| (globals.registry().bind(g.name, g.version.min(4), &qh, ()), 1)).collect()
+    outputs.map(|g| Output::bind(globals.registry(), g.name, g.version, &qh)).collect()
   });
 
   let surface = compositor.create_surface(&qh, ());
@@ -215,17 +225,13 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
       break;
     }
 
+    // A configure's frame comes at once: its ack is committed with a buffer of its size.
     let now = Instant::now();
-    if win.configured
-      && !win.frame_pending
-      && win.next_tick.is_none_or(|t| t <= now)
-      && win.rt.needs_frame()
-    {
+    let paced = !win.frame_pending && win.next_tick.is_none_or(|t| t <= now);
+    if win.configured && win.rt.needs_frame() && (paced || win.acked) {
       win.render();
-    } else if win.acked {
-      win.acked = false;
-      win.surface.commit();
     }
+
     queue.flush()?;
 
     let Some(guard) = queue.prepare_read() else { continue };
@@ -277,9 +283,9 @@ impl Win {
     {
       return n as f32 / 120.0;
     }
-    let on = self.entered.iter().filter_map(|o| self.outputs.iter().find(|x| x.0 == *o));
-    let on = on.map(|x| x.1).max();
-    let any = self.outputs.iter().map(|x| x.1).max();
+    let on = self.entered.iter().filter_map(|o| self.outputs.iter().find(|x| x.obj == *o));
+    let on = on.map(|x| x.scale).max();
+    let any = self.outputs.iter().map(|x| x.scale).max();
     self.preferred.or(on).or(any).unwrap_or(1).max(1) as f32
   }
 
@@ -327,10 +333,20 @@ impl Win {
       self.next_tick = Some(Instant::now() + TICK);
     }
 
-    if shown || self.acked {
+    // An ack goes with the buffer of its size: a new one, or the one shown when that has it (an
+    // unchanged frame, or one waiting for a buffer at the same size).
+    if shown || (self.acked && self.present.fits()) {
       self.acked = false;
       self.surface.commit();
+    } else if self.acked && self.trace {
+      eprintln!("nimbo: a configure waits for a buffer of its size");
     }
+  }
+}
+
+impl Output {
+  fn bind(registry: &WlRegistry, name: u32, version: u32, qh: &QueueHandle<Win>) -> Self {
+    Self { name, obj: registry.bind(name, version.min(4), qh, ()), scale: 1 }
   }
 }
 

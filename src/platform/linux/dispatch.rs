@@ -1,7 +1,7 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The Wayland objects' events into the window's state: the shell's configures, the surface's
-//! scale and outputs, frame callbacks and buffers coming back.
+//! scale and outputs (as they come and go), frame callbacks and buffers coming back.
 
 use std::sync::atomic::Ordering;
 
@@ -14,7 +14,7 @@ use wayland_client::protocol::wl_registry::{self, WlRegistry};
 use wayland_client::protocol::wl_shm::WlShm;
 use wayland_client::protocol::wl_shm_pool::WlShmPool;
 use wayland_client::protocol::wl_surface::{self, WlSurface};
-use wayland_client::{Connection, Dispatch, QueueHandle, delegate_noop};
+use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, delegate_noop};
 use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1;
 use wayland_protocols::wp::fractional_scale::v1::client::wp_fractional_scale_v1::{
   self, WpFractionalScaleV1,
@@ -25,8 +25,8 @@ use wayland_protocols::xdg::shell::client::xdg_surface::{self, XdgSurface};
 use wayland_protocols::xdg::shell::client::xdg_toplevel::{self, XdgToplevel};
 use wayland_protocols::xdg::shell::client::xdg_wm_base::{self, XdgWmBase};
 
-use super::Win;
 use super::shm::Busy;
+use super::{Output, Win};
 use crate::scene::Size;
 
 delegate_noop!(Win: ignore WlCompositor);
@@ -36,15 +36,32 @@ delegate_noop!(Win: ignore WpViewporter);
 delegate_noop!(Win: ignore WpViewport);
 delegate_noop!(Win: ignore WpFractionalScaleManagerV1);
 
+/// Outputs connected and disconnected after the start: a new one may have another scale.
 impl Dispatch<WlRegistry, GlobalListContents> for Win {
   fn event(
-    _: &mut Self,
-    _: &WlRegistry,
-    _: wl_registry::Event,
+    win: &mut Self,
+    registry: &WlRegistry,
+    ev: wl_registry::Event,
     _: &GlobalListContents,
     _: &Connection,
-    _: &QueueHandle<Self>,
+    qh: &QueueHandle<Self>,
   ) {
+    match ev {
+      wl_registry::Event::Global { name, interface, version } if interface == "wl_output" => {
+        win.outputs.push(Output::bind(registry, name, version, qh));
+      }
+      wl_registry::Event::GlobalRemove { name } => {
+        let Some(i) = win.outputs.iter().position(|o| o.name == name) else { return };
+        let o = win.outputs.remove(i);
+        win.entered.retain(|e| *e != o.obj);
+        if o.obj.version() >= 3 {
+          o.obj.release();
+        }
+      }
+      _ => return,
+    }
+
+    win.rt.redraw();
   }
 }
 
@@ -95,9 +112,9 @@ impl Dispatch<XdgToplevel, ()> for Win {
     _: &QueueHandle<Self>,
   ) {
     match ev {
-      // 0 × 0 leaves the size to us: the configured one, or the last.
-      xdg_toplevel::Event::Configure { width, height, .. } if width > 0 && height > 0 => {
-        win.pending_size = Some(Size::new(width as f32, height as f32));
+      xdg_toplevel::Event::Configure { width, height, .. } => {
+        let last = win.pending_size.unwrap_or(win.size);
+        win.pending_size = Some(configured(width, height, last));
       }
       xdg_toplevel::Event::Close => win.closed = true,
       _ => {}
@@ -135,9 +152,9 @@ impl Dispatch<WlOutput, ()> for Win {
     _: &QueueHandle<Self>,
   ) {
     if let wl_output::Event::Scale { factor } = ev
-      && let Some(o) = win.outputs.iter_mut().find(|o| o.0 == *output)
+      && let Some(o) = win.outputs.iter_mut().find(|o| o.obj == *output)
     {
-      o.1 = factor;
+      o.scale = factor;
       win.rt.redraw();
     }
   }
@@ -189,5 +206,25 @@ impl Dispatch<WlBuffer, Busy> for Win {
         win.rt.redraw();
       }
     }
+  }
+}
+
+/// The size an `xdg_toplevel.configure` asks for: a side of 0 is left to us, so it keeps `last`.
+fn configured(width: i32, height: i32, last: Size) -> Size {
+  let side = |n: i32, last: f32| if n > 0 { n as f32 } else { last };
+  Size::new(side(width, last.w), side(height, last.h))
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn a_configure_sets_each_side_it_gives() {
+    let last = Size::new(480.0, 320.0);
+    assert_eq!(configured(0, 0, last), last);
+    assert_eq!(configured(640, 0, last), Size::new(640.0, 320.0));
+    assert_eq!(configured(0, 200, last), Size::new(480.0, 200.0));
+    assert_eq!(configured(800, 600, last), Size::new(800.0, 600.0));
   }
 }
