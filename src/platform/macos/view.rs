@@ -120,7 +120,7 @@ define_class!(
 
     #[unsafe(method(viewDidChangeBackingProperties))]
     fn backing_changed(&self) {
-      // `render` picks up the new scale.
+      // `render` picks up the new scale and rebuilds the glyph cache at it.
       self.wake();
     }
 
