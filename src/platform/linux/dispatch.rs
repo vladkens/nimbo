@@ -448,8 +448,12 @@ impl Dispatch<WlDataDevice, ()> for Win {
     _: &QueueHandle<Self>,
   ) {
     match ev {
-      wl_data_device::Event::DataOffer { id } => win.clip.borrow_mut().offers.push((id, vec![])),
-      wl_data_device::Event::Selection { id } => win.clip.borrow_mut().select(id),
+      wl_data_device::Event::DataOffer { id } => win.clip.borrow_mut().offers.announce(id),
+      wl_data_device::Event::Selection { id } => win.clip.borrow_mut().offers.select(id),
+      wl_data_device::Event::Enter { id, .. } => win.clip.borrow_mut().offers.drag_enter(id),
+      wl_data_device::Event::Leave | wl_data_device::Event::Drop => {
+        win.clip.borrow_mut().offers.drag_end();
+      }
       _ => {}
     }
   }
@@ -468,10 +472,8 @@ impl Dispatch<WlDataOffer, ()> for Win {
     _: &Connection,
     _: &QueueHandle<Self>,
   ) {
-    if let wl_data_offer::Event::Offer { mime_type } = ev
-      && let Some((_, types)) = win.clip.borrow_mut().offers.iter_mut().find(|(o, _)| o == offer)
-    {
-      types.push(mime_type);
+    if let wl_data_offer::Event::Offer { mime_type } = ev {
+      win.clip.borrow_mut().offers.add_type(offer, mime_type);
     }
   }
 }
