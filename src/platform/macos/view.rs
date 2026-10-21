@@ -588,6 +588,9 @@ impl View {
     let mut state = self.ivars().state.borrow_mut();
     let Some(st) = state.as_mut() else { return };
     self.ivars().last_frame.set(Some(st.rt.now()));
+    // A wake set before this frame is let go: [Self::after_frame] sets the next, a refresh after
+    // this one at the soonest, and the old one finds itself superseded.
+    self.ivars().timer.set(None);
     st.rt.resize(size, scale);
     st.rt.frame();
     st.presenter.renderer.sync(&mut st.rt.text, &mut st.rt.images);
