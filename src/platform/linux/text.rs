@@ -17,7 +17,7 @@ use std::ops::Range;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use super::dl::{Lib, fns};
-use crate::text::edit::is_extend;
+use crate::text::edit::next_grapheme;
 use crate::text::{Font, Glyph, GlyphBox, Ink, Line, Metrics, Raster};
 
 // MARK: FFI
@@ -507,11 +507,11 @@ impl Cache {
 /// Runs of one font for `s` from fonts `0..fonts` (`has(font, c)`: whether it has `c`;
 /// `color(font)`: whether its glyphs are colour), by cluster (a character with what extends it
 /// in the editor's clusters: marks, vowel signs, joiners and selectors; what a joiner links; a
-/// pair of regional indicators): the first font with the whole cluster in the presentation a
-/// selector asks for (U+FE0F emoji: a colour font; U+FE0E text: another), or without one the
-/// character's default ([emoji_presentation]: emoji), else the first with the whole cluster,
-/// else the first with its first character, else font 0. A joined emoji or a letter with its
-/// mark is shaped in one font. A digit, `#` or `*` asks for emoji only with the keycap mark
+/// pair of regional indicators; a syllable of Hangul jamo): the first font with the whole cluster
+/// in the presentation a selector asks for (U+FE0F emoji: a colour font; U+FE0E text: another), or
+/// without one the character's default ([emoji_presentation]: emoji), else the first with the whole
+/// cluster, else the first with its first character, else font 0. A joined emoji or a letter with
+/// its mark is shaped in one font. A digit, `#` or `*` asks for emoji only with the keycap mark
 /// (U+20E3).
 fn runs(
   s: &str,
@@ -590,24 +590,15 @@ const EMOJI_PRESENTATION: [(u32, u32); 81] = [
   (0x1FADF, 0x1FAEA), (0x1FAEF, 0x1FAF8),
 ];
 
-/// The clusters of `s` for picking fonts, as byte ranges.
+/// The clusters of `s` for picking fonts, as byte ranges: the editor's grapheme clusters
+/// ([next_grapheme]), so a Hangul syllable of jamo stays in one font too.
 fn clusters(s: &str) -> Vec<Range<usize>> {
-  let regional = |c: char| matches!(c as u32, 0x1f1e6..=0x1f1ff);
-  let mut out: Vec<Range<usize>> = Vec::new();
-  let (mut prev, mut indicators) = (None, 0);
-  for (i, c) in s.char_indices() {
-    let end = i + c.len_utf8();
-    let linked = prev == Some('\u{200d}') || (regional(c) && indicators % 2 == 1);
-    match out.last_mut() {
-      Some(r) if is_extend(c) || linked => r.end = end,
-      _ => {
-        out.push(i..end);
-        indicators = 0;
-      }
-    }
-
-    indicators += regional(c) as usize;
-    prev = Some(c);
+  let mut out = Vec::new();
+  let mut i = 0;
+  while i < s.len() {
+    let end = next_grapheme(s, i);
+    out.push(i..end);
+    i = end;
   }
 
   out
@@ -1134,6 +1125,10 @@ mod tests {
     // A heart alone stays in the text font; flags pair up.
     assert_eq!(picks("❤🇺🇦"), [("❤", 0), ("🇺🇦", 1)]);
     assert_eq!(clusters("🇺🇦🇺🇦").len(), 2);
+    // A syllable of jamo (가 decomposed) the text font has only the first of: both in the other.
+    let jamo = |font: usize, c: char| c == '\u{1100}' || (font == 1 && c == '\u{1161}');
+    let runs = runs("\u{1100}\u{1161}", 2, jamo, |_| false);
+    assert_eq!(runs, [(0..6, 1)]);
   }
 
   /// With a colour font that has the heart in the fallback chain (Noto Color Emoji), a heart
