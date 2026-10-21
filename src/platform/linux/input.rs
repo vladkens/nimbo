@@ -62,6 +62,8 @@ const PRECISE: f32 = 10.0;
 /// milliseconds, and how far apart they may be: GTK's defaults (400 ms, 5 px).
 const CLICK_TIME: u32 = 400;
 const CLICK_DIST: f32 = 5.0;
+/// A touchpad's events further apart than this, in ms, are two gestures.
+const GESTURE_GAP: u32 = 150;
 
 /// `GdkKeymapKey`.
 #[repr(C)]
@@ -170,8 +172,9 @@ pub struct Input {
   buttons: Vec<MouseButton>,
   outside: bool,
   last_click: Option<Click>,
-  /// A touchpad scroll is under way.
+  /// A touchpad scroll is under way, and its last event's time (ms).
   scrolling: bool,
+  scrolled: u32,
   /// A pinch's scale since it began, at the last update.
   pinch: f64,
   /// The keys down (hardware code and keyval): a press of one is a repeat.
@@ -195,6 +198,7 @@ impl Input {
       outside: false,
       last_click: None,
       scrolling: false,
+      scrolled: 0,
       pinch: 1.0,
       held: Vec::new(),
       im,
@@ -378,7 +382,9 @@ impl Win {
     };
 
     let stop = unsafe { (g.gdk_event_is_scroll_stop_event)(ev) } != 0;
-    let phase = phase(&mut self.input.scrolling, precise, stop);
+    let time = unsafe { (g.gdk_event_get_time)(ev) };
+    let gap = time.wrapping_sub(std::mem::replace(&mut self.input.scrolled, time));
+    let phase = phase(&mut self.input.scrolling, precise, stop, gap);
     let unit = if precise { PRECISE } else { WHEEL_LINE };
     let delta = Point::new(-dx as f32 * unit, -dy as f32 * unit);
     self.send(Event::Scroll { pos, delta, precise, phase, momentum: Phase::None, mods });
@@ -543,10 +549,11 @@ fn clicks(last: Option<Click>, button: MouseButton, time: u32, pos: Point) -> u3
   }
 }
 
-/// A scroll's phase: a touchpad's begins, changes and ends with its stop event; a wheel's has
-/// none.
-fn phase(scrolling: &mut bool, precise: bool, stop: bool) -> Phase {
-  let was = std::mem::replace(scrolling, precise && !stop);
+/// A scroll's phase: a touchpad's begins, changes and ends with its stop event, or begins again
+/// after a pause of [GESTURE_GAP] ms (GDK's X11 backend sends no stop: a new gesture over another
+/// panel must not stay with the last one's); a wheel's has none.
+fn phase(scrolling: &mut bool, precise: bool, stop: bool, gap: u32) -> Phase {
+  let was = std::mem::replace(scrolling, precise && !stop) && gap < GESTURE_GAP;
   match (precise, was, stop) {
     (false, ..) => Phase::None,
     (true, true, true) => Phase::Ended,
@@ -576,14 +583,18 @@ mod tests {
   #[test]
   fn a_touchpad_scroll_ends_with_its_stop() {
     let mut on = false;
-    assert_eq!(phase(&mut on, true, false), Phase::Began);
-    assert_eq!(phase(&mut on, true, false), Phase::Changed);
-    assert_eq!(phase(&mut on, true, true), Phase::Ended);
+    assert_eq!(phase(&mut on, true, false, 10), Phase::Began);
+    assert_eq!(phase(&mut on, true, false, 10), Phase::Changed);
+    assert_eq!(phase(&mut on, true, true, 10), Phase::Ended);
     assert!(!on);
-    assert_eq!(phase(&mut on, true, true), Phase::None, "a stop alone");
+    assert_eq!(phase(&mut on, true, true, 10), Phase::None, "a stop alone");
     // A wheel: no phases, and it ends a touchpad scroll.
-    assert_eq!(phase(&mut on, true, false), Phase::Began);
-    assert_eq!(phase(&mut on, false, false), Phase::None);
+    assert_eq!(phase(&mut on, true, false, 10), Phase::Began);
+    assert_eq!(phase(&mut on, false, false, 10), Phase::None);
     assert!(!on);
+    // No stop (X11): a pause begins the next gesture, over whichever panel it is.
+    assert_eq!(phase(&mut on, true, false, 10), Phase::Began);
+    assert_eq!(phase(&mut on, true, false, 10), Phase::Changed);
+    assert_eq!(phase(&mut on, true, false, 400), Phase::Began);
   }
 }

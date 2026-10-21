@@ -57,9 +57,10 @@ const LAYOUT: c_int = 1 << 3;
 const HIDDEN: c_uint = 1 | 2;
 /// `GDK_SELECTION_CLIPBOARD`, a predefined atom.
 const CLIPBOARD: usize = 69;
-/// The shortest gap between frames while animating, in µs: 120 Hz with room for the clock's
-/// jitter (a 144 Hz display gets every other frame).
-const MIN_GAP_US: i64 = 7_000;
+/// Frames while animating come at most this often, in µs (120 Hz), give or take [JITTER_US]
+/// of the clock's jitter, which the next deadline makes up.
+const FRAME_US: i64 = 8_333;
+const JITTER_US: i64 = 1_500;
 
 // GTK 3.24's headers; GTK 3's ABI is frozen. A symbol looked up in `libgtk-3.so.0` is found in
 // what it links too: GDK, GLib, GObject, GIO, cairo.
@@ -165,10 +166,10 @@ struct Win {
   tiles: Vec<u64>,
   shown: (usize, usize),
   shown_scale: f32,
-  /// A tick callback is on: frames are wanted. The frame clock's time of the last frame it
-  /// asked for, µs.
+  /// A tick callback is on: frames are wanted. The frame clock's time the next frame is due
+  /// ([paced]), µs.
   ticking: bool,
-  last_tick: i64,
+  next_tick: i64,
   /// The GLib timeout for the runtime's next timer, and when it fires.
   timer: Option<(c_uint, Instant)>,
   /// The user can resize it ([Config::resizable]) down to `min`, which a size the app asks for
@@ -260,7 +261,8 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Res<()> {
   // GDK's X11 backend probes GLX as it opens the display, loading Mesa (and LLVM with
   // llvmpipe): about 34 MB more for nothing, every pixel being ours.
   if std::env::var_os("GDK_GL").is_none() {
-    // SAFETY: before GTK and the renderer start their threads.
+    // SAFETY: before GTK, GIO and the renderer start their threads; an app that reads the
+    // environment from threads of its own sets `GDK_GL` itself before `run` (then left alone).
     unsafe { std::env::set_var("GDK_GL", "disable") };
   }
 
@@ -320,7 +322,7 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Res<()> {
       shown: (0, 0),
       shown_scale: 0.0,
       ticking: false,
-      last_tick: 0,
+      next_tick: 0,
       timer: None,
       resizable: cfg.resizable,
       min,
@@ -579,6 +581,18 @@ fn new_surface(w: usize, h: usize, scale: f32) -> bool {
   true
 }
 
+/// Whether a frame at `now` (µs) keeps to 120 Hz: due at `next` give or take the clock's
+/// jitter, the next one due a frame later, so frames slightly early on a faster display are
+/// made up by one left out; after a pause the schedule starts again from `now`.
+fn paced(now: i64, next: &mut i64) -> bool {
+  if now < *next - JITTER_US {
+    return false;
+  }
+
+  *next = if now > *next + FRAME_US { now + FRAME_US } else { *next + FRAME_US };
+  true
+}
+
 /// What runs the loop next: the tick while frames are `wanted`, else a timeout for the next
 /// timer; neither while the window is hidden, where a timer that came due couldn't draw (it
 /// would fire again at once) and the window's showing again syncs.
@@ -608,14 +622,13 @@ fn pixels((w, h): (usize, usize)) -> Option<Pixels> {
 // MARK: Callbacks
 
 /// The frame clock's update phase while frames are wanted: asks for the layout phase, after
-/// which the frame is built ([on_layout]), at most every [MIN_GAP_US]; removed once none are.
+/// which the frame is built ([on_layout]), at most at 120 Hz ([paced]); removed once none are.
 unsafe extern "C" fn on_tick(_: P, clock: P, _: P) -> c_int {
   with(TRUE, |w| {
     let g = gtk();
     w.ticking = w.rt.needs_frame() && w.visible();
     let now = unsafe { (g.gdk_frame_clock_get_frame_time)(clock) };
-    if w.ticking && now - w.last_tick >= MIN_GAP_US {
-      w.last_tick = now;
+    if w.ticking && paced(now, &mut w.next_tick) {
       unsafe { (g.gdk_frame_clock_request_phase)(clock, LAYOUT) };
     }
 
@@ -743,6 +756,23 @@ mod tests {
     assert_eq!(next(true, true, due), (true, None));
     assert_eq!(next(true, false, later), (false, later));
     assert_eq!(next(true, false, None), (false, None));
+  }
+
+  /// A second of a display's ticks: 120 Hz keeps every one (with jitter too), faster ones at
+  /// most 120.
+  #[test]
+  fn frames_keep_to_120_hz() {
+    let frames = |hz: i64, jitter: i64| {
+      let mut next = 0;
+      let ticks = (0..hz).map(|i| i * 1_000_000 / hz + if i % 2 == 0 { jitter } else { -jitter });
+      ticks.filter(|&t| paced(t, &mut next)).count()
+    };
+    assert_eq!(frames(120, 0), 120);
+    assert_eq!(frames(120, 800), 120);
+    assert_eq!(frames(60, 0), 60);
+    for hz in [125, 144, 165, 240, 280] {
+      assert!((100..=121).contains(&frames(hz, 0)), "{hz} Hz: {}", frames(hz, 0));
+    }
   }
 
   #[test]
