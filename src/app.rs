@@ -493,6 +493,7 @@ impl<A: App> Runtime<A> {
     let keys = matches!(ev, Event::KeyDown(_) | Event::Text(_) | Event::Command(_));
     let keys = keys || matches!(ev, Event::Modifier { .. });
     if keys {
+      self.take_wake();
       self.fresh();
     }
 
@@ -635,6 +636,14 @@ impl<A: App> Runtime<A> {
     used
   }
 
+  /// A wake from another thread asks for a frame, and lays the view out again before the next
+  /// key: what the view shows and binds may follow the work it woke for.
+  fn take_wake(&mut self) {
+    let woken = self.waker.take();
+    self.ask(woken);
+    self.stale |= woken;
+  }
+
   /// Runs the view once to deliver input, without layout or drawing.
   fn pass(&mut self) {
     let mut ui = Ui::new(std::mem::take(&mut self.ui), self.size, self.mouse, self.clock.now());
@@ -645,8 +654,7 @@ impl<A: App> Runtime<A> {
   /// Whether the next display refresh should draw: an event changed something, an animation
   /// runs, a timer is due or a waker fired.
   pub fn needs_frame(&mut self) -> bool {
-    let woken = self.waker.take();
-    self.ask(woken);
+    self.take_wake();
     self.dirty || self.animating || self.ui.next_due().is_some_and(|d| self.clock.now() >= d)
   }
 
@@ -1284,6 +1292,54 @@ mod tests {
     assert_eq!(rt.ui.focus(), Some(Id::of("item")));
     assert!(rt.event(Event::Command(Command::InsertBacktab)));
     assert_eq!(rt.ui.focus(), Some(Id::of("item")));
+  }
+
+  /// Counts its views, and the views run when each key came.
+  #[derive(Default)]
+  struct Views {
+    views: usize,
+    at_key: Vec<usize>,
+  }
+
+  impl App for Views {
+    fn view(&mut self, _: &mut Ui) {
+      self.views += 1;
+    }
+
+    fn event(&mut self, _: &mut Cx, ev: &Event) -> bool {
+      if let Event::KeyDown(_) = ev {
+        self.at_key.push(self.views);
+      }
+
+      false
+    }
+  }
+
+  /// A wake lays the view out again before the next key, whether the platform asked for a
+  /// frame since or not: the key meets what the view shows after the work it woke for.
+  #[test]
+  fn a_wake_refreshes_the_view_before_a_key() {
+    let clock = Clock::Virtual(Duration::ZERO);
+    let size = Size::new(100.0, 100.0);
+    let mut rt =
+      Runtime::new(Views::default(), size, 1.0, clock, Box::new(MemClipboard::default()));
+    rt.frame();
+    let k = KeyEvent { key: Key::Char('a'), text: None, code: 0, mods: Mods::NONE, repeat: false };
+    rt.event(Event::KeyDown(k));
+    assert_eq!(rt.app.at_key, [rt.app.views], "no wake: the last frame's view");
+
+    rt.waker().wake();
+    assert!(rt.needs_frame());
+    let views = rt.app.views;
+    rt.event(Event::KeyDown(k));
+    assert!(rt.app.at_key[1] > views, "a wake the platform saw: laid out again");
+
+    rt.frame();
+    rt.waker().wake();
+    let views = rt.app.views;
+    rt.event(Event::KeyDown(k));
+    assert!(rt.app.at_key[2] > views, "a wake it didn't see yet: laid out again");
+    assert!(rt.needs_frame(), "the wake still draws");
   }
 
   /// An app that focuses its field on a letter and leaves the key unused.
