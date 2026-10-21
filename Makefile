@@ -23,10 +23,13 @@ update:
 clean:
 	cargo clean
 
-.PHONY: check-targets
+.PHONY: check-targets size
 
 # The library, its examples and tests build for these too; needs `rustup target add` of each.
 TARGETS := x86_64-pc-windows-msvc x86_64-unknown-linux-gnu
 
 check-targets: # clippy of the library, examples and tests for Windows and Linux
 	@for t in $(TARGETS); do cargo clippy --all-targets --target $$t -- -D warnings || exit 1; done
+
+size: # code, docs and tests per module; ARGS="--files", "--map" (each file and what it does) or "--vs main"
+	uv run scripts/size.py $(ARGS)
