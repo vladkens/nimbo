@@ -23,6 +23,12 @@ pub fn mods(state: u32) -> Mods {
   Mods { shift: on(SHIFT), ctrl: on(MOD4 | SUPER), alt: on(MOD1), cmd: on(CONTROL) }
 }
 
+/// Whether a key with `mods` may type: not with Ctrl, Super or Alt, as GTK (whose input context
+/// lets Super type).
+pub fn types(mods: Mods) -> bool {
+  !(mods.cmd || mods.ctrl || mods.alt)
+}
+
 /// The modifiers after modifier key `sym` went down or up, from those before (`mods`) and the
 /// keys still `held`: a Shift let go while the other is down keeps Shift.
 pub fn after(mods: Mods, sym: u32, down: bool, held: &[u32]) -> Mods {
@@ -323,6 +329,13 @@ mod tests {
     assert_eq!(after(shift, 0xffe1, false, &[]), Mods::NONE);
     assert_eq!(after(Mods::NONE, 0xffeb, true, &[]), Mods { ctrl: true, ..Mods::NONE });
     assert_eq!(after(shift, 0xffe5, true, &[]), shift, "Caps Lock");
+  }
+
+  #[test]
+  fn shortcuts_type_nothing() {
+    assert!(types(Mods::NONE) && types(Mods::SHIFT));
+    assert!(!types(CTRL) && !types(Mods { ctrl: true, ..Mods::NONE }));
+    assert!(!types(Mods { alt: true, ..Mods::NONE }));
   }
 
   #[test]

@@ -8,7 +8,8 @@
 //! [Event::Text], or through the PC editing keys into [Event::Command]; an input method's context
 //! comes with text fields.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::ffi::{CStr, c_char, c_int, c_uint};
 use std::ptr::null_mut;
 use std::sync::OnceLock;
@@ -130,6 +131,7 @@ fns!(Gdk {
   fn gdk_keyval_to_unicode(keyval: c_uint) -> u32;
   fn gdk_display_get_default() -> P;
   fn gdk_keymap_get_for_display(display: P) -> P;
+  fn gdk_keymap_get_modifier_state(keymap: P) -> c_uint;
   fn gdk_keymap_get_entries_for_keycode(keymap: P, code: c_uint, keys: *mut *mut KeymapKey,
     keyvals: *mut *mut c_uint, n: *mut c_int) -> c_int;
   fn gtk_im_context_simple_new() -> P;
@@ -139,6 +141,7 @@ fns!(Gdk {
   fn gtk_im_context_focus_out(im: P);
   fn gtk_im_context_reset(im: P);
   fn g_free(p: P);
+  fn g_object_unref(obj: P);
 });
 
 fn gdk() -> &'static Gdk {
@@ -147,8 +150,10 @@ fn gdk() -> &'static Gdk {
 }
 
 thread_local! {
-  /// Events that came while the window was busy, copied, to run after it.
-  static STASH: RefCell<Vec<P>> = const { RefCell::new(Vec::new()) };
+  /// Events that came while the window was busy, copied, to run after it in order; set while
+  /// they run, so a callback among them adds to the queue rather than running it again.
+  static STASH: RefCell<VecDeque<P>> = const { RefCell::new(VecDeque::new()) };
+  static REPLAYING: Cell<bool> = const { Cell::new(false) };
   /// Text the input context committed during a key press.
   static TYPED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
@@ -172,12 +177,19 @@ pub struct Input {
   held: Vec<(u16, u32)>,
   /// Dead keys and compose sequences ([TYPED]).
   im: P,
+  /// The window has the keyboard focus: the keymap's modifiers are ours.
+  focused: bool,
 }
 
 impl Input {
   pub fn new() -> Self {
-    let im = unsafe { (gdk().gtk_im_context_simple_new)() };
-    unsafe { connect(im, c"commit", on_commit as Fp, 0) };
+    let g = gdk();
+    let im = unsafe { (g.gtk_im_context_simple_new)() };
+    unsafe {
+      connect(im, c"commit", on_commit as Fp, 0);
+      connect(keymap(), c"state-changed", on_keymap as Fp, 0);
+    }
+
     Self {
       mods: Mods::NONE,
       mouse: Point::new(0.0, 0.0),
@@ -188,6 +200,7 @@ impl Input {
       pinch: 1.0,
       held: Vec::new(),
       im,
+      focused: false,
     }
   }
 
@@ -203,21 +216,51 @@ pub unsafe extern "C" fn on_event(_: P, ev: P, _: P) -> c_int {
   match with(None, |w| Some(w.event(ev))) {
     Some(used) => used as c_int,
     None if busy() => {
-      STASH.with_borrow_mut(|s| s.push(unsafe { (gdk().gdk_event_copy)(ev) }));
+      STASH.with_borrow_mut(|s| s.push_back(unsafe { (gdk().gdk_event_copy)(ev) }));
       TRUE
     }
     None => 0,
   }
 }
 
-/// Runs the events that waited for the window.
+impl Drop for Input {
+  fn drop(&mut self) {
+    unsafe { (gdk().g_object_unref)(self.im) };
+  }
+}
+
+/// Runs the events that waited for the window, oldest first, unless they already run further
+/// up the stack.
 pub fn replay() {
-  for ev in STASH.take() {
+  if REPLAYING.replace(true) {
+    return;
+  }
+
+  while let Some(ev) = STASH.with_borrow_mut(|s| s.pop_front()) {
     unsafe {
       on_event(null_mut(), ev, null_mut());
       (gdk().gdk_event_free)(ev);
     }
   }
+
+  REPLAYING.set(false);
+}
+
+/// The default display's keymap.
+fn keymap() -> P {
+  let g = gdk();
+  unsafe { (g.gdk_keymap_get_for_display)((g.gdk_display_get_default)()) }
+}
+
+/// The keyboard's modifiers changed (after a key, or as the window takes the focus while some
+/// are held): they are the window's while it has the focus.
+unsafe extern "C" fn on_keymap(_: P, _: P) {
+  with((), |w| {
+    if w.input.focused {
+      let state = unsafe { (gdk().gdk_keymap_get_modifier_state)(keymap()) };
+      w.mods(keys::mods(state));
+    }
+  });
 }
 
 unsafe extern "C" fn on_commit(_: P, s: *const c_char, _: P) {
@@ -361,22 +404,22 @@ impl Win {
     self.send(Event::Magnify { pos, delta, phase, mods });
   }
 
-  /// The window took or lost the focus; losing it, no key or modifier stays down.
+  /// The window took or lost the focus: taking it, the modifiers held now are ours; losing it,
+  /// no key or modifier stays down.
   fn focus(&mut self, on: bool) {
-    let im = self.input.im;
-    if !on {
-      self.input.held.clear();
-      self.mods(Mods::NONE);
-      unsafe { (gdk().gtk_im_context_reset)(im) };
+    let (g, im) = (gdk(), self.input.im);
+    self.input.focused = on;
+    let state = unsafe { (g.gdk_keymap_get_modifier_state)(keymap()) };
+    match on {
+      true => unsafe { (g.gtk_im_context_focus_in)(im) },
+      false => unsafe {
+        self.input.held.clear();
+        (g.gtk_im_context_reset)(im);
+        (g.gtk_im_context_focus_out)(im);
+      },
     }
 
-    unsafe {
-      match on {
-        true => (gdk().gtk_im_context_focus_in)(im),
-        false => (gdk().gtk_im_context_focus_out)(im),
-      }
-    }
-
+    self.mods(if on { keys::mods(state) } else { Mods::NONE });
     self.send(Event::Focus(on));
   }
 
@@ -430,12 +473,21 @@ impl Win {
       return;
     }
 
-    TYPED.take();
-    if unsafe { (g.gtk_im_context_filter_keypress)(self.input.im, ev) } != 0 {
-      for text in TYPED.take().into_iter().filter(|t| crate::keys::printable(t)) {
-        self.send(Event::Text(text));
+    // A shortcut types nothing and ends a compose sequence: GTK's context leaves Super out.
+    if keys::types(mods) {
+      TYPED.take();
+      if unsafe { (g.gtk_im_context_filter_keypress)(self.input.im, ev) } != 0 {
+        for text in TYPED.take().into_iter().filter(|t| crate::keys::printable(t)) {
+          self.send(Event::Text(text));
+        }
+
+        return;
       }
-    } else if let Some(c) = crate::keys::pc(&k) {
+    } else {
+      unsafe { (g.gtk_im_context_reset)(self.input.im) };
+    }
+
+    if let Some(c) = crate::keys::pc(&k) {
       self.send(Event::Command(c));
     }
   }
@@ -447,8 +499,7 @@ fn latin(hw: u16, shift: bool) -> Option<char> {
   let g = gdk();
   let (mut entries, mut vals, mut n) = (null_mut(), null_mut(), 0);
   let ok = unsafe {
-    let keymap = (g.gdk_keymap_get_for_display)((g.gdk_display_get_default)());
-    (g.gdk_keymap_get_entries_for_keycode)(keymap, hw as c_uint, &mut entries, &mut vals, &mut n)
+    (g.gdk_keymap_get_entries_for_keycode)(keymap(), hw as c_uint, &mut entries, &mut vals, &mut n)
   };
   if ok == 0 || n <= 0 {
     return None;
