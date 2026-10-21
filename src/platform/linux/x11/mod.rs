@@ -121,8 +121,12 @@ struct Win {
   /// Keys down (by X keycode); with detectable autorepeat a press of one is a repeat.
   held: [u64; 4],
   detectable: bool,
-  /// XKB's event code, for its keymap events; the keymap is read again after a batch of them.
+  /// XKB's event code, for its keymap events (the keymap is read again after a batch of them)
+  /// and state events, which keep the modifiers once they come ([Keyboard::state_notify]).
   xkb_event: Option<u8>,
+  /// The keyboard state was made from a key event's core state (a new keymap): the next key
+  /// sets it from its own until the server's state events follow.
+  kb_fresh: bool,
   reload_keymap: bool,
   focused: bool,
   clip: Rc<RefCell<Clip>>,
@@ -295,6 +299,7 @@ fn run_on(
     held: [0; 4],
     detectable: false,
     xkb_event: None,
+    kb_fresh: true,
     reload_keymap: false,
     focused: false,
     clip,
@@ -602,7 +607,7 @@ impl Win {
 
     self.detectable = Keyboard::detectable_repeat(x);
     let ev = self.x.extension_event("XKEYBOARD");
-    self.xkb_event = ev.filter(|_| Keyboard::select_keymap_events(x));
+    self.xkb_event = ev.filter(|_| Keyboard::select_events(x));
     if self.trace {
       let repeat = if self.detectable { "detectable" } else { "paired" };
       let keymap = if Keyboard::has_x11() { "the server's" } else { "the rules names'" };
@@ -610,9 +615,12 @@ impl Win {
     }
   }
 
-  /// An event's modifiers and group, as the state before it.
+  /// An event's modifiers and group, as the state before it: the keyboard's state, unless
+  /// the server's state events keep it.
   fn core_state(&mut self, state: u16) {
-    if let Some(kb) = &mut self.kb {
+    if let Some(kb) = &mut self.kb
+      && self.xkb_event.is_none()
+    {
       kb.set_core_state(state);
     }
 
@@ -641,6 +649,7 @@ impl Win {
       && let Some(kb) = keyboard(&self.x, self.root, self.atoms.rules)
     {
       self.kb = Some(kb);
+      self.kb_fresh = true;
     }
   }
 
@@ -816,8 +825,20 @@ impl Win {
       SELECTION_REQUEST => self.clip.borrow().request(ev.get::<SelectionRequestEv>()),
       SELECTION_CLEAR => self.clip.borrow_mut().cleared(ev.get::<SelectionClearEv>()),
       MAPPING_NOTIFY => self.reload_keymap |= ev.get::<MappingEv>().request == MAPPING_KEYBOARD,
-      // XkbNewKeyboardNotify, XkbMapNotify (the XKB event type is the second byte).
-      k if Some(k) == self.xkb_event => self.reload_keymap |= matches!(ev.bytes()[1], 0 | 1),
+      // XkbNewKeyboardNotify, XkbMapNotify, XkbStateNotify (the XKB event type is the second
+      // byte).
+      k if Some(k) == self.xkb_event => match ev.bytes()[1] {
+        0 | 1 => self.reload_keymap = true,
+        2 => {
+          if let Some(kb) = &mut self.kb {
+            kb.state_notify(&ev.bytes());
+          }
+
+          self.kb_fresh = false;
+          self.sync_mods();
+        }
+        _ => {}
+      },
       0 if self.trace => {
         let b = ev.bytes();
         eprintln!(
@@ -876,9 +897,14 @@ impl Win {
   fn key(&mut self, keycode: u8, state: u16, down: bool, repeat: bool) {
     let key = (keycode as u32).saturating_sub(8);
     let Some(kb) = &mut self.kb else { return };
-    kb.set_core_state(state);
+    // Without the server's state events, the state from the event's and the key's own change.
+    let own = self.kb_fresh || self.xkb_event.is_none();
+    if own {
+      kb.set_core_state(state);
+    }
+
     let (k, utf8) = kb.key(key, repeat);
-    if !repeat {
+    if own && !repeat {
       kb.update_key(key, down);
     }
 

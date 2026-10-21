@@ -67,8 +67,8 @@ fns!(XcbXkb {
 /// `XCB_XKB_ID_USE_CORE_KBD`, `XCB_XKB_PER_CLIENT_FLAG_DETECTABLE_AUTO_REPEAT`.
 const XKB_CORE_KBD: u16 = 0x100;
 const DETECTABLE_AUTO_REPEAT: u32 = 1;
-/// `XCB_XKB_EVENT_TYPE_NEW_KEYBOARD_NOTIFY | _MAP_NOTIFY`; every map part.
-const KEYMAP_EVENTS: u16 = 1 | 2;
+/// `XCB_XKB_EVENT_TYPE_NEW_KEYBOARD_NOTIFY | _MAP_NOTIFY | _STATE_NOTIFY`; every map part.
+const XKB_EVENTS: u16 = 1 | 2 | 4;
 const MAP_PARTS: u16 = 0xff;
 
 /// `struct xkb_rule_names`.
@@ -253,11 +253,12 @@ impl Keyboard {
     value & flag != 0
   }
 
-  /// Asks the X server for XKB's keymap events (`XkbNewKeyboardNotify`, `XkbMapNotify`): an
-  /// XKB-aware client gets no core `MappingNotify` when the keymap changes (`setxkbmap`).
-  pub fn select_keymap_events(c: P) -> bool {
+  /// Asks the X server for XKB's keymap events (`XkbNewKeyboardNotify`, `XkbMapNotify`: an
+  /// XKB-aware client gets no core `MappingNotify` when the keymap changes, `setxkbmap`) and
+  /// its state events (`XkbStateNotify`, [Keyboard::state_notify]).
+  pub fn select_events(c: P) -> bool {
     let Some(f) = sys_x11().1.as_ref() else { return false };
-    let (ev, parts) = (KEYMAP_EVENTS, MAP_PARTS);
+    let (ev, parts) = (XKB_EVENTS, MAP_PARTS);
     let null = std::ptr::null();
     unsafe { (f.xcb_xkb_select_events)(c, XKB_CORE_KBD, ev, 0, ev, parts, parts, null) };
     true
@@ -269,6 +270,16 @@ impl Keyboard {
     let Some(s) = sys() else { return };
     let (mods, group) = (state as u32 & 0xff, (state as u32 >> 13) & 3);
     unsafe { (s.f.xkb_state_update_mask)(self.state, mods, 0, 0, 0, 0, group) };
+  }
+
+  /// An `XkbStateNotify` event's modifiers and groups (base, latched, locked), as
+  /// xkbcommon's X11 guide keeps the state: the server sends one for every change, whichever
+  /// window has the focus, so a key let go in another window doesn't stay down here.
+  pub fn state_notify(&mut self, ev: &[u8; 32]) {
+    let Some(s) = sys() else { return };
+    let [dep, lat, lock, base_group, lat_group, lock_group] = state_mask(ev);
+    let st = self.state;
+    unsafe { (s.f.xkb_state_update_mask)(st, dep, lat, lock, base_group, lat_group, lock_group) };
   }
 
   /// A key (evdev code) going down or up, for the modifiers it changes.
@@ -391,6 +402,13 @@ impl Keyboard {
       (c.is_ascii() && !c.is_ascii_control()).then_some(c)
     })
   }
+}
+
+/// `xcb_xkb_state_notify_event_t`'s base, latched and locked modifiers (bytes 10–12) and
+/// groups (signed 16-bit at 14 and 16, then a byte at 18), for `xkb_state_update_mask`.
+fn state_mask(ev: &[u8; 32]) -> [u32; 6] {
+  let group = |i: usize| i16::from_ne_bytes([ev[i], ev[i + 1]]) as i32 as u32;
+  [ev[10] as u32, ev[11] as u32, ev[12] as u32, group(14), group(16), ev[18] as u32]
 }
 
 /// Ctrl, Super or Alt: a key with them types nothing (GTK).
@@ -568,6 +586,32 @@ mod tests {
   const SHIFT: u32 = 1;
   const CTRL: u32 = 4;
   const NUM_LOCK: u32 = 16;
+
+  /// Shift went down here and up in another window: the state notifications set what is held,
+  /// where keys tracked one by one would keep it down after the next tap.
+  #[test]
+  fn state_notifications_drop_a_key_let_go_elsewhere() {
+    let Some(mut kb) = Keyboard::from_layout(c"us") else {
+      eprintln!("no xkbcommon: skipped");
+      return;
+    };
+    let notify = |base: u8, locked: u8, group: i16| {
+      let mut ev = [0u8; 32];
+      (ev[1], ev[10], ev[12]) = (2, base, locked);
+      ev[14..16].copy_from_slice(&group.to_ne_bytes());
+      ev
+    };
+    assert_eq!(state_mask(&notify(1, 2, 1)), [1, 0, 2, 1, 0, 0]);
+
+    kb.state_notify(&notify(SHIFT as u8, 0, 0));
+    assert_eq!(kb.mods(), Mods::SHIFT);
+    // Let go while unfocused, then tapped again: the server's state after each.
+    for base in [0, SHIFT as u8, 0] {
+      kb.state_notify(&notify(base, 0, 0));
+    }
+
+    assert_eq!(kb.mods(), Mods::NONE);
+  }
 
   #[test]
   fn keys_type_and_name_like_appkit() {
