@@ -39,7 +39,7 @@ pub const GREEN: Color = rgb(0x30a46c);
 pub const WHITE: Color = rgb(0xffffff);
 
 /// Copy and paste, as the edit menu binds them: Cmd on macOS, Ctrl elsewhere.
-const KEYS: &[Binding] = &[bind("cmd-c", Command::Copy), bind("cmd-v", Command::Paste)];
+const KEYS: &[Binding] = &[bind("cmd+c", Command::Copy), bind("cmd+v", Command::Paste)];
 
 pub struct Input {
   /// The light appearance; dark by default.

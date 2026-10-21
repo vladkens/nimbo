@@ -4,7 +4,7 @@
 //! characters through ToUnicodeEx, and the commands Windows' text controls give the keys that
 //! type nothing ([standard]).
 //!
-//! Ctrl is the command key ([crate::keys::CMD]): bindings written `cmd-c` are Ctrl-C here, and
+//! Ctrl is the command key ([crate::keys::CMD]): bindings written `cmd+c` are Ctrl-C here, and
 //! `ctrl` is the Windows key. Alt is Alt.
 
 use keyboard_types::{Code, Modifiers, NamedKey};
@@ -15,7 +15,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
   VK_RIGHT, VK_RWIN, VK_SHIFT, VK_SNAPSHOT, VK_SPACE, VK_TAB, VK_UP,
 };
 
-use crate::keys::{self, Command, Delete, Key, KeyEvent, Move};
+use crate::keys::{self, Command, Key, KeyEvent};
 use crate::platform::scan_code;
 
 /// The keypad's scan codes that send navigation virtual keys with Num Lock off (7 8 9, 4 5 6,
@@ -178,55 +178,26 @@ pub fn key_event(vk: u16, scan: u16, extended: bool, repeat: bool) -> KeyEvent {
 /// The command a Windows text control gives a key that types nothing (Ctrl is `cmd`): Ctrl
 /// with arrows moves by words (and paragraphs), Home and End to the line's ends and with Ctrl
 /// the document's, Page Up and Down move, Ctrl-Backspace and Ctrl-Delete delete words, Ctrl-Y
-/// redoes, and the old Shift-Delete, Ctrl-Insert and Shift-Insert cut, copy and paste.
+/// redoes, and the old Shift-Delete, Ctrl-Insert and Shift-Insert cut, copy and paste; Ctrl-Enter
+/// does nothing.
 pub fn standard(k: &KeyEvent) -> Option<Command> {
-  use Move::*;
-  use NamedKey as N;
   let (shift, ctrl, alt, cmd) = keys::flags(k.mods);
-  if ctrl || alt {
-    return None;
-  }
-
-  let to = |m| Some(Command::Move(m, shift));
-  let del = |d| Some(Command::Delete(d));
-  let Key::Named(key) = k.key else {
-    let redo = matches!(k.key, Key::Char('y' | 'Y')) && cmd && !shift;
-    return redo.then_some(Command::Redo);
-  };
-
-  match (key, cmd) {
-    (N::ArrowLeft, false) => to(Left),
-    (N::ArrowLeft, true) => to(WordLeft),
-    (N::ArrowRight, false) => to(Right),
-    (N::ArrowRight, true) => to(WordRight),
-    (N::ArrowUp, false) => to(Up),
-    (N::ArrowUp, true) => to(ParagraphStart),
-    (N::ArrowDown, false) => to(Down),
-    (N::ArrowDown, true) => to(ParagraphEnd),
-    (N::Home, false) => to(LineStart),
-    (N::Home, true) => to(DocStart),
-    (N::End, false) => to(LineEnd),
-    (N::End, true) => to(DocEnd),
-    (N::PageUp, false) => to(PageUp),
-    (N::PageDown, false) => to(PageDown),
-    (N::Backspace, false) => del(Delete::Backward),
-    (N::Backspace, true) => del(Delete::WordBackward),
-    (N::Delete, false) if shift => Some(Command::Cut),
-    (N::Delete, false) => del(Delete::Forward),
-    (N::Delete, true) => del(Delete::WordForward),
-    (N::Insert, true) => Some(Command::Copy),
-    (N::Insert, false) if shift => Some(Command::Paste),
-    (N::Enter, false) => Some(Command::InsertNewline),
-    (N::Tab, false) if shift => Some(Command::InsertBacktab),
-    (N::Tab, false) => Some(Command::InsertTab),
-    (N::Escape, false) => Some(Command::Cancel),
-    _ => None,
+  match (k.key, cmd, shift) {
+    _ if ctrl || alt => None,
+    (Key::Named(NamedKey::Delete), false, true) => Some(Command::Cut),
+    (Key::Named(NamedKey::Insert), true, _) => Some(Command::Copy),
+    (Key::Named(NamedKey::Insert), false, true) => Some(Command::Paste),
+    (Key::Char('y' | 'Y'), true, false) => Some(Command::Redo),
+    (Key::Named(NamedKey::Enter), true, _) => None,
+    // The rest as GTK's: [keys::pc].
+    _ => keys::pc(k),
   }
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::keys::{Delete, Move};
 
   #[test]
   fn codes_by_place() {
@@ -304,6 +275,8 @@ mod tests {
       assert_eq!(standard(&ev(key, mods)), Some(want), "{key:?} {mods:?}");
     }
     assert_eq!(standard(&ev(Key::Char('c'), ctrl)), None);
+    assert_eq!(standard(&ev(Key::Named(N::Enter), ctrl)), None, "Ctrl-Enter");
+    assert_eq!(standard(&ev(Key::Named(N::Delete), Modifiers::SHIFT)), Some(Command::Cut));
     assert_eq!(standard(&ev(Key::Char('y'), ctrl | Modifiers::SHIFT)), None);
     assert_eq!(standard(&ev(Key::Named(N::ArrowLeft), Modifiers::META)), None, "the Windows key");
   }

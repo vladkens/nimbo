@@ -3,7 +3,7 @@
 //! Keys on macOS: virtual key codes (`kVK_*`) as W3C [Code]s ([code]), and what a key types on
 //! the ASCII-capable keyboard layout, the one macOS matches Cmd shortcuts against while a
 //! non-Latin layout is active: on a Russian layout Cmd-C reports `'с'`
-//! (Cyrillic) in `charactersIgnoringModifiers`, and should still be `"cmd-c"`. A layout that
+//! (Cyrillic) in `charactersIgnoringModifiers`, and should still be `"cmd+c"`. A layout that
 //! maps keys anew under Cmd ("Dvorak – QWERTY ⌘" types QWERTY's letters then) gives that
 //! mapping, which `charactersIgnoringModifiers` drops.
 //!

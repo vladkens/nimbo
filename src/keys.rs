@@ -1,9 +1,10 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! Keys: what a key press reports ([KeyEvent]: our [Key], and the W3C UI Events [Code] and
-//! [Modifiers] of the `keyboard-types` crate), keystrokes and bindings ([Keystroke], [Binding]),
-//! and the commands keys become ([Command]), named after AppKit's key binding selectors
-//! (`moveWordLeft:`, `deleteBackward:`, `insertNewline:`).
+//! [Modifiers] of the `keyboard-types` crate), shortcuts as keymaps and settings write them
+//! ([Shortcut], global [Hotkey]s) and their labels, bindings ([Binding]), and the commands keys
+//! become ([Command]), named after AppKit's key binding selectors (`moveWordLeft:`,
+//! `deleteBackward:`, `insertNewline:`).
 //!
 //! A key press travels in this order (the runtime routes it, [crate::Runtime::event]):
 //!
@@ -24,12 +25,13 @@
 
 use keyboard_types::{Code, Modifiers, NamedKey};
 
-/// The command key, `cmd` in a keystroke: ⌘ ([Modifiers::META]) on macOS, Ctrl
+/// The command key, `cmd` in a shortcut in the app: ⌘ ([Modifiers::META]) on macOS, Ctrl
 /// ([Modifiers::CONTROL]) on Windows and Linux, as their shortcuts use them.
 pub const CMD: Modifiers =
   if cfg!(target_os = "macos") { Modifiers::META } else { Modifiers::CONTROL };
 
-/// `ctrl` in a keystroke: Control on macOS; the Windows or Super key elsewhere, Ctrl being [CMD].
+/// `ctrl` in a shortcut in the app: Control on macOS; the Windows or Super key elsewhere, Ctrl
+/// being [CMD].
 pub const CTRL: Modifiers =
   if cfg!(target_os = "macos") { Modifiers::CONTROL } else { Modifiers::META };
 
@@ -90,25 +92,6 @@ pub fn f_key(n: u8) -> Option<(Code, NamedKey)> {
   F_KEYS.get((n as usize).wrapping_sub(1)).copied()
 }
 
-/// Named keys as a keystroke writes them, and as macOS menus (glyphs) and Windows menus show
-/// them.
-#[rustfmt::skip]
-const NAMES: [(NamedKey, &str, &str, &str); 13] = [
-  (NamedKey::Enter, "enter", "↩", "Enter"),
-  (NamedKey::Tab, "tab", "⇥", "Tab"),
-  (NamedKey::Backspace, "backspace", "⌫", "Backspace"),
-  (NamedKey::Delete, "delete", "⌦", "Del"),
-  (NamedKey::Escape, "escape", "⎋", "Esc"),
-  (NamedKey::ArrowLeft, "left", "←", "Left"),
-  (NamedKey::ArrowRight, "right", "→", "Right"),
-  (NamedKey::ArrowUp, "up", "↑", "Up"),
-  (NamedKey::ArrowDown, "down", "↓", "Down"),
-  (NamedKey::Home, "home", "↖", "Home"),
-  (NamedKey::End, "end", "↘", "End"),
-  (NamedKey::PageUp, "pageup", "⇞", "PgUp"),
-  (NamedKey::PageDown, "pagedown", "⇟", "PgDn"),
-];
-
 impl Key {
   /// The named key at `code`, wherever the layout puts it: the keypad's Enter is Enter.
   pub fn named(code: Code) -> Option<Self> {
@@ -120,19 +103,6 @@ impl Key {
   pub fn code(self) -> Option<Code> {
     let Self::Named(k) = self else { return None };
     NAMED.iter().chain(&F_KEYS).find(|(_, n)| *n == k).map(|&(c, _)| c)
-  }
-
-  /// As menus show the key: macOS's glyphs (`↩`, `⎋`, `←`), or with `windows` its names
-  /// (`Enter`, `Esc`, `Left`); a character in capitals, `Space`, `F5`, W3C's name for the rest.
-  pub fn label(self, windows: bool) -> String {
-    match self {
-      Key::Char(' ') => "Space".into(),
-      Key::Char(c) => c.to_uppercase().collect(),
-      Key::Named(k) => match NAMES.iter().find(|n| n.0 == k) {
-        Some(&(_, _, mac, win)) => (if windows { win } else { mac }).into(),
-        None => k.to_string(),
-      },
-    }
   }
 }
 
@@ -183,64 +153,101 @@ pub struct KeyEvent {
 }
 
 impl KeyEvent {
-  /// Whether this is the keystroke `s` ("cmd-shift-z", "escape"); see [Keystroke].
+  /// Whether this is the shortcut `s` in the app (`cmd+shift+z`, `escape`); see [Shortcut].
   pub fn is(&self, s: &str) -> bool {
-    Keystroke::parse(s).is_some_and(|k| k.matches(self))
+    Shortcut::parse(s).is_ok_and(|k| k.matches(self))
   }
 }
 
-// MARK: Keystrokes and bindings
+// MARK: Shortcuts
 
-/// A key with modifiers, written as in Zed and Sublime: modifiers first, joined by `-`:
-/// `"cmd-z"`, `"cmd-shift-z"`, `"alt-left"`, `"ctrl-a"`, `"escape"`, `"f5"`, `"cmd--"`,
-/// `"space"`. Modifiers: `cmd` ([CMD]), `ctrl` ([CTRL]), `alt` (or `opt`), `shift`.
+/// A key with modifiers, as keymaps and settings write it: modifiers and one key joined by `+`
+/// (or `-`), in any order and case, spaces allowed around the parts: `cmd+shift+z`,
+/// `option+space`, `ctrl+option+cmd+F12`, `cmd++`, `escape`. Modifiers: `ctrl` (`control`),
+/// `option` (`opt`, `alt`), `shift`, `cmd` (`command`, `super`, `meta`). Keys: a character,
+/// `f1` to `f20`, or a name: `return` (`enter`), `tab`, `delete` (`backspace`, ⌫),
+/// `forwarddelete` (⌦), `escape` (`esc`), `left`, `right`, `up`, `down`, `home`, `end`, `pageup`,
+/// `pagedown`, and `space`, `minus`, `equal`, `bracketleft`, `bracketright`, `backslash`,
+/// `semicolon`, `quote`, `comma`, `period`, `slash`, `grave` for those characters.
+///
+/// `mods` are the modifier keys held, as a [KeyEvent] has them; where it works decides what `cmd`
+/// and `ctrl` name and how the key matches:
+/// - in the app ([Shortcut::parse], [Binding]s): `cmd` is the command key [CMD] (Ctrl on Windows
+///   and Linux), `ctrl` is [CTRL]; the key matches the character a key types ([Shortcut::matches]),
+///   so `cmd+?` works on any layout;
+/// - system-wide ([Hotkey::parse], global hotkeys): `cmd` is [Modifiers::META] (⌘, the Windows or
+///   Super key), `ctrl` is Control; the key is a place on the keyboard ([Shortcut::code]).
+///
+/// Written back ([std::fmt::Display]) as a global hotkey spells its keys:
+/// `ctrl+option+shift+cmd+` then the key's name, lowercase.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Keystroke {
+pub struct Shortcut {
   pub key: Key,
   pub mods: Modifiers,
 }
 
-impl Keystroke {
-  pub fn parse(s: &str) -> Option<Self> {
-    let mut mods = Modifiers::empty();
-    let mut rest = s;
-    loop {
-      let (name, tail) = match rest.split_once('-') {
-        Some((name, tail)) if !tail.is_empty() => (name, tail),
-        _ => break,
-      };
+/// Named keys: how a shortcut writes them, and how macOS menus (glyphs) and the PC show them.
+#[rustfmt::skip]
+const NAMES: [(NamedKey, &str, &str, &str); 13] = [
+  (NamedKey::Enter, "return", "↩", "Enter"),
+  (NamedKey::Tab, "tab", "⇥", "Tab"),
+  (NamedKey::Backspace, "delete", "⌫", "Backspace"),
+  (NamedKey::Delete, "forwarddelete", "⌦", "Delete"),
+  (NamedKey::Escape, "escape", "⎋", "Esc"),
+  (NamedKey::ArrowUp, "up", "↑", "Up"),
+  (NamedKey::ArrowDown, "down", "↓", "Down"),
+  (NamedKey::ArrowLeft, "left", "←", "Left"),
+  (NamedKey::ArrowRight, "right", "→", "Right"),
+  (NamedKey::Home, "home", "↖", "Home"),
+  (NamedKey::End, "end", "↘", "End"),
+  (NamedKey::PageUp, "pageup", "⇞", "Page Up"),
+  (NamedKey::PageDown, "pagedown", "⇟", "Page Down"),
+];
 
-      mods |= match name {
-        "cmd" => CMD,
-        "ctrl" => CTRL,
-        "alt" | "opt" => Modifiers::ALT,
-        "shift" => Modifiers::SHIFT,
-        _ => return None,
-      };
+/// Characters a shortcut writes by name.
+#[rustfmt::skip]
+const CHAR_NAMES: [(char, &str); 12] = [
+  (' ', "space"), ('-', "minus"), ('=', "equal"), ('[', "bracketleft"), (']', "bracketright"),
+  ('\\', "backslash"), (';', "semicolon"), ('\'', "quote"), (',', "comma"), ('.', "period"),
+  ('/', "slash"), ('`', "grave"),
+];
 
-      rest = tail;
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShortcutError {
+  Empty,
+  Unknown(String),
+  TwoKeys(String, String),
+  NoKey,
+  Fn,
+  ModifierAlone,
+}
 
-    let f = rest.strip_prefix('f').and_then(|n| n.parse().ok()).and_then(f_key);
-    let key = match rest {
-      "return" => Key::Named(NamedKey::Enter),
-      "esc" => Key::Named(NamedKey::Escape),
-      "space" => Key::Char(' '),
-      _ if let Some(n) = NAMES.iter().find(|n| n.1 == rest) => Key::Named(n.0),
-      _ if let Some((_, k)) = f => Key::Named(k),
-      _ => {
-        let mut cs = rest.chars();
-        let (Some(c), None) = (cs.next(), cs.next()) else { return None };
-        Key::Char(c)
+impl std::fmt::Display for ShortcutError {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      Self::Empty => f.write_str("the hotkey is empty"),
+      Self::Unknown(k) => write!(f, "unknown key {k:?} in the hotkey"),
+      Self::TwoKeys(a, b) => write!(f, "the hotkey has two keys: {a:?} and {b:?}"),
+      Self::NoKey => {
+        f.write_str("the hotkey has only modifiers; it needs a key, such as ctrl+option+space")
       }
-    };
+      Self::Fn => f.write_str("the fn key cannot be part of a hotkey"),
+      Self::ModifierAlone => f.write_str("a modifier key alone works as the hotkey only on macOS"),
+    }
+  }
+}
 
-    Some(Self { key, mods })
+impl std::error::Error for ShortcutError {}
+
+impl Shortcut {
+  /// A shortcut in the app: `cmd` is the command key [CMD]; see [Shortcut].
+  pub fn parse(text: &str) -> Result<Self, ShortcutError> {
+    parse(text, false).map(|(s, _)| s)
   }
 
-  /// Letters match in either case, Shift given by the modifiers: `"cmd-shift-z"` is Cmd-Shift-Z.
+  /// Letters match in either case, Shift given by the modifiers: `cmd+shift+z` is Cmd-Shift-Z.
   /// Any other character matches itself, Shift or not, since the layout may need Shift to type
-  /// it: `"cmd-+"` is Cmd-Shift-= on a US layout. Named keys need the exact modifiers.
+  /// it: `cmd++` is Cmd-Shift-= on a US layout. Named keys need the exact modifiers.
   pub fn matches(&self, k: &KeyEvent) -> bool {
     let shift = Modifiers::SHIFT;
     match (self.key, k.key) {
@@ -251,35 +258,288 @@ impl Keystroke {
       (a, b) => a == b && self.mods == k.mods,
     }
   }
+
+  /// The key's place, as a global hotkey takes it: a character's on a US keyboard without Shift;
+  /// `None` for a character that needs Shift there (`!`) or none.
+  pub fn code(&self) -> Option<Code> {
+    match self.key {
+      Key::Char(c) => us_code(lower(c)).filter(|k| !k.1).map(|k| k.0),
+      k => k.code(),
+    }
+  }
+
+  /// As the platform shows it: [Shortcut::symbols] on macOS, [Shortcut::names] elsewhere.
+  pub fn label(&self) -> String {
+    if cfg!(target_os = "macos") { self.symbols() } else { self.names() }
+  }
+
+  /// As macOS menus show it: `⌃⌥⇧⌘` in that order, then the key: `⇧⌘Z`, `⌃⌥⌘F12`, `⌥Space`, `⎋`.
+  pub fn symbols(&self) -> String {
+    mods_label(self.mods, true) + &key_label(self.key, true)
+  }
+
+  /// As Windows, GNOME and KDE show it: `Ctrl+Shift+Z`, `Ctrl+Alt+Super+F12` (Windows: `Win`),
+  /// `Alt+Space`, `Esc`.
+  pub fn names(&self) -> String {
+    mods_label(self.mods, false) + &key_label(self.key, false)
+  }
 }
 
-/// As macOS menus show it: `⌃⌥⇧⌘` in that order, then the key: `⇧⌘Z`, `⌘=`, `⎋`, `F5`. On
-/// Windows as its menus do, Cmd being Ctrl there: `Ctrl+Shift+Z`, `Ctrl+=`, `Esc`, `F5`.
-impl std::fmt::Display for Keystroke {
-  fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-    let windows = cfg!(target_os = "windows");
-    let (alt, shift) = (Modifiers::ALT, Modifiers::SHIFT);
-    let mods = match windows {
-      true => [(CTRL, "Win+"), (CMD, "Ctrl+"), (alt, "Alt+"), (shift, "Shift+")],
-      false => [(CTRL, "⌃"), (alt, "⌥"), (shift, "⇧"), (CMD, "⌘")],
-    };
+/// The parts of `text` between its `+` and `-`; a separator that would leave a part empty is the
+/// key itself: `cmd++`, `cmd+-`, `-`.
+fn parts(text: &str) -> Vec<&str> {
+  let (mut parts, mut start) = (vec![], 0);
+  for (i, c) in text.char_indices() {
+    if matches!(c, '+' | '-') && !text[start..i].trim().is_empty() {
+      parts.push(text[start..i].trim());
+      start = i + 1;
+    }
+  }
 
-    for (m, name) in mods {
-      if self.mods.contains(m) {
-        f.write_str(name)?;
-      }
+  parts.push(text[start..].trim());
+  parts
+}
+
+/// The shortcut `text` writes, in the app or `global`, and the part that named its key.
+fn parse(text: &str, global: bool) -> Result<(Shortcut, String), ShortcutError> {
+  use ShortcutError::*;
+  let text = text.trim();
+  if text.is_empty() {
+    return Err(Empty);
+  }
+
+  if modifier_key(text).is_some() {
+    return Err(ModifierAlone);
+  }
+
+  let mut mods = Modifiers::empty();
+  let mut key: Option<(Key, &str)> = None;
+  for part in parts(text) {
+    let name = part.to_lowercase();
+    if name == "fn" || name == "function" {
+      return Err(Fn);
     }
 
-    f.write_str(&self.key.label(windows))
+    match modifier(&name) {
+      // In the app, the platform's command key and its other one.
+      Some(m) if !global && m == Modifiers::META => mods |= CMD,
+      Some(m) if !global && m == Modifiers::CONTROL => mods |= CTRL,
+      Some(m) => mods |= m,
+      None => {
+        let k = parse_key(&name).ok_or_else(|| Unknown(part.to_owned()))?;
+        if let Some((_, first)) = key {
+          return Err(TwoKeys(first.to_owned(), part.to_owned()));
+        }
+
+        key = Some((k, part));
+      }
+    }
   }
+
+  let (key, part) = key.ok_or(NoKey)?;
+  Ok((Shortcut { key, mods }, part.to_owned()))
+}
+
+/// A modifier: as a shortcut writes it, as macOS and the PC show it, and its left and right keys.
+type Mod = (Modifiers, &'static str, &'static str, &'static str, Code, Code);
+
+/// The modifiers, in the order shortcuts write and show them.
+#[rustfmt::skip]
+const MODS: [Mod; 4] = [
+  (Modifiers::CONTROL, "ctrl", "⌃", "Ctrl", Code::ControlLeft, Code::ControlRight),
+  (Modifiers::ALT, "option", "⌥", "Alt", Code::AltLeft, Code::AltRight),
+  (Modifiers::SHIFT, "shift", "⇧", "Shift", Code::ShiftLeft, Code::ShiftRight),
+  (Modifiers::META, "cmd", "⌘", if cfg!(windows) { "Win" } else { "Super" }, Code::MetaLeft,
+    Code::MetaRight),
+];
+
+/// The modifier a lowercase name is, as macOS names its keys: `cmd` is [Modifiers::META].
+fn modifier(name: &str) -> Option<Modifiers> {
+  Some(match name {
+    "ctrl" | "control" | "ctl" => Modifiers::CONTROL,
+    "option" | "opt" | "alt" => Modifiers::ALT,
+    "shift" => Modifiers::SHIFT,
+    "cmd" | "command" | "super" | "meta" => Modifiers::META,
+    _ => return None,
+  })
+}
+
+/// The key a lowercase part names: a character, `f1` to `f20`, or a name.
+fn parse_key(name: &str) -> Option<Key> {
+  let mut cs = name.chars();
+  if let (Some(c), None) = (cs.next(), cs.next()) {
+    return Some(Key::Char(c));
+  }
+
+  let f = name.strip_prefix('f').filter(|n| !n.starts_with('0'));
+  if let Some((_, k)) = f.and_then(|n| n.parse().ok()).and_then(f_key) {
+    return Some(Key::Named(k));
+  }
+
+  let name = match name {
+    "enter" => "return",
+    "backspace" => "delete",
+    "esc" => "escape",
+    name => name,
+  };
+
+  let named = NAMES.iter().find(|n| n.1 == name).map(|n| Key::Named(n.0));
+  named.or_else(|| CHAR_NAMES.iter().find(|n| n.1 == name).map(|n| Key::Char(n.0)))
+}
+
+/// The canonical spelling of a global hotkey: `ctrl+option+shift+cmd+key`, lowercase.
+impl std::fmt::Display for Shortcut {
+  fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    for m in MODS.iter().filter(|m| self.mods.contains(m.0)) {
+      write!(f, "{}+", m.1)?;
+    }
+
+    match self.key {
+      Key::Char(c) => match CHAR_NAMES.iter().find(|n| n.0 == c) {
+        Some(n) => f.write_str(n.1),
+        None => write!(f, "{c}"),
+      },
+      Key::Named(k) => match NAMES.iter().find(|n| n.0 == k) {
+        Some(n) => f.write_str(n.1),
+        None => f.write_str(&k.to_string().to_lowercase()),
+      },
+    }
+  }
+}
+
+/// As menus show a key: macOS's glyphs (`↩`, `⎋`, `←`) or the PC's names (`Enter`, `Esc`,
+/// `Left`); a character in capitals, `Space`, `F5`, W3C's name for the rest.
+fn key_label(key: Key, mac: bool) -> String {
+  match key {
+    Key::Char(' ') => "Space".into(),
+    Key::Char(c) => c.to_uppercase().collect(),
+    Key::Named(k) => match NAMES.iter().find(|n| n.0 == k) {
+      Some(&(_, _, glyph, name)) => (if mac { glyph } else { name }).into(),
+      None => k.to_string(),
+    },
+  }
+}
+
+/// The modifiers held, as the platform shows them before a key: `⌃⌥` on macOS, `Ctrl+Alt+`
+/// elsewhere.
+pub fn modifiers_label(m: Modifiers) -> String {
+  mods_label(m, cfg!(target_os = "macos"))
+}
+
+fn mods_label(m: Modifiers, mac: bool) -> String {
+  let held = MODS.iter().filter(|r| m.contains(r.0));
+  held.map(|r| if mac { r.2.to_string() } else { format!("{}+", r.3) }).collect()
 }
 
 fn lower(c: char) -> char {
   c.to_lowercase().next().unwrap_or(c)
 }
 
-/// A keystroke ([Keystroke] syntax) and the command it runs. `const`, so a keymap is a
-/// constant: `const KEYS: &[Binding] = &[bind("cmd-z", Command::Undo)]`.
+// MARK: Global hotkeys
+
+/// A global hotkey as settings spell it: a [Shortcut] system-wide (`option+space`,
+/// `ctrl+option+cmd+F12`), or one modifier key alone, left or right, such as `right_option` or
+/// `fn` (macOS only: the event tap sees it go down and up, and a key pressed while it is held
+/// makes it a chord of the user's instead).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hotkey {
+  Shortcut(Shortcut),
+  /// A modifier key by its place: [Code::AltRight], [Code::Fn].
+  Modifier(Code),
+}
+
+/// The modifier key `key` is, and whether it is the right one; none for Fn and other keys.
+fn side(key: Code) -> Option<(&'static Mod, bool)> {
+  MODS.iter().find(|r| r.4 == key || r.5 == key).map(|r| (r, r.5 == key))
+}
+
+/// Whether the key at `code` is a modifier a hotkey can be alone: Ctrl, Alt, Shift or Meta by
+/// its side, or Fn.
+pub fn is_modifier(code: Code) -> bool {
+  code == Code::Fn || side(code).is_some()
+}
+
+/// The modifier key `text` names alone: `right_option`, `Right Option`, `right-alt`, `rcmd`, `fn`,
+/// `globe`.
+fn modifier_key(text: &str) -> Option<Code> {
+  if text.contains('+') {
+    return None;
+  }
+
+  let name: String = text.to_lowercase().chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+  if name == "fn" || name == "globe" {
+    return Some(Code::Fn);
+  }
+
+  let (right, rest) = match () {
+    _ if name.starts_with("right") => (true, &name[5..]),
+    _ if name.starts_with("left") => (false, &name[4..]),
+    _ if name.starts_with('r') => (true, &name[1..]),
+    _ if name.starts_with('l') => (false, &name[1..]),
+    _ => return None,
+  };
+
+  let m = modifier(if rest == "win" { "cmd" } else { rest })?;
+  let row = MODS.iter().find(|r| r.0 == m)?;
+  Some(if right { row.5 } else { row.4 })
+}
+
+impl Hotkey {
+  /// A global hotkey: a modifier key alone, or a [Shortcut] whose `cmd` is ⌘, the Windows or the
+  /// Super key and whose key has a place ([Shortcut::code]).
+  pub fn parse(text: &str) -> Result<Self, ShortcutError> {
+    if let Some(key) = modifier_key(text.trim()) {
+      return Ok(Hotkey::Modifier(key));
+    }
+
+    let (shortcut, part) = parse(text, true)?;
+    match shortcut.code() {
+      Some(_) => Ok(Hotkey::Shortcut(shortcut)),
+      None => Err(ShortcutError::Unknown(part)),
+    }
+  }
+
+  /// As the platform shows it: `⌃⌥Space`, `Right ⌥`, `fn`; `Ctrl+Alt+Space`, `Right Alt`.
+  pub fn label(&self) -> String {
+    match self {
+      Hotkey::Shortcut(s) => s.label(),
+      Hotkey::Modifier(key) => modifier_label(*key),
+    }
+  }
+}
+
+/// A modifier key alone, by its side and the platform's mark or name: `Right ⌥`, `Left ⌘`
+/// on macOS (as its menus write modifiers), `Right Alt`, `Left Win` (Windows) or `Left Super`
+/// elsewhere; `fn` is `fn` (🌐 on newer Mac keyboards).
+pub fn modifier_label(key: Code) -> String {
+  let mac = cfg!(target_os = "macos");
+  match side(key) {
+    Some((r, right)) => {
+      format!("{} {}", if right { "Right" } else { "Left" }, if mac { r.2 } else { r.3 })
+    }
+    None if key == Code::Fn => "fn".into(),
+    None => key.to_string(),
+  }
+}
+
+/// The canonical spelling: the [Shortcut]'s, or the key's alone (`right_option`).
+impl std::fmt::Display for Hotkey {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      Hotkey::Shortcut(s) => s.fmt(f),
+      Hotkey::Modifier(Code::Fn) => f.write_str("fn"),
+      Hotkey::Modifier(key) => match side(*key) {
+        Some((r, right)) => write!(f, "{}_{}", if right { "right" } else { "left" }, r.1),
+        None => f.write_str("?"),
+      },
+    }
+  }
+}
+
+// MARK: Bindings
+
+/// A shortcut in the app ([Shortcut] syntax) and the command it runs. `const`, so a keymap is a
+/// constant: `const KEYS: &[Binding] = &[bind("cmd+z", Command::Undo)]`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Binding {
   pub keys: &'static str,
@@ -290,10 +550,10 @@ pub const fn bind(keys: &'static str, command: Command) -> Binding {
   Binding { keys, command }
 }
 
-/// The keystroke of the first binding in `map` that runs `cmd`: to show it beside the command,
-/// in a menu item or a tooltip.
-pub fn shortcut(map: &[Binding], cmd: Command) -> Option<Keystroke> {
-  map.iter().find(|b| b.command == cmd).and_then(|b| Keystroke::parse(b.keys))
+/// The shortcut of the first binding in `map` that runs `cmd`: to show it beside the command,
+/// in a menu item or a tooltip ([Shortcut::label]).
+pub fn shortcut(map: &[Binding], cmd: Command) -> Option<Shortcut> {
+  map.iter().find(|b| b.command == cmd).and_then(|b| Shortcut::parse(b.keys).ok())
 }
 
 /// The command of the first binding in `map` that matches `k`.
@@ -304,17 +564,17 @@ pub fn lookup(map: &[Binding], k: &KeyEvent) -> Option<Command> {
 /// The edit menu's keys, which a text field binds on itself (AppKit gets them from the
 /// menu's key equivalents, which we don't have).
 pub const EDIT_KEYS: &[Binding] = &[
-  bind("cmd-a", Command::SelectAll),
-  bind("cmd-c", Command::Copy),
-  bind("cmd-x", Command::Cut),
-  bind("cmd-v", Command::Paste),
-  bind("cmd-z", Command::Undo),
-  bind("cmd-shift-z", Command::Redo),
+  bind("cmd+a", Command::SelectAll),
+  bind("cmd+c", Command::Copy),
+  bind("cmd+x", Command::Cut),
+  bind("cmd+v", Command::Paste),
+  bind("cmd+z", Command::Undo),
+  bind("cmd+shift+z", Command::Redo),
 ];
 
 /// The keys of selectable text: select all and copy.
 pub const SELECT_KEYS: &[Binding] =
-  &[bind("cmd-a", Command::SelectAll), bind("cmd-c", Command::Copy)];
+  &[bind("cmd+a", Command::SelectAll), bind("cmd+c", Command::Copy)];
 
 // MARK: Commands
 
@@ -377,7 +637,7 @@ pub enum Command {
   ScrollPageDown,
   ScrollToTop,
   ScrollToBottom,
-  /// The app's own command, by name: `bind("cmd-n", Command::Action("new"))`.
+  /// The app's own command, by name: `bind("cmd+n", Command::Action("new"))`.
   Action(&'static str),
 }
 
@@ -508,7 +768,7 @@ pub fn standard(k: &KeyEvent) -> Option<Command> {
   }
 }
 
-/// The modifiers as keystrokes name them: Shift, [CTRL], Alt, [CMD].
+/// The modifiers as shortcuts in the app name them: Shift, [CTRL], Alt, [CMD].
 pub(crate) fn flags(m: Modifiers) -> (bool, bool, bool, bool) {
   (m.shift(), m.contains(CTRL), m.alt(), m.contains(CMD))
 }
@@ -573,64 +833,82 @@ mod tests {
 
   const CMD_SHIFT: Modifiers = CMD.union(Modifiers::SHIFT);
 
-  #[test]
-  fn parses_keystrokes() {
-    let k = |key, mods| Some(Keystroke { key, mods });
-    assert_eq!(Keystroke::parse("cmd-z"), k(Key::Char('z'), CMD));
-    assert_eq!(Keystroke::parse("cmd-shift-z"), k(Key::Char('z'), CMD_SHIFT));
-    assert_eq!(Keystroke::parse("cmd--"), k(Key::Char('-'), CMD));
-    assert_eq!(Keystroke::parse("-"), k(Key::Char('-'), Modifiers::empty()));
-    assert_eq!(Keystroke::parse("alt-left"), k(Key::Named(N::ArrowLeft), Modifiers::ALT));
-    assert_eq!(Keystroke::parse("escape"), k(Key::Named(N::Escape), Modifiers::empty()));
-    assert_eq!(Keystroke::parse("f12"), k(Key::Named(N::F12), Modifiers::empty()));
-    assert_eq!(Keystroke::parse("space"), k(Key::Char(' '), Modifiers::empty()));
-    for bad in ["", "cmd-", "hyper-a", "ab", "cmd-ab"] {
-      assert_eq!(Keystroke::parse(bad), None, "{bad}");
+  /// A global hotkey's shortcut.
+  fn hot(text: &str) -> Result<Shortcut, ShortcutError> {
+    match Hotkey::parse(text)? {
+      Hotkey::Shortcut(s) => Ok(s),
+      Hotkey::Modifier(_) => Err(ShortcutError::ModifierAlone),
     }
+  }
+
+  #[test]
+  fn parses_shortcuts_in_the_app() {
+    let k = |key, mods| Ok(Shortcut { key, mods });
+    assert_eq!(Shortcut::parse("cmd+z"), k(Key::Char('z'), CMD));
+    assert_eq!(Shortcut::parse("cmd+shift+z"), k(Key::Char('z'), CMD_SHIFT));
+    assert_eq!(Shortcut::parse("cmd-shift-Z"), k(Key::Char('z'), CMD_SHIFT), "dashes");
+    assert_eq!(Shortcut::parse("cmd+-"), k(Key::Char('-'), CMD));
+    assert_eq!(Shortcut::parse("cmd--"), k(Key::Char('-'), CMD));
+    assert_eq!(Shortcut::parse("cmd++"), k(Key::Char('+'), CMD));
+    assert_eq!(Shortcut::parse("ctrl + -"), k(Key::Char('-'), CTRL));
+    assert_eq!(Shortcut::parse("-"), k(Key::Char('-'), Modifiers::empty()));
+    assert_eq!(Shortcut::parse("alt+left"), k(Key::Named(N::ArrowLeft), Modifiers::ALT));
+    assert_eq!(Shortcut::parse("escape"), k(Key::Named(N::Escape), Modifiers::empty()));
+    assert_eq!(Shortcut::parse("f12"), k(Key::Named(N::F12), Modifiers::empty()));
+    assert_eq!(Shortcut::parse("space"), k(Key::Char(' '), Modifiers::empty()));
+    assert_eq!(Shortcut::parse("cmd+?"), k(Key::Char('?'), CMD));
+    for bad in ["", "cmd+", "hyper+a", "ab", "cmd+ab", "f21"] {
+      assert!(Shortcut::parse(bad).is_err(), "{bad}");
+    }
+
+    // In the app `cmd` is the command key; system-wide, ⌘ or the Windows or Super key.
+    let all = Shortcut::parse("ctrl+cmd+alt+shift+a").unwrap().mods;
+    assert_eq!(all, Modifiers::CONTROL | Modifiers::META | Modifiers::ALT | Modifiers::SHIFT);
+    assert_eq!(Shortcut::parse("cmd+a").unwrap().mods, CMD);
+    assert_eq!(hot("cmd+a").unwrap().mods, Modifiers::META);
+    assert_eq!(hot("ctrl+a").unwrap().mods, Modifiers::CONTROL);
   }
 
   #[test]
   fn matches_letters_in_either_case_and_symbols_with_shift() {
     // Cmd-Shift-Z reports 'Z'.
-    assert!(ev(Key::Char('Z'), CMD_SHIFT).is("cmd-shift-z"));
-    assert!(!ev(Key::Char('Z'), CMD_SHIFT).is("cmd-z"));
-    assert!(ev(Key::Char('z'), CMD).is("cmd-z"));
+    assert!(ev(Key::Char('Z'), CMD_SHIFT).is("cmd+shift+z"));
+    assert!(!ev(Key::Char('Z'), CMD_SHIFT).is("cmd+z"));
+    assert!(ev(Key::Char('z'), CMD).is("cmd+z"));
     // Cmd-Shift-= types '+' on a US layout.
-    assert!(ev(Key::Char('+'), CMD_SHIFT).is("cmd-+"));
-    assert!(!ev(Key::Char('+'), CMD_SHIFT).is("cmd-="));
-    assert!(ev(Key::Char('='), CMD).is("cmd-="));
+    assert!(ev(Key::Char('+'), CMD_SHIFT).is("cmd++"));
+    assert!(!ev(Key::Char('+'), CMD_SHIFT).is("cmd+="));
+    assert!(ev(Key::Char('='), CMD).is("cmd+="));
     assert!(!ev(Key::Named(N::ArrowLeft), Modifiers::SHIFT).is("left"));
-    let map = [bind("cmd-z", Command::Undo), bind("cmd-shift-z", Command::Redo)];
+    let map = [bind("cmd+z", Command::Undo), bind("cmd+shift+z", Command::Redo)];
     assert_eq!(lookup(&map, &ev(Key::Char('Z'), CMD_SHIFT)), Some(Command::Redo));
     assert_eq!(lookup(&map, &ev(Key::Char('y'), CMD)), None);
   }
 
   #[test]
-  #[cfg(not(target_os = "windows"))]
-  fn shortcuts_show_as_in_macos_menus() {
-    let show = |s: &str| Keystroke::parse(s).unwrap().to_string();
-    assert_eq!(show("cmd-shift-z"), "⇧⌘Z");
-    assert_eq!(show("ctrl-alt-left"), "⌃⌥←");
-    assert_eq!(show("cmd-="), "⌘=");
-    assert_eq!(
-      (show("escape"), show("f5"), show("cmd-space")),
-      ("⎋".into(), "F5".into(), "⌘Space".into())
-    );
-    let map = [bind("cmd-z", Command::Undo), bind("cmd-shift-z", Command::Redo)];
-    assert_eq!(shortcut(&map, Command::Redo).map(|k| k.to_string()).as_deref(), Some("⇧⌘Z"));
-    assert_eq!(shortcut(&map, Command::Copy), None);
-  }
+  fn shortcuts_show_as_in_menus() {
+    let show = |s: &str| {
+      let k = hot(s).unwrap();
+      (k.symbols(), k.names())
+    };
+    let pc = |s: &str| if cfg!(windows) { s.replace("Super", "Win") } else { s.to_string() };
+    for (text, symbols, names) in [
+      ("cmd+shift+z", "⇧⌘Z", "Shift+Super+Z"),
+      ("ctrl+alt+left", "⌃⌥←", "Ctrl+Alt+Left"),
+      ("cmd+=", "⌘=", "Super+="),
+      ("escape", "⎋", "Esc"),
+      ("f5", "F5", "F5"),
+      ("cmd+space", "⌘Space", "Super+Space"),
+    ] {
+      assert_eq!(show(text), (symbols.to_string(), pc(names)), "{text}");
+    }
 
-  #[test]
-  #[cfg(target_os = "windows")]
-  fn shortcuts_show_as_in_windows_menus() {
-    let show = |s: &str| Keystroke::parse(s).unwrap().to_string();
-    assert_eq!(show("cmd-shift-z"), "Ctrl+Shift+Z");
-    assert_eq!(show("cmd-="), "Ctrl+=");
-    assert_eq!(
-      (show("escape"), show("f5"), show("alt-left")),
-      ("Esc".into(), "F5".into(), "Alt+Left".into())
-    );
+    // In the app, the command key: ⌘ on macOS, Ctrl elsewhere.
+    let map = [bind("cmd+z", Command::Undo), bind("cmd+shift+z", Command::Redo)];
+    let redo = shortcut(&map, Command::Redo).map(|k| k.label());
+    let want = if cfg!(target_os = "macos") { "⇧⌘Z" } else { "Ctrl+Shift+Z" };
+    assert_eq!(redo.as_deref(), Some(want));
+    assert_eq!(shortcut(&map, Command::Copy), None);
   }
 
   #[test]
@@ -670,42 +948,167 @@ mod tests {
   /// The labels of every named key, on both platforms' menus.
   #[test]
   fn key_labels() {
-    let labels = |windows| NAMES.map(|(k, ..)| Key::Named(k).label(windows)).join(" ");
-    assert_eq!(labels(false), "↩ ⇥ ⌫ ⌦ ⎋ ← → ↑ ↓ ↖ ↘ ⇞ ⇟");
-    assert_eq!(labels(true), "Enter Tab Backspace Del Esc Left Right Up Down Home End PgUp PgDn");
+    let labels = |mac| NAMES.map(|(k, ..)| key_label(Key::Named(k), mac)).join(" ");
+    assert_eq!(labels(true), "↩ ⇥ ⌫ ⌦ ⎋ ↑ ↓ ← → ↖ ↘ ⇞ ⇟");
+    let pc = "Enter Tab Backspace Delete Esc Up Down Left Right Home End Page Up Page Down";
+    assert_eq!(labels(false), pc);
     let other = [Key::Char(' '), Key::Char('ß'), Key::Named(N::F5), Key::Named(N::Insert)];
-    assert_eq!(other.map(|k| k.label(true)), ["Space", "SS", "F5", "Insert"]);
+    assert_eq!(other.map(|k| key_label(k, false)), ["Space", "SS", "F5", "Insert"]);
   }
 
-  /// Keystrokes parse to the same keys as before `keyboard-types`, and print the same.
+  /// Every global hotkey key the settings grammar had, written and shown as it was before
+  /// `keyboard-types`: canonical, macOS's symbols and the PC's names, with Ctrl-Shift.
   #[test]
-  fn keystroke_names() {
-    for (s, key) in [
-      ("enter", N::Enter),
-      ("return", N::Enter),
-      ("tab", N::Tab),
-      ("backspace", N::Backspace),
-      ("delete", N::Delete),
-      ("escape", N::Escape),
-      ("esc", N::Escape),
-      ("left", N::ArrowLeft),
-      ("right", N::ArrowRight),
-      ("up", N::ArrowUp),
-      ("down", N::ArrowDown),
-      ("home", N::Home),
-      ("end", N::End),
-      ("pageup", N::PageUp),
-      ("pagedown", N::PageDown),
-      ("f1", N::F1),
-      ("f20", N::F20),
-    ] {
-      assert_eq!(Keystroke::parse(s).map(|k| k.key), Some(Key::Named(key)), "{s}");
+  fn every_hotkey_key_as_before() {
+    let mut want: Vec<String> = ('a'..='z')
+      .chain('0'..='9')
+      .map(|c| {
+        let up = c.to_ascii_uppercase();
+        format!("ctrl+shift+{c} ⌃⇧{up} Ctrl+Shift+{up}")
+      })
+      .collect();
+    want.extend((1..=20).map(|n| format!("ctrl+shift+f{n} ⌃⇧F{n} Ctrl+Shift+F{n}")));
+    want.extend(
+      "space Space Space|escape ⎋ Esc|tab ⇥ Tab|return ↩ Enter|delete ⌫ Backspace|\
+       forwarddelete ⌦ Delete|up ↑ Up|down ↓ Down|left ← Left|right → Right|home ↖ Home|\
+       end ↘ End|pageup ⇞ Page Up|pagedown ⇟ Page Down|minus - -|equal = =|bracketleft [ [|\
+       bracketright ] ]|backslash \\ \\|semicolon ; ;|quote ' '|comma , ,|period . .|\
+       slash / /|grave ` `"
+        .split('|')
+        .map(|row| {
+          let (name, rest) = row.trim().split_once(' ').unwrap();
+          let (symbol, names) = rest.split_once(' ').unwrap();
+          format!("ctrl+shift+{name} ⌃⇧{symbol} Ctrl+Shift+{names}")
+        }),
+    );
+    assert_eq!(want.len(), 26 + 10 + 20 + 25);
+    for row in want {
+      let name = row.split(' ').next().unwrap();
+      let c = hot(name).unwrap();
+      assert_eq!(hot(&c.to_string()), Ok(c), "{row}");
+      assert_eq!(format!("{c} {} {}", c.symbols(), c.names()), row);
+      assert!(c.code().is_some(), "{row}");
     }
 
-    assert_eq!(Keystroke::parse("f21").map(|k| k.key), None);
-    assert_eq!(Keystroke::parse("f").map(|k| k.key), Some(Key::Char('f')));
-    let ctrl = Keystroke::parse("ctrl-cmd-alt-shift-a").unwrap().mods;
-    assert_eq!(ctrl, Modifiers::CONTROL | Modifiers::META | Modifiers::ALT | Modifiers::SHIFT);
+    // The other spellings of keys.
+    for (alias, name) in [
+      ("esc", "escape"),
+      ("enter", "return"),
+      ("backspace", "delete"),
+      ("-", "minus"),
+      ("=", "equal"),
+      ("[", "bracketleft"),
+      ("]", "bracketright"),
+      ("\\", "backslash"),
+      (";", "semicolon"),
+      ("'", "quote"),
+      (",", "comma"),
+      (".", "period"),
+      ("/", "slash"),
+      ("`", "grave"),
+      ("F7", "f7"),
+      ("Q", "q"),
+    ] {
+      assert_eq!(hot(alias), hot(name), "{alias}");
+    }
+
+    let places = ["ctrl+/", "a", "1", "f12", "space", "return", "delete", "forwarddelete"];
+    let codes = places.map(|s| hot(s).unwrap().code().unwrap());
+    let want = [Code::Slash, Code::KeyA, Code::Digit1, Code::F12, Code::Space, Code::Enter];
+    assert_eq!(codes[..6], want);
+    assert_eq!(codes[6..], [Code::Backspace, Code::Delete]);
+  }
+
+  #[test]
+  fn parses_settings_and_other_spellings() {
+    let k = |key, mods| Ok(Shortcut { key, mods });
+    let (ctrl, alt, meta) = (Modifiers::CONTROL, Modifiers::ALT, Modifiers::META);
+    assert_eq!(hot("option+space"), k(Key::Char(' '), alt));
+    assert_eq!(hot("ctrl+option+cmd+F12"), k(Key::Named(N::F12), ctrl | alt | meta));
+    assert_eq!(hot(" Control + Alt + Command + f12 "), hot("ctrl+option+cmd+f12"));
+    assert_eq!(hot("option+shift+space"), k(Key::Char(' '), alt | Modifiers::SHIFT));
+    assert_eq!(hot("cmd+K"), k(Key::Char('k'), meta));
+    assert_eq!(hot("ctrl+/"), k(Key::Char('/'), ctrl));
+    assert_eq!(hot("escape"), hot("esc"));
+    for (text, canonical, symbols, names) in [
+      ("ctrl+option+cmd+F12", "ctrl+option+cmd+f12", "⌃⌥⌘F12", "Ctrl+Alt+Super+F12"),
+      ("Alt+Space", "option+space", "⌥Space", "Alt+Space"),
+      ("cmd+shift+a", "shift+cmd+a", "⇧⌘A", "Shift+Super+A"),
+      ("ctrl+/", "ctrl+slash", "⌃/", "Ctrl+/"),
+      ("ctrl+esc", "ctrl+escape", "⌃⎋", "Ctrl+Esc"),
+      ("shift+pagedown", "shift+pagedown", "⇧⇟", "Shift+Page Down"),
+    ] {
+      let c = hot(text).unwrap();
+      assert_eq!(c.to_string(), canonical);
+      assert_eq!(hot(canonical), Ok(c), "round trip of {text}");
+      // The command key is Windows' Win key there.
+      let names = if cfg!(windows) { names.replace("Super", "Win") } else { names.to_string() };
+      assert_eq!((c.symbols(), c.names()), (symbols.to_string(), names));
+    }
+
+    let held = if cfg!(target_os = "macos") { "⌃⌥" } else { "Ctrl+Alt+" };
+    assert_eq!(modifiers_label(Modifiers::CONTROL | Modifiers::ALT), held);
+  }
+
+  #[test]
+  fn a_modifier_alone_is_a_hotkey_of_its_own() {
+    for (text, key, canonical, label) in [
+      ("right_option", Code::AltRight, "right_option", "Right ⌥"),
+      ("Right Option", Code::AltRight, "right_option", "Right ⌥"),
+      ("right-alt", Code::AltRight, "right_option", "Right ⌥"),
+      ("ropt", Code::AltRight, "right_option", "Right ⌥"),
+      ("left_option", Code::AltLeft, "left_option", "Left ⌥"),
+      ("rcmd", Code::MetaRight, "right_cmd", "Right ⌘"),
+      ("left_ctrl", Code::ControlLeft, "left_ctrl", "Left ⌃"),
+      ("RightShift", Code::ShiftRight, "right_shift", "Right ⇧"),
+      ("fn", Code::Fn, "fn", "fn"),
+      ("Globe", Code::Fn, "fn", "fn"),
+    ] {
+      let hotkey = Hotkey::parse(text).unwrap();
+      assert_eq!(hotkey, Hotkey::Modifier(key), "{text}");
+      assert_eq!(hotkey.to_string(), canonical);
+      assert_eq!(Hotkey::parse(canonical), Ok(hotkey), "round trip of {text}");
+      if cfg!(target_os = "macos") {
+        assert_eq!(hotkey.label(), label);
+      }
+
+      assert_eq!(Shortcut::parse(text), Err(ShortcutError::ModifierAlone), "{text}");
+    }
+
+    let keys = MODS.iter().flat_map(|r| [r.4, r.5]).chain([Code::Fn]);
+    for key in keys.clone() {
+      let hotkey = Hotkey::Modifier(key);
+      assert_eq!(Hotkey::parse(&hotkey.to_string()), Ok(hotkey));
+      assert!(is_modifier(key));
+    }
+
+    let names = keys.map(|k| Hotkey::Modifier(k).to_string());
+    let want = "left_ctrl right_ctrl left_option right_option left_shift right_shift left_cmd \
+                right_cmd fn";
+    assert_eq!(names.collect::<Vec<_>>().join(" "), want);
+    assert!(!is_modifier(Code::CapsLock) && !is_modifier(Code::KeyA));
+    // Shortcuts stay shortcuts; a modifier without a side is no key of its own.
+    assert!(matches!(Hotkey::parse("ctrl+option+space"), Ok(Hotkey::Shortcut(_))));
+    assert_eq!(Hotkey::parse("option"), Err(ShortcutError::NoKey));
+    assert_eq!(Hotkey::parse("fn+f1"), Err(ShortcutError::Fn));
+    assert!(Hotkey::parse("right").is_ok_and(|h| h != Hotkey::Modifier(Code::AltRight)));
+    assert!(Hotkey::parse("rx").is_err());
+    assert!(matches!(Hotkey::parse("l+shift"), Ok(Hotkey::Shortcut(_))), "the L key with Shift");
+  }
+
+  #[test]
+  fn rejects_what_is_not_a_hotkey() {
+    use ShortcutError::*;
+    assert_eq!(Hotkey::parse("  "), Err(Empty));
+    assert_eq!(Hotkey::parse("ctrl+option"), Err(NoKey));
+    assert_eq!(Hotkey::parse("fn+f1"), Err(Fn));
+    assert_eq!(Hotkey::parse("ctrl+hyper"), Err(Unknown("hyper".into())));
+    assert_eq!(Hotkey::parse("a+b"), Err(TwoKeys("a".into(), "b".into())));
+    // Keys with no place without Shift on a US keyboard.
+    assert_eq!(Hotkey::parse("ctrl+!"), Err(Unknown("!".into())));
+    for bad in ["f0", "f21", "f012", "ctrl++", "ctrl+", "é"] {
+      assert!(Hotkey::parse(bad).is_err(), "{bad}");
+    }
   }
 
   #[test]

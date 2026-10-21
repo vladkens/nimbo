@@ -16,7 +16,6 @@
 pub mod app;
 pub mod cpu;
 pub mod harness;
-pub mod hotkey;
 pub mod keys;
 pub mod platform;
 mod png;
@@ -35,8 +34,8 @@ pub use harness::Harness;
 /// [Modifiers] the modifier keys held.
 pub use keyboard_types::{self, Code, Modifiers, NamedKey};
 pub use keys::{
-  Binding, CMD, Command, Delete, EDIT_KEYS, Key, KeyEvent, Keystroke, Move, SELECT_KEYS, bind,
-  shortcut,
+  Binding, CMD, Command, Delete, EDIT_KEYS, Hotkey, Key, KeyEvent, Move, SELECT_KEYS, Shortcut,
+  bind, shortcut,
 };
 pub use scene::{
   Color, Frame, ImageId, Images, Point, Quad, Rect, Scene, Segment, Size, alpha, mix, rgb,

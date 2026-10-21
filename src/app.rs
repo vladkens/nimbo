@@ -1210,13 +1210,13 @@ mod tests {
     item_takes: bool,
   }
 
-  const ITEM_KEYS: &[Binding] = &[keys::bind("cmd-z", Command::Undo)];
+  const ITEM_KEYS: &[Binding] = &[keys::bind("cmd+z", Command::Undo)];
   const PANEL_KEYS: &[Binding] = &[
-    keys::bind("cmd-z", Command::Action("panel undo")),
-    keys::bind("cmd-p", Command::Action("panel")),
+    keys::bind("cmd+z", Command::Action("panel undo")),
+    keys::bind("cmd+p", Command::Action("panel")),
   ];
   const APP_KEYS: &[Binding] =
-    &[keys::bind("cmd-p", Command::Action("app")), keys::bind("cmd-n", Command::Action("new"))];
+    &[keys::bind("cmd+p", Command::Action("app")), keys::bind("cmd+n", Command::Action("new"))];
 
   impl App for Keyed {
     fn keymap(&self) -> &[Binding] {
