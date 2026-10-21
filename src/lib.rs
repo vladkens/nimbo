@@ -26,7 +26,7 @@ pub mod ui;
 use std::path::PathBuf;
 
 pub use app::{
-  App, Appearance, Clipboard, Clock, Cx, Event, MemClipboard, MouseButton, Phase, Runtime,
+  App, Appearance, Clipboard, Clock, Cx, Event, Ime, MemClipboard, MouseButton, Phase, Runtime,
   WHEEL_LINE, Waker,
 };
 pub use harness::Harness;
@@ -40,11 +40,13 @@ pub use keys::{
 pub use scene::{
   Color, Frame, ImageId, Images, Point, Quad, Rect, Scene, Segment, Size, alpha, mix, rgb,
 };
+pub use text::edit::{Editor, Lines, Mono, Sel};
 pub use text::{Font, Weight};
 pub use ui::{
-  Align, Behavior, Button, ButtonStyle, Click, ControlSize, Cursor, Dim, Ease, Float, Focus,
-  FocusRing, Id, List, ListResponse, PopUp, Press, Response, Row, Scroll, Selection, Shadow, Sizes,
-  Split, Style, Tabs, TextStyle, Theme, Transition, TypeSelect, Ui, Variant, grow, pct, px, rigid,
+  Align, Behavior, Button, ButtonStyle, Click, ControlSize, Cursor, Dim, Ease, FieldBehavior,
+  FieldStyle, Float, Focus, FocusRing, Id, List, ListResponse, PopUp, Press, Response, Row, Scroll,
+  Selection, Shadow, Sizes, Split, Style, Tabs, TextInput, TextLayout, TextStyle, Theme,
+  Transition, TypeSelect, Ui, Variant, grow, pct, px, rigid,
 };
 
 /// A window's title and initial content size in points; the harness renders at this size.

@@ -9,11 +9,12 @@ use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use super::textlayout::{Edit, Stop, reveal};
 use super::{Align, Dim, Float, Id, Style, TextStyle};
 use crate::keys::Binding;
-use crate::scene::{Color, ImageId, Point, Rect, Size};
-use crate::text::edit::graphemes;
-use crate::text::{Font, FxHasher, Ink, Metrics};
+use crate::scene::{Color, ImageId, Images, Point, Rect, Size};
+use crate::text::edit::{graphemes, next_grapheme};
+use crate::text::{Font, FxHasher, Ink, Metrics, TextSystem};
 
 /// Slack for float sums when comparing sizes, in points.
 const EPS: f32 = 0.01;
@@ -34,6 +35,19 @@ pub trait Measure {
   fn metrics(&mut self, font: Font) -> Metrics;
   /// An image's natural size in points.
   fn image(&mut self, id: ImageId) -> Size;
+  /// Pushes a caret stop for every grapheme boundary of `s`, the start and end included, with
+  /// `base` added to its offset. By default from the widths of the prefixes.
+  fn stops(&mut self, s: &str, font: Font, base: u32, out: &mut Vec<Stop>) {
+    let mut i = 0;
+    loop {
+      out.push(Stop { at: base + i as u32, x: self.width(&s[..i], font) });
+      if i >= s.len() {
+        return;
+      }
+
+      i = next_grapheme(s, i);
+    }
+  }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -60,13 +74,16 @@ pub enum Kind {
   },
 }
 
-/// A wrapped line of a text element: a byte range of [Tree::text], its width and its ink.
+/// A wrapped line of a text element: a byte range of [Tree::text], its width and its ink. The
+/// lines of an editable text cover it all: a soft-wrapped line keeps the spaces it broke at, and
+/// its caret stops start at `stop` in [Tree::stops].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Line {
   pub start: u32,
   pub end: u32,
   pub width: f32,
   pub ink: Ink,
+  pub stop: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -95,7 +112,7 @@ pub struct Node {
   size: [f32; 2],
   /// The least the box can shrink to: the content's minimum (the longest word of a text).
   min: [f32; 2],
-  pos: [f32; 2],
+  pub(super) pos: [f32; 2],
   /// Grow distribution: the size is final.
   frozen: bool,
 }
@@ -155,6 +172,10 @@ pub struct Tree {
   /// Elements whose last-frame box and content the view drew from, as it saw them
   /// ([super::Ui::settle]).
   pub settle: Vec<(Id, Option<Seen>)>,
+  /// The selections of editable and selectable text elements, in tree order.
+  pub edits: Vec<Edit>,
+  /// Caret stops of the editable texts' lines.
+  pub stops: Vec<Stop>,
   index: HashMap<Id, u32, BuildHasherDefault<FxHasher>>,
   /// A grid's row heights while it is laid out.
   rows: Vec<f32>,
@@ -172,6 +193,8 @@ impl Tree {
     self.keymaps.clear();
     self.partial.clear();
     self.settle.clear();
+    self.edits.clear();
+    self.stops.clear();
     self.index.clear();
     let root = Style::new().w(Dim::Px(size.w)).h(Dim::Px(size.h));
     self.nodes.push(Node::new(Id::ROOT, Kind::Box, root, 1, None, 0, 1));
@@ -189,6 +212,15 @@ impl Tree {
   /// A node's index by id, once laid out.
   pub fn find(&self, id: Id) -> Option<u32> {
     self.index.get(&id).copied()
+  }
+
+  /// The index in [Tree::edits] of node `i`'s selection, when it is an editable text.
+  pub fn edit(&self, i: u32) -> Option<usize> {
+    if self.edits.is_empty() {
+      return None;
+    }
+
+    self.edits.binary_search_by_key(&i, |e| e.node).ok()
   }
 
   /// The key bindings of node `i`.
@@ -251,6 +283,7 @@ pub fn layout(t: &mut Tree, win: Size, scale: f32, m: &mut dyn Measure) {
   fit(t, 1, m);
   grow(t, 1, win);
   place(t, win, scale);
+  reveal(t, scale);
 
   let nodes = &t.nodes;
   t.floats.sort_unstable_by_key(|&i| (float_z(nodes, i), i));
@@ -559,12 +592,46 @@ fn distribute(t: &mut Tree, i: usize, ax: usize, avail: f32) {
   });
 }
 
+/// Text and image sizes from the runtime's text system and images.
+pub(crate) struct Sys<'a> {
+  pub text: &'a mut TextSystem,
+  pub images: &'a Images,
+  pub scale: f32,
+}
+
+impl Measure for Sys<'_> {
+  fn width(&mut self, s: &str, font: Font) -> f32 {
+    self.text.measure(s, font)
+  }
+
+  fn line(&mut self, s: &str, font: Font) -> (f32, Ink) {
+    let line = self.text.layout(s, font);
+    (line.width, line.ink)
+  }
+
+  fn metrics(&mut self, font: Font) -> Metrics {
+    self.text.metrics(font)
+  }
+
+  fn image(&mut self, id: ImageId) -> Size {
+    let (w, h) = self.images.size(id).unwrap_or((0, 0));
+    Size::new(w as f32 / self.scale, h as f32 / self.scale)
+  }
+
+  fn stops(&mut self, s: &str, font: Font, base: u32, out: &mut Vec<Stop>) {
+    self.text.carets(s, font, |i, x| out.push(Stop { at: base + i as u32, x }));
+  }
+}
+
 // MARK: Text
 
-/// Wraps every text element at its final width and sets its line metrics.
+/// Wraps every text element at its final width and sets its line metrics; editable ones get
+/// lines that cover their text and caret stops.
 fn wrap(t: &mut Tree, m: &mut dyn Measure) {
   t.lines.clear();
-  for n in t.nodes.iter_mut() {
+  t.stops.clear();
+  let mut edits = t.edits.iter_mut().peekable();
+  for (i, n) in t.nodes.iter_mut().enumerate() {
     let width = n.size[0];
     let Kind::Text { range, style, lines, baseline, line_h } = &mut n.kind else { continue };
     let met = m.metrics(style.font);
@@ -572,24 +639,36 @@ fn wrap(t: &mut Tree, m: &mut dyn Measure) {
     *baseline = (*line_h - met.ascent - met.descent) / 2.0 + met.ascent;
     let start = t.lines.len() as u32;
     let s = &t.text[range.0 as usize..range.1 as usize];
+    let edit = edits.next_if(|e| e.node == i as u32).filter(|e| !e.placeholder);
     // One line that fits (or doesn't wrap): its width is the one measured for the fit.
     let fits = !style.wrap || n.content[0] <= width + EPS;
-    let cut = style.ellipsis && n.content[0] > width + EPS;
+    let cut = style.ellipsis && edit.is_none() && n.content[0] > width + EPS;
+    let (start_at, end, cover) = (range.0, range.1, edit.is_some());
     match fits && !s.contains('\n') {
       // Paint adds the ellipsis after a line that ends before its text does.
       true if cut => {
         let (end, w) = ellipsize(s, style.font, width, m);
         let ink = m.line(&s[..end], style.font).1;
-        t.lines.push(Line { start: range.0, end: range.0 + end as u32, width: w, ink })
+        t.lines.push(Line { start: start_at, end: start_at + end as u32, width: w, ink, stop: 0 })
       }
       true => {
         let ink = m.line(s, style.font).1;
-        t.lines.push(Line { start: range.0, end: range.1, width: n.content[0], ink })
+        t.lines.push(Line { start: start_at, end, width: n.content[0], ink, stop: 0 })
       }
-      false => wrap_text(&t.text, *range, *style, width, m, &mut t.lines),
+      false => wrap_text(&t.text, *range, *style, width, cover, m, &mut t.lines),
     }
 
     *lines = (start, t.lines.len() as u32);
+    if let Some(e) = edit {
+      let first = t.stops.len() as u32;
+      for l in &mut t.lines[start as usize..] {
+        l.stop = t.stops.len() as u32;
+        let s = &t.text[l.start as usize..l.end as usize];
+        m.stops(s, style.font, l.start - range.0, &mut t.stops);
+      }
+
+      e.stops = (first, t.stops.len() as u32);
+    }
   }
 }
 
@@ -616,12 +695,15 @@ fn ellipsize(s: &str, font: Font, width: f32, m: &mut dyn Measure) -> (usize, f3
 
 /// Breaks the text at `range` into lines no wider than `width`: at newlines, and greedily at
 /// spaces when it wraps. A word wider than `width` starts a line and breaks between characters
-/// (graphemes), as AppKit's word wrapping does, each line at least one character.
+/// (graphemes), as AppKit's word wrapping does, each line at least one character. With `cover`
+/// (an editable text) the same breaks give lines that cover the text: each up to where the next
+/// starts, with the spaces it broke at, the first from the line break before it.
 fn wrap_text(
   text: &str,
   range: (u32, u32),
   style: TextStyle,
   width: f32,
+  cover: bool,
   m: &mut dyn Measure,
   out: &mut Vec<Line>,
 ) {
@@ -632,14 +714,15 @@ fn wrap_text(
     at += line.len() + 1;
     let (w, ink) = m.line(line, font);
     if !style.wrap || w <= width + EPS {
-      out.push(Line { start: base as u32, end: (base + line.len()) as u32, width: w, ink });
+      let end = (base + line.len()) as u32;
+      out.push(Line { start: base as u32, end, width: w, ink, stop: 0 });
       continue;
     }
 
     let space = m.width(" ", font);
     let mut push = |m: &mut dyn Measure, a: usize, b: usize| {
       let (width, ink) = m.line(&line[a..b], font);
-      out.push(Line { start: (base + a) as u32, end: (base + b) as u32, width, ink });
+      out.push(Line { start: (base + a) as u32, end: (base + b) as u32, width, ink, stop: 0 });
     };
     // The line so far: start, end and width.
     let mut cur: Option<(usize, usize, f32)> = None;
@@ -659,14 +742,16 @@ fn wrap_text(
           continue;
         }
 
-        push(m, start, end);
+        push(m, start, if cover { a } else { end });
       }
 
+      // Covering, the first line starts at the line break, with the spaces after it.
+      let from = if cover && cur.is_none() { 0 } else { a };
       cur = Some(match ww <= width + EPS {
-        true => (a, b, ww),
+        true => (from, b, ww),
         // Too wide for a line: its pieces, the last one going on with the words after it.
         false => {
-          let mut from = a;
+          let mut from = from;
           for cut in breaks(word, font, width, m) {
             push(m, from, a + cut);
             from = a + cut;
@@ -678,7 +763,7 @@ fn wrap_text(
     }
 
     let (start, end) = cur.map_or((0, 0), |(a, b, _)| (a, b));
-    push(m, start, end);
+    push(m, start, if cover { line.len() } else { end });
   }
 }
 
@@ -1217,7 +1302,7 @@ pub(crate) mod tests {
     let measured = |n: usize| {
       let text = "a".repeat(n);
       let (mut m, mut out) = (Counted(0), Vec::new());
-      wrap_text(&text, (0, n as u32), T, 60.0, &mut m, &mut out);
+      wrap_text(&text, (0, n as u32), T, 60.0, false, &mut m, &mut out);
       assert_eq!(out.len(), n.div_ceil(10));
       assert!(out.iter().all(|l| l.end - l.start == 10 || l.end == n as u32));
       m.0

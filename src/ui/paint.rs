@@ -6,6 +6,7 @@
 //! the window or their clip are skipped; text by where its ink reaches, not its box.
 
 use super::layout::{ELLIPSIS, Kind, Tree};
+use super::textlayout::{Edit, TextLayout};
 use super::{Canvas, FocusRing, Style};
 use crate::scene::{Color, Frame, Quad, Rect};
 use crate::text::Ink;
@@ -135,6 +136,11 @@ fn node(
   match n.kind {
     Kind::Box => {}
     Kind::Text { range, style, lines, baseline, line_h } => {
+      let edit = t.edit(i as u32).map(|k| &t.edits[k]);
+      if let Some(e) = edit {
+        selection(t, i, e, alpha, f);
+      }
+
       let color = fade(style.color, alpha);
       let (mut first, mut last) = lines;
       if last - first > 1 {
@@ -157,6 +163,10 @@ fn node(
         if style.strike && w > 0.0 {
           strike(r.x, y, w, style.font.size, color, f);
         }
+      }
+
+      if let Some(e) = edit {
+        caret(t, i, e, style.color, baseline, alpha, f);
       }
     }
     Kind::Image(id) => f.image(id, r, alpha),
@@ -215,6 +225,44 @@ fn ink_rect(t: &Tree, lines: (u32, u32), r: Rect, baseline: f32, line_h: f32) ->
   let (top, n) = (r.y + baseline, lines.1.saturating_sub(lines.0).max(1) as f32);
   let bottom = top + (n - 1.0) * line_h;
   Rect::new(r.x - ink.left, top - ink.up, ink.left + ink.right, bottom + ink.down - top + ink.up)
+}
+
+/// The selection of an editable or selectable text, under its glyphs.
+fn selection(t: &Tree, i: usize, e: &Edit, alpha: f32, f: &mut Frame) {
+  let (a, b) = (e.sel.0.min(e.sel.1), e.sel.0.max(e.sel.1));
+  if a == b {
+    return;
+  }
+
+  let Some(lay) = TextLayout::at(t, i as u32) else { return };
+  let color = fade(e.sel_color, alpha);
+  lay.rects(a as usize..b as usize, |r| f.rect(r, color, 0.0));
+}
+
+/// The caret, and the marked text's underline in the text's colour: the composition shows at
+/// the caret, apart from the committed text by its underline.
+fn caret(t: &Tree, i: usize, e: &Edit, text: Color, baseline: f32, alpha: f32, f: &mut Frame) {
+  let marked = e.marked.0 < e.marked.1;
+  if !e.caret && !marked {
+    return;
+  }
+
+  let Some(lay) = TextLayout::at(t, i as u32) else { return };
+  if marked {
+    let color = fade(text, alpha * 0.8);
+    let (a, b) = (e.marked.0 as usize, e.marked.1 as usize);
+    lay.rects(a..b, |r| {
+      let y = (r.y + baseline + 2.0).min(r.y + r.h - 1.0);
+      f.rect(Rect::new(r.x, y, r.w, 1.0), color, 0.0);
+    });
+  }
+
+  if e.caret {
+    let c = lay.caret(e.sel.1 as usize);
+    // 1.5 points wide, from half a point before the stop: on a pixel boundary at 2x.
+    let x = (c.x - 0.5).max(lay.rect.x - 1.0);
+    f.rect(Rect::new(x, c.y, 1.5, c.h), fade(e.caret_color, alpha), 0.0);
+  }
 }
 
 /// A strikethrough `w` wide from `x` over a line with its baseline at `y`: at half the

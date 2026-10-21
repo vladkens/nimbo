@@ -7,7 +7,8 @@
 //! An app changes the look in three steps, from the least work to the most:
 //! - a variant where the widget has one: `Button::new("Save").primary()`;
 //! - a style derived from the theme, changed for one widget: `t.button(Variant::Normal)
-//!   .height(36.0)` given to [super::Button::style];
+//!   .height(36.0)` given to [super::Button::style], `t.field().hint("Search")` to
+//!   [super::Ui::text_field];
 //! - its own theme: `const MINE: Theme = Theme { accent: rgb(0xe06c75), ..Theme::PLATES_DARK }` and
 //!   `ui.set_theme(MINE)`.
 //!
@@ -21,7 +22,8 @@
 //! accent, switching live when they change; [super::Ui::follow_system] goes back to it.
 
 use super::store::Transition;
-use super::{Dim, FocusRing, Shadow, Style, TextStyle, px};
+use super::widgets::FieldStyle;
+use super::{Align, Dim, FocusRing, Shadow, Style, TextStyle, grow, px};
 use crate::app::Appearance;
 use crate::scene::{Color, alpha, mix, rgb};
 use crate::text::{Font, Weight};
@@ -82,6 +84,11 @@ pub struct Theme {
   pub hover_all: bool,
   /// Opacity of disabled widgets.
   pub disabled: f32,
+  /// The ground of text fields, and their edge.
+  pub field: Color,
+  pub field_line: Color,
+  /// Fainter than muted: placeholders.
+  pub faint: Color,
 }
 
 /// A button's look ([Theme::button]).
@@ -226,6 +233,9 @@ impl Theme {
     fade: Transition::smooth(6.0),
     hover_all: true,
     disabled: 0.4,
+    field: WHITE,
+    field_line: rgb(0xdadade),
+    faint: rgb(0xb2b2b7),
   };
 
   /// [Theme::PLATES_LIGHT]'s roles on System Settings' dark greys; the focus ring is
@@ -249,6 +259,9 @@ impl Theme {
     menu: rgb(0x1a1a1a),
     menu_line: alpha(WHITE, 0.25),
     thumb: alpha(WHITE, 0.26),
+    field: rgb(0x252527),
+    field_line: rgb(0x424245),
+    faint: rgb(0x646468),
     ..Self::PLATES_LIGHT
   };
 
@@ -350,6 +363,26 @@ impl Theme {
 
   pub const fn focus_ring(&self) -> FocusRing {
     FocusRing::new(self.focus)
+  }
+
+  /// A single-line text field: [Sizes::control_h] high at least, the field's ground and edge
+  /// in the control's corners, the faint placeholder, the accent's caret and a selection of it
+  /// (`.multiline()` and a height for notes, `.password()` for secrets). Focused, the ring.
+  pub const fn field(&self) -> FieldStyle {
+    let frame = Style::new()
+      .w(grow())
+      .min_h(self.sizes.control_h)
+      .pad_xy((self.sizes.control_h / 3.0).round(), 4.0)
+      .align(Align::Start, Align::Center)
+      .bg(self.field)
+      .radius(self.radius)
+      .border(1.0, self.field_line);
+    let sel = alpha(self.accent, if self.dark { 0.4 } else { 0.3 });
+    FieldStyle::new(TextStyle::new(self.font, self.text))
+      .frame(frame)
+      .placeholder(self.faint)
+      .selection(sel)
+      .caret(self.accent)
   }
 }
 

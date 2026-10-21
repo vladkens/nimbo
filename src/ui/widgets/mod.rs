@@ -1,6 +1,7 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Widgets drawn from the theme ([Ui::theme]): label and button (variants, sizes). Each control
+//! Widgets drawn from the theme ([Ui::theme]): label, button (variants, sizes), text field and
+//! selectable text. Each control
 //! is its behaviour ([super::behavior]) plus drawing from the theme: an app that wants its own
 //! look draws over the same behaviour.
 //!
@@ -18,9 +19,11 @@
 //! Space activates it.
 
 mod button;
+mod field;
 mod label;
 
 pub use button::Button;
+pub use field::{FieldStyle, TextInput};
 
 use super::{Behavior, Id, Style, Ui};
 
