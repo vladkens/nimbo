@@ -255,16 +255,17 @@ pub fn word_range(s: &str, i: usize) -> Range<usize> {
     return i..next_grapheme(s, i);
   }
 
+  // By graphemes, each one classed by its first character: an emoji's modifier is not a word's.
   let (mut a, mut b) = (i, i);
-  while a > 0 && class(prev_char(s, a)) == c {
-    a = prev_char(s, a);
+  while a > 0 && class(prev_grapheme(s, a)) == c {
+    a = prev_grapheme(s, a);
   }
 
   while b < s.len() && class(b) == c {
-    b = next_char(s, b);
+    b = next_grapheme(s, b);
   }
 
-  snap(s, a)..snap(s, b)
+  a..b
 }
 
 /// The line between line breaks at `i` with its `\n` (a triple click).
@@ -1342,6 +1343,13 @@ mod tests {
     e.set_marked("abc", 0..2, None);
     assert!(e.cut(&mut cb));
     assert_eq!((e.text(), cb.0.as_deref()), ("c", Some("ab")));
+  }
+
+  #[test]
+  fn a_double_click_beside_an_emoji_takes_the_word_alone() {
+    let s = "👍🏽test";
+    assert_eq!(word_range(s, 9), 8..12);
+    assert_eq!(word_range(s, 0), 0..8);
   }
 
   #[test]

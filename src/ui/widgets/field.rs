@@ -320,6 +320,22 @@ mod tests {
 
     h.frame();
     assert!(h.rt.ui.last.get(Id::of("page")).unwrap().scroll.y > 0.0);
+    // Page Down is not the text's: it goes on to the app.
+    let page_down = crate::app::Event::Command(crate::keys::Command::ScrollPageDown);
+    assert!(!h.event(page_down));
+  }
+
+  /// A press and a move below the page before any frame: the drag reaches down at once, and
+  /// frames go on scrolling while the pointer rests below the page's visible part.
+  #[test]
+  fn a_drag_below_a_scrolled_page_selects_and_scrolls_on() {
+    let mut h = Harness::new(Page, Size::new(300.0, 200.0), 1.0);
+    h.frame();
+    h.press(10.0, 5.0);
+    h.move_to(10.0, 70.0);
+    h.frame();
+    assert!(h.editor(Id::of("t")).unwrap().sel().head > 0);
+    assert!(h.rt.due_in().is_some_and(|d| d <= std::time::Duration::from_millis(16)));
   }
 
   #[test]

@@ -186,6 +186,8 @@ struct Window {
   ime: Option<crate::ui::Id>,
   ime_marked: bool,
   ime_call: bool,
+  /// Where the composition and candidate windows were put last.
+  ime_at: Option<crate::scene::Rect>,
   /// The cursor last set.
   cursor: Cursor,
   /// The least content size in points ([Config::min]) and the window's style, for
@@ -638,6 +640,7 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
     ime: None,
     ime_marked: false,
     ime_call: false,
+    ime_at: None,
     cursor: Cursor::Arrow,
     min: cfg.min(),
     style,

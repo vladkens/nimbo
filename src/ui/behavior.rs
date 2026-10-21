@@ -330,7 +330,7 @@ impl Ui<'_> {
   /// hit testing on the last frame's layout of its text; returns whether Enter submitted it
   /// and whether Escape cancelled it.
   fn edit_input(&mut self, id: Id, st: &mut FieldState) -> (bool, bool) {
-    let viewport = self.st.last.rect(id);
+    let viewport = visible(&self.st.last, id);
     let lay = TextLayout::of(&self.st.last, st.text_id).filter(|l| shows(l, st));
     let lay = lay.map(|mut l| {
       let rows = viewport.map_or(0.0, |r| r.h / l.line_h) as usize;
@@ -368,7 +368,7 @@ impl Ui<'_> {
         | Command::ScrollPageDown
         | Command::ScrollToTop
         | Command::ScrollToBottom
-          if multiline =>
+          if multiline && st.editable =>
         {
           let line_h = lay.map_or(0.0, |l| l.line_h);
           if let Some(n) = self.st.last.get(id) {
@@ -524,9 +524,13 @@ fn drag(
   mouse: Option<Point>,
   viewport: Option<Rect>,
 ) -> bool {
+  // A press the view sees first starts the drag, which goes on to the pointer at once.
+  if let Some((p, clicks, shift)) = press.filter(|_| st.drag.is_none()) {
+    start_drag(st, lay, p, clicks, shift);
+  }
+
   match (press, st.drag.is_some()) {
-    (Some((p, clicks, shift)), false) => start_drag(st, lay, p, clicks, shift),
-    (Some(_), true) => {
+    (Some(_), _) => {
       let (Some(m), Some(v)) = (mouse, viewport) else { return false };
       // Past the edges the selection reaches a step further each frame, which the reveal of
       // its head scrolls to.
@@ -557,6 +561,21 @@ fn drag(
   }
 
   false
+}
+
+/// The part of element `id` of the last tree that shows, inside the clips of its ancestors (a
+/// scrolled page): where a drag past the edges scrolls.
+fn visible(t: &super::Tree, id: Id) -> Option<Rect> {
+  let mut i = t.find(id)? as usize;
+  let mut r = t.nodes[i].rect;
+  while i != 0 {
+    i = t.nodes[i].parent as usize;
+    if t.nodes[i].style.clip {
+      r = r.intersect(t.nodes[i].rect);
+    }
+  }
+
+  Some(r)
 }
 
 /// Page Up and Down, Home and End in a multi-line field of height `h`: scrolls without moving

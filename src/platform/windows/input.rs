@@ -290,6 +290,12 @@ impl Window {
         ime_notify(self.hwnd, CPS_CANCEL);
       }
 
+      // The composition moved (the field scrolled): its windows follow.
+      let at = self.rt.ui.text_input().filter(|_| marked).and_then(|t| t.caret_rect());
+      if at.is_some() && at != self.ime_at {
+        self.place_ime();
+      }
+
       return;
     }
 
@@ -314,6 +320,7 @@ impl Window {
   /// Puts the composition and candidate windows at the caret, the candidates under it.
   fn place_ime(&mut self) {
     let Some(rect) = self.rt.text_input().and_then(|t| t.caret_rect()) else { return };
+    self.ime_at = Some(rect);
     let s = self.scale;
     let px = |r: Rect| RECT {
       left: (r.x * s) as i32,
