@@ -26,14 +26,16 @@
 //! }
 //! ```
 //!
-//! Widgets ([widgets]: label, button) do this for an app in the look of the [Theme] set with
-//! [Ui::set_theme]: `if ui.id("plus").button("+").clicked { .. }`.
+//! Widgets ([widgets]: label, button) and containers ([containers]: scroll area) do this for an
+//! app in the look of the [Theme] set with [Ui::set_theme]: `if ui.id("plus").button("+")
+//! .clicked { .. }`.
 //!
 //! The rule for every widget: a headless behaviour ([behavior]: `ui.button_behavior(id)` and
 //! the like, hover, press, click, focus, keys and the value edited) plus drawing from the
 //! theme. An app that wants its own look keeps the behaviour and draws the element itself.
 
 pub mod behavior;
+pub mod containers;
 pub mod input;
 mod layout;
 mod paint;

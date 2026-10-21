@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::{Align, Dim, Float, Id, Style, TextStyle};
 use crate::keys::Binding;
-use crate::scene::{ImageId, Point, Rect, Size};
+use crate::scene::{Color, ImageId, Point, Rect, Size};
 use crate::text::edit::graphemes;
 use crate::text::{Font, FxHasher, Ink, Metrics};
 
@@ -52,6 +52,12 @@ pub enum Kind {
   Image(ImageId),
   /// The index of its paint callback.
   Canvas(u32),
+  /// Over a scroll container ([super::Ui::fade_edges]): its content fading into `color` under
+  /// the top and bottom edges, over `len` points, as far as it is scrolled away from them.
+  Fade {
+    color: Color,
+    len: f32,
+  },
 }
 
 /// A wrapped line of a text element: a byte range of [Tree::text], its width and its ink.
@@ -319,8 +325,8 @@ fn fit(t: &mut Tree, ax: usize, m: &mut dyn Measure) {
         let v = if ax == 0 { s.w } else { s.h };
         (v, v)
       }
-      Kind::Box | Kind::Canvas(_) if t.nodes[i].cols > 0 => grid_fit(t, i, ax),
-      Kind::Box | Kind::Canvas(_) => children_fit(t, i, ax),
+      Kind::Box | Kind::Canvas(_) | Kind::Fade { .. } if t.nodes[i].cols > 0 => grid_fit(t, i, ax),
+      Kind::Box | Kind::Canvas(_) | Kind::Fade { .. } => children_fit(t, i, ax),
     };
 
     let n = &mut t.nodes[i];

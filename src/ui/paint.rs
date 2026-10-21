@@ -44,6 +44,33 @@ pub(super) fn paint(
   }
 }
 
+/// The content of scroll container `p` fading into `color` under its top and bottom edges, each
+/// as strong as the content is scrolled away from it, full at `len` points.
+fn edge_fade(t: &Tree, p: usize, color: Color, len: f32, alpha: f32, f: &mut Frame) {
+  let n = &t.nodes[p];
+  let (r, off) = (n.rect, n.scroll.y);
+  let max = (n.content[1] - r.h).max(0.0);
+  let len = len.min(r.h / 2.0);
+  if len <= 0.0 {
+    return;
+  }
+
+  for (k, d) in [off, max - off].into_iter().enumerate() {
+    let a = (d / len).clamp(0.0, 1.0) * alpha;
+    if a <= 0.0 {
+      continue;
+    }
+
+    let (solid, clear) = (fade(color, a), fade(color, 0.0));
+    let q = match k {
+      0 => Quad::new(Rect::new(r.x, r.y, r.w, len), solid).gradient(clear, true),
+      _ => Quad::new(Rect::new(r.x, r.y + r.h - len, r.w, len), clear).gradient(solid, true),
+    };
+
+    f.quad(q);
+  }
+}
+
 fn fade(c: Color, alpha: f32) -> Color {
   [c[0], c[1], c[2], c[3] * alpha]
 }
@@ -133,6 +160,7 @@ fn node(
       }
     }
     Kind::Image(id) => f.image(id, r, alpha),
+    Kind::Fade { color, len } => edge_fade(t, n.parent as usize, color, len, alpha, f),
     Kind::Canvas(k) => {
       if let Some(paint) = canvases[k as usize].take() {
         paint(f, r);
