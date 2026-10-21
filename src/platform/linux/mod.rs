@@ -34,7 +34,7 @@ use wayland_protocols::xdg::shell::client::xdg_wm_base::XdgWmBase;
 
 use self::shm::Presenter;
 use crate::Config;
-use crate::app::{App, Clock, Runtime};
+use crate::app::{App, Appearance, Clock, Event, Runtime};
 use crate::scene::Size;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
@@ -50,6 +50,13 @@ pub fn run(cfg: &Config, app: Box<dyn App>) {
     eprintln!("nimbo: {e}");
     std::process::exit(1);
   }
+}
+
+/// The OS's light or dark setting and accent: light until ported. TODO: the XDG portal's
+/// `org.freedesktop.appearance` `color-scheme` and `accent-color` (`Settings.Read`, the
+/// `SettingChanged` signal); light without a portal.
+pub fn appearance() -> Appearance {
+  Appearance::LIGHT
 }
 
 /// The performance cores: Intel hybrid CPUs list theirs in `/sys/devices/cpu_core/cpus`
@@ -139,7 +146,8 @@ fn run_loop(conn: Connection, cfg: &Config, app: Box<dyn App>) -> Res<()> {
   }
   surface.commit();
 
-  let rt = Runtime::new(app, cfg.size, 1.0, Clock::real());
+  let mut rt = Runtime::new(app, cfg.size, 1.0, Clock::real());
+  rt.event(Event::Appearance(appearance()));
 
   // A wake from any thread writes the eventfd the loop polls.
   let wake: Arc<OwnedFd> = Arc::new(eventfd(0, EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK)?);

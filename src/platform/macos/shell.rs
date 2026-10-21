@@ -21,13 +21,15 @@ use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
   NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSApplicationTerminateReply,
-  NSBackingStoreType, NSEvent, NSEventModifierFlags, NSEventType, NSMenu, NSMenuItem, NSWindow,
-  NSWindowDelegate, NSWindowStyleMask,
+  NSBackingStoreType, NSEvent, NSEventModifierFlags, NSEventType, NSMenu, NSMenuItem,
+  NSSystemColorsDidChangeNotification, NSWindow, NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_foundation::{
-  NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString,
+  NSNotification, NSNotificationCenter, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize,
+  NSString,
 };
 
+use super::appearance;
 use super::view::View;
 use crate::Config;
 use crate::app::{App, Clock, Event, Runtime};
@@ -104,6 +106,15 @@ define_class!(
   }
 
   impl Delegate {
+    /// `NSSystemColorsDidChangeNotification`: the accent colour (or another system colour)
+    /// changed. Light and dark reach each view itself (`viewDidChangeEffectiveAppearance`).
+    #[unsafe(method(systemColorsChanged:))]
+    fn system_colors_changed(&self, _note: &NSNotification) {
+      for view in views() {
+        view.send(Event::Appearance(appearance()));
+      }
+    }
+
     /// The app menu's Quit: the same as [quit].
     #[unsafe(method(quit:))]
     fn quit_item(&self, _sender: Option<&AnyObject>) {
@@ -149,6 +160,16 @@ pub fn run(name: &str, start: impl FnOnce()) {
   let delegate = Delegate::new(mtm);
   ns_app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
   ns_app.setMainMenu(Some(&main_menu(mtm, name, &delegate)));
+  let center = NSNotificationCenter::defaultCenter();
+  // SAFETY: the delegate lives until the app ends and has the selector, taking a notification.
+  unsafe {
+    center.addObserver_selector_name_object(
+      &delegate,
+      sel!(systemColorsChanged:),
+      Some(NSSystemColorsDidChangeNotification),
+      None,
+    )
+  };
   shell(|s| *s = Shell::default());
   ns_app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
   ns_app.activate();
@@ -159,6 +180,8 @@ pub fn run(name: &str, start: impl FnOnce()) {
   }
 
   finish();
+  // SAFETY: the observer is the delegate, added above.
+  unsafe { center.removeObserver(&delegate) };
   ns_app.setDelegate(None);
   SHELL.take();
 }
@@ -260,6 +283,10 @@ fn view(id: u64) -> Option<Retained<View>> {
   shell(|s| s.windows.iter().find(|w| w.id == id).map(|w| w.view.clone()))
 }
 
+fn views() -> Vec<Retained<View>> {
+  shell(|s| s.windows.iter().map(|w| w.view.clone()).collect())
+}
+
 /// Opens a window running `app`, in front.
 pub fn open(cfg: &Config, app: Box<dyn App>) -> u64 {
   let mtm = mtm();
@@ -286,7 +313,8 @@ pub fn open(cfg: &Config, app: Box<dyn App>) -> u64 {
   window.setContentMinSize(NSSize::new(min.w as f64, min.h as f64));
 
   let scale = window.backingScaleFactor() as f32;
-  let rt = Runtime::new(app, cfg.size, scale, Clock::real());
+  let mut rt = Runtime::new(app, cfg.size, scale, Clock::real());
+  rt.event(Event::Appearance(appearance()));
   let view = View::new(mtm, frame, rt);
   window.setContentView(Some(&view));
   let id = shell(|s| {

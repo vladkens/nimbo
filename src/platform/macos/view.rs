@@ -77,6 +77,11 @@ define_class!(
       }
     }
 
+    #[unsafe(method(viewDidChangeEffectiveAppearance))]
+    fn appearance_changed(&self) {
+      self.send(Event::Appearance(super::appearance()));
+    }
+
     #[unsafe(method(viewDidChangeBackingProperties))]
     fn backing_changed(&self) {
       // `render` picks up the new scale.

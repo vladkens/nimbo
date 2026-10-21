@@ -29,7 +29,7 @@ use windows_sys::Win32::UI::HiDpi::{
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::Config;
-use crate::app::{App, Clock, Runtime};
+use crate::app::{App, Appearance, Clock, Event, Runtime};
 use crate::cpu::Renderer;
 use crate::cpu::raster::IRect;
 use crate::scene::Size;
@@ -367,7 +367,8 @@ pub fn run(cfg: &Config, app: Box<dyn App>) {
   assert!(!hwnd.is_null(), "nimbo: CreateWindowExW failed");
 
   let scale = unsafe { GetDpiForWindow(hwnd) } as f32 / 96.0;
-  let rt = Runtime::new(app, cfg.size, scale, Clock::real());
+  let mut rt = Runtime::new(app, cfg.size, scale, Clock::real());
+  rt.event(Event::Appearance(appearance()));
   // A wake from any thread posts a message; the window handle crosses threads as a number.
   let target = hwnd as isize;
   rt.waker().set_notify(Box::new(move || unsafe {
@@ -434,6 +435,13 @@ fn run_loop(hwnd: HWND, timer: HANDLE) {
 }
 
 // MARK: System
+
+/// The OS's light or dark setting and accent: light until ported. TODO: `AppsUseLightTheme`
+/// (registry, re-read on `WM_SETTINGCHANGE` "ImmersiveColorSet"), the accent from `UISettings`
+/// or `DwmGetColorizationColor`, a dark title bar with `DWMWA_USE_IMMERSIVE_DARK_MODE`.
+pub fn appearance() -> Appearance {
+  Appearance::LIGHT
+}
 
 /// The cores of the highest efficiency class (a hybrid CPU's performance cores, every core of
 /// another), at most 4: past that, more threads cost CPU time for little wall time

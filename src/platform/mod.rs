@@ -27,6 +27,20 @@
 //!     IOSurfaces as the layer's contents, `surface.rs`; Windows: a DIB section and BitBlt; Linux:
 //!     `wl_shm` buffers, on X11 a MIT-SHM segment). Draw synchronously during a live resize so the
 //!     content never stretches.
+//!   - appearance: send `Event::Appearance(appearance())` ([crate::Event::Appearance]) to the
+//!     runtime right after making it, before the first frame, and again whenever the OS's light or
+//!     dark setting or accent colour changes (macOS: `viewDidChangeEffectiveAppearance`,
+//!     `NSSystemColorsDidChangeNotification`).
+//! - `pub fn appearance() -> Appearance` ([crate::Appearance]): `dark`, and `accent` in sRGB or
+//!   `None` when the OS has none or the user left it to apps (macOS: `effectiveAppearance` matched
+//!   against Aqua / DarkAqua, `controlAccentColor` unless Multicolor). Stubs return
+//!   [crate::Appearance::LIGHT]. TODO Windows: `AppsUseLightTheme` (HKCU
+//!   `Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`), re-read on `WM_SETTINGCHANGE`
+//!   with "ImmersiveColorSet", the accent from `UISettings` or `DwmGetColorizationColor`, and the
+//!   title bar dark with `DWMWA_USE_IMMERSIVE_DARK_MODE`. TODO Linux: the XDG portal's
+//!   `org.freedesktop.appearance` `color-scheme` (1 dark, else light) and `accent-color` through
+//!   `org.freedesktop.portal.Settings.Read`, changes by its `SettingChanged` signal; light without
+//!   a portal.
 //! - `pub fn perf_cores() -> Option<usize>`: the performance cores, to size the CPU renderer's
 //!   threads ([crate::cpu::pool]); `None` falls back to `available_parallelism` capped at 4.
 
@@ -49,4 +63,4 @@ use linux as imp;
 compile_error!("nimbo runs on macOS, Windows and Linux");
 
 pub(crate) use imp::perf_cores;
-pub use imp::run;
+pub use imp::{appearance, run};
