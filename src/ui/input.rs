@@ -204,6 +204,12 @@ pub(super) fn max_scroll(n: &Node) -> [f32; 2] {
 // MARK: Routing
 
 impl UiState {
+  /// Ends the press without a click: the OS took the pointer mid-press, and the release that
+  /// follows isn't the user's. Returns whether there was one.
+  pub(crate) fn cancel_press(&mut self) -> bool {
+    self.input.press.take().is_some()
+  }
+
   /// Routes a pointer event through the last frame's tree: hover, press, click, focus and
   /// scrolling. Returns whether anything a view can show changed.
   pub(crate) fn pointer(&mut self, ev: &Event, now: Duration) -> bool {

@@ -446,6 +446,14 @@ impl<A: App> Runtime<A> {
     self.stale = true;
   }
 
+  /// The OS took the pointer while a button was held (another window captured it): the press
+  /// ends without a click. The platform then sends the button's [Event::MouseUp] as usual, which
+  /// ends the app's drags.
+  pub fn cancel_press(&mut self) {
+    let cancelled = self.ui.cancel_press();
+    self.ask(cancelled);
+  }
+
   /// A frame asked for from outside the last one, when `yes`.
   fn ask(&mut self, yes: bool) {
     self.dirty |= yes;
@@ -1104,6 +1112,21 @@ mod tests {
     rt.frame();
     // The label built before the button shows the new count in the very next frame.
     assert_eq!((text(&rt, "count"), rt.app.count), ("3".into(), 3));
+  }
+
+  #[test]
+  fn a_cancelled_press_does_not_click() {
+    let mut rt = ui_runtime();
+    rt.frame();
+    let r = rt.ui.last.rect(Id::of("plus")).unwrap();
+    let (pos, button, mods) = (Point::new(r.x + 5.0, r.y + 5.0), MouseButton::Left, Mods::NONE);
+    rt.event(Event::MouseDown { pos, button, clicks: 1, mods });
+    // Another window took the capture: the release that follows, still over it, is not a click.
+    rt.cancel_press();
+    rt.event(Event::MouseUp { pos, button, mods });
+    assert_eq!(rt.app.count, 0);
+    click(&mut rt, pos.x, pos.y);
+    assert_eq!(rt.app.count, 1);
   }
 
   #[test]
