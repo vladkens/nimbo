@@ -70,7 +70,7 @@ impl Window {
 
   /// Sets the runtime's cursor when it changed and the pointer is in the window, or when
   /// `force`d (WM_SETCURSOR: the pointer is over the client area, maybe before its first move).
-  fn sync_cursor(&mut self, force: bool) {
+  pub(super) fn sync_cursor(&mut self, force: bool) {
     let c = self.rt.cursor();
     let changed = c != std::mem::replace(&mut self.cursor, c);
     if force || (changed && self.rt.mouse.is_some()) {
