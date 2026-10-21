@@ -311,6 +311,11 @@ impl UiState {
           continue;
         }
 
+        // A trackpad takes over from the wheel's momentum, from where the content is.
+        if precise {
+          pend[ax] = 0.0;
+        }
+
         let from = off[ax] + pend[ax];
         let used = (from + w).clamp(0.0, max[ax]) - from;
         if used == 0.0 {
@@ -611,6 +616,21 @@ mod tests {
     ev(&mut st, wheel(10.0, 80.0, 0.0, 0.0, true, Phase::Began));
     ev(&mut st, wheel(10.0, 80.0, 0.0, -20.0, true, Phase::Changed));
     assert_eq!((offset(&st, "inner"), offset(&st, "outer")), (20.0, 20.0));
+  }
+
+  #[test]
+  fn a_trackpad_takes_over_from_wheel_momentum() {
+    let mut st = nested(UiState::default());
+    let outer = Id::of("outer");
+    // Below the inner column: 10 by trackpad, then 50 by the wheel, still to run.
+    ev(&mut st, wheel(10.0, 80.0, 0.0, -10.0, true, Phase::None));
+    ev(&mut st, wheel(10.0, 80.0, 0.0, -50.0, false, Phase::None));
+    // Back 20 by trackpad: from where the content is, down to the top, the wheel's rest gone.
+    ev(&mut st, wheel(10.0, 80.0, 0.0, 20.0, true, Phase::None));
+    let s = st.store.peek::<ScrollState>(outer).unwrap();
+    assert_eq!((s.offset.y, s.pending.y), (0.0, 0.0));
+    st.tick(Duration::from_secs(1));
+    assert_eq!(offset(&st, "outer"), 0.0);
   }
 
   #[test]
