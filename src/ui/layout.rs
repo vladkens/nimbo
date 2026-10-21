@@ -470,8 +470,9 @@ fn distribute(t: &mut Tree, i: usize, ax: usize, avail: f32) {
     fixed += c.size[ax];
   });
 
-  // Share, then freeze those the share would put under their minimum (or else over their
-  // maximum) and share the rest again; done when none is left unfrozen.
+  // CSS flexbox's flexible lengths: share what is left by weight, clamp each share within its
+  // min and max, and freeze by the clamps' total: those raised to their minimum when it grew,
+  // those cut to their maximum when it shrank, every one when it is none; again until all are.
   let weight = |c: &Node| match (c.float, c.style.size[ax]) {
     (None, Dim::Grow(w)) if !c.frozen => Some(w),
     _ => None,
@@ -488,32 +489,25 @@ fn distribute(t: &mut Tree, i: usize, ax: usize, avail: f32) {
     }
 
     let share = rest / wsum;
-    let mut froze = false;
+    let mut violation = 0.0;
     each(t, i, |c| {
-      if let Some(w) = weight(c)
-        && share * w < c.min[ax]
-      {
-        (c.size[ax], c.frozen, froze) = (c.min[ax], true, true);
+      if let Some(w) = weight(c) {
+        violation += clamp(share * w, c.min[ax], c.style.max[ax]) - share * w;
       }
     });
-    if !froze {
-      each(t, i, |c| {
-        if let Some(w) = weight(c)
-          && share * w > c.style.max[ax]
-        {
-          (c.size[ax], c.frozen, froze) = (c.style.max[ax], true, true);
-        }
-      });
-    }
+    each(t, i, |c| {
+      let Some(w) = weight(c) else { return };
+      let target = clamp(share * w, c.min[ax], c.style.max[ax]);
+      let freeze = match violation {
+        v if v > EPS => target > share * w,
+        v if v < -EPS => target < share * w,
+        _ => true,
+      };
 
-    if !froze {
-      each(t, i, |c| {
-        if let Some(w) = weight(c) {
-          c.size[ax] = share * w;
-        }
-      });
-      break;
-    }
+      if freeze {
+        (c.size[ax], c.frozen) = (target, true);
+      }
+    });
   }
 
   let mut total = 0.0;
@@ -1100,6 +1094,18 @@ pub(crate) mod tests {
     assert_eq!((rect(&t, "c").2, rect(&t, "d").2, rect(&t, "e").2), (200.0, 50.0, 50.0));
     assert_eq!(rect(&t, "f"), (0.0, 0.0, 120.0, 7.0));
     assert_eq!(rect(&t, "g").2, 100.0);
+  }
+
+  /// A maximum that frees space gives it to a sibling held at its minimum.
+  #[test]
+  fn a_max_frees_space_for_a_min() {
+    let t = run(400.0, 300.0, 1.0, |ui| {
+      ui.row(Style::new().w(px(100.0)), |ui| {
+        el(ui, "a", Style::new().w(grow()).min_w(80.0));
+        el(ui, "b", Style::new().w(grow()).max_w(10.0));
+      });
+    });
+    assert_eq!((rect(&t, "a").2, rect(&t, "b").2), (90.0, 10.0));
   }
 
   #[test]
