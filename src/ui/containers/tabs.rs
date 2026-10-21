@@ -13,7 +13,7 @@
 //! by being retained ([Ui::retain]). The behaviour is [Ui::pick_behavior].
 
 use crate::keys::{Command, Move};
-use crate::scene::{alpha, mix};
+use crate::scene::{Rect, alpha, mix};
 use crate::ui::{Align, Behavior, Id, Response, Style, Ui, grow, px};
 
 /// A tab strip over pages, one shown (`sel`). Tabs are keyed by title (`id.key(("tab",
@@ -47,6 +47,13 @@ impl<'s> Tabs<'s> {
     let b = ui.pick_behavior(id, n, |i| key(i, "tab"), &mut at);
     *self.sel = at.unwrap_or(*self.sel).min(n.saturating_sub(1));
     let sel = *self.sel;
+    // The tab picked into view in a strip too narrow for them all.
+    if b.changed
+      && let (Some(r), Some(sc)) = (ui.rect(key(sel, "tab")), ui.scroll(id))
+    {
+      ui.reveal(id, Rect::new(r.x - sc.viewport.x + sc.offset.x, 0.0, r.w, r.h));
+    }
+
     let strip = Style::new().w(grow()).h(px(t.sizes.tab_h)).bg(t.panel);
     let strip = strip.borders([0.0, 0.0, 1.0, 0.0], t.line).scroll_x();
     let strip = if b.disabled { strip } else { strip.tab_focusable_quiet() };
@@ -179,6 +186,34 @@ mod tests {
     h.click_id(strip.key(("tab", "B")));
     h.frame();
     assert_eq!(h.app().0, 1);
+  }
+
+  /// Ten tabs in a strip too narrow for them.
+  struct Many(usize);
+
+  impl App for Many {
+    fn view(&mut self, ui: &mut Ui) {
+      const T: [&str; 10] =
+        ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"];
+      Tabs::new(&mut self.0, &T).show(ui.id("tabs"), |ui, _| _ = ui.el(Style::new().grow()));
+    }
+  }
+
+  #[test]
+  fn the_arrows_bring_the_picked_tab_into_view() {
+    let mut h = Harness::new(Many(0), Size::new(200.0, 100.0), 1.0);
+    h.frame();
+    let tabs = Id::of("tabs");
+    h.rt.ui.set_focus(Some(tabs));
+    for _ in 0..9 {
+      h.key(crate::keys::Key::Right, crate::app::Mods::NONE);
+      h.frame();
+    }
+
+    assert_eq!(h.app().0, 9);
+    h.frame();
+    let r = h.rect(tabs.key(("tab", "Nine"))).unwrap();
+    assert!(r.x >= 0.0 && r.x + r.w <= 200.5, "{r:?}");
   }
 
   #[test]
