@@ -192,10 +192,12 @@ impl App for Input {
   }
 }
 
-/// A position written as `x,y`, spaces allowed around each number.
+/// A position written as `x,y`, spaces allowed around each number; finite numbers only (`NaN`
+/// parses as one, and no clamp would bring it back).
 pub fn parse_point(s: &str) -> Option<Point> {
   let (x, y) = s.trim().split_once(',')?;
-  Some(Point::new(x.trim().parse().ok()?, y.trim().parse().ok()?))
+  let num = |t: &str| t.trim().parse::<f32>().ok().filter(|v| v.is_finite());
+  Some(Point::new(num(x)?, num(y)?))
 }
 
 #[allow(dead_code)]
