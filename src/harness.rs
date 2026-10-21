@@ -129,14 +129,25 @@ impl<A: App> Harness<A> {
       return false;
     }
 
-    self.rt.frame();
-    self.cpu.sync(&mut self.rt.text, &mut self.rt.images);
+    self.build();
     true
   }
 
-  /// Renders the current state offscreen and reads the pixels back.
+  /// Builds a frame; returns whether it dropped glyphs (a full atlas) and must be built again.
+  fn build(&mut self) -> bool {
+    let again = self.rt.frame();
+    self.cpu.sync(&mut self.rt.text, &mut self.rt.images);
+    again
+  }
+
+  /// Renders the current state offscreen and reads the pixels back. A frame that dropped glyphs
+  /// is built once more first, as a window's next refresh would (never more: an animation
+  /// isn't run on).
   pub fn render(&mut self) -> Image {
-    self.frame();
+    if self.rt.needs_frame() && self.build() {
+      self.build();
+    }
+
     let (size, scale) = (self.rt.size, self.rt.scale);
     let pixels = self.cpu.snapshot(&self.rt.scene, size, scale);
     Image { scale, pixels }
@@ -207,6 +218,39 @@ impl Image {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::{App, Font, Frame, Rect};
+
+  /// Lines of text, each at its size.
+  struct Lines(Vec<(String, f32)>);
+
+  impl App for Lines {
+    fn paint(&mut self, f: &mut Frame) {
+      f.rect(Rect::new(0.0, 0.0, f.size.w, f.size.h), [1.0; 4], 0.0);
+      let mut y = 0.0;
+      for (s, size) in &self.0 {
+        y += size * 1.2;
+        f.text(0.0, y, s, Font::ui(*size), [0.0, 0.0, 0.0, 1.0]);
+      }
+    }
+  }
+
+  #[test]
+  fn a_snapshot_has_glyphs_a_full_atlas_dropped() {
+    let hello = || vec![("Hello, world".to_string(), 13.0)];
+    let size = Size::new(4000.0, 900.0);
+    // Earlier frames fill the atlas with large glyphs; the next one's don't fit until it resets.
+    let abc: String = ('A'..='Z').chain('a'..='z').collect();
+    let big = (0..5).map(|i| (abc.clone(), 100.0 + 20.0 * i as f32)).collect();
+    let mut h = Harness::new(Lines(big), size, 2.0);
+    h.render();
+    h.rt.redraw();
+    h.render();
+    h.app_mut().0 = hello();
+    h.rt.redraw();
+    let img = h.render();
+    let fresh = Harness::new(Lines(hello()), size, 2.0).render();
+    assert!(img.pixels.data == fresh.pixels.data, "glyphs missing from the snapshot");
+  }
 
   #[test]
   fn us_keyboard() {

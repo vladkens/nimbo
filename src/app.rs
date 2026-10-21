@@ -433,8 +433,8 @@ impl<A: App> Runtime<A> {
 
   /// Builds the scene from the app's paint; the caller syncs `text` glyphs and `images` to the
   /// renderer and draws `scene`. When glyphs were dropped (a full atlas), the next refresh draws
-  /// once more.
-  pub fn frame(&mut self) {
+  /// once more: returns whether this frame must be.
+  pub fn frame(&mut self) -> bool {
     self.scene.clear();
     let (size, scale, now) = (self.size, self.scale, self.clock.now());
     let mut f = Frame {
@@ -450,6 +450,7 @@ impl<A: App> Runtime<A> {
     self.app.paint(&mut f);
     self.animating = f.animate;
     self.dirty = self.text.end_frame();
+    self.dirty
   }
 }
 
