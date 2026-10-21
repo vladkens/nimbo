@@ -327,6 +327,8 @@ impl UiState {
           pend[ax] = 0.0;
         }
 
+        // An offset set since the last layout ([Ui::scroll_to]) may be past the content.
+        off[ax] = off[ax].clamp(0.0, max[ax]);
         let from = off[ax] + pend[ax];
         let used = (from + w).clamp(0.0, max[ax]) - from;
         if used == 0.0 {
@@ -663,6 +665,16 @@ mod tests {
     st = nested(st);
     ev(&mut st, wheel(10.0, 60.0, 0.0, 1000.0, true, Phase::None));
     assert_eq!(offset(&st, "outer"), 0.0);
+  }
+
+  /// An offset the view set past the content since the last layout starts from the end: a
+  /// scroll back moves the inner container, nothing reaches the outer one.
+  #[test]
+  fn a_scroll_after_an_offset_past_the_end_starts_from_it() {
+    let mut st = nested(UiState::default());
+    st.store.raw::<ScrollState>(Id::of("inner")).offset.y = 500.0;
+    ev(&mut st, wheel(10.0, 10.0, 0.0, 5.0, true, Phase::None));
+    assert_eq!((offset(&st, "inner"), offset(&st, "outer")), (45.0, 0.0));
   }
 
   #[test]
