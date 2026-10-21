@@ -212,6 +212,8 @@ impl Ui<'_> {
       return false;
     }
 
+    // Its highlight follows the pointer within an item too.
+    self.track_moves();
     // Laid out once, unseen: placed from then on.
     let placed = self.rect(menu).is_some();
     // The highlighted item into view, once the list was laid out; a menu over its trigger
@@ -568,7 +570,7 @@ mod tests {
     h.move_to(rr.x + 10.0, rr.y + 5.0);
     h.frame();
     h.key(Key::Down, Mods::NONE);
-    h.move_to(rr.x + 20.0, rr.y + 6.0);
+    assert!(h.move_to(rr.x + 20.0, rr.y + 6.0), "a move within an item draws");
     h.key(Key::Enter, Mods::NONE);
     assert_eq!(h.app().ran, Some(k));
     h.frame();
