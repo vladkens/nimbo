@@ -21,6 +21,10 @@ harness = false
 name = "shapes"
 harness = false
 
+[[test]]
+name = "text"
+harness = false
+
 [dependencies]
 
 [target.'cfg(target_os = "macos")'.dependencies]
