@@ -1,15 +1,16 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The headless harness: runs an app with no window on the same renderer, offscreen, at a
-//! given size and scale, on virtual time. Scripted events drive it; it renders PNG shots
-//! ([crate::png]).
+//! given size and scale, on virtual time and an in-memory clipboard. Scripted input drives it;
+//! it renders PNG shots ([crate::png]).
 
 use std::path::Path;
 use std::time::Duration;
 
-use crate::app::{App, Clock, Event, Runtime};
+use crate::app::{App, Clock, Event, MemClipboard, Mods, MouseButton, Runtime};
 use crate::cpu::{self, Pixels};
-use crate::scene::Size;
+use crate::keys::{self, Key, KeyEvent};
+use crate::scene::{Point, Size};
 
 /// A display refresh at 120 Hz, the step of [Harness::wait].
 pub const TICK: Duration = Duration::from_nanos(8_333_333);
@@ -22,7 +23,7 @@ pub struct Harness<A> {
 impl<A: App> Harness<A> {
   pub fn new(app: A, size: Size, scale: f32) -> Self {
     let clock = Clock::Virtual(Duration::ZERO);
-    let rt = Runtime::new(app, size, scale, clock);
+    let rt = Runtime::new(app, size, scale, clock, Box::new(MemClipboard::default()));
     Self { rt, cpu: cpu::Renderer::new() }
   }
 
@@ -40,6 +41,67 @@ impl<A: App> Harness<A> {
 
   pub fn event(&mut self, ev: Event) -> bool {
     self.rt.event(ev)
+  }
+
+  pub fn move_to(&mut self, x: f32, y: f32) -> bool {
+    self.event(Event::MouseMove { pos: Point::new(x, y), mods: Mods::NONE })
+  }
+
+  /// A left click at (x, y): move, press, release. Returns whether any of them was used.
+  pub fn click(&mut self, x: f32, y: f32) -> bool {
+    let moved = self.move_to(x, y);
+    let down = self.press(x, y);
+    let up = self.release(x, y);
+    moved | down | up
+  }
+
+  /// Presses the left button at (x, y).
+  pub fn press(&mut self, x: f32, y: f32) -> bool {
+    self.press_with(x, y, 1, Mods::NONE)
+  }
+
+  /// Presses the left button at (x, y) as the `clicks`-th click in a row, with `mods` held.
+  pub fn press_with(&mut self, x: f32, y: f32, clicks: u32, mods: Mods) -> bool {
+    let (pos, button) = (Point::new(x, y), MouseButton::Left);
+    self.event(Event::MouseDown { pos, button, clicks, mods })
+  }
+
+  /// Releases the left button at (x, y).
+  pub fn release(&mut self, x: f32, y: f32) -> bool {
+    self.event(Event::MouseUp {
+      pos: Point::new(x, y),
+      button: MouseButton::Left,
+      mods: Mods::NONE,
+    })
+  }
+
+  /// Presses and releases `key` with `mods` as on a US keyboard (Shift-1 is `'!'`, Shift-A
+  /// `'A'`); returns whether the press was used. Unused, it goes through text input as in a
+  /// window: [Self::key_event].
+  pub fn key(&mut self, key: Key, mods: Mods) -> bool {
+    self.key_event(us_key(key, mods))
+  }
+
+  /// Presses and releases a key as a window does: the key goes through bindings to the focused
+  /// element and the app; unused, AppKit's text input would make it text or a command, here
+  /// [keys::standard] does. Returns whether any of it was used.
+  pub fn key_event(&mut self, k: KeyEvent) -> bool {
+    let mut used = self.event(Event::KeyDown(k));
+    if !used {
+      used = match (k.text, keys::standard(&k)) {
+        (Some(c), _) => self.event(Event::Text(c.to_string())),
+        (None, Some(cmd)) => self.event(Event::Command(cmd)),
+        (None, None) => false,
+      };
+    }
+
+    self.event(Event::KeyUp(KeyEvent { repeat: false, ..k }));
+    used
+  }
+
+  /// The pointer leaves the view.
+  pub fn leave(&mut self) -> bool {
+    self.event(Event::MouseExit)
   }
 
   /// Moves virtual time on without building frames.
@@ -85,6 +147,41 @@ impl<A: App> Harness<A> {
   }
 }
 
+// MARK: US keyboard
+
+/// The key code typing `c` on a US keyboard and whether it takes Shift.
+fn us_char(c: char) -> Option<(u16, bool)> {
+  if c == '\0' {
+    return None;
+  }
+
+  let at = |s: &str| s.chars().position(|k| k == c).map(|i| i as u16);
+  at(keys::US).map(|i| (i, false)).or_else(|| at(keys::US_SHIFT).map(|i| (i, true)))
+}
+
+/// The event AppKit reports for `key` with `mods` on a US keyboard. A character may be given
+/// shifted or not: `Char('1')` or `Char('!')` with Shift is `'!'`.
+pub fn us_key(key: Key, mods: Mods) -> KeyEvent {
+  let (key, code, mods) = match key {
+    Key::Char(c) => match us_char(c) {
+      Some((code, shifted)) => {
+        let shift = mods.shift || shifted;
+        let c = keys::us_char(code, shift).unwrap_or(c);
+        (Key::Char(c), code, Mods { shift, ..mods })
+      }
+      None => (key, 0xffff, mods),
+    },
+    k => (k, k.code().unwrap_or(0xffff), mods),
+  };
+
+  let text = match key {
+    Key::Char(c) if !(mods.cmd || mods.ctrl || mods.alt) => Some(c),
+    _ => None,
+  };
+
+  KeyEvent { key, text, code, mods, repeat: false }
+}
+
 /// Offscreen frame pixels with their backing scale.
 pub struct Image {
   pub scale: f32,
@@ -104,5 +201,23 @@ impl Image {
   /// Writes a PNG, tagged sRGB.
   pub fn save_png(&self, path: &Path) -> Result<(), String> {
     crate::png::write(path, &self.pixels)
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn us_keyboard() {
+    let ev = us_key(Key::Char('1'), Mods::SHIFT);
+    assert_eq!((ev.key, ev.text, ev.code, ev.mods), (Key::Char('!'), Some('!'), 18, Mods::SHIFT));
+    let ev = us_key(Key::Char('A'), Mods::NONE);
+    assert_eq!((ev.key, ev.text, ev.code, ev.mods.shift), (Key::Char('A'), Some('A'), 0, true));
+    let ev = us_key(Key::Char('z'), Mods::CMD);
+    assert_eq!((ev.key, ev.text, ev.code), (Key::Char('z'), None, 6));
+    assert_eq!(us_key(Key::Char(' '), Mods::NONE).code, 49);
+    assert_eq!(us_key(Key::Tab, Mods::SHIFT).code, 48);
+    assert_eq!(us_char('é'), None);
   }
 }

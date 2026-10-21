@@ -1,11 +1,13 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The macOS platform: NSApplication and its windows ([shell]), each window's content our NSView
-//! ([view]: display link, occlusion, present through [surface]) and the performance cores.
+//! ([view]: input, cursors, display link, occlusion, present through [surface]), the keyboard
+//! layout ([keyboard]), the clipboard on NSPasteboard and the performance cores.
 //! macOS 14 or later: the app's activation and the view's display link need it.
 
 mod view;
 
+mod keyboard;
 mod shell;
 mod surface;
 
@@ -15,11 +17,28 @@ use block2::StackBlock;
 use objc2::MainThreadMarker;
 use objc2_app_kit::{
   NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSApplication, NSColor, NSColorSpace,
+  NSPasteboard, NSPasteboardTypeString,
 };
-use objc2_foundation::{NSArray, NSUserDefaults, ns_string};
+use objc2_foundation::{NSArray, NSString, NSUserDefaults, ns_string};
 
 use crate::Config;
-use crate::app::{App, Appearance};
+use crate::app::{App, Appearance, Clipboard};
+
+/// The system clipboard, plain text only.
+pub struct Pasteboard;
+
+impl Clipboard for Pasteboard {
+  fn read(&self) -> Option<String> {
+    let pb = NSPasteboard::generalPasteboard();
+    pb.stringForType(unsafe { NSPasteboardTypeString }).map(|s| s.to_string())
+  }
+
+  fn write(&mut self, s: &str) {
+    let pb = NSPasteboard::generalPasteboard();
+    pb.clearContents();
+    pb.setString_forType(&NSString::from_str(s), unsafe { NSPasteboardTypeString });
+  }
+}
 
 /// Opens the app's window and runs the AppKit event loop until it closes or the app quits: the
 /// shell with one window.

@@ -6,7 +6,7 @@ Work in progress: the toolkit is moving here from its research repository.
 
 It runs on macOS 14 or later; an app built with it sets `MACOSX_DEPLOYMENT_TARGET=14.0`, as this repository does in `.cargo/config.toml`.
 
-Run the example with `cargo run --example shapes`, or render it without a window: `cargo run --example shapes -- --shot shapes.png`, or with `--appearance light`.
+Run an example with `cargo run --example shapes` (every shape the renderer draws) or `cargo run --example input` (a square to drag, move with the arrows, resize with the wheel, copy and paste), or render it without a window: `cargo run --example shapes -- --shot shapes.png`, or with `--appearance light`.
 
 ## License
 

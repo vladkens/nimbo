@@ -6,7 +6,11 @@
 //! (the waker posts a message) or a high-resolution waitable timer: while the runtime animates,
 //! the next frame slot at the refresh rate of the display it is on, followed as it moves to
 //! another or the mode changes. No frames while the window is minimized; one when it shows again.
-//! Then the performance cores.
+//! Input and cursors are in [input], keys in [keyboard]; then the clipboard and the performance
+//! cores.
+
+mod input;
+mod keyboard;
 
 use std::cell::RefCell;
 use std::mem::offset_of;
@@ -15,10 +19,16 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use windows_sys::Win32::Foundation::{
-  CloseHandle, FILETIME, HANDLE, HWND, LPARAM, LRESULT, RECT, WPARAM,
+  CloseHandle, FILETIME, GlobalFree, HANDLE, HWND, LPARAM, LRESULT, RECT, WPARAM,
 };
 use windows_sys::Win32::Graphics::Gdi::*;
+use windows_sys::Win32::System::DataExchange::{
+  CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
+};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::System::Memory::{
+  GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock,
+};
 use windows_sys::Win32::System::SystemInformation::{
   GetLogicalProcessorInformationEx, GetSystemTimePreciseAsFileTime, PROCESSOR_RELATIONSHIP,
   RelationProcessorCore, SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
@@ -31,20 +41,24 @@ use windows_sys::Win32::UI::HiDpi::{
   AdjustWindowRectExForDpi, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForSystem,
   GetDpiForWindow, SetProcessDpiAwarenessContext,
 };
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetFocus;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::Config;
-use crate::app::{App, Appearance, Clock, Event, Runtime};
+use crate::app::{App, Appearance, Clipboard, Clock, Event, Mods, MouseButton, Runtime};
 use crate::cpu::Renderer;
 use crate::cpu::raster::IRect;
 use crate::platform::{Pace, points};
 use crate::scene::Size;
+use crate::ui::Cursor;
 
 /// Posted by the waker: something changed on another thread.
 const WM_WAKE: u32 = WM_APP + 1;
 /// Frames during a live resize or move, or while a menu is open: modal loops the message loop
 /// doesn't run.
 const TIMER_MODAL: usize = 1;
+/// `CF_UNICODETEXT`.
+const CF_TEXT_UTF16: u32 = 13;
 
 fn wide(s: &str) -> Vec<u16> {
   s.encode_utf16().chain([0]).collect()
@@ -154,6 +168,15 @@ struct Window {
   /// first one's time since the process started.
   trace: bool,
   frames: u64,
+  /// The pointer is tracked for WM_MOUSELEAVE.
+  tracking: bool,
+  clicks: input::Clicks,
+  /// The buttons held, in the window's capture.
+  held: Vec<MouseButton>,
+  /// A high surrogate from WM_CHAR, waiting for its low one.
+  high: Option<u16>,
+  /// The cursor last set.
+  cursor: Cursor,
   /// The least content size in points ([Config::min]) and the window's style, for
   /// WM_GETMINMAXINFO.
   min: Size,
@@ -334,6 +357,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
 }
 
 fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+  if let Some(r) = input::handle(msg, wp, lp) {
+    return r;
+  }
+
   let def = || unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
   match msg {
     WM_WAKE => {
@@ -424,8 +451,14 @@ fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
       with(|w| w.modal += 1);
       0
     }
+    // The live move's or the menu's loop took the keys pressed or let go meanwhile: the
+    // modifiers held now.
     WM_EXITSIZEMOVE | WM_EXITMENULOOP => {
-      with(|w| w.modal = w.modal.saturating_sub(1));
+      let focused = unsafe { GetFocus() } == hwnd;
+      with(|w| {
+        w.modal = w.modal.saturating_sub(1);
+        w.send(Event::Mods(if focused { keyboard::mods_held() } else { Mods::NONE }));
+      });
       0
     }
     WM_TIMER if wp == TIMER_MODAL => {
@@ -436,8 +469,20 @@ fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
       });
       0
     }
-    WM_SETFOCUS | WM_KILLFOCUS => {
-      with(|w| w.rt.event(Event::Focus(msg == WM_SETFOCUS)));
+    // Modifiers that went up or down in another window never reach this one: none held while
+    // away, those held now on return.
+    WM_SETFOCUS => {
+      with(|w| {
+        w.send(Event::Focus(true));
+        w.send(Event::Mods(keyboard::mods_held()));
+      });
+      0
+    }
+    WM_KILLFOCUS => {
+      with(|w| {
+        w.send(Event::Mods(Mods::NONE));
+        w.send(Event::Focus(false));
+      });
       0
     }
     WM_DESTROY => {
@@ -507,7 +552,7 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
   assert!(!hwnd.is_null(), "nimbo: CreateWindowExW failed");
 
   let scale = unsafe { GetDpiForWindow(hwnd) } as f32 / 96.0;
-  let mut rt = Runtime::new(app, cfg.size, scale, Clock::real());
+  let mut rt = Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(WinClipboard::new(hwnd)));
   rt.event(Event::Appearance(appearance()));
   // A wake from any thread posts a message; the window handle crosses threads as a number, held
   // while posting so the window's end waits for a post under way.
@@ -531,6 +576,11 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
     monitor: unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) },
     trace: std::env::var_os("NIMBO_TRACE").is_some(),
     frames: 0,
+    tracking: false,
+    clicks: input::Clicks::default(),
+    held: Vec::new(),
+    high: None,
+    cursor: Cursor::Arrow,
     min: cfg.min(),
     style,
     modal: 0,
@@ -549,6 +599,10 @@ fn run_loop(hwnd: HWND, timer: &Timer) {
     while unsafe { PeekMessageW(&mut msg, null_mut(), 0, 0, PM_REMOVE) } != 0 {
       if msg.message == WM_QUIT {
         return;
+      }
+
+      if input::key_message(&msg) {
+        continue;
       }
 
       unsafe {
@@ -580,6 +634,72 @@ fn run_loop(hwnd: HWND, timer: &Timer) {
 
     unsafe { MsgWaitForMultipleObjectsEx(n, &timer.0, ms, QS_ALLINPUT, MWMO_INPUTAVAILABLE) };
   }
+}
+
+// MARK: Clipboard
+
+/// The system clipboard, plain text (`CF_UNICODETEXT`), opened for the window: one opened for
+/// no window has no owner once emptied, and `SetClipboardData` fails then (its docs).
+pub struct WinClipboard {
+  /// The window's handle, as a number (it never leaves the thread).
+  owner: isize,
+}
+
+impl WinClipboard {
+  fn new(owner: HWND) -> Self {
+    Self { owner: owner as isize }
+  }
+}
+
+impl Clipboard for WinClipboard {
+  fn read(&self) -> Option<String> {
+    if unsafe { OpenClipboard(self.owner as HWND) } == 0 {
+      return None;
+    }
+
+    let mut out = None;
+    let data = unsafe { GetClipboardData(CF_TEXT_UTF16) };
+    let p = unsafe { GlobalLock(data) }.cast::<u16>();
+    if !p.is_null() {
+      // SAFETY: the locked allocation holds `GlobalSize` bytes; another process wrote them, so
+      // the NUL that ends CF_UNICODETEXT is looked for only within them.
+      let units = unsafe { std::slice::from_raw_parts(p, GlobalSize(data) / 2) };
+      out = Some(utf16_text(units));
+      unsafe { GlobalUnlock(data) };
+    }
+
+    unsafe { CloseClipboard() };
+    out
+  }
+
+  fn write(&mut self, s: &str) {
+    if unsafe { OpenClipboard(self.owner as HWND) } == 0 {
+      return;
+    }
+
+    let text = wide(s);
+    let mem = unsafe { GlobalAlloc(GMEM_MOVEABLE, text.len() * 2) };
+    let p = unsafe { GlobalLock(mem) }.cast::<u16>();
+    if !p.is_null() {
+      unsafe {
+        std::ptr::copy_nonoverlapping(text.as_ptr(), p, text.len());
+        GlobalUnlock(mem);
+        EmptyClipboard();
+        // The clipboard owns the memory once it takes it.
+        if SetClipboardData(CF_TEXT_UTF16, mem).is_null() {
+          GlobalFree(mem);
+        }
+      }
+    }
+
+    unsafe { CloseClipboard() };
+  }
+}
+
+/// The text of UTF-16 `units` up to the first NUL, or all of them without one.
+fn utf16_text(units: &[u16]) -> String {
+  let n = units.iter().position(|&u| u == 0).unwrap_or(units.len());
+  String::from_utf16_lossy(&units[..n])
 }
 
 // MARK: System
@@ -625,6 +745,8 @@ pub fn perf_cores() -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+  use windows_sys::Win32::System::DataExchange::GetClipboardOwner;
+
   use super::*;
 
   /// The modal loop's timer messages handled after waiting `ms`: how many came.
@@ -650,6 +772,45 @@ mod tests {
   #[test]
   fn perf_cores_are_found() {
     assert!(perf_cores().is_some_and(|n| (1..=4).contains(&n)));
+  }
+
+  /// It empties the user's clipboard (every format, not only text), so it runs only when asked:
+  /// `cargo test -- --ignored clipboard_round_trips` on a machine whose clipboard can go.
+  #[test]
+  #[ignore = "empties the system clipboard"]
+  fn clipboard_round_trips() {
+    // A message-only window owns it, as the app's window does: never shown.
+    let class = wide("STATIC");
+    let hwnd = unsafe {
+      CreateWindowExW(
+        0,
+        class.as_ptr(),
+        null(),
+        0,
+        0,
+        0,
+        0,
+        0,
+        HWND_MESSAGE,
+        null_mut(),
+        null_mut(),
+        null(),
+      )
+    };
+    assert!(!hwnd.is_null());
+    let mut c = WinClipboard::new(hwnd);
+    c.write("nimbo ✓ 👍");
+    assert_eq!(c.read().as_deref(), Some("nimbo ✓ 👍"));
+    assert_eq!(unsafe { GetClipboardOwner() }, hwnd, "the window owns what it wrote");
+    unsafe { DestroyWindow(hwnd) };
+  }
+
+  #[test]
+  fn clipboard_text_ends_within_its_memory() {
+    let ab: Vec<u16> = "ab".encode_utf16().collect();
+    assert_eq!(utf16_text(&ab), "ab", "no NUL: the allocation's end");
+    assert_eq!(utf16_text(&[0x61, 0, 0x62]), "a");
+    assert_eq!(utf16_text(&[]), "");
   }
 
   #[test]
@@ -682,6 +843,34 @@ mod tests {
       SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0);
       DestroyWindow(hwnd);
     }
+    WINDOW.with(|w| w.borrow_mut().take());
+  }
+
+  /// Shift let go during a live resize, whose loop takes its key message: the modifiers come
+  /// again as it ends, none for a window without the focus. The window is never shown.
+  #[test]
+  fn a_live_resize_ends_with_the_modifiers_held() {
+    #[derive(Default)]
+    struct Seen(std::rc::Rc<std::cell::Cell<Option<Mods>>>);
+    impl App for Seen {
+      fn event(&mut self, _: &mut crate::app::Cx, ev: &Event) -> bool {
+        if let Event::Mods(m) = ev {
+          self.0.set(Some(*m));
+        }
+
+        false
+      }
+    }
+
+    let app = Seen::default();
+    let seen = app.0.clone();
+    let hwnd = create(&Config::new("mods", 200.0, 100.0), Box::new(app));
+    with(|w| w.send(Event::Mods(Mods::SHIFT)));
+    unsafe { SendMessageW(hwnd, WM_ENTERSIZEMOVE, 0, 0) };
+    unsafe { SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0) };
+    assert_eq!(seen.get(), Some(Mods::NONE));
+
+    unsafe { DestroyWindow(hwnd) };
     WINDOW.with(|w| w.borrow_mut().take());
   }
 

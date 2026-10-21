@@ -29,8 +29,8 @@ use objc2_foundation::{
   NSString,
 };
 
-use super::appearance;
 use super::view::View;
+use super::{Pasteboard, appearance};
 use crate::Config;
 use crate::app::{App, Clock, Event, Runtime};
 
@@ -261,14 +261,14 @@ define_class!(
     #[unsafe(method(windowDidBecomeKey:))]
     fn did_become_key(&self, _note: &NSNotification) {
       if let Some(view) = view(self.ivars().id.get()) {
-        view.send(Event::Focus(true));
+        view.focus(true);
       }
     }
 
     #[unsafe(method(windowDidResignKey:))]
     fn did_resign_key(&self, _note: &NSNotification) {
       if let Some(view) = view(self.ivars().id.get()) {
-        view.send(Event::Focus(false));
+        view.focus(false);
       }
     }
 
@@ -328,7 +328,7 @@ pub fn open(cfg: &Config, app: Box<dyn App>) -> u64 {
   window.setContentMinSize(NSSize::new(min.w as f64, min.h as f64));
 
   let scale = window.backingScaleFactor() as f32;
-  let mut rt = Runtime::new(app, cfg.size, scale, Clock::real());
+  let mut rt = Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(Pasteboard));
   rt.event(Event::Appearance(appearance()));
   let view = View::new(mtm, frame, rt);
   window.setContentView(Some(&view));
@@ -339,6 +339,7 @@ pub fn open(cfg: &Config, app: Box<dyn App>) -> u64 {
   let delegate = WindowDelegate::new(mtm, id);
   window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
   window.center();
+  window.makeFirstResponder(Some(&view));
   let win = Win { id, window, view, _delegate: delegate, on_close: None };
   shell(|s| s.windows.push(win));
   front(id);

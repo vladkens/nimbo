@@ -10,11 +10,26 @@
 //! - `pub fn run(cfg: &Config, app: Box<dyn App>)`: opens one window and runs the event loop until
 //!   it closes or the app quits ([crate::Cx::quit]); macOS builds it on its app shell (`shell.rs`).
 //!   Each window owns a [crate::Runtime] made with `Runtime::new(app, cfg.size, scale,
-//!   Clock::real())`, and:
+//!   Clock::real(), Box::new(<its clipboard>))`, and:
 //!   - window: `cfg.title`, `cfg.size` in points (content area), `cfg.resizable`, the least content
 //!     size `cfg.min()` (macOS: `contentMinSize`, Windows: `WM_GETMINMAXINFO`, Linux:
 //!     `xdg_toplevel.set_min_size`, X11 `WM_NORMAL_HINTS`); minimal app menu where the OS has one
 //!     (macOS: Quit);
+//!   - input: OS events to [crate::Event] in points, y down from the view's top left: mouse (moves,
+//!     buttons with click counts, exit), scroll (`precise` and phases for trackpads, wheel lines ×
+//!     [crate::WHEEL_LINE]), pinch, modifiers (none once the focus goes: their changes then go to
+//!     another window), focus (key window); keys as [crate::KeyEvent] whose `code` is the macOS
+//!     virtual key code (`kVK_*`, [crate::keys]): translate the OS scan code to it, so
+//!     [crate::Key::named] and bindings work unchanged; `key` from the layout (with Cmd/Ctrl, a
+//!     non-Latin layout's character is the ASCII-capable layout's, so shortcuts work: macOS
+//!     `keyboard.rs`), `text` the printable character it types; a modifier key going down or up
+//!     also sends [crate::Event::Modifier] (macOS: `flagsChanged:`, the side from the
+//!     device-dependent flags);
+//!   - text input: a key nobody used ([crate::Runtime::event] returns false) goes to the OS's text
+//!     input and comes back as [crate::Event::Text] (typed) or [crate::Event::Command] (editing
+//!     keys; [crate::keys::standard] is the US mapping);
+//!   - cursors: show [crate::Runtime::cursor] (a [crate::Cursor]) while the pointer is in the view;
+//!   - clipboard: plain text, an [crate::Clipboard]; a reader of ours never blocks the loop;
 //!   - frames: draw only while [crate::Runtime::needs_frame], paced by the display (≤ 120 Hz);
 //!     idle, sleep until a wake: set `rt.waker().set_notify(f)`, `f` called from any thread to wake
 //!     the loop; no frames while the window is hidden (minimized, covered), one when it shows
