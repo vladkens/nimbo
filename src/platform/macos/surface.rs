@@ -2,8 +2,9 @@
 
 //! The CPU renderer's window path: frames drawn straight into IOSurfaces that become the view
 //! layer's `contents`, which the window server composites without a copy. A surface the window
-//! server still reads is left alone (a second, at most a third, is made); each keeps the tile
-//! hashes of the frame it holds, so only the tiles that changed since are drawn into it.
+//! server still reads is left alone (a second, at most a third, is made; with all three busy the
+//! frame waits, [Presenter::starved]); each keeps the tile hashes of the frame it holds, so only
+//! the tiles that changed since are drawn into it.
 
 use std::ffi::c_void;
 use std::ptr::NonNull;
@@ -26,6 +27,10 @@ unsafe extern "C" {
   fn IOSurfaceGetBaseAddress(surface: &CFType) -> *mut c_void;
   fn IOSurfaceGetBytesPerRow(surface: &CFType) -> usize;
   fn IOSurfaceIsInUse(surface: &CFType) -> u8;
+  #[cfg(test)]
+  fn IOSurfaceIncrementUseCount(surface: &CFType);
+  #[cfg(test)]
+  fn IOSurfaceDecrementUseCount(surface: &CFType);
 }
 
 /// Surfaces at most: one shown, one drawn, one more while the window server holds both.
@@ -85,16 +90,21 @@ pub struct Presenter {
   surfaces: Vec<Surface>,
   /// The surface the layer shows.
   front: Option<usize>,
+  /// A frame waits: the window server reads every surface. The caller draws it again later.
+  pub starved: bool,
 }
 
 impl Presenter {
   pub fn new(layer: Retained<CALayer>) -> Self {
-    Self { renderer: Renderer::new(), trace: false, layer, surfaces: Vec::new(), front: None }
+    let surfaces = Vec::new();
+    Self { renderer: Renderer::new(), trace: false, layer, surfaces, front: None, starved: false }
   }
 
   /// Draws the scene into a surface the window server isn't reading and shows it; nothing when
-  /// the frame equals the one shown. Returns whether a frame was shown.
+  /// the frame equals the one shown, or when every surface is busy ([Presenter::starved]).
+  /// Returns whether a frame was shown.
   pub fn present(&mut self, scene: &Scene, size: Size, scale: f32) -> bool {
+    self.starved = false;
     if size.w <= 0.0 || size.h <= 0.0 {
       return false;
     }
@@ -123,8 +133,12 @@ impl Presenter {
         }
         None => return false,
       },
-      // Every surface is busy: draw into the one after the shown one anyway.
-      None => self.front.map_or(0, |f| (f + 1) % self.surfaces.len()),
+      // Every surface is busy: drawing into one would tear the frame the window server reads
+      // (a lock isn't its fence).
+      None => {
+        self.starved = true;
+        return false;
+      }
     };
 
     let s = &mut self.surfaces[i];
@@ -163,7 +177,11 @@ mod tests {
 
   /// The pixels of the shown surface, rows without padding.
   fn shown(p: &mut Presenter) -> Vec<u8> {
-    let s = &mut p.surfaces[p.front.unwrap()];
+    pixels(p, p.front.unwrap())
+  }
+
+  fn pixels(p: &mut Presenter, i: usize) -> Vec<u8> {
+    let s = &mut p.surfaces[i];
     let mut out = Vec::new();
     let w = s.w;
     s.with_pixels(|px, stride| {
@@ -186,5 +204,39 @@ mod tests {
     }
 
     assert!(!p.present(&scene(61.0), size, scale), "an unchanged frame is shown again");
+  }
+
+  #[test]
+  fn busy_surfaces_are_left_alone() {
+    let mut p = Presenter::new(CALayer::new());
+    let (size, scale) = (Size::new(150.0, 90.0), 2.0);
+    let busy = |p: &Presenter, i: usize| unsafe { IOSurfaceIncrementUseCount(&p.surfaces[i].obj) };
+    // Two surfaces while the window server reads none; a third while it reads both.
+    assert!(p.present(&scene(10.0), size, scale));
+    assert!(p.present(&scene(20.0), size, scale));
+    assert_eq!(p.surfaces.len(), 2);
+    busy(&p, 0);
+    busy(&p, 1);
+    assert!(p.present(&scene(30.0), size, scale));
+    assert_eq!((p.surfaces.len(), p.front), (3, Some(2)));
+
+    // All three busy: the frame waits and no surface changes.
+    busy(&p, 2);
+    let before: Vec<Vec<u8>> = (0..3).map(|i| pixels(&mut p, i)).collect();
+    assert!(!p.present(&scene(40.0), size, scale));
+    assert!(p.starved);
+    assert_eq!((0..3).map(|i| pixels(&mut p, i)).collect::<Vec<_>>(), before);
+
+    // One comes back: the frame draws into it.
+    unsafe { IOSurfaceDecrementUseCount(&p.surfaces[0].obj) };
+    assert!(p.present(&scene(40.0), size, scale));
+    assert!(!p.starved && p.front == Some(0));
+    let want = p.renderer.snapshot(&scene(40.0), size, scale).data;
+    assert!(shown(&mut p) == want);
+    for i in 0..3 {
+      while p.surfaces[i].in_use() {
+        unsafe { IOSurfaceDecrementUseCount(&p.surfaces[i].obj) };
+      }
+    }
   }
 }

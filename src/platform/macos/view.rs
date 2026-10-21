@@ -52,8 +52,10 @@ define_class!(
     #[unsafe(method(setFrameSize:))]
     fn set_frame_size(&self, size: NSSize) {
       let _: () = unsafe { msg_send![super(self), setFrameSize: size] };
-      // Draw right away, inside the resize transaction, so the content never stretches.
+      // Draw right away, inside the resize transaction, so the content never stretches; then
+      // the display link runs while that frame wants more (a paused one would stall them).
       self.render();
+      self.after_frame();
     }
 
     /// The display link retains the view: leaving the window breaks the cycle.
@@ -221,5 +223,9 @@ impl View {
     st.rt.frame();
     st.presenter.renderer.sync(&mut st.rt.images);
     st.presenter.present(&st.rt.scene, size, scale);
+    // Every surface busy: the frame is drawn again at the next tick.
+    if st.presenter.starved {
+      st.rt.redraw();
+    }
   }
 }
