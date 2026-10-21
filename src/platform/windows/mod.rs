@@ -21,6 +21,7 @@ use std::ptr::{null, null_mut};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use keyboard_types::Modifiers;
 pub use settings::appearance;
 use windows_sys::Win32::Foundation::{
   CloseHandle, FILETIME, GlobalFree, HANDLE, HWND, LPARAM, LRESULT, RECT, WPARAM,
@@ -49,7 +50,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetFocus;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::Config;
-use crate::app::{App, Appearance, Clipboard, Clock, Event, Mods, MouseButton, Runtime};
+use crate::app::{App, Appearance, Clipboard, Clock, Event, MouseButton, Runtime};
 use crate::cpu::Renderer;
 use crate::cpu::raster::IRect;
 use crate::platform::{Pace, points};
@@ -495,7 +496,7 @@ fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
       let focused = unsafe { GetFocus() } == hwnd;
       with(|w| {
         w.modal = w.modal.saturating_sub(1);
-        w.send(Event::Mods(if focused { keyboard::mods_held() } else { Mods::NONE }));
+        w.send(Event::Mods(if focused { keyboard::mods_held() } else { Modifiers::empty() }));
       });
       0
     }
@@ -518,7 +519,7 @@ fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     }
     WM_KILLFOCUS => {
       with(|w| {
-        w.send(Event::Mods(Mods::NONE));
+        w.send(Event::Mods(Modifiers::empty()));
         w.send(Event::Focus(false));
       });
       0
@@ -922,7 +923,7 @@ mod tests {
   #[test]
   fn a_live_resize_ends_with_the_modifiers_held() {
     #[derive(Default)]
-    struct Seen(std::rc::Rc<std::cell::Cell<Option<Mods>>>);
+    struct Seen(std::rc::Rc<std::cell::Cell<Option<Modifiers>>>);
     impl App for Seen {
       fn event(&mut self, _: &mut crate::app::Cx, ev: &Event) -> bool {
         if let Event::Mods(m) = ev {
@@ -936,10 +937,10 @@ mod tests {
     let app = Seen::default();
     let seen = app.0.clone();
     let hwnd = create(&Config::new("mods", 200.0, 100.0), Box::new(app));
-    with(|w| w.send(Event::Mods(Mods::SHIFT)));
+    with(|w| w.send(Event::Mods(Modifiers::SHIFT)));
     unsafe { SendMessageW(hwnd, WM_ENTERSIZEMOVE, 0, 0) };
     unsafe { SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0) };
-    assert_eq!(seen.get(), Some(Mods::NONE));
+    assert_eq!(seen.get(), Some(Modifiers::empty()));
 
     unsafe { DestroyWindow(hwnd) };
     WINDOW.with(|w| w.borrow_mut().take());

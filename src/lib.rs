@@ -16,7 +16,6 @@
 pub mod app;
 pub mod cpu;
 pub mod harness;
-pub mod hotkey;
 pub mod keys;
 pub mod platform;
 mod png;
@@ -27,12 +26,16 @@ pub mod ui;
 use std::path::PathBuf;
 
 pub use app::{
-  App, Appearance, Clipboard, Clock, Cx, Event, MemClipboard, Mods, MouseButton, Phase, Runtime,
+  App, Appearance, Clipboard, Clock, Cx, Event, MemClipboard, MouseButton, Phase, Runtime,
   WHEEL_LINE, Waker,
 };
 pub use harness::Harness;
+/// Keys' W3C UI Events names: [Code] a key's place, [NamedKey] a key that types nothing,
+/// [Modifiers] the modifier keys held.
+pub use keyboard_types::{self, Code, Modifiers, NamedKey};
 pub use keys::{
-  Binding, Command, Delete, EDIT_KEYS, Key, KeyEvent, Keystroke, Move, SELECT_KEYS, bind, shortcut,
+  Binding, CMD, Command, Delete, EDIT_KEYS, Hotkey, Key, KeyEvent, Move, SELECT_KEYS, Shortcut,
+  bind, shortcut,
 };
 pub use scene::{
   Color, Frame, ImageId, Images, Point, Quad, Rect, Scene, Segment, Size, alpha, mix, rgb,

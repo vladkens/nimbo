@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
+use keyboard_types::{Code, Modifiers};
+
 use crate::keys::{self, Binding, Command, KeyEvent};
 use crate::scene::{Color, Frame, Images, Point, Rect, Scene, Size};
 use crate::text::TextSystem;
@@ -65,20 +67,6 @@ impl<A: App + ?Sized> App for Box<A> {
 
 // MARK: Events
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Mods {
-  pub shift: bool,
-  pub ctrl: bool,
-  pub alt: bool,
-  pub cmd: bool,
-}
-
-impl Mods {
-  pub const NONE: Self = Self { shift: false, ctrl: false, alt: false, cmd: false };
-  pub const CMD: Self = Self { cmd: true, ..Self::NONE };
-  pub const SHIFT: Self = Self { shift: true, ..Self::NONE };
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MouseButton {
   Left,
@@ -106,18 +94,18 @@ pub enum Event {
   /// Pointer moved, with or without a button held (drag).
   MouseMove {
     pos: Point,
-    mods: Mods,
+    mods: Modifiers,
   },
   MouseDown {
     pos: Point,
     button: MouseButton,
     clicks: u32,
-    mods: Mods,
+    mods: Modifiers,
   },
   MouseUp {
     pos: Point,
     button: MouseButton,
-    mods: Mods,
+    mods: Modifiers,
   },
   /// The pointer left the view.
   MouseExit,
@@ -129,7 +117,7 @@ pub enum Event {
     precise: bool,
     phase: Phase,
     momentum: Phase,
-    mods: Mods,
+    mods: Modifiers,
   },
   KeyDown(KeyEvent),
   KeyUp(KeyEvent),
@@ -140,12 +128,13 @@ pub enum Event {
   /// one (`doCommandBySelector:`: arrows, Backspace, Enter, Ctrl-A).
   Command(Command),
   /// Modifier keys changed.
-  Mods(Mods),
-  /// A modifier key went down or up, by its place (left or right, fn): what a shortcut recorder
-  /// needs to take one alone (`right_option`). After the [Event::Mods] it changed; to the
-  /// focused element first ([Ui::modifier_key]), then the app. Autorepeats send none.
+  Mods(Modifiers),
+  /// A modifier key went down or up, by its place ([Code::AltRight], [Code::Fn]): what a
+  /// shortcut recorder needs to take one alone (`right_option`). After the [Event::Mods] it
+  /// changed; to the focused element first ([Ui::modifier_key]), then the app. Autorepeats send
+  /// none.
   Modifier {
-    key: crate::hotkey::ModKey,
+    key: Code,
     down: bool,
   },
   /// A trackpad pinch: `delta` is the change in magnification (0.1 is 10% larger).
@@ -153,7 +142,7 @@ pub enum Event {
     pos: Point,
     delta: f32,
     phase: Phase,
-    mods: Mods,
+    mods: Modifiers,
   },
   /// The window became or stopped being the key window.
   Focus(bool),
@@ -759,7 +748,7 @@ mod tests {
   use std::sync::mpsc;
 
   use super::*;
-  use crate::keys::Key;
+  use crate::keys::{CMD, Key};
   use crate::scene::Rect;
   use crate::ui::{Kind, Style, Theme, Transition, px};
 
@@ -803,12 +792,17 @@ mod tests {
     rt.frame();
     assert!(!rt.needs_frame());
 
-    assert!(!rt.event(Event::MouseMove { pos: Point::new(5.0, 5.0), mods: Mods::NONE }));
+    assert!(!rt.event(Event::MouseMove { pos: Point::new(5.0, 5.0), mods: Modifiers::empty() }));
     assert_eq!(rt.mouse, Some(Point::new(5.0, 5.0)));
     assert!(!rt.needs_frame());
 
-    let key =
-      KeyEvent { key: Key::Char('c'), text: None, code: 8, mods: Mods::NONE, repeat: false };
+    let key = KeyEvent {
+      key: Key::Char('c'),
+      text: None,
+      code: Code::KeyC,
+      mods: Modifiers::empty(),
+      repeat: false,
+    };
     assert!(rt.event(Event::KeyDown(key)));
     assert!(rt.needs_frame());
     rt.frame();
@@ -821,7 +815,7 @@ mod tests {
     // Momentum scrolling after the pointer left leaves it out.
     let (pos, delta) = (Point::new(5.0, 5.0), Point::new(0.0, 3.0));
     let momentum = Phase::Changed;
-    let (precise, phase, mods) = (true, Phase::None, Mods::NONE);
+    let (precise, phase, mods) = (true, Phase::None, Modifiers::empty());
     rt.event(Event::Scroll { pos, delta, precise, phase, momentum, mods });
     assert_eq!(rt.mouse, None);
   }
@@ -1104,7 +1098,7 @@ mod tests {
   }
 
   fn click(rt: &mut Runtime<Ui1>, x: f32, y: f32) {
-    let (pos, button, mods) = (Point::new(x, y), MouseButton::Left, Mods::NONE);
+    let (pos, button, mods) = (Point::new(x, y), MouseButton::Left, Modifiers::empty());
     rt.event(Event::MouseDown { pos, button, clicks: 1, mods });
     rt.event(Event::MouseUp { pos, button, mods });
   }
@@ -1131,7 +1125,8 @@ mod tests {
     let mut rt = ui_runtime();
     rt.frame();
     let r = rt.ui.last.rect(Id::of("plus")).unwrap();
-    let (pos, button, mods) = (Point::new(r.x + 5.0, r.y + 5.0), MouseButton::Left, Mods::NONE);
+    let (pos, button, mods) =
+      (Point::new(r.x + 5.0, r.y + 5.0), MouseButton::Left, Modifiers::empty());
     rt.event(Event::MouseDown { pos, button, clicks: 1, mods });
     // Another window took the capture: the release that follows, still over it, is not a click.
     rt.cancel_press();
@@ -1147,7 +1142,10 @@ mod tests {
     rt.frame();
     let b = rt.ui.last.rect(Id::of("box")).unwrap();
     // Just under the box: nothing hovered.
-    rt.event(Event::MouseMove { pos: Point::new(b.x + 5.0, b.y + b.h + 5.0), mods: Mods::NONE });
+    rt.event(Event::MouseMove {
+      pos: Point::new(b.x + 5.0, b.y + b.h + 5.0),
+      mods: Modifiers::empty(),
+    });
     assert!(!rt.needs_frame());
     // The box moves under the pointer: the view runs again and sees the hover.
     rt.app.shift = true;
@@ -1181,7 +1179,7 @@ mod tests {
     let clock = Clock::Virtual(Duration::ZERO);
     let mut rt =
       Runtime::new(Dodge, Size::new(200.0, 200.0), 1.0, clock, Box::new(MemClipboard::default()));
-    rt.event(Event::MouseMove { pos: Point::new(5.0, 5.0), mods: Mods::NONE });
+    rt.event(Event::MouseMove { pos: Point::new(5.0, 5.0), mods: Modifiers::empty() });
     let mut frames = 0;
     while rt.needs_frame() && frames < 10 {
       rt.frame();
@@ -1212,13 +1210,13 @@ mod tests {
     item_takes: bool,
   }
 
-  const ITEM_KEYS: &[Binding] = &[keys::bind("cmd-z", Command::Undo)];
+  const ITEM_KEYS: &[Binding] = &[keys::bind("cmd+z", Command::Undo)];
   const PANEL_KEYS: &[Binding] = &[
-    keys::bind("cmd-z", Command::Action("panel undo")),
-    keys::bind("cmd-p", Command::Action("panel")),
+    keys::bind("cmd+z", Command::Action("panel undo")),
+    keys::bind("cmd+p", Command::Action("panel")),
   ];
   const APP_KEYS: &[Binding] =
-    &[keys::bind("cmd-p", Command::Action("app")), keys::bind("cmd-n", Command::Action("new"))];
+    &[keys::bind("cmd+p", Command::Action("app")), keys::bind("cmd+n", Command::Action("new"))];
 
   impl App for Keyed {
     fn keymap(&self) -> &[Binding] {
@@ -1262,7 +1260,8 @@ mod tests {
       Runtime::new(Keyed::default(), size, 1.0, clock, Box::new(MemClipboard::default()));
     rt.frame();
     let key = |rt: &mut Runtime<Keyed>, c: char| {
-      let k = KeyEvent { key: Key::Char(c), text: None, code: 0, mods: Mods::CMD, repeat: false };
+      let k =
+        KeyEvent { key: Key::Char(c), text: None, code: Code::KeyA, mods: CMD, repeat: false };
       rt.event(Event::KeyDown(k))
     };
     // No focus: only the app's bindings; a key nobody binds is unused.
@@ -1324,7 +1323,13 @@ mod tests {
     let mut rt =
       Runtime::new(Views::default(), size, 1.0, clock, Box::new(MemClipboard::default()));
     rt.frame();
-    let k = KeyEvent { key: Key::Char('a'), text: None, code: 0, mods: Mods::NONE, repeat: false };
+    let k = KeyEvent {
+      key: Key::Char('a'),
+      text: None,
+      code: Code::KeyA,
+      mods: Modifiers::empty(),
+      repeat: false,
+    };
     rt.event(Event::KeyDown(k));
     assert_eq!(rt.app.at_key, [rt.app.views], "no wake: the last frame's view");
 
@@ -1370,7 +1375,13 @@ mod tests {
     let size = Size::new(100.0, 100.0);
     let mut rt = Runtime::new(Search, size, 1.0, clock, Box::new(MemClipboard::default()));
     rt.frame();
-    let k = KeyEvent { key: Key::Char('a'), text: None, code: 0, mods: Mods::NONE, repeat: false };
+    let k = KeyEvent {
+      key: Key::Char('a'),
+      text: None,
+      code: Code::KeyA,
+      mods: Modifiers::empty(),
+      repeat: false,
+    };
     assert!(!rt.event(Event::KeyDown(k)));
     assert_eq!(rt.ui.focus(), Some(Id::of("field")));
     assert!(rt.needs_frame());
@@ -1405,7 +1416,8 @@ mod tests {
     rt.ui.set_focus(Some(Id::of("item")));
     // Laid out wide, with the panel's bindings, before the key goes to it.
     rt.resize(Size::new(200.0, 100.0), 1.0);
-    let k = KeyEvent { key: Key::Char('p'), text: None, code: 0, mods: Mods::CMD, repeat: false };
+    let k =
+      KeyEvent { key: Key::Char('p'), text: None, code: Code::KeyA, mods: CMD, repeat: false };
     assert!(rt.event(Event::KeyDown(k)));
     assert_eq!(rt.app.0, ["Action(\"panel\")"]);
   }

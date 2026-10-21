@@ -1024,7 +1024,7 @@ impl<'a> Ui<'a> {
 
   /// A modifier key going down (`true`) or up while `id` has focus ([Event::Modifier]): a
   /// shortcut recorder taking one alone. Seen once; reading it uses it.
-  pub fn modifier_key(&self, id: Id) -> Option<(crate::hotkey::ModKey, bool)> {
+  pub fn modifier_key(&self, id: Id) -> Option<(crate::Code, bool)> {
     match self.st.peek(id)? {
       &Event::Modifier { key, down } => self.st.take(id).map(|_| (key, down)),
       _ => None,
