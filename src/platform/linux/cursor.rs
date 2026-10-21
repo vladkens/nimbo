@@ -90,6 +90,7 @@ impl Cursors {
       None => {
         let path = find(&self.dirs, &self.theme, names(c));
         let img = path.and_then(|p| parse(&std::fs::read(p).ok()?, self.size * scale as u32));
+        let img = img.map(|i| padded(i, scale as u32));
         let buf = img.and_then(|img| {
           let hot = (img.hot.0 as i32 / scale, img.hot.1 as i32 / scale);
           Some((buffer(&self.shm, &img, qh)?, hot))
@@ -226,6 +227,23 @@ pub fn parse(d: &[u8], size: u32) -> Option<Image> {
   Some(Image { w, h, hot, px })
 }
 
+/// `img` grown with clear pixels at the right and bottom to whole multiples of `scale`: a buffer
+/// of another size can't have that scale (`wl_surface.invalid_size`). The hotspot stays.
+fn padded(img: Image, scale: u32) -> Image {
+  let up = |n: u32| n.div_ceil(scale) * scale;
+  let (w, h) = (up(img.w), up(img.h));
+  if (w, h) == (img.w, img.h) {
+    return img;
+  }
+
+  let mut px = vec![0; (w * h) as usize];
+  for (dst, src) in px.chunks_mut(w as usize).zip(img.px.chunks(img.w as usize)) {
+    dst[..src.len()].copy_from_slice(src);
+  }
+
+  Image { w, h, hot: img.hot, px }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -267,6 +285,16 @@ mod tests {
     assert_eq!((img.w, img.hot, img.px[0]), (48, (8, 4), 0xff00_ff00));
     assert_eq!(parse(&d[..d.len() - 1], 48), None, "cut short");
     assert_eq!(parse(b"nope", 24), None);
+  }
+
+  #[test]
+  fn images_pad_to_the_scale() {
+    let img = Image { w: 2, h: 1, hot: (1, 0), px: vec![1, 2] };
+    let p = padded(img, 3);
+    assert_eq!((p.w, p.h, p.hot), (3, 3, (1, 0)));
+    assert_eq!(p.px, [1, 2, 0, 0, 0, 0, 0, 0, 0]);
+    let img = Image { w: 64, h: 64, hot: (0, 0), px: vec![7; 64 * 64] };
+    assert_eq!(padded(img, 2).w, 64, "already whole");
   }
 
   #[test]
