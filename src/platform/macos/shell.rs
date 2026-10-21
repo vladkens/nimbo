@@ -261,14 +261,14 @@ define_class!(
     #[unsafe(method(windowDidBecomeKey:))]
     fn did_become_key(&self, _note: &NSNotification) {
       if let Some(view) = view(self.ivars().id.get()) {
-        view.send(Event::Focus(true));
+        view.focus(true);
       }
     }
 
     #[unsafe(method(windowDidResignKey:))]
     fn did_resign_key(&self, _note: &NSNotification) {
       if let Some(view) = view(self.ivars().id.get()) {
-        view.send(Event::Focus(false));
+        view.focus(false);
       }
     }
 

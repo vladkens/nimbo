@@ -17,13 +17,14 @@
 //!     (macOS: Quit);
 //!   - input: OS events to [crate::Event] in points, y down from the view's top left: mouse (moves,
 //!     buttons with click counts, exit), scroll (`precise` and phases for trackpads, wheel lines ×
-//!     [crate::WHEEL_LINE]), pinch, modifiers (none on losing the focus, read again on gaining it),
-//!     focus (key window); keys as [crate::KeyEvent] whose `code` is the macOS virtual key code
-//!     (`kVK_*`, [crate::keys]): translate the OS scan code to it, so [crate::Key::named] and
-//!     bindings work unchanged; `key` from the layout (with Cmd/Ctrl, a non-Latin layout's
-//!     character is the ASCII-capable layout's, so shortcuts work: macOS `keyboard.rs`), `text` the
-//!     printable character it types; a modifier key going down or up also sends
-//!     [crate::Event::Modifier] (macOS: `flagsChanged:`, the side from the device-dependent flags);
+//!     [crate::WHEEL_LINE]), pinch, modifiers (none once the focus goes: their changes then go to
+//!     another window), focus (key window); keys as [crate::KeyEvent] whose `code` is the macOS
+//!     virtual key code (`kVK_*`, [crate::keys]): translate the OS scan code to it, so
+//!     [crate::Key::named] and bindings work unchanged; `key` from the layout (with Cmd/Ctrl, a
+//!     non-Latin layout's character is the ASCII-capable layout's, so shortcuts work: macOS
+//!     `keyboard.rs`), `text` the printable character it types; a modifier key going down or up
+//!     also sends [crate::Event::Modifier] (macOS: `flagsChanged:`, the side from the
+//!     device-dependent flags);
 //!   - text input: a key nobody used ([crate::Runtime::event] returns false) goes to the OS's text
 //!     input and comes back as [crate::Event::Text] (typed) or [crate::Event::Command] (editing
 //!     keys; [crate::keys::standard] is the US mapping);
