@@ -25,7 +25,8 @@
 //! anchor. Keys, while the list has focus (a press gives it), come as the platform's commands:
 //! Up and Down (Shift extends), Page Up and Page Down, Home and End or Cmd-Up and Cmd-Down,
 //! Cmd-A, and Enter, which activates the row, as a double click does. The row the keys moved
-//! to scrolls into view; so does [Ui::reveal_row].
+//! to scrolls into view; so does [Ui::reveal_row]. Disabled ([Ui::disabled]), it takes no input
+//! or focus and dims.
 //!
 //! The list is the behaviour, its rows' fills the look: [List::unstyled] leaves the fills to
 //! the app, which draws them from [Row].
@@ -175,8 +176,8 @@ struct ListState {
   sel: Selection,
   /// A row to scroll into view once the list knows its viewport.
   reveal: Option<usize>,
-  /// The press going on was seen.
-  pressed: bool,
+  /// The element the press going on is on, once a pass saw it.
+  pressed: Option<Id>,
   /// The rows built last time, keyed as then: what a press can be on.
   shown: Vec<u64>,
 }
@@ -250,6 +251,12 @@ impl<'s> List<'s> {
   pub fn show<'a>(self, ui: &mut Ui<'a>, mut f: impl FnMut(&mut Ui<'a>, Row)) -> ListResponse {
     let t = ui.theme();
     let id = ui.take_id();
+    // Disabled: no input, no focus, dimmed.
+    let disabled = ui.take_disabled();
+    if disabled && ui.focused(id) {
+      ui.focus(None);
+    }
+
     let List { n, h, style, row, fill, multi, .. } = self;
     let keyf = self.key;
     let key = move |i: usize| keyf.map_or(i as u64, |k| k(i));
@@ -264,19 +271,25 @@ impl<'s> List<'s> {
     let mut out = ListResponse { id, focused, ..Default::default() };
     let sc = ui.scroll(id);
     let view_h = sc.map_or(ui.size().h, |s| s.viewport.h);
-    if n > 0 {
+    if n > 0 && !disabled {
       ui.list_keys(id, &mut st, sel, &mut out, (n, h, view_h, multi), &key);
       ui.list_press(id, &mut st, sel, &mut out, n, multi, &key);
     }
 
     // Scroll a row into view, by the last frame's viewport; the first and the last with the
     // list's padding.
-    if let (Some(i), Some(sc)) = (st.reveal.take(), sc)
-      && i < n
-    {
-      let top = if i == 0 { 0.0 } else { style.pad[0] + i as f32 * h };
-      let end = style.pad[0] + (i + 1) as f32 * h + if i + 1 == n { style.pad[2] } else { 0.0 };
-      ui.reveal(id, Rect::new(sc.offset.x, top, 1.0, end - top));
+    // Not laid out yet, it waits for the next frame, which comes at once.
+    match (st.reveal, sc) {
+      (Some(i), Some(sc)) => {
+        st.reveal = None;
+        let top = if i == 0 { 0.0 } else { style.pad[0] + i as f32 * h };
+        let end = style.pad[0] + (i + 1) as f32 * h + if i + 1 == n { style.pad[2] } else { 0.0 };
+        if i < n {
+          ui.reveal(id, Rect::new(sc.offset.x, top, 1.0, end - top));
+        }
+      }
+      (Some(_), None) => ui.st.animating = true,
+      _ => {}
     }
 
     let sel_bg = match focused {
@@ -287,11 +300,15 @@ impl<'s> List<'s> {
     let hover_bg = alpha(t.text, 0.05);
     st.shown.clear();
     let mut shown = 0..0;
-    if multi {
+    if multi && !disabled {
       ui.keymap(MULTI_KEYS);
     }
 
-    let style = style.focusable_quiet().gap(0.0);
+    let style = match disabled {
+      true => style.gap(0.0).opacity(t.disabled),
+      false => style.focusable_quiet().gap(0.0),
+    };
+
     ui.with_id(id).scroll_area(style, |ui| {
       // The offset after the input and the scroll area's own (a thumb drag), clamped to the
       // content as it is now.
@@ -311,7 +328,7 @@ impl<'s> List<'s> {
       for (i, &k) in shown.clone().zip(&st.shown) {
         let rid = id.key(("row", k));
         let selected = sel.contains(k);
-        let hover = ui.hot(rid, ui.hovered(rid));
+        let hover = ui.hot(rid, !disabled && ui.hovered(rid));
         let bg = match (fill, selected) {
           (true, true) => sel_bg,
           (true, false) => alpha(hover_bg, hover_bg[3] * hover),
@@ -320,8 +337,12 @@ impl<'s> List<'s> {
 
         let cursor = sel.cursor.is_some_and(|c| c.0 == k);
         let r = Row { index: i, key: k, id: rid, selected, hover, cursor, focused };
-        let s = row.h(px(h)).bg(bg).cursor(Cursor::Pointer);
-        ui.with_id(rid).row(s, |ui| f(ui, r));
+        // Disabled, the same id (keyed in the list) taking no input.
+        let s = row.h(px(h)).bg(bg);
+        match disabled {
+          true => ui.key(("row", k)).row(s, |ui| f(ui, r)),
+          false => ui.with_id(rid).row(s.cursor(Cursor::Pointer), |ui| f(ui, r)),
+        };
       }
 
       ui.el(Style::new().h(px(total - shown.end as f32 * h)));
@@ -440,16 +461,17 @@ impl<'a> Ui<'a> {
     key: &dyn Fn(usize) -> u64,
   ) {
     let press = self.press().filter(|p| p.button == MouseButton::Left);
+    // A press is seen once; a click whose press no pass saw (a quick one) stands for it.
     let hit = match (press, st.pressed) {
-      (Some(p), false) => Some((p.id, p.mods, p.clicks)),
-      (Some(_), true) => None,
-      (None, was) => {
-        let c = self.st.input.click.filter(|c| c.button == MouseButton::Left && !was);
+      (Some(p), seen) if seen != Some(p.id) => Some((p.id, p.mods, p.clicks)),
+      (Some(_), _) => None,
+      (None, seen) => {
+        let c = self.st.input.click.filter(|c| c.button == MouseButton::Left && seen != Some(c.id));
         c.map(|c| (c.id, c.mods, c.clicks))
       }
     };
 
-    st.pressed = press.is_some();
+    st.pressed = press.map(|p| p.id);
     let Some((at, mods, clicks)) = hit else { return };
     let Some(&k) = st.shown.iter().find(|&&k| id.key(("row", k)) == at) else { return };
     let Some(i) = find((k, 0), n, key) else { return };
@@ -525,6 +547,63 @@ mod tests {
     ui.layout(&mut Fake, 1.0);
     let short = ui.partial_short();
     (ui.finish(), shown, short)
+  }
+
+  /// A list of 1000 rows 20 high, the app holding the selection, then a button; the list
+  /// can be disabled, and asks for row 500 before its first frame.
+  #[derive(Default)]
+  struct Rows {
+    sel: Selection,
+    off: bool,
+    asked: bool,
+    clicks: usize,
+  }
+
+  impl crate::App for Rows {
+    fn view(&mut self, ui: &mut Ui) {
+      if !std::mem::replace(&mut self.asked, true) {
+        ui.reveal_row(Id::of("list"), 500);
+      }
+
+      ui.col(Style::new().w(px(200.0)).h(px(200.0)), |ui| {
+        let list = List::new(1000, 20.0).selection(&mut self.sel).style(Style::new().grow());
+        list.show(ui.disabled(self.off).id("list"), |ui, _| ui.label("row"));
+      });
+      if ui.id("b").button("B").clicked {
+        self.clicks += 1;
+      }
+    }
+  }
+
+  #[test]
+  fn a_row_revealed_early_a_cancelled_press_and_a_disabled_list() {
+    use crate::harness::Harness;
+    let mut h = Harness::new(Rows::default(), Size::new(300.0, 300.0), 1.0);
+    let row = |k: u64| Id::of("list").key(("row", k));
+    // Asked before the list had a viewport: shown once it has one.
+    h.frame();
+    h.frame();
+    assert!(h.rect(row(500)).is_some(), "row 500 revealed");
+    // A press seen by a frame, released off the list (no click), then a quick click on another
+    // row before the next frame: that click selects.
+    let (a, b) = (h.rect(row(500)).unwrap(), h.rect(row(497)).unwrap());
+    h.press(a.x + 5.0, a.y + 5.0);
+    h.frame();
+    h.move_to(250.0, 250.0);
+    h.release(250.0, 250.0);
+    h.click(b.x + 5.0, b.y + 5.0);
+    assert_eq!(h.app().sel.cursor(), Some(497));
+    // Disabled: no selection by click, no focus, and the button after it still works.
+    h.frame();
+    h.app_mut().off = true;
+    h.frame();
+    assert_eq!(h.focused(), None);
+    let c = h.rect(row(498)).unwrap();
+    h.click(c.x + 5.0, c.y + 5.0);
+    h.frame();
+    assert_eq!((h.app().sel.cursor(), h.focused()), (Some(497), None));
+    assert!(h.click_id(Id::of("b")));
+    assert_eq!(h.app().clicks, 1);
   }
 
   #[test]
