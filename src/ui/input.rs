@@ -251,7 +251,9 @@ impl UiState {
       Event::Focus(key) => {
         let changed = self.input.blurred == key;
         self.input.blurred = !key;
-        changed
+        // A press ends with the window's focus: its release may go to another window.
+        let dropped = !key && self.input.press.take().is_some();
+        changed | dropped
       }
       _ => false,
     }
@@ -451,6 +453,21 @@ mod tests {
       ui.with_id(id).el(off.style(field));
     });
     assert_eq!(st.focus(), Some(a));
+  }
+
+  #[test]
+  fn losing_the_window_focus_ends_a_press() {
+    let b = Id::of("b");
+    let mut st =
+      frame(UiState::default(), |ui| _ = ui.id("b").el(Style::new().w(px(50.0)).h(px(20.0))));
+    ev(&mut st, down(10.0, 10.0));
+    assert!(st.held(b));
+    assert!(ev(&mut st, Event::Focus(false)));
+    assert!(!st.held(b));
+    // Back, a release that comes after is no click.
+    ev(&mut st, Event::Focus(true));
+    ev(&mut st, up(10.0, 10.0));
+    assert!(st.input.click.is_none());
   }
 
   #[test]
