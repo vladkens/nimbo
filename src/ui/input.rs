@@ -362,6 +362,16 @@ impl UiState {
     changed
   }
 
+  /// Stops what scrolls now: the trackpad gesture's latch, so its next events go to what is
+  /// under the pointer, and wheel momentum. A menu opening calls it, so the content under it
+  /// stays put.
+  pub(crate) fn halt_scrolling(&mut self) {
+    self.input.latch.clear();
+    for id in std::mem::take(&mut self.input.moving) {
+      self.store.raw::<ScrollState>(id).pending = Point::default();
+    }
+  }
+
   /// Moves wheel momentum on to `now`.
   pub(crate) fn tick(&mut self, now: Duration) {
     let mut moving = std::mem::take(&mut self.input.moving);

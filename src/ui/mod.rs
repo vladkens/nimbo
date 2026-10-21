@@ -26,9 +26,9 @@
 //! }
 //! ```
 //!
-//! Widgets ([widgets]: label, button) and containers ([containers]: scroll area, list) do this
-//! for an app in the look of the [Theme] set with [Ui::set_theme]: `if ui.id("plus").button("+")
-//! .clicked { .. }`.
+//! Widgets ([widgets]: label, button) and containers ([containers]: scroll area, list, menu,
+//! pop-up button) do this for an app in the look of the [Theme] set with [Ui::set_theme]: `if
+//! ui.id("plus").button("+").clicked { .. }`.
 //!
 //! The rule for every widget: a headless behaviour ([behavior]: `ui.button_behavior(id)` and
 //! the like, hover, press, click, focus, keys and the value edited) plus drawing from the
@@ -50,7 +50,7 @@ use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
 pub use behavior::Behavior;
-pub use containers::{List, ListResponse, Row, Selection};
+pub use containers::{List, ListResponse, PopUp, Row, Selection, TypeSelect};
 pub use input::{Click, Press, Scroll, hit};
 pub use layout::{Kind, Line, Measure, Node, Tree};
 pub use store::{Ease, Transition};
@@ -446,6 +446,7 @@ impl UiState {
       pressed: self.pressed(id),
       focused: self.focused(id),
       clicked: self.clicked(id),
+      changed: false,
     }
   }
 }
@@ -474,6 +475,8 @@ pub struct Response {
   pub focused: bool,
   /// Clicked with the left button; seen once.
   pub clicked: bool,
+  /// The value a widget edits changed: a pop-up's choice, the selected tab, a split's ratio.
+  pub changed: bool,
 }
 
 /// The element tree builder an app's `view` gets each frame it redraws. `'a` lets canvas

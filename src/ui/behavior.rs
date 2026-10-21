@@ -21,7 +21,14 @@
 //! [super::Ui::disabled] before the call disables it: no input is read, no hand. Hover fades are
 //! [super::Ui::hot]. What each one covers:
 //!
-//! - [Ui::button_behavior]: click, Space while focused (flashes it pressed).
+//! - [Ui::button_behavior]: click, Space while focused (flashes it pressed);
+//! - [Ui::menu_popup] and [Ui::menu_item_behavior]: a menu's open state, keys and items;
+//! - [Ui::pop_up_behavior]: a pop-up button, opened by a click, Space, Enter or the arrows, letters
+//!   typed choosing an option ([super::containers::TypeSelect]);
+//! - [super::List] with [super::List::unstyled] rows: selection, keys and scrolling, rows drawn by
+//!   the app from [super::Row].
+//!
+//! The containers' behaviours live beside their looks in [super::containers].
 
 use keyboard_types::Modifiers;
 
@@ -43,6 +50,10 @@ pub struct Behavior {
   pub focused: bool,
   /// Clicked with the left button, or activated by Space.
   pub clicked: bool,
+  /// The value it edits changed, written back already.
+  pub changed: bool,
+  /// Chosen or highlighted: the selected tab, a menu's highlighted item.
+  pub on: bool,
 }
 
 impl Behavior {
@@ -53,6 +64,12 @@ impl Behavior {
       true => Style { focus: Focus::None, cursor: Cursor::Inherit, ..s },
       false => s.tab_focusable().cursor(Cursor::Pointer),
     }
+  }
+
+  /// A part of a control that doesn't take focus itself (a tab, a menu's item): the pointing
+  /// hand while enabled.
+  pub const fn pointer(&self, s: Style) -> Style {
+    if self.disabled { s } else { s.cursor(Cursor::Pointer) }
   }
 }
 
@@ -75,7 +92,7 @@ impl Ui<'_> {
 
   /// The disabled flag and autofocus for `id`; a disabled behaviour, or `None` to read input.
   /// Disabled while focused, it gives focus up: its keys no longer route through it.
-  fn begin(&mut self, id: Id) -> Option<Behavior> {
+  pub(super) fn begin(&mut self, id: Id) -> Option<Behavior> {
     // Autofocus reads the disabled flag, so before it is taken.
     self.take_autofocus(id);
     let off = self.take_disabled();
@@ -87,7 +104,7 @@ impl Ui<'_> {
   }
 
   /// Pointer state of `id`, without keys.
-  fn pointer_state(&self, id: Id) -> Behavior {
+  pub(super) fn pointer_state(&self, id: Id) -> Behavior {
     Behavior {
       id,
       hovered: self.hovered(id),
