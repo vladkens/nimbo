@@ -47,8 +47,8 @@ use crate::scene::Size;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
-/// Frames paced by a timer while the runtime animates without a visible change (no commit, so
-/// no frame callback): 120 Hz.
+/// Frames paced by a timer while a frame waits for a buffer (all held by the compositor, or a
+/// configure's ack that needs one of its size): 120 Hz.
 const TICK: Duration = Duration::from_micros(8333);
 
 /// Opens the app's window and runs the event loop until it closes or quits, on Wayland or X11.
@@ -336,10 +336,22 @@ impl Win {
     self.rt.frame();
     self.present.renderer.sync(&mut self.rt.images);
     let shown = self.present.present(&self.rt.scene, size, scale, &self.surface, &self.qh);
+    let fits = self.present.fits();
     self.next_tick = None;
-    if shown {
+    // An unchanged frame that animates on asks for a callback too, committed with no buffer: the
+    // compositor paces it, and sends none while the window is hidden. One waiting for a buffer
+    // ticks instead.
+    let waits = self.present.starved || (self.acked && !fits);
+    let callback = shown || (self.rt.needs_frame() && !waits);
+    if callback {
       self.surface.frame(&self.qh, ());
       self.frame_pending = true;
+    } else if self.rt.needs_frame() {
+      // From the frame's start: the time spent building it is part of the tick.
+      self.next_tick = Some(t0 + TICK);
+    }
+
+    if shown {
       self.frames += 1;
       if self.trace {
         let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
@@ -347,14 +359,11 @@ impl Win {
         let (w, h) = self.present.renderer.size();
         eprintln!("nimbo: presented {:.3} (+{since:.1} ms) {w}x{h}", t.as_secs_f64() * 1e3);
       }
-    } else if self.rt.needs_frame() {
-      // From the frame's start: the time spent building it is part of the tick.
-      self.next_tick = Some(t0 + TICK);
     }
 
     // An ack goes with the buffer of its size: a new one, or the one shown when that has it (an
     // unchanged frame, or one waiting for a buffer at the same size).
-    if shown || (self.acked && self.present.fits()) {
+    if callback || (self.acked && fits) {
       self.acked = false;
       self.surface.commit();
     } else if self.acked && self.trace {
