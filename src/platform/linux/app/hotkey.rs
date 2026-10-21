@@ -181,7 +181,16 @@ fn connect(s: &Rc<State>) -> Result<P, String> {
 
   let mut signals = s.signals.borrow_mut();
   for (signal, cb) in [("Activated", on_activated as Fp), ("Deactivated", on_deactivated as Fp)] {
-    signals.push(dbus::subscribe(bus, SHORTCUTS, signal, Some(PATH), cb, weak(s), free_weak as Fp));
+    signals.push(dbus::subscribe(
+      bus,
+      PORTAL,
+      SHORTCUTS,
+      signal,
+      Some(PATH),
+      cb,
+      weak(s),
+      free_weak as Fp,
+    ));
   }
 
   Ok(bus)
@@ -215,8 +224,16 @@ fn request(s: &Rc<State>, method: &str, mut args: Vec<V>, done: Fp) {
 
   args.push(V::dict(opts));
   // Subscribed first: the response may come before the call returns.
-  let sub =
-    dbus::subscribe(s.bus.get(), REQUEST, "Response", Some(&path), done, weak(s), free_weak as Fp);
+  let sub = dbus::subscribe(
+    s.bus.get(),
+    PORTAL,
+    REQUEST,
+    "Response",
+    Some(&path),
+    done,
+    weak(s),
+    free_weak as Fp,
+  );
   s.request.set(sub);
   s.listener.set(Listener::Starting);
   if let Err(e) = dbus::call(s.bus.get(), PORTAL, PATH, SHORTCUTS, method, V::Tuple(args), MS) {

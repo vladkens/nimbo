@@ -110,7 +110,9 @@ impl Hotkeys {
   /// can't take (another app has it, a key this platform can't see alone), disables the hotkey
   /// and is the error. While paused it is taken once the pause ends.
   pub fn set(&mut self, text: &str) -> Result<(), String> {
-    if self.text.as_deref() != Some(text) {
+    // The same hotkey again after the OS refused it (another app had it) tries again.
+    let refused = self.hotkey.is_some() && self.error.is_some();
+    if self.text.as_deref() != Some(text) || refused {
       self.text = Some(text.to_owned());
       match Hotkey::parse(text) {
         Ok(h) => self.hotkey = Some(h),

@@ -205,10 +205,13 @@ pub fn call(
   }
 }
 
-/// Subscribes `cb` (`GDBusSignalCallback`) to `member` of `iface`, from any sender, on `path`
-/// (any when `None`); `data` is freed by `free` when unsubscribed.
+/// Subscribes `cb` (`GDBusSignalCallback`) to `member` of `iface` from `sender` only (GDBus
+/// follows a well-known name's owner), on `path` (any when `None`); `data` is freed by `free`
+/// when unsubscribed.
+#[allow(clippy::too_many_arguments)]
 pub fn subscribe(
   bus: P,
+  sender: &str,
   iface: &str,
   member: &str,
   path: Option<&str>,
@@ -216,10 +219,10 @@ pub fn subscribe(
   data: P,
   free: Fp,
 ) -> c_uint {
-  let (i, m, p) = (cstr(iface), cstr(member), path.map(cstr));
+  let (from, i, m, p) = (cstr(sender), cstr(iface), cstr(member), path.map(cstr));
   let path = p.as_ref().map_or(null(), |p| p.as_ptr());
   let sub = f().g_dbus_connection_signal_subscribe;
-  unsafe { sub(bus, null(), i.as_ptr(), m.as_ptr(), path, null(), 0, cb, data, free) }
+  unsafe { sub(bus, from.as_ptr(), i.as_ptr(), m.as_ptr(), path, null(), 0, cb, data, free) }
 }
 
 pub fn unsubscribe(bus: P, id: c_uint) {

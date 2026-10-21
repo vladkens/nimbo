@@ -73,16 +73,17 @@ fn main() {
   assert_eq!(*chosen.borrow(), ["settings", "large", "quit"]);
 
   // Open, the menu stays as it is (its submenus too); the last one set comes as it closes.
+  // (A click closes the menu on Linux: it is opened again first.)
+  tray.closing();
+  tray.opening();
+  assert_eq!(items(&tray)[0], "Status 2||off|disabled", "the refresh as it opens");
   tray.set_menu(&menu(7));
   tray.set_menu(&menu(8));
-  assert_eq!(items(&tray)[0], "Status 1||off|disabled");
+  assert_eq!(items(&tray)[0], "Status 2||off|disabled");
   tray.closing();
   assert_eq!(items(&tray)[0], "Status 8||off|disabled");
   tray.set_menu(&menu(9));
   assert_eq!(items(&tray)[0], "Status 9||off|disabled", "closed: at once");
-  tray.opening();
-  assert_eq!(items(&tray)[0], "Status 2||off|disabled", "the refresh as it opens");
-  tray.closing();
 
   tray.set_icon(TrayIcon::path(24.0, "M2 2H22V22Z"));
   assert!(tray.describe()[0].starts_with("icon "));

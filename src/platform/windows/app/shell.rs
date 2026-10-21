@@ -329,6 +329,8 @@ pub fn with_app(id: u64, ty: TypeId, f: &mut dyn FnMut(&mut dyn App)) -> bool {
   let done = with_window(hwnd, |w| {
     f(&mut *w.rt.app);
     w.rt.redraw();
+    // In a live resize's or a menu's loop, frames come from its timer: started for the redraw.
+    w.sync_modal();
   });
   done.is_some()
 }

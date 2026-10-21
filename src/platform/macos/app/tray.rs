@@ -279,7 +279,13 @@ impl Tray {
     let _: () = unsafe { msg_send![&*self.0.delegate, menuDidClose: &*self.0.menu] };
     // SAFETY: a static of the CoreFoundation framework.
     let mode = unsafe { objc2_core_foundation::kCFRunLoopDefaultMode };
-    CFRunLoop::run_in_mode(mode, 0.0, true);
+    for _ in 0..50 {
+      if self.0.pending.borrow().is_none() {
+        break;
+      }
+
+      CFRunLoop::run_in_mode(mode, 0.01, true);
+    }
   }
 
   pub fn choose(&self, path: &[usize]) {
