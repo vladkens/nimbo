@@ -44,7 +44,7 @@ use windows_sys::Win32::UI::HiDpi::{
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::Config;
-use crate::app::{App, Appearance, Clipboard, Clock, Event, Mods, Runtime};
+use crate::app::{App, Appearance, Clipboard, Clock, Event, Mods, MouseButton, Runtime};
 use crate::cpu::Renderer;
 use crate::cpu::raster::IRect;
 use crate::platform::{Pace, points};
@@ -170,6 +170,8 @@ struct Window {
   /// The pointer is tracked for WM_MOUSELEAVE.
   tracking: bool,
   clicks: input::Clicks,
+  /// The buttons held, in the window's capture.
+  held: Vec<MouseButton>,
   /// A high surrogate from WM_CHAR, waiting for its low one.
   high: Option<u16>,
   /// The cursor last set.
@@ -569,6 +571,7 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
     frames: 0,
     tracking: false,
     clicks: input::Clicks::default(),
+    held: Vec::new(),
     high: None,
     cursor: Cursor::Arrow,
     min: cfg.min(),
