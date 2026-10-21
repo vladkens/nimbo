@@ -608,7 +608,9 @@ impl Win {
   /// so the compositor configures it so.
   fn apply_resize(&mut self) {
     let Some(size) = self.rt.take_resize() else { return };
-    let (w, h) = (size.w.ceil() as i32, size.h.ceil() as i32);
+    // In whole surface coordinates, as the first size ([whole]).
+    let size = whole(size);
+    let (w, h) = (size.w as i32, size.h as i32);
     match self.resizable {
       true if self.min.w > size.w || self.min.h > size.h => {
         self.min = Size::new(self.min.w.min(size.w), self.min.h.min(size.h));
