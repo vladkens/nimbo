@@ -257,7 +257,7 @@ impl Dispatch<WlSeat, ()> for Win {
         dev.destroy();
       }
 
-      if let Some(pinch) = win._pinch.take().filter(|p| p.version() >= 2) {
+      if let Some(pinch) = win._pinch.take() {
         pinch.destroy();
       }
 
