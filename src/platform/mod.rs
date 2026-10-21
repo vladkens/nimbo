@@ -55,12 +55,12 @@
 //! - `pub fn appearance() -> Appearance` ([crate::Appearance]): `dark`, and `accent` in sRGB or
 //!   `None` when the OS has none or the user left it to apps (macOS: `effectiveAppearance` matched
 //!   against Aqua / DarkAqua, `controlAccentColor` unless Multicolor). Stubs return
-//!   [crate::Appearance::LIGHT]. TODO Windows: `AppsUseLightTheme` (HKCU
+//!   [crate::Appearance::LIGHT]. Windows: `AppsUseLightTheme` (HKCU
 //!   `Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`), re-read on `WM_SETTINGCHANGE`
-//!   with "ImmersiveColorSet", the accent from `UISettings` or `DwmGetColorizationColor`, and the
-//!   title bar dark with `DWMWA_USE_IMMERSIVE_DARK_MODE`. Linux: the XDG portal's
-//!   `org.freedesktop.appearance` `color-scheme` and `accent-color`, changes by its
-//!   `SettingChanged` signal; else GtkSettings' dark preference or theme name.
+//!   with "ImmersiveColorSet", the accent from `AccentColorMenu`, and the title bar dark with
+//!   `DWMWA_USE_IMMERSIVE_DARK_MODE`. Linux: the XDG portal's `org.freedesktop.appearance`
+//!   `color-scheme` and `accent-color`, changes by its `SettingChanged` signal; else GtkSettings'
+//!   dark preference or theme name.
 //! - `pub fn perf_cores() -> Option<usize>`: the performance cores, to size the CPU renderer's
 //!   threads ([crate::cpu::pool]); `None` falls back to `available_parallelism` capped at 4.
 //! - `pub mod text`, the text backend under [crate::text] (its atlas and line cache are portable):
