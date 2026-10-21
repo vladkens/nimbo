@@ -350,11 +350,12 @@ pub struct Face {
   format: Option<Com>,
 }
 
+/// The same font face at the same size, with the same text format: requests that resolve to
+/// one face keep their own format (its weight picks the fallback fonts), its clones share it.
 impl PartialEq for Face {
   fn eq(&self, other: &Self) -> bool {
-    self.face.0 == other.face.0
-      && self.size == other.size
-      && self.format.is_some() == other.format.is_some()
+    let format = |f: &Self| f.format.as_ref().map(|c| c.0);
+    self.face.0 == other.face.0 && self.size == other.size && format(self) == format(other)
   }
 }
 
@@ -805,4 +806,17 @@ pub fn rasterize(
   }
 
   Some(rgba)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn requests_keep_their_format() {
+    let regular = face(Font::ui(13.0));
+    let medium = face(Font { weight: Weight::Medium, ..Font::ui(13.0) });
+    assert!(regular == regular.clone(), "a clone shares the format");
+    assert!(regular != medium, "another weight keeps its own format, even on the same face");
+  }
 }
