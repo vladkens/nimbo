@@ -6,11 +6,13 @@
 //! (the waker posts a message) or a high-resolution waitable timer: the runtime's next timer, or
 //! while it animates the next frame slot at the refresh rate of the display it is on, followed as
 //! it moves to another or the mode changes. No frames while the window is minimized; one when it
-//! shows again. Input and cursors are in [input], keys in [keyboard]; then the clipboard, the
-//! performance cores, and the DirectWrite text backend ([text]).
+//! shows again. Input and cursors are in [input], keys in [keyboard], light or dark and the
+//! accent in [settings]; then the clipboard, the performance cores, and the DirectWrite text
+//! backend ([text]).
 
 mod input;
 mod keyboard;
+mod settings;
 pub mod text;
 
 use std::cell::RefCell;
@@ -19,6 +21,7 @@ use std::ptr::{null, null_mut};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+pub use settings::appearance;
 use windows_sys::Win32::Foundation::{
   CloseHandle, FILETIME, GlobalFree, HANDLE, HWND, LPARAM, LRESULT, RECT, WPARAM,
 };
@@ -183,6 +186,8 @@ struct Window {
   /// WM_GETMINMAXINFO.
   min: Size,
   style: WINDOW_STYLE,
+  /// The system's light or dark mode and accent last sent.
+  look: Appearance,
 }
 
 thread_local! {
@@ -283,6 +288,22 @@ impl Window {
   fn retime(&mut self) {
     self.monitor = unsafe { MonitorFromWindow(self.hwnd, MONITOR_DEFAULTTONEAREST) };
     self.pace.interval = refresh(self.hwnd);
+  }
+
+  /// Follows the system's light or dark mode and accent: the title bar and the app, when they
+  /// changed.
+  fn restyle(&mut self) {
+    let look = appearance();
+    if look == self.look {
+      return;
+    }
+
+    if look.dark != self.look.dark {
+      settings::title_bar(self.hwnd, look.dark);
+    }
+
+    self.look = look;
+    self.send(Event::Appearance(look));
   }
 
   /// Wakes post nowhere from now on: the window is going.
@@ -502,6 +523,10 @@ fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
       });
       0
     }
+    m if settings::changed(m, lp) => {
+      with(|w| w.restyle());
+      def()
+    }
     WM_DESTROY => {
       with(|w| w.revoke());
       unsafe { PostQuitMessage(0) };
@@ -570,7 +595,10 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
 
   let scale = unsafe { GetDpiForWindow(hwnd) } as f32 / 96.0;
   let mut rt = Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(WinClipboard::new(hwnd)));
-  rt.event(Event::Appearance(appearance()));
+  // The title bar's mode before the window shows, so it never flashes light.
+  let look = appearance();
+  settings::title_bar(hwnd, look.dark);
+  rt.event(Event::Appearance(look));
   // A wake from any thread posts a message; the window handle crosses threads as a number, held
   // while posting so the window's end waits for a post under way.
   let target = Arc::new(Mutex::new(hwnd as isize));
@@ -600,6 +628,7 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
     cursor: Cursor::Arrow,
     min: cfg.min(),
     style,
+    look,
     modal: 0,
     armed: None,
     target,
@@ -751,13 +780,6 @@ impl Clipboard for WinClipboard {
 fn utf16_text(units: &[u16]) -> String {
   let n = units.iter().position(|&u| u == 0).unwrap_or(units.len());
   String::from_utf16_lossy(&units[..n])
-}
-
-/// The OS's light or dark setting and accent: light until ported. TODO: `AppsUseLightTheme`
-/// (registry, re-read on `WM_SETTINGCHANGE` "ImmersiveColorSet"), the accent from `UISettings`
-/// or `DwmGetColorizationColor`, a dark title bar with `DWMWA_USE_IMMERSIVE_DARK_MODE`.
-pub fn appearance() -> Appearance {
-  Appearance::LIGHT
 }
 
 /// The cores of the highest efficiency class (a hybrid CPU's performance cores, every core of
@@ -994,6 +1016,47 @@ mod tests {
       SendMessageW(hwnd, WM_KILLFOCUS, 0, 0);
     }
     assert_eq!(*seen.borrow(), [true, false]);
+
+    unsafe { DestroyWindow(hwnd) };
+    WINDOW.with(|w| w.borrow_mut().take());
+  }
+
+  /// The app hears the system's appearance before the first frame, and again on a colour-set
+  /// change only when it differs from the one sent last. The window is never shown.
+  #[test]
+  fn a_color_set_change_sends_the_new_appearance() {
+    use std::rc::Rc;
+
+    struct Seen(Rc<RefCell<Vec<Appearance>>>);
+    impl App for Seen {
+      fn event(&mut self, _: &mut crate::app::Cx, ev: &Event) -> bool {
+        if let Event::Appearance(a) = ev {
+          self.0.borrow_mut().push(*a);
+        }
+
+        false
+      }
+    }
+
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let hwnd = create(&Config::new("look", 200.0, 100.0), Box::new(Seen(seen.clone())));
+    let now = appearance();
+    assert_eq!(*seen.borrow(), [now]);
+
+    let set = wide("ImmersiveColorSet");
+    let change = || unsafe { SendMessageW(hwnd, WM_SETTINGCHANGE, 0, set.as_ptr() as LPARAM) };
+    change();
+    assert_eq!(seen.borrow().len(), 1, "unchanged: nothing sent");
+
+    // As if the window last saw the other mode.
+    let other = Appearance { dark: !now.dark, ..now };
+    with(|w| {
+      w.look = other;
+      w.send(Event::Appearance(other));
+    });
+    change();
+    assert_eq!(*seen.borrow(), [now, other, now]);
+    assert_eq!(with(|w| w.look), Some(now));
 
     unsafe { DestroyWindow(hwnd) };
     WINDOW.with(|w| w.borrow_mut().take());
