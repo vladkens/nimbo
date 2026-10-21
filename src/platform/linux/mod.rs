@@ -11,12 +11,13 @@
 //! layout phase, and the frame is built after GTK's layout, at the size it just gave the area,
 //! so a live resize never stretches. Nothing runs while idle or minimized: timers are GLib
 //! timeouts, a wake from another thread an idle source. Input is in [input] (keys in [keys]),
-//! the text stack in [text] (fontconfig, FreeType, HarfBuzz). GTK 3 scales by whole numbers
-//! only.
+//! light or dark in [settings], the text stack in [text] (fontconfig, FreeType, HarfBuzz).
+//! GTK 3 scales by whole numbers only.
 
 mod dl;
 mod input;
 mod keys;
+mod settings;
 pub mod text;
 
 use std::cell::{Cell, RefCell};
@@ -28,8 +29,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use self::dl::{Lib, fns};
 use self::input::Input;
+pub use self::settings::appearance;
 use crate::Config;
-use crate::app::{App, Appearance, Clipboard, Clock, Event, Runtime};
+use crate::app::{App, Clipboard, Clock, Event, Runtime};
 use crate::cpu::{Pixels, Renderer};
 use crate::scene::Size;
 use crate::ui::Cursor;
@@ -127,11 +129,6 @@ fn gtk() -> &'static Gtk {
 /// Connects `cb` to `obj`'s `signal`, with no data: the callbacks find the window in [WIN].
 unsafe fn connect(obj: P, signal: &CStr, cb: Fp, flags: c_int) {
   unsafe { (gtk().g_signal_connect_data)(obj, signal.as_ptr(), cb, null_mut(), null(), flags) };
-}
-
-/// The OS's light or dark setting and accent: light, until the settings are read.
-pub fn appearance() -> Appearance {
-  Appearance::LIGHT
 }
 
 /// The performance cores: Intel hybrid CPUs list theirs in `/sys/devices/cpu_core/cpus`
@@ -308,6 +305,7 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Res<()> {
     connect(clock, c"layout", on_layout as Fp, AFTER);
     connect(clock, c"after-paint", on_after_paint as Fp, 0);
     with((), |w| w.input.realized((g.gtk_widget_get_window)(area)));
+    settings::watch();
     (g.gtk_main)();
   }
 
