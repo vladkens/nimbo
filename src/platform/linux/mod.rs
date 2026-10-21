@@ -672,7 +672,12 @@ impl Win {
       return;
     }
 
-    let precise = matches!(a.source, Some(AxisSource::Finger | AxisSource::Continuous));
+    // A frame with no source (an `axis_stop` alone) goes on with the finger scroll under way.
+    let precise = match a.source {
+      Some(s) => matches!(s, AxisSource::Finger | AxisSource::Continuous),
+      None => self.scrolling,
+    };
+
     let (pos, mods) = (self.mouse, self.mods);
     let delta = match precise {
       true => Point::new(-a.value[1] as f32, -a.value[0] as f32),
