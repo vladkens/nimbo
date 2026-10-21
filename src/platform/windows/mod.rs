@@ -6,7 +6,10 @@
 //! (the waker posts a message) or a high-resolution waitable timer: while the runtime animates,
 //! the next frame slot at the refresh rate of the display it is on, followed as it moves to
 //! another or the mode changes. No frames while the window is minimized; one when it shows again.
-//! Then the performance cores.
+//! Input and cursors are in [input], keys in [keyboard]; then the performance cores.
+
+mod input;
+mod keyboard;
 
 use std::cell::RefCell;
 use std::mem::offset_of;
@@ -39,6 +42,7 @@ use crate::cpu::Renderer;
 use crate::cpu::raster::IRect;
 use crate::platform::{Pace, points};
 use crate::scene::Size;
+use crate::ui::Cursor;
 
 /// Posted by the waker: something changed on another thread.
 const WM_WAKE: u32 = WM_APP + 1;
@@ -154,6 +158,13 @@ struct Window {
   /// first one's time since the process started.
   trace: bool,
   frames: u64,
+  /// The pointer is tracked for WM_MOUSELEAVE.
+  tracking: bool,
+  clicks: input::Clicks,
+  /// A high surrogate from WM_CHAR, waiting for its low one.
+  high: Option<u16>,
+  /// The cursor last set.
+  cursor: Cursor,
   /// The least content size in points ([Config::min]) and the window's style, for
   /// WM_GETMINMAXINFO.
   min: Size,
@@ -334,6 +345,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
 }
 
 fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+  if let Some(r) = input::handle(msg, wp, lp) {
+    return r;
+  }
+
   let def = || unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
   match msg {
     WM_WAKE => {
@@ -437,7 +452,7 @@ fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
       0
     }
     WM_SETFOCUS | WM_KILLFOCUS => {
-      with(|w| w.rt.event(Event::Focus(msg == WM_SETFOCUS)));
+      with(|w| w.send(Event::Focus(msg == WM_SETFOCUS)));
       0
     }
     WM_DESTROY => {
@@ -531,6 +546,10 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
     monitor: unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) },
     trace: std::env::var_os("NIMBO_TRACE").is_some(),
     frames: 0,
+    tracking: false,
+    clicks: input::Clicks::default(),
+    high: None,
+    cursor: Cursor::Arrow,
     min: cfg.min(),
     style,
     modal: 0,
@@ -549,6 +568,10 @@ fn run_loop(hwnd: HWND, timer: &Timer) {
     while unsafe { PeekMessageW(&mut msg, null_mut(), 0, 0, PM_REMOVE) } != 0 {
       if msg.message == WM_QUIT {
         return;
+      }
+
+      if input::key_message(&msg) {
+        continue;
       }
 
       unsafe {
