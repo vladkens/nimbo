@@ -135,6 +135,10 @@ struct Window {
   hidden: bool,
   /// While animating, frames come a refresh of the display apart.
   pace: Pace,
+  /// In a live move or resize (its modal loop), and whether its frame timer runs: only while
+  /// frames are due.
+  modal: bool,
+  armed: bool,
   /// Logs each presented frame (`NIMBO_TRACE`): `nimbo: presented <unix ms>` on stderr, and the
   /// first one's time since the process started.
   trace: bool,
@@ -207,6 +211,27 @@ impl Window {
     }
   }
 
+  /// Runs the live move or resize's frame timer while frames are due and stops it when idle;
+  /// after each message, so a wake or an input that needs a frame starts it again.
+  fn sync_modal(&mut self) {
+    let due = self.modal && !self.hidden && self.rt.needs_frame();
+    if due == self.armed {
+      return;
+    }
+
+    match due {
+      true => {
+        let ms = self.pace.interval.as_millis() as u32;
+        unsafe { SetTimer(self.hwnd, TIMER_MODAL, ms.max(1), None) };
+      }
+      false => unsafe {
+        KillTimer(self.hwnd, TIMER_MODAL);
+      },
+    }
+
+    self.armed = due;
+  }
+
   /// Draws a frame if one is due; returns how long the loop may sleep (`None`: until a
   /// message).
   fn tick(&mut self) -> Option<Duration> {
@@ -250,6 +275,12 @@ fn refresh(hwnd: HWND) -> Duration {
 }
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+  let res = handle(hwnd, msg, wp, lp);
+  with(|w| w.sync_modal());
+  res
+}
+
+fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
   let def = || unsafe { DefWindowProcW(hwnd, msg, wp, lp) };
   match msg {
     WM_WAKE => {
@@ -322,13 +353,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
       unsafe { SetWindowPos(hwnd, null_mut(), x, y, cx, cy, flags) };
       0
     }
-    WM_ENTERSIZEMOVE => {
-      let ms = with(|w| w.pace.interval.as_millis() as u32).unwrap_or(16);
-      unsafe { SetTimer(hwnd, TIMER_MODAL, ms.max(1), None) };
-      0
-    }
-    WM_EXITSIZEMOVE => {
-      unsafe { KillTimer(hwnd, TIMER_MODAL) };
+    WM_ENTERSIZEMOVE | WM_EXITSIZEMOVE => {
+      with(|w| w.modal = msg == WM_ENTERSIZEMOVE);
       0
     }
     WM_TIMER if wp == TIMER_MODAL => {
@@ -349,6 +375,15 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
 
 /// Opens the app's window and runs the Win32 message loop until it closes or the app quits.
 pub fn run(cfg: &Config, app: Box<dyn App>) {
+  let hwnd = create(cfg, app);
+  unsafe { ShowWindow(hwnd, SW_SHOW) };
+
+  run_loop(hwnd, &Timer::new());
+  WINDOW.with(|w| w.borrow_mut().take());
+}
+
+/// Makes the app's window, hidden, and keeps it as this thread's [WINDOW].
+fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
   unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
   let hinstance = unsafe { GetModuleHandleW(null()) };
   let class = wide("nimbo");
@@ -415,12 +450,11 @@ pub fn run(cfg: &Config, app: Box<dyn App>) {
     frames: 0,
     min: cfg.min(),
     style,
+    modal: false,
+    armed: false,
   };
   WINDOW.with(|w| *w.borrow_mut() = Some(window));
-  unsafe { ShowWindow(hwnd, SW_SHOW) };
-
-  run_loop(hwnd, &Timer::new());
-  WINDOW.with(|w| w.borrow_mut().take());
+  hwnd
 }
 
 /// Handles messages until WM_QUIT; between them draws the frames due and sleeps until the next
@@ -519,6 +553,42 @@ mod tests {
     let mut d = Dib::new(3, 2).unwrap();
     d.pixels().fill(0xff00ff00);
     assert_eq!(d.pixels().len(), 6);
+  }
+
+  /// Holding the title bar of a still window: the live move's timer stops once no frame is
+  /// due, and a wake starts it again. The window is never shown.
+  #[test]
+  fn a_live_move_ticks_only_while_frames_are_due() {
+    struct Still;
+    impl App for Still {}
+
+    let cfg = Config::new("modal", 200.0, 100.0);
+    let hwnd = create(&cfg, Box::new(Still));
+    let ticks = || {
+      std::thread::sleep(Duration::from_millis(120));
+      let mut msg: MSG = unsafe { std::mem::zeroed() };
+      let mut n = 0;
+      while unsafe { PeekMessageW(&mut msg, hwnd, WM_TIMER, WM_TIMER, PM_REMOVE) } != 0 {
+        unsafe { DispatchMessageW(&msg) };
+        n += 1;
+      }
+
+      n
+    };
+
+    unsafe { SendMessageW(hwnd, WM_ENTERSIZEMOVE, 0, 0) };
+    assert!(ticks() > 0, "the first frame is due");
+    assert_eq!(ticks(), 0, "idle");
+
+    unsafe { SendMessageW(hwnd, WM_WAKE, 0, 0) };
+    assert!(ticks() > 0, "a wake draws");
+    assert_eq!(ticks(), 0, "idle again");
+
+    unsafe {
+      SendMessageW(hwnd, WM_EXITSIZEMOVE, 0, 0);
+      DestroyWindow(hwnd);
+    }
+    WINDOW.with(|w| w.borrow_mut().take());
   }
 
   #[test]
