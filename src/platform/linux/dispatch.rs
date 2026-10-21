@@ -114,7 +114,8 @@ impl Dispatch<XdgSurface, ()> for Win {
     if let xdg_surface::Event::Configure { serial } = ev {
       xdg.ack_configure(serial);
       if let Some(s) = win.pending_size.take() {
-        win.size = s;
+        win.held = win.pending_held;
+        win.size = configured_size(s, win.held, &mut win.asked);
       }
 
       win.configured = true;
@@ -134,9 +135,10 @@ impl Dispatch<XdgToplevel, ()> for Win {
     _: &QueueHandle<Self>,
   ) {
     match ev {
-      xdg_toplevel::Event::Configure { width, height, .. } => {
+      xdg_toplevel::Event::Configure { width, height, states } => {
         let last = win.pending_size.unwrap_or(win.size);
         win.pending_size = Some(configured(width, height, last));
+        win.pending_held = held(&states);
       }
       xdg_toplevel::Event::Close => win.closed = true,
       _ => {}
@@ -498,9 +500,62 @@ fn configured(width: i32, height: i32, last: Size) -> Size {
   Size::new(side(width, last.w), side(height, last.h))
 }
 
+/// Whether a configure's states hold the window at the compositor's size: maximized or
+/// fullscreen (xdg-shell has the window's geometry be the configured size then), or tiled on a
+/// side.
+fn held(states: &[u8]) -> bool {
+  use xdg_toplevel::State as S;
+  let states = states.as_chunks::<4>().0.iter().map(|b| u32::from_ne_bytes(*b));
+  states.filter_map(|n| S::try_from(n).ok()).any(|s| {
+    matches!(
+      s,
+      S::Maximized | S::Fullscreen | S::TiledLeft | S::TiledRight | S::TiledTop | S::TiledBottom
+    )
+  })
+}
+
+/// The size a configure leaves the window at: the compositor's; floating, the one the app asked
+/// for while it was held ([asked_size]), if any.
+fn configured_size(given: Size, held: bool, asked: &mut Option<Size>) -> Size {
+  match held {
+    true => given,
+    false => asked.take().unwrap_or(given),
+  }
+}
+
+/// The size an app's request gives the window: its own while it floats; held at the
+/// compositor's, none, the request kept for when it floats again ([configured_size]).
+pub(super) fn asked_size(size: Size, held: bool, asked: &mut Option<Size>) -> Option<Size> {
+  if held {
+    *asked = Some(size);
+    return None;
+  }
+
+  *asked = None;
+  Some(size)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn a_held_window_keeps_the_compositors_size() {
+    let states = |s: &[u32]| s.iter().flat_map(|n| n.to_ne_bytes()).collect::<Vec<u8>>();
+    // Activated alone floats; maximized, fullscreen or tiled on a side holds it.
+    assert!(!held(&states(&[4])));
+    assert!(held(&states(&[4, 1])) && held(&states(&[2])) && held(&states(&[5])));
+    // Maximized: the app's size waits, the compositor's stays.
+    let (app, max, back) =
+      (Size::new(300.0, 200.0), Size::new(1920.0, 1080.0), Size::new(480.0, 320.0));
+    let mut asked = None;
+    assert_eq!(asked_size(app, true, &mut asked), None);
+    assert_eq!(configured_size(max, true, &mut asked), max);
+    // Floating again: the size the app asked for.
+    assert_eq!(configured_size(back, false, &mut asked), app);
+    assert_eq!(configured_size(back, false, &mut asked), back);
+    assert_eq!(asked_size(app, false, &mut asked), Some(app));
+  }
 
   #[test]
   fn a_configure_sets_each_side_it_gives() {
