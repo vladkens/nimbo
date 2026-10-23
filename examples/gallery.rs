@@ -3,8 +3,8 @@
 //! Every widget, in the light theme and the dark one side by side over the same state: buttons
 //! (variants, an icon button with a tooltip, ⓘ and "?"), check boxes, switches in both sizes, a
 //! slider, selects, a segmented control with counts, progress bars and a spinner, a link,
-//! badges in every tone, shortcut recorders (with and without the ⊗ that clears one), the
-//! stroke icons, and a button that asks in a modal dialog.
+//! badges in every tone, shortcut recorders (with and without the ⊗ that clears one), search
+//! fields, the icons (stroked; play and ⊗ filled), and a button that asks in a modal dialog.
 //!
 //! `cargo run --release --example gallery [-- --shot <file.png>]`
 
@@ -28,6 +28,7 @@ pub const CLEARABLE: &str = "clearable";
 pub const ASK: &str = "ask";
 pub const DIALOG: &str = "dialog";
 pub const RESET: &str = "reset";
+pub const SEARCH: &str = "search";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Size {
@@ -47,6 +48,7 @@ pub struct Gallery {
   pub size: Size,
   pub view: u8,
   pub hotkey: Option<Hotkey>,
+  pub search: String,
   /// The pane whose button opened the dialog: it asks in that pane's theme.
   pub ask: Option<usize>,
   pub deleted: usize,
@@ -62,6 +64,7 @@ impl Default for Gallery {
       size: Size::Medium,
       view: 0,
       hotkey: Hotkey::parse("ctrl+option+space").ok(),
+      search: "Switches".to_owned(),
       ask: None,
       deleted: 0,
     }
@@ -135,6 +138,10 @@ impl Gallery {
         ui.set_theme(Theme { shortcut_clear: true, ..t });
         ui.id((CLEARABLE, i)).shortcut(&mut self.hotkey);
         ui.set_theme(t);
+      });
+      line(ui, "SEARCH", |ui| {
+        ui.id((SEARCH, i)).search(&mut self.search, "Search widgets");
+        ui.disabled(true).search(&mut String::new(), "Off");
       });
       line(ui, "ICONS", |ui| {
         for (_, icon) in Icon::ALL {

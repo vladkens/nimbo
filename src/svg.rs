@@ -1,9 +1,9 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! SVG path data (`d`) into polylines: the reader the widget icons stroke
-//! ([crate::ui::widgets::icon]) and the tray fills ([crate::tray::TrayIcon]). SVG's whole path
-//! syntax (`M L H V C S Q T A Z`, absolute and relative, implicit repeats); curves and arcs in
-//! pieces of about 2 pixels.
+//! SVG path data (`d`) into polylines: the reader the widget icons stroke or fill
+//! ([crate::ui::widgets::icon]) and the tray fills ([crate::tray::TrayIcon]), and the spans a
+//! scanline fills ([spans]). SVG's whole path syntax (`M L H V C S Q T A Z`, absolute and
+//! relative, implicit repeats); curves and arcs in pieces of about 2 pixels.
 
 use crate::scene::Point;
 
@@ -264,6 +264,49 @@ fn arc(
   }
 }
 
+/// Calls `span` with each stretch, left to right, of the horizontal line at `y` inside the
+/// closed polylines `polys`, by the non-zero rule or `even_odd`; `xs` is scratch for the
+/// crossings. What the tray icons and the filled widget icons fill.
+pub fn spans(
+  polys: &[Vec<Point>],
+  y: f32,
+  even_odd: bool,
+  xs: &mut Vec<(f32, i32)>,
+  mut span: impl FnMut(f32, f32),
+) {
+  xs.clear();
+  for poly in polys {
+    for (a, b) in poly.iter().zip(poly.iter().cycle().skip(1)) {
+      if (a.y <= y) != (b.y <= y) {
+        let x = a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x);
+        xs.push((x, if b.y > a.y { 1 } else { -1 }));
+      }
+    }
+  }
+
+  xs.sort_by(|a, b| a.0.total_cmp(&b.0));
+  // A span runs from where the line goes in to where it comes out, whole across the edges
+  // inside it.
+  let inside = |wind: i32| if even_odd { wind % 2 != 0 } else { wind != 0 };
+  let (mut wind, mut start, mut was) = (0, 0.0, false);
+  for (i, &(x, dir)) in xs.iter().enumerate() {
+    wind += dir;
+    // Crossings at one x count together: where two subpaths touch, a span goes on.
+    if xs.get(i + 1).is_some_and(|n| n.0 == x) {
+      continue;
+    }
+
+    let now = inside(wind);
+    match (was, now) {
+      (false, true) => start = x,
+      (true, false) => span(start, x),
+      _ => {}
+    }
+
+    was = now;
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -293,6 +336,23 @@ mod tests {
     for bad in ["1 2", "M1", "M1 2 X3", "M1 2 A1 1 0 2 0 3 3"] {
       assert!(flatten(bad, 2.0, &mut Vec::new()).is_err(), "{bad}");
     }
+  }
+
+  #[test]
+  fn spans_are_whole_by_the_rule() {
+    // A square in a square, drawn the same way: one span non-zero, two even-odd.
+    let squares = lines("M0 0H10V10H0ZM2 2H8V8H2Z");
+    let mut xs = Vec::new();
+    let mut got = Vec::new();
+    spans(&squares, 5.0, false, &mut xs, |a, b| got.push((a, b)));
+    assert_eq!(got, [(0.0, 10.0)]);
+    got.clear();
+    spans(&squares, 5.0, true, &mut xs, |a, b| got.push((a, b)));
+    assert_eq!(got, [(0.0, 2.0), (8.0, 10.0)]);
+    // Two squares side by side, touching: one span.
+    got.clear();
+    spans(&lines("M0 0H5V10H0ZM5 0H10V10H5Z"), 5.0, false, &mut xs, |a, b| got.push((a, b)));
+    assert_eq!(got, [(0.0, 10.0)]);
   }
 
   #[test]

@@ -4,7 +4,7 @@
 //! focus, cursor), a text element's [TextStyle], and [Float] for overlays. All `const`, so a
 //! look is a set of constants.
 
-use crate::scene::{Color, Point};
+use crate::scene::{Color, Point, Rect};
 use crate::text::Font;
 
 /// How an element is sized along one axis.
@@ -70,6 +70,18 @@ pub enum Cursor {
   /// A closed hand, while dragging.
   Grabbing,
   NotAllowed,
+}
+
+/// What an element clips its children to ([Style::clip], [Style::clip_content]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Clip {
+  #[default]
+  None,
+  /// Its box (overflow hidden).
+  Box,
+  /// Its box inside the padding (a point short of it, for a caret at the edge): a search
+  /// field's text stops short of the marks there.
+  Content,
 }
 
 /// How an element takes focus ([Style::focusable], [Style::tab_focusable]).
@@ -153,9 +165,9 @@ pub struct Style {
   /// Drawn when its colour isn't transparent (not an `Option`: four bytes keep a laid-out node
   /// in five cache lines).
   pub shadow: Shadow,
-  /// Clips the children to the box (overflow hidden); the box can then shrink below its
+  /// Clips the children to the box, or inside its padding; the box can then shrink below its
   /// content.
-  pub clip: bool,
+  pub clip: Clip,
   /// Multiplies the alpha of everything the element and its children draw, except canvases.
   pub opacity: f32,
   /// Scrolls its children when they overflow, horizontally and vertically; implies `clip`.
@@ -190,7 +202,7 @@ impl Style {
       border_color: [0.0; 4],
       radii: [0.0; 4],
       shadow: Shadow::NONE,
-      clip: false,
+      clip: Clip::None,
       opacity: 1.0,
       scroll: [false; 2],
       hit: false,
@@ -281,7 +293,34 @@ impl Style {
   }
 
   pub const fn clip(self) -> Self {
-    Self { clip: true, ..self }
+    Self { clip: Clip::Box, ..self }
+  }
+
+  /// Clips the children inside the padding, not at the box.
+  pub const fn clip_content(self) -> Self {
+    Self { clip: Clip::Content, ..self }
+  }
+
+  /// Where its children are clipped, given its box `r`; `None` when they aren't. Inside the
+  /// padding is a point short of it, for a caret at the text's edge.
+  pub fn clip_rect(&self, r: Rect) -> Option<Rect> {
+    let [top, right, bottom, left] = self.pad.map(|p| (p - 1.0).max(0.0));
+    match self.clip {
+      Clip::None => None,
+      Clip::Box => Some(r),
+      Clip::Content => {
+        let (w, h) = ((r.w - left - right).max(0.0), (r.h - top - bottom).max(0.0));
+        Some(Rect::new(r.x + left, r.y + top, w, h))
+      }
+    }
+  }
+
+  /// Its clip, at least the box: a scroll container clips.
+  const fn clipped(self) -> Clip {
+    match self.clip {
+      Clip::None => Clip::Box,
+      c => c,
+    }
   }
 
   pub const fn opacity(self, opacity: f32) -> Self {
@@ -290,17 +329,17 @@ impl Style {
 
   /// Scrolls vertically on overflow (and clips); the children keep their heights.
   pub const fn scroll_y(self) -> Self {
-    Self { scroll: [self.scroll[0], true], clip: true, ..self }
+    Self { scroll: [self.scroll[0], true], clip: self.clipped(), ..self }
   }
 
   /// Scrolls horizontally on overflow (and clips); the children keep their widths.
   pub const fn scroll_x(self) -> Self {
-    Self { scroll: [true, self.scroll[1]], clip: true, ..self }
+    Self { scroll: [true, self.scroll[1]], clip: self.clipped(), ..self }
   }
 
   /// Scrolls both ways.
   pub const fn scroll(self) -> Self {
-    Self { scroll: [true; 2], clip: true, ..self }
+    Self { scroll: [true; 2], clip: self.clipped(), ..self }
   }
 
   /// Takes pointer input without a name: a popup's background that must not let clicks

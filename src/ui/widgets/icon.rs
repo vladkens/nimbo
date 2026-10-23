@@ -1,8 +1,9 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Stroke icons from SVG path data: the path flattened to polylines and drawn as round-capped
-//! lines, so an icon is crisp at any size and scale and takes any colour (the theme's text,
-//! muted or accent). The paths are in a 24 × 24 view box, as Lucide's (<https://lucide.dev>).
+//! Icons from SVG path data: the path flattened to polylines and drawn as round-capped lines,
+//! or filled ([Icon::filled]), so an icon is crisp at any size and scale and takes any colour
+//! (the theme's text, muted or accent). The paths are in a 24 × 24 view box, as Lucide's
+//! (<https://lucide.dev>).
 //!
 //! ```ignore
 //! ui.icon(Icon::INFO, 16.0, t.muted);
@@ -11,22 +12,38 @@
 //! ```
 //!
 //! The path syntax is SVG's whole (`M L H V C S Q T A Z`, absolute and relative, implicit
-//! repeats); only strokes are drawn. Draw them in an opaque colour: the round joints of a
+//! repeats). A filled icon fills its subpaths by the non-zero rule, SVG's default, its edges
+//! smoothed by a hairline of its outline. Draw icons in an opaque colour: the round joints of a
 //! translucent one overlap darker. [Ui::icon] dims an icon in a disabled scope by mixing it
 //! toward the ground instead. The built-in set is drawn for nimbo, thinner than Lucide's:
 //! stroke them 1.6 units wide ([Ui::icon_stroke]).
 
 use crate::scene::{Color, Frame, Point, Rect};
-use crate::svg::flatten;
+use crate::svg::{flatten, spans};
 use crate::ui::{Response, Style, Ui, px};
 
-/// SVG path data in a 24 × 24 view box, drawn as a stroke ([draw], [Ui::icon]).
+/// SVG path data in a 24 × 24 view box, drawn as a stroke or filled ([draw], [Ui::icon]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct Icon(pub &'static str);
+pub struct Icon {
+  /// The path data.
+  pub d: &'static str,
+  /// Filled rather than stroked: a play triangle.
+  pub fill: bool,
+}
 
 impl Icon {
+  /// A stroked icon from path data `d`.
+  pub const fn new(d: &'static str) -> Self {
+    Self { d, fill: false }
+  }
+
+  /// A filled one.
+  pub const fn filled(d: &'static str) -> Self {
+    Self { d, fill: true }
+  }
+
   /// A gear of eight teeth.
-  pub const GEAR: Self = Self(concat!(
+  pub const GEAR: Self = Self::new(concat!(
     "M18.86 10.16L21.28 10.53L21.28 13.47L18.86 13.84L18.15 15.55L19.60 17.53L17.53 19.60",
     "L15.55 18.15L13.84 18.86L13.47 21.28L10.53 21.28L10.16 18.86L8.45 18.15L6.47 19.60",
     "L4.40 17.53L5.85 15.55L5.14 13.84L2.72 13.47L2.72 10.53L5.14 10.16L5.85 8.45L4.40 6.47",
@@ -35,27 +52,41 @@ impl Icon {
     "M9 12a3 3 0 1 0 6 0a3 3 0 1 0-6 0"
   ));
   /// A circle halved: light and dark.
-  pub const CONTRAST: Self = Self("M3.5 12a8.5 8.5 0 1 0 17 0a8.5 8.5 0 1 0-17 0M12 3.5v17");
+  pub const CONTRAST: Self = Self::new("M3.5 12a8.5 8.5 0 1 0 17 0a8.5 8.5 0 1 0-17 0M12 3.5v17");
   /// Two sliders.
-  pub const SLIDERS: Self = Self("M4 7h9M17 7h3M15 4.8v4.4M4 17h3M11 17h9M9 14.8v4.4");
+  pub const SLIDERS: Self = Self::new("M4 7h9M17 7h3M15 4.8v4.4M4 17h3M11 17h9M9 14.8v4.4");
   /// A circled i.
-  pub const INFO: Self = Self("M3.5 12a8.5 8.5 0 1 0 17 0a8.5 8.5 0 1 0-17 0M12 11v5.5M12 7.7v.1");
+  pub const INFO: Self =
+    Self::new("M3.5 12a8.5 8.5 0 1 0 17 0a8.5 8.5 0 1 0-17 0M12 11v5.5M12 7.7v.1");
   /// A turning arrow: back to the default.
-  pub const RESET: Self = Self("M5 12a7 7 0 1 0 2.1-5M5 4.5V8.5h4");
+  pub const RESET: Self = Self::new("M5 12a7 7 0 1 0 2.1-5M5 4.5V8.5h4");
   /// A bin.
-  pub const TRASH: Self = Self("M4.5 7h15M9.5 7V4.5h5V7M6.5 7l.9 12.5h9.2L17.5 7");
+  pub const TRASH: Self = Self::new("M4.5 7h15M9.5 7V4.5h5V7M6.5 7l.9 12.5h9.2L17.5 7");
   /// A folder.
-  pub const FOLDER: Self =
-    Self("M3.5 7.5a2 2 0 0 1 2-2h3.6l2 2h7.4a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z");
+  pub const FOLDER: Self = Self::new(
+    "M3.5 7.5a2 2 0 0 1 2-2h3.6l2 2h7.4a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z",
+  );
   /// A page of text.
-  pub const DOC: Self = Self("M7 3.5h7l4 4v13H7zM14 3.5v4h4M9.5 12.5h6M9.5 15.5h6M9.5 18.5h3.5");
+  pub const DOC: Self =
+    Self::new("M7 3.5h7l4 4v13H7zM14 3.5v4h4M9.5 12.5h6M9.5 15.5h6M9.5 18.5h3.5");
   /// An arrow up and right: opens elsewhere.
-  pub const EXTERNAL: Self = Self("M8 16 16 8M9.5 8H16v6.5");
+  pub const EXTERNAL: Self = Self::new("M8 16 16 8M9.5 8H16v6.5");
   /// A check mark.
-  pub const CHECK: Self = Self("m5.5 12.5 4 4 9-9.5");
+  pub const CHECK: Self = Self::new("m5.5 12.5 4 4 9-9.5");
+  /// A magnifier: search.
+  pub const SEARCH: Self = Self::new("M4.5 10.5a6 6 0 1 0 12 0a6 6 0 1 0-12 0M15 15l4.5 4.5");
+  /// A disc with a cross cut out of it, the ground showing through: clears a value (⊗).
+  pub const CLEAR: Self = Self::filled(concat!(
+    "M2.5 12a9.5 9.5 0 1 0 19 0a9.5 9.5 0 1 0-19 0Z",
+    "M16.70 9.28L13.98 12L16.70 14.72L14.72 16.70L12 13.98L9.28 16.70L7.30 14.72L10.02 12",
+    "L7.30 9.28L9.28 7.30L12 10.02L14.72 7.30Z"
+  ));
+  /// A filled triangle with round corners: play.
+  pub const PLAY: Self =
+    Self::filled("M8 5.8v12.4a.8.8 0 0 0 1.2.7l10-6.2a.8.8 0 0 0 0-1.4l-10-6.2A.8.8 0 0 0 8 5.8z");
 
   /// Every built-in icon, for a gallery and the tests.
-  pub const ALL: [(&'static str, Self); 10] = [
+  pub const ALL: [(&'static str, Self); 13] = [
     ("gear", Self::GEAR),
     ("contrast", Self::CONTRAST),
     ("sliders", Self::SLIDERS),
@@ -66,6 +97,9 @@ impl Icon {
     ("doc", Self::DOC),
     ("external", Self::EXTERNAL),
     ("check", Self::CHECK),
+    ("search", Self::SEARCH),
+    ("play", Self::PLAY),
+    ("clear", Self::CLEAR),
   ];
 }
 
@@ -73,17 +107,38 @@ impl Icon {
 const VIEW: f32 = 24.0;
 
 /// Draws `icon` into `r` (its view box stretched over it) in `color`, stroked `width` view box
-/// units wide (Lucide's are 2). Data that doesn't parse draws as far as it parsed.
+/// units wide (Lucide's are 2), or filled. Data that doesn't parse draws as far as it parsed.
 pub fn draw(f: &mut Frame, icon: Icon, r: Rect, color: Color, width: f32) {
   let (kx, ky) = (r.w / VIEW, r.h / VIEW);
   let mut lines = Vec::new();
-  _ = flatten(icon.0, kx.max(ky) * f.scale, &mut lines);
-  let stroke = width * kx.min(ky);
-  let mut pts = Vec::new();
+  _ = flatten(icon.d, kx.max(ky) * f.scale, &mut lines);
+  for p in lines.iter_mut().flatten() {
+    *p = Point::new(r.x + p.x * kx, r.y + p.y * ky);
+  }
+
+  if icon.fill {
+    fill(f, &lines, color);
+  }
+
+  // A filled icon's outline a pixel wide, over the fill's edges.
+  let stroke = if icon.fill { 1.0 / f.scale } else { width * kx.min(ky) };
   for l in &lines {
-    pts.clear();
-    pts.extend(l.iter().map(|p| Point::new(r.x + p.x * kx, r.y + p.y * ky)));
-    f.polyline(&pts, stroke, color);
+    f.polyline(l, stroke, color);
+  }
+}
+
+/// Fills the closed polylines `polys` (in points) non-zero: a rect a pixel high for each span
+/// of each pixel row.
+fn fill(f: &mut Frame, polys: &[Vec<Point>], color: Color) {
+  let pts = polys.iter().flatten();
+  let (top, bottom) = pts.fold((f32::MAX, f32::MIN), |(a, b), p| (a.min(p.y), b.max(p.y)));
+  let row = 1.0 / f.scale;
+  let mut y = (top * f.scale).floor() * row;
+  let mut xs = Vec::new();
+  while y < bottom {
+    let r = |x0: f32, x1: f32| Rect::new(x0, y, x1 - x0, row);
+    spans(polys, y + row / 2.0, false, &mut xs, |x0, x1| f.rect(r(x0, x1), color, 0.0));
+    y += row;
   }
 }
 
@@ -113,11 +168,64 @@ mod tests {
   fn every_built_in_icon_parses_whole() {
     for (name, icon) in Icon::ALL {
       let mut out = Vec::new();
-      flatten(icon.0, 2.0, &mut out).unwrap_or_else(|e| panic!("{name}: {e}"));
+      flatten(icon.d, 2.0, &mut out).unwrap_or_else(|e| panic!("{name}: {e}"));
       assert!(!out.is_empty(), "{name}");
       for p in out.iter().flatten() {
         assert!((-0.5..=24.5).contains(&p.x) && (-0.5..=24.5).contains(&p.y), "{name}: {p:?}");
       }
+    }
+  }
+
+  /// Play, filled, and the same path stroked.
+  struct Icons;
+
+  impl crate::app::App for Icons {
+    fn view(&mut self, ui: &mut Ui) {
+      let row = Style::new().w(crate::ui::grow()).h(crate::ui::grow()).bg([1.0; 4]);
+      ui.row(row, |ui| {
+        ui.icon(Icon::PLAY, 48.0, [0.0, 0.0, 0.0, 1.0]);
+        ui.icon(Icon::new(Icon::PLAY.d), 48.0, [0.0, 0.0, 0.0, 1.0]);
+      });
+    }
+  }
+
+  #[test]
+  fn a_filled_icon_fills_inside_its_outline() {
+    let mut h = crate::Harness::new(Icons, crate::Size::new(96.0, 48.0), 2.0);
+    h.frame();
+    let img = h.render();
+    // The triangle's middle (12.5, 12 in its view box), its tip, and outside it.
+    let at = |x: f32, y: f32| img.pixel(x * 2.0, y * 2.0);
+    assert_eq!(at(12.5, 12.0), [0, 0, 0, 255], "filled");
+    assert_eq!(at(18.5, 12.0), [0, 0, 0, 255], "to its tip");
+    assert_eq!(at(5.0, 12.0), [255; 4], "outside");
+    assert_eq!(at(24.0 + 12.5, 12.0), [255; 4], "stroked, hollow");
+    assert_eq!(at(24.0 + 8.0, 12.0), [0, 0, 0, 255], "stroked, its edge");
+  }
+
+  /// A square in a square drawn the same way, its inner edges between pixels, and two squares
+  /// touching between pixels.
+  struct Nested;
+
+  impl crate::app::App for Nested {
+    fn view(&mut self, ui: &mut Ui) {
+      let row = Style::new().w(crate::ui::grow()).h(crate::ui::grow()).bg([1.0; 4]);
+      let icon = Icon::filled("M2 2H22V22H2ZM6.3 6.3H17.7V17.7H6.3Z");
+      let touching = Icon::filled("M2 2H8.25V22H2ZM8.25 2H22V22H8.25Z");
+      ui.row(row, |ui| {
+        ui.icon(icon, 24.0, [0.0, 0.0, 0.0, 1.0]);
+        ui.icon(touching, 24.0, [0.0, 0.0, 0.0, 1.0]);
+      });
+    }
+  }
+
+  #[test]
+  fn a_compound_fill_has_no_seams_inside() {
+    let mut h = crate::Harness::new(Nested, crate::Size::new(48.0, 24.0), 1.0);
+    h.frame();
+    let img = h.render();
+    for x in (3..21).chain(27..45) {
+      assert_eq!(img.pixel(x as f32 + 0.5, 12.5), [0, 0, 0, 255], "at {x}");
     }
   }
 }

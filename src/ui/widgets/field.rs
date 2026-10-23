@@ -35,6 +35,11 @@ impl Ui<'_> {
   /// password ([FieldStyle::password]). [Ui::disabled] dims it and reads no input.
   pub fn text_field(&mut self, id: Id, text: &mut String, style: &FieldStyle) -> Response {
     let b = self.text_field_behavior(id, text, style.multiline, style.password);
+    self.field_box(&b, style)
+  }
+
+  /// A text field's box and text in `style`'s look over its behaviour `b`.
+  pub(super) fn field_box(&mut self, b: &FieldBehavior, style: &FieldStyle) -> Response {
     let border = match b.focused && style.focus_border[3] > 0.0 {
       true => style.focus_border,
       false => style.frame.border_color,
@@ -50,8 +55,8 @@ impl Ui<'_> {
       false => (frame.scroll_x(), 0),
     };
 
-    let keys = self.keymap(EDIT_KEYS).with_id(id);
-    let r = keys.container(axis, frame, |ui| ui.field_text(&b, style, Style::new()));
+    let keys = self.keymap(EDIT_KEYS).with_id(b.id);
+    let r = keys.container(axis, frame, |ui| ui.field_text(b, style, Style::new()));
     let (changed, submitted, cancelled, blurred) = (b.changed, b.submitted, b.cancelled, b.blurred);
     Response { hovered: b.hovered, changed, submitted, cancelled, blurred, ..r }
   }

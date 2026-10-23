@@ -10,7 +10,7 @@ use std::hash::BuildHasherDefault;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::textlayout::{Edit, Stop, reveal};
-use super::{Align, Dim, Float, Id, Style, TextStyle};
+use super::{Align, Clip, Dim, Float, Id, Style, TextStyle};
 use crate::keys::Binding;
 use crate::scene::{Color, ImageId, Images, Point, Rect, Size};
 use crate::text::edit::{graphemes, next_grapheme};
@@ -256,8 +256,8 @@ impl Tree {
     let (mut clip, mut k) = (None::<Rect>, n.parent);
     loop {
       let a = &self.nodes[k as usize];
-      if a.style.clip {
-        clip = Some(clip.map_or(a.rect, |c| c.intersect(a.rect)));
+      if let Some(r) = a.style.clip_rect(a.rect) {
+        clip = Some(clip.map_or(r, |c| c.intersect(r)));
       }
 
       if k == 0 || a.float.is_some_and(|f| !f.clip) {
@@ -376,7 +376,7 @@ fn fit(t: &mut Tree, ax: usize, m: &mut dyn Measure) {
     (n.size[ax], n.min[ax]) = match s.size[ax] {
       Dim::Px(v) => (clamp(v, lo, hi), clamp(v, lo, hi)),
       Dim::Rigid => (clamp(content, lo, hi), clamp(content, lo, hi)),
-      _ if s.clip => (clamp(content, lo, hi), lo),
+      _ if s.clip != Clip::None => (clamp(content, lo, hi), lo),
       _ => (clamp(content, lo, hi), clamp(least, lo, hi)),
     };
   }

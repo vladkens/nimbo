@@ -35,7 +35,8 @@
 //! - [super::List] with [super::List::unstyled] rows: selection, keys and scrolling, rows drawn by
 //!   the app from [super::Row];
 //! - [Ui::text_field_behavior] and [Ui::selectable_behavior]: text editing on the editing model
-//!   ([Editor]), drawn by [Ui::field_text] ([super::widgets]).
+//!   ([Editor]), drawn by [Ui::field_text] ([super::widgets]);
+//! - [Ui::search_behavior]: a single-line field's, its text cleared by a ⊗ or Escape.
 //!
 //! The widgets' and containers' behaviours live beside their looks, in [super::widgets] and
 //! [super::containers].
@@ -209,6 +210,24 @@ pub(crate) struct FieldState {
   /// Requests made so far.
   reveals: u32,
   focused: bool,
+}
+
+impl FieldState {
+  /// Clears the text as one edit that undoes, a composition dropped first, and the app's
+  /// `text` with it, at `now`: the caret shows and scrolls into view. A search field's ⊗ and
+  /// Escape.
+  pub(crate) fn clear(&mut self, text: &mut String, now: Duration) {
+    self.ed.discard_marked();
+    if !self.ed.text().is_empty() {
+      self.ed.replace(0..self.ed.text().len(), "");
+    }
+
+    text.clear();
+    self.held = None;
+    synced(self, text);
+    self.blink = now;
+    reveal(self);
+  }
 }
 
 /// What a text field or selectable text got this frame, read before it is built; see the
@@ -579,11 +598,12 @@ fn drag(
 /// scrolled page): where a drag past the edges scrolls.
 fn visible(t: &super::Tree, id: Id) -> Option<Rect> {
   let mut i = t.find(id)? as usize;
-  let mut r = t.nodes[i].rect;
+  let n = &t.nodes[i];
+  let mut r = n.style.clip_rect(n.rect).unwrap_or(n.rect);
   while i != 0 {
     i = t.nodes[i].parent as usize;
-    if t.nodes[i].style.clip {
-      r = r.intersect(t.nodes[i].rect);
+    if let Some(c) = t.nodes[i].style.clip_rect(t.nodes[i].rect) {
+      r = r.intersect(c);
     }
   }
 

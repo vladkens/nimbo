@@ -4,7 +4,7 @@
 //! and RGBA images scaled by averaging ([scale_alpha]); only the alpha, the icons being
 //! templates.
 
-use crate::svg::flatten;
+use crate::svg::{flatten, spans};
 
 /// Samples a pixel's side is cut into: 4 × 4 per pixel.
 const SUB: usize = 4;
@@ -17,32 +17,18 @@ pub fn fill(d: &str, size: f32, side: u32, even_odd: bool) -> Vec<u8> {
   _ = flatten(d, k * SUB as f32, &mut polys);
   let n = side as usize;
   let mut hits = vec![0u16; n * n];
-  let mut xs: Vec<(f32, i32)> = Vec::new();
+  let mut xs = Vec::new();
   for row in 0..n * SUB {
     let y = (row as f32 + 0.5) / (SUB as f32 * k);
-    xs.clear();
-    for poly in &polys {
-      for (a, b) in poly.iter().zip(poly.iter().cycle().skip(1)) {
-        if (a.y <= y) != (b.y <= y) {
-          let x = a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x);
-          xs.push((x * k * SUB as f32, if b.y > a.y { 1 } else { -1 }));
-        }
-      }
-    }
-
-    xs.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let mut wind = 0;
-    for (i, &(x0, dir)) in xs.iter().enumerate() {
-      wind += dir;
-      let inside = if even_odd { wind % 2 != 0 } else { wind != 0 };
-      let Some(&(x1, _)) = xs.get(i + 1).filter(|_| inside) else { continue };
+    spans(&polys, y, even_odd, &mut xs, |x0, x1| {
       // The samples whose centres the span covers.
+      let (x0, x1) = (x0 * k * SUB as f32, x1 * k * SUB as f32);
       let first = (x0 - 0.5).ceil().max(0.0) as usize;
       let last = ((x1 - 0.5).ceil().max(0.0) as usize).min(n * SUB);
       for s in first..last {
         hits[row / SUB * n + s / SUB] += 1;
       }
-    }
+    });
   }
 
   hits.iter().map(|&h| (h as u32 * 255 / (SUB * SUB) as u32) as u8).collect()

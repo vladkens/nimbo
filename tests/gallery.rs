@@ -4,7 +4,8 @@
 //! check box clicked in the light pane shows checked in the dark one, in its accent; a switch
 //! flips and its knob slides; the slider drags; a select opens and chooses by letters; a
 //! segment picks; an icon button's tooltip shows after a rest; a recorder records a chord; the
-//! dialog opens in the dark pane's theme, Escape closes it and the action counts.
+//! dialog opens in the dark pane's theme, Escape closes it and the action counts. The search
+//! field is drawn in each pane's theme, and what is typed in one clears from the other's ⊗.
 
 #[path = "../examples/gallery.rs"]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
@@ -15,9 +16,9 @@ mod common;
 
 use std::time::Duration;
 
-use common::{mid, px};
+use common::{diff, mid, px};
 use gallery::*;
-use nimbo::{Appearance, Event, Harness, Id, Modifiers, NamedKey, Rect, Size, Theme};
+use nimbo::{Appearance, Event, Harness, Id, Modifiers, NamedKey, Rect, Size, Theme, alpha, mix};
 
 type H = Harness<Gallery>;
 
@@ -113,4 +114,35 @@ fn every_widget_in_both_themes() {
   h.frame();
   h.click_id(dialog.key("action"));
   assert_eq!((h.app().deleted, h.app().ask), (1, None));
+}
+
+#[test]
+fn the_search_field_in_both_themes() {
+  let mut h = Harness::new(Gallery::default(), Size::new(1040.0, 560.0), 2.0);
+  h.event(Event::Appearance(Appearance::LIGHT));
+  h.frame();
+
+  // Each pane's field: the theme's search look over its ground, a touch lighter in the dark.
+  let img = h.render();
+  for (pane, t) in [(0, Theme::PLATES_LIGHT), (1, Theme::PLATES_DARK)] {
+    let r = rect(&h, SEARCH, pane);
+    let fill = t.search().frame.bg;
+    let want = px(mix(t.bg, alpha(fill, 1.0), fill[3]));
+    let got = img.pixel(r.x + r.w / 2.0, r.y + 4.0);
+    assert!(diff(got, want) <= 1, "pane {pane}: {got:?}, not {want:?}");
+  }
+
+  // Cleared from the dark pane's ⊗, typed in the light one: both show it.
+  h.click_id(id(SEARCH, 1).key("clear"));
+  h.frame();
+  assert_eq!(h.app().search, "");
+  assert!(h.rect(id(SEARCH, 0).key("clear")).is_none());
+  h.type_text("icons");
+  h.frame();
+  assert_eq!(h.focused(), Some(id(SEARCH, 1)));
+  h.click_id(id(SEARCH, 0));
+  h.type_text("!");
+  h.frame();
+  assert_eq!(h.app().search, "icons!");
+  assert!(h.rect(id(SEARCH, 1).key("clear")).is_some());
 }
