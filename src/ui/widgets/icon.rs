@@ -196,23 +196,28 @@ mod tests {
     assert_eq!(at(24.0 + 8.0, 12.0), [0, 0, 0, 255], "stroked, its edge");
   }
 
-  /// A square in a square drawn the same way, its inner edges between pixels.
+  /// A square in a square drawn the same way, its inner edges between pixels, and two squares
+  /// touching between pixels.
   struct Nested;
 
   impl crate::app::App for Nested {
     fn view(&mut self, ui: &mut Ui) {
       let row = Style::new().w(crate::ui::grow()).h(crate::ui::grow()).bg([1.0; 4]);
       let icon = Icon::filled("M2 2H22V22H2ZM6.3 6.3H17.7V17.7H6.3Z");
-      ui.row(row, |ui| _ = ui.icon(icon, 24.0, [0.0, 0.0, 0.0, 1.0]));
+      let touching = Icon::filled("M2 2H8.25V22H2ZM8.25 2H22V22H8.25Z");
+      ui.row(row, |ui| {
+        ui.icon(icon, 24.0, [0.0, 0.0, 0.0, 1.0]);
+        ui.icon(touching, 24.0, [0.0, 0.0, 0.0, 1.0]);
+      });
     }
   }
 
   #[test]
   fn a_compound_fill_has_no_seams_inside() {
-    let mut h = crate::Harness::new(Nested, crate::Size::new(24.0, 24.0), 1.0);
+    let mut h = crate::Harness::new(Nested, crate::Size::new(48.0, 24.0), 1.0);
     h.frame();
     let img = h.render();
-    for x in 3..21 {
+    for x in (3..21).chain(27..45) {
       assert_eq!(img.pixel(x as f32 + 0.5, 12.5), [0, 0, 0, 255], "at {x}");
     }
   }

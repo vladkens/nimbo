@@ -288,15 +288,22 @@ pub fn spans(
   // A span runs from where the line goes in to where it comes out, whole across the edges
   // inside it.
   let inside = |wind: i32| if even_odd { wind % 2 != 0 } else { wind != 0 };
-  let (mut wind, mut start) = (0, 0.0);
-  for &(x, dir) in xs.iter() {
-    let was = inside(wind);
+  let (mut wind, mut start, mut was) = (0, 0.0, false);
+  for (i, &(x, dir)) in xs.iter().enumerate() {
     wind += dir;
-    match (was, inside(wind)) {
+    // Crossings at one x count together: where two subpaths touch, a span goes on.
+    if xs.get(i + 1).is_some_and(|n| n.0 == x) {
+      continue;
+    }
+
+    let now = inside(wind);
+    match (was, now) {
       (false, true) => start = x,
       (true, false) => span(start, x),
       _ => {}
     }
+
+    was = now;
   }
 }
 
@@ -342,6 +349,10 @@ mod tests {
     got.clear();
     spans(&squares, 5.0, true, &mut xs, |a, b| got.push((a, b)));
     assert_eq!(got, [(0.0, 2.0), (8.0, 10.0)]);
+    // Two squares side by side, touching: one span.
+    got.clear();
+    spans(&lines("M0 0H5V10H0ZM5 0H10V10H5Z"), 5.0, false, &mut xs, |a, b| got.push((a, b)));
+    assert_eq!(got, [(0.0, 10.0)]);
   }
 
   #[test]
