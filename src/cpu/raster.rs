@@ -76,7 +76,7 @@ fn scaled(c: [f32; 4], k: f32) -> [f32; 4] {
   [c[0] * k, c[1] * k, c[2] * k, c[3] * k]
 }
 
-/// A float to 8-bit unorm as the GPU converts it: clamped, scaled, rounded to nearest even.
+/// A float to an 8-bit unorm: clamped to 0..=1, scaled by 255, rounded half to even.
 #[inline]
 fn unorm(x: f32) -> u32 {
   (x.clamp(0.0, 1.0) * 255.0).round_ties_even() as u32
