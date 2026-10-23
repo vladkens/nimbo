@@ -8,12 +8,17 @@
 //! ```
 //!
 //! A click on the ⊗ (`id.key("clear")`) clears the text and focuses the field, ready for the
-//! next search; Escape clears it too, and goes on to the app only when the field is empty
-//! already, so an Escape that cleared it doesn't also close a dialog.
+//! next search; Escape clears it too, before the app's bindings, and goes on to them only when
+//! the field is empty already, so an Escape that cleared it doesn't also close a dialog. While
+//! an input method composes, Escape is the input method's.
+
+use keyboard_types::NamedKey;
 
 use super::icon::{self, Icon};
 use super::shortcut::clear_mark;
-use crate::ui::{Cursor, FieldBehavior, FieldStyle, Float, Id, Response, Style, Ui, px};
+use crate::keys::Key;
+use crate::ui::behavior::FieldState;
+use crate::ui::{Cursor, FieldBehavior, FieldStyle, Float, Id, Response, Style, Ui, grow, px};
 
 /// The ⊗'s side, and how far in it is from the field's right edge.
 const MARK: f32 = 14.0;
@@ -22,21 +27,31 @@ const INSET: f32 = 8.0;
 impl Ui<'_> {
   /// A search field's input: [Ui::text_field_behavior]'s on one line, and a click on
   /// `id.key("clear")` (the ⊗ a look draws while there is text) or Escape clears the text,
-  /// `changed`; the ⊗ focuses the field, and an Escape that cleared it goes no further.
+  /// `changed`, an input method's composition with it. The ⊗ focuses the field; Escape is the
+  /// field's before any binding while there is text and nothing composing, else it goes on.
   pub fn search_behavior(&mut self, id: Id, text: &mut String) -> FieldBehavior {
     let off = self.next_disabled || self.scope_off;
-    let cleared = !off && self.clicked(id.key("clear")) && !text.is_empty();
+    let mut cleared = !off && self.clicked(id.key("clear")) && !text.is_empty();
     if cleared {
-      text.clear();
       self.focus(Some(id));
     }
 
-    let mut b = self.text_field_behavior(id, text, false, false);
-    if b.cancelled && !text.is_empty() {
+    if let Some(k) = self.key_down(id) {
+      let composing = self.state::<FieldState>(id).ed.marked().is_some();
+      match k.key == Key::Named(NamedKey::Escape) && k.mods.is_empty() {
+        true if !text.is_empty() && !composing => cleared = true,
+        _ => self.pass(id),
+      }
+    }
+
+    if cleared {
       text.clear();
-      b.changed = true;
-      // Taken again: the field gave it back to the app.
-      _ = self.command(id);
+      self.state::<FieldState>(id).ed.set_text("");
+    }
+
+    let mut b = self.text_field_behavior(id, text, false, false);
+    if b.focused && !text.is_empty() {
+      self.grab_keys(id);
     }
 
     b.changed |= cleared;
@@ -50,12 +65,15 @@ impl Ui<'_> {
     let t = self.theme();
     let b = self.search_behavior(id, text);
     let clear = !text.is_empty() && !b.disabled;
-    let mut style = *style;
+    // The frame's width goes to the box the marks sit in, which the field fills.
+    let f = style.frame;
+    let wrap = Style::new().w(f.size[0]).min_w(f.min[0]).max_w(f.max[0]);
+    let mut style = FieldStyle { frame: f.w(grow()).min_w(0.0).max_w(f32::INFINITY), ..*style };
     if clear {
       style.frame.pad[1] = style.frame.pad[1].max(INSET + MARK + 6.0);
     }
 
-    let (muted, wrap) = (self.dim(t.muted, b.disabled), Style::new().w(style.frame.size[0]));
+    let muted = self.dim(t.muted, b.disabled);
     let mut r = Response::default();
     // Its own id: the field may have taken its place's.
     self.next_id = Some((id.key("wrap"), false));
@@ -88,25 +106,52 @@ impl Ui<'_> {
 
 #[cfg(test)]
 mod tests {
-  use crate::app::App;
+  use crate::app::{App, Cx, Event};
   use crate::harness::Harness;
+  use crate::keys::{Binding, Command, bind};
   use crate::scene::{Rect, Size};
-  use crate::ui::{Cursor, Id, Ui};
+  use crate::ui::{Cursor, Id, Style, Ui, pct};
   use crate::{Modifiers, NamedKey};
 
-  /// A search field and the changes it reported.
+  const NONE: Modifiers = Modifiers::empty();
+
+  /// A search field, the changes it reported, and the app's own Escape: what the field gives
+  /// back. `narrow`: half the window wide, at most 100.
   #[derive(Default)]
   struct Find {
     text: String,
     changes: u32,
+    cancels: u32,
     off: bool,
+    narrow: bool,
   }
 
   impl App for Find {
+    fn keymap(&self) -> &[Binding] {
+      const KEYS: &[Binding] = &[bind("escape", Command::Cancel)];
+      KEYS
+    }
+
+    fn event(&mut self, _: &mut Cx, ev: &Event) -> bool {
+      let cancel = matches!(ev, Event::Command(Command::Cancel));
+      self.cancels += cancel as u32;
+      cancel
+    }
+
     fn view(&mut self, ui: &mut Ui) {
-      if ui.disabled(self.off).id("s").search(&mut self.text, "Search").changed {
+      let t = ui.theme();
+      let frame = t.search().frame;
+      let style = match self.narrow {
+        true => t.search().frame(frame.w(pct(50.0)).max_w(100.0)),
+        false => t.search().hint("Search"),
+      };
+
+      let r = ui.disabled(self.off).search_field(Id::of("s"), &mut self.text, &style);
+      if r.changed {
         self.changes += 1;
       }
+
+      ui.el(Style::new().w(crate::ui::grow()).h(crate::ui::px(20.0)));
     }
   }
 
@@ -163,17 +208,49 @@ mod tests {
   }
 
   #[test]
-  fn escape_clears_then_goes_on() {
+  fn escape_clears_before_the_apps_binding_then_goes_on() {
+    let mut h = find("");
+    h.click_id(Id::of("s"));
+    h.key('m', NONE);
+    h.type_text("oon");
+    assert_eq!(h.app().text, "moon");
+    assert!(h.key(NamedKey::Escape, NONE));
+    h.frame();
+    assert_eq!((h.app().text.as_str(), h.app().changes, h.app().cancels), ("", 3, 0));
+    assert_eq!(h.text(Id::of("s").key("text")), Some("Search"));
+    assert_eq!(h.focused(), Some(Id::of("s")));
+    // Empty, it is the app's.
+    assert!(h.key(NamedKey::Escape, NONE));
+    assert_eq!((h.app().changes, h.app().cancels), (3, 1));
+  }
+
+  #[test]
+  fn clearing_drops_a_composition() {
     let mut h = find("");
     h.click_id(Id::of("s"));
     h.type_text("moon");
-    assert!(h.key(NamedKey::Escape, Modifiers::empty()), "the field's while it clears");
+    h.ime_mark("ni");
     h.frame();
-    assert_eq!((h.app().text.as_str(), h.app().changes), ("", 2));
-    assert_eq!(h.text(Id::of("s").key("text")), Some("Search"));
-    assert_eq!(h.focused(), Some(Id::of("s")));
-    assert!(!h.key(NamedKey::Escape, Modifiers::empty()), "the app's when empty");
-    assert_eq!(h.app().changes, 2);
+    // Escape is the input method's while it composes.
+    h.key(NamedKey::Escape, NONE);
+    assert_eq!(h.app().text, "moon");
+    h.click_id(Id::of("s").key("clear"));
+    h.frame();
+    assert_eq!(h.app().text, "");
+    assert_eq!(h.editor(Id::of("s")).map(|e| (e.text(), e.marked())), Some(("", None)));
+    h.ime_commit("日");
+    h.frame();
+    assert_eq!(h.app().text, "日");
+  }
+
+  #[test]
+  fn the_marks_stay_in_a_field_of_its_own_width() {
+    let mut h = find("moon");
+    h.app_mut().narrow = true;
+    h.frame();
+    let (field, x) = (h.rect(Id::of("s")).unwrap(), clear(&h).unwrap());
+    assert_eq!(field.w, 100.0);
+    assert!(x.x > field.x + field.w / 2.0 && x.x + x.w <= field.x + field.w - 8.0, "{x:?}");
   }
 
   #[test]
@@ -184,6 +261,7 @@ mod tests {
     assert!(clear(&h).is_none());
     h.click_id(Id::of("s"));
     assert_eq!(h.focused(), None);
+    h.key(NamedKey::Escape, NONE);
     assert_eq!((h.app().text.as_str(), h.app().changes), ("moon", 0));
   }
 }
