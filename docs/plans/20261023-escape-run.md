@@ -8,6 +8,6 @@ Two pieces an app on the app platform (#15) still needs: taking Escape from ever
 - [x] Linux: the portal can't; `Status::escape_error` says so.
 - [x] Tests of the tap's and the hook's decisions, the hotkey thread's dedupe, Linux's status.
 - [x] `run_args(cfg, app, script, &args)`, with `run` over it; its doc snippet and a unit test of the shot path.
-- [ ] PR, reviews.
+- [x] PR (#19), reviews: Codex (three fixed), Copilot out of quota.
 - [ ] Checks: the Windows hook in a desktop session.
 
