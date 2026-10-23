@@ -309,7 +309,8 @@ impl Style {
       Clip::None => None,
       Clip::Box => Some(r),
       Clip::Content => {
-        Some(Rect::new(r.x + left, r.y + top, r.w - left - right, r.h - top - bottom))
+        let (w, h) = ((r.w - left - right).max(0.0), (r.h - top - bottom).max(0.0));
+        Some(Rect::new(r.x + left, r.y + top, w, h))
       }
     }
   }
