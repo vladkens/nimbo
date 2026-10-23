@@ -310,11 +310,14 @@ pub fn spans(
 
 /// An icon file's `<path>` elements joined into one path: its view box's side, the path data and
 /// whether it fills even-odd. What an icon file has, and nothing else: a square `viewBox` from
-/// `0 0`, and paths filled by one rule (`fill-rule="evenodd"` on each, or on none) that don't
-/// overlap (joined, they fill as one path); groups, titles and comments are passed over. Any
-/// other element, a `transform`, an unfilled path or data that doesn't parse is an error.
+/// `0 0`, and paths filled by one rule (`fill-rule="evenodd"`, on each or a group around them,
+/// or none) that don't overlap (joined, they fill as one path); groups, titles and comments are
+/// passed over. Any other element, a `transform` or `style`, an unfilled path (`fill="none"` on
+/// it or a group around it) or data that doesn't parse is an error.
 pub fn document(svg: &str) -> Result<(f32, String, bool), String> {
   let (mut size, mut paths, mut rules) = (None, Vec::new(), Vec::new());
+  // Each open element's fill and fill rule, which the elements in it inherit.
+  let mut fills = vec![(true, false)];
   let mut rest = svg;
   while let Some(at) = rest.find('<') {
     rest = &rest[at + 1..];
@@ -326,31 +329,55 @@ pub fn document(svg: &str) -> Result<(f32, String, bool), String> {
     let end = rest.find('>').filter(|&e| !rest[..e].contains('<')).ok_or("an unclosed tag")?;
     let tag = &rest[..end];
     rest = &rest[end + 1..];
-    let name = &tag[..tag.find(|c: char| !c.is_ascii_alphanumeric()).unwrap_or(tag.len())];
-    if attr(tag, "transform").is_some() {
-      return Err(format!("<{name}> has a transform"));
+    if tag.starts_with(['?', '!']) {
+      continue;
     }
 
+    if let Some(name) = tag.strip_prefix('/') {
+      if matches!(name.trim(), "svg" | "g") && fills.len() > 1 {
+        fills.pop();
+      }
+
+      continue;
+    }
+
+    let (name, attrs) = attributes(tag)?;
+    let get = |k: &str| attrs.iter().find(|a| a.0 == k).map(|a| a.1);
+    if let Some(k) = ["transform", "style"].into_iter().find(|k| get(k).is_some()) {
+      return Err(format!("<{name}> has a {k}"));
+    }
+
+    let (filled, even_odd) = *fills.last().unwrap_or(&(true, false));
+    let fill = (
+      get("fill").map_or(filled, |f| f != "none"),
+      get("fill-rule").map_or(even_odd, |r| r == "evenodd"),
+    );
     match name {
-      // `</…>`, `<?xml …?>`, `<!DOCTYPE …>`.
-      "" | "g" | "title" | "desc" => {}
-      "svg" => {
-        let view = attr(tag, "viewBox").ok_or("no viewBox")?;
-        let v: Vec<f32> = view.split([' ', ',']).filter_map(|n| n.parse().ok()).collect();
-        size = match v[..] {
-          [0.0, 0.0, w, h] if w == h && w > 0.0 => Some(w),
-          _ => return Err(format!("a viewBox not square from 0 0: {view}")),
-        };
+      "title" | "desc" => {}
+      "svg" | "g" => {
+        if name == "svg" {
+          let view = get("viewBox").ok_or("no viewBox")?;
+          let v: Vec<f32> = view.split([' ', ',']).filter_map(|n| n.parse().ok()).collect();
+          size = match v[..] {
+            [0.0, 0.0, w, h] if w == h && w > 0.0 => Some(w),
+            _ => return Err(format!("a viewBox not square from 0 0: {view}")),
+          };
+        }
+
+        if !tag.ends_with('/') {
+          fills.push(fill);
+        }
       }
       "path" => {
-        let d = attr(tag, "d").ok_or("a <path> without d")?;
-        if attr(tag, "fill") == Some("none") {
+        let d = get("d").ok_or("a <path> without d")?;
+        if !fill.0 {
           return Err("a <path> not filled".into());
         }
 
         flatten(d, 1.0, &mut Vec::new())?;
-        paths.push(d);
-        rules.push(attr(tag, "fill-rule") == Some("evenodd"));
+        // A path's first `m` is from the origin, not from where the path before it ended.
+        paths.push(if d.trim_start().starts_with('m') { format!("M0 0{d}") } else { d.into() });
+        rules.push(fill.1);
       }
       _ => return Err(format!("<{name}> is not read")),
     }
@@ -365,21 +392,32 @@ pub fn document(svg: &str) -> Result<(f32, String, bool), String> {
   Ok((size, paths.join(" "), even_odd))
 }
 
-/// The value of attribute `name` in a tag's text, quoted either way.
-fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
-  let mut from = 0;
-  while let Some(i) = tag[from..].find(name) {
-    let at = from + i;
-    from = at + name.len();
-    let after = tag[from..].strip_prefix('=');
-    let quote = after.and_then(|a| a.chars().next()).filter(|q| matches!(q, '"' | '\''));
-    if let (Some(q), true) = (quote, tag[..at].ends_with(|c: char| c.is_ascii_whitespace())) {
-      let value = &tag[from + 2..];
-      return value.find(q).map(|e| &value[..e]);
-    }
-  }
+/// An element's attributes, `(name, value)`.
+type Attrs<'a> = Vec<(&'a str, &'a str)>;
 
-  None
+/// A start tag's name and its attributes, `name = "value"` with either quote and any spaces.
+fn attributes(tag: &str) -> Result<(&str, Attrs<'_>), String> {
+  let tag = tag.strip_suffix('/').unwrap_or(tag);
+  let word = |s: &str| s.find(|c: char| c.is_whitespace() || c == '=').unwrap_or(s.len());
+  let (name, mut rest) = tag.split_at(word(tag));
+  let mut out = Vec::new();
+  loop {
+    rest = rest.trim_start();
+    if rest.is_empty() {
+      return Ok((name, out));
+    }
+
+    let (key, after) = rest.split_at(word(rest));
+    let after = after.trim_start().strip_prefix('=').map(str::trim_start);
+    let quote = after.and_then(|a| a.chars().next()).filter(|q| matches!(q, '"' | '\''));
+    let (Some(after), Some(q)) = (after, quote) else {
+      return Err(format!("<{name}>: an attribute {key} without a quoted value"));
+    };
+    let value = &after[1..];
+    let len = value.find(q).ok_or_else(|| format!("<{name}>: {key} is not closed"))?;
+    out.push((key, &value[..len]));
+    rest = &value[len + 1..];
+  }
 }
 
 #[cfg(test)]
@@ -396,12 +434,27 @@ mod tests {
     let one = |path: &str| format!(r#"<svg viewBox="0,0,24,24">{path}</svg>"#);
     assert!(!document(&one(r#"<path id="a" d="M1 1h2"/>"#)).unwrap().2);
 
+    // Spaces around `=`; fill and rule inherited from a group; a relative first move from the
+    // origin.
+    let svg = r#"<svg viewBox = '0 0 24 24' fill="none"><g fill-rule="evenodd" fill="black">
+      <path d="M1 1h2v2H1Z"/><path d = "m5 5h2v2h-2z"/></g></svg>"#;
+    let (_, d, even_odd) = document(svg).unwrap();
+    assert_eq!((d.as_str(), even_odd), ("M1 1h2v2H1Z M0 0m5 5h2v2h-2z", true));
+    let mut out = Vec::new();
+    flatten(&d, 1.0, &mut out).unwrap();
+    assert!(near(out[1][0], 5.0, 5.0), "{:?}", out[1][0]);
+
     for (bad, why) in [
       (one(""), "no <path>"),
       (one(r#"<path d="M1 1h2" fill-rule="evenodd"/><path d="M1 1h2"/>"#), "different rules"),
       (one(r#"<circle r="2"/>"#), "<circle> is not read"),
       (one(r#"<g transform="scale(2)"><path d="M1 1h2"/></g>"#), "transform"),
       (one(r#"<path d="M1 1h2" fill="none"/>"#), "not filled"),
+      (r#"<svg viewBox="0 0 9 9" fill="none"><path d="M1 1h2"/></svg>"#.into(), "not filled"),
+      (one(r#"<g fill="none"><g><path d="M1 1h2"/></g></g>"#), "not filled"),
+      (one(r#"<path transform = "scale(2)" d="M1 1h2"/>"#), "transform"),
+      (one(r#"<path style="fill:none" d="M1 1h2"/>"#), "style"),
+      (one(r#"<path d=M1/>"#), "quoted"),
       (one(r#"<path d="M1 1Q"/>"#), ""),
       (one(r#"<path fill="red"/>"#), "without d"),
       (r#"<svg viewBox="0 0 24 18"><path d="M1 1h2"/></svg>"#.into(), "not square"),
