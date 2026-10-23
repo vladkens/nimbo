@@ -138,7 +138,7 @@ pub fn key_for(c: char, cmd: bool) -> Option<(u16, bool)> {
 /// first, never the keypad's (its `+` is no `cmd++`).
 fn key_in(src: CFTypeRef, c: char, cmd: bool) -> Option<(u16, bool)> {
   let main = |k: &u16| !code(*k).to_string().starts_with("Numpad");
-  let at = |shift, cmd| (0..128).filter(main).find(|&k| translate(src, k, shift, cmd) == Some(c));
+  let at = |shift, cmd| (0..128).find(|k| translate(src, *k, shift, cmd) == Some(c) && main(k));
   let ways = [(false, cmd), (true, cmd), (false, false), (true, false)];
   ways.into_iter().find_map(|(shift, cmd)| Some((at(shift, cmd)?, shift)))
 }
@@ -222,8 +222,11 @@ mod tests {
     fn CFArrayGetValueAtIndex(a: CFTypeRef, i: isize) -> CFTypeRef;
   }
 
-  /// `f` on the installed layout `id` (enabled or not).
+  /// `f` on the installed layout `id` (enabled or not), one test at a time: TIS aborts the
+  /// process when two threads call it at once.
   fn on_layout(id: &str, f: impl FnOnce(CFTypeRef)) {
+    static TIS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one = TIS.lock().unwrap_or_else(|e| e.into_inner());
     // SAFETY: the key is a CFString constant; the list is retained (Create rule) and released
     // after its source is used.
     unsafe {

@@ -448,7 +448,7 @@ fn mods_label(m: Modifiers, mac: bool) -> String {
   held.map(|r| if mac { r.2.to_string() } else { format!("{}+", r.3) }).collect()
 }
 
-pub(crate) fn lower(c: char) -> char {
+fn lower(c: char) -> char {
   c.to_lowercase().next().unwrap_or(c)
 }
 
@@ -857,33 +857,48 @@ pub fn printable(s: &str) -> bool {
 /// | Windows | `SendInput`: the modifier keys down, the key, the modifiers up | an app in focus that does not run elevated above this one |
 /// | Linux | XTest (`libXtst`, loaded at run time) on X11 | X11: on Wayland it fails, no protocol lets an app type into another |
 pub fn post(s: Shortcut) -> Result<(), String> {
-  crate::platform::post::post(s)
+  let key = match s.key {
+    Key::Char(c) => Key::Char(lower(c)),
+    k => k,
+  };
+
+  crate::platform::post::post(Shortcut { key, ..s })
 }
 
-/// The presses that send `key` with modifiers `want` while the modifier keys `held` are down
-/// (each with its modifier: a side's own key), where modifier keys are pressed (Windows, X11):
-/// the held keys of modifiers not wanted up, a key for each wanted modifier not held down
-/// (`modkey`), the key down and up, then each modifier key back as it was. The keys the user
-/// still holds (a hotkey's) neither join the shortcut nor end up let go, and no other key stays
-/// down.
+/// The presses that send `key` with modifiers `want` where modifier keys are pressed (Windows,
+/// X11), `of` giving the key at a modifier's place and `down` whether a key is held now: each
+/// held key of a modifier not wanted up, the left key of each wanted modifier not held down, the
+/// key down and up, then each modifier key back as it was. The keys the user still holds (a
+/// hotkey's) neither join the shortcut nor end up let go, and no other key stays down. A held Alt
+/// or Win/Super lifted and put back would read as tapped alone (the menu bar, the Start menu,
+/// GNOME's overview), at the lift and at the user's own release after: `mask`, a key that does
+/// nothing, is tapped before the lift and after the keys are back. `None` when a wanted modifier
+/// has no key.
 #[cfg(any(test, not(target_os = "macos")))]
 pub(crate) fn strokes<K: Copy>(
   want: Modifiers,
-  held: &[(Modifiers, K)],
   key: K,
-  modkey: impl Fn(Modifiers) -> K,
-) -> Vec<(K, bool)> {
-  let all = [Modifiers::CONTROL, Modifiers::ALT, Modifiers::SHIFT, Modifiers::META];
-  let has = held.iter().fold(Modifiers::empty(), |m, h| m | h.0);
-  let lift: Vec<K> = held.iter().filter(|h| !want.contains(h.0)).map(|h| h.1).collect();
-  let press: Vec<K> =
-    all.into_iter().filter(|&m| want.contains(m) && !has.contains(m)).map(modkey).collect();
-  let mut out: Vec<_> = lift.iter().map(|&k| (k, false)).collect();
-  out.extend(press.iter().map(|&k| (k, true)));
-  out.extend([(key, true), (key, false)]);
-  out.extend(press.iter().rev().map(|&k| (k, false)));
-  out.extend(lift.iter().rev().map(|&k| (k, true)));
-  out
+  of: impl Fn(Code) -> Option<K>,
+  down: impl Fn(K) -> bool,
+  mask: Option<K>,
+) -> Option<Vec<(K, bool)>> {
+  let (mut lift, mut press, mut lone) = (Vec::new(), Vec::new(), false);
+  for &(m, .., left, right) in &MODS {
+    let held: Vec<K> = [left, right].into_iter().filter_map(&of).filter(|&k| down(k)).collect();
+    if !want.contains(m) {
+      lone |= !held.is_empty() && m.intersects(Modifiers::ALT | Modifiers::META);
+      lift.extend(held);
+    } else if held.is_empty() {
+      press.push(of(left)?);
+    }
+  }
+
+  let (up, dn) = (|&k: &K| (k, false), |&k: &K| (k, true));
+  let tap: Vec<_> =
+    mask.filter(|_| lone).into_iter().flat_map(|m| [(m, true), (m, false)]).collect();
+  let around = tap.iter().copied().chain(lift.iter().map(up)).chain(press.iter().map(dn));
+  let back = press.iter().rev().map(up).chain(lift.iter().rev().map(dn)).chain(tap.iter().copied());
+  Some(around.chain([(key, true), (key, false)]).chain(back).collect())
 }
 
 #[cfg(test)]
@@ -906,18 +921,37 @@ mod tests {
     }
   }
 
-  /// Ctrl-V as Windows and X11 get it: Ctrl around the key; a held right Shift lifted for it and
-  /// put back after, itself and not the left one; a held Ctrl left as it is.
+  /// Ctrl-V as Windows and X11 get it: the left Ctrl around the key; a held right Shift lifted
+  /// for it and put back after, itself and not the left one; a held right Ctrl left as it is; and
+  /// none without a key for a modifier wanted. A held right Alt or Win lifted gets the mask key
+  /// tapped before it goes up and after it is back, so neither its lift nor the user's release
+  /// reads as a lone tap; Shift needs none.
   #[test]
   fn posted_keys_hold_the_modifiers_around_the_key() {
-    let name = |m: Modifiers| if m == Modifiers::SHIFT { "lshift" } else { "lctrl" };
-    let (ctrl, shift) = (Modifiers::CONTROL, Modifiers::SHIFT);
-    let s = strokes(ctrl, &[(shift, "rshift")], "v", name);
-    let want = [("rshift", false), ("lctrl", true), ("v", true), ("v", false), ("lctrl", false)];
-    assert_eq!(s, [&want[..], &[("rshift", true)]].concat());
-    assert_eq!(strokes(ctrl, &[(ctrl, "rctrl")], "v", name), [("v", true), ("v", false)]);
-    assert_eq!(strokes(Modifiers::empty(), &[], "a", name), [("a", true), ("a", false)]);
+    use Code::{
+      AltRight as RAlt, ControlLeft as LCtrl, ControlRight as RCtrl, F24 as Mask, KeyA, KeyV,
+      MetaRight as RWin, ShiftRight as RShift,
+    };
+    let s = |want, held: &[Code], key| strokes(want, key, Some, |c| held.contains(&c), Some(Mask));
+    let ctrl = Modifiers::CONTROL;
+    let want = [(RShift, false), (LCtrl, true), (KeyV, true), (KeyV, false), (LCtrl, false)];
+    assert_eq!(s(ctrl, &[RShift], KeyV), Some([&want[..], &[(RShift, true)]].concat()));
+    assert_eq!(s(ctrl, &[RCtrl], KeyV), Some(vec![(KeyV, true), (KeyV, false)]));
+    assert_eq!(s(Modifiers::empty(), &[], KeyA), Some(vec![(KeyA, true), (KeyA, false)]));
+    let no_left = |c| Some(c).filter(|&c| c != LCtrl);
+    assert_eq!(strokes(ctrl, KeyV, no_left, |_| false, None), None);
+
+    let tap = [(Mask, true), (Mask, false)];
+    for held in [RAlt, RWin] {
+      let lifted = [(held, false), (LCtrl, true), (KeyV, true), (KeyV, false), (LCtrl, false)];
+      let want = [&tap[..], &lifted, &[(held, true)], &tap].concat();
+      assert_eq!(s(ctrl, &[held], KeyV), Some(want), "{held}");
+    }
+
+    let alt = Modifiers::ALT;
+    assert_eq!(s(alt, &[RAlt], KeyV), Some(vec![(KeyV, true), (KeyV, false)]), "Alt kept");
   }
+
   #[test]
   fn parses_shortcuts_in_the_app() {
     let k = |key, mods| Ok(Shortcut { key, mods });

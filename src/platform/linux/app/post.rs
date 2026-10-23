@@ -4,7 +4,8 @@
 //! `libXtst`, loaded at run time), the modifier keys set as the shortcut wants them, the key, the
 //! modifiers back as the user holds them ([crate::keys::strokes]). The key is the one with the
 //! character's keysym in the group in use, else in another (so Ctrl-V works on a Russian
-//! layout), Shift added at its second level. Wayland has no
+//! layout), Shift added at its second level; a key with no symbols is the mask tapped around a
+//! held Alt or Super lifted and put back, so neither reads as tapped alone. Wayland has no
 //! protocol for one app to type into another (only the RemoteDesktop portal, which asks the user
 //! each session): there it fails, as on X11 without the libraries.
 
@@ -14,9 +15,9 @@ use std::sync::OnceLock;
 
 use keyboard_types::{Modifiers, NamedKey};
 
-use super::super::P;
 use super::super::dl::{Lib, fns};
-use crate::keys::{Key, Shortcut, f_key, lower, strokes};
+use super::super::{P, keys, lib};
+use crate::keys::{Key, Shortcut, f_key, strokes};
 
 fns!(X11 {
   fn XOpenDisplay(name: *const c_char) -> P;
@@ -26,6 +27,7 @@ fns!(X11 {
   fn XkbKeycodeToKeysym(d: P, code: u8, group: c_int, level: c_int) -> c_ulong;
   fn XkbGetState(d: P, device: c_uint, state: *mut u8) -> c_int;
   fn XFlush(d: P) -> c_int;
+  fn XDisplayKeycodes(d: P, min: *mut c_int, max: *mut c_int) -> c_int;
 });
 
 fns!(Xtst {
@@ -50,7 +52,7 @@ fn libs() -> Option<&'static (X11, Xtst)> {
 
 fn gdk() -> Option<&'static Gdk> {
   static GDK: OnceLock<Option<Gdk>> = OnceLock::new();
-  GDK.get_or_init(|| Gdk::load(&Lib::open(&[c"libgdk-3.so.0"])?)).as_ref()
+  GDK.get_or_init(|| Gdk::load(&lib()?)).as_ref()
 }
 
 pub fn post(s: Shortcut) -> Result<(), String> {
@@ -65,26 +67,36 @@ pub fn post(s: Shortcut) -> Result<(), String> {
     return Err("no X display".into());
   }
 
-  let posted = (|| {
-    let (key, shift) = find(x, d, sym)?;
-    let mods = if shift { s.mods | Modifiers::SHIFT } else { s.mods };
-    let modkey = |m| unsafe { (x.XKeysymToKeycode)(d, modifier_keysym(m)) };
-    let presses = strokes(mods, &held(x, d), key, modkey);
-    if presses.iter().any(|&(k, _)| k == 0) {
-      return None;
-    }
-
-    for (k, down) in presses {
-      unsafe { (t.XTestFakeKeyEvent)(d, k.into(), down.into(), 0) };
-    }
-
-    Some(())
-  })();
+  let posted = send(x, t, d, s.mods, sym);
   unsafe {
     (x.XFlush)(d);
     (x.XCloseDisplay)(d);
   }
   posted.ok_or("the keymap has no such key".into())
+}
+
+/// Sends `sym` with `mods` on display `d`: none sent when the keymap lacks a key it needs.
+fn send(x: &X11, t: &Xtst, d: P, mods: Modifiers, sym: c_ulong) -> Option<()> {
+  let (key, shift) = find(x, d, sym)?;
+  let mods = if shift { mods | Modifiers::SHIFT } else { mods };
+  let mut held = [0u8; 32];
+  unsafe { (x.XQueryKeymap)(d, held.as_mut_ptr()) };
+  let of = |code| keys::modifier_sym(code).map(|s| unsafe { (x.XKeysymToKeycode)(d, s.into()) });
+  let down = |k: u8| held[k as usize / 8] & (1 << (k % 8)) != 0;
+  for (k, press) in strokes(mods, key, |c| of(c).filter(|&k| k != 0), down, spare(x, d))? {
+    unsafe { (t.XTestFakeKeyEvent)(d, k.into(), press.into(), 0) };
+  }
+
+  Some(())
+}
+
+/// A keycode of the server's with no symbols in any group: pressed, it does nothing.
+fn spare(x: &X11, d: P) -> Option<u8> {
+  let (mut min, mut max) = (0, 0);
+  unsafe { (x.XDisplayKeycodes)(d, &mut min, &mut max) };
+  let codes = (min.max(8) as u8)..=(max.min(255) as u8);
+  let none = |k| (0..4).all(|g| (0..4).all(|l| unsafe { (x.XkbKeycodeToKeysym)(d, k, g, l) } == 0));
+  codes.rev().find(|&k| none(k))
 }
 
 /// The keycode with `sym` and whether it takes Shift: in the group in use first (with US and
@@ -103,34 +115,12 @@ fn find(x: &X11, d: P, sym: c_ulong) -> Option<(u8, bool)> {
   groups.flat_map(|g| [(g, 0), (g, 1)]).find_map(|(g, level)| Some((at(g, level)?, level == 1)))
 }
 
-/// The modifier keys down now, each side by its own keycode.
-fn held(x: &X11, d: P) -> Vec<(Modifiers, u8)> {
-  let mut keys = [0u8; 32];
-  unsafe { (x.XQueryKeymap)(d, keys.as_mut_ptr()) };
-  let sides = [
-    (Modifiers::SHIFT, 0xFFE1),
-    (Modifiers::SHIFT, 0xFFE2),
-    (Modifiers::CONTROL, 0xFFE3),
-    (Modifiers::CONTROL, 0xFFE4),
-    (Modifiers::ALT, 0xFFE9),
-    (Modifiers::ALT, 0xFFEA),
-    (Modifiers::META, 0xFFEB),
-    (Modifiers::META, 0xFFEC),
-  ];
-  let code = |(m, sym)| (m, unsafe { (x.XKeysymToKeycode)(d, sym) });
-  let down = |&(_, k): &(Modifiers, u8)| k != 0 && keys[k as usize / 8] & (1 << (k % 8)) != 0;
-  sides.into_iter().map(code).filter(down).collect()
-}
-
 /// The X keysym of `key`: a character's as GDK has it (Cyrillic, Greek and others have their own
-/// keysyms, `ж` is `Cyrillic_zhe`), else [unicode_keysym]; named keys' from `keysymdef.h`.
+/// keysyms, `ж` is `Cyrillic_zhe`, the rest `0x1000000` plus the code point); named keys' from
+/// `keysymdef.h`.
 fn keysym(key: Key) -> Option<c_ulong> {
   let named = match key {
-    Key::Char(c) => {
-      let c = lower(c);
-      let gdk = gdk().map(|g| unsafe { (g.gdk_unicode_to_keyval)(c as u32) } as c_ulong);
-      return Some(gdk.unwrap_or_else(|| unicode_keysym(c)));
-    }
+    Key::Char(c) => return gdk().map(|g| unsafe { (g.gdk_unicode_to_keyval)(c as u32) }.into()),
     Key::Named(k) => k,
   };
 
@@ -158,31 +148,15 @@ fn keysym(key: Key) -> Option<c_ulong> {
   })
 }
 
-/// A character's keysym without GDK: Latin-1's is its code point, another's `0x1000000` plus it.
-fn unicode_keysym(c: char) -> c_ulong {
-  let c = c as c_ulong;
-  if (0x20..0x7F).contains(&c) || (0xA0..0x100).contains(&c) { c } else { 0x0100_0000 | c }
-}
-
-/// The left key of modifier `m`: Control_L, Alt_L, Shift_L, Super_L.
-fn modifier_keysym(m: Modifiers) -> c_ulong {
-  match m {
-    Modifiers::CONTROL => 0xFFE3,
-    Modifiers::ALT => 0xFFE9,
-    Modifiers::SHIFT => 0xFFE1,
-    _ => 0xFFEB,
-  }
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
 
   #[test]
   fn keysyms_of_keys() {
-    let keys = [Key::Char('V'), Key::Char('+'), Key::Named(NamedKey::Enter)];
-    assert_eq!(keys.map(keysym), [Some(0x76), Some(0x2B), Some(0xFF0D)]);
-    assert_eq!(unicode_keysym('ж'), 0x0100_0436);
+    let keys = [Key::Char('v'), Key::Char('+'), Key::Char('ж'), Key::Named(NamedKey::Enter)];
+    assert_eq!(keys.map(keysym), [Some(0x76), Some(0x2B), Some(0x6D6), Some(0xFF0D)]);
+    assert_eq!(keysym(Key::Char('\u{1F600}')), Some(0x0101_F600));
     assert_eq!(keysym(Key::Named(NamedKey::F12)), Some(0xFFC9));
   }
 }

@@ -95,8 +95,8 @@
 //!   path), each `-> Result<(), String>` without waiting for the app it starts; `file_manager() ->
 //!   &'static str`.
 //! - `pub mod post` ([crate::keys::post]): `post(Shortcut) -> Result<(), String>`, the shortcut as
-//!   key events to the app in focus, its character found on the layout in use.
-//! - `pub fn clipboard() -> Option<Box<dyn Clipboard>>`: the system clipboard outside a window
+//!   key events to the app in focus, its character (lowercase) found on the layout in use.
+//! - `pub fn clipboard() -> Option<impl Clipboard>`: the system clipboard outside a window
 //!   ([crate::SystemClipboard]), `None` while the platform can't reach it (no app running).
 //! - macOS only, `pub mod permissions` ([crate::permissions]): `accessibility(prompt: bool) ->
 //!   bool`, `secure_input() -> bool`.

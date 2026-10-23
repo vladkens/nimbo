@@ -32,17 +32,17 @@ KINDS = ("code", "docs", "comments", "tests", "blank")
 # platform/<os>/app) and the core (the rest of src/). Raising one is a decision recorded in its
 # PR.
 BUDGETS = {
-  "platform/macos": 1700,
+  "platform/macos": 1730,
   "platform/windows": 2000,
-  "platform/linux": 2810,
+  "platform/linux": 2830,
   "ui": 3700,
   "widgets": 2940,
   "text": 1180,
-  "core": 3460,
-  "app/shared": 720,
+  "core": 3490,
+  "app/shared": 750,
   "app/macos": 1210,
-  "app/windows": 1140,
-  "app/linux": 1080,
+  "app/windows": 1130,
+  "app/linux": 1060,
 }
 # Modules that count against a budget of another name ("app", src/app.rs, is the core's seams).
 # The settings form and the dialog are add-ons over the widgets, as the containers are.

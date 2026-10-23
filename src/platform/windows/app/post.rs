@@ -6,55 +6,41 @@
 //! between them. A letter or digit is its own virtual key on every layout (Ctrl-V is VK `V` on a
 //! Russian one too); another character the key that types it on the layout of the window in
 //! front (`VkKeyScanExW`). Windows drops input to an app running elevated above this one (UIPI).
+//! The events carry [POSTED], so the app's own hotkey hook lets them pass unseen.
 
 use keyboard_types::Modifiers;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
   GetAsyncKeyState, GetKeyboardLayout, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
-  KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, MapVirtualKeyW, SendInput, VK_CONTROL,
-  VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN,
-  VK_SHIFT, VkKeyScanExW,
+  KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, MapVirtualKeyW, SendInput, VkKeyScanExW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
 
 use super::super::keyboard;
-use crate::keys::{Key, Shortcut, lower, strokes};
+use super::hotkey::lone_vk;
+use crate::keys::{Key, Shortcut, strokes};
+
+/// The posted events' `dwExtraInfo`: the hotkey hook leaves them to the app in front.
+pub(super) const POSTED: usize = u32::from_be_bytes(*b"nmbo") as usize;
+/// The key tapped around a held Alt or Win lifted and put back: unassigned, so it does nothing,
+/// but neither key then reads as tapped alone (AutoHotkey's menu mask key).
+const MASK: u16 = 0xE8;
 
 pub fn post(s: Shortcut) -> Result<(), String> {
   let (vk, shift) = match s.key {
-    Key::Char(c) => char_key(lower(c)).ok_or(format!("no key types {c:?} without AltGr"))?,
+    Key::Char(c) => char_key(c).ok_or(format!("no key types {c:?} without AltGr"))?,
     Key::Named(k) => (keyboard::vk_of(k).ok_or("no such key")?, false),
   };
 
   let mods = if shift { s.mods | Modifiers::SHIFT } else { s.mods };
-  let modkey = |m| match m {
-    Modifiers::CONTROL => VK_CONTROL,
-    Modifiers::ALT => VK_MENU,
-    Modifiers::SHIFT => VK_SHIFT,
-    _ => VK_LWIN,
-  };
-  let inputs: Vec<INPUT> =
-    strokes(mods, &held(), vk, modkey).into_iter().map(|(vk, d)| input(vk, d)).collect();
+  let of = |code| lone_vk(code).map(|vk| vk as u16);
+  let down = |vk: u16| unsafe { GetAsyncKeyState(vk.into()) as u16 & 0x8000 != 0 };
+  let presses = strokes(mods, vk, of, down, Some(MASK)).ok_or("no modifier key")?;
+  let inputs: Vec<INPUT> = presses.into_iter().map(|(vk, d)| input(vk, d)).collect();
   let sent = unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), size_of::<INPUT>() as i32) };
   match sent as usize == inputs.len() {
     true => Ok(()),
     false => Err("SendInput was blocked (an elevated app in front?)".into()),
   }
-}
-
-/// The modifier keys down now, each side by its own virtual key.
-fn held() -> Vec<(Modifiers, u16)> {
-  let sides = [
-    (Modifiers::SHIFT, VK_LSHIFT),
-    (Modifiers::SHIFT, VK_RSHIFT),
-    (Modifiers::CONTROL, VK_LCONTROL),
-    (Modifiers::CONTROL, VK_RCONTROL),
-    (Modifiers::ALT, VK_LMENU),
-    (Modifiers::ALT, VK_RMENU),
-    (Modifiers::META, VK_LWIN),
-    (Modifiers::META, VK_RWIN),
-  ];
-  let down = |vk: u16| unsafe { GetAsyncKeyState(vk as i32) as u16 & 0x8000 != 0 };
-  sides.into_iter().filter(|s| down(s.1)).collect()
 }
 
 /// The virtual key typing `c` and whether it takes Shift.
@@ -79,6 +65,6 @@ fn input(vk: u16, down: bool) -> INPUT {
   }
 
   let scan = unsafe { MapVirtualKeyW(vk as u32, MAPVK_VK_TO_VSC) } as u16;
-  let ki = KEYBDINPUT { wVk: vk, wScan: scan, dwFlags: flags, time: 0, dwExtraInfo: 0 };
+  let ki = KEYBDINPUT { wVk: vk, wScan: scan, dwFlags: flags, time: 0, dwExtraInfo: POSTED };
   INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki } }
 }

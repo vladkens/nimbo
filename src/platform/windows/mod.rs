@@ -960,9 +960,9 @@ impl Clipboard for WinClipboard {
 
 /// The system clipboard outside a window, through the app's hidden window; `None` while no app
 /// runs: a clipboard opened for no window can't be written.
-pub fn clipboard() -> Option<Box<dyn Clipboard>> {
+pub fn clipboard() -> Option<impl Clipboard> {
   let host = app::shell::host();
-  (!host.is_null()).then(|| Box::new(WinClipboard::new(host)) as Box<dyn Clipboard>)
+  (!host.is_null()).then(|| WinClipboard::new(host))
 }
 
 /// The text of UTF-16 `units` up to the first NUL, or all of them without one.

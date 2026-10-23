@@ -56,6 +56,7 @@ fn absolute(path: &Path) -> Result<std::path::PathBuf, String> {
 /// what the file managers' D-Bus interface takes.
 #[cfg(any(all(test, unix), target_os = "linux"))]
 pub(crate) fn file_uri(path: &Path) -> String {
+  use std::fmt::Write;
   use std::os::unix::ffi::OsStrExt;
 
   let mut out = String::from("file://");
@@ -64,7 +65,7 @@ pub(crate) fn file_uri(path: &Path) -> String {
       b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
         out.push(b as char)
       }
-      _ => out.push_str(&format!("%{b:02X}")),
+      _ => _ = write!(out, "%{b:02X}"),
     }
   }
 

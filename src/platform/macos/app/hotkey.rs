@@ -31,7 +31,7 @@ use objc2_core_graphics::{
   CGEventTapProxy, CGEventType,
 };
 
-use super::super::keyboard::{code as key_at, device_flag};
+use super::super::keyboard::{code as key_at, device_flag, kvk};
 use crate::hotkey::{Edge, Listener, OnEdge, Status};
 use crate::keys::{Hotkey, is_modifier};
 
@@ -201,13 +201,13 @@ impl Hotkeys {
     let Some(hotkey) = hotkey else { return Ok(()) };
     match hotkey {
       Hotkey::Shortcut(s) => {
-        let code = s.code().and_then(mac_code).ok_or_else(|| format!("{s} has no key here"))?;
+        let code = s.code().and_then(kvk).ok_or_else(|| format!("{s} has no key here"))?;
         let flags = tap_flags(s.mods);
         self.shared.chord.store(SET | u64::from(code) | flags << 16, Ordering::Release);
         self.carbon_error = self.carbon.register(code, carbon::modifiers(s.mods)).err();
       }
       Hotkey::Modifier(key) => {
-        let code = mac_code(key).ok_or_else(|| format!("{hotkey} has no key here"))?;
+        let code = kvk(key).ok_or_else(|| format!("{hotkey} has no key here"))?;
         self.shared.chord.store(SET | LONE | u64::from(code), Ordering::Release);
       }
     }
@@ -276,11 +276,6 @@ impl Drop for Hotkeys {
     _ = self.set(None);
     self.escape(false);
   }
-}
-
-/// The virtual key code (`kVK_*`) of the key at `code`.
-fn mac_code(code: Code) -> Option<u16> {
-  (0..128).find(|&k| key_at(k) == code && code != Code::Unidentified)
 }
 
 /// The modifier key alone at virtual key code `kvk`.
@@ -414,6 +409,11 @@ unsafe extern "C-unwind" fn tap_callback(
   };
   // SAFETY: the event is valid for the duration of the callback.
   let event = Some(unsafe { event.as_ref() });
+  // The app's own posted keys ([super::post]) are no key of the user's.
+  if CGEvent::integer_value_field(event, CGEventField::EventSourceUserData) == super::post::POSTED {
+    return pass;
+  }
+
   let code = CGEvent::integer_value_field(event, CGEventField::KeyboardEventKeycode) as u64;
   let flags = CGEvent::flags(event).0;
   let repeat = || CGEvent::integer_value_field(event, CGEventField::KeyboardEventAutorepeat) != 0;
@@ -610,7 +610,7 @@ fn general_flag(key: Code) -> u64 {
 }
 
 /// The event tap's modifier flags for a chord's modifiers.
-fn tap_flags(mods: Modifiers) -> u64 {
+pub(super) fn tap_flags(mods: Modifiers) -> u64 {
   let flags = [
     (Modifiers::CONTROL, CGEventFlags::MaskControl),
     (Modifiers::ALT, CGEventFlags::MaskAlternate),
@@ -726,14 +726,14 @@ mod tests {
   }
 
   fn flags_at(s: &Shared, ms: u64, key: Code, flags: u64) -> Verdict {
-    let code = mac_code(key).unwrap();
+    let code = kvk(key).unwrap();
     judge(s, KeyKind::Flags, u64::from(code), flags, ms * 1_000_000, || false)
   }
 
   /// `key` alone set, as `Hotkeys::set` stores a modifier alone.
   fn lone_shared(key: Code) -> Shared {
     let s = Shared::default();
-    s.chord.store(SET | LONE | u64::from(mac_code(key).unwrap()), Ordering::Release);
+    s.chord.store(SET | LONE | u64::from(kvk(key).unwrap()), Ordering::Release);
     s
   }
 
@@ -908,20 +908,20 @@ mod tests {
   #[test]
   fn hotkeys_map_to_key_codes_and_flags() {
     let Ok(Hotkey::Shortcut(s)) = Hotkey::parse("ctrl+option+cmd+F12") else { panic!() };
-    assert_eq!(s.code().and_then(mac_code), Some(0x6F));
+    assert_eq!(s.code().and_then(kvk), Some(0x6F));
     let want = CGEventFlags::MaskControl.0 | CGEventFlags::MaskAlternate.0;
     assert_eq!(tap_flags(s.mods), want | CGEventFlags::MaskCommand.0);
     for (text, code) in
       [("a", 0x00), ("z", 0x06), ("0", 0x1D), ("9", 0x19), ("f1", 0x7A), ("f20", 0x5A)]
     {
       let Ok(Hotkey::Shortcut(s)) = Hotkey::parse(text) else { panic!("{text}") };
-      assert_eq!(s.code().and_then(mac_code), Some(code), "{text}");
+      assert_eq!(s.code().and_then(kvk), Some(code), "{text}");
     }
 
     let lone = [("right_option", 0x3D), ("left_cmd", 0x37), ("fn", 0x3F), ("rshift", 0x3C)];
     for (text, code) in lone {
       let Ok(Hotkey::Modifier(key)) = Hotkey::parse(text) else { panic!("{text}") };
-      assert_eq!(mac_code(key), Some(code), "{text}");
+      assert_eq!(kvk(key), Some(code), "{text}");
       assert_eq!(mod_key(code), Some(key));
     }
 

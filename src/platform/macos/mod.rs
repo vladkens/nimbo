@@ -45,8 +45,8 @@ impl Clipboard for Pasteboard {
 }
 
 /// The system clipboard outside a window: the general pasteboard.
-pub fn clipboard() -> Option<Box<dyn Clipboard>> {
-  Some(Box::new(Pasteboard))
+pub fn clipboard() -> Option<impl Clipboard> {
+  Some(Pasteboard)
 }
 
 /// The main thread's marker: AppKit, the app's windows and its tray are main thread only.

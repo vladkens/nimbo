@@ -84,9 +84,9 @@ mod tests {
   /// Reading needs no permission and never prompts.
   #[test]
   fn reading_never_prompts() {
-    let _ = (accessibility(false), secure_input());
+    let (trusted, secure) = (accessibility(false), secure_input());
     if !cfg!(target_os = "macos") {
-      assert!(accessibility(false) && !secure_input());
+      assert!(trusted && !secure);
     }
   }
 }

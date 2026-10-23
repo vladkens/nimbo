@@ -6,14 +6,12 @@
 //! StartupApproved\Run` (the first byte of the value odd), which reads as
 //! [State::RequiresApproval]: only the user turns it on again there.
 
-use std::ptr::{null, null_mut};
+use std::ptr::null_mut;
 
 use windows_sys::Win32::System::Registry::{
   HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_BINARY, RRF_RT_REG_SZ, RegDeleteKeyValueW, RegGetValueW,
   RegSetKeyValueW,
 };
-use windows_sys::Win32::UI::Shell::ShellExecuteW;
-use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
 use super::super::wide;
 use crate::AppInfo;
@@ -99,8 +97,7 @@ pub fn set(app: &AppInfo, on: bool) -> Result<State, String> {
 
 /// Settings › Apps › Startup.
 pub fn open_settings() {
-  let (op, uri) = (wide("open"), wide("ms-settings:startupapps"));
-  unsafe { ShellExecuteW(null_mut(), op.as_ptr(), uri.as_ptr(), null(), null(), SW_SHOWNORMAL) };
+  _ = super::open::url("ms-settings:startupapps");
 }
 
 #[cfg(test)]
