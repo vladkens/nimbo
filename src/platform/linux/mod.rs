@@ -27,7 +27,6 @@ pub mod text;
 
 use std::cell::{Cell, RefCell};
 use std::ffi::{CStr, CString, c_char, c_int, c_uint, c_ulong, c_void};
-use std::path::Path;
 use std::ptr::{null, null_mut};
 use std::rc::Rc;
 use std::sync::OnceLock;
@@ -39,7 +38,7 @@ use self::input::Input;
 pub use self::settings::appearance;
 use crate::Config;
 use crate::app::{App, Clipboard, Clock, Event, Runtime};
-use crate::cpu::{Pixels, Renderer};
+use crate::cpu::Renderer;
 use crate::scene::Size;
 use crate::ui::Cursor;
 
@@ -203,9 +202,8 @@ struct Win {
   painted: bool,
   frames: u64,
   started: Instant,
-  /// Logs every frame presented (`NIMBO_TRACE`), and every event (`NIMBO_TRACE=2`).
+  /// Logs every frame presented (`NIMBO_TRACE`).
   trace: bool,
-  trace_events: bool,
 }
 
 impl Drop for Win {
@@ -404,7 +402,6 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Result<u64, std::ffi::NulError> {
     unsafe { (gtk().g_idle_add)(on_wake as Fp, id as usize as P) };
   }));
 
-  let trace = std::env::var("NIMBO_TRACE").ok();
   let surface = Rc::new(Cell::new(null_mut()));
   let win = Win {
     id,
@@ -427,8 +424,7 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Result<u64, std::ffi::NulError> {
     painted: false,
     frames: 0,
     started,
-    trace: trace.is_some(),
-    trace_events: trace.as_deref() == Some("2"),
+    trace: std::env::var_os("NIMBO_TRACE").is_some(),
   };
   let win = Rc::new(RefCell::new(win));
   WINS.with_borrow_mut(|ws| ws.push(Slot { id, window, area, win, surface, shown: false }));
@@ -468,25 +464,17 @@ fn front(id: u64) {
 
 /// Window `id` goes: hidden at once; its runtime and GTK window once no call up the stack has
 /// them (`defer`: a callback further up, or one waiting in a nested main loop for a paste,
-/// never meets them gone; [on_destroy]) or at once. With
-/// `NIMBO_SHOT=<file>`, its last frame is written as a PNG first (to check a window run).
+/// never meets them gone; [on_destroy]) or at once.
 fn close(id: u64, defer: bool) -> bool {
   let Some(s) = WINS.with_borrow_mut(|ws| Some(ws.remove(ws.iter().position(|s| s.id == id)?)))
   else {
     return false;
   };
 
-  if let Ok(w) = s.win.try_borrow() {
-    if w.trace {
-      eprintln!("nimbo: closed after {} frames", w.frames);
-    }
-
-    if let Some(path) = std::env::var_os("NIMBO_SHOT")
-      && let Some(px) = pixels(s.surface.get(), w.shown)
-      && let Err(e) = crate::png::write(Path::new(&path), &px)
-    {
-      eprintln!("nimbo: {e}");
-    }
+  if let Ok(w) = s.win.try_borrow()
+    && w.trace
+  {
+    eprintln!("nimbo: closed after {} frames", w.frames);
   }
 
   let g = gtk();
@@ -535,10 +523,6 @@ impl Win {
 
   /// Feeds an event to the runtime; returns whether it was used.
   fn send(&mut self, ev: Event) -> bool {
-    if self.trace_events {
-      eprintln!("nimbo: {ev:?}");
-    }
-
     let (size, scale) = self.size();
     self.rt.resize(size, scale);
     self.rt.event(ev)
@@ -741,25 +725,6 @@ fn paced(now: i64, next: &mut i64) -> bool {
 /// would fire again at once) and the window's showing again syncs.
 fn next(visible: bool, wanted: bool, due_in: Option<Duration>) -> (bool, Option<Duration>) {
   (wanted, due_in.filter(|_| visible && !wanted))
-}
-
-/// The pixels of surface `s`, `w × h`.
-fn pixels(s: P, (w, h): (usize, usize)) -> Option<Pixels> {
-  let g = gtk();
-  if s.is_null() {
-    return None;
-  }
-
-  // SAFETY: the surface holds `stride × h` pixels.
-  let (data, stride) = unsafe {
-    (g.cairo_surface_flush)(s);
-    let stride = (g.cairo_image_surface_get_stride)(s) as usize / 4;
-    let data = (g.cairo_image_surface_get_data)(s).cast::<u32>();
-    (std::slice::from_raw_parts(data, stride * h), stride)
-  };
-  let rows = data.chunks(stride).flat_map(|row| &row[..w]);
-  let data = rows.flat_map(|p| (p | 0xff00_0000).to_le_bytes()).collect();
-  Some(Pixels { w, h, data })
 }
 
 // MARK: Callbacks

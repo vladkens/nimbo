@@ -39,7 +39,6 @@ fns!(Gio {
   fn g_variant_get_type_string(v: P) -> S;
   fn g_variant_get_uint32(v: P) -> u32;
   fn g_variant_get_double(v: P) -> f64;
-  fn g_variant_get_string(v: P, len: *mut usize) -> S;
   fn g_variant_unref(v: P);
   fn g_error_free(e: P);
   fn g_object_unref(obj: P);
