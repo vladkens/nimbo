@@ -484,7 +484,10 @@ fn front(id: u64) {
     }
 
     match overlay {
-      Some(_) => (g.gtk_widget_show_all)(window),
+      Some(_) => {
+        (g.gtk_widget_show_all)(window);
+        overlay::raise(window);
+      }
       None => (g.gtk_window_present)(window),
     }
   }

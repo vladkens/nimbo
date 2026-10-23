@@ -38,6 +38,7 @@ fns!(Gdk {
   fn gtk_window_set_type_hint(w: P, hint: c_int);
   fn gtk_window_move(w: P, x: c_int, y: c_int);
   fn gtk_widget_get_window(w: P) -> P;
+  fn gdk_window_raise(w: P);
   fn gdk_display_get_default() -> P;
   fn gdk_display_get_default_seat(display: P) -> P;
   fn gdk_seat_get_pointer(seat: P) -> P;
@@ -135,6 +136,15 @@ pub fn setup(window: P, anchor: Anchor) {
       (ls.gtk_layer_set_anchor)(window, edge, TRUE);
       (ls.gtk_layer_set_margin)(window, edge, margin.round() as c_int);
     }
+  }
+}
+
+/// Raises overlay `window`, shown already, over the others (X11; the compositor's on Wayland).
+pub fn raise(window: P) {
+  let g = gdk();
+  let w = unsafe { (g.gtk_widget_get_window)(window) };
+  if !w.is_null() {
+    unsafe { (g.gdk_window_raise)(w) };
   }
 }
 

@@ -225,7 +225,8 @@ impl Renderer {
     self.tiles_w = tw;
     self.tiles.clear();
     // Items hash their geometry in points and pixels; the scale maps one to the other.
-    let seed = hash(&[w as u64, h as u64, scale.to_bits() as u64, self.generation]);
+    let clear = self.transparent as u64;
+    let seed = hash(&[w as u64, h as u64, scale.to_bits() as u64, self.generation, clear]);
     self.tiles.resize(tw * th, seed);
     for (n, it) in self.items.iter().enumerate() {
       let r = it.rect;
@@ -551,8 +552,13 @@ mod tests {
     let mut r = Renderer::new();
     let size = Size::new(20.0, 10.0);
     let opaque = r.snapshot(&s, size, 1.0);
+    let mut c = Canvas::default();
+    c.draw(&mut r, &s, size, 1.0, false);
     r.transparent = true;
     let px = r.snapshot(&s, size, 1.0);
+    // A canvas drawn opaque is drawn again, all of it.
+    assert_eq!(c.draw(&mut r, &s, size, 1.0, true), 20 * 10);
+    assert_eq!(c.pixels().data, px.data);
     let at = |p: &Pixels, x: usize| p.data[x * 4..x * 4 + 4].to_vec();
     assert_eq!(at(&opaque, 15), [0, 0, 0, 255]);
     assert_eq!(at(&px, 15), [0, 0, 0, 0]);

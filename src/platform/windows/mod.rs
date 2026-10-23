@@ -571,10 +571,11 @@ fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
       let dpi = (wp & 0xFFFF) as f32;
       let overlay = with(|w| {
         w.scale = dpi / 96.0;
-        w.overlay.is_some()
+        w.overlay
       });
-      // An overlay was sized for the new monitor as it was placed there ([place]).
-      if overlay == Some(true) {
+      // An overlay keeps its size in points at its anchor, on the monitor it is on now.
+      if let Some(Some(anchor)) = overlay {
+        place(hwnd, anchor, false);
         with(|w| w.retime());
         return 0;
       }
@@ -725,10 +726,12 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
       unsafe { PostMessageW(*hwnd as HWND, WM_WAKE, 0, 0) };
     }
   }));
+  let mut renderer = Renderer::new();
+  renderer.transparent = cfg.overlay.is_some();
   let window = Window {
     hwnd,
     rt,
-    renderer: Renderer::new(),
+    renderer,
     dib: None,
     scale,
     // Opened hidden ([Config::hidden]): no frames until it shows ([shown]).
@@ -791,14 +794,10 @@ pub(crate) fn show_overlay(hwnd: HWND, anchor: Anchor) {
 }
 
 /// Moves overlay `hwnd` to `anchor` in the work area (no taskbar) of the monitor with the
-/// pointer, or of its own unless `pointer`, sized for that monitor's DPI; topmost again.
+/// pointer, or of its own unless `pointer`, at its size in points (the last frame's, or the one
+/// it asked for) for that monitor's DPI; topmost again.
 fn place(hwnd: HWND, anchor: Anchor, pointer: bool) {
-  let Some(size) = with_window(hwnd, |w| {
-    let (cw, ch) = w.client();
-    Size::new(cw as f32 / w.scale, ch as f32 / w.scale)
-  }) else {
-    return;
-  };
+  let Some(size) = with_window(hwnd, |w| w.rt.size) else { return };
   let monitor = match pointer {
     true => {
       let mut p = POINT { x: 0, y: 0 };
@@ -1162,6 +1161,18 @@ mod tests {
     timer_ticks(hwnd, 0);
     assert_eq!(timer_ticks(hwnd, 120), 0, "closed");
 
+    unsafe { DestroyWindow(hwnd) };
+  }
+
+  /// An overlay: a layered, click-through, never activated tool window, drawn transparent.
+  #[test]
+  fn an_overlay_is_layered_and_transparent() {
+    let cfg = Config::new("hud", 200.0, 60.0).overlay(Anchor::Bottom(40.0));
+    let hwnd = open(&cfg, Box::new(Busy));
+    let ex = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
+    let want = WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+    assert_eq!(ex & want, want);
+    assert_eq!(with_window(hwnd, |w| w.renderer.transparent), Some(true));
     unsafe { DestroyWindow(hwnd) };
   }
 
