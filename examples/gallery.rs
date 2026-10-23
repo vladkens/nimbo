@@ -180,7 +180,6 @@ impl App for Gallery {
   }
 }
 
-#[allow(dead_code)]
 fn main() {
   // The shot: the pointer on the light pane's switch.
   nimbo::run(Config::new("gallery", 1040.0, 560.0), Gallery::default(), |h| {

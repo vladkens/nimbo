@@ -11,8 +11,11 @@
 #[allow(dead_code, unused_attributes)]
 mod gallery;
 
+mod common;
+
 use std::time::Duration;
 
+use common::px;
 use gallery::*;
 use nimbo::{Appearance, Event, Harness, Id, Modifiers, NamedKey, Rect, Size, Theme};
 
@@ -24,10 +27,6 @@ fn id(name: &str, pane: usize) -> Id {
 
 fn rect(h: &H, name: &str, pane: usize) -> Rect {
   h.rect(id(name, pane)).unwrap_or_else(|| panic!("no {name} in pane {pane}"))
-}
-
-fn px(c: nimbo::Color) -> [u8; 4] {
-  c.map(|v| (v * 255.0).round() as u8)
 }
 
 #[test]
