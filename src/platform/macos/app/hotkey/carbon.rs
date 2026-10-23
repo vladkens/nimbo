@@ -1,18 +1,20 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The hotkeys' fallback: Carbon's `RegisterEventHotKey` (HIToolbox, declared by hand), which
-//! works without Accessibility access and under Secure Input, chords only. Its handler runs on
+//! works without Accessibility access and under Secure Input, chords only, and takes Escape
+//! while that is on: a key registered here never reaches the app in front. Its handler runs on
 //! the main thread and sends the edge, timed when the key moved, to the hotkey thread.
 
 use std::ffi::c_void;
 use std::ptr::null_mut;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::SyncSender as Sender;
 use std::time::{Duration, Instant};
 
 use keyboard_types::Modifiers;
 
-use super::{DEDUPE, Hit, Raw, Shared, Source};
+use super::{DEDUPE, Hit, KEY_ESCAPE, Raw, Shared, Source};
 
 type OSStatus = i32;
 type EventRef = *mut c_void;
@@ -87,22 +89,28 @@ unsafe extern "C" {
 
 const SIGNATURE: u32 = u32::from_be_bytes(*b"nmbo");
 const CHORD_ID: u32 = 1;
+const ESCAPE_ID: u32 = 2;
 
 /// What the handler works with; leaked: the handler stays installed for the process.
 struct State {
   shared: Arc<Shared>,
   events: Sender<Raw>,
+  /// Escape is held: Carbon repeats its press, told once.
+  escape_down: AtomicBool,
 }
 
-/// This app's Carbon hotkey; main thread only.
+/// This app's Carbon hotkeys; main thread only.
 pub struct Carbon {
   installed: bool,
   chord: Option<EventHotKeyRef>,
+  escape: Option<EventHotKeyRef>,
+  state: &'static State,
 }
 
 impl Carbon {
   pub fn install(shared: Arc<Shared>, events: Sender<Raw>) -> Self {
-    let state: &'static State = Box::leak(Box::new(State { shared, events }));
+    let state: &'static State =
+      Box::leak(Box::new(State { shared, events, escape_down: AtomicBool::new(false) }));
     let kinds = [K_EVENT_HOT_KEY_PRESSED, K_EVENT_HOT_KEY_RELEASED];
     let specs =
       kinds.map(|event_kind| EventTypeSpec { event_class: K_EVENT_CLASS_KEYBOARD, event_kind });
@@ -118,41 +126,64 @@ impl Carbon {
         &mut handler,
       )
     };
-    Self { installed: status == 0, chord: None }
+    Self { installed: status == 0, chord: None, escape: None, state }
   }
 
   /// Registers virtual key `code` with Carbon's `modifiers`, in place of the one before.
   pub fn register(&mut self, code: u16, modifiers: u32) -> Result<(), String> {
     self.unregister();
+    self.chord = Some(self.hot_key(code, modifiers, CHORD_ID)?);
+    Ok(())
+  }
+
+  fn hot_key(&self, code: u16, modifiers: u32, id: u32) -> Result<EventHotKeyRef, String> {
     if !self.installed {
       return Err("no Carbon event handler".into());
     }
 
     let mut hot_key = null_mut();
-    let id = EventHotKeyID { signature: SIGNATURE, id: CHORD_ID };
+    let id = EventHotKeyID { signature: SIGNATURE, id };
     // SAFETY: plain registration with the application target; `hot_key` receives the ref.
     let status = unsafe {
       RegisterEventHotKey(code.into(), modifiers, id, GetEventDispatcherTarget(), 0, &mut hot_key)
     };
     match status {
-      0 => {
-        self.chord = Some(hot_key);
-        Ok(())
-      }
+      0 => Ok(hot_key),
       HOT_KEY_EXISTS => Err("another app has registered this hotkey".into()),
       status => Err(format!("RegisterEventHotKey failed (OSStatus {status})")),
     }
   }
 
   pub fn unregister(&mut self) {
-    if let Some(hot_key) = self.chord.take() {
-      // SAFETY: a ref RegisterEventHotKey returned and that was not unregistered yet.
-      unsafe { UnregisterEventHotKey(hot_key) };
-    }
+    release(self.chord.take());
   }
 
   pub fn registered(&self) -> bool {
     self.chord.is_some()
+  }
+
+  /// Escape alone registered while `on`; the error is why it is not.
+  pub fn set_escape(&mut self, on: bool) -> Result<(), String> {
+    if !on {
+      release(self.escape.take());
+    } else if self.escape.is_none() {
+      // A release missed while it was off is not waited for.
+      self.state.escape_down.store(false, Ordering::Relaxed);
+      self.escape = Some(self.hot_key(KEY_ESCAPE, 0, ESCAPE_ID)?);
+    }
+
+    Ok(())
+  }
+
+  pub fn escape_registered(&self) -> bool {
+    self.escape.is_some()
+  }
+}
+
+fn release(hot_key: Option<EventHotKeyRef>) {
+  if let Some(hot_key) = hot_key {
+    // SAFETY: a ref RegisterEventHotKey returned and that was not unregistered yet.
+    unsafe { UnregisterEventHotKey(hot_key) };
   }
 }
 
@@ -183,9 +214,15 @@ extern "C" fn handler_fn(
   // SAFETY: a valid event for the duration of the handler.
   let (kind, happened, now) =
     unsafe { (GetEventKind(event), GetEventTime(event), GetCurrentEventTime()) };
+  let escape = &state.escape_down;
   let edge = match (id.id, kind) {
     (CHORD_ID, K_EVENT_HOT_KEY_PRESSED) => Hit::Down { repeat: false },
     (CHORD_ID, K_EVENT_HOT_KEY_RELEASED) => Hit::Up,
+    (ESCAPE_ID, K_EVENT_HOT_KEY_PRESSED) if !escape.swap(true, Ordering::Relaxed) => Hit::Escape,
+    (ESCAPE_ID, K_EVENT_HOT_KEY_RELEASED) => {
+      escape.store(false, Ordering::Relaxed);
+      return 0;
+    }
     _ => return 0,
   };
   // When the key moved, not when the main thread got to the event: it may have been busy, and the

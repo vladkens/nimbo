@@ -75,8 +75,10 @@
 //!   `closing()`, `choose(path: &[usize])`; `available() -> Result<(), String>`.
 //! - `pub mod hotkey` ([crate::hotkey]): `Hotkeys` with `new(on: OnEdge)` (`on` runs on a thread of
 //!   its own), `set(&mut self, Option<Hotkey>) -> Result<(), String>` (`None`: no hotkey; `Err`
-//!   when the OS can't take it), `start(&mut self) -> Result<(), String>` (the listener), and
-//!   `status(&self, &mut Status)` filling the listener, fallback, secure input and counts.
+//!   when the OS can't take it), `start(&mut self) -> Result<(), String>` (the listener),
+//!   `escape(&mut self, on: bool)` (Escape taken from every app as `Edge::Escape`), and
+//!   `status(&self, &mut Status)` filling the listener, fallback, secure input, counts and, while
+//!   Escape is on, why it is not taken (`escape_error`).
 //! - `pub mod autostart` ([crate::autostart]): `available()`, `state(&AppInfo)`, `set(&AppInfo,
 //!   on)`, `open_settings()`.
 //!

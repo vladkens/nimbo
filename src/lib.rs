@@ -160,12 +160,37 @@ fn positive(n: f32) -> bool {
   n.is_finite() && n > 0.0
 }
 
-/// The entry point of every example. With no arguments it opens a window; with `--shot` it runs
-/// the app in the [Harness] at `cfg.size` and `--scale` (default 2), first applying `script` (the
-/// state the shot shows), then writing the PNG.
+/// The entry point of every example: [run_args] with the process's arguments.
 pub fn run<A: App + 'static>(cfg: Config, app: A, script: impl FnOnce(&mut Harness<A>)) {
-  let argv: Vec<String> = std::env::args().skip(1).collect();
-  let args = Args::parse(&argv).unwrap_or_else(|e| {
+  let args: Vec<String> = std::env::args().skip(1).collect();
+  run_args(cfg, app, script, &args);
+}
+
+/// With no `args` it opens a window and runs until it closes; with `--shot <file.png>` it runs
+/// the app in the [Harness] at `cfg.size` (or `--size`) and `--scale` (default 2), first applying
+/// `script` (the state the shot shows), then writing the PNG. Unknown arguments print the usage
+/// and exit with status 2. For an app that parses its own command line and passes the rest on:
+///
+/// ```no_run
+/// struct Settings;
+/// impl nimbo::App for Settings {}
+///
+/// // `myapp settings --shot settings.png`: the app takes `settings`, the rest opens the window
+/// // or renders its shot.
+/// let args: Vec<String> = std::env::args().skip(1).collect();
+/// if let Some((command, rest)) = args.split_first()
+///   && command == "settings"
+/// {
+///   nimbo::run_args(nimbo::Config::new("Settings", 640.0, 480.0), Settings, |_| {}, rest);
+/// }
+/// ```
+pub fn run_args<A: App + 'static>(
+  cfg: Config,
+  app: A,
+  script: impl FnOnce(&mut Harness<A>),
+  args: &[String],
+) {
+  let args = Args::parse(args).unwrap_or_else(|e| {
     eprintln!("{e}\n{USAGE}");
     std::process::exit(2);
   });
@@ -238,6 +263,27 @@ mod tests {
 
     assert!(parse("--shot").is_err());
     assert!(parse("--what").is_err());
+  }
+
+  /// The arguments given, not the process's (the test runner's), pick the shot.
+  #[test]
+  fn run_args_shoots_with_the_arguments_given() {
+    struct Blank;
+    impl App for Blank {}
+
+    let dir = std::env::temp_dir().join(format!("nimbo-run-args-{}", std::process::id()));
+    let path = dir.join("shot.png");
+    let args = ["--shot", path.to_str().unwrap(), "--scale", "1", "--size", "40x30"];
+    let args: Vec<String> = args.map(String::from).to_vec();
+    let mut scripted = false;
+    run_args(Config::new("a", 100.0, 100.0), Blank, |_| scripted = true, &args);
+    let png = std::fs::read(&path).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    assert!(scripted);
+    assert_eq!(&png[1..4], b"PNG");
+    // IHDR's width and height, big-endian: `--size` at `--scale`.
+    let size = |at: usize| u32::from_be_bytes(png[at..at + 4].try_into().unwrap());
+    assert_eq!((size(16), size(20)), (40, 30));
   }
 
   #[test]

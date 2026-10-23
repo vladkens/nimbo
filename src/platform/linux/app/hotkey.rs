@@ -11,7 +11,8 @@
 //! its own, the app first registers its id with `org.freedesktop.host.portal.Registry`
 //! (xdg-desktop-portal 1.19+), which the backend keeps the shortcut under. KDE Plasma 6 and GNOME
 //! 48+ have the portal; without it (X11 desktops, older GNOME) there are no hotkeys, and a
-//! modifier key alone is no shortcut the spec can write.
+//! modifier key alone is no shortcut the spec can write. Nor can it take Escape for a while
+//! ([crate::hotkey::Hotkeys::escape]): that is reported, not done.
 
 use std::cell::{Cell, RefCell};
 use std::ffi::c_uint;
@@ -51,6 +52,8 @@ struct State {
   /// Requests made, for their tokens.
   tokens: Cell<u32>,
   events: Cell<u64>,
+  /// [Hotkeys::escape] is on: only reported, the portal can't take Escape.
+  escape: Cell<bool>,
 }
 
 pub struct Hotkeys(Rc<State>);
@@ -80,6 +83,7 @@ impl Hotkeys {
       signals: RefCell::default(),
       tokens: Cell::new(0),
       events: Cell::new(0),
+      escape: Cell::new(false),
     }))
   }
 
@@ -141,11 +145,20 @@ impl Hotkeys {
     Ok(())
   }
 
+  /// The portal binds shortcuts the user approved, never a key taken for a while: Escape stays
+  /// the focused app's, and the status says so.
+  pub fn escape(&mut self, on: bool) {
+    self.0.escape.set(on);
+  }
+
   pub fn status(&self, out: &mut Status) {
     let s = &self.0;
     out.listener = s.listener.get();
     out.listener_error = s.error.borrow().clone();
     out.counts.listener = s.events.get();
+    if s.escape.get() {
+      out.escape_error = Some("the GlobalShortcuts portal can't take Escape".into());
+    }
   }
 }
 
@@ -389,6 +402,18 @@ mod tests {
   fn chord(text: &str) -> Shortcut {
     let Ok(Hotkey::Shortcut(k)) = Hotkey::parse(text) else { panic!("{text}") };
     k
+  }
+
+  /// No session, no bus: the status alone says Escape is not taken.
+  #[test]
+  fn escape_is_reported_as_not_taken() {
+    let mut h = crate::hotkey::Hotkeys::new(|_| {});
+    h.escape(true);
+    let s = h.status();
+    assert!(!s.escape);
+    assert!(s.escape_error.is_some_and(|e| e.contains("can't take Escape")));
+    h.escape(false);
+    assert_eq!((h.status().escape, h.status().escape_error), (false, None));
   }
 
   #[test]

@@ -1,10 +1,12 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! Global hotkeys on macOS: an active `CGEventTap` on its own thread (with its own run loop)
-//! matches the chord and swallows its key events. A Carbon `RegisterEventHotKey` on the same
-//! chord is the fallback for Secure Input, which leaves the tap deaf, and for no Accessibility
-//! access ([carbon]). Both sources feed the "hotkey" thread, which drops an edge the other source
-//! reported ≤ [DEDUPE] earlier and passes the rest to the app's callback.
+//! matches the chord and swallows its key events and, only while [Hotkeys::escape] is on, Escape.
+//! A Carbon `RegisterEventHotKey` on the same chord is the fallback for Secure Input, which leaves
+//! the tap deaf, and for no Accessibility access ([carbon]); while Escape is on it is registered
+//! there too, which also keeps it from the app in front. Both sources feed the "hotkey" thread,
+//! which drops an edge the other source reported ≤ [DEDUPE] earlier and passes the rest to the
+//! app's callback.
 //!
 //! A hotkey that is a modifier key alone (`right_option`, `fn`) is the tap's only: Carbon has no
 //! such hotkeys. The tap sees the key's own press and release (`flagsChanged`, left and right
@@ -85,6 +87,7 @@ enum Hit {
     repeat: bool,
   },
   Up,
+  Escape,
   /// Another key went down while the modifier key alone was held.
   Abort,
 }
@@ -94,7 +97,8 @@ impl Hit {
     match self {
       Hit::Down { .. } => 0,
       Hit::Up => 1,
-      Hit::Abort => 2,
+      Hit::Escape => 2,
+      Hit::Abort => 3,
     }
   }
 }
@@ -110,7 +114,7 @@ struct Raw {
 /// whichever source is first wins, so neither waits for the other.
 #[derive(Debug, Default)]
 struct Dedupe {
-  last: [[Option<Instant>; 3]; 2],
+  last: [[Option<Instant>; 4]; 2],
 }
 
 impl Dedupe {
@@ -135,6 +139,10 @@ struct Shared {
   chord_down: AtomicBool,
   /// When a modifier alone went down, in ns of [EPOCH].
   chord_since: AtomicU64,
+  /// Escape is swallowed and told only while this is set ([Hotkeys::escape]).
+  escape: AtomicBool,
+  /// The tap swallowed a press of Escape and owes its release.
+  escape_down: AtomicBool,
   tap: AtomicU8,
   /// Why the tap failed, set before [TAP_FAILED].
   tap_error: Mutex<Option<String>>,
@@ -162,6 +170,8 @@ pub struct Hotkeys {
   events: Sender<Raw>,
   carbon: Carbon,
   carbon_error: Option<String>,
+  /// Why Carbon did not take Escape (another app has it).
+  escape_error: Option<String>,
 }
 
 impl Hotkeys {
@@ -177,7 +187,7 @@ impl Hotkeys {
       .spawn(move || route(&rx, &on, &routing))
       .expect("spawn the hotkey thread");
     let carbon = Carbon::install(shared.clone(), events.clone());
-    Self { shared, events, carbon, carbon_error: None }
+    Self { shared, events, carbon, carbon_error: None, escape_error: None }
   }
 
   /// Matches `hotkey` from now on, none for `None`; `Err` when it has no key code here. Carbon
@@ -227,6 +237,12 @@ impl Hotkeys {
     Ok(())
   }
 
+  /// While on, Escape is taken: the tap swallows it, and Carbon has it registered.
+  pub fn escape(&mut self, on: bool) {
+    self.shared.escape.store(on, Ordering::Release);
+    self.escape_error = self.carbon.set_escape(on).err();
+  }
+
   pub fn status(&self, out: &mut Status) {
     let s = &self.shared;
     let n = |a: &AtomicU64| a.load(Ordering::Relaxed);
@@ -246,12 +262,19 @@ impl Hotkeys {
     out.counts.duplicates = n(&s.duplicates);
     out.counts.reenabled = n(&s.tap_reenabled);
     out.counts.overflow = n(&s.overflow);
+    // Secure Input leaves the tap deaf, never Carbon.
+    let tap = out.listener == Listener::Active && !out.secure_input;
+    if s.escape.load(Ordering::Relaxed) && !tap && !self.carbon.escape_registered() {
+      let why = self.escape_error.as_deref().unwrap_or("not registered");
+      out.escape_error = Some(format!("no event tap, and Carbon's hotkey for Escape: {why}"));
+    }
   }
 }
 
 impl Drop for Hotkeys {
   fn drop(&mut self) {
     _ = self.set(None);
+    self.escape(false);
   }
 }
 
@@ -285,7 +308,7 @@ fn route(rx: &Receiver<Raw>, on: &OnEdge, shared: &Shared) {
         }
         Hit::Down { .. } => carbon_down = true,
         Hit::Up => carbon_down = false,
-        Hit::Abort => {}
+        Hit::Escape | Hit::Abort => {}
       }
     }
 
@@ -297,6 +320,7 @@ fn route(rx: &Receiver<Raw>, on: &OnEdge, shared: &Shared) {
     on(match raw.edge {
       Hit::Down { repeat } => Edge::Down { at: raw.at, repeat },
       Hit::Up => Edge::Up { at: raw.at },
+      Hit::Escape => Edge::Escape,
       Hit::Abort => Edge::Aborted,
     });
   }
@@ -405,7 +429,7 @@ unsafe extern "C-unwind" fn tap_callback(
       pass
     }
     Verdict::Swallow(edge) => {
-      send(edge);
+      edge.map(send);
       null_mut()
     }
   }
@@ -426,16 +450,15 @@ enum Verdict {
   Pass,
   /// Let through, and the edge goes to the app.
   Tell(Hit),
-  /// Swallowed; the edge goes to the app.
-  Swallow(Hit),
+  /// Swallowed; the edge, if any, goes to the app.
+  Swallow(Option<Hit>),
 }
 
 /// The tap's decision for a key event (`code`, the event's `flags`; `repeat` reads its autorepeat
-/// field, only when needed). A key press is ours only if it starts as the chord; then its
-/// autorepeats and its release are swallowed too, whatever the modifiers are by then. An
-/// autorepeat of a key that went down before is the app's: it saw the press. Any fresh press of
-/// the key settles who owns it, so a lost release is not owed for long. A modifier key alone:
-/// [lone].
+/// field, only when needed): a modifier key alone's ([lone]), the chord's, or Escape's while
+/// [Shared::escape] is on. The chord is a press with exactly its modifiers. Escape is one with no
+/// ⌃, ⌥ or ⌘ held (Shift is fine, and so is the modifier hotkey's own key, held past
+/// [CHORD_WINDOW]); its release is swallowed also once Escape went off. Both: [owned].
 fn judge(
   shared: &Shared,
   kind: KeyKind,
@@ -445,36 +468,61 @@ fn judge(
   repeat: impl Fn() -> bool,
 ) -> Verdict {
   let chord = shared.chord.load(Ordering::Acquire);
-  if chord & (SET | LONE) == SET | LONE {
-    return lone(shared, chord, kind, code, flags, at, &repeat).unwrap_or(Verdict::Pass);
+  let alone = chord & (SET | LONE) == SET | LONE;
+  if alone && let Some(verdict) = lone(shared, chord, kind, code, flags, at, &repeat) {
+    return verdict;
   }
 
-  if kind == KeyKind::Flags || chord & SET == 0 || code != chord & 0xffff {
+  if kind == KeyKind::Flags {
     return Verdict::Pass;
   }
 
-  let held = &shared.chord_down;
+  let ours = || flags & MODIFIERS == (chord >> 16) & MODIFIERS;
+  let edges = [Hit::Down { repeat: false }, Hit::Down { repeat: true }, Hit::Up].map(Some);
+  if !alone
+    && chord & SET != 0
+    && code == chord & 0xffff
+    && let Some(verdict) = owned(&shared.chord_down, kind, &repeat, ours, edges)
+  {
+    return verdict;
+  }
+
+  if code != u64::from(KEY_ESCAPE) {
+    return Verdict::Pass;
+  }
+
+  let ours = || {
+    let chords = MODIFIERS & !CGEventFlags::MaskShift.0;
+    let held = alone && shared.chord_down.load(Ordering::Relaxed);
+    let own = mod_key((chord & 0xffff) as u16).filter(|_| held).map_or(0, general_flag);
+    flags & chords & !own == 0 && shared.escape.load(Ordering::Acquire)
+  };
+  let edges = [Some(Hit::Escape), None, None];
+  owned(&shared.escape_down, kind, &repeat, ours, edges).unwrap_or(Verdict::Pass)
+}
+
+/// A key whose fresh press `ours` claims is ours until its release, whatever the modifiers are by
+/// then: the press, its autorepeats and the release are swallowed, telling `edges`. `held`: a
+/// press of it is ours now. An autorepeat of a press the app saw stays the app's; any fresh press
+/// settles who owns the key, so a lost release is not owed for long. `None`: the app's.
+fn owned(
+  held: &AtomicBool,
+  kind: KeyKind,
+  repeat: &impl Fn() -> bool,
+  ours: impl FnOnce() -> bool,
+  [press, autorepeat, release]: [Option<Hit>; 3],
+) -> Option<Verdict> {
   if kind == KeyKind::Up {
-    return match held.swap(false, Ordering::Relaxed) {
-      true => Verdict::Swallow(Hit::Up),
-      false => Verdict::Pass,
-    };
+    return held.swap(false, Ordering::Relaxed).then_some(Verdict::Swallow(release));
   }
 
-  let repeat = repeat();
-  if repeat && held.load(Ordering::Relaxed) {
-    return Verdict::Swallow(Hit::Down { repeat: true });
+  if repeat() {
+    return held.load(Ordering::Relaxed).then_some(Verdict::Swallow(autorepeat));
   }
 
-  if !repeat {
-    let ours = flags & MODIFIERS == (chord >> 16) & MODIFIERS;
-    held.store(ours, Ordering::Relaxed);
-    if ours {
-      return Verdict::Swallow(Hit::Down { repeat: false });
-    }
-  }
-
-  Verdict::Pass
+  let ours = ours();
+  held.store(ours, Ordering::Relaxed);
+  ours.then_some(Verdict::Swallow(press))
 }
 
 /// The hotkey is modifier key `chord`'s code alone: its press (with no other modifier held) and
@@ -587,12 +635,14 @@ mod tests {
     assert!(d.accept(Source::Tap, Hit::Up, ms(1_251)));
     assert!(d.accept(Source::Tap, down, ms(1_260)));
     assert!(d.accept(Source::Tap, Hit::Down { repeat: true }, ms(1_270)));
-    // Kinds do not mix.
+    // Kinds do not mix; Escape from both is one.
     assert!(d.accept(Source::Carbon, Hit::Abort, ms(1_275)));
+    assert!(d.accept(Source::Tap, Hit::Escape, ms(1_280)));
+    assert!(!d.accept(Source::Carbon, Hit::Escape, ms(1_281)));
   }
 
   /// The hotkey thread: the tap's press, Carbon's copy of it (dropped), Carbon repeating it (an
-  /// autorepeat) and the release, as the app hears them.
+  /// autorepeat), the release and Escape from both, as the app hears them.
   #[test]
   fn the_thread_dedupes_and_hands_edges_over() {
     let shared = Shared::default();
@@ -606,6 +656,8 @@ mod tests {
       raw(Source::Carbon, down, ms(5)),
       raw(Source::Carbon, down, ms(400)),
       raw(Source::Tap, Hit::Up, ms(600)),
+      raw(Source::Tap, Hit::Escape, ms(700)),
+      raw(Source::Carbon, Hit::Escape, ms(710)),
     ] {
       tx.send(r).unwrap();
     }
@@ -619,11 +671,12 @@ mod tests {
       Edge::Down { at: ms(0), repeat: false },
       Edge::Down { at: ms(400), repeat: true },
       Edge::Up { at: ms(600) },
+      Edge::Escape,
     ];
     assert_eq!(got, want);
     let n = |a: &AtomicU64| a.load(Ordering::Relaxed);
-    assert_eq!((n(&shared.duplicates), n(&shared.carbon_repeats)), (1, 1));
-    assert_eq!((n(&shared.tap_events), n(&shared.carbon_events)), (2, 2));
+    assert_eq!((n(&shared.duplicates), n(&shared.carbon_repeats)), (2, 1));
+    assert_eq!((n(&shared.tap_events), n(&shared.carbon_events)), (3, 3));
   }
 
   const SPACE: u64 = 0x31;
@@ -760,7 +813,7 @@ mod tests {
   #[test]
   fn the_chord_is_swallowed_with_its_repeats_and_release() {
     let s = shared();
-    let swallow = Verdict::Swallow;
+    let swallow = |hit| Verdict::Swallow(Some(hit));
     assert_eq!(key(&s, true, SPACE, OPT, false), swallow(Hit::Down { repeat: false }));
     assert_eq!(key(&s, true, SPACE, OPT, true), swallow(Hit::Down { repeat: true }));
     // Option let go first: the repeats and the release are still the chord's.
@@ -785,6 +838,57 @@ mod tests {
     assert!(matches!(key(&s, true, SPACE, OPT, false), Verdict::Swallow(_)));
     assert_eq!(key(&s, true, SPACE, NONE, false), Verdict::Pass, "a plain press");
     assert_eq!(key(&s, false, SPACE, NONE, false), Verdict::Pass, "and its release");
+  }
+
+  #[test]
+  fn escape_is_taken_only_while_on() {
+    let s = shared();
+    let taken = Verdict::Swallow(Some(Hit::Escape));
+    assert_eq!(key(&s, true, ESC, NONE, false), Verdict::Pass);
+    assert_eq!(key(&s, false, ESC, NONE, false), Verdict::Pass);
+    s.escape.store(true, Ordering::Release);
+    assert_eq!(key(&s, true, ESC, NONE, false), taken);
+    assert_eq!(key(&s, true, ESC, NONE, true), Verdict::Swallow(None), "its repeats");
+    s.escape.store(false, Ordering::Release); // turned off meanwhile
+    assert_eq!(key(&s, false, ESC, NONE, false), Verdict::Swallow(None), "its release");
+    // Held since before it was on: the app's.
+    assert_eq!(key(&s, true, ESC, NONE, false), Verdict::Pass);
+    s.escape.store(true, Ordering::Release);
+    assert_eq!(key(&s, true, ESC, NONE, true), Verdict::Pass);
+    assert_eq!(key(&s, false, ESC, NONE, false), Verdict::Pass);
+    // ⌘⎋, ⌃⎋, ⌥⎋ are not Escape; ⇧⎋ is.
+    for flags in [CGEventFlags::MaskCommand, CGEventFlags::MaskControl, OPT] {
+      assert_eq!(key(&s, true, ESC, flags, false), Verdict::Pass, "{flags:?}");
+    }
+
+    assert_eq!(key(&s, true, ESC, CGEventFlags::MaskShift, false), taken);
+    // The chord still works meanwhile.
+    assert!(matches!(key(&s, true, SPACE, OPT, false), Verdict::Swallow(Some(Hit::Down { .. }))));
+  }
+
+  #[test]
+  fn escape_with_a_modifier_hotkey_held() {
+    let s = lone_shared(Code::AltRight);
+    s.escape.store(true, Ordering::Release);
+    let opt = CGEventFlags(RIGHT_ALT);
+    // Right after the press: the user's ⌥⎋, which aborts the press and is the app's.
+    flags_at(&s, 0, Code::AltRight, RIGHT_ALT);
+    assert_eq!(key_at(&s, 100, true, ESC, opt, false), Verdict::Tell(Hit::Abort));
+    assert_eq!(key_at(&s, 150, false, ESC, opt, false), Verdict::Pass);
+    flags_at(&s, 200, Code::AltRight, 0);
+    // Held past the chord window: Escape is taken, the hotkey's own ⌥ notwithstanding.
+    flags_at(&s, 1_000, Code::AltRight, RIGHT_ALT);
+    let taken = Verdict::Swallow(Some(Hit::Escape));
+    assert_eq!(key_at(&s, 2_000, true, ESC, opt, false), taken);
+    assert_eq!(key_at(&s, 2_050, false, ESC, opt, false), Verdict::Swallow(None));
+    // ⌥⎋ with another hotkey, or with this one not held, is still the app's.
+    let s = lone_shared(Code::MetaRight);
+    s.escape.store(true, Ordering::Release);
+    assert_eq!(key(&s, true, ESC, opt, false), Verdict::Pass);
+    let s = lone_shared(Code::AltRight);
+    s.escape.store(true, Ordering::Release);
+    assert_eq!(key(&s, true, ESC, CGEventFlags(LEFT_ALT), false), Verdict::Pass);
+    assert_eq!(key(&s, true, ESC, NONE, false), taken, "and plain Escape is taken");
   }
 
   #[test]
