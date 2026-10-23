@@ -273,7 +273,7 @@ fn set(shared: &Shared, chord: &mut Chord, target: Option<Target>) -> Result<(),
     _ => 0,
   };
 
-  HOOK.with_borrow_mut(|h| h.lone = Lone { key: lone, ..Lone::default() });
+  HOOK.with_borrow_mut(|h| h.lone.watch(lone));
   let result = match target {
     Some(Target::Chord { vk, mods }) => {
       match unsafe { RegisterHotKey(null_mut(), CHORD_ID, mods, vk) } {
@@ -370,6 +370,11 @@ struct Lone {
 }
 
 impl Lone {
+  /// Watches modifier key `key` (0: none) from now on; the keys down, Escape's too, stay known.
+  fn watch(&mut self, key: u32) {
+    (self.key, self.held) = (key, None);
+  }
+
   /// What the hook does with a key: the edge to tell, and whether the key is taken ([Lone::key],
   /// then [Lone::escape] while `escape`). Escape that aborted the hotkey is the user's chord: the
   /// app's.
@@ -614,6 +619,11 @@ mod tests {
     l.key(shift, true, t0);
     assert_eq!(l.escape(true, esc, true), taken);
     assert_eq!(l.escape(true, esc, false), Some(None));
+    // Another hotkey meanwhile: a taken press stays taken, repeats and release.
+    assert_eq!(l.escape(true, esc, true), taken);
+    l.watch(VK_RMENU as u32);
+    assert_eq!(l.escape(true, esc, true), Some(None));
+    assert_eq!(l.escape(false, esc, false), Some(None));
   }
 
   #[test]

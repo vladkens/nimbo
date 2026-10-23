@@ -89,7 +89,8 @@ unsafe extern "C" {
 
 const SIGNATURE: u32 = u32::from_be_bytes(*b"nmbo");
 const CHORD_ID: u32 = 1;
-const ESCAPE_ID: u32 = 2;
+/// Escape alone, and with Shift.
+const ESCAPE_IDS: [u32; 2] = [2, 3];
 
 /// What the handler works with; leaked: the handler stays installed for the process.
 struct State {
@@ -103,7 +104,8 @@ struct State {
 pub struct Carbon {
   installed: bool,
   chord: Option<EventHotKeyRef>,
-  escape: Option<EventHotKeyRef>,
+  /// Escape and ⇧⎋, while on.
+  escape: Vec<EventHotKeyRef>,
   state: &'static State,
 }
 
@@ -126,7 +128,7 @@ impl Carbon {
         &mut handler,
       )
     };
-    Self { installed: status == 0, chord: None, escape: None, state }
+    Self { installed: status == 0, chord: None, escape: Vec::new(), state }
   }
 
   /// Registers virtual key `code` with Carbon's `modifiers`, in place of the one before.
@@ -162,21 +164,24 @@ impl Carbon {
     self.chord.is_some()
   }
 
-  /// Escape alone registered while `on`; the error is why it is not.
+  /// Escape alone and with Shift registered while `on`; the error is why one is not.
   pub fn set_escape(&mut self, on: bool) -> Result<(), String> {
+    self.escape.drain(..).for_each(|k| release(Some(k)));
     if !on {
-      release(self.escape.take());
-    } else if self.escape.is_none() {
-      // A release missed while it was off is not waited for.
-      self.state.escape_down.store(false, Ordering::Relaxed);
-      self.escape = Some(self.hot_key(KEY_ESCAPE, 0, ESCAPE_ID)?);
+      return Ok(());
+    }
+
+    // A release missed while it was off is not waited for.
+    self.state.escape_down.store(false, Ordering::Relaxed);
+    for (modifiers, id) in [0, SHIFT_KEY].into_iter().zip(ESCAPE_IDS) {
+      self.escape.push(self.hot_key(KEY_ESCAPE, modifiers, id)?);
     }
 
     Ok(())
   }
 
   pub fn escape_registered(&self) -> bool {
-    self.escape.is_some()
+    !self.escape.is_empty()
   }
 }
 
@@ -218,8 +223,13 @@ extern "C" fn handler_fn(
   let edge = match (id.id, kind) {
     (CHORD_ID, K_EVENT_HOT_KEY_PRESSED) => Hit::Down { repeat: false },
     (CHORD_ID, K_EVENT_HOT_KEY_RELEASED) => Hit::Up,
-    (ESCAPE_ID, K_EVENT_HOT_KEY_PRESSED) if !escape.swap(true, Ordering::Relaxed) => Hit::Escape,
-    (ESCAPE_ID, K_EVENT_HOT_KEY_RELEASED) => {
+    // Carbon repeats the press while Escape is held: told once.
+    (id, K_EVENT_HOT_KEY_PRESSED)
+      if ESCAPE_IDS.contains(&id) && !escape.swap(true, Ordering::Relaxed) =>
+    {
+      Hit::Escape
+    }
+    (id, K_EVENT_HOT_KEY_RELEASED) if ESCAPE_IDS.contains(&id) => {
       escape.store(false, Ordering::Relaxed);
       return 0;
     }

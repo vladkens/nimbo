@@ -494,8 +494,10 @@ fn judge(
   let ours = || {
     let chords = MODIFIERS & !CGEventFlags::MaskShift.0;
     let held = alone && shared.chord_down.load(Ordering::Relaxed);
-    let own = mod_key((chord & 0xffff) as u16).filter(|_| held).map_or(0, general_flag);
-    flags & chords & !own == 0 && shared.escape.load(Ordering::Acquire)
+    // The hotkey's own key, with no other modifier key (its other side) held.
+    let only = |k: &Code| flags & devices() & !device_flag(*k).unwrap_or(0) == 0;
+    let own = mod_key((chord & 0xffff) as u16).filter(|k| held && only(k));
+    flags & chords & !own.map_or(0, general_flag) == 0 && shared.escape.load(Ordering::Acquire)
   };
   let edges = [Some(Hit::Escape), None, None];
   owned(&shared.escape_down, kind, &repeat, ours, edges).unwrap_or(Verdict::Pass)
@@ -547,9 +549,8 @@ fn lone(
   let down = flags & own != 0;
   if code == chord & 0xffff && kind == KeyKind::Flags {
     // Another modifier held: of another kind, or the other side of this one.
-    let device = MOD_KEYS.iter().filter_map(|&k| device_flag(k)).fold(0, |all, f| all | f);
     let others = flags & (MODIFIERS | CGEventFlags::MaskSecondaryFn.0) & !general_flag(key)
-      | flags & device & !own;
+      | flags & devices() & !own;
     return Some(match (down, held.load(Ordering::Relaxed)) {
       (true, false) if others == 0 => {
         held.store(true, Ordering::Relaxed);
@@ -588,6 +589,11 @@ fn lone(
   }
 
   None
+}
+
+/// The device-dependent flags of all modifier keys: which side is held.
+fn devices() -> u64 {
+  MOD_KEYS.iter().filter_map(|&k| device_flag(k)).fold(0, |all, f| all | f)
 }
 
 /// The device-independent flag of modifier key `key`, either side's.
@@ -881,6 +887,9 @@ mod tests {
     let taken = Verdict::Swallow(Some(Hit::Escape));
     assert_eq!(key_at(&s, 2_000, true, ESC, opt, false), taken);
     assert_eq!(key_at(&s, 2_050, false, ESC, opt, false), Verdict::Swallow(None));
+    // With the left ⌥ held too: the user's ⌥⎋.
+    let both = CGEventFlags(RIGHT_ALT | LEFT_ALT);
+    assert_eq!(key_at(&s, 2_100, true, ESC, both, false), Verdict::Pass);
     // ⌥⎋ with another hotkey, or with this one not held, is still the app's.
     let s = lone_shared(Code::MetaRight);
     s.escape.store(true, Ordering::Release);
