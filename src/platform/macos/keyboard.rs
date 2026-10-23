@@ -22,6 +22,7 @@ type CFTypeRef = *const c_void;
 unsafe extern "C" {
   static kTISPropertyUnicodeKeyLayoutData: CFTypeRef;
   fn TISCopyCurrentASCIICapableKeyboardLayoutInputSource() -> CFTypeRef;
+  fn TISCopyCurrentKeyboardLayoutInputSource() -> CFTypeRef;
   fn TISGetInputSourceProperty(src: CFTypeRef, key: CFTypeRef) -> CFTypeRef;
   fn LMGetKbdType() -> u8;
   fn UCKeyTranslate(
@@ -123,11 +124,43 @@ fn ascii(c: Option<char>) -> Option<char> {
   c.filter(|c| c.is_ascii() && !c.is_ascii_control())
 }
 
+/// The key that types `c` (lowercase for a letter) with Cmd held or not, and whether it takes
+/// Shift: on the layout in use (with Cmd, its Cmd mapping, Latin on a Russian one), else the
+/// ASCII-capable one, else a US keyboard's place. Main thread only.
+pub fn key_for(c: char, cmd: bool) -> Option<(u16, bool)> {
+  let current = with_source(TISCopyCurrentKeyboardLayoutInputSource, |s| key_in(s, c, cmd));
+  let found = current.flatten().or_else(|| with_layout(|s| key_in(s, c, cmd)).flatten());
+  found.or_else(|| keys::us_code(c).and_then(|(code, shift)| Some((kvk(code)?, shift))))
+}
+
+/// [key_for] on the layout of input source `src`, a live `TISInputSourceRef`: by its Cmd mapping
+/// with `cmd`, then as it types (US maps Cmd-Shift-= to `=`, typing `+`); a key without Shift
+/// first, never the keypad's (its `+` is no `cmd++`).
+fn key_in(src: CFTypeRef, c: char, cmd: bool) -> Option<(u16, bool)> {
+  let main = |k: &u16| !code(*k).to_string().starts_with("Numpad");
+  let at = |shift, cmd| (0..128).find(|k| translate(src, *k, shift, cmd) == Some(c) && main(k));
+  let ways = [(false, cmd), (true, cmd), (false, false), (true, false)];
+  ways.into_iter().find_map(|(shift, cmd)| Some((at(shift, cmd)?, shift)))
+}
+
+/// The virtual key code at `place`, as [code] maps them back.
+pub fn kvk(place: Code) -> Option<u16> {
+  (0..128).find(|&k| code(k) == place).filter(|_| place != Code::Unidentified)
+}
+
 /// `f` on the current ASCII-capable layout's input source; none when there is none.
 fn with_layout<R>(f: impl FnOnce(CFTypeRef) -> R) -> Option<R> {
+  with_source(TISCopyCurrentASCIICapableKeyboardLayoutInputSource, f)
+}
+
+/// `f` on the input source `copy` gives (a TIS Copy function); none when it gives none.
+fn with_source<R>(
+  copy: unsafe extern "C" fn() -> CFTypeRef,
+  f: impl FnOnce(CFTypeRef) -> R,
+) -> Option<R> {
   // SAFETY: a Copy function returns a retained source or null, released after `f`.
   unsafe {
-    let src = TISCopyCurrentASCIICapableKeyboardLayoutInputSource();
+    let src = copy();
     if src.is_null() {
       return None;
     }
@@ -189,8 +222,11 @@ mod tests {
     fn CFArrayGetValueAtIndex(a: CFTypeRef, i: isize) -> CFTypeRef;
   }
 
-  /// `f` on the installed layout `id` (enabled or not).
+  /// `f` on the installed layout `id` (enabled or not), one test at a time: TIS aborts the
+  /// process when two threads call it at once.
   fn on_layout(id: &str, f: impl FnOnce(CFTypeRef)) {
+    static TIS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one = TIS.lock().unwrap_or_else(|e| e.into_inner());
     // SAFETY: the key is a CFString constant; the list is retained (Create rule) and released
     // after its source is used.
     unsafe {
@@ -245,5 +281,26 @@ mod tests {
       assert_eq!(cmd_char_in(src, 8, false), None);
       assert_eq!(cmd_char_in(src, 24, true), None);
     });
+  }
+
+  /// The key a posted shortcut presses: ⌘V where V is on QWERTY on a Russian layout (Cyrillic
+  /// alone, Latin with Cmd), Dvorak's own V, and `+` with Shift on US.
+  #[test]
+  fn posted_keys_follow_the_layout() {
+    on_layout("com.apple.keylayout.RussianWin", |src| {
+      assert_eq!(key_in(src, 'v', true), Some((9, false)));
+      assert_eq!(key_in(src, 'v', false), None, "Cyrillic without Cmd");
+    });
+    on_layout("com.apple.keylayout.Dvorak", |src| {
+      assert_eq!(key_in(src, 'v', true), Some((0x2F, false)))
+    });
+    on_layout("com.apple.keylayout.DVORAK-QWERTYCMD", |src| {
+      assert_eq!(key_in(src, 'v', true), Some((9, false)));
+    });
+    on_layout("com.apple.keylayout.US", |src| assert_eq!(key_in(src, '+', true), Some((24, true))));
+    assert_eq!(
+      (kvk(Code::KeyV), kvk(Code::Enter), kvk(Code::Unidentified)),
+      (Some(9), Some(0x24), None)
+    );
   }
 }

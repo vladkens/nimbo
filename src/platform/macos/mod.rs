@@ -25,7 +25,7 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSArray, NSString, NSUserDefaults, ns_string};
 
-pub use self::app::{autostart, hotkey, tray};
+pub use self::app::{autostart, hotkey, open, permissions, post, tray};
 use crate::app::{Appearance, Clipboard};
 
 /// The system clipboard, plain text only.
@@ -42,6 +42,11 @@ impl Clipboard for Pasteboard {
     pb.clearContents();
     pb.setString_forType(&NSString::from_str(s), unsafe { NSPasteboardTypeString });
   }
+}
+
+/// The system clipboard outside a window: the general pasteboard.
+pub fn clipboard() -> Option<impl Clipboard> {
+  Some(Pasteboard)
 }
 
 /// The main thread's marker: AppKit, the app's windows and its tray are main thread only.

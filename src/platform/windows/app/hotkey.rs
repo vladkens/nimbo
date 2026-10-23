@@ -319,8 +319,10 @@ unsafe extern "system" fn hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
   // SAFETY: for HC_ACTION, lParam points to the event's KBDLLHOOKSTRUCT.
   let k = (code == HC_ACTION as i32).then(|| unsafe { &*(lp as *const KBDLLHOOKSTRUCT) });
   let fake = k.is_some_and(|k| k.vkCode == VK_LCONTROL as u32 && k.scanCode == ALTGR_CTRL);
-  if let Some(k) = k.filter(|_| !fake) {
-    // AltGr's Left Ctrl, filtered, is no key of the user's: Right Alt stays alone.
+  let posted = k.is_some_and(|k| k.dwExtraInfo == super::post::POSTED);
+  if let Some(k) = k.filter(|_| !fake && !posted) {
+    // AltGr's Left Ctrl, filtered, is no key of the user's: Right Alt stays alone. Nor are the
+    // app's own posted keys: a held hotkey lifted and put back for them is still held.
     let down = matches!(wp as u32, WM_KEYDOWN | WM_SYSKEYDOWN);
     let now = Instant::now();
     let taken = HOOK.with_borrow_mut(|h| {
@@ -480,7 +482,7 @@ fn mods_of(m: Modifiers) -> u32 {
 }
 
 /// The left or right modifier key at `code`.
-fn lone_vk(code: Code) -> Option<u32> {
+pub(super) fn lone_vk(code: Code) -> Option<u32> {
   let vk = match code {
     Code::ControlLeft => VK_LCONTROL,
     Code::ControlRight => VK_RCONTROL,

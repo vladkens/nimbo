@@ -122,6 +122,11 @@ pub fn modifier(sym: u32, code: Code) -> Option<Option<Code>> {
   side(sym).map(|side| side.or_else(at))
 }
 
+/// The keysym of the modifier key at `code`, a side's own (Super for Meta).
+pub fn modifier_sym(code: Code) -> Option<u32> {
+  (0xffe1..=0xffec).find(|&s| side(s) == Some(Some(code)))
+}
+
 fn side(sym: u32) -> Option<Option<Code>> {
   Some(match sym {
     0xffe1 => Some(Code::ShiftLeft),

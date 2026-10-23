@@ -101,6 +101,11 @@ pub fn quit() {
   super::super::quit();
 }
 
+/// The app runs and this is its thread, GTK's ([run], from before `start` to after its loop).
+pub(in super::super) fn running() -> bool {
+  INFO.get().is_some()
+}
+
 pub fn is_main() -> bool {
   MAIN.get() == Some(&thread::current().id())
 }

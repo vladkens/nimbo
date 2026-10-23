@@ -86,7 +86,6 @@ unsafe extern "C" {
   /// Seconds since startup, when the event happened.
   fn GetEventTime(event: EventRef) -> f64;
   fn GetCurrentEventTime() -> f64;
-  fn IsSecureEventInputEnabled() -> u8;
 }
 
 const SIGNATURE: u32 = u32::from_be_bytes(*b"nmbo");
@@ -245,13 +244,6 @@ pub fn modifiers(mods: Modifiers) -> u32 {
     (Modifiers::META, CMD_KEY),
   ];
   bits.iter().filter(|(m, _)| mods.contains(*m)).fold(0, |all, (_, b)| all | b)
-}
-
-/// Secure Input is on: some app (a password field, a terminal's secure keyboard entry) keeps the
-/// event tap from seeing key presses.
-pub fn secure_input() -> bool {
-  // SAFETY: no arguments, no preconditions.
-  unsafe { IsSecureEventInputEnabled() != 0 }
 }
 
 #[cfg(test)]

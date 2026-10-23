@@ -126,6 +126,17 @@ fn decoded(n: i32, buf: &[u16]) -> Option<(char, bool)> {
   }
 }
 
+/// The virtual key of named key `k` (the dedicated one, not the keypad's).
+pub fn vk_of(k: NamedKey) -> Option<u16> {
+  (1..0xFF).find(|&vk| navigation(vk).or_else(|| named(vk)) == Some(k))
+}
+
+/// Whether `vk` is sent with the extended bit: the navigation keys, the right Ctrl and Alt and the
+/// Windows keys, which would otherwise be the keypad's, the left ones or nothing.
+pub fn extended(vk: u16) -> bool {
+  navigation(vk).is_some() || matches!(vk, VK_LWIN | VK_RWIN | 0xA3 | 0xA5)
+}
+
 /// The key a navigation virtual key names wherever it is: the keypad's with Num Lock off too.
 fn navigation(vk: u16) -> Option<NamedKey> {
   Some(match vk {

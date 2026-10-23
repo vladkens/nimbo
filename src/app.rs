@@ -228,6 +228,25 @@ impl Clipboard for MemClipboard {
   }
 }
 
+/// The system clipboard, plain text, as each window's runtime has it: for code outside a window
+/// (a tray menu's Copy, a paste of the app's own). On the main thread, while the app runs
+/// ([crate::app]): Windows writes through the app's hidden window, Linux through GTK, which also
+/// serves the text to other apps; with no app running it reads nothing and writes nothing there.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SystemClipboard;
+
+impl Clipboard for SystemClipboard {
+  fn read(&self) -> Option<String> {
+    crate::platform::clipboard()?.read()
+  }
+
+  fn write(&mut self, s: &str) {
+    if let Some(mut c) = crate::platform::clipboard() {
+      c.write(s);
+    }
+  }
+}
+
 /// An in-memory one, until the runtime puts its own in.
 impl Default for Box<dyn Clipboard> {
   fn default() -> Self {

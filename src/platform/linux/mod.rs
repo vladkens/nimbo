@@ -35,7 +35,7 @@ use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-pub use self::app::{autostart, hotkey, shell, tray};
+pub use self::app::{autostart, hotkey, open, post, shell, tray};
 use self::dl::{Lib, fns};
 use self::input::Input;
 pub use self::settings::appearance;
@@ -926,6 +926,16 @@ impl Clipboard for Clip {
     let len = s.len().min(c_int::MAX as usize) as c_int;
     unsafe { (gtk().gtk_clipboard_set_text)(self.0, s.as_ptr().cast(), len) };
   }
+}
+
+/// The system clipboard outside a window, GTK's CLIPBOARD selection: on the main thread while
+/// the app runs (GTK initialized), `None` elsewhere.
+pub fn clipboard() -> Option<impl Clipboard> {
+  if !app::shell::running() {
+    return None;
+  }
+
+  Some(Clip(unsafe { (load()?.gtk_clipboard_get)(CLIPBOARD) }))
 }
 
 #[cfg(test)]

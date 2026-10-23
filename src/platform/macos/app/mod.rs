@@ -3,10 +3,14 @@
 //! What a menu-bar app needs on macOS besides its windows ([super::shell]): the status item and
 //! its menu ([tray]), global hotkeys ([hotkey]: an event tap with Carbon's hotkeys as the
 //! fallback), launch at login ([autostart]: SMAppService), work from other threads on the main
-//! queue ([post]), and the Dock ([Presence]).
+//! queue ([post()]), and the Dock ([Presence]); links and files opened ([open]), Accessibility
+//! and Secure Input ([permissions]) and shortcuts posted to the app in focus ([post]).
 
 pub mod autostart;
 pub mod hotkey;
+pub mod open;
+pub mod permissions;
+pub mod post;
 pub mod tray;
 
 use std::cell::Cell;
