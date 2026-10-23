@@ -237,7 +237,10 @@ impl Tray {
     // TrackPopupMenu), and needs a message after to settle.
     let cmd = unsafe {
       SetForegroundWindow(host);
+      // Its loop runs the messages: the app's windows keep drawing from their timers.
+      super::super::modal(1);
       let cmd = TrackPopupMenuEx(self.0.hmenu.get(), flags, x, y, host, null());
+      super::super::modal(-1);
       PostMessageW(host, WM_NULL, 0, 0);
       cmd
     };
@@ -365,9 +368,10 @@ fn build(items: &[Item], next: &mut u32) -> HMENU {
   for it in items {
     let text = wide(&text(it));
     let flags = flags(it);
+    // A separator is only that, whatever else it carries.
     let id = match &it.submenu {
+      _ if it.separator => 0,
       Some(sub) => build(&sub.items, next) as usize,
-      None if it.separator => 0,
       None => {
         *next += 1;
         *next as usize
@@ -457,6 +461,19 @@ mod tests {
     );
     assert_eq!(flags(&Item::separator()), MF_SEPARATOR);
     assert_eq!(flags(&Item::new("s", "S").submenu(Menu::default())), MF_STRING | MF_POPUP);
+  }
+
+  /// A separator's submenu, which [Item] says is ignored, takes no command numbers.
+  #[test]
+  fn a_separator_numbers_nothing() {
+    let sep = Item { submenu: Some(Menu::new(vec![Item::new("x", "X")])), ..Item::separator() };
+    let tray = Tray::detached(crate::tray::TrayIcon::path(4.0, "M0 0H4V4Z"), "t");
+    tray.set_menu(&Menu::new(vec![sep, Item::new("quit", "Quit")]));
+    let got = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let g = got.clone();
+    tray.on_item(Box::new(move |_, _, id| g.borrow_mut().push(id.to_owned())));
+    tray.choose(&[1]);
+    assert_eq!(*got.borrow(), ["quit"]);
   }
 
   /// A menu dismissed (Escape, a click outside) chooses nothing and keeps the callback.

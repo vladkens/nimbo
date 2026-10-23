@@ -11,6 +11,7 @@
 
 use std::any::TypeId;
 use std::marker::PhantomData;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -50,7 +51,18 @@ pub enum Presence {
 /// from the loop and the process exits after it, so `app` does not return. After [Main::quit]
 /// the hook runs once the loop has stopped, then `app` returns.
 pub fn app(info: AppInfo, start: impl FnOnce(&mut Main)) {
-  imp::run(&info, start);
+  running(|| imp::run(&info, start));
+}
+
+/// The loop running now, by number (0: none): [Proxy]'s work runs only in the loop it was
+/// posted to, so work posted after it ended is dropped, and never runs in a later one.
+static LOOP: AtomicU64 = AtomicU64::new(0);
+static LOOPS: AtomicU64 = AtomicU64::new(0);
+
+fn running(run: impl FnOnce()) {
+  LOOP.store(LOOPS.fetch_add(1, Ordering::Relaxed) + 1, Ordering::Release);
+  run();
+  LOOP.store(0, Ordering::Release);
 }
 
 /// One window running `app` with the loop around it, which ends when the window closes or the
@@ -61,9 +73,11 @@ pub(crate) fn window(cfg: &Config, app: Box<dyn App>) {
   // The loop runs once per process: the strings live as long as it.
   let id: &'static str = Box::leak(stem.unwrap_or_else(|| "nimbo".into()).into_boxed_str());
   let info = AppInfo { id, name: cfg.title, presence: Presence::Regular };
-  imp::run(&info, |_| {
-    let id = imp::open(cfg, app, TypeId::of::<()>());
-    imp::on_close(id, Box::new(Main::quit));
+  running(|| {
+    imp::run(&info, |_| {
+      let id = imp::open(cfg, app, TypeId::of::<()>());
+      imp::on_close(id, Box::new(Main::quit));
+    })
   });
 }
 
@@ -198,12 +212,24 @@ pub struct Proxy(());
 impl Proxy {
   /// Runs `f` on the main thread, from the loop, after the work already queued.
   pub fn post(&self, f: impl FnOnce(&mut Main) + Send + 'static) {
-    imp::post(Duration::ZERO, Box::new(move || f(&mut Main::here())));
+    self.after(Duration::ZERO, f);
   }
 
   /// Runs `f` on the main thread after `delay`.
   pub fn after(&self, delay: Duration, f: impl FnOnce(&mut Main) + Send + 'static) {
-    imp::post(delay, Box::new(move || f(&mut Main::here())));
+    let n = LOOP.load(Ordering::Acquire);
+    if n == 0 {
+      return;
+    }
+
+    imp::post(
+      delay,
+      Box::new(move || {
+        if LOOP.load(Ordering::Acquire) == n {
+          f(&mut Main::here());
+        }
+      }),
+    );
   }
 
   /// Runs `f` on the main thread and returns what it returns: at once on the main thread;

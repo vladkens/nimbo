@@ -155,7 +155,8 @@ pub fn is_main() -> bool {
 
 type Posted = Box<dyn FnOnce() + Send>;
 
-/// Runs `f` on the main thread after `delay`: an idle or timeout source, from any thread.
+/// Runs `f` on the main thread after `delay` (at most `u32::MAX` ms, GLib's timeout: about 49
+/// days): an idle or timeout source, from any thread.
 pub fn post(delay: Duration, f: Posted) {
   let Some(g) = load() else { return };
   let data = Box::into_raw(Box::new(f)) as P;
@@ -163,7 +164,10 @@ pub fn post(delay: Duration, f: Posted) {
   unsafe {
     match delay.is_zero() {
       true => (g.g_idle_add)(on_post as Fp, data),
-      false => (g.g_timeout_add)(delay.as_micros().div_ceil(1000) as u32, on_post as Fp, data),
+      false => {
+        let ms = delay.as_micros().div_ceil(1000).min(u32::MAX as u128) as u32;
+        (g.g_timeout_add)(ms, on_post as Fp, data)
+      }
     };
   }
 }

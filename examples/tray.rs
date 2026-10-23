@@ -58,7 +58,7 @@ pub fn menu(s: &Shown) -> Menu {
 #[derive(Default)]
 struct State {
   window: Option<Window<Counter>>,
-  hotkey: String,
+  hotkeys: Option<Hotkeys>,
 }
 
 type Shared = Rc<RefCell<State>>;
@@ -67,7 +67,11 @@ fn shown(state: &Shared) -> Shown {
   let s = state.borrow();
   let count = s.window.as_ref().and_then(|w| w.with(|c| c.count));
   let login = autostart::state(&INFO).ok().map(|st| st.wanted());
-  Shown { count, login, hotkey: s.hotkey.clone() }
+  // Read each time: the listener may fail later (Linux: the user didn't approve the shortcut).
+  let status = s.hotkeys.as_ref().map(|h| h.status());
+  let bound = status.filter(|st| st.error.is_none() && st.listener_error.is_none());
+  let hotkey = bound.and_then(|st| st.hotkey).map(|h| h.label()).unwrap_or_default();
+  Shown { count, login, hotkey }
 }
 
 /// Opens the counter, or closes it when open.
@@ -103,11 +107,8 @@ fn start(main: &mut Main) {
       proxy.post(|main| STATE.with(|s| toggle(main, s)));
     }
   });
-  match hotkeys.set(HOTKEY) {
-    Ok(()) => {
-      state.borrow_mut().hotkey = hotkeys.status().hotkey.map(|h| h.label()).unwrap_or_default()
-    }
-    Err(e) => eprintln!("hotkey: {e}"),
+  if let Err(e) = hotkeys.set(HOTKEY) {
+    eprintln!("hotkey: {e}");
   }
 
   // The listener: the portal on Linux; on macOS a chord works without the event tap, which
@@ -118,12 +119,11 @@ fn start(main: &mut Main) {
     eprintln!("hotkey: {e}");
   }
 
-  // No listener (Linux without the portal): no hotkey to show.
   if let Some(e) = hotkeys.status().listener_error {
     eprintln!("hotkey: {e}");
-    state.borrow_mut().hotkey.clear();
   }
 
+  state.borrow_mut().hotkeys = Some(hotkeys);
   let refresh = |t: &Tray, state: &Shared| t.set_menu(&menu(&shown(state)));
   refresh(&tray, &state);
   let s = state.clone();
@@ -144,9 +144,8 @@ fn start(main: &mut Main) {
     refresh(t, &state);
   });
 
-  // The tray and the hotkeys live as long as the app.
-  let keep = (tray, hotkeys);
-  main.on_quit(move |_| drop(keep));
+  // The tray lives as long as the app; the hotkeys are in its state.
+  main.on_quit(move |_| drop(tray));
 }
 
 fn main() {

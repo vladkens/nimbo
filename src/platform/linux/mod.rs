@@ -421,7 +421,7 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Result<u64, std::ffi::NulError> {
     timer: None,
     resizable: cfg.resizable,
     min,
-    input: Input::new(),
+    input: Input::new(id),
     cursor: None,
     cursors: Vec::new(),
     painted: false,

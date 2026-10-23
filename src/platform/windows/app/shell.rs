@@ -290,6 +290,7 @@ pub fn type_of(id: u64) -> Option<TypeId> {
 pub fn front(id: u64) {
   let Some(hwnd) = hwnd(id) else { return };
   let show = if unsafe { IsIconic(hwnd) } != 0 { SW_RESTORE } else { SW_SHOW };
+  super::super::shown(hwnd);
   unsafe {
     ShowWindow(hwnd, show);
     SetForegroundWindow(hwnd);

@@ -15,6 +15,7 @@
 //! and keys stay plain.
 
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
@@ -63,6 +64,8 @@ pub struct State {
 #[derive(Default)]
 pub struct Ivars {
   state: RefCell<Option<State>>,
+  /// Events that came while the runtime was busy up the stack, sent in order before the next.
+  waiting: RefCell<VecDeque<Event>>,
   /// Timestamp of the last key event offered through `performKeyEquivalent:`, which AppKit
   /// sends again as `keyDown:` when neither we nor the menu used it.
   key_equivalent: Cell<f64>,
@@ -528,19 +531,39 @@ impl View {
 
   /// Feeds an event to the runtime and restarts the display link if it needs a frame.
   pub fn send(&self, ev: Event) -> bool {
-    let (used, quit) = {
-      let Ok(mut state) = self.ivars().state.try_borrow_mut() else {
-        // The runtime is busy up the stack (an app changed through `Window::with` fronts
-        // another window, and AppKit tells this one it lost the keys): sent once it is done.
+    if self.ivars().state.try_borrow_mut().is_err() {
+      // The runtime is busy up the stack (an app changed through `Window::with` fronts another
+      // window, and AppKit tells this one it lost the keys): sent once it is done, in order.
+      let mut waiting = self.ivars().waiting.borrow_mut();
+      if waiting.is_empty() {
         let weak = self.weak();
         DispatchQueue::main().exec_async(move || {
           let mtm = MainThreadMarker::new().unwrap();
           if let Some(view) = weak.get(mtm).load() {
-            view.send(ev);
+            view.flush();
           }
         });
-        return false;
-      };
+      }
+
+      waiting.push_back(ev);
+      return false;
+    }
+
+    self.flush();
+    self.deliver(ev)
+  }
+
+  /// Sends the events that waited, unless the runtime is still busy.
+  fn flush(&self) {
+    while self.ivars().state.try_borrow_mut().is_ok() {
+      let Some(ev) = self.ivars().waiting.borrow_mut().pop_front() else { return };
+      self.deliver(ev);
+    }
+  }
+
+  fn deliver(&self, ev: Event) -> bool {
+    let (used, quit) = {
+      let mut state = self.ivars().state.borrow_mut();
       let Some(st) = state.as_mut() else { return false };
       let used = st.rt.event(ev);
       match st.rt.needs_frame() {

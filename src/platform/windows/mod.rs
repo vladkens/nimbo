@@ -167,10 +167,8 @@ struct Window {
   /// While animating, frames come a refresh of the display apart: the display it is on.
   pace: Pace,
   monitor: HMONITOR,
-  /// How many modal loops run the messages (a live move or resize, a menu's), and their frame
-  /// timer's period in milliseconds: a refresh while frames are due, the app's next timer when
-  /// one is set, else none.
-  modal: u8,
+  /// The frame timer's period in milliseconds while a modal loop runs ([MODAL]): a refresh
+  /// while frames are due, the app's next timer when one is set, else none.
   armed: Option<u32>,
   /// The window a wake posts to: none once it is destroyed, so a waker kept by another thread
   /// never posts to a window that took the handle over.
@@ -208,6 +206,12 @@ thread_local! {
   static WINDOWS: RefCell<Vec<(HWND, Rc<RefCell<Window>>)>> = const { RefCell::new(Vec::new()) };
   /// The window whose message is being handled: [with]'s.
   static CURRENT: Cell<HWND> = const { Cell::new(null_mut()) };
+  /// The modal loops running the thread's messages (a live move or resize, a menu's, the tray's
+  /// menu): every window's frames come from its timer then ([Window::sync_modal]).
+  static MODAL: Cell<u8> = const { Cell::new(0) };
+  /// Focus changes that came while their window was busy up the stack (an app changed through
+  /// `Window::with` fronts another window): sent in order once it is free ([with_window]).
+  static WAITING: RefCell<Vec<(HWND, Event)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Runs `f` on the current window ([CURRENT]), unless a call up the stack has it (a message sent
@@ -216,11 +220,44 @@ fn with<R>(f: impl FnOnce(&mut Window) -> R) -> Option<R> {
   with_window(CURRENT.get(), f)
 }
 
-/// Runs `f` on window `hwnd`, as [with].
+/// Runs `f` on window `hwnd`, as [with], then sends what waited for it.
 fn with_window<R>(hwnd: HWND, f: impl FnOnce(&mut Window) -> R) -> Option<R> {
   let w = WINDOWS.with_borrow(|ws| ws.iter().find(|(h, _)| *h == hwnd).map(|(_, w)| w.clone()))?;
-  let mut w = w.try_borrow_mut().ok()?;
-  Some(f(&mut w))
+  let r = f(&mut *w.try_borrow_mut().ok()?);
+  while let Ok(mut win) = w.try_borrow_mut() {
+    let next = WAITING.with_borrow_mut(|q| Some(q.remove(q.iter().position(|e| e.0 == hwnd)?)));
+    let Some((_, ev)) = next else { break };
+    win.send(ev);
+  }
+
+  Some(r)
+}
+
+/// Sends `events` to the current window, or keeps them for it while it is busy.
+fn send_or_wait(events: [Event; 2]) {
+  let hwnd = CURRENT.get();
+  let mut events = Some(events);
+  with(|w| events.take().map(|e| e.map(|ev| w.send(ev))));
+  if let Some(events) = events {
+    WAITING.with_borrow_mut(|q| q.extend(events.map(|ev| (hwnd, ev))));
+  }
+}
+
+/// Window `hwnd` shows for the first time: its frames start.
+pub(crate) fn shown(hwnd: HWND) {
+  with_window(hwnd, |w| {
+    if std::mem::replace(&mut w.hidden, false) {
+      w.rt.redraw();
+    }
+  });
+}
+
+/// A modal loop starts (`delta` 1) or ends (-1): every window's frame timer follows.
+pub(crate) fn modal(delta: i8) {
+  MODAL.set(MODAL.get().saturating_add_signed(delta));
+  for h in handles() {
+    with_window(h, |w| w.sync_modal());
+  }
 }
 
 /// Runs `f` with `hwnd` the [CURRENT] window, then the one before again.
@@ -297,7 +334,7 @@ impl Window {
   /// again.
   fn sync_modal(&mut self) {
     // Every refresh while a frame is due, else at the app's next timer.
-    let wait = match self.modal > 0 && !self.hidden {
+    let wait = match MODAL.get() > 0 && !self.hidden {
       false => None,
       true if self.rt.needs_frame() => Some(self.pace.interval),
       true => self.rt.due_in(),
@@ -526,15 +563,15 @@ fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
       0
     }
     WM_ENTERSIZEMOVE | WM_ENTERMENULOOP => {
-      with(|w| w.modal += 1);
+      modal(1);
       0
     }
     // The live move's or the menu's loop took the keys pressed or let go meanwhile: the
     // modifiers held now.
     WM_EXITSIZEMOVE | WM_EXITMENULOOP => {
       let focused = unsafe { GetFocus() } == hwnd;
+      modal(-1);
       with(|w| {
-        w.modal = w.modal.saturating_sub(1);
         w.send(Event::Mods(if focused { keyboard::mods_held() } else { Modifiers::empty() }));
       });
       0
@@ -550,17 +587,11 @@ fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     // Modifiers that went up or down in another window never reach this one: none held while
     // away, those held now on return.
     WM_SETFOCUS => {
-      with(|w| {
-        w.send(Event::Focus(true));
-        w.send(Event::Mods(keyboard::mods_held()));
-      });
+      send_or_wait([Event::Focus(true), Event::Mods(keyboard::mods_held())]);
       0
     }
     WM_KILLFOCUS => {
-      with(|w| {
-        w.send(Event::Mods(Modifiers::empty()));
-        w.send(Event::Focus(false));
-      });
+      send_or_wait([Event::Mods(Modifiers::empty()), Event::Focus(false)]);
       0
     }
     m if settings::changed(m, lp) => {
@@ -656,7 +687,8 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
     renderer: Renderer::new(),
     dib: None,
     scale,
-    hidden: false,
+    // Opened hidden ([Config::hidden]): no frames until it shows ([shown]).
+    hidden: cfg.hidden,
     pace: Pace::new(refresh(hwnd)),
     monitor: unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) },
     trace: std::env::var_os("NIMBO_TRACE").is_some(),
@@ -673,7 +705,6 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
     min: cfg.min(),
     style,
     look,
-    modal: 0,
     armed: None,
     target,
   };
@@ -1066,6 +1097,14 @@ mod tests {
       SendMessageW(hwnd, WM_KILLFOCUS, 0, 0);
     }
     assert_eq!(*seen.borrow(), [true, false]);
+
+    // Sent while the window is busy up the stack (an app's `with` fronting another window):
+    // kept, then sent in order once it is free, never a double borrow.
+    with_window(hwnd, |_| unsafe {
+      SendMessageW(hwnd, WM_SETFOCUS, 0, 0);
+      SendMessageW(hwnd, WM_KILLFOCUS, 0, 0);
+    });
+    assert_eq!(*seen.borrow(), [true, false, true, false]);
 
     unsafe { DestroyWindow(hwnd) };
   }
