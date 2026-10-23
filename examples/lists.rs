@@ -170,7 +170,6 @@ impl App for Lists {
   }
 }
 
-#[allow(dead_code)]
 fn main() {
   // The shot: rows 3 to 6 selected, the list scrolled a little, the pointer on the menu.
   nimbo::run(Config::new("lists", 760.0, 480.0), Lists::new(), |h| {

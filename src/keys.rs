@@ -984,10 +984,10 @@ mod tests {
     assert_eq!(other.map(|k| key_label(k, false)), ["Space", "SS", "F5", "Insert"]);
   }
 
-  /// Every global hotkey key the settings grammar had, written and shown as it was before
-  /// `keyboard-types`: canonical, macOS's symbols and the PC's names, with Ctrl-Shift.
+  /// Every global hotkey key with Ctrl-Shift: its canonical spelling parses back to it, and it
+  /// shows in macOS's symbols and the PC's names.
   #[test]
-  fn every_hotkey_key_as_before() {
+  fn every_hotkey_key() {
     let mut want: Vec<String> = ('a'..='z')
       .chain('0'..='9')
       .map(|c| {

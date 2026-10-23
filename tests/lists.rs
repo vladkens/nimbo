@@ -1,25 +1,42 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Harness scenario for `examples/lists.rs`: the 100k-row list builds only the rows in view and
-//! scrolls by the wheel and the keys, selects by click, Shift-click, Cmd-click and the arrows,
-//! opens a row by Enter; the menu opens, moves over its enabled items and runs one, closes by
-//! Escape or a click outside; the pop-up button chooses by letters typed, closed and open; the
-//! tabs switch and keep the hidden page's scroll; the split's divider drags.
+//! Tests of `examples/lists.rs` through the harness: the 100k-row list builds only the rows in
+//! view and scrolls by the wheel and the keys, selects by click, Shift-click, Cmd-click and the
+//! arrows, opens a row by Enter; the menu opens, moves over its enabled items and runs one,
+//! closes by Escape or a click outside; the pop-up button chooses by letters typed, closed and
+//! open; the tabs switch and keep the hidden page's scroll; the split's divider drags.
 
 #[path = "../examples/lists.rs"]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
 #[allow(dead_code, unused_attributes)]
 mod lists;
 
+mod common;
+
 use std::time::Duration;
 
+use common::mid;
 use lists::*;
-use nimbo::{Event, Harness, Id, Key, Modifiers, NamedKey, Phase, Point, Rect, Size};
+use nimbo::{CMD, Event, Harness, Id, Key, Modifiers, NamedKey, Phase, Point, Size};
 
 type H = Harness<Lists>;
 
-fn mid(r: Rect) -> (f32, f32) {
-  (r.x + r.w / 2.0, r.y + r.h / 2.0)
+const NONE: Modifiers = Modifiers::empty();
+
+/// The example, its first frame built.
+fn lists() -> H {
+  let mut h = Harness::new(Lists::new(), Size::new(760.0, 480.0), 2.0);
+  h.render();
+  h
+}
+
+/// The example with its list scrolled down to row 100.
+fn scrolled() -> H {
+  let mut h = lists();
+  let at = mid(h.rect(Id::of(LIST)).unwrap());
+  assert!(swipe(&mut h, at, -2400.0));
+  h.frame();
+  h
 }
 
 fn row(k: u64) -> Id {
@@ -29,7 +46,7 @@ fn row(k: u64) -> Id {
 /// A trackpad's scroll of `dy` points at `at`.
 fn swipe(h: &mut H, at: (f32, f32), dy: f32) -> bool {
   let (pos, delta) = (Point::new(at.0, at.1), Point::new(0.0, dy));
-  let (phase, momentum, mods) = (Phase::Changed, Phase::None, Modifiers::empty());
+  let (phase, momentum, mods) = (Phase::Changed, Phase::None, NONE);
   h.event(Event::Scroll { pos, delta, precise: true, phase, momentum, mods })
 }
 
@@ -50,47 +67,74 @@ fn selected(h: &H) -> Vec<u64> {
   v
 }
 
-use nimbo::keys::CMD;
+/// Rows 101, 103 and 104 selected by a click, a Shift-click and a Cmd-click.
+fn select_some(h: &mut H) {
+  h.click_id(row(101));
+  assert_eq!(selected(h), [101]);
+  click_with(h, row(104), Modifiers::SHIFT);
+  assert_eq!(selected(h), [101, 102, 103, 104]);
+  click_with(h, row(102), CMD);
+  assert_eq!(selected(h), [101, 103, 104]);
+}
 
-fn main() {
-  let mut h = Harness::new(Lists::new(), Size::new(760.0, 480.0), 2.0);
-  h.render();
-  let list = Id::of(LIST);
+/// Opens the menu or pop-up button `id` by a click; it has the focus.
+fn open(h: &mut H, id: Id) {
+  h.click_id(id);
+  h.frame();
+  h.frame();
+  assert!(h.rect(id.key("menu")).is_some(), "{id:?} open");
+}
 
-  // Only the rows in view are built, under the whole content's height.
+/// Only the rows in view are built, under the whole content's height.
+#[test]
+fn only_the_rows_in_view_are_built() {
+  let h = lists();
   let built = h.rt.ui.last.nodes.iter().filter(|n| n.parent != 0).count();
   assert!(h.rect(row(0)).is_some() && h.rect(row(30)).is_none());
-  let sc = h.rt.ui.scroll(list).unwrap();
+  let sc = h.rt.ui.scroll(Id::of(LIST)).unwrap();
   assert_eq!(sc.content.h, ROWS as f32 * ROW_H + 8.0);
   assert!(built < 120, "{built} nodes");
+}
 
-  // The trackpad scrolls it; the rows follow.
-  let at = mid(h.rect(list).unwrap());
-  assert!(swipe(&mut h, at, -2400.0));
-  h.frame();
-  assert_eq!(offset(&h, list), 2400.0);
+/// The trackpad scrolls it; the rows follow; left alone, it goes idle.
+#[test]
+fn the_trackpad_scrolls_the_rows() {
+  let mut h = scrolled();
+  assert_eq!(offset(&h, Id::of(LIST)), 2400.0);
   assert!(h.rect(row(0)).is_none() && h.rect(row(105)).is_some());
+  h.leave();
+  h.wait(Duration::from_millis(2000));
+  assert!(!h.frame(), "idle");
+}
 
-  // Click, Shift-click and Cmd-click select; the status shows the count.
-  h.click_id(row(101));
-  assert_eq!(selected(&h), [101]);
-  click_with(&mut h, row(104), Modifiers::SHIFT);
-  assert_eq!(selected(&h), [101, 102, 103, 104]);
-  click_with(&mut h, row(102), CMD);
-  assert_eq!(selected(&h), [101, 103, 104]);
-  assert_eq!(h.focused(), Some(list));
+#[test]
+fn click_shift_click_and_cmd_click_select() {
+  let mut h = scrolled();
+  select_some(&mut h);
+  assert_eq!(h.focused(), Some(Id::of(LIST)));
+}
 
-  // Down moves the cursor from the last row clicked; Shift-Down extends; Enter opens.
-  h.key(NamedKey::ArrowDown, Modifiers::empty());
+/// Down moves the cursor from the last row clicked; Shift-Down extends; Enter opens.
+#[test]
+fn arrows_move_and_extend_and_enter_opens() {
+  let mut h = scrolled();
+  select_some(&mut h);
+  h.key(NamedKey::ArrowDown, NONE);
   assert_eq!((selected(&h), h.app().sel.cursor()), (vec![103], Some(103)));
   h.key(NamedKey::ArrowDown, Modifiers::SHIFT);
   h.key(NamedKey::ArrowDown, Modifiers::SHIFT);
   assert_eq!(selected(&h), [103, 104, 105]);
-  h.key(NamedKey::Enter, Modifiers::empty());
+  h.key(NamedKey::Enter, NONE);
   assert_eq!(h.app().opened, Some(105));
+}
 
-  // End goes to the last row, scrolled into view; Home back to the first.
-  h.key(NamedKey::End, Modifiers::empty());
+/// End goes to the last row, scrolled into view; Cmd-Up back to the first; Cmd-A selects all.
+#[test]
+fn keys_go_to_the_ends_and_select_all() {
+  let mut h = scrolled();
+  let list = Id::of(LIST);
+  h.click_id(row(101));
+  h.key(NamedKey::End, NONE);
   h.frame();
   assert_eq!(selected(&h), [ROWS as u64 - 1]);
   let (v, last) = (h.rt.ui.scroll(list).unwrap().viewport, h.rect(row(ROWS as u64 - 1)).unwrap());
@@ -98,78 +142,108 @@ fn main() {
   h.key(NamedKey::ArrowUp, CMD);
   h.frame();
   assert_eq!((selected(&h), offset(&h, list)), (vec![0], 0.0));
-
-  // Cmd-A selects all 100k.
   h.key(Key::Char('a'), CMD);
   assert_eq!(h.app().sel.len(), ROWS);
+}
 
-  // The menu: opened by a click, focused, Down skips nothing while rows are selected, Enter
-  // runs the highlighted item and closes it, focus going back to the list.
+/// The menu: opened by a click, focused, Down skips nothing while rows are selected, Enter runs
+/// the highlighted item and closes it.
+#[test]
+fn the_menu_runs_the_highlighted_item() {
+  let mut h = lists();
   let (menu, popup) = (Id::of(MENU), Id::of(MENU).key("menu"));
-  let open = |h: &mut H, id: Id| {
-    h.click_id(id);
-    h.frame();
-    h.frame();
-    assert!(h.rect(id.key("menu")).is_some(), "{id:?} open");
-  };
+  h.click_id(row(1));
+  h.key(Key::Char('a'), CMD);
   open(&mut h, menu);
   assert_eq!(h.focused(), Some(popup));
-  h.key(NamedKey::ArrowDown, Modifiers::empty());
-  h.key(NamedKey::ArrowDown, Modifiers::empty());
-  h.key(NamedKey::ArrowDown, Modifiers::empty());
-  h.key(NamedKey::Enter, Modifiers::empty());
+  h.key(NamedKey::ArrowDown, NONE);
+  h.key(NamedKey::ArrowDown, NONE);
+  h.key(NamedKey::ArrowDown, NONE);
+  h.key(NamedKey::Enter, NONE);
   h.frame();
   assert_eq!(h.app().ran, [2]);
   assert!(h.rect(popup).is_none() && h.app().sel.is_empty());
-  // Nothing selected: Up from nothing wraps past the disabled "Open" to "Select None".
-  open(&mut h, menu);
-  h.key(NamedKey::ArrowUp, Modifiers::empty());
-  h.key(Key::Char(' '), Modifiers::empty());
+}
+
+/// Nothing selected: Up from nothing wraps past the disabled "Open" to "Select None", which
+/// Space runs.
+#[test]
+fn the_menu_skips_disabled_items() {
+  let mut h = lists();
+  open(&mut h, Id::of(MENU));
+  h.key(NamedKey::ArrowUp, NONE);
+  h.key(Key::Char(' '), NONE);
   h.frame();
-  assert_eq!(h.app().ran, [2, 2]);
-  // Escape closes it, a click outside too, running nothing; letters typed highlight the item
-  // they start.
+  assert_eq!(h.app().ran, [2]);
+}
+
+/// Escape closes the menu, a click outside too, running nothing.
+#[test]
+fn escape_or_a_click_outside_closes_the_menu() {
+  let mut h = lists();
+  let (menu, popup) = (Id::of(MENU), Id::of(MENU).key("menu"));
   open(&mut h, menu);
-  h.key(NamedKey::Escape, Modifiers::empty());
+  h.key(NamedKey::Escape, NONE);
   h.frame();
   assert!(h.rect(popup).is_none());
   open(&mut h, menu);
   h.click(700.0, 400.0);
   h.frame();
-  assert!(h.rect(popup).is_none() && h.app().ran == [2, 2]);
-  open(&mut h, menu);
-  h.key(Key::Char('g'), Modifiers::empty());
-  h.advance(Duration::from_millis(300));
-  h.key(Key::Char('o'), Modifiers::empty());
-  h.key(Key::Char(' '), Modifiers::empty());
-  h.frame();
-  // "go" highlights the first, Space runs it: the first row selected and shown.
-  assert_eq!((h.app().ran.as_slice(), selected(&h)), ([2, 2, 0].as_slice(), vec![0]));
+  assert!(h.rect(popup).is_none() && h.app().ran.is_empty());
+}
 
-  // The pop-up button, focused: letters typed choose an option at once, closed.
-  let sort = Id::of(SORT);
-  h.rt.ui.set_focus(Some(sort));
-  h.key(Key::Char('k'), Modifiers::empty());
+/// Letters typed highlight the item they start: "go" the first, which Space runs, the first row
+/// selected and shown.
+#[test]
+fn letters_typed_highlight_a_menu_item() {
+  let mut h = scrolled();
+  open(&mut h, Id::of(MENU));
+  h.key(Key::Char('g'), NONE);
+  h.advance(Duration::from_millis(300));
+  h.key(Key::Char('o'), NONE);
+  h.key(Key::Char(' '), NONE);
+  h.frame();
+  assert_eq!((h.app().ran.as_slice(), selected(&h)), ([0].as_slice(), vec![0]));
+  assert_eq!(offset(&h, Id::of(LIST)), 0.0);
+}
+
+/// The pop-up button, focused and closed: letters typed choose an option at once.
+#[test]
+fn the_pop_up_button_chooses_by_letters_typed() {
+  let mut h = lists();
+  h.rt.ui.set_focus(Some(Id::of(SORT)));
+  h.key(Key::Char('k'), NONE);
   assert_eq!(h.app().sort, 2, "k: Kind");
   h.advance(Duration::from_millis(1100));
   h.key(Key::Char('S'), Modifiers::SHIFT);
   assert_eq!(h.app().sort, 1, "s: Size, whatever the case");
-  // Open on Space; "d" highlights Date Modified, Enter
-  // picks it and gives focus back.
-  h.advance(Duration::from_millis(1100));
-  h.key(Key::Char(' '), Modifiers::empty());
+}
+
+/// The pop-up button opens on Space over itself, as near as the window lets it; "d" highlights
+/// Date Modified, Enter picks it and gives the focus back.
+#[test]
+fn the_pop_up_button_opens_over_itself() {
+  let mut h = lists();
+  let sort = Id::of(SORT);
+  h.rt.ui.set_focus(Some(sort));
+  h.key(Key::Char(' '), NONE);
   h.frame();
   h.frame();
   assert_eq!(h.focused(), Some(sort.key("menu")));
-  // Over the button, as near as the window lets it: the button sits by the window's top.
+  // The button sits by the window's top.
   let (b, m) = (h.rect(sort).unwrap(), h.rect(sort.key("menu")).unwrap());
   assert!(m.x < b.x && m.y < b.y + b.h && m.y >= 6.0, "{m:?} over {b:?}");
-  h.key(Key::Char('d'), Modifiers::empty());
-  h.key(NamedKey::Enter, Modifiers::empty());
+  h.key(Key::Char('d'), NONE);
+  h.key(NamedKey::Enter, NONE);
   h.frame();
   assert_eq!((h.app().sort, h.focused()), (3, Some(sort)));
+}
 
-  // Tabs: a click on Notes shows its page; scrolled, then back and forth, it keeps its offset.
+/// A click on Notes shows its page; scrolled, then back and forth, it keeps its offset. Focused,
+/// the strip switches by the arrows.
+#[test]
+fn tabs_switch_and_keep_the_hidden_page_scroll() {
+  let mut h = lists();
   let tabs = Id::of(TABS);
   h.click_id(tabs.key(("tab", "Notes")));
   h.frame();
@@ -182,13 +256,17 @@ fn main() {
   h.click_id(tabs.key(("tab", "Details")));
   h.frame();
   assert!(h.rect(notes).is_none());
-  // Tab focuses the strip; the arrows switch.
   h.rt.ui.set_focus(Some(tabs));
-  h.key(NamedKey::ArrowRight, Modifiers::empty());
+  h.key(NamedKey::ArrowRight, NONE);
   h.frame();
   assert_eq!((h.app().tab, offset(&h, notes)), (1, 60.0));
+}
 
-  // The split's divider drags: the list grows by as much.
+/// The split's divider drags: the list grows by as much; left alone after, it goes idle.
+#[test]
+fn the_split_divider_drags() {
+  let mut h = lists();
+  let list = Id::of(LIST);
   let handle = Id::of(SPLIT).key("handle");
   let w = h.rect(list).unwrap().w;
   let (x, y) = mid(h.rect(handle).unwrap());
@@ -201,11 +279,7 @@ fn main() {
   let grown = h.rect(list).unwrap().w;
   assert!((grown - (w + 80.0)).abs() <= 1.0, "{w} → {grown}");
   assert!(h.app().side > 0.45);
-
-  // Left alone, it goes idle.
   h.leave();
   h.wait(Duration::from_millis(2000));
   assert!(!h.frame(), "idle");
-
-  println!("lists scenario: ok");
 }

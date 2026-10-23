@@ -146,7 +146,6 @@ impl App for Text {
   }
 }
 
-#[allow(dead_code)]
 fn main() {
   nimbo::run(Config::new("text", SIZE.w, SIZE.h), Text::default(), |_| {});
 }

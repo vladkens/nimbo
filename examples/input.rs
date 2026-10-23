@@ -206,7 +206,6 @@ pub fn parse_point(s: &str) -> Option<Point> {
   Some(Point::new(num(x)?, num(y)?))
 }
 
-#[allow(dead_code)]
 fn main() {
   nimbo::run(Config::new("input", SIZE.w, SIZE.h), Input::default(), |_| {});
 }

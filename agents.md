@@ -22,7 +22,7 @@ A small, fast, custom-drawn desktop UI toolkit in Rust, in the spirit of Sublime
 
 - Start every `.rs` file with `// Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo`.
 - A file stays within ~800 lines of code, not counting tests, doc comments, comments and blanks; split it into submodules before it grows past that. `make size` counts them.
-- Each part has a code budget (`BUDGETS` in `scripts/size.py`: macOS 1500, Windows 2000, Linux 2500, `ui/` 3500, the rest of the core 4000), checked by `make size ARGS=--check` (and `make check`); raising one is a decision recorded in the PR.
+- Each part has a code budget (`BUDGETS` in `scripts/size.py`: each platform, `ui/`, its widgets and containers, `text/` and the rest of the core), checked by `make size ARGS=--check` (and `make check`); raising one is a decision recorded in the PR.
 - A statement after an `if`, `for`, `while`, `loop` or `match` block starts after a blank line, as do the other logical steps; rustfmt never adds them, `scripts/blank-lines.py` checks it.
 - Every file starts with a `//!` doc whose first sentence says what the file does; `make size ARGS=--map` lists the files by it, and a PR's description carries that list for the files it adds or changes.
 - Every styled widget is a headless behaviour (hover, press, click, focus, keys, the value it edits) plus drawing from the theme, so an app can draw its own look over the same behaviour.
@@ -39,7 +39,7 @@ A small, fast, custom-drawn desktop UI toolkit in Rust, in the spirit of Sublime
 ## Testing
 
 - `make check` (nightly fmt, the blank-line check, clippy with `-D warnings`, and clippy for Windows and Linux) and `make test` pass before a commit; `make prepare` formats, adds the blank lines and applies clippy fixes.
-- Harness scenarios are `harness = false` test targets in `tests/` that include their example with `#[path]` and assert app state and pixels headless; pure logic gets inline unit tests. Tests never show a window, a status item or start an event tap.
+- Tests are ordinary `#[test]` functions, and `Cargo.toml` has no `[[test]]` sections. An example's tests are in `tests/<example>.rs`, one per thing they check: each includes the example with `#[path]`, drives it through the harness and asserts app state and pixels headless (pixel helpers in `tests/common/`); pure logic gets inline unit tests. They run in parallel on libtest's threads, so the harness and what it reaches stay thread-safe. Tests never show a window, a status item or start an event tap; checks that need real OS windows run through `machine-check`.
 - Verify every visual change by opening its harness shot with Read, cropped for text detail; compare with the macOS references at the same scale when the look is meant to match.
 - A PR that touches a platform's event loop or present path runs `scripts/pace.py` (`make pace`) on each backend it touches: Wayland and X11 (GTK's, `GDK_BACKEND=wayland|x11`), Windows; CI runs it on X11 under Xvfb.
 - Real windows on the developer's machine open only with their permission, one example, 1–3 launches, never in a loop.

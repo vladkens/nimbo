@@ -107,7 +107,6 @@ impl App for Fields {
   }
 }
 
-#[allow(dead_code)]
 fn main() {
   nimbo::run(Config::new("fields", SIZE.w, SIZE.h), Fields::new(), |h| {
     h.frame();

@@ -46,7 +46,6 @@ impl App for Counter {
   }
 }
 
-#[allow(dead_code)]
 fn main() {
   // The shot: counted to 3, the pointer resting on + after the fade.
   nimbo::run(Config::new("counter", 360.0, 300.0), Counter::default(), |h| {

@@ -163,7 +163,6 @@ impl App for Shapes {
   }
 }
 
-#[allow(dead_code)]
 fn main() {
   nimbo::run(Config::new("shapes", SIZE.w, SIZE.h), Shapes::default(), |_| {});
 }

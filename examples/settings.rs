@@ -381,7 +381,6 @@ impl App for Settings {
   }
 }
 
-#[allow(dead_code)]
 fn main() {
   nimbo::run(Config::new("Settings", WIDTH, 560.0).fixed(), Settings::default(), |h| {
     h.frame();

@@ -11,8 +11,11 @@
 #[allow(dead_code, unused_attributes)]
 mod gallery;
 
+mod common;
+
 use std::time::Duration;
 
+use common::{mid, px};
 use gallery::*;
 use nimbo::{Appearance, Event, Harness, Id, Modifiers, NamedKey, Rect, Size, Theme};
 
@@ -24,10 +27,6 @@ fn id(name: &str, pane: usize) -> Id {
 
 fn rect(h: &H, name: &str, pane: usize) -> Rect {
   h.rect(id(name, pane)).unwrap_or_else(|| panic!("no {name} in pane {pane}"))
-}
-
-fn px(c: nimbo::Color) -> [u8; 4] {
-  c.map(|v| (v * 255.0).round() as u8)
 }
 
 #[test]
@@ -86,7 +85,8 @@ fn every_widget_in_both_themes() {
 
   // The reset's tooltip shows after a rest.
   let r = rect(&h, RESET, 0);
-  h.move_to(r.x + r.w / 2.0, r.y + r.h / 2.0);
+  let (x, y) = mid(r);
+  h.move_to(x, y);
   h.wait(Duration::from_millis(400));
   assert!(h.rect(id(RESET, 0).key("tip")).is_some());
 

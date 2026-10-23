@@ -14,8 +14,11 @@
 #[allow(dead_code, unused_attributes)]
 mod settings;
 
+mod common;
+
 use std::time::Duration;
 
+use common::px;
 use nimbo::{
   Appearance, Code, Event, Harness, Hotkey, Id, Key, Modifiers, NamedKey, Rect, Size, Theme,
 };
@@ -56,8 +59,7 @@ fn general_switches_select_and_recorder() {
   let mut h = start();
   // The switch that is on is in the accent.
   let r = rect(&h, LOGIN);
-  let accent = Theme::PLATES_LIGHT.accent.map(|c| (c * 255.0).round() as u8);
-  assert_eq!(h.render().pixel(r.x + 6.0, r.y + r.h / 2.0), accent);
+  assert_eq!(h.render().pixel(r.x + 6.0, r.y + r.h / 2.0), px(Theme::PLATES_LIGHT.accent));
 
   // Switches flip; one disabled by another setting doesn't.
   h.click_id(Id::of(LOGIN));
