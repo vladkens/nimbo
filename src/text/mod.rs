@@ -291,6 +291,41 @@ impl TextSystem {
     self.layout(s, font).width
   }
 
+  /// Calls `f(offset, x)` for every grapheme boundary of `s` in order, the start and the end
+  /// included: where a caret goes, in points from the line start. A boundary inside a glyph
+  /// (a ligature) is placed in proportion to its bytes. Left-to-right text only: the
+  /// positions of right-to-left runs come out in logical order, not visual.
+  pub fn carets(&mut self, s: &str, font: Font, mut f: impl FnMut(usize, f32)) {
+    let line = self.layout(s, font);
+    let (g, at) = (&line.glyphs, &line.clusters);
+    // The first glyph of the cluster after glyph `k`.
+    let next = |k: usize| (k + 1..g.len()).find(|&j| at[j] != at[k]);
+    let mut k = 0;
+    // The boundaries in one pass: a run of flags isn't counted back at each.
+    for b in std::iter::once(0).chain(edit::graphemes(s).map(|g| g.end)) {
+      while let Some(j) = (k < g.len()).then(|| next(k)).flatten()
+        && at[j] as usize <= b
+      {
+        k = j;
+      }
+
+      let x = match g.get(k) {
+        _ if b >= s.len() => line.width,
+        Some(c) if at[k] as usize <= b => {
+          let (a0, x0) = (at[k] as usize, c.x);
+          let (a1, x1) = next(k).map_or((s.len(), line.width), |j| (at[j] as usize, g[j].x));
+          match a1 > a0 && b > a0 {
+            true => x0 + (x1 - x0) * (b - a0) as f32 / (a1 - a0) as f32,
+            false => x0,
+          }
+        }
+        _ => 0.0,
+      };
+
+      f(b, x);
+    }
+  }
+
   /// Ascent, descent, leading, cap and x-height of `font` (its primary face, before fallback).
   pub fn metrics(&mut self, font: Font) -> Metrics {
     let face = self.face(font);
@@ -480,6 +515,37 @@ mod tests {
     ts.end_frame();
     assert_eq!(ts.lines.len(), 1);
     assert!(!Rc::ptr_eq(&a, &ts.layout("hello", font)));
+  }
+
+  #[test]
+  fn caret_stops_at_grapheme_boundaries() {
+    let mut ts = TextSystem::new(2.0);
+    let font = Font::ui(13.0);
+    let stops = |ts: &mut TextSystem, s: &str| {
+      let mut v = Vec::new();
+      ts.carets(s, font, |i, x| v.push((i, x)));
+      v
+    };
+    // Every byte of ASCII, at the prefix widths.
+    let s = "Wave fi";
+    let v = stops(&mut ts, s);
+    assert_eq!(v.iter().map(|p| p.0).collect::<Vec<_>>(), (0..=s.len()).collect::<Vec<_>>());
+    for &(i, x) in &v {
+      let w = ts.measure(&s[..i], font);
+      assert!((x - w).abs() < 1.0, "{i}: {x} vs {w}");
+    }
+
+    // Clusters: an accent with its letter, an emoji with its tone, a flag.
+    let s = "e\u{301}👍🏽🇺🇸x";
+    let v = stops(&mut ts, s);
+    assert_eq!(v.iter().map(|p| p.0).collect::<Vec<_>>(), [0, 3, 11, 19, 20]);
+    assert!(v.windows(2).all(|w| w[1].1 > w[0].1), "{v:?}");
+    assert_eq!(v[4].1, ts.measure(s, font));
+    // A long run of flags in one pass.
+    let s = "🇺🇦".repeat(5_000);
+    let t = std::time::Instant::now();
+    assert_eq!(stops(&mut ts, &s).len(), 5_001);
+    assert!(t.elapsed().as_millis() < 1500, "{:?}", t.elapsed());
   }
 
   #[test]

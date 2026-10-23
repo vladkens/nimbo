@@ -181,6 +181,13 @@ struct Window {
   held: Vec<MouseButton>,
   /// A high surrogate from WM_CHAR, waiting for its low one.
   high: Option<u16>,
+  /// The text field the input method is on for (off without one), whether it had marked text,
+  /// and whether the input method's own message is under way.
+  ime: Option<crate::ui::Id>,
+  ime_marked: bool,
+  ime_call: bool,
+  /// Where the composition and candidate windows were put last.
+  ime_at: Option<crate::scene::Rect>,
   /// The cursor last set.
   cursor: Cursor,
   /// The least content size in points ([Config::min]) and the window's style, for
@@ -220,8 +227,10 @@ impl Window {
     let size = Size::new(points(w as u32, self.scale), points(h as u32, self.scale));
     self.rt.resize(size, self.scale);
     self.rt.frame();
-    // The new tree's element under the pointer may want another cursor.
+    // The new tree's element under the pointer may want another cursor, and its focus (a field
+    // focused as it shows) the input method.
     self.sync_cursor(false);
+    self.sync_ime();
     let r = &mut self.renderer;
     r.sync(&mut self.rt.text, &mut self.rt.images);
     r.prepare(&self.rt.scene, size, self.scale);
@@ -396,7 +405,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
 }
 
 fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-  if let Some(r) = input::handle(msg, wp, lp) {
+  if let Some(r) = input::handle(hwnd, msg, wp, lp) {
     return r;
   }
 
@@ -593,6 +602,8 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
     )
   };
   assert!(!hwnd.is_null(), "nimbo: CreateWindowExW failed");
+  // No input method until a text field takes it.
+  input::ime_off(hwnd);
 
   let scale = unsafe { GetDpiForWindow(hwnd) } as f32 / 96.0;
   let mut rt = Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(WinClipboard::new(hwnd)));
@@ -626,6 +637,10 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
     clicks: input::Clicks::default(),
     held: Vec::new(),
     high: None,
+    ime: None,
+    ime_marked: false,
+    ime_call: false,
+    ime_at: None,
     cursor: Cursor::Arrow,
     min: cfg.min(),
     style,

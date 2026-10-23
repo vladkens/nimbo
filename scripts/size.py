@@ -24,15 +24,17 @@ DIRS = ("src", "examples", "tests")
 EXTS = (".rs", ".metal")
 KINDS = ("code", "docs", "comments", "tests", "blank")
 # The code lines each part may have: a platform, the UI core (ui/: the tree, layout, input,
-# paint, theme), its widgets and containers (ui/widgets, ui/containers: add-ons over it) and
-# the core (the rest of src/). Raising one is a decision recorded in its PR.
+# paint, theme), its widgets and containers (ui/widgets, ui/containers: add-ons over it), the
+# text system (text/: shaping, the glyph atlas, the editing model) and the core (the rest of
+# src/). Raising one is a decision recorded in its PR.
 BUDGETS = {
-  "platform/macos": 1500,
+  "platform/macos": 1600,
   "platform/windows": 2000,
   "platform/linux": 2500,
   "ui": 3500,
   "widgets": 2000,
-  "core": 4000,
+  "text": 1500,
+  "core": 3500,
 }
 # Modules that count against a budget of another name.
 PARTS = {"ui/widgets": "widgets", "ui/containers": "widgets"}
@@ -60,8 +62,8 @@ def module(path: str, files: bool) -> str:
 def part(module: str) -> str | None:
   """The budget a module's code counts against; examples and tests have none.
 
-  >>> [part(m) for m in ("platform/linux", "ui", "ui/containers", "cpu", "platform", "tests")]
-  ['platform/linux', 'ui', 'widgets', 'core', 'core', None]
+  >>> [part(m) for m in ("platform/linux", "ui", "ui/containers", "text", "cpu", "tests")]
+  ['platform/linux', 'ui', 'widgets', 'text', 'core', None]
   """
   if module in BUDGETS:
     return module

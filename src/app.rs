@@ -4,6 +4,7 @@
 //! and waker injected, so one app runs the same in a window ([crate::platform]) and in the
 //! headless harness ([crate::harness]).
 
+use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
@@ -13,7 +14,7 @@ use keyboard_types::{Code, Modifiers};
 use crate::keys::{self, Binding, Command, KeyEvent};
 use crate::scene::{Color, Frame, Images, Point, Rect, Scene, Size};
 use crate::text::TextSystem;
-use crate::ui::{Click, Cursor, FrameStats, Id, Sys, Ui, UiState};
+use crate::ui::{Click, Cursor, FrameStats, Id, Sys, TextInput, Ui, UiState};
 
 /// An application: owns its state, reacts to events and draws the frame from it, as an element
 /// tree (`view`), by hand (`paint`), or both. A frame is built only when something changed.
@@ -146,6 +147,8 @@ pub enum Event {
   },
   /// The window became or stopped being the key window.
   Focus(bool),
+  /// An input method composing or committing text, for the focused text field.
+  Ime(Ime),
   /// The OS's light or dark setting or accent colour changed, or is first known (before the
   /// first frame): the theme follows it unless the app set one ([Ui::set_theme]).
   Appearance(Appearance),
@@ -163,6 +166,22 @@ pub struct Appearance {
 impl Appearance {
   pub const LIGHT: Self = Self { dark: false, accent: None };
   pub const DARK: Self = Self { dark: true, accent: None };
+}
+
+/// What an input method does to the focused text field (macOS `NSTextInputClient`, Windows
+/// IMM32, GTK's input method context). Ranges are UTF-16 code units of the field's text, as
+/// AppKit and IMM32 count.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Ime {
+  /// Shows `text` as marked text (the composition: underlined at the caret, not yet part of the
+  /// value) in place of the marked text, or `replace` (a range of the field's text), or the
+  /// selection; `sel` is the selection within `text` (the input method's caret or converted
+  /// clause). Empty, it ends composing with nothing typed.
+  Mark { text: String, sel: Range<usize>, replace: Option<Range<usize>> },
+  /// Commits `text` in place of the marked text, or `replace`, or the selection.
+  Commit { text: String, replace: Option<Range<usize>> },
+  /// Keeps the marked text as typed (a click elsewhere, the input method switched off).
+  Unmark,
 }
 
 /// Points per line for mouse wheels, which report lines rather than points.
@@ -479,7 +498,7 @@ impl<A: App> Runtime<A> {
       return self.appearance(a);
     }
 
-    let keys = matches!(ev, Event::KeyDown(_) | Event::Text(_) | Event::Command(_));
+    let keys = matches!(ev, Event::KeyDown(_) | Event::Text(_) | Event::Command(_) | Event::Ime(_));
     let keys = keys || matches!(ev, Event::Modifier { .. });
     if keys {
       self.take_wake();
@@ -489,7 +508,7 @@ impl<A: App> Runtime<A> {
     let focus = self.ui.focus();
     let used = match ev {
       Event::KeyDown(k) => self.key_down(k),
-      Event::Text(_) | Event::Command(_) | Event::Modifier { .. } => self.typed(ev),
+      Event::Text(_) | Event::Command(_) | Event::Ime(_) | Event::Modifier { .. } => self.typed(ev),
       ev => self.pointer(ev),
     };
 
@@ -526,6 +545,14 @@ impl<A: App> Runtime<A> {
     run_view(&mut self.app, &mut self.text, &mut ui);
     ui.layout(&mut Sys { text: &mut self.text, images: &self.images, scale }, scale);
     self.ui = ui.finish();
+  }
+
+  /// The focused text field as an input method sees it: its text, selection, marked text and
+  /// where they are; `None` unless an editable field that takes input methods has focus (not a
+  /// password). Lays the view out again first when an event changed it.
+  pub fn text_input(&mut self) -> Option<TextInput<'_>> {
+    self.fresh();
+    self.ui.text_input()
   }
 
   /// The pointer follows the mouse's events; a scroll or pinch carries its own position and
@@ -577,8 +604,8 @@ impl<A: App> Runtime<A> {
     self.app_event(&Event::KeyDown(k))
   }
 
-  /// Text, a command or a modifier key: the focused element, the app, then Tab and Shift-Tab
-  /// move focus.
+  /// Text, a command, an input method's event or a modifier key: the focused element, the app,
+  /// then Tab and Shift-Tab move focus.
   fn typed(&mut self, ev: Event) -> bool {
     if let Some(id) = self.ui.focus()
       && self.deliver(id, ev.clone())

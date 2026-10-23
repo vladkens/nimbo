@@ -409,6 +409,8 @@ impl Win {
   /// loop next ([next]).
   fn sync(&mut self) {
     let g = gtk();
+    self.drain_ime();
+    self.sync_ime();
     self.apply_resize();
     self.sync_cursor();
     if self.rt.quit_requested() {

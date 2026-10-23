@@ -5,8 +5,10 @@
 //! wheel's in lines), a touchpad's pinch (Wayland only, in GTK 3), focus and keys ([keys]: their
 //! repeats are presses of a key already down, the Latin key of a shortcut from GDK's keymap). A
 //! key nobody used goes through a GtkIMContextSimple, GTK's dead keys and compose table, into
-//! [Event::Text], or through the PC editing keys into [Event::Command]; an input method's context
-//! comes with text fields.
+//! [Event::Text], or through the PC editing keys into [Event::Command]. While a text field that
+//! takes input methods has focus, keys go first to a GtkIMMulticontext, the input method the
+//! user runs (ibus, fcitx5): its preedit comes as marked text and its commits as [Ime] events,
+//! its candidates placed at the caret.
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -17,9 +19,10 @@ use std::sync::OnceLock;
 use keyboard_types::Modifiers;
 
 use super::dl::fns;
-use super::{Fp, P, TRUE, Win, busy, connect, keys, lib, with};
-use crate::app::{Event, MouseButton, Phase, WHEEL_LINE};
-use crate::scene::Point;
+use super::{Fp, P, TRUE, Win, busy, connect, gtk, keys, lib, with};
+use crate::app::{Event, Ime, MouseButton, Phase, WHEEL_LINE};
+use crate::scene::{Point, Rect};
+use crate::ui::Id;
 
 /// The events the area asks for (GdkEventMask): motion, buttons, keys, crossing, focus,
 /// scrolling (smooth too) and touchpad gestures.
@@ -49,6 +52,9 @@ const FOCUS: c_int = 12;
 const SCROLL: c_int = 31;
 const GRAB_BROKEN: c_int = 35;
 const PINCH: c_int = 42;
+/// The state bit of a key an input method gave back unused (ibus' and fcitx's
+/// `IGNORED_MASK`): offered to it already.
+const GIVEN_BACK: c_uint = 1 << 25;
 /// `GDK_NOTIFY_INFERIOR`: a crossing into a child window, still ours.
 const INFERIOR: c_int = 2;
 /// `GDK_SOURCE_TOUCHPAD`, `GDK_SOURCE_TRACKPOINT`.
@@ -65,6 +71,16 @@ const CLICK_TIME: u32 = 400;
 const CLICK_DIST: f32 = 5.0;
 /// A touchpad's events further apart than this, in ms, are two gestures.
 const GESTURE_GAP: u32 = 150;
+
+/// `GdkRectangle`, in the window's coordinates (points).
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq)]
+pub struct GdkRect {
+  x: c_int,
+  y: c_int,
+  w: c_int,
+  h: c_int,
+}
 
 /// `GdkKeymapKey`.
 #[repr(C)]
@@ -138,6 +154,9 @@ fns!(Gdk {
   fn gdk_keymap_get_entries_for_keycode(keymap: P, code: c_uint, keys: *mut *mut KeymapKey,
     keyvals: *mut *mut c_uint, n: *mut c_int) -> c_int;
   fn gtk_im_context_simple_new() -> P;
+  fn gtk_im_multicontext_new() -> P;
+  fn gtk_im_context_get_preedit_string(im: P, s: *mut *mut c_char, attrs: P, cursor: *mut c_int);
+  fn gtk_im_context_set_cursor_location(im: P, rect: *const GdkRect);
   fn gtk_im_context_set_client_window(im: P, window: P);
   fn gtk_im_context_filter_keypress(im: P, ev: P) -> c_int;
   fn gtk_im_context_focus_in(im: P);
@@ -160,6 +179,12 @@ thread_local! {
   static REPLAYING: Cell<bool> = const { Cell::new(false) };
   /// Text the input context committed during a key press.
   static TYPED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+  /// The input method's commits and preedits, sent once the window is free ([Win::drain_ime]).
+  static IME: RefCell<VecDeque<Ime>> = const { RefCell::new(VecDeque::new()) };
+  /// The idle callback after an empty preedit runs: it goes out too.
+  static FLUSH: Cell<bool> = const { Cell::new(false) };
+  /// The input context made last ([new_ime]): an older one's signals are dropped.
+  static IME_GEN: Cell<usize> = const { Cell::new(0) };
 }
 
 /// The last press: its button, the event's time (milliseconds, wrapping), place and click count.
@@ -182,6 +207,17 @@ pub struct Input {
   held: Vec<(u16, u32)>,
   /// Dead keys and compose sequences ([TYPED]).
   im: P,
+  /// The user's input method, made anew for each field ([Input::fresh_ime]), the field it is
+  /// on for (none: off), and the caret's rect it was told.
+  ime: P,
+  ime_on: Option<Id>,
+  caret: Option<GdkRect>,
+  /// The area's GdkWindow, which the input contexts work for.
+  window: P,
+  /// The field had marked text after the last callback; the input method's own events came
+  /// since ([Win::drain_ime]).
+  ime_marked: bool,
+  ime_call: bool,
   /// The window has the keyboard focus: the keymap's modifiers are ours.
   focused: bool,
 }
@@ -203,13 +239,39 @@ impl Input {
       pinch: 1.0,
       held: Vec::new(),
       im,
+      ime: new_ime(null_mut()),
+      ime_on: None,
+      caret: None,
+      window: null_mut(),
+      ime_marked: false,
+      ime_call: false,
       focused: false,
     }
   }
 
-  /// The area has its GdkWindow, which the input context works for.
+  /// The area has its GdkWindow, which the input contexts work for.
   pub fn realized(&mut self, window: P) {
-    unsafe { (gdk().gtk_im_context_set_client_window)(self.im, window) };
+    self.window = window;
+    for im in [self.im, self.ime] {
+      unsafe { (gdk().gtk_im_context_set_client_window)(im, window) };
+    }
+  }
+
+  /// Lets the input method's composition go: a new context takes its place, so what the old
+  /// one still sends (a commit as it loses the focus, a reply under way) reaches no field. The
+  /// field kept what was composed as typed. GTK's fields hold a context each; this is ours per
+  /// field focused.
+  fn fresh_ime(&mut self) {
+    let g = gdk();
+    unsafe {
+      (g.gtk_im_context_reset)(self.ime);
+      (g.gtk_im_context_focus_out)(self.ime);
+      (g.gtk_im_context_set_client_window)(self.ime, null_mut());
+      (g.g_object_unref)(self.ime);
+    }
+
+    IME.with_borrow_mut(|q| q.clear());
+    (self.ime, self.caret) = (new_ime(self.window), None);
   }
 }
 
@@ -228,7 +290,9 @@ pub unsafe extern "C" fn on_event(_: P, ev: P, _: P) -> c_int {
 
 impl Drop for Input {
   fn drop(&mut self) {
-    unsafe { (gdk().g_object_unref)(self.im) };
+    for im in [self.im, self.ime] {
+      unsafe { (gdk().g_object_unref)(im) };
+    }
   }
 }
 
@@ -273,6 +337,86 @@ unsafe extern "C" fn on_settled(_: P) -> c_int {
 unsafe extern "C" fn on_commit(_: P, s: *const c_char, _: P) {
   let text = unsafe { CStr::from_ptr(s) }.to_string_lossy().into_owned();
   TYPED.with_borrow_mut(|t| t.push(text));
+}
+
+/// A GtkIMMulticontext on `window` (none yet: set when the area is realized), its commits and
+/// preedits queued for the window.
+fn new_ime(window: P) -> P {
+  let g = gdk();
+  let ime = unsafe { (g.gtk_im_multicontext_new)() };
+  let n = IME_GEN.get() + 1;
+  IME_GEN.set(n);
+  // Each handler gets its context's number: one kept alive by a reply under way stays mute.
+  let connect = |signal: &CStr, cb: Fp| unsafe {
+    let free = std::ptr::null();
+    (gtk().g_signal_connect_data)(ime, signal.as_ptr(), cb, n as P, free, 0);
+  };
+  connect(c"commit", on_ime_commit as Fp);
+  connect(c"preedit-changed", on_preedit as Fp);
+  unsafe {
+    if !window.is_null() {
+      (g.gtk_im_context_set_client_window)(ime, window);
+    }
+  }
+
+  ime
+}
+
+/// Queues an input method's event. An empty preedit right before a commit goes: GTK clears the
+/// preedit before committing, and the commit replaces the marked text in one step.
+fn queue(q: &mut VecDeque<Ime>, ime: Ime) {
+  if let Ime::Commit { .. } = ime
+    && matches!(q.back(), Some(Ime::Mark { text, .. }) if text.is_empty())
+  {
+    q.pop_back();
+  }
+
+  q.push_back(ime);
+}
+
+/// The input method committed text: queued, then sent as soon as the window is free (now,
+/// unless a key press of ours is under way).
+unsafe extern "C" fn on_ime_commit(_: P, s: *const c_char, n: P) {
+  if n as usize != IME_GEN.get() {
+    return;
+  }
+
+  let text = unsafe { CStr::from_ptr(s) }.to_string_lossy().into_owned();
+  IME.with_borrow_mut(|q| queue(q, Ime::Commit { text, replace: None }));
+  with((), |_| {});
+}
+
+/// An empty preedit no commit followed: the composition was cancelled.
+unsafe extern "C" fn on_ime_idle(_: P) -> c_int {
+  FLUSH.set(true);
+  with((), |_| {});
+  FLUSH.set(false);
+  0
+}
+
+/// The preedit changed: the text being composed and the input method's caret in it (in
+/// characters; [Ime] counts UTF-16).
+unsafe extern "C" fn on_preedit(im: P, n: P) {
+  if n as usize != IME_GEN.get() {
+    return;
+  }
+
+  let g = gdk();
+  let (mut s, mut cursor) = (null_mut(), 0);
+  let text = unsafe {
+    (g.gtk_im_context_get_preedit_string)(im, &mut s, null_mut(), &mut cursor);
+    let text = CStr::from_ptr(s).to_string_lossy().into_owned();
+    (g.g_free)(s.cast());
+    text
+  };
+  let at = text.chars().take(cursor.max(0) as usize).map(char::len_utf16).sum::<usize>();
+  // An empty one waits for the commit that may follow it ([queue]), until GDK's events ran.
+  let empty = text.is_empty();
+  IME.with_borrow_mut(|q| queue(q, Ime::Mark { text, sel: at..at, replace: None }));
+  match empty {
+    true => _ = unsafe { (g.g_idle_add)(on_ime_idle as Fp, null_mut()) },
+    false => with((), |_| {}),
+  }
 }
 
 impl Win {
@@ -341,6 +485,12 @@ impl Win {
       return;
     }
 
+    // A click ends a composition as typed; the input method lets go of it ([Win::sync_ime]).
+    if self.rt.ui.text_input().is_some_and(|t| t.marked().is_some()) {
+      self.send(Event::Ime(Ime::Unmark));
+    }
+
+    let i = &mut self.input;
     i.buttons.push(button);
     let time = unsafe { (gdk().gdk_event_get_time)(ev) };
     let clicks = clicks(i.last_click, button, time, pos);
@@ -416,20 +566,74 @@ impl Win {
   /// The window took or lost the focus: taking it, the modifiers held now are ours; losing it,
   /// no key or modifier stays down.
   fn focus(&mut self, on: bool) {
-    let (g, im) = (gdk(), self.input.im);
+    let g = gdk();
     self.input.focused = on;
     let state = unsafe { (g.gdk_keymap_get_modifier_state)(keymap()) };
-    match on {
-      true => unsafe { (g.gtk_im_context_focus_in)(im) },
-      false => unsafe {
-        self.input.held.clear();
-        (g.gtk_im_context_reset)(im);
-        (g.gtk_im_context_focus_out)(im);
-      },
+    let ime = self.input.ime_on.map(|_| self.input.ime);
+    for im in std::iter::once(self.input.im).chain(ime) {
+      match on {
+        true => unsafe { (g.gtk_im_context_focus_in)(im) },
+        false => unsafe {
+          (g.gtk_im_context_reset)(im);
+          (g.gtk_im_context_focus_out)(im);
+        },
+      }
+    }
+
+    if !on {
+      self.input.held.clear();
     }
 
     self.mods(if on { keys::mods(state) } else { Modifiers::empty() });
     self.send(Event::Focus(on));
+  }
+
+  /// Sends what the input method did since the last call; an empty preedit only while composing
+  /// (GTK reports one after every commit too).
+  pub(super) fn drain_ime(&mut self) {
+    // An empty preedit last waits for its idle callback, in case a commit follows.
+    let flush = FLUSH.get();
+    let next = |q: &mut VecDeque<Ime>| {
+      let waits = q.len() == 1 && matches!(&q[0], Ime::Mark { text, .. } if text.is_empty());
+      if waits && !flush { None } else { q.pop_front() }
+    };
+    while let Some(ime) = IME.with_borrow_mut(next) {
+      let empty = matches!(&ime, Ime::Mark { text, .. } if text.is_empty());
+      if !empty || self.rt.ui.text_input().is_some_and(|t| t.marked().is_some()) {
+        self.input.ime_call = true;
+        self.send(Event::Ime(ime));
+      }
+    }
+  }
+
+  /// The input method only while a field that takes it has focus, told where the caret is; a
+  /// composition the field ended by itself (the focus moved on, a click, a command) is dropped
+  /// from it, the field having kept it as typed.
+  pub(super) fn sync_ime(&mut self) {
+    let g = gdk();
+    let on = self.rt.ui.text_input().and(self.rt.ui.focus());
+    let marked = self.rt.ui.text_input().is_some_and(|t| t.marked().is_some());
+    let own = std::mem::take(&mut self.input.ime_call);
+    let ended = std::mem::replace(&mut self.input.ime_marked, marked) && !marked && !own;
+    if on != self.input.ime_on || ended && on.is_some() {
+      if self.input.ime_on.is_some() {
+        self.input.fresh_ime();
+      }
+
+      if on.is_some() && self.input.focused {
+        unsafe { (g.gtk_im_context_focus_in)(self.input.ime) };
+      }
+
+      self.input.ime_on = on;
+    }
+
+    let ime = self.input.ime;
+    let Some(r) = on.and_then(|_| self.rt.text_input()?.caret_rect()) else { return };
+    let r = gdk_rect(r);
+    if self.input.caret != Some(r) {
+      self.input.caret = Some(r);
+      unsafe { (g.gtk_im_context_set_cursor_location)(ime, &r) };
+    }
   }
 
   /// Sends the modifiers when they changed.
@@ -451,15 +655,28 @@ impl Win {
       (g.gdk_event_get_keycode)(ev, &mut hw);
     }
 
+    // With a field's input method on, every key goes to it first, as in GTK's own fields, its
+    // shortcuts too (Ctrl+Space, Shift alone); what it takes comes back as its commit or
+    // preedit, what it gives back comes again, marked, as no new press.
+    let again = state & GIVEN_BACK != 0;
+    let ime = self.input.ime_on.is_some() && !again;
+    let taken = ime && unsafe { (g.gtk_im_context_filter_keypress)(self.input.ime, ev) } != 0;
     let held = &mut self.input.held;
-    let repeat = down && held.iter().any(|&(h, _)| h == hw);
-    held.retain(|&(h, _)| h != hw);
-    if down {
-      held.push((hw, sym));
+    let repeat = down && !again && held.iter().any(|&(h, _)| h == hw);
+    if !again {
+      held.retain(|&(h, _)| h != hw);
+      if down {
+        held.push((hw, sym));
+      }
     }
 
     let code = keys::code(hw.saturating_sub(8) as u32);
+    // A modifier counts for ours either way, once.
     if let Some(side) = keys::modifier(sym, code) {
+      if again {
+        return;
+      }
+
       let syms: Vec<u32> = held.iter().map(|&(_, s)| s).collect();
       self.mods(keys::after(keys::mods(state), sym, down, &syms));
       if let Some(key) = side.filter(|_| !repeat) {
@@ -475,6 +692,10 @@ impl Win {
     self.mods(mods);
     let ch = char::from_u32(unsafe { (g.gdk_keyval_to_unicode)(sym) }).filter(|&c| c != '\0');
     let k = keys::key_event(sym, ch, code, mods, repeat, || latin(hw, mods.shift()));
+    if taken {
+      return;
+    }
+
     if !down {
       self.send(Event::KeyUp(k));
       return;
@@ -502,6 +723,13 @@ impl Win {
       self.send(Event::Command(c));
     }
   }
+}
+
+/// A rect in points as GDK's, whole units around it.
+fn gdk_rect(r: Rect) -> GdkRect {
+  let (x, y) = (r.x.floor() as c_int, r.y.floor() as c_int);
+  let (w, h) = ((r.x + r.w).ceil() as c_int - x, (r.y + r.h).ceil() as c_int - y);
+  GdkRect { x, y, w: w.max(1), h: h.max(1) }
 }
 
 /// The ASCII character hardware key `hw` types on the first layout that has one, at the Shift
@@ -579,6 +807,23 @@ mod tests {
     assert_eq!(clicks(Some((left, u32::MAX - 100, at, 2)), left, 100, at), 3);
     assert_eq!(clicks(first, MouseButton::Right, 1300, at), 1);
     assert_eq!(clicks(first, left, 1300, Point::new(20.0, 10.0)), 1);
+  }
+
+  /// GTK clears the preedit, then commits: the commit replaces the marked text alone, so the
+  /// composition is one undo step and no value the app held applies in between.
+  #[test]
+  fn an_empty_preedit_before_a_commit_goes() {
+    let mark = |t: &str| Ime::Mark { text: t.into(), sel: 0..0, replace: None };
+    let commit = Ime::Commit { text: "你".into(), replace: None };
+    let mut q = VecDeque::new();
+    for ime in [mark("ni"), mark(""), commit.clone()] {
+      queue(&mut q, ime);
+    }
+
+    assert_eq!(q, [mark("ni"), commit.clone()]);
+    // Alone, it stays: a cancel.
+    queue(&mut q, mark(""));
+    assert_eq!(q.back(), Some(&mark("")));
   }
 
   #[test]

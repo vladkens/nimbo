@@ -18,6 +18,10 @@ name = "counter"
 harness = false
 
 [[test]]
+name = "fields"
+harness = false
+
+[[test]]
 name = "input"
 harness = false
 
@@ -40,12 +44,12 @@ keyboard-types = { version = "0.8.3", default-features = false }
 block2 = { version = "0.6.2", default-features = false, features = ["std"] }
 dispatch2 = { version = "0.3.1", default-features = false, features = ["std", "objc2", "block2"] }
 objc2 = { version = "0.6.5", default-features = false, features = ["std"] }
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSApplication", "NSResponder", "NSView", "NSWindow", "NSEvent", "NSGraphics", "NSRunningApplication", "NSMenu", "NSMenuItem", "NSGraphicsContext", "NSAppearance", "NSColor", "NSColorSpace", "block2", "NSTrackingArea", "NSCursor", "NSPasteboard", "NSFont", "NSFontDescriptor"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSApplication", "NSResponder", "NSView", "NSWindow", "NSEvent", "NSGraphics", "NSRunningApplication", "NSMenu", "NSMenuItem", "NSGraphicsContext", "NSAppearance", "NSColor", "NSColorSpace", "block2", "NSTrackingArea", "NSCursor", "NSPasteboard", "NSFont", "NSFontDescriptor", "NSTextInputClient", "NSTextInputContext"] }
 objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFString", "CFDictionary", "CFNumber", "CFCGTypes", "CFAttributedString", "CFArray"] }
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGBitmapContext", "CGColorSpace", "CGContext", "CGImage", "CGPath"] }
 objc2-core-text = { version = "0.3.2", default-features = false, features = ["std", "objc2-core-graphics", "CTFont", "CTLine", "CTRun", "CTStringAttributes", "CTFontDescriptor", "CTFontTraits"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSGeometry", "NSRunLoop", "NSObject", "NSNotification", "NSArray", "NSUserDefaults", "NSAttributedString"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSGeometry", "NSRunLoop", "NSObject", "NSNotification", "NSArray", "NSUserDefaults", "NSAttributedString", "NSRange", "NSObjCRuntime"] }
 objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["std", "objc2-core-foundation", "CALayer", "CADisplayLink", "CAFrameRateRange", "CATransaction"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.61.2", default-features = false, features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security", "Win32_System_DataExchange", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61.2", default-features = false, features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security", "Win32_System_DataExchange", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_HiDpi", "Win32_UI_Input_Ime", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }

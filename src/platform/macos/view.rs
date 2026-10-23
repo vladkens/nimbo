@@ -7,8 +7,15 @@
 //! paused. While the window is hidden (minimized, covered, on another space) frames wait until it
 //! shows again. Keys nobody used go through `interpretKeyEvents:`, which calls back `insertText:`
 //! and `doCommandBySelector:` (see [crate::keys]); the pointer's cursor follows the runtime's.
+//!
+//! The view is an `NSTextInputClient`: while a text field that takes input methods has focus
+//! ([Runtime::text_input]), it has an input context, so input methods compose marked text in the
+//! field ([Event::Ime]) and ask where its text is, placing their candidates under the caret;
+//! while they compose, keys go to them first. With no such field the view has no input context
+//! and keys stay plain.
 
 use std::cell::{Cell, RefCell};
+use std::ops::Range;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -24,21 +31,23 @@ use objc2::{
   AllocAnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel,
 };
 use objc2_app_kit::{
-  NSCursor, NSEvent, NSEventModifierFlags, NSEventPhase, NSResponder, NSTrackingArea,
-  NSTrackingAreaOptions, NSView, NSWindow, NSWindowOcclusionState,
+  NSCursor, NSEvent, NSEventModifierFlags, NSEventPhase, NSResponder, NSTextInputClient,
+  NSTextInputContext, NSTrackingArea, NSTrackingAreaOptions, NSView, NSWindow,
+  NSWindowOcclusionState,
 };
 use objc2_foundation::{
-  NSArray, NSAttributedString, NSObject, NSPoint, NSRect, NSRunLoop, NSRunLoopCommonModes, NSSize,
-  NSString,
+  NSArray, NSAttributedString, NSAttributedStringKey, NSNotFound, NSObject, NSPoint, NSRange,
+  NSRangePointer, NSRect, NSRunLoop, NSRunLoopCommonModes, NSSize, NSString, NSUInteger,
 };
 use objc2_quartz_core::{CADisplayLink, CAFrameRateRange, CALayer, kCAGravityTopLeft};
 
 use super::keyboard;
 use super::surface::Presenter;
-use crate::app::{App, Event, MouseButton, Phase, Runtime, WHEEL_LINE};
+use crate::app::{App, Event, Ime, MouseButton, Phase, Runtime, WHEEL_LINE};
 use crate::keys::{self, Command, Key, KeyEvent};
-use crate::scene::{Point, Size};
-use crate::ui::Cursor;
+use crate::scene::{Point, Rect, Size};
+use crate::text::edit::utf16_len;
+use crate::ui::{Cursor, Id, TextInput};
 
 type WeakView = Arc<MainThreadBound<Weak<View>>>;
 
@@ -73,6 +82,14 @@ pub struct Ivars {
   /// each release to the view that got the press, while `pressedMouseButtons` is the mouse's
   /// state now, ahead of the events queued and with presses in other windows.
   held: Cell<u64>,
+  /// The field input methods work for and whether it had marked text, as of the last event or
+  /// frame; whether the input method's own call is under way.
+  ime_field: Cell<Option<Id>>,
+  ime_marked: Cell<bool>,
+  ime_call: Cell<bool>,
+  /// Where the composition was as the input method last saw it: when the text moves under it
+  /// (scrolled), its windows are told.
+  ime_at: Cell<Option<Rect>>,
 }
 
 define_class!(
@@ -175,6 +192,11 @@ define_class!(
 
     #[unsafe(method(mouseDown:))]
     fn mouse_down(&self, event: &NSEvent) {
+      // A click ends composing: the marked text stays as typed, the input method lets go.
+      if self.composing() {
+        self.send(Event::Ime(Ime::Unmark));
+      }
+
       self.button(event, true);
     }
 
@@ -236,8 +258,9 @@ define_class!(
     #[unsafe(method(keyDown:))]
     fn key_down(&self, event: &NSEvent) {
       // A key equivalent nobody used comes back here: it was offered already.
+      // While an input method composes, keys are its own first.
       let offered = event.timestamp() == self.ivars().key_equivalent.get();
-      if offered || !self.send(Event::KeyDown(key_event(event))) {
+      if offered || self.composing() || !self.send(Event::KeyDown(key_event(event))) {
         self.interpret(event);
       }
     }
@@ -247,7 +270,7 @@ define_class!(
       self.send(Event::KeyUp(KeyEvent { repeat: false, ..key_event(event) }));
     }
 
-    /// Text from `interpretKeyEvents:`.
+    /// Text from `interpretKeyEvents:` with no input context (no field focused).
     #[unsafe(method(insertText:))]
     fn insert_text(&self, text: &AnyObject) {
       if let Some(s) = ns_text(text) {
@@ -255,12 +278,13 @@ define_class!(
       }
     }
 
-    /// A command from `interpretKeyEvents:` (`moveWordLeft:`); unknown ones are dropped
-    /// quietly, where NSResponder would beep.
-    #[unsafe(method(doCommandBySelector:))]
-    fn do_command(&self, sel: Sel) {
-      if let Some(cmd) = sel.name().to_str().ok().and_then(Command::from_selector) {
-        self.send(Event::Command(cmd));
+    /// An input context only while a field that takes input methods has focus: without one,
+    /// input methods leave the keys alone.
+    #[unsafe(method_id(inputContext))]
+    fn input_context(&self) -> Option<Retained<NSTextInputContext>> {
+      match self.input(|_| ()).is_some() {
+        true => unsafe { msg_send![super(self), inputContext] },
+        false => None,
       }
     }
 
@@ -304,6 +328,87 @@ define_class!(
         self.render();
         self.after_frame();
       }
+    }
+  }
+
+  unsafe impl NSTextInputClient for View {
+    /// Typed or committed text: typing (no range, nothing marked) as [Event::Text], an input
+    /// method's commit as [Ime::Commit].
+    #[unsafe(method(insertText:replacementRange:))]
+    fn insert_text_replacing(&self, text: &AnyObject, range: NSRange) {
+      let Some(s) = ns_text(text) else { return };
+      match to_range(range) {
+        None if !self.composing() => self.typed(s),
+        replace => self.send_ime(Ime::Commit { text: s, replace }),
+      }
+    }
+
+    /// A command from `interpretKeyEvents:` (`moveWordLeft:`); unknown ones are dropped
+    /// quietly, where NSResponder would beep.
+    #[unsafe(method(doCommandBySelector:))]
+    fn do_command(&self, sel: Sel) {
+      if let Some(cmd) = sel.name().to_str().ok().and_then(Command::from_selector) {
+        self.send(Event::Command(cmd));
+      }
+    }
+
+    #[unsafe(method(setMarkedText:selectedRange:replacementRange:))]
+    fn set_marked_text(&self, text: &AnyObject, sel: NSRange, range: NSRange) {
+      let Some(s) = ns_text(text) else { return };
+      let n = utf16_len(&s);
+      let sel = to_range(sel).map_or(n..n, |r| r.start.min(n)..r.end.min(n));
+      self.send_ime(Ime::Mark { text: s, sel, replace: to_range(range) });
+    }
+
+    #[unsafe(method(unmarkText))]
+    fn unmark_text(&self) {
+      self.send_ime(Ime::Unmark);
+    }
+
+    #[unsafe(method(selectedRange))]
+    fn selected_range(&self) -> NSRange {
+      self.input(|t| ns_range(t.selected())).unwrap_or(NOT_FOUND)
+    }
+
+    #[unsafe(method(markedRange))]
+    fn marked_range(&self) -> NSRange {
+      self.input(|t| t.marked().map(ns_range)).flatten().unwrap_or(NOT_FOUND)
+    }
+
+    #[unsafe(method(hasMarkedText))]
+    fn has_marked_text(&self) -> bool {
+      self.composing()
+    }
+
+    #[unsafe(method_id(attributedSubstringForProposedRange:actualRange:))]
+    fn attributed_substring(
+      &self,
+      range: NSRange,
+      actual: NSRangePointer,
+    ) -> Option<Retained<NSAttributedString>> {
+      self.substring(range, actual)
+    }
+
+    #[unsafe(method_id(validAttributesForMarkedText))]
+    fn valid_attributes(&self) -> Retained<NSArray<NSAttributedStringKey>> {
+      NSArray::new()
+    }
+
+    /// Where the range's first line is on screen: the candidate window goes under it.
+    #[unsafe(method(firstRectForCharacterRange:actualRange:))]
+    fn first_rect(&self, range: NSRange, actual: NSRangePointer) -> NSRect {
+      let r = to_range(range).unwrap_or(0..0);
+      let Some((rect, got)) = self.input(|t| t.rect(r)).flatten() else { return NSRect::ZERO };
+      write_range(actual, got);
+      self.to_screen(rect)
+    }
+
+    #[unsafe(method(characterIndexForPoint:))]
+    fn character_index(&self, p: NSPoint) -> NSUInteger {
+      let p = self.window().map_or(p, |w| w.convertPointFromScreen(p));
+      let p = self.convertPoint_fromView(p, None);
+      let at = self.input(|t| t.index(Point::new(p.x as f32, p.y as f32))).flatten();
+      at.unwrap_or(NSNotFound as NSUInteger)
     }
   }
 );
@@ -424,6 +529,7 @@ impl View {
       self.sync_cursor(st);
       (used, st.rt.quit_requested())
     };
+    self.sync_ime();
     if quit {
       super::shell::quit();
     }
@@ -448,6 +554,38 @@ impl View {
     let (w, h) = (min.width.min(size.w as f64), min.height.min(size.h as f64));
     window.setContentMinSize(NSSize::new(w, h));
     window.setFrame_display(frame, true);
+  }
+
+  /// Lets `f` look at the focused text field, as an input method asks; `None` when no field
+  /// that takes input methods has focus, or the runtime is busy further up the stack.
+  fn input<R>(&self, f: impl FnOnce(&TextInput) -> R) -> Option<R> {
+    let mut state = self.ivars().state.try_borrow_mut().ok()?;
+    state.as_mut()?.rt.text_input().map(|t| f(&t))
+  }
+
+  fn substring(
+    &self,
+    range: NSRange,
+    actual: NSRangePointer,
+  ) -> Option<Retained<NSAttributedString>> {
+    let (s, got) = self.input(|t| to_range(range).map(|r| t.substring(r))).flatten()?;
+    write_range(actual, got);
+    Some(NSAttributedString::from_nsstring(&NSString::from_str(&s)))
+  }
+
+  /// Whether an input method has marked text in the focused field.
+  fn composing(&self) -> bool {
+    let state = self.ivars().state.try_borrow();
+    let st = state.as_ref().ok().and_then(|s| s.as_ref());
+    st.and_then(|st| st.rt.ui.text_input()).is_some_and(|t| t.marked().is_some())
+  }
+
+  /// A rect of the view in screen coordinates (window coordinates without a window).
+  fn to_screen(&self, r: Rect) -> NSRect {
+    let rect =
+      NSRect::new(NSPoint::new(r.x as f64, r.y as f64), NSSize::new(r.w as f64, r.h as f64));
+    let rect = self.convertRect_toView(rect, None);
+    self.window().map_or(rect, |w| w.convertRectToScreen(rect))
   }
 
   /// Typed text, unless it came with Cmd or is a control character.
@@ -554,7 +692,42 @@ impl View {
         }
       }
     }
+    self.sync_ime();
     self.apply_resize();
+  }
+
+  /// Lets the input method's composition go when the field ended it by itself (a click, a
+  /// command, the focus moved on, by an event or the view): the field kept it as typed.
+  fn sync_ime(&self) {
+    let (now, at) = {
+      let Ok(state) = self.ivars().state.try_borrow() else { return };
+      let ui = state.as_ref().map(|st| &st.rt.ui);
+      let t = ui.and_then(|ui| ui.text_input().map(|t| (ui.focus(), t)));
+      let at = t.as_ref().filter(|(_, t)| t.marked().is_some()).and_then(|(_, t)| t.caret_rect());
+      (t.map_or((None, false), |(f, t)| (f, t.marked().is_some())), at)
+    };
+    let (iv, own) = (self.ivars(), self.ivars().ime_call.get());
+    let (was, had) = (iv.ime_field.replace(now.0), iv.ime_marked.replace(now.1));
+    let moved = was.is_some_and(|f| Some(f) != now.0);
+    let shifted = at.is_some() && iv.ime_at.replace(at) != at;
+    let cx: Option<Retained<NSTextInputContext>> = match moved || had && !now.1 && !own {
+      true => unsafe { msg_send![super(self), inputContext] },
+      false if shifted => self.inputContext(),
+      false => None,
+    };
+
+    match (cx, shifted && !moved) {
+      (Some(cx), true) => cx.invalidateCharacterCoordinates(),
+      (Some(cx), false) => cx.discardMarkedText(),
+      (None, _) => {}
+    }
+  }
+
+  /// Sends an input method's own event: its end is no reason to discard its composition.
+  fn send_ime(&self, ime: Ime) {
+    self.ivars().ime_call.set(true);
+    self.send(Event::Ime(ime));
+    self.ivars().ime_call.set(false);
   }
 
   fn button(&self, event: &NSEvent, down: bool) {
@@ -665,6 +838,24 @@ impl Drop for Wake {
 }
 
 // MARK: NSEvent conversion
+
+const NOT_FOUND: NSRange = NSRange::new(NSNotFound as usize, 0);
+
+fn to_range(r: NSRange) -> Option<Range<usize>> {
+  (r.location != NSNotFound as usize).then(|| r.location..r.location + r.length)
+}
+
+fn ns_range(r: Range<usize>) -> NSRange {
+  NSRange::new(r.start, r.end - r.start)
+}
+
+/// Writes `r` where AppKit asked for the range it got, unless it passed null.
+fn write_range(to: NSRangePointer, r: Range<usize>) {
+  if !to.is_null() {
+    // SAFETY: AppKit passes a valid pointer or null.
+    unsafe { to.write(ns_range(r)) };
+  }
+}
 
 /// The string of an NSString or NSAttributedString, as text input passes either.
 fn ns_text(text: &AnyObject) -> Option<String> {

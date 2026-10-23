@@ -26,9 +26,9 @@
 //! }
 //! ```
 //!
-//! Widgets ([widgets]: label, button) and containers ([containers]: scroll area, list, menu,
-//! pop-up button, tabs, split) do this for an app in the look of the [Theme] set with
-//! [Ui::set_theme]: `if ui.id("plus").button("+").clicked { .. }`.
+//! Widgets ([widgets]: label, button, text field) and containers ([containers]: scroll area,
+//! list, menu, pop-up button, tabs, split) do this for an app in the look of the [Theme] set
+//! with [Ui::set_theme]: `if ui.id("plus").button("+").clicked { .. }`.
 //!
 //! The rule for every widget: a headless behaviour ([behavior]: `ui.button_behavior(id)` and
 //! the like, hover, press, click, focus, keys and the value edited) plus drawing from the
@@ -41,6 +41,7 @@ mod layout;
 mod paint;
 pub mod store;
 mod style;
+mod textlayout;
 pub mod theme;
 pub mod widgets;
 
@@ -49,25 +50,27 @@ use std::fmt::{Display, Write};
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
-pub use behavior::Behavior;
+pub use behavior::{Behavior, FieldBehavior};
 pub use containers::{
   List, ListResponse, PopUp, Row, Selection, Split, SplitBehavior, Tabs, TypeSelect,
 };
 pub use input::{Click, Press, Scroll, hit};
+pub(crate) use layout::Sys;
 pub use layout::{Kind, Line, Measure, Node, Tree};
 pub use store::{Ease, Transition};
 pub use style::{
   Align, Cursor, Dim, Float, Focus, FocusRing, Shadow, Style, TextStyle, grow, pct, px, rigid,
 };
+pub use textlayout::{Edit, Stop, TextLayout};
 pub use theme::{ButtonStyle, ControlSize, Sizes, Theme, Variant};
-pub use widgets::Button;
+pub use widgets::{Button, FieldStyle, TextInput};
 
 use self::input::{Deliver, Input, ScrollState};
 use self::store::{Anim, Store};
 use crate::app::{Appearance, Clipboard, Event, MouseButton, Waker};
 use crate::keys::{Binding, Command, KeyEvent};
-use crate::scene::{Frame, ImageId, Images, Point, Rect, Size};
-use crate::text::{Font, FxHasher, Ink, Metrics, TextSystem};
+use crate::scene::{Frame, ImageId, Point, Rect, Size};
+use crate::text::{Font, FxHasher, Metrics, TextSystem};
 
 /// How long [UiState::flash] shows an element pressed.
 const FLASH: Duration = Duration::from_millis(120);
@@ -449,6 +452,9 @@ impl UiState {
       focused: self.focused(id),
       clicked: self.clicked(id),
       changed: false,
+      submitted: false,
+      cancelled: false,
+      blurred: false,
     }
   }
 }
@@ -477,8 +483,14 @@ pub struct Response {
   pub focused: bool,
   /// Clicked with the left button; seen once.
   pub clicked: bool,
-  /// The value a widget edits changed: a pop-up's choice, the selected tab, a split's ratio.
+  /// The value a widget edits changed: a text field's text.
   pub changed: bool,
+  /// Enter in a single-line text field.
+  pub submitted: bool,
+  /// Escape in a text field.
+  pub cancelled: bool,
+  /// A text field lost focus since the view last built it.
+  pub blurred: bool,
 }
 
 /// The element tree builder an app's `view` gets each frame it redraws. `'a` lets canvas
@@ -1194,33 +1206,6 @@ impl<'a> Ui<'a> {
   pub fn discard(mut self) -> UiState {
     self.st.input.ended = None;
     self.st
-  }
-}
-
-/// Text and image sizes from the runtime's text system and images.
-pub(crate) struct Sys<'a> {
-  pub text: &'a mut TextSystem,
-  pub images: &'a Images,
-  pub scale: f32,
-}
-
-impl Measure for Sys<'_> {
-  fn width(&mut self, s: &str, font: Font) -> f32 {
-    self.text.measure(s, font)
-  }
-
-  fn line(&mut self, s: &str, font: Font) -> (f32, Ink) {
-    let line = self.text.layout(s, font);
-    (line.width, line.ink)
-  }
-
-  fn metrics(&mut self, font: Font) -> Metrics {
-    self.text.metrics(font)
-  }
-
-  fn image(&mut self, id: ImageId) -> Size {
-    let (w, h) = self.images.size(id).unwrap_or((0, 0));
-    Size::new(w as f32 / self.scale, h as f32 / self.scale)
   }
 }
 

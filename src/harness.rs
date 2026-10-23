@@ -9,10 +9,11 @@ use std::time::Duration;
 
 use keyboard_types::{Code, Modifiers};
 
-use crate::app::{App, Clock, Event, MemClipboard, MouseButton, Runtime};
+use crate::app::{App, Clock, Event, Ime, MemClipboard, MouseButton, Runtime};
 use crate::cpu::{self, Pixels};
 use crate::keys::{self, Key, KeyEvent};
 use crate::scene::{Point, Rect, Size};
+use crate::text::edit::{Editor, utf16_len};
 use crate::ui::{Id, Kind};
 
 /// A display refresh at 120 Hz, the step of [Harness::wait].
@@ -108,6 +109,23 @@ impl<A: App> Harness<A> {
     used
   }
 
+  /// Types `s` as text input would: one [Event::Text]. Returns whether it was used.
+  pub fn type_text(&mut self, s: &str) -> bool {
+    self.event(Event::Text(s.into()))
+  }
+
+  /// An input method marks `s` in the focused field (composing), its caret at the end, as
+  /// `setMarkedText:selectedRange:replacementRange:` does.
+  pub fn ime_mark(&mut self, s: &str) -> bool {
+    let n = utf16_len(s);
+    self.event(Event::Ime(Ime::Mark { text: s.into(), sel: n..n, replace: None }))
+  }
+
+  /// An input method commits `s` in place of the marked text (`insertText:replacementRange:`).
+  pub fn ime_commit(&mut self, s: &str) -> bool {
+    self.event(Event::Ime(Ime::Commit { text: s.into(), replace: None }))
+  }
+
   /// The pointer leaves the view.
   pub fn leave(&mut self) -> bool {
     self.event(Event::MouseExit)
@@ -148,6 +166,11 @@ impl<A: App> Harness<A> {
       Kind::Text { range, .. } => Some(t.str(range.0, range.1)),
       _ => None,
     }
+  }
+
+  /// The editor of a text field or selectable text.
+  pub fn editor(&self, id: Id) -> Option<&Editor> {
+    self.rt.ui.editor(id)
   }
 
   // MARK: Output
