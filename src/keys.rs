@@ -860,19 +860,27 @@ pub fn post(s: Shortcut) -> Result<(), String> {
   crate::platform::post::post(s)
 }
 
-/// The presses that send `key` with `mods`, where the modifier keys are pressed too (Windows,
-/// X11): each modifier down (`modkey` its key), the key down and up, the modifiers up in reverse.
+/// The presses that send `key` with modifiers `want` while `held` are down, where modifier keys
+/// are pressed (Windows, X11): the held ones not wanted up and the wanted ones not held down
+/// (`modkey` the key of each), the key down and up, then each modifier back as it was, so the
+/// keys the user still holds (a hotkey's) neither join the shortcut nor end up let go.
 #[cfg(any(test, not(target_os = "macos")))]
 pub(crate) fn strokes<K: Copy>(
-  mods: Modifiers,
+  want: Modifiers,
+  held: Modifiers,
   key: K,
   modkey: impl Fn(Modifiers) -> K,
 ) -> Vec<(K, bool)> {
   let all = [Modifiers::CONTROL, Modifiers::ALT, Modifiers::SHIFT, Modifiers::META];
-  let held: Vec<K> = all.into_iter().filter(|&m| mods.contains(m)).map(modkey).collect();
-  let mut out: Vec<_> = held.iter().map(|&k| (k, true)).collect();
+  let keys = |set: Modifiers| -> Vec<K> {
+    all.into_iter().filter(|&m| set.contains(m)).map(&modkey).collect()
+  };
+  let (lift, press) = (keys(held - want), keys(want - held));
+  let mut out: Vec<_> = lift.iter().map(|&k| (k, false)).collect();
+  out.extend(press.iter().map(|&k| (k, true)));
   out.extend([(key, true), (key, false)]);
-  out.extend(held.iter().rev().map(|&k| (k, false)));
+  out.extend(press.iter().rev().map(|&k| (k, false)));
+  out.extend(lift.iter().rev().map(|&k| (k, true)));
   out
 }
 
@@ -896,14 +904,20 @@ mod tests {
     }
   }
 
-  /// Ctrl-Shift-V as Windows and X11 get it: the modifiers around the key, let go in reverse.
+  /// Ctrl-V as Windows and X11 get it: Ctrl around the key; a held Shift lifted for it and put
+  /// back after; a held Ctrl left as it is.
   #[test]
   fn posted_keys_hold_the_modifiers_around_the_key() {
     let name = |m: Modifiers| if m == Modifiers::SHIFT { "shift" } else { "ctrl" };
-    let s = strokes(Modifiers::CONTROL | Modifiers::SHIFT, "v", name);
-    let want = [("ctrl", true), ("shift", true), ("v", true), ("v", false), ("shift", false)];
-    assert_eq!(s, [&want[..], &[("ctrl", false)]].concat());
-    assert_eq!(strokes(Modifiers::empty(), "a", name), [("a", true), ("a", false)]);
+    let ctrl = Modifiers::CONTROL;
+    let s = strokes(ctrl, Modifiers::SHIFT, "v", name);
+    let want = [("shift", false), ("ctrl", true), ("v", true), ("v", false), ("ctrl", false)];
+    assert_eq!(s, [&want[..], &[("shift", true)]].concat());
+    assert_eq!(strokes(ctrl, ctrl, "v", name), [("v", true), ("v", false)]);
+    assert_eq!(
+      strokes(Modifiers::empty(), Modifiers::empty(), "a", name),
+      [("a", true), ("a", false)]
+    );
   }
   #[test]
   fn parses_shortcuts_in_the_app() {

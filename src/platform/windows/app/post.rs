@@ -1,7 +1,8 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Shortcuts posted as key events on Windows through `SendInput`: the modifier keys down, the key
-//! down and up, the modifiers up ([crate::keys::strokes]), in one call so no other input comes
+//! Shortcuts posted as key events on Windows through `SendInput`: the modifier keys set as the
+//! shortcut wants them, the key down and up, the modifiers back as the user holds them
+//! ([crate::keys::strokes]), in one call so no other input comes
 //! between them. A letter or digit is its own virtual key on every layout (Ctrl-V is VK `V` on a
 //! Russian one too); another character the key that types it on the layout of the window in
 //! front (`VkKeyScanExW`). Windows drops input to an app running elevated above this one (UIPI).
@@ -30,8 +31,10 @@ pub fn post(s: Shortcut) -> Result<(), String> {
     Modifiers::SHIFT => VK_SHIFT,
     _ => VK_LWIN,
   };
-  let inputs: Vec<INPUT> =
-    strokes(mods, vk, modkey).into_iter().map(|(vk, d)| input(vk, d)).collect();
+  let inputs: Vec<INPUT> = strokes(mods, keyboard::mods_held(), vk, modkey)
+    .into_iter()
+    .map(|(vk, d)| input(vk, d))
+    .collect();
   let sent = unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), size_of::<INPUT>() as i32) };
   match sent as usize == inputs.len() {
     true => Ok(()),

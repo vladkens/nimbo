@@ -20,17 +20,21 @@ pub fn path(path: &Path) -> Result<(), String> {
   xdg_open(path.as_os_str())
 }
 
+/// On a thread of its own: the file manager may have to start first, and the call waits for it.
 pub fn reveal(path: &Path) -> Result<(), String> {
-  let items = V::Array("s", vec![V::S(file_uri(path))]);
-  let args = V::Tuple(vec![items, V::s("")]);
-  let (name, object) = ("org.freedesktop.FileManager1", "/org/freedesktop/FileManager1");
-  let shown =
-    dbus::session().and_then(|bus| dbus::call(bus, name, object, name, "ShowItems", args, 3000));
-  match (shown, path.parent()) {
-    (Ok(_), _) => Ok(()),
-    (Err(_), Some(dir)) => xdg_open(dir.as_os_str()),
-    (Err(e), None) => Err(e),
-  }
+  let (path, uri) = (path.to_owned(), file_uri(path));
+  std::thread::spawn(move || {
+    let items = V::Array("s", vec![V::S(uri)]);
+    let args = V::Tuple(vec![items, V::s("")]);
+    let (name, object) = ("org.freedesktop.FileManager1", "/org/freedesktop/FileManager1");
+    let call = |bus| dbus::call(bus, name, object, name, "ShowItems", args, 5000);
+    if dbus::session().and_then(call).is_err()
+      && let Some(dir) = path.parent()
+    {
+      let _ = xdg_open(dir.as_os_str());
+    }
+  });
+  Ok(())
 }
 
 pub fn file_manager() -> &'static str {

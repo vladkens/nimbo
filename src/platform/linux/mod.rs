@@ -929,13 +929,9 @@ impl Clipboard for Clip {
 }
 
 /// The system clipboard outside a window, GTK's CLIPBOARD selection: on the main thread while
-/// GTK's loop runs, `None` elsewhere.
+/// the app runs (GTK initialized), `None` elsewhere.
 pub fn clipboard() -> Option<Box<dyn Clipboard>> {
-  let g = load().filter(|_| app::shell::is_main())?;
-  if unsafe { (g.gtk_main_level)() } == 0 {
-    return None;
-  }
-
+  let g = load().filter(|_| app::shell::is_main() && app::shell::running())?;
   Some(Box::new(Clip(unsafe { (g.gtk_clipboard_get)(CLIPBOARD) })))
 }
 
