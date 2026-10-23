@@ -1123,29 +1123,33 @@ mod tests {
     assert_eq!(runs, [(0..6, 1)]);
   }
 
+  /// Whether glyph `i` of `s` in the UI font is drawn in a colour font; `None` (the test
+  /// skipped) without a colour font that has `c` in the fallback chain.
+  fn in_colour(s: &str, c: char, i: usize) -> Option<bool> {
+    let f = face(Font::ui(13.0));
+    let has = {
+      let cache = cache();
+      let mut fonts = cache.chains[f.chain].fallbacks.iter();
+      fonts.any(|&(p, _)| get_bool(p, c"color") == Some(true) && has_char(charset(p), c))
+    };
+    if !has {
+      println!("no colour font with {c}: skipped");
+      return None;
+    }
+
+    let mut faces = Vec::new();
+    let line = shape(&f, s, |f| {
+      faces.push(f);
+      faces.len() as u16 - 1
+    });
+    Some(is_color(&faces[line.glyphs[i].face as usize]))
+  }
+
   /// With a colour font that has the heart in the fallback chain (Noto Color Emoji), a heart
   /// asked for as emoji is drawn in it, not as the UI font's outline (DejaVu Sans has one).
   #[test]
   fn an_emoji_heart_is_drawn_in_colour() {
-    let f = face(Font::ui(13.0));
-    let colour_heart = {
-      let c = cache();
-      let ch = &c.chains[f.chain];
-      ch.fallbacks
-        .iter()
-        .any(|&(p, _)| get_bool(p, c"color") == Some(true) && has_char(charset(p), '\u{2764}'))
-    };
-    if !colour_heart {
-      println!("no colour font with the heart: skipped");
-      return;
-    }
-
-    let mut faces = Vec::new();
-    let line = shape(&f, "\u{2764}\u{fe0f}", |f| {
-      faces.push(f);
-      faces.len() as u16 - 1
-    });
-    assert!(is_color(&faces[line.glyphs[0].face as usize]));
+    assert_ne!(in_colour("\u{2764}\u{fe0f}", '\u{2764}', 0), Some(false));
   }
 
   /// A COLR emoji font's glyphs by their layers (Segoe UI Emoji, Twemoji): one with none is
@@ -1233,24 +1237,6 @@ mod tests {
   /// With a colour emoji font, 😀 is drawn in it without a selector.
   #[test]
   fn a_default_emoji_is_drawn_in_colour() {
-    let f = face(Font::ui(13.0));
-    let colour = {
-      let c = cache();
-      c.chains[f.chain]
-        .fallbacks
-        .iter()
-        .any(|&(p, _)| get_bool(p, c"color") == Some(true) && has_char(charset(p), '😀'))
-    };
-    if !colour {
-      println!("no colour font with 😀: skipped");
-      return;
-    }
-
-    let mut faces = Vec::new();
-    let line = shape(&f, "a😀", |f| {
-      faces.push(f);
-      faces.len() as u16 - 1
-    });
-    assert!(is_color(&faces[line.glyphs[1].face as usize]));
+    assert_ne!(in_colour("a😀", '😀', 1), Some(false));
   }
 }
