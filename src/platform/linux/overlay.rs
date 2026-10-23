@@ -119,7 +119,8 @@ pub fn setup(window: P, anchor: Anchor) {
     (g.gtk_window_set_type_hint)(window, NOTIFICATION);
   }
 
-  let Some(ls) = layer_shell() else { return };
+  // Not loaded on X11, where it has nothing to do.
+  let Some(ls) = wayland().then(layer_shell).flatten() else { return };
   // SAFETY: the layer shell's calls on a toplevel not realized yet.
   unsafe {
     (ls.gtk_layer_init_for_window)(window);

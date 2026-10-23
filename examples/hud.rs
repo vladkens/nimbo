@@ -96,9 +96,9 @@ pub fn shot(h: &mut nimbo::Harness<Hud>) {
 }
 
 fn main() {
-  let args: Vec<String> = std::env::args().skip(1).collect();
-  match args.is_empty() {
-    true => nimbo::app(INFO, start),
-    false => nimbo::run_args(CONFIG, Hud::default(), shot, &args),
+  if std::env::args().any(|a| a == "--shot") {
+    return nimbo::run(CONFIG, Hud::default(), shot);
   }
+
+  nimbo::app(INFO, start);
 }

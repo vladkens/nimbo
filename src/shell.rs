@@ -370,8 +370,6 @@ mod tests {
 
   use super::*;
 
-  /// The windows by id: a close callback set on one is given back once, as it closes; the quit
-  /// hook runs once.
   /// A HUD 200x40 in a 1000x600 work area: centred across, 20 points off the edge.
   #[test]
   fn anchors_place_in_the_work_area() {
@@ -381,6 +379,8 @@ mod tests {
     assert_eq!(Anchor::Center.offset(area, size), Point::new(400.0, 280.0));
   }
 
+  /// The windows by id: a close callback set on one is given back once, as it closes; the quit
+  /// hook runs once.
   #[test]
   fn windows_and_hooks_by_id() {
     hooks(|h| h.windows.extend([(1, TypeId::of::<u8>(), None), (2, TypeId::of::<u16>(), None)]));

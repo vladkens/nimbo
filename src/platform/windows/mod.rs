@@ -262,11 +262,6 @@ fn send_or_wait(events: [Event; 2]) {
   }
 }
 
-/// Window `hwnd` was hidden ([crate::Window::hide]): no frames until it shows again.
-pub(crate) fn hidden(hwnd: HWND) {
-  with_window(hwnd, |w| w.hidden = true);
-}
-
 /// Window `hwnd` shows (again): its frames start.
 pub(crate) fn shown(hwnd: HWND) {
   with_window(hwnd, |w| {
@@ -553,15 +548,16 @@ fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
       0
     }
     WM_SIZE => {
-      let minimized = wp == SIZE_MINIMIZED as usize;
+      // Minimized, or resized while hidden ([crate::Window::hide]): no frames until it shows.
+      let off = wp == SIZE_MINIMIZED as usize || unsafe { IsWindowVisible(hwnd) } == 0;
       with(|w| {
-        let shown = w.hidden && !minimized;
-        w.hidden = minimized;
+        let shown = w.hidden && !off;
+        w.hidden = off;
         if shown {
           w.rt.redraw();
         }
         // Draw right away, so a live resize never shows a stretched or stale frame.
-        if !minimized {
+        if !off {
           w.render();
         }
       });
@@ -574,7 +570,7 @@ fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         w.overlay
       });
       // An overlay keeps its size in points at its anchor, on the monitor it is on now.
-      if let Some(Some(anchor)) = overlay {
+      if let Some(anchor) = overlay.flatten() {
         place(hwnd, anchor, false);
         with(|w| w.retime());
         return 0;
@@ -778,7 +774,7 @@ fn apply_resize(hwnd: HWND) -> bool {
   let flags = SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE;
   let (cx, cy) = (rc.right - rc.left, rc.bottom - rc.top);
   unsafe { SetWindowPos(hwnd, null_mut(), 0, 0, cx, cy, flags) };
-  if let Some(Some(anchor)) = with(|w| w.overlay) {
+  if let Some(anchor) = with(|w| w.overlay).flatten() {
     place(hwnd, anchor, false);
   }
 
@@ -797,7 +793,6 @@ pub(crate) fn show_overlay(hwnd: HWND, anchor: Anchor) {
 /// pointer, or of its own unless `pointer`, at its size in points (the last frame's, or the one
 /// it asked for) for that monitor's DPI; topmost again.
 fn place(hwnd: HWND, anchor: Anchor, pointer: bool) {
-  let Some(size) = with_window(hwnd, |w| w.rt.size) else { return };
   let monitor = match pointer {
     true => {
       let mut p = POINT { x: 0, y: 0 };
@@ -816,6 +811,14 @@ fn place(hwnd: HWND, anchor: Anchor, pointer: bool) {
   }
 
   let (r, k) = (info.rcWork, dpi as f32 / 96.0);
+  // Drawn at that monitor's scale from the move's WM_SIZE on, before or without WM_DPICHANGED
+  // (a hidden window): a stale one would turn its size in points into another.
+  let Some(size) = with_window(hwnd, |w| {
+    w.scale = k;
+    w.rt.size
+  }) else {
+    return;
+  };
   let area = Size::new((r.right - r.left) as f32 / k, (r.bottom - r.top) as f32 / k);
   let at = anchor.offset(area, size);
   let px = |v: f32| (v * k).round() as i32;

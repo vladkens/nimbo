@@ -26,7 +26,7 @@ use windows_sys::Win32::UI::HiDpi::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-use super::super::{Timer, create, hidden, run_loop, settings, show_overlay, wide, with_window};
+use super::super::{Timer, create, run_loop, settings, show_overlay, wide, with_window};
 use super::tray;
 use crate::Config;
 use crate::app::App;
@@ -255,7 +255,7 @@ fn hwnd(id: u64) -> Option<HWND> {
 /// when the app has it or the user just used it: a tray menu, not a hotkey from the background).
 pub fn front(id: u64) {
   let Some(hwnd) = hwnd(id) else { return };
-  if let Some(Some(anchor)) = with_window(hwnd, |w| w.overlay) {
+  if let Some(anchor) = with_window(hwnd, |w| w.overlay).flatten() {
     return show_overlay(hwnd, anchor);
   }
 
@@ -270,7 +270,7 @@ pub fn front(id: u64) {
 pub fn hide(id: u64) {
   if let Some(hwnd) = hwnd(id) {
     unsafe { ShowWindow(hwnd, SW_HIDE) };
-    hidden(hwnd);
+    with_window(hwnd, |w| w.hidden = true);
   }
 }
 

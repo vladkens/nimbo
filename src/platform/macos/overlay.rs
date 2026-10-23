@@ -11,7 +11,7 @@ use objc2_app_kit::{
   NSBackingStoreType, NSColor, NSEvent, NSPanel, NSScreen, NSStatusWindowLevel, NSWindow,
   NSWindowAnimationBehavior, NSWindowCollectionBehavior, NSWindowStyleMask,
 };
-use objc2_foundation::{NSPoint, NSRect};
+use objc2_foundation::{NSMouseInRect, NSPoint, NSRect};
 
 use crate::scene::Size;
 use crate::shell::Anchor;
@@ -59,11 +59,7 @@ pub fn place(window: &NSWindow, anchor: Anchor, pointer: bool) {
   let screen = match pointer {
     true => {
       let p = NSEvent::mouseLocation();
-      let inside = |r: NSRect| {
-        let (o, s) = (r.origin, r.size);
-        p.x >= o.x && p.x < o.x + s.width && p.y >= o.y && p.y < o.y + s.height
-      };
-      NSScreen::screens(mtm).iter().find(|s| inside(s.frame()))
+      NSScreen::screens(mtm).iter().find(|s| NSMouseInRect(p, s.frame(), false))
     }
     false => window.screen(),
   };
