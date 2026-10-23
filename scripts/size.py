@@ -34,7 +34,7 @@ KINDS = ("code", "docs", "comments", "tests", "blank")
 BUDGETS = {
   "platform/macos": 1650,
   "platform/windows": 2000,
-  "platform/linux": 2500,
+  "platform/linux": 2800,
   "ui": 3700,
   "widgets": 3100,
   "text": 1500,
@@ -42,7 +42,7 @@ BUDGETS = {
   "app/shared": 660,
   "app/macos": 1200,
   "app/windows": 1200,
-  "app/linux": 1500,
+  "app/linux": 1000,
 }
 # Modules that count against a budget of another name ("app", src/app.rs, is the core's seams).
 # The settings form and the dialog are add-ons over the widgets, as the containers are.

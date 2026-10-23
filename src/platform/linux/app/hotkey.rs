@@ -22,8 +22,8 @@ use std::time::Instant;
 
 use keyboard_types::NamedKey;
 
+use super::super::dbus::{self, Gv, V};
 use super::super::{Fp, P, S};
-use super::dbus::{self, Gv, V};
 use crate::Modifiers;
 use crate::hotkey::{Edge, Listener, OnEdge, Status};
 use crate::keys::{Hotkey, Key, Shortcut};

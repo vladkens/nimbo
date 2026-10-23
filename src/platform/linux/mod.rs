@@ -19,6 +19,7 @@
 //! window for [with] while it runs.
 
 mod app;
+mod dbus;
 mod dl;
 mod input;
 mod keys;

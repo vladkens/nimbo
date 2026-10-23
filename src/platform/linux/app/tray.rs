@@ -18,8 +18,8 @@ use std::ptr::null;
 use std::rc::Rc;
 use std::sync::OnceLock;
 
+use super::super::dbus::{self, Gv, V, VTable};
 use super::super::{Fp, P, S};
-use super::dbus::{self, Gv, V, VTable};
 use super::menu::{self, nodes};
 use crate::tray::{Menu, State, TrayIcon};
 

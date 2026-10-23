@@ -1,16 +1,17 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! D-Bus over GIO's GDBus, loaded at run time ([super::super::dl]): the session bus, calls,
-//! signals, exported objects, and GVariants built from an owned tree ([V]), so what the tray
-//! and the portal send is plain Rust data until it goes out (and testable without a bus).
+//! D-Bus over GIO's GDBus, loaded at run time ([super::dl]): the session bus, calls, signals,
+//! exported objects, and GVariants built from an owned tree ([V]), so what the tray and the
+//! portals get is plain Rust data until it goes out (and testable without a bus).
 
 use std::ffi::{CStr, CString, c_char, c_int, c_uint, c_void};
 use std::ptr::{null, null_mut};
 use std::rc::{Rc, Weak};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicPtr, Ordering};
 
-use super::super::dl::fns;
-use super::super::{Fp, P, S, lib};
+use super::dl::fns;
+use super::{Fp, P, S, lib};
 
 /// `G_BUS_TYPE_SESSION`.
 const SESSION: c_int = 2;
@@ -60,6 +61,7 @@ fns!(Gio {
   fn g_variant_get_type_string(v: P) -> S;
   fn g_variant_get_int32(v: P) -> i32;
   fn g_variant_get_uint32(v: P) -> u32;
+  fn g_variant_get_double(v: P) -> f64;
   fn g_variant_get_boolean(v: P) -> c_int;
   fn g_variant_get_string(v: P, len: *mut usize) -> S;
   fn g_variant_lookup_value(dict: P, key: S, ty: S) -> P;
@@ -123,15 +125,25 @@ pub fn error(err: P) -> String {
   msg
 }
 
-/// The session bus (GIO's shared connection, kept for the process); `Err` with GIO's reason.
+/// The session bus (GIO's shared connection, referenced once and kept for the process); `Err`
+/// with GIO's reason.
 pub fn session() -> Result<P, String> {
+  static BUS: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
+  let bus = BUS.load(Ordering::Acquire);
+  if !bus.is_null() {
+    return Ok(bus);
+  }
+
   let gio = gio().ok_or("GTK 3's GIO did not load")?;
   let mut err = null_mut();
   let bus = unsafe { (gio.g_bus_get_sync)(SESSION, null_mut(), &mut err) };
-  match bus.is_null() {
-    true => Err(format!("no session bus: {}", error(err))),
-    false => Ok(bus),
+  if bus.is_null() {
+    return Err(format!("no session bus: {}", error(err)));
   }
+
+  // Another thread's reference, if it got there first, is GIO's shared connection too.
+  BUS.store(bus, Ordering::Release);
+  Ok(bus)
 }
 
 /// A connection to the session bus of its own (`G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT |
@@ -457,6 +469,10 @@ impl Gv {
 
   pub fn u32(&self) -> u32 {
     if self.ty() == "u" { unsafe { (f().g_variant_get_uint32)(self.0) } } else { 0 }
+  }
+
+  pub fn f64(&self) -> f64 {
+    if self.ty() == "d" { unsafe { (f().g_variant_get_double)(self.0) } } else { 0.0 }
   }
 
   pub fn bool(&self) -> bool {
