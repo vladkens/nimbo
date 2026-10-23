@@ -53,7 +53,6 @@ impl App for Pace {
   }
 }
 
-#[allow(dead_code)]
 fn main() {
   nimbo::run(Config::new("pace", SIZE.w, SIZE.h).fixed(), Pace::default(), |_| {});
 }
