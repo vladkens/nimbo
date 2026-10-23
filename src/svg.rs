@@ -285,12 +285,17 @@ pub fn spans(
   }
 
   xs.sort_by(|a, b| a.0.total_cmp(&b.0));
-  let mut wind = 0;
-  for (i, &(x0, dir)) in xs.iter().enumerate() {
+  // A span runs from where the line goes in to where it comes out, whole across the edges
+  // inside it.
+  let inside = |wind: i32| if even_odd { wind % 2 != 0 } else { wind != 0 };
+  let (mut wind, mut start) = (0, 0.0);
+  for &(x, dir) in xs.iter() {
+    let was = inside(wind);
     wind += dir;
-    let inside = if even_odd { wind % 2 != 0 } else { wind != 0 };
-    if let Some(&(x1, _)) = xs.get(i + 1).filter(|_| inside) {
-      span(x0, x1);
+    match (was, inside(wind)) {
+      (false, true) => start = x,
+      (true, false) => span(start, x),
+      _ => {}
     }
   }
 }
@@ -324,6 +329,19 @@ mod tests {
     for bad in ["1 2", "M1", "M1 2 X3", "M1 2 A1 1 0 2 0 3 3"] {
       assert!(flatten(bad, 2.0, &mut Vec::new()).is_err(), "{bad}");
     }
+  }
+
+  #[test]
+  fn spans_are_whole_by_the_rule() {
+    // A square in a square, drawn the same way: one span non-zero, two even-odd.
+    let squares = lines("M0 0H10V10H0ZM2 2H8V8H2Z");
+    let mut xs = Vec::new();
+    let mut got = Vec::new();
+    spans(&squares, 5.0, false, &mut xs, |a, b| got.push((a, b)));
+    assert_eq!(got, [(0.0, 10.0)]);
+    got.clear();
+    spans(&squares, 5.0, true, &mut xs, |a, b| got.push((a, b)));
+    assert_eq!(got, [(0.0, 2.0), (8.0, 10.0)]);
   }
 
   #[test]
