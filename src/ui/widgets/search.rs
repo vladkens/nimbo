@@ -17,6 +17,7 @@ use keyboard_types::NamedKey;
 use super::icon::{self, Icon};
 use super::shortcut::clear_mark;
 use crate::keys::Key;
+use crate::scene::{alpha, mix};
 use crate::ui::behavior::FieldState;
 use crate::ui::{Cursor, FieldBehavior, FieldStyle, Float, Id, Response, Style, Ui, grow, px};
 
@@ -76,7 +77,9 @@ impl Ui<'_> {
       style.frame.pad[1] = style.frame.pad[1].max(INSET + MARK + 6.0);
     }
 
-    let muted = self.dim(t.muted, b.disabled);
+    // The ⊗'s cross cut out of it in the field's ground, as it shows over the window's.
+    let bg = style.frame.bg;
+    let (muted, ground) = (self.dim(t.muted, b.disabled), mix(t.bg, alpha(bg, 1.0), bg[3]));
     let mut r = Response::default();
     // Its own id: the field may have taken its place's.
     self.next_id = Some((id.key("wrap"), false));
@@ -91,8 +94,8 @@ impl Ui<'_> {
         let at = Float::parent().attach(1.0, 0.5).anchor(1.0, 0.5).offset(-INSET, 0.0).clip();
         let s = Style::new().w(px(MARK)).h(px(MARK)).cursor(Cursor::Pointer);
         let hot = ui.ctl_hot(x, ui.hovered(x));
-        let mark = crate::scene::mix(t.faint, t.muted, hot);
-        ui.with_id(x).float(at).canvas(s, move |f, r| clear_mark(f, r, mark, t.field));
+        let mark = mix(t.faint, t.muted, hot);
+        ui.with_id(x).float(at).canvas(s, move |f, r| clear_mark(f, r, mark, ground));
       }
     });
     r
@@ -119,7 +122,8 @@ mod tests {
   const NONE: Modifiers = Modifiers::empty();
 
   /// A search field, the changes it reported, and the app's own Escape: what the field gives
-  /// back. `narrow`: half the window wide, at most 100, and 60% of it high.
+  /// back. `narrow`: half the window wide, at most 100, and 60% of it high; `red`: on a red
+  /// ground.
   #[derive(Default)]
   struct Find {
     text: String,
@@ -127,6 +131,7 @@ mod tests {
     cancels: u32,
     off: bool,
     narrow: bool,
+    red: bool,
   }
 
   impl App for Find {
@@ -147,6 +152,11 @@ mod tests {
       let style = match self.narrow {
         true => t.search().frame(frame.w(pct(50.0)).max_w(100.0).h(pct(60.0))),
         false => t.search().hint("Search"),
+      };
+
+      let style = match self.red {
+        true => style.frame(style.frame.bg([1.0, 0.0, 0.0, 1.0])),
+        false => style,
       };
 
       let r = ui.disabled(self.off).search_field(Id::of("s"), &mut self.text, &style);
@@ -256,14 +266,40 @@ mod tests {
     let y = field.y + field.h / 2.0;
     // Scrolled to the end, then back to the start: nothing of it over the magnifier's side or
     // the ⊗'s.
-    for key in [NamedKey::End, NamedKey::Home] {
-      h.key(key, NONE);
+    let len = h.app().text.len();
+    for (key, at) in [(NamedKey::ArrowRight, len), (NamedKey::ArrowLeft, 0)] {
+      h.key(key, crate::CMD);
       h.frame();
+      assert_eq!(h.editor(Id::of("s")).unwrap().sel().head, at);
       let img = h.render();
       for x in [3.0, 6.0, field.w - 3.0, field.w - 5.0] {
         assert_eq!(img.pixel(field.x + x, y - 2.0), ground, "{key:?} at {x}");
       }
     }
+  }
+
+  /// A drag held past the text's end, by the ⊗, scrolls on.
+  #[test]
+  fn a_drag_by_the_mark_scrolls() {
+    let mut h = find(&"moon ".repeat(20));
+    let (field, x) = (h.rect(Id::of("s")).unwrap(), clear(&h).unwrap());
+    let y = field.y + field.h / 2.0;
+    h.press(field.x + 40.0, y);
+    h.frame();
+    h.move_to(x.x - 4.0, y);
+    h.frame();
+    assert!(h.rt.due_in().is_some_and(|d| d <= std::time::Duration::from_millis(16)));
+  }
+
+  /// The ⊗'s cross is the field's own ground.
+  #[test]
+  fn the_mark_is_cut_in_the_fields_ground() {
+    let mut h = find("moon");
+    h.app_mut().red = true;
+    h.frame();
+    let x = clear(&h).unwrap();
+    let px = h.render().pixel(x.x + x.w / 2.0, x.y + x.h / 2.0);
+    assert_eq!(px, [255, 0, 0, 255]);
   }
 
   #[test]
