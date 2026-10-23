@@ -69,13 +69,7 @@ impl Ui<'_> {
   /// An input method's marked text or commit for `id` ([Event::Ime]), seen once. Reading it
   /// uses it.
   pub fn ime(&self, id: Id) -> Option<&Ime> {
-    match self.st.peek(id)? {
-      Event::Ime(_) => match self.st.take(id) {
-        Some(Event::Ime(ime)) => Some(ime),
-        _ => None,
-      },
-      _ => None,
-    }
+    self.st.take(id, |e| if let Event::Ime(ime) = e { Some(ime) } else { None })
   }
 }
 
