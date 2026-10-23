@@ -8,6 +8,8 @@
 //!
 //! A key press travels in this order (the runtime routes it, [crate::Runtime::event]):
 //!
+//! 0. A focused element that grabs the keys ([crate::Ui::grab_keys]: a shortcut recorder recording,
+//!    a modal dialog) gets the key itself first.
 //! 1. Bindings of the focused element, then of its ancestors ([crate::Ui::keymap]): a match becomes
 //!    a [Command] for that element, which reads it with [crate::Ui::command].
 //! 2. The app's bindings ([crate::App::keymap]): a match goes to `App::event` as

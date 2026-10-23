@@ -579,6 +579,13 @@ impl<A: App> Runtime<A> {
   /// Bindings from the focused element up, then the app's; then the key itself, to the
   /// focused element and the app.
   fn key_down(&mut self, k: KeyEvent) -> bool {
+    // A recorder recording or a dialog open takes the keys before any binding.
+    if let Some(id) = self.ui.grab.filter(|&g| self.ui.focus() == Some(g))
+      && self.deliver(id, Event::KeyDown(k))
+    {
+      return true;
+    }
+
     let mut at = self.ui.focus().and_then(|id| self.ui.last.find(id));
     while let Some(i) = at {
       let n = &self.ui.last.nodes[i as usize];

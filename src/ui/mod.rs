@@ -26,9 +26,11 @@
 //! }
 //! ```
 //!
-//! Widgets ([widgets]: label, button, text field) and containers ([containers]: scroll area,
-//! list, menu, pop-up button, tabs, split) do this for an app in the look of the [Theme] set
-//! with [Ui::set_theme]: `if ui.id("plus").button("+").clicked { .. }`.
+//! Widgets ([widgets]: label, button, text field, check box, switch, slider, select and the
+//! like) and containers ([containers]: scroll area, list, menu, pop-up button, tabs, split) do
+//! this for an app in the look of the [Theme] set with [Ui::set_theme]:
+//! `if ui.id("plus").button("+").clicked { .. }`; so do a settings form ([form]) and a modal
+//! dialog ([dialog]).
 //!
 //! The rule for every widget: a headless behaviour ([behavior]: `ui.button_behavior(id)` and
 //! the like, hover, press, click, focus, keys and the value edited) plus drawing from the
@@ -36,6 +38,8 @@
 
 pub mod behavior;
 pub mod containers;
+pub mod dialog;
+pub mod form;
 pub mod input;
 mod layout;
 mod paint;
@@ -54,6 +58,8 @@ pub use behavior::{Behavior, FieldBehavior};
 pub use containers::{
   List, ListResponse, PopUp, Row, Selection, Split, SplitBehavior, Tabs, TypeSelect,
 };
+pub use dialog::{Answer, Dialog, DialogBehavior};
+pub use form::{FormRow, FormStyle, Glass, Tile};
 pub use input::{Click, Press, Scroll, hit};
 pub(crate) use layout::Sys;
 pub use layout::{Kind, Line, Measure, Node, Tree};
@@ -62,8 +68,8 @@ pub use style::{
   Align, Cursor, Dim, Float, Focus, FocusRing, Shadow, Style, TextStyle, grow, pct, px, rigid,
 };
 pub use textlayout::{Edit, Stop, TextLayout};
-pub use theme::{ButtonStyle, ControlSize, Sizes, Theme, Variant};
-pub use widgets::{Button, FieldStyle, TextInput};
+pub use theme::{ButtonStyle, ControlSize, Sizes, SwitchSize, Theme, Tone, Variant};
+pub use widgets::{Button, Choice, FieldStyle, Icon, Select, TextInput};
 
 use self::input::{Deliver, Input, ScrollState};
 use self::store::{Anim, Store};
@@ -201,6 +207,9 @@ pub struct UiState {
   pub(crate) resize: Option<Size>,
   /// The last size asked: asking it again is nothing new, so a view may ask every frame.
   asked: Option<Size>,
+  /// The element that takes key presses before any binding ([Ui::grab_keys]), as the view
+  /// built last asked.
+  pub(crate) grab: Option<Id>,
 }
 
 /// What the runtime's last frame cost, for a status bar or a frame meter ([Ui::last_frame]).
@@ -245,6 +254,7 @@ impl Default for UiState {
       stats: FrameStats::default(),
       resize: None,
       asked: None,
+      grab: None,
     }
   }
 }
@@ -532,6 +542,7 @@ impl<'a> Ui<'a> {
     st.stack.push((0, 0));
     st.animating = false;
     st.input.moves = false;
+    st.grab = None;
     st.input.now = now;
     let (next_id, next_float, next_keymap) = (None, None, None);
     let canvases = Vec::new();

@@ -5,7 +5,7 @@
 """Lines per module: code, docs, comments and inline tests, apart.
 
 A module is a directory under src/ (platform/<os>, ui/widgets and ui/containers each on
-their own) or a top-level file; examples/ and tests/ are one row each. Code is every line that is not blank, a comment, a doc
+their own, and so are the add-on files ui/form.rs and ui/dialog.rs) or a top-level file; examples/ and tests/ are one row each. Code is every line that is not blank, a comment, a doc
 comment or inside a `#[cfg(test)]` item. With a git ref, a column shows how code moved since it.
 `--map` lists the files with the first sentence of each one's module doc (`//!`): what it does.
 `--check` sums the code per part against its budget (BUDGETS) and fails when one is over.
@@ -31,16 +31,27 @@ BUDGETS = {
   "platform/macos": 1600,
   "platform/windows": 2000,
   "platform/linux": 2500,
-  "ui": 3500,
-  "widgets": 2000,
+  "ui": 3700,
+  "widgets": 3100,
   "text": 1500,
   "core": 3500,
 }
 # Modules that count against a budget of another name.
-PARTS = {"ui/widgets": "widgets", "ui/containers": "widgets"}
+# The settings form and the dialog are add-ons over the widgets, as the containers are.
+PARTS = {
+  "ui/widgets": "widgets",
+  "ui/containers": "widgets",
+  "ui/form": "widgets",
+  "ui/dialog": "widgets",
+}
 
 
 def module(path: str, files: bool) -> str:
+  """The module a file's lines count in.
+
+  >>> [module(p, False) for p in ("src/ui/form.rs", "src/ui/theme.rs", "src/ui/widgets/x.rs")]
+  ['ui/form', 'ui', 'ui/widgets']
+  """
   if files:
     return path
 
@@ -51,9 +62,9 @@ def module(path: str, files: bool) -> str:
   if len(parts) == 2:
     return parts[1].removesuffix(".rs")
 
-  if parts[1] in ("platform", "ui") and len(parts) > 3:
-    sub = f"{parts[1]}/{parts[2]}"
-    if parts[1] == "platform" or sub in PARTS:
+  if parts[1] in ("platform", "ui") and len(parts) > 2:
+    sub = f"{parts[1]}/{parts[2].removesuffix('.rs')}"
+    if parts[1] == "platform" and len(parts) > 3 or sub in PARTS:
       return sub
 
   return parts[1]
