@@ -21,8 +21,7 @@ use std::sync::OnceLock;
 use super::super::{Fp, P, S};
 use super::dbus::{self, Gv, V, VTable};
 use super::menu::{self, nodes};
-use crate::Main;
-use crate::tray::{Menu, OnItem, OnOpen, TrayIcon};
+use crate::tray::{Menu, State, TrayIcon};
 
 const SNI: &str = "org.kde.StatusNotifierItem";
 const SNI_PATH: &str = "/StatusNotifierItem";
@@ -93,12 +92,8 @@ struct Inner {
   tooltip: RefCell<String>,
   menu: RefCell<Menu>,
   revision: Cell<u32>,
-  on_open: RefCell<Option<OnOpen>>,
-  on_item: RefCell<Option<OnItem>>,
-  /// Between `AboutToShow` of the root and its close (or a click).
-  open: Cell<bool>,
-  /// The last menu set while it was open.
-  pending: RefCell<Option<Menu>>,
+  /// Open between `AboutToShow` of the root and its close (or a click).
+  state: State,
   bus: RefCell<Option<Bus>>,
 }
 
@@ -137,10 +132,7 @@ impl Tray {
       tooltip: RefCell::new(tooltip.into()),
       menu: RefCell::default(),
       revision: Cell::new(1),
-      on_open: RefCell::default(),
-      on_item: RefCell::default(),
-      open: Cell::new(false),
-      pending: RefCell::default(),
+      state: State::default(),
       bus: RefCell::default(),
     }));
     tray.paint(&icon);
@@ -206,13 +198,9 @@ impl Tray {
   }
 
   pub fn set_menu(&self, menu: &Menu) {
-    if self.0.open.get() {
-      *self.0.pending.borrow_mut() = Some(menu.clone());
-      return;
+    if !self.0.state.hold(menu) {
+      self.apply(menu.clone());
     }
-
-    self.0.pending.take();
-    self.apply(menu.clone());
   }
 
   /// Serves `menu` from now on, a new revision the host is told of.
@@ -225,30 +213,22 @@ impl Tray {
 
   /// The menu closed: the one set meanwhile, if any, is served.
   fn closed(&self) {
-    self.0.open.set(false);
-    if let Some(menu) = self.0.pending.take() {
+    self.0.state.set_open(false);
+    if let Some(menu) = self.0.state.released() {
       self.apply(menu);
     }
   }
 
-  pub fn on_open(&self, f: OnOpen) {
-    *self.0.on_open.borrow_mut() = Some(f);
-  }
-
-  pub fn on_item(&self, f: OnItem) {
-    *self.0.on_item.borrow_mut() = Some(f);
+  pub fn state(&self) -> &State {
+    &self.0.state
   }
 
   /// `AboutToShow` of the root: the app refreshes the menu; whether the layout changed.
   fn about_to_show(&self) -> bool {
     self.closed();
     let rev = self.0.revision.get();
-    if let Some(mut f) = self.0.on_open.take() {
-      f(&mut Main::here(), &crate::tray::Tray(self.clone()));
-      self.0.on_open.borrow_mut().get_or_insert(f);
-    }
-
-    self.0.open.set(true);
+    self.0.state.opening(self);
+    self.0.state.set_open(true);
     self.0.revision.get() != rev
   }
 
@@ -263,9 +243,9 @@ impl Tray {
           it.filter(|it| !it.separator && it.submenu.is_none()).map(|it| it.id.clone())
         };
         self.closed();
-        let (Some(choice), Some(mut f)) = (choice, self.0.on_item.take()) else { return };
-        f(&mut Main::here(), &crate::tray::Tray(self.clone()), &choice);
-        self.0.on_item.borrow_mut().get_or_insert(f);
+        if let Some(choice) = choice {
+          self.0.state.chosen(self, &choice);
+        }
       }
       "closed" if id == 0 => self.closed(),
       _ => {}

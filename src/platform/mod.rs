@@ -68,9 +68,9 @@
 //!     unless the app set one.
 //! - `pub mod tray` ([crate::tray]): `Tray: Clone` with `new(icon, tooltip)`, `detached(icon,
 //!   tooltip)` (nothing on screen, for tests), `set_icon`, `set_tooltip`, `set_menu(&Menu)` (held
-//!   while the menu is open, the last one set when it closes), `on_open(OnOpen)`,
-//!   `on_item(OnItem)`, and for tests `describe() -> Vec<String>`, `opening()`, `closing()`,
-//!   `choose(path: &[usize])`; `available() -> Result<(), String>`.
+//!   while the menu is open, the last one set when it closes: `tray::State` holds it), `state() ->
+//!   &State` (the app's callbacks too), and for tests `describe() -> Vec<String>`, `opening()`,
+//!   `closing()`, `choose(path: &[usize])`; `available() -> Result<(), String>`.
 //! - `pub mod hotkey` ([crate::hotkey]): `Hotkeys` with `new(on: OnEdge)` (`on` runs on a thread of
 //!   its own), `set(&mut self, Option<Hotkey>) -> Result<(), String>` (`None`: no hotkey; `Err`
 //!   when the OS can't take it), `start(&mut self) -> Result<(), String>` (the listener), and

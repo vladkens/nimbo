@@ -20,8 +20,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use super::super::{settings, wide};
 use super::shell::{WM_TRAY, host};
-use crate::Main;
-use crate::tray::{Item, Menu, OnItem, OnOpen, TrayIcon, choices};
+use crate::tray::{Item, Menu, State, TrayIcon, choices};
 
 /// `NIN_KEYSELECT`: the icon chosen with the keyboard.
 const NIN_KEYSELECT: u32 = NIN_SELECT | 1;
@@ -39,11 +38,8 @@ struct Inner {
   /// The menu as built, and the ids of its choices by command id less one.
   hmenu: Cell<HMENU>,
   ids: RefCell<Vec<String>>,
-  on_open: RefCell<Option<OnOpen>>,
-  on_item: RefCell<Option<OnItem>>,
-  /// While the menu shows: a menu set meanwhile waits for it to close.
-  open: Cell<bool>,
-  pending: RefCell<Option<Menu>>,
+  /// Open while the menu shows.
+  state: State,
 }
 
 impl Drop for Inner {
@@ -103,10 +99,7 @@ impl Tray {
       tip: RefCell::new(tooltip.into()),
       hmenu: Cell::new(null_mut()),
       ids: RefCell::default(),
-      on_open: RefCell::default(),
-      on_item: RefCell::default(),
-      open: Cell::new(false),
-      pending: RefCell::default(),
+      state: State::default(),
     };
     let tray = Self(Rc::new(inner));
     tray.draw_icon();
@@ -152,13 +145,9 @@ impl Tray {
   }
 
   pub fn set_menu(&self, menu: &Menu) {
-    if self.0.open.get() {
-      *self.0.pending.borrow_mut() = Some(menu.clone());
-      return;
+    if !self.0.state.hold(menu) {
+      self.build(menu);
     }
-
-    self.0.pending.take();
-    self.build(menu);
   }
 
   fn build(&self, menu: &Menu) {
@@ -168,28 +157,20 @@ impl Tray {
     *self.0.ids.borrow_mut() = choices(menu);
   }
 
-  pub fn on_open(&self, f: OnOpen) {
-    *self.0.on_open.borrow_mut() = Some(f);
-  }
-
-  pub fn on_item(&self, f: OnItem) {
-    *self.0.on_item.borrow_mut() = Some(f);
+  pub fn state(&self) -> &State {
+    &self.0.state
   }
 
   /// The app refreshes the menu, and it counts as open from here.
   pub fn opening(&self) {
-    if let Some(mut f) = self.0.on_open.take() {
-      f(&mut Main::here(), &crate::tray::Tray(self.clone()));
-      self.0.on_open.borrow_mut().get_or_insert(f);
-    }
-
-    self.0.open.set(true);
+    self.0.state.opening(self);
+    self.0.state.set_open(true);
   }
 
   /// The menu closed: the one set while it was open is built.
   pub fn closing(&self) {
-    self.0.open.set(false);
-    if let Some(menu) = self.0.pending.take() {
+    self.0.state.set_open(false);
+    if let Some(menu) = self.0.state.released() {
       self.build(&menu);
     }
   }
@@ -206,10 +187,9 @@ impl Tray {
 
   /// Runs `on_item` with `id`; nothing for none (the menu dismissed), the callback kept.
   fn run(&self, id: Option<String>) {
-    let Some(id) = id else { return };
-    let Some(mut f) = self.0.on_item.take() else { return };
-    f(&mut Main::here(), &crate::tray::Tray(self.clone()), &id);
-    self.0.on_item.borrow_mut().get_or_insert(f);
+    if let Some(id) = id {
+      self.0.state.chosen(self, &id);
+    }
   }
 
   pub fn choose(&self, path: &[usize]) {
@@ -471,7 +451,7 @@ mod tests {
     tray.set_menu(&Menu::new(vec![sep, Item::new("quit", "Quit")]));
     let got = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let g = got.clone();
-    tray.on_item(Box::new(move |_, _, id| g.borrow_mut().push(id.to_owned())));
+    crate::tray::Tray(tray.clone()).on_item(move |_, _, id| g.borrow_mut().push(id.to_owned()));
     tray.choose(&[1]);
     assert_eq!(*got.borrow(), ["quit"]);
   }
@@ -483,7 +463,7 @@ mod tests {
     tray.set_menu(&Menu::new(vec![Item::new("a", "A")]));
     let got = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let g = got.clone();
-    tray.on_item(Box::new(move |_, _, id| g.borrow_mut().push(id.to_owned())));
+    crate::tray::Tray(tray.clone()).on_item(move |_, _, id| g.borrow_mut().push(id.to_owned()));
     tray.run(None);
     tray.choose(&[0]);
     assert_eq!(*got.borrow(), ["a"]);

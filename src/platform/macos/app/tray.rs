@@ -8,7 +8,7 @@
 //! after `menuDidClose:`, where AppKit forbids changing the menu, and after the chosen item's
 //! action, which still finds its id.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::ptr::null_mut;
 use std::rc::{Rc, Weak};
 
@@ -33,10 +33,9 @@ use objc2_core_graphics::{
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
 
 use super::super::mtm;
-use crate::Main;
 use crate::keys::{Key, Shortcut, f_key};
 use crate::svg::flatten;
-use crate::tray::{Item, Menu, OnItem, OnOpen, TrayIcon};
+use crate::tray::{Item, Menu, State, TrayIcon};
 
 /// The menu bar's icon box, in points.
 const SIZE: NSSize = NSSize::new(18.0, 18.0);
@@ -50,12 +49,8 @@ struct Inner {
   image: RefCell<Retained<NSImage>>,
   /// The ids of the menu's items, by tag.
   ids: RefCell<Vec<String>>,
-  on_open: RefCell<Option<OnOpen>>,
-  on_item: RefCell<Option<OnItem>>,
-  /// Between `menuWillOpen:` and `menuDidClose:`.
-  open: Cell<bool>,
-  /// The last menu set while it was open.
-  pending: RefCell<Option<Menu>>,
+  /// Open between `menuWillOpen:` and `menuDidClose:`.
+  state: State,
 }
 
 impl Drop for Inner {
@@ -82,30 +77,27 @@ define_class!(
   unsafe impl NSMenuDelegate for Delegate {
     #[unsafe(method(menuNeedsUpdate:))]
     fn menu_needs_update(&self, _menu: &NSMenu) {
-      let Some(tray) = self.tray() else { return };
-      let Some(mut f) = tray.0.on_open.take() else { return };
-      f(&mut Main::here(), &crate::tray::Tray(tray.clone()));
-      tray.0.on_open.borrow_mut().get_or_insert(f);
+      if let Some(tray) = self.tray() {
+        tray.0.state.opening(&tray);
+      }
     }
 
     #[unsafe(method(menuWillOpen:))]
     fn menu_will_open(&self, _menu: &NSMenu) {
       if let Some(tray) = self.tray() {
-        tray.0.open.set(true);
+        tray.0.state.set_open(true);
       }
     }
 
     #[unsafe(method(menuDidClose:))]
     fn menu_did_close(&self, _menu: &NSMenu) {
       let Some(tray) = self.tray() else { return };
-      tray.0.open.set(false);
+      tray.0.state.set_open(false);
       let weak = MainThreadBound::new(Rc::downgrade(&tray.0), tray.0.mtm);
       DispatchQueue::main().exec_async(move || {
         let mtm = MainThreadMarker::new().unwrap();
         let Some(tray) = weak.into_inner(mtm).upgrade().map(Tray) else { return };
-        if !tray.0.open.get()
-          && let Some(menu) = tray.0.pending.take()
-        {
+        if let Some(menu) = tray.0.state.released() {
           tray.build(&menu);
         }
       });
@@ -118,9 +110,9 @@ define_class!(
       let Some(item) = sender.and_then(|s| s.downcast_ref::<NSMenuItem>()) else { return };
       let Some(tray) = self.tray() else { return };
       let id = tray.0.ids.borrow().get(item.tag() as usize).cloned();
-      let (Some(id), Some(mut f)) = (id, tray.0.on_item.take()) else { return };
-      f(&mut Main::here(), &crate::tray::Tray(tray.clone()), &id);
-      tray.0.on_item.borrow_mut().get_or_insert(f);
+      if let Some(id) = id {
+        tray.0.state.chosen(&tray, &id);
+      }
     }
   }
 );
@@ -173,10 +165,7 @@ impl Tray {
       delegate,
       image: RefCell::new(image(&icon)),
       ids: RefCell::default(),
-      on_open: RefCell::default(),
-      on_item: RefCell::default(),
-      open: Cell::new(false),
-      pending: RefCell::default(),
+      state: State::default(),
     };
     let tray = Self(Rc::new(inner));
     *tray.0.delegate.ivars().borrow_mut() = Rc::downgrade(&tray.0);
@@ -207,13 +196,9 @@ impl Tray {
   }
 
   pub fn set_menu(&self, menu: &Menu) {
-    if self.0.open.get() {
-      *self.0.pending.borrow_mut() = Some(menu.clone());
-      return;
+    if !self.0.state.hold(menu) {
+      self.build(menu);
     }
-
-    self.0.pending.take();
-    self.build(menu);
   }
 
   fn build(&self, menu: &Menu) {
@@ -223,12 +208,8 @@ impl Tray {
     *self.0.ids.borrow_mut() = ids;
   }
 
-  pub fn on_open(&self, f: OnOpen) {
-    *self.0.on_open.borrow_mut() = Some(f);
-  }
-
-  pub fn on_item(&self, f: OnItem) {
-    *self.0.on_item.borrow_mut() = Some(f);
+  pub fn state(&self) -> &State {
+    &self.0.state
   }
 
   pub fn describe(&self) -> Vec<String> {
@@ -278,7 +259,7 @@ impl Tray {
     // SAFETY: a static of the CoreFoundation framework.
     let mode = unsafe { objc2_core_foundation::kCFRunLoopDefaultMode };
     for _ in 0..50 {
-      if self.0.pending.borrow().is_none() {
+      if !self.0.state.waiting() {
         break;
       }
 
