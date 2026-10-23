@@ -258,6 +258,11 @@ fn id_of(data: P) -> u64 {
   data as usize as u64
 }
 
+/// [with] the window a callback's `data` names as the current one.
+fn with_data<R>(data: P, none: R, f: impl FnOnce(&mut Win) -> R) -> R {
+  as_window(id_of(data), || with(none, f))
+}
+
 /// The current window: the callback's, or outside one the active window (else the first).
 fn current() -> Option<Rc<RefCell<Win>>> {
   let g = gtk();
@@ -733,47 +738,40 @@ fn next(visible: bool, wanted: bool, due_in: Option<Duration>) -> (bool, Option<
 /// The frame clock's update phase while frames are wanted: asks for the layout phase, after
 /// which the frame is built ([on_layout]), at most at 120 Hz ([paced]); removed once none are.
 unsafe extern "C" fn on_tick(_: P, clock: P, data: P) -> c_int {
-  as_window(id_of(data), || {
-    with(TRUE, |w| {
-      let g = gtk();
-      w.ticking = w.rt.needs_frame() && w.visible();
-      let now = unsafe { (g.gdk_frame_clock_get_frame_time)(clock) };
-      if w.ticking && paced(now, &mut w.next_tick) {
-        unsafe { (g.gdk_frame_clock_request_phase)(clock, LAYOUT) };
-      }
+  with_data(data, TRUE, |w| {
+    let g = gtk();
+    w.ticking = w.rt.needs_frame() && w.visible();
+    let now = unsafe { (g.gdk_frame_clock_get_frame_time)(clock) };
+    if w.ticking && paced(now, &mut w.next_tick) {
+      unsafe { (g.gdk_frame_clock_request_phase)(clock, LAYOUT) };
+    }
 
-      w.ticking as c_int
-    })
+    w.ticking as c_int
   })
 }
 
 /// After GTK's layout: the frame, at the size GTK just gave the area, when one is wanted or
 /// that size is new.
 unsafe extern "C" fn on_layout(_: P, data: P) {
-  as_window(id_of(data), || {
-    with((), |w| {
-      if w.rt.needs_frame() || w.stale() {
-        w.render(true);
-      }
-    })
+  with_data(data, (), |w| {
+    if w.rt.needs_frame() || w.stale() {
+      w.render(true);
+    }
   });
 }
 
 /// GTK's paint: our surface where GTK repaints (the rects queued, or all of it after an expose
 /// or a resize), built first if it is stale (the first frame).
 unsafe extern "C" fn on_draw(_: P, cr: P, data: P) -> c_int {
-  let id = id_of(data);
-  as_window(id, || {
-    with((), |w| {
-      if w.stale() {
-        w.render(false);
-      }
+  with_data(data, (), |w| {
+    if w.stale() {
+      w.render(false);
+    }
 
-      w.painted = true;
-    })
+    w.painted = true;
   });
 
-  let (g, s) = (gtk(), slot(id, |s| s.surface.get()).unwrap_or(null_mut()));
+  let (g, s) = (gtk(), slot(id_of(data), |s| s.surface.get()).unwrap_or(null_mut()));
   if s.is_null() {
     return FALSE;
   }
@@ -791,20 +789,18 @@ unsafe extern "C" fn on_draw(_: P, cr: P, data: P) -> c_int {
 /// After GDK painted (and on Wayland committed) the frame: counted, and logged with
 /// `NIMBO_TRACE` as `nimbo: presented <unix ms> (+<ms since start>) <w>x<h>`.
 unsafe extern "C" fn on_after_paint(_: P, data: P) {
-  as_window(id_of(data), || {
-    with((), |w| {
-      if !std::mem::take(&mut w.painted) {
-        return;
-      }
+  with_data(data, (), |w| {
+    if !std::mem::take(&mut w.painted) {
+      return;
+    }
 
-      w.frames += 1;
-      if w.trace {
-        let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
-        let since = w.started.elapsed().as_secs_f64() * 1e3;
-        let (pw, ph) = w.shown;
-        eprintln!("nimbo: presented {:.3} (+{since:.1} ms) {pw}x{ph}", t.as_secs_f64() * 1e3);
-      }
-    })
+    w.frames += 1;
+    if w.trace {
+      let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+      let since = w.started.elapsed().as_secs_f64() * 1e3;
+      let (pw, ph) = w.shown;
+      eprintln!("nimbo: presented {:.3} (+{since:.1} ms) {pw}x{ph}", t.as_secs_f64() * 1e3);
+    }
   });
 }
 
@@ -821,13 +817,13 @@ unsafe extern "C" fn on_timer(data: P) -> c_int {
 /// A wake from another thread; while the window is busy, the sync after the call that holds it
 /// sees the wake.
 unsafe extern "C" fn on_wake(data: P) -> c_int {
-  as_window(id_of(data), || with((), |_| {}));
+  with_data(data, (), |_| {});
   FALSE
 }
 
 /// Minimized or shown again: frames stop or go on.
 unsafe extern "C" fn on_state(_: P, _: P, data: P) -> c_int {
-  as_window(id_of(data), || with((), |_| {}));
+  with_data(data, (), |_| {});
   FALSE
 }
 
