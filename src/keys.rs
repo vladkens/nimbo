@@ -984,8 +984,8 @@ mod tests {
     assert_eq!(other.map(|k| key_label(k, false)), ["Space", "SS", "F5", "Insert"]);
   }
 
-  /// Every global hotkey key with Ctrl-Shift, written canonically and shown in macOS's symbols
-  /// and the PC's names, parses back from each.
+  /// Every global hotkey key with Ctrl-Shift: its canonical spelling parses back to it, and it
+  /// shows in macOS's symbols and the PC's names.
   #[test]
   fn every_hotkey_key() {
     let mut want: Vec<String> = ('a'..='z')

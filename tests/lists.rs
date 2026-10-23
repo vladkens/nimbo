@@ -262,7 +262,7 @@ fn tabs_switch_and_keep_the_hidden_page_scroll() {
   assert_eq!((h.app().tab, offset(&h, notes)), (1, 60.0));
 }
 
-/// The split's divider drags: the list grows by as much.
+/// The split's divider drags: the list grows by as much; left alone after, it goes idle.
 #[test]
 fn the_split_divider_drags() {
   let mut h = lists();
@@ -279,4 +279,7 @@ fn the_split_divider_drags() {
   let grown = h.rect(list).unwrap().w;
   assert!((grown - (w + 80.0)).abs() <= 1.0, "{w} → {grown}");
   assert!(h.app().side > 0.45);
+  h.leave();
+  h.wait(Duration::from_millis(2000));
+  assert!(!h.frame(), "idle");
 }
