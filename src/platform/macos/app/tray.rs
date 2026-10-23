@@ -34,7 +34,8 @@ use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSSt
 
 use crate::Main;
 use crate::keys::{Key, Shortcut, f_key};
-use crate::tray::{Item, Menu, OnItem, OnOpen, TrayIcon, flatten};
+use crate::svg::flatten;
+use crate::tray::{Item, Menu, OnItem, OnOpen, TrayIcon};
 
 /// The menu bar's icon box, in points.
 const SIZE: NSSize = NSSize::new(18.0, 18.0);

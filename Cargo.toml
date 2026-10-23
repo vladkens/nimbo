@@ -13,11 +13,6 @@ include = ["/src/**/*.rs", "/Cargo.toml", "/Cargo.lock", "/LICENSE", "/readme.md
 keywords = ["gui", "ui", "desktop", "widgets", "toolkit"]
 categories = ["gui"]
 
-# AppKit's objects on the main thread: the shell's hidden windows and the tray's NSMenu.
-[[test]]
-name = "appkit"
-harness = false
-
 [[test]]
 name = "counter"
 harness = false

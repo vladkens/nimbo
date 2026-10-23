@@ -39,7 +39,7 @@ BUDGETS = {
   "widgets": 3100,
   "text": 1500,
   "core": 3500,
-  "app/shared": 900,
+  "app/shared": 600,
   "app/macos": 1200,
   "app/windows": 1200,
   "app/linux": 1500,

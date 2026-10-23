@@ -38,6 +38,6 @@ fn the_example() {
   assert_eq!(l[3], ("Launch at Login".into(), true, true));
   assert!(nimbo::Hotkey::parse(example::HOTKEY).is_ok());
   let mut rings = Vec::new();
-  nimbo::tray::flatten(example::ICON, 1.0, &mut rings).unwrap();
+  nimbo::svg::flatten(example::ICON, 1.0, &mut rings).unwrap();
   assert_eq!(rings.len(), 2, "a ring: two circles");
 }

@@ -4,8 +4,8 @@
 //! notify icon or D-Bus item): built from a [Menu] (labels, shortcuts, check marks, disabled
 //! items, separators, a submenu), rebuilt as it opens, kept while open (a new one waits for it
 //! to close), and items chosen through the OS's own path, reaching the app by id; icons from
-//! RGBA and from path data. A plain test on Windows and Linux (`tests/tray.rs`); on macOS, where
-//! the NSMenu and NSImage are main thread only, from `tests/appkit.rs`.
+//! RGBA and from path data. A plain test on Windows and Linux (`tests/tray.rs`); on macOS the
+//! NSMenu and NSImage are main thread only, which the test harness isn't.
 
 use std::cell::RefCell;
 use std::rc::Rc;

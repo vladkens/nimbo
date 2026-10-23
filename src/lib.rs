@@ -28,6 +28,7 @@ pub mod platform;
 mod png;
 pub mod scene;
 pub mod shell;
+pub mod svg;
 pub mod text;
 pub mod tray;
 pub mod ui;

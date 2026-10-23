@@ -16,8 +16,6 @@
 
 mod icon;
 
-pub use icon::flatten;
-
 use crate::Main;
 use crate::platform::tray as imp;
 
@@ -30,7 +28,8 @@ pub enum TrayIcon {
   /// drawn for Retina): 36 × 36 at 2 fills the menu bar's 18 pt.
   Rgba { w: u32, h: u32, scale: f32, px: Vec<u8> },
   /// SVG path data in a `size` × `size` view box, filled (non-zero, or even-odd), drawn at the
-  /// size the OS shows it, so crisp at every scale. Arcs and curves are flattened ([flatten]).
+  /// size the OS shows it, so crisp at every scale. Arcs and curves are flattened
+  /// ([crate::svg::flatten]).
   Path { size: f32, d: String, even_odd: bool },
 }
 
