@@ -1,15 +1,17 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! D-Bus over GIO's GDBus, loaded at run time ([super::super::dl]): the session bus, calls,
-//! signals, exported objects, and GVariants built from an owned tree ([V]), so what the tray
-//! and the portal send is plain Rust data until it goes out (and testable without a bus).
+//! D-Bus over GIO's GDBus, loaded at run time ([super::dl]): the session bus, calls, signals,
+//! exported objects, and GVariants built from an owned tree ([V]), so what the tray and the
+//! portals get is plain Rust data until it goes out (and testable without a bus).
 
 use std::ffi::{CStr, CString, c_char, c_int, c_uint, c_void};
 use std::ptr::{null, null_mut};
+use std::rc::{Rc, Weak};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicPtr, Ordering};
 
-use super::super::dl::fns;
-use super::super::{Fp, P, S, lib};
+use super::dl::fns;
+use super::{Fp, P, S, lib};
 
 /// `G_BUS_TYPE_SESSION`.
 const SESSION: c_int = 2;
@@ -59,6 +61,7 @@ fns!(Gio {
   fn g_variant_get_type_string(v: P) -> S;
   fn g_variant_get_int32(v: P) -> i32;
   fn g_variant_get_uint32(v: P) -> u32;
+  fn g_variant_get_double(v: P) -> f64;
   fn g_variant_get_boolean(v: P) -> c_int;
   fn g_variant_get_string(v: P, len: *mut usize) -> S;
   fn g_variant_lookup_value(dict: P, key: S, ty: S) -> P;
@@ -122,15 +125,25 @@ pub fn error(err: P) -> String {
   msg
 }
 
-/// The session bus (GIO's shared connection, kept for the process); `Err` with GIO's reason.
+/// The session bus (GIO's shared connection, referenced once and kept for the process); `Err`
+/// with GIO's reason.
 pub fn session() -> Result<P, String> {
+  static BUS: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
+  let bus = BUS.load(Ordering::Acquire);
+  if !bus.is_null() {
+    return Ok(bus);
+  }
+
   let gio = gio().ok_or("GTK 3's GIO did not load")?;
   let mut err = null_mut();
   let bus = unsafe { (gio.g_bus_get_sync)(SESSION, null_mut(), &mut err) };
-  match bus.is_null() {
-    true => Err(format!("no session bus: {}", error(err))),
-    false => Ok(bus),
+  if bus.is_null() {
+    return Err(format!("no session bus: {}", error(err)));
   }
+
+  // Another thread's reference, if it got there first, is GIO's shared connection too.
+  BUS.store(bus, Ordering::Release);
+  Ok(bus)
 }
 
 /// A connection to the session bus of its own (`G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT |
@@ -206,9 +219,8 @@ pub fn call(
 }
 
 /// Subscribes `cb` (`GDBusSignalCallback`) to `member` of `iface` from `sender` only (GDBus
-/// follows a well-known name's owner), on `path` (any when `None`); `data` is freed by `free`
+/// follows a well-known name's owner), on `path` (any when `None`); `data` ([weak]'s) is freed
 /// when unsubscribed.
-#[allow(clippy::too_many_arguments)]
 pub fn subscribe(
   bus: P,
   sender: &str,
@@ -216,8 +228,7 @@ pub fn subscribe(
   member: &str,
   path: Option<&str>,
   cb: Fp,
-  data: P,
-  free: Fp,
+  (data, free): (P, Fp),
 ) -> c_uint {
   let (from, i, m, p) = (cstr(sender), cstr(iface), cstr(member), path.map(cstr));
   let path = p.as_ref().map_or(null(), |p| p.as_ptr());
@@ -249,15 +260,14 @@ pub fn emit(bus: P, path: &str, iface: &str, name: &str, args: V) {
 }
 
 /// Exports interface `iface` of introspection `xml` at `path`, its calls to `vtable` with
-/// `data` (freed by `free` when unregistered); the registration id, 0 when it failed.
+/// `data` ([weak]'s, freed when unregistered); the registration id, 0 when it failed.
 pub fn export(
   bus: P,
   path: &str,
   xml: &CStr,
   iface: &str,
   vtable: &'static VTable,
-  data: P,
-  free: Fp,
+  (data, free): (P, Fp),
 ) -> c_uint {
   let g = f();
   let mut err = null_mut();
@@ -285,7 +295,7 @@ pub fn unexport(bus: P, id: c_uint) {
 }
 
 /// Owns well-known `name` on `bus`; `acquired` and `lost` are `GBusNameAcquiredCallback`s.
-pub fn own(bus: P, name: &str, acquired: Fp, lost: Fp, data: P, free: Fp) -> c_uint {
+pub fn own(bus: P, name: &str, acquired: Fp, lost: Fp, (data, free): (P, Fp)) -> c_uint {
   let n = cstr(name);
   unsafe { (f().g_bus_own_name_on_connection)(bus, n.as_ptr(), 0, acquired, lost, data, free) }
 }
@@ -296,7 +306,7 @@ pub fn unown(id: c_uint) {
 
 /// Watches `name`'s owner: `appeared` (`GBusNameAppearedCallback`) as one has it, `vanished`
 /// as it goes.
-pub fn watch(bus: P, name: &str, appeared: Fp, vanished: Fp, data: P, free: Fp) -> c_uint {
+pub fn watch(bus: P, name: &str, appeared: Fp, vanished: Fp, (data, free): (P, Fp)) -> c_uint {
   let n = cstr(name);
   unsafe {
     (f().g_bus_watch_name_on_connection)(bus, n.as_ptr(), 0, appeared, vanished, data, free)
@@ -305,6 +315,23 @@ pub fn watch(bus: P, name: &str, appeared: Fp, vanished: Fp, data: P, free: Fp) 
 
 pub fn unwatch(id: c_uint) {
   unsafe { (f().g_bus_unwatch_name)(id) };
+}
+
+/// A callback's data: a weak handle to `rc`, boxed, and the `GDestroyNotify` that frees it.
+pub fn weak<T>(rc: &Rc<T>) -> (P, Fp) {
+  (Box::into_raw(Box::new(Rc::downgrade(rc))) as P, free_weak::<T> as Fp)
+}
+
+unsafe extern "C" fn free_weak<T>(data: P) {
+  drop(unsafe { Box::from_raw(data as *mut Weak<T>) });
+}
+
+/// What a callback's data from [weak] points to, if it still lives.
+///
+/// # Safety
+/// `data` is [weak]'s for a `T`, not freed yet.
+pub unsafe fn upgrade<T>(data: P) -> Option<Rc<T>> {
+  unsafe { &*(data as *const Weak<T>) }.upgrade()
 }
 
 /// Answers a method call with `out`, a tuple.
@@ -442,6 +469,10 @@ impl Gv {
 
   pub fn u32(&self) -> u32 {
     if self.ty() == "u" { unsafe { (f().g_variant_get_uint32)(self.0) } } else { 0 }
+  }
+
+  pub fn f64(&self) -> f64 {
+    if self.ty() == "d" { unsafe { (f().g_variant_get_double)(self.0) } } else { 0.0 }
   }
 
   pub fn bool(&self) -> bool {

@@ -32,22 +32,18 @@ use objc2_foundation::{
   NSString,
 };
 
-pub use super::app::{is_main, on_quit, on_reopen, post, set_presence};
+pub use super::app::{is_main, post, set_presence};
 use super::view::View;
-use super::{Pasteboard, appearance};
+use super::{Pasteboard, appearance, mtm};
 use crate::Config;
 use crate::app::{App, Clock, Event, Runtime};
 use crate::shell::{AppInfo, Main, Presence};
 
-type OnMain = Box<dyn FnOnce(&mut Main)>;
-
 struct Win {
   id: u64,
-  ty: TypeId,
   window: Retained<NSWindow>,
   view: Retained<View>,
   _delegate: Retained<WindowDelegate>,
-  on_close: Option<OnMain>,
   /// Shown at least once: it counts for the Dock while open.
   shown: bool,
 }
@@ -80,10 +76,6 @@ fn shell<R>(f: impl FnOnce(&mut Shell) -> R) -> R {
   SHELL.with_borrow_mut(f)
 }
 
-fn mtm() -> MainThreadMarker {
-  MainThreadMarker::new().expect("nimbo: the app and its windows are main thread only")
-}
-
 // MARK: The app
 
 define_class!(
@@ -110,7 +102,7 @@ define_class!(
           return;
         }
 
-        finish();
+        crate::shell::finish(close);
         release();
         NSApplication::sharedApplication(mtm()).replyToApplicationShouldTerminate(true);
       });
@@ -127,7 +119,7 @@ define_class!(
     /// Opened again while it runs: LaunchServices starts no second process but tells.
     #[unsafe(method(applicationShouldHandleReopen:hasVisibleWindows:))]
     fn should_handle_reopen(&self, _app: &NSApplication, _visible: bool) -> bool {
-      defer(super::app::reopened);
+      defer(crate::shell::reopened);
       false
     }
   }
@@ -209,20 +201,12 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
   }
 
   // The main queue isn't served once the loop ends: the closed windows go now.
-  finish();
+  crate::shell::finish(close);
   release();
   // SAFETY: the observer is the delegate, added above.
   unsafe { center.removeObserver(&delegate) };
   ns_app.setDelegate(None);
   SHELL.take();
-}
-
-/// The app ends: its quit hook runs (once), then the windows close.
-fn finish() {
-  super::app::quitting();
-  for id in shell(|s| s.windows.iter().map(|w| w.id).collect::<Vec<_>>()) {
-    close(id);
-  }
 }
 
 /// Ends the loop after the event in progress (`stop:` takes effect after the next event: one
@@ -367,18 +351,14 @@ pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
   window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
   window.center();
   window.makeFirstResponder(Some(&view));
-  let win = Win { id, ty, window, view, _delegate: delegate, on_close: None, shown: false };
+  let win = Win { id, window, view, _delegate: delegate, shown: false };
   shell(|s| s.windows.push(win));
+  crate::shell::opened(id, ty);
   if !cfg.hidden {
     front(id);
   }
 
   id
-}
-
-/// The type of the app of window `id`; `None` once it closed.
-pub fn type_of(id: u64) -> Option<TypeId> {
-  shell(|s| s.windows.iter().find(|w| w.id == id).map(|w| w.ty))
 }
 
 pub fn front(id: u64) {
@@ -409,14 +389,6 @@ pub fn close(id: u64) {
   window.close();
 }
 
-pub fn on_close(id: u64, f: OnMain) {
-  shell(|s| {
-    if let Some(w) = s.windows.iter_mut().find(|w| w.id == id) {
-      w.on_close = Some(f);
-    }
-  });
-}
-
 /// Window `id` closes: its runtime stops and goes (after AppKit's call in progress: [release]),
 /// the Dock follows, then its close callback runs.
 fn closed(id: u64) {
@@ -426,9 +398,10 @@ fn closed(id: u64) {
   }) else {
     return;
   };
+  let on_close = crate::shell::closed(id);
   win.view.stop();
   win.window.setDelegate(None);
-  let Win { window, view, _delegate, on_close, .. } = win;
+  let Win { window, view, _delegate, .. } = win;
   shell(|s| s.gone.push(Gone { window, _view: view, _delegate }));
   defer(release);
   super::app::sync_presence();
@@ -437,9 +410,9 @@ fn closed(id: u64) {
   }
 }
 
-/// Runs `f` on window `id`'s app if it is of type `ty` and not busy, then redraws the window.
-pub fn with_app(id: u64, ty: TypeId, f: &mut dyn FnMut(&mut dyn App)) -> bool {
-  let Some(view) = view(id).filter(|_| type_of(id) == Some(ty)) else { return false };
+/// Runs `f` on window `id`'s app if it is not busy, then redraws the window.
+pub fn with_app(id: u64, f: &mut dyn FnMut(&mut dyn App)) -> bool {
+  let Some(view) = view(id) else { return false };
   view.try_runtime(|rt| f(&mut *rt.app)).is_some()
 }
 

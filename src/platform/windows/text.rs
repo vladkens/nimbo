@@ -18,6 +18,8 @@ use std::sync::OnceLock;
 use windows_sys::Win32::Foundation::RECT;
 use windows_sys::core::{BOOL, GUID, HRESULT};
 
+use super::wide;
+use crate::text::edit::Utf16Bytes;
 use crate::text::{Font, Glyph, GlyphBox, Ink, Line, Metrics, Raster, Weight};
 
 // MARK: COM
@@ -86,10 +88,6 @@ fn out(f: impl FnOnce(*mut *mut c_void) -> HRESULT) -> Option<Com> {
 fn iid(g: &GUID) -> u128 {
   let tail = u64::from_be_bytes(g.data4) as u128;
   (g.data1 as u128) << 96 | (g.data2 as u128) << 80 | (g.data3 as u128) << 64 | tail
-}
-
-fn wide(s: &str) -> Vec<u16> {
-  s.encode_utf16().chain([0]).collect()
 }
 
 const IID_IUNKNOWN: u128 = 0x00000000_0000_0000_c000_000000000046;
@@ -642,20 +640,7 @@ pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {
     call!(layout, LAYOUT_METRICS, (*mut TextMetrics) -> HRESULT; &mut m);
   }
 
-  // UTF-16 offsets to bytes, unless they are the same.
-  let bytes: Vec<u32> = match s.is_ascii() {
-    true => Vec::new(),
-    false => s
-      .char_indices()
-      .flat_map(|(i, c)| std::iter::repeat_n(i as u32, c.len_utf16()))
-      .chain([s.len() as u32])
-      .collect(),
-  };
-
-  let at = |u: u32| match bytes.is_empty() {
-    true => u,
-    false => bytes.get(u as usize).copied().unwrap_or(s.len() as u32),
-  };
+  let bytes = Utf16Bytes::new(s);
   let mut glyphs = Vec::with_capacity(c.ids.len());
   let mut start = 0;
   for run in c.runs {
@@ -669,7 +654,7 @@ pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {
     start = end;
   }
 
-  let clusters = c.clusters.iter().map(|&u| at(u)).collect();
+  let clusters = c.clusters.iter().map(|&u| bytes.at(u as usize)).collect();
   Line { glyphs, clusters, width: m.width_trailing, ink: Ink::default(), epoch: 0 }
 }
 

@@ -14,7 +14,10 @@
 //! Cinnamon and MATE have one, GNOME only with the AppIndicator extension (Ubuntu ships it on).
 //! [available] says whether the session has one; the tray waits for one that starts later.
 
+#[cfg(any(test, not(target_os = "macos")))]
 mod icon;
+
+use std::cell::{Cell, RefCell};
 
 use crate::Main;
 use crate::platform::tray as imp;
@@ -41,7 +44,7 @@ impl TrayIcon {
 
   /// The icon as `side` × `side` straight RGBA filled with `tint`: an RGBA image scaled by
   /// averaging, path data rasterized with 16 samples a pixel.
-  #[cfg_attr(target_os = "macos", allow(dead_code))]
+  #[cfg(any(test, not(target_os = "macos")))]
   pub(crate) fn pixels(&self, side: u32, tint: [u8; 3]) -> Vec<u8> {
     let alpha = match self {
       TrayIcon::Rgba { w, h, px, .. } => icon::scale_alpha(*w, *h, px, side),
@@ -127,7 +130,7 @@ impl Item {
 
 /// The items of `menu` that can be chosen, depth first, in the order they show: the item
 /// numbers the OS menus use (an index here is a tag, a command id or a D-Bus menu id).
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg(any(test, windows))]
 pub(crate) fn choices(menu: &Menu) -> Vec<String> {
   fn walk(items: &[Item], out: &mut Vec<String>) {
     for it in items.iter().filter(|it| !it.separator) {
@@ -143,8 +146,63 @@ pub(crate) fn choices(menu: &Menu) -> Vec<String> {
   out
 }
 
-pub(crate) type OnOpen = Box<dyn FnMut(&mut Main, &Tray)>;
-pub(crate) type OnItem = Box<dyn FnMut(&mut Main, &Tray, &str)>;
+type OnOpen = Box<dyn FnMut(&mut Main, &Tray)>;
+type OnItem = Box<dyn FnMut(&mut Main, &Tray, &str)>;
+
+/// What each platform's tray keeps alike: the app's callbacks, and while the menu is open, the
+/// last menu set meanwhile, which waits for it to close.
+#[derive(Default)]
+pub(crate) struct State {
+  on_open: RefCell<Option<OnOpen>>,
+  on_item: RefCell<Option<OnItem>>,
+  open: Cell<bool>,
+  pending: RefCell<Option<Menu>>,
+}
+
+impl State {
+  /// The menu is about to open: the app's [Tray::on_open] runs, kept for the next time.
+  pub fn opening(&self, tray: &imp::Tray) {
+    if let Some(mut f) = self.on_open.take() {
+      f(&mut Main::here(), &Tray(tray.clone()));
+      self.on_open.borrow_mut().get_or_insert(f);
+    }
+  }
+
+  /// Item `id` was chosen: the app's [Tray::on_item] runs, kept for the next time.
+  pub fn chosen(&self, tray: &imp::Tray, id: &str) {
+    if let Some(mut f) = self.on_item.take() {
+      f(&mut Main::here(), &Tray(tray.clone()), id);
+      self.on_item.borrow_mut().get_or_insert(f);
+    }
+  }
+
+  pub fn set_open(&self, open: bool) {
+    self.open.set(open);
+  }
+
+  /// Whether `menu` waits, the menu being open (the last one set wins); if not, one that waited
+  /// is dropped, `menu` to be built now.
+  pub fn hold(&self, menu: &Menu) -> bool {
+    if self.open.get() {
+      *self.pending.borrow_mut() = Some(menu.clone());
+      return true;
+    }
+
+    self.pending.take();
+    false
+  }
+
+  /// The menu set while it was open, once it is closed: to be built now.
+  pub fn released(&self) -> Option<Menu> {
+    if self.open.get() { None } else { self.pending.take() }
+  }
+
+  /// A menu set while it was open still waits.
+  #[cfg(target_os = "macos")]
+  pub fn waiting(&self) -> bool {
+    self.pending.borrow().is_some()
+  }
+}
 
 /// The icon and its menu, shown while any handle lives: cheap to clone, so callbacks get one
 /// and the app may keep one. Main thread only.
@@ -173,12 +231,12 @@ impl Tray {
 
   /// `f` runs as the menu is about to open: the moment to refresh it with [Tray::set_menu].
   pub fn on_open(&self, f: impl FnMut(&mut Main, &Tray) + 'static) {
-    self.0.on_open(Box::new(f));
+    *self.0.state().on_open.borrow_mut() = Some(Box::new(f));
   }
 
   /// `f` runs with the id of the item chosen, after the menu closed.
   pub fn on_item(&self, f: impl FnMut(&mut Main, &Tray, &str) + 'static) {
-    self.0.on_item(Box::new(f));
+    *self.0.state().on_item.borrow_mut() = Some(Box::new(f));
   }
 }
 
@@ -221,6 +279,27 @@ impl Tray {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// A menu set while it is open waits for it to close, the last one set winning; one set
+  /// once it is closed drops what waited.
+  #[test]
+  fn a_menu_set_while_open_waits() {
+    let (a, b) = (Menu::new(vec![Item::new("a", "A")]), Menu::new(vec![Item::new("b", "B")]));
+    let s = State::default();
+    assert!(!s.hold(&a));
+    s.set_open(true);
+    assert!(s.hold(&a) && s.hold(&b));
+    assert_eq!(s.released(), None, "still open");
+    s.set_open(false);
+    assert_eq!(s.released(), Some(b.clone()));
+    assert_eq!(s.released(), None);
+
+    s.set_open(true);
+    s.hold(&a);
+    s.set_open(false);
+    assert!(!s.hold(&b));
+    assert_eq!(s.released(), None);
+  }
 
   #[test]
   fn choices_are_numbered_depth_first() {

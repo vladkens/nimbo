@@ -8,17 +8,19 @@
 //!
 //! What a platform module provides (the `use` below fails to build when one is missing):
 //!
-//! - `pub mod shell`, the loop and the windows ([crate::shell] over it; ids are `u64`, the
-//!   callbacks `Box<dyn FnOnce(&mut Main)>`, all on the main thread unless noted):
+//! - `pub mod shell`, the loop and the windows ([crate::shell] over it, which keeps each window's
+//!   app type and close callback, and the quit hook; ids are `u64`, all on the main thread unless
+//!   noted):
 //!   - `run(info: &AppInfo, start: impl FnOnce(&mut Main))`: sets the app up, runs `start`, then
 //!     the loop until `quit` (not when the last window closes); `quit` in `start` skips the loop;
-//!     at the end the `on_quit` hook, then the windows close;
-//!   - `open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64`: a window, shown in front unless
-//!     `cfg.hidden`; `type_of(id) -> Option<TypeId>` (none once closed), `front(id)`, `close(id)`
-//!     (its runtime dropped, then its `on_close(id, f)` callback), `with_app(id, ty, f: &mut dyn
-//!     FnMut(&mut dyn App)) -> bool` (not while the window is busy up the stack; redraws);
-//!   - `set_presence(Presence)`, `on_reopen(Box<dyn FnMut(&mut Main)>)`, `on_quit(f)`,
-//!     `terminating() -> bool`, `quit()`;
+//!     at the end `crate::shell::finish(close)`: the quit hook, then the windows close;
+//!   - `open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64`: a window, kept with
+//!     `crate::shell::opened(id, ty)` where the platform keeps it, shown in front unless
+//!     `cfg.hidden`; `front(id)`, `close(id)` (its runtime dropped, then its close callback from
+//!     `crate::shell::closed(id)`), `with_app(id, f: &mut dyn FnMut(&mut dyn App)) -> bool` (not
+//!     while the window is busy up the stack; redraws);
+//!   - `set_presence(Presence)`, `terminating() -> bool`, `quit()`; a second launch, where the OS
+//!     tells (macOS), runs `crate::shell::reopened`;
 //!   - `post(delay: Duration, f: Box<dyn FnOnce() + Send>)` from any thread, run by the loop also
 //!     in modal loops (a menu open, a live resize); `is_main() -> bool`.
 //!
@@ -68,9 +70,9 @@
 //!     unless the app set one.
 //! - `pub mod tray` ([crate::tray]): `Tray: Clone` with `new(icon, tooltip)`, `detached(icon,
 //!   tooltip)` (nothing on screen, for tests), `set_icon`, `set_tooltip`, `set_menu(&Menu)` (held
-//!   while the menu is open, the last one set when it closes), `on_open(OnOpen)`,
-//!   `on_item(OnItem)`, and for tests `describe() -> Vec<String>`, `opening()`, `closing()`,
-//!   `choose(path: &[usize])`; `available() -> Result<(), String>`.
+//!   while the menu is open, the last one set when it closes: `tray::State` holds it), `state() ->
+//!   &State` (the app's callbacks too), and for tests `describe() -> Vec<String>`, `opening()`,
+//!   `closing()`, `choose(path: &[usize])`; `available() -> Result<(), String>`.
 //! - `pub mod hotkey` ([crate::hotkey]): `Hotkeys` with `new(on: OnEdge)` (`on` runs on a thread of
 //!   its own), `set(&mut self, Option<Hotkey>) -> Result<(), String>` (`None`: no hotkey; `Err`
 //!   when the OS can't take it), `start(&mut self) -> Result<(), String>` (the listener), and

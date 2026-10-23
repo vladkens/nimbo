@@ -430,16 +430,14 @@ impl UiState {
     self.input.deliver.take().map_or((false, false), |d| (d.used.get(), d.seen.get()))
   }
 
-  /// The event being delivered to `id`, marked used and seen.
-  fn take(&self, id: Id) -> Option<&Event> {
+  /// What `pick` finds in the event being delivered to `id`, which is then marked used and
+  /// seen; when it finds nothing, the event is left as it was.
+  fn take<'s, T>(&'s self, id: Id, pick: impl FnOnce(&'s Event) -> Option<T>) -> Option<T> {
     let d = self.input.deliver.as_ref().filter(|d| d.target == id)?;
+    let found = pick(&d.ev)?;
     d.used.set(true);
     d.seen.set(true);
-    Some(&d.ev)
-  }
-
-  fn peek(&self, id: Id) -> Option<&Event> {
-    self.input.deliver.as_ref().filter(|d| d.target == id).map(|d| &d.ev)
+    Some(found)
   }
 
   /// Asks for a frame at `at` on the runtime's clock (the earliest request wins), from the
@@ -1022,30 +1020,18 @@ impl<'a> Ui<'a> {
   /// turned into one by text input while it has focus. Reading it uses it; [Ui::pass] gives it
   /// back.
   pub fn command(&self, id: Id) -> Option<Command> {
-    match self.st.peek(id)? {
-      &Event::Command(c) => self.st.take(id).map(|_| c),
-      _ => None,
-    }
+    self.st.take(id, |e| if let &Event::Command(c) = e { Some(c) } else { None })
   }
 
   /// Text typed while `id` has focus, seen once. Reading it uses it.
   pub fn typed(&self, id: Id) -> Option<&str> {
-    match self.st.peek(id)? {
-      Event::Text(_) => match self.st.take(id) {
-        Some(Event::Text(s)) => Some(s),
-        _ => None,
-      },
-      _ => None,
-    }
+    self.st.take(id, |e| if let Event::Text(s) = e { Some(s.as_str()) } else { None })
   }
 
   /// A key pressed while `id` has focus, before bindings of the app and text input, seen once.
   /// Reading it uses it: what it would type or do is then not typed or done.
   pub fn key_down(&self, id: Id) -> Option<KeyEvent> {
-    match self.st.peek(id)? {
-      &Event::KeyDown(k) => self.st.take(id).map(|_| k),
-      _ => None,
-    }
+    self.st.take(id, |e| if let &Event::KeyDown(k) = e { Some(k) } else { None })
   }
 
   /// [Ui::key_down] unless something built before (a tree over its list) used it already.
@@ -1057,10 +1043,10 @@ impl<'a> Ui<'a> {
   /// A modifier key going down (`true`) or up while `id` has focus ([Event::Modifier]): a
   /// shortcut recorder taking one alone. Seen once; reading it uses it.
   pub fn modifier_key(&self, id: Id) -> Option<(crate::Code, bool)> {
-    match self.st.peek(id)? {
-      &Event::Modifier { key, down } => self.st.take(id).map(|_| (key, down)),
+    self.st.take(id, |e| match *e {
+      Event::Modifier { key, down } => Some((key, down)),
       _ => None,
-    }
+    })
   }
 
   /// Gives back the key, text or command `id` read: it goes on as if unused (a single-line
@@ -1241,6 +1227,25 @@ mod tests {
     assert_eq!(ui.slot::<Menu>().map(|m| m.0), Some(1));
     ui.set_slot::<Menu>(None);
     assert!(ui.slot::<Menu>().is_none());
+  }
+
+  /// A delivered event is read as its own kind only: asked as another, it stays unused and
+  /// unseen; read, it is both.
+  #[test]
+  fn events_are_taken_by_their_kind() {
+    let id = Id::of("field");
+    let mut st = UiState::default();
+    st.deliver(id, Event::Text("a".into()));
+    let ui = Ui::new(st, Size::new(10.0, 10.0), None, Duration::ZERO);
+    assert_eq!((ui.command(id), ui.key_down(id), ui.modifier_key(id)), (None, None, None));
+    assert_eq!((ui.ime(id), ui.typed(Id::of("other"))), (None, None));
+    let mut st = ui.finish();
+    assert_eq!(st.delivered(), (false, false));
+
+    st.deliver(id, Event::Text("a".into()));
+    let ui = Ui::new(st, Size::new(10.0, 10.0), None, Duration::ZERO);
+    assert_eq!(ui.typed(id), Some("a"));
+    assert_eq!(ui.finish().delivered(), (true, true));
   }
 
   #[test]

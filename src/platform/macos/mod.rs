@@ -43,6 +43,11 @@ impl Clipboard for Pasteboard {
   }
 }
 
+/// The main thread's marker: AppKit, the app's windows and its tray are main thread only.
+fn mtm() -> MainThreadMarker {
+  MainThreadMarker::new().expect("nimbo: AppKit is main thread only")
+}
+
 /// The app's effective appearance (light or dark Aqua, as System Settings sets it unless the
 /// app overrides it) and the accent colour, `None` for Multicolor: `AppleAccentColor` is then
 /// unset and controls use the app's own. The accent is `controlAccentColor` resolved in that

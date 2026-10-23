@@ -4,7 +4,7 @@
 //! then each item, separators and submenus too, in the order they show), each item's
 //! properties, and the layout tree `GetLayout` returns, as plain data ([V]).
 
-use super::dbus::V;
+use super::super::dbus::V;
 use super::hotkey::keysym;
 use crate::Modifiers;
 use crate::keys::Shortcut;

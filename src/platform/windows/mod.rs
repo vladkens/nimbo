@@ -70,6 +70,7 @@ const TIMER_MODAL: usize = 1;
 /// `CF_UNICODETEXT`.
 const CF_TEXT_UTF16: u32 = 13;
 
+/// `s` as a NUL-terminated UTF-16 string, for the `W` calls.
 fn wide(s: &str) -> Vec<u16> {
   s.encode_utf16().chain([0]).collect()
 }

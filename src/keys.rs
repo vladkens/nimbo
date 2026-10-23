@@ -753,20 +753,19 @@ pub fn standard(k: &KeyEvent) -> Option<Command> {
     };
   };
 
-  // Ctrl with an arrow is Mission Control's; with Option or Cmd, nothing.
+  // Ctrl with an arrow is Mission Control's; with Backspace or Delete, the key alone.
+  if let Some([alone, word, line]) = by_unit(key, shift) {
+    let deletes = matches!(key, N::Backspace | N::Delete);
+    return match (ctrl, alt, cmd) {
+      (false, false, false) => alone,
+      (true, false, false) if deletes => alone,
+      (false, true, false) => word,
+      (false, false, true) => line,
+      _ => None,
+    };
+  }
+
   match (key, ctrl, alt, cmd) {
-    (N::ArrowLeft, false, false, false) => to(Left),
-    (N::ArrowLeft, false, true, false) => to(WordLeft),
-    (N::ArrowLeft, false, false, true) => to(LineStart),
-    (N::ArrowRight, false, false, false) => to(Right),
-    (N::ArrowRight, false, true, false) => to(WordRight),
-    (N::ArrowRight, false, false, true) => to(LineEnd),
-    (N::ArrowUp, false, false, false) => to(Up),
-    (N::ArrowUp, false, true, false) => to(ParagraphStart),
-    (N::ArrowUp, false, false, true) => to(DocStart),
-    (N::ArrowDown, false, false, false) => to(Down),
-    (N::ArrowDown, false, true, false) => to(ParagraphEnd),
-    (N::ArrowDown, false, false, true) => to(DocEnd),
     (N::Home, false, false, false) if shift => to(DocStart),
     (N::Home, false, false, false) => Some(Command::ScrollToTop),
     (N::End, false, false, false) if shift => to(DocEnd),
@@ -775,17 +774,30 @@ pub fn standard(k: &KeyEvent) -> Option<Command> {
     (N::PageUp, false, false, false) => Some(Command::ScrollPageUp),
     (N::PageDown, false, false, false) if shift => to(PageDown),
     (N::PageDown, false, false, false) => Some(Command::ScrollPageDown),
-    (N::Backspace, _, false, false) => del(Delete::Backward),
-    (N::Backspace, false, true, false) => del(Delete::WordBackward),
-    (N::Backspace, false, false, true) => del(Delete::ToLineStart),
-    (N::Delete, _, false, false) => del(Delete::Forward),
-    (N::Delete, false, true, false) => del(Delete::WordForward),
     (N::Enter, _, _, false) => Some(Command::InsertNewline),
     (N::Tab, false, false, false) if shift => Some(Command::InsertBacktab),
     (N::Tab, false, false, false) => Some(Command::InsertTab),
     (N::Escape, false, false, false) => Some(Command::Cancel),
     _ => None,
   }
+}
+
+/// What an arrow, Backspace or Delete does alone, with the word modifier (macOS Option, the
+/// PC's Ctrl) and with macOS's Cmd: both move and delete by the same units.
+fn by_unit(key: NamedKey, shift: bool) -> Option<[Option<Command>; 3]> {
+  use Move::*;
+  use NamedKey as N;
+  let to = |m| Some(Command::Move(m, shift));
+  let del = |d| Some(Command::Delete(d));
+  Some(match key {
+    N::ArrowLeft => [to(Left), to(WordLeft), to(LineStart)],
+    N::ArrowRight => [to(Right), to(WordRight), to(LineEnd)],
+    N::ArrowUp => [to(Up), to(ParagraphStart), to(DocStart)],
+    N::ArrowDown => [to(Down), to(ParagraphEnd), to(DocEnd)],
+    N::Backspace => [del(Delete::Backward), del(Delete::WordBackward), del(Delete::ToLineStart)],
+    N::Delete => [del(Delete::Forward), del(Delete::WordForward), None],
+    _ => return None,
+  })
 }
 
 /// The modifiers as shortcuts in the app name them: Shift, [CTRL], Alt, [CMD].
@@ -802,31 +814,22 @@ pub fn pc(k: &KeyEvent) -> Option<Command> {
   use NamedKey as N;
   let (shift, ctrl, alt, cmd) = flags(k.mods);
   let to = |m| Some(Command::Move(m, shift));
-  let del = |d| Some(Command::Delete(d));
   let Key::Named(key) = k.key else { return None };
   if alt || ctrl {
     return None;
   }
 
+  if let Some([alone, word, _]) = by_unit(key, shift) {
+    return if cmd { word } else { alone };
+  }
+
   match (key, cmd) {
-    (N::ArrowLeft, false) => to(Left),
-    (N::ArrowLeft, true) => to(WordLeft),
-    (N::ArrowRight, false) => to(Right),
-    (N::ArrowRight, true) => to(WordRight),
-    (N::ArrowUp, false) => to(Up),
-    (N::ArrowUp, true) => to(ParagraphStart),
-    (N::ArrowDown, false) => to(Down),
-    (N::ArrowDown, true) => to(ParagraphEnd),
     (N::Home, false) => to(LineStart),
     (N::Home, true) => to(DocStart),
     (N::End, false) => to(LineEnd),
     (N::End, true) => to(DocEnd),
     (N::PageUp, false) => to(PageUp),
     (N::PageDown, false) => to(PageDown),
-    (N::Backspace, false) => del(Delete::Backward),
-    (N::Backspace, true) => del(Delete::WordBackward),
-    (N::Delete, false) => del(Delete::Forward),
-    (N::Delete, true) => del(Delete::WordForward),
     (N::Enter, _) => Some(Command::InsertNewline),
     (N::Tab, false) if shift => Some(Command::InsertBacktab),
     (N::Tab, false) => Some(Command::InsertTab),
@@ -1170,6 +1173,8 @@ mod tests {
       (Key::Named(N::ArrowUp), CMD, "moveToBeginningOfDocument:"),
       (Key::Named(N::Backspace), alt, "deleteWordBackward:"),
       (Key::Named(N::Backspace), CMD, "deleteToBeginningOfLine:"),
+      (Key::Named(N::Backspace), ctrl, "deleteBackward:"),
+      (Key::Named(N::Delete), alt, "deleteWordForward:"),
       (Key::Char('a'), ctrl, "moveToBeginningOfParagraph:"),
       (Key::Char('k'), ctrl, "deleteToEndOfParagraph:"),
       (Key::Named(N::Tab), Modifiers::SHIFT, "insertBacktab:"),
@@ -1180,6 +1185,7 @@ mod tests {
     }
     assert_eq!(standard(&ev(Key::Char('c'), CMD)), None);
     assert_eq!(standard(&ev(Key::Named(N::ArrowLeft), ctrl)), None);
+    assert_eq!(standard(&ev(Key::Named(N::Delete), CMD)), None);
   }
 
   #[test]
@@ -1192,6 +1198,7 @@ mod tests {
       (Key::Named(N::End), cmd_shift, Command::Move(Move::DocEnd, true)),
       (Key::Named(N::Backspace), CMD, Command::Delete(Delete::WordBackward)),
       (Key::Named(N::Delete), Modifiers::empty(), Command::Delete(Delete::Forward)),
+      (Key::Named(N::ArrowUp), cmd_shift, Command::Move(Move::ParagraphStart, true)),
       (Key::Named(N::Tab), Modifiers::SHIFT, Command::InsertBacktab),
     ] {
       assert_eq!(pc(&ev(key, mods)), Some(want), "{key:?} {mods:?}");

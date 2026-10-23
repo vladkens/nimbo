@@ -9,7 +9,7 @@
 //! Modal loops (a menu, a live resize) dispatch its messages too, so posts run under them.
 //!
 //! Windows has no Dock: the taskbar shows the windows only, so [set_presence] changes nothing; a
-//! second launch starts a second process ([on_reopen] is never called yet).
+//! second launch starts a second process (the reopen hook never runs yet).
 
 use std::any::TypeId;
 use std::cell::RefCell;
@@ -32,8 +32,6 @@ use crate::Config;
 use crate::app::App;
 use crate::shell::{AppInfo, Main, Presence};
 
-type OnMain = Box<dyn FnOnce(&mut Main)>;
-type OnReopen = Box<dyn FnMut(&mut Main)>;
 type Job = Box<dyn FnOnce() + Send>;
 
 /// Work from any thread: lParam is a `Box<Job>`.
@@ -41,20 +39,11 @@ const WM_POST: u32 = WM_APP + 2;
 /// The tray icons' callback message ([tray]).
 pub(super) const WM_TRAY: u32 = WM_APP + 3;
 
-struct Entry {
-  id: u64,
-  hwnd: HWND,
-  ty: TypeId,
-  on_close: Option<OnMain>,
-}
-
 #[derive(Default)]
 struct Shell {
-  windows: Vec<Entry>,
+  /// The windows by id.
+  windows: Vec<(u64, HWND)>,
   next: u64,
-  on_quit: Option<OnMain>,
-  /// Stored for when a second launch can reach this one.
-  reopen: Option<OnReopen>,
   /// Work waiting for its delay, by timer id.
   later: Vec<(usize, Job)>,
   next_timer: usize,
@@ -103,7 +92,7 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
     run_loop(&Timer::new());
   }
 
-  finish();
+  crate::shell::finish(close);
   tray::removed();
   // Work posted after the loop is dropped unrun: the closures are let go here.
   if let Ok(mut h) = HOST.lock() {
@@ -153,18 +142,7 @@ fn make_host(name: &str) -> HWND {
   hwnd
 }
 
-/// The app ends: its quit hook runs (once), then the windows close.
-fn finish() {
-  if let Some(f) = shell(|s| s.on_quit.take()) {
-    f(&mut Main::here());
-  }
-
-  for id in shell(|s| s.windows.iter().map(|w| w.id).collect::<Vec<_>>()) {
-    close(id);
-  }
-}
-
-/// Ends the loop after the message in progress; the windows close after it ([finish]).
+/// Ends the loop after the message in progress; the windows close after it.
 pub fn quit() {
   let looping = shell(|s| !std::mem::replace(&mut s.quitting, true) && s.looping);
   if looping {
@@ -174,14 +152,6 @@ pub fn quit() {
 
 /// Windows has no Dock: the taskbar follows the windows (see the module docs).
 pub fn set_presence(_: Presence) {}
-
-pub fn on_reopen(f: OnReopen) {
-  shell(|s| s.reopen = Some(f));
-}
-
-pub fn on_quit(f: OnMain) {
-  shell(|s| s.on_quit = Some(f));
-}
 
 pub fn terminating() -> bool {
   shell(|s| s.terminating)
@@ -244,7 +214,7 @@ unsafe extern "system" fn host_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
     WM_ENDSESSION if wp != 0 => {
       // The session ends: the process may be ended at any moment after this returns.
       shell(|s| s.terminating = true);
-      finish();
+      crate::shell::finish(close);
       std::process::exit(0);
     }
     m if m == tray::taskbar_created() => {
@@ -266,9 +236,10 @@ pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
   let hwnd = create(cfg, app);
   let id = shell(|s| {
     s.next += 1;
-    s.windows.push(Entry { id: s.next, hwnd, ty, on_close: None });
+    s.windows.push((s.next, hwnd));
     s.next
   });
+  crate::shell::opened(id, ty);
   if !cfg.hidden {
     front(id);
   }
@@ -277,12 +248,7 @@ pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
 }
 
 fn hwnd(id: u64) -> Option<HWND> {
-  shell(|s| s.windows.iter().find(|w| w.id == id).map(|w| w.hwnd))
-}
-
-/// The type of the app of window `id`; `None` once it closed.
-pub fn type_of(id: u64) -> Option<TypeId> {
-  shell(|s| s.windows.iter().find(|w| w.id == id).map(|w| w.ty))
+  shell(|s| s.windows.iter().find(|w| w.0 == id).map(|w| w.1))
 }
 
 /// Shows the window, restored if minimized, and asks for the foreground (which Windows grants
@@ -304,29 +270,21 @@ pub fn close(id: u64) {
   }
 }
 
-pub fn on_close(id: u64, f: OnMain) {
-  shell(|s| {
-    if let Some(w) = s.windows.iter_mut().find(|w| w.id == id) {
-      w.on_close = Some(f);
-    }
-  });
-}
-
 /// Window `hwnd` was destroyed: its entry goes, then its close callback runs. Nothing for a
 /// window the shell didn't open.
 pub(in super::super) fn destroyed(hwnd: HWND) {
-  let entry = shell(|s| {
-    let i = s.windows.iter().position(|w| w.hwnd == hwnd)?;
-    Some(s.windows.remove(i))
+  let id = shell(|s| {
+    let i = s.windows.iter().position(|w| w.1 == hwnd)?;
+    Some(s.windows.remove(i).0)
   });
-  if let Some(f) = entry.and_then(|e| e.on_close) {
+  if let Some(f) = id.and_then(crate::shell::closed) {
     f(&mut Main::here());
   }
 }
 
-/// Runs `f` on window `id`'s app if it is of type `ty` and not busy, then redraws the window.
-pub fn with_app(id: u64, ty: TypeId, f: &mut dyn FnMut(&mut dyn App)) -> bool {
-  let Some(hwnd) = hwnd(id).filter(|_| type_of(id) == Some(ty)) else { return false };
+/// Runs `f` on window `id`'s app if it is not busy, then redraws the window.
+pub fn with_app(id: u64, f: &mut dyn FnMut(&mut dyn App)) -> bool {
+  let Some(hwnd) = hwnd(id) else { return false };
   let done = with_window(hwnd, |w| {
     f(&mut *w.rt.app);
     w.rt.redraw();
