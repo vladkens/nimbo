@@ -923,10 +923,10 @@ impl<'a> Utf16Bytes<'a> {
     Self { s, bytes }
   }
 
-  /// The byte offset of UTF-16 offset `u`, as [from_utf16] gives it (ASCII: `u` itself).
+  /// The byte offset of UTF-16 offset `u`, as [from_utf16] gives it.
   pub fn at(&self, u: usize) -> u32 {
     match self.bytes.is_empty() {
-      true => u as u32,
+      true => u.min(self.s.len()) as u32,
       false => self.bytes.get(u).copied().unwrap_or(self.s.len() as u32),
     }
   }
@@ -1438,6 +1438,7 @@ mod tests {
       assert_eq!(table.at(u), from_utf16(s, u) as u32, "{u}");
     }
 
-    assert_eq!((Utf16Bytes::new("ab").at(1), Utf16Bytes::new("ab").at(2)), (1, 2));
+    let ascii = Utf16Bytes::new("ab");
+    assert_eq!((ascii.at(1), ascii.at(2), ascii.at(99), Utf16Bytes::new("").at(1)), (1, 2, 2, 0));
   }
 }
