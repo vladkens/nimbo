@@ -9,7 +9,7 @@
 use crate::keys::{Command, Move};
 use crate::scene::{Point, Rect, alpha, mix};
 use crate::ui::containers::menu::TypeSelect;
-use crate::ui::{Align, Behavior, Id, Response, Style, Ui, grow, px};
+use crate::ui::{Align, Behavior, Id, Response, Style, Ui, grow, px, rigid};
 
 /// A pop-up button over `cur`, an index into `options`, as macOS 26 System Settings draws one:
 /// the current option's label 13 in from the frame and a chevron capsule after it, no box.
@@ -20,20 +20,28 @@ use crate::ui::{Align, Behavior, Id, Response, Style, Ui, grow, px};
 /// go to the first option they start ([TypeSelect]). As wide as the current label, or
 /// [PopUp::width]; the list is at least as wide as the button and [crate::Sizes::menu_w]. Its
 /// items are `id.key(("item", i))`; `changed` when one was picked that wasn't the current.
+/// Disabled, its label and chevrons turn [crate::Theme::tertiary] and the capsule fades to half,
+/// as System Settings dims one.
 pub struct PopUp<'s> {
   cur: &'s mut usize,
   options: &'s [&'s str],
   width: Option<f32>,
+  separators: &'s [usize],
 }
 
 impl<'s> PopUp<'s> {
   pub fn new(cur: &'s mut usize, options: &'s [&'s str]) -> Self {
-    Self { cur, options, width: None }
+    Self { cur, options, width: None, separators: &[] }
   }
 
   /// A fixed width in points; a label longer than it ends in "…".
   pub fn width(self, w: f32) -> Self {
     Self { width: Some(w), ..self }
+  }
+
+  /// A line in the list after each of these options: "System Default", a line, the devices.
+  pub fn separators(self, after: &'s [usize]) -> Self {
+    Self { separators: after, ..self }
   }
 
   pub fn show(self, ui: &mut Ui) -> Response {
@@ -56,23 +64,21 @@ impl<'s> PopUp<'s> {
       .align(Align::Start, Align::Center)
       .radius(t.radius)
       .bg(alpha(fill, fill[3] * hot));
-    let frame = match self.width {
-      Some(w) => frame.w(px(w)),
-      None => frame,
-    };
+    // Its label's width, or the one given: text beside it wraps instead.
+    let frame = frame.w(self.width.map_or(rigid(), px));
 
-    let frame = match b.disabled {
-      true => b.style(frame).opacity(t.disabled),
-      false => b.style(frame),
-    };
-
+    let frame = b.style(frame);
     let label = at.map_or("", |i| options[i]);
-    let ink = t.text;
-    let cap = alpha(t.raised, t.raised[3] * (1.0 - hot));
+    let (text, ink) = match b.disabled {
+      true => (t.label().color(t.tertiary), t.tertiary),
+      false => (t.label(), t.text),
+    };
+
+    let cap = alpha(t.raised, t.raised[3] * if b.disabled { 0.5 } else { 1.0 - hot });
     let mut r = ui.with_id(id).row(frame, |ui| {
       match self.width {
-        Some(_) => _ = ui.col(Style::new().w(grow()), |ui| ui.text(label, t.label())),
-        None => ui.text(label, t.label()),
+        Some(_) => _ = ui.col(Style::new().w(grow()), |ui| ui.text(label, text)),
+        None => ui.text(label, text),
       }
 
       let d = h - 4.0;
@@ -115,6 +121,13 @@ impl<'s> PopUp<'s> {
         });
         if ib.clicked {
           pick = Some(i);
+        }
+
+        // 11 high, from the text column to 16 from the menu's right.
+        if self.separators.contains(&i) && i + 1 < options.len() {
+          ui.row(Style::new().w(grow()).pads([5.0, 11.0, 5.0, 25.0]), |ui| {
+            ui.el(Style::new().w(grow()).h(px(1.0)).bg(t.line));
+          });
         }
       }
     });

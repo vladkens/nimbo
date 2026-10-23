@@ -22,7 +22,12 @@
 //! [super::Ui::hot]. What each one covers:
 //!
 //! - [Ui::button_behavior]: click, Space while focused (flashes it pressed);
-//! - [Ui::pick_behavior] (tabs): one of `n` items by a click, the arrows step;
+//! - [Ui::toggle_behavior] (check box, switch): a button that flips a `bool`;
+//! - [Ui::slider_behavior]: a drag along the element, the arrows step a twentieth;
+//! - [Ui::pick_behavior] (tabs, segmented control, toolbar tabs): one of `n` items by a click, the
+//!   arrows step;
+//! - [Ui::shortcut_behavior]: a shortcut recorder over a global hotkey ([crate::Hotkey]);
+//! - [Ui::dialog_behavior]: a modal dialog's keys, focus trap and fade ([super::dialog]);
 //! - [Ui::split_behavior]: a divider's drag within both panes' minimums;
 //! - [Ui::menu_popup] and [Ui::menu_item_behavior]: a menu's open state, keys and items;
 //! - [Ui::pop_up_behavior]: a pop-up button, opened by a click, Space, Enter or the arrows, letters
@@ -32,7 +37,8 @@
 //! - [Ui::text_field_behavior] and [Ui::selectable_behavior]: text editing on the editing model
 //!   ([Editor]), drawn by [Ui::field_text] ([super::widgets]).
 //!
-//! The containers' behaviours live beside their looks in [super::containers].
+//! The widgets' and containers' behaviours live beside their looks, in [super::widgets] and
+//! [super::containers].
 //!
 //! A text field's behaviour keeps its editor (selection, undo, marked text) in the store under
 //! its id and writes edits back to the app's text, reporting [FieldBehavior::changed]. A
@@ -114,9 +120,10 @@ impl Behavior {
 
 impl Ui<'_> {
   /// Whether Space was pressed on `id` (focused), which flashes it pressed; another key goes on
-  /// unused, Space with Cmd, Ctrl or Alt too (Alt-Space opens the window menu on Windows).
+  /// unused, Space with Cmd, Ctrl or Alt too (Alt-Space opens the window menu on Windows). A
+  /// key something built before used (a dialog around it) stays used.
   pub(super) fn activated(&mut self, id: Id) -> bool {
-    match self.key_down(id) {
+    match self.key_unused(id) {
       Some(k) if k.key == Key::Char(' ') && (k.mods - Modifiers::SHIFT).is_empty() => {
         self.flash(id);
         true
@@ -153,6 +160,13 @@ impl Ui<'_> {
       clicked: self.clicked(id),
       ..Behavior::default()
     }
+  }
+
+  /// Gives `id` the key presses while it has focus before any binding of its own, of its
+  /// ancestors or of the app ([crate::keys] has the order), this frame: a shortcut recorder
+  /// recording, a modal dialog. A key it doesn't use goes on as usual.
+  pub fn grab_keys(&mut self, id: Id) {
+    self.st.grab = Some(id);
   }
 
   /// A button: hover, press, and a click or Space while focused.
