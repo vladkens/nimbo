@@ -1,9 +1,9 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! SVG path data (`d`) into polylines: the reader the widget icons stroke
-//! ([crate::ui::widgets::icon]) and the tray fills ([crate::tray::TrayIcon]). SVG's whole path
-//! syntax (`M L H V C S Q T A Z`, absolute and relative, implicit repeats); curves and arcs in
-//! pieces of about 2 pixels.
+//! SVG path data (`d`) into polylines: the reader the widget icons stroke or fill
+//! ([crate::ui::widgets::icon]) and the tray fills ([crate::tray::TrayIcon]), and the spans a
+//! scanline fills ([spans]). SVG's whole path syntax (`M L H V C S Q T A Z`, absolute and
+//! relative, implicit repeats); curves and arcs in pieces of about 2 pixels.
 
 use crate::scene::Point;
 
@@ -261,6 +261,37 @@ fn arc(
   // The end exactly, not as the floats land.
   if let Some(p) = out.last_mut() {
     *p = p1;
+  }
+}
+
+/// Calls `span` with each stretch, left to right, of the horizontal line at `y` inside the
+/// closed polylines `polys`, by the non-zero rule or `even_odd`; `xs` is scratch for the
+/// crossings. What the tray icons and the filled widget icons fill.
+pub fn spans(
+  polys: &[Vec<Point>],
+  y: f32,
+  even_odd: bool,
+  xs: &mut Vec<(f32, i32)>,
+  mut span: impl FnMut(f32, f32),
+) {
+  xs.clear();
+  for poly in polys {
+    for (a, b) in poly.iter().zip(poly.iter().cycle().skip(1)) {
+      if (a.y <= y) != (b.y <= y) {
+        let x = a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x);
+        xs.push((x, if b.y > a.y { 1 } else { -1 }));
+      }
+    }
+  }
+
+  xs.sort_by(|a, b| a.0.total_cmp(&b.0));
+  let mut wind = 0;
+  for (i, &(x0, dir)) in xs.iter().enumerate() {
+    wind += dir;
+    let inside = if even_odd { wind % 2 != 0 } else { wind != 0 };
+    if let Some(&(x1, _)) = xs.get(i + 1).filter(|_| inside) {
+      span(x0, x1);
+    }
   }
 }
 
