@@ -4,7 +4,7 @@
 //! (variants, an icon button with a tooltip, ⓘ and "?"), check boxes, switches in both sizes, a
 //! slider, selects, a segmented control with counts, progress bars and a spinner, a link,
 //! badges in every tone, shortcut recorders (with and without the ⊗ that clears one), search
-//! fields, the icons (stroked, play filled), and a button that asks in a modal dialog.
+//! fields, the icons (stroked; play and ⊗ filled), and a button that asks in a modal dialog.
 //!
 //! `cargo run --release --example gallery [-- --shot <file.png>]`
 

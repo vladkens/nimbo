@@ -15,8 +15,9 @@
 
 use keyboard_types::{Code, Modifiers, NamedKey};
 
+use super::icon::{self, Icon};
 use crate::keys::{Hotkey, Key, KeyEvent, Shortcut, f_key, is_modifier, us_char};
-use crate::scene::{Color, Frame, Point, Rect, mix};
+use crate::scene::mix;
 use crate::text::Weight;
 use crate::ui::{Behavior, Cursor, Float, Id, Response, Style, Ui, px};
 
@@ -176,23 +177,12 @@ impl Ui<'_> {
         let s = Style::new().w(px(14.0)).h(px(14.0)).cursor(Cursor::Pointer);
         let hot = ui.ctl_hot(clear, ui.hovered(clear));
         let mark = mix(t.faint, t.muted, hot);
-        ui.with_id(clear).float(at).canvas(s, move |f, r| clear_mark(f, r, mark, bg));
+        ui.with_id(clear).float(at).canvas(s, move |f, r| icon::draw(f, Icon::CLEAR, r, mark, 0.0));
       }
     });
     (r.clicked, r.changed) = (b.clicked, b.changed);
     r
   }
-}
-
-/// The ⊗ that clears a value, in `r` (a 24-unit icon's box): a disc in `fill` crossed in
-/// `cross`, the ground it sits on.
-pub(super) fn clear_mark(f: &mut Frame, r: Rect, fill: Color, cross: Color) {
-  let k = r.w / 24.0;
-  let (cx, cy, d) = (r.x + r.w / 2.0, r.y + r.h / 2.0, 19.0 * k);
-  f.rect(Rect::new(cx - d / 2.0, cy - d / 2.0, d, d), fill, d / 2.0);
-  let a = 3.0 * k;
-  f.line(Point::new(cx - a, cy - a), Point::new(cx + a, cy + a), 2.0 * k, cross);
-  f.line(Point::new(cx + a, cy - a), Point::new(cx - a, cy + a), 2.0 * k, cross);
 }
 
 #[cfg(test)]

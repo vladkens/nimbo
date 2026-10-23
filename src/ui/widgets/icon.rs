@@ -75,12 +75,18 @@ impl Icon {
   pub const CHECK: Self = Self::new("m5.5 12.5 4 4 9-9.5");
   /// A magnifier: search.
   pub const SEARCH: Self = Self::new("M4.5 10.5a6 6 0 1 0 12 0a6 6 0 1 0-12 0M15 15l4.5 4.5");
+  /// A disc with a cross cut out of it, the ground showing through: clears a value (⊗).
+  pub const CLEAR: Self = Self::filled(concat!(
+    "M2.5 12a9.5 9.5 0 1 0 19 0a9.5 9.5 0 1 0-19 0Z",
+    "M16.70 9.28L13.98 12L16.70 14.72L14.72 16.70L12 13.98L9.28 16.70L7.30 14.72L10.02 12",
+    "L7.30 9.28L9.28 7.30L12 10.02L14.72 7.30Z"
+  ));
   /// A filled triangle with round corners: play.
   pub const PLAY: Self =
     Self::filled("M8 5.8v12.4a.8.8 0 0 0 1.2.7l10-6.2a.8.8 0 0 0 0-1.4l-10-6.2A.8.8 0 0 0 8 5.8z");
 
   /// Every built-in icon, for a gallery and the tests.
-  pub const ALL: [(&'static str, Self); 12] = [
+  pub const ALL: [(&'static str, Self); 13] = [
     ("gear", Self::GEAR),
     ("contrast", Self::CONTRAST),
     ("sliders", Self::SLIDERS),
@@ -93,6 +99,7 @@ impl Icon {
     ("check", Self::CHECK),
     ("search", Self::SEARCH),
     ("play", Self::PLAY),
+    ("clear", Self::CLEAR),
   ];
 }
 

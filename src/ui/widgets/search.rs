@@ -15,9 +15,8 @@
 use keyboard_types::NamedKey;
 
 use super::icon::{self, Icon};
-use super::shortcut::clear_mark;
 use crate::keys::Key;
-use crate::scene::{alpha, mix};
+use crate::scene::mix;
 use crate::ui::behavior::FieldState;
 use crate::ui::{Cursor, FieldBehavior, FieldStyle, Float, Id, Response, Style, Ui, grow, px};
 
@@ -77,9 +76,7 @@ impl Ui<'_> {
       style.frame.pad[1] = style.frame.pad[1].max(INSET + MARK + 6.0);
     }
 
-    // The ⊗'s cross cut out of it in the field's ground, as it shows over the window's.
-    let bg = style.frame.bg;
-    let (muted, ground) = (self.dim(t.muted, b.disabled), mix(t.bg, alpha(bg, 1.0), bg[3]));
+    let muted = self.dim(t.muted, b.disabled);
     let mut r = Response::default();
     // Its own id: the field may have taken its place's.
     self.next_id = Some((id.key("wrap"), false));
@@ -95,7 +92,7 @@ impl Ui<'_> {
         let s = Style::new().w(px(MARK)).h(px(MARK)).cursor(Cursor::Pointer);
         let hot = ui.ctl_hot(x, ui.hovered(x));
         let mark = mix(t.faint, t.muted, hot);
-        ui.with_id(x).float(at).canvas(s, move |f, r| clear_mark(f, r, mark, ground));
+        ui.with_id(x).float(at).canvas(s, move |f, r| icon::draw(f, Icon::CLEAR, r, mark, 0.0));
       }
     });
     r
@@ -154,17 +151,13 @@ mod tests {
         false => t.search().hint("Search"),
       };
 
-      let style = match self.red {
-        true => style.frame(style.frame.bg([1.0, 0.0, 0.0, 1.0])),
-        false => style,
-      };
-
-      let r = ui.disabled(self.off).search_field(Id::of("s"), &mut self.text, &style);
-      if r.changed {
-        self.changes += 1;
-      }
-
-      ui.el(Style::new().w(crate::ui::grow()).h(crate::ui::px(20.0)));
+      let ground = if self.red { [1.0, 0.0, 0.0, 1.0] } else { t.bg };
+      ui.row(Style::new().grow().bg(ground), |ui| {
+        let r = ui.disabled(self.off).search_field(Id::of("s"), &mut self.text, &style);
+        if r.changed {
+          self.changes += 1;
+        }
+      });
     }
   }
 
@@ -291,15 +284,35 @@ mod tests {
     assert!(h.rt.due_in().is_some_and(|d| d <= std::time::Duration::from_millis(16)));
   }
 
-  /// The ⊗'s cross is the field's own ground.
+  /// The ⊗'s cross is cut out: the field's ground over what it sits on shows through.
   #[test]
-  fn the_mark_is_cut_in_the_fields_ground() {
+  fn the_mark_is_cut_out_of_the_fields_ground() {
     let mut h = find("moon");
     h.app_mut().red = true;
     h.frame();
-    let x = clear(&h).unwrap();
-    let px = h.render().pixel(x.x + x.w / 2.0, x.y + x.h / 2.0);
-    assert_eq!(px, [255, 0, 0, 255]);
+    let (field, x) = (h.rect(Id::of("s")).unwrap(), clear(&h).unwrap());
+    let img = h.render();
+    let ground = img.pixel(field.x + field.w / 2.0, field.y + 3.0);
+    assert!(ground[0] > ground[1] + 100, "a reddish ground: {ground:?}");
+    assert_eq!(img.pixel(x.x + x.w / 2.0, x.y + x.h / 2.0), ground);
+    assert_ne!(img.pixel(x.x + 2.0, x.y + x.h / 2.0), ground, "the disc");
+  }
+
+  /// Narrower than its padding: it lays out, takes a press and draws.
+  #[test]
+  fn a_field_narrower_than_its_padding_still_works() {
+    let mut h = find("moon");
+    h.app_mut().narrow = true;
+    h.rt.resize(Size::new(40.0, 100.0), 2.0);
+    h.frame();
+    let field = h.rect(Id::of("s")).unwrap();
+    let (x, y) = (field.x + field.w - 1.0, field.y + field.h / 2.0);
+    h.press(x, y);
+    h.frame();
+    h.move_to(x - 2.0, y);
+    h.frame();
+    h.release(x - 2.0, y);
+    h.render();
   }
 
   #[test]
