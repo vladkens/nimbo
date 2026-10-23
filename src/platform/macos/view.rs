@@ -417,7 +417,13 @@ define_class!(
 );
 
 impl View {
-  pub fn new(mtm: MainThreadMarker, frame: NSRect, rt: Runtime<Box<dyn App>>) -> Retained<Self> {
+  /// The view of a window, `transparent` for an overlay: the frame's alpha shows through.
+  pub fn new(
+    mtm: MainThreadMarker,
+    frame: NSRect,
+    rt: Runtime<Box<dyn App>>,
+    transparent: bool,
+  ) -> Retained<Self> {
     let this = Self::alloc(mtm).set_ivars(Ivars::default());
     let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
     let layer = CALayer::new();
@@ -426,6 +432,7 @@ impl View {
     view.setWantsLayer(true);
     let mut presenter = Presenter::new(layer);
     presenter.trace = std::env::var_os("NIMBO_TRACE").is_some();
+    presenter.renderer.transparent = transparent;
 
     // Mouse moves and exits for the visible rect, which AppKit keeps up to date, in an inactive
     // app too; `cursorUpdate:` in an area of its own, as AppKit sends none with `ActiveAlways`.
@@ -599,6 +606,7 @@ impl View {
     let (w, h) = (min.width.min(size.w as f64), min.height.min(size.h as f64));
     window.setContentMinSize(NSSize::new(w, h));
     window.setFrame_display(frame, true);
+    super::shell::resized(&window);
   }
 
   /// Lets `f` look at the focused text field, as an input method asks; `None` when no field

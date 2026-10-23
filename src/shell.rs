@@ -18,7 +18,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use crate::platform::shell as imp;
-use crate::{App, Config};
+use crate::{App, Config, Point, Size};
 
 /// The app as the OS knows it.
 #[derive(Clone, Copy, Debug)]
@@ -41,6 +41,30 @@ pub enum Presence {
   /// accessory activation policy, regular while a window is open). Windows and Linux have no
   /// Dock: the taskbar shows the windows only, so both are the same there.
   Accessory,
+}
+
+/// Where an overlay ([crate::Config::overlay]) shows: centred across the work area (the screen
+/// less the menu bar, the Dock or the taskbar) of the screen with the pointer, a margin in points
+/// from its top or bottom edge, or in its middle.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Anchor {
+  Top(f32),
+  Center,
+  Bottom(f32),
+}
+
+impl Anchor {
+  /// The top-left corner of a window of `size` in a work area of `area`, from the area's top
+  /// left (y down), in whole points.
+  pub fn offset(self, area: Size, size: Size) -> Point {
+    let y = match self {
+      Self::Top(margin) => margin,
+      Self::Center => (area.h - size.h) / 2.0,
+      Self::Bottom(margin) => area.h - size.h - margin,
+    };
+
+    Point::new(((area.w - size.w) / 2.0).round(), y.round())
+  }
 }
 
 /// Runs the event loop with no window: `start` opens what the app needs (windows, a
@@ -246,9 +270,17 @@ impl<A: App + 'static> Window<A> {
     type_of(self.id.0).is_some()
   }
 
-  /// Shows the window in front, restored if minimized, and the app with it.
+  /// Shows the window in front, restored if minimized, and the app with it. An overlay
+  /// ([Config::overlay]) shows at its [Anchor] on the screen with the pointer instead, without
+  /// activating the app or taking the keys.
   pub fn front(&self) {
     imp::front(self.id.0);
+  }
+
+  /// Hides the window without closing it: its app and state stay, no frames are drawn, and
+  /// [Window::front] shows it again. How an overlay goes away.
+  pub fn hide(&self) {
+    imp::hide(self.id.0);
   }
 
   /// Closes the window: its runtime and app are dropped, its close callback runs.
@@ -340,6 +372,15 @@ mod tests {
 
   /// The windows by id: a close callback set on one is given back once, as it closes; the quit
   /// hook runs once.
+  /// A HUD 200x40 in a 1000x600 work area: centred across, 20 points off the edge.
+  #[test]
+  fn anchors_place_in_the_work_area() {
+    let (area, size) = (Size::new(1000.0, 600.0), Size::new(200.0, 40.5));
+    assert_eq!(Anchor::Top(20.0).offset(area, size), Point::new(400.0, 20.0));
+    assert_eq!(Anchor::Bottom(20.0).offset(area, size), Point::new(400.0, 540.0));
+    assert_eq!(Anchor::Center.offset(area, size), Point::new(400.0, 280.0));
+  }
+
   #[test]
   fn windows_and_hooks_by_id() {
     hooks(|h| h.windows.extend([(1, TypeId::of::<u8>(), None), (2, TypeId::of::<u16>(), None)]));

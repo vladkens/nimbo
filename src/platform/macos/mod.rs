@@ -2,14 +2,15 @@
 
 //! The macOS platform: NSApplication and its windows ([shell]), each window's content our NSView
 //! ([view]: input, cursors, display link and timers, occlusion, present through [surface]), the
-//! keyboard layout ([keyboard]), the clipboard on NSPasteboard, the CoreText text backend
-//! ([text]) and the performance cores; the tray, global hotkeys and launch at login in [app].
-//! macOS 14 or later: the app's activation and the view's display link need it.
+//! keyboard layout ([keyboard]), overlay panels ([overlay]), the clipboard on NSPasteboard, the
+//! CoreText text backend ([text]) and the performance cores; the tray, global hotkeys and launch at
+//! login in [app]. macOS 14 or later: the app's activation and the view's display link need it.
 
 mod view;
 
 mod app;
 mod keyboard;
+mod overlay;
 pub mod shell;
 mod surface;
 pub mod text;

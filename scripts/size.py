@@ -32,9 +32,9 @@ KINDS = ("code", "docs", "comments", "tests", "blank")
 # platform/<os>/app) and the core (the rest of src/). Raising one is a decision recorded in its
 # PR.
 BUDGETS = {
-  "platform/macos": 1650,
+  "platform/macos": 1700,
   "platform/windows": 2000,
-  "platform/linux": 2770,
+  "platform/linux": 2810,
   "ui": 3700,
   "widgets": 2910,
   "text": 1180,

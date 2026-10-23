@@ -29,7 +29,7 @@ pub use app::{autostart, hotkey, shell, tray};
 use keyboard_types::Modifiers;
 pub use settings::appearance;
 use windows_sys::Win32::Foundation::{
-  CloseHandle, FILETIME, GlobalFree, HANDLE, HWND, LPARAM, LRESULT, RECT, WPARAM,
+  CloseHandle, FILETIME, GlobalFree, HANDLE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
 };
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::System::DataExchange::{
@@ -48,19 +48,19 @@ use windows_sys::Win32::System::Threading::{
   GetProcessTimes, INFINITE, SetWaitableTimer, TIMER_ALL_ACCESS,
 };
 use windows_sys::Win32::UI::HiDpi::{
-  AdjustWindowRectExForDpi, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForSystem,
-  GetDpiForWindow, SetProcessDpiAwarenessContext,
+  AdjustWindowRectExForDpi, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForMonitor,
+  GetDpiForSystem, GetDpiForWindow, MDT_EFFECTIVE_DPI, SetProcessDpiAwarenessContext,
 };
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetFocus;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-use crate::Config;
 use crate::app::{App, Appearance, Clipboard, Clock, Event, MouseButton, Runtime};
 use crate::cpu::Renderer;
 use crate::cpu::raster::IRect;
 use crate::platform::{Pace, points};
 use crate::scene::Size;
 use crate::ui::Cursor;
+use crate::{Anchor, Config};
 
 /// Posted by the waker: something changed on another thread.
 const WM_WAKE: u32 = WM_APP + 1;
@@ -125,6 +125,22 @@ impl Dib {
     let (w, h) = (r.x1 - r.x0, r.y1 - r.y0);
     unsafe { BitBlt(dst, r.x0, r.y0, w, h, self.dc, r.x0, r.y0, SRCCOPY) };
   }
+
+  /// Shows the whole frame in layered window `hwnd`, blended by its alpha (premultiplied, as
+  /// `AC_SRC_ALPHA` takes it): an overlay's.
+  fn show_layered(&self, hwnd: HWND) {
+    let size = SIZE { cx: self.w as i32, cy: self.h as i32 };
+    let blend = BLENDFUNCTION {
+      BlendOp: AC_SRC_OVER as u8,
+      BlendFlags: 0,
+      SourceConstantAlpha: 255,
+      AlphaFormat: AC_SRC_ALPHA as u8,
+    };
+    let at = POINT { x: 0, y: 0 };
+    unsafe {
+      UpdateLayeredWindow(hwnd, null_mut(), null(), &size, self.dc, &at, 0, &blend, ULW_ALPHA)
+    };
+  }
 }
 
 impl Drop for Dib {
@@ -163,8 +179,10 @@ struct Window {
   renderer: Renderer,
   dib: Option<Dib>,
   scale: f32,
-  /// Minimized: frames wait until it shows again.
+  /// Minimized or hidden: frames wait until it shows again.
   hidden: bool,
+  /// An overlay ([Config::overlay]): a layered window, placed by [place].
+  overlay: Option<Anchor>,
   /// While animating, frames come a refresh of the display apart: the display it is on.
   pace: Pace,
   monitor: HMONITOR,
@@ -244,7 +262,12 @@ fn send_or_wait(events: [Event; 2]) {
   }
 }
 
-/// Window `hwnd` shows for the first time: its frames start.
+/// Window `hwnd` was hidden ([crate::Window::hide]): no frames until it shows again.
+pub(crate) fn hidden(hwnd: HWND) {
+  with_window(hwnd, |w| w.hidden = true);
+}
+
+/// Window `hwnd` shows (again): its frames start.
 pub(crate) fn shown(hwnd: HWND) {
   with_window(hwnd, |w| {
     if std::mem::replace(&mut w.hidden, false) {
@@ -314,12 +337,17 @@ impl Window {
     r.draw(&self.rt.scene, dib.pixels(), pw, &rects);
     dib.tiles.clear();
     dib.tiles.extend_from_slice(r.tiles());
-    let dc = unsafe { GetDC(self.hwnd) };
-    for &rect in &rects {
-      dib.blit(dc, rect);
+    if self.overlay.is_some() {
+      dib.show_layered(self.hwnd);
+    } else {
+      let dc = unsafe { GetDC(self.hwnd) };
+      for &rect in &rects {
+        dib.blit(dc, rect);
+      }
+
+      unsafe { ReleaseDC(self.hwnd, dc) };
     }
 
-    unsafe { ReleaseDC(self.hwnd, dc) };
     self.frames += 1;
     if self.trace {
       let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
@@ -541,7 +569,16 @@ fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     }
     WM_DPICHANGED => {
       let dpi = (wp & 0xFFFF) as f32;
-      with(|w| w.scale = dpi / 96.0);
+      let overlay = with(|w| {
+        w.scale = dpi / 96.0;
+        w.overlay.is_some()
+      });
+      // An overlay was sized for the new monitor as it was placed there ([place]).
+      if overlay == Some(true) {
+        with(|w| w.retime());
+        return 0;
+      }
+
       // SAFETY: lParam is the suggested window rect.
       let r = unsafe { &*(lp as *const RECT) };
       let flags = SWP_NOZORDER | SWP_NOACTIVATE;
@@ -631,23 +668,29 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
 
   // The content area at the system DPI, centred on the primary screen; a window on another
   // monitor gets WM_DPICHANGED.
-  let style = match cfg.resizable {
-    true => WS_OVERLAPPEDWINDOW,
-    false => WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+  // An overlay: no frame, blended by its alpha, the mouse going through, never activated, out
+  // of the taskbar and Alt+Tab, over other windows.
+  let (style, ex) = match (cfg.overlay, cfg.resizable) {
+    (Some(_), _) => {
+      let ex = WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+      (WS_POPUP, ex | WS_EX_TOPMOST)
+    }
+    (None, true) => (WS_OVERLAPPEDWINDOW, 0),
+    (None, false) => (WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX, 0),
   };
 
   let dpi = unsafe { GetDpiForSystem() };
   let scale = dpi as f32 / 96.0;
   let (w, h) = ((cfg.size.w * scale).round() as i32, (cfg.size.h * scale).round() as i32);
   let mut rc = RECT { left: 0, top: 0, right: w, bottom: h };
-  unsafe { AdjustWindowRectExForDpi(&mut rc, style, 0, 0, dpi) };
+  unsafe { AdjustWindowRectExForDpi(&mut rc, style, 0, ex, dpi) };
   let (ww, wh) = (rc.right - rc.left, rc.bottom - rc.top);
   let (sw, sh) = unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) };
   let (x, y) = (((sw - ww) / 2).max(0), ((sh - wh) / 2).max(0));
   let title = wide(cfg.title);
   let hwnd = unsafe {
     CreateWindowExW(
-      0,
+      ex,
       class.as_ptr(),
       title.as_ptr(),
       style,
@@ -690,6 +733,7 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
     scale,
     // Opened hidden ([Config::hidden]): no frames until it shows ([shown]).
     hidden: cfg.hidden,
+    overlay: cfg.overlay,
     pace: Pace::new(refresh(hwnd)),
     monitor: unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) },
     trace: std::env::var_os("NIMBO_TRACE").is_some(),
@@ -731,7 +775,53 @@ fn apply_resize(hwnd: HWND) -> bool {
   let flags = SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE;
   let (cx, cy) = (rc.right - rc.left, rc.bottom - rc.top);
   unsafe { SetWindowPos(hwnd, null_mut(), 0, 0, cx, cy, flags) };
+  if let Some(Some(anchor)) = with(|w| w.overlay) {
+    place(hwnd, anchor, false);
+  }
+
   true
+}
+
+/// Shows overlay `hwnd` at `anchor` on the monitor with the pointer, over other windows,
+/// activating nothing.
+pub(crate) fn show_overlay(hwnd: HWND, anchor: Anchor) {
+  place(hwnd, anchor, true);
+  shown(hwnd);
+  unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
+}
+
+/// Moves overlay `hwnd` to `anchor` in the work area (no taskbar) of the monitor with the
+/// pointer, or of its own unless `pointer`, sized for that monitor's DPI; topmost again.
+fn place(hwnd: HWND, anchor: Anchor, pointer: bool) {
+  let Some(size) = with_window(hwnd, |w| {
+    let (cw, ch) = w.client();
+    Size::new(cw as f32 / w.scale, ch as f32 / w.scale)
+  }) else {
+    return;
+  };
+  let monitor = match pointer {
+    true => {
+      let mut p = POINT { x: 0, y: 0 };
+      unsafe { GetCursorPos(&mut p) };
+      unsafe { MonitorFromPoint(p, MONITOR_DEFAULTTONEAREST) }
+    }
+    false => unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) },
+  };
+
+  let mut info =
+    MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..unsafe { std::mem::zeroed() } };
+  let (mut dpi, mut _y) = (96, 96);
+  unsafe {
+    GetMonitorInfoW(monitor, &mut info);
+    GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut _y);
+  }
+
+  let (r, k) = (info.rcWork, dpi as f32 / 96.0);
+  let area = Size::new((r.right - r.left) as f32 / k, (r.bottom - r.top) as f32 / k);
+  let at = anchor.offset(area, size);
+  let px = |v: f32| (v * k).round() as i32;
+  let (x, y) = (r.left + px(at.x), r.top + px(at.y));
+  unsafe { SetWindowPos(hwnd, HWND_TOPMOST, x, y, px(size.w), px(size.h), SWP_NOACTIVATE) };
 }
 
 /// Draws the frame due and applies a size the app asked for, before it and in it; returns how

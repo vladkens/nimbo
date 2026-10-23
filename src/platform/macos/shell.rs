@@ -34,18 +34,19 @@ use objc2_foundation::{
 
 pub use super::app::{is_main, post, set_presence};
 use super::view::View;
-use super::{Pasteboard, appearance, mtm};
+use super::{Pasteboard, appearance, mtm, overlay};
 use crate::Config;
 use crate::app::{App, Clock, Event, Runtime};
-use crate::shell::{AppInfo, Main, Presence};
+use crate::shell::{Anchor, AppInfo, Main, Presence};
 
 struct Win {
   id: u64,
   window: Retained<NSWindow>,
   view: Retained<View>,
   _delegate: Retained<WindowDelegate>,
-  /// Shown at least once: it counts for the Dock while open.
+  /// Shown and not hidden since: it counts for the Dock. Never an overlay.
   shown: bool,
+  overlay: Option<Anchor>,
 }
 
 /// What a closed window leaves: let go after AppKit's call that closed it ([release]).
@@ -236,7 +237,7 @@ pub fn terminating() -> bool {
   shell(|s| s.terminating)
 }
 
-/// A window shown at least once is open: the app is in the Dock ([super::app::sync_presence]).
+/// A window is shown: the app is in the Dock ([super::app::sync_presence]).
 pub(super) fn any_shown() -> bool {
   shell(|s| s.windows.iter().any(|w| w.shown))
 }
@@ -323,14 +324,17 @@ pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
     style |= NSWindowStyleMask::Resizable;
   }
 
-  let window = unsafe {
-    NSWindow::initWithContentRect_styleMask_backing_defer(
-      NSWindow::alloc(mtm),
-      frame,
-      style,
-      NSBackingStoreType::Buffered,
-      false,
-    )
+  let window = match cfg.overlay {
+    Some(_) => overlay::panel(mtm, frame),
+    None => unsafe {
+      NSWindow::initWithContentRect_styleMask_backing_defer(
+        NSWindow::alloc(mtm),
+        frame,
+        style,
+        NSBackingStoreType::Buffered,
+        false,
+      )
+    },
   };
   // SAFETY: the shell keeps the window until it closes.
   unsafe { window.setReleasedWhenClosed(false) };
@@ -341,7 +345,7 @@ pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
   let scale = window.backingScaleFactor() as f32;
   let mut rt = Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(Pasteboard));
   rt.event(Event::Appearance(appearance()));
-  let view = View::new(mtm, frame, rt);
+  let view = View::new(mtm, frame, rt, cfg.overlay.is_some());
   window.setContentView(Some(&view));
   let id = shell(|s| {
     s.next += 1;
@@ -351,7 +355,7 @@ pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
   window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
   window.center();
   window.makeFirstResponder(Some(&view));
-  let win = Win { id, window, view, _delegate: delegate, shown: false };
+  let win = Win { id, window, view, _delegate: delegate, shown: false, overlay: cfg.overlay };
   shell(|s| s.windows.push(win));
   crate::shell::opened(id, ty);
   if !cfg.hidden {
@@ -363,13 +367,17 @@ pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
 
 pub fn front(id: u64) {
   let mtm = mtm();
-  let Some(window) = shell(|s| {
+  let Some((window, overlay)) = shell(|s| {
     let w = s.windows.iter_mut().find(|w| w.id == id)?;
-    w.shown = true;
-    Some(w.window.clone())
+    w.shown = w.overlay.is_none();
+    Some((w.window.clone(), w.overlay))
   }) else {
     return;
   };
+  if let Some(anchor) = overlay {
+    return overlay::show(&window, anchor);
+  }
+
   super::app::sync_presence();
   if window.isMiniaturized() {
     window.deminiaturize(None);
@@ -377,6 +385,27 @@ pub fn front(id: u64) {
 
   window.makeKeyAndOrderFront(None);
   NSApplication::sharedApplication(mtm).activate();
+}
+
+/// Orders the window out; the Dock follows.
+pub fn hide(id: u64) {
+  let Some(window) = shell(|s| {
+    let w = s.windows.iter_mut().find(|w| w.id == id)?;
+    w.shown = false;
+    Some(w.window.clone())
+  }) else {
+    return;
+  };
+  window.orderOut(None);
+  super::app::sync_presence();
+}
+
+/// `window` took the size its app asked for: an overlay goes back to its anchor, on its screen.
+pub(super) fn resized(window: &NSWindow) {
+  let find = |s: &mut Shell| s.windows.iter().find(|w| std::ptr::eq(&*w.window, window))?.overlay;
+  if let Some(anchor) = shell(find) {
+    overlay::place(window, anchor, false);
+  }
 }
 
 pub fn close(id: u64) {

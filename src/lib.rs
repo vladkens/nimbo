@@ -10,9 +10,10 @@
 //! ([cpu]). Examples start with [run], which opens a window, or with `--shot <file.png>` runs the
 //! harness instead (in the dark appearance unless `--appearance light`).
 //!
-//! An app with no window, or more than one, starts with [app]: windows on demand ([Main::open]),
-//! work from other threads ([Proxy]), and what a tray app needs besides: an icon with a menu
-//! ([tray]), global hotkeys ([hotkey]), its folders ([paths]) and launch at login ([autostart]).
+//! An app with no window, or more than one, starts with [app]: windows on demand ([Main::open])
+//! and overlays, HUDs over every app ([Config::overlay]), work from other threads ([Proxy]), and
+//! what a tray app needs besides: an icon with a menu ([tray]), global hotkeys ([hotkey]), its
+//! folders ([paths]) and launch at login ([autostart]).
 //!
 //! macOS 14 is the least it runs on (`NSApplication`'s `activate`, `NSView`'s display link): build
 //! apps with `MACOSX_DEPLOYMENT_TARGET=14.0`.
@@ -50,7 +51,7 @@ pub use keys::{
 pub use scene::{
   Color, Frame, ImageId, Images, Point, Quad, Rect, Scene, Segment, Size, alpha, mix, rgb,
 };
-pub use shell::{AppInfo, Main, Presence, Proxy, Window, WindowId, app};
+pub use shell::{Anchor, AppInfo, Main, Presence, Proxy, Window, WindowId, app};
 pub use text::edit::{Editor, Lines, Mono, Sel};
 pub use text::{Font, Weight};
 pub use ui::{
@@ -71,6 +72,8 @@ pub struct Config {
   pub resizable: bool,
   /// Opened without showing ([Config::hidden]) until [Window::front].
   pub hidden: bool,
+  /// An overlay and where it shows ([Config::overlay]); `None` for a window.
+  pub overlay: Option<Anchor>,
 }
 
 impl Config {
@@ -79,7 +82,7 @@ impl Config {
 
   pub const fn new(title: &'static str, w: f32, h: f32) -> Self {
     let (size, min_size) = (Size::new(w, h), Self::MIN_SIZE);
-    Self { title, size, min_size, resizable: true, hidden: false }
+    Self { title, size, min_size, resizable: true, hidden: false, overlay: None }
   }
 
   /// The least content size the user can resize the window to, [Config::MIN_SIZE] unless set.
@@ -100,6 +103,24 @@ impl Config {
   /// A window [Main::open] makes without showing it, until [Window::front].
   pub const fn hidden(self) -> Self {
     Self { hidden: true, ..self }
+  }
+
+  /// An overlay, a HUD over everything: no frame, transparent where the app draws nothing
+  /// ([cpu::Renderer::transparent]), of a fixed size; it never activates the app or takes the
+  /// keys, the mouse goes through it, it shows on every Space and over full-screen apps.
+  /// [Window::front] shows it at `anchor` on the screen with the pointer (again at each call),
+  /// [Window::hide] hides it. Size it to the widest the app draws, as it draws its own shape and
+  /// shadow inside.
+  ///
+  /// Per OS: macOS a borderless non-activating `NSPanel` at the status bar level. Windows a
+  /// layered, click-through, topmost tool window with no activation, shown on the current
+  /// virtual desktop. Linux on X11 an override-redirect popup (above all, on every workspace);
+  /// on Wayland, where an app can't place itself, a layer-shell surface (`libgtk-layer-shell`,
+  /// if installed: wlroots compositors, KDE) on the overlay layer at the anchor, on the output
+  /// the compositor picks; without it (GNOME) a borderless toplevel that the compositor places
+  /// and may focus and stack as any window.
+  pub const fn overlay(self, anchor: Anchor) -> Self {
+    Self { overlay: Some(anchor), resizable: false, ..self }
   }
 }
 
@@ -210,6 +231,7 @@ pub fn run_args<A: App + 'static>(
 /// appearance, dark unless `--appearance` says otherwise, as a window tells it the OS's.
 fn harness<A: App>(cfg: &Config, app: A, args: &Args) -> Harness<A> {
   let mut h = Harness::new(app, args.size.unwrap_or(cfg.size), args.scale);
+  h.cpu.transparent = cfg.overlay.is_some();
   h.event(Event::Appearance(args.appearance.unwrap_or(Appearance::DARK)));
   h
 }
@@ -240,6 +262,19 @@ mod tests {
     };
     assert_eq!(seen(""), (Some(Appearance::DARK), Appearance::DARK));
     assert_eq!(seen("--appearance light"), (Some(Appearance::LIGHT), Appearance::LIGHT));
+  }
+
+  /// An overlay's shot is transparent where it draws nothing, a window's black.
+  #[test]
+  fn overlay_shots_are_transparent() {
+    struct Nothing;
+    impl App for Nothing {}
+
+    let args = parse("").unwrap();
+    let cfg = Config::new("a", 10.0, 10.0);
+    let corner = |cfg: &Config| harness(cfg, Nothing, &args).render().pixel(1.0, 1.0);
+    assert_eq!(corner(&cfg), [0, 0, 0, 255]);
+    assert_eq!(corner(&cfg.overlay(Anchor::Center)), [0; 4]);
   }
 
   fn parse(s: &str) -> Result<Args, String> {
