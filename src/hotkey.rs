@@ -147,11 +147,11 @@ impl Hotkeys {
     }
   }
 
-  /// While on, Escape (alone or with Shift; a modifier hotkey held past its chord window aside) is
-  /// taken from every app and comes as [Edge::Escape], once per press; its repeats and release
-  /// are swallowed too. A press that began before stays the app's. Whether it is taken is in
-  /// [Status::escape]: macOS needs the listener or Carbon's hotkey, Windows the listener, Linux
-  /// can't.
+  /// While on, Escape (alone or with Shift, with Shift not through macOS's fallback; a modifier
+  /// hotkey held past its chord window aside) is taken from every app and comes as [Edge::Escape],
+  /// once per press; its repeats and release are swallowed too. A press that began before stays
+  /// the app's. Whether it is taken is in [Status::escape]: macOS needs the listener or Carbon's
+  /// hotkey, Windows the listener, Linux can't.
   pub fn escape(&mut self, on: bool) {
     if self.escape != on {
       self.escape = on;

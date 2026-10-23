@@ -2,8 +2,10 @@
 
 //! The hotkeys' fallback: Carbon's `RegisterEventHotKey` (HIToolbox, declared by hand), which
 //! works without Accessibility access and under Secure Input, chords only, and takes Escape
-//! while that is on: a key registered here never reaches the app in front. Its handler runs on
-//! the main thread and sends the edge, timed when the key moved, to the hotkey thread.
+//! alone while that is on: a key registered here never reaches the app in front. Not ⇧⎋: the
+//! tap passes it while a Shift hotkey is held within its chord window, which Carbon can't tell. Its
+//! handler runs on the main thread and sends the edge, timed when the key moved, to the hotkey
+//! thread.
 
 use std::ffi::c_void;
 use std::ptr::null_mut;
@@ -89,8 +91,7 @@ unsafe extern "C" {
 
 const SIGNATURE: u32 = u32::from_be_bytes(*b"nmbo");
 const CHORD_ID: u32 = 1;
-/// Escape alone, and with Shift.
-const ESCAPE_IDS: [u32; 2] = [2, 3];
+const ESCAPE_ID: u32 = 2;
 
 /// What the handler works with; leaked: the handler stays installed for the process.
 struct State {
@@ -104,8 +105,7 @@ struct State {
 pub struct Carbon {
   installed: bool,
   chord: Option<EventHotKeyRef>,
-  /// Escape and ⇧⎋, while on.
-  escape: Vec<EventHotKeyRef>,
+  escape: Option<EventHotKeyRef>,
   state: &'static State,
 }
 
@@ -128,7 +128,7 @@ impl Carbon {
         &mut handler,
       )
     };
-    Self { installed: status == 0, chord: None, escape: Vec::new(), state }
+    Self { installed: status == 0, chord: None, escape: None, state }
   }
 
   /// Registers virtual key `code` with Carbon's `modifiers`, in place of the one before.
@@ -164,24 +164,21 @@ impl Carbon {
     self.chord.is_some()
   }
 
-  /// Escape alone and with Shift registered while `on`; the error is why one is not.
+  /// Escape alone registered while `on`; the error is why it is not.
   pub fn set_escape(&mut self, on: bool) -> Result<(), String> {
-    self.escape.drain(..).for_each(|k| release(Some(k)));
     if !on {
-      return Ok(());
-    }
-
-    // A release missed while it was off is not waited for.
-    self.state.escape_down.store(false, Ordering::Relaxed);
-    for (modifiers, id) in [0, SHIFT_KEY].into_iter().zip(ESCAPE_IDS) {
-      self.escape.push(self.hot_key(KEY_ESCAPE, modifiers, id)?);
+      release(self.escape.take());
+    } else if self.escape.is_none() {
+      // A release missed while it was off is not waited for.
+      self.state.escape_down.store(false, Ordering::Relaxed);
+      self.escape = Some(self.hot_key(KEY_ESCAPE, 0, ESCAPE_ID)?);
     }
 
     Ok(())
   }
 
   pub fn escape_registered(&self) -> bool {
-    !self.escape.is_empty()
+    self.escape.is_some()
   }
 }
 
@@ -224,12 +221,8 @@ extern "C" fn handler_fn(
     (CHORD_ID, K_EVENT_HOT_KEY_PRESSED) => Hit::Down { repeat: false },
     (CHORD_ID, K_EVENT_HOT_KEY_RELEASED) => Hit::Up,
     // Carbon repeats the press while Escape is held: told once.
-    (id, K_EVENT_HOT_KEY_PRESSED)
-      if ESCAPE_IDS.contains(&id) && !escape.swap(true, Ordering::Relaxed) =>
-    {
-      Hit::Escape
-    }
-    (id, K_EVENT_HOT_KEY_RELEASED) if ESCAPE_IDS.contains(&id) => {
+    (ESCAPE_ID, K_EVENT_HOT_KEY_PRESSED) if !escape.swap(true, Ordering::Relaxed) => Hit::Escape,
+    (ESCAPE_ID, K_EVENT_HOT_KEY_RELEASED) => {
       escape.store(false, Ordering::Relaxed);
       return 0;
     }

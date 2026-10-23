@@ -4,9 +4,9 @@
 //! matches the chord and swallows its key events and, only while [Hotkeys::escape] is on, Escape.
 //! A Carbon `RegisterEventHotKey` on the same chord is the fallback for Secure Input, which leaves
 //! the tap deaf, and for no Accessibility access ([carbon]); while Escape is on it is registered
-//! there too, which also keeps it from the app in front. Both sources feed the "hotkey" thread,
-//! which drops an edge the other source reported ≤ [DEDUPE] earlier and passes the rest to the
-//! app's callback.
+//! there too (alone, [carbon]), which also keeps it from the app in front. Both sources feed the
+//! "hotkey" thread, which drops an edge the other source reported ≤ [DEDUPE] earlier and passes the
+//! rest to the app's callback.
 //!
 //! A hotkey that is a modifier key alone (`right_option`, `fn`) is the tap's only: Carbon has no
 //! such hotkeys. The tap sees the key's own press and release (`flagsChanged`, left and right
@@ -494,8 +494,10 @@ fn judge(
   let ours = || {
     let chords = MODIFIERS & !CGEventFlags::MaskShift.0;
     let held = alone && shared.chord_down.load(Ordering::Relaxed);
-    // The hotkey's own key, with no other modifier key (its other side) held.
-    let only = |k: &Code| flags & devices() & !device_flag(*k).unwrap_or(0) == 0;
+    // The hotkey's own key, with no other ⌃⌥⌘ key (its other side) held.
+    let shift = [Code::ShiftLeft, Code::ShiftRight].map(|k| device_flag(k).unwrap_or(0));
+    let only =
+      |k: &Code| flags & devices() & !device_flag(*k).unwrap_or(0) & !shift[0] & !shift[1] == 0;
     let own = mod_key((chord & 0xffff) as u16).filter(|k| held && only(k));
     flags & chords & !own.map_or(0, general_flag) == 0 && shared.escape.load(Ordering::Acquire)
   };
@@ -887,7 +889,10 @@ mod tests {
     let taken = Verdict::Swallow(Some(Hit::Escape));
     assert_eq!(key_at(&s, 2_000, true, ESC, opt, false), taken);
     assert_eq!(key_at(&s, 2_050, false, ESC, opt, false), Verdict::Swallow(None));
-    // With the left ⌥ held too: the user's ⌥⎋.
+    // Shift too: still taken. With the left ⌥ held too: the user's ⌥⎋.
+    let shift = CGEventFlags(RIGHT_ALT | CGEventFlags::MaskShift.0 | 0x02);
+    assert_eq!(key_at(&s, 2_080, true, ESC, shift, false), taken);
+    assert_eq!(key_at(&s, 2_090, false, ESC, shift, false), Verdict::Swallow(None));
     let both = CGEventFlags(RIGHT_ALT | LEFT_ALT);
     assert_eq!(key_at(&s, 2_100, true, ESC, both, false), Verdict::Pass);
     // ⌥⎋ with another hotkey, or with this one not held, is still the app's.
