@@ -15,7 +15,7 @@ mod common;
 
 use std::time::Duration;
 
-use common::px;
+use common::{mid, px};
 use gallery::*;
 use nimbo::{Appearance, Event, Harness, Id, Modifiers, NamedKey, Rect, Size, Theme};
 
@@ -85,7 +85,8 @@ fn every_widget_in_both_themes() {
 
   // The reset's tooltip shows after a rest.
   let r = rect(&h, RESET, 0);
-  h.move_to(r.x + r.w / 2.0, r.y + r.h / 2.0);
+  let (x, y) = mid(r);
+  h.move_to(x, y);
   h.wait(Duration::from_millis(400));
   assert!(h.rect(id(RESET, 0).key("tip")).is_some());
 
