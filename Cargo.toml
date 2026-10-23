@@ -1,6 +1,6 @@
 [package]
 name = "nimbo"
-version = "0.0.1"
+version = "0.1.0"
 edition = "2024"
 description = "A small, fast, custom-drawn desktop UI toolkit: one look on macOS, Windows and Linux."
 authors = ["vladkens"]
