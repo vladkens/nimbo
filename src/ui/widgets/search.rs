@@ -15,6 +15,7 @@
 use keyboard_types::NamedKey;
 
 use super::icon::{self, Icon};
+use crate::app::MouseButton;
 use crate::keys::Key;
 use crate::scene::mix;
 use crate::ui::behavior::FieldState;
@@ -29,13 +30,14 @@ const INSET: f32 = 8.0;
 impl Ui<'_> {
   /// A search field's input: [Ui::text_field_behavior]'s on one line, and a click on
   /// `id.key("clear")` (the ⊗ a look draws while there is text) or Escape clears the text,
-  /// `changed`, an input method's composition with it. The ⊗ focuses the field; Escape is the
+  /// `changed`, an input method's composition with it, as one edit that undoes. The ⊗ (a press
+  /// of the left button on it) focuses the field; Escape is the
   /// field's before any binding while there is text and nothing composing, else it goes on.
   pub fn search_behavior(&mut self, id: Id, text: &mut String) -> FieldBehavior {
     let off = self.next_disabled || self.scope_off;
     let x = id.key("clear");
     // The ⊗ is the field's: a press on it leaves the focus there, or brings it.
-    if !off && self.press().is_some_and(|p| p.id == x) {
+    if !off && self.press().is_some_and(|p| p.id == x && p.button == MouseButton::Left) {
       self.focus(Some(id));
     }
 
@@ -52,9 +54,14 @@ impl Ui<'_> {
       }
     }
 
+    // An edit of its own, undone as one, which the field writes back; a composition goes too.
     if cleared {
-      text.clear();
-      self.state::<FieldState>(id).ed.set_text("");
+      let ed = &mut self.state::<FieldState>(id).ed;
+      if ed.marked().is_some() {
+        ed.set_marked("", 0..0, None);
+      }
+
+      ed.replace(0..ed.text().len(), "");
     }
 
     let mut b = self.text_field_behavior(id, text, false, false);
@@ -121,7 +128,7 @@ impl Ui<'_> {
 
 #[cfg(test)]
 mod tests {
-  use crate::app::{App, Cx, Event};
+  use crate::app::{App, Cx, Event, MouseButton};
   use crate::harness::Harness;
   use crate::keys::{Binding, Command, bind};
   use crate::scene::{Rect, Size};
@@ -336,6 +343,40 @@ mod tests {
     h.frame();
     h.release(x - 2.0, y);
     h.render();
+  }
+
+  /// Clearing by the ⊗ or by Escape is an edit: Cmd-Z brings the text back.
+  #[test]
+  fn clearing_undoes() {
+    let mut h = find("");
+    h.click_id(Id::of("s"));
+    h.type_text("moon");
+    h.frame();
+    h.click_id(Id::of("s").key("clear"));
+    h.frame();
+    assert_eq!(h.app().text, "");
+    h.key('z', crate::CMD);
+    h.frame();
+    assert_eq!(h.app().text, "moon");
+    h.key(NamedKey::Escape, NONE);
+    h.frame();
+    assert_eq!(h.app().text, "");
+    h.key('z', crate::CMD);
+    assert_eq!(h.app().text, "moon");
+  }
+
+  /// Another button on the ⊗ neither clears nor moves the focus.
+  #[test]
+  fn only_the_left_button_takes_the_mark() {
+    let mut h = find("moon");
+    let x = clear(&h).unwrap();
+    let pos = crate::Point::new(x.x + 7.0, x.y + 7.0);
+    let (button, mods) = (MouseButton::Right, Modifiers::empty());
+    h.event(Event::MouseDown { pos, button, clicks: 1, mods });
+    h.frame();
+    h.event(Event::MouseUp { pos, button, mods });
+    h.frame();
+    assert_eq!((h.focused(), h.app().text.as_str()), (None, "moon"));
   }
 
   /// Held on the ⊗ a while, the field keeps the focus; released, it clears.
