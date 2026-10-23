@@ -16,9 +16,16 @@
 //!     at the end `crate::shell::finish(close)`: the quit hook, then the windows close;
 //!   - `open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64`: a window, kept with
 //!     `crate::shell::opened(id, ty)` where the platform keeps it, shown in front unless
-//!     `cfg.hidden`; `front(id)`, `close(id)` (its runtime dropped, then its close callback from
+//!     `cfg.hidden`; `front(id)`, `hide(id)` (off screen, no frames, its app kept: `front` shows it
+//!     again), `close(id)` (its runtime dropped, then its close callback from
 //!     `crate::shell::closed(id)`), `with_app(id, f: &mut dyn FnMut(&mut dyn App)) -> bool` (not
 //!     while the window is busy up the stack; redraws);
+//!   - an overlay (`cfg.overlay`, [crate::Config::overlay]): no frame, transparent (the renderer's
+//!     `transparent`, the buffer's alpha composited), click-through, never key or active, above
+//!     full-screen apps on every Space or workspace, not in the Dock, taskbar or window cycling;
+//!     `front` places it at its [crate::Anchor] in the work area of the screen with the pointer
+//!     (where the OS lets an app place itself) and shows it without activating anything; a size the
+//!     app asks for keeps it at its anchor;
 //!   - `set_presence(Presence)`, `terminating() -> bool`, `quit()`; a second launch, where the OS
 //!     tells (macOS), runs `crate::shell::reopened`;
 //!   - `post(delay: Duration, f: Box<dyn FnOnce() + Send>)` from any thread, run by the loop also

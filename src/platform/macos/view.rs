@@ -42,11 +42,12 @@ use objc2_foundation::{
 };
 use objc2_quartz_core::{CADisplayLink, CAFrameRateRange, CALayer, kCAGravityTopLeft};
 
-use super::keyboard;
 use super::surface::Presenter;
+use super::{keyboard, overlay};
 use crate::app::{App, Event, Ime, MouseButton, Phase, Runtime, WHEEL_LINE};
 use crate::keys::{self, Command, Key, KeyEvent};
 use crate::scene::{Point, Rect, Size};
+use crate::shell::Anchor;
 use crate::text::edit::utf16_len;
 use crate::ui::{Cursor, Id, TextInput};
 
@@ -93,6 +94,8 @@ pub struct Ivars {
   /// Where the composition was as the input method last saw it: when the text moves under it
   /// (scrolled), its windows are told.
   ime_at: Cell<Option<Rect>>,
+  /// An overlay's anchor ([crate::Config::overlay]): a new size goes back to it.
+  overlay: Cell<Option<Anchor>>,
 }
 
 define_class!(
@@ -417,8 +420,15 @@ define_class!(
 );
 
 impl View {
-  pub fn new(mtm: MainThreadMarker, frame: NSRect, rt: Runtime<Box<dyn App>>) -> Retained<Self> {
-    let this = Self::alloc(mtm).set_ivars(Ivars::default());
+  /// The view of a window, or of an overlay at `overlay`: the frame's alpha shows through.
+  pub fn new(
+    mtm: MainThreadMarker,
+    frame: NSRect,
+    rt: Runtime<Box<dyn App>>,
+    overlay: Option<Anchor>,
+  ) -> Retained<Self> {
+    let ivars = Ivars { overlay: Cell::new(overlay), ..Default::default() };
+    let this = Self::alloc(mtm).set_ivars(ivars);
     let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
     let layer = CALayer::new();
     layer.setContentsGravity(unsafe { kCAGravityTopLeft });
@@ -426,6 +436,7 @@ impl View {
     view.setWantsLayer(true);
     let mut presenter = Presenter::new(layer);
     presenter.trace = std::env::var_os("NIMBO_TRACE").is_some();
+    presenter.renderer.transparent = overlay.is_some();
 
     // Mouse moves and exits for the visible rect, which AppKit keeps up to date, in an inactive
     // app too; `cursorUpdate:` in an area of its own, as AppKit sends none with `ActiveAlways`.
@@ -584,7 +595,8 @@ impl View {
   }
 
   /// Resizes the window's content to the size the app asked for ([Runtime::take_resize]),
-  /// keeping its top edge where it is, as preferences windows do when their tab changes. The
+  /// keeping its top edge where it is, as preferences windows do when their tab changes, or an
+  /// overlay at its anchor on its screen. The
   /// least content size comes down with it; a fixed window stays fixed for the user. Outside the
   /// runtime's borrow: the new frame size draws at once ([Self::render]).
   fn apply_resize(&self) {
@@ -599,6 +611,9 @@ impl View {
     let (w, h) = (min.width.min(size.w as f64), min.height.min(size.h as f64));
     window.setContentMinSize(NSSize::new(w, h));
     window.setFrame_display(frame, true);
+    if let Some(anchor) = self.ivars().overlay.get() {
+      overlay::place(&window, anchor, false);
+    }
   }
 
   /// Lets `f` look at the focused text field, as an input method asks; `None` when no field

@@ -11,7 +11,8 @@
 //! layout phase, and the frame is built after GTK's layout, at the size it just gave the area,
 //! so a live resize never stretches. Nothing runs while idle or minimized: timers are GLib
 //! timeouts, a wake from another thread an idle source. Input is in [input] (keys in [keys]),
-//! light or dark in [settings], the text stack in [text] (fontconfig, FreeType, HarfBuzz).
+//! light or dark in [settings], the text stack in [text] (fontconfig, FreeType, HarfBuzz),
+//! overlays in [overlay].
 //! GTK 3 scales by whole numbers only.
 //!
 //! Windows open and close on demand while GTK's main loop runs ([app] has the loop, the tray,
@@ -23,6 +24,7 @@ mod dbus;
 mod dl;
 mod input;
 mod keys;
+mod overlay;
 mod settings;
 pub mod text;
 
@@ -37,11 +39,11 @@ pub use self::app::{autostart, hotkey, shell, tray};
 use self::dl::{Lib, fns};
 use self::input::Input;
 pub use self::settings::appearance;
-use crate::Config;
 use crate::app::{App, Clipboard, Clock, Event, Runtime};
 use crate::cpu::Renderer;
 use crate::scene::Size;
 use crate::ui::Cursor;
+use crate::{Anchor, Config};
 
 type P = *mut c_void;
 type S = *const c_char;
@@ -54,8 +56,9 @@ const FALSE: c_int = 0;
 /// `G_CONNECT_AFTER`: the handler runs after the signal's other ones.
 const AFTER: c_int = 1;
 const WINDOW_TOPLEVEL: c_int = 0;
-/// `CAIRO_FORMAT_RGB24` (32 bits, B G R x in memory, as the CPU renderer writes) and
-/// `CAIRO_OPERATOR_SOURCE`.
+/// `CAIRO_FORMAT_ARGB32` and `RGB24` (32 bits, B G R A or x in memory, premultiplied, as the
+/// CPU renderer writes) and `CAIRO_OPERATOR_SOURCE`.
+const ARGB32: c_int = 0;
 const RGB24: c_int = 1;
 const SOURCE: c_int = 1;
 /// `GDK_FRAME_CLOCK_PHASE_LAYOUT`.
@@ -196,6 +199,7 @@ struct Win {
   /// lowers.
   resizable: bool,
   min: Size,
+  overlay: Option<Anchor>,
   input: Input,
   cursor: Option<Cursor>,
   cursors: Vec<(Cursor, P)>,
@@ -232,6 +236,7 @@ struct Slot {
   surface: Rc<Cell<P>>,
   /// Shown once: its frame clock is followed and its input set up.
   shown: bool,
+  overlay: Option<Anchor>,
 }
 
 thread_local! {
@@ -375,7 +380,11 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Result<u64, std::ffi::NulError> {
   // SAFETY: GTK's calls, on the thread that runs its loop; each callback has its signal's
   // signature.
   let (window, area) = unsafe {
-    let window = (g.gtk_window_new)(WINDOW_TOPLEVEL);
+    let window = (g.gtk_window_new)(cfg.overlay.map_or(WINDOW_TOPLEVEL, |_| overlay::kind()));
+    if let Some(anchor) = cfg.overlay {
+      overlay::setup(window, anchor);
+    }
+
     let area = (g.gtk_drawing_area_new)();
     (g.gtk_window_set_title)(window, title.as_ptr());
     match cfg.resizable {
@@ -402,6 +411,8 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Result<u64, std::ffi::NulError> {
 
   let clip = Box::new(Clip(unsafe { (g.gtk_clipboard_get)(CLIPBOARD) }));
   let mut rt = Runtime::new(app, size, 1.0, Clock::real(), clip);
+  let mut renderer = Renderer::new();
+  renderer.transparent = cfg.overlay.is_some();
   rt.event(Event::Appearance(appearance()));
   // A wake from any thread: an idle source on the main context, which GLib wakes.
   rt.waker().set_notify(Box::new(move || {
@@ -412,7 +423,7 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Result<u64, std::ffi::NulError> {
   let win = Win {
     id,
     rt,
-    renderer: Renderer::new(),
+    renderer,
     window,
     area,
     surface: surface.clone(),
@@ -424,6 +435,7 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Result<u64, std::ffi::NulError> {
     timer: None,
     resizable: cfg.resizable,
     min,
+    overlay: cfg.overlay,
     input: Input::new(id),
     cursor: None,
     cursors: Vec::new(),
@@ -433,7 +445,9 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Result<u64, std::ffi::NulError> {
     trace: std::env::var_os("NIMBO_TRACE").is_some(),
   };
   let win = Rc::new(RefCell::new(win));
-  WINS.with_borrow_mut(|ws| ws.push(Slot { id, window, area, win, surface, shown: false }));
+  WINS.with_borrow_mut(|ws| {
+    ws.push(Slot { id, window, area, win, surface, shown: false, overlay: cfg.overlay })
+  });
   if !cfg.hidden {
     front(id);
   }
@@ -441,15 +455,20 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Result<u64, std::ffi::NulError> {
   Ok(id)
 }
 
-/// Shows window `id` in front; the first time, follows its frame clock and sets its input up
-/// (shown, the window is realized: its frame clock and the area's GdkWindow exist).
+/// Shows window `id` in front, an overlay at its anchor ([overlay]); the first time, follows its
+/// frame clock and sets its input up (shown, the window is realized: its frame clock and the
+/// area's GdkWindow exist).
 fn front(id: u64) {
   let g = gtk();
-  let Some((window, area, first)) =
-    slot(id, |s| (s.window, s.area, !std::mem::replace(&mut s.shown, true)))
-  else {
+  let Some((window, area, first, overlay, size)) = slot(id, |s| {
+    let first = !std::mem::replace(&mut s.shown, true);
+    (s.window, s.area, first, s.overlay, s.win.try_borrow().map(|w| w.rt.size))
+  }) else {
     return;
   };
+  if let (Some(anchor), Ok(size)) = (overlay, size) {
+    overlay::place(window, size, anchor, true);
+  }
 
   // SAFETY: GTK's calls on a window of ours.
   unsafe {
@@ -464,7 +483,20 @@ fn front(id: u64) {
       return;
     }
 
-    (g.gtk_window_present)(window);
+    match overlay {
+      Some(_) => {
+        (g.gtk_widget_show_all)(window);
+        overlay::raise(window);
+      }
+      None => (g.gtk_window_present)(window),
+    }
+  }
+}
+
+/// Hides window `id`: withdrawn, it draws no frames until it shows again.
+fn hide(id: u64) {
+  if let Some(window) = slot(id, |s| s.window) {
+    unsafe { (gtk().gtk_widget_hide)(window) };
   }
 }
 
@@ -591,7 +623,7 @@ impl Win {
     let (w, h) = r.size();
     if ((w, h), scale) != (self.shown, self.shown_scale) || self.surface.get().is_null() {
       // Out of memory: the frame waits for the next.
-      if !new_surface(&self.surface, w, h, scale) {
+      if !new_surface(&self.surface, w, h, scale, r.transparent) {
         return;
       }
 
@@ -649,6 +681,10 @@ impl Win {
       }
     }
 
+    if let Some(anchor) = self.overlay {
+      overlay::place(self.window, size, anchor, false);
+    }
+
     self.rt.redraw();
   }
 
@@ -692,13 +728,14 @@ fn name(c: Cursor) -> S {
   n.as_ptr()
 }
 
-/// A new surface of `w × h` pixels at `scale` in `cell`, the old one dropped; false when cairo
-/// couldn't make one (its error surface has no pixels).
-fn new_surface(cell: &Cell<P>, w: usize, h: usize, scale: f32) -> bool {
+/// A new surface of `w × h` pixels at `scale` in `cell`, with `alpha` or not, the old one
+/// dropped; false when cairo couldn't make one (its error surface has no pixels).
+fn new_surface(cell: &Cell<P>, w: usize, h: usize, scale: f32, alpha: bool) -> bool {
   let g = gtk();
   // SAFETY: a new surface, ours until the next one.
   unsafe {
-    let s = (g.cairo_image_surface_create)(RGB24, w as c_int, h as c_int);
+    let format = if alpha { ARGB32 } else { RGB24 };
+    let s = (g.cairo_image_surface_create)(format, w as c_int, h as c_int);
     if (g.cairo_surface_status)(s) != 0 {
       (g.cairo_surface_destroy)(s);
       return false;

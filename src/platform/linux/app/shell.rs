@@ -62,6 +62,10 @@ pub fn front(id: u64) {
   super::super::front(id);
 }
 
+pub fn hide(id: u64) {
+  super::super::hide(id);
+}
+
 pub fn close(id: u64) {
   closed(id, true);
 }
