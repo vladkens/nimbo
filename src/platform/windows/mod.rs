@@ -300,16 +300,25 @@ impl Window {
     (r.right - r.left, r.bottom - r.top)
   }
 
-  /// Builds a frame at the window's size and scale and presents it.
-  fn render(&mut self) {
-    self.pace.start(Instant::now());
+  /// Gives the runtime the window's size and scale; false while it has no area (minimized).
+  fn sync_size(&mut self) -> bool {
     let (w, h) = self.client();
     if w <= 0 || h <= 0 {
-      return;
+      return false;
     }
 
     let size = Size::new(points(w as u32, self.scale), points(h as u32, self.scale));
     self.rt.resize(size, self.scale);
+    true
+  }
+
+  /// Builds a frame at the window's size and scale and presents it.
+  fn render(&mut self) {
+    self.pace.start(Instant::now());
+    if !self.sync_size() {
+      return;
+    }
+
     self.rt.frame();
     // The new tree's element under the pointer may want another cursor, and its focus (a field
     // focused as it shows) the input method.
@@ -317,7 +326,7 @@ impl Window {
     self.sync_ime();
     let r = &mut self.renderer;
     r.sync(&mut self.rt.text, &mut self.rt.images);
-    r.prepare(&self.rt.scene, size, self.scale);
+    r.prepare(&self.rt.scene, self.rt.size, self.scale);
     let (pw, ph) = r.size();
     if self.dib.as_ref().is_none_or(|d| (d.w, d.h) != (pw, ph)) {
       self.dib = Dib::new(pw, ph);
@@ -556,9 +565,11 @@ fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         if shown {
           w.rt.redraw();
         }
-        // Draw right away, so a live resize never shows a stretched or stale frame.
-        if !off {
-          w.render();
+        // Draw right away, so a live resize never shows a stretched or stale frame; hidden, the
+        // runtime still takes the size, which placing an overlay reads.
+        match off {
+          false => w.render(),
+          true => _ = w.sync_size(),
         }
       });
       0
