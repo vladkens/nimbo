@@ -13,6 +13,12 @@
 //! On Linux the portal binds the shortcut with the chord only as a preference: the desktop asks
 //! the user, who may pick another. Without the portal (X11 desktops, older GNOME) there are no
 //! hotkeys: [Status::listener] fails with the reason.
+//!
+//! [Hotkeys::escape] takes Escape from every app for a while (to cancel what the hotkey started)
+//! and reports it as [Edge::Escape]: on macOS the event tap swallows it, and Carbon's hotkey takes
+//! it without the tap (no Accessibility access, Secure Input); on Windows the keyboard hook
+//! swallows it. The portal can't, so on Linux Escape stays the focused app's
+//! ([Status::escape_error] says so).
 
 use std::time::Instant;
 
@@ -30,6 +36,8 @@ pub enum Edge {
   Up {
     at: Instant,
   },
+  /// Escape pressed while [Hotkeys::escape] is on; the app in front never sees it.
+  Escape,
   /// A modifier key alone was pressed, then another key within a moment: the user's own chord
   /// (⌥E), so what the press started is dropped. Its release comes as no edge.
   Aborted,
@@ -64,6 +72,10 @@ pub struct Status {
   pub fallback: bool,
   pub fallback_error: Option<String>,
   pub paused: bool,
+  /// Escape is taken now: [Hotkeys::escape] is on and a source here has it.
+  pub escape: bool,
+  /// Why Escape is on but not taken: the platform can't (Linux) or no source is up.
+  pub escape_error: Option<String>,
   /// Some app keeps key presses from the listener (macOS Secure Input: a password field, a
   /// terminal's secure keyboard entry); the fallback still hears chords.
   pub secure_input: bool,
@@ -97,13 +109,14 @@ pub struct Hotkeys {
   hotkey: Option<Hotkey>,
   error: Option<String>,
   paused: bool,
+  escape: bool,
 }
 
 impl Hotkeys {
   /// No hotkey until [Hotkeys::set]; the listener after [Hotkeys::start].
   pub fn new(on: impl Fn(Edge) + Send + 'static) -> Self {
     let imp = imp::Hotkeys::new(Box::new(on));
-    Self { imp, text: None, hotkey: None, error: None, paused: false }
+    Self { imp, text: None, hotkey: None, error: None, paused: false, escape: false }
   }
 
   /// Uses the hotkey spelled `text` ([Hotkey::parse]); one that doesn't parse, or that the OS
@@ -134,6 +147,18 @@ impl Hotkeys {
     }
   }
 
+  /// While on, Escape (alone or with Shift, with Shift not through macOS's fallback; a modifier
+  /// hotkey held past its chord window aside) is taken from every app and comes as [Edge::Escape],
+  /// once per press; its repeats and release are swallowed too. A press that began before stays
+  /// the app's. Whether it is taken is in [Status::escape]: macOS needs the listener or Carbon's
+  /// hotkey, Windows the listener, Linux can't.
+  pub fn escape(&mut self, on: bool) {
+    if self.escape != on {
+      self.escape = on;
+      self.imp.escape(on);
+    }
+  }
+
   /// Hands the hotkey to the platform, none while paused or unparsed; a parse error stays.
   fn arm(&mut self) {
     let want = self.hotkey.filter(|_| !self.paused);
@@ -156,6 +181,10 @@ impl Hotkeys {
     let mut s = Status { paused: self.paused, error: self.error.clone(), ..Status::default() };
     s.hotkey = self.hotkey.filter(|_| s.error.is_none());
     self.imp.status(&mut s);
+    if self.escape {
+      s.escape = s.escape_error.is_none();
+    }
+
     s
   }
 }

@@ -7,8 +7,10 @@
 //! polling the key's state every [POLL] after the press. A modifier key alone is a low-level
 //! keyboard hook's (`WH_KEYBOARD_LL`, installed by `start` on the same thread): [Lone] sees the
 //! key go down with no other modifier held and up again, and another key pressed within
-//! [CHORD_WINDOW] makes it the user's chord. The hook only queues and posts: low-level hooks
-//! that take too long are removed by Windows without a word. Every key passes through.
+//! [CHORD_WINDOW] makes it the user's chord. While [Hotkeys::escape] is on the hook also takes
+//! Escape ([Lone::escape]): it never reaches the app in front. The hook only queues and posts:
+//! low-level hooks that take too long are removed by Windows without a word. Every other key
+//! passes through.
 //!
 //! Keys by place: a character key's virtual key is the US layout's scan code of its place mapped
 //! by the current layout (`MapVirtualKeyW`), a named key's is fixed. The Fn key never reaches
@@ -70,6 +72,8 @@ struct Shared {
   listener_events: AtomicU64,
   fallback_events: AtomicU64,
   fallback_repeats: AtomicU64,
+  /// The hook takes Escape while this is set.
+  escape: AtomicBool,
 }
 
 /// The hotkey thread, driven from the main thread.
@@ -92,7 +96,7 @@ impl Hotkeys {
       .expect("spawn the hotkey edges thread");
     std::thread::Builder::new()
       .name("hotkey".into())
-      .spawn(move || run(&edges, &s, &rx, &ready))
+      .spawn(move || run(&edges, s, &rx, &ready))
       .expect("spawn the hotkey thread");
     let thread = id.recv().expect("the hotkey thread starts");
     Self { thread, cmds, shared }
@@ -130,6 +134,11 @@ impl Hotkeys {
     Ok(())
   }
 
+  /// While on, the hook takes Escape.
+  pub fn escape(&mut self, on: bool) {
+    self.shared.escape.store(on, Ordering::Release);
+  }
+
   pub fn status(&self, s: &mut Status) {
     let sh = &self.shared;
     let n = |a: &AtomicU64| a.load(Ordering::Relaxed);
@@ -145,6 +154,10 @@ impl Hotkeys {
     s.counts.listener = n(&sh.listener_events);
     s.counts.fallback = n(&sh.fallback_events);
     s.counts.fallback_repeats = n(&sh.fallback_repeats);
+    if sh.escape.load(Ordering::Relaxed) && s.listener != Listener::Active {
+      let why = s.listener_error.clone();
+      s.escape_error = Some(why.unwrap_or_else(|| "the keyboard hook is not installed".into()));
+    }
   }
 }
 
@@ -157,14 +170,16 @@ impl Drop for Hotkeys {
 // MARK: The thread
 
 /// What the hook works with, on the hotkey thread.
+#[derive(Default)]
 struct Hook {
   lone: Lone,
   queue: Vec<Edge>,
   thread: u32,
+  shared: Option<Arc<Shared>>,
 }
 
 thread_local! {
-  static HOOK: RefCell<Hook> = RefCell::new(Hook { lone: Lone::default(), queue: Vec::new(), thread: 0 });
+  static HOOK: RefCell<Hook> = RefCell::default();
 }
 
 /// The thread's state besides the hook's.
@@ -176,13 +191,13 @@ struct Chord {
   hook: HHOOK,
 }
 
-fn run(edges: &Sender<Edge>, shared: &Shared, cmds: &Receiver<Cmd>, ready: &SyncSender<u32>) {
+fn run(edges: &Sender<Edge>, shared: Arc<Shared>, cmds: &Receiver<Cmd>, ready: &SyncSender<u32>) {
   let on = |e| _ = edges.send(e);
   let mut msg: MSG = unsafe { std::mem::zeroed() };
   // The thread's message queue exists once it asked for a message.
   unsafe { PeekMessageW(&mut msg, null_mut(), WM_USER, WM_USER, PM_NOREMOVE) };
   let thread = unsafe { GetCurrentThreadId() };
-  HOOK.with_borrow_mut(|h| h.thread = thread);
+  HOOK.with_borrow_mut(|h| (h.thread, h.shared) = (thread, Some(shared.clone())));
   _ = ready.send(thread);
   let mut chord = Chord { registered: false, held: None, timer: 0, hook: null_mut() };
   while unsafe { GetMessageW(&mut msg, null_mut(), 0, 0) } > 0 {
@@ -219,10 +234,10 @@ fn run(edges: &Sender<Edge>, shared: &Shared, cmds: &Receiver<Cmd>, ready: &Sync
       WM_CMD => {
         while let Ok(cmd) = cmds.try_recv() {
           match cmd {
-            Cmd::Set(target, reply) => _ = reply.send(set(shared, &mut chord, target)),
-            Cmd::Start => start(shared, &mut chord),
+            Cmd::Set(target, reply) => _ = reply.send(set(&shared, &mut chord, target)),
+            Cmd::Start => start(&shared, &mut chord),
             Cmd::Stop => {
-              _ = set(shared, &mut chord, None);
+              _ = set(&shared, &mut chord, None);
               if !chord.hook.is_null() {
                 unsafe { UnhookWindowsHookEx(chord.hook) };
               }
@@ -258,7 +273,7 @@ fn set(shared: &Shared, chord: &mut Chord, target: Option<Target>) -> Result<(),
     _ => 0,
   };
 
-  HOOK.with_borrow_mut(|h| h.lone = Lone { key: lone, ..Lone::default() });
+  HOOK.with_borrow_mut(|h| h.lone.watch(lone));
   let result = match target {
     Some(Target::Chord { vk, mods }) => {
       match unsafe { RegisterHotKey(null_mut(), CHORD_ID, mods, vk) } {
@@ -308,15 +323,24 @@ unsafe extern "system" fn hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     // AltGr's Left Ctrl, filtered, is no key of the user's: Right Alt stays alone.
     let down = matches!(wp as u32, WM_KEYDOWN | WM_SYSKEYDOWN);
     let now = Instant::now();
-    HOOK.with_borrow_mut(|h| {
-      let Some(hit) = h.lone.key(k.vkCode, down, now) else { return };
-      h.queue.push(match hit {
-        Hit::Down => Edge::Down { at: now, repeat: false },
-        Hit::Up => Edge::Up { at: now },
-        Hit::Aborted => Edge::Aborted,
-      });
-      unsafe { PostThreadMessageW(h.thread, WM_EDGE, 0, 0) };
+    let taken = HOOK.with_borrow_mut(|h| {
+      let on = h.shared.as_ref().is_some_and(|s| s.escape.load(Ordering::Acquire));
+      let (hit, taken) = h.lone.judge(on, k.vkCode, down, now);
+      if let Some(hit) = hit {
+        h.queue.push(match hit {
+          Hit::Down => Edge::Down { at: now, repeat: false },
+          Hit::Up => Edge::Up { at: now },
+          Hit::Escape => Edge::Escape,
+          Hit::Aborted => Edge::Aborted,
+        });
+        unsafe { PostThreadMessageW(h.thread, WM_EDGE, 0, 0) };
+      }
+
+      taken
     });
+    if taken {
+      return 1;
+    }
   }
 
   unsafe { CallNextHookEx(null_mut(), code, wp, lp) }
@@ -328,6 +352,7 @@ unsafe extern "system" fn hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
 enum Hit {
   Down,
   Up,
+  Escape,
   Aborted,
 }
 
@@ -340,9 +365,25 @@ struct Lone {
   held: Option<Instant>,
   /// The modifier keys down now.
   down: Vec<u32>,
+  /// Escape is down: whether it was taken.
+  escape: Option<bool>,
 }
 
 impl Lone {
+  /// Watches modifier key `key` (0: none) from now on; the keys down, Escape's too, stay known.
+  fn watch(&mut self, key: u32) {
+    (self.key, self.held) = (key, None);
+  }
+
+  /// What the hook does with a key: the edge to tell, and whether the key is taken ([Lone::key],
+  /// then [Lone::escape] while `escape`). Escape that aborted the hotkey is the user's chord: the
+  /// app's.
+  fn judge(&mut self, escape: bool, vk: u32, down: bool, now: Instant) -> (Option<Hit>, bool) {
+    let hit = self.key(vk, down, now);
+    let taken = self.escape(escape && hit.is_none(), vk, down);
+    (hit.or(taken.flatten()), taken.is_some())
+  }
+
   fn key(&mut self, vk: u32, down: bool, now: Instant) -> Option<Hit> {
     let others = self.down.iter().any(|&m| m != self.key);
     let repeat = down && self.down.contains(&vk);
@@ -378,6 +419,31 @@ impl Lone {
     }
 
     None
+  }
+
+  /// Escape while taking it is `on`: a press with no Ctrl, Alt or Win held (Shift is fine, and so
+  /// is the hotkey's own key, held past [CHORD_WINDOW]) is taken and told; its autorepeats and
+  /// release are taken too, also once it went off. A press the app saw stays the app's. `Some`:
+  /// swallowed, with the edge if any.
+  fn escape(&mut self, on: bool, vk: u32, down: bool) -> Option<Option<Hit>> {
+    if vk != VK_ESCAPE as u32 {
+      return None;
+    }
+
+    if !down {
+      return self.escape.take().filter(|&taken| taken).map(|_| None);
+    }
+
+    if let Some(taken) = self.escape {
+      return taken.then_some(None);
+    }
+
+    let own = self.held.map(|_| self.key);
+    let shift = [VK_LSHIFT as u32, VK_RSHIFT as u32];
+    let chord = self.down.iter().any(|&m| Some(m) != own && !shift.contains(&m));
+    let taken = on && !chord;
+    self.escape = Some(taken);
+    taken.then_some(Some(Hit::Escape))
   }
 }
 
@@ -523,5 +589,64 @@ mod tests {
     assert_eq!(l.key(shift, true, ms(1500)), None);
     assert_eq!(l.key(shift, false, ms(1550)), None);
     assert_eq!(l.key(ralt, false, ms(2000)), Some(Hit::Up));
+  }
+
+  #[test]
+  fn escape_is_taken_only_while_on() {
+    let t0 = Instant::now();
+    let (esc, ctrl, shift, win, a) =
+      (VK_ESCAPE as u32, VK_LCONTROL as u32, VK_LSHIFT as u32, VK_LWIN as u32, 0x41);
+    let mut l = Lone::default();
+    let taken = Some(Some(Hit::Escape));
+    assert_eq!(l.escape(false, esc, true), None);
+    assert_eq!(l.escape(false, esc, false), None);
+    assert_eq!(l.escape(true, esc, true), taken);
+    assert_eq!(l.escape(true, esc, true), Some(None), "its autorepeat");
+    assert_eq!(l.escape(false, esc, false), Some(None), "its release, once off");
+    // Held since before it was on: the app's, repeats and release too.
+    assert_eq!(l.escape(false, esc, true), None);
+    assert_eq!(l.escape(true, esc, true), None);
+    assert_eq!(l.escape(true, esc, false), None);
+    assert_eq!(l.escape(true, a, true), None, "other keys pass");
+    // Ctrl+Esc (Start), Win+Esc are not Escape; Shift+Esc is.
+    for m in [ctrl, win] {
+      l.key(m, true, t0);
+      assert_eq!(l.escape(true, esc, true), None, "{m:#x}");
+      assert_eq!(l.escape(true, esc, false), None);
+      l.key(m, false, t0);
+    }
+
+    l.key(shift, true, t0);
+    assert_eq!(l.escape(true, esc, true), taken);
+    assert_eq!(l.escape(true, esc, false), Some(None));
+    // Another hotkey meanwhile: a taken press stays taken, repeats and release.
+    assert_eq!(l.escape(true, esc, true), taken);
+    l.watch(VK_RMENU as u32);
+    assert_eq!(l.escape(true, esc, true), Some(None));
+    assert_eq!(l.escape(false, esc, false), Some(None));
+  }
+
+  #[test]
+  fn escape_with_a_modifier_hotkey_held() {
+    let t0 = Instant::now();
+    let ms = |n| t0 + Duration::from_millis(n);
+    let (ralt, lalt, esc) = (VK_RMENU as u32, VK_LMENU as u32, VK_ESCAPE as u32);
+    let mut l = Lone { key: ralt, ..Lone::default() };
+    let mut judge = |vk, down, at| l.judge(true, vk, down, ms(at));
+    // Right after the press: the user's Alt+Esc, which aborts the press and passes.
+    assert_eq!(judge(ralt, true, 0), (Some(Hit::Down), false));
+    assert_eq!(judge(esc, true, 100), (Some(Hit::Aborted), false));
+    assert_eq!(judge(esc, true, 130), (None, false), "its autorepeat is the app's too");
+    assert_eq!(judge(esc, false, 150), (None, false));
+    assert_eq!(judge(ralt, false, 200), (None, false), "no release owed");
+    // Held past the chord window: Escape is taken, the hotkey's own Alt notwithstanding.
+    assert_eq!(judge(ralt, true, 1000), (Some(Hit::Down), false));
+    assert_eq!(judge(esc, true, 2000), (Some(Hit::Escape), true));
+    assert_eq!(judge(esc, true, 2030), (None, true));
+    assert_eq!(judge(esc, false, 2050), (None, true));
+    assert_eq!(judge(ralt, false, 2100), (Some(Hit::Up), false));
+    // Left Alt is another key: Alt+Esc stays the app's.
+    assert_eq!(judge(lalt, true, 3000), (None, false));
+    assert_eq!(judge(esc, true, 4000), (None, false));
   }
 }
