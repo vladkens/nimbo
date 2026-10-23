@@ -14,6 +14,7 @@
 //! Cinnamon and MATE have one, GNOME only with the AppIndicator extension (Ubuntu ships it on).
 //! [available] says whether the session has one; the tray waits for one that starts later.
 
+#[cfg(any(test, not(target_os = "macos")))]
 mod icon;
 
 use crate::Main;
@@ -41,7 +42,7 @@ impl TrayIcon {
 
   /// The icon as `side` × `side` straight RGBA filled with `tint`: an RGBA image scaled by
   /// averaging, path data rasterized with 16 samples a pixel.
-  #[cfg_attr(target_os = "macos", allow(dead_code))]
+  #[cfg(any(test, not(target_os = "macos")))]
   pub(crate) fn pixels(&self, side: u32, tint: [u8; 3]) -> Vec<u8> {
     let alpha = match self {
       TrayIcon::Rgba { w, h, px, .. } => icon::scale_alpha(*w, *h, px, side),
@@ -127,7 +128,7 @@ impl Item {
 
 /// The items of `menu` that can be chosen, depth first, in the order they show: the item
 /// numbers the OS menus use (an index here is a tag, a command id or a D-Bus menu id).
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg(any(test, windows))]
 pub(crate) fn choices(menu: &Menu) -> Vec<String> {
   fn walk(items: &[Item], out: &mut Vec<String>) {
     for it in items.iter().filter(|it| !it.separator) {
