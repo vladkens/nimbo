@@ -179,6 +179,9 @@ pub struct Tree {
   index: HashMap<Id, u32, BuildHasherDefault<FxHasher>>,
   /// A grid's row heights while it is laid out.
   rows: Vec<f32>,
+  /// The height the root's content takes at its fit size, scroll areas at their content's
+  /// ([super::Ui::fit_window_height]).
+  pub fit_h: f32,
 }
 
 impl Tree {
@@ -281,6 +284,7 @@ pub fn layout(t: &mut Tree, win: Size, scale: f32, m: &mut dyn Measure) {
   grow(t, 0, win);
   wrap(t, m);
   fit(t, 1, m);
+  t.fit_h = t.nodes[0].content[1];
   grow(t, 1, win);
   place(t, win, scale);
   reveal(t, scale);

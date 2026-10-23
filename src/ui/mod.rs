@@ -75,7 +75,7 @@ use self::input::{Deliver, Input, ScrollState};
 use self::store::{Anim, Store};
 use crate::app::{Appearance, Clipboard, Event, MouseButton, Waker};
 use crate::keys::{Binding, Command, KeyEvent};
-use crate::scene::{Frame, ImageId, Point, Rect, Size};
+use crate::scene::{Frame, ImageId, Images, Point, Rect, Size};
 use crate::text::{Font, FxHasher, Metrics, TextSystem};
 
 /// How long [UiState::flash] shows an element pressed.
@@ -207,6 +207,12 @@ pub struct UiState {
   pub(crate) resize: Option<Size>,
   /// The last size asked: asking it again is nothing new, so a view may ask every frame.
   asked: Option<Size>,
+  /// The width and the least and most height of a window as high as its content, as the view
+  /// built last asked ([Ui::fit_window_height]).
+  fit: Option<[f32; 3]>,
+  /// The images [Ui::rgba_image] added: their pixels' hash, the image, and whether a view built
+  /// it since the last frame.
+  pub(crate) pictures: Vec<(u64, ImageId, bool)>,
   /// The element that takes key presses before any binding ([Ui::grab_keys]), as the view
   /// built last asked.
   pub(crate) grab: Option<Id>,
@@ -254,6 +260,8 @@ impl Default for UiState {
       stats: FrameStats::default(),
       resize: None,
       asked: None,
+      fit: None,
+      pictures: Vec::new(),
       grab: None,
     }
   }
@@ -523,6 +531,8 @@ pub struct Ui<'a> {
   next_autofocus: bool,
   /// The runtime's text system, lent while the view runs ([Ui::measure]).
   pub(crate) text: Option<TextSystem>,
+  /// The runtime's images, lent while the view runs ([Ui::rgba_image]).
+  pub(crate) images: Images,
   /// Columns the next element takes in a grid ([Ui::span]).
   next_span: u8,
   /// Build-time state of add-ons, one per type ([Ui::slot]).
@@ -541,6 +551,7 @@ impl<'a> Ui<'a> {
     st.animating = false;
     st.input.moves = false;
     st.grab = None;
+    st.fit = None;
     st.input.now = now;
     let (next_id, next_float, next_keymap) = (None, None, None);
     let canvases = Vec::new();
@@ -555,6 +566,7 @@ impl<'a> Ui<'a> {
       scope_off: false,
       next_autofocus,
       text: None,
+      images: Images::default(),
       next_span: 1,
       slots: Vec::new(),
       size,
@@ -621,6 +633,15 @@ impl<'a> Ui<'a> {
   /// a fixed one ([crate::Config::fixed]) too.
   pub fn set_window_size(&mut self, w: f32, h: f32) {
     self.st.ask_size(Size::new(w, h), self.size);
+  }
+
+  /// Asks the window for `w` points wide and as high as its content, between `min_h` and
+  /// `max_h`: the height its elements take at their fit size, a scroll area at its content's
+  /// whole height (so nothing scrolls while it fits; past `max_h` it scrolls), the text wrapped
+  /// at the window's width. Measured by this frame's layout, the window follows after it as for
+  /// [Ui::set_window_size]: no per-OS heights for fonts of other metrics. Ask it each frame.
+  pub fn fit_window_height(&mut self, w: f32, min_h: f32, max_h: f32) {
+    self.st.fit = Some([w, min_h, max_h]);
   }
 
   /// The pointer, `None` when it is outside the window.
@@ -1125,6 +1146,12 @@ impl<'a> Ui<'a> {
     }
 
     layout::layout(tree, self.size, scale, m);
+    if let Some([w, lo, hi]) = self.st.fit {
+      let h = self.st.tree.fit_h.ceil().clamp(lo, hi.max(lo));
+      self.st.ask_size(Size::new(w, h), self.size);
+    }
+
+    let UiState { tree, store, .. } = &mut self.st;
     for &i in &tree.scrolls {
       let n = &tree.nodes[i as usize];
       let (s, max) = (store.raw::<ScrollState>(n.id), input::max_scroll(n));

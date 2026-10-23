@@ -2,9 +2,10 @@
 
 //! Widgets drawn from the theme ([Ui::theme]): label, link, button (variants, sizes, an
 //! [Icon]), ⓘ and "?" buttons, text field, search field and selectable text, check box, switch,
-//! slider, select, segmented control, progress bar and spinner, badge, tooltip and the shortcut
-//! recorder. Each control is its behaviour (`*_behavior`, as [super::behavior] lists) plus
-//! drawing from the theme: an app that wants its own look draws over the same behaviour.
+//! slider, select, segmented control, progress bar and spinner, badge, tooltip, the shortcut
+//! recorder, and images from pixels. Each control is its behaviour (`*_behavior`, as
+//! [super::behavior] lists) plus drawing from the theme: an app that wants its own look draws over
+//! the same behaviour.
 //!
 //! ```ignore
 //! if ui.button("Refresh").clicked { self.refresh() }
@@ -30,6 +31,7 @@ mod button;
 mod checkbox;
 mod field;
 pub mod icon;
+pub mod image;
 mod label;
 mod link;
 mod progress;

@@ -36,7 +36,7 @@ BUDGETS = {
   "platform/windows": 2000,
   "platform/linux": 2770,
   "ui": 3700,
-  "widgets": 2910,
+  "widgets": 2940,
   "text": 1180,
   "core": 3460,
   "app/shared": 660,

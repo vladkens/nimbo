@@ -540,7 +540,7 @@ impl<A: App> Runtime<A> {
     self.stale = false;
     let (size, scale, now) = (self.size, self.scale, self.clock.now());
     let mut ui = Ui::new(std::mem::take(&mut self.ui), size, self.mouse, now);
-    run_view(&mut self.app, &mut self.text, &mut ui);
+    run_view(&mut self.app, &mut self.text, &mut self.images, &mut ui);
     ui.layout(&mut Sys { text: &mut self.text, images: &self.images, scale }, scale);
     self.ui = ui.finish();
   }
@@ -668,7 +668,7 @@ impl<A: App> Runtime<A> {
   /// Runs the view once to deliver input, without layout or drawing.
   fn pass(&mut self) {
     let mut ui = Ui::new(std::mem::take(&mut self.ui), self.size, self.mouse, self.clock.now());
-    run_view(&mut self.app, &mut self.text, &mut ui);
+    run_view(&mut self.app, &mut self.text, &mut self.images, &mut ui);
     self.ui = ui.discard();
   }
 
@@ -713,7 +713,7 @@ impl<A: App> Runtime<A> {
       passes += 1;
       let t0 = Instant::now();
       let mut ui = Ui::new(std::mem::take(&mut self.ui), size, self.mouse, now);
-      run_view(&mut self.app, &mut self.text, &mut ui);
+      run_view(&mut self.app, &mut self.text, &mut self.images, &mut ui);
       let t1 = Instant::now();
       ui.layout(&mut Sys { text: &mut self.text, images: &self.images, scale }, scale);
       let moved = ui.rehover();
@@ -758,18 +758,26 @@ impl<A: App> Runtime<A> {
     let settle = shifted && (!self.settled || self.asked);
     self.settled = settle;
     self.asked = false;
+    self.ui.sweep_images(&mut self.images);
     let glyphs = self.text.end_frame();
     self.dirty = glyphs || again || settle;
     glyphs
   }
 }
 
-/// Runs `app`'s view on `ui`, lending it the text system for [Ui::measure] (moved in and back:
-/// an empty one holds its place, which allocates nothing).
-fn run_view<'a, A: App>(app: &'a mut A, text: &mut TextSystem, ui: &mut Ui<'a>) {
+/// Runs `app`'s view on `ui`, lending it the text system for [Ui::measure] and the images for
+/// [Ui::rgba_image] (moved in and back: an empty one holds its place, which allocates nothing).
+fn run_view<'a, A: App>(
+  app: &'a mut A,
+  text: &mut TextSystem,
+  images: &mut Images,
+  ui: &mut Ui<'a>,
+) {
   let scale = text.scale();
   ui.text = Some(std::mem::replace(text, TextSystem::new(scale)));
+  std::mem::swap(images, &mut ui.images);
   app.view(ui);
+  std::mem::swap(images, &mut ui.images);
   if let Some(t) = ui.text.take() {
     *text = t;
   }
@@ -1063,6 +1071,75 @@ mod tests {
     };
     cx_size(&mut h.rt);
     assert_eq!(h.rt.take_resize(), Some(Size::new(300.0, 90.0)));
+  }
+
+  /// A window as high as its content, a scroll area's whole, between the least and the most.
+  #[test]
+  fn the_window_fits_its_content() {
+    struct Page {
+      rows: usize,
+    }
+    impl App for Page {
+      fn view(&mut self, ui: &mut Ui) {
+        ui.fit_window_height(200.0, 50.0, 500.0);
+        ui.col(Style::new().grow(), |ui| {
+          ui.el(Style::new().w(crate::ui::grow()).h(px(40.0)));
+          ui.id("list").scroll_area(Style::new().grow(), |ui| {
+            for _ in 0..self.rows {
+              ui.el(Style::new().w(crate::ui::grow()).h(px(30.0)));
+            }
+          });
+        });
+      }
+    }
+    let mut h = crate::Harness::new(Page { rows: 3 }, Size::new(100.0, 100.0), 1.0);
+    h.frame();
+    assert_eq!(h.rt.size, Size::new(200.0, 130.0));
+
+    // More than the most: the rest scrolls.
+    h.app_mut().rows = 30;
+    h.rt.redraw();
+    h.frame();
+    let list = h.rt.ui.last.get(crate::Id::of("list")).unwrap();
+    assert_eq!((h.rt.size, list.rect.h, list.content[1]), (Size::new(200.0, 500.0), 460.0, 900.0));
+
+    // Nothing in it: the least.
+    h.app_mut().rows = 0;
+    h.rt.redraw();
+    h.frame();
+    assert_eq!(h.rt.size, Size::new(200.0, 50.0));
+  }
+
+  /// An image from pixels shows; one image for the same pixels, kept while built, then dropped.
+  #[test]
+  fn images_from_pixels_live_while_built() {
+    const RED: [u8; 16] = [255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255];
+    struct Logo(usize);
+    impl App for Logo {
+      fn view(&mut self, ui: &mut Ui) {
+        for _ in 0..self.0 {
+          ui.rgba_image(2, 2, &RED, Style::new().w(px(20.0)).h(px(20.0)));
+        }
+      }
+    }
+    let mut h = crate::Harness::new(Logo(2), Size::new(40.0, 40.0), 1.0);
+    h.frame();
+    let images: Vec<_> = h.rt.ui.pictures.iter().map(|p| p.1).collect();
+    assert_eq!(images.len(), 1, "the same pixels, one image");
+    assert_eq!(h.rt.images.size(images[0]), Some((2, 2)));
+    assert_eq!(
+      (h.render().pixel(10.0, 30.0), h.render().pixel(30.0, 30.0)),
+      ([255, 0, 0, 255], [0, 0, 0, 255])
+    );
+
+    // Built again: kept; not built: dropped.
+    h.rt.redraw();
+    h.frame();
+    assert_eq!(h.rt.images.size(images[0]), Some((2, 2)));
+    h.app_mut().0 = 0;
+    h.rt.redraw();
+    h.frame();
+    assert_eq!((h.rt.images.size(images[0]), h.rt.ui.pictures.len()), (None, 0));
   }
 
   #[test]
