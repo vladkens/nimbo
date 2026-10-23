@@ -258,8 +258,6 @@ impl Waker {
   }
 
   /// Sets how a wake reaches the event loop (the window hops to the main thread).
-  // Unused by the stub platforms until they are ported.
-  #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
   pub(crate) fn set_notify(&self, f: Notify) {
     let _ = self.0.notify.set(f);
   }

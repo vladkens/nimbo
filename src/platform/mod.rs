@@ -82,8 +82,8 @@
 //!   shell), sized apart from the window layer (`scripts/size.py`).
 //! - `pub fn appearance() -> Appearance` ([crate::Appearance]): `dark`, and `accent` in sRGB or
 //!   `None` when the OS has none or the user left it to apps (macOS: `effectiveAppearance` matched
-//!   against Aqua / DarkAqua, `controlAccentColor` unless Multicolor). Stubs return
-//!   [crate::Appearance::LIGHT]. Windows: `AppsUseLightTheme` (HKCU
+//!   against Aqua / DarkAqua, `controlAccentColor` unless Multicolor; on the main thread only,
+//!   [crate::Appearance::LIGHT] elsewhere). Windows: `AppsUseLightTheme` (HKCU
 //!   `Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`), re-read on `WM_SETTINGCHANGE`
 //!   with "ImmersiveColorSet", the accent from `AccentColorMenu`, and the title bar dark with
 //!   `DWMWA_USE_IMMERSIVE_DARK_MODE`. Linux: the XDG portal's `org.freedesktop.appearance`

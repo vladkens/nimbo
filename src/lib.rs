@@ -112,7 +112,7 @@ struct Args {
   scale: f32,
   /// The view size in points instead of the config's.
   size: Option<Size>,
-  /// The OS appearance the harness reports; dark by default, as before the theme followed it.
+  /// The OS appearance the harness reports; dark by default.
   appearance: Option<Appearance>,
 }
 
