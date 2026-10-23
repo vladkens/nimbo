@@ -34,7 +34,7 @@ use objc2_foundation::{
 
 pub use super::app::{is_main, on_quit, on_reopen, post, set_presence};
 use super::view::View;
-use super::{Pasteboard, appearance};
+use super::{Pasteboard, appearance, mtm};
 use crate::Config;
 use crate::app::{App, Clock, Event, Runtime};
 use crate::shell::{AppInfo, Main, Presence};
@@ -78,10 +78,6 @@ thread_local! {
 
 fn shell<R>(f: impl FnOnce(&mut Shell) -> R) -> R {
   SHELL.with_borrow_mut(f)
-}
-
-fn mtm() -> MainThreadMarker {
-  MainThreadMarker::new().expect("nimbo: the app and its windows are main thread only")
 }
 
 // MARK: The app

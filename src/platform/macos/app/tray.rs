@@ -32,6 +32,7 @@ use objc2_core_graphics::{
 };
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
 
+use super::super::mtm;
 use crate::Main;
 use crate::keys::{Key, Shortcut, f_key};
 use crate::svg::flatten;
@@ -133,10 +134,6 @@ impl Delegate {
   fn tray(&self) -> Option<Tray> {
     self.ivars().borrow().upgrade().map(Tray)
   }
-}
-
-fn mtm() -> MainThreadMarker {
-  MainThreadMarker::new().expect("nimbo: the tray is main thread only")
 }
 
 /// The menu bar always has room for a status item.

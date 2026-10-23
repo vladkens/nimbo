@@ -18,6 +18,7 @@ use std::sync::OnceLock;
 use windows_sys::Win32::Foundation::RECT;
 use windows_sys::core::{BOOL, GUID, HRESULT};
 
+use super::wide;
 use crate::text::{Font, Glyph, GlyphBox, Ink, Line, Metrics, Raster, Weight};
 
 // MARK: COM
@@ -86,10 +87,6 @@ fn out(f: impl FnOnce(*mut *mut c_void) -> HRESULT) -> Option<Com> {
 fn iid(g: &GUID) -> u128 {
   let tail = u64::from_be_bytes(g.data4) as u128;
   (g.data1 as u128) << 96 | (g.data2 as u128) << 80 | (g.data3 as u128) << 64 | tail
-}
-
-fn wide(s: &str) -> Vec<u16> {
-  s.encode_utf16().chain([0]).collect()
 }
 
 const IID_IUNKNOWN: u128 = 0x00000000_0000_0000_c000_000000000046;

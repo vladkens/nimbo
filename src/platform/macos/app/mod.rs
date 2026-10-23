@@ -45,7 +45,7 @@ pub(super) fn sync_presence() {
     false => NSApplicationActivationPolicy::Accessory,
   };
 
-  let ns_app = NSApplication::sharedApplication(MainThreadMarker::new().expect("main thread"));
+  let ns_app = NSApplication::sharedApplication(super::mtm());
   if ns_app.activationPolicy() != policy {
     ns_app.setActivationPolicy(policy);
   }
