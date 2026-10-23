@@ -18,7 +18,9 @@ use super::icon::{self, Icon};
 use crate::keys::Key;
 use crate::scene::mix;
 use crate::ui::behavior::FieldState;
-use crate::ui::{Cursor, FieldBehavior, FieldStyle, Float, Id, Response, Style, Ui, grow, px};
+use crate::ui::{
+  Align, Cursor, FieldBehavior, FieldStyle, Float, Id, Response, Style, Ui, grow, px,
+};
 
 /// The ⊗'s side, and how far in it is from the field's right edge.
 const MARK: f32 = 14.0;
@@ -31,7 +33,13 @@ impl Ui<'_> {
   /// field's before any binding while there is text and nothing composing, else it goes on.
   pub fn search_behavior(&mut self, id: Id, text: &mut String) -> FieldBehavior {
     let off = self.next_disabled || self.scope_off;
-    let mut cleared = !off && self.clicked(id.key("clear")) && !text.is_empty();
+    let x = id.key("clear");
+    // The ⊗ is the field's: a press on it leaves the focus there, or brings it.
+    if !off && self.press().is_some_and(|p| p.id == x) {
+      self.focus(Some(id));
+    }
+
+    let mut cleared = !off && self.clicked(x) && !text.is_empty();
     if cleared {
       self.focus(Some(id));
     }
@@ -82,18 +90,22 @@ impl Ui<'_> {
     self.next_id = Some((id.key("wrap"), false));
     self.row(wrap, |ui| {
       r = ui.field_box(&b, &style);
-      // System Settings' magnifier: its ink 13 wide, 10 in from the edge.
-      let at = Float::parent().attach(0.0, 0.5).anchor(0.0, 0.5).offset(INSET, 0.0).clip();
-      let s = Style::new().w(px(17.0)).h(px(17.0));
-      ui.float(at).canvas(s, move |f, r| icon::draw(f, Icon::SEARCH, r, muted, 2.0));
-      if clear {
-        let x = id.key("clear");
-        let at = Float::parent().attach(1.0, 0.5).anchor(1.0, 0.5).offset(-INSET, 0.0).clip();
-        let s = Style::new().w(px(MARK)).h(px(MARK)).cursor(Cursor::Pointer);
-        let hot = ui.ctl_hot(x, ui.hovered(x));
-        let mark = mix(t.faint, t.muted, hot);
-        ui.with_id(x).float(at).canvas(s, move |f, r| icon::draw(f, Icon::CLEAR, r, mark, 0.0));
-      }
+      // Over the field, clipped to it: System Settings' magnifier (its ink 13 wide, 10 in from
+      // the edge) and the ⊗.
+      let cover = Style::new().grow().pads([0.0, INSET, 0.0, INSET]).clip();
+      let cover = cover.align(Align::Start, Align::Center);
+      ui.float(Float::parent().clip()).row(cover, |ui| {
+        let s = Style::new().w(px(17.0)).h(px(17.0));
+        ui.canvas(s, move |f, r| icon::draw(f, Icon::SEARCH, r, muted, 2.0));
+        if clear {
+          let x = id.key("clear");
+          ui.el(Style::new().w(grow()));
+          let s = Style::new().w(px(MARK)).h(px(MARK)).cursor(Cursor::Pointer);
+          let hot = ui.ctl_hot(x, ui.hovered(x));
+          let mark = mix(t.faint, t.muted, hot);
+          ui.with_id(x).canvas(s, move |f, r| icon::draw(f, Icon::CLEAR, r, mark, 0.0));
+        }
+      });
     });
     r
   }
@@ -119,8 +131,8 @@ mod tests {
   const NONE: Modifiers = Modifiers::empty();
 
   /// A search field, the changes it reported, and the app's own Escape: what the field gives
-  /// back. `narrow`: half the window wide, at most 100, and 60% of it high; `red`: on a red
-  /// ground.
+  /// back. `narrow`: 40 in, half the rest wide, at most 100, and 60% of the window high;
+  /// `red`: on a red ground.
   #[derive(Default)]
   struct Find {
     text: String,
@@ -129,6 +141,7 @@ mod tests {
     off: bool,
     narrow: bool,
     red: bool,
+    blurs: u32,
   }
 
   impl App for Find {
@@ -152,11 +165,11 @@ mod tests {
       };
 
       let ground = if self.red { [1.0, 0.0, 0.0, 1.0] } else { t.bg };
-      ui.row(Style::new().grow().bg(ground), |ui| {
+      let left = if self.narrow { 40.0 } else { 0.0 };
+      ui.row(Style::new().grow().pads([0.0, 0.0, 0.0, left]).bg(ground), |ui| {
         let r = ui.disabled(self.off).search_field(Id::of("s"), &mut self.text, &style);
-        if r.changed {
-          self.changes += 1;
-        }
+        self.changes += r.changed as u32;
+        self.blurs += r.blurred as u32;
       });
     }
   }
@@ -298,21 +311,45 @@ mod tests {
     assert_ne!(img.pixel(x.x + 2.0, x.y + x.h / 2.0), ground, "the disc");
   }
 
-  /// Narrower than its padding: it lays out, takes a press and draws.
+  /// Narrower than its padding: it lays out, takes a drag and draws; its marks stay inside it.
   #[test]
   fn a_field_narrower_than_its_padding_still_works() {
     let mut h = find("moon");
     h.app_mut().narrow = true;
-    h.rt.resize(Size::new(40.0, 100.0), 2.0);
+    h.rt.resize(Size::new(76.0, 100.0), 2.0);
     h.frame();
     let field = h.rect(Id::of("s")).unwrap();
+    assert_eq!((field.x, field.w), (40.0, 18.0));
     let (x, y) = (field.x + field.w - 1.0, field.y + field.h / 2.0);
+    // Either side of it, the row's ground, and a click there clears nothing.
+    let img = h.render();
+    for x in [field.x - 2.0, field.x + field.w + 4.0, field.x + field.w + 12.0] {
+      assert_eq!(img.pixel(x, y), img.pixel(10.0, y), "at {x}");
+      h.click(x, y);
+      h.frame();
+      assert_eq!(h.app().text, "moon", "at {x}");
+    }
+
     h.press(x, y);
     h.frame();
     h.move_to(x - 2.0, y);
     h.frame();
     h.release(x - 2.0, y);
     h.render();
+  }
+
+  /// Held on the ⊗ a while, the field keeps the focus; released, it clears.
+  #[test]
+  fn a_press_on_the_mark_keeps_the_focus() {
+    let mut h = find("moon");
+    h.click_id(Id::of("s"));
+    let x = clear(&h).unwrap();
+    h.press(x.x + 7.0, x.y + 7.0);
+    h.frame();
+    assert_eq!((h.focused(), h.app().blurs), (Some(Id::of("s")), 0));
+    h.release(x.x + 7.0, x.y + 7.0);
+    h.frame();
+    assert_eq!((h.app().text.as_str(), h.app().blurs), ("", 0));
   }
 
   #[test]
