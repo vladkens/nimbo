@@ -85,8 +85,35 @@ impl Icon {
   pub const PLAY: Self =
     Self::filled("M8 5.8v12.4a.8.8 0 0 0 1.2.7l10-6.2a.8.8 0 0 0 0-1.4l-10-6.2A.8.8 0 0 0 8 5.8z");
 
+  /// Two sheets: copy.
+  pub const COPY: Self = Self::new(concat!(
+    "M10.5 8.5h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z",
+    "M15.5 8.5V6A1.5 1.5 0 0 0 14 4.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"
+  ));
+  /// An arrow down into a tray: a download.
+  pub const DOWNLOAD: Self = Self::new(
+    "M12 4v10M7.5 9.5 12 14l4.5-4.5M4 14v4.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V14",
+  );
+  /// A clock with a turning arrow: what happened before.
+  pub const HISTORY: Self = Self::new("M4 12a8 8 0 1 0 2.4-5.7M4 4.5v4h4M12 7.5V12l3 2");
+  /// A rounded square: stop.
+  pub const STOP: Self =
+    Self::new("M6 4h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z");
+  /// A microphone.
+  pub const MIC: Self = Self::new(
+    "M12 3.5a3 3 0 0 1 3 3V11a3 3 0 0 1-6 0V6.5a3 3 0 0 1 3-3zM6 11a6 6 0 0 0 12 0M12 17v3.5",
+  );
+  /// A cross: cancel, close.
+  pub const X: Self = Self::new("M7 7l10 10M17 7 7 17");
+  /// A person in a circle: accessibility.
+  pub const ACCESSIBILITY: Self = Self::new(concat!(
+    "M3.5 12a8.5 8.5 0 1 0 17 0a8.5 8.5 0 1 0-17 0",
+    "M11.4 7.6a.6 .6 0 1 0 1.2 0a.6 .6 0 1 0-1.2 0",
+    "M7.8 10.2 12 11l4.2-.8M12 11v3.2l-2.3 3.6M12 14.2l2.3 3.6"
+  ));
+
   /// Every built-in icon, for a gallery and the tests.
-  pub const ALL: [(&'static str, Self); 13] = [
+  pub const ALL: [(&'static str, Self); 20] = [
     ("gear", Self::GEAR),
     ("contrast", Self::CONTRAST),
     ("sliders", Self::SLIDERS),
@@ -100,6 +127,13 @@ impl Icon {
     ("search", Self::SEARCH),
     ("play", Self::PLAY),
     ("clear", Self::CLEAR),
+    ("copy", Self::COPY),
+    ("download", Self::DOWNLOAD),
+    ("history", Self::HISTORY),
+    ("stop", Self::STOP),
+    ("mic", Self::MIC),
+    ("x", Self::X),
+    ("accessibility", Self::ACCESSIBILITY),
   ];
 }
 

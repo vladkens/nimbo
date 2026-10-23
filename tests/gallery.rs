@@ -32,7 +32,7 @@ fn rect(h: &H, name: &str, pane: usize) -> Rect {
 
 #[test]
 fn every_widget_in_both_themes() {
-  let mut h = Harness::new(Gallery::default(), Size::new(1040.0, 560.0), 2.0);
+  let mut h = Harness::new(Gallery::default(), Size::new(1040.0, 590.0), 2.0);
   h.event(Event::Appearance(Appearance::LIGHT));
   h.frame();
 
@@ -118,7 +118,7 @@ fn every_widget_in_both_themes() {
 
 #[test]
 fn the_search_field_in_both_themes() {
-  let mut h = Harness::new(Gallery::default(), Size::new(1040.0, 560.0), 2.0);
+  let mut h = Harness::new(Gallery::default(), Size::new(1040.0, 590.0), 2.0);
   h.event(Event::Appearance(Appearance::LIGHT));
   h.frame();
 
