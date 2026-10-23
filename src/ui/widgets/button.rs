@@ -1,6 +1,6 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The button: a label or a stroke icon over the button behaviour, drawn from the theme's
+//! The button: a label or an icon over the button behaviour, drawn from the theme's
 //! variants and sizes; the ⓘ that explains a row and the round "?" that opens a page's help.
 
 use super::icon::{self, Icon};
@@ -8,7 +8,7 @@ use crate::scene::mix;
 use crate::ui::theme::{ButtonStyle, ControlSize, Variant};
 use crate::ui::{Response, Style, TextStyle, Ui, px};
 
-/// A button with a label, a stroke [Icon], or both.
+/// A button with a label, an [Icon], or both.
 #[derive(Clone, Copy, Debug)]
 pub struct Button<'s> {
   label: &'s str,
@@ -26,13 +26,13 @@ impl<'s> Button<'s> {
     Self { label, icon: None, variant, size, selected, style }
   }
 
-  /// A square ghost button showing a stroke icon, muted until the pointer is on it: reset,
+  /// A square ghost button showing an icon, muted until the pointer is on it: reset,
   /// delete, open elsewhere.
   pub fn icon(icon: Icon) -> Self {
     Self { icon: Some(icon), variant: Variant::Ghost, ..Self::new("") }
   }
 
-  /// A stroke icon before the label.
+  /// An icon before the label.
   pub fn with_icon(self, icon: Icon) -> Self {
     Self { icon: Some(icon), ..self }
   }
@@ -130,7 +130,7 @@ impl Ui<'_> {
     Button::new(label).show(self)
   }
 
-  /// A square ghost button showing a stroke icon ([Button::icon]).
+  /// A square ghost button showing an icon ([Button::icon]).
   pub fn icon_button(&mut self, icon: Icon) -> Response {
     Button::icon(icon).show(self)
   }
