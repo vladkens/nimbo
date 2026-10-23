@@ -65,10 +65,13 @@ impl Ui<'_> {
     let t = self.theme();
     let b = self.search_behavior(id, text);
     let clear = !text.is_empty() && !b.disabled;
-    // The frame's width goes to the box the marks sit in, which the field fills.
+    // The frame's size goes to the box the marks sit in, which the field fills, its text
+    // clipped short of them.
     let f = style.frame;
-    let wrap = Style::new().w(f.size[0]).min_w(f.min[0]).max_w(f.max[0]);
-    let mut style = FieldStyle { frame: f.w(grow()).min_w(0.0).max_w(f32::INFINITY), ..*style };
+    let wrap = Style { size: f.size, min: f.min, max: f.max, ..Style::new() };
+    let (min, max) = (Style::new().min, Style::new().max);
+    let frame = Style { size: [grow(); 2], min, max, ..f }.clip_content();
+    let mut style = FieldStyle { frame, ..*style };
     if clear {
       style.frame.pad[1] = style.frame.pad[1].max(INSET + MARK + 6.0);
     }
@@ -116,7 +119,7 @@ mod tests {
   const NONE: Modifiers = Modifiers::empty();
 
   /// A search field, the changes it reported, and the app's own Escape: what the field gives
-  /// back. `narrow`: half the window wide, at most 100.
+  /// back. `narrow`: half the window wide, at most 100, and 60% of it high.
   #[derive(Default)]
   struct Find {
     text: String,
@@ -142,7 +145,7 @@ mod tests {
       let t = ui.theme();
       let frame = t.search().frame;
       let style = match self.narrow {
-        true => t.search().frame(frame.w(pct(50.0)).max_w(100.0)),
+        true => t.search().frame(frame.w(pct(50.0)).max_w(100.0).h(pct(60.0))),
         false => t.search().hint("Search"),
       };
 
@@ -244,12 +247,32 @@ mod tests {
   }
 
   #[test]
+  fn a_long_text_stays_clear_of_the_marks() {
+    let mut h = find(&"moon ".repeat(20));
+    h.click_id(Id::of("s"));
+    let field = h.rect(Id::of("s")).unwrap();
+    // The field's ground, above the text.
+    let ground = h.render().pixel(field.x + field.w / 2.0, field.y + 3.0);
+    let y = field.y + field.h / 2.0;
+    // Scrolled to the end, then back to the start: nothing of it over the magnifier's side or
+    // the ⊗'s.
+    for key in [NamedKey::End, NamedKey::Home] {
+      h.key(key, NONE);
+      h.frame();
+      let img = h.render();
+      for x in [3.0, 6.0, field.w - 3.0, field.w - 5.0] {
+        assert_eq!(img.pixel(field.x + x, y - 2.0), ground, "{key:?} at {x}");
+      }
+    }
+  }
+
+  #[test]
   fn the_marks_stay_in_a_field_of_its_own_width() {
     let mut h = find("moon");
     h.app_mut().narrow = true;
     h.frame();
     let (field, x) = (h.rect(Id::of("s")).unwrap(), clear(&h).unwrap());
-    assert_eq!(field.w, 100.0);
+    assert_eq!((field.w, field.h), (100.0, 60.0));
     assert!(x.x > field.x + field.w / 2.0 && x.x + x.w <= field.x + field.w - 8.0, "{x:?}");
   }
 
