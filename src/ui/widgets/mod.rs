@@ -1,8 +1,8 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Widgets drawn from the theme ([Ui::theme]): label, link, button (variants, sizes, a stroke
-//! [Icon]), ⓘ and "?" buttons, text field and selectable text, check box, switch, slider,
-//! select, segmented control, progress bar and spinner, badge, tooltip and the shortcut
+//! Widgets drawn from the theme ([Ui::theme]): label, link, button (variants, sizes, an
+//! [Icon]), ⓘ and "?" buttons, text field, search field and selectable text, check box, switch,
+//! slider, select, segmented control, progress bar and spinner, badge, tooltip and the shortcut
 //! recorder. Each control is its behaviour (`*_behavior`, as [super::behavior] lists) plus
 //! drawing from the theme: an app that wants its own look draws over the same behaviour.
 //!
@@ -33,6 +33,7 @@ pub mod icon;
 mod label;
 mod link;
 mod progress;
+mod search;
 mod segmented;
 mod select;
 pub mod shortcut;

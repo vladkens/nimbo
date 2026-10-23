@@ -186,7 +186,7 @@ impl Ui<'_> {
 
 /// The ⊗ that clears a value, in `r` (a 24-unit icon's box): a disc in `fill` crossed in
 /// `cross`, the ground it sits on.
-fn clear_mark(f: &mut Frame, r: Rect, fill: Color, cross: Color) {
+pub(super) fn clear_mark(f: &mut Frame, r: Rect, fill: Color, cross: Color) {
   let k = r.w / 24.0;
   let (cx, cy, d) = (r.x + r.w / 2.0, r.y + r.h / 2.0, 19.0 * k);
   f.rect(Rect::new(cx - d / 2.0, cy - d / 2.0, d, d), fill, d / 2.0);

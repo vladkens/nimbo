@@ -35,7 +35,8 @@
 //! - [super::List] with [super::List::unstyled] rows: selection, keys and scrolling, rows drawn by
 //!   the app from [super::Row];
 //! - [Ui::text_field_behavior] and [Ui::selectable_behavior]: text editing on the editing model
-//!   ([Editor]), drawn by [Ui::field_text] ([super::widgets]).
+//!   ([Editor]), drawn by [Ui::field_text] ([super::widgets]);
+//! - [Ui::search_behavior]: a single-line field's, its text cleared by a ⊗ or Escape.
 //!
 //! The widgets' and containers' behaviours live beside their looks, in [super::widgets] and
 //! [super::containers].

@@ -566,6 +566,25 @@ impl Theme {
       .selection(sel)
       .caret(self.accent)
   }
+
+  /// A search field ([super::Ui::search]): [Theme::field]'s box [Sizes::control_h] + 4 high,
+  /// padded 30 at the left for the magnifier and 10 at the right. Where controls are flat
+  /// ([Theme::flat]), System Settings' sidebar field: the ground a touch lighter, a half-point
+  /// edge, the hint in the muted colour.
+  pub const fn search(&self) -> FieldStyle {
+    let f = self.field();
+    let frame = f.frame.h(px(self.sizes.control_h + 4.0)).pads([0.0, 10.0, 0.0, 30.0]);
+    if !self.flat() {
+      return f.frame(frame);
+    }
+
+    let (fill, edge) = match self.dark {
+      true => (alpha(WHITE, 0.12), alpha(BLACK, 0.5)),
+      false => (alpha(WHITE, 0.3), alpha(BLACK, 0.15)),
+    };
+
+    f.frame(frame.bg(fill).border(0.5, edge)).placeholder(self.muted)
+  }
 }
 
 #[cfg(test)]
