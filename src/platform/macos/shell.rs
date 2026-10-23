@@ -101,7 +101,7 @@ define_class!(
           return;
         }
 
-        finish();
+        crate::shell::finish(close);
         release();
         NSApplication::sharedApplication(mtm()).replyToApplicationShouldTerminate(true);
       });
@@ -200,20 +200,12 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
   }
 
   // The main queue isn't served once the loop ends: the closed windows go now.
-  finish();
+  crate::shell::finish(close);
   release();
   // SAFETY: the observer is the delegate, added above.
   unsafe { center.removeObserver(&delegate) };
   ns_app.setDelegate(None);
   SHELL.take();
-}
-
-/// The app ends: its quit hook runs (once), then the windows close.
-fn finish() {
-  crate::shell::quitting();
-  for id in crate::shell::windows() {
-    close(id);
-  }
 }
 
 /// Ends the loop after the event in progress (`stop:` takes effect after the next event: one

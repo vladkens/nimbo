@@ -44,10 +44,7 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
   INFO.set(Some(*info));
   start(&mut Main::here());
   super::super::main_loop();
-  crate::shell::quitting();
-  for id in crate::shell::windows() {
-    closed(id, false);
-  }
+  crate::shell::finish(|id| closed(id, false));
 
   super::super::reap();
   INFO.set(None);

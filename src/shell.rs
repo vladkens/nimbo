@@ -107,8 +107,7 @@ fn on_close(id: u64, f: OnMain) {
   });
 }
 
-/// The windows open, by id: for the platform to close them as the app ends.
-pub(crate) fn windows() -> Vec<u64> {
+fn windows() -> Vec<u64> {
   hooks(|h| h.windows.iter().map(|w| w.0).collect())
 }
 
@@ -121,10 +120,14 @@ pub(crate) fn closed(id: u64) -> Option<OnMain> {
   })
 }
 
-/// The app ends: its quit hook runs, once.
-pub(crate) fn quitting() {
+/// The app ends: its quit hook runs (once), then the platform's `close` closes each window.
+pub(crate) fn finish(close: impl Fn(u64)) {
   if let Some(f) = hooks(|h| h.quit.take()) {
     f(&mut Main::here());
+  }
+
+  for id in windows() {
+    close(id);
   }
 }
 
@@ -342,8 +345,10 @@ mod tests {
     let ran = Rc::new(Cell::new(0));
     let r = ran.clone();
     Main::here().on_quit(move |_| r.set(r.get() + 1));
-    quitting();
-    quitting();
-    assert_eq!(ran.get(), 1);
+    hooks(|h| h.windows.push((4, TypeId::of::<u8>(), None)));
+    let closing = Rc::new(Cell::new(0));
+    finish(|id| closing.set(id));
+    finish(|_| {});
+    assert_eq!((ran.get(), closing.get()), (1, 4));
   }
 }

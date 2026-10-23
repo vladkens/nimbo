@@ -91,7 +91,7 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
     run_loop(&Timer::new());
   }
 
-  finish();
+  crate::shell::finish(close);
   tray::removed();
   // Work posted after the loop is dropped unrun: the closures are let go here.
   if let Ok(mut h) = HOST.lock() {
@@ -141,15 +141,7 @@ fn make_host(name: &str) -> HWND {
   hwnd
 }
 
-/// The app ends: its quit hook runs (once), then the windows close.
-fn finish() {
-  crate::shell::quitting();
-  for id in crate::shell::windows() {
-    close(id);
-  }
-}
-
-/// Ends the loop after the message in progress; the windows close after it ([finish]).
+/// Ends the loop after the message in progress; the windows close after it.
 pub fn quit() {
   let looping = shell(|s| !std::mem::replace(&mut s.quitting, true) && s.looping);
   if looping {
@@ -224,7 +216,7 @@ unsafe extern "system" fn host_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
     WM_ENDSESSION if wp != 0 => {
       // The session ends: the process may be ended at any moment after this returns.
       shell(|s| s.terminating = true);
-      finish();
+      crate::shell::finish(close);
       std::process::exit(0);
     }
     m if m == tray::taskbar_created() => {

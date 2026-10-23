@@ -13,7 +13,7 @@
 //!   noted):
 //!   - `run(info: &AppInfo, start: impl FnOnce(&mut Main))`: sets the app up, runs `start`, then
 //!     the loop until `quit` (not when the last window closes); `quit` in `start` skips the loop;
-//!     at the end the quit hook (`crate::shell::quitting`), then the windows close;
+//!     at the end `crate::shell::finish(close)`: the quit hook, then the windows close;
 //!   - `open(cfg: &Config, app: Box<dyn App>) -> u64`: a window, shown in front unless
 //!     `cfg.hidden`; `front(id)`, `close(id)` (its runtime dropped, then its close callback from
 //!     `crate::shell::closed(id)`), `with_app(id, f: &mut dyn FnMut(&mut dyn App)) -> bool` (not
