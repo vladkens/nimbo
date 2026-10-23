@@ -902,6 +902,36 @@ pub fn range_from_utf16(s: &str, r: Range<usize>) -> Range<usize> {
   from_utf16(s, r.start)..from_utf16(s, r.end)
 }
 
+/// [from_utf16] for a shaper's many lookups (CoreText's and DirectWrite's string indices): a
+/// table of the byte offsets by UTF-16 offset, none for ASCII, where the two are the same.
+pub struct Utf16Bytes<'a> {
+  s: &'a str,
+  bytes: Vec<u32>,
+}
+
+impl<'a> Utf16Bytes<'a> {
+  pub fn new(s: &'a str) -> Self {
+    let bytes = match s.is_ascii() {
+      true => Vec::new(),
+      false => s
+        .char_indices()
+        .flat_map(|(i, c)| std::iter::repeat_n(i as u32, c.len_utf16()))
+        .chain([s.len() as u32])
+        .collect(),
+    };
+
+    Self { s, bytes }
+  }
+
+  /// The byte offset of UTF-16 offset `u`, as [from_utf16] gives it (ASCII: `u` itself).
+  pub fn at(&self, u: usize) -> u32 {
+    match self.bytes.is_empty() {
+      true => u as u32,
+      false => self.bytes.get(u).copied().unwrap_or(self.s.len() as u32),
+    }
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -1403,5 +1433,11 @@ mod tests {
     assert_eq!((from_utf16(s, 3), to_utf16(s, 2), from_utf16(s, 99)), (3, 1, 12));
     assert_eq!(range_to_utf16(s, 3..11), 2..6);
     assert_eq!(range_from_utf16(s, 2..6), 3..11);
+    let table = Utf16Bytes::new(s);
+    for u in 0..9 {
+      assert_eq!(table.at(u), from_utf16(s, u) as u32, "{u}");
+    }
+
+    assert_eq!((Utf16Bytes::new("ab").at(1), Utf16Bytes::new("ab").at(2)), (1, 2));
   }
 }

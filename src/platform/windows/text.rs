@@ -19,6 +19,7 @@ use windows_sys::Win32::Foundation::RECT;
 use windows_sys::core::{BOOL, GUID, HRESULT};
 
 use super::wide;
+use crate::text::edit::Utf16Bytes;
 use crate::text::{Font, Glyph, GlyphBox, Ink, Line, Metrics, Raster, Weight};
 
 // MARK: COM
@@ -639,20 +640,7 @@ pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {
     call!(layout, LAYOUT_METRICS, (*mut TextMetrics) -> HRESULT; &mut m);
   }
 
-  // UTF-16 offsets to bytes, unless they are the same.
-  let bytes: Vec<u32> = match s.is_ascii() {
-    true => Vec::new(),
-    false => s
-      .char_indices()
-      .flat_map(|(i, c)| std::iter::repeat_n(i as u32, c.len_utf16()))
-      .chain([s.len() as u32])
-      .collect(),
-  };
-
-  let at = |u: u32| match bytes.is_empty() {
-    true => u,
-    false => bytes.get(u as usize).copied().unwrap_or(s.len() as u32),
-  };
+  let bytes = Utf16Bytes::new(s);
   let mut glyphs = Vec::with_capacity(c.ids.len());
   let mut start = 0;
   for run in c.runs {
@@ -666,7 +654,7 @@ pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {
     start = end;
   }
 
-  let clusters = c.clusters.iter().map(|&u| at(u)).collect();
+  let clusters = c.clusters.iter().map(|&u| bytes.at(u as usize)).collect();
   Line { glyphs, clusters, width: m.width_trailing, ink: Ink::default(), epoch: 0 }
 }
 

@@ -22,6 +22,7 @@ use objc2_core_text::{
   CTFont, CTFontOrientation, CTFontSymbolicTraits, CTLine, CTRun, kCTFontAttributeName,
 };
 
+use crate::text::edit::Utf16Bytes;
 use crate::text::{Font, Glyph, GlyphBox, Ink, Line, Metrics, Raster, Weight};
 
 /// A CTFont at its point size.
@@ -87,15 +88,7 @@ pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {
   let width = unsafe { line.typographic_bounds(null, null, null) } as f32;
   let runs = unsafe { line.glyph_runs() };
   let runs = unsafe { runs.cast_unchecked::<CTRun>() };
-  // UTF-16 offsets (CoreText's string indices) to bytes, unless they are the same.
-  let bytes: Vec<u32> = match s.is_ascii() {
-    true => Vec::new(),
-    false => s
-      .char_indices()
-      .flat_map(|(i, c)| std::iter::repeat_n(i as u32, c.len_utf16()))
-      .chain([s.len() as u32])
-      .collect(),
-  };
+  let bytes = Utf16Bytes::new(s);
 
   let (mut glyphs, mut clusters) = (Vec::new(), Vec::new());
   for i in 0..runs.len() {
@@ -113,10 +106,7 @@ pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {
       run.positions(all, NonNull::new(pos.as_mut_ptr()).unwrap());
       run.string_indices(all, NonNull::new(idx.as_mut_ptr()).unwrap());
     }
-    let at = |&u: &CFIndex| match bytes.is_empty() {
-      true => u as u32,
-      false => bytes.get(u as usize).copied().unwrap_or(s.len() as u32),
-    };
+    let at = |&u: &CFIndex| bytes.at(u as usize);
     glyphs.extend(ids.iter().zip(&pos).map(|(&id, p)| Glyph {
       face,
       id,
