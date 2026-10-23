@@ -4,11 +4,8 @@
 //! view builds one, by their pixels' hash, and dropped after a frame that doesn't, so a view
 //! shows a logo without keeping an [crate::ImageId].
 
-use std::hash::{Hash, Hasher};
-
 use crate::scene::Images;
-use crate::text::FxHasher;
-use crate::ui::{Response, Style, Ui, UiState};
+use crate::ui::{Id, Response, Style, Ui, UiState};
 
 impl Ui<'_> {
   /// An image from straight (not premultiplied) RGBA pixels, `w * h * 4` bytes, top row first:
@@ -16,9 +13,7 @@ impl Ui<'_> {
   /// each frame does (the same pixels share one image), then dropped. The pixels are hashed each
   /// time to tell, which suits an icon or a logo; pictures that change go through [Images].
   pub fn rgba_image(&mut self, w: usize, h: usize, rgba: &[u8], style: Style) -> Response {
-    let mut hasher = FxHasher::default();
-    (w, h, rgba).hash(&mut hasher);
-    let key = hasher.finish();
+    let key = Id::of((w, h, rgba)).0;
     let image = match self.st.pictures.iter_mut().find(|p| p.0 == key) {
       Some(p) => {
         p.2 = true;

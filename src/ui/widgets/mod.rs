@@ -31,7 +31,7 @@ mod button;
 mod checkbox;
 mod field;
 pub mod icon;
-pub mod image;
+mod image;
 mod label;
 mod link;
 mod progress;

@@ -342,7 +342,9 @@ pub fn document(svg: &str) -> Result<(f32, String, bool), String> {
     }
 
     let (name, attrs) = attributes(tag)?;
-    let get = |k: &str| attrs.iter().find(|a| a.0 == k).map(|a| a.1);
+    // A value of `inherit` is the same as none.
+    let get =
+      |k: &str| attrs.iter().find(|a| a.0 == k).map(|a| a.1.trim()).filter(|&v| v != "inherit");
     if let Some(k) = ["transform", "style"].into_iter().find(|k| get(k).is_some()) {
       return Err(format!("<{name}> has a {k}"));
     }
@@ -352,18 +354,19 @@ pub fn document(svg: &str) -> Result<(f32, String, bool), String> {
       get("fill").map_or(filled, |f| f != "none"),
       get("fill-rule").map_or(even_odd, |r| r == "evenodd"),
     );
+    if name == "svg" {
+      let view = get("viewBox").ok_or("no viewBox")?;
+      let v = view.split(|c: char| c.is_whitespace() || c == ',').filter(|n| !n.is_empty());
+      let v: Vec<f32> = v.map(str::parse).collect::<Result<_, _>>().unwrap_or_default();
+      size = match v[..] {
+        [0.0, 0.0, w, h] if w == h && w > 0.0 => Some(w),
+        _ => return Err(format!("a viewBox not square from 0 0: {view}")),
+      };
+    }
+
     match name {
       "title" | "desc" => {}
       "svg" | "g" => {
-        if name == "svg" {
-          let view = get("viewBox").ok_or("no viewBox")?;
-          let v: Vec<f32> = view.split([' ', ',']).filter_map(|n| n.parse().ok()).collect();
-          size = match v[..] {
-            [0.0, 0.0, w, h] if w == h && w > 0.0 => Some(w),
-            _ => return Err(format!("a viewBox not square from 0 0: {view}")),
-          };
-        }
-
         if !tag.ends_with('/') {
           fills.push(fill);
         }
@@ -436,8 +439,9 @@ mod tests {
 
     // Spaces around `=`; fill and rule inherited from a group; a relative first move from the
     // origin.
-    let svg = r#"<svg viewBox = '0 0 24 24' fill="none"><g fill-rule="evenodd" fill="black">
-      <path d="M1 1h2v2H1Z"/><path d = "m5 5h2v2h-2z"/></g></svg>"#;
+    let svg = r#"<svg viewBox = '0
+      0 24 24' fill="none"><g fill-rule="evenodd" fill="black">
+      <path d="M1 1h2v2H1Z"/><path fill-rule="inherit" d = "m5 5h2v2h-2z"/></g></svg>"#;
     let (_, d, even_odd) = document(svg).unwrap();
     assert_eq!((d.as_str(), even_odd), ("M1 1h2v2H1Z M0 0m5 5h2v2h-2z", true));
     let mut out = Vec::new();
@@ -459,6 +463,8 @@ mod tests {
       (one(r#"<path fill="red"/>"#), "without d"),
       (r#"<svg viewBox="0 0 24 18"><path d="M1 1h2"/></svg>"#.into(), "not square"),
       (r#"<svg viewBox="2 0 24 24"><path d="M1 1h2"/></svg>"#.into(), "not square"),
+      (r#"<svg viewBox="0 0 x 24 24"><path d="M1 1h2"/></svg>"#.into(), "not square"),
+      (one(r#"<g fill="none"><path fill="inherit" d="M1 1h2"/></g>"#), "not filled"),
       (r#"<path d="M1 1h2"/>"#.into(), "no <svg>"),
       (one("<path d=\"M1 1h2\""), "unclosed"),
     ] {

@@ -179,9 +179,6 @@ pub struct Tree {
   index: HashMap<Id, u32, BuildHasherDefault<FxHasher>>,
   /// A grid's row heights while it is laid out.
   rows: Vec<f32>,
-  /// The height the root's content takes at its fit size, scroll areas at their content's
-  /// ([super::Ui::fit_window_height]).
-  pub fit_h: f32,
 }
 
 impl Tree {
@@ -273,8 +270,9 @@ impl Tree {
 }
 
 /// Lays out `t` in a window of `win`, snapping edges to pixels at `scale` (0 doesn't snap),
-/// sorts the overlays by z and indexes the nodes by id.
-pub fn layout(t: &mut Tree, win: Size, scale: f32, m: &mut dyn Measure) {
+/// sorts the overlays by z and indexes the nodes by id. Returns the height the root's content
+/// takes at its fit size, scroll areas at their content's ([super::Ui::fit_window_height]).
+pub fn layout(t: &mut Tree, win: Size, scale: f32, m: &mut dyn Measure) -> f32 {
   let n = t.nodes.len() as u32;
   let root = &mut t.nodes[0];
   root.end = n;
@@ -284,7 +282,7 @@ pub fn layout(t: &mut Tree, win: Size, scale: f32, m: &mut dyn Measure) {
   grow(t, 0, win);
   wrap(t, m);
   fit(t, 1, m);
-  t.fit_h = t.nodes[0].content[1];
+  let fit_h = t.nodes[0].content[1];
   grow(t, 1, win);
   place(t, win, scale);
   reveal(t, scale);
@@ -297,6 +295,8 @@ pub fn layout(t: &mut Tree, win: Size, scale: f32, m: &mut dyn Measure) {
       duplicate(n.id);
     }
   }
+
+  fit_h
 }
 
 /// The paint order of the overlay at node `i`: its own z, raised to that of every overlay it

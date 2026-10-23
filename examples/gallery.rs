@@ -144,13 +144,9 @@ impl Gallery {
         ui.disabled(true).search(&mut String::new(), "Off");
       });
       line(ui, "ICONS", |ui| {
-        ui.col(Style::new().gap(10.0), |ui| {
-          for icons in Icon::ALL.chunks(10) {
-            ui.row(Style::new().gap(10.0), |ui| {
-              for &(_, icon) in icons {
-                ui.icon_stroke(icon, 20.0, t.text, 1.6);
-              }
-            });
+        ui.grid(10, Style::new().gap(10.0), |ui| {
+          for (_, icon) in Icon::ALL {
+            ui.icon_stroke(icon, 20.0, t.text, 1.6);
           }
         });
       });
