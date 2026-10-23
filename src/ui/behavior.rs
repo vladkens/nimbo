@@ -580,7 +580,8 @@ fn drag(
 /// scrolled page): where a drag past the edges scrolls.
 fn visible(t: &super::Tree, id: Id) -> Option<Rect> {
   let mut i = t.find(id)? as usize;
-  let mut r = t.nodes[i].rect;
+  let n = &t.nodes[i];
+  let mut r = n.style.clip_rect(n.rect).unwrap_or(n.rect);
   while i != 0 {
     i = t.nodes[i].parent as usize;
     if let Some(c) = t.nodes[i].style.clip_rect(t.nodes[i].rect) {
