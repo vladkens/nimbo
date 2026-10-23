@@ -16,7 +16,7 @@
 use std::cell::{Cell, RefCell};
 use std::ffi::c_uint;
 use std::ptr::null_mut;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::sync::mpsc::{Sender, channel};
 use std::time::Instant;
 
@@ -181,16 +181,7 @@ fn connect(s: &Rc<State>) -> Result<P, String> {
 
   let mut signals = s.signals.borrow_mut();
   for (signal, cb) in [("Activated", on_activated as Fp), ("Deactivated", on_deactivated as Fp)] {
-    signals.push(dbus::subscribe(
-      bus,
-      PORTAL,
-      SHORTCUTS,
-      signal,
-      Some(PATH),
-      cb,
-      weak(s),
-      free_weak as Fp,
-    ));
+    signals.push(dbus::subscribe(bus, PORTAL, SHORTCUTS, signal, Some(PATH), cb, dbus::weak(s)));
   }
 
   Ok(bus)
@@ -224,16 +215,8 @@ fn request(s: &Rc<State>, method: &str, mut args: Vec<V>, done: Fp) {
 
   args.push(V::dict(opts));
   // Subscribed first: the response may come before the call returns.
-  let sub = dbus::subscribe(
-    s.bus.get(),
-    PORTAL,
-    REQUEST,
-    "Response",
-    Some(&path),
-    done,
-    weak(s),
-    free_weak as Fp,
-  );
+  let sub =
+    dbus::subscribe(s.bus.get(), PORTAL, REQUEST, "Response", Some(&path), done, dbus::weak(s));
   s.request.set(sub);
   s.listener.set(Listener::Starting);
   if let Err(e) = dbus::call(s.bus.get(), PORTAL, PATH, SHORTCUTS, method, V::Tuple(args), MS) {
@@ -339,22 +322,9 @@ pub fn keysym(key: Key) -> Option<String> {
 
 // MARK: Callbacks
 
-fn weak(s: &Rc<State>) -> P {
-  Box::into_raw(Box::new(Rc::downgrade(s))) as P
-}
-
-unsafe extern "C" fn free_weak(data: P) {
-  drop(unsafe { Box::from_raw(data as *mut Weak<State>) });
-}
-
-/// The state a callback's data points to, if it still lives.
-unsafe fn state(data: P) -> Option<Rc<State>> {
-  unsafe { &*(data as *const Weak<State>) }.upgrade()
-}
-
 /// A request's `Response(u code, a{sv} results)`: the state and both, the request over.
 unsafe fn response(args: P, data: P) -> Option<(Rc<State>, u32, Gv)> {
-  let s = unsafe { state(data) }?;
+  let s = unsafe { dbus::upgrade::<State>(data) }?;
   end_request(&s);
   let args = Gv::borrowed(args);
   Some((s, args.child(0).u32(), args.child(1)))
@@ -389,7 +359,7 @@ unsafe extern "C" fn on_bound(_: P, _: S, _: S, _: S, _: S, args: P, data: P) {
 
 /// `Activated` or `Deactivated(o session, s id, t timestamp, a{sv})` of our session's hotkey.
 unsafe fn edge(args: P, data: P, down: bool) {
-  let Some(s) = (unsafe { state(data) }) else { return };
+  let Some(s) = (unsafe { dbus::upgrade::<State>(data) }) else { return };
   let args = Gv::borrowed(args);
   let ours =
     s.session.borrow().as_deref() == Some(&args.child(0).str()) && args.child(1).str() == ID;

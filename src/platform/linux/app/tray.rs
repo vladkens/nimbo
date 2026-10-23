@@ -15,7 +15,7 @@
 use std::cell::{Cell, RefCell};
 use std::ffi::c_uint;
 use std::ptr::null;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::sync::OnceLock;
 
 use super::super::{Fp, P, S};
@@ -152,14 +152,13 @@ impl Tray {
     static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
     let name = format!("{SNI}-{}-{n}", std::process::id());
-    let data = || Box::into_raw(Box::new(Rc::downgrade(&self.0))) as P;
-    let free = free_weak as Fp;
+    let data = || dbus::weak(&self.0);
     let objects = [
-      dbus::export(conn, SNI_PATH, SNI_XML, SNI, vtable(), data(), free),
-      dbus::export(conn, MENU_PATH, MENU_XML, MENU, vtable(), data(), free),
+      dbus::export(conn, SNI_PATH, SNI_XML, SNI, vtable(), data()),
+      dbus::export(conn, MENU_PATH, MENU_XML, MENU, vtable(), data()),
     ];
-    let own = dbus::own(conn, &name, on_owned as Fp, null(), data(), free);
-    let watch = dbus::watch(conn, WATCHER, on_watcher as Fp, on_no_watcher as Fp, data(), free);
+    let own = dbus::own(conn, &name, on_owned as Fp, null(), data());
+    let watch = dbus::watch(conn, WATCHER, on_watcher as Fp, on_no_watcher as Fp, data());
     let (owned, watcher) = (Cell::new(false), Cell::new(false));
     Bus { conn, name, objects, own, watch, owned, watcher }
   }
@@ -428,11 +427,7 @@ fn vtable() -> &'static VTable {
 
 /// The tray a callback's data points to, if it still lives.
 unsafe fn tray(data: P) -> Option<Tray> {
-  unsafe { &*(data as *const Weak<Inner>) }.upgrade().map(Tray)
-}
-
-unsafe extern "C" fn free_weak(data: P) {
-  drop(unsafe { Box::from_raw(data as *mut Weak<Inner>) });
+  unsafe { dbus::upgrade(data) }.map(Tray)
 }
 
 #[allow(clippy::too_many_arguments)]
