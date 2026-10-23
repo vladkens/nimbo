@@ -8,17 +8,18 @@
 //!
 //! What a platform module provides (the `use` below fails to build when one is missing):
 //!
-//! - `pub mod shell`, the loop and the windows ([crate::shell] over it; ids are `u64`, the
-//!   callbacks `Box<dyn FnOnce(&mut Main)>`, all on the main thread unless noted):
+//! - `pub mod shell`, the loop and the windows ([crate::shell] over it, which keeps each window's
+//!   app type and close callback, and the quit hook; ids are `u64`, all on the main thread unless
+//!   noted):
 //!   - `run(info: &AppInfo, start: impl FnOnce(&mut Main))`: sets the app up, runs `start`, then
 //!     the loop until `quit` (not when the last window closes); `quit` in `start` skips the loop;
-//!     at the end the `on_quit` hook, then the windows close;
-//!   - `open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64`: a window, shown in front unless
-//!     `cfg.hidden`; `type_of(id) -> Option<TypeId>` (none once closed), `front(id)`, `close(id)`
-//!     (its runtime dropped, then its `on_close(id, f)` callback), `with_app(id, ty, f: &mut dyn
-//!     FnMut(&mut dyn App)) -> bool` (not while the window is busy up the stack; redraws);
-//!   - `set_presence(Presence)`, `on_reopen(Box<dyn FnMut(&mut Main)>)`, `on_quit(f)`,
-//!     `terminating() -> bool`, `quit()`;
+//!     at the end the quit hook (`crate::shell::quitting`), then the windows close;
+//!   - `open(cfg: &Config, app: Box<dyn App>) -> u64`: a window, shown in front unless
+//!     `cfg.hidden`; `front(id)`, `close(id)` (its runtime dropped, then its close callback from
+//!     `crate::shell::closed(id)`), `with_app(id, f: &mut dyn FnMut(&mut dyn App)) -> bool` (not
+//!     while the window is busy up the stack; redraws);
+//!   - `set_presence(Presence)`, `on_reopen(Box<dyn FnMut(&mut Main)>)`, `terminating() -> bool`,
+//!     `quit()`;
 //!   - `post(delay: Duration, f: Box<dyn FnOnce() + Send>)` from any thread, run by the loop also
 //!     in modal loops (a menu open, a live resize); `is_main() -> bool`.
 //!

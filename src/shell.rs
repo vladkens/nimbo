@@ -7,9 +7,11 @@
 //!
 //! Everything here runs on the main thread: [Main] is its token, given to the start closure, to
 //! [Proxy]'s closures and to the callbacks, and never leaves it. Each OS implements it in
-//! `platform/<os>` (macOS: `shell.rs`; Windows and Linux: `app/shell.rs`).
+//! `platform/<os>` (macOS: `shell.rs`; Windows and Linux: `app/shell.rs`); what they keep alike
+//! (each window's app type and close callback, the quit hook) is kept here.
 
 use std::any::TypeId;
+use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
@@ -61,8 +63,69 @@ static LOOPS: AtomicU64 = AtomicU64::new(0);
 
 fn running(run: impl FnOnce()) {
   LOOP.store(LOOPS.fetch_add(1, Ordering::Relaxed) + 1, Ordering::Release);
+  HOOKS.take();
   run();
+  HOOKS.take();
   LOOP.store(0, Ordering::Release);
+}
+
+pub(crate) type OnMain = Box<dyn FnOnce(&mut Main)>;
+
+/// What every platform's loop keeps alike: the open windows by id, each with its app's type and
+/// close callback, and the quit hook.
+#[derive(Default)]
+struct Hooks {
+  windows: Vec<(u64, TypeId, Option<OnMain>)>,
+  quit: Option<OnMain>,
+}
+
+thread_local! {
+  static HOOKS: RefCell<Hooks> = RefCell::default();
+}
+
+fn hooks<R>(f: impl FnOnce(&mut Hooks) -> R) -> R {
+  HOOKS.with_borrow_mut(f)
+}
+
+/// Opens a window running `app` (of type `ty`) and keeps its type.
+fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
+  let id = imp::open(cfg, app);
+  hooks(|h| h.windows.push((id, ty, None)));
+  id
+}
+
+/// The type of window `id`'s app; `None` once it closed.
+fn type_of(id: u64) -> Option<TypeId> {
+  hooks(|h| h.windows.iter().find(|w| w.0 == id).map(|w| w.1))
+}
+
+fn on_close(id: u64, f: OnMain) {
+  hooks(|h| {
+    if let Some(w) = h.windows.iter_mut().find(|w| w.0 == id) {
+      w.2 = Some(f);
+    }
+  });
+}
+
+/// The windows open, by id: for the platform to close them as the app ends.
+pub(crate) fn windows() -> Vec<u64> {
+  hooks(|h| h.windows.iter().map(|w| w.0).collect())
+}
+
+/// Window `id` closes: it is no longer open, and its close callback is given back, for the
+/// platform to run once it has let the window go.
+pub(crate) fn closed(id: u64) -> Option<OnMain> {
+  hooks(|h| {
+    let i = h.windows.iter().position(|w| w.0 == id)?;
+    h.windows.remove(i).2
+  })
+}
+
+/// The app ends: its quit hook runs, once.
+pub(crate) fn quitting() {
+  if let Some(f) = hooks(|h| h.quit.take()) {
+    f(&mut Main::here());
+  }
 }
 
 /// One window running `app` with the loop around it, which ends when the window closes or the
@@ -75,8 +138,8 @@ pub(crate) fn window(cfg: &Config, app: Box<dyn App>) {
   let info = AppInfo { id, name: cfg.title, presence: Presence::Regular };
   running(|| {
     imp::run(&info, |_| {
-      let id = imp::open(cfg, app, TypeId::of::<()>());
-      imp::on_close(id, Box::new(Main::quit));
+      let id = open(cfg, app, TypeId::of::<()>());
+      on_close(id, Box::new(Main::quit));
     })
   });
 }
@@ -96,14 +159,14 @@ impl Main {
   /// Opens a window running `app` with its own runtime, in front unless `cfg` is
   /// [hidden](Config::hidden).
   pub fn open<A: App + 'static>(&mut self, cfg: &Config, app: A) -> Window<A> {
-    let id = imp::open(cfg, Box::new(app), TypeId::of::<A>());
+    let id = open(cfg, Box::new(app), TypeId::of::<A>());
     Window::new(WindowId(id))
   }
 
   /// The window `id` if it is open and runs an `A`: for a [Proxy] closure, which gets the id
   /// from another thread.
   pub fn window<A: App + 'static>(&self, id: WindowId) -> Option<Window<A>> {
-    (imp::type_of(id.0)? == TypeId::of::<A>()).then(|| Window::new(id))
+    (type_of(id.0)? == TypeId::of::<A>()).then(|| Window::new(id))
   }
 
   /// Where the app shows besides its windows ([Presence]).
@@ -127,7 +190,7 @@ impl Main {
   /// [Main::quit] once the loop has stopped, or on a quit the system asks for, after which the
   /// process exits (see [app]). The place for the app's cleanup.
   pub fn on_quit(&mut self, f: impl FnOnce(&mut Main) + 'static) {
-    imp::on_quit(Box::new(f));
+    hooks(|h| h.quit = Some(Box::new(f)));
   }
 
   /// The system asked the app to quit: [Main::on_quit]'s hook runs next and the process exits.
@@ -168,7 +231,7 @@ impl<A: App + 'static> Window<A> {
 
   /// Not closed yet.
   pub fn is_open(&self) -> bool {
-    imp::type_of(self.id.0).is_some()
+    type_of(self.id.0).is_some()
   }
 
   /// Shows the window in front, restored if minimized, and the app with it.
@@ -183,18 +246,22 @@ impl<A: App + 'static> Window<A> {
 
   /// `f` runs when the window closes, by the user or [Window::close] (replacing an earlier one).
   pub fn on_close(&self, f: impl FnOnce(&mut Main) + 'static) {
-    imp::on_close(self.id.0, Box::new(f));
+    on_close(self.id.0, Box::new(f));
   }
 
   /// Runs `f` on the window's app now and redraws it: new data from outside the window. `None`
   /// when the window is closed, or busy further up the stack (called from inside its own event
   /// or view: there the app has itself already).
   pub fn with<R>(&self, f: impl FnOnce(&mut A) -> R) -> Option<R> {
+    if type_of(self.id.0) != Some(TypeId::of::<A>()) {
+      return None;
+    }
+
     let mut f = Some(f);
     let mut out = None;
-    imp::with_app(self.id.0, TypeId::of::<A>(), &mut |app| {
-      // SAFETY: the platform runs this only on a window opened with an `A` (its type id is
-      // checked against the one `open` stored), so the box holds an `A`.
+    imp::with_app(self.id.0, &mut |app| {
+      // SAFETY: the window was opened with an `A` (its type id is checked against the one
+      // `open` kept), so the box holds an `A`.
       let app = unsafe { &mut *(app as *mut dyn App as *mut A) };
       out = f.take().map(|f| f(app));
     });
@@ -249,5 +316,34 @@ impl Proxy {
       let _ = tx.send(f(main));
     });
     rx.recv_timeout(timeout).ok()
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use std::cell::Cell;
+  use std::rc::Rc;
+
+  use super::*;
+
+  /// The windows by id: a close callback set on one is given back once, as it closes; the quit
+  /// hook runs once.
+  #[test]
+  fn windows_and_hooks_by_id() {
+    hooks(|h| h.windows.extend([(1, TypeId::of::<u8>(), None), (2, TypeId::of::<u16>(), None)]));
+    on_close(2, Box::new(|_| {}));
+    on_close(3, Box::new(|_| {}));
+    assert_eq!((windows(), type_of(2), type_of(3)), (vec![1, 2], Some(TypeId::of::<u16>()), None));
+    assert!(closed(1).is_none());
+    assert!(closed(2).is_some());
+    assert!(closed(2).is_none());
+    assert_eq!((windows(), type_of(2)), (vec![], None));
+
+    let ran = Rc::new(Cell::new(0));
+    let r = ran.clone();
+    Main::here().on_quit(move |_| r.set(r.get() + 1));
+    quitting();
+    quitting();
+    assert_eq!(ran.get(), 1);
   }
 }

@@ -3,7 +3,7 @@
 //! What a menu-bar app needs on macOS besides its windows ([super::shell]): the status item and
 //! its menu ([tray]), global hotkeys ([hotkey]: an event tap with Carbon's hotkeys as the
 //! fallback), launch at login ([autostart]: SMAppService), work from other threads on the main
-//! queue ([post]), and the shell's app-wide state: the Dock ([Presence]), reopen and quit hooks.
+//! queue ([post]), and the shell's app-wide state: the Dock ([Presence]) and the reopen hook.
 
 pub mod autostart;
 pub mod hotkey;
@@ -19,13 +19,11 @@ use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 use crate::shell::{Main, Presence};
 
 type OnReopen = Box<dyn FnMut(&mut Main)>;
-type OnQuit = Box<dyn FnOnce(&mut Main)>;
 
 #[derive(Default)]
 struct State {
   presence: Presence,
   reopen: Option<OnReopen>,
-  on_quit: Option<OnQuit>,
 }
 
 thread_local! {
@@ -60,17 +58,6 @@ pub(super) fn reopened() {
   let Some(mut f) = STATE.with_borrow_mut(|s| s.reopen.take()) else { return };
   f(&mut Main::here());
   STATE.with_borrow_mut(|s| _ = s.reopen.get_or_insert(f));
-}
-
-pub fn on_quit(f: OnQuit) {
-  STATE.with_borrow_mut(|s| s.on_quit = Some(f));
-}
-
-/// The app ends: its quit hook runs, once.
-pub(super) fn quitting() {
-  if let Some(f) = STATE.with_borrow_mut(|s| s.on_quit.take()) {
-    f(&mut Main::here());
-  }
 }
 
 pub fn is_main() -> bool {

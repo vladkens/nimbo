@@ -9,9 +9,8 @@
 //! Modal loops (a menu, a live resize) dispatch its messages too, so posts run under them.
 //!
 //! Windows has no Dock: the taskbar shows the windows only, so [set_presence] changes nothing; a
-//! second launch starts a second process ([on_reopen] is never called yet).
+//! second launch starts a second process (the reopen hook never runs yet).
 
-use std::any::TypeId;
 use std::cell::RefCell;
 use std::ptr::{null, null_mut};
 use std::sync::Mutex;
@@ -32,8 +31,6 @@ use crate::Config;
 use crate::app::App;
 use crate::shell::{AppInfo, Main, Presence};
 
-type OnMain = Box<dyn FnOnce(&mut Main)>;
-type OnReopen = Box<dyn FnMut(&mut Main)>;
 type Job = Box<dyn FnOnce() + Send>;
 
 /// Work from any thread: lParam is a `Box<Job>`.
@@ -41,20 +38,11 @@ const WM_POST: u32 = WM_APP + 2;
 /// The tray icons' callback message ([tray]).
 pub(super) const WM_TRAY: u32 = WM_APP + 3;
 
-struct Entry {
-  id: u64,
-  hwnd: HWND,
-  ty: TypeId,
-  on_close: Option<OnMain>,
-}
-
 #[derive(Default)]
 struct Shell {
-  windows: Vec<Entry>,
+  /// The windows by id.
+  windows: Vec<(u64, HWND)>,
   next: u64,
-  on_quit: Option<OnMain>,
-  /// Stored for when a second launch can reach this one.
-  reopen: Option<OnReopen>,
   /// Work waiting for its delay, by timer id.
   later: Vec<(usize, Job)>,
   next_timer: usize,
@@ -155,11 +143,8 @@ fn make_host(name: &str) -> HWND {
 
 /// The app ends: its quit hook runs (once), then the windows close.
 fn finish() {
-  if let Some(f) = shell(|s| s.on_quit.take()) {
-    f(&mut Main::here());
-  }
-
-  for id in shell(|s| s.windows.iter().map(|w| w.id).collect::<Vec<_>>()) {
+  crate::shell::quitting();
+  for id in crate::shell::windows() {
     close(id);
   }
 }
@@ -175,13 +160,8 @@ pub fn quit() {
 /// Windows has no Dock: the taskbar follows the windows (see the module docs).
 pub fn set_presence(_: Presence) {}
 
-pub fn on_reopen(f: OnReopen) {
-  shell(|s| s.reopen = Some(f));
-}
-
-pub fn on_quit(f: OnMain) {
-  shell(|s| s.on_quit = Some(f));
-}
+/// A second launch is a second process: never called yet.
+pub fn on_reopen(_: Box<dyn FnMut(&mut Main)>) {}
 
 pub fn terminating() -> bool {
   shell(|s| s.terminating)
@@ -261,12 +241,12 @@ unsafe extern "system" fn host_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
 
 // MARK: Windows
 
-/// Opens a window running `app` (an app of type `ty`), in front unless `cfg.hidden`.
-pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
+/// Opens a window running `app`, in front unless `cfg.hidden`.
+pub fn open(cfg: &Config, app: Box<dyn App>) -> u64 {
   let hwnd = create(cfg, app);
   let id = shell(|s| {
     s.next += 1;
-    s.windows.push(Entry { id: s.next, hwnd, ty, on_close: None });
+    s.windows.push((s.next, hwnd));
     s.next
   });
   if !cfg.hidden {
@@ -277,12 +257,7 @@ pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
 }
 
 fn hwnd(id: u64) -> Option<HWND> {
-  shell(|s| s.windows.iter().find(|w| w.id == id).map(|w| w.hwnd))
-}
-
-/// The type of the app of window `id`; `None` once it closed.
-pub fn type_of(id: u64) -> Option<TypeId> {
-  shell(|s| s.windows.iter().find(|w| w.id == id).map(|w| w.ty))
+  shell(|s| s.windows.iter().find(|w| w.0 == id).map(|w| w.1))
 }
 
 /// Shows the window, restored if minimized, and asks for the foreground (which Windows grants
@@ -304,29 +279,21 @@ pub fn close(id: u64) {
   }
 }
 
-pub fn on_close(id: u64, f: OnMain) {
-  shell(|s| {
-    if let Some(w) = s.windows.iter_mut().find(|w| w.id == id) {
-      w.on_close = Some(f);
-    }
-  });
-}
-
 /// Window `hwnd` was destroyed: its entry goes, then its close callback runs. Nothing for a
 /// window the shell didn't open.
 pub(in super::super) fn destroyed(hwnd: HWND) {
-  let entry = shell(|s| {
-    let i = s.windows.iter().position(|w| w.hwnd == hwnd)?;
-    Some(s.windows.remove(i))
+  let id = shell(|s| {
+    let i = s.windows.iter().position(|w| w.1 == hwnd)?;
+    Some(s.windows.remove(i).0)
   });
-  if let Some(f) = entry.and_then(|e| e.on_close) {
+  if let Some(f) = id.and_then(crate::shell::closed) {
     f(&mut Main::here());
   }
 }
 
-/// Runs `f` on window `id`'s app if it is of type `ty` and not busy, then redraws the window.
-pub fn with_app(id: u64, ty: TypeId, f: &mut dyn FnMut(&mut dyn App)) -> bool {
-  let Some(hwnd) = hwnd(id).filter(|_| type_of(id) == Some(ty)) else { return false };
+/// Runs `f` on window `id`'s app if it is not busy, then redraws the window.
+pub fn with_app(id: u64, f: &mut dyn FnMut(&mut dyn App)) -> bool {
+  let Some(hwnd) = hwnd(id) else { return false };
   let done = with_window(hwnd, |w| {
     f(&mut *w.rt.app);
     w.rt.redraw();

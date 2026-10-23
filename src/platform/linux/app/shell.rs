@@ -5,11 +5,10 @@
 //! the default main context, which GLib makes safe to add from any thread and wakes for.
 //!
 //! Linux has no Dock: [Presence] changes nothing, the panel's task list shows the windows. A
-//! second launch is a second process ([on_reopen] is kept, never called), and the session's
+//! second launch is a second process (the reopen hook never runs), and the session's
 //! end (SIGTERM) is not caught: the quit hook runs after [quit] only.
 
-use std::any::TypeId;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::ffi::c_int;
 use std::sync::OnceLock;
 use std::thread::{self, ThreadId};
@@ -20,39 +19,17 @@ use crate::Config;
 use crate::app::App;
 use crate::shell::{AppInfo, Main, Presence};
 
-type OnMain = Box<dyn FnOnce(&mut Main)>;
-type OnReopen = Box<dyn FnMut(&mut Main)>;
-
-/// An open window's type, for [type_of], and its close callback.
-struct Open {
-  id: u64,
-  ty: TypeId,
-  on_close: Option<OnMain>,
-}
-
-#[derive(Default)]
-struct Shell {
-  info: Option<AppInfo>,
-  windows: Vec<Open>,
-  reopen: Option<OnReopen>,
-  on_quit: Option<OnMain>,
-}
-
 thread_local! {
-  static SHELL: RefCell<Shell> = RefCell::default();
+  /// The app running.
+  static INFO: Cell<Option<AppInfo>> = const { Cell::new(None) };
 }
 
 /// The thread GTK runs on.
 static MAIN: OnceLock<ThreadId> = OnceLock::new();
 
-fn shell<R>(f: impl FnOnce(&mut Shell) -> R) -> R {
-  SHELL.with_borrow_mut(f)
-}
-
 /// The app running ([crate::app]'s info); outside it, one named after the executable.
 pub(super) fn info() -> AppInfo {
-  let info = shell(|s| s.info);
-  info.unwrap_or(AppInfo { id: "nimbo", name: "nimbo", presence: Presence::Regular })
+  INFO.get().unwrap_or(AppInfo { id: "nimbo", name: "nimbo", presence: Presence::Regular })
 }
 
 /// Opens the display, runs `start`, then GTK's loop until [quit]; the quit hook, then the
@@ -64,30 +41,21 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
     std::process::exit(1);
   }
 
-  shell(|s| *s = Shell { info: Some(*info), ..Shell::default() });
+  INFO.set(Some(*info));
   start(&mut Main::here());
   super::super::main_loop();
-  if let Some(f) = shell(|s| s.on_quit.take()) {
-    f(&mut Main::here());
-  }
-
-  for id in shell(|s| s.windows.iter().map(|w| w.id).collect::<Vec<_>>()) {
+  crate::shell::quitting();
+  for id in crate::shell::windows() {
     closed(id, false);
   }
 
   super::super::reap();
-  shell(|s| s.info = None);
+  INFO.set(None);
 }
 
-/// Opens a window running `app` (of type `ty`), in front unless `cfg.hidden`.
-pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
-  let id = super::super::open(cfg, app).unwrap_or_else(|e| panic!("nimbo: the window title: {e}"));
-  shell(|s| s.windows.push(Open { id, ty, on_close: None }));
-  id
-}
-
-pub fn type_of(id: u64) -> Option<TypeId> {
-  shell(|s| s.windows.iter().find(|w| w.id == id).map(|w| w.ty))
+/// Opens a window running `app`, in front unless `cfg.hidden`.
+pub fn open(cfg: &Config, app: Box<dyn App>) -> u64 {
+  super::super::open(cfg, app).unwrap_or_else(|e| panic!("nimbo: the window title: {e}"))
 }
 
 pub fn front(id: u64) {
@@ -100,27 +68,15 @@ pub fn close(id: u64) {
 
 /// Window `id` goes ([super::super::close]), then its close callback runs.
 fn closed(id: u64, defer: bool) {
-  let open = shell(|s| Some(s.windows.remove(s.windows.iter().position(|w| w.id == id)?)));
+  let on_close = crate::shell::closed(id);
   super::super::close(id, defer);
-  if let Some(f) = open.and_then(|o| o.on_close) {
+  if let Some(f) = on_close {
     f(&mut Main::here());
   }
 }
 
-pub fn on_close(id: u64, f: OnMain) {
-  shell(|s| {
-    if let Some(w) = s.windows.iter_mut().find(|w| w.id == id) {
-      w.on_close = Some(f);
-    }
-  });
-}
-
-/// Runs `f` on window `id`'s app if it is of type `ty` and not busy, then redraws the window.
-pub fn with_app(id: u64, ty: TypeId, f: &mut dyn FnMut(&mut dyn App)) -> bool {
-  if type_of(id) != Some(ty) {
-    return false;
-  }
-
+/// Runs `f` on window `id`'s app if it is not busy, then redraws the window.
+pub fn with_app(id: u64, f: &mut dyn FnMut(&mut dyn App)) -> bool {
   let Some(win) = slot(id, |s| s.win.clone()) else { return false };
   as_window(id, || {
     let Ok(mut w) = win.try_borrow_mut() else { return false };
@@ -133,13 +89,8 @@ pub fn with_app(id: u64, ty: TypeId, f: &mut dyn FnMut(&mut dyn App)) -> bool {
 
 pub fn set_presence(_: Presence) {}
 
-pub fn on_reopen(f: OnReopen) {
-  shell(|s| s.reopen = Some(f));
-}
-
-pub fn on_quit(f: OnMain) {
-  shell(|s| s.on_quit = Some(f));
-}
+/// A second launch is a second process: never called.
+pub fn on_reopen(_: Box<dyn FnMut(&mut Main)>) {}
 
 pub fn terminating() -> bool {
   false

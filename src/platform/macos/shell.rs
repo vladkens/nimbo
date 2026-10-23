@@ -15,7 +15,6 @@
 //! All of it is in a thread local of the main thread. No borrow of it is held while app code
 //! runs (a callback, an app's `with`), so that code may open, close and front windows.
 
-use std::any::TypeId;
 use std::cell::{Cell, RefCell};
 
 use dispatch2::{DispatchQueue, MainThreadBound};
@@ -32,22 +31,18 @@ use objc2_foundation::{
   NSString,
 };
 
-pub use super::app::{is_main, on_quit, on_reopen, post, set_presence};
+pub use super::app::{is_main, on_reopen, post, set_presence};
 use super::view::View;
 use super::{Pasteboard, appearance, mtm};
 use crate::Config;
 use crate::app::{App, Clock, Event, Runtime};
 use crate::shell::{AppInfo, Main, Presence};
 
-type OnMain = Box<dyn FnOnce(&mut Main)>;
-
 struct Win {
   id: u64,
-  ty: TypeId,
   window: Retained<NSWindow>,
   view: Retained<View>,
   _delegate: Retained<WindowDelegate>,
-  on_close: Option<OnMain>,
   /// Shown at least once: it counts for the Dock while open.
   shown: bool,
 }
@@ -215,8 +210,8 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
 
 /// The app ends: its quit hook runs (once), then the windows close.
 fn finish() {
-  super::app::quitting();
-  for id in shell(|s| s.windows.iter().map(|w| w.id).collect::<Vec<_>>()) {
+  crate::shell::quitting();
+  for id in crate::shell::windows() {
     close(id);
   }
 }
@@ -324,8 +319,8 @@ fn views() -> Vec<Retained<View>> {
   shell(|s| s.windows.iter().map(|w| w.view.clone()).collect())
 }
 
-/// Opens a window running `app` (an app of type `ty`), in front unless `cfg.hidden`.
-pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
+/// Opens a window running `app`, in front unless `cfg.hidden`.
+pub fn open(cfg: &Config, app: Box<dyn App>) -> u64 {
   let mtm = mtm();
   let size = NSSize::new(cfg.size.w as f64, cfg.size.h as f64);
   let frame = NSRect::new(NSPoint::new(0.0, 0.0), size);
@@ -363,18 +358,13 @@ pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
   window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
   window.center();
   window.makeFirstResponder(Some(&view));
-  let win = Win { id, ty, window, view, _delegate: delegate, on_close: None, shown: false };
+  let win = Win { id, window, view, _delegate: delegate, shown: false };
   shell(|s| s.windows.push(win));
   if !cfg.hidden {
     front(id);
   }
 
   id
-}
-
-/// The type of the app of window `id`; `None` once it closed.
-pub fn type_of(id: u64) -> Option<TypeId> {
-  shell(|s| s.windows.iter().find(|w| w.id == id).map(|w| w.ty))
 }
 
 pub fn front(id: u64) {
@@ -405,14 +395,6 @@ pub fn close(id: u64) {
   window.close();
 }
 
-pub fn on_close(id: u64, f: OnMain) {
-  shell(|s| {
-    if let Some(w) = s.windows.iter_mut().find(|w| w.id == id) {
-      w.on_close = Some(f);
-    }
-  });
-}
-
 /// Window `id` closes: its runtime stops and goes (after AppKit's call in progress: [release]),
 /// the Dock follows, then its close callback runs.
 fn closed(id: u64) {
@@ -422,9 +404,10 @@ fn closed(id: u64) {
   }) else {
     return;
   };
+  let on_close = crate::shell::closed(id);
   win.view.stop();
   win.window.setDelegate(None);
-  let Win { window, view, _delegate, on_close, .. } = win;
+  let Win { window, view, _delegate, .. } = win;
   shell(|s| s.gone.push(Gone { window, _view: view, _delegate }));
   defer(release);
   super::app::sync_presence();
@@ -433,9 +416,9 @@ fn closed(id: u64) {
   }
 }
 
-/// Runs `f` on window `id`'s app if it is of type `ty` and not busy, then redraws the window.
-pub fn with_app(id: u64, ty: TypeId, f: &mut dyn FnMut(&mut dyn App)) -> bool {
-  let Some(view) = view(id).filter(|_| type_of(id) == Some(ty)) else { return false };
+/// Runs `f` on window `id`'s app if it is not busy, then redraws the window.
+pub fn with_app(id: u64, f: &mut dyn FnMut(&mut dyn App)) -> bool {
+  let Some(view) = view(id) else { return false };
   view.try_runtime(|rt| f(&mut *rt.app)).is_some()
 }
 
