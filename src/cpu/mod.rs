@@ -71,6 +71,9 @@ pub struct Renderer {
   /// Threads to draw a big frame with (the calling thread and the pool's); 1 draws on the
   /// calling thread.
   pub threads: usize,
+  /// Clears to transparent instead of opaque black: an overlay over the desktop
+  /// ([crate::Config::overlay]).
+  pub transparent: bool,
   /// The atlas epoch each atlas holds: coverage, colour.
   epochs: [u32; 2],
   /// Bumped when atlas or image pixels change under the same coordinates (an atlas reset, an
@@ -101,6 +104,7 @@ impl Renderer {
       color_atlas: Vec::new(),
       images: Vec::new(),
       threads,
+      transparent: false,
       epochs: [0; 2],
       generation: 0,
       size: (0, 0),
@@ -304,8 +308,9 @@ impl Renderer {
     assert!(stride >= w && px.len() >= stride * (h - 1) + w, "frame buffer too small");
     let atlas = Tex { data: &self.atlas, w: ATLAS_SIZE, h: ATLAS_SIZE };
     let color = Tex { data: &self.color_atlas, w: COLOR_ATLAS_SIZE, h: COLOR_ATLAS_SIZE };
-    let job =
-      Job { scene, items: &self.items, images: &self.images, atlas, color, scale: self.scale };
+    let (items, images, scale) = (&self.items, &self.images, self.scale);
+    let clear = if self.transparent { 0 } else { CLEAR };
+    let job = Job { scene, items, images, atlas, color, scale, clear };
     let rows = BAND as usize * stride;
     let px = &mut px[..stride * (h - 1) + w];
     let bands: Vec<(usize, &mut [u32])> = px.chunks_mut(rows).enumerate().collect();
@@ -406,6 +411,7 @@ struct Job<'a> {
   atlas: Tex<'a>,
   color: Tex<'a>,
   scale: f32,
+  clear: u32,
 }
 
 impl Job<'_> {
@@ -414,7 +420,7 @@ impl Job<'_> {
   fn draw(&self, t: &mut Target, bin: &[u32], clip: IRect) {
     let covers = |n: &u32| self.items[*n as usize].opaque.intersect(clip) == clip;
     let start = bin.iter().rposition(covers).unwrap_or_else(|| {
-      t.fill(clip, CLEAR);
+      t.fill(clip, self.clear);
       0
     });
     let layers = self.scene.layers();
@@ -534,6 +540,25 @@ mod tests {
     s.quad(Quad::new(Rect::new(30.0, 130.0, 40.0, 20.0), [1.0, 0.2, 0.2, 0.7]));
     s.pop_clip();
     s
+  }
+
+  /// An overlay's frame: nothing where the scene draws nothing, premultiplied where it draws
+  /// half through.
+  #[test]
+  fn a_transparent_frame_clears_to_nothing() {
+    let mut s = Scene::default();
+    s.quad(Quad::new(Rect::new(0.0, 0.0, 10.0, 10.0), [1.0, 0.0, 0.0, 0.5]));
+    let mut r = Renderer::new();
+    let size = Size::new(20.0, 10.0);
+    let opaque = r.snapshot(&s, size, 1.0);
+    r.transparent = true;
+    let px = r.snapshot(&s, size, 1.0);
+    let at = |p: &Pixels, x: usize| p.data[x * 4..x * 4 + 4].to_vec();
+    assert_eq!(at(&opaque, 15), [0, 0, 0, 255]);
+    assert_eq!(at(&px, 15), [0, 0, 0, 0]);
+    let [b, g, r, a] = at(&px, 5)[..] else { unreachable!() };
+    assert_eq!((b, g, a), (0, 0, 128));
+    assert!(r.abs_diff(a) <= 1, "premultiplied: {r} of {a}");
   }
 
   #[test]
