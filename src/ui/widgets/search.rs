@@ -41,7 +41,9 @@ impl Ui<'_> {
       self.focus(Some(id));
     }
 
-    let mut cleared = !off && self.clicked(x) && !text.is_empty();
+    // A click on the ⊗ clears what it was shown over, whatever the app set since.
+    let had = !text.is_empty();
+    let mut cleared = !off && self.clicked(x);
     if cleared {
       self.focus(Some(id));
     }
@@ -49,13 +51,14 @@ impl Ui<'_> {
     if let Some(k) = self.key_down(id) {
       let composing = self.state::<FieldState>(id).ed.marked().is_some();
       match k.key == Key::Named(NamedKey::Escape) && k.mods.is_empty() {
-        true if !text.is_empty() && !composing => cleared = true,
+        true if had && !composing => cleared = true,
         _ => self.pass(id),
       }
     }
 
     if cleared {
-      self.state::<FieldState>(id).clear(text);
+      let now = self.now;
+      self.state::<FieldState>(id).clear(text, now);
     }
 
     let mut b = self.text_field_behavior(id, text, false, false);
@@ -63,7 +66,7 @@ impl Ui<'_> {
       self.grab_keys(id);
     }
 
-    b.changed |= cleared;
+    b.changed |= cleared && had;
     b
   }
 
@@ -130,6 +133,8 @@ mod tests {
   use crate::{Modifiers, NamedKey};
 
   const NONE: Modifiers = Modifiers::empty();
+  /// Wider than the narrow field.
+  const HINT: &str = "Search models and history";
 
   /// A search field, the changes it reported, and the app's own Escape: what the field gives
   /// back. `narrow`: 40 in, half the rest wide, at most 100, and 60% of the window high;
@@ -161,7 +166,7 @@ mod tests {
       let t = ui.theme();
       let frame = t.search().frame;
       let style = match self.narrow {
-        true => t.search().frame(frame.w(pct(50.0)).max_w(100.0).h(pct(60.0))),
+        true => t.search().frame(frame.w(pct(50.0)).max_w(100.0).h(pct(60.0))).hint(HINT),
         false => t.search().hint("Search"),
       };
 
@@ -382,6 +387,37 @@ mod tests {
       h.key('z', crate::CMD);
       assert_eq!(h.app().text, "moon stars", "all selected: {select_all}");
     }
+  }
+
+  /// Cleared while scrolled to its end, the field scrolls back: the hint from its start.
+  #[test]
+  fn clearing_scrolls_back() {
+    let mut h = find(&"moon ".repeat(20));
+    h.app_mut().narrow = true;
+    h.frame();
+    h.click_id(Id::of("s"));
+    h.key(NamedKey::ArrowRight, crate::CMD);
+    h.frame();
+    let scroll = |h: &Harness<Find>| h.rt.ui.last.get(Id::of("s")).unwrap().scroll.x;
+    assert!(scroll(&h) > 0.0);
+    h.click_id(Id::of("s").key("clear"));
+    h.frame();
+    h.frame();
+    assert_eq!((h.text(Id::of("s").key("text")), scroll(&h)), (Some(HINT), 0.0));
+  }
+
+  /// Composing over a value the app just emptied: the ⊗ still shown clears the composition.
+  #[test]
+  fn clearing_takes_a_composition_over_an_empty_value() {
+    let mut h = find("moon");
+    h.click_id(Id::of("s"));
+    h.ime_mark("ni");
+    h.frame();
+    h.app_mut().text.clear();
+    h.click_id(Id::of("s").key("clear"));
+    h.frame();
+    assert_eq!(h.app().text, "");
+    assert_eq!(h.editor(Id::of("s")).map(|e| (e.text(), e.marked())), Some(("", None)));
   }
 
   /// The app's own value, set since the last frame, is cleared too.

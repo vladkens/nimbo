@@ -214,13 +214,19 @@ pub(crate) struct FieldState {
 
 impl FieldState {
   /// Clears the text as one edit that undoes, a composition dropped first, and the app's
-  /// `text` with it: a search field's ⊗ and Escape.
-  pub(crate) fn clear(&mut self, text: &mut String) {
+  /// `text` with it, at `now`: the caret shows and scrolls into view. A search field's ⊗ and
+  /// Escape.
+  pub(crate) fn clear(&mut self, text: &mut String, now: Duration) {
     self.ed.discard_marked();
-    self.ed.replace(0..self.ed.text().len(), "");
+    if !self.ed.text().is_empty() {
+      self.ed.replace(0..self.ed.text().len(), "");
+    }
+
     text.clear();
     self.held = None;
     synced(self, text);
+    self.blink = now;
+    reveal(self);
   }
 }
 
