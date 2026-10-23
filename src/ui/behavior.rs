@@ -212,6 +212,18 @@ pub(crate) struct FieldState {
   focused: bool,
 }
 
+impl FieldState {
+  /// Clears the text as one edit that undoes, a composition dropped first, and the app's
+  /// `text` with it: a search field's ⊗ and Escape.
+  pub(crate) fn clear(&mut self, text: &mut String) {
+    self.ed.discard_marked();
+    self.ed.replace(0..self.ed.text().len(), "");
+    text.clear();
+    self.held = None;
+    synced(self, text);
+  }
+}
+
 /// What a text field or selectable text got this frame, read before it is built; see the
 /// module's docs. [Ui::field_text] draws its text from it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

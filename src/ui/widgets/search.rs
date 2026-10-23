@@ -54,14 +54,8 @@ impl Ui<'_> {
       }
     }
 
-    // An edit of its own, undone as one, which the field writes back; a composition goes too.
     if cleared {
-      let ed = &mut self.state::<FieldState>(id).ed;
-      if ed.marked().is_some() {
-        ed.set_marked("", 0..0, None);
-      }
-
-      ed.replace(0..ed.text().len(), "");
+      self.state::<FieldState>(id).clear(text);
     }
 
     let mut b = self.text_field_behavior(id, text, false, false);
@@ -363,6 +357,42 @@ mod tests {
     assert_eq!(h.app().text, "");
     h.key('z', crate::CMD);
     assert_eq!(h.app().text, "moon");
+  }
+
+  /// A composition over a selection, cleared: one undo brings back the text from before it.
+  #[test]
+  fn clearing_a_composition_undoes_to_before_it() {
+    for select_all in [false, true] {
+      let mut h = find("");
+      h.click_id(Id::of("s"));
+      h.type_text("moon stars");
+      match select_all {
+        true => _ = h.key('a', crate::CMD),
+        false => {
+          h.key(NamedKey::ArrowLeft, crate::CMD);
+          h.key(NamedKey::ArrowRight, Modifiers::ALT | Modifiers::SHIFT);
+        }
+      }
+
+      h.ime_mark("ni");
+      h.frame();
+      h.click_id(Id::of("s").key("clear"));
+      h.frame();
+      assert_eq!(h.app().text, "");
+      h.key('z', crate::CMD);
+      assert_eq!(h.app().text, "moon stars", "all selected: {select_all}");
+    }
+  }
+
+  /// The app's own value, set since the last frame, is cleared too.
+  #[test]
+  fn clearing_wins_over_a_value_the_app_just_set() {
+    let mut h = find("moon stars");
+    h.app_mut().text = "sun".into();
+    h.click_id(Id::of("s").key("clear"));
+    h.frame();
+    assert_eq!(h.app().text, "");
+    assert_eq!(h.editor(Id::of("s")).unwrap().text(), "");
   }
 
   /// Another button on the ⊗ neither clears nor moves the focus.
