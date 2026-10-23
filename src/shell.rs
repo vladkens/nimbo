@@ -8,7 +8,7 @@
 //! Everything here runs on the main thread: [Main] is its token, given to the start closure, to
 //! [Proxy]'s closures and to the callbacks, and never leaves it. Each OS implements it in
 //! `platform/<os>` (macOS: `shell.rs`; Windows and Linux: `app/shell.rs`); what they keep alike
-//! (each window's app type and close callback, the quit hook) is kept here.
+//! (each window's app type and close callback, the reopen and quit hooks) is kept here.
 
 use std::any::TypeId;
 use std::cell::RefCell;
@@ -70,12 +70,14 @@ fn running(run: impl FnOnce()) {
 }
 
 pub(crate) type OnMain = Box<dyn FnOnce(&mut Main)>;
+type OnReopen = Box<dyn FnMut(&mut Main)>;
 
 /// What every platform's loop keeps alike: the open windows by id, each with its app's type and
-/// close callback, and the quit hook.
+/// close callback, and the reopen and quit hooks.
 #[derive(Default)]
 struct Hooks {
   windows: Vec<(u64, TypeId, Option<OnMain>)>,
+  reopen: Option<OnReopen>,
   quit: Option<OnMain>,
 }
 
@@ -87,11 +89,10 @@ fn hooks<R>(f: impl FnOnce(&mut Hooks) -> R) -> R {
   HOOKS.with_borrow_mut(f)
 }
 
-/// Opens a window running `app` (of type `ty`) and keeps its type.
-fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
-  let id = imp::open(cfg, app);
+/// The platform opened window `id`, running an app of type `ty`: kept where the platform keeps
+/// it, before the window can run app code.
+pub(crate) fn opened(id: u64, ty: TypeId) {
   hooks(|h| h.windows.push((id, ty, None)));
-  id
 }
 
 /// The type of window `id`'s app; `None` once it closed.
@@ -120,6 +121,14 @@ pub(crate) fn closed(id: u64) -> Option<OnMain> {
   })
 }
 
+/// The app was opened again: its reopen hook runs, kept for the next time.
+#[cfg(target_os = "macos")]
+pub(crate) fn reopened() {
+  let Some(mut f) = hooks(|h| h.reopen.take()) else { return };
+  f(&mut Main::here());
+  hooks(|h| _ = h.reopen.get_or_insert(f));
+}
+
 /// The app ends: its quit hook runs (once), then the platform's `close` closes each window.
 pub(crate) fn finish(close: impl Fn(u64)) {
   if let Some(f) = hooks(|h| h.quit.take()) {
@@ -141,7 +150,7 @@ pub(crate) fn window(cfg: &Config, app: Box<dyn App>) {
   let info = AppInfo { id, name: cfg.title, presence: Presence::Regular };
   running(|| {
     imp::run(&info, |_| {
-      let id = open(cfg, app, TypeId::of::<()>());
+      let id = imp::open(cfg, app, TypeId::of::<()>());
       on_close(id, Box::new(Main::quit));
     })
   });
@@ -162,7 +171,7 @@ impl Main {
   /// Opens a window running `app` with its own runtime, in front unless `cfg` is
   /// [hidden](Config::hidden).
   pub fn open<A: App + 'static>(&mut self, cfg: &Config, app: A) -> Window<A> {
-    let id = open(cfg, Box::new(app), TypeId::of::<A>());
+    let id = imp::open(cfg, Box::new(app), TypeId::of::<A>());
     Window::new(WindowId(id))
   }
 
@@ -181,7 +190,7 @@ impl Main {
   /// Spotlight, `open`), as for a second launch: a menu-bar app shows its settings. macOS only
   /// for now: Windows and Linux start a second process.
   pub fn on_reopen(&mut self, f: impl FnMut(&mut Main) + 'static) {
-    imp::on_reopen(Box::new(f));
+    hooks(|h| h.reopen = Some(Box::new(f)));
   }
 
   /// Closes the windows and ends the loop once the work already queued is done: [app] returns.
@@ -350,5 +359,15 @@ mod tests {
     finish(|id| closing.set(id));
     finish(|_| {});
     assert_eq!((ran.get(), closing.get()), (1, 4));
+
+    // The reopen hook is kept after it runs.
+    #[cfg(target_os = "macos")]
+    {
+      let r = ran.clone();
+      Main::here().on_reopen(move |_| r.set(r.get() + 1));
+      reopened();
+      reopened();
+      assert_eq!(ran.get(), 3);
+    }
   }
 }

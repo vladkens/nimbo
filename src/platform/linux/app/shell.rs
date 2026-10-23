@@ -8,6 +8,7 @@
 //! second launch is a second process (the reopen hook never runs), and the session's
 //! end (SIGTERM) is not caught: the quit hook runs after [quit] only.
 
+use std::any::TypeId;
 use std::cell::Cell;
 use std::ffi::c_int;
 use std::sync::OnceLock;
@@ -50,9 +51,11 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
   INFO.set(None);
 }
 
-/// Opens a window running `app`, in front unless `cfg.hidden`.
-pub fn open(cfg: &Config, app: Box<dyn App>) -> u64 {
-  super::super::open(cfg, app).unwrap_or_else(|e| panic!("nimbo: the window title: {e}"))
+/// Opens a window running `app` (an app of type `ty`), in front unless `cfg.hidden`.
+pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
+  let id = super::super::open(cfg, app).unwrap_or_else(|e| panic!("nimbo: the window title: {e}"));
+  crate::shell::opened(id, ty);
+  id
 }
 
 pub fn front(id: u64) {
@@ -85,9 +88,6 @@ pub fn with_app(id: u64, f: &mut dyn FnMut(&mut dyn App)) -> bool {
 }
 
 pub fn set_presence(_: Presence) {}
-
-/// A second launch is a second process: never called.
-pub fn on_reopen(_: Box<dyn FnMut(&mut Main)>) {}
 
 pub fn terminating() -> bool {
   false

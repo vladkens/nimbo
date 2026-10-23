@@ -3,41 +3,33 @@
 //! What a menu-bar app needs on macOS besides its windows ([super::shell]): the status item and
 //! its menu ([tray]), global hotkeys ([hotkey]: an event tap with Carbon's hotkeys as the
 //! fallback), launch at login ([autostart]: SMAppService), work from other threads on the main
-//! queue ([post]), and the shell's app-wide state: the Dock ([Presence]) and the reopen hook.
+//! queue ([post]), and the Dock ([Presence]).
 
 pub mod autostart;
 pub mod hotkey;
 pub mod tray;
 
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::time::Duration;
 
 use dispatch2::{DispatchQueue, DispatchTime};
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
 
-use crate::shell::{Main, Presence};
-
-type OnReopen = Box<dyn FnMut(&mut Main)>;
-
-#[derive(Default)]
-struct State {
-  presence: Presence,
-  reopen: Option<OnReopen>,
-}
+use crate::shell::Presence;
 
 thread_local! {
-  static STATE: RefCell<State> = RefCell::default();
+  static PRESENCE: Cell<Presence> = const { Cell::new(Presence::Regular) };
 }
 
 pub fn set_presence(p: Presence) {
-  STATE.with_borrow_mut(|s| s.presence = p);
+  PRESENCE.set(p);
   sync_presence();
 }
 
 /// Regular while the app is or a window is shown, else accessory (no Dock icon, no ⌘Tab).
 pub(super) fn sync_presence() {
-  let regular = STATE.with_borrow(|s| s.presence == Presence::Regular) || super::shell::any_shown();
+  let regular = PRESENCE.get() == Presence::Regular || super::shell::any_shown();
   let policy = match regular {
     true => NSApplicationActivationPolicy::Regular,
     false => NSApplicationActivationPolicy::Accessory,
@@ -47,17 +39,6 @@ pub(super) fn sync_presence() {
   if ns_app.activationPolicy() != policy {
     ns_app.setActivationPolicy(policy);
   }
-}
-
-pub fn on_reopen(f: OnReopen) {
-  STATE.with_borrow_mut(|s| s.reopen = Some(f));
-}
-
-/// The app was opened again: its reopen hook runs, kept for the next time.
-pub(super) fn reopened() {
-  let Some(mut f) = STATE.with_borrow_mut(|s| s.reopen.take()) else { return };
-  f(&mut Main::here());
-  STATE.with_borrow_mut(|s| _ = s.reopen.get_or_insert(f));
 }
 
 pub fn is_main() -> bool {

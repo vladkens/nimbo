@@ -14,12 +14,13 @@
 //!   - `run(info: &AppInfo, start: impl FnOnce(&mut Main))`: sets the app up, runs `start`, then
 //!     the loop until `quit` (not when the last window closes); `quit` in `start` skips the loop;
 //!     at the end `crate::shell::finish(close)`: the quit hook, then the windows close;
-//!   - `open(cfg: &Config, app: Box<dyn App>) -> u64`: a window, shown in front unless
+//!   - `open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64`: a window, kept with
+//!     `crate::shell::opened(id, ty)` where the platform keeps it, shown in front unless
 //!     `cfg.hidden`; `front(id)`, `close(id)` (its runtime dropped, then its close callback from
 //!     `crate::shell::closed(id)`), `with_app(id, f: &mut dyn FnMut(&mut dyn App)) -> bool` (not
 //!     while the window is busy up the stack; redraws);
-//!   - `set_presence(Presence)`, `on_reopen(Box<dyn FnMut(&mut Main)>)`, `terminating() -> bool`,
-//!     `quit()`;
+//!   - `set_presence(Presence)`, `terminating() -> bool`, `quit()`; a second launch, where the OS
+//!     tells (macOS), runs `crate::shell::reopened`;
 //!   - `post(delay: Duration, f: Box<dyn FnOnce() + Send>)` from any thread, run by the loop also
 //!     in modal loops (a menu open, a live resize); `is_main() -> bool`.
 //!

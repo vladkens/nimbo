@@ -15,6 +15,7 @@
 //! All of it is in a thread local of the main thread. No borrow of it is held while app code
 //! runs (a callback, an app's `with`), so that code may open, close and front windows.
 
+use std::any::TypeId;
 use std::cell::{Cell, RefCell};
 
 use dispatch2::{DispatchQueue, MainThreadBound};
@@ -31,7 +32,7 @@ use objc2_foundation::{
   NSString,
 };
 
-pub use super::app::{is_main, on_reopen, post, set_presence};
+pub use super::app::{is_main, post, set_presence};
 use super::view::View;
 use super::{Pasteboard, appearance, mtm};
 use crate::Config;
@@ -118,7 +119,7 @@ define_class!(
     /// Opened again while it runs: LaunchServices starts no second process but tells.
     #[unsafe(method(applicationShouldHandleReopen:hasVisibleWindows:))]
     fn should_handle_reopen(&self, _app: &NSApplication, _visible: bool) -> bool {
-      defer(super::app::reopened);
+      defer(crate::shell::reopened);
       false
     }
   }
@@ -311,8 +312,8 @@ fn views() -> Vec<Retained<View>> {
   shell(|s| s.windows.iter().map(|w| w.view.clone()).collect())
 }
 
-/// Opens a window running `app`, in front unless `cfg.hidden`.
-pub fn open(cfg: &Config, app: Box<dyn App>) -> u64 {
+/// Opens a window running `app` (an app of type `ty`), in front unless `cfg.hidden`.
+pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
   let mtm = mtm();
   let size = NSSize::new(cfg.size.w as f64, cfg.size.h as f64);
   let frame = NSRect::new(NSPoint::new(0.0, 0.0), size);
@@ -352,6 +353,7 @@ pub fn open(cfg: &Config, app: Box<dyn App>) -> u64 {
   window.makeFirstResponder(Some(&view));
   let win = Win { id, window, view, _delegate: delegate, shown: false };
   shell(|s| s.windows.push(win));
+  crate::shell::opened(id, ty);
   if !cfg.hidden {
     front(id);
   }

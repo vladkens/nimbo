@@ -11,6 +11,7 @@
 //! Windows has no Dock: the taskbar shows the windows only, so [set_presence] changes nothing; a
 //! second launch starts a second process (the reopen hook never runs yet).
 
+use std::any::TypeId;
 use std::cell::RefCell;
 use std::ptr::{null, null_mut};
 use std::sync::Mutex;
@@ -152,9 +153,6 @@ pub fn quit() {
 /// Windows has no Dock: the taskbar follows the windows (see the module docs).
 pub fn set_presence(_: Presence) {}
 
-/// A second launch is a second process: never called yet.
-pub fn on_reopen(_: Box<dyn FnMut(&mut Main)>) {}
-
 pub fn terminating() -> bool {
   shell(|s| s.terminating)
 }
@@ -233,14 +231,15 @@ unsafe extern "system" fn host_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
 
 // MARK: Windows
 
-/// Opens a window running `app`, in front unless `cfg.hidden`.
-pub fn open(cfg: &Config, app: Box<dyn App>) -> u64 {
+/// Opens a window running `app` (an app of type `ty`), in front unless `cfg.hidden`.
+pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
   let hwnd = create(cfg, app);
   let id = shell(|s| {
     s.next += 1;
     s.windows.push((s.next, hwnd));
     s.next
   });
+  crate::shell::opened(id, ty);
   if !cfg.hidden {
     front(id);
   }
