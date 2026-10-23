@@ -13,7 +13,9 @@
 //! An app with no window, or more than one, starts with [app]: windows on demand ([Main::open])
 //! and overlays, HUDs over every app ([Config::overlay]), work from other threads ([Proxy]), and
 //! what a tray app needs besides: an icon with a menu ([tray]), global hotkeys ([hotkey]), its
-//! folders ([paths]) and launch at login ([autostart]).
+//! folders ([paths]) and launch at login ([autostart]); and to reach other apps: links and files
+//! opened or shown ([open]), the OS's permissions ([permissions]), keys posted to the app in focus
+//! ([keys::post]) and the clipboard ([SystemClipboard]).
 //!
 //! macOS 14 is the least it runs on (`NSApplication`'s `activate`, `NSView`'s display link): build
 //! apps with `MACOSX_DEPLOYMENT_TARGET=14.0`.
@@ -24,7 +26,9 @@ pub mod cpu;
 pub mod harness;
 pub mod hotkey;
 pub mod keys;
+pub mod open;
 pub mod paths;
+pub mod permissions;
 pub mod platform;
 mod png;
 pub mod scene;
@@ -38,7 +42,7 @@ use std::path::PathBuf;
 
 pub use app::{
   App, Appearance, Clipboard, Clock, Cx, Event, Ime, MemClipboard, MouseButton, Phase, Runtime,
-  WHEEL_LINE, Waker,
+  SystemClipboard, WHEEL_LINE, Waker,
 };
 pub use harness::Harness;
 /// Keys' W3C UI Events names: [Code] a key's place, [NamedKey] a key that types nothing,

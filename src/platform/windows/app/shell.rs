@@ -68,7 +68,7 @@ static MAIN: AtomicU32 = AtomicU32::new(0);
 static HOST: Mutex<isize> = Mutex::new(0);
 
 /// The shell's window: null while no app runs.
-pub(super) fn host() -> HWND {
+pub(in super::super) fn host() -> HWND {
   HOST.lock().map_or(0, |h| *h) as HWND
 }
 

@@ -28,7 +28,7 @@ KINDS = ("code", "docs", "comments", "tests", "blank")
 # The code lines each part may have: a platform, the UI core (ui/: the tree, layout, input,
 # paint, theme), its widgets and containers (ui/widgets, ui/containers: add-ons over it), the
 # text system (text/: shaping, the glyph atlas, the editing model), the app platform (its
-# portable part: the shell, tray, hotkeys, paths, launch at login; and each OS's
+# portable part: the shell, tray, hotkeys, paths, launch at login, opening, permissions; and each OS's
 # platform/<os>/app) and the core (the rest of src/). Raising one is a decision recorded in its
 # PR.
 BUDGETS = {
@@ -39,10 +39,10 @@ BUDGETS = {
   "widgets": 2940,
   "text": 1180,
   "core": 3460,
-  "app/shared": 660,
-  "app/macos": 1130,
-  "app/windows": 1050,
-  "app/linux": 930,
+  "app/shared": 720,
+  "app/macos": 1210,
+  "app/windows": 1120,
+  "app/linux": 1040,
 }
 # Modules that count against a budget of another name ("app", src/app.rs, is the core's seams).
 # The settings form and the dialog are add-ons over the widgets, as the containers are.
@@ -51,7 +51,7 @@ PARTS = {
   "ui/containers": "widgets",
   "ui/form": "widgets",
   "ui/dialog": "widgets",
-  **{m: "app/shared" for m in ("shell", "tray", "hotkey", "paths", "autostart")},
+  **{m: "app/shared" for m in ("shell", "tray", "hotkey", "paths", "autostart", "open", "permissions")},
 }
 
 

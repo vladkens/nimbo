@@ -448,7 +448,7 @@ fn mods_label(m: Modifiers, mac: bool) -> String {
   held.map(|r| if mac { r.2.to_string() } else { format!("{}+", r.3) }).collect()
 }
 
-fn lower(c: char) -> char {
+pub(crate) fn lower(c: char) -> char {
   c.to_lowercase().next().unwrap_or(c)
 }
 
@@ -844,6 +844,38 @@ pub fn printable(s: &str) -> bool {
   !s.is_empty() && s.chars().all(|c| !c.is_control() && !('\u{f700}'..='\u{f8ff}').contains(&c))
 }
 
+// MARK: Posting keys
+
+/// Sends shortcut `s` to the app in focus as key presses, as if typed: `cmd+v` pastes there. A
+/// character is the key that types it on the layout in use (on macOS with ⌘ held, as apps match
+/// ⌘ shortcuts: ⌘V on a Russian layout, or in Dvorak), with Shift added where it needs it
+/// (`cmd++`); a named key is its key. On the main thread.
+///
+/// | | how | needs |
+/// |---|---|---|
+/// | macOS | `CGEvent`s posted at the HID level, the modifiers as their flags | Accessibility ([crate::permissions::accessibility]); Secure Input may swallow them |
+/// | Windows | `SendInput`: the modifier keys down, the key, the modifiers up | an app in focus that does not run elevated above this one |
+/// | Linux | XTest (`libXtst`, loaded at run time) on X11 | X11: on Wayland it fails, no protocol lets an app type into another |
+pub fn post(s: Shortcut) -> Result<(), String> {
+  crate::platform::post::post(s)
+}
+
+/// The presses that send `key` with `mods`, where the modifier keys are pressed too (Windows,
+/// X11): each modifier down (`modkey` its key), the key down and up, the modifiers up in reverse.
+#[cfg(any(test, not(target_os = "macos")))]
+pub(crate) fn strokes<K: Copy>(
+  mods: Modifiers,
+  key: K,
+  modkey: impl Fn(Modifiers) -> K,
+) -> Vec<(K, bool)> {
+  let all = [Modifiers::CONTROL, Modifiers::ALT, Modifiers::SHIFT, Modifiers::META];
+  let held: Vec<K> = all.into_iter().filter(|&m| mods.contains(m)).map(modkey).collect();
+  let mut out: Vec<_> = held.iter().map(|&k| (k, true)).collect();
+  out.extend([(key, true), (key, false)]);
+  out.extend(held.iter().rev().map(|&k| (k, false)));
+  out
+}
+
 #[cfg(test)]
 mod tests {
   use NamedKey as N;
@@ -864,6 +896,15 @@ mod tests {
     }
   }
 
+  /// Ctrl-Shift-V as Windows and X11 get it: the modifiers around the key, let go in reverse.
+  #[test]
+  fn posted_keys_hold_the_modifiers_around_the_key() {
+    let name = |m: Modifiers| if m == Modifiers::SHIFT { "shift" } else { "ctrl" };
+    let s = strokes(Modifiers::CONTROL | Modifiers::SHIFT, "v", name);
+    let want = [("ctrl", true), ("shift", true), ("v", true), ("v", false), ("shift", false)];
+    assert_eq!(s, [&want[..], &[("ctrl", false)]].concat());
+    assert_eq!(strokes(Modifiers::empty(), "a", name), [("a", true), ("a", false)]);
+  }
   #[test]
   fn parses_shortcuts_in_the_app() {
     let k = |key, mods| Ok(Shortcut { key, mods });

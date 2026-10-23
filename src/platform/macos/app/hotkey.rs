@@ -255,7 +255,7 @@ impl Hotkeys {
     out.listener_error = s.tap_error.lock().unwrap().clone();
     out.fallback = self.carbon.registered();
     out.fallback_error = self.carbon_error.clone();
-    out.secure_input = carbon::secure_input();
+    out.secure_input = super::permissions::secure_input();
     out.counts.listener = n(&s.tap_events);
     out.counts.fallback = n(&s.carbon_events);
     out.counts.fallback_repeats = n(&s.carbon_repeats);

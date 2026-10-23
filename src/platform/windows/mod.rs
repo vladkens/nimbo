@@ -25,7 +25,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-pub use app::{autostart, hotkey, shell, tray};
+pub use app::{autostart, hotkey, open, post, shell, tray};
 use keyboard_types::Modifiers;
 pub use settings::appearance;
 use windows_sys::Win32::Foundation::{
@@ -956,6 +956,13 @@ impl Clipboard for WinClipboard {
 
     unsafe { CloseClipboard() };
   }
+}
+
+/// The system clipboard outside a window, through the app's hidden window; `None` while no app
+/// runs: a clipboard opened for no window can't be written.
+pub fn clipboard() -> Option<Box<dyn Clipboard>> {
+  let host = app::shell::host();
+  (!host.is_null()).then(|| Box::new(WinClipboard::new(host)) as Box<dyn Clipboard>)
 }
 
 /// The text of UTF-16 `units` up to the first NUL, or all of them without one.

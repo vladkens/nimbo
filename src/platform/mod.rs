@@ -91,6 +91,17 @@
 //!
 //!   The tray, hotkeys and autostart live in `app/` on each OS (on Windows and Linux with the
 //!   shell), sized apart from the window layer (`scripts/size.py`).
+//! - `pub mod open` ([crate::open]): `url(&str)`, `path(&Path)` and `reveal(&Path)` (an absolute
+//!   path), each `-> Result<(), String>` without waiting for the app it starts; `file_manager() ->
+//!   &'static str`.
+//! - `pub mod post` ([crate::keys::post]): `post(Shortcut) -> Result<(), String>`, the shortcut as
+//!   key events to the app in focus, its character found on the layout in use.
+//! - `pub fn clipboard() -> Option<Box<dyn Clipboard>>`: the system clipboard outside a window
+//!   ([crate::SystemClipboard]), `None` while the platform can't reach it (no app running).
+//! - macOS only, `pub mod permissions` ([crate::permissions]): `accessibility(prompt: bool) ->
+//!   bool`, `secure_input() -> bool`.
+//!
+//!   `open`, `post` and `permissions` live in `app/` on each OS too.
 //! - `pub fn appearance() -> Appearance` ([crate::Appearance]): `dark`, and `accent` in sRGB or
 //!   `None` when the OS has none or the user left it to apps (macOS: `effectiveAppearance` matched
 //!   against Aqua / DarkAqua, `controlAccentColor` unless Multicolor; on the main thread only,
@@ -149,7 +160,9 @@ compile_error!("nimbo runs on macOS, Windows and Linux");
 use std::time::{Duration, Instant};
 
 pub use imp::appearance;
-pub(crate) use imp::{autostart, hotkey, perf_cores, shell, text, tray};
+#[cfg(target_os = "macos")]
+pub(crate) use imp::permissions;
+pub(crate) use imp::{autostart, clipboard, hotkey, open, perf_cores, post, shell, text, tray};
 #[cfg(any(test, target_os = "windows", target_os = "linux"))]
 use keyboard_types::Code;
 
