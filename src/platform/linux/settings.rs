@@ -13,7 +13,7 @@ use std::ptr::{null, null_mut};
 use std::sync::OnceLock;
 
 use super::dl::fns;
-use super::{Fp, P, S, busy, connect, lib, with};
+use super::{Fp, P, S, connect, each, lib};
 use crate::app::{Appearance, Event};
 
 const PORTAL: &CStr = c"org.freedesktop.portal.Desktop";
@@ -109,14 +109,15 @@ unsafe extern "C" fn on_portal(_: P, _: S, _: S, _: S, _: S, _: P, _: P) {
   unsafe { deliver(null_mut()) };
 }
 
-/// Sends the appearance now; while the window is busy (a paste waits), again in a moment.
+/// Sends the appearance to every window now; while one is busy (a paste waits), again in a
+/// moment.
 unsafe extern "C" fn deliver(_: P) -> c_int {
-  let sent = with(false, |w| {
-    w.send(Event::Appearance(appearance()));
-    true
+  let look = appearance();
+  let missed = each(|w| {
+    w.send(Event::Appearance(look));
   });
 
-  if !sent && busy() {
+  if missed {
     let f = &api().expect("loaded before its callbacks").f;
     unsafe { (f.g_timeout_add)(100, deliver as Fp, null_mut()) };
   }

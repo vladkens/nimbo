@@ -3,13 +3,14 @@
 //! The macOS platform: NSApplication and its windows ([shell]), each window's content our NSView
 //! ([view]: input, cursors, display link and timers, occlusion, present through [surface]), the
 //! keyboard layout ([keyboard]), the clipboard on NSPasteboard, the CoreText text backend
-//! ([text]) and the performance cores.
+//! ([text]) and the performance cores; the tray, global hotkeys and launch at login in [app].
 //! macOS 14 or later: the app's activation and the view's display link need it.
 
 mod view;
 
+mod app;
 mod keyboard;
-mod shell;
+pub mod shell;
 mod surface;
 pub mod text;
 
@@ -23,8 +24,8 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSArray, NSString, NSUserDefaults, ns_string};
 
-use crate::Config;
-use crate::app::{App, Appearance, Clipboard};
+pub use self::app::{autostart, hotkey, tray};
+use crate::app::{Appearance, Clipboard};
 
 /// The system clipboard, plain text only.
 pub struct Pasteboard;
@@ -40,15 +41,6 @@ impl Clipboard for Pasteboard {
     pb.clearContents();
     pb.setString_forType(&NSString::from_str(s), unsafe { NSPasteboardTypeString });
   }
-}
-
-/// Opens the app's window and runs the AppKit event loop until it closes or the app quits: the
-/// shell with one window.
-pub fn run(cfg: &Config, app: Box<dyn App>) {
-  shell::run(cfg.title, || {
-    let id = shell::open(cfg, app);
-    shell::on_close(id, Box::new(shell::quit));
-  });
 }
 
 /// The app's effective appearance (light or dark Aqua, as System Settings sets it unless the

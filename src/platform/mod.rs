@@ -8,10 +8,23 @@
 //!
 //! What a platform module provides (the `use` below fails to build when one is missing):
 //!
-//! - `pub fn run(cfg: &Config, app: Box<dyn App>)`: opens one window and runs the event loop until
-//!   it closes or the app quits ([crate::Cx::quit]); macOS builds it on its app shell (`shell.rs`).
-//!   Each window owns a [crate::Runtime] made with `Runtime::new(app, cfg.size, scale,
-//!   Clock::real(), Box::new(<its clipboard>))`, and:
+//! - `pub mod shell`, the loop and the windows ([crate::shell] over it; ids are `u64`, the
+//!   callbacks `Box<dyn FnOnce(&mut Main)>`, all on the main thread unless noted):
+//!   - `run(info: &AppInfo, start: impl FnOnce(&mut Main))`: sets the app up, runs `start`, then
+//!     the loop until `quit` (not when the last window closes); `quit` in `start` skips the loop;
+//!     at the end the `on_quit` hook, then the windows close;
+//!   - `open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64`: a window, shown in front unless
+//!     `cfg.hidden`; `type_of(id) -> Option<TypeId>` (none once closed), `front(id)`, `close(id)`
+//!     (its runtime dropped, then its `on_close(id, f)` callback), `with_app(id, ty, f: &mut dyn
+//!     FnMut(&mut dyn App)) -> bool` (not while the window is busy up the stack; redraws);
+//!   - `set_presence(Presence)`, `on_reopen(Box<dyn FnMut(&mut Main)>)`, `on_quit(f)`,
+//!     `terminating() -> bool`, `quit()`;
+//!   - `post(delay: Duration, f: Box<dyn FnOnce() + Send>)` from any thread, run by the loop also
+//!     in modal loops (a menu open, a live resize); `is_main() -> bool`.
+//!
+//!   [crate::run] is one window whose close quits ([crate::shell] `window`). A window's app that
+//!   quits ([crate::Cx::quit]) quits the app. Each window owns a [crate::Runtime] made with
+//!   `Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(<its clipboard>))`, and:
 //!   - window: `cfg.title`, `cfg.size` in points (content area), `cfg.resizable`, the least content
 //!     size `cfg.min()` (macOS: `contentMinSize`, Windows: `WM_GETMINMAXINFO`, Linux: the drawing
 //!     area's size request); minimal app menu where the OS has one (macOS: Quit);
@@ -53,6 +66,20 @@
 //!     dark setting or accent colour changes (macOS: `viewDidChangeEffectiveAppearance`,
 //!     `NSSystemColorsDidChangeNotification`); the runtime drops repeats. The theme follows it
 //!     unless the app set one.
+//! - `pub mod tray` ([crate::tray]): `Tray: Clone` with `new(icon, tooltip)`, `detached(icon,
+//!   tooltip)` (nothing on screen, for tests), `set_icon`, `set_tooltip`, `set_menu(&Menu)` (held
+//!   while the menu is open, the last one set when it closes), `on_open(OnOpen)`,
+//!   `on_item(OnItem)`, and for tests `describe() -> Vec<String>`, `opening()`, `closing()`,
+//!   `choose(path: &[usize])`; `available() -> Result<(), String>`.
+//! - `pub mod hotkey` ([crate::hotkey]): `Hotkeys` with `new(on: OnEdge)` (`on` runs on a thread of
+//!   its own), `set(&mut self, Option<Hotkey>) -> Result<(), String>` (`None`: no hotkey; `Err`
+//!   when the OS can't take it), `start(&mut self) -> Result<(), String>` (the listener), and
+//!   `status(&self, &mut Status)` filling the listener, fallback, secure input and counts.
+//! - `pub mod autostart` ([crate::autostart]): `available()`, `state(&AppInfo)`, `set(&AppInfo,
+//!   on)`, `open_settings()`.
+//!
+//!   The tray, hotkeys and autostart live in `app/` on each OS (on Windows and Linux with the
+//!   shell), sized apart from the window layer (`scripts/size.py`).
 //! - `pub fn appearance() -> Appearance` ([crate::Appearance]): `dark`, and `accent` in sRGB or
 //!   `None` when the OS has none or the user left it to apps (macOS: `effectiveAppearance` matched
 //!   against Aqua / DarkAqua, `controlAccentColor` unless Multicolor). Stubs return
@@ -110,8 +137,8 @@ compile_error!("nimbo runs on macOS, Windows and Linux");
 #[cfg(any(test, target_os = "windows"))]
 use std::time::{Duration, Instant};
 
-pub use imp::{appearance, run};
-pub(crate) use imp::{perf_cores, text};
+pub use imp::appearance;
+pub(crate) use imp::{autostart, hotkey, perf_cores, shell, text, tray};
 #[cfg(any(test, target_os = "windows", target_os = "linux"))]
 use keyboard_types::Code;
 

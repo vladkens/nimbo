@@ -10,17 +10,27 @@
 //! ([cpu]). Examples start with [run], which opens a window, or with `--shot <file.png>` runs the
 //! harness instead (in the dark appearance unless `--appearance light`).
 //!
+//! An app with no window, or more than one, starts with [app]: windows on demand ([Main::open]),
+//! work from other threads ([Proxy]), and what a tray app needs besides: an icon with a menu
+//! ([tray]), global hotkeys ([hotkey]), its folders ([paths]) and launch at login ([autostart]).
+//!
 //! macOS 14 is the least it runs on (`NSApplication`'s `activate`, `NSView`'s display link): build
 //! apps with `MACOSX_DEPLOYMENT_TARGET=14.0`.
 
 pub mod app;
+pub mod autostart;
 pub mod cpu;
 pub mod harness;
+pub mod hotkey;
 pub mod keys;
+pub mod paths;
 pub mod platform;
 mod png;
 pub mod scene;
+pub mod shell;
+pub mod svg;
 pub mod text;
+pub mod tray;
 pub mod ui;
 
 use std::path::PathBuf;
@@ -40,6 +50,7 @@ pub use keys::{
 pub use scene::{
   Color, Frame, ImageId, Images, Point, Quad, Rect, Scene, Segment, Size, alpha, mix, rgb,
 };
+pub use shell::{AppInfo, Main, Presence, Proxy, Window, WindowId, app};
 pub use text::edit::{Editor, Lines, Mono, Sel};
 pub use text::{Font, Weight};
 pub use ui::{
@@ -58,6 +69,8 @@ pub struct Config {
   pub min_size: Size,
   /// The window can be resized (the default).
   pub resizable: bool,
+  /// Opened without showing ([Config::hidden]) until [Window::front].
+  pub hidden: bool,
 }
 
 impl Config {
@@ -66,7 +79,7 @@ impl Config {
 
   pub const fn new(title: &'static str, w: f32, h: f32) -> Self {
     let (size, min_size) = (Size::new(w, h), Self::MIN_SIZE);
-    Self { title, size, min_size, resizable: true }
+    Self { title, size, min_size, resizable: true, hidden: false }
   }
 
   /// The least content size the user can resize the window to, [Config::MIN_SIZE] unless set.
@@ -82,6 +95,11 @@ impl Config {
   /// A window of a fixed size: a calculator, a dialog.
   pub const fn fixed(self) -> Self {
     Self { resizable: false, ..self }
+  }
+
+  /// A window [Main::open] makes without showing it, until [Window::front].
+  pub const fn hidden(self) -> Self {
+    Self { hidden: true, ..self }
   }
 }
 
@@ -151,7 +169,7 @@ pub fn run<A: App + 'static>(cfg: Config, app: A, script: impl FnOnce(&mut Harne
     eprintln!("{e}\n{USAGE}");
     std::process::exit(2);
   });
-  let Some(path) = &args.shot else { return platform::run(&cfg, Box::new(app)) };
+  let Some(path) = &args.shot else { return shell::window(&cfg, Box::new(app)) };
 
   let mut h = harness(&cfg, app, &args);
   script(&mut h);

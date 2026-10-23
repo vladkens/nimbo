@@ -19,7 +19,9 @@ use std::sync::OnceLock;
 use keyboard_types::Modifiers;
 
 use super::dl::fns;
-use super::{Fp, P, TRUE, Win, busy, connect, gtk, keys, lib, with};
+use super::{
+  CURRENT, Fp, P, TRUE, Win, as_window, busy, connect, gtk, keys, lib, window_busy, with,
+};
 use crate::app::{Event, Ime, MouseButton, Phase, WHEEL_LINE};
 use crate::scene::{Point, Rect};
 use crate::ui::Id;
@@ -174,17 +176,21 @@ fn gdk() -> &'static Gdk {
 
 thread_local! {
   /// Events that came while the window was busy, copied, to run after it in order; set while
-  /// they run, so a callback among them adds to the queue rather than running it again.
-  static STASH: RefCell<VecDeque<P>> = const { RefCell::new(VecDeque::new()) };
+  /// they run, so a callback among them adds to the queue rather than running it again. Each
+  /// with the window it came to.
+  static STASH: RefCell<VecDeque<(u64, P)>> = const { RefCell::new(VecDeque::new()) };
   static REPLAYING: Cell<bool> = const { Cell::new(false) };
   /// Text the input context committed during a key press.
   static TYPED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
-  /// The input method's commits and preedits, sent once the window is free ([Win::drain_ime]).
-  static IME: RefCell<VecDeque<Ime>> = const { RefCell::new(VecDeque::new()) };
+  /// The input methods' commits and preedits, by window, sent once it is free
+  /// ([Win::drain_ime]).
+  static IME: RefCell<VecDeque<(u64, Ime)>> = const { RefCell::new(VecDeque::new()) };
   /// The idle callback after an empty preedit runs: it goes out too.
   static FLUSH: Cell<bool> = const { Cell::new(false) };
-  /// The input context made last ([new_ime]): an older one's signals are dropped.
+  /// The number of the input context made last ([new_ime]), and the live ones' windows: a
+  /// context let go stays mute ([owner]).
   static IME_GEN: Cell<usize> = const { Cell::new(0) };
+  static LIVE: RefCell<Vec<(usize, u64)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// The last press: its button, the event's time (milliseconds, wrapping), place and click count.
@@ -220,11 +226,15 @@ pub struct Input {
   ime_call: bool,
   /// The window has the keyboard focus: the keymap's modifiers are ours.
   focused: bool,
+  /// The window's id, and its input context's number ([new_ime]).
+  id: u64,
+  ime_n: usize,
 }
 
 impl Input {
-  pub fn new() -> Self {
+  pub fn new(id: u64) -> Self {
     let g = gdk();
+    let (ime, ime_n) = new_ime(null_mut(), id);
     let im = unsafe { (g.gtk_im_context_simple_new)() };
     unsafe { connect(im, c"commit", on_commit as Fp, 0) };
 
@@ -239,13 +249,15 @@ impl Input {
       pinch: 1.0,
       held: Vec::new(),
       im,
-      ime: new_ime(null_mut()),
+      ime,
       ime_on: None,
       caret: None,
       window: null_mut(),
       ime_marked: false,
       ime_call: false,
       focused: false,
+      id,
+      ime_n,
     }
   }
 
@@ -270,8 +282,11 @@ impl Input {
       (g.g_object_unref)(self.ime);
     }
 
-    IME.with_borrow_mut(|q| q.clear());
-    (self.ime, self.caret) = (new_ime(self.window), None);
+    let id = self.id;
+    LIVE.with_borrow_mut(|l| l.retain(|e| e.0 != self.ime_n));
+    IME.with_borrow_mut(|q| q.retain(|e| e.0 != id));
+    (self.ime, self.ime_n) = new_ime(self.window, id);
+    self.caret = None;
   }
 }
 
@@ -281,7 +296,8 @@ pub unsafe extern "C" fn on_event(_: P, ev: P, _: P) -> c_int {
   match with(None, |w| Some(w.event(ev))) {
     Some(used) => used as c_int,
     None if busy() => {
-      STASH.with_borrow_mut(|s| s.push_back(unsafe { (gdk().gdk_event_copy)(ev) }));
+      let copy = unsafe { (gdk().gdk_event_copy)(ev) };
+      STASH.with_borrow_mut(|s| s.push_back((CURRENT.get(), copy)));
       TRUE
     }
     None => 0,
@@ -290,27 +306,43 @@ pub unsafe extern "C" fn on_event(_: P, ev: P, _: P) -> c_int {
 
 impl Drop for Input {
   fn drop(&mut self) {
+    LIVE.with_borrow_mut(|l| l.retain(|e| e.0 != self.ime_n));
     for im in [self.im, self.ime] {
       unsafe { (gdk().g_object_unref)(im) };
     }
   }
 }
 
-/// Runs the events that waited for the window, oldest first, unless they already run further
-/// up the stack.
+/// Runs the events that waited for their window, oldest first, unless they already run further
+/// up the stack; stops at one whose window is still busy (another window's callback ran during
+/// its paste), which the window's own call runs once it returns.
 pub fn replay() {
   if REPLAYING.replace(true) {
     return;
   }
 
-  while let Some(ev) = STASH.with_borrow_mut(|s| s.pop_front()) {
-    unsafe {
-      on_event(null_mut(), ev, null_mut());
-      (gdk().gdk_event_free)(ev);
-    }
-  }
-
+  drain(&STASH, window_busy, |id, ev| {
+    as_window(id, || unsafe { on_event(null_mut(), ev, null_mut()) });
+    unsafe { (gdk().gdk_event_free)(ev) };
+  });
   REPLAYING.set(false);
+}
+
+/// Runs `queue`'s items in order, each with its window's id, while that window isn't `busy`:
+/// the first one that is stays first.
+fn drain<T: Copy>(
+  queue: &'static std::thread::LocalKey<RefCell<VecDeque<(u64, T)>>>,
+  busy: impl Fn(u64) -> bool,
+  mut run: impl FnMut(u64, T),
+) {
+  while let Some((id, item)) = queue.with_borrow(|q| q.front().copied()) {
+    if busy(id) {
+      break;
+    }
+
+    queue.with_borrow_mut(|q| q.pop_front());
+    run(id, item);
+  }
 }
 
 /// The default display's keymap.
@@ -340,12 +372,13 @@ unsafe extern "C" fn on_commit(_: P, s: *const c_char, _: P) {
 }
 
 /// A GtkIMMulticontext on `window` (none yet: set when the area is realized), its commits and
-/// preedits queued for the window.
-fn new_ime(window: P) -> P {
+/// preedits queued for window `id`; and its number.
+fn new_ime(window: P, id: u64) -> (P, usize) {
   let g = gdk();
   let ime = unsafe { (g.gtk_im_multicontext_new)() };
   let n = IME_GEN.get() + 1;
   IME_GEN.set(n);
+  LIVE.with_borrow_mut(|l| l.push((n, id)));
   // Each handler gets its context's number: one kept alive by a reply under way stays mute.
   let connect = |signal: &CStr, cb: Fp| unsafe {
     let free = std::ptr::null();
@@ -359,37 +392,41 @@ fn new_ime(window: P) -> P {
     }
   }
 
-  ime
+  (ime, n)
 }
 
-/// Queues an input method's event. An empty preedit right before a commit goes: GTK clears the
-/// preedit before committing, and the commit replaces the marked text in one step.
-fn queue(q: &mut VecDeque<Ime>, ime: Ime) {
+/// The window of live input context `n`; none for one let go.
+fn owner(n: P) -> Option<u64> {
+  LIVE.with_borrow(|l| l.iter().find(|e| e.0 == n as usize).map(|e| e.1))
+}
+
+/// Queues an input method's event for window `id`. An empty preedit right before a commit goes:
+/// GTK clears the preedit before committing, and the commit replaces the marked text in one step.
+fn queue(q: &mut VecDeque<(u64, Ime)>, id: u64, ime: Ime) {
+  let last = q.iter().rposition(|e| e.0 == id);
   if let Ime::Commit { .. } = ime
-    && matches!(q.back(), Some(Ime::Mark { text, .. }) if text.is_empty())
+    && let Some(i) = last
+    && matches!(&q[i].1, Ime::Mark { text, .. } if text.is_empty())
   {
-    q.pop_back();
+    q.remove(i);
   }
 
-  q.push_back(ime);
+  q.push_back((id, ime));
 }
 
 /// The input method committed text: queued, then sent as soon as the window is free (now,
 /// unless a key press of ours is under way).
 unsafe extern "C" fn on_ime_commit(_: P, s: *const c_char, n: P) {
-  if n as usize != IME_GEN.get() {
-    return;
-  }
-
+  let Some(id) = owner(n) else { return };
   let text = unsafe { CStr::from_ptr(s) }.to_string_lossy().into_owned();
-  IME.with_borrow_mut(|q| queue(q, Ime::Commit { text, replace: None }));
-  with((), |_| {});
+  IME.with_borrow_mut(|q| queue(q, id, Ime::Commit { text, replace: None }));
+  as_window(id, || with((), |_| {}));
 }
 
 /// An empty preedit no commit followed: the composition was cancelled.
-unsafe extern "C" fn on_ime_idle(_: P) -> c_int {
+unsafe extern "C" fn on_ime_idle(id: P) -> c_int {
   FLUSH.set(true);
-  with((), |_| {});
+  as_window(id as u64, || with((), |_| {}));
   FLUSH.set(false);
   0
 }
@@ -397,9 +434,7 @@ unsafe extern "C" fn on_ime_idle(_: P) -> c_int {
 /// The preedit changed: the text being composed and the input method's caret in it (in
 /// characters; [Ime] counts UTF-16).
 unsafe extern "C" fn on_preedit(im: P, n: P) {
-  if n as usize != IME_GEN.get() {
-    return;
-  }
+  let Some(id) = owner(n) else { return };
 
   let g = gdk();
   let (mut s, mut cursor) = (null_mut(), 0);
@@ -412,10 +447,10 @@ unsafe extern "C" fn on_preedit(im: P, n: P) {
   let at = text.chars().take(cursor.max(0) as usize).map(char::len_utf16).sum::<usize>();
   // An empty one waits for the commit that may follow it ([queue]), until GDK's events ran.
   let empty = text.is_empty();
-  IME.with_borrow_mut(|q| queue(q, Ime::Mark { text, sel: at..at, replace: None }));
+  IME.with_borrow_mut(|q| queue(q, id, Ime::Mark { text, sel: at..at, replace: None }));
   match empty {
-    true => _ = unsafe { (g.g_idle_add)(on_ime_idle as Fp, null_mut()) },
-    false => with((), |_| {}),
+    true => _ = unsafe { (g.g_idle_add)(on_ime_idle as Fp, id as P) },
+    false => as_window(id, || with((), |_| {})),
   }
 }
 
@@ -592,10 +627,12 @@ impl Win {
   /// (GTK reports one after every commit too).
   pub(super) fn drain_ime(&mut self) {
     // An empty preedit last waits for its idle callback, in case a commit follows.
-    let flush = FLUSH.get();
-    let next = |q: &mut VecDeque<Ime>| {
-      let waits = q.len() == 1 && matches!(&q[0], Ime::Mark { text, .. } if text.is_empty());
-      if waits && !flush { None } else { q.pop_front() }
+    let (flush, id) = (FLUSH.get(), self.input.id);
+    let next = |q: &mut VecDeque<(u64, Ime)>| {
+      let mut ours = q.iter().enumerate().filter(|e| e.1.0 == id).map(|e| e.0);
+      let (first, more) = (ours.next()?, ours.next().is_some());
+      let empty = matches!(&q[first].1, Ime::Mark { text, .. } if text.is_empty());
+      if empty && !more && !flush { None } else { q.remove(first).map(|e| e.1) }
     };
     while let Some(ime) = IME.with_borrow_mut(next) {
       let empty = matches!(&ime, Ime::Mark { text, .. } if text.is_empty());
@@ -796,6 +833,22 @@ fn phase(scrolling: &mut bool, precise: bool, stop: bool, gap: u32) -> Phase {
 mod tests {
   use super::*;
 
+  thread_local! {
+    static QUEUE: RefCell<VecDeque<(u64, u32)>> = RefCell::new(VecDeque::from([(1, 10), (2, 20), (1, 11)]));
+  }
+
+  /// Window 2 is busy (waiting for a paste): window 1's first event runs, then the replay stops
+  /// at window 2's, in order, rather than queuing it again forever.
+  #[test]
+  fn replay_stops_at_a_busy_window() {
+    let mut ran = Vec::new();
+    drain(&QUEUE, |id| id == 2, |id, ev| ran.push((id, ev)));
+    assert_eq!(ran, [(1, 10)]);
+    assert_eq!(QUEUE.with_borrow(|q| q.clone()), [(2, 20), (1, 11)]);
+    drain(&QUEUE, |_| false, |id, ev| ran.push((id, ev)));
+    assert_eq!(ran, [(1, 10), (2, 20), (1, 11)]);
+  }
+
   /// Presses 600 ms apart are two clicks even when handled together; a second within 400 ms is
   /// a double click, across the clock's wrap too.
   #[test]
@@ -817,13 +870,16 @@ mod tests {
     let commit = Ime::Commit { text: "你".into(), replace: None };
     let mut q = VecDeque::new();
     for ime in [mark("ni"), mark(""), commit.clone()] {
-      queue(&mut q, ime);
+      queue(&mut q, 1, ime);
     }
 
-    assert_eq!(q, [mark("ni"), commit.clone()]);
+    assert_eq!(q, [(1, mark("ni")), (1, commit.clone())]);
     // Alone, it stays: a cancel.
-    queue(&mut q, mark(""));
-    assert_eq!(q.back(), Some(&mark("")));
+    queue(&mut q, 1, mark(""));
+    assert_eq!(q.back(), Some(&(1, mark(""))));
+    // Another window's commit leaves it: each window's events are its own.
+    queue(&mut q, 2, commit.clone());
+    assert_eq!(q.len(), 4);
   }
 
   #[test]
