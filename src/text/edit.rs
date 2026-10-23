@@ -753,6 +753,15 @@ impl Editor {
     }
   }
 
+  /// Drops the marked text and puts back what it replaced, with the selection from before:
+  /// as if nothing was composed, no undo step.
+  pub fn discard_marked(&mut self) {
+    if let Some(m) = self.marked.take() {
+      self.text.replace_range(m.range, &m.removed);
+      (self.sel, self.goal, self.run) = (m.before, None, None);
+    }
+  }
+
   /// Keeps the marked text as it is (`unmarkText`).
   pub fn unmark(&mut self) {
     if let Some(m) = &self.marked {
@@ -1440,5 +1449,16 @@ mod tests {
 
     let ascii = Utf16Bytes::new("ab");
     assert_eq!((ascii.at(1), ascii.at(2), ascii.at(99), Utf16Bytes::new("").at(1)), (1, 2, 2, 0));
+  }
+
+  #[test]
+  fn discarding_marked_text_puts_back_what_it_replaced() {
+    let mut e = Editor::new("moon stars");
+    e.select(Sel::new(0, 4));
+    e.set_marked("ni", 2..2, None);
+    assert_eq!(e.text(), "ni stars");
+    e.discard_marked();
+    let got = (e.text(), e.sel(), e.marked(), e.can_undo());
+    assert_eq!(got, ("moon stars", Sel::new(0, 4), None, false));
   }
 }
