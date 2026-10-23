@@ -13,30 +13,6 @@ include = ["/src/**/*.rs", "/Cargo.toml", "/Cargo.lock", "/LICENSE", "/readme.md
 keywords = ["gui", "ui", "desktop", "widgets", "toolkit"]
 categories = ["gui"]
 
-[[test]]
-name = "counter"
-harness = false
-
-[[test]]
-name = "fields"
-harness = false
-
-[[test]]
-name = "input"
-harness = false
-
-[[test]]
-name = "lists"
-harness = false
-
-[[test]]
-name = "shapes"
-harness = false
-
-[[test]]
-name = "text"
-harness = false
-
 [dependencies]
 keyboard-types = { version = "0.8.3", default-features = false }
 

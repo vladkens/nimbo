@@ -1,8 +1,8 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Harness scenario for `examples/fields.rs`: typing, moves by word and line, selection by Shift
-//! and the mouse (click, drag, double and triple click), the clipboard, undo and redo, Enter and
-//! Tab; an input method's composition kept out of the value until committed, a commit and a new
+//! Tests of `examples/fields.rs` through the harness: typing, moves by word and line, selection by
+//! Shift and the mouse (click, drag, double and triple click), the clipboard, undo and redo, Enter
+//! and Tab; an input method's composition kept out of the value until committed, a commit and a new
 //! composition back to back, a value the app sets meanwhile held, Enter completing it; the
 //! password's dots, clipboard and input method; the placeholder, the disabled field, selectable
 //! text, and the caret's blink timers only while a field has focus (the first one from the
@@ -32,23 +32,25 @@ fn clipboard(h: &mut Harness<Fields>) -> Option<String> {
   h.rt.clipboard().read()
 }
 
-fn main() {
+/// The fields, laid out once.
+fn fields() -> Harness<Fields> {
   let mut h = Harness::new(Fields::new(), SIZE, 2.0);
   h.frame();
-  assert!(!h.frame(), "a frame without changes");
-  // The first field has the focus from the start, its caret blinking on timers.
-  assert_eq!(h.focused(), Some(Id::of(NAME)));
-  assert_eq!(h.rt.due_in(), Some(Duration::from_millis(500)));
-
-  typing_moves_and_the_clipboard(&mut h);
-  the_mouse_selects(&mut h);
-  the_caret_stays_in_view(&mut h);
-  input_methods(&mut h);
-  password(&mut h);
-  placeholder_disabled_and_selectable(&mut h);
+  h
 }
 
-fn typing_moves_and_the_clipboard(h: &mut Harness<Fields>) {
+/// The first field has the focus from the start, its caret blinking on timers.
+#[test]
+fn the_first_field_has_the_focus_from_the_start() {
+  let mut h = fields();
+  assert!(!h.frame(), "a frame without changes");
+  assert_eq!(h.focused(), Some(Id::of(NAME)));
+  assert_eq!(h.rt.due_in(), Some(Duration::from_millis(500)));
+}
+
+#[test]
+fn typing_word_moves_undo_and_the_clipboard() {
+  let h = &mut fields();
   let name = Id::of(NAME);
   h.click_id(name);
   assert_eq!(h.focused(), Some(name));
@@ -100,7 +102,9 @@ fn typing_moves_and_the_clipboard(h: &mut Harness<Fields>) {
   assert_eq!(h.focused(), Some(Id::of(EMAIL)));
 }
 
-fn the_mouse_selects(h: &mut Harness<Fields>) {
+#[test]
+fn the_mouse_selects() {
+  let h = &mut fields();
   let name = Id::of(NAME);
   h.click_id(name);
   h.key(Key::Char('a'), CMD);
@@ -144,7 +148,9 @@ fn the_mouse_selects(h: &mut Harness<Fields>) {
 
 /// The caret scrolled into view: at the end of a long line, then at its start, the second asked
 /// for by a key between the frames.
-fn the_caret_stays_in_view(h: &mut Harness<Fields>) {
+#[test]
+fn the_caret_stays_in_view() {
+  let h = &mut fields();
   let name = Id::of(NAME);
   h.click_id(name);
   h.key(Key::Char('a'), CMD);
@@ -169,7 +175,9 @@ fn the_caret_stays_in_view(h: &mut Harness<Fields>) {
   assert!(off(h) > 0.0, "the wider value's end in view");
 }
 
-fn input_methods(h: &mut Harness<Fields>) {
+#[test]
+fn input_methods_compose_apart_from_the_value() {
+  let h = &mut fields();
   let notes = Id::of(NOTES);
   h.click_id(notes);
   h.type_text("ab");
@@ -229,7 +237,9 @@ fn input_methods(h: &mut Harness<Fields>) {
   assert_eq!(h.app().notes, "from the appok\nz");
 }
 
-fn password(h: &mut Harness<Fields>) {
+#[test]
+fn a_password_shows_dots_and_keeps_its_secret() {
+  let h = &mut fields();
   let pw = Id::of(PASSWORD);
   h.click_id(pw);
   assert!(h.rt.text_input().is_none(), "no input method in a password");
@@ -253,7 +263,9 @@ fn password(h: &mut Harness<Fields>) {
   assert_eq!(sel(h, PASSWORD), Sel::caret(3));
 }
 
-fn placeholder_disabled_and_selectable(h: &mut Harness<Fields>) {
+#[test]
+fn placeholder_disabled_and_selectable() {
+  let h = &mut fields();
   h.frame();
   assert_eq!(h.text(text_of(EMAIL)), Some("name@example.com"));
   // Disabled: no focus by a click or Tab, its text unchanged.

@@ -1,29 +1,23 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Harness scenario for `examples/text.rs`, in the dark and the light appearance, at scale 2 and
-//! 1, with checks that hold for any system font: every line's ink inside its line box, wider
-//! strings measuring wider, a monospaced font, a combining accent taking no room, the ink colour
-//! reached, a clipped line cut at its panel, subpixel positions moving the ink a quarter pixel,
-//! and the emoji in colour where the OS has a colour font. CJK is checked where a font has it.
+//! Tests of `examples/text.rs` through the harness, in the dark and the light appearance, at
+//! scale 2 and 1, with checks that hold for any system font: every line's ink inside its line
+//! box, wider strings measuring wider, a monospaced font, a combining accent taking no room, the
+//! ink colour reached, a clipped line cut at its panel, subpixel positions moving the ink a
+//! quarter pixel, and the emoji in colour where the OS has a colour font. CJK is checked where a
+//! font has it.
 
 #[path = "../examples/text.rs"]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
 #[allow(dead_code, unused_attributes)]
 mod text;
 
+mod common;
+
+use common::{diff, px};
 use nimbo::harness::Image;
-use nimbo::{Appearance, Color, Event, Font, Harness, Rect, Weight};
+use nimbo::{Appearance, Event, Font, Harness, Rect, Weight};
 use text::*;
-
-/// A colour as the frame stores an opaque one.
-fn px(c: Color) -> [u8; 4] {
-  c.map(|v| (v * 255.0).round() as u8)
-}
-
-/// The largest difference of a channel.
-fn diff(a: [u8; 4], b: [u8; 4]) -> u8 {
-  (0..4).map(|i| a[i].abs_diff(b[i])).max().unwrap()
-}
 
 /// The pixels of `area` (in points) as (x, y, RGBA), in pixels.
 fn pixels(img: &Image, area: Rect) -> impl Iterator<Item = (usize, usize, [u8; 4])> + '_ {
@@ -169,7 +163,9 @@ fn check(h: &mut Harness<Text>, p: &Palette) {
 }
 
 /// Measures that hold for any system font.
-fn measures(h: &mut Harness<Text>) {
+#[test]
+fn measures_hold_for_any_font() {
+  let mut h = Harness::new(Text::default(), SIZE, 2.0);
   let t = &mut h.rt.text;
   let ui = Font::ui(13.0);
   assert!(t.measure("Hello, world", ui) > t.measure("Hello", ui));
@@ -194,18 +190,33 @@ fn measures(h: &mut Harness<Text>) {
   assert!(m.cap_height > m.x_height && m.x_height > 0.0, "{m:?}");
 }
 
-fn main() {
-  let mut h = Harness::new(Text::default(), SIZE, 2.0);
-  measures(&mut h);
-  check(&mut h, &DARK);
+/// The text at `scale`, in the light appearance or the dark one.
+fn text(scale: f32, light: bool) -> Harness<Text> {
+  let mut h = Harness::new(Text::default(), SIZE, scale);
+  if light {
+    h.render();
+    assert!(h.event(Event::Appearance(Appearance::LIGHT)));
+  }
 
-  assert!(h.event(Event::Appearance(Appearance::LIGHT)));
-  check(&mut h, &LIGHT);
+  h
+}
 
-  let mut one = Harness::new(Text::default(), SIZE, 1.0);
-  check(&mut one, &DARK);
-  assert!(one.event(Event::Appearance(Appearance::LIGHT)));
-  check(&mut one, &LIGHT);
+#[test]
+fn dark_at_scale_2() {
+  check(&mut text(2.0, false), &DARK);
+}
 
-  println!("text scenario: ok");
+#[test]
+fn light_at_scale_2() {
+  check(&mut text(2.0, true), &LIGHT);
+}
+
+#[test]
+fn dark_at_scale_1() {
+  check(&mut text(1.0, false), &DARK);
+}
+
+#[test]
+fn light_at_scale_1() {
+  check(&mut text(1.0, true), &LIGHT);
 }

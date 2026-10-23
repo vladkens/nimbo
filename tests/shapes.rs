@@ -1,32 +1,21 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Harness scenario for `examples/shapes.rs`, in the dark and the light appearance: the colours
-//! at known points of every shape, a rounded corner's antialiased edge, a border all round and
-//! one on a single side, a shadow fading out, the gradients, the image, the lines and a clip;
-//! and frames built only when something changed.
+//! Tests of `examples/shapes.rs` through the harness, in the dark and the light appearance: the
+//! colours at known points of every shape, a rounded corner's antialiased edge, a border all
+//! round and one on a single side, a shadow fading out, the gradients, the image, the lines and a
+//! clip; and frames built only when something changed.
 
 #[path = "../examples/shapes.rs"]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
 #[allow(dead_code, unused_attributes)]
 mod shapes;
 
+mod common;
+
+use common::{diff, mid, px};
 use nimbo::harness::Image;
-use nimbo::{Appearance, Color, Event, Harness, Rect, mix};
+use nimbo::{Appearance, Event, Harness, mix};
 use shapes::*;
-
-/// A colour as the frame stores an opaque one.
-fn px(c: Color) -> [u8; 4] {
-  c.map(|v| (v * 255.0).round() as u8)
-}
-
-/// The largest difference of a channel.
-fn diff(a: [u8; 4], b: [u8; 4]) -> u8 {
-  (0..4).map(|i| a[i].abs_diff(b[i])).max().unwrap()
-}
-
-fn mid(r: Rect) -> (f32, f32) {
-  (r.x + r.w / 2.0, r.y + r.h / 2.0)
-}
 
 fn check(img: &Image, p: &Palette) {
   let at = |x: f32, y: f32| img.pixel(x, y);
@@ -112,35 +101,50 @@ fn check(img: &Image, p: &Palette) {
   assert_eq!(at(PANEL.x + 0.5, PANEL.y + PANEL.h / 2.0), px(p.border));
 }
 
-fn main() {
+#[test]
+fn every_shape_in_the_dark() {
   let mut h = Harness::new(Shapes::default(), SIZE, 2.0);
-  let dark = h.render();
-  check(&dark, &DARK);
+  check(&h.render(), &DARK);
   assert!(!h.frame(), "a frame without changes");
+}
 
-  // An event the app doesn't use builds no frame; a wake from another thread builds one.
+#[test]
+fn every_shape_in_the_light() {
+  let mut h = Harness::new(Shapes::default(), SIZE, 2.0);
+  h.render();
+  assert!(h.event(Event::Appearance(Appearance::LIGHT)));
+  check(&h.render(), &LIGHT);
+  assert!(!h.frame());
+}
+
+#[test]
+fn at_scale_1() {
+  let mut h = Harness::new(Shapes::default(), SIZE, 1.0);
+  h.event(Event::Appearance(Appearance::LIGHT));
+  let img = h.render();
+  assert_eq!((img.pixels.w, img.pixels.h), (SIZE.w as usize, SIZE.h as usize));
+  assert_eq!(img.pixel(5.0, 5.0), px(LIGHT.bg));
+  assert_eq!(img.pixel(mid(SQUARE).0, mid(SQUARE).1), px(RED));
+}
+
+/// An event the app doesn't use builds no frame; a wake from another thread builds one.
+#[test]
+fn frames_only_when_something_changed() {
+  let mut h = Harness::new(Shapes::default(), SIZE, 2.0);
+  h.render();
   assert!(!h.move_to(5.0, 5.0));
   assert!(!h.frame());
   let waker = h.rt.waker().clone();
   std::thread::spawn(move || waker.wake()).join().unwrap();
   assert!(h.frame());
   assert!(!h.frame());
+}
 
-  // The light appearance redraws in its colours; the same shapes at scale 1 too.
-  assert!(h.event(Event::Appearance(Appearance::LIGHT)));
-  let light = h.render();
-  check(&light, &LIGHT);
-  assert!(!h.frame());
-  let mut one = Harness::new(Shapes::default(), SIZE, 1.0);
-  one.event(Event::Appearance(Appearance::LIGHT));
-  let img = one.render();
-  assert_eq!((img.pixels.w, img.pixels.h), (SIZE.w as usize, SIZE.h as usize));
-  assert_eq!(img.pixel(5.0, 5.0), px(LIGHT.bg));
-  assert_eq!(img.pixel(mid(SQUARE).0, mid(SQUARE).1), px(RED));
-
-  // State changed through `app_mut` redraws.
+#[test]
+fn a_change_through_app_mut_redraws() {
+  let mut h = Harness::new(Shapes::default(), SIZE, 2.0);
+  h.event(Event::Appearance(Appearance::LIGHT));
+  check(&h.render(), &LIGHT);
   h.app_mut().light = false;
   check(&h.render(), &DARK);
-
-  println!("shapes scenario: ok");
 }
