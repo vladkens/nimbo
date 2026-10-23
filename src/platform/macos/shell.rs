@@ -23,16 +23,16 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
-  NSApplication, NSApplicationActivationPolicy, NSApplicationDelegate, NSApplicationTerminateReply,
-  NSBackingStoreType, NSEvent, NSEventModifierFlags, NSEventType, NSMenu, NSMenuItem,
-  NSSystemColorsDidChangeNotification, NSWindow, NSWindowDelegate, NSWindowStyleMask,
+  NSApplication, NSApplicationDelegate, NSApplicationTerminateReply, NSBackingStoreType, NSEvent,
+  NSEventModifierFlags, NSEventType, NSMenu, NSMenuItem, NSSystemColorsDidChangeNotification,
+  NSWindow, NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_foundation::{
   NSNotification, NSNotificationCenter, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize,
   NSString,
 };
 
-pub use super::app::{is_main, post};
+pub use super::app::{is_main, on_quit, on_reopen, post, set_presence};
 use super::view::View;
 use super::{Pasteboard, appearance};
 use crate::Config;
@@ -40,7 +40,6 @@ use crate::app::{App, Clock, Event, Runtime};
 use crate::shell::{AppInfo, Main, Presence};
 
 type OnMain = Box<dyn FnOnce(&mut Main)>;
-type OnReopen = Box<dyn FnMut(&mut Main)>;
 
 struct Win {
   id: u64,
@@ -62,13 +61,10 @@ struct Gone {
 
 #[derive(Default)]
 struct Shell {
-  presence: Presence,
   windows: Vec<Win>,
   /// Closed windows not yet let go.
   gone: Vec<Gone>,
   next: u64,
-  reopen: Option<OnReopen>,
-  on_quit: Option<OnMain>,
   /// [quit] ran: the loop ends, or does not start.
   quitting: bool,
   /// The system asked to quit (`applicationShouldTerminate:` answered «later»): the process ends
@@ -131,13 +127,7 @@ define_class!(
     /// Opened again while it runs: LaunchServices starts no second process but tells.
     #[unsafe(method(applicationShouldHandleReopen:hasVisibleWindows:))]
     fn should_handle_reopen(&self, _app: &NSApplication, _visible: bool) -> bool {
-      defer(|| {
-        let Some(mut f) = shell(|s| s.reopen.take()) else { return };
-        f(&mut Main::here());
-        shell(|s| {
-          s.reopen.get_or_insert(f);
-        });
-      });
+      defer(super::app::reopened);
       false
     }
   }
@@ -207,8 +197,8 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
       None,
     )
   };
-  shell(|s| *s = Shell { presence: info.presence, ..Shell::default() });
-  sync_presence(mtm);
+  shell(|s| *s = Shell::default());
+  super::app::set_presence(info.presence);
   if info.presence == Presence::Regular {
     ns_app.activate();
   }
@@ -229,10 +219,7 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
 
 /// The app ends: its quit hook runs (once), then the windows close.
 fn finish() {
-  if let Some(f) = shell(|s| s.on_quit.take()) {
-    f(&mut Main::here());
-  }
-
+  super::app::quitting();
   for id in shell(|s| s.windows.iter().map(|w| w.id).collect::<Vec<_>>()) {
     close(id);
   }
@@ -261,35 +248,13 @@ pub fn quit() {
   }
 }
 
-pub fn set_presence(p: Presence) {
-  shell(|s| s.presence = p);
-  sync_presence(mtm());
-}
-
-pub fn on_reopen(f: OnReopen) {
-  shell(|s| s.reopen = Some(f));
-}
-
-pub fn on_quit(f: OnMain) {
-  shell(|s| s.on_quit = Some(f));
-}
-
 pub fn terminating() -> bool {
   shell(|s| s.terminating)
 }
 
-/// Regular while the app is or a window is shown, else accessory (no Dock icon, no ⌘Tab).
-fn sync_presence(mtm: MainThreadMarker) {
-  let regular = shell(|s| s.presence == Presence::Regular || s.windows.iter().any(|w| w.shown));
-  let policy = match regular {
-    true => NSApplicationActivationPolicy::Regular,
-    false => NSApplicationActivationPolicy::Accessory,
-  };
-
-  let ns_app = NSApplication::sharedApplication(mtm);
-  if ns_app.activationPolicy() != policy {
-    ns_app.setActivationPolicy(policy);
-  }
+/// A window shown at least once is open: the app is in the Dock ([super::app::sync_presence]).
+pub(super) fn any_shown() -> bool {
+  shell(|s| s.windows.iter().any(|w| w.shown))
 }
 
 /// Runs `f` on the main queue, after what AppKit is doing now.
@@ -425,7 +390,7 @@ pub fn front(id: u64) {
   }) else {
     return;
   };
-  sync_presence(mtm);
+  super::app::sync_presence();
   if window.isMiniaturized() {
     window.deminiaturize(None);
   }
@@ -466,7 +431,7 @@ fn closed(id: u64) {
   let Win { window, view, _delegate, on_close, .. } = win;
   shell(|s| s.gone.push(Gone { window, _view: view, _delegate }));
   defer(release);
-  sync_presence(mtm());
+  super::app::sync_presence();
   if let Some(f) = on_close {
     f(&mut Main::here());
   }
