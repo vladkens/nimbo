@@ -3,7 +3,8 @@
 //! SVG path data (`d`) into polylines: the reader the widget icons stroke or fill
 //! ([crate::ui::widgets::icon]) and the tray fills ([crate::tray::TrayIcon]), and the spans a
 //! scanline fills ([spans]). SVG's whole path syntax (`M L H V C S Q T A Z`, absolute and
-//! relative, implicit repeats); curves and arcs in pieces of about 2 pixels.
+//! relative, implicit repeats); curves and arcs in pieces of about 2 pixels. [document] reads an
+//! icon file's `<path>`s into one path.
 
 use crate::scene::Point;
 
@@ -307,9 +308,111 @@ pub fn spans(
   }
 }
 
+/// An icon file's `<path>` elements joined into one path: its view box's side, the path data and
+/// whether it fills even-odd. What an icon file has, and nothing else: a square `viewBox` from
+/// `0 0`, and paths filled by one rule (`fill-rule="evenodd"` on each, or on none) that don't
+/// overlap (joined, they fill as one path); groups, titles and comments are passed over. Any
+/// other element, a `transform`, an unfilled path or data that doesn't parse is an error.
+pub fn document(svg: &str) -> Result<(f32, String, bool), String> {
+  let (mut size, mut paths, mut rules) = (None, Vec::new(), Vec::new());
+  let mut rest = svg;
+  while let Some(at) = rest.find('<') {
+    rest = &rest[at + 1..];
+    if let Some(comment) = rest.strip_prefix("!--") {
+      rest = &comment[comment.find("-->").ok_or("an unclosed comment")? + 3..];
+      continue;
+    }
+
+    let end = rest.find('>').filter(|&e| !rest[..e].contains('<')).ok_or("an unclosed tag")?;
+    let tag = &rest[..end];
+    rest = &rest[end + 1..];
+    let name = &tag[..tag.find(|c: char| !c.is_ascii_alphanumeric()).unwrap_or(tag.len())];
+    if attr(tag, "transform").is_some() {
+      return Err(format!("<{name}> has a transform"));
+    }
+
+    match name {
+      // `</…>`, `<?xml …?>`, `<!DOCTYPE …>`.
+      "" | "g" | "title" | "desc" => {}
+      "svg" => {
+        let view = attr(tag, "viewBox").ok_or("no viewBox")?;
+        let v: Vec<f32> = view.split([' ', ',']).filter_map(|n| n.parse().ok()).collect();
+        size = match v[..] {
+          [0.0, 0.0, w, h] if w == h && w > 0.0 => Some(w),
+          _ => return Err(format!("a viewBox not square from 0 0: {view}")),
+        };
+      }
+      "path" => {
+        let d = attr(tag, "d").ok_or("a <path> without d")?;
+        if attr(tag, "fill") == Some("none") {
+          return Err("a <path> not filled".into());
+        }
+
+        flatten(d, 1.0, &mut Vec::new())?;
+        paths.push(d);
+        rules.push(attr(tag, "fill-rule") == Some("evenodd"));
+      }
+      _ => return Err(format!("<{name}> is not read")),
+    }
+  }
+
+  let size = size.ok_or("no <svg>")?;
+  let even_odd = rules.first().copied().ok_or("no <path>")?;
+  if rules.iter().any(|&r| r != even_odd) {
+    return Err("paths filled by different rules".into());
+  }
+
+  Ok((size, paths.join(" "), even_odd))
+}
+
+/// The value of attribute `name` in a tag's text, quoted either way.
+fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+  let mut from = 0;
+  while let Some(i) = tag[from..].find(name) {
+    let at = from + i;
+    from = at + name.len();
+    let after = tag[from..].strip_prefix('=');
+    let quote = after.and_then(|a| a.chars().next()).filter(|q| matches!(q, '"' | '\''));
+    if let (Some(q), true) = (quote, tag[..at].ends_with(|c: char| c.is_ascii_whitespace())) {
+      let value = &tag[from + 2..];
+      return value.find(q).map(|e| &value[..e]);
+    }
+  }
+
+  None
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// An icon file's paths joined; what isn't an icon's is refused.
+  #[test]
+  fn icon_files() {
+    let svg = r#"<?xml version="1.0"?><!-- a > b --><svg xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 18 18"><title>w</title><g><path fill-rule="evenodd" d="M1 1h4v4H1Z"/>
+      <path d='M6 6h4v4H6Z' fill-rule='evenodd'></path></g></svg>"#;
+    assert_eq!(document(svg).unwrap(), (18.0, "M1 1h4v4H1Z M6 6h4v4H6Z".into(), true));
+    let one = |path: &str| format!(r#"<svg viewBox="0,0,24,24">{path}</svg>"#);
+    assert!(!document(&one(r#"<path id="a" d="M1 1h2"/>"#)).unwrap().2);
+
+    for (bad, why) in [
+      (one(""), "no <path>"),
+      (one(r#"<path d="M1 1h2" fill-rule="evenodd"/><path d="M1 1h2"/>"#), "different rules"),
+      (one(r#"<circle r="2"/>"#), "<circle> is not read"),
+      (one(r#"<g transform="scale(2)"><path d="M1 1h2"/></g>"#), "transform"),
+      (one(r#"<path d="M1 1h2" fill="none"/>"#), "not filled"),
+      (one(r#"<path d="M1 1Q"/>"#), ""),
+      (one(r#"<path fill="red"/>"#), "without d"),
+      (r#"<svg viewBox="0 0 24 18"><path d="M1 1h2"/></svg>"#.into(), "not square"),
+      (r#"<svg viewBox="2 0 24 24"><path d="M1 1h2"/></svg>"#.into(), "not square"),
+      (r#"<path d="M1 1h2"/>"#.into(), "no <svg>"),
+      (one("<path d=\"M1 1h2\""), "unclosed"),
+    ] {
+      let e = document(&bad).unwrap_err();
+      assert!(e.contains(why), "{bad}: {e}");
+    }
+  }
 
   fn lines(d: &str) -> Vec<Vec<Point>> {
     let mut out = Vec::new();
