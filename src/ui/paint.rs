@@ -7,7 +7,7 @@
 
 use super::layout::{ELLIPSIS, Kind, Tree};
 use super::textlayout::{Edit, TextLayout};
-use super::{Canvas, FocusRing, Style};
+use super::{Canvas, Clip, FocusRing, Style};
 use crate::scene::{Color, Frame, Quad, Rect};
 use crate::text::Ink;
 
@@ -120,7 +120,7 @@ fn node(
     }
     _ => visible(out, clip),
   };
-  if alpha <= 0.0 || (leaf || s.clip) && !shown(outer(s, r, own)) {
+  if alpha <= 0.0 || (leaf || s.clip != Clip::None) && !shown(outer(s, r, own)) {
     return;
   }
 
@@ -187,12 +187,12 @@ fn node(
     return;
   }
 
-  let clip = match s.clip {
-    true => {
+  let clip = match s.clip_rect(r) {
+    Some(r) => {
       f.push_clip(r);
       clip.intersect(r)
     }
-    false => clip,
+    None => clip,
   };
 
   for c in t.children(i as u32) {
@@ -201,7 +201,7 @@ fn node(
     }
   }
 
-  if s.clip {
+  if s.clip != Clip::None {
     f.pop_clip();
   }
 }

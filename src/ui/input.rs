@@ -193,7 +193,7 @@ fn reaches(t: &Tree, i: u32, root: u32, p: Point) -> bool {
 
     k = n.parent;
     let a = &t.nodes[k as usize];
-    if a.style.clip && !a.rect.contains(p) {
+    if a.style.clip_rect(a.rect).is_some_and(|c| !c.contains(p)) {
       return false;
     }
   }

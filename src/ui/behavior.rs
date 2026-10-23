@@ -583,8 +583,8 @@ fn visible(t: &super::Tree, id: Id) -> Option<Rect> {
   let mut r = t.nodes[i].rect;
   while i != 0 {
     i = t.nodes[i].parent as usize;
-    if t.nodes[i].style.clip {
-      r = r.intersect(t.nodes[i].rect);
+    if let Some(c) = t.nodes[i].style.clip_rect(t.nodes[i].rect) {
+      r = r.intersect(c);
     }
   }
 

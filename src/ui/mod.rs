@@ -65,7 +65,7 @@ pub(crate) use layout::Sys;
 pub use layout::{Kind, Line, Measure, Node, Tree};
 pub use store::{Ease, Transition};
 pub use style::{
-  Align, Cursor, Dim, Float, Focus, FocusRing, Shadow, Style, TextStyle, grow, pct, px, rigid,
+  Align, Clip, Cursor, Dim, Float, Focus, FocusRing, Shadow, Style, TextStyle, grow, pct, px, rigid,
 };
 pub use textlayout::{Edit, Stop, TextLayout};
 pub use theme::{ButtonStyle, ControlSize, Sizes, SwitchSize, Theme, Tone, Variant};

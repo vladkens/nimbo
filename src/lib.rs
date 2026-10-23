@@ -54,9 +54,9 @@ pub use shell::{AppInfo, Main, Presence, Proxy, Window, WindowId, app};
 pub use text::edit::{Editor, Lines, Mono, Sel};
 pub use text::{Font, Weight};
 pub use ui::{
-  Align, Answer, Behavior, Button, ButtonStyle, Choice, Click, ControlSize, Cursor, Dialog, Dim,
-  Ease, FieldBehavior, FieldStyle, Float, Focus, FocusRing, FormRow, FormStyle, Icon, Id, List,
-  ListResponse, PopUp, Press, Response, Row, Scroll, Select, Selection, Shadow, Sizes, Split,
+  Align, Answer, Behavior, Button, ButtonStyle, Choice, Click, Clip, ControlSize, Cursor, Dialog,
+  Dim, Ease, FieldBehavior, FieldStyle, Float, Focus, FocusRing, FormRow, FormStyle, Icon, Id,
+  List, ListResponse, PopUp, Press, Response, Row, Scroll, Select, Selection, Shadow, Sizes, Split,
   Style, Tabs, TextInput, TextLayout, TextStyle, Theme, Tile, Tone, Transition, TypeSelect, Ui,
   Variant, grow, pct, px, rigid,
 };
