@@ -131,10 +131,10 @@ pub fn vk_of(k: NamedKey) -> Option<u16> {
   (1..0xFF).find(|&vk| navigation(vk).or_else(|| named(vk)) == Some(k))
 }
 
-/// Whether `vk` is sent with the extended bit: the navigation keys and the Windows keys, which
-/// would otherwise be the keypad's or nothing.
+/// Whether `vk` is sent with the extended bit: the navigation keys, the right Ctrl and Alt and the
+/// Windows keys, which would otherwise be the keypad's, the left ones or nothing.
 pub fn extended(vk: u16) -> bool {
-  navigation(vk).is_some() || matches!(vk, VK_LWIN | VK_RWIN)
+  navigation(vk).is_some() || matches!(vk, VK_LWIN | VK_RWIN | 0xA3 | 0xA5)
 }
 
 /// The key a navigation virtual key names wherever it is: the keypad's with Num Lock off too.

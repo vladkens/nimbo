@@ -21,9 +21,7 @@ use crate::keys::{Key, Shortcut, f_key, lower, strokes};
 fns!(X11 {
   fn XOpenDisplay(name: *const c_char) -> P;
   fn XCloseDisplay(d: P) -> c_int;
-  fn XDefaultRootWindow(d: P) -> c_ulong;
-  fn XQueryPointer(d: P, w: c_ulong, root: *mut c_ulong, child: *mut c_ulong, rx: *mut c_int,
-    ry: *mut c_int, x: *mut c_int, y: *mut c_int, mask: *mut c_uint) -> c_int;
+  fn XQueryKeymap(d: P, keys: *mut u8) -> c_int;
   fn XKeysymToKeycode(d: P, sym: c_ulong) -> u8;
   fn XkbKeycodeToKeysym(d: P, code: u8, group: c_int, level: c_int) -> c_ulong;
   fn XkbGetState(d: P, device: c_uint, state: *mut u8) -> c_int;
@@ -71,7 +69,7 @@ pub fn post(s: Shortcut) -> Result<(), String> {
     let (key, shift) = find(x, d, sym)?;
     let mods = if shift { s.mods | Modifiers::SHIFT } else { s.mods };
     let modkey = |m| unsafe { (x.XKeysymToKeycode)(d, modifier_keysym(m)) };
-    let presses = strokes(mods, held(x, d), key, modkey);
+    let presses = strokes(mods, &held(x, d), key, modkey);
     if presses.iter().any(|&(k, _)| k == 0) {
       return None;
     }
@@ -105,15 +103,23 @@ fn find(x: &X11, d: P, sym: c_ulong) -> Option<(u8, bool)> {
   groups.flat_map(|g| [(g, 0), (g, 1)]).find_map(|(g, level)| Some((at(g, level)?, level == 1)))
 }
 
-/// The modifiers held now (the pointer's state: the keyboard's modifiers).
-fn held(x: &X11, d: P) -> Modifiers {
-  let (mut w, mut i, mut mask) = (0, 0, 0);
-  let root = unsafe { (x.XDefaultRootWindow)(d) };
-  let ok = unsafe {
-    (x.XQueryPointer)(d, root, &mut w, &mut w, &mut i, &mut i, &mut i, &mut i, &mut mask)
-  };
-  // X's Shift, Control, Mod1 and Mod4 masks are GDK's.
-  if ok != 0 { super::super::keys::mods(mask) } else { Modifiers::empty() }
+/// The modifier keys down now, each side by its own keycode.
+fn held(x: &X11, d: P) -> Vec<(Modifiers, u8)> {
+  let mut keys = [0u8; 32];
+  unsafe { (x.XQueryKeymap)(d, keys.as_mut_ptr()) };
+  let sides = [
+    (Modifiers::SHIFT, 0xFFE1),
+    (Modifiers::SHIFT, 0xFFE2),
+    (Modifiers::CONTROL, 0xFFE3),
+    (Modifiers::CONTROL, 0xFFE4),
+    (Modifiers::ALT, 0xFFE9),
+    (Modifiers::ALT, 0xFFEA),
+    (Modifiers::META, 0xFFEB),
+    (Modifiers::META, 0xFFEC),
+  ];
+  let code = |(m, sym)| (m, unsafe { (x.XKeysymToKeycode)(d, sym) });
+  let down = |&(_, k): &(Modifiers, u8)| k != 0 && keys[k as usize / 8] & (1 << (k % 8)) != 0;
+  sides.into_iter().map(code).filter(down).collect()
 }
 
 /// The X keysym of `key`: a character's as GDK has it (Cyrillic, Greek and others have their own

@@ -41,7 +41,7 @@ BUDGETS = {
   "core": 3460,
   "app/shared": 720,
   "app/macos": 1210,
-  "app/windows": 1120,
+  "app/windows": 1140,
   "app/linux": 1080,
 }
 # Modules that count against a budget of another name ("app", src/app.rs, is the core's seams).

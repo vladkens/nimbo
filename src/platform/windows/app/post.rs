@@ -9,8 +9,9 @@
 
 use keyboard_types::Modifiers;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-  GetKeyboardLayout, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
-  KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, MapVirtualKeyW, SendInput, VK_CONTROL, VK_LWIN, VK_MENU,
+  GetAsyncKeyState, GetKeyboardLayout, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
+  KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, MapVirtualKeyW, SendInput, VK_CONTROL,
+  VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN,
   VK_SHIFT, VkKeyScanExW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
@@ -31,15 +32,29 @@ pub fn post(s: Shortcut) -> Result<(), String> {
     Modifiers::SHIFT => VK_SHIFT,
     _ => VK_LWIN,
   };
-  let inputs: Vec<INPUT> = strokes(mods, keyboard::mods_held(), vk, modkey)
-    .into_iter()
-    .map(|(vk, d)| input(vk, d))
-    .collect();
+  let inputs: Vec<INPUT> =
+    strokes(mods, &held(), vk, modkey).into_iter().map(|(vk, d)| input(vk, d)).collect();
   let sent = unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), size_of::<INPUT>() as i32) };
   match sent as usize == inputs.len() {
     true => Ok(()),
     false => Err("SendInput was blocked (an elevated app in front?)".into()),
   }
+}
+
+/// The modifier keys down now, each side by its own virtual key.
+fn held() -> Vec<(Modifiers, u16)> {
+  let sides = [
+    (Modifiers::SHIFT, VK_LSHIFT),
+    (Modifiers::SHIFT, VK_RSHIFT),
+    (Modifiers::CONTROL, VK_LCONTROL),
+    (Modifiers::CONTROL, VK_RCONTROL),
+    (Modifiers::ALT, VK_LMENU),
+    (Modifiers::ALT, VK_RMENU),
+    (Modifiers::META, VK_LWIN),
+    (Modifiers::META, VK_RWIN),
+  ];
+  let down = |vk: u16| unsafe { GetAsyncKeyState(vk as i32) as u16 & 0x8000 != 0 };
+  sides.into_iter().filter(|s| down(s.1)).collect()
 }
 
 /// The virtual key typing `c` and whether it takes Shift.
