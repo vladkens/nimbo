@@ -361,20 +361,13 @@ impl App for Settings {
       Look::Dark => ui.set_theme(Theme::system(Appearance { dark: true, ..a })),
     }
 
-    // The window as high as the page, or as the room it needs where the OS's font is taller,
-    // by the last frame's layout; a page not laid out yet is measured on the next frame.
-    let content = Id::of(("content", self.page as u8));
-    let fit = ui.rect(Id::of(TABS)).zip(ui.rect(content)).map_or(0.0, |(t, c)| (t.h + c.h).ceil());
-    if ui.rect(content).is_none() {
-      ui.request_frame_in(Duration::ZERO);
-    }
-
-    ui.set_window_size(WIDTH, fit.clamp(300.0, 720.0));
+    // The window as high as the page, in the OS's font.
+    ui.fit_window_height(WIDTH, 300.0, 720.0);
     let fs = FormStyle::plates(&ui.theme());
     ui.col(Style::new().grow().bg(fs.bg), |ui| {
       ui.id(TABS).toolbar_tabs(&fs, &mut self.page, &PAGES);
       ui.id(("page", self.page as u8)).form_scroll(&fs, Style::new().grow(), |ui| {
-        ui.with_id(content).col(Style::new().w(grow()), |ui| self.page(ui, &fs));
+        ui.col(Style::new().w(grow()), |ui| self.page(ui, &fs));
       });
     });
     self.confirm(ui);

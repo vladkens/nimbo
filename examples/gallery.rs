@@ -144,9 +144,11 @@ impl Gallery {
         ui.disabled(true).search(&mut String::new(), "Off");
       });
       line(ui, "ICONS", |ui| {
-        for (_, icon) in Icon::ALL {
-          ui.icon_stroke(icon, 20.0, t.text, 1.6);
-        }
+        ui.grid(10, Style::new().gap(10.0), |ui| {
+          for (_, icon) in Icon::ALL {
+            ui.icon_stroke(icon, 20.0, t.text, 1.6);
+          }
+        });
       });
       line(ui, "DIALOG", |ui| {
         if ui.id((ASK, i)).button("Delete…").clicked {
@@ -189,7 +191,7 @@ impl App for Gallery {
 
 fn main() {
   // The shot: the pointer on the light pane's switch.
-  nimbo::run(Config::new("gallery", 1040.0, 560.0), Gallery::default(), |h| {
+  nimbo::run(Config::new("gallery", 1040.0, 590.0), Gallery::default(), |h| {
     h.frame();
     let r = h.rect(Id::of((TOGGLE, 0usize))).unwrap();
     h.move_to(r.x + 10.0, r.y + r.h / 2.0);

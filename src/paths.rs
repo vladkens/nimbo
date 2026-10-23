@@ -9,10 +9,11 @@
 //! | [config_dir] | `~/Library/Application Support/<id>` | `%APPDATA%\<id>` | `$XDG_CONFIG_HOME/<id>` (`~/.config`) |
 //! | [cache_dir] | `~/Library/Caches/<id>` | `%LOCALAPPDATA%\<id>\cache` | `$XDG_CACHE_HOME/<id>` (`~/.cache`) |
 //!
-//! Only the environment is read: nothing is created.
+//! Only the environment is read: nothing is created. [display] writes a path as the user
+//! reads it: `~/…` under the home folder on macOS and Linux.
 
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Os {
@@ -47,6 +48,21 @@ pub fn config_dir(id: &str) -> PathBuf {
 /// What the app can make again; the OS may clear it.
 pub fn cache_dir(id: &str) -> PathBuf {
   dir(OS, Kind::Cache, id, &|k| std::env::var_os(k))
+}
+
+/// `path` as the user reads it: under the home folder `~/…` on macOS and Linux (`~` itself for
+/// it), as a shell writes it; whole on Windows, which has no such form.
+pub fn display(path: &Path) -> String {
+  display_in(OS, path, std::env::var_os("HOME").map(PathBuf::from).as_deref())
+}
+
+fn display_in(os: Os, path: &Path, home: Option<&Path>) -> String {
+  let home = home.filter(|h| os != Os::Windows && h.is_absolute() && h.parent().is_some());
+  match home.and_then(|h| path.strip_prefix(h).ok()) {
+    Some(rest) if rest.as_os_str().is_empty() => "~".into(),
+    Some(rest) => format!("~/{}", rest.display()),
+    None => path.display().to_string(),
+  }
 }
 
 fn dir(os: Os, kind: Kind, id: &str, env: &dyn Fn(&str) -> Option<OsString>) -> PathBuf {
@@ -117,6 +133,21 @@ mod tests {
     assert_eq!(got(Os::Windows, Kind::Config, &none), p("/AppData/Roaming/com.example.app"));
     assert_eq!(got(Os::Windows, Kind::Cache, &none), p("/AppData/Local/com.example.app/cache"));
     assert!(data_dir(id).ends_with(id));
+  }
+
+  /// Under the home folder as `~/…`, whole elsewhere, on Windows, or with a home of `/`.
+  #[cfg(unix)]
+  #[test]
+  fn home_as_a_tilde() {
+    let (p, home) = (Path::new, Some(Path::new("/Users/me")));
+    let shown = |os, path| display_in(os, p(path), home);
+    assert_eq!(shown(Os::Mac, "/Users/me/.cache/hub"), "~/.cache/hub");
+    assert_eq!(shown(Os::Linux, "/Users/me"), "~");
+    assert_eq!(shown(Os::Linux, "/Users/me/"), "~");
+    assert_eq!(shown(Os::Mac, "/Users/meg/x"), "/Users/meg/x", "a component, not a prefix");
+    assert_eq!(shown(Os::Windows, "/Users/me/x"), "/Users/me/x");
+    assert_eq!(display_in(Os::Mac, p("/etc/x"), Some(p("/"))), "/etc/x");
+    assert_eq!(display_in(Os::Mac, p("/Users/me/x"), None), "/Users/me/x");
   }
 
   #[cfg(windows)]

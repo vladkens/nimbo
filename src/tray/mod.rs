@@ -42,6 +42,13 @@ impl TrayIcon {
     Self::Path { size, d: d.into(), even_odd: false }
   }
 
+  /// An icon file: an SVG of `<path>`s in a square view box ([crate::svg::document] says what
+  /// it reads), drawn as [TrayIcon::Path].
+  pub fn from_svg(svg: &str) -> Result<Self, String> {
+    let (size, d, even_odd) = crate::svg::document(svg)?;
+    Ok(Self::Path { size, d, even_odd })
+  }
+
   /// The icon as `side` × `side` straight RGBA filled with `tint`: an RGBA image scaled by
   /// averaging, path data rasterized with 16 samples a pixel.
   #[cfg(any(test, not(target_os = "macos")))]
@@ -279,6 +286,19 @@ impl Tray {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// An SVG file's ring of two paths fills even-odd, as the file draws it.
+  #[test]
+  fn an_svg_file_fills_as_drawn() {
+    let svg = r#"<svg viewBox="0 0 24 24">
+      <path fill-rule="evenodd" d="M2 12a10 10 0 1 0 20 0a10 10 0 1 0-20 0Z"/>
+      <path fill-rule="evenodd" d="M7 12a5 5 0 1 0 10 0a5 5 0 1 0-10 0Z"/></svg>"#;
+    let px = TrayIcon::from_svg(svg).unwrap().pixels(24, [1, 2, 3]);
+    let alpha = |x: usize, y: usize| px[(y * 24 + x) * 4 + 3];
+    assert_eq!((alpha(12, 12), alpha(12, 4), alpha(0, 0)), (0, 255, 0));
+    assert_eq!(px[..3], [1, 2, 3]);
+    assert!(TrayIcon::from_svg("<svg/>").is_err());
+  }
 
   /// A menu set while it is open waits for it to close, the last one set winning; one set
   /// once it is closed drops what waited.
