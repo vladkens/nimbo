@@ -261,6 +261,13 @@ impl<A: App + 'static> Window<A> {
     on_close(self.id.0, Box::new(f));
   }
 
+  /// Redraws the window: its view runs again, showing what it reads from outside its app (a
+  /// model shared with the main thread). Nothing when it is closed or busy further up the stack
+  /// (called from inside its own event or view), as [Window::with].
+  pub fn redraw(&self) {
+    self.with(|_| {});
+  }
+
   /// Runs `f` on the window's app now and redraws it: new data from outside the window. `None`
   /// when the window is closed, or busy further up the stack (called from inside its own event
   /// or view: there the app has itself already).
