@@ -218,7 +218,7 @@ unsafe extern "system" fn host_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
       0
     }
     WM_RENDERFORMAT | WM_RENDERALLFORMATS => {
-      paste::render(msg == WM_RENDERALLFORMATS);
+      paste::render(hwnd, msg == WM_RENDERALLFORMATS);
       0
     }
     WM_DESTROYCLIPBOARD => {

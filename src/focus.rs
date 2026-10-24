@@ -24,11 +24,11 @@ pub struct Focused {
   /// Its name as the user reads it (macOS its localized name, Windows its executable's without
   /// `.exe`, Linux `/proc/<pid>/comm`), empty if unknown.
   pub name: String,
-  /// Its focused window, `Ok(None)` when it has none in focus; `Err` when the app was asked and
-  /// did not answer (why).
+  /// Its focused window, `Ok(None)` when it has none in focus; `Err` when the OS could not get
+  /// it (why: the app did not answer, macOS without Accessibility access).
   pub window: Result<Option<Window>, String>,
-  /// A password field has the focus; `Ok(false)` also where the OS can't tell (see the module
-  /// docs); `Err` when the app was asked and did not answer (why).
+  /// A password field has the focus; `Ok(false)` also where the OS has no way to tell (see the
+  /// module docs); `Err` as for `window`.
   pub secure: Result<bool, String>,
 }
 

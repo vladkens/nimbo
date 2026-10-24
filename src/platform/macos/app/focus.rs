@@ -10,15 +10,17 @@ use std::ptr::NonNull;
 use objc2::rc::Retained;
 use objc2::{class, msg_send};
 use objc2_app_kit::{NSRunningApplication, NSWorkspace};
-use objc2_core_foundation::{CFRetained, CFString, CFType};
+use objc2_core_foundation::{CFGetTypeID, CFRetained, CFString, CFType};
 
 use crate::focus::{self, Focused};
 
 /// How long one request may wait for the app: a hung app does not hold the caller longer.
 const TIMEOUT: f32 = 0.25;
 const SUCCESS: i32 = 0;
-/// `kAXErrorCannotComplete` (also a timeout), `kAXErrorAttributeUnsupported`, `kAXErrorNoValue`.
+/// `kAXErrorCannotComplete` (also a timeout), `kAXErrorAttributeUnsupported`,
+/// `kAXErrorAPIDisabled` (no Accessibility access), `kAXErrorNoValue`.
 const CANNOT_COMPLETE: i32 = -25204;
+const API_DISABLED: i32 = -25211;
 const UNSUPPORTED: i32 = -25205;
 const NO_VALUE: i32 = -25212;
 
@@ -32,7 +34,6 @@ unsafe extern "C" {
   fn AXUIElementSetMessagingTimeout(e: Element, seconds: f32) -> i32;
   fn AXUIElementGetPid(e: Element, pid: *mut i32) -> i32;
   fn AXUIElementGetTypeID() -> usize;
-  fn CFGetTypeID(cf: Element) -> usize;
 }
 
 /// An accessibility element, compared with `CFEqual`.
@@ -58,9 +59,9 @@ pub fn current() -> Option<Focused> {
   // SAFETY: any pid is accepted; the element is returned retained.
   let app = owned(unsafe { AXUIElementCreateApplication(pid) })?;
   let window = attribute(&app, "AXFocusedWindow");
-  // An app that just timed out isn't asked again.
+  // An app that just timed out isn't asked again, nor anything without access.
   let secure = match window {
-    Err(CANNOT_COMPLETE) => Err(CANNOT_COMPLETE),
+    Err(e @ (CANNOT_COMPLETE | API_DISABLED)) => Err(e),
     _ => secure_field(&app),
   };
 
@@ -75,8 +76,10 @@ pub fn current() -> Option<Focused> {
 /// The pid of the app with the keyboard focus (`AXFocusedApplication`), asked live: `NSWorkspace`
 /// learns of a switch only when the main thread's run loop turns.
 fn focused_app() -> Option<i32> {
+  // Not timed: the system-wide element's timeout is the whole process's (the window server
+  // answers this one).
   // SAFETY: no arguments; the element is returned retained.
-  let system = owned(unsafe { AXUIElementCreateSystemWide() })?;
+  let system = retained(unsafe { AXUIElementCreateSystemWide() })?;
   let app = attribute(&system, "AXFocusedApplication").ok().flatten().filter(is_element)?;
   let mut pid = 0;
   // SAFETY: an AXUIElement, `pid` receives its pid.
@@ -86,10 +89,14 @@ fn focused_app() -> Option<i32> {
 
 /// A retained element from a "Create" call, [timed].
 fn owned(e: Element) -> Option<CFRetained<CFType>> {
-  // SAFETY: "Create" returns an owned reference or null.
-  let e = unsafe { CFRetained::from_raw(NonNull::new(e.cast_mut())?.cast()) };
+  let e = retained(e)?;
   timed(&e);
   Some(e)
+}
+
+fn retained(e: Element) -> Option<CFRetained<CFType>> {
+  // SAFETY: "Create" returns an owned reference or null.
+  Some(unsafe { CFRetained::from_raw(NonNull::new(e.cast_mut())?.cast()) })
 }
 
 /// The element's requests time out at [TIMEOUT] (each element has its own).
@@ -103,8 +110,8 @@ fn ptr(cf: &CFRetained<CFType>) -> Element {
 }
 
 fn is_element(cf: &CFRetained<CFType>) -> bool {
-  // SAFETY: a valid CF object; no arguments.
-  unsafe { CFGetTypeID(ptr(cf)) == AXUIElementGetTypeID() }
+  // SAFETY: no arguments.
+  CFGetTypeID(Some(cf)) == unsafe { AXUIElementGetTypeID() }
 }
 
 /// An attribute's value; `None` when the element has none.
@@ -124,9 +131,12 @@ fn attribute(e: &CFRetained<CFType>, name: &str) -> Result<Option<CFRetained<CFT
 
 /// The app's focused element is a password field (`AXSecureTextField`).
 fn secure_field(app: &CFRetained<CFType>) -> Result<bool, i32> {
-  let Some(focused) = attribute(app, "AXFocusedUIElement")?.filter(is_element) else {
-    return Ok(false);
+  let focused = match attribute(app, "AXFocusedUIElement") {
+    Err(UNSUPPORTED) => None,
+    focused => focused?,
   };
+
+  let Some(focused) = focused.filter(is_element) else { return Ok(false) };
 
   timed(&focused);
   let subrole = match attribute(&focused, "AXSubrole") {

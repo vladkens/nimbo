@@ -134,9 +134,10 @@ pub fn offer(text: &str, on_read: Option<OnRead>) -> Option<u64> {
   Some(id)
 }
 
-/// The shell's window got `WM_RENDERFORMAT` (someone reads the text, the clipboard open for
-/// them) or, with `all`, `WM_RENDERALLFORMATS` (the app quits: opened here, if still its own).
-pub(super) fn render(all: bool) {
+/// The shell's window `hwnd` got `WM_RENDERFORMAT` (someone reads the text, the clipboard open
+/// for them) or, with `all`, `WM_RENDERALLFORMATS` (it is being destroyed as the app quits, after
+/// [host] went: opened here, if still its own).
+pub(super) fn render(hwnd: HWND, all: bool) {
   let pending = OFFER.with_borrow_mut(|o| o.as_mut()?.pending.take());
   let Some((text, mut on_read)) = pending else { return };
   if !all {
@@ -144,8 +145,8 @@ pub(super) fn render(all: bool) {
     return on_read();
   }
 
-  if unsafe { GetClipboardOwner() } == host()
-    && let Some(_open) = Open::new()
+  if unsafe { GetClipboardOwner() } == hwnd
+    && let Some(_open) = Open::by(hwnd)
   {
     set(CF_TEXT_UTF16, &utf16_bytes(&text));
   }

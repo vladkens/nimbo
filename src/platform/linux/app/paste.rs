@@ -58,6 +58,8 @@ struct Served {
 thread_local! {
   static SERVED: RefCell<Option<Served>> = const { RefCell::new(None) };
   static NEXT: Cell<u64> = const { Cell::new(1) };
+  /// A snapshot reads: the app's own reads of its offer are not the paste's.
+  static SNAPSHOT: Cell<bool> = const { Cell::new(false) };
 }
 
 /// The functions and the CLIPBOARD selection, while the app runs.
@@ -84,7 +86,9 @@ pub fn snapshot() -> Option<Snapshot> {
   let (s, g, c) = clip()?;
   let (mut atoms, mut n) = (null_mut(), 0);
   let mut snapshot = Snapshot::default();
+  // No targets: empty, or an owner that did not answer, which a restore must not empty.
   if unsafe { (s.gtk_clipboard_wait_for_targets)(c, &mut atoms, &mut n) } == 0 {
+    snapshot.missing = 1;
     return Some(snapshot);
   }
 
@@ -98,7 +102,10 @@ pub fn snapshot() -> Option<Snapshot> {
       continue;
     }
 
-    match contents(s, c, atom) {
+    SNAPSHOT.set(true);
+    let data = contents(s, c, atom);
+    SNAPSHOT.set(false);
+    match data {
       Some(data) => types.push((kind, data)),
       None => snapshot.missing += 1,
     }
@@ -188,7 +195,7 @@ unsafe extern "C" fn get(_c: P, selection: P, info: c_uint, data: P) {
     }
     Some(kind != MARKER.0)
   });
-  if read != Some(true) {
+  if read != Some(true) || SNAPSHOT.get() {
     return;
   }
 

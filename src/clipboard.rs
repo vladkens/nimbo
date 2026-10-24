@@ -75,15 +75,17 @@ impl SystemClipboard {
     imp::change_count()
   }
 
-  /// The app may read what other apps put on the clipboard without the OS asking the user: on
-  /// macOS 15.4+ unless Privacy & Security › Paste from Other Apps has it ask or deny
-  /// (`NSPasteboard.accessBehavior`, which asks nothing to read); always elsewhere.
+  /// The app may read what other apps put on the clipboard without the OS asking the user each
+  /// time: on macOS 15.4+ unless Privacy & Security › Paste from Other Apps has it ask or deny
+  /// (`NSPasteboard.accessBehavior`, which asks nothing to read; never decided, the first read
+  /// asks once, and the answer stays); always elsewhere ([crate::permissions::Pane::Pasteboard]).
   pub fn readable(&self) -> bool {
     imp::readable()
   }
 
   /// The clipboard's contents now; it may take a while (an app that provides its data lazily).
-  /// `None` where it can't be reached (no app running on Windows and Linux).
+  /// `None` where it can't be reached (no app running on Windows and Linux); an owner that does
+  /// not answer counts as [missing](Snapshot::missing).
   pub fn snapshot(&self) -> Option<Snapshot> {
     imp::snapshot()
   }
@@ -99,8 +101,10 @@ impl SystemClipboard {
   /// `ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory` and
   /// `CanUploadToCloudClipboard` off; Linux `x-kde-passwordManagerHint`). With `on_read` the text
   /// is handed out only when an app reads it, and `on_read` runs on the main thread at each read
-  /// the OS asks the app for (macOS and Windows ask once and keep the text; GTK asks each time).
-  /// `None` where it can't be reached.
+  /// the OS asks the app for (macOS and Windows ask once and keep the text; GTK asks each time),
+  /// any reader's (a clipboard manager that ignores the markers too), while the reader waits:
+  /// post what it does to the clipboard ([crate::Proxy]), as the reader holds it open on
+  /// Windows. `None` where it can't be reached.
   pub fn offer(&self, text: &str, on_read: Option<Box<dyn FnMut()>>) -> Option<Offer> {
     imp::offer(text, on_read).map(Offer)
   }
