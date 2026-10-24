@@ -5,10 +5,10 @@
 //! `/proc`; Wayland shows no app another's windows, nor does an X server under it (XWayland sees
 //! only X clients): there is none.
 
-use std::ffi::{CStr, c_ulong};
+use std::ffi::{CStr, c_int, c_ulong};
 use std::ptr::{null, null_mut};
 
-use super::super::P;
+use super::super::{Fp, P};
 use super::{X11, x11};
 use crate::focus::{self, Focused};
 
@@ -27,10 +27,18 @@ pub fn current() -> Option<Focused> {
     return None;
   }
 
+  // A window gone meanwhile is a BadWindow error, on which Xlib's default handler exits: errors
+  // are ignored while asking (the handler is the process's, put back after).
+  let handler = unsafe { (x.XSetErrorHandler)(ignore as Fp) };
   let root = unsafe { (x.XDefaultRootWindow)(d) };
   let active = property(x, d, root, c"_NET_ACTIVE_WINDOW");
   let pid = active.filter(|&w| w != 0).and_then(|w| property(x, d, w, c"_NET_WM_PID"));
-  unsafe { (x.XCloseDisplay)(d) };
+  unsafe {
+    (x.XSync)(d, 0);
+    (x.XSetErrorHandler)(handler);
+    (x.XCloseDisplay)(d);
+  }
+
   let (active, pid) = (active?, pid.unwrap_or(0) as u32);
   let name = match pid {
     0 => String::new(),
@@ -43,6 +51,10 @@ pub fn current() -> Option<Focused> {
     window: Ok((active != 0).then_some(focus::Window(Window(active)))),
     secure: Ok(false),
   })
+}
+
+unsafe extern "C" fn ignore(_d: P, _error: P) -> c_int {
+  0
 }
 
 /// The first 32-bit value (a window, a cardinal) of `w`'s property `name`, which Xlib hands out

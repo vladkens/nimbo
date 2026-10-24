@@ -20,8 +20,8 @@ pub mod tray;
 use std::ffi::{c_char, c_int, c_long, c_uint, c_ulong};
 use std::sync::OnceLock;
 
-use super::P;
 use super::dl::{Lib, fns};
+use super::{Fp, P};
 
 // Xlib, for posted keys and the active window on X11.
 fns!(X11 {
@@ -50,6 +50,8 @@ fns!(X11 {
     data: *mut *mut u8,
   ) -> c_int;
   fn XFree(p: P) -> c_int;
+  fn XSync(d: P, discard: c_int) -> c_int;
+  fn XSetErrorHandler(handler: Fp) -> Fp;
 });
 
 /// `libX11`, loaded at the first use.

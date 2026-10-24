@@ -26,6 +26,8 @@ fns!(Selection {
   fn gtk_clipboard_clear(c: P);
   fn gtk_selection_data_get_data_with_length(d: P, len: *mut c_int) -> *const u8;
   fn gtk_selection_data_get_target(d: P) -> P;
+  fn gtk_selection_data_get_data_type(d: P) -> P;
+  fn gtk_selection_data_get_format(d: P) -> c_int;
   fn gtk_selection_data_set(d: P, kind: P, format: c_int, data: *const u8, len: c_int);
   fn gtk_selection_data_free(d: P);
   fn gdk_atom_name(atom: P) -> *mut c_char;
@@ -119,15 +121,20 @@ pub fn snapshot() -> Option<Snapshot> {
   Some(snapshot)
 }
 
-/// The owner's data for `target`, waited for.
+/// The owner's data for `target`, waited for: bytes of the target's own type, which a restore
+/// serves as it (`TEXT` answered as `COMPOUND_TEXT`, 16- or 32-bit data count as missing).
 fn contents(s: &Selection, c: P, target: P) -> Option<Vec<u8>> {
   let data = unsafe { (s.gtk_clipboard_wait_for_contents)(c, target) };
   if data.is_null() {
     return None;
   }
 
-  let mut len = 0;
-  let p = unsafe { (s.gtk_selection_data_get_data_with_length)(data, &mut len) };
+  let (mut len, mut p) = (0, null());
+  let kind = unsafe { (s.gtk_selection_data_get_data_type)(data) };
+  if kind == target && unsafe { (s.gtk_selection_data_get_format)(data) } == 8 {
+    p = unsafe { (s.gtk_selection_data_get_data_with_length)(data, &mut len) };
+  }
+
   // SAFETY: the selection data holds `len` bytes, copied before it is freed.
   let bytes = (!p.is_null() && len >= 0)
     .then(|| unsafe { std::slice::from_raw_parts(p, len as usize) }.to_vec());
@@ -141,11 +148,8 @@ pub fn restore(snapshot: Snapshot) -> bool {
   let Some((s, _, c)) = clip() else { return false };
   let types: Vec<_> = snapshot.items.into_iter().flatten().collect();
   if types.is_empty() {
-    // The app's own selection goes (it serves one while the clipboard holds an offer).
-    if SERVED.with_borrow(Option::is_some) {
-      unsafe { (s.gtk_clipboard_clear)(c) };
-    }
-
+    // What the app owns goes (an offer, its plain text); GTK leaves another owner's alone.
+    unsafe { (s.gtk_clipboard_clear)(c) };
     return true;
   }
 
