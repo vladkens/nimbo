@@ -7,6 +7,7 @@
 
 use std::ffi::{CStr, c_int, c_ulong};
 use std::ptr::{null, null_mut};
+use std::sync::Mutex;
 
 use super::super::{Fp, P};
 use super::{X11, x11};
@@ -28,7 +29,9 @@ pub fn current() -> Option<Focused> {
   }
 
   // A window gone meanwhile is a BadWindow error, on which Xlib's default handler exits: errors
-  // are ignored while asking (the handler is the process's, put back after).
+  // are ignored while asking (the handler is the process's, put back after; one query at a time).
+  static ASKING: Mutex<()> = Mutex::new(());
+  let _asking = ASKING.lock().unwrap_or_else(|e| e.into_inner());
   let handler = unsafe { (x.XSetErrorHandler)(ignore as Fp) };
   let root = unsafe { (x.XDefaultRootWindow)(d) };
   let active = property(x, d, root, c"_NET_ACTIVE_WINDOW");
