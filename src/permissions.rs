@@ -1,10 +1,12 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! What the OS lets the app do to other apps, where it asks the user first: macOS's Privacy &
-//! Security. Accessibility is what an event tap ([crate::hotkey]) and posting keys
+//! What the OS lets the app do to other apps and devices, where it asks the user first: macOS's
+//! Privacy & Security. Accessibility is what an event tap ([crate::hotkey]) and posting keys
 //! ([crate::keys::post]) need; Secure Input, which a password field turns on, keeps keys from
-//! both. Windows and Linux ask nothing of the kind: there everything is granted, no pane opens
-//! and Secure Input is never on.
+//! both; the microphone is AVFoundation's to grant (AVFoundation loaded at the first call, not
+//! at launch). Windows and Linux are taken as asking nothing: everything is granted there, no pane
+//! opens and Secure Input is never on (Windows' microphone switch in Settings › Privacy isn't read
+//! yet).
 
 /// A pane of System Settings › Privacy & Security.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -15,6 +17,9 @@ pub enum Pane {
   Microphone,
   /// Listening to the keyboard while other apps have it (a listen-only event tap).
   InputMonitoring,
+  /// Paste from Other Apps (macOS 15.4+): reading the clipboard without asking
+  /// ([crate::SystemClipboard::readable]).
+  Pasteboard,
 }
 
 impl Pane {
@@ -29,6 +34,9 @@ impl Pane {
       }
       Self::InputMonitoring => {
         "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
+      }
+      Self::Pasteboard => {
+        "x-apple.systempreferences:com.apple.preference.security?Privacy_Pasteboard"
       }
     }
   }
@@ -64,6 +72,36 @@ pub fn secure_input() -> bool {
   false
 }
 
+/// What the user decided about a device the app asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Access {
+  Granted,
+  /// The user said no; System Settings changes it ([open_pane]).
+  Denied,
+  /// A policy (parental controls, a device profile) keeps it, and the user can't change it.
+  Restricted,
+  /// Never asked: the first use (or [request_microphone]) shows the system's prompt.
+  NotDetermined,
+}
+
+/// Whether the app may record from the microphone; asks nothing.
+pub fn microphone() -> Access {
+  #[cfg(target_os = "macos")]
+  return crate::platform::permissions::microphone();
+  #[cfg(not(target_os = "macos"))]
+  Access::Granted
+}
+
+/// Shows the system's prompt for the microphone, once ever per app (later calls answer at once
+/// with the decision); `done` gets the answer on the main thread, while the app runs. Elsewhere
+/// `done` gets true at once.
+pub fn request_microphone(done: impl FnOnce(bool) + Send + 'static) {
+  #[cfg(target_os = "macos")]
+  crate::platform::permissions::request_microphone(Box::new(done));
+  #[cfg(not(target_os = "macos"))]
+  done(true);
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -74,6 +112,7 @@ mod tests {
       (Pane::Accessibility, "Privacy_Accessibility"),
       (Pane::Microphone, "Privacy_Microphone"),
       (Pane::InputMonitoring, "Privacy_ListenEvent"),
+      (Pane::Pasteboard, "Privacy_Pasteboard"),
     ] {
       let url = pane.url();
       assert!(url.starts_with("x-apple.systempreferences:com.apple.preference.security?"));
@@ -84,9 +123,9 @@ mod tests {
   /// Reading needs no permission and never prompts.
   #[test]
   fn reading_never_prompts() {
-    let (trusted, secure) = (accessibility(false), secure_input());
+    let (trusted, secure, mic) = (accessibility(false), secure_input(), microphone());
     if !cfg!(target_os = "macos") {
-      assert!(trusted && !secure);
+      assert!(trusted && !secure && mic == Access::Granted);
     }
   }
 }

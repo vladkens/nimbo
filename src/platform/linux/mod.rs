@@ -35,7 +35,7 @@ use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-pub use self::app::{autostart, hotkey, open, post, shell, tray};
+pub use self::app::{autostart, focus, hotkey, open, paste, post, shell, tray};
 use self::dl::{Lib, fns};
 use self::input::Input;
 pub use self::settings::appearance;
@@ -119,6 +119,7 @@ fns!(Gtk {
   fn gtk_window_present(w: P);
   fn gtk_window_is_active(w: P) -> c_int;
   fn gtk_widget_destroy(w: P);
+  fn gtk_dialog_run(d: P) -> c_int;
   fn gtk_widget_hide(w: P);
   fn gtk_widget_queue_draw_area(w: P, x: c_int, y: c_int, width: c_int, height: c_int);
   fn gtk_widget_add_tick_callback(w: P, cb: Fp, data: P, free: Fp) -> c_uint;

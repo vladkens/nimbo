@@ -27,7 +27,7 @@ use windows_sys::Win32::UI::HiDpi::{
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use super::super::{Timer, create, run_loop, settings, show_overlay, wide, with_window};
-use super::tray;
+use super::{paste, tray};
 use crate::Config;
 use crate::app::App;
 use crate::shell::{AppInfo, Main, Presence};
@@ -157,6 +157,13 @@ pub fn terminating() -> bool {
   shell(|s| s.terminating)
 }
 
+/// A message box of its own, topmost, with the system's warning sound and icon.
+pub fn alert(title: &str, message: &str) {
+  let (title, message) = (wide(title), wide(message));
+  let style = MB_OK | MB_ICONWARNING | MB_TOPMOST | MB_SETFOREGROUND;
+  unsafe { MessageBoxW(null_mut(), message.as_ptr(), title.as_ptr(), style) };
+}
+
 /// Runs `f` on the main thread after `delay`: a message to the shell's window, which schedules a
 /// timer for a delay. Dropped when no app runs.
 pub fn post(delay: Duration, f: Job) {
@@ -208,6 +215,14 @@ unsafe extern "system" fn host_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
     }
     WM_TRAY => {
       tray::notify(wp, lp);
+      0
+    }
+    WM_RENDERFORMAT | WM_RENDERALLFORMATS => {
+      paste::render(msg == WM_RENDERALLFORMATS);
+      0
+    }
+    WM_DESTROYCLIPBOARD => {
+      paste::destroyed();
       0
     }
     WM_QUERYENDSESSION => 1,

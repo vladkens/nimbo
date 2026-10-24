@@ -32,7 +32,7 @@ use objc2_foundation::{
   NSString,
 };
 
-pub use super::app::{is_main, post, set_presence};
+pub use super::app::{alert, is_main, post, set_presence};
 use super::view::View;
 use super::{Pasteboard, appearance, mtm, overlay};
 use crate::Config;

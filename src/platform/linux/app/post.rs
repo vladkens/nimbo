@@ -9,7 +9,7 @@
 //! protocol for one app to type into another (only the RemoteDesktop portal, which asks the user
 //! each session): there it fails, as on X11 without the libraries.
 
-use std::ffi::{c_char, c_int, c_uint, c_ulong};
+use std::ffi::{c_int, c_uint, c_ulong};
 use std::ptr::null;
 use std::sync::OnceLock;
 
@@ -17,18 +17,8 @@ use keyboard_types::{Modifiers, NamedKey};
 
 use super::super::dl::{Lib, fns};
 use super::super::{P, keys, lib};
+use super::{X11, x11};
 use crate::keys::{Key, Shortcut, f_key, strokes};
-
-fns!(X11 {
-  fn XOpenDisplay(name: *const c_char) -> P;
-  fn XCloseDisplay(d: P) -> c_int;
-  fn XQueryKeymap(d: P, keys: *mut u8) -> c_int;
-  fn XKeysymToKeycode(d: P, sym: c_ulong) -> u8;
-  fn XkbKeycodeToKeysym(d: P, code: u8, group: c_int, level: c_int) -> c_ulong;
-  fn XkbGetState(d: P, device: c_uint, state: *mut u8) -> c_int;
-  fn XFlush(d: P) -> c_int;
-  fn XDisplayKeycodes(d: P, min: *mut c_int, max: *mut c_int) -> c_int;
-});
 
 fns!(Xtst {
   fn XTestFakeKeyEvent(d: P, code: c_uint, press: c_int, delay: c_ulong) -> c_int;
@@ -41,13 +31,9 @@ fns!(Gdk {
 /// `XkbUseCoreKbd`.
 const CORE_KBD: c_uint = 0x100;
 
-fn libs() -> Option<&'static (X11, Xtst)> {
-  static LIBS: OnceLock<Option<(X11, Xtst)>> = OnceLock::new();
-  let load = || {
-    let x = X11::load(&Lib::open(&[c"libX11.so.6"])?)?;
-    Some((x, Xtst::load(&Lib::open(&[c"libXtst.so.6"])?)?))
-  };
-  LIBS.get_or_init(load).as_ref()
+fn xtst() -> Option<&'static Xtst> {
+  static XTST: OnceLock<Option<Xtst>> = OnceLock::new();
+  XTST.get_or_init(|| Xtst::load(&Lib::open(&[c"libXtst.so.6"])?)).as_ref()
 }
 
 fn gdk() -> Option<&'static Gdk> {
@@ -60,7 +46,7 @@ pub fn post(s: Shortcut) -> Result<(), String> {
     return Err("Wayland lets no app send keys to another".into());
   }
 
-  let (x, t) = libs().ok_or("no libX11 or libXtst")?;
+  let (x, t) = x11().zip(xtst()).ok_or("no libX11 or libXtst")?;
   let sym = keysym(s.key).ok_or("no keysym for the key")?;
   let d = unsafe { (x.XOpenDisplay)(null()) };
   if d.is_null() {
