@@ -98,10 +98,20 @@
 //!   key events to the app in focus, its character (lowercase) found on the layout in use.
 //! - `pub fn clipboard() -> Option<impl Clipboard>`: the system clipboard outside a window
 //!   ([crate::SystemClipboard]), `None` while the platform can't reach it (no app running).
+//! - `pub mod paste` ([crate::clipboard], on the main thread): `change_count() -> Option<u64>`,
+//!   `readable() -> bool`, `snapshot() -> Option<Snapshot>`, `restore(Snapshot) -> bool`,
+//!   `offer(&str, Option<Box<dyn FnMut()>>) -> Option<u64>` (the text marked for clipboard managers
+//!   to skip, handed out at a read that runs the callback when there is one) and `holds(u64) ->
+//!   bool` (nothing was written since that offer).
+//! - `pub mod focus` ([crate::focus]): `current() -> Option<Focused>` and `Window: Clone + Debug +
+//!   PartialEq + Send + Sync`, another app's window by identity.
+//! - `shell::alert(title: &str, message: &str)` ([crate::Main::alert]): a modal alert on the main
+//!   thread, returning once dismissed.
 //! - macOS only, `pub mod permissions` ([crate::permissions]): `accessibility(prompt: bool) ->
-//!   bool`, `secure_input() -> bool`.
+//!   bool`, `secure_input() -> bool`, `microphone() -> Access`, `request_microphone(Box<dyn
+//!   FnOnce(bool) + Send>)`.
 //!
-//!   `open`, `post` and `permissions` live in `app/` on each OS too.
+//!   `open`, `post`, `paste`, `focus` and `permissions` live in `app/` on each OS too.
 //! - `pub fn appearance() -> Appearance` ([crate::Appearance]): `dark`, and `accent` in sRGB or
 //!   `None` when the OS has none or the user left it to apps (macOS: `effectiveAppearance` matched
 //!   against Aqua / DarkAqua, `controlAccentColor` unless Multicolor; on the main thread only,
@@ -162,7 +172,9 @@ use std::time::{Duration, Instant};
 pub use imp::appearance;
 #[cfg(target_os = "macos")]
 pub(crate) use imp::permissions;
-pub(crate) use imp::{autostart, clipboard, hotkey, open, perf_cores, post, shell, text, tray};
+pub(crate) use imp::{
+  autostart, clipboard, focus, hotkey, open, paste, perf_cores, post, shell, text, tray,
+};
 #[cfg(any(test, target_os = "windows", target_os = "linux"))]
 use keyboard_types::Code;
 

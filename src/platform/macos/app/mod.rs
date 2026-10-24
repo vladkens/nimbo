@@ -3,12 +3,16 @@
 //! What a menu-bar app needs on macOS besides its windows ([super::shell]): the status item and
 //! its menu ([tray]), global hotkeys ([hotkey]: an event tap with Carbon's hotkeys as the
 //! fallback), launch at login ([autostart]: SMAppService), work from other threads on the main
-//! queue ([post()]), and the Dock ([Presence]); links and files opened ([open]), Accessibility
-//! and Secure Input ([permissions]) and shortcuts posted to the app in focus ([post]).
+//! queue ([post()]), and the Dock ([Presence]); links and files opened ([open]), Accessibility,
+//! Secure Input and the microphone ([permissions]), shortcuts posted to the app in focus
+//! ([post]), where the user types ([focus]), the pasteboard for a paste ([paste]) and alerts
+//! ([alert]).
 
 pub mod autostart;
+pub mod focus;
 pub mod hotkey;
 pub mod open;
+pub mod paste;
 pub mod permissions;
 pub mod post;
 pub mod tray;
@@ -18,7 +22,8 @@ use std::time::Duration;
 
 use dispatch2::{DispatchQueue, DispatchTime};
 use objc2::MainThreadMarker;
-use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+use objc2_app_kit::{NSAlert, NSApplication, NSApplicationActivationPolicy};
+use objc2_foundation::NSString;
 
 use crate::shell::Presence;
 
@@ -57,4 +62,14 @@ pub fn post(delay: Duration, f: Box<dyn FnOnce() + Send>) {
 
   let when = DispatchTime::try_from(delay).unwrap_or(DispatchTime::NOW);
   let _ = DispatchQueue::main().after(when, f);
+}
+
+/// An `NSAlert`, the app activated so it shows in front.
+pub fn alert(title: &str, message: &str) {
+  let mtm = super::mtm();
+  let alert = NSAlert::new(mtm);
+  alert.setMessageText(&NSString::from_str(title));
+  alert.setInformativeText(&NSString::from_str(message));
+  NSApplication::sharedApplication(mtm).activate();
+  alert.runModal();
 }

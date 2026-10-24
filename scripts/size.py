@@ -28,21 +28,21 @@ KINDS = ("code", "docs", "comments", "tests", "blank")
 # The code lines each part may have: a platform, the UI core (ui/: the tree, layout, input,
 # paint, theme), its widgets and containers (ui/widgets, ui/containers: add-ons over it), the
 # text system (text/: shaping, the glyph atlas, the editing model), the app platform (its
-# portable part: the shell, tray, hotkeys, paths, launch at login, opening, permissions; and each OS's
-# platform/<os>/app) and the core (the rest of src/). Raising one is a decision recorded in its
-# PR.
+# portable part: the shell, tray, hotkeys, paths, launch at login, opening, permissions, the
+# system clipboard, the focus of other apps; and each OS's platform/<os>/app) and the core (the
+# rest of src/). Raising one is a decision recorded in its PR.
 BUDGETS = {
   "platform/macos": 1730,
-  "platform/windows": 2000,
+  "platform/windows": 1970,
   "platform/linux": 2830,
   "ui": 3700,
   "widgets": 2940,
   "text": 1180,
   "core": 3490,
-  "app/shared": 750,
-  "app/macos": 1210,
-  "app/windows": 1130,
-  "app/linux": 1060,
+  "app/shared": 845,
+  "app/macos": 1490,
+  "app/windows": 1365,
+  "app/linux": 1325,
 }
 # Modules that count against a budget of another name ("app", src/app.rs, is the core's seams).
 # The settings form and the dialog are add-ons over the widgets, as the containers are.
@@ -51,7 +51,7 @@ PARTS = {
   "ui/containers": "widgets",
   "ui/form": "widgets",
   "ui/dialog": "widgets",
-  **{m: "app/shared" for m in ("shell", "tray", "hotkey", "paths", "autostart", "open", "permissions")},
+  **{m: "app/shared" for m in ("shell", "tray", "hotkey", "paths", "autostart", "open", "permissions", "clipboard", "focus")},
 }
 
 

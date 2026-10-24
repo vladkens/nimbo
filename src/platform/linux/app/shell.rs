@@ -10,12 +10,14 @@
 
 use std::any::TypeId;
 use std::cell::Cell;
-use std::ffi::c_int;
+use std::ffi::{c_char, c_int};
+use std::ptr::null_mut;
 use std::sync::OnceLock;
 use std::thread::{self, ThreadId};
 use std::time::Duration;
 
-use super::super::{FALSE, Fp, P, as_window, load, slot};
+use super::super::dbus::cstr;
+use super::super::{FALSE, Fp, P, as_window, lib, load, slot};
 use crate::Config;
 use crate::app::App;
 use crate::shell::{AppInfo, Main, Presence};
@@ -95,6 +97,26 @@ pub fn set_presence(_: Presence) {}
 
 pub fn terminating() -> bool {
   false
+}
+
+/// A GTK message dialog run modally (its constructors are variadic: looked up apart from
+/// [super::super::Gtk]); stderr while no app runs or GTK isn't there.
+pub fn alert(title: &str, message: &str) {
+  type New = unsafe extern "C" fn(P, c_int, c_int, c_int, *const c_char, ...) -> P;
+  type Secondary = unsafe extern "C" fn(P, *const c_char, ...);
+  let found = lib().filter(|_| running()).zip(load()).and_then(|(lib, g)| unsafe {
+    let new = lib.sym::<New>("gtk_message_dialog_new\0")?;
+    Some((new, lib.sym::<Secondary>("gtk_message_dialog_format_secondary_text\0")?, g))
+  });
+  let Some((new, secondary, g)) = found else { return eprintln!("{title}: {message}") };
+  let (title, message) = (cstr(title), cstr(message));
+  // `GTK_DIALOG_MODAL`, `GTK_MESSAGE_WARNING`, `GTK_BUTTONS_OK`; the texts through "%s".
+  unsafe {
+    let dialog = new(null_mut(), 1, 1, 1, c"%s".as_ptr(), title.as_ptr());
+    secondary(dialog, c"%s".as_ptr(), message.as_ptr());
+    (g.gtk_dialog_run)(dialog);
+    (g.gtk_widget_destroy)(dialog);
+  }
 }
 
 pub fn quit() {

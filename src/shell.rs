@@ -234,6 +234,15 @@ impl Main {
     imp::terminating()
   }
 
+  /// A modal alert with an OK button, in front of every app, that returns once the user closes
+  /// it: what failed where no window or terminal shows it (a menu bar app that can't start).
+  /// macOS an `NSAlert` (the app activated for it), Windows a `MessageBoxW`, Linux a GTK message
+  /// dialog; printed to stderr where no dialog shows (GTK not loaded). Tests can't reach it: it
+  /// waits for the user.
+  pub fn alert(&mut self, title: &str, message: &str) {
+    imp::alert(title, message);
+  }
+
   pub fn proxy(&self) -> Proxy {
     Proxy(())
   }
