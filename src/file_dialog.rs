@@ -1,6 +1,6 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The system's file panel, asked for by a window ([Ui::file_dialog], [Cx::file_dialog]): an
+//! The system's file panel, asked for by a window ([Ui::file_dialog]): an
 //! open or a save panel over it, the window drawing on, its answer coming back to the window as
 //! [crate::Event::FileDialog]. The harness answers it as a test says
 //! ([crate::Harness::file_dialog]).
@@ -10,7 +10,7 @@
 
 use std::path::PathBuf;
 
-use crate::{Cx, Ui};
+use crate::Ui;
 
 /// An open or a save panel, plain data: `FileDialog::open("Import").types(&["tar"])`,
 /// `FileDialog::save("Export").name("history.tar")`.
@@ -40,10 +40,6 @@ impl FileDialog {
     Self { types: types.iter().map(|t| t.to_string()).collect(), ..self }
   }
 
-  pub fn dir(self, dir: impl Into<PathBuf>) -> Self {
-    Self { dir: Some(dir.into()), ..self }
-  }
-
   pub fn name(self, name: &str) -> Self {
     Self { name: Some(name.into()), ..self }
   }
@@ -55,12 +51,5 @@ impl Ui<'_> {
   /// while one is open is dropped.
   pub fn file_dialog(&mut self, dialog: FileDialog) {
     self.st.file_dialog = Some(dialog);
-  }
-}
-
-impl Cx<'_> {
-  /// [Ui::file_dialog] from an event.
-  pub fn file_dialog(&mut self, dialog: FileDialog) {
-    self.ui.file_dialog = Some(dialog);
   }
 }

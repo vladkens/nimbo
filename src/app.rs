@@ -297,7 +297,7 @@ pub struct Cx<'a> {
   pub waker: &'a Waker,
   quit: &'a mut bool,
   redraw: bool,
-  pub(crate) ui: &'a mut UiState,
+  ui: &'a mut UiState,
 }
 
 impl Cx<'_> {

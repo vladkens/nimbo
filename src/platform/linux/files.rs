@@ -37,10 +37,10 @@ struct Target(S, c_uint, c_uint);
 struct Drag {
   ctx: P,
   pos: Point,
-  paths: Option<Vec<PathBuf>>,
+  paths: Vec<PathBuf>,
 }
 
-const NONE: Drag = Drag { ctx: null_mut(), pos: Point::new(0.0, 0.0), paths: None };
+const NONE: Drag = Drag { ctx: null_mut(), pos: Point::new(0.0, 0.0), paths: Vec::new() };
 
 thread_local! {
   static DRAG: RefCell<Drag> = const { RefCell::new(NONE) };
@@ -151,7 +151,7 @@ fn end_drag(ctx: P) -> Option<Drag> {
 /// Tells the source whether a drop would copy (it would with files), and the window where they
 /// are.
 fn status(ctx: P, time: u32, data: P) {
-  let (pos, paths) = DRAG.with_borrow(|d| (d.pos, d.paths.clone().unwrap_or_default()));
+  let (pos, paths) = DRAG.with_borrow(|d| (d.pos, d.paths.clone()));
   unsafe { (gtk().gdk_drag_status)(ctx, if paths.is_empty() { 0 } else { COPY }, time) };
   if !paths.is_empty() {
     with_data(data, false, |w| w.send(Event::DragOver { pos, paths }));
@@ -164,7 +164,7 @@ unsafe extern "C" fn on_motion(area: P, ctx: P, x: i32, y: i32, time: u32, data:
   let pos = Point::new(x as f32, y as f32);
   let new = DRAG.with_borrow_mut(|d| {
     let new = d.ctx != ctx;
-    *d = Drag { ctx, pos, paths: d.paths.take().filter(|_| !new) };
+    *d = Drag { ctx, pos, paths: if new { Vec::new() } else { std::mem::take(&mut d.paths) } };
     new
   });
   let target = unsafe { (gtk().gtk_drag_dest_find_target)(area, ctx, null_mut()) };
@@ -184,7 +184,7 @@ unsafe extern "C" fn on_leave(_: P, ctx: P, _: u32, data: P) {
     unsafe { (gtk().gdk_event_free)(ev) };
   }
 
-  if !dropping && end_drag(ctx).and_then(|d| d.paths).is_some_and(|p| !p.is_empty()) {
+  if !dropping && end_drag(ctx).is_some_and(|d| !d.paths.is_empty()) {
     with_data(data, false, |w| w.send(Event::DragExit));
   }
 }
@@ -192,7 +192,7 @@ unsafe extern "C" fn on_leave(_: P, ctx: P, _: u32, data: P) {
 /// `drag-drop`: the files known drop. Only a drag answered with files drops ([status]): they
 /// came on its first motion.
 unsafe extern "C" fn on_drop(_: P, ctx: P, x: i32, y: i32, time: u32, data: P) -> c_int {
-  let paths = end_drag(ctx).and_then(|d| d.paths).unwrap_or_default();
+  let paths = end_drag(ctx).map(|d| d.paths).unwrap_or_default();
   unsafe { (gtk().gtk_drag_finish)(ctx, !paths.is_empty() as c_int, FALSE, time) };
   if !paths.is_empty() {
     with_data(data, false, |w| w.send(Event::Drop { pos: Point::new(x as f32, y as f32), paths }));
@@ -211,7 +211,7 @@ unsafe extern "C" fn on_data(_: P, ctx: P, _: i32, _: i32, sel: P, _: u32, t: u3
     false => uri_list(unsafe { std::slice::from_raw_parts(ptr, len as usize) }),
   };
 
-  if DRAG.with_borrow_mut(|d| (d.ctx == ctx).then(|| d.paths = Some(paths)).is_some()) {
+  if DRAG.with_borrow_mut(|d| (d.ctx == ctx).then(|| d.paths = paths).is_some()) {
     status(ctx, t, data);
   }
 }
@@ -260,7 +260,8 @@ mod tests {
 
   #[test]
   fn portal_options() {
-    let d = FileDialog::save("Export").types(&["tar", "7z"]).dir("/tmp").name("h.tar");
+    let d = FileDialog { dir: Some("/tmp".into()), ..FileDialog::save("Export") };
+    let d = d.types(&["tar", "7z"]).name("h.tar");
     let o = options(&d, "t1");
     assert_eq!(o.ty(), "a{sv}");
     let glob = |g: &str| V::Tuple(vec![V::U(0), V::s(g)]);
