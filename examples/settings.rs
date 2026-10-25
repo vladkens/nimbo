@@ -245,7 +245,11 @@ impl Settings {
         ui.form_row_with(
           fs,
           row,
-          |ui| _ = ui.progress(Some(0.42)),
+          // Clear of the description's descenders.
+          |ui| {
+            _ = ui
+              .col(Style::new().w(grow()).pads([4.0, 0.0, 0.0, 0.0]), |ui| ui.progress(Some(0.42)))
+          },
           |ui| ui.badge("Running", Tone::Accent),
         );
       },
