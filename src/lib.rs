@@ -25,6 +25,7 @@ pub mod app;
 pub mod autostart;
 pub mod clipboard;
 pub mod cpu;
+mod file_dialog;
 pub mod focus;
 pub mod harness;
 pub mod hotkey;
@@ -48,6 +49,7 @@ pub use app::{
   WHEEL_LINE, Waker,
 };
 pub use clipboard::SystemClipboard;
+pub use file_dialog::FileDialog;
 pub use harness::Harness;
 /// Keys' W3C UI Events names: [Code] a key's place, [NamedKey] a key that types nothing,
 /// [Modifiers] the modifier keys held.

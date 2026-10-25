@@ -59,7 +59,7 @@ fn xy(lp: LPARAM) -> (i32, i32) {
 }
 
 impl Window {
-  fn point(&self, (x, y): (i32, i32)) -> Point {
+  pub(super) fn point(&self, (x, y): (i32, i32)) -> Point {
     Point::new(x as f32 / self.scale, y as f32 / self.scale)
   }
 

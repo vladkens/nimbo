@@ -208,6 +208,8 @@ pub struct UiState {
   pub(crate) resize: Option<Size>,
   /// The last size asked: asking it again is nothing new, so a view may ask every frame.
   asked: Option<Size>,
+  /// The file panel asked for ([Ui::file_dialog]), until the platform takes it.
+  pub(crate) file_dialog: Option<crate::FileDialog>,
   /// The height of the title bar over the content and the window's title ([Ui::titlebar]).
   pub(crate) titlebar: Option<(f32, &'static str)>,
   /// The images [Ui::rgba_image] added: their pixels' hash, the image, and whether a view built
@@ -260,6 +262,7 @@ impl Default for UiState {
       stats: FrameStats::default(),
       resize: None,
       asked: None,
+      file_dialog: None,
       titlebar: None,
       pictures: Vec::new(),
       grab: None,
@@ -517,7 +520,7 @@ pub struct Response {
 /// runtime runs the view once more right after a click, without drawing, so the app changes
 /// its state before the frame that shows it, wherever in the view the click is read.
 pub struct Ui<'a> {
-  st: UiState,
+  pub(crate) st: UiState,
   canvases: Vec<Option<Canvas<'a>>>,
   /// The next element's id, and whether it is named (interactive).
   next_id: Option<(Id, bool)>,

@@ -5,12 +5,14 @@
 //! headless harness ([crate::harness]).
 
 use std::ops::Range;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use keyboard_types::{Code, Modifiers};
 
+use crate::file_dialog::FileDialog;
 use crate::keys::{self, Binding, Command, KeyEvent};
 use crate::scene::{Color, Frame, Images, Point, Rect, Scene, Size};
 use crate::text::TextSystem;
@@ -152,6 +154,22 @@ pub enum Event {
   /// The OS's light or dark setting or accent colour changed, or is first known (before the
   /// first frame): the theme follows it unless the app set one ([Ui::set_theme]).
   Appearance(Appearance),
+  /// Files dragged over the window, the pointer at `pos`; the hover follows it, so
+  /// [Cx::hovered] tells where they would go.
+  DragOver {
+    pos: Point,
+    paths: Vec<PathBuf>,
+  },
+  /// The dragged files left the window, or the drag ended elsewhere.
+  DragExit,
+  /// Files dropped on the window at `pos`.
+  Drop {
+    pos: Point,
+    paths: Vec<PathBuf>,
+  },
+  /// The file picked in the panel the window asked for ([Ui::file_dialog]); `None` when
+  /// cancelled.
+  FileDialog(Option<PathBuf>),
 }
 
 /// The OS's look: light or dark, and the accent colour the user picked, if the OS has one
@@ -279,7 +297,7 @@ pub struct Cx<'a> {
   pub waker: &'a Waker,
   quit: &'a mut bool,
   redraw: bool,
-  ui: &'a mut UiState,
+  pub(crate) ui: &'a mut UiState,
 }
 
 impl Cx<'_> {
@@ -478,6 +496,12 @@ impl<A: App> Runtime<A> {
     self.ui.titlebar = bar;
   }
 
+  /// The file panel the app asked for ([Ui::file_dialog]), once: the platform shows it over the
+  /// window after an event or a frame and sends the answer as [Event::FileDialog].
+  pub fn take_file_dialog(&mut self) -> Option<FileDialog> {
+    self.ui.file_dialog.take()
+  }
+
   /// The content size the app asked the window for ([Ui::set_window_size]), once: the platform
   /// resizes the window to it after an event or a frame, then reports the new size by
   /// [Runtime::resize] as it does for any.
@@ -572,7 +596,8 @@ impl<A: App> Runtime<A> {
       Event::MouseMove { pos, .. } | Event::MouseDown { pos, .. } | Event::MouseUp { pos, .. } => {
         self.mouse = Some(pos)
       }
-      Event::MouseExit => self.mouse = None,
+      Event::DragOver { pos, .. } | Event::Drop { pos, .. } => self.mouse = Some(pos),
+      Event::MouseExit | Event::DragExit => self.mouse = None,
       _ => {}
     }
 

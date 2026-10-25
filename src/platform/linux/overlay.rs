@@ -73,7 +73,7 @@ fn gdk() -> &'static Gdk {
 }
 
 /// The display is Wayland's: GDK's Wayland backend is built in and opened it.
-fn wayland() -> bool {
+pub fn wayland() -> bool {
   let Some(lib) = lib() else { return false };
   // SAFETY: GObject's type getter of GDK's Wayland display, a `GType` (a `gsize`).
   let get = unsafe { lib.sym::<unsafe extern "C" fn() -> usize>("gdk_wayland_display_get_type\0") };

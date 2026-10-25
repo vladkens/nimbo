@@ -9,6 +9,8 @@
 mod view;
 
 mod app;
+mod files;
+mod input;
 mod keyboard;
 mod overlay;
 pub mod shell;

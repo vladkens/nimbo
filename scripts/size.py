@@ -36,13 +36,13 @@ KINDS = ("code", "docs", "comments", "tests", "blank")
 # lines one change needs.
 STEP = 100
 BUDGETS = {
-  "platform/macos": 1800,
-  "platform/windows": 2000,
-  "platform/linux": 2900,
+  "platform/macos": 1900,
+  "platform/windows": 2200,
+  "platform/linux": 3000,
   "ui": 3800,
   "widgets": 3000,
   "text": 1200,
-  "core": 3500,
+  "core": 3600,
   "app/shared": 900,
   "app/macos": 1500,
   "app/windows": 1400,

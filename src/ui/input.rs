@@ -261,8 +261,10 @@ impl UiState {
       Event::MouseMove { pos, .. } => {
         self.hover_at(Some(pos), false) | self.input.press.is_some() | self.input.moves
       }
-      Event::Magnify { pos, .. } => self.hover_at(Some(pos), false),
-      Event::MouseExit => self.hover_at(None, false),
+      Event::Magnify { pos, .. } | Event::DragOver { pos, .. } | Event::Drop { pos, .. } => {
+        self.hover_at(Some(pos), false)
+      }
+      Event::MouseExit | Event::DragExit => self.hover_at(None, false),
       Event::MouseDown { pos, button, clicks, mods } => {
         let mut changed = self.hover_at(Some(pos), false);
         let top = self.input.hover.first().copied();
