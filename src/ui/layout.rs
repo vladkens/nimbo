@@ -697,6 +697,13 @@ fn ellipsize(s: &str, font: Font, width: f32, m: &mut dyn Measure) -> (usize, f3
   (end, m.width(&s[..end], font) + dots)
 }
 
+/// The widest line of `s` in `style` wrapped at `width`, as [wrap_text] breaks it.
+pub(crate) fn wrapped_width(s: &str, style: TextStyle, width: f32, m: &mut dyn Measure) -> f32 {
+  let mut lines = Vec::new();
+  wrap_text(s, (0, s.len() as u32), style, width, false, m, &mut lines);
+  lines.iter().fold(0.0, |w, l| w.max(l.width))
+}
+
 /// Breaks the text at `range` into lines no wider than `width`: at newlines, and greedily at
 /// spaces when it wraps. A word wider than `width` starts a line and breaks between characters
 /// (graphemes), as AppKit's word wrapping does, each line at least one character. With `cover`

@@ -674,6 +674,15 @@ impl<'a> Ui<'a> {
     self.text.as_mut().map_or(0.0, |t| t.measure(s, style.font))
   }
 
+  /// The widest line of `s` in `style` wrapped at `width`, as the layout breaks it: to fit a box
+  /// to its wrapped text (a tooltip), as the layout sizes one by the text's width before it
+  /// wraps. 0 in a [Ui] the runtime didn't build.
+  pub fn measure_wrapped(&mut self, s: &str, style: TextStyle, width: f32) -> f32 {
+    let Some(text) = self.text.as_mut() else { return 0.0 };
+    let mut m = Sys { text, images: &self.images, scale: 1.0 };
+    layout::wrapped_width(s, style, width, &mut m)
+  }
+
   /// Vertical metrics of `font` as the layout uses them: to set a mark beside text by its
   /// baseline, cap or x-height. Zeros in a [Ui] the runtime didn't build.
   pub fn metrics(&mut self, font: Font) -> Metrics {
