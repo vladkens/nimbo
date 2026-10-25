@@ -9,10 +9,11 @@
 //! minimized; one when it shows again. The windows are kept by handle; a message's handler finds
 //! its own through [CURRENT] ([with]). Input and cursors are in [input], keys in [keyboard],
 //! light or dark and the accent in [settings], the app shell, tray, hotkeys and launch at login
-//! in [app]; then the clipboard, the performance cores, and the DirectWrite text backend
-//! ([text]).
+//! in [app], file dialogs and drops in [files]; then the clipboard, the performance cores, and
+//! the DirectWrite text backend ([text]).
 
 mod app;
+mod files;
 mod input;
 mod keyboard;
 mod settings;
@@ -35,6 +36,7 @@ use windows_sys::Win32::Foundation::{
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::System::DataExchange::EmptyClipboard;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::System::Ole::RevokeDragDrop;
 use windows_sys::Win32::System::SystemInformation::{
   GetLogicalProcessorInformationEx, GetSystemTimePreciseAsFileTime, PROCESSOR_RELATIONSHIP,
   RelationProcessorCore, SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
@@ -214,6 +216,8 @@ struct Window {
   style: WINDOW_STYLE,
   /// The system's light or dark mode and accent last sent.
   look: Appearance,
+  /// Takes the files dragged onto the window while held.
+  drops: Cell<files::This>,
 }
 
 thread_local! {
@@ -410,8 +414,9 @@ impl Window {
     self.send(Event::Appearance(look));
   }
 
-  /// Wakes post nowhere from now on: the window is going.
+  /// Wakes post nowhere from now on, and drops come no more: the window is going.
   fn revoke(&self) {
+    files::unregister(self.hwnd, &self.drops);
     if let Ok(mut hwnd) = self.target.lock() {
       *hwnd = 0;
     }
@@ -494,7 +499,9 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     let res = handle(hwnd, msg, wp, lp);
     // A size the app asked for in the live move or resize loop (a timer's frame) is applied
     // now, not when the loop ends; outside the window's borrow, as SetWindowPos sends WM_SIZE.
+    // So is a file dialog asked for, which runs the messages until it closes.
     apply_resize(hwnd);
+    files::apply(hwnd);
     with(|w| w.sync_modal());
     res
   })
@@ -641,6 +648,8 @@ fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
       def()
     }
     WM_DESTROY => {
+      // OLE lets go of the drop target while the window is there, even one borrowed up the stack.
+      unsafe { RevokeDragDrop(hwnd) };
       with(|w| w.revoke());
       // Dropped here unless a call up the stack holds it, outside the list's borrow (the app's
       // drop may open or close windows); its close callback runs after.
@@ -711,6 +720,7 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
   assert!(!hwnd.is_null(), "nimbo: CreateWindowExW failed");
   // No input method until a text field takes it.
   input::ime_off(hwnd);
+  let drops = files::register(hwnd);
 
   let scale = unsafe { GetDpiForWindow(hwnd) } as f32 / 96.0;
   let mut rt = Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(WinClipboard::new(hwnd)));
@@ -756,6 +766,7 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
     min: cfg.min(),
     style,
     look,
+    drops,
     armed: None,
     target,
   };
@@ -833,14 +844,14 @@ fn place(hwnd: HWND, anchor: Anchor, pointer: bool) {
   unsafe { SetWindowPos(hwnd, HWND_TOPMOST, x, y, px(size.w), px(size.h), SWP_NOACTIVATE) };
 }
 
-/// Draws the frame due and applies a size the app asked for, before it and in it; returns how
-/// long the loop may sleep (`None`: until a message). A size asked for in the frame draws
-/// another through WM_SIZE, and the sleep follows that one: what it wants (an animation, a
-/// timer) would otherwise wait for the next message.
+/// Draws the frame due and applies a size the app asked for, before it and in it, then a file
+/// dialog; returns how long the loop may sleep (`None`: until a message). A size asked for in
+/// the frame draws another through WM_SIZE, as a dialog's answer wants one, and the sleep
+/// follows that: what it wants (an animation, a timer) would otherwise wait for the next message.
 fn settle(hwnd: HWND) -> Option<Duration> {
   apply_resize(hwnd);
   let wait = with(|w| w.tick()).flatten();
-  match apply_resize(hwnd) {
+  match apply_resize(hwnd) | files::apply(hwnd) {
     true => with(|w| w.wait()).flatten(),
     false => wait,
   }

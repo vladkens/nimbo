@@ -34,8 +34,10 @@ macro_rules! call {
   }};
 }
 
+pub(super) use call;
+
 /// An owned COM interface pointer: AddRef on clone, Release on drop.
-struct Com(NonNull<c_void>);
+pub(super) struct Com(NonNull<c_void>);
 
 impl Com {
   /// Takes the reference an out parameter returned, `None` for null.
@@ -43,18 +45,18 @@ impl Com {
     NonNull::new(p).map(Self)
   }
 
-  /// A new reference to an interface DirectWrite lends a callback.
-  fn borrowed(p: *mut c_void) -> Option<Self> {
+  /// A new reference to an interface lent to a callback.
+  pub(super) fn borrowed(p: *mut c_void) -> Option<Self> {
     let com = std::mem::ManuallyDrop::new(Self::new(p)?);
     Some((*com).clone())
   }
 
-  fn ptr(&self) -> *mut c_void {
+  pub(super) fn ptr(&self) -> *mut c_void {
     self.0.as_ptr()
   }
 
   /// The function in vtable slot `i`, of type `F` (an `extern "system"` fn pointer).
-  unsafe fn slot<F: Copy>(&self, i: usize) -> F {
+  pub(super) unsafe fn slot<F: Copy>(&self, i: usize) -> F {
     // SAFETY: a COM object starts with its vtable pointer; the caller names the slot's type.
     unsafe {
       let vtbl = *self.ptr().cast::<*const usize>();
@@ -77,7 +79,7 @@ impl Drop for Com {
 }
 
 /// An interface from a call that returns it through its last parameter.
-fn out(f: impl FnOnce(*mut *mut c_void) -> HRESULT) -> Option<Com> {
+pub(super) fn out(f: impl FnOnce(*mut *mut c_void) -> HRESULT) -> Option<Com> {
   let mut p = null_mut();
   match f(&mut p) {
     0.. => Com::new(p),
@@ -85,17 +87,17 @@ fn out(f: impl FnOnce(*mut *mut c_void) -> HRESULT) -> Option<Com> {
   }
 }
 
-fn iid(g: &GUID) -> u128 {
+pub(super) fn iid(g: &GUID) -> u128 {
   let tail = u64::from_be_bytes(g.data4) as u128;
   (g.data1 as u128) << 96 | (g.data2 as u128) << 80 | (g.data3 as u128) << 64 | tail
 }
 
-const IID_IUNKNOWN: u128 = 0x00000000_0000_0000_c000_000000000046;
+pub(super) const IID_IUNKNOWN: u128 = 0x00000000_0000_0000_c000_000000000046;
 const IID_FACTORY2: u128 = 0x0439fc60_ca44_4994_8dee_3a9af7b732ec;
 const IID_PIXEL_SNAPPING: u128 = 0xeaf3a2da_ecf4_4d24_b644_b34f6842024b;
 const IID_TEXT_RENDERER: u128 = 0xef8a8135_5cc6_45fe_8825_c5a0724eb819;
 const IID_RENDERING_PARAMS1: u128 = 0x94413cf4_a6fc_4248_8b50_6674348fcad3;
-const E_NOINTERFACE: HRESULT = 0x80004002_u32 as i32;
+pub(super) const E_NOINTERFACE: HRESULT = 0x80004002_u32 as i32;
 
 // Vtable slots (IUnknown is 0–2).
 const FACTORY_SYSTEM_FONTS: usize = 3;

@@ -12,7 +12,7 @@
 //! so a live resize never stretches. Nothing runs while idle or minimized: timers are GLib
 //! timeouts, a wake from another thread an idle source. Input is in [input] (keys in [keys]),
 //! light or dark in [settings], the text stack in [text] (fontconfig, FreeType, HarfBuzz),
-//! overlays in [overlay].
+//! overlays in [overlay], file panels and drops in [files].
 //! GTK 3 scales by whole numbers only.
 //!
 //! Windows open and close on demand while GTK's main loop runs ([app] has the loop, the tray,
@@ -22,6 +22,7 @@
 mod app;
 mod dbus;
 mod dl;
+mod files;
 mod input;
 mod keys;
 mod overlay;
@@ -131,6 +132,15 @@ fns!(Gtk {
   fn gtk_clipboard_get(selection: usize) -> P;
   fn gtk_clipboard_set_text(c: P, text: S, len: c_int);
   fn gtk_clipboard_wait_for_text(c: P) -> *mut c_char;
+  fn gtk_get_current_event() -> P;
+  fn gdk_event_get_event_type(ev: P) -> c_int;
+  fn gdk_event_free(ev: P);
+  fn gtk_drag_dest_set(w: P, flags: c_int, targets: P, n: c_int, actions: c_int);
+  fn gtk_drag_dest_find_target(w: P, ctx: P, list: P) -> P;
+  fn gtk_drag_get_data(w: P, ctx: P, target: P, time: u32);
+  fn gtk_drag_finish(ctx: P, ok: c_int, delete: c_int, time: u32);
+  fn gdk_drag_status(ctx: P, action: c_int, time: u32);
+  fn gtk_selection_data_get_data_with_length(sel: P, len: *mut c_int) -> *const u8;
 });
 
 /// `libgtk-3.so.0`, opened by each module for its own functions (the same handle each time).
@@ -407,6 +417,7 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Result<u64, std::ffi::NulError> {
     connect_id(window, c"window-state-event", on_state as Fp, 0, id);
     connect_id(area, c"draw", on_draw as Fp, 0, id);
     connect_id(area, c"event", on_event as Fp, 0, id);
+    files::dest(area, id);
     (window, area)
   };
 
@@ -567,13 +578,20 @@ impl Win {
     self.rt.event(ev)
   }
 
-  /// After every callback: the size the app asked for, the cursor, quitting, and what runs the
-  /// loop next ([next]).
+  /// After every callback: the size and the file panel the app asked for ([files]), the
+  /// cursor, quitting, and what runs the loop next ([next]).
   fn sync(&mut self) {
     let g = gtk();
     self.drain_ime();
     self.sync_ime();
     self.apply_resize();
+    if let Some(d) = self.rt.take_file_dialog()
+      && let Err(e) = files::show(self.id, self.window, &d)
+    {
+      eprintln!("nimbo: {e}");
+      self.send(Event::FileDialog(None));
+    }
+
     self.sync_cursor();
     if self.rt.quit_requested() {
       quit();

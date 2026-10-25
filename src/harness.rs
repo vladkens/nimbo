@@ -11,6 +11,7 @@ use keyboard_types::{Code, Modifiers};
 
 use crate::app::{App, Clock, Event, Ime, MemClipboard, MouseButton, Runtime};
 use crate::cpu::{self, Pixels};
+use crate::file_dialog::FileDialog;
 use crate::keys::{self, Key, KeyEvent};
 use crate::scene::{Point, Rect, Size};
 use crate::text::edit::{Editor, utf16_len};
@@ -45,6 +46,15 @@ impl<A: App> Harness<A> {
 
   pub fn event(&mut self, ev: Event) -> bool {
     self.rt.event(ev)
+  }
+
+  /// Answers the file panel the app asked for ([crate::Ui::file_dialog]) as the person would,
+  /// with `answer` (`None` cancels), and returns what it asked; `None` and no answer when it
+  /// asked for none.
+  pub fn file_dialog(&mut self, answer: Option<&Path>) -> Option<FileDialog> {
+    let asked = self.rt.take_file_dialog()?;
+    self.event(Event::FileDialog(answer.map(Path::to_path_buf)));
+    Some(asked)
   }
 
   pub fn move_to(&mut self, x: f32, y: f32) -> bool {
