@@ -48,8 +48,8 @@ impl FileDialog {
 impl Ui<'_> {
   /// Shows the system's file panel over the window once this frame is built: from the person's
   /// click, never by itself. The answer comes as [crate::Event::FileDialog]. Asked while one is
-  /// open, it is dropped on macOS and Windows and replaces it on Linux, where a portal that went
-  /// away never answers.
+  /// open, it is answered `None` at once on macOS and Windows and replaces it on Linux, where a
+  /// portal that went away never answers.
   pub fn file_dialog(&mut self, dialog: FileDialog) {
     self.st.file_dialog = Some(dialog);
   }

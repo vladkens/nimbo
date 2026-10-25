@@ -36,6 +36,7 @@ use windows_sys::Win32::Foundation::{
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::System::DataExchange::EmptyClipboard;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::System::Ole::RevokeDragDrop;
 use windows_sys::Win32::System::SystemInformation::{
   GetLogicalProcessorInformationEx, GetSystemTimePreciseAsFileTime, PROCESSOR_RELATIONSHIP,
   RelationProcessorCore, SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
@@ -647,6 +648,8 @@ fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
       def()
     }
     WM_DESTROY => {
+      // OLE lets go of the drop target while the window is there, even one borrowed up the stack.
+      unsafe { RevokeDragDrop(hwnd) };
       with(|w| w.revoke());
       // Dropped here unless a call up the stack holds it, outside the list's borrow (the app's
       // drop may open or close windows); its close callback runs after.

@@ -46,17 +46,19 @@ const DATA_GET: usize = 3;
 
 // MARK: Dialogs
 
-/// Shows the dialog window `hwnd` asked for ([crate::Runtime::take_file_dialog]), unless one is
-/// up (it disables the window), and sends it the answer as [Event::FileDialog]; whether it
-/// showed one. Outside the window's borrow: the dialog runs the thread's messages until it
-/// closes, the window's frames coming from its modal timer meanwhile.
+/// Shows the dialog window `hwnd` asked for ([crate::Runtime::take_file_dialog]) and sends it
+/// the answer as [Event::FileDialog]: `None` at once while one is up (it disables the window);
+/// whether it asked. Outside the window's borrow: the dialog runs the thread's messages until
+/// it closes, the window's frames coming from its modal timer meanwhile.
 pub(super) fn apply(hwnd: HWND) -> bool {
-  let d = with_window(hwnd, |w| w.rt.take_file_dialog()).flatten();
-  let Some(d) = d.filter(|_| unsafe { IsWindowEnabled(hwnd) } != 0) else { return false };
-  modal(1);
-  let path = show(hwnd, &d);
-  modal(-1);
-  with_window(hwnd, |w| w.send(Event::FileDialog(path)));
+  let Some(d) = with_window(hwnd, |w| w.rt.take_file_dialog()).flatten() else { return false };
+  let path = (unsafe { IsWindowEnabled(hwnd) } != 0).then(|| {
+    modal(1);
+    let path = show(hwnd, &d);
+    modal(-1);
+    path
+  });
+  with_window(hwnd, |w| w.send(Event::FileDialog(path.flatten())));
   true
 }
 
@@ -151,11 +153,14 @@ struct TargetVtbl {
 static TARGET: TargetVtbl =
   TargetVtbl { query, add_ref, release, enter, over, leave, drop: dropped };
 
-/// Takes files dragged onto window `hwnd`, OLE started on the thread first (once: it lasts as
-/// long as the app), which calls the target there; the window's reference.
+/// Takes files dragged onto window `hwnd`, OLE started on its thread first (once a thread: it
+/// lasts as long as the app), which calls the target there; the window's reference.
 pub(super) fn register(hwnd: HWND) -> Cell<This> {
-  static OLE: std::sync::Once = std::sync::Once::new();
-  OLE.call_once(|| unsafe { _ = OleInitialize(null()) });
+  thread_local!(static OLE: Cell<bool> = const { Cell::new(false) });
+  if !OLE.replace(true) {
+    unsafe { OleInitialize(null()) };
+  }
+
   let paths = RefCell::default();
   let target = Box::into_raw(Box::new(Target { vtbl: &TARGET, hwnd, paths, refs: Cell::new(1) }));
   unsafe { RegisterDragDrop(hwnd, target.cast()) };

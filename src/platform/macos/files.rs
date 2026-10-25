@@ -19,10 +19,11 @@ use super::view::View;
 use crate::scene::Point;
 use crate::{Event, FileDialog};
 
-/// Shows `d` as a sheet over `window`, unless one is up already, and sends its answer to `view`
-/// as [Event::FileDialog].
+/// Shows `d` as a sheet over `window` and sends its answer to `view` as [Event::FileDialog]:
+/// `None` at once while a sheet is up already.
 pub fn show(view: &View, window: &NSWindow, d: FileDialog) {
   if window.attachedSheet().is_some() {
+    view.send(Event::FileDialog(None));
     return;
   }
 
