@@ -466,6 +466,18 @@ impl<A: App> Runtime<A> {
     self.asked |= yes;
   }
 
+  /// Whether a press at `p` moves the window ([crate::Ui::drags_window]): the platform then
+  /// moves it (or zooms it on a double-click) instead of sending the press.
+  pub fn drags_window(&self, p: Point) -> bool {
+    crate::ui::drags_window(&self.ui.last, p)
+  }
+
+  /// The height of the title bar over the content and the window's title ([Ui::titlebar]), for
+  /// a unified window ([crate::Config::unified]); the platform's.
+  pub fn set_titlebar(&mut self, bar: Option<(f32, &'static str)>) {
+    self.ui.titlebar = bar;
+  }
+
   /// The content size the app asked the window for ([Ui::set_window_size]), once: the platform
   /// resizes the window to it after an event or a frame, then reports the new size by
   /// [Runtime::resize] as it does for any.

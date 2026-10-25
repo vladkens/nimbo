@@ -34,11 +34,12 @@ use objc2::{
 use objc2_app_kit::{
   NSCursor, NSEvent, NSEventModifierFlags, NSEventPhase, NSResponder, NSTextInputClient,
   NSTextInputContext, NSTrackingArea, NSTrackingAreaOptions, NSView, NSWindow,
-  NSWindowOcclusionState,
+  NSWindowOcclusionState, NSWindowStyleMask,
 };
 use objc2_foundation::{
-  NSArray, NSAttributedString, NSAttributedStringKey, NSNotFound, NSObject, NSPoint, NSRange,
-  NSRangePointer, NSRect, NSRunLoop, NSRunLoopCommonModes, NSSize, NSString, NSUInteger,
+  NSArray, NSAttributedString, NSAttributedStringKey, NSNotFound, NSObject, NSObjectProtocol,
+  NSPoint, NSRange, NSRangePointer, NSRect, NSRunLoop, NSRunLoopCommonModes, NSSize, NSString,
+  NSUInteger, NSUserDefaults, ns_string,
 };
 use objc2_quartz_core::{CADisplayLink, CAFrameRateRange, CALayer, kCAGravityTopLeft};
 
@@ -115,6 +116,13 @@ define_class!(
     #[unsafe(method(acceptsFirstResponder))]
     fn accepts_first_responder(&self) -> bool {
       true
+    }
+
+    /// AppKit never moves the window from the view: the app says where a press does
+    /// ([View::drag_window]).
+    #[unsafe(method(mouseDownCanMoveWindow))]
+    fn mouse_down_can_move_window(&self) -> bool {
+      false
     }
 
     #[unsafe(method(acceptsFirstMouse:))]
@@ -198,6 +206,10 @@ define_class!(
 
     #[unsafe(method(mouseDown:))]
     fn mouse_down(&self, event: &NSEvent) {
+      if self.drag_window(event) {
+        return;
+      }
+
       // A click ends composing: the marked text stays as typed, the input method lets go.
       if self.composing() {
         self.send(Event::Ime(Ime::Unmark));
@@ -813,6 +825,32 @@ impl View {
     if released_outside(pos, Size::new(bounds.width as f32, bounds.height as f32), held) {
       self.send(Event::MouseExit);
     }
+  }
+
+  /// A press where the app draws its title bar ([crate::Ui::drags_window]) moves the window; a
+  /// double-click there does what System Settings asks of a title bar's
+  /// (`AppleActionOnDoubleClick`): minimize, nothing, fill (macOS 15's private `_zoomFill:`, as
+  /// Firefox calls it) or zoom, which a window of a fixed size can't. The app never sees the
+  /// press.
+  fn drag_window(&self, event: &NSEvent) -> bool {
+    let pos = self.location(event);
+    let drags = self.ivars().state.borrow().as_ref().is_some_and(|st| st.rt.drags_window(pos));
+    let Some(window) = self.window().filter(|_| drags) else { return false };
+    let key = ns_string!("AppleActionOnDoubleClick");
+    let action = NSUserDefaults::standardUserDefaults().stringForKey(key).map(|s| s.to_string());
+    let fill = sel!(_zoomFill:);
+    match (event.clickCount(), action.as_deref()) {
+      (1, _) => window.performWindowDragWithEvent(event),
+      (_, Some("Minimize")) => window.miniaturize(None),
+      (_, Some("None")) => {}
+      _ if !window.styleMask().contains(NSWindowStyleMask::Resizable) => {}
+      (_, Some("Fill")) if window.respondsToSelector(fill) => unsafe {
+        let _: () = msg_send![&window, _zoomFill: None::<&AnyObject>];
+      },
+      _ => window.zoom(None),
+    }
+
+    true
   }
 
   fn location(&self, event: &NSEvent) -> Point {

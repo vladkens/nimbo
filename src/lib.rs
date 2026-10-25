@@ -82,6 +82,8 @@ pub struct Config {
   pub hidden: bool,
   /// An overlay and where it shows ([Config::overlay]); `None` for a window.
   pub overlay: Option<Anchor>,
+  /// The content runs under the title bar ([Config::unified]).
+  pub unified: bool,
 }
 
 impl Config {
@@ -90,7 +92,7 @@ impl Config {
 
   pub const fn new(title: &'static str, w: f32, h: f32) -> Self {
     let (size, min_size) = (Size::new(w, h), Self::MIN_SIZE);
-    Self { title, size, min_size, resizable: true, hidden: false, overlay: None }
+    Self { title, size, min_size, resizable: true, hidden: false, overlay: None, unified: false }
   }
 
   /// The least content size the user can resize the window to, [Config::MIN_SIZE] unless set.
@@ -111,6 +113,18 @@ impl Config {
   /// A window [Main::open] makes without showing it, until [Window::front].
   pub const fn hidden(self) -> Self {
     Self { hidden: true, ..self }
+  }
+
+  /// The title bar is part of the content, as in a macOS preferences window: the content runs
+  /// under it and its size is the window's, the app draws the title in the band at the top
+  /// ([Ui::titlebar]) and moves the window from its empty parts
+  /// ([Ui::drags_window]); [Ui::toolbar_tabs] does both.
+  ///
+  /// Per OS: macOS a full-size content view under a transparent title bar, its title hidden (the
+  /// Window menu and Mission Control still show it), the traffic lights over the content.
+  /// Windows and Linux keep their title bar: [Ui::titlebar] is `None` there.
+  pub const fn unified(self) -> Self {
+    Self { unified: true, ..self }
   }
 
   /// An overlay, a HUD over everything: no frame, transparent where the app draws nothing
@@ -240,6 +254,8 @@ pub fn run_args<A: App + 'static>(
 fn harness<A: App>(cfg: &Config, app: A, args: &Args) -> Harness<A> {
   let mut h = Harness::new(app, args.size.unwrap_or(cfg.size), args.scale);
   h.cpu.transparent = cfg.overlay.is_some();
+  // A unified window's title bar as high as macOS 26's.
+  h.rt.set_titlebar(cfg.unified.then_some((32.0, cfg.title)));
   h.event(Event::Appearance(args.appearance.unwrap_or(Appearance::DARK)));
   h
 }

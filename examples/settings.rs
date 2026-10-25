@@ -305,7 +305,7 @@ impl Settings {
     let page = match self.page {
       Page::About => {
         self.about_head(ui, fs);
-        fs.page.pads([20.0, 20.0, 10.0, 20.0])
+        fs.page.pads([20.0, 20.0, 20.0, 20.0])
       }
       _ => fs.page,
     };
@@ -379,7 +379,7 @@ impl App for Settings {
 }
 
 fn main() {
-  nimbo::run(Config::new("Settings", WIDTH, 560.0).fixed(), Settings::default(), |h| {
+  nimbo::run(Config::new("Settings", WIDTH, 560.0).fixed().unified(), Settings::default(), |h| {
     h.frame();
     h.frame();
     let r = h.rect(Id::of(LAUNCH_ROW).key("info")).expect("the ⓘ of On launch");

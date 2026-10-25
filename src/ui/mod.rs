@@ -60,6 +60,7 @@ pub use containers::{
 };
 pub use dialog::{Answer, Dialog, DialogBehavior};
 pub use form::{FormRow, FormStyle, Glass, Tile};
+pub(crate) use input::drags_window;
 pub use input::{Click, Press, Scroll, hit};
 pub(crate) use layout::Sys;
 pub use layout::{Kind, Line, Measure, Node, Tree};
@@ -207,6 +208,8 @@ pub struct UiState {
   pub(crate) resize: Option<Size>,
   /// The last size asked: asking it again is nothing new, so a view may ask every frame.
   asked: Option<Size>,
+  /// The height of the title bar over the content and the window's title ([Ui::titlebar]).
+  pub(crate) titlebar: Option<(f32, &'static str)>,
   /// The images [Ui::rgba_image] added: their pixels' hash, the image, and whether a view built
   /// it since the last frame.
   pub(crate) pictures: Vec<(u64, ImageId, bool)>,
@@ -257,6 +260,7 @@ impl Default for UiState {
       stats: FrameStats::default(),
       resize: None,
       asked: None,
+      titlebar: None,
       pictures: Vec::new(),
       grab: None,
     }
@@ -525,6 +529,8 @@ pub struct Ui<'a> {
   scope_off: bool,
   /// The next element takes focus when it first shows ([Ui::autofocus]).
   next_autofocus: bool,
+  /// The next element moves the window when pressed ([Ui::drags_window]).
+  next_drag: bool,
   /// The runtime's text system, lent while the view runs ([Ui::measure]).
   pub(crate) text: Option<TextSystem>,
   /// The runtime's images, lent while the view runs ([Ui::rgba_image]).
@@ -563,6 +569,7 @@ impl<'a> Ui<'a> {
       next_disabled,
       scope_off: false,
       next_autofocus,
+      next_drag: false,
       text: None,
       images: Images::default(),
       next_span: 1,
@@ -632,6 +639,12 @@ impl<'a> Ui<'a> {
   /// a fixed one ([crate::Config::fixed]) too.
   pub fn set_window_size(&mut self, w: f32, h: f32) {
     self.st.ask_size(Size::new(w, h), self.size);
+  }
+
+  /// The height of the title bar the content runs under and the window's title, for a window
+  /// that draws its own title bar ([crate::Config::unified]); `None` for any other.
+  pub fn titlebar(&self) -> Option<(f32, &'static str)> {
+    self.st.titlebar
   }
 
   /// Asks the window for `w` points wide and as high as its content, between `min_h` and
@@ -742,6 +755,15 @@ impl<'a> Ui<'a> {
   /// form; the view sees the focus at once.
   pub fn autofocus(&mut self) -> &mut Self {
     self.next_autofocus = true;
+    self
+  }
+
+  /// Makes the next element move the window when pressed where no interactive element inside it
+  /// is: the header of a window that draws its own title bar ([crate::Config::unified]). A
+  /// double-click zooms or minimizes the window as the OS's setting says; the app never sees
+  /// the press. The element takes pointer input.
+  pub fn drags_window(&mut self) -> &mut Self {
+    self.next_drag = true;
     self
   }
 
@@ -928,9 +950,12 @@ impl<'a> Ui<'a> {
       }
     }
 
-    let hit = style.hit || named || scrolls || focus || style.cursor != Cursor::Inherit;
+    let drag = std::mem::take(&mut self.next_drag);
+    let hit = style.hit || named || scrolls || focus || drag || style.cursor != Cursor::Inherit;
     let tree = &mut self.st.tree;
     let i = tree.nodes.len() as u32;
+    tree.drags.extend(drag.then_some(i));
+
     let float = self.next_float.take();
     if float.is_some() {
       tree.floats.push(i);

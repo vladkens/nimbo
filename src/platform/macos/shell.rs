@@ -25,7 +25,7 @@ use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_se
 use objc2_app_kit::{
   NSApplication, NSApplicationDelegate, NSApplicationTerminateReply, NSBackingStoreType, NSEvent,
   NSEventModifierFlags, NSEventType, NSMenu, NSMenuItem, NSSystemColorsDidChangeNotification,
-  NSWindow, NSWindowDelegate, NSWindowStyleMask,
+  NSWindow, NSWindowDelegate, NSWindowStyleMask, NSWindowTitleVisibility,
 };
 use objc2_foundation::{
   NSNotification, NSNotificationCenter, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize,
@@ -323,9 +323,8 @@ pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
     None => {
       let mut style =
         NSWindowStyleMask::Titled | NSWindowStyleMask::Closable | NSWindowStyleMask::Miniaturizable;
-      if cfg.resizable {
-        style |= NSWindowStyleMask::Resizable;
-      }
+      style.set(NSWindowStyleMask::Resizable, cfg.resizable);
+      style.set(NSWindowStyleMask::FullSizeContentView, cfg.unified);
 
       unsafe {
         NSWindow::initWithContentRect_styleMask_backing_defer(
@@ -341,12 +340,19 @@ pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
   // SAFETY: the shell keeps the window until it closes.
   unsafe { window.setReleasedWhenClosed(false) };
   window.setTitle(&NSString::from_str(cfg.title));
+  // A unified window draws its title bar: AppKit's turns clear, its title hidden.
+  window.setTitlebarAppearsTransparent(cfg.unified);
+  window.setTitleVisibility(NSWindowTitleVisibility(cfg.unified as _));
+
   let min = cfg.min();
   window.setContentMinSize(NSSize::new(min.w as f64, min.h as f64));
 
   let scale = window.backingScaleFactor() as f32;
   let mut rt = Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(Pasteboard));
   rt.event(Event::Appearance(appearance()));
+  // The title bar over the content: the frame's height over the layout rect's.
+  let bar = (window.frame().size.height - window.contentLayoutRect().size.height) as f32;
+  rt.set_titlebar(cfg.unified.then_some((bar, cfg.title)));
   let view = View::new(mtm, frame, rt, cfg.overlay);
   window.setContentView(Some(&view));
   let id = shell(|s| {
