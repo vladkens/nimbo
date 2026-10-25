@@ -32,13 +32,13 @@ KINDS = ("code", "docs", "comments", "tests", "blank")
 # system clipboard, the focus of other apps; and each OS's platform/<os>/app) and the core (the
 # rest of src/). Raising one is a decision recorded in its PR.
 BUDGETS = {
-  "platform/macos": 1730,
+  "platform/macos": 1755,
   "platform/windows": 1970,
   "platform/linux": 2830,
-  "ui": 3700,
-  "widgets": 2940,
+  "ui": 3725,
+  "widgets": 2965,
   "text": 1180,
-  "core": 3490,
+  "core": 3505,
   "app/shared": 845,
   "app/macos": 1490,
   "app/windows": 1365,

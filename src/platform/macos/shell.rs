@@ -25,7 +25,7 @@ use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_se
 use objc2_app_kit::{
   NSApplication, NSApplicationDelegate, NSApplicationTerminateReply, NSBackingStoreType, NSEvent,
   NSEventModifierFlags, NSEventType, NSMenu, NSMenuItem, NSSystemColorsDidChangeNotification,
-  NSWindow, NSWindowDelegate, NSWindowStyleMask,
+  NSWindow, NSWindowDelegate, NSWindowStyleMask, NSWindowTitleVisibility,
 };
 use objc2_foundation::{
   NSNotification, NSNotificationCenter, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize,
@@ -327,6 +327,10 @@ pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
         style |= NSWindowStyleMask::Resizable;
       }
 
+      if cfg.unified {
+        style |= NSWindowStyleMask::FullSizeContentView;
+      }
+
       unsafe {
         NSWindow::initWithContentRect_styleMask_backing_defer(
           NSWindow::alloc(mtm),
@@ -341,12 +345,24 @@ pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
   // SAFETY: the shell keeps the window until it closes.
   unsafe { window.setReleasedWhenClosed(false) };
   window.setTitle(&NSString::from_str(cfg.title));
+  // A unified window draws its title bar: AppKit's turns clear, its title hidden, and the
+  // content runs under it as high as the title bar is (the frame's height over the layout rect's).
+  let titlebar = match cfg.unified && cfg.overlay.is_none() {
+    true => {
+      window.setTitlebarAppearsTransparent(true);
+      window.setTitleVisibility(NSWindowTitleVisibility::Hidden);
+      (window.frame().size.height - window.contentLayoutRect().size.height) as f32
+    }
+    false => 0.0,
+  };
+
   let min = cfg.min();
   window.setContentMinSize(NSSize::new(min.w as f64, min.h as f64));
 
   let scale = window.backingScaleFactor() as f32;
   let mut rt = Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(Pasteboard));
   rt.event(Event::Appearance(appearance()));
+  rt.set_titlebar(titlebar, cfg.title);
   let view = View::new(mtm, frame, rt, cfg.overlay);
   window.setContentView(Some(&view));
   let id = shell(|s| {

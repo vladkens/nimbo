@@ -12,7 +12,7 @@
 //! [super::Theme::PLATES_DARK], or the OS's of the two ([super::Theme::system], the default).
 //!
 //! The controls keep their own width ([super::Dim::Rigid]) and sit at the row's right edge
-//! whatever is beside them, centred on the label's first line; the label and its description
+//! whatever is beside them, centred on the row's height; the label and its description
 //! take the rest and wrap onto as many lines as they need, the row growing taller, as System
 //! Settings does.
 //!
@@ -84,8 +84,12 @@ pub struct FormStyle {
   pub page: Style,
   /// The toolbar of tabs, and a tab: its box, label, icon size and stroke, and the selected
   /// one: the tab on a raised tile (fill, hairline, shadow), or on a glass one when
-  /// `tab_glass` is set, its icon and label in the accent. A grey tile under the pointer.
+  /// `tab_glass` is set, its icon and label in the accent. A grey tile under the pointer. Under
+  /// a title bar the app draws ([crate::Config::unified]) the toolbar starts with the title,
+  /// centred in a line as high as the title bar, and the tabs right under it, without the top
+  /// padding.
   pub toolbar: Style,
+  pub title: TextStyle,
   pub tab: Style,
   pub tab_text: TextStyle,
   pub tab_icon: f32,
@@ -159,11 +163,12 @@ impl FormStyle {
   /// from the plate above to the next title; rows padded 10 at the sides and around the label,
   /// at least 36.5 high (37.5 with the hairline), 52 with a one-line 11-point description;
   /// hairlines of black 4% (white 5%) inset 10; a 24-point tile at 12 with the label at 48; a
-  /// footer 20 under the last plate. The toolbar as an AppKit preferences window's (Shottr's,
-  /// macOS 26): tabs 48 high and at least 56 wide, 3 under the top and 8 over a half-point
-  /// line, half a point apart; a 26-point icon 3 from the tab's top, the label 11-point medium
-  /// (AppKit's labels read that heavy) with its baseline at 40.5; the selected tab on [Glass]
-  /// in dark ([Theme::glass]).
+  /// footer 20 under the last plate, and 20 under the page. The toolbar as an AppKit preferences
+  /// window's (Shottr's, macOS 26): the title bold 13 in the labels' grey, centred in the title
+  /// bar; tabs 48 high and at least 56 wide, right under the title bar (8 under the window's own)
+  /// and 8 over a half-point line, half a point apart; a 26-point icon 3 from the tab's top, the
+  /// label 11-point medium (AppKit's labels read that heavy) with its baseline at 40.5; the
+  /// selected tab on [Glass] in dark ([Theme::glass]).
   pub const fn plates(t: &Theme) -> Self {
     let h = t.sizes.control_h;
     let small = t.small;
@@ -213,14 +218,15 @@ impl FormStyle {
       tile_text: TextStyle::new(Font { size: 11.0, ..t.font }.weight(Weight::Semibold), t.muted)
         .nowrap(),
       tile_icon: t.muted,
-      page: Style::new().w(grow()).pads([12.0, 20.0, 10.0, 20.0]).gap(10.0),
+      page: Style::new().w(grow()).pads([12.0, 20.0, 20.0, 20.0]).gap(10.0),
       toolbar: Style::new()
         .w(grow())
-        .pads([3.0, 0.0, 8.5, 0.0])
+        .pads([8.0, 0.0, 8.5, 0.0])
         .gap(0.5)
         .center()
         .bg(t.bg)
         .borders([0.0, 0.0, 0.5, 0.0], toolbar_line),
+      title: TextStyle::new(t.bold, t.muted).nowrap(),
       tab,
       tab_text: TextStyle::new(Font { size: 11.0, ..t.font }.weight(Weight::Medium), t.muted)
         .nowrap(),
@@ -384,8 +390,8 @@ impl Ui<'_> {
 
   /// A row of the section being built: the tile, the label (with its ⓘ and description) at the
   /// left, what `control` builds at the right, 8 apart, and a hairline above it unless it is the
-  /// first. The controls keep their width and place at the right edge, centred on the label's
-  /// first line; the label and description wrap in what is left, the row growing taller. A
+  /// first. The controls keep their width and place at the right edge, centred on the row's
+  /// height; the label and description wrap in what is left, the row growing taller. A
   /// disabled row's text is [super::Theme::tertiary]. The ⓘ is `id.key("info")` of the row's
   /// id, the description's text `id.key("caption")`. The row itself takes no input: its
   /// controls do.
@@ -421,7 +427,7 @@ impl Ui<'_> {
       }
     };
     let style = fs.row.min_h(fs.row.min[1] + top).align(Align::Start, Align::Start);
-    // The first line's height: the controls centre on it.
+    // The first line's height: the least the controls' slot is, with the padding around it.
     let line_h = match fs.label.line_h > 0.0 {
       true => fs.label.line_h,
       false => self.metrics(fs.label.font).line_height(),
@@ -466,10 +472,11 @@ impl Ui<'_> {
 
           below(ui);
         });
-        // A slot as high as the label's first line and the padding around it, holding the
-        // controls centred: on that line, whatever their height.
+        // A slot as high as the row, at least the label's first line and the padding around
+        // it, holding the controls centred: on the label and its description, as the tile.
         let slot = Style::new()
           .w(rigid())
+          .h(grow())
           .min_h(top + 2.0 * fs.pad_y + line_h)
           .pads([top, 0.0, 0.0, 0.0])
           .align(Align::End, Align::Center);
@@ -517,7 +524,9 @@ impl Ui<'_> {
   /// A toolbar of tabs, one per `(value, icon, label)`, centred: the icon over the label, the
   /// one equal to `cur` raised on a tile, in the accent ([FormStyle::tab_on]), a grey tile under
   /// the pointer. A click picks a tab; so do Left and Right while the toolbar has focus (Tab gives
-  /// it, ringing the selected tab). `changed` when `cur` changed. Tabs are `id.key(i)`.
+  /// it, ringing the selected tab). `changed` when `cur` changed. Tabs are `id.key(i)`. Under a
+  /// title bar the app draws ([Ui::titlebar]) the window's title tops it, and a press on it
+  /// anywhere but a tab moves the window.
   pub fn toolbar_tabs<T: PartialEq + Copy>(
     &mut self,
     fs: &FormStyle,
@@ -534,43 +543,64 @@ impl Ui<'_> {
     {
       *cur = items[i].0;
     }
+    let titlebar = self.titlebar();
+    let mut head = Style { gap: 0.0, ..fs.toolbar };
+    let bar = Style::new().w(grow()).gap(fs.toolbar.gap).align(Align::Center, Align::Start);
+    if titlebar > 0.0 {
+      head.pad[0] = 0.0;
+      self.drags_window();
+    }
+
     let bar = match b.disabled {
-      true => fs.toolbar.opacity(t.disabled),
-      false => fs.toolbar.tab_focusable_quiet(),
+      true => bar.opacity(t.disabled),
+      false => bar.tab_focusable_quiet(),
     };
 
+    let title = self.window_title();
     let ring = b.focused.then_some((t.focus_ring().color, t.focus_ring().width));
-    let mut r = self.with_id(id).row(bar, |ui| {
-      for (i, &(v, icon, label)) in items.iter().enumerate() {
-        let tab = id.key(i);
-        let on = v == *cur;
-        let hot = ui.hot(tab, !on && !b.disabled && ui.hovered(tab));
-        let (tile, color) = match on {
-          true => (fs.tab_on, t.accent),
-          false => (fs.tab.bg(mix(alpha(fs.tab_over, 0.0), fs.tab_over, hot)), fs.tab_text.color),
-        };
-
-        let radius = fs.tab.radii[0];
-        let ring = ring.filter(|_| on);
-        let glass = fs.tab_glass.filter(|_| on);
-        let opacity = if b.disabled { t.disabled } else { 1.0 };
-        let paint = move |f: &mut Frame, r: Rect| {
-          if let Some(g) = glass {
-            g.paint(f, r, radius, opacity);
-          }
-
-          if let Some((c, w)) = ring {
-            let o = Rect::new(r.x - w, r.y - w, r.w + 2.0 * w, r.h + 2.0 * w);
-            f.quad(Quad::new(o, [0.0; 4]).radius(radius + w).border(w, c));
-          }
-        };
-        let s = b.pointer(tile);
-        ui.with_id(tab).canvas_col(s, paint, |ui| {
-          // Canvases draw past the bar's opacity: the icon dims itself.
-          ui.disabled(b.disabled).icon_stroke(icon, fs.tab_icon, color, fs.tab_stroke);
-          ui.text(label, fs.tab_text.color(color));
-        });
+    let mut r = Response::default();
+    self.col(head, |ui| {
+      if titlebar > 0.0 {
+        let line = Style::new().w(grow()).h(px(titlebar)).center().clip();
+        ui.row(line, |ui| ui.text(title, fs.title));
       }
+
+      if titlebar > 0.0 {
+        ui.drags_window();
+      }
+
+      r = ui.with_id(id).row(bar, |ui| {
+        for (i, &(v, icon, label)) in items.iter().enumerate() {
+          let tab = id.key(i);
+          let on = v == *cur;
+          let hot = ui.hot(tab, !on && !b.disabled && ui.hovered(tab));
+          let (tile, color) = match on {
+            true => (fs.tab_on, t.accent),
+            false => (fs.tab.bg(mix(alpha(fs.tab_over, 0.0), fs.tab_over, hot)), fs.tab_text.color),
+          };
+
+          let radius = fs.tab.radii[0];
+          let ring = ring.filter(|_| on);
+          let glass = fs.tab_glass.filter(|_| on);
+          let opacity = if b.disabled { t.disabled } else { 1.0 };
+          let paint = move |f: &mut Frame, r: Rect| {
+            if let Some(g) = glass {
+              g.paint(f, r, radius, opacity);
+            }
+
+            if let Some((c, w)) = ring {
+              let o = Rect::new(r.x - w, r.y - w, r.w + 2.0 * w, r.h + 2.0 * w);
+              f.quad(Quad::new(o, [0.0; 4]).radius(radius + w).border(w, c));
+            }
+          };
+          let s = b.pointer(tile);
+          ui.with_id(tab).canvas_col(s, paint, |ui| {
+            // Canvases draw past the bar's opacity: the icon dims itself.
+            ui.disabled(b.disabled).icon_stroke(icon, fs.tab_icon, color, fs.tab_stroke);
+            ui.text(label, fs.tab_text.color(color));
+          });
+        }
+      });
     });
     (r.changed, r.clicked) = (b.changed, b.changed);
     r
@@ -582,7 +612,7 @@ mod tests {
   use super::*;
   use crate::app::App;
   use crate::harness::Harness;
-  use crate::scene::Size;
+  use crate::scene::{Point, Size};
   use crate::ui::Id;
 
   /// A section of one row and a footer with the "?" alone, nothing named.
@@ -639,5 +669,35 @@ mod tests {
     };
     let (on, off) = (darkest(false), darkest(true));
     assert!(off > on + 30, "the icon at {on} enabled, {off} disabled");
+  }
+
+  #[test]
+  fn tabs_sit_halfway_under_the_os_title_bar_and_never_drag_the_window() {
+    let mut h = Harness::new(Bar(false), Size::new(300.0, 120.0), 2.0);
+    h.frame();
+    let tab = h.rect(Id::of("bar").key(1)).unwrap();
+    assert_eq!(tab.y, 8.0, "8 over the tabs");
+    // 8 under them the hairline, over the window's ground.
+    let img = h.render();
+    let at = |dy: f32| img.pixel(5.0, tab.y + tab.h + dy)[0];
+    assert!(at(8.25) < at(4.0), "the hairline at {}, the ground at {}", at(8.25), at(4.0));
+    assert!(!h.rt.drags_window(Point::new(5.0, 20.0)));
+  }
+
+  #[test]
+  fn under_its_own_title_bar_the_toolbar_has_the_title_and_drags_the_window() {
+    let mut h = Harness::new(Bar(false), Size::new(300.0, 120.0), 2.0);
+    h.rt.set_titlebar(32.0, "Preferences");
+    h.frame();
+    let tab = h.rect(Id::of("bar").key(1)).unwrap();
+    assert_eq!(tab.y, 32.0, "the tabs right under the title bar");
+    // The title's ink in the middle of the line.
+    let img = h.render();
+    let ink =
+      (0..600).filter_map(|x| (0..64).map(|y| img.pixel(x as f32 / 2.0, y as f32 / 2.0)[0]).min());
+    assert!(ink.min().unwrap() < 200, "the title in the title bar");
+    assert!(h.rt.drags_window(Point::new(150.0, 16.0)), "the title line drags the window");
+    assert!(h.rt.drags_window(Point::new(5.0, tab.y + 10.0)), "so does the bar beside the tabs");
+    assert!(!h.rt.drags_window(Point::new(tab.x + 10.0, tab.y + 10.0)), "a tab is clicked");
   }
 }

@@ -198,6 +198,10 @@ define_class!(
 
     #[unsafe(method(mouseDown:))]
     fn mouse_down(&self, event: &NSEvent) {
+      if self.drag_window(event) {
+        return;
+      }
+
       // A click ends composing: the marked text stays as typed, the input method lets go.
       if self.composing() {
         self.send(Event::Ime(Ime::Unmark));
@@ -813,6 +817,22 @@ impl View {
     if released_outside(pos, Size::new(bounds.width as f32, bounds.height as f32), held) {
       self.send(Event::MouseExit);
     }
+  }
+
+  /// A press where the app draws its title bar ([crate::Ui::drags_window]): AppKit moves the
+  /// window, and a double-click does what the title bar's would. The app never sees the press.
+  fn drag_window(&self, event: &NSEvent) -> bool {
+    let pos = self.location(event);
+    let state = self.ivars().state.borrow();
+    let drags = state.as_ref().is_some_and(|st| st.rt.drags_window(pos));
+    drop(state);
+    let Some(window) = self.window().filter(|_| drags) else { return false };
+    match event.clickCount() {
+      2 => super::title_double_click(&window),
+      _ => window.performWindowDragWithEvent(event),
+    }
+
+    true
   }
 
   fn location(&self, event: &NSEvent) -> Point {

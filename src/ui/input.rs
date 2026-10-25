@@ -135,6 +135,12 @@ pub fn hit(t: &Tree, p: Point, out: &mut Vec<Id>) {
   }
 }
 
+/// Whether a press at `p` moves the window: the topmost interactive node there drags it
+/// ([super::Ui::drags_window]).
+pub fn drags_window(t: &Tree, p: Point) -> bool {
+  top(t, p).is_some_and(|i| t.drags.binary_search(&i).is_ok())
+}
+
 /// The topmost interactive node under `p`: overlays from the top by z, then the tree; none
 /// outside the window (a release after a drag out of it), where nothing shows.
 fn top(t: &Tree, p: Point) -> Option<u32> {

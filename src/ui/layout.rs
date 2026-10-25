@@ -164,6 +164,8 @@ pub struct Tree {
   pub hits: Vec<u32>,
   /// Scroll containers, in tree order.
   pub scrolls: Vec<u32>,
+  /// Elements that move the window when pressed ([super::Ui::drags_window]), in tree order.
+  pub drags: Vec<u32>,
   /// Elements with key bindings, in tree order.
   pub keymaps: Vec<(u32, &'static [Binding])>,
   /// Content built only in part (a virtual list's rows in view): its scroll container and the
@@ -190,6 +192,7 @@ impl Tree {
     self.floats.clear();
     self.hits.clear();
     self.scrolls.clear();
+    self.drags.clear();
     self.keymaps.clear();
     self.partial.clear();
     self.settle.clear();

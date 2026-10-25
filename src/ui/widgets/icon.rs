@@ -70,7 +70,7 @@ impl Icon {
   pub const DOC: Self =
     Self::new("M7 3.5h7l4 4v13H7zM14 3.5v4h4M9.5 12.5h6M9.5 15.5h6M9.5 18.5h3.5");
   /// An arrow up and right: opens elsewhere.
-  pub const EXTERNAL: Self = Self::new("M8 16 16 8M9.5 8H16v6.5");
+  pub const EXTERNAL: Self = Self::new("M6.5 17.5 17.5 6.5M8.5 6.5h9v9");
   /// A check mark.
   pub const CHECK: Self = Self::new("m5.5 12.5 4 4 9-9.5");
   /// A magnifier: search.

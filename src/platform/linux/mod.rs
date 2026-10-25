@@ -415,6 +415,7 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Result<u64, std::ffi::NulError> {
   let mut renderer = Renderer::new();
   renderer.transparent = cfg.overlay.is_some();
   rt.event(Event::Appearance(appearance()));
+  rt.set_titlebar(0.0, cfg.title);
   // A wake from any thread: an idle source on the main context, which GLib wakes.
   rt.waker().set_notify(Box::new(move || {
     unsafe { (gtk().g_idle_add)(on_wake as Fp, id as usize as P) };

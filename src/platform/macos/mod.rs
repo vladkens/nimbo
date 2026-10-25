@@ -21,7 +21,7 @@ use block2::StackBlock;
 use objc2::MainThreadMarker;
 use objc2_app_kit::{
   NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSApplication, NSColor, NSColorSpace,
-  NSPasteboard, NSPasteboardTypeString,
+  NSPasteboard, NSPasteboardTypeString, NSWindow, NSWindowStyleMask,
 };
 use objc2_foundation::{NSArray, NSString, NSUserDefaults, ns_string};
 
@@ -106,6 +106,20 @@ pub fn perf_cores() -> Option<usize> {
     )
   };
   (rc == 0 && n > 0).then_some(n as usize)
+}
+
+/// A double-click on a title bar the app draws: what System Settings' "Double-click a window's
+/// title bar to" asks (`AppleActionOnDoubleClick`): minimize, nothing, or zoom (the default, also
+/// for Fill), which a window of a fixed size can't.
+pub fn title_double_click(window: &NSWindow) {
+  let key = ns_string!("AppleActionOnDoubleClick");
+  let action = NSUserDefaults::standardUserDefaults().stringForKey(key).map(|s| s.to_string());
+  match action.as_deref() {
+    Some("Minimize") => window.miniaturize(None),
+    Some("None") => {}
+    _ if window.styleMask().contains(NSWindowStyleMask::Resizable) => window.zoom(None),
+    _ => {}
+  }
 }
 
 #[cfg(test)]

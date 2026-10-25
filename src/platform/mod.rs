@@ -37,6 +37,11 @@
 //!   - window: `cfg.title`, `cfg.size` in points (content area), `cfg.resizable`, the least content
 //!     size `cfg.min()` (macOS: `contentMinSize`, Windows: `WM_GETMINMAXINFO`, Linux: the drawing
 //!     area's size request); minimal app menu where the OS has one (macOS: Quit);
+//!   - title bar: [crate::Runtime::set_titlebar] with `cfg.title` and the height of the title bar
+//!     over the content, 0 unless `cfg.unified` and the OS draws the content under it (macOS: a
+//!     full-size content view under a transparent title bar, its title hidden); a left press where
+//!     [crate::Runtime::drags_window] moves the window (macOS: `performWindowDragWithEvent:`, a
+//!     double-click as `AppleActionOnDoubleClick` says) and never reaches the app;
 //!   - window size from the app: after each event and frame, [crate::Runtime::take_resize] is a
 //!     content size the app asked for ([crate::Ui::set_window_size]); resize the window to it,
 //!     resizable or not, lowering the least size with it (macOS: `setFrame:display:` keeping the
