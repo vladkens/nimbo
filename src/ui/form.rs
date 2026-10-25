@@ -161,8 +161,9 @@ impl FormStyle {
   /// hairlines of black 4% (white 5%) inset 10; a 24-point tile at 12 with the label at 48; a
   /// footer 20 under the last plate. The toolbar as an AppKit preferences window's (Shottr's,
   /// macOS 26): tabs 48 high and at least 56 wide, 3 under the top and 8 over a half-point
-  /// line, half a point apart; a 26-point icon 3 from the tab's top, the label's baseline
-  /// 40.5; the selected tab on [Glass] in dark ([Theme::glass]).
+  /// line, half a point apart; a 26-point icon 3 from the tab's top, the label 11-point medium
+  /// (AppKit's labels read that heavy) with its baseline at 40.5; the selected tab on [Glass]
+  /// in dark ([Theme::glass]).
   pub const fn plates(t: &Theme) -> Self {
     let h = t.sizes.control_h;
     let small = t.small;
@@ -221,7 +222,8 @@ impl FormStyle {
         .bg(t.bg)
         .borders([0.0, 0.0, 0.5, 0.0], toolbar_line),
       tab,
-      tab_text: TextStyle::new(Font { size: 11.0, ..t.font }, t.muted).nowrap(),
+      tab_text: TextStyle::new(Font { size: 11.0, ..t.font }.weight(Weight::Medium), t.muted)
+        .nowrap(),
       tab_icon: 26.0,
       tab_stroke: 1.4,
       tab_on,
