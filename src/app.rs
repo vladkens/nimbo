@@ -472,14 +472,10 @@ impl<A: App> Runtime<A> {
     crate::ui::drags_window(&self.ui.last, p)
   }
 
-  /// The window's title and the height of the title bar over the content ([Ui::titlebar]): the
-  /// platform's for a unified window ([crate::Config::unified]), 0 for any other.
-  pub fn set_titlebar(&mut self, h: f32, title: &'static str) {
-    let changed = (self.ui.titlebar, self.ui.title) != (h, title);
-    (self.ui.titlebar, self.ui.title) = (h, title);
-    if changed {
-      self.redraw();
-    }
+  /// The height of the title bar over the content and the window's title ([Ui::titlebar]), for
+  /// a unified window ([crate::Config::unified]); the platform's.
+  pub fn set_titlebar(&mut self, bar: Option<(f32, &'static str)>) {
+    self.ui.titlebar = bar;
   }
 
   /// The content size the app asked the window for ([Ui::set_window_size]), once: the platform

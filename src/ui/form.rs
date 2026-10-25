@@ -545,27 +545,23 @@ impl Ui<'_> {
     }
     let titlebar = self.titlebar();
     let mut head = Style { gap: 0.0, ..fs.toolbar };
-    let bar = Style::new().w(grow()).gap(fs.toolbar.gap).align(Align::Center, Align::Start);
-    if titlebar > 0.0 {
+    if titlebar.is_some() {
       head.pad[0] = 0.0;
       self.drags_window();
     }
 
+    let bar = Style::new().w(grow()).gap(fs.toolbar.gap).align(Align::Center, Align::Start);
     let bar = match b.disabled {
       true => bar.opacity(t.disabled),
       false => bar.tab_focusable_quiet(),
     };
 
-    let title = self.window_title();
     let ring = b.focused.then_some((t.focus_ring().color, t.focus_ring().width));
     let mut r = Response::default();
+    self.next_id = Some((id.key("head"), false));
     self.col(head, |ui| {
-      if titlebar > 0.0 {
-        let line = Style::new().w(grow()).h(px(titlebar)).center().clip();
-        ui.row(line, |ui| ui.text(title, fs.title));
-      }
-
-      if titlebar > 0.0 {
+      if let Some((h, title)) = titlebar {
+        ui.row(Style::new().w(grow()).h(px(h)).center().clip(), |ui| ui.text(title, fs.title));
         ui.drags_window();
       }
 
@@ -672,6 +668,22 @@ mod tests {
   }
 
   #[test]
+  fn tabs_without_a_name_build_under_a_title_bar() {
+    struct Unnamed;
+    impl App for Unnamed {
+      fn view(&mut self, ui: &mut Ui) {
+        let fs = FormStyle::plates(&ui.theme());
+        ui.toolbar_tabs(&fs, &mut 0, &[(0, Icon::GEAR, "General")]);
+      }
+    }
+
+    let mut h = Harness::new(Unnamed, Size::new(200.0, 120.0), 1.0);
+    h.rt.set_titlebar(Some((32.0, "Preferences")));
+    h.frame();
+    assert!(h.rt.drags_window(Point::new(5.0, 16.0)));
+  }
+
+  #[test]
   fn tabs_sit_halfway_under_the_os_title_bar_and_never_drag_the_window() {
     let mut h = Harness::new(Bar(false), Size::new(300.0, 120.0), 2.0);
     h.frame();
@@ -687,7 +699,7 @@ mod tests {
   #[test]
   fn under_its_own_title_bar_the_toolbar_has_the_title_and_drags_the_window() {
     let mut h = Harness::new(Bar(false), Size::new(300.0, 120.0), 2.0);
-    h.rt.set_titlebar(32.0, "Preferences");
+    h.rt.set_titlebar(Some((32.0, "Preferences")));
     h.frame();
     let tab = h.rect(Id::of("bar").key(1)).unwrap();
     assert_eq!(tab.y, 32.0, "the tabs right under the title bar");

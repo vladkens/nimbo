@@ -90,9 +90,6 @@ impl Config {
   /// The least content size by default: room for a small form.
   pub const MIN_SIZE: Size = Size::new(320.0, 240.0);
 
-  /// The title bar's height over a unified window's content in the harness: macOS 26's.
-  pub const TITLEBAR: f32 = 32.0;
-
   pub const fn new(title: &'static str, w: f32, h: f32) -> Self {
     let (size, min_size) = (Size::new(w, h), Self::MIN_SIZE);
     Self { title, size, min_size, resizable: true, hidden: false, overlay: None, unified: false }
@@ -119,13 +116,13 @@ impl Config {
   }
 
   /// The title bar is part of the content, as in a macOS preferences window: the content runs
-  /// under it and its size is the window's, the app draws the title ([Ui::window_title]) in the
-  /// band [Ui::titlebar] high at the top and moves the window from its empty parts
+  /// under it and its size is the window's, the app draws the title in the band at the top
+  /// ([Ui::titlebar]) and moves the window from its empty parts
   /// ([Ui::drags_window]); [Ui::toolbar_tabs] does both.
   ///
   /// Per OS: macOS a full-size content view under a transparent title bar, its title hidden (the
   /// Window menu and Mission Control still show it), the traffic lights over the content.
-  /// Windows and Linux keep their title bar: [Ui::titlebar] is 0 there.
+  /// Windows and Linux keep their title bar: [Ui::titlebar] is `None` there.
   pub const fn unified(self) -> Self {
     Self { unified: true, ..self }
   }
@@ -257,7 +254,8 @@ pub fn run_args<A: App + 'static>(
 fn harness<A: App>(cfg: &Config, app: A, args: &Args) -> Harness<A> {
   let mut h = Harness::new(app, args.size.unwrap_or(cfg.size), args.scale);
   h.cpu.transparent = cfg.overlay.is_some();
-  h.rt.set_titlebar(if cfg.unified { Config::TITLEBAR } else { 0.0 }, cfg.title);
+  // A unified window's title bar as high as macOS 26's.
+  h.rt.set_titlebar(cfg.unified.then_some((32.0, cfg.title)));
   h.event(Event::Appearance(args.appearance.unwrap_or(Appearance::DARK)));
   h
 }

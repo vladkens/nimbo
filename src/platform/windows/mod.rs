@@ -718,7 +718,6 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
   let look = appearance();
   settings::title_bar(hwnd, look.dark);
   rt.event(Event::Appearance(look));
-  rt.set_titlebar(0.0, cfg.title);
   // A wake from any thread posts a message; the window handle crosses threads as a number, held
   // while posting so the window's end waits for a post under way.
   let target = Arc::new(Mutex::new(hwnd as isize));

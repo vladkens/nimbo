@@ -209,8 +209,7 @@ pub struct UiState {
   /// The last size asked: asking it again is nothing new, so a view may ask every frame.
   asked: Option<Size>,
   /// The height of the title bar over the content and the window's title ([Ui::titlebar]).
-  pub(crate) titlebar: f32,
-  pub(crate) title: &'static str,
+  pub(crate) titlebar: Option<(f32, &'static str)>,
   /// The images [Ui::rgba_image] added: their pixels' hash, the image, and whether a view built
   /// it since the last frame.
   pub(crate) pictures: Vec<(u64, ImageId, bool)>,
@@ -261,8 +260,7 @@ impl Default for UiState {
       stats: FrameStats::default(),
       resize: None,
       asked: None,
-      titlebar: 0.0,
-      title: "",
+      titlebar: None,
       pictures: Vec::new(),
       grab: None,
     }
@@ -643,15 +641,10 @@ impl<'a> Ui<'a> {
     self.st.ask_size(Size::new(w, h), self.size);
   }
 
-  /// The height of the title bar the content runs under ([crate::Config::unified]), 0 when the
-  /// window has its own above the content.
-  pub fn titlebar(&self) -> f32 {
+  /// The height of the title bar the content runs under and the window's title, for a window
+  /// that draws its own title bar ([crate::Config::unified]); `None` for any other.
+  pub fn titlebar(&self) -> Option<(f32, &'static str)> {
     self.st.titlebar
-  }
-
-  /// The window's title ([crate::Config::title]), for a window that draws its own title bar.
-  pub fn window_title(&self) -> &'static str {
-    self.st.title
   }
 
   /// Asks the window for `w` points wide and as high as its content, between `min_h` and
@@ -961,9 +954,7 @@ impl<'a> Ui<'a> {
     let hit = style.hit || named || scrolls || focus || drag || style.cursor != Cursor::Inherit;
     let tree = &mut self.st.tree;
     let i = tree.nodes.len() as u32;
-    if drag {
-      tree.drags.push(i);
-    }
+    tree.drags.extend(drag.then_some(i));
 
     let float = self.next_float.take();
     if float.is_some() {

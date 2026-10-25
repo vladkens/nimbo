@@ -10,7 +10,8 @@ top-level file; examples/ and tests/ are one row each. Code is every line that i
 comment, a doc comment or inside a `#[cfg(test)]` item. With a git ref, a column shows how code
 moved since it.
 `--map` lists the files with the first sentence of each one's module doc (`//!`): what it does.
-`--check` sums the code per part against its budget (BUDGETS) and fails when one is over.
+`--check` sums the code per part against its budget (BUDGETS) and fails when one is over, or
+when a budget is not a whole number of hundreds.
 
 uv run scripts/size.py [--files | --map | --check] [--vs <ref>]
 """
@@ -30,19 +31,22 @@ KINDS = ("code", "docs", "comments", "tests", "blank")
 # text system (text/: shaping, the glyph atlas, the editing model), the app platform (its
 # portable part: the shell, tray, hotkeys, paths, launch at login, opening, permissions, the
 # system clipboard, the focus of other apps; and each OS's platform/<os>/app) and the core (the
-# rest of src/). Raising one is a decision recorded in its PR.
+# rest of src/). A budget is whole hundreds (STEP): a change that doesn't fit is written
+# tighter, or the budget goes up by a hundred, a decision recorded in its PR; never by the few
+# lines one change needs.
+STEP = 100
 BUDGETS = {
-  "platform/macos": 1755,
-  "platform/windows": 1970,
-  "platform/linux": 2830,
-  "ui": 3725,
-  "widgets": 2965,
-  "text": 1180,
-  "core": 3505,
-  "app/shared": 845,
-  "app/macos": 1490,
-  "app/windows": 1365,
-  "app/linux": 1325,
+  "platform/macos": 1800,
+  "platform/windows": 2000,
+  "platform/linux": 2900,
+  "ui": 3800,
+  "widgets": 3000,
+  "text": 1200,
+  "core": 3500,
+  "app/shared": 900,
+  "app/macos": 1500,
+  "app/windows": 1400,
+  "app/linux": 1400,
 }
 # Modules that count against a budget of another name ("app", src/app.rs, is the core's seams).
 # The settings form and the dialog are add-ons over the widgets, as the containers are.
@@ -106,7 +110,11 @@ def check(rows: dict[str, dict[str, int]]) -> bool:
     if (p := part(m)) is not None:
       used[p] += r["code"]
 
-  ok = True
+  odd = [p for p, limit in BUDGETS.items() if limit % STEP]
+  for p in odd:
+    print(f"{p}: budget {BUDGETS[p]} is not whole hundreds: raise it by {STEP}, not by a few lines")
+
+  ok = not odd
   for p, limit in BUDGETS.items():
     over = used[p] > limit
     print(f"{p:<18} {used[p]:>6} / {limit:<6} {'over' if over else 'ok'}")
