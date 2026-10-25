@@ -481,8 +481,8 @@ impl Ui<'_> {
   }
 
   /// How far below the middle of a one-line label in `style` a mark centred beside it goes to
-  /// sit on the middle of its lowercase letters (the x-height), where the eye puts the middle of
-  /// a label in sentence case: half a point to a point and a half at body sizes.
+  /// sit on the middle of its capitals (the cap height), where the row's controls centre: on
+  /// the x-height a circle reads dropped below a label with capitals and ascenders.
   fn mark_shift(&mut self, style: TextStyle) -> f32 {
     let m = self.metrics(style.font);
     if m.ascent == 0.0 {
@@ -491,7 +491,7 @@ impl Ui<'_> {
 
     let line = if style.line_h > 0.0 { style.line_h } else { m.line_height() };
     let baseline = (line - m.ascent - m.descent) / 2.0 + m.ascent;
-    baseline - m.x_height / 2.0 - line / 2.0
+    baseline - m.cap_height / 2.0 - line / 2.0
   }
 
   /// The page's footer under its last plate ([FormStyle::footer]): what `buttons` builds,

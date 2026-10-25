@@ -110,14 +110,20 @@ impl Gallery {
         ui.toggle_sized(&mut self.big, "", ControlSize::Large);
       });
       line(ui, "SLIDER, SELECT, SEGMENTS", |ui| {
-        ui.id((SLIDER, i)).slider(&mut self.zoom, 0.0..=200.0);
-        ui.text(format_args!("{:.0}%", self.zoom), t.muted().nowrap());
-      });
-      ui.row(Style::new().gap(10.0).align(Align::Start, Align::Center), |ui| {
-        ui.id((SIZE, i)).select(&mut self.size, &SIZES);
-        ui.disabled(true).select(&mut Size::Small, &SIZES);
-        let views = [(0, "List", 128), (1, "Grid", 12), (2, "Columns", 3)];
-        ui.id((VIEW, i)).segmented(&mut self.view, &views);
+        // Two lines under one title, as far apart as the widgets in a line.
+        ui.col(Style::new().w(grow()).gap(10.0), |ui| {
+          let row = Style::new().gap(10.0).align(Align::Start, Align::Center);
+          ui.row(row, |ui| {
+            ui.id((SLIDER, i)).slider(&mut self.zoom, 0.0..=200.0);
+            ui.text(format_args!("{:.0}%", self.zoom), t.muted().nowrap());
+          });
+          ui.row(row, |ui| {
+            ui.id((SIZE, i)).select(&mut self.size, &SIZES);
+            ui.disabled(true).select(&mut Size::Small, &SIZES);
+            let views = [(0, "List", 128), (1, "Grid", 12), (2, "Columns", 3)];
+            ui.id((VIEW, i)).segmented(&mut self.view, &views);
+          });
+        });
       });
       line(ui, "PROGRESS", |ui| {
         ui.col(Style::new().w(px(150.0)), |ui| ui.progress(Some(0.42)));

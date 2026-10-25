@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use crate::scene::Point;
-use crate::ui::{Float, Id, TextStyle, Transition, Ui};
+use crate::ui::{Float, Id, TextStyle, Transition, Ui, px};
 
 /// Paint order of tooltips among overlays: above menus and dialogs.
 const TIP_Z: i32 = 2000;
@@ -67,8 +67,12 @@ impl Ui<'_> {
 
     let at = Float::window().anchor(0.0, ay).offset(x, y).z(TIP_Z);
     let text_style = TextStyle::new(t.small, t.tip_text).line_h((t.small.size * 1.3).round());
+    // As wide as its widest line, as macOS's: the layout would keep the width before wrapping.
+    let (boxed, pads) = (t.tip(), t.tip().pad[1] + t.tip().pad[3]);
+    let widest = self.measure_wrapped(text, text_style, boxed.max[0] - pads);
+    let boxed = if widest > 0.0 { boxed.w(px(widest.ceil() + pads)) } else { boxed };
     self.next_id = Some((tip, false));
-    self.float(at).row(t.tip().opacity(fade), |ui| ui.text(text, text_style));
+    self.float(at).row(boxed.opacity(fade), |ui| ui.text(text, text_style));
   }
 }
 
@@ -130,6 +134,41 @@ mod tests {
         ui.tooltip(b.id, "A tip much wider than what is left of the window at its right");
       });
     }
+  }
+
+  /// A button whose tip wraps, in the light theme.
+  struct Long;
+
+  impl App for Long {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.set_theme(crate::ui::Theme::PLATES_LIGHT);
+      let a = ui.id("a").button("A");
+      let tip = "What the app shows when it starts. Restoring the last session reopens its \
+                 windows where they were.";
+      ui.tooltip(a.id, tip);
+    }
+  }
+
+  #[test]
+  fn a_wrapped_tip_is_as_wide_as_its_widest_line() {
+    let mut h = Harness::new(Long, Size::new(400.0, 200.0), 2.0);
+    h.frame();
+    let r = h.rect(Id::of("a")).unwrap();
+    h.move_to(r.x + 2.0, r.y + 2.0);
+    h.wait(Duration::from_millis(400));
+    let tip = h.rect(Id::of("a").key("tip")).unwrap();
+    assert!(tip.h > 30.0, "it wraps: {tip:?}");
+    // The text's rightmost pixel, clear of the rounded corners: the padding (6) and a bearing
+    // in from the edge, not the 16 of a box as wide as its text before wrapping.
+    let img = h.render();
+    let ink = |x: f32| {
+      let ys = (12..(tip.h * 2.0) as i32 - 12).map(|y| tip.y + y as f32 / 2.0);
+      ys.into_iter().any(|y| img.pixel(x, y)[0] < 150)
+    };
+    let xs = (4..(tip.w * 2.0) as i32 - 4).rev().map(|x| tip.x + x as f32 / 2.0);
+    let right = xs.into_iter().find(|&x| ink(x)).unwrap();
+    let gap = tip.x + tip.w - right;
+    assert!(gap < 10.0, "{gap} from the text to the right edge: {tip:?}");
   }
 
   #[test]

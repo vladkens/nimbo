@@ -92,7 +92,8 @@ impl Lists {
   fn list(&mut self, ui: &mut Ui) {
     let t = ui.theme();
     let name = t.label();
-    let size = t.muted().font(t.small);
+    // In the name's font, as Finder's columns: a smaller one would sit off its baseline.
+    let size = t.muted();
     let r = List::new(ROWS, ROW_H)
       .multi()
       .selection(&mut self.sel)
@@ -110,21 +111,27 @@ impl Lists {
   fn details(&self, ui: &mut Ui) {
     let t = ui.theme();
     let text = TextStyle::new(t.font, t.text);
-    ui.col(Style::new().grow().pad(16.0).gap(8.0), |ui| {
-      ui.text("SELECTION", t.section());
-      match self.sel.cursor() {
-        Some(k) => ui.text(format_args!("Item {:06}, {} selected", k + 1, self.sel.len()), text),
-        None => ui.text("Nothing selected", t.muted()),
-      }
-
-      ui.text("OPENED", t.section());
-      match self.opened {
-        Some(i) => ui.text(format_args!("Item {:06}", i + 1), text),
-        None => ui.text("Press Enter or double-click a row", t.muted()),
-      }
-
-      ui.text("SORTED BY", t.section());
-      ui.text(SORTS[self.sort], text);
+    // Each title over its value, the pairs further apart than a title from its value.
+    let pair = Style::new().w(grow()).gap(6.0);
+    ui.col(Style::new().grow().pad(16.0).gap(16.0), |ui| {
+      ui.col(pair, |ui| {
+        ui.text("SELECTION", t.section());
+        match self.sel.cursor() {
+          Some(k) => ui.text(format_args!("Item {:06}, {} selected", k + 1, self.sel.len()), text),
+          None => ui.text("Nothing selected", t.muted()),
+        }
+      });
+      ui.col(pair, |ui| {
+        ui.text("OPENED", t.section());
+        match self.opened {
+          Some(i) => ui.text(format_args!("Item {:06}", i + 1), text),
+          None => ui.text("Press Enter or double-click a row", t.muted()),
+        }
+      });
+      ui.col(pair, |ui| {
+        ui.text("SORTED BY", t.section());
+        ui.text(SORTS[self.sort], text);
+      });
     });
   }
 
