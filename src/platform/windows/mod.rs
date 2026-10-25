@@ -36,7 +36,6 @@ use windows_sys::Win32::Foundation::{
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::System::DataExchange::EmptyClipboard;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::System::Ole::RevokeDragDrop;
 use windows_sys::Win32::System::SystemInformation::{
   GetLogicalProcessorInformationEx, GetSystemTimePreciseAsFileTime, PROCESSOR_RELATIONSHIP,
   RelationProcessorCore, SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX,
@@ -217,7 +216,7 @@ struct Window {
   /// The system's light or dark mode and accent last sent.
   look: Appearance,
   /// Takes the files dragged onto the window while held.
-  _drops: Box<files::Target>,
+  drops: Cell<files::This>,
 }
 
 thread_local! {
@@ -416,7 +415,7 @@ impl Window {
 
   /// Wakes post nowhere from now on, and drops come no more: the window is going.
   fn revoke(&self) {
-    unsafe { RevokeDragDrop(self.hwnd) };
+    files::unregister(self.hwnd, &self.drops);
     if let Ok(mut hwnd) = self.target.lock() {
       *hwnd = 0;
     }
@@ -764,7 +763,7 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
     min: cfg.min(),
     style,
     look,
-    _drops: drops,
+    drops,
     armed: None,
     target,
   };

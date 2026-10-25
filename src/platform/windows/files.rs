@@ -7,7 +7,7 @@
 //! The COM interfaces are called through their vtables by slot number as in [super::text] (the
 //! order of `shobjidl_core.h`, `objidl.h`, `oleidl.h`).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::ffi::{OsString, c_void};
 use std::os::windows::ffi::OsStringExt;
 use std::path::PathBuf;
@@ -122,17 +122,18 @@ fn show(hwnd: HWND, d: &crate::FileDialog) -> Option<PathBuf> {
 
 // MARK: Drops
 
-/// Our IDropTarget for a window: the files of the drag over it, read as it enters. The window
-/// holds it from [register] on, revoked as it goes ([super::Window::revoke]): references are not
-/// counted.
+/// Our IDropTarget for a window: the files of the drag over it, read as it enters. Counted:
+/// the window holds a reference from [register] until [unregister], OLE its own while it calls
+/// it, and the last one let go frees it.
 #[repr(C)]
 pub(super) struct Target {
   vtbl: &'static TargetVtbl,
   hwnd: HWND,
   paths: RefCell<Vec<PathBuf>>,
+  refs: Cell<u32>,
 }
 
-type This = *const Target;
+pub(super) type This = *const Target;
 type Data = *mut c_void;
 type Effect = *mut u32;
 
@@ -148,15 +149,25 @@ struct TargetVtbl {
 }
 
 static TARGET: TargetVtbl =
-  TargetVtbl { query, add_ref: count, release: count, enter, over, leave, drop: dropped };
+  TargetVtbl { query, add_ref, release, enter, over, leave, drop: dropped };
 
 /// Takes files dragged onto window `hwnd`, OLE started on the thread first (again for each
-/// window: it counts), which calls the target there.
-pub(super) fn register(hwnd: HWND) -> Box<Target> {
+/// window: it counts), which calls the target there; the window's reference.
+pub(super) fn register(hwnd: HWND) -> Cell<This> {
   unsafe { OleInitialize(null()) };
-  let target = Box::new(Target { vtbl: &TARGET, hwnd, paths: RefCell::default() });
-  unsafe { RegisterDragDrop(hwnd, (&raw const *target).cast_mut().cast()) };
-  target
+  let paths = RefCell::default();
+  let target = Box::into_raw(Box::new(Target { vtbl: &TARGET, hwnd, paths, refs: Cell::new(1) }));
+  unsafe { RegisterDragDrop(hwnd, target.cast()) };
+  Cell::new(target)
+}
+
+/// Stops taking drops on `hwnd` and lets go of the window's reference, once.
+pub(super) fn unregister(hwnd: HWND, target: &Cell<This>) {
+  unsafe { RevokeDragDrop(hwnd) };
+  let t = target.replace(null());
+  if !t.is_null() {
+    unsafe { release(t) };
+  }
 }
 
 unsafe extern "system" fn query(this: This, riid: *const GUID, out: *mut *mut c_void) -> HRESULT {
@@ -165,8 +176,22 @@ unsafe extern "system" fn query(this: This, riid: *const GUID, out: *mut *mut c_
   if ok { 0 } else { E_NOINTERFACE }
 }
 
-unsafe extern "system" fn count(_: This) -> u32 {
-  1
+unsafe extern "system" fn add_ref(this: This) -> u32 {
+  let refs = unsafe { &(*this).refs };
+  refs.set(refs.get() + 1);
+  refs.get()
+}
+
+unsafe extern "system" fn release(this: This) -> u32 {
+  let refs = unsafe { &(*this).refs };
+  let n = refs.get() - 1;
+  refs.set(n);
+  if n == 0 {
+    // SAFETY: made by [register] with `Box::into_raw`; no reference is left.
+    drop(unsafe { Box::from_raw(this.cast_mut()) });
+  }
+
+  n
 }
 
 unsafe extern "system" fn enter(this: This, data: Data, _: u32, at: POINTL, e: Effect) -> HRESULT {

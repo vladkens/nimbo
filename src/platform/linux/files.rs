@@ -23,6 +23,7 @@ use crate::{Event, FileDialog};
 
 const PORTAL: &str = "org.freedesktop.portal.Desktop";
 const PATH: &str = "/org/freedesktop/portal/desktop";
+const REQUEST: &str = "org.freedesktop.portal.Request";
 /// The portal may start on the first call (D-Bus activation): it answers within this, in ms.
 const MS: c_int = 5000;
 /// `GDK_ACTION_COPY`; `GDK_DROP_START`, a `GdkEventType`.
@@ -51,19 +52,19 @@ thread_local! {
 
 // MARK: Panels
 
-/// Asks the portal for panel `d` over window `id` (its GtkWindow `window`), unless one is up
-/// for it already; `Err` without a portal.
+/// Asks the portal for panel `d` over window `id` (its GtkWindow `window`), closing the one
+/// still open for it: a portal that went away with it never answers. `Err` without a portal.
 pub fn show(id: u64, window: P, d: &FileDialog) -> Result<(), String> {
-  if OPEN.with_borrow(|o| o.iter().any(|r| r.0 == id)) {
-    return Ok(());
+  let bus = dbus::session()?;
+  if let Some(old) = OPEN.with_borrow_mut(|o| Some(o.remove(o.iter().position(|r| r.0 == id)?).1)) {
+    _ = dbus::call(bus, PORTAL, &old, REQUEST, "Close", V::Tuple(vec![]), MS);
   }
 
-  let bus = dbus::session()?;
   // Every request's `Response`, subscribed before the first call: one may come before its call
   // returns.
   if !SUBSCRIBED.replace(true) {
-    let (iface, cb) = ("org.freedesktop.portal.Request", on_response as Fp);
-    dbus::subscribe(bus, PORTAL, iface, "Response", None, cb, (null_mut(), null()));
+    let cb = on_response as Fp;
+    dbus::subscribe(bus, PORTAL, REQUEST, "Response", None, cb, (null_mut(), null()));
   }
 
   // The request's object path, by the portal's spec: the sender's unique name without the
@@ -96,10 +97,7 @@ fn options(d: &FileDialog, token: &str) -> V {
     o.push(("current_folder", V::Bytes([dir.as_os_str().as_bytes(), &[0]].concat())));
   }
 
-  if let (true, Some(name)) = (d.save, &d.name) {
-    o.push(("current_name", V::s(name)));
-  }
-
+  o.extend(d.name.as_ref().filter(|_| d.save).map(|n| ("current_name", V::s(n))));
   V::dict(o)
 }
 
@@ -224,10 +222,11 @@ fn uri_list(bytes: &[u8]) -> Vec<PathBuf> {
   text.lines().map(str::trim).filter(|l| !l.starts_with('#')).filter_map(file).collect()
 }
 
-/// The path of a `file://` URI (any host), percent-decoded; `None` for another scheme.
+/// The path of a local `file://` URI (no host, or `localhost`), percent-decoded; `None` for
+/// another scheme or host: a file on another machine is not the local one at its path.
 fn file(uri: &str) -> Option<PathBuf> {
-  let rest = uri.strip_prefix("file://")?;
-  let b = &rest.as_bytes()[rest.find('/')?..];
+  let rest = uri.strip_prefix("file://localhost").or(uri.strip_prefix("file://"))?;
+  let b = rest.starts_with('/').then_some(rest.as_bytes())?;
   let (mut out, mut i) = (Vec::with_capacity(b.len()), 0);
   while let Some(&c) = b.get(i) {
     let hex = |j: usize| b.get(i + j).and_then(|&h| (h as char).to_digit(16));
@@ -254,6 +253,7 @@ mod tests {
     assert_eq!(file("file://localhost/tmp/%D1%84%25x%2"), p("/tmp/ф%x%2"));
     assert_eq!(file("https://example.com/a"), None);
     assert_eq!(file("file://host"), None);
+    assert_eq!(file("file://other/home/me/a.txt"), None);
     let list = b"# from Files\r\nfile:///a/b.tar\r\nhttps://x.org/\r\n\r\nfile:///c%23d\r\n";
     assert_eq!(uri_list(list), vec![PathBuf::from("/a/b.tar"), PathBuf::from("/c#d")]);
   }
