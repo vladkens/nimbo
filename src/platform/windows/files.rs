@@ -151,10 +151,11 @@ struct TargetVtbl {
 static TARGET: TargetVtbl =
   TargetVtbl { query, add_ref, release, enter, over, leave, drop: dropped };
 
-/// Takes files dragged onto window `hwnd`, OLE started on the thread first (again for each
-/// window: it counts), which calls the target there; the window's reference.
+/// Takes files dragged onto window `hwnd`, OLE started on the thread first (once: it lasts as
+/// long as the app), which calls the target there; the window's reference.
 pub(super) fn register(hwnd: HWND) -> Cell<This> {
-  unsafe { OleInitialize(null()) };
+  static OLE: std::sync::Once = std::sync::Once::new();
+  OLE.call_once(|| unsafe { _ = OleInitialize(null()) });
   let paths = RefCell::default();
   let target = Box::into_raw(Box::new(Target { vtbl: &TARGET, hwnd, paths, refs: Cell::new(1) }));
   unsafe { RegisterDragDrop(hwnd, target.cast()) };
@@ -173,7 +174,13 @@ pub(super) fn unregister(hwnd: HWND, target: &Cell<This>) {
 unsafe extern "system" fn query(this: This, riid: *const GUID, out: *mut *mut c_void) -> HRESULT {
   let ok = matches!(iid(unsafe { &*riid }), IID_IUNKNOWN | IID_DROP_TARGET);
   unsafe { *out = if ok { this.cast_mut().cast() } else { null_mut() } };
-  if ok { 0 } else { E_NOINTERFACE }
+  // The interface given out is a reference, which its caller releases.
+  if ok {
+    unsafe { add_ref(this) };
+    0
+  } else {
+    E_NOINTERFACE
+  }
 }
 
 unsafe extern "system" fn add_ref(this: This) -> u32 {

@@ -81,14 +81,15 @@ pub fn show(id: u64, window: P, d: &FileDialog) -> Result<(), String> {
 }
 
 /// The portal's options for `d`: the request's token, modal, its types as one filter of
-/// `*.ext` globs (either case: GTK's are case-sensitive), the folder it starts in and a save
-/// panel's name.
+/// `*.ext` globs in any case (GTK's are case-sensitive: `*.[tT][xX][tT]`), the folder it starts
+/// in and a save panel's name.
 fn options(d: &FileDialog, token: &str) -> V {
   let mut o = vec![("handle_token", V::s(token)), ("modal", V::B(true))];
   if !d.types.is_empty() {
     let name = d.types.iter().map(|t| format!("*.{t}")).collect::<Vec<_>>().join(", ");
-    let globs = d.types.iter().flat_map(|t| [t.to_lowercase(), t.to_uppercase()]);
-    let globs = globs.map(|t| V::Tuple(vec![V::U(0), V::S(format!("*.{t}"))])).collect();
+    let class = |c: char| format!("[{}{}]", c.to_lowercase(), c.to_uppercase());
+    let glob = |t: &String| format!("*.{}", t.chars().map(class).collect::<String>());
+    let globs = d.types.iter().map(|t| V::Tuple(vec![V::U(0), V::S(glob(t))])).collect();
     let filter = V::Tuple(vec![V::S(name), V::Array("(us)", globs)]);
     o.push(("filters", V::Array("(sa(us))", vec![filter])));
   }
@@ -265,7 +266,7 @@ mod tests {
     let o = options(&d, "t1");
     assert_eq!(o.ty(), "a{sv}");
     let glob = |g: &str| V::Tuple(vec![V::U(0), V::s(g)]);
-    let globs = vec![glob("*.tar"), glob("*.TAR"), glob("*.7z"), glob("*.7Z")];
+    let globs = vec![glob("*.[tT][aA][rR]"), glob("*.[77][zZ]")];
     let filter = V::Tuple(vec![V::s("*.tar, *.7z"), V::Array("(us)", globs)]);
     let want = V::dict(vec![
       ("handle_token", V::s("t1")),
