@@ -17,8 +17,9 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+/// The OS whose layout a path follows: [OS] in use, another in tests.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Os {
+pub(crate) enum Os {
   Mac,
   Windows,
   Linux,
@@ -31,7 +32,7 @@ enum Kind {
   Cache,
 }
 
-const OS: Os = match () {
+pub(crate) const OS: Os = match () {
   _ if cfg!(target_os = "macos") => Os::Mac,
   _ if cfg!(windows) => Os::Windows,
   _ => Os::Linux,

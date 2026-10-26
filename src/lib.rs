@@ -15,11 +15,11 @@
 //! what a tray app needs besides: an icon with a menu ([tray]), global hotkeys ([hotkey]), one
 //! instance that takes commands from a second launch ([instance], [Main::serve]), its folders and
 //! the user's Downloads ([paths]), launch at login ([autostart]), its launcher entry on Linux
-//! ([desktop]), alerts ([Main::alert]) and its command line's console on Windows
-//! ([attach_console]); and to reach other apps: links and files opened or shown ([open]), the
-//! OS's permissions ([permissions]), where the user types ([focus]), keys posted to the app in
-//! focus ([keys::post]) and the clipboard, also taken and put back around a paste of the app's own
-//! ([SystemClipboard]).
+//! ([desktop]), alerts ([Main::alert]), its command line's console on Windows
+//! ([attach_console]) and an uninstall that leaves nothing behind ([uninstall]); and to reach other
+//! apps: links and files opened or shown ([open]), the OS's permissions ([permissions]), where the
+//! user types ([focus]), keys posted to the app in focus ([keys::post]) and the clipboard, also
+//! taken and put back around a paste of the app's own ([SystemClipboard]).
 //!
 //! macOS 14 is the least it runs on (`NSApplication`'s `activate`, `NSView`'s display link): build
 //! apps with `MACOSX_DEPLOYMENT_TARGET=14.0`.
@@ -47,6 +47,7 @@ pub mod svg;
 pub mod text;
 pub mod tray;
 pub mod ui;
+pub mod uninstall;
 
 use std::path::PathBuf;
 

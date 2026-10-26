@@ -5,7 +5,8 @@
 //! area icon ([tray]), global hotkeys on a thread of their own ([hotkey]), launch at login
 //! through the registry ([autostart]), links and files opened ([open]), shortcuts posted to the
 //! app in front ([post]), where the user types ([focus]) and the clipboard for a paste ([paste]);
-//! the Downloads folder ([downloads]) and the console of the command line ([attach_console]).
+//! the Downloads folder ([downloads]), the console of the command line ([attach_console]) and
+//! the uninstall's retries ([uninstall]).
 
 pub mod activity;
 pub mod autostart;
@@ -17,6 +18,7 @@ pub mod paste;
 pub mod post;
 pub mod shell;
 pub mod tray;
+pub mod uninstall;
 
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;

@@ -109,6 +109,10 @@
 //!   (`linux/app/instance.rs`) and Windows' (`windows/app/instance.rs`): `lock_file(&Path) ->
 //!   io::Result<File>`, `Server` with `bind(dir, lock)` and `serve(on: impl Fn(&str) + Send)`, a
 //!   thread that calls `on` with each line, both let go on drop, and `send(dir, line)`.
+//! - `pub mod uninstall` ([crate::uninstall]): `steps(&AppInfo) -> Vec<Step>`, what the OS keeps
+//!   for the app besides launch at login, undone (macOS its permissions and defaults, Linux the
+//!   launcher entry and the portal's token), and `busy(&io::Error) -> bool`, an error a removal may
+//!   pass when tried again.
 //! - `pub mod activity` ([crate::activity]), from any thread: `Token: Send`, `begin(&str) ->
 //!   Token`, `end(Token)`.
 //! - `pub mod post` ([crate::keys::post]): `post(Shortcut) -> Result<(), String>`, the shortcut as
@@ -130,7 +134,8 @@
 //!   bool`, `secure_input() -> bool`, `microphone() -> Access`, `request_microphone(Box<dyn
 //!   FnOnce(bool) + Send>)`.
 //!
-//!   `activity`, `open`, `post`, `paste`, `focus` and `permissions` live in `app/` on each OS too.
+//!   `activity`, `open`, `post`, `paste`, `focus`, `permissions` and `uninstall` live in `app/` on
+//!   each OS too.
 //! - `pub fn appearance() -> Appearance` ([crate::Appearance]): `dark`, and `accent` in sRGB or
 //!   `None` when the OS has none or the user left it to apps (macOS: `effectiveAppearance` matched
 //!   against Aqua / DarkAqua, `controlAccentColor` unless Multicolor; on the main thread only,
@@ -203,7 +208,7 @@ pub use imp::appearance;
 pub(crate) use imp::permissions;
 pub(crate) use imp::{
   activity, autostart, clipboard, desktop, focus, hotkey, open, paste, perf_cores, post, shell,
-  text, tray,
+  text, tray, uninstall,
 };
 #[cfg(target_os = "windows")]
 pub(crate) use imp::{attach_console, downloads};

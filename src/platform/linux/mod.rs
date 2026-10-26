@@ -36,7 +36,9 @@ use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-pub use self::app::{activity, autostart, desktop, focus, hotkey, open, paste, post, shell, tray};
+pub use self::app::{
+  activity, autostart, desktop, focus, hotkey, open, paste, post, shell, tray, uninstall,
+};
 use self::dl::{Lib, fns};
 use self::input::Input;
 pub use self::settings::appearance;
