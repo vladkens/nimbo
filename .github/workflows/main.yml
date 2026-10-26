@@ -26,7 +26,10 @@ jobs:
       - run: rustup target add x86_64-pc-windows-msvc x86_64-unknown-linux-gnu
       - run: sudo apt-get update && sudo apt-get install -y libfontconfig1 libfreetype6 libharfbuzz0b fonts-dejavu-core libgtk-3-0t64
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      # The budgets fail a PR; on main, where two PRs that each fit can merge over one, they warn.
       - run: make check
+        env:
+          SIZE_WARN: ${{ github.event_name == 'pull_request' && '' || '1' }}
       - run: make test
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb xauth
       - run: xvfb-run -a make pace
