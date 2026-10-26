@@ -30,17 +30,15 @@
 
 ## 🧭 Why nimbo
 
-I set out to replace Handy, the dictation app I use about 400 times a day (77,597 dictations in 208 days), with one that uses little memory and feels native:
+nimbo grew out of [wavo-app](https://github.com/vladkens/wavo-app), the dictation app I use about 400 times a day. I wanted it to take little memory, react fast and run as one process, with no Electron or webview:
 
-- **Handy** (Tauri + WebKit): **565 MB** at idle on an M2.
-- **egui and GPUI**, four experiments: a GPU surface and a text stack of their own even for a settings window, 337–911 crates, and still not System Settings' look, even with SF's font axes tuned by hand.
-- **AppKit**: **13 MB** at idle and no wakeups, but macOS only.
-- **Native controls on three systems**: every feature written three times, 79% of the code glue, and no place for a waveform.
-- **How Sublime does it**, read from its binaries: a thin platform layer, the system's text everywhere, CPU drawing outside the Mac.
-- **The same in Rust**: 9k lines on 13 crates ran a Sublime Merge–like browser over 100k commits and a chart over 100k candles; an 8 s build, a 1 MB binary, a window on screen in under 200 ms (Zed: 299 ms).
-- **The CPU everywhere**: Vulkan took 55–148 MB on Windows, the CPU renderer 5 MB, a full 2560×1600 frame within 8.3 ms.
+- **Tauri** (Handy, the app it replaces): **565 MB** at idle.
+- **GPUI**: a decent framework, but a zoo of dependencies (**465–619 crates** for the UI alone) and slow rebuilds.
+- **egui**: the best of the two, lighter in binary and memory, but hard to customise and far from native.
+- **Native controls on each system**: the lightest on memory, but the controls differ everywhere, the design came out different on each system, and every feature was written three times.
+- **The Sublime Text and Sublime Merge way**: a small UI I draw myself over the system's window, input and text. The middle ground, and this library came out of it.
 
-nimbo is that toolkit as a library: **13 crates**, a **1.1 MB** binary, a clean build in **10 s**.
+nimbo is **31k lines** of Rust with its tests (`tokei`), against GPUI's 65.5k plus 18.1k of Taffy, egui's 52.2k and iced's 51.9k; it builds from scratch in **10 s** on **13 crates** into a **1.1 MB** binary.
 
 ## 🤖 How it's made
 
