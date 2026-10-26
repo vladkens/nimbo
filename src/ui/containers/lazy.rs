@@ -53,11 +53,11 @@ impl Spans for Ends<'_> {
 }
 
 /// A column's state in the store: where its items end, for [Ui::virtual_col] (kept to build
-/// them without allocating), and an item to reveal once the column knows its place.
+/// them without allocating), and an item to reveal with the frames it may still take.
 #[derive(Default)]
 struct Lazy {
   ends: Vec<f64>,
-  reveal: Option<usize>,
+  reveal: Option<(usize, u8)>,
 }
 
 impl<'a> Ui<'a> {
@@ -110,13 +110,21 @@ impl<'a> Ui<'a> {
       _ => 0.0,
     };
 
+    // An item to reveal is scrolled to until it shows, laid out: the column may move under it
+    // meanwhile, or not be laid out yet.
     let n = spans.len();
-    if let (Some(i), Some(sc)) = (self.state::<Lazy>(id).reveal.take(), sc)
-      && i < n
-    {
-      let (from, to) = (spans.top(i), spans.top(i + 1));
-      let r = Rect::new(sc.offset.x, (top + from) as f32, 1.0, (to - from) as f32);
-      self.reveal(area_id.unwrap(), r);
+    if let Some((i, tries)) = self.state::<Lazy>(id).reveal.filter(|&(i, t)| i < n && t > 0) {
+      let vp = sc.map(|sc| sc.viewport);
+      let shows = (vp.zip(self.rect(id.key(key(i)))))
+        .is_some_and(|(vp, r)| r.y >= vp.y - 0.5 && (r.y + r.h <= vp.y + vp.h + 0.5 || r.h > vp.h));
+      self.state::<Lazy>(id).reveal = (!shows).then_some((i, tries - 1));
+      if let (false, Some(sc)) = (shows, sc) {
+        let (from, to) = (spans.top(i), spans.top(i + 1));
+        let r = Rect::new(sc.offset.x, (top + from) as f32, 1.0, (to - from) as f32);
+        self.reveal(area_id.unwrap(), r);
+      }
+
+      self.st.animating |= !shows;
     }
 
     // Before the area is laid out, a window's height from the top; outside one, everything.
@@ -160,6 +168,6 @@ impl<'a> Ui<'a> {
   /// Scrolls item `i` of virtual column `id` into view, the least that shows it, in the
   /// column's next build.
   pub fn reveal_item(&mut self, id: Id, i: usize) {
-    self.state::<Lazy>(id).reveal = Some(i);
+    self.state::<Lazy>(id).reveal = Some((i, 8));
   }
 }

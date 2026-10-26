@@ -119,6 +119,20 @@ fn a_selection_and_the_rows_ids_hold_across_scrolling() {
   assert_eq!(h.app().selected, Some(entry(0, 2)));
 }
 
+/// Asked before the page is laid out, a row is revealed once it is.
+#[test]
+fn a_row_asked_for_before_the_first_frame_is_revealed() {
+  let app = History { reveal: Some((120, 3)), ..History::default() };
+  let mut h = Harness::new(app, Size::new(560.0, 520.0), 1.0);
+  for _ in 0..4 {
+    h.frame();
+  }
+
+  let view = rect(&h, Id::of(PAGE)).unwrap();
+  let r = rect(&h, row(120, 3)).expect("built");
+  assert!(r.y >= view.y && r.y + r.h <= view.y + view.h, "{r:?} in {view:?}");
+}
+
 #[test]
 fn a_row_from_the_middle_is_revealed() {
   let mut h = history();

@@ -1261,6 +1261,14 @@ impl<'a> Ui<'a> {
     self.st
   }
 
+  /// Keeps this tree as the last for a pass run again on its layout ([Ui::partial_short]),
+  /// keeping the state and focus of what it left out: the pass after builds them.
+  pub fn relayout(mut self) -> UiState {
+    self.st.input.ended = None;
+    std::mem::swap(&mut self.st.tree, &mut self.st.last);
+    self.st
+  }
+
   /// Drops this tree, keeping the last frame's: a pass that only delivers input to the view,
   /// or one run again.
   pub fn discard(mut self) -> UiState {
