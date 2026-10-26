@@ -87,8 +87,10 @@ pub struct Config {
   pub overlay: Option<Anchor>,
   /// The content runs under the title bar ([Config::unified]).
   pub unified: bool,
-  /// The window's icon off macOS ([Config::icon]): its side and straight RGBA pixels.
-  pub icon: Option<(u32, &'static [u8])>,
+  /// The window's icon off macOS ([Config::icon]): its side and straight RGBA pixels, `side`²
+  /// of them, as only the builder checks.
+  #[cfg_attr(target_os = "macos", allow(dead_code))]
+  pub(crate) icon: Option<(u32, &'static [u8])>,
 }
 
 impl Config {
