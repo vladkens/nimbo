@@ -33,12 +33,10 @@
 nimbo grew out of [wavo-app](https://github.com/vladkens/wavo-app), the dictation app I use about 400 times a day. I wanted it to take little memory, react fast and run as one process, with no Electron or webview:
 
 - **Tauri** (Handy, the app it replaces): **565 MB** at idle.
-- **GPUI**: a decent framework, but a zoo of dependencies (**465–619 crates** for the UI alone) and slow rebuilds.
+- **GPUI**, directly and through GPUI Kit: a decent base, but a zoo of dependencies (**465 crates** for the UI alone, **619** with the Kit) and slow rebuilds.
 - **egui**: the best of the two, lighter in binary and memory, but hard to customise and far from native.
 - **Native controls on each system**: the lightest on memory, but the controls differ everywhere, the design came out different on each system, and every feature was written three times.
 - **The Sublime Text and Sublime Merge way**: a small UI I draw myself over the system's window, input and text. The middle ground, and this library came out of it.
-
-nimbo is **31k lines** of Rust with its tests (`tokei`), against GPUI's 65.5k plus 18.1k of Taffy, egui's 52.2k and iced's 51.9k; it builds from scratch in **10 s** on **13 crates** into a **1.1 MB** binary.
 
 ## 🤖 How it's made
 
