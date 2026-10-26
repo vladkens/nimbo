@@ -2,7 +2,6 @@
 
 //! The launcher entry ([crate::desktop]) on Windows: none to write, the executable carries
 //! the name and icon.
-//! nothing to write.
 
 pub fn install(_: &crate::AppInfo, _: &crate::desktop::Launcher) -> Result<bool, String> {
   Ok(false)
