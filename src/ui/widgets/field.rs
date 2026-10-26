@@ -324,7 +324,7 @@ mod tests {
     }
 
     h.frame();
-    assert!(h.rt.ui.last.get(Id::of("page")).unwrap().scroll.y > 0.0);
+    assert!(h.rt.ui.last.get(Id::of("page")).unwrap().scroll[1] > 0.0);
     // Page Down is not the text's: it goes on to the app.
     let page_down = crate::app::Event::Command(crate::keys::Command::ScrollPageDown);
     assert!(!h.event(page_down));

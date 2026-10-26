@@ -614,11 +614,11 @@ fn visible(t: &super::Tree, id: Id) -> Option<Rect> {
 /// the caret.
 fn page(s: &mut ScrollState, h: f32, c: Command, line_h: f32) {
   let page = (h - line_h).max(1.0);
-  s.offset.y = match c {
-    Command::ScrollPageUp => s.offset.y - page,
-    Command::ScrollPageDown => s.offset.y + page,
+  s.offset[1] = match c {
+    Command::ScrollPageUp => s.offset[1] - f64::from(page),
+    Command::ScrollPageDown => s.offset[1] + f64::from(page),
     Command::ScrollToTop => 0.0,
-    _ => f32::MAX,
+    _ => f64::MAX,
   };
   s.pending = Point::default();
 }

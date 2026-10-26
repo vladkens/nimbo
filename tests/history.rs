@@ -3,7 +3,8 @@
 //! Tests of `examples/history.rs` through the harness: of 86,000 rows a day at a time only those
 //! in view are built, under a scroll area as tall as all of them; the end builds the last rows;
 //! rows and days sit where a whole build would put them; a selection and the rows' ids hold
-//! across scrolling; a row from the middle is revealed.
+//! across scrolling; a row from the middle is revealed; a million rows, past `f32`'s whole
+//! numbers, scroll to their end and their middle a row apart.
 
 #[path = "../examples/history.rs"]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
@@ -142,4 +143,41 @@ fn a_row_from_the_middle_is_revealed() {
   let view = rect(&h, Id::of(PAGE)).unwrap();
   let r = rect(&h, row(200, 10)).expect("built");
   assert!(r.y >= view.y && r.y + r.h <= view.y + view.h, "{r:?} in {view:?}");
+}
+
+/// A million rows, about 53 million points: past the end, the last row in view and rows a row
+/// and a hairline apart; a row from the middle revealed, its neighbours a row apart too, and
+/// swipes there move it by exactly as much.
+#[test]
+fn a_million_rows_scroll_to_the_point() {
+  const MILLION: usize = 1_000_000;
+  let mut h = Harness::new(History::new(MILLION), Size::new(560.0, 520.0), 2.0);
+  h.frame();
+  let row = |g: usize, i: usize| Id::of(LIST).key((1u8, (MILLION - g * PER_DAY - i) as u64));
+  let step = |h: &H, g, i| rect(h, row(g, i + 1)).unwrap().y - rect(h, row(g, i)).unwrap().y;
+
+  swipe(&mut h, -1e9);
+  let days = MILLION.div_ceil(PER_DAY);
+  let last = MILLION - (days - 1) * PER_DAY - 1;
+  let view = rect(&h, Id::of(PAGE)).unwrap();
+  let r = rect(&h, row(days - 1, last)).expect("the last row built");
+  assert!(r.y >= view.y && r.y + r.h <= view.y + view.h, "{r:?} in {view:?}");
+  assert_eq!(step(&h, days - 1, last - 1), ROW_H + 1.0, "a row and a hairline apart");
+
+  let (g, i) = (days / 2, 70);
+  h.app_mut().reveal = Some((g, i));
+  for _ in 0..4 {
+    h.frame();
+  }
+
+  let r = rect(&h, row(g, i)).expect("built");
+  assert!(r.y >= view.y && r.y + r.h <= view.y + view.h, "{r:?} in {view:?}");
+  assert_eq!((step(&h, g, i - 1), step(&h, g, i)), (ROW_H + 1.0, ROW_H + 1.0));
+
+  // A swipe this deep moves the rows by exactly as much: `f32` would round the offset to 4.
+  for dy in [-37.0, -1.5, 3.0] {
+    let y = rect(&h, row(g, i)).unwrap().y;
+    swipe(&mut h, dy);
+    assert_eq!(rect(&h, row(g, i)).unwrap().y - y, dy, "moved by the swipe's {dy}");
+  }
 }

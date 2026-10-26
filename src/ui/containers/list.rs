@@ -354,7 +354,7 @@ impl<'s> List<'s> {
       let lo = if shown.start == 0 { f32::NEG_INFINITY } else { pad_t + shown.start as f32 * h };
       let hi = if shown.end == n { f32::INFINITY } else { pad_t + shown.end as f32 * h };
       let node = ui.st.stack.last().unwrap().0;
-      ui.st.tree.partial.push((node, node, lo, hi));
+      ui.st.tree.partial.push((node, node, lo.into(), hi.into()));
     });
 
     if let Some(own) = own {
@@ -387,7 +387,8 @@ impl<'a> Ui<'a> {
 
   /// A scroll container's offset as last set, before the layout clamps it.
   fn scroll_raw(&self, id: Id) -> Point {
-    let raw = self.st.store.peek::<crate::ui::input::ScrollState>(id).map(|s| s.offset);
+    let raw = self.st.store.peek::<crate::ui::input::ScrollState>(id);
+    let raw = raw.map(|s| Point::new(s.offset[0] as f32, s.offset[1] as f32));
     raw.or_else(|| self.scroll(id).map(|s| s.offset)).unwrap_or_default()
   }
 
@@ -649,7 +650,7 @@ mod tests {
     use crate::harness::Harness;
     let mut h = Harness::new(Counted::default(), Size::new(200.0, 200.0), 1.0);
     h.frame();
-    h.rt.ui.store.raw::<crate::ui::input::ScrollState>(Id::of("list")).offset.y = 1_999_000.0;
+    h.rt.ui.store.raw::<crate::ui::input::ScrollState>(Id::of("list")).offset[1] = 1_999_000.0;
     h.rt.redraw();
     h.frame();
     let row = Id::of("list").key(("row", 99_955u64 * 7));

@@ -249,7 +249,8 @@ pub(super) fn reveal(t: &mut Tree, scale: f32) {
     let hi = [r.x + r.w - pad[1], r.y + r.h - pad[2]];
     let (clo, chi) = ([c.x, c.y], [c.x + 1.0, c.y + c.h]);
     let snap = |v: f32| if scale > 0.0 { (v * scale).round() / scale } else { v };
-    let (mut d, mut scroll) = ([0.0; 2], [n.scroll.x, n.scroll.y]);
+    // A text field's offset is small: in `f32`, as its rects.
+    let (mut d, mut scroll) = ([0.0; 2], [n.scroll[0] as f32, n.scroll[1] as f32]);
     for ax in 0..2 {
       if !n.style.scroll[ax] {
         continue;
@@ -262,7 +263,7 @@ pub(super) fn reveal(t: &mut Tree, scale: f32) {
       };
 
       let size = if ax == 0 { r.w } else { r.h };
-      let max = (n.content[ax] - size).max(0.0);
+      let max = (n.content[ax] as f32 - size).max(0.0);
       let to = snap((scroll[ax] + want).clamp(0.0, max));
       (d[ax], scroll[ax]) = (to - scroll[ax], to);
     }
@@ -272,7 +273,7 @@ pub(super) fn reveal(t: &mut Tree, scale: f32) {
     }
 
     let end = n.end as usize;
-    t.nodes[p].scroll = Point::new(scroll[0], scroll[1]);
+    t.nodes[p].scroll = [scroll[0].into(), scroll[1].into()];
     // Overlays on the container itself (its scrollbars) or the window stay.
     let mut k = p + 1;
     while k < end {
@@ -283,7 +284,7 @@ pub(super) fn reveal(t: &mut Tree, scale: f32) {
       }
 
       (c.rect.x, c.rect.y) = (c.rect.x - d[0], c.rect.y - d[1]);
-      (c.pos[0], c.pos[1]) = (c.pos[0] - d[0], c.pos[1] - d[1]);
+      (c.pos[0], c.pos[1]) = (c.pos[0] - f64::from(d[0]), c.pos[1] - f64::from(d[1]));
       k += 1;
     }
   }

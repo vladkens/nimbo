@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use super::textlayout::{Edit, Stop, reveal};
 use super::{Align, Clip, Dim, Float, Id, Style, TextStyle};
 use crate::keys::Binding;
-use crate::scene::{Color, ImageId, Images, Point, Rect, Size};
+use crate::scene::{Color, ImageId, Images, Rect, Size};
 use crate::text::edit::{graphemes, next_grapheme};
 use crate::text::{Font, FxHasher, Ink, Metrics, TextSystem};
 
@@ -102,17 +102,18 @@ pub struct Node {
   pub cols: u8,
   /// Columns it takes in a grid ([super::Ui::span]), at least 1.
   pub span: u8,
-  /// Moves the children back by this much (scroll containers).
-  pub scroll: Point,
+  /// Moves the children back by this much (scroll containers): `f64`, as content may run past
+  /// `f32`'s whole numbers (a virtual list of a million rows).
+  pub scroll: [f64; 2],
   /// The laid-out box, edges snapped to pixels.
   pub rect: Rect,
   /// Width and height of the content (children, gaps and padding, or text lines); more than
   /// the box when it overflows.
-  pub content: [f32; 2],
-  size: [f32; 2],
+  pub content: [f64; 2],
+  size: [f64; 2],
   /// The least the box can shrink to: the content's minimum (the longest word of a text).
-  min: [f32; 2],
-  pub(super) pos: [f32; 2],
+  min: [f64; 2],
+  pub(super) pos: [f64; 2],
   /// Grow distribution: the size is final.
   frozen: bool,
 }
@@ -137,7 +138,7 @@ impl Node {
       end,
       cols: 0,
       span: 1,
-      scroll: Point::default(),
+      scroll: [0.0; 2],
       rect: Rect::default(),
       content: [0.0; 2],
       size: [0.0; 2],
@@ -149,7 +150,7 @@ impl Node {
 }
 
 /// A box and its content's size, as a view saw them ([Tree::settle]).
-pub type Seen = (Rect, [f32; 2]);
+pub type Seen = (Rect, [f64; 2]);
 
 /// One frame's elements; node 0 is the root, the window.
 #[derive(Default)]
@@ -171,7 +172,7 @@ pub struct Tree {
   /// Content built only in part (a virtual list's rows in view): its scroll container, the block
   /// built in part (the container itself, or a column inside it) and the span built, from the
   /// block's top ([super::Ui::partial_short]).
-  pub partial: Vec<(u32, u32, f32, f32)>,
+  pub partial: Vec<(u32, u32, f64, f64)>,
   /// Elements whose last-frame box and content the view drew from, as it saw them
   /// ([super::Ui::settle]).
   pub settle: Vec<(Id, Option<Seen>)>,
@@ -181,7 +182,7 @@ pub struct Tree {
   pub stops: Vec<Stop>,
   index: HashMap<Id, u32, BuildHasherDefault<FxHasher>>,
   /// A grid's row heights while it is laid out.
-  rows: Vec<f32>,
+  rows: Vec<f64>,
 }
 
 impl Tree {
@@ -286,7 +287,7 @@ pub fn layout(t: &mut Tree, win: Size, scale: f32, m: &mut dyn Measure) -> f32 {
   grow(t, 0, win);
   wrap(t, m);
   fit(t, 1, m);
-  let fit_h = t.nodes[0].content[1];
+  let fit_h = t.nodes[0].content[1] as f32;
   grow(t, 1, win);
   place(t, win, scale);
   reveal(t, scale);
@@ -332,15 +333,15 @@ fn duplicate(id: Id) {
   }
 }
 
-fn clamp(v: f32, lo: f32, hi: f32) -> f32 {
+fn clamp(v: f64, lo: f64, hi: f64) -> f64 {
   v.min(hi).max(lo)
 }
 
 /// Padding before and after the content along an axis.
-fn pads(s: &Style, ax: usize) -> (f32, f32) {
+fn pads(s: &Style, ax: usize) -> (f64, f64) {
   match ax {
-    0 => (s.pad[3], s.pad[1]),
-    _ => (s.pad[0], s.pad[2]),
+    0 => (s.pad[3].into(), s.pad[1].into()),
+    _ => (s.pad[0].into(), s.pad[2].into()),
   }
 }
 
@@ -362,15 +363,16 @@ fn fit(t: &mut Tree, ax: usize, m: &mut dyn Measure) {
   for i in (0..t.nodes.len()).rev() {
     let (content, least) = match t.nodes[i].kind {
       Kind::Text { range, style, .. } if ax == 0 => {
-        text_width(&t.text[range.0 as usize..range.1 as usize], style, m)
+        let (w, least) = text_width(&t.text[range.0 as usize..range.1 as usize], style, m);
+        (w.into(), least.into())
       }
       Kind::Text { lines, line_h, .. } => {
-        let h = (lines.1 - lines.0) as f32 * line_h;
+        let h = (lines.1 - lines.0) as f64 * f64::from(line_h);
         (h, h)
       }
       Kind::Image(id) => {
         let s = m.image(id);
-        let v = if ax == 0 { s.w } else { s.h };
+        let v = f64::from(if ax == 0 { s.w } else { s.h });
         (v, v)
       }
       Kind::Box | Kind::Canvas(_) | Kind::Fade { .. } if t.nodes[i].cols > 0 => grid_fit(t, i, ax),
@@ -379,10 +381,10 @@ fn fit(t: &mut Tree, ax: usize, m: &mut dyn Measure) {
 
     let n = &mut t.nodes[i];
     let s = &n.style;
-    let (lo, hi) = (s.min[ax], s.max[ax]);
+    let (lo, hi) = (f64::from(s.min[ax]), f64::from(s.max[ax]));
     n.content[ax] = content;
     (n.size[ax], n.min[ax]) = match s.size[ax] {
-      Dim::Px(v) => (clamp(v, lo, hi), clamp(v, lo, hi)),
+      Dim::Px(v) => (clamp(v.into(), lo, hi), clamp(v.into(), lo, hi)),
       Dim::Rigid => (clamp(content, lo, hi), clamp(content, lo, hi)),
       _ if s.clip != Clip::None => (clamp(content, lo, hi), lo),
       _ => (clamp(content, lo, hi), clamp(least, lo, hi)),
@@ -391,10 +393,10 @@ fn fit(t: &mut Tree, ax: usize, m: &mut dyn Measure) {
 }
 
 /// The content size and minimum of a box from its children in the flow.
-fn children_fit(t: &Tree, i: usize, ax: usize) -> (f32, f32) {
+fn children_fit(t: &Tree, i: usize, ax: usize) -> (f64, f64) {
   let n = &t.nodes[i];
   let along = n.axis as usize == ax;
-  let (mut size, mut least, mut count) = (0.0f32, 0.0f32, 0);
+  let (mut size, mut least, mut count) = (0.0f64, 0.0f64, 0);
   let mut c = i + 1;
   while c < n.end as usize {
     let ch = &t.nodes[c];
@@ -409,7 +411,7 @@ fn children_fit(t: &Tree, i: usize, ax: usize) -> (f32, f32) {
     c = ch.end as usize;
   }
 
-  let gaps = if along && count > 1 { n.style.gap * (count - 1) as f32 } else { 0.0 };
+  let gaps = if along && count > 1 { f64::from(n.style.gap) * (count - 1) as f64 } else { 0.0 };
   let (a, b) = pads(&n.style, ax);
   (size + gaps + a + b, least + gaps + a + b)
 }
@@ -446,14 +448,14 @@ fn text_width(s: &str, style: TextStyle, m: &mut dyn Measure) -> (f32, f32) {
 /// Top-down: sizes children from their parent's final size, along the parent's axis
 /// ([distribute]) and across it (fill or shrink to the inner size); overlays from their target.
 fn grow(t: &mut Tree, ax: usize, win: Size) {
-  let win = [win.w, win.h];
+  let win = [win.w.into(), win.h.into()];
   for i in 0..t.nodes.len() {
     let n = &t.nodes[i];
     if n.end as usize == i + 1 {
       continue;
     }
 
-    let (along, size, gap) = (n.axis as usize == ax, n.size[ax], n.style.gap);
+    let (along, size, gap) = (n.axis as usize == ax, n.size[ax], f64::from(n.style.gap));
     let (a, b) = pads(&n.style, ax);
     let inner = size - a - b;
     let scrolls = n.style.scroll[ax];
@@ -476,24 +478,24 @@ fn grow(t: &mut Tree, ax: usize, win: Size) {
       None if scrolls => {
         c.size[ax] = match c.style.size[ax] {
           Dim::Fit | Dim::Rigid | Dim::Px(_) => c.size[ax],
-          Dim::Grow(_) => inner.max(c.size[ax]).min(c.style.max[ax]),
+          Dim::Grow(_) => inner.max(c.size[ax]).min(c.style.max[ax].into()),
           Dim::Pct(_) => fill(c, ax, inner),
         }
       }
       None => c.size[ax] = fill(c, ax, inner),
     });
     if count > 0 {
-      distribute(t, i, ax, inner - gap * (count - 1) as f32);
+      distribute(t, i, ax, inner - gap * (count - 1) as f64);
     }
   }
 }
 
 /// A child's size across its parent's axis, or an overlay's, given the space it has.
-fn fill(n: &Node, ax: usize, space: f32) -> f32 {
+fn fill(n: &Node, ax: usize, space: f64) -> f64 {
   let s = &n.style;
   match s.size[ax] {
-    Dim::Grow(_) => clamp(space, n.min[ax], s.max[ax]),
-    Dim::Pct(p) => clamp(space * p / 100.0, s.min[ax], s.max[ax]),
+    Dim::Grow(_) => clamp(space, n.min[ax], s.max[ax].into()),
+    Dim::Pct(p) => clamp(space * f64::from(p) / 100.0, s.min[ax].into(), s.max[ax].into()),
     Dim::Px(_) => n.size[ax],
     Dim::Fit | Dim::Rigid => n.size[ax].min(space).max(n.min[ax]),
   }
@@ -502,7 +504,7 @@ fn fill(n: &Node, ax: usize, space: f32) -> f32 {
 /// Sizes the children of node `i` along its axis in `avail` (the inner size less the gaps):
 /// percent ones from it, growing ones share what the others leave by weight within their min
 /// and max; on overflow the widest fit or growing ones shrink first, down to their minimum.
-fn distribute(t: &mut Tree, i: usize, ax: usize, avail: f32) {
+fn distribute(t: &mut Tree, i: usize, ax: usize, avail: f64) {
   let mut fixed = 0.0;
   each(t, i, |c| {
     if c.float.is_some() {
@@ -510,7 +512,10 @@ fn distribute(t: &mut Tree, i: usize, ax: usize, avail: f32) {
     }
 
     match c.style.size[ax] {
-      Dim::Pct(p) => c.size[ax] = clamp(avail * p / 100.0, c.style.min[ax], c.style.max[ax]),
+      Dim::Pct(p) => {
+        let (lo, hi) = (c.style.min[ax].into(), c.style.max[ax].into());
+        c.size[ax] = clamp(avail * f64::from(p) / 100.0, lo, hi);
+      }
       Dim::Grow(_) => {
         c.frozen = false;
         return;
@@ -525,13 +530,13 @@ fn distribute(t: &mut Tree, i: usize, ax: usize, avail: f32) {
   // min and max, and freeze by the clamps' total: those raised to their minimum when it grew,
   // those cut to their maximum when it shrank, every one when it is none; again until all are.
   let weight = |c: &Node| match (c.float, c.style.size[ax]) {
-    (None, Dim::Grow(w)) if !c.frozen => Some(w),
+    (None, Dim::Grow(w)) if !c.frozen => Some(f64::from(w)),
     _ => None,
   };
   loop {
     let (mut rest, mut wsum) = (avail - fixed, 0.0);
     each(t, i, |c| match (c.float, c.style.size[ax]) {
-      (None, Dim::Grow(w)) if !c.frozen => wsum += w,
+      (None, Dim::Grow(w)) if !c.frozen => wsum += f64::from(w),
       (None, Dim::Grow(_)) => rest -= c.size[ax],
       _ => {}
     });
@@ -543,15 +548,15 @@ fn distribute(t: &mut Tree, i: usize, ax: usize, avail: f32) {
     let mut violation = 0.0;
     each(t, i, |c| {
       if let Some(w) = weight(c) {
-        violation += clamp(share * w, c.min[ax], c.style.max[ax]) - share * w;
+        violation += clamp(share * w, c.min[ax], c.style.max[ax].into()) - share * w;
       }
     });
     each(t, i, |c| {
       let Some(w) = weight(c) else { return };
-      let target = clamp(share * w, c.min[ax], c.style.max[ax]);
+      let target = clamp(share * w, c.min[ax], c.style.max[ax].into());
       let freeze = match violation {
-        v if v > EPS => target > share * w,
-        v if v < -EPS => target < share * w,
+        v if v > f64::from(EPS) => target > share * w,
+        v if v < -f64::from(EPS) => target < share * w,
         _ => true,
       };
 
@@ -569,19 +574,19 @@ fn distribute(t: &mut Tree, i: usize, ax: usize, avail: f32) {
   });
   let over = total - avail;
   // Along a scroll axis the content overflows instead.
-  if over <= EPS || t.nodes[i].style.scroll[ax] {
+  if over <= f64::from(EPS) || t.nodes[i].style.scroll[ax] {
     return;
   }
   // Water-fill from the top: find the cap where cutting everything above it (but not below
   // each one's minimum) frees `over`.
   let shrinks = |c: &Node| c.float.is_none() && matches!(c.style.size[ax], Dim::Fit | Dim::Grow(_));
-  let mut hi = 0.0f32;
+  let mut hi = 0.0f64;
   each(t, i, |c| {
     if shrinks(c) {
       hi = hi.max(c.size[ax]);
     }
   });
-  let mut lo = 0.0f32;
+  let mut lo = 0.0f64;
   for _ in 0..32 {
     let cap = (lo + hi) / 2.0;
     let mut cut = 0.0;
@@ -640,7 +645,8 @@ fn wrap(t: &mut Tree, m: &mut dyn Measure) {
   t.stops.clear();
   let mut edits = t.edits.iter_mut().peekable();
   for (i, n) in t.nodes.iter_mut().enumerate() {
-    let width = n.size[0];
+    // Text is measured in `f32`: a line is never that long.
+    let (width, wide) = (n.size[0] as f32, n.content[0] as f32);
     let Kind::Text { range, style, lines, baseline, line_h } = &mut n.kind else { continue };
     let met = m.metrics(style.font);
     *line_h = if style.line_h > 0.0 { style.line_h } else { met.line_height() };
@@ -649,8 +655,8 @@ fn wrap(t: &mut Tree, m: &mut dyn Measure) {
     let s = &t.text[range.0 as usize..range.1 as usize];
     let edit = edits.next_if(|e| e.node == i as u32).filter(|e| !e.placeholder);
     // One line that fits (or doesn't wrap): its width is the one measured for the fit.
-    let fits = !style.wrap || n.content[0] <= width + EPS;
-    let cut = style.ellipsis && edit.is_none() && n.content[0] > width + EPS;
+    let fits = !style.wrap || wide <= width + EPS;
+    let cut = style.ellipsis && edit.is_none() && wide > width + EPS;
     let (start_at, end, cover) = (range.0, range.1, edit.is_some());
     match fits && !s.contains('\n') {
       // Paint adds the ellipsis after a line that ends before its text does.
@@ -661,7 +667,7 @@ fn wrap(t: &mut Tree, m: &mut dyn Measure) {
       }
       true => {
         let ink = m.line(s, style.font).1;
-        t.lines.push(Line { start: start_at, end, width: n.content[0], ink, stop: 0 })
+        t.lines.push(Line { start: start_at, end, width: wide, ink, stop: 0 })
       }
       false => wrap_text(&t.text, *range, *style, width, cover, m, &mut t.lines),
     }
@@ -853,11 +859,12 @@ fn place(t: &mut Tree, win: Size, scale: f32) {
     }
 
     let (ax, cr) = (n.axis as usize, 1 - n.axis as usize);
-    let (pos, size, gap, align, style) = (n.pos, n.size, n.style.gap, n.style.align, n.style);
+    let (pos, size, align, style) = (n.pos, n.size, n.style.align, n.style);
+    let gap = f64::from(n.style.gap);
     let ((a, b), (ca, cb)) = (pads(&n.style, ax), pads(&n.style, cr));
     let inner = (size[ax] - a - b, size[cr] - ca - cb);
 
-    let (mut used, mut across, mut count) = (0.0, 0.0f32, 0);
+    let (mut used, mut across, mut count) = (0.0, 0.0f64, 0);
     each(t, i, |c| {
       if c.float.is_none() {
         used += c.size[ax];
@@ -866,13 +873,13 @@ fn place(t: &mut Tree, win: Size, scale: f32) {
       }
     });
     if count > 1 {
-      used += gap * (count - 1) as f32;
+      used += gap * (count - 1) as f64;
     }
     // The content at its final size; a scroll container's offset is clamped to it.
     let n = &mut t.nodes[i];
     (n.content[ax], n.content[cr]) = (used + a + b, across + ca + cb);
     n.scroll = clamp_scroll(n.scroll, style.scroll, n.content, size);
-    let scroll = [n.scroll.x, n.scroll.y];
+    let scroll = n.scroll;
     let mut cur = pos[ax] + a + offset(align[ax], inner.0 - used) - scroll[ax];
     each(t, i, |c| {
       if let Some(f) = c.float {
@@ -886,29 +893,32 @@ fn place(t: &mut Tree, win: Size, scale: f32) {
     });
   }
 
-  let snap = |v: f32| if scale > 0.0 { (v * scale).round() / scale } else { v };
+  // Rects in `f32` from here: on screen, or near it, positions are small again.
+  let scale = f64::from(scale);
+  let snap = |v: f64| if scale > 0.0 { (v * scale).round() / scale } else { v };
   for n in &mut t.nodes {
     let (x, y) = (snap(n.pos[0]), snap(n.pos[1]));
     let (r, b) = (snap(n.pos[0] + n.size[0]), snap(n.pos[1] + n.size[1]));
-    n.rect = Rect::new(x, y, r - x, b - y);
+    n.rect = Rect::new(x as f32, y as f32, (r - x) as f32, (b - y) as f32);
   }
 }
 
 /// A scroll offset within `content` seen through `size`, 0 along an axis that doesn't scroll.
-fn clamp_scroll(off: Point, scrolls: [bool; 2], content: [f32; 2], size: [f32; 2]) -> Point {
-  let at = |k: usize, v: f32| match scrolls[k] {
-    true => v.clamp(0.0, (content[k] - size[k]).max(0.0)),
+fn clamp_scroll(off: [f64; 2], scrolls: [bool; 2], content: [f64; 2], size: [f64; 2]) -> [f64; 2] {
+  let at = |k: usize| match scrolls[k] {
+    true => off[k].clamp(0.0, (content[k] - size[k]).max(0.0)),
     false => 0.0,
   };
-  Point::new(at(0, off.x), at(1, off.y))
+  [at(0), at(1)]
 }
 
 /// Places overlay `c` on its target: the parent at `pos` of `size`, or the window.
-fn place_float(c: &mut Node, f: Float, pos: [f32; 2], size: [f32; 2], win: Size) {
-  let (tp, ts) = if f.window { ([0.0; 2], [win.w, win.h]) } else { (pos, size) };
+fn place_float(c: &mut Node, f: Float, pos: [f64; 2], size: [f64; 2], win: Size) {
+  let (tp, ts) = if f.window { ([0.0; 2], [win.w.into(), win.h.into()]) } else { (pos, size) };
   let off = [f.offset.x, f.offset.y];
   for k in 0..2 {
-    c.pos[k] = tp[k] + ts[k] * f.attach[k] - c.size[k] * f.anchor[k] + off[k];
+    let (attach, anchor) = (f64::from(f.attach[k]), f64::from(f.anchor[k]));
+    c.pos[k] = tp[k] + ts[k] * attach - c.size[k] * anchor + f64::from(off[k]);
   }
 }
 
@@ -940,19 +950,19 @@ fn each_cell(t: &mut Tree, i: usize, mut f: impl FnMut(&mut Node, u32, u32, u32)
 
 /// A grid's content size and minimum: equal columns as wide as the widest child per column it
 /// spans, rows as high as their highest child.
-fn grid_fit(t: &mut Tree, i: usize, ax: usize) -> (f32, f32) {
-  let (cols, gap) = (t.nodes[i].cols as u32, t.nodes[i].style.gap);
-  let (mut size, mut least) = (0.0f32, 0.0f32);
+fn grid_fit(t: &mut Tree, i: usize, ax: usize) -> (f64, f64) {
+  let (cols, gap) = (t.nodes[i].cols as u32, f64::from(t.nodes[i].style.gap));
+  let (mut size, mut least) = (0.0f64, 0.0f64);
   if ax == 0 {
     each_cell(t, i, |c, _, _, s| {
-      let per = |v: f32| (v - gap * (s - 1) as f32) / s as f32;
+      let per = |v: f64| (v - gap * (s - 1) as f64) / s as f64;
       (size, least) = (size.max(per(c.size[0])), least.max(per(c.min[0])));
     });
-    let gaps = gap * (cols - 1) as f32;
-    (size, least) = (size * cols as f32 + gaps, least * cols as f32 + gaps);
+    let gaps = gap * (cols - 1) as f64;
+    (size, least) = (size * cols as f64 + gaps, least * cols as f64 + gaps);
   } else {
     // Sums of the rows' highest, the last row's still open.
-    let (mut row, mut hi, mut lo, mut rows) = (0, 0.0f32, 0.0f32, 0);
+    let (mut row, mut hi, mut lo, mut rows) = (0, 0.0f64, 0.0f64, 0);
     each_cell(t, i, |c, _, r, _| {
       if r != row {
         (size, least, hi, lo, row) = (size + hi, least + lo, 0.0, 0.0, r);
@@ -960,7 +970,7 @@ fn grid_fit(t: &mut Tree, i: usize, ax: usize) -> (f32, f32) {
 
       (hi, lo, rows) = (hi.max(c.size[1]), lo.max(c.min[1]), r + 1);
     });
-    let gaps = gap * rows.saturating_sub(1) as f32;
+    let gaps = gap * rows.saturating_sub(1) as f64;
     (size, least) = (size + hi + gaps, least + lo + gaps);
   }
 
@@ -971,8 +981,9 @@ fn grid_fit(t: &mut Tree, i: usize, ax: usize) -> (f32, f32) {
 /// Sizes a grid's children to their cells in `inner`: across, equal columns; down, rows as high
 /// as their highest child plus an equal share of the height left. Overlays from their target.
 /// A child's row height and top are kept in its `pos` for [grid_place].
-fn grid_grow(t: &mut Tree, i: usize, ax: usize, inner: f32, win: [f32; 2]) {
-  let (cols, gap, size) = (t.nodes[i].cols as u32, t.nodes[i].style.gap, t.nodes[i].size[ax]);
+fn grid_grow(t: &mut Tree, i: usize, ax: usize, inner: f64, win: [f64; 2]) {
+  let (cols, size) = (t.nodes[i].cols as u32, t.nodes[i].size[ax]);
+  let gap = f64::from(t.nodes[i].style.gap);
   each(t, i, |c| {
     if let Some(f) = c.float
       && !matches!(c.style.size[ax], Dim::Fit | Dim::Rigid)
@@ -981,8 +992,8 @@ fn grid_grow(t: &mut Tree, i: usize, ax: usize, inner: f32, win: [f32; 2]) {
     }
   });
   if ax == 0 {
-    let cw = (inner - gap * (cols - 1) as f32) / cols as f32;
-    each_cell(t, i, |c, _, _, s| c.size[0] = fill(c, 0, cw * s as f32 + gap * (s - 1) as f32));
+    let cw = (inner - gap * (cols - 1) as f64) / cols as f64;
+    each_cell(t, i, |c, _, _, s| c.size[0] = fill(c, 0, cw * s as f64 + gap * (s - 1) as f64));
     return;
   }
 
@@ -992,8 +1003,8 @@ fn grid_grow(t: &mut Tree, i: usize, ax: usize, inner: f32, win: [f32; 2]) {
     Some(h) => *h = h.max(c.size[1]),
     None => rows.push(c.size[1]),
   });
-  let n = rows.len().max(1) as f32;
-  let free = inner - rows.iter().sum::<f32>() - gap * (n - 1.0);
+  let n = rows.len().max(1) as f64;
+  let free = inner - rows.iter().sum::<f64>() - gap * (n - 1.0);
   let extra = (free / n).max(0.0);
   let (mut top, mut at) = (0.0, 0);
   each_cell(t, i, |c, _, r, _| {
@@ -1012,10 +1023,11 @@ fn grid_grow(t: &mut Tree, i: usize, ax: usize, inner: f32, win: [f32; 2]) {
 /// overlays; sets its content size.
 fn grid_place(t: &mut Tree, i: usize, win: Size) {
   let n = &t.nodes[i];
-  let (pos, size, gap, align, cols) = (n.pos, n.size, n.style.gap, n.style.align, n.cols as u32);
+  let (pos, size, align, cols) = (n.pos, n.size, n.style.align, n.cols as u32);
+  let gap = f64::from(n.style.gap);
   let ((a, b), (ca, cb)) = (pads(&n.style, 0), pads(&n.style, 1));
-  let cw = (size[0] - a - b - gap * (cols - 1) as f32) / cols as f32;
-  let mut bottom = 0.0f32;
+  let cw = (size[0] - a - b - gap * (cols - 1) as f64) / cols as f64;
+  let mut bottom = 0.0f64;
   each(t, i, |c| {
     if let Some(f) = c.float {
       place_float(c, f, pos, size, win);
@@ -1024,8 +1036,8 @@ fn grid_place(t: &mut Tree, i: usize, win: Size) {
   // Each cell holds its row's height and top until placed. The columns fit the width, but a
   // child wider than its cell (a fixed one) goes past it.
   let x = |c: &Node, col: u32, s: u32| {
-    let w = cw * s as f32 + gap * (s - 1) as f32;
-    (cw + gap) * col as f32 + offset(align[0], w - c.size[0])
+    let w = cw * s as f64 + gap * (s - 1) as f64;
+    (cw + gap) * col as f64 + offset(align[0], w - c.size[0])
   };
   let mut right = size[0] - a - b;
   each_cell(t, i, |c, col, _, s| {
@@ -1036,7 +1048,7 @@ fn grid_place(t: &mut Tree, i: usize, win: Size) {
   let n = &mut t.nodes[i];
   n.content = [right + a + b, bottom + ca + cb];
   n.scroll = clamp_scroll(n.scroll, n.style.scroll, n.content, size);
-  let (dx, dy) = (n.scroll.x, n.scroll.y);
+  let [dx, dy] = n.scroll;
   each_cell(t, i, |c, col, _, s| {
     let (h, top) = (c.pos[0], c.pos[1]);
     c.pos[0] = pos[0] + a + x(c, col, s) - dx;
@@ -1044,7 +1056,7 @@ fn grid_place(t: &mut Tree, i: usize, win: Size) {
   });
 }
 
-fn offset(align: Align, free: f32) -> f32 {
+fn offset(align: Align, free: f64) -> f64 {
   let free = free.max(0.0);
   match align {
     Align::Start => 0.0,
@@ -1063,9 +1075,11 @@ pub(crate) mod tests {
   /// Every character is 0.6 of the font size wide; ascent 0.8, descent 0.2.
   pub(crate) struct Fake;
 
+  /// Positions and extents in `f64` took it from 320 to 360 bytes, with no time measured at a
+  /// million rows; this keeps it from growing unnoticed.
   #[test]
-  fn node_fits_five_cache_lines() {
-    assert_eq!(size_of::<Node>(), 320);
+  fn node_size_is_known() {
+    assert_eq!(size_of::<Node>(), 360);
   }
 
   impl Measure for Fake {

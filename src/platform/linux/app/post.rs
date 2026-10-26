@@ -42,6 +42,13 @@ fn gdk() -> Option<&'static Gdk> {
   GDK.get_or_init(|| Gdk::load(&lib()?)).as_ref()
 }
 
+pub fn ready() -> bool {
+  match super::wayland() {
+    true => super::remote::granted(),
+    false => x11().zip(xtst()).is_some(),
+  }
+}
+
 pub fn post(s: Shortcut) -> Result<(), String> {
   if super::wayland() {
     return super::remote::post(s);

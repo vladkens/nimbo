@@ -291,7 +291,7 @@ mod tests {
     assert_eq!(img.pixel(100.0, 1.0), [0, 0, 255, 255]);
     assert!(img.pixel(100.0, 199.0)[0] > 200, "{:?}", img.pixel(100.0, 199.0));
     // Scrolled 10 down: half the fade above.
-    h.rt.ui.store.raw::<crate::ui::input::ScrollState>(area).offset.y = 10.0;
+    h.rt.ui.store.raw::<crate::ui::input::ScrollState>(area).offset[1] = 10.0;
     h.rt.redraw();
     let top = h.render().pixel(100.0, 0.0);
     assert!(top[0] > 100 && top[0] < 150 && top[2] > 100, "{top:?}");

@@ -156,7 +156,7 @@ fn the_caret_stays_in_view() {
   h.key(Key::Char('a'), CMD);
   h.type_text(&"a long name that does not fit the field ".repeat(3));
   h.frame();
-  let off = |h: &Harness<Fields>| h.rt.ui.last.get(name).unwrap().scroll.x;
+  let off = |h: &Harness<Fields>| h.rt.ui.last.get(name).unwrap().scroll[0];
   assert!(off(h) > 0.0, "the end in view");
   h.key(NamedKey::ArrowLeft, CMD);
   h.frame();

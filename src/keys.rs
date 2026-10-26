@@ -846,6 +846,13 @@ pub fn printable(s: &str) -> bool {
 
 // MARK: Posting keys
 
+/// Whether [post] works now without asking the user: macOS has Accessibility access, Linux on
+/// Wayland has the RemoteDesktop portal's session or its saved approval, X11 has XTest; Windows
+/// always. An app offers its own "Allow Pasting…" only until it does (wavo-app).
+pub fn ready() -> bool {
+  crate::platform::post::ready()
+}
+
 /// Sends shortcut `s` to the app in focus as key presses, as if typed: `cmd+v` pastes there. A
 /// character is the key that types it on the layout in use (on macOS with ⌘ held, as apps match
 /// ⌘ shortcuts: ⌘V on a Russian layout, or in Dvorak), with Shift added where it needs it
