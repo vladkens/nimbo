@@ -25,6 +25,9 @@ use crate::scene::Rect;
 /// How far past the viewport items are built, in points: a wheel step and more.
 const MARGIN: f64 = 200.0;
 
+/// The passes a reveal may take to show its item.
+const TRIES: u8 = 8;
+
 /// Where a column's items lie, in points from its top (`f64`: a long column passes `f32`'s
 /// whole numbers).
 pub(crate) trait Spans {
@@ -110,13 +113,17 @@ impl<'a> Ui<'a> {
       _ => 0.0,
     };
 
-    // An item to reveal is scrolled to until it shows, laid out: the column may move under it
-    // meanwhile, or not be laid out yet.
+    // An item to reveal is scrolled to until a layout after the request shows it as the scroll
+    // would put it (a tall one from its top): the column may move under it meanwhile, or not be
+    // laid out yet.
     let n = spans.len();
     if let Some((i, tries)) = self.state::<Lazy>(id).reveal.filter(|&(i, t)| i < n && t > 0) {
       let vp = sc.map(|sc| sc.viewport);
-      let shows = (vp.zip(self.rect(id.key(key(i)))))
-        .is_some_and(|(vp, r)| r.y >= vp.y - 0.5 && (r.y + r.h <= vp.y + vp.h + 0.5 || r.h > vp.h));
+      let shows = tries < TRIES
+        && (vp.zip(self.rect(id.key(key(i))))).is_some_and(|(vp, r)| {
+          let (top, end) = (vp.y + 0.5, vp.y + vp.h + 0.5);
+          r.y >= vp.y - 0.5 && (r.y + r.h <= end || r.y <= top)
+        });
       self.state::<Lazy>(id).reveal = (!shows).then_some((i, tries - 1));
       if let (false, Some(sc)) = (shows, sc) {
         let (from, to) = (spans.top(i), spans.top(i + 1));
@@ -168,6 +175,69 @@ impl<'a> Ui<'a> {
   /// Scrolls item `i` of virtual column `id` into view, the least that shows it, in the
   /// column's next build.
   pub fn reveal_item(&mut self, id: Id, i: usize) {
-    self.state::<Lazy>(id).reveal = Some((i, 8));
+    self.state::<Lazy>(id).reveal = Some((i, TRIES));
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use crate::app::App;
+  use crate::harness::Harness;
+  use crate::scene::Size;
+  use crate::ui::{Id, Style, Ui, grow, px};
+
+  /// A scroll area 300 high over a prefix `pre` high and a column of 50 items `h` high each, the
+  /// item `reveal` asked for in the next view.
+  struct Col {
+    pre: f32,
+    h: f32,
+    reveal: Option<usize>,
+  }
+
+  impl App for Col {
+    fn view(&mut self, ui: &mut Ui) {
+      if let Some(i) = self.reveal.take() {
+        ui.reveal_item(Id::of("col"), i);
+      }
+
+      ui.id("area").scroll_area(Style::new().w(grow()).h(px(300.0)), |ui| {
+        ui.el(Style::new().h(px(self.pre)));
+        ui.id("col").virtual_col((0..50).map(|_| self.h), |i| i, |_, _| {});
+      });
+    }
+  }
+
+  fn shown(h: &Harness<Col>, i: usize) -> Option<(f32, f32)> {
+    let (vp, r) = (h.rect(Id::of("area"))?, h.rect(Id::of("col").key(i))?);
+    Some((r.y - vp.y, r.y + r.h - vp.y))
+  }
+
+  fn settle(h: &mut Harness<Col>) {
+    for _ in 0..6 {
+      h.frame();
+    }
+  }
+
+  /// Taller than the viewport, an item is revealed from its top.
+  #[test]
+  fn a_tall_item_is_revealed_from_its_top() {
+    let mut h = Harness::new(Col { pre: 0.0, h: 400.0, reveal: None }, Size::new(200.0, 300.0), 1.0);
+    h.frame();
+    h.app_mut().reveal = Some(1);
+    settle(&mut h);
+    assert_eq!(shown(&h, 1).map(|s| s.0), Some(0.0));
+  }
+
+  /// An item in view when it is asked for, pushed out by content growing above the column in
+  /// the same frame: it still shows.
+  #[test]
+  fn a_reveal_follows_the_column_as_content_above_it_moves() {
+    let mut h = Harness::new(Col { pre: 0.0, h: 40.0, reveal: None }, Size::new(200.0, 300.0), 1.0);
+    h.frame();
+    assert!(shown(&h, 2).is_some_and(|(_, end)| end <= 300.0), "in view before");
+    (h.app_mut().pre, h.app_mut().reveal) = (1000.0, Some(2));
+    settle(&mut h);
+    let (top, end) = shown(&h, 2).expect("built");
+    assert!(top >= 0.0 && end <= 300.0, "{top}..{end}");
   }
 }
