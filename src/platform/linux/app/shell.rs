@@ -119,6 +119,10 @@ pub fn alert(title: &str, message: &str) {
   }
 }
 
+pub fn overlay_takes_focus() -> bool {
+  super::super::overlay::takes_focus()
+}
+
 pub fn quit() {
   super::super::quit();
 }

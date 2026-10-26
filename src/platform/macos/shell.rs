@@ -212,6 +212,10 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
 
 /// Ends the loop after the event in progress (`stop:` takes effect after the next event: one
 /// that does nothing is posted).
+pub fn overlay_takes_focus() -> bool {
+  false
+}
+
 pub fn quit() {
   let mtm = mtm();
   shell(|s| s.quitting = true);

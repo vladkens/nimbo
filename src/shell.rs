@@ -222,6 +222,14 @@ impl Main {
     imp::quit();
   }
 
+  /// Whether an overlay ([crate::Config::overlay]) takes the keyboard focus while it shows, so
+  /// keys typed meanwhile go to it, not to the app before. Only on Linux under Wayland with
+  /// neither the layer shell nor XWayland (see the overlay's docs there): an app may show it
+  /// less, or not at all.
+  pub fn overlay_takes_focus(&self) -> bool {
+    imp::overlay_takes_focus()
+  }
+
   /// `f` runs once as the app ends, before its windows close (replacing an earlier one): after
   /// [Main::quit] once the loop has stopped, or on a quit the system asks for, after which the
   /// process exits (see [app]). The place for the app's cleanup.

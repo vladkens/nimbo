@@ -114,6 +114,11 @@ fn layer_shell() -> Option<&'static LayerShell> {
   ls.as_ref().filter(|ls| unsafe { (ls.gtk_layer_is_supported)() } != 0)
 }
 
+/// The overlay is a Wayland toplevel the compositor focuses: neither the layer shell nor XWayland.
+pub fn takes_focus() -> bool {
+  wayland() && layer_shell().is_none() && xwayland().is_none()
+}
+
 /// The kind of GtkWindow an overlay is: a popup on X11 and XWayland, else a toplevel.
 pub fn kind() -> c_int {
   if wayland() && xwayland().is_none() { super::WINDOW_TOPLEVEL } else { POPUP }
