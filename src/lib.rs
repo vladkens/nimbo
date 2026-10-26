@@ -87,6 +87,10 @@ pub struct Config {
   pub overlay: Option<Anchor>,
   /// The content runs under the title bar ([Config::unified]).
   pub unified: bool,
+  /// The window's icon off macOS ([Config::icon]): its side and straight RGBA pixels, `side`²
+  /// of them, as only the builder checks.
+  #[cfg_attr(target_os = "macos", allow(dead_code))]
+  pub(crate) icon: Option<(u32, &'static [u8])>,
 }
 
 impl Config {
@@ -95,7 +99,8 @@ impl Config {
 
   pub const fn new(title: &'static str, w: f32, h: f32) -> Self {
     let (size, min_size) = (Size::new(w, h), Self::MIN_SIZE);
-    Self { title, size, min_size, resizable: true, hidden: false, overlay: None, unified: false }
+    let (resizable, hidden, overlay, unified, icon) = (true, false, None, false, None);
+    Self { title, size, min_size, resizable, hidden, overlay, unified, icon }
   }
 
   /// The least content size the user can resize the window to, [Config::MIN_SIZE] unless set.
@@ -111,6 +116,15 @@ impl Config {
   /// A window of a fixed size: a calculator, a dialog.
   pub const fn fixed(self) -> Self {
     Self { resizable: false, ..self }
+  }
+
+  /// The icon in the window's title bar and taskbar entry on Windows and X11: `side` × `side`
+  /// pixels of straight RGBA, rows top-down (256 serves every size the system shows). macOS
+  /// shows the bundle's icon; Wayland the one of the app's `.desktop` entry, found by the app id
+  /// ([AppInfo::id]).
+  pub const fn icon(self, side: u32, px: &'static [u8]) -> Self {
+    assert!(px.len() == side as usize * side as usize * 4, "an icon is side² RGBA pixels");
+    Self { icon: Some((side, px)), ..self }
   }
 
   /// A window [Main::open] makes without showing it, until [Window::front].
@@ -266,6 +280,13 @@ fn harness<A: App>(cfg: &Config, app: A, args: &Args) -> Harness<A> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// An icon is `side`² RGBA pixels: other sizes are refused where the config is made.
+  #[test]
+  #[should_panic(expected = "side² RGBA")]
+  fn an_icon_of_the_wrong_size_is_refused() {
+    let _ = Config::new("a", 1.0, 1.0).icon(2, &[0; 4]);
+  }
 
   #[test]
   fn shots_tell_the_appearance() {

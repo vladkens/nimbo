@@ -307,7 +307,7 @@ fn taskbar_light() -> bool {
 
 /// An icon of straight RGBA `px`, `side` pixels square: a 32-bit colour bitmap with its alpha,
 /// and an empty mask.
-fn hicon(side: i32, px: &[u8]) -> HICON {
+pub(crate) fn hicon(side: i32, px: &[u8]) -> HICON {
   let mut info: BITMAPINFO = unsafe { std::mem::zeroed() };
   info.bmiHeader = BITMAPINFOHEADER {
     biSize: size_of::<BITMAPINFOHEADER>() as u32,

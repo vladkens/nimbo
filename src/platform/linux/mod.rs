@@ -110,6 +110,9 @@ fns!(Gtk {
   fn gtk_main_quit();
   fn gtk_window_new(kind: c_int) -> P;
   fn gtk_window_set_title(w: P, title: S);
+  fn gtk_window_set_icon(w: P, icon: P);
+  fn gdk_pixbuf_new_from_data(px: *const u8, space: c_int, alpha: c_int, bits: c_int, w: c_int,
+    h: c_int, stride: c_int, free: P, data: P) -> P;
   fn gtk_window_set_default_size(w: P, width: c_int, height: c_int);
   fn gtk_window_set_resizable(w: P, on: c_int);
   fn gtk_window_resize(w: P, width: c_int, height: c_int);
@@ -401,6 +404,15 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Result<u64, std::ffi::NulError> {
 
     let area = (g.gtk_drawing_area_new)();
     (g.gtk_window_set_title)(window, title.as_ptr());
+    // X11's `_NET_WM_ICON`; Wayland has no such request (the `.desktop` entry's icon shows).
+    if let Some((side, px)) = cfg.icon {
+      let s = side as c_int;
+      let pixbuf =
+        (g.gdk_pixbuf_new_from_data)(px.as_ptr(), 0, TRUE, 8, s, s, s * 4, null_mut(), null_mut());
+      (g.gtk_window_set_icon)(window, pixbuf);
+      (g.g_object_unref)(pixbuf);
+    }
+
     match cfg.resizable {
       true => {
         (g.gtk_window_set_default_size)(window, w, h);
