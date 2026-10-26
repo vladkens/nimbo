@@ -9,8 +9,8 @@
 //! action, its backdrop dims the page and takes the pointer; a row's switch keeps its width and
 //! place beside a long description that wraps. Assistive technology reads the controls by their
 //! rows with their values, and the dialog as modal, its default button focused until it gives
-//! the focus back; its actions flip a switch, step the slider, choose in a select, move the
-//! focus, and reach only the dialog while it is open.
+//! the focus back, and the focus only while the window has it; its actions flip a switch, step
+//! the slider, choose in a select, move the focus, and reach only the dialog while it is open.
 
 #[path = "../examples/settings.rs"]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
@@ -349,6 +349,21 @@ fn an_assistive_focus_moves_the_focus() {
   assert_eq!(h.focused(), Some(Id::of(LANG)));
   assert!(!h.act(Id::of(RESET), Action::Focus));
   assert_eq!(h.focused(), Some(Id::of(LANG)));
+}
+
+/// The focus reads only while the window has it: leaving and coming back change the tree, so
+/// a screen reader is told of the focus on return.
+#[test]
+fn the_focus_reads_only_in_the_focused_window() {
+  let mut h = start();
+  assert!(h.act(Id::of(LANG), Action::Focus));
+  let focused = h.a11y();
+  assert!(focused.contains(" focused"), "{focused}");
+  h.event(Event::Focus(false));
+  let away = h.a11y();
+  assert!(!away.contains(" focused"), "{away}");
+  h.event(Event::Focus(true));
+  assert_eq!(h.a11y(), focused);
 }
 
 /// An open dialog leaves the page behind it out of the tree, and a press there is refused; its

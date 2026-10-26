@@ -6,7 +6,8 @@
 //! composition back to back, a value the app sets meanwhile held, Enter completing it; the
 //! password's dots, clipboard and input method; the placeholder, the disabled field, selectable
 //! text, and the caret's blink timers only while a field has focus (the first one from the
-//! start). Assistive technology reads the fields' text, never the password's, and sets it.
+//! start). Assistive technology reads the fields' text as shown, a composition in it, never the
+//! password's, and sets it, over a value the app set while composing.
 
 #[path = "../examples/fields.rs"]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
@@ -346,4 +347,38 @@ fn assistive_technology_sets_a_fields_text() {
   assert!(!dump.contains("sécret") && !dump.contains('•'), "{dump}");
   assert!(!h.act(Id::of(OFF), Action::SetValue("x".into())));
   assert_eq!(h.app().off, "Read only");
+}
+
+/// A text set by assistive technology while the app's value waits on a composition replaces
+/// that value, even when it is the text the field had: field "old", composing, the app sets
+/// "held", then "old" is set.
+#[test]
+fn an_assistive_value_supersedes_one_held() {
+  let h = &mut fields();
+  let name = Id::of(NAME);
+  h.type_text("old");
+  h.ime_mark("ni");
+  h.app_mut().name = "held".into();
+  h.frame();
+  assert!(h.act(name, Action::SetValue("old".into())));
+  h.frame();
+  assert_eq!((h.app().name.as_str(), h.editor(name).unwrap().text()), ("old", "old"));
+  reads(&h.a11y(), &["text field \"Name\" value \"old\" focused"]);
+}
+
+/// A field reads the text it shows, a composition in it, so its value, its length and the
+/// selection's offsets agree; a password composing still reads no text.
+#[test]
+fn a_composition_reads_as_the_field_shows_it() {
+  let h = &mut fields();
+  h.type_text("old");
+  h.ime_mark("ni");
+  assert_eq!(h.app().name, "old");
+  assert_eq!(h.rt.text_input().unwrap().selected(), 5..5);
+  reads(&h.a11y(), &["text field \"Name\" value \"oldni\" focused"]);
+  h.click_id(Id::of(PASSWORD));
+  h.ime_mark("xy");
+  let dump = h.a11y();
+  reads(&dump, &["secure text field \"Password\" focused"]);
+  assert!(!dump.contains("xy"), "{dump}");
 }

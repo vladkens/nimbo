@@ -289,9 +289,15 @@ impl Ui<'_> {
       false => self.edit_input(id, &mut st),
     };
 
-    // A new text from assistive technology, as one edit.
+    // A new text from assistive technology, as one edit over a value the app set while
+    // composing, which it supersedes.
     if let Some(s) = self.a11y_value(id) {
       st.ed.discard_marked();
+      if let Some(h) = st.held.take() {
+        st.ed.set_text(&h);
+        synced(&mut st, &h);
+      }
+
       st.ed.replace(0..st.ed.text().len(), s);
     }
 
@@ -307,9 +313,10 @@ impl Ui<'_> {
       reveal(&mut st);
     }
 
+    // The text shown, a composition in it, as the ranges of the focused field count it.
     st.focused = focused;
     if !password {
-      self.a11y(id, role).text(text);
+      self.a11y(id, role).text(st.ed.text());
     }
 
     let mut b = self.field_state(id, st.text_id, disabled);

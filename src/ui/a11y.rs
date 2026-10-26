@@ -9,8 +9,9 @@
 //! one [Ui::a11y_label] gave the next record, else the label of the form row around it
 //! ([Ui::form_row], its caption the description), else, for roles titled by their text (a
 //! button, a tab), the text inside it. A control with text of its own (a button's label) keeps
-//! it over the form row's, whose label and caption are then read as they are; one whose text is
-//! its value (a shortcut recorder) is not named by it. Leaf roles (a button, a field) hide the
+//! it, or a name and a description set since, over the form row's, whose label and caption are
+//! then read as they are; one whose text is its value (a shortcut recorder) is not named by it.
+//! Only the focused window's focus reads as focused. Leaf roles (a button, a field) hide the
 //! text inside them; plain text anywhere else is static text, with no record.
 //!
 //! ```ignore
@@ -193,8 +194,8 @@ pub struct Records {
   text: String,
   /// The name for the next record ([Ui::a11y_label]).
   next: Option<Span>,
-  /// The records that took a form row's label and caption, and those text elements.
-  forms: Vec<(usize, [Id; 2])>,
+  /// The records that took a form row's label and caption, those text elements and the names.
+  forms: Vec<(usize, [Id; 2], [Span; 2])>,
   /// While the first has the focus, the second shows focused ([Ui::a11y_focus]).
   focus: Option<(Id, Id)>,
 }
@@ -292,7 +293,7 @@ impl Ui<'_> {
     if unnamed && let Some(f) = self.set_slot::<FormNames>(None) {
       let recs = &mut self.st.tree.a11y;
       (recs.list[i].1.name, recs.list[i].1.description) = (f.name, f.description);
-      recs.forms.push((i, f.texts));
+      recs.forms.push((i, f.texts, [f.name, f.description]));
     }
 
     Access { recs: &mut self.st.tree.a11y, i }
@@ -453,21 +454,25 @@ impl UiState {
 
     // A form row's label and caption name its control and are not read, unless it has text of
     // its own (a button's label, not counting them: a row a click selects holds them): then
-    // they are read, and it is named by its text.
-    let mut own = vec![false; recs.list.len()];
-    for &(k, texts) in &recs.forms {
+    // they are read, and it is named by its text, or by what named it since (`own`, the names
+    // it drops).
+    let mut own = vec![[(0, 0); 2]; recs.list.len()];
+    for &(k, texts, names) in &recs.forms {
       let (id, p) = recs.list[k];
       let named = |i: u32| titled(&p) && !inner_text(t, &at, i as usize, &texts).is_empty();
-      own[k] = t.find(id).is_some_and(named);
-      for i in texts.iter().filter(|_| !own[k]).filter_map(|&id| t.find(id)) {
+      let mine = t.find(id).is_some_and(named);
+      own[k] = if mine { names } else { own[k] };
+      for i in texts.iter().filter(|_| !mine).filter_map(|&id| t.find(id)) {
         if at[i as usize] == NONE {
           at[i as usize] = HIDDEN;
         }
       }
     }
 
-    // The focus, or what shows focused while it is held ([Ui::a11y_focus]).
-    let focus = self.focus().map(|f| recs.focus.filter(|h| h.0 == f).map_or(f, |h| h.1));
+    // The focus, or what shows focused while it is held ([Ui::a11y_focus]), read only while the
+    // window has it: coming back tells it again.
+    let focus = self.focus().filter(|_| self.window_focused());
+    let focus = focus.map(|f| recs.focus.filter(|h| h.0 == f).map_or(f, |h| h.1));
 
     // An open modal dialog (the last) leaves out what is behind it.
     let modal = recs.list.iter().rev().filter(|r| r.1.has(State::Modal)).find_map(|r| t.find(r.0));
@@ -499,11 +504,9 @@ impl UiState {
       if let Some(&(id, p)) = recs.list.get(at[i] as usize).filter(|_| shown) {
         let copy =
           |out: &mut A11yTree, s: Span| put(&mut out.text, &recs.text[s.0 as usize..s.1 as usize]);
-        let (mut name, mut description) = (copy(&mut out, p.name), copy(&mut out, p.description));
-        if own[at[i] as usize] {
-          (name, description) = ((0, 0), (0, 0));
-        }
-
+        let drop = |s: Span, k: usize| if s == own[at[i] as usize][k] { (0, 0) } else { s };
+        let (name, description) =
+          (copy(&mut out, drop(p.name, 0)), copy(&mut out, drop(p.description, 1)));
         let mut props = Props { name, description, ..p };
         if let Value::Text(s) = p.value {
           props.value = Value::Text(copy(&mut out, s));
@@ -563,10 +566,7 @@ fn inner_text(t: &Tree, at: &[u32], i: usize, not: &[Id]) -> String {
 fn words(name: impl fmt::Debug) -> String {
   let mut s = String::new();
   for c in format!("{name:?}").chars() {
-    if c.is_uppercase() && !s.is_empty() {
-      s.push(' ');
-    }
-
+    s += if c.is_uppercase() && !s.is_empty() { " " } else { "" };
     s.push(c.to_ascii_lowercase());
   }
 
@@ -732,6 +732,27 @@ mod tests {
       });
     });
     assert_eq!(s, "static text \"Account\"\nbutton \"Out\"\nbutton \"Hotkey\" value \"F5\"\n");
+  }
+
+  /// A name and a description set after a control took its form row's keep over its text: only
+  /// what the row gave is dropped, and the row's label and caption are read.
+  #[test]
+  fn a_control_named_since_keeps_its_names_in_a_form_row() {
+    let s = dump(|ui| {
+      let fs = FormStyle::plates(&ui.theme());
+      ui.form_row(&fs, FormRow::new("Account").caption("Signed in"), |ui| {
+        control(ui, "del", Role::Button, "Delete");
+        ui.a11y_of(Id::of("del")).unwrap().name("Delete account permanently").description("Gone");
+      });
+      ui.form_row(&fs, FormRow::new("Data").caption("Local"), |ui| {
+        control(ui, "wipe", Role::Button, "Wipe");
+        ui.a11y_of(Id::of("wipe")).unwrap().description("A tooltip");
+      });
+    });
+    let want = "static text \"Account\"\nstatic text \"Signed in\"\nbutton \"Delete account \
+                permanently\" desc \"Gone\"\nstatic text \"Data\"\nstatic text \"Local\"\nbutton \
+                \"Wipe\" desc \"A tooltip\"\n";
+    assert_eq!(s, want);
   }
 
   /// Rows of 20 in a scroll area of 30 scrolled by 15: the first cut at the top, the third at
