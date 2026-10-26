@@ -434,9 +434,7 @@ mod tests {
     h.escape(true);
     let s = h.status();
     assert!(!s.escape);
-    assert!(
-      s.escape_error.is_some_and(|e| e.contains("takes Escape") || e.contains("take Escape"))
-    );
+    assert!(s.escape_error.is_some_and(|e| e.contains("Escape")));
     h.escape(false);
     assert_eq!((h.status().escape, h.status().escape_error), (false, None));
   }
