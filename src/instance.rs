@@ -349,6 +349,32 @@ mod tests {
     assert_eq!(recv(&rx).name, QUIT);
   }
 
+  /// A sender that trickles bytes without a line is let go after [READ_TIMEOUT]: the next one
+  /// gets through.
+  #[cfg(unix)]
+  #[test]
+  fn a_slow_sender_does_not_hold_the_instance() {
+    use std::io::Write;
+
+    let dir = Dir::new("slow");
+    let (_instance, rx) = serve(&dir.0);
+    let path = imp::socket_path(&dir.0).unwrap();
+    let slow = thread::spawn(move || {
+      let mut s = std::os::unix::net::UnixStream::connect(path).unwrap();
+      for _ in 0..6 {
+        if s.write_all(b"x").is_err() {
+          break;
+        }
+
+        thread::sleep(Duration::from_millis(300));
+      }
+    });
+    thread::sleep(Duration::from_millis(50));
+    send_in(&dir.0, OPEN).unwrap();
+    assert_eq!(recv(&rx).name, OPEN, "the slow one dropped");
+    slow.join().unwrap();
+  }
+
   /// It waits for the instance to quit, at once when none runs, and gives up after the timeout.
   #[test]
   fn quit_and_wait_returns_once_the_lock_is_free() {

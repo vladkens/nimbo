@@ -26,7 +26,7 @@
 //! }
 //! ```
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -58,7 +58,8 @@ const TERMINALS: [&str; 20] = [
 #[derive(Clone, Debug, PartialEq)]
 pub struct Paste {
   /// The clipboard the user had comes back after the paste; otherwise the text stays on it, as
-  /// if copied.
+  /// if copied (on Wayland marked for clipboard managers to skip: only the paste's own way
+  /// reaches the clipboard there).
   pub restore: bool,
   /// Where the text goes, as [focus::current] found it when the user asked: the paste is refused
   /// when the focus moved from it since. `None` (not known) refuses it, unless the OS hides the
@@ -72,6 +73,9 @@ pub struct Paste {
 pub enum NotPasted {
   /// Called off the main thread.
   NotMain,
+  /// Another paste is under way: called from a nested loop it runs (a clipboard read, the
+  /// portal's dialog).
+  Busy,
   /// The app in focus is not known: when the user asked ([Paste::target] `None`), or now.
   Unknown,
   /// The focus moved from the target to another app, or another window of it.
@@ -93,6 +97,7 @@ impl std::fmt::Display for NotPasted {
   fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
     match self {
       Self::NotMain => write!(f, "a paste runs on the main thread"),
+      Self::Busy => write!(f, "another paste is under way"),
       Self::Unknown => write!(f, "the app in focus is unknown"),
       Self::FocusMoved { from, to } => write!(f, "the focus moved from {from} to {to}"),
       Self::SecureField => write!(f, "the focused field is a password field"),
@@ -132,8 +137,8 @@ struct Sys {
   snapshot: fn() -> Option<Snapshot>,
   offer: fn(&str, Option<OnRead>) -> Option<Offer>,
   write: fn(&str),
-  /// Puts the snapshot back if the clipboard still holds the offer.
-  give_back: fn(Offer, Snapshot),
+  /// Puts the snapshot back if the clipboard still holds the offer; `false` when it couldn't.
+  give_back: fn(Offer, &Snapshot) -> bool,
   post: fn(Shortcut) -> Result<(), String>,
   focus: fn() -> Option<Focused>,
   hidden: fn() -> bool,
@@ -147,7 +152,7 @@ const SYSTEM: Sys = Sys {
   snapshot: || SystemClipboard.readable().then(|| SystemClipboard.snapshot()).flatten(),
   offer: |text, on_read| SystemClipboard.offer(text, on_read),
   write: |text| SystemClipboard.write(text),
-  give_back: |offer, old| _ = SystemClipboard.holds(offer) && SystemClipboard.restore(old),
+  give_back: |offer, old| !SystemClipboard.holds(offer) || SystemClipboard.restore(old.clone()),
   post: crate::keys::post,
   focus: focus::current,
   hidden: focus::hidden,
@@ -161,7 +166,27 @@ thread_local! {
   static PENDING: RefCell<Option<(u64, Offer, Snapshot)>> = const { RefCell::new(None) };
 }
 
-fn paste(sys: Sys, text: &str, Paste { restore, target }: Paste) -> Result<(), NotPasted> {
+/// How often a clipboard that can't be put back (another app has it open: Windows) is tried, a
+/// [RESTORE] apart.
+const TRIES: u32 = 10;
+
+thread_local! {
+  static BUSY: Cell<bool> = const { Cell::new(false) };
+}
+
+/// One paste at a time: a nested loop in it (a clipboard read, the portal's dialog) may run code
+/// that pastes again.
+fn paste(sys: Sys, text: &str, opts: Paste) -> Result<(), NotPasted> {
+  if BUSY.replace(true) {
+    return Err(NotPasted::Busy);
+  }
+
+  let done = paste_now(sys, text, opts);
+  BUSY.set(false);
+  done
+}
+
+fn paste_now(sys: Sys, text: &str, Paste { restore, target }: Paste) -> Result<(), NotPasted> {
   static NEXT: AtomicU64 = AtomicU64::new(1);
   if target.is_none() && !(sys.hidden)() {
     return Err(NotPasted::Unknown);
@@ -190,7 +215,9 @@ fn paste(sys: Sys, text: &str, Paste { restore, target }: Paste) -> Result<(), N
       PENDING.set(Some((id, offer, snapshot)));
       after(CAP);
     }
-    None if !restore => (sys.write)(text),
+    // On Wayland only the paste's own way (the portal's clipboard) reaches the clipboard of an app
+    // in the background.
+    None if !restore && !(sys.hidden)() => (sys.write)(text),
     // Nothing to restore: the text stays, marked for clipboard managers to skip.
     None => _ = (sys.offer)(text, None).ok_or(NotPasted::NoClipboard)?,
   }
@@ -236,9 +263,17 @@ fn paste_key(target: &Option<Focused>) -> Shortcut {
 /// The clipboard of paste `id` (any for `None`) comes back if it still waits, and only while the
 /// clipboard holds its offer: what was copied since stays.
 fn settle(sys: Sys, id: Option<u64>) {
+  settle_tries(sys, id, TRIES);
+}
+
+/// [settle], tried again `tries - 1` more times while the clipboard can't be put back, unless a
+/// paste or the quit settles it first.
+fn settle_tries(sys: Sys, id: Option<u64>, tries: u32) {
   let pending = PENDING.with_borrow_mut(|p| p.take_if(|p| id.is_none_or(|id| p.0 == id)));
-  if let Some((_, offer, snapshot)) = pending {
-    (sys.give_back)(offer, snapshot);
+  let Some((id, offer, snapshot)) = pending else { return };
+  if !(sys.give_back)(offer, &snapshot) && tries > 1 {
+    PENDING.set(Some((id, offer, snapshot)));
+    (sys.after)(RESTORE, Box::new(move || settle_tries(sys, Some(id), tries - 1)));
   }
 }
 
@@ -263,6 +298,9 @@ mod tests {
     hidden: bool,
     denied: bool,
     timers: Vec<Timer>,
+    /// The clipboard can't be put back this many more times (another app has it open).
+    busy: usize,
+    nested: Option<Result<(), NotPasted>>,
   }
 
   thread_local! {
@@ -291,10 +329,16 @@ mod tests {
     },
     write,
     give_back: |offer, snapshot| {
+      if world(|w| w.busy.checked_sub(1).map(|b| w.busy = b)).is_some() {
+        return false;
+      }
+
       if world(|w| w.holder == Some(offer.0)) {
         write(&String::from_utf8(snapshot.items[0][0].1.clone()).unwrap());
         world(|w| w.restored += 1);
       }
+
+      true
     },
     post: |key| {
       world(|w| match w.post_error.clone() {
@@ -409,6 +453,47 @@ mod tests {
     let opts = setup("TextEdit");
     paste(FAKE, "hello", Paste { restore: false, ..opts }).unwrap();
     assert_eq!(world(|w| (w.clip.clone(), w.holder, w.timers.len())), ("hello".into(), None, 0));
+
+    // Wayland: the offer, which reaches the clipboard from the background, with nothing to put
+    // back.
+    let opts = setup("TextEdit");
+    world(|w| w.hidden = true);
+    paste(FAKE, "hello", Paste { restore: false, ..opts }).unwrap();
+    assert_eq!(world(|w| (w.clip.clone(), w.holder, w.timers.len())), ("hello".into(), Some(1), 0));
+  }
+
+  /// A clipboard another app holds open is put back at a later try.
+  #[test]
+  fn a_busy_clipboard_is_tried_again() {
+    let opts = setup("TextEdit");
+    paste(FAKE, "hello", opts).unwrap();
+    world(|w| w.busy = 2);
+    fire(CAP);
+    fire(RESTORE);
+    assert_eq!(clip(), ("hello".into(), 0), "busy twice");
+    fire(RESTORE);
+    assert_eq!(clip(), ("mine".into(), 1));
+    assert!(world(|w| w.timers.is_empty()));
+  }
+
+  /// A paste from a nested loop inside another (its clipboard read) is refused: the first puts
+  /// the user's clipboard back, not the nested one's text.
+  #[test]
+  fn one_paste_at_a_time() {
+    let opts = setup("TextEdit");
+    let nested = Sys {
+      snapshot: || {
+        let inner = paste(FAKE, "inner", Paste { restore: true, target: None });
+        world(|w| w.nested = Some(inner));
+        (FAKE.snapshot)()
+      },
+      ..FAKE
+    };
+    paste(nested, "hello", opts).unwrap();
+    assert_eq!(world(|w| w.nested.clone()), Some(Err(NotPasted::Busy)));
+    fire(CAP);
+    assert_eq!(clip(), ("mine".into(), 1));
+    assert!(paste(FAKE, "again", setup("TextEdit")).is_ok(), "free again");
   }
 
   #[test]

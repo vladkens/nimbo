@@ -7,7 +7,7 @@
 //! |---|---|---|
 //! | macOS | launch at login, the app's permissions (`tccutil reset All <id>`), its defaults (`defaults delete <id>`, then the empty `~/Library/Preferences/<id>.plist` cfprefsd leaves) | the `.app` bundle |
 //! | Windows | launch at login | none: Windows can't delete a running exe, its folder is left to the person |
-//! | Linux | launch at login, the launcher entry ([crate::desktop]), the remote desktop portal's approval (`remote-desktop.token` in [crate::paths::config_dir]) | the AppImage (`$APPIMAGE`) |
+//! | Linux | launch at login (its entry also when the user turned it off), the launcher entry ([crate::desktop]), the remote desktop portal's approval (`remote-desktop.token` in [crate::paths::config_dir]) | the AppImage (`$APPIMAGE`) |
 //!
 //! The app's own files are the app's to pick: an uninstall quits the running instance first
 //! ([crate::instance::quit_and_wait]), then runs [system], then removes the app's folders

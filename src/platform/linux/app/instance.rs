@@ -5,7 +5,7 @@
 //! (vladkens, MIT, <https://github.com/vladkens/wavo-app>).
 
 use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader, ErrorKind, Read, Write};
+use std::io::{self, ErrorKind, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -61,10 +61,7 @@ impl Server {
           break;
         }
 
-        let Ok(stream) = stream else { continue };
-        _ = stream.set_read_timeout(Some(READ_TIMEOUT));
-        let mut line = String::new();
-        if BufReader::new(stream.take(MAX_LINE as u64)).read_line(&mut line).is_ok() {
+        if let Some(line) = stream.ok().and_then(read_line) {
           on(&line);
         }
       }
@@ -72,6 +69,24 @@ impl Server {
 
     std::thread::Builder::new().name("instance".into()).spawn(serve).map(drop)
   }
+}
+
+/// The sender's line as it comes: until a line break, [MAX_LINE] bytes or its end, within
+/// [READ_TIMEOUT] in all, so a sender that trickles bytes doesn't hold the instance.
+fn read_line(mut stream: UnixStream) -> Option<String> {
+  let (deadline, mut line) = (Instant::now() + READ_TIMEOUT, Vec::new());
+  while !line.contains(&b'\n') && line.len() < MAX_LINE {
+    let left = deadline.checked_duration_since(Instant::now()).filter(|d| !d.is_zero())?;
+    // macOS refuses it (EINVAL) once the sender has hung up: then the read doesn't wait.
+    _ = stream.set_read_timeout(Some(left));
+    let mut buf = [0u8; MAX_LINE];
+    match stream.read(&mut buf[..MAX_LINE - line.len()]).ok()? {
+      0 => break,
+      n => line.extend_from_slice(&buf[..n]),
+    }
+  }
+
+  String::from_utf8(line).ok()
 }
 
 unsafe extern "C" {
