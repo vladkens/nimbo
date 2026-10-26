@@ -143,6 +143,10 @@ fn make_host(name: &str) -> HWND {
 }
 
 /// Ends the loop after the message in progress; the windows close after it.
+pub fn overlay_takes_focus() -> bool {
+  false
+}
+
 pub fn quit() {
   let looping = shell(|s| !std::mem::replace(&mut s.quitting, true) && s.looping);
   if looping {
