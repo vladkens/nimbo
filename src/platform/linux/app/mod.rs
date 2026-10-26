@@ -3,13 +3,14 @@
 //! What an app needs on Linux besides its windows: GTK's loop with no window and windows on
 //! demand ([shell]), a StatusNotifierItem with its menu ([tray]), hotkeys through X11's grab
 //! ([grab]) or the GlobalShortcuts portal on Wayland ([hotkey]), an XDG autostart entry
-//! ([autostart]), links and files opened ([open]), shortcuts posted to the app in focus ([post])
-//! and where the user types on X11 ([focus]), and the clipboard for a paste ([paste]), both
-//! through the RemoteDesktop portal on Wayland ([remote]); the tray, the portals and the file
-//! manager speak D-Bus through GIO ([super::dbus]).
+//! ([autostart]) and launcher entry ([desktop]), links and files opened ([open]), shortcuts posted
+//! to the app in focus ([post]) and where the user types on X11 ([focus]), and the clipboard for a
+//! paste ([paste]), both through the RemoteDesktop portal on Wayland ([remote]); the tray, the
+//! portals and the file manager speak D-Bus through GIO ([super::dbus]).
 
 pub mod activity;
 pub mod autostart;
+pub mod desktop;
 pub mod focus;
 mod grab;
 pub mod hotkey;

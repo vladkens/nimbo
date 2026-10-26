@@ -54,10 +54,11 @@ pub fn open_settings() {
   imp::open_settings()
 }
 
-/// The XDG autostart entry that runs `exe` at login, as the Desktop Entry spec quotes it.
+/// A Desktop Entry spec entry that runs `exe` (quoted as the spec asks) under the app's name and
+/// icon (named by its id), the `keys` after: an autostart entry or a launcher's
+/// ([crate::desktop]).
 #[cfg(any(test, target_os = "linux"))]
-pub(crate) fn desktop_entry(app: &AppInfo, exe: &str) -> String {
-  let name = app.name.replace(['\n', '\r'], " ");
+pub(crate) fn desktop_entry(app: &AppInfo, exe: &str, keys: &[(&str, &str)]) -> String {
   let mut arg = String::from("\"");
   for c in exe.chars() {
     match c {
@@ -72,9 +73,17 @@ pub(crate) fn desktop_entry(app: &AppInfo, exe: &str) -> String {
   }
 
   arg.push('"');
-  format!(
-    "[Desktop Entry]\nType=Application\nName={name}\nExec={arg}\nX-GNOME-Autostart-enabled=true\n"
-  )
+  // A string value: a backslash escaped (Exec's are above), line breaks as spaces.
+  let esc = |v: &str| v.replace('\\', "\\\\").replace(['\n', '\r'], " ");
+  let (name, id) = (esc(app.name), app.id);
+  let mut out = format!(
+    "[Desktop Entry]\nType=Application\nName={name}\nExec={arg}\nIcon={id}\nTerminal=false\n"
+  );
+  for (k, v) in keys {
+    out += &format!("{k}={}\n", esc(v));
+  }
+
+  out
 }
 
 /// Whether an autostart entry runs: not `Hidden`, not turned off by GNOME's key.
@@ -92,8 +101,12 @@ mod tests {
   #[test]
   fn desktop_entries_quote_the_path() {
     let app = AppInfo { id: "com.example.app", name: "Example", presence: Default::default() };
-    let e = desktop_entry(&app, "/opt/My App/run$1 \"x\" 100% a\\b");
-    assert!(e.contains("Name=Example\n"));
+    let e = desktop_entry(
+      &app,
+      "/opt/My App/run$1 \"x\" 100% a\\b",
+      &[("X-GNOME-Autostart-enabled", "true")],
+    );
+    assert!(e.contains("Name=Example\n") && e.contains("Icon=com.example.app\n"));
     let want = r#"Exec="/opt/My App/run\\$1 \\"x\\" 100%% a\\\\b""#;
     assert!(e.contains(&format!("{want}\n")), "{e}");
     assert!(entry_runs(&e));

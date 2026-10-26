@@ -8,6 +8,7 @@
 
 pub mod activity;
 pub mod autostart;
+pub mod desktop;
 pub mod focus;
 pub mod hotkey;
 pub mod open;

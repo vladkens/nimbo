@@ -17,8 +17,11 @@ pub fn write(path: &Path, px: &Pixels) -> Result<(), String> {
 
 /// The PNG file of `px`.
 pub fn encode(px: &Pixels) -> Vec<u8> {
-  let (w, h) = (px.w, px.h);
-  let rows = rgba_rows(px);
+  encode_rgba(px.w, px.h, &rgba_rows(px))
+}
+
+/// The PNG file of `w` × `h` straight-alpha RGBA pixels, rows top-down.
+pub fn encode_rgba(w: usize, h: usize, rows: &[u8]) -> Vec<u8> {
   let mut raw = Vec::with_capacity((w * 4 + 1) * h);
   let mut prev = vec![0u8; w * 4];
   let mut best = Vec::with_capacity(w * 4);
@@ -315,7 +318,7 @@ fn adler32(data: &[u8]) -> u32 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
   use super::*;
 
   /// Inflates a stream of fixed-Huffman blocks, the only kind [zlib] writes.
@@ -388,43 +391,37 @@ mod tests {
     assert!(zlib(&flat).len() < 1000);
   }
 
-  #[test]
-  fn png_rows_unfilter() {
-    // A gradient, a flat run and a half-transparent pixel, through every filter.
-    let (w, h) = (9, 4);
-    let mut data = Vec::new();
-    for y in 0..h {
-      for x in 0..w {
-        let v = (x * 28 + y * 5) as u8;
-        data.extend(if x == 4 { [64, 32, 16, 128] } else { [v, 255 - v, 30, 255] });
-      }
-    }
-
-    let px = Pixels { w, h, data };
-    let file = encode(&px);
+  /// The size and straight RGBA rows of a PNG file [encode_rgba] wrote, its chunks checked:
+  /// IHDR, sRGB, IDAT, IEND with valid CRCs.
+  pub(crate) fn decode(file: &[u8]) -> (usize, usize, Vec<u8>) {
     assert_eq!(&file[..8], b"\x89PNG\r\n\x1a\n");
-    // IHDR, sRGB, IDAT, IEND with valid CRCs.
     let mut at = 8;
     let mut kinds = Vec::new();
-    let mut idat = Vec::new();
+    let (mut ihdr, mut idat) = (Vec::new(), Vec::new());
     while at < file.len() {
       let n = u32::from_be_bytes(file[at..at + 4].try_into().unwrap()) as usize;
       let body = &file[at + 4..at + 8 + n];
       let crc = u32::from_be_bytes(file[at + 8 + n..at + 12 + n].try_into().unwrap());
       assert_eq!(crc32(body), crc);
       kinds.push(String::from_utf8_lossy(&body[..4]).into_owned());
-      if &body[..4] == b"IDAT" {
-        idat.extend_from_slice(&body[4..]);
+      match &body[..4] {
+        b"IHDR" => ihdr.extend_from_slice(&body[4..]),
+        b"IDAT" => idat.extend_from_slice(&body[4..]),
+        _ => {}
       }
 
       at += 12 + n;
     }
 
     assert_eq!(kinds, ["IHDR", "sRGB", "IDAT", "IEND"]);
+    let size = |i: usize| u32::from_be_bytes(ihdr[i..i + 4].try_into().unwrap()) as usize;
+    let (w, h) = (size(0), size(4));
+    assert_eq!(ihdr[8..], [8, 6, 0, 0, 0], "8-bit RGBA");
     let raw = inflate(&idat);
+    assert_eq!(raw.len(), (w * 4 + 1) * h);
+    let mut out = Vec::with_capacity(w * h * 4);
     let mut prev = vec![0u8; w * 4];
-    let want = rgba_rows(&px);
-    for (y, line) in raw.chunks(w * 4 + 1).enumerate() {
+    for line in raw.chunks(w * 4 + 1) {
       let mut row = vec![0u8; w * 4];
       for i in 0..w * 4 {
         let a = if i >= 4 { row[i - 4] } else { 0 };
@@ -440,9 +437,28 @@ mod tests {
         row[i] = line[1 + i].wrapping_add(pred);
       }
 
-      assert_eq!(row, want[y * w * 4..(y + 1) * w * 4], "row {y}");
+      out.extend_from_slice(&row);
       prev = row;
     }
+
+    (w, h, out)
+  }
+
+  #[test]
+  fn png_rows_unfilter() {
+    // A gradient, a flat run and a half-transparent pixel, through every filter.
+    let (w, h) = (9, 4);
+    let mut data = Vec::new();
+    for y in 0..h {
+      for x in 0..w {
+        let v = (x * 28 + y * 5) as u8;
+        data.extend(if x == 4 { [64, 32, 16, 128] } else { [v, 255 - v, 30, 255] });
+      }
+    }
+
+    let px = Pixels { w, h, data };
+    let want = rgba_rows(&px);
+    assert_eq!(decode(&encode(&px)), (w, h, want.clone()));
     // Premultiplied BGRA to straight RGBA.
     assert_eq!(want[16..20], [32, 64, 128, 128]);
   }

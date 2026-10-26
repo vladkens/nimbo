@@ -29,11 +29,11 @@ KINDS = ("code", "docs", "comments", "tests", "blank")
 # The code lines each part may have: a platform, the UI core (ui/: the tree, layout, input,
 # paint, theme), its widgets and containers (ui/widgets, ui/containers: add-ons over it), the
 # text system (text/: shaping, the glyph atlas, the editing model), the app platform (its
-# portable part: the shell, tray, hotkeys, paths, launch at login, opening, permissions, the
-# system clipboard, the focus of other apps; and each OS's platform/<os>/app) and the core (the
-# rest of src/). A budget is whole hundreds (STEP): a change that doesn't fit is written
-# tighter, or the budget goes up by a hundred, a decision recorded in its PR; never by the few
-# lines one change needs.
+# portable part: the shell, tray, hotkeys, paths, launch at login, the launcher entry, opening,
+# permissions, the system clipboard, the focus of other apps; and each OS's platform/<os>/app)
+# and the core (the rest of src/). A budget is whole hundreds (STEP): a change that doesn't fit
+# is written tighter, or the budget goes up by a hundred, a decision recorded in its PR; never by
+# the few lines one change needs.
 STEP = 100
 BUDGETS = {
   "platform/macos": 1900,
@@ -43,7 +43,7 @@ BUDGETS = {
   "widgets": 3200,
   "text": 1200,
   "core": 3600,
-  "app/shared": 900,
+  "app/shared": 1000,
   "app/macos": 1600,
   "app/windows": 1400,
   "app/linux": 1900,
@@ -55,7 +55,7 @@ PARTS = {
   "ui/containers": "widgets",
   "ui/form": "widgets",
   "ui/dialog": "widgets",
-  **{m: "app/shared" for m in ("shell", "tray", "hotkey", "paths", "autostart", "open", "permissions", "clipboard", "focus")},
+  **{m: "app/shared" for m in ("shell", "tray", "hotkey", "paths", "autostart", "desktop", "open", "permissions", "clipboard", "focus")},
 }
 
 

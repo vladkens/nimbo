@@ -19,7 +19,7 @@ pub struct Counter {
 }
 
 /// The window's icon on Windows and X11: a blue disc, 64 pixels square.
-const ICON: [u8; 64 * 64 * 4] = {
+pub const ICON: [u8; 64 * 64 * 4] = {
   let mut px = [0; 64 * 64 * 4];
   let mut i = 0;
   while i < 64 * 64 {

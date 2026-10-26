@@ -13,10 +13,11 @@
 //! An app with no window, or more than one, starts with [app]: windows on demand ([Main::open])
 //! and overlays, HUDs over every app ([Config::overlay]), work from other threads ([Proxy]), and
 //! what a tray app needs besides: an icon with a menu ([tray]), global hotkeys ([hotkey]), its
-//! folders ([paths]), launch at login ([autostart]) and alerts ([Main::alert]); and to reach
-//! other apps: links and files opened or shown ([open]), the OS's permissions ([permissions]),
-//! where the user types ([focus]), keys posted to the app in focus ([keys::post]) and the
-//! clipboard, also taken and put back around a paste of the app's own ([SystemClipboard]).
+//! folders ([paths]), launch at login ([autostart]), its launcher entry on Linux ([desktop]) and
+//! alerts ([Main::alert]); and to reach other apps: links and files opened or shown ([open]), the
+//! OS's permissions ([permissions]), where the user types ([focus]), keys posted to the app in
+//! focus ([keys::post]) and the clipboard, also taken and put back around a paste of the app's own
+//! ([SystemClipboard]).
 //!
 //! macOS 14 is the least it runs on (`NSApplication`'s `activate`, `NSView`'s display link): build
 //! apps with `MACOSX_DEPLOYMENT_TARGET=14.0`.
@@ -26,6 +27,7 @@ pub mod app;
 pub mod autostart;
 pub mod clipboard;
 pub mod cpu;
+pub mod desktop;
 mod file_dialog;
 pub mod focus;
 pub mod harness;
