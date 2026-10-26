@@ -89,6 +89,7 @@ fns!(Gtk {
   fn g_object_unref(obj: P);
   fn gdk_display_get_default() -> P;
   fn gdk_cursor_new_from_name(display: P, name: S) -> P;
+  fn gdk_window_get_display(w: P) -> P;
   fn gdk_window_set_cursor(w: P, cursor: P);
   fn gdk_window_get_state(w: P) -> c_uint;
   fn gdk_frame_clock_request_phase(clock: P, phase: c_int);
@@ -735,7 +736,8 @@ impl Win {
     let cursor = match self.cursors.iter().find(|(k, _)| *k == c) {
       Some((_, p)) => *p,
       None => {
-        let p = unsafe { (g.gdk_cursor_new_from_name)((g.gdk_display_get_default)(), name(c)) };
+        // On the window's display: an overlay's may be XWayland's.
+        let p = unsafe { (g.gdk_cursor_new_from_name)((g.gdk_window_get_display)(win), name(c)) };
         self.cursors.push((c, p));
         p
       }

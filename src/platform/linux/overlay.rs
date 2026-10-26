@@ -8,14 +8,17 @@
 //! to its anchor in the work area of the monitor with the pointer at each show. Wayland lets no
 //! app place itself: with `libgtk-layer-shell` (the wlroots compositors, KDE) it is a layer
 //! surface on the overlay layer, anchored to the edge with its margin, without the keyboard, on
-//! the output the compositor picks (usually the focused one); without it (GNOME) a borderless
-//! toplevel that the compositor places, and focuses and stacks as any window: GTK 3 sends
-//! Wayland nothing of `accept_focus` or `focus_on_map` (no-ops in `gdkwindow-wayland.c`, gtk-3-24,
-//! as of 2026-10), so GNOME 46 focuses it while it shows and gives the focus back to the window
-//! before when it hides (measured). It is shown, never presented (`gtk_window_present` asks for
-//! activation).
+//! the output the compositor picks (usually the focused one). Without it (GNOME) a Wayland
+//! toplevel would take the focus while it shows: GTK 3 sends Wayland nothing of `accept_focus` or
+//! `focus_on_map` (no-ops in `gdkwindow-wayland.c`, gtk-3-24, as of 2026-10), and GNOME 46
+//! focuses it. So there it is X11's popup again, on XWayland's display (`DISPLAY`, opened once):
+//! the compositor gives an override-redirect window no focus, and it is placed as on X11 (the
+//! pointer as XWayland last saw it; drawn at XWayland's scale, which GNOME may enlarge on a HiDPI
+//! output). With no XWayland, a borderless toplevel that the compositor places, focuses and
+//! stacks. It is shown, never presented (`gtk_window_present` asks for activation).
 
-use std::ffi::c_int;
+use std::ffi::{CString, c_int};
+use std::os::unix::ffi::OsStringExt;
 use std::sync::OnceLock;
 
 use super::dl::{Lib, fns};
@@ -44,6 +47,10 @@ fns!(Gdk {
   fn gtk_widget_get_window(w: P) -> P;
   fn gdk_window_raise(w: P);
   fn gdk_display_get_default() -> P;
+  fn gdk_display_open(name: S) -> P;
+  fn gdk_display_get_default_screen(display: P) -> P;
+  fn gtk_window_set_screen(w: P, screen: P);
+  fn gtk_widget_get_display(w: P) -> P;
   fn gdk_display_get_default_seat(display: P) -> P;
   fn gdk_seat_get_pointer(seat: P) -> P;
   fn gdk_device_get_position(device: P, screen: *mut P, x: *mut c_int, y: *mut c_int);
@@ -78,13 +85,26 @@ fn gdk() -> &'static Gdk {
 
 /// The display is Wayland's: GDK's Wayland backend is built in and opened it.
 pub fn wayland() -> bool {
+  is_wayland(unsafe { (gdk().gdk_display_get_default)() })
+}
+
+fn is_wayland(display: P) -> bool {
   let Some(lib) = lib() else { return false };
   // SAFETY: GObject's type getter of GDK's Wayland display, a `GType` (a `gsize`).
   let get = unsafe { lib.sym::<unsafe extern "C" fn() -> usize>("gdk_wayland_display_get_type\0") };
-  let g = gdk();
-  get.is_some_and(
-    |f| unsafe { (g.g_type_check_instance_is_a)((g.gdk_display_get_default)(), f()) } != 0,
-  )
+  get.is_some_and(|f| unsafe { (gdk().g_type_check_instance_is_a)(display, f()) } != 0)
+}
+
+/// XWayland's display, for an overlay on Wayland without the layer shell; opened at the first.
+fn xwayland() -> Option<P> {
+  static X: OnceLock<usize> = OnceLock::new();
+  let at = X.get_or_init(|| {
+    let name = std::env::var_os("DISPLAY").and_then(|d| CString::new(d.into_vec()).ok());
+    // SAFETY: GDK's call on the main thread; GDK's Wayland backend refuses an X display's name.
+    let d = name.map_or(std::ptr::null_mut(), |n| unsafe { (gdk().gdk_display_open)(n.as_ptr()) });
+    if d.is_null() || is_wayland(d) { 0 } else { d as usize }
+  });
+  (wayland() && layer_shell().is_none() && *at != 0).then_some(*at as P)
 }
 
 /// The layer shell, where the compositor has it (Wayland only).
@@ -94,9 +114,9 @@ fn layer_shell() -> Option<&'static LayerShell> {
   ls.as_ref().filter(|ls| unsafe { (ls.gtk_layer_is_supported)() } != 0)
 }
 
-/// The kind of GtkWindow an overlay is: a popup on X11, a toplevel on Wayland.
+/// The kind of GtkWindow an overlay is: a popup on X11 and XWayland, else a toplevel.
 pub fn kind() -> c_int {
-  if wayland() { super::WINDOW_TOPLEVEL } else { POPUP }
+  if wayland() && xwayland().is_none() { super::WINDOW_TOPLEVEL } else { POPUP }
 }
 
 /// Sets overlay `window` up before it shows: see the module docs.
@@ -104,6 +124,10 @@ pub fn setup(window: P, anchor: Anchor) {
   let g = gdk();
   // SAFETY: GTK's calls on a window of ours not shown yet.
   unsafe {
+    if let Some(x) = xwayland() {
+      (g.gtk_window_set_screen)(window, (g.gdk_display_get_default_screen)(x));
+    }
+
     let visual = (g.gdk_screen_get_rgba_visual)((g.gtk_widget_get_screen)(window));
     if !visual.is_null() {
       (g.gtk_widget_set_visual)(window, visual);
@@ -156,15 +180,15 @@ pub fn raise(window: P) {
 /// Moves overlay `window` of `size` to `anchor` in the work area of the monitor with the
 /// pointer, or of its own unless `pointer`; nothing on Wayland, where the compositor places it.
 pub fn place(window: P, size: Size, anchor: Anchor, pointer: bool) {
-  if wayland() {
+  let g = gdk();
+  let display = unsafe { (g.gtk_widget_get_display)(window) };
+  if is_wayland(display) {
     return;
   }
 
-  let g = gdk();
   let mut area = [0; 4];
-  // SAFETY: GDK's calls on the default display and a window of ours; out-pointers to locals.
+  // SAFETY: GDK's calls on the window's display and the window; out-pointers to locals.
   unsafe {
-    let display = (g.gdk_display_get_default)();
     let monitor = match pointer {
       true => {
         let pointer = (g.gdk_seat_get_pointer)((g.gdk_display_get_default_seat)(display));

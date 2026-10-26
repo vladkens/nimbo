@@ -38,7 +38,7 @@ STEP = 100
 BUDGETS = {
   "platform/macos": 1900,
   "platform/windows": 2200,
-  "platform/linux": 3100,
+  "platform/linux": 3200,
   "ui": 3800,
   "widgets": 3200,
   "text": 1200,
