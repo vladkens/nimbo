@@ -170,6 +170,11 @@ impl Inner {
   /// refused are undone.
   fn grab(&self, code: u8, mods: &[c_uint], on: bool) -> Result<(), String> {
     let (x, d, root, kc) = (self.x, self.d, self.root, c_int::from(code));
+    // X keeps one grab of a key and mask for the app: what the chord or Escape (Shift's mask 1
+    // or none) still holds stays.
+    let (chord, escape) = (self.keys.chord.get(), self.keys.escape.get());
+    let held = |m: c_uint| chord == Some((code, m)) || escape == Some(code) && m <= 1;
+    let mods: Vec<_> = mods.iter().copied().filter(|&m| on || !held(m)).collect();
     let ((), error) = trap(x, d, || {
       for m in mods.iter().flat_map(|m| LOCKS.map(|lock| m | lock)) {
         // `GrabModeAsync` (1): the keyboard and the pointer go on as before.
@@ -182,7 +187,7 @@ impl Inner {
     // What the sync read meanwhile waits in Xlib's queue: the socket won't say.
     self.drain();
     if error != 0 && on {
-      self.grab(code, mods, false)?;
+      self.grab(code, &mods, false)?;
     }
 
     match error {

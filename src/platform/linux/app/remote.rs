@@ -22,7 +22,7 @@
 use std::cell::{Cell, RefCell};
 use std::ffi::{c_int, c_uint, c_ulong};
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::path::PathBuf;
 use std::ptr::null_mut;
@@ -163,9 +163,7 @@ fn ask(s: &State, method: &str, args: Vec<V>, opts: Vec<(&str, V)>) -> Result<Gv
   let sub = request(s.bus, REMOTE, method, args, opts, on_response as Fp, dbus::weak(&got))?;
   let deadline = Instant::now() + WAIT;
   while got.borrow().is_none() && Instant::now() < deadline {
-    if unsafe { (gtk().g_main_context_iteration)(null_mut(), 0) } == 0 {
-      std::thread::sleep(Duration::from_millis(10));
-    }
+    turn();
   }
 
   dbus::unsubscribe(s.bus, sub);
@@ -203,6 +201,7 @@ pub(super) fn post(k: Shortcut) -> Result<(), String> {
     let args = vec![path(&s), V::dict(vec![]), V::I(code as i32), V::U(down.into())];
     if let Err(e) = call(&s, REMOTE, "NotifyKeyboardKeycode", args) {
       SESSION.set(None);
+      paste::lost();
       return Err(format!("NotifyKeyboardKeycode: {e}"));
     }
   }
@@ -262,28 +261,43 @@ pub(super) fn snapshot(s: &State) -> Snapshot {
   snapshot
 }
 
-/// The owner's bytes of `kind`, read to their end on a thread of its own; `None` unless it gave
-/// them within [READ] (an owner that never ends, or the app itself, which can't serve now).
+/// The owner's bytes of `kind`, read as they come while the main loop turns (the owner may be
+/// the app, GTK serving it there); `None` unless they ended within [READ]. The descriptor closes
+/// either way, which ends the transfer.
 fn read(s: &State, kind: &str) -> Option<Vec<u8>> {
   let args = V::Tuple(vec![path(s), V::s(kind)]);
   let fd = dbus::call_fd(s.bus, PORTAL, PATH, CLIPBOARD, "SelectionRead", args, MS).ok()?;
-  let (tx, rx) = std::sync::mpsc::channel();
-  std::thread::spawn(move || {
-    let mut bytes = Vec::new();
-    let _ = tx.send(blocking(fd).read_to_end(&mut bytes).map(|_| bytes));
-  });
-  rx.recv_timeout(READ).ok()?.ok()
+  let (mut file, mut bytes, mut buf) = (file(fd, true), Vec::new(), [0; 16384]);
+  let deadline = Instant::now() + READ;
+  while Instant::now() < deadline {
+    match file.read(&mut buf) {
+      Ok(0) => return Some(bytes),
+      Ok(n) => bytes.extend_from_slice(&buf[..n]),
+      Err(e) if e.kind() == ErrorKind::WouldBlock => turn(),
+      Err(_) => return None,
+    }
+  }
+
+  None
+}
+
+/// One turn of the main loop, or a short sleep when nothing was waiting.
+fn turn() {
+  if unsafe { (gtk().g_main_context_iteration)(null_mut(), 0) } == 0 {
+    std::thread::sleep(Duration::from_millis(2));
+  }
 }
 
 unsafe extern "C" {
   fn fcntl(fd: c_int, cmd: c_int, ...) -> c_int;
 }
 
-/// A transfer's descriptor, which the portal gives non-blocking, read or written to its end.
-fn blocking(fd: OwnedFd) -> File {
+/// A transfer's descriptor as a file, `nonblock` or not, whichever way the portal gave it.
+fn file(fd: OwnedFd, nonblock: bool) -> File {
   // `F_GETFL`, `F_SETFL` and `O_NONBLOCK`.
-  let (get, set, nonblock) = (3, 4, 0o4000);
-  unsafe { fcntl(fd.as_raw_fd(), set, fcntl(fd.as_raw_fd(), get) & !nonblock) };
+  let (get, set, flag) = (3, 4, 0o4000);
+  let flags = unsafe { fcntl(fd.as_raw_fd(), get) } & !flag;
+  unsafe { fcntl(fd.as_raw_fd(), set, if nonblock { flags | flag } else { flags }) };
   File::from(fd)
 }
 
@@ -297,11 +311,12 @@ unsafe extern "C" fn on_response(_: P, _: S, _: S, _: S, _: S, args: P, data: P)
   }
 }
 
-/// A session's `Closed`: the next paste starts another.
+/// A session's `Closed`: what it served goes, and the next paste starts another.
 unsafe extern "C" fn on_closed(_: P, _: S, path: S, _: S, _: S, _: P, data: P) {
   let Some(s) = (unsafe { dbus::upgrade::<State>(data) }) else { return };
   if dbus::text(path) == *s.session.borrow() {
     SESSION.set(None);
+    paste::lost();
   }
 }
 
@@ -337,7 +352,7 @@ unsafe extern "C" fn on_transfer(_: P, _: S, _: S, _: S, _: S, args: P, data: P)
   let fd = bytes.as_ref().and_then(|_| write());
   let bus = dbus::retain(s.bus);
   std::thread::spawn(move || {
-    let done = fd.zip(bytes).is_some_and(|(fd, b)| blocking(fd).write_all(&b).is_ok());
+    let done = fd.zip(bytes).is_some_and(|(fd, b)| file(fd, false).write_all(&b).is_ok());
     let args = V::Tuple(vec![V::O(session), V::U(serial), V::B(done)]);
     let _ = dbus::call(bus as P, PORTAL, PATH, CLIPBOARD, "SelectionWriteDone", args, MS);
     dbus::release(bus);
