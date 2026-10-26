@@ -32,6 +32,7 @@ use windows_sys::Win32::UI::Shell::{FOLDERID_Downloads, KF_FLAG_DEFAULT, SHGetKn
 /// The user's Downloads, the Known Folder (wherever the user moved it): [crate::paths::downloads].
 pub fn downloads() -> Option<PathBuf> {
   let mut s = null_mut::<u16>();
+  // SAFETY: a known folder's id and a pointer for the string the shell allocates.
   let ok = unsafe {
     SHGetKnownFolderPath(&FOLDERID_Downloads, KF_FLAG_DEFAULT as u32, null_mut(), &mut s)
   } >= 0;
