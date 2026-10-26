@@ -71,11 +71,45 @@ SCENARIOS = {
 
 
 def run(*cmd: str, check: bool = True) -> str:
-  out = subprocess.run(cmd, capture_output=True, text=True)
-  if check and out.returncode != 0:
-    raise SystemExit(f"ax-check: {' '.join(cmd)} failed:\n{out.stderr or out.stdout}")
+  rs = subprocess.run(cmd, capture_output=True, text=True)
+  if check and rs.returncode != 0:
+    raise SystemExit(f"ax-check: {' '.join(cmd)} failed:\n{rs.stderr or rs.stdout}")
 
-  return out.stdout
+  return rs.stdout
+
+
+def gui(*cmd: str) -> list[str]:
+  """`cmd` run in the guest's desktop session."""
+  return [str(VM), "exec", "macos", "--gui", "--", *cmd]
+
+
+def started(ssh: list[str], example: str) -> str:
+  """The example's pid in the guest once it runs, waiting up to 10 s."""
+  for _ in range(40):
+    pid = run(*ssh, "pgrep", "-nx", example, check=False).strip()
+    if pid:
+      return pid
+
+    time.sleep(0.25)
+
+  raise SystemExit(f"ax-check: {example} did not start")
+
+
+def drive(pid: str, ops: list[str]) -> None:
+  """Runs `ops` through ax-dump on the app `pid` and prints what it says."""
+  if not ops:
+    return
+
+  rs = subprocess.run(gui(f"{GUEST}/ax-dump", pid, *ops), capture_output=True, text=True)
+  print(rs.stdout + rs.stderr, flush=True)
+
+
+def shoot(config: Path, example: str) -> None:
+  """A screenshot of the guest's screen, to target/ax/<example>.png."""
+  shot, out = f"{GUEST}/{example}.png", OUT / f"{example}.png"
+  run(*gui("screencapture", "-x", shot))
+  run("scp", "-F", str(config), f"vm-macos:{shot}", str(out))
+  print(f"screenshot: {out}")
 
 
 def main() -> None:
@@ -94,38 +128,21 @@ def main() -> None:
   ssh = ["ssh", "-F", str(config), "vm-macos"]
   run(*ssh, "mkdir", "-p", GUEST)
   bins = [str(ROOT / "target/release/examples" / e) for e in examples] + [str(dumper)]
-  run("rsync", "-a", "-e", f"ssh -F {config}", "--rsync-path=/usr/bin/rsync", *bins, f"vm-macos:{GUEST}/")
+  rsync = ["rsync", "-a", "-e", f"ssh -F {config}", "--rsync-path=/usr/bin/rsync"]
+  run(*rsync, *bins, f"vm-macos:{GUEST}/")
 
   for example in examples:
     print(f"== {example}", flush=True)
     run(*ssh, "pkill", "-x", example, check=False)
-    app = subprocess.Popen([str(VM), "exec", "macos", "--gui", "--", f"{GUEST}/{example}"])
+    app = subprocess.Popen(gui(f"{GUEST}/{example}"))
     try:
-      pid = ""
-      for _ in range(40):
-        pid = run(*ssh, "pgrep", "-nx", example, check=False).strip()
-        if pid:
-          break
-
-        time.sleep(0.25)
-
-      if not pid:
-        raise SystemExit(f"ax-check: {example} did not start")
-
+      pid = started(ssh, example)
       time.sleep(1.5)
       ops = SCENARIOS.get(example, ["dump"])
-      ops = ops if "shot" in ops else [*ops, "shot"]
-      cut = ops.index("shot")
-      for part in (ops[:cut], "shot", ops[cut + 1 :]):
-        if part == "shot":
-          shot = f"{GUEST}/{example}.png"
-          run(str(VM), "exec", "macos", "--gui", "--", "screencapture", "-x", shot)
-          run("scp", "-F", str(config), f"vm-macos:{shot}", str(OUT / f"{example}.png"))
-          print(f"screenshot: {OUT / f'{example}.png'}")
-        elif part:
-          dump = [str(VM), "exec", "macos", "--gui", "--", f"{GUEST}/ax-dump", pid, *part]
-          out = subprocess.run(dump, capture_output=True, text=True)
-          print(out.stdout + out.stderr, flush=True)
+      cut = ops.index("shot") if "shot" in ops else len(ops)
+      drive(pid, ops[:cut])
+      shoot(config, example)
+      drive(pid, ops[cut + 1 :])
     finally:
       run(*ssh, "pkill", "-x", example, check=False)
       app.wait(timeout=10)

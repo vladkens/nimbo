@@ -79,7 +79,8 @@ func line(_ e: AXUIElement) -> String {
   var names: CFArray?
   if AXUIElementCopyActionNames(e, &names) == .success, let a = names as? [String], !a.isEmpty {
     let short = a.filter { !$0.hasPrefix("AXShowMenu") && !$0.hasPrefix("AXScrollToVisible") }
-    if !short.isEmpty { out += " {" + short.map { $0.replacingOccurrences(of: "AX", with: "") }.joined(separator: ",") + "}" }
+    let shown = short.map { $0.replacingOccurrences(of: "AX", with: "") }
+    if !shown.isEmpty { out += " {" + shown.joined(separator: ",") + "}" }
   }
 
   if let f = text(attr(e, "AXFrame")) { out += " @" + f }
@@ -123,7 +124,8 @@ func dump(_ app: AXUIElement) {
 }
 
 func find(_ app: AXUIElement, _ sel: String) -> AXUIElement? {
-  let parts = sel.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+  let parts = sel.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+    .map(String.init)
   let role = parts[0]
   let title = parts.count > 1 ? parts[1] : nil
   for (_, e) in all(app) {
@@ -158,13 +160,19 @@ var observer: AXObserver?
 if AXObserverCreate(pid, callback, &observer) == .success, let observer {
   for n in [
     "AXFocusedUIElementChanged", "AXValueChanged", "AXLayoutChanged", "AXTitleChanged",
-    "AXSelectedRowsChanged", "AXSelectedTextChanged", "AXSelectedChildrenChanged", "AXUIElementDestroyed",
+    "AXSelectedRowsChanged", "AXSelectedTextChanged", "AXSelectedChildrenChanged",
+    "AXUIElementDestroyed",
   ] {
     let err = AXObserverAddNotification(observer, app, n as CFString, nil)
     if err != .success { print("observe \(n): error \(err.rawValue)") }
   }
 
   CFRunLoopAddSource(CFRunLoopGetCurrent(), AXObserverGetRunLoopSource(observer), .defaultMode)
+}
+
+/// "ok", or the error's code.
+func result(_ err: AXError) -> String {
+  err == .success ? "ok" : "error \(err.rawValue)"
 }
 
 var i = 1
@@ -186,23 +194,28 @@ while i < args.count {
     seen = [:]
   case "watch":
     let sel = next()
-    let err = find(app, sel).map { AXObserverAddNotification(observer!, $0, "AXUIElementDestroyed" as CFString, nil) }
-    print("watch \(sel): " + (err.map { $0 == .success ? "ok" : "error \($0.rawValue)" } ?? "not found"))
+    let gone = "AXUIElementDestroyed" as CFString
+    let err = find(app, sel).map { AXObserverAddNotification(observer!, $0, gone, nil) }
+    print("watch \(sel): " + (err.map(result) ?? "not found"))
   case "focused":
     let e = attr(app, "AXFocusedUIElement")
     print("focused: " + (e.map { line($0 as! AXUIElement) } ?? "none"))
   case "hit":
     let sel = next()
     var r = CGRect.zero
-    guard let f = find(app, sel).flatMap({ attr($0, "AXFrame") }), AXValueGetValue(f as! AXValue, .cgRect, &r) else {
+    guard let f = find(app, sel).flatMap({ attr($0, "AXFrame") }),
+      AXValueGetValue(f as! AXValue, .cgRect, &r)
+    else {
       print("hit \(sel): not found")
       continue
     }
 
     var e: AXUIElement?
-    let err = AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(r.midX), Float(r.midY), &e)
+    let (x, y) = (Float(r.midX), Float(r.midY))
+    let err = AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), x, y, &e)
     let up = e.flatMap { attr($0, "AXParent") }.map { line($0 as! AXUIElement) } ?? "none"
-    print("hit \(sel) at \(Int(r.midX)),\(Int(r.midY)): " + (e.map(line) ?? "error \(err.rawValue)") + "\n  parent: " + up)
+    let hit = e.map(line) ?? "error \(err.rawValue)"
+    print("hit \(sel) at \(Int(x)),\(Int(y)): \(hit)\n  parent: \(up)")
   case "press", "inc", "dec", "focus", "set":
     let sel = next()
     let value = op == "set" ? next() : ""
@@ -220,7 +233,7 @@ while i < args.count {
     default: err = AXUIElementSetAttributeValue(e, "AXValue" as CFString, value as CFString)
     }
 
-    print("\(op) \(sel)\(op == "set" ? " \"\(value)\"" : ""): \(err == .success ? "ok" : "error \(err.rawValue)")")
+    print("\(op) \(sel)\(op == "set" ? " \"\(value)\"" : ""): \(result(err))")
   default:
     print("unknown op \(op)")
     exit(2)

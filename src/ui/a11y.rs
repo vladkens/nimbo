@@ -44,6 +44,8 @@ use crate::text::FxHasher;
 /// A byte range of a string arena; empty when unset.
 pub type Span = (u32, u32);
 
+// MARK: Roles, values, actions
+
 /// What an element is, as AppKit's roles (and subroles) name it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Role {
@@ -159,21 +161,6 @@ impl Action {
   }
 }
 
-/// The actions ([Action::bit]s) a node of `p` takes: enabled, a press on what a click acts on,
-/// the steps on a slider, focus on an element that takes it (`focusable`), a new text on a
-/// field; scrolling to it on any.
-fn actions(p: &Props, focusable: bool) -> u8 {
-  use Role::*;
-  let press = matches!(
-    p.role,
-    Button | CheckBox | Switch | RadioButton | Link | PopUpButton | MenuItem | Tab | Row
-  );
-  let (step, set) = (p.role == Slider, matches!(p.role, TextField | TextArea | SecureTextField));
-  let on = !p.has(State::Disabled);
-  let can = [press, step, step, focusable, set];
-  can.iter().zip(0..).fold(Action::ScrollToVisible.bit(), |b, (&c, k)| b | u8::from(c && on) << k)
-}
-
 /// What an element is to assistive technology; its strings are in the arena of the records or
 /// the tree that holds it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -193,6 +180,8 @@ impl Props {
     self.states & 1 << s as u8 != 0
   }
 }
+
+// MARK: Records
 
 /// A frame's records, by id, as the view made them ([Ui::a11y]).
 #[derive(Default)]
@@ -360,6 +349,8 @@ impl Ui<'_> {
   }
 }
 
+// MARK: Assembly
+
 /// A node of the assembled tree ([A11yTree]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct A11yNode {
@@ -382,6 +373,21 @@ impl A11yNode {
   pub fn can(&self, a: &Action) -> bool {
     self.actions & a.bit() != 0
   }
+}
+
+/// The actions ([Action::bit]s) a node of `p` takes: enabled, a press on what a click acts on,
+/// the steps on a slider, focus on an element that takes it (`focusable`), a new text on a
+/// field; scrolling to it on any.
+fn actions(p: &Props, focusable: bool) -> u8 {
+  use Role::*;
+  let press = matches!(
+    p.role,
+    Button | CheckBox | Switch | RadioButton | Link | PopUpButton | MenuItem | Tab | Row
+  );
+  let (step, set) = (p.role == Slider, matches!(p.role, TextField | TextArea | SecureTextField));
+  let on = !p.has(State::Disabled);
+  let can = [press, step, step, focusable, set];
+  can.iter().zip(0..).fold(Action::ScrollToVisible.bit(), |b, (&c, k)| b | u8::from(c && on) << k)
 }
 
 /// The last frame as assistive technology sees it ([UiState::a11y_tree]). Its [Display] is one
@@ -550,6 +556,8 @@ fn inner_text(t: &Tree, at: &[u32], i: usize, not: &[Id]) -> String {
 
   out
 }
+
+// MARK: Display
 
 /// A role's, a state's or a value's name in lowercase words: `CheckBox` as `check box`.
 fn words(name: impl fmt::Debug) -> String {

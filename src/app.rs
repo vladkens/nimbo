@@ -593,6 +593,7 @@ impl<A: App> Runtime<A> {
     let tree = self.ui.a11y_tree();
     let node = tree.nodes.iter().find(|n| n.id == id && n.props.role == role);
     let Some(r) = node.filter(|n| n.can(&action)).map(|n| n.rect) else { return false };
+
     match &action {
       Action::Press => {
         let at = Point::new(r.x + r.w / 2.0, r.y + r.h / 2.0);

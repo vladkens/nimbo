@@ -195,7 +195,7 @@ impl Ui<'_> {
     let mut b = self.button_behavior(id);
     // Its value the current option's label; expanded while open ([Ui::menu_popup]).
     if b.disabled {
-      self.a11y(id, Role::PopUpButton).text(at.map_or("", &label));
+      self.a11y(id, Role::PopUpButton).text(at.map_or("", label));
       return b;
     }
 

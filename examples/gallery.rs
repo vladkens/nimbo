@@ -151,7 +151,7 @@ impl Gallery {
       });
       line(ui, "ICONS", |ui| {
         ui.grid(10, Style::new().gap(10.0), |ui| {
-          for (_, icon) in Icon::ALL {
+          for (_, icon, _) in Icon::ALL {
             ui.icon_stroke(icon, 20.0, t.text, 1.6);
           }
         });

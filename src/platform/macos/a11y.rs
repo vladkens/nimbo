@@ -44,6 +44,8 @@ use crate::scene::Point;
 use crate::text::edit::{range_from_utf16, utf16_len};
 use crate::ui::{A11yNode, A11yTree, Action, Id, Role, State, UiState, Value};
 
+// MARK: Roles
+
 /// A node as elements know it across frames.
 type Key = (Id, Role);
 
@@ -116,14 +118,22 @@ fn allowed(n: &A11yNode, sel: &str) -> Option<bool> {
   })
 }
 
+// MARK: Snapshot
+
+/// The focused text field: its selection in UTF-16 and the line of its caret.
+struct Field {
+  id: Id,
+  sel: Range<usize>,
+  line: usize,
+}
+
 /// The last frame as clients see it.
 #[derive(Default)]
 pub(super) struct Snapshot {
   tree: A11yTree,
   /// The first node of each key.
   index: HashMap<Key, u32>,
-  /// The focused text field: its selection in UTF-16 and the line of its caret.
-  field: Option<(Id, Range<usize>, usize)>,
+  field: Option<Field>,
 }
 
 impl Snapshot {
@@ -135,12 +145,12 @@ impl Snapshot {
         _ => 0,
       };
 
-      (id, t.selected(), line)
+      Field { id, sel: t.selected(), line }
     });
     Self::of(ui.a11y_tree(), field)
   }
 
-  fn of(tree: A11yTree, field: Option<(Id, Range<usize>, usize)>) -> Self {
+  fn of(tree: A11yTree, field: Option<Field>) -> Self {
     let mut index = HashMap::with_capacity(tree.nodes.len());
     for (n, i) in tree.nodes.iter().zip(0..) {
       index.entry(key(n)).or_insert(i);
@@ -185,9 +195,9 @@ impl Snapshot {
     if let Value::Text(s) = n.props.value { self.tree.str(s) } else { "" }
   }
 
-  /// The selection and the caret's line of `n`, the focused field.
-  fn sel(&self, n: &A11yNode) -> Option<(Range<usize>, usize)> {
-    self.field.as_ref().filter(|f| f.0 == n.id).map(|f| (f.1.clone(), f.2))
+  /// `n` as the focused field.
+  fn field(&self, n: &A11yNode) -> Option<&Field> {
+    self.field.as_ref().filter(|f| f.id == n.id)
   }
 
   /// A node's value to compare: its text, else the value itself.
@@ -198,6 +208,8 @@ impl Snapshot {
     }
   }
 }
+
+// MARK: Notifications
 
 /// What a client is told of a new frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -260,10 +272,10 @@ fn diff(old: &Snapshot, new: &Snapshot) -> Vec<Note> {
   }
 
   // The same field, its selection moved.
-  if let (Some((id, sel, _)), Some((was, before, _))) = (&new.field, &old.field)
-    && id == was
-    && sel != before
-    && let Some(n) = new.tree.nodes.iter().find(|n| n.id == *id)
+  if let (Some(f), Some(was)) = (&new.field, &old.field)
+    && f.id == was.id
+    && f.sel != was.sel
+    && let Some(n) = new.tree.nodes.iter().find(|n| n.id == f.id)
   {
     out.push(Note::Text(key(n)));
   }
@@ -271,6 +283,27 @@ fn diff(old: &Snapshot, new: &Snapshot) -> Vec<Note> {
   out.extend(last);
   out
 }
+
+/// Tells the clients `note` on `el`.
+fn post(el: &AnyObject, note: Note) {
+  // SAFETY: AppKit's notification names, posted on the main thread.
+  unsafe {
+    let name = match note {
+      Note::Layout => NSAccessibilityLayoutChangedNotification,
+      Note::Destroyed(_) => NSAccessibilityUIElementDestroyedNotification,
+      Note::Title(_) => NSAccessibilityTitleChangedNotification,
+      Note::Selected((_, Role::List)) => NSAccessibilitySelectedRowsChangedNotification,
+      Note::Selected(_) => NSAccessibilitySelectedChildrenChangedNotification,
+      Note::Value(_) => NSAccessibilityValueChangedNotification,
+      Note::Focus(_) => NSAccessibilityFocusedUIElementChangedNotification,
+      Note::Text(_) => NSAccessibilitySelectedTextChangedNotification,
+    };
+
+    NSAccessibilityPostNotification(el, name);
+  }
+}
+
+// MARK: Elements
 
 /// What the view and its elements share: the snapshot, the elements by key, the view itself,
 /// weakly.
@@ -461,12 +494,12 @@ define_class!(
 
     #[unsafe(method(accessibilitySelectedTextRange))]
     fn selected_range(&self) -> NSRange {
-      self.get(|s, n| Some(ns_range(s.sel(n)?.0))).unwrap_or(NSRange::new(0, 0))
+      self.get(|s, n| Some(ns_range(s.field(n)?.sel.clone()))).unwrap_or(NSRange::new(0, 0))
     }
 
     #[unsafe(method_id(accessibilitySelectedText))]
     fn selected_text(&self) -> Option<Retained<NSString>> {
-      self.get(|s, n| Some(substring(s.text(n), s.sel(n)?.0)))
+      self.get(|s, n| Some(substring(s.text(n), s.field(n)?.sel.clone())))
     }
 
     #[unsafe(method_id(accessibilityStringForRange:))]
@@ -476,7 +509,7 @@ define_class!(
 
     #[unsafe(method(accessibilityInsertionPointLineNumber))]
     fn insertion_line(&self) -> NSInteger {
-      self.get(|s, n| Some(s.sel(n)?.1 as NSInteger)).unwrap_or(0)
+      self.get(|s, n| Some(s.field(n)?.line as NSInteger)).unwrap_or(0)
     }
 
     /// A menu item's check mark: the pop-up's current item.
@@ -585,6 +618,8 @@ impl Element {
   }
 }
 
+// MARK: The view
+
 /// The view's assistive state, made on the first query from the last frame (empty while the
 /// runtime is busy up the stack: a frame once it is free fills it and tells the client).
 fn shared(view: &View) -> Option<Rc<Shared>> {
@@ -651,6 +686,7 @@ pub(super) fn sync(view: &View) {
   let Ok(mut snap) = sh.snap.try_borrow_mut() else { return };
   *snap = new;
   drop(snap);
+
   let posts: Vec<_> = (notes.into_iter())
     .filter_map(|note| match note {
       Note::Layout => Some((any(view.window()?), note)),
@@ -672,24 +708,6 @@ pub(super) fn close(view: &View) {
   for (k, el) in all.unwrap_or_default() {
     post(&el, Note::Destroyed(k));
     el.ivars().dead.set(true);
-  }
-}
-
-fn post(el: &AnyObject, note: Note) {
-  // SAFETY: AppKit's notification names, posted on the main thread.
-  unsafe {
-    let name = match note {
-      Note::Layout => NSAccessibilityLayoutChangedNotification,
-      Note::Destroyed(_) => NSAccessibilityUIElementDestroyedNotification,
-      Note::Title(_) => NSAccessibilityTitleChangedNotification,
-      Note::Selected((_, Role::List)) => NSAccessibilitySelectedRowsChangedNotification,
-      Note::Selected(_) => NSAccessibilitySelectedChildrenChangedNotification,
-      Note::Value(_) => NSAccessibilityValueChangedNotification,
-      Note::Focus(_) => NSAccessibilityFocusedUIElementChangedNotification,
-      Note::Text(_) => NSAccessibilitySelectedTextChangedNotification,
-    };
-
-    NSAccessibilityPostNotification(el, name);
   }
 }
 
@@ -750,7 +768,7 @@ mod tests {
   }
 
   fn snap(t: A11yTree, sel: Range<usize>) -> Snapshot {
-    Snapshot::of(t, Some((FIELD.0, sel, 0)))
+    Snapshot::of(t, Some(Field { id: FIELD.0, sel, line: 0 }))
   }
 
   fn at(t: &A11yTree, k: Key) -> usize {
