@@ -18,8 +18,8 @@ use crate::ui::{Align, Behavior, Id, Response, Style, Ui, grow, px, rigid};
 /// ([Ui::pop_up_behavior]) open its list over it, the current option checked, highlighted and
 /// over the button ([Ui::menu_popup_over]); letters typed while it has focus, open or closed,
 /// go to the first option they start ([TypeSelect]). As wide as the current label, up to
-/// [crate::Sizes::menu_w] (a longer one ends in "…"), or [PopUp::width]; the list is at least
-/// as wide as the button and `menu_w`. Its
+/// [PopUp::max_width], or [PopUp::width]; the list is at least as wide as the button and
+/// [crate::Sizes::menu_w]. Its
 /// items are `id.key(("item", i))`; `changed` when one was picked that wasn't the current.
 /// Disabled, its label and chevrons turn [crate::Theme::tertiary] and the capsule fades to half,
 /// as System Settings dims one.
@@ -27,17 +27,24 @@ pub struct PopUp<'s> {
   cur: &'s mut usize,
   options: &'s [&'s str],
   width: Option<f32>,
+  max_width: Option<f32>,
   separators: &'s [usize],
 }
 
 impl<'s> PopUp<'s> {
   pub fn new(cur: &'s mut usize, options: &'s [&'s str]) -> Self {
-    Self { cur, options, width: None, separators: &[] }
+    Self { cur, options, width: None, max_width: None, separators: &[] }
   }
 
   /// A fixed width in points; a label longer than it ends in "…".
   pub fn width(self, w: f32) -> Self {
     Self { width: Some(w), ..self }
+  }
+
+  /// At most `w` points wide, as wide as the label up to it: a longer one ends in "…", so a
+  /// long value leaves the label beside it its line.
+  pub fn max_width(self, w: f32) -> Self {
+    Self { max_width: Some(w), ..self }
   }
 
   /// A line in the list after each of these options: "System Default", a line, the devices.
@@ -65,10 +72,11 @@ impl<'s> PopUp<'s> {
       .align(Align::Start, Align::Center)
       .radius(t.radius)
       .bg(alpha(fill, fill[3] * hot));
-    // Its label's width up to the list's, or the one given: text beside it wraps instead.
-    let frame = match self.width {
-      Some(w) => frame.w(px(w)),
-      None => frame.w(rigid()).max_w(t.sizes.menu_w),
+    // Its label's width (up to the most given), or the one given: text beside it wraps instead.
+    let frame = match (self.width, self.max_width) {
+      (Some(w), _) => frame.w(px(w)),
+      (None, Some(max)) => frame.w(rigid()).max_w(max),
+      (None, None) => frame.w(rigid()),
     };
 
     let frame = b.style(frame);
@@ -239,15 +247,24 @@ mod tests {
     }
   }
 
-  /// A form row with a pop-up showing a long value.
-  struct Long(usize);
+  /// A form row with a pop-up showing `value`, at most `max` wide if given.
+  struct Long {
+    value: &'static str,
+    max: Option<f32>,
+  }
 
   impl App for Long {
     fn view(&mut self, ui: &mut Ui) {
       let fs = crate::ui::FormStyle::plates(&ui.theme());
-      let long = "A microphone with a very long name, as USB devices report theirs";
+      let mut cur = 0;
       ui.id("row").form_row(&fs, crate::ui::FormRow::new("Microphone"), |ui| {
-        ui.id("pick").pop_up(&mut self.0, &[long]);
+        let pop = PopUp::new(&mut cur, std::slice::from_ref(&self.value));
+        let pop = match self.max {
+          Some(w) => pop.max_width(w),
+          None => pop,
+        };
+
+        pop.show(ui.id("pick"));
       });
     }
   }
@@ -274,13 +291,24 @@ mod tests {
     assert_eq!(h.app().cur, 2);
   }
 
-  /// A long value ends in "…" at the list's least width: the row's label keeps its line.
+  /// At most 220 wide, a long value ends in "…" there: the row's label keeps its line.
   #[test]
-  fn a_long_value_stops_at_the_lists_width() {
-    let mut h = Harness::new(Long(0), Size::new(500.0, 200.0), 1.0);
+  fn a_long_value_stops_at_its_most() {
+    let value = "A microphone with a very long name, as USB devices report theirs";
+    let mut h = Harness::new(Long { value, max: Some(220.0) }, Size::new(500.0, 200.0), 1.0);
     h.frame();
-    let w = h.rt.ui.theme.sizes.menu_w;
-    assert_eq!(h.rect(Id::of("pick")).map(|r| r.w), Some(w));
+    assert_eq!(h.rect(Id::of("pick")).map(|r| r.w), Some(220.0));
+    assert!(h.rect(Id::of("row")).unwrap().h < 60.0, "the label on one line");
+  }
+
+  /// A value that fits its row is shown whole, wider than the list's least width.
+  #[test]
+  fn a_value_that_fits_stays_whole() {
+    let value = "System Default (MacBook Pro Microphone)";
+    let mut h = Harness::new(Long { value, max: None }, Size::new(560.0, 200.0), 1.0);
+    h.frame();
+    let w = h.rect(Id::of("pick")).unwrap().w;
+    assert!(w > h.rt.ui.theme.sizes.menu_w, "{w}");
     assert!(h.rect(Id::of("row")).unwrap().h < 60.0, "the label on one line");
   }
 }
