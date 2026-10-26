@@ -11,27 +11,22 @@
 
 </div>
 
-`nimbo` draws one look on macOS, Windows and Linux, in the spirit of Sublime Merge: the UI is drawn by the toolkit on the CPU, over a thin native layer for the window and input and each system's own text stack. It is built to start instantly and draw every frame within vsync, and builds from scratch in about 10 seconds. The look follows macOS System Settings, in light and dark.
-
-Work in progress: the API changes from one pull request to the next.
-
-<div align="center">
-  <img src="docs/gallery.png" alt="the gallery example in light and dark" />
-</div>
+`nimbo` is a desktop UI toolkit for Rust that draws its own widgets, on the CPU, with one look on macOS, Windows and Linux. Work in progress: the API changes from one pull request to the next.
 
 ## 🌟 Features
 
-- 🖌️ One look everywhere, measured from macOS System Settings, light and dark, in the system's accent colour
-- 🔤 The OS's own text: CoreText, DirectWrite, or FreeType and HarfBuzz; shaping, subpixel positioning, colour emoji and input methods (IME)
-- 🖥️ Drawn on the CPU: no GPU driver, shader compiler or graphics stack to ship
-- 🧩 Widgets: buttons, check boxes, switches, sliders, selects, segmented controls, text fields, a virtualized list of 100,000 rows, tabs, splits, scroll areas, tooltips, dialogs, shortcut recorders
-- 🎛️ Every widget is a headless behaviour (hover, press, focus, keys, its value) plus a theme, so an app can draw its own look over the same behaviour
-- 🪟 Settings windows as macOS draws them: the title bar part of the window, the title centred over toolbar tabs, pages of grey plates
-- 📂 Files in and out: the system's open and save panels over a window, and files dragged onto it
-- 🛎️ What a tray app needs: a tray icon with a menu, global hotkeys, launch at login, overlays that never take the focus, the clipboard and the OS's permissions
-- 🧪 A headless harness: every example renders to a PNG without a window, and tests click and type through it and check the pixels
-- 📦 13 crates on macOS, 4 on Windows, 2 on Linux, where GTK 3 is loaded at run time and nothing is linked at build time
-- 🦀 Written in Rust
+- 🖌️ **One look** on macOS, Windows and Linux, after macOS System Settings
+- 🔤 **The system's text**: shaping, emoji, input methods
+- 🖥️ **Drawn on the CPU**: no GPU stack to ship
+- 🧩 **Widgets**: buttons, switches, fields, lists of 100k rows, tabs, dialogs
+- 🛎️ **Tray apps**: tray menu, global hotkeys, launch at login, overlays
+- 📂 **Files**: open and save panels, drag and drop
+- 🧪 **Headless tests**: click, type and check pixels without a window
+- 📦 **Few crates**: 13 on macOS, 4 on Windows, 2 on Linux
+
+<div align="center">
+  <img src="docs/settings.png" alt="the settings example in a macOS window" width="700" />
+</div>
 
 ## 🤖 How it's made
 
