@@ -62,8 +62,11 @@ SCENARIOS = {
     "set", "AXTextField:Search widgets", "Sliders", "sleep", "0.5", "count",
     "dump",
   ],
-  # An open menu over the rows: a hit on its items finds them, not the rows under them.
+  # The row cut by the list's bottom edge scrolled into view (its whole frame at its centre); an
+  # open menu over the rows: a hit on its items finds them, not the rows under them.
   "lists": [
+    "scroll", "AXRow:Item 000019 678 KB", "sleep", "0.5", "count",
+    "hit", "AXRow:Item 000019 678 KB",
     "press", "AXButton:Actions", "sleep", "0.5",
     "hit", "AXMenuItem:Go to First", "hit", "AXMenuItem:Open", "shot",
   ],

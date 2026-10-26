@@ -6,12 +6,12 @@
 //   ax-dump <pid> <op>...
 //
 // Ops run in order: `dump` prints the app's windows and their elements, one indented line each
-// (retried once when a window has no children yet); `press | inc | dec | focus <sel>` performs
-// AXPress, AXIncrement, AXDecrement or sets AXFocused; `set <sel> <text>` sets AXValue; `sleep <s>`
-// runs the run loop; `count` prints the notifications seen since the last count, by the
-// element's role; `focused` prints the app's focused element; `hit <sel>` the element at the
-// centre of the selected one's frame and its parent; `watch <sel>` observes when that element is
-// destroyed. A selector is `role`, `role:title` or `:title`, the role or the subrole (first match
+// (retried once when a window has no children yet); `press | inc | dec | scroll | focus <sel>`
+// performs AXPress, AXIncrement, AXDecrement, AXScrollToVisible or sets AXFocused; `set <sel>
+// <text>` sets AXValue; `sleep <s>` runs the run loop; `count` prints the notifications seen
+// since the last count, by the element's role; `focused` prints the app's focused element; `hit
+// <sel>` the element at the centre of the selected one's frame and its parent; `watch <sel>`
+// observes when that element is destroyed. A selector is `role`, `role:title` or `:title`, the role or the subrole (first match
 // in the dump's order). Notifications are observed from the start: focus, value, layout, title,
 // selected rows / text / children, destroyed.
 
@@ -216,7 +216,7 @@ while i < args.count {
     let up = e.flatMap { attr($0, "AXParent") }.map { line($0 as! AXUIElement) } ?? "none"
     let hit = e.map(line) ?? "error \(err.rawValue)"
     print("hit \(sel) at \(Int(x)),\(Int(y)): \(hit)\n  parent: \(up)")
-  case "press", "inc", "dec", "focus", "set":
+  case "press", "inc", "dec", "scroll", "focus", "set":
     let sel = next()
     let value = op == "set" ? next() : ""
     guard let e = find(app, sel) else {
@@ -229,6 +229,7 @@ while i < args.count {
     case "press": err = AXUIElementPerformAction(e, "AXPress" as CFString)
     case "inc": err = AXUIElementPerformAction(e, "AXIncrement" as CFString)
     case "dec": err = AXUIElementPerformAction(e, "AXDecrement" as CFString)
+    case "scroll": err = AXUIElementPerformAction(e, "AXScrollToVisible" as CFString)
     case "focus": err = AXUIElementSetAttributeValue(e, "AXFocused" as CFString, kCFBooleanTrue)
     default: err = AXUIElementSetAttributeValue(e, "AXValue" as CFString, value as CFString)
     }

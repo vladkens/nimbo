@@ -548,6 +548,16 @@ define_class!(
       self.act(Action::Decrement)
     }
 
+    /// AXScrollToVisible, which AppKit lists for every element and has no method of the new
+    /// protocol: shown in its scroll areas. Other actions of the old protocol are AppKit's.
+    #[unsafe(method(accessibilityPerformAction:))]
+    fn perform(&self, name: &NSString) {
+      match name.isEqualToString(ns_string!("AXScrollToVisible")) {
+        true => _ = self.act(Action::ScrollToVisible),
+        false => unsafe { msg_send![super(self), accessibilityPerformAction: name] },
+      }
+    }
+
     #[unsafe(method(setAccessibilityFocused:))]
     fn set_focused(&self, on: bool) {
       if on {

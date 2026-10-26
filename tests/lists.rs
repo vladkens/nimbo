@@ -5,8 +5,8 @@
 //! arrows, opens a row by Enter; the menu opens, moves over its enabled items and runs one,
 //! closes by Escape or a click outside; the pop-up button chooses by letters typed, closed and
 //! open; the tabs switch and keep the hidden page's scroll; the split's divider drags. Assistive
-//! technology reads the rows, the selection and the cursor, the menu's highlight, the tabs, and
-//! presses a tab.
+//! technology reads the rows, the selection and the cursor, the menu's highlight, the tabs,
+//! presses a tab and scrolls a cut row into view.
 
 #[path = "../examples/lists.rs"]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
@@ -340,4 +340,16 @@ fn an_assistive_press_turns_a_tab() {
   assert!(h.act(Id::of(TABS).key(("tab", "Notes")), Action::Press));
   assert_eq!(h.app().tab, 1);
   reads(&h.a11y(), &["tab \"Notes\" selected"]);
+}
+
+/// Assistive technology scrolls a row cut by the list's bottom edge fully into view.
+#[test]
+fn an_assistive_scroll_shows_a_cut_row() {
+  let mut h = lists();
+  let list = h.rect(Id::of(LIST)).unwrap();
+  let bottom = |h: &H, k| h.rect(row(k)).map_or(0.0, |r| r.y + r.h);
+  let k = (0..40).find(|&k| bottom(&h, k) > list.y + list.h + 0.5).unwrap();
+  assert!(h.act(row(k), Action::ScrollToVisible));
+  assert!(offset(&h, Id::of(LIST)) > 0.0);
+  assert!(bottom(&h, k) <= list.y + list.h + 0.5, "row {k} at {:?} in {list:?}", h.rect(row(k)));
 }
