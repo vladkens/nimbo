@@ -164,6 +164,16 @@ impl Shared {
   }
 }
 
+/// The event tap sees a modifier key alone go down and up.
+pub fn modifier_alone() -> bool {
+  true
+}
+
+/// The tap's Accessibility access is asked for apart ([crate::permissions]), never by the start.
+pub fn start_asks() -> bool {
+  false
+}
+
 /// The hotkey sources. Lives on the main thread (Carbon is registered there).
 pub struct Hotkeys {
   shared: Arc<Shared>,

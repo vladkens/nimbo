@@ -180,6 +180,16 @@ pub(crate) fn window(cfg: &Config, app: Box<dyn App>) {
   });
 }
 
+/// Prints to the console of the command line that started the app, on Windows, where an app
+/// built as a GUI program (`windows_subsystem = "windows"`) has none; nothing elsewhere, where it
+/// prints there anyway. Call it only on the app's command-line paths (a command, `--help`, a
+/// mistake in the arguments), not for a launch that runs the app: attached, its output would show
+/// after the prompt, and closing that console would end it without its quit hook.
+pub fn attach_console() {
+  #[cfg(windows)]
+  crate::platform::attach_console();
+}
+
 /// The main thread while the app runs: only code on it gets one (`start`, [Proxy]'s closures,
 /// the callbacks). Not `Send`.
 pub struct Main {

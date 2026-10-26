@@ -76,6 +76,15 @@ struct Shared {
   escape: AtomicBool,
 }
 
+/// The keyboard hook sees a modifier key alone go down and up.
+pub fn modifier_alone() -> bool {
+  true
+}
+
+pub fn start_asks() -> bool {
+  false
+}
+
 /// The hotkey thread, driven from the main thread.
 pub struct Hotkeys {
   thread: u32,

@@ -13,8 +13,9 @@
 //! An app with no window, or more than one, starts with [app]: windows on demand ([Main::open])
 //! and overlays, HUDs over every app ([Config::overlay]), work from other threads ([Proxy]), and
 //! what a tray app needs besides: an icon with a menu ([tray]), global hotkeys ([hotkey]), its
-//! folders ([paths]), launch at login ([autostart]), its launcher entry on Linux ([desktop]) and
-//! alerts ([Main::alert]); and to reach other apps: links and files opened or shown ([open]), the
+//! folders and the user's Downloads ([paths]), launch at login ([autostart]), its launcher entry
+//! on Linux ([desktop]), alerts ([Main::alert]) and its command line's console on Windows
+//! ([attach_console]); and to reach other apps: links and files opened or shown ([open]), the
 //! OS's permissions ([permissions]), where the user types ([focus]), keys posted to the app in
 //! focus ([keys::post]) and the clipboard, also taken and put back around a paste of the app's own
 //! ([SystemClipboard]).
@@ -64,7 +65,7 @@ pub use keys::{
 pub use scene::{
   Color, Frame, ImageId, Images, Point, Quad, Rect, Scene, Segment, Size, alpha, mix, rgb,
 };
-pub use shell::{Anchor, AppInfo, Main, Presence, Proxy, Window, WindowId, app};
+pub use shell::{Anchor, AppInfo, Main, Presence, Proxy, Window, WindowId, app, attach_console};
 pub use text::edit::{Editor, Lines, Mono, Sel};
 pub use text::{Font, Weight};
 pub use ui::{

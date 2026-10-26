@@ -27,7 +27,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use app::paste::Open;
-pub use app::{activity, autostart, desktop, focus, hotkey, open, paste, post, shell, tray};
+pub use app::{
+  activity, attach_console, autostart, desktop, downloads, focus, hotkey, open, paste, post, shell,
+  tray,
+};
 use keyboard_types::Modifiers;
 pub use settings::appearance;
 use windows_sys::Win32::Foundation::{

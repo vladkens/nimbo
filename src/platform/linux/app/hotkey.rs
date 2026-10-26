@@ -62,6 +62,16 @@ struct State {
   fallback: Cell<bool>,
 }
 
+/// X11's grab and the portal take chords only.
+pub fn modifier_alone() -> bool {
+  false
+}
+
+/// The portal, on Wayland, asks the user to approve the shortcut.
+pub fn start_asks() -> bool {
+  super::wayland()
+}
+
 pub struct Hotkeys(Rc<State>);
 
 impl Hotkeys {

@@ -90,7 +90,9 @@
 //!   when the OS can't take it), `start(&mut self) -> Result<(), String>` (the listener),
 //!   `escape(&mut self, on: bool)` (Escape taken from every app as `Edge::Escape`), and
 //!   `status(&self, &mut Status)` filling the listener, fallback, secure input, counts and, while
-//!   Escape is on, why it is not taken (`escape_error`).
+//!   Escape is on, why it is not taken (`escape_error`). Besides, `modifier_alone() -> bool` (a
+//!   modifier key alone can be the hotkey) and `start_asks() -> bool` (`start` shows the desktop's
+//!   dialog).
 //! - `pub mod autostart` ([crate::autostart]): `available()`, `state(&AppInfo)`, `set(&AppInfo,
 //!   on)`, `open_settings()`.
 //! - `pub mod desktop` ([crate::desktop]): `install(&AppInfo, &Launcher) -> Result<bool, String>`
@@ -116,6 +118,8 @@
 //!   PartialEq + Send + Sync`, another app's window by identity.
 //! - `shell::alert(title: &str, message: &str)` ([crate::Main::alert]): a modal alert on the main
 //!   thread, returning once dismissed.
+//! - Windows only, `downloads() -> Option<PathBuf>` (the Known Folder, [crate::paths::downloads])
+//!   and `attach_console()` ([crate::attach_console]), in `app/`.
 //! - macOS only, `pub mod permissions` ([crate::permissions]): `accessibility(prompt: bool) ->
 //!   bool`, `secure_input() -> bool`, `microphone() -> Access`, `request_microphone(Box<dyn
 //!   FnOnce(bool) + Send>)`.
@@ -190,6 +194,8 @@ pub(crate) use imp::{
   activity, autostart, clipboard, desktop, focus, hotkey, open, paste, perf_cores, post, shell,
   text, tray,
 };
+#[cfg(target_os = "windows")]
+pub(crate) use imp::{attach_console, downloads};
 #[cfg(any(test, target_os = "windows", target_os = "linux"))]
 use keyboard_types::Code;
 
