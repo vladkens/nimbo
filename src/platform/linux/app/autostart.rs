@@ -14,6 +14,14 @@ pub fn available() -> Result<(), String> {
   Ok(())
 }
 
+/// The executable an entry runs: `$APPIMAGE` when the app is one, else the one running now.
+pub(super) fn exe() -> Result<PathBuf, String> {
+  match std::env::var_os("APPIMAGE") {
+    Some(p) => Ok(PathBuf::from(p)),
+    None => std::env::current_exe().map_err(|e| format!("the executable: {e}")),
+  }
+}
+
 /// The entry's file.
 fn entry(app: &AppInfo) -> PathBuf {
   crate::paths::config_dir("autostart").join(format!("{}.desktop", app.id))
@@ -32,16 +40,13 @@ pub fn set(app: &AppInfo, on: bool) -> Result<State, String> {
   let path = entry(app);
   let err = |e: std::io::Error| format!("{}: {e}", path.display());
   if on {
-    let exe = match std::env::var_os("APPIMAGE") {
-      Some(p) => PathBuf::from(p),
-      None => std::env::current_exe().map_err(|e| format!("the executable: {e}"))?,
-    };
-
+    let on_login = [("X-GNOME-Autostart-enabled", "true")];
+    let text = desktop_entry(app, &exe()?.to_string_lossy(), &on_login);
     if let Some(dir) = path.parent() {
       std::fs::create_dir_all(dir).map_err(err)?;
     }
 
-    std::fs::write(&path, desktop_entry(app, &exe.to_string_lossy())).map_err(err)?;
+    std::fs::write(&path, text).map_err(err)?;
   } else if let Err(e) = std::fs::remove_file(&path)
     && e.kind() != std::io::ErrorKind::NotFound
   {

@@ -3,7 +3,8 @@
 //! A tray app with no window of its own: an icon in the menu bar (macOS) or the tray (Windows,
 //! Linux) whose menu opens a counter window and shows its count, a global hotkey that opens or
 //! closes that window from any app, launch at login as a check mark, and an item that pastes a
-//! line where the user types three seconds later, as a dictation app does ([paste]).
+//! line where the user types three seconds later, as a dictation app does ([paste]). On Linux it
+//! writes its launcher entry at start ([desktop]), so the dock shows its icon for the window.
 //!
 //! `cargo run --release --example tray [-- --shot <file.png>]`; the shot is the counter window.
 //! The hotkey is ⌃⌥Space on macOS, Ctrl+Alt+Space elsewhere (on Wayland the desktop asks first,
@@ -22,9 +23,12 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use counter::Counter;
+use nimbo::desktop::Launcher;
 use nimbo::hotkey::{Edge, Hotkeys};
 use nimbo::tray::{Item, Menu, Tray, TrayIcon};
-use nimbo::{AppInfo, Config, Main, Presence, Shortcut, SystemClipboard, Window, autostart};
+use nimbo::{
+  AppInfo, Config, Main, Presence, Shortcut, SystemClipboard, Window, autostart, desktop,
+};
 
 pub const INFO: AppInfo =
   AppInfo { id: "com.example.nimbo-tray", name: "Nimbo Tray", presence: Presence::Accessory };
@@ -84,7 +88,8 @@ fn toggle(main: &mut Main, state: &Shared) {
   match open {
     Some(w) => w.close(),
     None => {
-      let w = main.open(&Config::new("Counter", 360.0, 300.0), Counter::default());
+      let cfg = Config::new("Counter", 360.0, 300.0).icon(64, &counter::ICON);
+      let w = main.open(&cfg, Counter::default());
       let gone = state.clone();
       w.on_close(move |_| gone.borrow_mut().window = None);
       state.borrow_mut().window = Some(w);
@@ -116,6 +121,13 @@ thread_local! {
 }
 
 fn start(main: &mut Main) {
+  // Nothing off Linux; there the entry is written once, again when the executable moves.
+  let icon = (64, &counter::ICON[..]);
+  let launcher = Launcher { comment: "A tray app made with nimbo", categories: &["Utility"], icon };
+  if let Err(e) = desktop::install(&INFO, &launcher) {
+    eprintln!("desktop: {e}");
+  }
+
   let state = STATE.with(Rc::clone);
   let tray = Tray::new(TrayIcon::Path { size: 18.0, d: ICON.into(), even_odd: true }, INFO.name);
   if let Err(e) = nimbo::tray::available() {

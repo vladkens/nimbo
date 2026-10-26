@@ -93,6 +93,8 @@
 //!   Escape is on, why it is not taken (`escape_error`).
 //! - `pub mod autostart` ([crate::autostart]): `available()`, `state(&AppInfo)`, `set(&AppInfo,
 //!   on)`, `open_settings()`.
+//! - `pub mod desktop` ([crate::desktop]): `install(&AppInfo, &Launcher) -> Result<bool, String>`
+//!   and `uninstall(&AppInfo) -> Result<(), String>`; nothing but on Linux.
 //!
 //!   The tray, hotkeys and autostart live in `app/` on each OS (on Windows and Linux with the
 //!   shell), sized apart from the window layer (`scripts/size.py`).
@@ -180,7 +182,8 @@ pub use imp::appearance;
 #[cfg(target_os = "macos")]
 pub(crate) use imp::permissions;
 pub(crate) use imp::{
-  activity, autostart, clipboard, focus, hotkey, open, paste, perf_cores, post, shell, text, tray,
+  activity, autostart, clipboard, desktop, focus, hotkey, open, paste, perf_cores, post, shell,
+  text, tray,
 };
 #[cfg(any(test, target_os = "windows", target_os = "linux"))]
 use keyboard_types::Code;
