@@ -11,12 +11,14 @@ is every line that is not blank, a comment, a doc comment or inside a `#[cfg(tes
 a git ref, a column shows how code moved since it.
 `--map` lists the files with the first sentence of each one's module doc (`//!`): what it does.
 `--check` sums the code per part against its budget (BUDGETS) and fails when one is over, or
-when a budget is not a whole number of hundreds.
+when a budget is not a whole number of hundreds; with `SIZE_WARN` set (CI on `main`, where two
+PRs that each fit can merge into one over) it only warns, so a release still publishes.
 
 uv run scripts/size.py [--files | --map | --check] [--vs <ref>]
 """
 
 import argparse
+import os
 import re
 import subprocess
 from collections import defaultdict
@@ -47,7 +49,7 @@ BUDGETS = {
   "app/shared": 1000,
   "app/macos": 1600,
   "app/windows": 1500,
-  "app/linux": 1900,
+  "app/linux": 2000,
   "a11y": 400,
 }
 # Modules that count against a budget of another name ("app", src/app.rs, is the core's seams).
@@ -218,7 +220,11 @@ def main():
 
   files = files_now()
   if args.check:
-    raise SystemExit(0 if check(table(files, False)) else 1)
+    ok = check(table(files, False))
+    if not ok and os.environ.get("SIZE_WARN"):
+      print("::warning::a part is over its code budget; raise it or trim in the next PR")
+
+    raise SystemExit(0 if ok or os.environ.get("SIZE_WARN") else 1)
 
   if args.map:
     for path in sorted(files, key=lambda p: (p.count("/"), p)):

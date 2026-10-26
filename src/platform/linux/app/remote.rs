@@ -16,8 +16,14 @@
 //! `Response` waited for in a nested main loop: the desktop asks the user the first time only,
 //! as the permission persists (`persist_mode` 2) and the `restore_token` each start gives, kept
 //! in the app's config folder ([crate::paths::config_dir]), lets the next one start without
-//! asking. It lasts as long as the app (GNOME shows it in the top bar); closed by the desktop,
-//! the next paste starts another, and one refused is tried again only after [RETRY].
+//! asking. It lasts only while it is used, as GNOME shows it in the top bar: [LINGER] after its
+//! last use (no request or read of its own waiting then) it closes unless the app serves the
+//! clipboard through it ([paste::serving]), as when another owner took it, a restore had nothing to
+//! put back or the paste failed, and the next paste starts another with the token. One that serves
+//! a restore stays, as closing it would empty the user's clipboard: its icon stays until
+//! something else is copied; so does one with no token saved, as the next would ask again. Closed
+//! by the desktop, the next paste starts another too, and one refused is tried again only after
+//! [RETRY].
 
 use std::cell::{Cell, RefCell};
 use std::ffi::{c_int, c_uint, c_ulong};
@@ -45,10 +51,12 @@ const CLIPBOARD: &str = "org.freedesktop.portal.Clipboard";
 const KEYBOARD: u32 = 1;
 const MS: c_int = 2000;
 /// How long a request may take (the user's answer to the desktop's question), how soon a
-/// session that failed is tried again, and how long the owner may take to give a type.
+/// session that failed is tried again, how long the owner may take to give a type, and how long
+/// a session that serves nothing stays after its last use (a paste's steps come within it).
 const WAIT: Duration = Duration::from_secs(60);
 const RETRY: Duration = Duration::from_secs(2);
 const READ: Duration = Duration::from_millis(500);
+const LINGER: Duration = Duration::from_secs(1);
 
 fns!(Keymap {
   fn gdk_keymap_get_for_display(display: P) -> P;
@@ -61,6 +69,8 @@ pub(super) struct State {
   bus: P,
   session: RefCell<String>,
   clipboard: Cell<bool>,
+  /// Its start saved a token: the next starts without asking.
+  restorable: Cell<bool>,
   signals: RefCell<Vec<c_uint>>,
   /// The types of the clipboard's owner, once another than the app took it.
   owner: RefCell<Option<Vec<String>>>,
@@ -70,14 +80,22 @@ thread_local! {
   static SESSION: RefCell<Option<Rc<State>>> = const { RefCell::new(None) };
   /// When the last session failed, and why: in the future while one starts.
   static FAILED: RefCell<(Option<Instant>, String)> = const { RefCell::new((None, String::new())) };
+  /// [close_unused]'s timer, 0 for none.
+  static TIMER: Cell<c_uint> = const { Cell::new(0) };
+  /// The nested main loops of the session's own calls turning now.
+  static NESTED: Cell<u32> = const { Cell::new(0) };
 }
 
-/// The session, started at the first call; `Err` with why there is none.
+/// The session, started at the first call, closed [LINGER] after the last ([close_unused]);
+/// `Err` with why there is none.
 fn session() -> Result<Rc<State>, String> {
-  if let Some(s) = SESSION.with_borrow(Clone::clone) {
-    return Ok(s);
-  }
+  let s = SESSION.with_borrow(Clone::clone).map_or_else(open, Ok)?;
+  close_unused();
+  Ok(s)
+}
 
+/// Starts the session.
+fn open() -> Result<Rc<State>, String> {
   let (at, why) = FAILED.with_borrow(Clone::clone);
   if at.is_some_and(|t| t.elapsed() < RETRY) {
     return Err(why);
@@ -92,6 +110,20 @@ fn session() -> Result<Rc<State>, String> {
   Ok(s)
 }
 
+/// Closes the session [LINGER] from now unless the app serves the clipboard then; while a call
+/// of its own waits in a nested main loop, later.
+fn close_unused() {
+  let g = gtk();
+  if let id @ 1.. = TIMER.take() {
+    unsafe { (g.g_source_remove)(id) };
+  }
+
+  if SESSION.with_borrow(Option::is_some) {
+    let ms = LINGER.as_millis() as c_uint;
+    TIMER.set(unsafe { (g.g_timeout_add)(ms, on_linger as Fp, null_mut()) });
+  }
+}
+
 /// The session when it has the clipboard (Wayland only).
 pub(super) fn clipboard() -> Option<Rc<State>> {
   let on = super::wayland() && super::shell::running();
@@ -100,10 +132,10 @@ pub(super) fn clipboard() -> Option<Rc<State>> {
 
 /// A session on a connection of its own, its signals followed from the start.
 fn start() -> Result<Rc<State>, String> {
-  let (session, clipboard) = (RefCell::default(), Cell::new(false));
-  let (signals, owner) = (RefCell::default(), RefCell::default());
-  let s =
-    Rc::new(State { bus: portal(super::shell::info().id)?, session, clipboard, signals, owner });
+  let (session, clipboard, restorable) = (RefCell::default(), Cell::default(), Cell::default());
+  let (signals, owner, bus) =
+    (RefCell::default(), RefCell::default(), portal(super::shell::info().id)?);
+  let s = Rc::new(State { bus, session, clipboard, restorable, signals, owner });
   let follow = [
     (CLIPBOARD, "SelectionOwnerChanged", on_owner as Fp),
     (CLIPBOARD, "SelectionTransfer", on_transfer as Fp),
@@ -138,10 +170,10 @@ fn start() -> Result<Rc<State>, String> {
 
   s.clipboard.set(results.get("clipboard_enabled").is_some_and(|v| v.bool()));
   // A token is good for one start: each gives the next.
-  let (file, token) = (token_file(), results.get("restore_token").map(|v| v.str()));
-  let kept = file.parent().map_or(Ok(()), std::fs::create_dir_all);
-  if let Err(e) = kept.and_then(|_| std::fs::write(&file, token.unwrap_or_default())) {
-    eprintln!("nimbo: the remote desktop's restore token: {e}");
+  let token = results.get("restore_token").map(|v| v.str()).unwrap_or_default();
+  match crate::platform::write::file(&token_file(), token.as_bytes()) {
+    Ok(()) => s.restorable.set(!token.is_empty()),
+    Err(e) => eprintln!("nimbo: the remote desktop's restore token: {e}"),
   }
 
   Ok(s)
@@ -301,7 +333,10 @@ fn read(s: &State, kind: &str) -> Option<Vec<u8>> {
 
 /// One turn of the main loop, or a short sleep when nothing was waiting.
 fn turn() {
-  if unsafe { (gtk().g_main_context_iteration)(null_mut(), 0) } == 0 {
+  NESTED.set(NESTED.get() + 1);
+  let idle = unsafe { (gtk().g_main_context_iteration)(null_mut(), 0) } == 0;
+  NESTED.set(NESTED.get() - 1);
+  if idle {
     std::thread::sleep(Duration::from_millis(2));
   }
 }
@@ -360,6 +395,23 @@ unsafe extern "C" fn on_owner(_: P, _: S, _: S, _: S, _: S, args: P, data: P) {
   let types = types.map(|v| (0..v.len()).map(|i| v.child(i).str()).collect());
   *s.owner.borrow_mut() = Some(types.unwrap_or_default());
   paste::lost();
+  close_unused();
+}
+
+/// [close_unused]'s timer: again while a call of the session's own waits.
+unsafe extern "C" fn on_linger(_: P) -> c_int {
+  if NESTED.get() > 0 {
+    return 1;
+  }
+
+  TIMER.set(0);
+  // What GTK serves where the desktop gave no clipboard is not the session's.
+  let serves = |s: &State| s.clipboard.get() && paste::serving();
+  if SESSION.with_borrow(|s| s.as_deref().is_some_and(|s| s.restorable.get() && !serves(s))) {
+    SESSION.set(None);
+  }
+
+  0
 }
 
 /// `SelectionTransfer(o session, s type, u serial)`: an app reads a type of what the app serves,

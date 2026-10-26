@@ -85,11 +85,9 @@ pub(crate) fn install_in(
       continue;
     }
 
-    let err = |e: std::io::Error| format!("{}: {e}", path.display());
-    std::fs::create_dir_all(path.parent().unwrap_or(data)).map_err(err)?;
-    std::fs::write(&path, bytes).map_err(err)?;
+    crate::platform::write::file(&path, &bytes)?;
     if path.starts_with(&hicolor) {
-      date(&hicolor).map_err(err)?;
+      date(&hicolor).map_err(|e| format!("{}: {e}", hicolor.display()))?;
     }
 
     wrote = true;

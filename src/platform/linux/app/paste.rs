@@ -258,6 +258,11 @@ pub(super) fn served() -> Option<Vec<(String, Vec<u8>)>> {
   SERVED.with_borrow(|s| s.as_ref().map(|s| s.types.clone()))
 }
 
+/// The app serves the clipboard.
+pub(super) fn serving() -> bool {
+  SERVED.with_borrow(Option::is_some)
+}
+
 /// Another owner took the clipboard: what the app served goes.
 pub(super) fn lost() {
   SERVED.set(None);
