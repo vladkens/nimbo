@@ -30,9 +30,15 @@
 
 ## 🧭 Why nimbo
 
-It started with a dictation app. The one in use, Handy, is Tauri over a webview and idles at **565 MB**. The rewrite in egui on wgpu pulled in 226 crates and an 18 MB binary, and still didn't look like macOS: egui draws its own text, and its "strong" text changed the colour, not the weight. Four more tries put the same app on egui (glow, then wgpu) and on GPUI (directly, then through a component kit): **337 to 911 crates** in the lockfile, GPUI building only with a vendored patch, and a GPU surface and a text stack of their own for what was a settings window. The same window in plain AppKit idled at **13 MB**.
+I wanted a small, fast dictation app, and every stack I tried for it fell short:
 
-Native controls on each OS kept those 13 MB, but every feature was built three times, 79% of the code was per-platform glue, and a waveform had nowhere to go. So the next toolkit went Sublime Text's way: draw the UI yourself, take the window, the input and the text from the OS. On Metal it opened a window in under 200 ms (Zed: 299 ms), idled at 0.08% CPU and drew text within a few percent of AppKit's coverage. Then came Windows and Linux, where Vulkan alone cost **55–148 MB** of memory; the CPU renderer cost 5 MB, drew a full 2560×1600 frame within 8.3 ms on 8 threads, and an interactive one in 0.02–0.7 ms with damage tracking. The CPU became the renderer everywhere, and GTK 3 loaded at run time replaced a Wayland and X11 layer of our own: 4847 lines and 15 crates down to 2158 lines and none. nimbo is that toolkit, rebuilt as a library.
+- **Tauri** (Handy, the app I used): a webview, **565 MB** at idle.
+- **egui and GPUI**: 337 to 911 crates, a GPU surface and a text stack of their own, and still not the macOS look.
+- **AppKit alone**: **13 MB** at idle, but macOS only.
+- **Native controls on each OS**: every feature written three times, 79% of the code glue.
+- **Drawing the UI myself over the OS's window and text**: right look, small and fast; on the CPU instead of Vulkan, **5 MB** of memory instead of 55–148 MB.
+
+nimbo is that last approach, made into a library.
 
 | | Crates | Clean build | Binary | Accessibility |
 |---|---:|---:|---:|---|
