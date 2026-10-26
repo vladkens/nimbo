@@ -42,11 +42,7 @@ pub fn set(app: &AppInfo, on: bool) -> Result<State, String> {
   if on {
     let on_login = [("X-GNOME-Autostart-enabled", "true")];
     let text = desktop_entry(app, &exe()?.to_string_lossy(), &on_login);
-    if let Some(dir) = path.parent() {
-      std::fs::create_dir_all(dir).map_err(err)?;
-    }
-
-    std::fs::write(&path, text).map_err(err)?;
+    crate::platform::write::file(&path, text.as_bytes())?;
   } else if let Err(e) = std::fs::remove_file(&path)
     && e.kind() != std::io::ErrorKind::NotFound
   {

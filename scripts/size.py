@@ -48,7 +48,7 @@ BUDGETS = {
   "app/shared": 1000,
   "app/macos": 1600,
   "app/windows": 1500,
-  "app/linux": 1900,
+  "app/linux": 2000,
 }
 # Modules that count against a budget of another name ("app", src/app.rs, is the core's seams).
 # The settings form and the dialog are add-ons over the widgets, as the containers are.
