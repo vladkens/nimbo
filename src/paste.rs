@@ -68,7 +68,10 @@ pub struct Paste {
 
 /// Why [text] did not paste.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NotPasted {
+  /// Called off the main thread.
+  NotMain,
   /// The app in focus is not known: when the user asked ([Paste::target] `None`), or now.
   Unknown,
   /// The focus moved from the target to another app, or another window of it.
@@ -89,6 +92,7 @@ pub enum NotPasted {
 impl std::fmt::Display for NotPasted {
   fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
     match self {
+      Self::NotMain => write!(f, "a paste runs on the main thread"),
       Self::Unknown => write!(f, "the app in focus is unknown"),
       Self::FocusMoved { from, to } => write!(f, "the focus moved from {from} to {to}"),
       Self::SecureField => write!(f, "the focused field is a password field"),
@@ -103,9 +107,14 @@ impl std::fmt::Display for NotPasted {
 impl std::error::Error for NotPasted {}
 
 /// Pastes `text` where the user types (see the module docs), on the main thread while the app
-/// runs. Refused before the clipboard changes when the focus is not where `opts` says, or it is a
-/// password field (or Secure Input is on and the app in focus can't tell).
+/// runs ([NotPasted::NotMain] elsewhere). Refused before the clipboard changes when the focus is
+/// not where `opts` says, or it is a password field (or Secure Input is on and the app in focus
+/// can't tell).
 pub fn text(text: &str, opts: Paste) -> Result<(), NotPasted> {
+  if !crate::platform::shell::is_main() {
+    return Err(NotPasted::NotMain);
+  }
+
   paste(SYSTEM, text, opts)
 }
 
@@ -471,5 +480,13 @@ mod tests {
     assert_eq!(key("konsole"), shift);
     assert!(!key("firefox"));
     assert_eq!(paste_key(&None), PASTE);
+  }
+
+  /// The system's paste refuses a thread other than the main one, before it reaches anything.
+  #[test]
+  fn refused_off_the_main_thread() {
+    let opts = Paste { restore: true, target: None };
+    let got = std::thread::spawn(move || text("hello", opts)).join().unwrap();
+    assert_eq!(got, Err(NotPasted::NotMain));
   }
 }

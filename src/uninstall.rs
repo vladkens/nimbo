@@ -12,7 +12,9 @@
 //! The app's own files are the app's to pick: an uninstall quits the running instance first
 //! ([crate::instance::quit_and_wait]), then runs [system], then removes the app's folders
 //! ([crate::paths]: the [outermost] of them, as one may hold another) and the app last, as the
-//! uninstall may run from it:
+//! uninstall may run from it. It runs in a process of its own (the app's `--uninstall` command,
+//! say), not in the running app: there [crate::instance::quit_and_wait] would ask the app's own
+//! main thread, blocked in the wait, to quit, and time out.
 //!
 //! ```no_run
 //! use std::time::Duration;

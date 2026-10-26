@@ -22,6 +22,11 @@ use crate::focus::{self, Focused};
 #[derive(Clone, Debug, PartialEq)]
 pub struct Window(isize);
 
+/// The focus is never hidden here.
+pub fn hidden() -> bool {
+  false
+}
+
 pub fn current() -> Option<Focused> {
   let hwnd = unsafe { GetForegroundWindow() };
   if hwnd.is_null() {

@@ -13,13 +13,14 @@
 
 use std::any::TypeId;
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::io;
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use crate::instance::{Command, Instance, OPEN};
+use crate::instance::{Command, Instance, OPEN, QUIT};
 use crate::platform::shell as imp;
 use crate::{App, Config, Point, Size};
 
@@ -101,8 +102,9 @@ type OnReopen = Box<dyn FnMut(&mut Main)>;
 type OnCommand = Box<dyn FnMut(&mut Main, &Command)>;
 
 /// What every platform's loop keeps alike: the open windows by id, each with its app's type and
-/// close callback, the reopen and quit hooks, and the instance served with its handler and the
-/// activation token of the command it handles.
+/// close callback, the reopen and quit hooks, and the instance served with its handler, the
+/// commands that came while one runs, and the activation token of the one it handles (and
+/// whether a window used it).
 #[derive(Default)]
 struct Hooks {
   windows: Vec<(u64, TypeId, Option<OnMain>)>,
@@ -110,7 +112,8 @@ struct Hooks {
   quit: Option<OnMain>,
   instance: Option<Instance>,
   command: Option<OnCommand>,
-  token: Option<String>,
+  queued: Option<VecDeque<Command>>,
+  token: Option<(String, bool)>,
 }
 
 thread_local! {
@@ -161,26 +164,58 @@ pub(crate) fn reopened() {
 }
 
 /// A command came to the instance [Main::serve] keeps: the reopen hook for a bare [OPEN], then
-/// the handler, the command's activation token kept meanwhile.
-fn command(main: &mut Main, cmd: Command) {
-  hooks(|h| h.token = cmd.token.clone());
+/// the handler, the command's activation token kept meanwhile, then [Main::quit] for [QUIT]. One
+/// that comes while another runs (from a nested loop: a dialog, a paste waiting for the portal)
+/// is queued and runs after it. `quit` is [Main::quit], a test's fake in tests.
+fn command(main: &mut Main, cmd: Command, quit: &dyn Fn(&mut Main)) {
+  let busy = hooks(|h| h.queued.as_mut().map(|q| q.push_back(cmd.clone())).is_some());
+  if busy {
+    return;
+  }
+
+  hooks(|h| h.queued = Some(VecDeque::new()));
+  let mut next = Some(cmd);
+  while let Some(cmd) = next {
+    handle(main, &cmd, quit);
+    next = hooks(|h| h.queued.as_mut().and_then(VecDeque::pop_front));
+  }
+
+  hooks(|h| h.queued = None);
+}
+
+/// One command, as [command] says.
+fn handle(main: &mut Main, cmd: &Command, quit: &dyn Fn(&mut Main)) {
+  hooks(|h| h.token = cmd.token.clone().map(|t| (t, false)));
   if cmd.name == OPEN {
     reopened();
   }
 
   if let Some(mut f) = hooks(|h| h.command.take()) {
-    f(main, &cmd);
+    f(main, cmd);
     hooks(|h| _ = h.command.get_or_insert(f));
   }
 
-  hooks(|h| h.token = None);
+  if cmd.name == QUIT {
+    quit(main);
+  }
+
+  // No window came forward with the token: the launcher stops its busy cursor (Linux).
+  let _unused = hooks(|h| h.token.take()).filter(|t| !t.1);
+  #[cfg(target_os = "linux")]
+  if let Some((token, _)) = _unused {
+    crate::platform::startup_complete(&token);
+  }
 }
 
 /// The activation token of the command being handled, for a window that shows or comes to the
-/// front meanwhile.
+/// front meanwhile: used by it.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) fn token() -> Option<String> {
-  hooks(|h| h.token.clone())
+  hooks(|h| {
+    let (token, used) = h.token.as_mut()?;
+    *used = true;
+    Some(token.clone())
+  })
 }
 
 /// The app ends: its quit hook runs (once), a paste's clipboard comes back ([crate::paste]),
@@ -262,17 +297,18 @@ impl Main {
 
   /// Serves the app's one instance ([crate::instance::claim]) until the loop ends, keeping it
   /// and its lock (replacing an earlier one): `f` runs on the main thread with each command
-  /// another process sends ([crate::instance::send]); a bare [OPEN] runs [Main::on_reopen]'s hook
-  /// first. While they run, a window [Main::open] shows or [Window::front] brings forward comes
-  /// to the front with the command's activation token (Linux; Windows lets it through the
-  /// sender). `Err` when its thread can't start.
+  /// another process sends ([crate::instance::send]), one at a time; a bare [OPEN] runs
+  /// [Main::on_reopen]'s hook first, and [QUIT] quits after it ([Main::quit]: the app's cleanup
+  /// is in [Main::on_quit]). While they run, a window [Main::open] shows or [Window::front] brings
+  /// forward comes to the front with the command's activation token (Linux; Windows lets it
+  /// through the sender). `Err` when its thread can't start.
   pub fn serve(
     &mut self,
     mut instance: Instance,
     f: impl FnMut(&mut Main, &Command) + 'static,
   ) -> io::Result<()> {
     let proxy = self.proxy();
-    instance.listen(move |cmd| proxy.post(move |main| command(main, cmd)))?;
+    instance.listen(move |cmd| proxy.post(move |main| command(main, cmd, &Main::quit)))?;
     let f: OnCommand = Box::new(f);
     hooks(|h| (h.instance, h.command) = (Some(instance), Some(f)));
     Ok(())
@@ -495,7 +531,7 @@ mod tests {
   }
 
   /// A command runs the handler with its token kept meanwhile; a bare "open" the reopen hook
-  /// first, with the token too.
+  /// first, with the token too; "quit" quits after the handler.
   #[test]
   fn commands_run_their_handler_with_the_token() {
     let seen = Rc::new(RefCell::new(Vec::new()));
@@ -505,15 +541,44 @@ mod tests {
     let f =
       move |_: &mut Main, c: &Command| s.borrow_mut().push(format!("{} {:?}", c.name, token()));
     hooks(|h| h.command = Some(Box::new(f)));
-    let cmd =
-      |name: &str, token: Option<&str>| Command { name: name.into(), token: token.map(Into::into) };
-    command(&mut Main::here(), cmd("open", Some("t1")));
-    command(&mut Main::here(), cmd("quit", None));
-    command(&mut Main::here(), cmd("open now", Some("t2")));
-    let want =
-      [r#"reopen Some("t1")"#, r#"open Some("t1")"#, "quit None", r#"open now Some("t2")"#];
+    let s = seen.clone();
+    let quit = move |_: &mut Main| s.borrow_mut().push("quits".into());
+    command(&mut Main::here(), cmd("open", Some("t1")), &quit);
+    command(&mut Main::here(), cmd("quit", None), &quit);
+    command(&mut Main::here(), cmd("open now", Some("t2")), &quit);
+    let want = [
+      r#"reopen Some("t1")"#,
+      r#"open Some("t1")"#,
+      "quit None",
+      "quits",
+      r#"open now Some("t2")"#,
+    ];
     assert_eq!(*seen.borrow(), want);
     assert_eq!(token(), None, "only while it runs");
     HOOKS.take();
+  }
+
+  /// A command that comes while the handler runs (a nested loop dispatches it) waits for it,
+  /// then runs with its own token; the first keeps its token meanwhile.
+  #[test]
+  fn a_command_during_the_handler_runs_after_it() {
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let s = seen.clone();
+    let f = move |main: &mut Main, c: &Command| {
+      if c.name == "first" {
+        command(main, cmd("second", Some("t2")), &|_| {});
+      }
+
+      s.borrow_mut().push(format!("{} {:?}", c.name, token()));
+    };
+    hooks(|h| h.command = Some(Box::new(f)));
+    command(&mut Main::here(), cmd("first", Some("t1")), &|_| {});
+    assert_eq!(*seen.borrow(), [r#"first Some("t1")"#, r#"second Some("t2")"#]);
+    assert_eq!(token(), None);
+    HOOKS.take();
+  }
+
+  fn cmd(name: &str, token: Option<&str>) -> Command {
+    Command { name: name.into(), token: token.map(Into::into) }
   }
 }

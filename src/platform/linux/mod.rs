@@ -129,6 +129,7 @@ fns!(Gtk {
   fn gtk_window_present(w: P);
   fn gtk_window_set_startup_id(w: P, id: S);
   fn gdk_notify_startup_complete();
+  fn gdk_notify_startup_complete_with_id(id: S);
   fn gtk_window_is_active(w: P) -> c_int;
   fn gtk_widget_destroy(w: P);
   fn gtk_dialog_run(d: P) -> c_int;
@@ -503,8 +504,8 @@ fn front(id: u64) {
     overlay::place(window, size, anchor, true);
   }
 
-  let token =
-    crate::shell::token().filter(|_| overlay.is_none()).and_then(|t| CString::new(t).ok());
+  let token = overlay.is_none().then(crate::shell::token).flatten();
+  let token = token.and_then(|t| CString::new(t).ok());
   // SAFETY: GTK's calls on a window of ours.
   unsafe {
     if let Some(token) = token {
@@ -536,7 +537,18 @@ fn front(id: u64) {
 /// tells it then).
 fn started() {
   if !WINS.with_borrow(|ws| ws.iter().any(|s| s.shown)) {
+    // SAFETY: GDK's call on the main thread, after `init` opened the display.
     unsafe { (gtk().gdk_notify_startup_complete)() };
+  }
+}
+
+/// A command with the launch's `token` was served and no window came forward with it
+/// ([crate::shell]): the launcher stops its busy cursor for that launch.
+pub(crate) fn startup_complete(token: &str) {
+  let Ok(token) = CString::new(token) else { return };
+  if app::shell::running() {
+    // SAFETY: GDK's call on the main thread while the app runs, with a NUL-terminated string.
+    unsafe { (gtk().gdk_notify_startup_complete_with_id)(token.as_ptr()) };
   }
 }
 

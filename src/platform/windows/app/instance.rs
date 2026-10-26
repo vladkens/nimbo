@@ -36,7 +36,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{ASFW_ANY, AllowSetForegroundWi
 
 use crate::instance::{READ_TIMEOUT, hash, read_polled};
 
-/// How long a sender waits while the pipe serves another, and the instance for its thread to end.
+/// How long the instance waits for its thread to end.
 const BUSY_WAIT: Duration = Duration::from_secs(2);
 const POLL: Duration = Duration::from_millis(5);
 /// Full access for the pipe's owner (this user) and the system, none for anyone else: the
@@ -65,7 +65,7 @@ impl Drop for Server {
     let Some(thread) = self.thread.take() else { return };
     let deadline = Instant::now() + BUSY_WAIT;
     while !thread.is_finished() && Instant::now() < deadline {
-      _ = client(&self.path);
+      _ = client(&self.path, deadline);
       thread::sleep(Duration::from_millis(10));
     }
 
@@ -170,10 +170,10 @@ fn pipe_path(dir: &Path) -> PathBuf {
   PathBuf::from(format!(r"\\.\pipe\nimbo-{id:016x}"))
 }
 
-/// Connects, waiting while the pipe serves another sender. The instance may only identify the
-/// sender, not act as it: a pipe of that name made by another process gets no rights of ours.
-fn client(path: &Path) -> io::Result<File> {
-  let deadline = Instant::now() + BUSY_WAIT;
+/// Connects, waiting until `deadline` while the pipe serves another sender. The instance may only
+/// identify the sender, not act as it: a pipe of that name made by another process gets no rights
+/// of ours.
+fn client(path: &Path, deadline: Instant) -> io::Result<File> {
   loop {
     let mut options = File::options();
     options.read(true).write(true).security_qos_flags(SECURITY_IDENTIFICATION);
@@ -186,16 +186,15 @@ fn client(path: &Path) -> io::Result<File> {
   }
 }
 
-/// Sends `line` to the instance for `dir`, back once it has read it.
-pub fn send(dir: &Path, line: &str) -> io::Result<()> {
+/// Sends `line` to the instance for `dir`, back once it has read it, or `TimedOut` at `deadline`.
+pub fn send(dir: &Path, line: &str, deadline: Instant) -> io::Result<()> {
   // The instance runs in the background: its window comes to the front only if the process in
   // front (this one) lets it.
   // SAFETY: no preconditions.
   unsafe { AllowSetForegroundWindow(ASFW_ANY) };
-  let mut pipe = client(&pipe_path(dir))?;
+  let mut pipe = client(&pipe_path(dir), deadline)?;
   pipe.write_all(line.as_bytes())?;
   // The instance hangs up once it has the line, within its READ_TIMEOUT.
-  let deadline = Instant::now() + BUSY_WAIT;
   while available(pipe.as_raw_handle()).is_some() {
     if Instant::now() >= deadline {
       return Err(io::Error::new(io::ErrorKind::TimedOut, "the app did not take the command"));

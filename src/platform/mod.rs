@@ -108,7 +108,8 @@
 //! - `pub(crate) mod instance` ([crate::instance]), one file for every Unix
 //!   (`linux/app/instance.rs`) and Windows' (`windows/app/instance.rs`): `lock_file(&Path) ->
 //!   io::Result<File>`, `Server` with `bind(dir, lock)` and `serve(on: impl Fn(&str) + Send)`, a
-//!   thread that calls `on` with each line, both let go on drop, and `send(dir, line)`.
+//!   thread that calls `on` with each line, both let go on drop, and `send(dir, line, deadline:
+//!   Instant)`, `NotFound` or `ConnectionRefused` when nothing listens.
 //! - `pub mod uninstall` ([crate::uninstall]): `steps(&AppInfo) -> Vec<Step>`, what the OS keeps
 //!   for the app besides launch at login, undone (macOS its permissions and defaults, Linux the
 //!   launcher entry and the portal's token), and `busy(&io::Error) -> bool`, an error a removal may
@@ -124,12 +125,15 @@
 //!   `offer(&str, Option<Box<dyn FnMut()>>) -> Option<u64>` (the text marked for clipboard managers
 //!   to skip, handed out at a read that runs the callback when there is one) and `holds(u64) ->
 //!   bool` (nothing was written since that offer).
-//! - `pub mod focus` ([crate::focus]): `current() -> Option<Focused>` and `Window: Clone + Debug +
-//!   PartialEq + Send + Sync`, another app's window by identity.
+//! - `pub mod focus` ([crate::focus]): `current() -> Option<Focused>`, `hidden() -> bool` (the OS
+//!   hides the focus: `current` is always `None`) and `Window: Clone + Debug + PartialEq + Send +
+//!   Sync`, another app's window by identity.
 //! - `shell::alert(title: &str, message: &str)` ([crate::Main::alert]): a modal alert on the main
 //!   thread, returning once dismissed.
 //! - Windows only, `downloads() -> Option<PathBuf>` (the Known Folder, [crate::paths::downloads])
 //!   and `attach_console()` ([crate::attach_console]), in `app/`.
+//! - Linux only, `startup_complete(token: &str)`: the launcher's busy cursor stops for a launch
+//!   whose command ([crate::Main::serve]) brought no window forward.
 //! - macOS only, `pub mod permissions` ([crate::permissions]): `accessibility(prompt: bool) ->
 //!   bool`, `secure_input() -> bool`, `microphone() -> Access`, `request_microphone(Box<dyn
 //!   FnOnce(bool) + Send>)`.
@@ -206,6 +210,8 @@ use std::time::{Duration, Instant};
 pub use imp::appearance;
 #[cfg(target_os = "macos")]
 pub(crate) use imp::permissions;
+#[cfg(target_os = "linux")]
+pub(crate) use imp::startup_complete;
 pub(crate) use imp::{
   activity, autostart, clipboard, desktop, focus, hotkey, open, paste, perf_cores, post, shell,
   text, tray, uninstall,

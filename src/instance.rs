@@ -30,8 +30,9 @@
 //! nimbo::app(INFO, |main| {
 //!   // A second launch's "open" runs this, as a reopen from the Dock does.
 //!   main.on_reopen(|_main| { /* show the settings */ });
+//!   // "quit" quits after the handler; the app's own commands come here.
 //!   if let Some(instance) = instance {
-//!     _ = main.serve(instance, |main, cmd| if cmd.name == instance::QUIT { main.quit() });
+//!     _ = main.serve(instance, |_main, cmd| eprintln!("command: {}", cmd.name));
 //!   }
 //! });
 //! ```
@@ -52,11 +53,17 @@ use crate::platform::instance as imp;
 
 /// Shows the app: what a second launch sends. [Main::serve] runs [Main::on_reopen]'s hook for it.
 pub const OPEN: &str = "open";
-/// Quits the app, for [quit_and_wait]: the app's handler answers it with [Main::quit].
+/// Quits the app, for [quit_and_wait]: [Main::serve] runs [Main::quit] after the app's handler.
 pub const QUIT: &str = "quit";
 
 /// The lock's file in the instance's folder.
 const LOCK: &str = "instance.lock";
+/// How long [send_in] may take: the instance may still be starting, and on Windows the pipe
+/// may serve another sender, then the instance reads the line.
+const SEND_WAIT: Duration = Duration::from_secs(3);
+/// How long a sender tries while the lock is held but nothing takes the command: an instance
+/// that started at the same time has yet to listen.
+const STARTING: Duration = Duration::from_secs(1);
 /// How long a sender may take to send its line.
 pub(crate) const READ_TIMEOUT: Duration = Duration::from_secs(1);
 /// The longest line taken: a command and an activation token.
@@ -154,15 +161,31 @@ pub fn send(app: &AppInfo, name: &str) -> io::Result<()> {
 }
 
 /// Sends the command `name` to the instance for `dir`, with this process's activation token
-/// ([Command::token]); `Err` when none runs. On Windows it waits until the instance has read it,
-/// and lets it come to the front: this process, in front, allows it.
+/// ([Command::token]), within 3 s: an instance that holds the lock but doesn't listen yet (it
+/// started at the same time) is given a second; `Err` when none runs. On Windows it waits until
+/// the instance has read it, and lets it come to the front: this process, in front, allows it.
 pub fn send_in(dir: &Path, name: &str) -> io::Result<()> {
-  deliver(dir, &Command::new(name))
+  deliver(dir, &Command::new(name), Instant::now() + SEND_WAIT)
 }
 
-fn deliver(dir: &Path, cmd: &Command) -> io::Result<()> {
+/// Sends `cmd` by `deadline`, tried again for up to [STARTING] while nothing takes it but an
+/// instance holds the lock.
+fn deliver(dir: &Path, cmd: &Command, deadline: Instant) -> io::Result<()> {
   let bad = || io::Error::new(ErrorKind::InvalidInput, "a command is one line without tabs");
-  imp::send(dir, &cmd.line().ok_or_else(bad)?)
+  let line = cmd.line().ok_or_else(bad)?;
+  let retry = deadline.min(Instant::now() + STARTING);
+  loop {
+    match imp::send(dir, &line, deadline) {
+      Err(e)
+        if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::ConnectionRefused)
+          && Instant::now() < retry
+          && running(dir).unwrap_or(false) =>
+      {
+        thread::sleep(Duration::from_millis(20));
+      }
+      sent => return sent,
+    }
+  }
 }
 
 /// Asks the app's instance to quit ([QUIT]) and waits up to `timeout` for its lock:
@@ -171,9 +194,10 @@ pub fn quit_and_wait(app: &AppInfo, timeout: Duration) -> io::Result<()> {
   quit_and_wait_in(&crate::paths::data_dir(app.id), timeout)
 }
 
-/// Asks the instance for `dir` to quit ([QUIT], which its handler answers with [Main::quit]) and
+/// Asks the instance for `dir` to quit ([QUIT], which [Main::serve] answers with [Main::quit]) and
 /// waits up to `timeout` for it to let its lock go: `Ok` once none runs (at once when none did),
-/// `Err` of [ErrorKind::TimedOut] while one still does. Before an uninstall removes its files.
+/// `Err` of [ErrorKind::TimedOut] while one still does; sending counts in the `timeout`. Before an
+/// uninstall removes its files, from a process other than the app's.
 pub fn quit_and_wait_in(dir: &Path, timeout: Duration) -> io::Result<()> {
   let deadline = Instant::now() + timeout;
   let mut asked = false;
@@ -184,7 +208,7 @@ pub fn quit_and_wait_in(dir: &Path, timeout: Duration) -> io::Result<()> {
 
     if !asked {
       asked = true;
-      _ = send_in(dir, QUIT);
+      _ = deliver(dir, &Command::new(QUIT), deadline);
     }
 
     thread::sleep(Duration::from_millis(20));
@@ -301,7 +325,7 @@ mod tests {
     let (instance, rx) = serve(&dir.0);
     let open =
       Command { name: OPEN.into(), token: Some("gnome-shell/App/1234-1-host_TIME42".into()) };
-    deliver(&dir.0, &open).unwrap();
+    deliver(&dir.0, &open, Instant::now() + SEND_WAIT).unwrap();
     assert_eq!(recv(&rx), open);
     send_in(&dir.0, "show settings").unwrap();
     assert_eq!(recv(&rx).name, "show settings");
@@ -336,7 +360,8 @@ mod tests {
     let took = Instant::now();
     let err = quit_and_wait_in(&dir.0, Duration::from_millis(100)).unwrap_err();
     assert_eq!(err.kind(), ErrorKind::TimedOut);
-    assert!(took.elapsed() >= Duration::from_millis(100));
+    let took = took.elapsed();
+    assert!(took >= Duration::from_millis(100) && took < Duration::from_millis(600), "{took:?}");
     assert_eq!(recv(&rx).name, QUIT);
 
     // The app quits on it, from its loop.
@@ -347,6 +372,26 @@ mod tests {
     quit_and_wait_in(&dir.0, Duration::from_secs(5)).unwrap();
     app.join().unwrap();
     assert!(matches!(claim_in(&dir.0).unwrap(), Claim::Primary(_)));
+  }
+
+  /// A second launch that finds the lock taken before the first listens (both started at once)
+  /// waits for it.
+  #[test]
+  fn a_send_waits_for_an_instance_that_is_starting() {
+    let dir = Dir::new("starting");
+    let lock = imp::lock_file(&dir.0.join(LOCK)).unwrap();
+    lock.try_lock().unwrap();
+    let path = dir.0.clone();
+    let first = thread::spawn(move || {
+      thread::sleep(Duration::from_millis(200));
+      let mut instance = Instance(imp::Server::bind(&path, lock).unwrap());
+      let (tx, rx) = mpsc::channel();
+      instance.listen(move |cmd| _ = tx.send(cmd)).unwrap();
+      (instance, rx)
+    });
+    send_in(&dir.0, OPEN).unwrap();
+    let (_instance, rx) = first.join().unwrap();
+    assert_eq!(recv(&rx).name, OPEN);
   }
 
   #[test]

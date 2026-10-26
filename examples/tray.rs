@@ -65,12 +65,12 @@ pub fn menu(s: &Shown) -> Menu {
 }
 
 #[derive(Default)]
-struct State {
+pub struct State {
   window: Option<Window<Counter>>,
   hotkeys: Option<Hotkeys>,
 }
 
-type Shared = Rc<RefCell<State>>;
+pub type Shared = Rc<RefCell<State>>;
 
 fn shown(state: &Shared) -> Shown {
   let s = state.borrow();
@@ -83,10 +83,15 @@ fn shown(state: &Shared) -> Shown {
   Shown { count, login, hotkey }
 }
 
+/// The counter while it is open; the state's borrow ends before the caller opens or closes it,
+/// which borrows the state again.
+pub fn open_counter(state: &Shared) -> Option<Window<Counter>> {
+  state.borrow().window.clone().filter(|w| w.is_open())
+}
+
 /// Opens the counter, or closes it when open.
 fn toggle(main: &mut Main, state: &Shared) {
-  let open = state.borrow().window.clone().filter(|w| w.is_open());
-  match open {
+  match open_counter(state) {
     Some(w) => w.close(),
     None => {
       let cfg = Config::new("Counter", 360.0, 300.0).icon(64, &counter::ICON);
@@ -100,7 +105,7 @@ fn toggle(main: &mut Main, state: &Shared) {
 
 /// Shows the counter, opening it when closed.
 fn show(main: &mut Main, state: &Shared) {
-  match state.borrow().window.clone().filter(|w| w.is_open()) {
+  match open_counter(state) {
     Some(w) => w.front(),
     None => toggle(main, state),
   }
@@ -181,12 +186,9 @@ fn start(main: &mut Main, instance: Option<Instance>) {
 
   // A second launch's "open" shows the counter, as opening the app again does on macOS.
   main.on_reopen(|main| STATE.with(|s| show(main, s)));
+  // "quit" (an uninstaller's) quits after the handler: the tray has no commands of its own.
   if let Some(instance) = instance
-    && let Err(e) = main.serve(instance, |main, cmd| {
-      if cmd.name == instance::QUIT {
-        main.quit();
-      }
-    })
+    && let Err(e) = main.serve(instance, |_, _| {})
   {
     eprintln!("instance: {e}");
   }
