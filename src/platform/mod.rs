@@ -172,6 +172,11 @@ mod linux;
 #[cfg(target_os = "linux")]
 use linux as imp;
 
+/// Linux's, for its files in the user's folders: on every Unix for [crate::desktop]'s tests.
+#[cfg(any(all(test, unix), target_os = "linux"))]
+#[path = "linux/app/write.rs"]
+pub(crate) mod write;
+
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 compile_error!("nimbo runs on macOS, Windows and Linux");
 
