@@ -30,16 +30,17 @@
 
 ## 🧭 Why nimbo
 
-I wanted a small, fast dictation app, and every stack I tried for it fell short:
+I set out to replace Handy, the dictation app I use about 400 times a day (77,597 dictations in 208 days), with one that uses little memory and feels native:
 
-- **Tauri** (Handy, the app I used): a webview, **565 MB** at idle.
-- **egui**: 226–391 crates, an 18 MB binary, its own text that never matched CoreText.
-- **GPUI**: 695–911 crates, and it built only with a vendored patch.
-- **AppKit alone**: **13 MB** at idle, but macOS only.
-- **Native controls on each OS**: every feature written three times, 79% of the code glue.
-- **Drawing the UI myself over the OS's window and text**: a window on screen in under 200 ms (Zed: 299 ms), and on the CPU **5 MB** of memory where Vulkan took 55–148 MB.
+- **Handy** (Tauri + WebKit): **565 MB** at idle on an M2.
+- **egui and GPUI**, four experiments: a GPU surface and a text stack of their own even for a settings window, 337–911 crates, and still not System Settings' look, even with SF's font axes tuned by hand.
+- **AppKit**: **13 MB** at idle and no wakeups, but macOS only.
+- **Native controls on three systems**: every feature written three times, 79% of the code glue, and no place for a waveform.
+- **How Sublime does it**, read from its binaries: a thin platform layer, the system's text everywhere, CPU drawing outside the Mac.
+- **The same in Rust**: 9k lines on 13 crates ran a Sublime Merge–like browser over 100k commits and a chart over 100k candles; an 8 s build, a 1 MB binary, a window on screen in under 200 ms (Zed: 299 ms).
+- **The CPU everywhere**: Vulkan took 55–148 MB on Windows, the CPU renderer 5 MB, a full 2560×1600 frame within 8.3 ms.
 
-nimbo is that last approach as a library: **13 crates**, a **1.1 MB** binary, a clean build in **10 s**.
+nimbo is that toolkit as a library: **13 crates**, a **1.1 MB** binary, a clean build in **10 s**.
 
 ## 🤖 How it's made
 
