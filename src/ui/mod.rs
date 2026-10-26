@@ -1203,9 +1203,11 @@ impl<'a> Ui<'a> {
     let t = &self.st.tree;
     let moved = t.settle.iter().any(|&(id, seen)| t.get(id).map(|n| (n.rect, n.content)) != seen);
     moved
-      || t.partial.iter().any(|&(i, lo, hi)| {
-        let n = &t.nodes[i as usize];
-        lo > n.scroll.y + 0.5 || hi < n.scroll.y + n.rect.h - 0.5
+      || t.partial.iter().any(|&(i, b, lo, hi)| {
+        let (n, b) = (&t.nodes[i as usize], &t.nodes[b as usize]);
+        // The block's top in the container's content: 0 for the container itself.
+        let top = if std::ptr::eq(n, b) { 0.0 } else { b.rect.y - n.rect.y + n.scroll.y };
+        top + lo > n.scroll.y + 0.5 || top + hi < n.scroll.y + n.rect.h - 0.5
       })
   }
 

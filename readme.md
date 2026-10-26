@@ -18,7 +18,7 @@
 - 🖌️ **One look on three systems**, measured from macOS System Settings, in light and dark and the system's accent colour
 - 🔤 **The system's text stack**: CoreText, DirectWrite or FreeType with HarfBuzz; shaping, subpixel positioning, colour emoji, input methods
 - 🖥️ **A CPU renderer**: no GPU, shaders or drivers to ship; frames paced to the display, an idle window asleep
-- 🧩 **Widgets as headless behaviours** plus a theme: buttons, switches, fields, selects, tabs, splits, dialogs, a list of 100k rows; or your own look over the same behaviour
+- 🧩 **Widgets as headless behaviours** plus a theme: buttons, switches, fields, selects, tabs, splits, dialogs, lists and form pages of 500k rows built in view only; or your own look over the same behaviour
 - 🛎️ **Tray and HUD apps**: a tray menu, global hotkeys, launch at login, overlays that never take the focus, the system's permissions
 - 📂 **Files**: the system's open and save panels, files dragged onto a window
 - 🧪 **A headless harness**: every example renders to a PNG without a window; tests click, type and check pixels, in parallel
@@ -102,6 +102,7 @@ cargo run --release --example gallery -- --shot gallery.png    # the same, rende
 - `settings`: a macOS-style settings window
 - `files`: open and save panels, drag and drop
 - `lists`: a list of 100,000 rows, menus, tabs, a split
+- `history`: 86,000 rows a day at a time in a form, built in view only
 - `fields`: text fields and input methods
 - `text`: fonts, scripts, emoji
 - `shapes`: what the renderer draws

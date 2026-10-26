@@ -36,9 +36,12 @@
 //! toolbar is a pick ([Ui::pick_behavior]): a click, or the arrows while it has focus (Tab), choose
 //! a tab.
 
+use std::ops::Range;
+
+use super::containers::lazy::Spans;
 use super::theme::Theme;
 use super::widgets::Icon;
-use super::{Align, Dim, Float, Response, Shadow, Style, TextStyle, Ui, grow, px, rigid};
+use super::{Align, Dim, Float, Id, Response, Shadow, Style, TextStyle, Ui, grow, px, rigid};
 use crate::scene::{Color, Frame, Quad, Rect, alpha, mix, rgb};
 use crate::text::{Font, Weight};
 
@@ -359,33 +362,46 @@ impl Ui<'_> {
     let fs = *fs;
     // The page's first section starts at the page's top; the others 30 under the plate above.
     let first = self.st.stack.last().is_none_or(|&(_, n)| n == 0);
-    let line = match fs.head.line_h > 0.0 {
-      true => fs.head.line_h,
-      false => self.metrics(fs.head.font).line_height(),
-    };
-
     self.col(Style::new().w(grow()), |ui| {
       if !title.is_empty() {
-        let mut pad = fs.head_pad;
-        if first {
-          pad[0] = 0.0;
-        }
-
-        let head = Style::new().w(grow()).pads(pad).gap(12.0);
-        ui.row(head.align(Align::Start, Align::Start), |ui| {
-          ui.col(Style::new().w(grow()).gap(fs.subtitle_gap), |ui| {
-            ui.text(title, fs.head);
-            if !subtitle.is_empty() {
-              ui.text(subtitle, fs.subtitle);
-            }
-          });
-          // On the title's line.
-          ui.row(Style::new().min_h(line).align(Align::Start, Align::Center), note);
-        });
+        ui.form_head(&fs, title, subtitle, if first { 0.0 } else { fs.head_pad[0] }, note);
       }
 
       ui.col(fs.group.clip(), rows);
     })
+  }
+
+  /// A section's title line: the title (and `subtitle` under it), what `note` builds at its
+  /// right, `top` over it and [FormStyle::head_pad] around the rest.
+  fn form_head(
+    &mut self,
+    fs: &FormStyle,
+    title: &str,
+    sub: &str,
+    top: f32,
+    note: impl FnOnce(&mut Self),
+  ) {
+    let line = self.head_line(fs);
+    let [_, r, b, l] = fs.head_pad;
+    let head = Style::new().w(grow()).pads([top, r, b, l]).gap(12.0);
+    self.row(head.align(Align::Start, Align::Start), |ui| {
+      ui.col(Style::new().w(grow()).gap(fs.subtitle_gap), |ui| {
+        ui.text(title, fs.head);
+        if !sub.is_empty() {
+          ui.text(sub, fs.subtitle);
+        }
+      });
+      // On the title's line.
+      ui.row(Style::new().min_h(line).align(Align::Start, Align::Center), note);
+    });
+  }
+
+  /// A section title's line height.
+  fn head_line(&mut self, fs: &FormStyle) -> f32 {
+    match fs.head.line_h > 0.0 {
+      true => fs.head.line_h,
+      false => self.metrics(fs.head.font).line_height(),
+    }
   }
 
   /// A row of the section being built: the tile, the label (with its ⓘ and description) at the
@@ -603,6 +619,123 @@ impl Ui<'_> {
   }
 }
 
+impl<'a> Ui<'a> {
+  /// Form sections built in view only, for a long page in a [Ui::form_scroll] (a
+  /// [Ui::virtual_col]): a section for each of `groups`, its title (with what `note(ui, g)`
+  /// builds at its right) over a plate of its rows, each `row_h` high without the hairline
+  /// above it and built with `row(ui, g, i)` as [Ui::form_row]'s are. Each row is its piece of
+  /// the plate: rounded at the section's ends, the hairline above all but the first; keyed by
+  /// `key(g, i)`, so its ids, hover and focus stay as rows come and go above it. Returns the
+  /// column's items built: each section's title, then its rows.
+  pub fn form_list(
+    &mut self,
+    fs: &FormStyle,
+    groups: &[(&str, usize)],
+    row_h: f32,
+    key: &dyn Fn(usize, usize) -> u64,
+    mut note: impl FnMut(&mut Ui<'a>, usize),
+    mut row: impl FnMut(&mut Ui<'a>, usize, usize),
+  ) -> Range<usize> {
+    let fs = *fs;
+    let first = self.st.stack.last().is_none_or(|&(_, n)| n == 0);
+    // A title's top: the page's gap and the title's padding, none for the page's first.
+    let top = |g: usize| if g == 0 && first { 0.0 } else { fs.page.gap + fs.head_pad[0] };
+    let head_h = self.head_line(&fs) + fs.head_pad[2];
+    let (row_h, hair) = (row_h as f64, fs.hairline as f64);
+    let mut sec = Sections { starts: vec![0], tops: vec![0.0], heads: vec![], row_h, hair };
+    for (g, &(_, n)) in groups.iter().enumerate() {
+      let head = (top(g) + head_h) as f64;
+      sec.heads.push(head);
+      sec.starts.push(sec.starts[g] + 1 + n);
+      sec.tops.push(sec.tops[g] + head + sec.rows(n));
+    }
+
+    let (r, [l, rr], line) = (fs.group.radii[0], fs.inset, fs.divider);
+    // A title by its section, a row by the app's key.
+    let item = |k: usize| {
+      let g = sec.starts.partition_point(|&s| s <= k) - 1;
+      (g, k - sec.starts[g])
+    };
+    let keys = |k| match item(k) {
+      (g, 0) => (0u8, g as u64),
+      (g, i) => (1, key(g, i - 1)),
+    };
+    let id = self.take_id();
+    self.lazy_col(id, &sec, keys, |ui, k| {
+      let (g, i) = item(k);
+      let (title, n) = groups[g];
+      if i == 0 {
+        return ui.form_head(&fs, title, "", top(g), |ui| note(ui, g));
+      }
+
+      let (i, hair) = (i - 1, if i > 1 { fs.hairline } else { 0.0 });
+      let radii = [(i == 0) as u8 as f32 * r, (i + 1 == n) as u8 as f32 * r];
+      let piece = fs.group.h(grow()).pads([hair, 0.0, 0.0, 0.0]).clip();
+      let piece = Style { radii: [radii[0], radii[0], radii[1], radii[1]], ..piece };
+      let paint = move |f: &mut Frame, at: Rect| {
+        f.rect(Rect::new(at.x + l, at.y, (at.w - l - rr).max(0.0), hair), line, 0.0);
+      };
+      ui.canvas_col(piece, paint, |ui| row(ui, g, i));
+    })
+  }
+
+  /// Scrolls row `i` of section `g` of form list `id` into view in its next build
+  /// ([Ui::reveal_item]); `groups` as the list has them.
+  pub fn reveal_form_row(&mut self, id: Id, groups: &[(&str, usize)], g: usize, i: usize) {
+    let before: usize = groups[..g].iter().map(|&(_, n)| 1 + n).sum();
+    self.reveal_item(id, before + 1 + i);
+  }
+}
+
+/// A [Ui::form_list]'s items, placed a section at a time, so a frame costs its sections, not its
+/// rows: where each section's items start, its top, and its title's height, then its rows, a
+/// row and a hairline apart (the first without one).
+struct Sections {
+  starts: Vec<usize>,
+  tops: Vec<f64>,
+  heads: Vec<f64>,
+  row_h: f64,
+  hair: f64,
+}
+
+impl Sections {
+  /// The height of a section's first `r` rows.
+  fn rows(&self, r: usize) -> f64 {
+    r as f64 * self.row_h + r.saturating_sub(1) as f64 * self.hair
+  }
+}
+
+impl Spans for Sections {
+  fn len(&self) -> usize {
+    self.starts[self.starts.len() - 1]
+  }
+
+  fn top(&self, i: usize) -> f64 {
+    let g = self.starts.partition_point(|&s| s <= i) - 1;
+    match i - self.starts[g] {
+      0 => self.tops[g],
+      j => self.tops[g] + self.heads[g] + self.rows(j - 1),
+    }
+  }
+
+  fn at(&self, y: f64) -> usize {
+    let g = self.tops.partition_point(|&t| t <= y).saturating_sub(1);
+    if g + 1 >= self.tops.len() {
+      return self.len();
+    }
+
+    // In the title, or in row `r` (past its rows, the next section's title).
+    let y = y - self.tops[g] - self.heads[g];
+    let r = match y {
+      y if y < 0.0 => return self.starts[g],
+      y if y < self.row_h => 0,
+      y => 1 + ((y - self.row_h) / (self.row_h + self.hair)) as usize,
+    };
+
+    (self.starts[g] + 1 + r).min(self.starts[g + 1])
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -649,6 +782,35 @@ mod tests {
       ui.col(Style::new().grow().bg(fs.bg), |ui| {
         ui.disabled(self.0).id("bar").toolbar_tabs(&fs, &mut 0, &tabs);
       });
+    }
+  }
+
+  /// Placed a section at a time, items lie where summing every height puts them, for sections
+  /// of many rows, none and one.
+  #[test]
+  fn sections_place_their_items_as_their_heights_do() {
+    let (counts, heads) = ([3, 0, 1, 5], [30.0, 40.5, 40.5, 40.5]);
+    let (row_h, hair) = (52.0, 1.0);
+    let mut sec = Sections { starts: vec![0], tops: vec![0.0], heads: vec![], row_h, hair };
+    let mut ends: Vec<f64> = vec![];
+    for (g, &n) in counts.iter().enumerate() {
+      sec.heads.push(heads[g]);
+      sec.starts.push(sec.starts[g] + 1 + n);
+      sec.tops.push(sec.tops[g] + heads[g] + sec.rows(n));
+      let hs =
+        std::iter::once(heads[g]).chain((0..n).map(|i| row_h + if i > 0 { hair } else { 0.0 }));
+      for h in hs {
+        ends.push(ends.last().unwrap_or(&0.0) + h);
+      }
+    }
+
+    assert_eq!(sec.len(), ends.len());
+    for i in 0..=ends.len() {
+      assert_eq!(sec.top(i), if i == 0 { 0.0 } else { ends[i - 1] }, "top of {i}");
+    }
+
+    for y in (-40..1200).map(|y| y as f64 * 0.5) {
+      assert_eq!(sec.at(y), ends.partition_point(|&e| e <= y), "at {y}");
     }
   }
 

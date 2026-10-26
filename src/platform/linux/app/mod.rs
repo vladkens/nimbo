@@ -7,6 +7,7 @@
 //! [focus]) and the clipboard for a paste ([paste]); the tray, the portal and the file manager
 //! speak D-Bus through GIO ([super::dbus]).
 
+pub mod activity;
 pub mod autostart;
 pub mod focus;
 pub mod hotkey;

@@ -27,7 +27,7 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSArray, NSString, NSUserDefaults, ns_string};
 
-pub use self::app::{autostart, focus, hotkey, open, paste, permissions, post, tray};
+pub use self::app::{activity, autostart, focus, hotkey, open, paste, permissions, post, tray};
 use crate::app::{Appearance, Clipboard};
 
 /// The system clipboard, plain text only.

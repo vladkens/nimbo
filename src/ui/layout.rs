@@ -168,9 +168,10 @@ pub struct Tree {
   pub drags: Vec<u32>,
   /// Elements with key bindings, in tree order.
   pub keymaps: Vec<(u32, &'static [Binding])>,
-  /// Content built only in part (a virtual list's rows in view): its scroll container and the
-  /// span of its content built ([super::Ui::partial_short]).
-  pub partial: Vec<(u32, f32, f32)>,
+  /// Content built only in part (a virtual list's rows in view): its scroll container, the block
+  /// built in part (the container itself, or a column inside it) and the span built, from the
+  /// block's top ([super::Ui::partial_short]).
+  pub partial: Vec<(u32, u32, f32, f32)>,
   /// Elements whose last-frame box and content the view drew from, as it saw them
   /// ([super::Ui::settle]).
   pub settle: Vec<(Id, Option<Seen>)>,

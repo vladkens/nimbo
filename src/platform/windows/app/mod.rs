@@ -6,6 +6,7 @@
 //! through the registry ([autostart]), links and files opened ([open]), shortcuts posted to the
 //! app in front ([post]), where the user types ([focus]) and the clipboard for a paste ([paste]).
 
+pub mod activity;
 pub mod autostart;
 pub mod focus;
 pub mod hotkey;
