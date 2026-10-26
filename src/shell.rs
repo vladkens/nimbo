@@ -8,15 +8,18 @@
 //! Everything here runs on the main thread: [Main] is its token, given to the start closure, to
 //! [Proxy]'s closures and to the callbacks, and never leaves it. Each OS implements it in
 //! `platform/<os>` (macOS: `shell.rs`; Windows and Linux: `app/shell.rs`); what they keep alike
-//! (each window's app type and close callback, the reopen and quit hooks) is kept here.
+//! (each window's app type and close callback, the reopen and quit hooks, the app's one instance
+//! that [Main::serve] keeps) is kept here.
 
 use std::any::TypeId;
 use std::cell::RefCell;
+use std::io;
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
+use crate::instance::{Command, Instance, OPEN};
 use crate::platform::shell as imp;
 use crate::{App, Config, Point, Size};
 
@@ -95,14 +98,19 @@ fn running(run: impl FnOnce()) {
 
 pub(crate) type OnMain = Box<dyn FnOnce(&mut Main)>;
 type OnReopen = Box<dyn FnMut(&mut Main)>;
+type OnCommand = Box<dyn FnMut(&mut Main, &Command)>;
 
 /// What every platform's loop keeps alike: the open windows by id, each with its app's type and
-/// close callback, and the reopen and quit hooks.
+/// close callback, the reopen and quit hooks, and the instance served with its handler and the
+/// activation token of the command it handles.
 #[derive(Default)]
 struct Hooks {
   windows: Vec<(u64, TypeId, Option<OnMain>)>,
   reopen: Option<OnReopen>,
   quit: Option<OnMain>,
+  instance: Option<Instance>,
+  command: Option<OnCommand>,
+  token: Option<String>,
 }
 
 thread_local! {
@@ -146,11 +154,33 @@ pub(crate) fn closed(id: u64) -> Option<OnMain> {
 }
 
 /// The app was opened again: its reopen hook runs, kept for the next time.
-#[cfg(target_os = "macos")]
 pub(crate) fn reopened() {
   let Some(mut f) = hooks(|h| h.reopen.take()) else { return };
   f(&mut Main::here());
   hooks(|h| _ = h.reopen.get_or_insert(f));
+}
+
+/// A command came to the instance [Main::serve] keeps: the reopen hook for a bare [OPEN], then
+/// the handler, the command's activation token kept meanwhile.
+fn command(main: &mut Main, cmd: Command) {
+  hooks(|h| h.token = cmd.token.clone());
+  if cmd.name == OPEN {
+    reopened();
+  }
+
+  if let Some(mut f) = hooks(|h| h.command.take()) {
+    f(main, &cmd);
+    hooks(|h| _ = h.command.get_or_insert(f));
+  }
+
+  hooks(|h| h.token = None);
+}
+
+/// The activation token of the command being handled, for a window that shows or comes to the
+/// front meanwhile.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) fn token() -> Option<String> {
+  hooks(|h| h.token.clone())
 }
 
 /// The app ends: its quit hook runs (once), then the platform's `close` closes each window.
@@ -221,10 +251,28 @@ impl Main {
   }
 
   /// `f` runs when the app is opened again while it runs (macOS: the Dock icon, Finder,
-  /// Spotlight, `open`), as for a second launch: a menu-bar app shows its settings. macOS only
-  /// for now: Windows and Linux start a second process.
+  /// Spotlight, `open`) and when a second launch sends [OPEN] to the instance [Main::serve]
+  /// keeps (Windows and Linux start a second process): a menu-bar app shows its settings.
   pub fn on_reopen(&mut self, f: impl FnMut(&mut Main) + 'static) {
     hooks(|h| h.reopen = Some(Box::new(f)));
+  }
+
+  /// Serves the app's one instance ([crate::instance::claim]) until the loop ends, keeping it
+  /// and its lock (replacing an earlier one): `f` runs on the main thread with each command
+  /// another process sends ([crate::instance::send]); a bare [OPEN] runs [Main::on_reopen]'s hook
+  /// first. While they run, a window [Main::open] shows or [Window::front] brings forward comes
+  /// to the front with the command's activation token (Linux; Windows lets it through the
+  /// sender). `Err` when its thread can't start.
+  pub fn serve(
+    &mut self,
+    mut instance: Instance,
+    f: impl FnMut(&mut Main, &Command) + 'static,
+  ) -> io::Result<()> {
+    let proxy = self.proxy();
+    instance.listen(move |cmd| proxy.post(move |main| command(main, cmd)))?;
+    let f: OnCommand = Box::new(f);
+    hooks(|h| (h.instance, h.command) = (Some(instance), Some(f)));
+    Ok(())
   }
 
   /// Closes the windows and ends the loop once the work already queued is done: [app] returns.
@@ -436,13 +484,33 @@ mod tests {
     assert_eq!((ran.get(), closing.get()), (1, 4));
 
     // The reopen hook is kept after it runs.
-    #[cfg(target_os = "macos")]
-    {
-      let r = ran.clone();
-      Main::here().on_reopen(move |_| r.set(r.get() + 1));
-      reopened();
-      reopened();
-      assert_eq!(ran.get(), 3);
-    }
+    let r = ran.clone();
+    Main::here().on_reopen(move |_| r.set(r.get() + 1));
+    reopened();
+    reopened();
+    assert_eq!(ran.get(), 3);
+  }
+
+  /// A command runs the handler with its token kept meanwhile; a bare "open" the reopen hook
+  /// first, with the token too.
+  #[test]
+  fn commands_run_their_handler_with_the_token() {
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let s = seen.clone();
+    Main::here().on_reopen(move |_| s.borrow_mut().push(format!("reopen {:?}", token())));
+    let s = seen.clone();
+    let f =
+      move |_: &mut Main, c: &Command| s.borrow_mut().push(format!("{} {:?}", c.name, token()));
+    hooks(|h| h.command = Some(Box::new(f)));
+    let cmd =
+      |name: &str, token: Option<&str>| Command { name: name.into(), token: token.map(Into::into) };
+    command(&mut Main::here(), cmd("open", Some("t1")));
+    command(&mut Main::here(), cmd("quit", None));
+    command(&mut Main::here(), cmd("open now", Some("t2")));
+    let want =
+      [r#"reopen Some("t1")"#, r#"open Some("t1")"#, "quit None", r#"open now Some("t2")"#];
+    assert_eq!(*seen.borrow(), want);
+    assert_eq!(token(), None, "only while it runs");
+    HOOKS.take();
   }
 }

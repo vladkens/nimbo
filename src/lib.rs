@@ -12,9 +12,10 @@
 //!
 //! An app with no window, or more than one, starts with [app]: windows on demand ([Main::open])
 //! and overlays, HUDs over every app ([Config::overlay]), work from other threads ([Proxy]), and
-//! what a tray app needs besides: an icon with a menu ([tray]), global hotkeys ([hotkey]), its
-//! folders and the user's Downloads ([paths]), launch at login ([autostart]), its launcher entry
-//! on Linux ([desktop]), alerts ([Main::alert]) and its command line's console on Windows
+//! what a tray app needs besides: an icon with a menu ([tray]), global hotkeys ([hotkey]), one
+//! instance that takes commands from a second launch ([instance], [Main::serve]), its folders and
+//! the user's Downloads ([paths]), launch at login ([autostart]), its launcher entry on Linux
+//! ([desktop]), alerts ([Main::alert]) and its command line's console on Windows
 //! ([attach_console]); and to reach other apps: links and files opened or shown ([open]), the
 //! OS's permissions ([permissions]), where the user types ([focus]), keys posted to the app in
 //! focus ([keys::post]) and the clipboard, also taken and put back around a paste of the app's own
@@ -33,6 +34,7 @@ mod file_dialog;
 pub mod focus;
 pub mod harness;
 pub mod hotkey;
+pub mod instance;
 pub mod keys;
 pub mod open;
 pub mod paths;

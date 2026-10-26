@@ -27,7 +27,9 @@
 //!     (where the OS lets an app place itself) and shows it without activating anything; a size the
 //!     app asks for keeps it at its anchor;
 //!   - `set_presence(Presence)`, `terminating() -> bool`, `quit()`; a second launch, where the OS
-//!     tells (macOS), runs `crate::shell::reopened`;
+//!     tells (macOS), runs `crate::shell::reopened`; a window shown or brought to the front comes
+//!     with `crate::shell::token()`, the activation token of the command being served, where the OS
+//!     takes one (Linux: `gtk_window_set_startup_id`);
 //!   - `post(delay: Duration, f: Box<dyn FnOnce() + Send>)` from any thread, run by the loop also
 //!     in modal loops (a menu open, a live resize); `is_main() -> bool`.
 //!
@@ -103,6 +105,10 @@
 //! - `pub mod open` ([crate::open]): `url(&str)`, `path(&Path)` and `reveal(&Path)` (an absolute
 //!   path), each `-> Result<(), String>` without waiting for the app it starts; `file_manager() ->
 //!   &'static str`.
+//! - `pub(crate) mod instance` ([crate::instance]), one file for every Unix
+//!   (`linux/app/instance.rs`) and Windows' (`windows/app/instance.rs`): `lock_file(&Path) ->
+//!   io::Result<File>`, `Server` with `bind(dir, lock)` and `serve(on: impl Fn(&str) + Send)`, a
+//!   thread that calls `on` with each line, both let go on drop, and `send(dir, line)`.
 //! - `pub mod activity` ([crate::activity]), from any thread: `Token: Send`, `begin(&str) ->
 //!   Token`, `end(Token)`.
 //! - `pub mod post` ([crate::keys::post]): `post(Shortcut) -> Result<(), String>`, the shortcut as
@@ -175,6 +181,11 @@ use windows as imp;
 mod linux;
 #[cfg(target_os = "linux")]
 use linux as imp;
+
+/// One instance ([crate::instance]): Linux's Unix socket on macOS too, a named pipe on Windows.
+#[cfg_attr(unix, path = "linux/app/instance.rs")]
+#[cfg_attr(windows, path = "windows/app/instance.rs")]
+pub(crate) mod instance;
 
 /// Linux's, for its files in the user's folders: on every Unix for [crate::desktop]'s tests.
 #[cfg(any(all(test, unix), target_os = "linux"))]

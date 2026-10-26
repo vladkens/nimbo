@@ -4,7 +4,8 @@
 //! Linux) whose menu opens a counter window and shows its count, a global hotkey that opens or
 //! closes that window from any app, launch at login as a check mark, and an item that pastes a
 //! line where the user types three seconds later, as a dictation app does ([paste]). On Linux it
-//! writes its launcher entry at start ([desktop]), so the dock shows its icon for the window.
+//! writes its launcher entry at start ([desktop]), so the dock shows its icon for the window. It
+//! runs once: a second launch has the first show its counter ([instance]), and ends.
 //!
 //! `cargo run --release --example tray [-- --shot <file.png>]`; the shot is the counter window.
 //! The hotkey is ⌃⌥Space on macOS, Ctrl+Alt+Space elsewhere (on Wayland the desktop asks first,
@@ -25,6 +26,7 @@ use std::time::Duration;
 use counter::Counter;
 use nimbo::desktop::Launcher;
 use nimbo::hotkey::{Edge, Hotkeys};
+use nimbo::instance::{self, Claim, Instance};
 use nimbo::tray::{Item, Menu, Tray, TrayIcon};
 use nimbo::{
   AppInfo, Config, Main, Presence, Shortcut, SystemClipboard, Window, autostart, desktop,
@@ -97,6 +99,14 @@ fn toggle(main: &mut Main, state: &Shared) {
   }
 }
 
+/// Shows the counter, opening it when closed.
+fn show(main: &mut Main, state: &Shared) {
+  match state.borrow().window.clone().filter(|w| w.is_open()) {
+    Some(w) => w.front(),
+    None => toggle(main, state),
+  }
+}
+
 /// Pastes `text` where the user types: the clipboard taken, the text offered, the paste shortcut
 /// posted, and a second later what the clipboard held put back, unless something else was copied
 /// meanwhile.
@@ -120,7 +130,7 @@ thread_local! {
   static STATE: Shared = Shared::default();
 }
 
-fn start(main: &mut Main) {
+fn start(main: &mut Main, instance: Option<Instance>) {
   // Nothing off Linux; there the entry is written once, again when the executable moves.
   let icon = (64, &counter::ICON[..]);
   let launcher = Launcher { comment: "A tray app made with nimbo", categories: &["Utility"], icon };
@@ -179,6 +189,18 @@ fn start(main: &mut Main) {
     refresh(t, &state);
   });
 
+  // A second launch's "open" shows the counter, as opening the app again does on macOS.
+  main.on_reopen(|main| STATE.with(|s| show(main, s)));
+  if let Some(instance) = instance
+    && let Err(e) = main.serve(instance, |main, cmd| {
+      if cmd.name == instance::QUIT {
+        main.quit();
+      }
+    })
+  {
+    eprintln!("instance: {e}");
+  }
+
   // The tray lives as long as the app; the hotkeys are in its state.
   main.on_quit(move |_| drop(tray));
 }
@@ -188,5 +210,17 @@ fn main() {
     return nimbo::run(Config::new("Counter", 360.0, 300.0), Counter::default(), |h| _ = h.frame());
   }
 
-  nimbo::app(INFO, start);
+  // One instance: a second launch asks the first to show the counter, and ends.
+  let instance = match instance::claim(&INFO) {
+    Ok(Claim::Primary(instance)) => Some(instance),
+    Ok(Claim::Running) => {
+      return instance::send(&INFO, instance::OPEN).unwrap_or_else(|e| eprintln!("instance: {e}"));
+    }
+    Err(e) => {
+      eprintln!("instance: {e}");
+      None
+    }
+  };
+
+  nimbo::app(INFO, |main| start(main, instance));
 }

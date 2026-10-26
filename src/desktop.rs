@@ -73,7 +73,14 @@ pub(crate) fn install_in(
   }
 
   let categories: String = l.categories.iter().map(|c| format!("{c};")).collect();
-  let keys = [("Comment", l.comment), ("Categories", &categories), ("StartupWMClass", id)];
+  // Startup notification: GLib hands a launch its activation token, which a second launch sends
+  // to the instance ([crate::instance]) for its window to come to the front.
+  let keys = [
+    ("Comment", l.comment),
+    ("Categories", &categories),
+    ("StartupWMClass", id),
+    ("StartupNotify", "true"),
+  ];
   let entry_text = crate::autostart::desktop_entry(app, exe, &keys);
   let hicolor = data.join("icons/hicolor");
   let icon = hicolor.join(format!("{side}x{side}/apps/{id}.png"));
@@ -143,7 +150,7 @@ mod tests {
     let text = std::fs::read_to_string(data.join("applications/com.example.app.desktop")).unwrap();
     let want = "[Desktop Entry]\nType=Application\nName=Example\nExec=\"/opt/Ex ample/app\"\n\
       Icon=com.example.app\nTerminal=false\nComment=Counts C:\\\\things\nCategories=Utility;Office;\n\
-      StartupWMClass=com.example.app\n";
+      StartupWMClass=com.example.app\nStartupNotify=true\n";
     assert_eq!(text, want);
     let png = std::fs::read(data.join("icons/hicolor/16x16/apps/com.example.app.png")).unwrap();
     assert_eq!(crate::png::tests::decode(&png), (16, 16, px.clone()));
