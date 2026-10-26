@@ -184,7 +184,10 @@ fn clear_marks_are_beside_their_controls() {
   let mut h = Harness::new(Gallery::default(), Size::new(1040.0, 590.0), 2.0);
   h.frame();
   let dump = h.a11y();
-  for pair in ["button value \"⌃⌥Space\"", "text field \"Search widgets\" value \"Switches\""] {
-    assert!(dump.contains(&format!("\n{pair}\nbutton \"Clear\"\n")), "{pair} in\n{dump}");
+  // The recorder's value is the platform's label of its shortcut (⌃⌥Space, Ctrl+Alt+Space).
+  let lines: Vec<&str> = dump.lines().collect();
+  let next = |first: &str| lines.iter().rposition(|l| l.starts_with(first)).map(|i| lines[i + 1]);
+  for first in ["button value ", "text field \"Search widgets\" value \"Switches\""] {
+    assert_eq!(next(first), Some("button \"Clear\""), "{first} in\n{dump}");
   }
 }
