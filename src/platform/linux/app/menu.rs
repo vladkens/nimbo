@@ -84,15 +84,19 @@ fn shortcut(text: &str) -> Option<Vec<String>> {
   Some(out)
 }
 
-/// The layout of item `id` and its children `depth` levels down (all for -1): `(ia{sv}av)`.
-pub fn layout(nodes: &[Node], id: usize, depth: i32) -> V {
+/// The layout of item `id` and its children `depth` levels down (all for -1): `(ia{sv}av)`, the
+/// items' numbers past the root's `base` higher.
+pub fn layout(nodes: &[Node], id: usize, depth: i32, base: i32) -> V {
   let node = &nodes[id];
   let kids = match depth {
     0 => Vec::new(),
-    _ => node.children.iter().map(|&c| V::Var(Box::new(layout(nodes, c, depth - 1)))).collect(),
+    _ => {
+      (node.children.iter()).map(|&c| V::Var(Box::new(layout(nodes, c, depth - 1, base)))).collect()
+    }
   };
 
-  V::Tuple(vec![V::I(id as i32), props(node), V::Array("v", kids)])
+  let id = if id == 0 { 0 } else { base + id as i32 };
+  V::Tuple(vec![V::I(id), props(node), V::Array("v", kids)])
 }
 
 /// The menu as the tray's `describe` shows it: `label|key|on or off|enabled or disabled`, `-`
@@ -157,10 +161,12 @@ mod tests {
     let V::Array(_, quit) = props(&n[6]) else { panic!() };
     let keys = V::Array("as", vec![V::Array("s", vec![V::s("Control"), V::s("q")])]);
     assert!(quit.contains(&entry("shortcut", keys)));
-    assert_eq!(layout(&n, 0, -1).ty(), "(ia{sv}av)");
-    let V::Tuple(root) = layout(&n, 0, 1) else { panic!() };
+    assert_eq!(layout(&n, 0, -1, 0).ty(), "(ia{sv}av)");
+    let V::Tuple(root) = layout(&n, 0, 1, 100) else { panic!() };
+    assert_eq!(root[0], V::I(0), "the root keeps 0");
     let V::Array(_, kids) = &root[2] else { panic!() };
     let V::Var(sub) = &kids[2] else { panic!() };
+    assert!(matches!(&**sub, V::Tuple(t) if t[0] == V::I(103)), "numbered past the base");
     assert!(matches!(&**sub, V::Tuple(t) if t[2] == V::Array("v", vec![])), "one level only");
   }
 

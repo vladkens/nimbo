@@ -1,14 +1,16 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! D-Bus over GIO's GDBus, loaded at run time ([super::dl]): the session bus, calls, signals,
-//! exported objects, and GVariants built from an owned tree ([V]), so what the tray and the
-//! portals get is plain Rust data until it goes out (and testable without a bus).
+//! D-Bus over GIO's GDBus, loaded at run time ([super::dl]): the session bus, calls (with a file
+//! descriptor in the reply), signals, exported objects, the XDG desktop portal's requests, and
+//! GVariants built from an owned tree ([V]), so what the tray and the portals get is plain Rust
+//! data until it goes out (and testable without a bus).
 
 use std::ffi::{CStr, CString, c_char, c_int, c_uint, c_void};
+use std::os::fd::{FromRawFd, OwnedFd};
 use std::ptr::{null, null_mut};
 use std::rc::{Rc, Weak};
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 
 use super::dl::fns;
 use super::{Fp, P, S, lib};
@@ -30,9 +32,12 @@ fns!(Gio {
   fn g_bus_unwatch_name(id: c_uint);
   fn g_dbus_connection_get_unique_name(c: P) -> S;
   fn g_dbus_connection_close_sync(c: P, cancel: P, err: *mut P) -> c_int;
+  fn g_object_ref(obj: P) -> P;
   fn g_object_unref(obj: P);
-  fn g_dbus_connection_call_sync(c: P, name: S, path: S, iface: S, method: S, args: P,
-    reply: P, flags: c_int, ms: c_int, cancel: P, err: *mut P) -> P;
+  fn g_dbus_connection_call_with_unix_fd_list_sync(c: P, name: S, path: S, iface: S,
+    method: S, args: P, reply: P, flags: c_int, ms: c_int, fds: P, out_fds: *mut P, cancel: P,
+    err: *mut P) -> P;
+  fn g_unix_fd_list_get(list: P, i: c_int, err: *mut P) -> c_int;
   fn g_dbus_connection_signal_subscribe(c: P, sender: S, iface: S, member: S, path: S, arg0: S,
     flags: c_int, cb: Fp, data: P, free: Fp) -> c_uint;
   fn g_dbus_connection_signal_unsubscribe(c: P, id: c_uint);
@@ -64,6 +69,7 @@ fns!(Gio {
   fn g_variant_get_double(v: P) -> f64;
   fn g_variant_get_boolean(v: P) -> c_int;
   fn g_variant_get_string(v: P, len: *mut usize) -> S;
+  fn g_variant_get_handle(v: P) -> i32;
   fn g_variant_lookup_value(dict: P, key: S, ty: S) -> P;
   fn g_variant_ref_sink(v: P) -> P;
   fn g_variant_unref(v: P);
@@ -179,6 +185,17 @@ pub fn close(bus: P) {
   unsafe { (f().g_object_unref)(bus) };
 }
 
+/// Another reference to connection `bus` (as a number, to move to another thread, which GDBus
+/// allows), for work that may outlive its owner's: closed meanwhile, its calls fail. [release]
+/// lets it go.
+pub fn retain(bus: P) -> usize {
+  unsafe { (f().g_object_ref)(bus) as usize }
+}
+
+pub fn release(bus: usize) {
+  unsafe { (f().g_object_unref)(bus as P) };
+}
+
 /// This connection's unique name (`:1.42`).
 pub fn unique_name(bus: P) -> String {
   text(unsafe { (f().g_dbus_connection_get_unique_name)(bus) })
@@ -194,11 +211,45 @@ pub fn call(
   args: V,
   ms: c_int,
 ) -> Result<Gv, String> {
-  let (d, p, i, m) = (cstr(dest), cstr(path), cstr(iface), cstr(method));
+  call_with(bus, [dest, path, iface, method], args, ms, null_mut())
+}
+
+/// Calls `method`, whose reply is a file descriptor (`h`, as the clipboard portal's
+/// `SelectionRead`): the descriptor, owned.
+pub fn call_fd(
+  bus: P,
+  dest: &str,
+  path: &str,
+  iface: &str,
+  method: &str,
+  args: V,
+  ms: c_int,
+) -> Result<OwnedFd, String> {
+  let mut fds = null_mut();
+  let reply = call_with(bus, [dest, path, iface, method], args, ms, &mut fds)?;
+  if fds.is_null() {
+    return Err(format!("{method} gave no file descriptor"));
+  }
+
+  let mut err = null_mut();
+  let i = unsafe { (f().g_variant_get_handle)(reply.child(0).0) };
+  // A duplicate of the list's, which goes with its last reference.
+  let fd = unsafe { (f().g_unix_fd_list_get)(fds, i, &mut err) };
+  unsafe { (f().g_object_unref)(fds) };
+  match fd {
+    -1 => Err(format!("{method}: {}", error(err))),
+    // SAFETY: GIO's duplicate, ours alone.
+    fd => Ok(unsafe { OwnedFd::from_raw_fd(fd) }),
+  }
+}
+
+/// [call], with the reply's file descriptors in `fds` unless it is null.
+fn call_with(bus: P, names: [&str; 4], args: V, ms: c_int, fds: *mut P) -> Result<Gv, String> {
+  let [d, p, i, m] = names.map(cstr);
   let mut err = null_mut();
   let args = args.build();
   let reply = unsafe {
-    (f().g_dbus_connection_call_sync)(
+    (f().g_dbus_connection_call_with_unix_fd_list_sync)(
       bus,
       d.as_ptr(),
       p.as_ptr(),
@@ -208,6 +259,8 @@ pub fn call(
       null_mut(),
       0,
       ms,
+      null_mut(),
+      fds,
       null_mut(),
       &mut err,
     )
@@ -343,6 +396,62 @@ pub fn reply(inv: P, out: V) {
 pub fn fail(inv: P, name: &str, msg: &str) {
   let (n, m) = (cstr(name), cstr(msg));
   unsafe { (f().g_dbus_method_invocation_return_dbus_error)(inv, n.as_ptr(), m.as_ptr()) };
+}
+
+// MARK: Portals
+
+/// The XDG desktop portal's name and object.
+pub const PORTAL: &str = "org.freedesktop.portal.Desktop";
+pub const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
+const MS: c_int = 2000;
+
+/// A connection of the app's own to the portals, its `id` registered with
+/// `org.freedesktop.host.portal.Registry` (xdg-desktop-portal 1.19+), which the backend keeps
+/// what the user allowed under; older portals have no registry and take the id from the
+/// process's systemd scope.
+pub fn portal(id: &str) -> Result<P, String> {
+  let bus = private_session()?;
+  let args = V::Tuple(vec![V::s(id), V::dict(Vec::new())]);
+  let registry = "org.freedesktop.host.portal.Registry";
+  let _ = call(bus, PORTAL, PORTAL_PATH, registry, "Register", args, MS);
+  Ok(bus)
+}
+
+/// Calls portal `iface`'s `method` on `bus` with `args` and options last: `opts`, a fresh
+/// `handle_token` (and for a session its `session_handle_token`); `done` gets the request's
+/// `Response` (its code, 0 for success, and results) with `data`. The `Response`'s subscription,
+/// to end once it came.
+pub fn request(
+  bus: P,
+  iface: &str,
+  method: &str,
+  mut args: Vec<V>,
+  mut opts: Vec<(&str, V)>,
+  done: Fp,
+  data: (P, Fp),
+) -> Result<c_uint, String> {
+  static TOKENS: AtomicU32 = AtomicU32::new(0);
+  let token = format!("nimbo{}_{}", std::process::id(), TOKENS.fetch_add(1, Ordering::Relaxed));
+  // The request's object path, as the spec makes it: the sender's unique name without the
+  // colon, dots as underscores.
+  let sender = unique_name(bus).trim_start_matches(':').replace('.', "_");
+  let path = format!("{PORTAL_PATH}/request/{sender}/{token}");
+  opts.push(("handle_token", V::S(token.clone())));
+  if method == "CreateSession" {
+    opts.push(("session_handle_token", V::S(token)));
+  }
+
+  args.push(V::dict(opts));
+  // Subscribed first: the response may come before the call returns.
+  let request = "org.freedesktop.portal.Request";
+  let sub = subscribe(bus, PORTAL, request, "Response", Some(&path), done, data);
+  match call(bus, PORTAL, PORTAL_PATH, iface, method, V::Tuple(args), MS) {
+    Ok(_) => Ok(sub),
+    Err(e) => {
+      unsubscribe(bus, sub);
+      Err(format!("{method}: {e}"))
+    }
+  }
 }
 
 // MARK: Values

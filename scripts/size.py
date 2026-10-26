@@ -38,7 +38,7 @@ STEP = 100
 BUDGETS = {
   "platform/macos": 1900,
   "platform/windows": 2200,
-  "platform/linux": 3000,
+  "platform/linux": 3100,
   "ui": 3800,
   "widgets": 3200,
   "text": 1200,
@@ -46,7 +46,7 @@ BUDGETS = {
   "app/shared": 900,
   "app/macos": 1500,
   "app/windows": 1400,
-  "app/linux": 1400,
+  "app/linux": 1900,
 }
 # Modules that count against a budget of another name ("app", src/app.rs, is the core's seams).
 # The settings form and the dialog are add-ons over the widgets, as the containers are.

@@ -17,7 +17,10 @@
 //! an offer by delayed rendering (`WM_RENDERFORMAT`). Linux GTK's CLIPBOARD selection: its targets
 //! as one item, no change count (X11 and Wayland keep none), an offer served by GTK, which
 //! asks for it at each read, and a restore served by the app, kept after it quits only where a
-//! clipboard manager takes it.
+//! clipboard manager takes it. On Wayland, where GTK can't set the clipboard without the keyboard
+//! focus, the RemoteDesktop portal's clipboard does the same (its types MIME types) once the
+//! desktop gave it, its session started by the first call on Wayland (the desktop asks the user
+//! once).
 
 use crate::app::Clipboard;
 use crate::platform::{clipboard, paste as imp};

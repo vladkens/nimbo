@@ -6,11 +6,15 @@
 //! GDBus on the main loop. The item registers with `org.kde.StatusNotifierWatcher` whenever one
 //! appears, so a panel that starts later or restarts shows it.
 //!
-//! The icon is a template filled white on a dark appearance, black on a light one, at 22 and
-//! 44 px (`IconPixmap`, ARGB in network order). `ItemIsMenu`: a click opens the menu. Panels ask
-//! `AboutToShow` as it opens ([crate::tray::Tray::on_open] runs then) and fetch the layout; a
-//! menu set while it is open waits until it closes (`Event` "closed" on the root, or a click),
-//! and at the latest until it opens next, as hosts don't all send "closed".
+//! The icon is a template filled white on a dark appearance or GNOME (its top bar is dark in
+//! either), black on a light one, at 22 and 44 px (`IconPixmap`, ARGB in network order).
+//! `ItemIsMenu`: a click opens the menu. Panels ask `AboutToShow` as it opens
+//! ([crate::tray::Tray::on_open] runs then) and fetch the layout; a menu set while it is open
+//! waits until it closes (`Event` "closed" on the root, or a click), until the host fetches it
+//! whole, or at the latest until it opens next, as hosts don't all send "closed". Each menu set
+//! numbers its items past the last one's: a host keeps what it fetched by number (Plasma draws
+//! an item cached under a number with the properties of the one it has now), so a number never
+//! means another item, and a click on one gone does nothing.
 
 use std::cell::{Cell, RefCell};
 use std::ffi::c_uint;
@@ -92,6 +96,8 @@ struct Inner {
   tooltip: RefCell<String>,
   menu: RefCell<Menu>,
   revision: Cell<u32>,
+  /// What the menu's numbers ([menu::nodes]) are past the root's on the bus.
+  base: Cell<i32>,
   /// Open between `AboutToShow` of the root and its close (or a click).
   state: State,
   bus: RefCell<Option<Bus>>,
@@ -132,6 +138,7 @@ impl Tray {
       tooltip: RefCell::new(tooltip.into()),
       menu: RefCell::default(),
       revision: Cell::new(1),
+      base: Cell::new(0),
       state: State::default(),
       bus: RefCell::default(),
     }));
@@ -176,7 +183,8 @@ impl Tray {
 
   /// The icon's pixmaps, tinted for the appearance now.
   fn paint(&self, icon: &TrayIcon) {
-    let tint = if crate::platform::appearance().dark { [255; 3] } else { [0; 3] };
+    let gnome = std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| d.contains("GNOME"));
+    let tint = if gnome || crate::platform::appearance().dark { [255; 3] } else { [0; 3] };
     let pixmap = |side: u32| {
       let rgba = icon.pixels(side, tint);
       let argb = rgba.chunks(4).flat_map(|p| [p[3], p[0], p[1], p[2]]).collect();
@@ -205,7 +213,8 @@ impl Tray {
 
   /// Serves `menu` from now on, a new revision the host is told of.
   fn apply(&self, menu: Menu) {
-    *self.0.menu.borrow_mut() = menu;
+    let gone = nodes(&self.0.menu.replace(menu)).len() as i32;
+    self.0.base.set(self.0.base.get() + gone);
     let rev = self.0.revision.get() + 1;
     self.0.revision.set(rev);
     self.emit(MENU_PATH, MENU, "LayoutUpdated", V::Tuple(vec![V::U(rev), V::I(0)]));
@@ -223,12 +232,14 @@ impl Tray {
     &self.0.state
   }
 
-  /// `AboutToShow` of the root: the app refreshes the menu; whether the layout changed.
+  /// `AboutToShow` of the root: the app refreshes the menu; whether the layout changed. An empty
+  /// menu doesn't count as open: GNOME's AppIndicator asks when the item registers, before the
+  /// app's menu and without a close, and nothing in it would be rebuilt under the person.
   fn about_to_show(&self) -> bool {
     self.closed();
     let rev = self.0.revision.get();
     self.0.state.opening(self);
-    self.0.state.set_open(true);
+    self.0.state.set_open(!self.0.menu.borrow().items.is_empty());
     self.0.revision.get() != rev
   }
 
@@ -239,7 +250,7 @@ impl Tray {
         let choice: Option<String> = {
           let menu = self.0.menu.borrow();
           let n = nodes(&menu);
-          let it = usize::try_from(id).ok().and_then(|i| n.get(i)?.item);
+          let it = self.index(id, n.len()).and_then(|i| n[i].item);
           it.filter(|it| !it.separator && it.submenu.is_none()).map(|it| it.id.clone())
         };
         self.closed();
@@ -270,8 +281,15 @@ impl Tray {
   pub fn choose(&self, path: &[usize]) {
     let id = menu::at(&nodes(&self.0.menu.borrow()), path);
     if let Some(id) = id {
-      self.event(id as i32, "clicked");
+      self.event(self.0.base.get() + id as i32, "clicked");
     }
+  }
+
+  /// The number of the item that is `id` on the bus, of a menu of `n` (the root's 0 its own).
+  fn index(&self, id: i32, n: usize) -> Option<usize> {
+    let i =
+      if id == 0 { 0 } else { usize::try_from(id - self.0.base.get()).ok().filter(|&i| i > 0)? };
+    (i < n).then_some(i)
   }
 
   // MARK: D-Bus
@@ -315,18 +333,26 @@ impl Tray {
       (SNI, _) => V::Tuple(Vec::new()),
       (MENU, "GetLayout") => {
         let (parent, depth) = (args.child(0).i32(), args.child(1).i32());
+        // Fetched whole, the menu is built anew: the one that waited goes in.
+        if parent == 0
+          && let Some(menu) = self.0.state.take_pending()
+        {
+          self.apply(menu);
+        }
+
         let menu = self.0.menu.borrow();
         let n = nodes(&menu);
-        let Some(id) = usize::try_from(parent).ok().filter(|&i| i < n.len()) else {
+        let Some(id) = self.index(parent, n.len()) else {
           return dbus::fail(inv, "org.freedesktop.DBus.Error.InvalidArgs", "no such item");
         };
-        V::Tuple(vec![V::U(self.0.revision.get()), menu::layout(&n, id, depth)])
+        let layout = menu::layout(&n, id, depth, self.0.base.get());
+        V::Tuple(vec![V::U(self.0.revision.get()), layout])
       }
       (MENU, "GetGroupProperties") => {
         let menu = self.0.menu.borrow();
         let n = nodes(&menu);
         let found = ints(args.child(0)).into_iter().filter_map(|id| {
-          let node = n.get(usize::try_from(id).ok()?)?;
+          let node = &n[self.index(id, n.len())?];
           Some(V::Tuple(vec![V::I(id), menu::props(node)]))
         });
         V::Tuple(vec![V::Array("(ia{sv})", found.collect())])
@@ -335,7 +361,7 @@ impl Tray {
         let (id, name) = (args.child(0).i32(), args.child(1).str());
         let menu = self.0.menu.borrow();
         let n = nodes(&menu);
-        let props = usize::try_from(id).ok().and_then(|i| n.get(i)).map(menu::props);
+        let props = self.index(id, n.len()).map(|i| menu::props(&n[i]));
         let value = match props {
           Some(V::Array(_, entries)) => entries.into_iter().find_map(|e| match e {
             V::Entry(k, v) if *k == V::S(name.clone()) => Some(*v),

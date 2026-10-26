@@ -1,6 +1,7 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The hotkey on Linux, through the XDG desktop portal's `org.freedesktop.portal.GlobalShortcuts`
+//! The hotkey on Linux: X11's grab ([super::grab]) where the session is not Wayland's, else the
+//! XDG desktop portal's `org.freedesktop.portal.GlobalShortcuts`
 //! (<https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.GlobalShortcuts.html>,
 //! as of 2026-10): a session ([Hotkeys::start]: `CreateSession`) binds the hotkey
 //! (`BindShortcuts`, with the chord as its `preferred_trigger` in the XDG shortcuts spec's form,
@@ -10,9 +11,11 @@
 //! A session binds once, so another hotkey closes it and makes a new one. On a connection of
 //! its own, the app first registers its id with `org.freedesktop.host.portal.Registry`
 //! (xdg-desktop-portal 1.19+), which the backend keeps the shortcut under. KDE Plasma 6 and GNOME
-//! 48+ have the portal; without it (X11 desktops, older GNOME) there are no hotkeys, and a
-//! modifier key alone is no shortcut the spec can write. Nor can it take Escape for a while
-//! ([crate::hotkey::Hotkeys::escape]): that is reported, not done.
+//! 48+ have the portal; without it (older GNOME on Wayland) [Hotkeys::start] falls back to X11's
+//! grab through XWayland, which hears the chord only while an X11 app has the keyboard (the
+//! listener's error says so). A modifier key alone is no shortcut the spec can write, nor one
+//! the grab takes. The portal can't take Escape for a while ([crate::hotkey::Hotkeys::escape]):
+//! that is reported, not done; the grab takes it.
 
 use std::cell::{Cell, RefCell};
 use std::ffi::c_uint;
@@ -23,19 +26,19 @@ use std::time::Instant;
 
 use keyboard_types::NamedKey;
 
-use super::super::dbus::{self, Gv, V};
+use super::super::dbus::{self, Gv, PORTAL, PORTAL_PATH as PATH, V, portal, request};
 use super::super::{Fp, P, S};
+use super::grab::Grab;
 use crate::Modifiers;
 use crate::hotkey::{Edge, Listener, OnEdge, Status};
 use crate::keys::{Hotkey, Key, Shortcut};
 
-const PORTAL: &str = "org.freedesktop.portal.Desktop";
-const PATH: &str = "/org/freedesktop/portal/desktop";
 const SHORTCUTS: &str = "org.freedesktop.portal.GlobalShortcuts";
-const REQUEST: &str = "org.freedesktop.portal.Request";
 /// The one shortcut the session binds.
 const ID: &str = "hotkey";
 const MS: i32 = 2000;
+
+type Done = Result<(), String>;
 
 struct State {
   tx: Sender<Edge>,
@@ -49,11 +52,14 @@ struct State {
   /// The `Response` subscription of the request under way, and the signals' subscriptions.
   request: Cell<c_uint>,
   signals: RefCell<Vec<c_uint>>,
-  /// Requests made, for their tokens.
-  tokens: Cell<u32>,
   events: Cell<u64>,
-  /// [Hotkeys::escape] is on: only reported, the portal can't take Escape.
+  /// [Hotkeys::escape] is on: taken by X11's grab, only reported with the portal.
   escape: Cell<bool>,
+  /// X11's grab, once made, why it did not take Escape, and whether it stands in for a portal
+  /// missing on Wayland.
+  grab: RefCell<Option<Grab>>,
+  grab_escape: RefCell<Option<String>>,
+  fallback: Cell<bool>,
 }
 
 pub struct Hotkeys(Rc<State>);
@@ -81,34 +87,36 @@ impl Hotkeys {
       session: RefCell::new(None),
       request: Cell::new(0),
       signals: RefCell::default(),
-      tokens: Cell::new(0),
       events: Cell::new(0),
       escape: Cell::new(false),
+      grab: RefCell::new(None),
+      grab_escape: RefCell::new(None),
+      fallback: Cell::new(false),
     }))
   }
 
   pub fn set(&mut self, hotkey: Option<Hotkey>) -> Result<(), String> {
     let s = &self.0;
-    let shortcut = match hotkey {
-      None => None,
-      Some(Hotkey::Modifier(_)) => {
-        self.rebind(None);
-        return Err("a modifier key alone is not supported by the GlobalShortcuts portal".into());
+    let (shortcut, error) = match hotkey {
+      None => (None, None),
+      Some(Hotkey::Modifier(_)) => (None, Some("a modifier key alone is not supported".into())),
+      Some(Hotkey::Shortcut(k)) if !x11(s) && trigger(&k).is_none() => {
+        (None, Some(format!("{k} has no key name the portal takes")))
       }
-      Some(Hotkey::Shortcut(k)) => match trigger(&k) {
-        Some(_) => Some(k),
-        None => {
-          self.rebind(None);
-          return Err(format!("{k} has no key name the portal takes"));
-        }
-      },
+      Some(Hotkey::Shortcut(k)) => (Some(k), None),
     };
+
+    if x11(s) {
+      s.hotkey.set(shortcut);
+      let taken = grabbed(s, shortcut.is_some(), |g| g.set(shortcut));
+      return error.map_or(taken, Err);
+    }
 
     if s.hotkey.get() != shortcut {
       self.rebind(shortcut);
     }
 
-    Ok(())
+    error.map_or(Ok(()), Err)
   }
 
   /// Takes `hotkey`: the session that bound another closes, and once started a new one binds it.
@@ -122,17 +130,37 @@ impl Hotkeys {
   }
 
   pub fn start(&mut self) -> Result<(), String> {
-    let s = &self.0;
+    let s = &self.0.clone();
     if matches!(s.listener.get(), Listener::Active | Listener::Starting) {
       return Ok(());
     }
 
     s.started.set(true);
+    if x11(s) {
+      match grabbed(s, true, |_| Ok(())) {
+        Ok(()) => s.listener.set(Listener::Active),
+        Err(e) => fail(s, e),
+      }
+
+      return Ok(());
+    }
+
     if s.bus.get().is_null() {
       match connect(s) {
         Ok(bus) => s.bus.set(bus),
         Err(e) => {
-          fail(s, e);
+          // XWayland's grab, where there is an X server: it hears the chord only while an X11
+          // app has the keyboard.
+          s.fallback.set(true);
+          let taken = self.set(s.hotkey.get().map(Hotkey::Shortcut));
+          let taken = taken.and_then(|_| grabbed(s, true, |_| Ok(())));
+          s.fallback.set(s.grab.borrow().is_some());
+          let only = "X11's grab hears the hotkey only while an X11 app has the keyboard";
+          fail(s, format!("{e}; {}", taken.err().unwrap_or(only.into())));
+          if s.fallback.get() {
+            s.listener.set(Listener::Active);
+          }
+
           return Ok(());
         }
       }
@@ -145,19 +173,29 @@ impl Hotkeys {
     Ok(())
   }
 
-  /// The portal binds shortcuts the user approved, never a key taken for a while: Escape stays
-  /// the focused app's, and the status says so.
+  /// X11's grab takes Escape (with its connection, which the hotkey opens); the portal binds
+  /// shortcuts the user approved, never a key taken for a while: Escape stays the focused app's,
+  /// and the status says so.
   pub fn escape(&mut self, on: bool) {
-    self.0.escape.set(on);
+    let s = &self.0;
+    s.escape.set(on);
+    if x11(s) {
+      *s.grab_escape.borrow_mut() = grabbed(s, false, |g| g.escape(on)).err();
+    }
   }
 
   pub fn status(&self, out: &mut Status) {
     let s = &self.0;
     out.listener = s.listener.get();
     out.listener_error = s.error.borrow().clone();
-    out.counts.listener = s.events.get();
+    let grab = s.grab.borrow();
+    out.counts.listener = s.events.get() + grab.as_ref().map_or(0, Grab::events);
     if s.escape.get() {
-      out.escape_error = Some("the GlobalShortcuts portal can't take Escape".into());
+      out.escape_error = match x11(s) {
+        true if grab.is_none() => Some("X11's grab takes Escape once a hotkey is set".into()),
+        true => s.grab_escape.borrow().clone(),
+        false => Some("the GlobalShortcuts portal can't take Escape".into()),
+      };
     }
   }
 }
@@ -165,6 +203,7 @@ impl Hotkeys {
 impl Drop for Hotkeys {
   fn drop(&mut self) {
     let s = &self.0;
+    s.grab.take();
     close_session(s);
     for id in s.signals.take() {
       dbus::unsubscribe(s.bus.get(), id);
@@ -174,15 +213,27 @@ impl Drop for Hotkeys {
   }
 }
 
-/// A connection of the app's own to the portal, its id registered and the signals followed;
-/// `Err` without a portal that has global shortcuts.
+/// X11's grab is the hotkey: the session is not Wayland's, or Wayland's has no portal.
+fn x11(s: &State) -> bool {
+  !super::wayland() || s.fallback.get()
+}
+
+/// Runs `f` on X11's grab, its connection made at the first call that `needs` it.
+fn grabbed(s: &State, needs: bool, f: impl FnOnce(&Grab) -> Done) -> Done {
+  let mut grab = s.grab.borrow_mut();
+  if grab.is_none() && needs {
+    let g = grab.insert(Grab::open(s.tx.clone())?);
+    // Escape, turned on before there was a connection.
+    *s.grab_escape.borrow_mut() = g.escape(s.escape.get()).err();
+  }
+
+  grab.as_ref().map_or(Ok(()), f)
+}
+
+/// A connection to the portal ([dbus::portal]), the signals followed; `Err` without a portal that
+/// has global shortcuts.
 fn connect(s: &Rc<State>) -> Result<P, String> {
-  let bus = dbus::private_session()?;
-  let app = super::shell::info();
-  let args = V::Tuple(vec![V::s(app.id), V::dict(Vec::new())]);
-  let registry = "org.freedesktop.host.portal.Registry";
-  // Older portals have no registry: they take the id from the process's systemd scope.
-  let _ = dbus::call(bus, PORTAL, PATH, registry, "Register", args, MS);
+  let bus = portal(super::shell::info().id)?;
   let args = V::Tuple(vec![V::s(SHORTCUTS), V::s("version")]);
   if let Err(e) = dbus::call(bus, PORTAL, PATH, "org.freedesktop.DBus.Properties", "Get", args, MS)
   {
@@ -205,36 +256,12 @@ fn fail(s: &State, why: String) {
   s.listener.set(Listener::Failed);
 }
 
-/// A token for a request, and the request's object path it gives (the portal's spec: the
-/// sender's unique name without the colon, dots as underscores).
-fn token(s: &State) -> (String, String) {
-  let n = s.tokens.get() + 1;
-  s.tokens.set(n);
-  let token = format!("nimbo{}_{n}", std::process::id());
-  let sender = dbus::unique_name(s.bus.get()).trim_start_matches(':').replace('.', "_");
-  let path = format!("{PATH}/request/{sender}/{token}");
-  (token, path)
-}
-
-/// Calls `method` with `args` and its options last: a fresh `handle_token` (and for a session
-/// its `session_handle_token`); `done` gets the request's `Response` (its code, 0 for success,
-/// and results).
-fn request(s: &Rc<State>, method: &str, mut args: Vec<V>, done: Fp) {
-  let (token, path) = token(s);
-  let mut opts = vec![("handle_token", V::S(token.clone()))];
-  if method == "CreateSession" {
-    opts.push(("session_handle_token", V::S(token)));
-  }
-
-  args.push(V::dict(opts));
-  // Subscribed first: the response may come before the call returns.
-  let sub =
-    dbus::subscribe(s.bus.get(), PORTAL, REQUEST, "Response", Some(&path), done, dbus::weak(s));
-  s.request.set(sub);
+/// A GlobalShortcuts request, `done` getting its `Response`.
+fn ask(s: &Rc<State>, method: &str, args: Vec<V>, done: Fp) {
   s.listener.set(Listener::Starting);
-  if let Err(e) = dbus::call(s.bus.get(), PORTAL, PATH, SHORTCUTS, method, V::Tuple(args), MS) {
-    end_request(s);
-    fail(s, format!("{method}: {e}"));
+  match request(s.bus.get(), SHORTCUTS, method, args, Vec::new(), done, dbus::weak(s)) {
+    Ok(sub) => s.request.set(sub),
+    Err(e) => fail(s, e),
   }
 }
 
@@ -246,7 +273,7 @@ fn end_request(s: &State) {
 }
 
 fn create_session(s: &Rc<State>) {
-  request(s, "CreateSession", Vec::new(), on_session as Fp);
+  ask(s, "CreateSession", Vec::new(), on_session as Fp);
 }
 
 fn close_session(s: &State) {
@@ -271,7 +298,7 @@ fn bind(s: &Rc<State>) {
   }
 
   let shortcuts = V::Array("(sa{sv})", vec![V::Tuple(vec![V::s(ID), V::dict(opts)])]);
-  request(s, "BindShortcuts", vec![V::O(session), shortcuts, V::s("")], on_bound as Fp);
+  ask(s, "BindShortcuts", vec![V::O(session), shortcuts, V::s("")], on_bound as Fp);
 }
 
 /// The chord in the XDG shortcuts spec's form: `CTRL`, `ALT`, `SHIFT`, `LOGO`, then the key's
@@ -343,7 +370,6 @@ unsafe fn response(args: P, data: P) -> Option<(Rc<State>, u32, Gv)> {
   Some((s, args.child(0).u32(), args.child(1)))
 }
 
-#[allow(clippy::too_many_arguments)]
 unsafe extern "C" fn on_session(_: P, _: S, _: S, _: S, _: S, args: P, data: P) {
   let Some((s, code, results)) = (unsafe { response(args, data) }) else { return };
   let session = results.get("session_handle").map(|v| v.str()).filter(|h| !h.is_empty());
@@ -356,7 +382,6 @@ unsafe extern "C" fn on_session(_: P, _: S, _: S, _: S, _: S, args: P, data: P) 
   }
 }
 
-#[allow(clippy::too_many_arguments)]
 unsafe extern "C" fn on_bound(_: P, _: S, _: S, _: S, _: S, args: P, data: P) {
   let Some((s, code, results)) = (unsafe { response(args, data) }) else { return };
   let bound = results.get("shortcuts").is_none_or(|v| v.len() > 0);
@@ -385,12 +410,10 @@ unsafe fn edge(args: P, data: P, down: bool) {
   let _ = s.tx.send(if down { Edge::Down { at, repeat: false } } else { Edge::Up { at } });
 }
 
-#[allow(clippy::too_many_arguments)]
 unsafe extern "C" fn on_activated(_: P, _: S, _: S, _: S, _: S, args: P, data: P) {
   unsafe { edge(args, data, true) };
 }
 
-#[allow(clippy::too_many_arguments)]
 unsafe extern "C" fn on_deactivated(_: P, _: S, _: S, _: S, _: S, args: P, data: P) {
   unsafe { edge(args, data, false) };
 }
@@ -404,14 +427,14 @@ mod tests {
     k
   }
 
-  /// No session, no bus: the status alone says Escape is not taken.
+  /// No hotkey, so no session or X connection: the status alone says Escape is not taken.
   #[test]
   fn escape_is_reported_as_not_taken() {
     let mut h = crate::hotkey::Hotkeys::new(|_| {});
     h.escape(true);
     let s = h.status();
     assert!(!s.escape);
-    assert!(s.escape_error.is_some_and(|e| e.contains("can't take Escape")));
+    assert!(s.escape_error.is_some_and(|e| e.contains("Escape")));
     h.escape(false);
     assert_eq!((h.status().escape, h.status().escape_error), (false, None));
   }

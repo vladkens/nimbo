@@ -8,17 +8,19 @@
 //! |---|---|---|---|---|
 //! | macOS | event tap, Carbon `RegisterEventHotKey` as the fallback | event tap | both | the tap: Accessibility access |
 //! | Windows | `RegisterHotKey` | low-level keyboard hook | key state polled | nothing |
-//! | Linux | the `GlobalShortcuts` portal (KDE, GNOME 48+, Hyprland) | no | `Deactivated` | the user's approval |
+//! | Linux X11 | `XGrabKey` on the root window | no | `KeyRelease` | nothing |
+//! | Linux Wayland | the `GlobalShortcuts` portal (KDE, GNOME 48+, Hyprland) | no | `Deactivated` | the user's approval |
 //!
-//! On Linux the portal binds the shortcut with the chord only as a preference: the desktop asks
-//! the user, who may pick another. Without the portal (X11 desktops, older GNOME) there are no
-//! hotkeys: [Status::listener] fails with the reason.
+//! On X11 another app's grab of the chord is the error of [Hotkeys::set]. On Wayland the portal
+//! binds the shortcut with the chord only as a preference: the desktop asks the user, who may
+//! pick another. Without the portal (older GNOME) X11's grab through XWayland stands in, which
+//! hears the chord only while an X11 app has the keyboard ([Status::listener_error] says so).
 //!
 //! [Hotkeys::escape] takes Escape from every app for a while (to cancel what the hotkey started)
 //! and reports it as [Edge::Escape]: on macOS the event tap swallows it, and Carbon's hotkey takes
 //! it without the tap (no Accessibility access, Secure Input); on Windows the keyboard hook
-//! swallows it. The portal can't, so on Linux Escape stays the focused app's
-//! ([Status::escape_error] says so).
+//! swallows it; on X11 a grab of Escape takes it. The portal can't, so on Wayland Escape stays
+//! the focused app's ([Status::escape_error] says so).
 
 use std::time::Instant;
 
@@ -44,7 +46,7 @@ pub enum Edge {
 }
 
 /// The system-wide key source [Hotkeys::start] starts: macOS's event tap, Windows' low-level
-/// keyboard hook, Linux's portal session.
+/// keyboard hook, Linux's X connection or portal session.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Listener {
   /// Not started.
@@ -74,7 +76,7 @@ pub struct Status {
   pub paused: bool,
   /// Escape is taken now: [Hotkeys::escape] is on and a source here has it.
   pub escape: bool,
-  /// Why Escape is on but not taken: the platform can't (Linux) or no source is up.
+  /// Why Escape is on but not taken: the platform can't (Linux on Wayland) or no source is up.
   pub escape_error: Option<String>,
   /// Some app keeps key presses from the listener (macOS Secure Input: a password field, a
   /// terminal's secure keyboard entry); the fallback still hears chords.
@@ -151,7 +153,7 @@ impl Hotkeys {
   /// hotkey held past its chord window aside) is taken from every app and comes as [Edge::Escape],
   /// once per press; its repeats and release are swallowed too. A press that began before stays
   /// the app's. Whether it is taken is in [Status::escape]: macOS needs the listener or Carbon's
-  /// hotkey, Windows the listener, Linux can't.
+  /// hotkey, Windows the listener, Linux X11's grab (with a hotkey set); Wayland can't.
   pub fn escape(&mut self, on: bool) {
     if self.escape != on {
       self.escape = on;
@@ -171,8 +173,8 @@ impl Hotkeys {
   /// Starts the listener, unless it runs or is starting; again after it failed. Returns at once:
   /// whether it came up is in [Hotkeys::status] a moment later; the error here is only one
   /// starting it. macOS: the event tap needs Accessibility access (System Settings → Privacy &
-  /// Security), chords work without it through the fallback; Linux: the portal asks the user to
-  /// approve the shortcut.
+  /// Security), chords work without it through the fallback; Linux: on Wayland the portal asks
+  /// the user to approve the shortcut, on X11 the chord is grabbed already.
   pub fn start(&mut self) -> Result<(), String> {
     self.imp.start()
   }

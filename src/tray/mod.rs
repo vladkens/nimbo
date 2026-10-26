@@ -204,6 +204,12 @@ impl State {
     if self.open.get() { None } else { self.pending.take() }
   }
 
+  /// The menu set while it was open, open or not: a host fetching the menu builds it anew.
+  #[cfg(target_os = "linux")]
+  pub fn take_pending(&self) -> Option<Menu> {
+    self.pending.take()
+  }
+
   /// A menu set while it was open still waits.
   #[cfg(target_os = "macos")]
   pub fn waiting(&self) -> bool {

@@ -83,6 +83,9 @@ fns!(Gtk {
   fn g_idle_add(f: Fp, data: P) -> c_uint;
   fn g_timeout_add(ms: c_uint, f: Fp, data: P) -> c_uint;
   fn g_source_remove(id: c_uint) -> c_int;
+  fn g_unix_fd_add_full(priority: c_int, fd: c_int, cond: c_uint, f: Fp, data: P, free: Fp)
+    -> c_uint;
+  fn g_main_context_iteration(context: P, block: c_int) -> c_int;
   fn g_object_unref(obj: P);
   fn gdk_display_get_default() -> P;
   fn gdk_cursor_new_from_name(display: P, name: S) -> P;

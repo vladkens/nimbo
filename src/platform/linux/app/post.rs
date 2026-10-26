@@ -6,8 +6,9 @@
 //! character's keysym in the group in use, else in another (so Ctrl-V works on a Russian
 //! layout), Shift added at its second level; a key with no symbols is the mask tapped around a
 //! held Alt or Super lifted and put back, so neither reads as tapped alone. Wayland has no
-//! protocol for one app to type into another (only the RemoteDesktop portal, which asks the user
-//! each session): there it fails, as on X11 without the libraries.
+//! protocol for one app to type into another: there the RemoteDesktop portal's keyboard presses
+//! the keys ([super::remote]), the desktop asking the user the first time; it fails without the
+//! portal, as on X11 without the libraries.
 
 use std::ffi::{c_int, c_uint, c_ulong};
 use std::ptr::null;
@@ -42,8 +43,8 @@ fn gdk() -> Option<&'static Gdk> {
 }
 
 pub fn post(s: Shortcut) -> Result<(), String> {
-  if std::env::var_os("WAYLAND_DISPLAY").is_some() {
-    return Err("Wayland lets no app send keys to another".into());
+  if super::wayland() {
+    return super::remote::post(s);
   }
 
   let (x, t) = x11().zip(xtst()).ok_or("no libX11 or libXtst")?;
@@ -104,7 +105,7 @@ fn find(x: &X11, d: P, sym: c_ulong) -> Option<(u8, bool)> {
 /// The X keysym of `key`: a character's as GDK has it (Cyrillic, Greek and others have their own
 /// keysyms, `ж` is `Cyrillic_zhe`, the rest `0x1000000` plus the code point); named keys' from
 /// `keysymdef.h`.
-fn keysym(key: Key) -> Option<c_ulong> {
+pub(super) fn keysym(key: Key) -> Option<c_ulong> {
   let named = match key {
     Key::Char(c) => return gdk().map(|g| unsafe { (g.gdk_unicode_to_keyval)(c as u32) }.into()),
     Key::Named(k) => k,
