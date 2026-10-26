@@ -855,7 +855,7 @@ pub fn printable(s: &str) -> bool {
 /// |---|---|---|
 /// | macOS | `CGEvent`s posted at the HID level, the modifiers as their flags | Accessibility ([crate::permissions::accessibility]); Secure Input may swallow them |
 /// | Windows | `SendInput`: the modifier keys down, the key, the modifiers up | an app in focus that does not run elevated above this one |
-/// | Linux | XTest (`libXtst`, loaded at run time) on X11 | X11: on Wayland it fails, no protocol lets an app type into another |
+/// | Linux | XTest (`libXtst`, loaded at run time) on X11; on Wayland the RemoteDesktop portal's keyboard | Wayland: the user's approval, asked once (the desktop's dialog) |
 pub fn post(s: Shortcut) -> Result<(), String> {
   let key = match s.key {
     Key::Char(c) => Key::Char(lower(c)),

@@ -17,8 +17,9 @@ use crate::ui::{Align, Behavior, Id, Response, Style, Ui, grow, px, rigid};
 /// stays filled, a shade darker, while its list is open. A click, Space, Enter or the arrows
 /// ([Ui::pop_up_behavior]) open its list over it, the current option checked, highlighted and
 /// over the button ([Ui::menu_popup_over]); letters typed while it has focus, open or closed,
-/// go to the first option they start ([TypeSelect]). As wide as the current label, or
-/// [PopUp::width]; the list is at least as wide as the button and [crate::Sizes::menu_w]. Its
+/// go to the first option they start ([TypeSelect]). As wide as the current label, up to
+/// [crate::Sizes::menu_w] (a longer one ends in "…"), or [PopUp::width]; the list is at least
+/// as wide as the button and `menu_w`. Its
 /// items are `id.key(("item", i))`; `changed` when one was picked that wasn't the current.
 /// Disabled, its label and chevrons turn [crate::Theme::tertiary] and the capsule fades to half,
 /// as System Settings dims one.
@@ -64,8 +65,11 @@ impl<'s> PopUp<'s> {
       .align(Align::Start, Align::Center)
       .radius(t.radius)
       .bg(alpha(fill, fill[3] * hot));
-    // Its label's width, or the one given: text beside it wraps instead.
-    let frame = frame.w(self.width.map_or(rigid(), px));
+    // Its label's width up to the list's, or the one given: text beside it wraps instead.
+    let frame = match self.width {
+      Some(w) => frame.w(px(w)),
+      None => frame.w(rigid()).max_w(t.sizes.menu_w),
+    };
 
     let frame = b.style(frame);
     let label = at.map_or("", |i| options[i]);
@@ -235,6 +239,19 @@ mod tests {
     }
   }
 
+  /// A form row with a pop-up showing a long value.
+  struct Long(usize);
+
+  impl App for Long {
+    fn view(&mut self, ui: &mut Ui) {
+      let fs = crate::ui::FormStyle::plates(&ui.theme());
+      let long = "A microphone with a very long name, as USB devices report theirs";
+      ui.id("row").form_row(&fs, crate::ui::FormRow::new("Microphone"), |ui| {
+        ui.id("pick").pop_up(&mut self.0, &[long]);
+      });
+    }
+  }
+
   #[test]
   fn a_pop_up_picks_by_letters_and_closes_when_disabled() {
     let mut h = Harness::new(Pick::default(), Size::new(300.0, 200.0), 1.0);
@@ -255,5 +272,15 @@ mod tests {
     assert!(h.rect(pick.key("menu")).is_none());
     h.key(NamedKey::Enter, Modifiers::empty());
     assert_eq!(h.app().cur, 2);
+  }
+
+  /// A long value ends in "…" at the list's least width: the row's label keeps its line.
+  #[test]
+  fn a_long_value_stops_at_the_lists_width() {
+    let mut h = Harness::new(Long(0), Size::new(500.0, 200.0), 1.0);
+    h.frame();
+    let w = h.rt.ui.theme.sizes.menu_w;
+    assert_eq!(h.rect(Id::of("pick")).map(|r| r.w), Some(w));
+    assert!(h.rect(Id::of("row")).unwrap().h < 60.0, "the label on one line");
   }
 }

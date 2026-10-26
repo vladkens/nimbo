@@ -6,11 +6,12 @@
 //! GDBus on the main loop. The item registers with `org.kde.StatusNotifierWatcher` whenever one
 //! appears, so a panel that starts later or restarts shows it.
 //!
-//! The icon is a template filled white on a dark appearance, black on a light one, at 22 and
-//! 44 px (`IconPixmap`, ARGB in network order). `ItemIsMenu`: a click opens the menu. Panels ask
-//! `AboutToShow` as it opens ([crate::tray::Tray::on_open] runs then) and fetch the layout; a
-//! menu set while it is open waits until it closes (`Event` "closed" on the root, or a click),
-//! and at the latest until it opens next, as hosts don't all send "closed".
+//! The icon is a template filled white on a dark appearance or GNOME (its top bar is dark in
+//! either), black on a light one, at 22 and 44 px (`IconPixmap`, ARGB in network order).
+//! `ItemIsMenu`: a click opens the menu. Panels ask `AboutToShow` as it opens
+//! ([crate::tray::Tray::on_open] runs then) and fetch the layout; a menu set while it is open
+//! waits until it closes (`Event` "closed" on the root, or a click), until the host fetches it
+//! whole, or at the latest until it opens next, as hosts don't all send "closed".
 
 use std::cell::{Cell, RefCell};
 use std::ffi::c_uint;
@@ -176,7 +177,8 @@ impl Tray {
 
   /// The icon's pixmaps, tinted for the appearance now.
   fn paint(&self, icon: &TrayIcon) {
-    let tint = if crate::platform::appearance().dark { [255; 3] } else { [0; 3] };
+    let gnome = std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| d.contains("GNOME"));
+    let tint = if gnome || crate::platform::appearance().dark { [255; 3] } else { [0; 3] };
     let pixmap = |side: u32| {
       let rgba = icon.pixels(side, tint);
       let argb = rgba.chunks(4).flat_map(|p| [p[3], p[0], p[1], p[2]]).collect();
@@ -223,12 +225,14 @@ impl Tray {
     &self.0.state
   }
 
-  /// `AboutToShow` of the root: the app refreshes the menu; whether the layout changed.
+  /// `AboutToShow` of the root: the app refreshes the menu; whether the layout changed. An empty
+  /// menu doesn't count as open: GNOME's AppIndicator asks when the item registers, before the
+  /// app's menu and without a close, and nothing in it would be rebuilt under the person.
   fn about_to_show(&self) -> bool {
     self.closed();
     let rev = self.0.revision.get();
     self.0.state.opening(self);
-    self.0.state.set_open(true);
+    self.0.state.set_open(!self.0.menu.borrow().items.is_empty());
     self.0.revision.get() != rev
   }
 
@@ -315,6 +319,13 @@ impl Tray {
       (SNI, _) => V::Tuple(Vec::new()),
       (MENU, "GetLayout") => {
         let (parent, depth) = (args.child(0).i32(), args.child(1).i32());
+        // Fetched whole, the menu is built anew: the one that waited goes in.
+        if parent == 0
+          && let Some(menu) = self.0.state.take_pending()
+        {
+          self.apply(menu);
+        }
+
         let menu = self.0.menu.borrow();
         let n = nodes(&menu);
         let Some(id) = usize::try_from(parent).ok().filter(|&i| i < n.len()) else {

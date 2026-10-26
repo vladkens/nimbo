@@ -55,7 +55,7 @@ cargo add nimbo --git https://github.com/vladkens/nimbo
 
 - **macOS** 14 or later: an app sets `MACOSX_DEPLOYMENT_TARGET=14.0`, as `.cargo/config.toml` here does.
 - **Windows**: `#![cfg_attr(windows, windows_subsystem = "windows")]` in `main.rs`, so no console opens with the window.
-- **Linux**: GTK 3 at run time (every desktop has it), on Wayland or X11. Overlays on Wayland need `libgtk-layer-shell`, the tray icon a panel with StatusNotifierItems, hotkeys and file panels the desktop's portals (GNOME, KDE).
+- **Linux**: GTK 3 at run time (every desktop has it), on Wayland or X11. Overlays on Wayland need `libgtk-layer-shell`, the tray icon a panel with StatusNotifierItems, file panels the desktop's portals (GNOME, KDE), and on Wayland hotkeys and a paste into another app the portals too (X11 grabs the hotkey and types with XTest).
 
 </details>
 

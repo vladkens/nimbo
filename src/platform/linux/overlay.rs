@@ -9,7 +9,11 @@
 //! app place itself: with `libgtk-layer-shell` (the wlroots compositors, KDE) it is a layer
 //! surface on the overlay layer, anchored to the edge with its margin, without the keyboard, on
 //! the output the compositor picks (usually the focused one); without it (GNOME) a borderless
-//! toplevel that the compositor places, and may focus and stack, as any window.
+//! toplevel that the compositor places, and focuses and stacks as any window: GTK 3 sends
+//! Wayland nothing of `accept_focus` or `focus_on_map` (no-ops in `gdkwindow-wayland.c`, gtk-3-24,
+//! as of 2026-10), so GNOME 46 focuses it while it shows and gives the focus back to the window
+//! before when it hides (measured). It is shown, never presented (`gtk_window_present` asks for
+//! activation).
 
 use std::ffi::c_int;
 use std::sync::OnceLock;

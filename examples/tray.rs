@@ -2,10 +2,12 @@
 
 //! A tray app with no window of its own: an icon in the menu bar (macOS) or the tray (Windows,
 //! Linux) whose menu opens a counter window and shows its count, a global hotkey that opens or
-//! closes that window from any app, and launch at login as a check mark.
+//! closes that window from any app, launch at login as a check mark, and an item that pastes a
+//! line where the user types three seconds later, as a dictation app does ([paste]).
 //!
 //! `cargo run --release --example tray [-- --shot <file.png>]`; the shot is the counter window.
-//! The hotkey is ⌃⌥Space on macOS, Ctrl+Alt+Space elsewhere (on Linux the desktop asks first).
+//! The hotkey is ⌃⌥Space on macOS, Ctrl+Alt+Space elsewhere (on Wayland the desktop asks first,
+//! as it does for the paste's keys).
 
 // A Windows app, not a console one: no terminal opens with it.
 #![cfg_attr(windows, windows_subsystem = "windows")]
@@ -17,11 +19,12 @@ mod counter;
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Duration;
 
 use counter::Counter;
 use nimbo::hotkey::{Edge, Hotkeys};
 use nimbo::tray::{Item, Menu, Tray, TrayIcon};
-use nimbo::{AppInfo, Config, Main, Presence, Window, autostart};
+use nimbo::{AppInfo, Config, Main, Presence, Shortcut, SystemClipboard, Window, autostart};
 
 pub const INFO: AppInfo =
   AppInfo { id: "com.example.nimbo-tray", name: "Nimbo Tray", presence: Presence::Accessory };
@@ -50,6 +53,7 @@ pub fn menu(s: &Shown) -> Menu {
     Item::new("toggle", toggle),
     Item::separator(),
     Item::new("login", "Launch at Login").checked(s.login == Some(true)).enabled(s.login.is_some()),
+    Item::new("paste", "Paste a Line in 3 Seconds"),
     Item::separator(),
     Item::new("quit", "Quit").key("cmd+q"),
   ])
@@ -86,6 +90,24 @@ fn toggle(main: &mut Main, state: &Shared) {
       state.borrow_mut().window = Some(w);
     }
   }
+}
+
+/// Pastes `text` where the user types: the clipboard taken, the text offered, the paste shortcut
+/// posted, and a second later what the clipboard held put back, unless something else was copied
+/// meanwhile.
+fn paste(main: &mut Main, text: &str) {
+  let clip = SystemClipboard;
+  let before = clip.snapshot().filter(|s| !s.unreadable());
+  let Some(offer) = clip.offer(text, None) else { return eprintln!("paste: no clipboard") };
+  if let Err(e) = Shortcut::parse("cmd+v").map_err(|e| e.to_string()).and_then(nimbo::keys::post) {
+    eprintln!("paste: {e}");
+  }
+
+  main.proxy().after(Duration::from_secs(1), move |_| {
+    if let Some(before) = before.filter(|_| clip.holds(offer)) {
+      clip.restore(before);
+    }
+  });
 }
 
 thread_local! {
@@ -137,6 +159,7 @@ fn start(main: &mut Main) {
           eprintln!("launch at login: {e}");
         }
       }
+      "paste" => main.proxy().after(Duration::from_secs(3), |main| paste(main, "Hello from nimbo")),
       "quit" => main.quit(),
       _ => {}
     }
