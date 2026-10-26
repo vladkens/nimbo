@@ -114,6 +114,11 @@ fn start() -> Result<Rc<State>, String> {
     s.signals.borrow_mut().push(sub);
   }
 
+  // The portal gone (it crashed) closes no session: no signal would tell the clipboard changed.
+  let (bus, gone) = ("org.freedesktop.DBus", on_portal_gone as Fp);
+  let sub = dbus::subscribe(s.bus, bus, bus, "NameOwnerChanged", None, gone, dbus::weak(&s));
+  s.signals.borrow_mut().push(sub);
+
   let made = ask(&s, "CreateSession", vec![], vec![])?.get("session_handle").map(|v| v.str());
   *s.session.borrow_mut() = made.ok_or("the portal made no session")?;
   // `persist_mode` 2: until the user revokes it.
@@ -124,7 +129,8 @@ fn start() -> Result<Rc<State>, String> {
 
   ask(&s, "SelectDevices", vec![path(&s)], opts)?;
   // Before `Start`, as the portal wants; a desktop without the Clipboard portal has none.
-  let _ = call(&s, CLIPBOARD, "RequestClipboard", vec![path(&s), V::dict(vec![])]);
+  let args = V::Tuple(vec![path(&s), V::dict(vec![])]);
+  let _ = dbus::call(s.bus, PORTAL, PATH, CLIPBOARD, "RequestClipboard", args, MS);
   let results = ask(&s, "Start", vec![path(&s), V::s("")], vec![])?;
   if results.get("devices").is_none_or(|v| v.u32() & KEYBOARD == 0) {
     return Err("the desktop gave no keyboard".into());
@@ -176,8 +182,17 @@ fn ask(s: &State, method: &str, args: Vec<V>, opts: Vec<(&str, V)>) -> Result<Gv
   }
 }
 
+/// Calls the session's `method`; failed, the session is forgotten (the portal may have restarted
+/// without closing it), so the next paste starts another.
 fn call(s: &State, iface: &str, method: &str, args: Vec<V>) -> Result<Gv, String> {
-  dbus::call(s.bus, PORTAL, PATH, iface, method, V::Tuple(args), MS)
+  let done = dbus::call(s.bus, PORTAL, PATH, iface, method, V::Tuple(args), MS);
+  done.inspect_err(|_| forget()).map_err(|e| format!("{method}: {e}"))
+}
+
+/// No session: what it served goes with it.
+fn forget() {
+  SESSION.set(None);
+  paste::lost();
 }
 
 /// The session's own path, first of each call's arguments.
@@ -200,11 +215,7 @@ pub(super) fn post(k: Shortcut) -> Result<(), String> {
   let mods = if shift { k.mods | Modifiers::SHIFT } else { k.mods };
   for (code, down) in strokes(mods, key, evdev, |_| false, None).ok_or("no modifier key")? {
     let args = vec![path(&s), V::dict(vec![]), V::I(code as i32), V::U(down.into())];
-    if let Err(e) = call(&s, REMOTE, "NotifyKeyboardKeycode", args) {
-      SESSION.set(None);
-      paste::lost();
-      return Err(format!("NotifyKeyboardKeycode: {e}"));
-    }
+    call(&s, REMOTE, "NotifyKeyboardKeycode", args)?;
   }
 
   Ok(())
@@ -316,8 +327,16 @@ unsafe extern "C" fn on_response(_: P, _: S, _: S, _: S, _: S, args: P, data: P)
 unsafe extern "C" fn on_closed(_: P, _: S, path: S, _: S, _: S, _: P, data: P) {
   let Some(s) = (unsafe { dbus::upgrade::<State>(data) }) else { return };
   if dbus::text(path) == *s.session.borrow() {
-    SESSION.set(None);
-    paste::lost();
+    forget();
+  }
+}
+
+/// `NameOwnerChanged(s name, s old, s new)`: the portal left the bus, and the session with it.
+unsafe extern "C" fn on_portal_gone(_: P, _: S, _: S, _: S, _: S, args: P, data: P) {
+  let args = Gv::borrowed(args);
+  let ours = unsafe { dbus::upgrade::<State>(data) }.is_some();
+  if ours && args.child(0).str() == PORTAL && args.child(2).str().is_empty() {
+    forget();
   }
 }
 
