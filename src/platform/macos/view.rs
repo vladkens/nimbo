@@ -83,6 +83,10 @@ pub struct Ivars {
   /// The display link was invalidated (the view left its window): a new one starts when it
   /// moves to a window again.
   stopped: Cell<bool>,
+  /// A wake that came while the runtime was busy up the stack (a nested run loop: a panel, a
+  /// permission prompt, Finder revealing a file), done once it is free ([View::deliver],
+  /// [View::after_frame]).
+  rewake: Cell<bool>,
   /// The buttons pressed in the view and not let go yet, a bit per button number: AppKit sends
   /// each release to the view that got the press, while `pressedMouseButtons` is the mouse's
   /// state now, ahead of the events queued and with presses in other windows.
@@ -173,7 +177,7 @@ define_class!(
       let _: () = unsafe { msg_send![super(self), viewDidMoveToWindow] };
       if self.window().is_some() && self.ivars().stopped.replace(false) {
         let link = self.display_link();
-        if let Some(st) = self.ivars().state.borrow_mut().as_mut() {
+        if let Ok(Some(st)) = self.ivars().state.try_borrow_mut().as_deref_mut() {
           st.link = link;
         }
 
@@ -348,7 +352,8 @@ define_class!(
     #[unsafe(method(tick:))]
     fn tick(&self, _link: &CADisplayLink) {
       let pause = {
-        let mut state = self.ivars().state.borrow_mut();
+        // Busy up the stack (a nested run loop): this refresh is skipped, the link runs on.
+        let Ok(mut state) = self.ivars().state.try_borrow_mut() else { return };
         let Some(st) = state.as_mut() else { return };
         let idle = !st.rt.needs_frame() || !self.visible();
         if idle {
@@ -625,12 +630,20 @@ impl View {
 
     self.apply_resize();
     self.apply_file_dialog();
+    if self.ivars().rewake.take() {
+      self.wake();
+    }
+
     used
   }
 
   /// Shows the file panel the app asked for ([crate::Runtime::take_file_dialog]).
   fn apply_file_dialog(&self) {
-    let d = self.ivars().state.borrow_mut().as_mut().and_then(|st| st.rt.take_file_dialog());
+    let d = match self.ivars().state.try_borrow_mut().as_deref_mut() {
+      Ok(Some(st)) => st.rt.take_file_dialog(),
+      _ => None,
+    };
+
     if let (Some(d), Some(window)) = (d, self.window()) {
       super::files::show(self, &window, d);
     }
@@ -642,7 +655,11 @@ impl View {
   /// least content size comes down with it; a fixed window stays fixed for the user. Outside the
   /// runtime's borrow: the new frame size draws at once ([Self::render]).
   fn apply_resize(&self) {
-    let want = self.ivars().state.borrow_mut().as_mut().and_then(|st| st.rt.take_resize());
+    let want = match self.ivars().state.try_borrow_mut().as_deref_mut() {
+      Ok(Some(st)) => st.rt.take_resize(),
+      _ => None,
+    };
+
     let (Some(size), Some(window)) = (want, self.window()) else { return };
     let old = window.frame();
     let content = window.contentRectForFrameRect(old);
@@ -729,10 +746,15 @@ impl View {
     }
   }
 
+  /// Asks for a frame; busy up the stack, once the runtime is free ([Ivars::rewake]).
   fn wake(&self) {
-    if let Some(st) = self.ivars().state.borrow_mut().as_mut() {
-      st.rt.redraw();
-      st.link.setPaused(false);
+    match self.ivars().state.try_borrow_mut().as_deref_mut() {
+      Ok(Some(st)) => {
+        st.rt.redraw();
+        st.link.setPaused(false);
+      }
+      Ok(None) => {}
+      Err(_) => self.ivars().rewake.set(true),
     }
   }
 
@@ -764,7 +786,10 @@ impl View {
     }
 
     let due = {
-      let mut state = self.ivars().state.borrow_mut();
+      let Ok(mut state) = self.ivars().state.try_borrow_mut() else {
+        self.ivars().rewake.set(true);
+        return;
+      };
       let Some(st) = state.as_mut() else { return };
       match st.rt.needs_frame() {
         true => st.link.isPaused(),
@@ -784,7 +809,7 @@ impl View {
   /// else it stops at once, not a refresh later, and the view sleeps until the next timer.
   fn after_frame(&self) {
     {
-      let mut state = self.ivars().state.borrow_mut();
+      let Ok(mut state) = self.ivars().state.try_borrow_mut() else { return };
       let Some(st) = state.as_mut() else { return };
       match st.rt.needs_frame() {
         true => st.link.setPaused(false),
@@ -797,6 +822,9 @@ impl View {
     self.sync_ime();
     self.apply_resize();
     self.apply_file_dialog();
+    if self.ivars().rewake.take() {
+      self.wake();
+    }
   }
 
   /// Lets the input method's composition go when the field ended it by itself (a click, a
@@ -865,7 +893,8 @@ impl View {
   /// press.
   fn drag_window(&self, event: &NSEvent) -> bool {
     let pos = self.location(event);
-    let drags = self.ivars().state.borrow().as_ref().is_some_and(|st| st.rt.drags_window(pos));
+    let drags =
+      matches!(self.ivars().state.try_borrow().as_deref(), Ok(Some(st)) if st.rt.drags_window(pos));
     let Some(window) = self.window().filter(|_| drags) else { return false };
     let key = ns_string!("AppleActionOnDoubleClick");
     let action = NSUserDefaults::standardUserDefaults().stringForKey(key).map(|s| s.to_string());
@@ -894,7 +923,11 @@ impl View {
     let scale = self.window().map_or(1.0, |w| w.backingScaleFactor() as f32);
     let bounds = self.bounds().size;
     let size = Size::new(bounds.width as f32, bounds.height as f32);
-    let mut state = self.ivars().state.borrow_mut();
+    // Busy up the stack (resized during a frame): drawn again once the runtime is free.
+    let Ok(mut state) = self.ivars().state.try_borrow_mut() else {
+      self.ivars().rewake.set(true);
+      return;
+    };
     let Some(st) = state.as_mut() else { return };
     self.ivars().last_frame.set(Some(st.rt.now()));
     // A wake set before this frame is let go: [Self::after_frame] sets the next, a refresh after

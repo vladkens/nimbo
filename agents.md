@@ -25,6 +25,7 @@ A small, fast, custom-drawn desktop UI toolkit in Rust, in the spirit of Sublime
 - Each part has a code budget (`BUDGETS` in `scripts/size.py`: each platform, `ui/`, its widgets and containers, `text/` and the rest of the core), checked by `make size ARGS=--check` (and `make check`); raising one is a decision recorded in the PR.
 - A statement after an `if`, `for`, `while`, `loop` or `match` block starts after a blank line, as do the other logical steps; rustfmt never adds them, `scripts/blank-lines.py` checks it.
 - Every file starts with a `//!` doc whose first sentence says what the file does; `make size ARGS=--map` lists the files by it, and a PR's description carries that list for the files it adds or changes.
+- A window's state is reached only through `try_borrow*` or the platform's helper that uses it (macOS `View`, Windows `with_window`, Linux `with`), never `borrow_mut` in a callback: the system calls back in from nested run loops (panels, permission prompts, Finder) while a callback up the stack holds it. Busy, the work is deferred, not dropped: events queue, frames and wakes run again once it is free.
 - Every styled widget is a headless behaviour (hover, press, click, focus, keys, the value it edits) plus drawing from the theme, so an app can draw its own look over the same behaviour.
 - Keep third-party checkouts in `3rd/` (gitignored), never modify them, and name the source file in a comment when porting from one, keeping its license.
 - Helper scripts go in `scripts/`, in kebab-case, in Python run with `uv run`.
