@@ -94,7 +94,8 @@ fn session() -> Result<Rc<State>, String> {
 
 /// The session when it has the clipboard (Wayland only).
 pub(super) fn clipboard() -> Option<Rc<State>> {
-  super::wayland().then(session).and_then(Result::ok).filter(|s| s.clipboard.get())
+  let on = super::wayland() && super::shell::running();
+  on.then(session).and_then(Result::ok).filter(|s| s.clipboard.get())
 }
 
 /// A session on a connection of its own, its signals followed from the start.
@@ -210,7 +211,7 @@ pub(super) fn post(k: Shortcut) -> Result<(), String> {
 }
 
 /// The evdev code of the key at `code`.
-fn evdev(code: Code) -> Option<u32> {
+pub(super) fn evdev(code: Code) -> Option<u32> {
   (1..256).find(|&k| keys::code(k) == code)
 }
 

@@ -2,7 +2,8 @@
 
 //! The hotkey on X11: a passive grab of its chord on the root window (`XGrabKey`) on an X
 //! connection of its own (`libX11` loaded at run time), ported from lalo's `src/linux/hotkey.rs`
-//! (same author, MIT; on x11rb there). X matches a grab's modifiers exactly, so the chord is
+//! (same author, MIT; on x11rb there). The chord's key is its place, as on the other platforms
+//! (X's keycode, evdev's past 8). X matches a grab's modifiers exactly, so the chord is
 //! grabbed four times, with and without Caps Lock (`LockMask`) and Num Lock (`Mod2Mask`); another
 //! client's grab of it is a BadAccess, caught ([super::trap]) and returned by [Grab::set], the
 //! grabs made undone. XKB's detectable autorepeat has a held key repeat as presses with no
@@ -18,11 +19,13 @@ use std::rc::Rc;
 use std::sync::mpsc::Sender;
 use std::time::Instant;
 
+use keyboard_types::Code;
+
 use super::super::{Fp, P, dbus, gtk};
-use super::{X11, post, trap, x11};
+use super::{X11, remote, trap, x11};
 use crate::Modifiers;
 use crate::hotkey::Edge;
-use crate::keys::{Key, Shortcut};
+use crate::keys::Shortcut;
 
 /// The lock modifiers each grab is made with and without: `LockMask` and `Mod2Mask`.
 const LOCKS: [c_uint; 4] = [0, 2, 16, 2 | 16];
@@ -110,29 +113,25 @@ impl Grab {
     self.0.events.get()
   }
 
-  /// Grabs `chord` in place of the one before; `Err` (none grabbed) when the keyboard has no key
-  /// for it or another app grabbed it.
+  /// Grabs `chord` in place of the one before, by the key's place ([Shortcut::code]) as the
+  /// other platforms do; `Err` (none grabbed) when it has none or another app grabbed it.
   pub fn set(&self, chord: Option<Shortcut>) -> Result<(), String> {
     let s = &self.0;
-    if let Some((code, mods)) = s.keys.chord.take() {
-      s.grab(code, &[mods], false)?;
-    }
+    let done = (|| {
+      if let Some((code, mods)) = s.keys.chord.take() {
+        s.grab(code, &[mods], false)?;
+      }
 
-    let Some(k) = chord else { return Ok(()) };
-    let key = match k.key {
-      Key::Char(c) => Key::Char(c.to_lowercase().next().unwrap_or(c)),
-      key => key,
-    };
-
-    let code = post::keysym(key).map_or(0, |sym| unsafe { (s.x.XKeysymToKeycode)(s.d, sym) });
-    if code == 0 {
-      return Err(format!("no key on this keyboard types {k}"));
-    }
-
-    let mods = mask(k.mods);
-    s.grab(code, &[mods], true)?;
-    s.keys.chord.set(Some((code, mods)));
-    Ok(())
+      let Some(k) = chord else { return Ok(()) };
+      let code = keycode(k.code()).ok_or_else(|| format!("{k} has no key on this keyboard"))?;
+      let mods = mask(k.mods);
+      s.grab(code, &[mods], true)?;
+      s.keys.chord.set(Some((code, mods)));
+      Ok(())
+    })();
+    // Read after the keys are known: a press the grab's sync queued is the chord's.
+    s.drain();
+    done
   }
 
   /// Grabs Escape alone and with Shift (`ShiftMask`), or lets it go; `Err` when another app
@@ -140,17 +139,20 @@ impl Grab {
   pub fn escape(&self, on: bool) -> Result<(), String> {
     let s = &self.0;
     s.keys.escape_down.set(false);
-    if let Some(code) = s.keys.escape.take() {
-      s.grab(code, &[0, 1], false)?;
-    }
+    let done = (|| {
+      if let Some(code) = s.keys.escape.take() {
+        s.grab(code, &[0, 1], false)?;
+      }
 
-    let code = unsafe { (s.x.XKeysymToKeycode)(s.d, 0xff1b) };
-    if on && code != 0 {
-      s.grab(code, &[0, 1], true)?;
-      s.keys.escape.set(Some(code));
-    }
+      if let Some(code) = keycode(Some(Code::Escape)).filter(|_| on) {
+        s.grab(code, &[0, 1], true)?;
+        s.keys.escape.set(Some(code));
+      }
 
-    Ok(())
+      Ok(())
+    })();
+    s.drain();
+    done
   }
 }
 
@@ -184,8 +186,6 @@ impl Inner {
         };
       }
     });
-    // What the sync read meanwhile waits in Xlib's queue: the socket won't say.
-    self.drain();
     if error != 0 && on {
       self.grab(code, &mods, false)?;
     }
@@ -198,7 +198,8 @@ impl Inner {
     }
   }
 
-  /// Reads the events queued: the edges go to the "hotkey" thread.
+  /// Reads the events queued, those a sync read too, which the socket won't tell of: the edges go
+  /// to the "hotkey" thread.
   fn drain(&self) {
     let mut event = [0 as c_long; 24];
     while unsafe { (self.x.XPending)(self.d) } > 0 {
@@ -211,6 +212,11 @@ impl Inner {
       }
     }
   }
+}
+
+/// The X keycode of the key at `code`: its evdev code past X's 8.
+fn keycode(code: Option<Code>) -> Option<u8> {
+  u8::try_from(remote::evdev(code?)? + 8).ok()
 }
 
 /// The X modifier mask of `mods`.
@@ -253,9 +259,12 @@ mod tests {
     assert_eq!(edge(RELEASE, 65, 4 | 8), Some(Edge::Up { at }));
   }
 
-  /// The grab's masks: each chord's modifiers, with the four lock variants.
+  /// The grab's keys by their place (X's keycodes on a PC keyboard) and its masks: each chord's
+  /// modifiers, with the four lock variants.
   #[test]
-  fn masks_with_the_locks() {
+  fn keys_by_place_and_masks_with_the_locks() {
+    let codes = [Code::KeyV, Code::Space, Code::Escape].map(Some).map(keycode);
+    assert_eq!(codes, [Some(55), Some(65), Some(9)]);
     assert_eq!(mask(Modifiers::CONTROL | Modifiers::ALT), 4 | 8);
     assert_eq!(mask(Modifiers::META | Modifiers::SHIFT), 64 | 1);
     assert_eq!(LOCKS.map(|l| 4 | l), [4, 4 | 2, 4 | 16, 4 | 2 | 16]);

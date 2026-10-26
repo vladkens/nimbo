@@ -158,7 +158,7 @@ pub fn restore(snapshot: Snapshot) -> bool {
   if types.is_empty() && remote.is_some() {
     // The portal can't empty the clipboard: what it asks for of the app's own is not there.
     SERVED.set(None);
-    return true;
+    return false;
   }
 
   let Some((s, _, c)) = clip() else { return false };
