@@ -185,10 +185,20 @@ pub fn offer(text: &str, on_read: Option<OnRead>) -> Option<u64> {
 /// Takes the selection, serving `types`.
 fn serve(types: Vec<(String, Vec<u8>)>, on_read: Option<OnRead>) -> Option<u64> {
   let id = NEXT.replace(NEXT.get() + 1);
-  if let Some(r) = remote::clipboard() {
-    remote::offer(&r, types.iter().map(|t| t.0.clone()).collect()).then_some(())?;
-    SERVED.set(Some(Served { id, types, on_read }));
-    return Some(id);
+  // Twice: a session the portal lost (it restarted) is forgotten at the first call, and the
+  // second starts another.
+  let mut portal = false;
+  for _ in 0..2 {
+    let Some(r) = remote::clipboard() else { break };
+    portal = true;
+    if remote::offer(&r, types.iter().map(|t| t.0.clone()).collect()) {
+      SERVED.set(Some(Served { id, types, on_read }));
+      return Some(id);
+    }
+  }
+
+  if portal {
+    return None;
   }
 
   let (s, _, c) = clip()?;
