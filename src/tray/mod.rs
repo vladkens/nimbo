@@ -94,7 +94,13 @@ pub struct Item {
 }
 
 impl Item {
+  /// An item labelled `label`, a longer one than [LABEL] shortened ([Item::full] keeps it whole).
   pub fn new(id: &str, label: &str) -> Self {
+    Self::full(id, &fit(label, LABEL))
+  }
+
+  /// An item showing all of `label`, however long.
+  pub fn full(id: &str, label: &str) -> Self {
     Self {
       id: id.into(),
       label: label.into(),
@@ -260,22 +266,33 @@ pub fn available() -> Result<(), String> {
   imp::available()
 }
 
-/// `name` as a menu item shows it, at most `max` characters, so the menu keeps its width whatever
-/// the app lists (a device, a file): a longer one cut at a word with `…`, inside its brackets
-/// where the part before them leaves room (`System Default (MacBook Pro…)`). From wavo-app's
-/// `src/menu.rs` (`short`) and `src/history.rs` (`shorten`).
-pub fn short(name: &str, max: usize) -> String {
+/// The most characters an item's label shows ([Item::new]): a menu keeps its width whatever the
+/// app lists (a device, a file, a warning).
+pub const LABEL: usize = 48;
+
+/// `text` in at most `max` characters: the part in brackets shortened first (`System Default
+/// (MacBook Pro…)`), or left out when too little of it would show (`No sound from Line In: check
+/// the microphone`); else cut at a word, with `…`. From wavo-app's `src/menu.rs` (`fit`) and
+/// `src/history.rs` (`shorten`).
+fn fit(text: &str, max: usize) -> String {
   let len = |s: &str| s.chars().count();
-  if len(name) <= max {
-    return name.to_owned();
+  if len(text) <= max {
+    return text.to_owned();
   }
 
-  match name.strip_suffix(')').and_then(|n| n.split_once(" (")) {
-    Some((head, inner)) if len(head) + 12 <= max => {
-      format!("{head} ({})", shorten(inner, max - len(head) - 4))
+  if let Some((head, rest)) = text.split_once(" (")
+    && let Some((inner, tail)) = rest.split_once(')')
+  {
+    // " (", "…)" around what shows of it.
+    let room = max.saturating_sub(len(head) + len(tail) + 4);
+    if room >= 8 {
+      return format!("{head} ({}){tail}", shorten(inner, room));
     }
-    _ => shorten(name, max.saturating_sub(1)),
+
+    return fit(&format!("{head}{tail}"), max);
   }
+
+  shorten(text, max.saturating_sub(1))
 }
 
 /// `text` on one line, its first words up to `max` characters and `…` where it is cut (a word
@@ -335,23 +352,30 @@ impl Tray {
 mod tests {
   use super::*;
 
-  /// Names cut at a word to fit, inside their brackets where there is room.
+  /// Labels cut at a word to fit, brackets shortened or left out, and items fitting by themselves.
   #[test]
-  fn long_names_cut_at_a_word() {
+  fn long_labels_fit() {
+    assert_eq!(fit("System Default (MacBook Pro Microphone)", 32), "System Default (MacBook Pro…)");
     assert_eq!(
-      short("System Default (MacBook Pro Microphone)", 32),
-      "System Default (MacBook Pro…)"
-    );
-    assert_eq!(
-      short("a-very-long-model-name-for-the-menu-q8", 32),
+      fit("a-very-long-model-name-for-the-menu-q8", 32),
       "a-very-long-model-name-for-the…"
     );
-    assert_eq!(short("Elgato Wave:3 Microphone Array", 32), "Elgato Wave:3 Microphone Array");
-    assert_eq!(short("Large v3, Turbo, quantized to eight bits", 24), "Large v3, Turbo…");
-    // No room inside the brackets: cut as a whole.
-    assert_eq!(short("A Rather Long Device Name (USB)", 24), "A Rather Long Device…");
-    assert_eq!(short("Ünïcödé wörds ärë cöüntëd äs chärs", 20), "Ünïcödé wörds ärë…");
-    assert_eq!(short("anything", 0), "…");
+    assert_eq!(fit("Elgato Wave:3 Microphone Array", 32), "Elgato Wave:3 Microphone Array");
+    assert_eq!(fit("Large v3, Turbo, quantized to eight bits", 24), "Large v3, Turbo…");
+    // No room inside the brackets: they go.
+    assert_eq!(fit("A Rather Long Device Name (USB)", 24), "A Rather Long Device…");
+    assert_eq!(fit("Ünïcödé wörds ärë cöüntëd äs chärs", 20), "Ünïcödé wörds ärë…");
+    assert_eq!(fit("anything", 0), "…");
+    // Brackets in the middle: shortened, or left out when too little of them would show.
+    let warning = "No sound from Line In (High Definition Audio Device): check the microphone";
+    assert_eq!(fit(warning, LABEL), "No sound from Line In: check the microphone");
+    let warning = "No sound from USB Mic (Elgato Wave:3 Microphone Array): check the microphone";
+    assert_eq!(fit(warning, 60), "No sound from USB Mic (Elgato Wave:3…): check the microphone");
+    let error = "The last dictation failed: the engine did not answer in time and was restarted";
+    assert!(fit(error, LABEL).ends_with('…') && fit(error, LABEL).chars().count() <= LABEL);
+    // Items fit by themselves, unless asked to show it all.
+    assert_eq!(Item::new("e", error).label, fit(error, LABEL));
+    assert_eq!(Item::full("e", error).label, error);
   }
 
   /// An SVG file's ring of two paths fills even-odd, as the file draws it.
