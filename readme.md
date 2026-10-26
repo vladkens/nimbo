@@ -16,8 +16,8 @@
 ## 🌟 Features
 
 - 🖌️ **One look on three systems**, measured from macOS System Settings, in light and dark and the system's accent colour
-- 🔤 **The system's text stack**: CoreText, DirectWrite or FreeType with HarfBuzz; shaping, subpixel positioning, colour emoji, input methods
-- 🖥️ **A CPU renderer**: no GPU, shaders or drivers to ship; frames paced to the display, an idle window asleep
+- 🔤 **The system's text stack**: CoreText, DirectWrite or FreeType with HarfBuzz shape the text and rasterize each glyph once into an atlas; subpixel positioning, colour emoji, input methods
+- 🖥️ **A CPU renderer**: draws the whole window, the glyphs from that atlas too, and hands the frame to the system's 2D path (an IOSurface, a GDI bitmap, a cairo surface); no GPU API, shaders or drivers; frames paced to the display, an idle window asleep
 - 🧩 **Widgets as headless behaviours** plus a theme: buttons, switches, fields, selects, tabs, splits, dialogs, lists and form pages of 500k rows built in view only; or your own look over the same behaviour
 - 🛎️ **Tray and HUD apps**: a tray menu, global hotkeys, launch at login, overlays that never take the focus, the system's permissions
 - 📂 **Files**: the system's open and save panels, files dragged onto a window
@@ -89,6 +89,16 @@ fn main() {
 ```
 
 `nimbo::run` opens the window; `-- --shot counter.png` renders it to a file without one.
+
+### How a frame is built
+
+The API is immediate-mode, like egui: `view` builds the whole tree from the app's state, and a widget answers right where it's built. There are no signals, no `Rc<RefCell>` and no message enums: the state is a plain struct, a switch gets `&mut self.field`. What keeps the cost down:
+
+- **`view` runs only on frames that redraw**: after input, during an animation, when a timer is due. An idle window runs and draws nothing.
+- **What lives between frames**: the last laid-out tree (for hit testing), each widget's own state by its id (scroll, focus, caret, animations), shaped text lines.
+- **Long content is built in view only**: a form of 500,000 rows takes about 0.4 ms of view and layout per frame on an M2.
+
+It suits settings windows, tray and HUD apps and tools with long lists. A change runs the whole `view` again, where a reactive toolkit (SwiftUI, Xilem) would rebuild one branch. So heavy work belongs in the app's state or on a thread, and `view` only reads its result.
 
 ### Examples
 

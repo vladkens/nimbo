@@ -718,6 +718,13 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
     )
   };
   assert!(!hwnd.is_null(), "nimbo: CreateWindowExW failed");
+  if let Some((side, px)) = cfg.icon {
+    // Big and small alike, the system scales it; it lives as long as the app.
+    let icon = app::tray::hicon(side as i32, px) as LPARAM;
+    unsafe { SendMessageW(hwnd, WM_SETICON, ICON_BIG as WPARAM, icon) };
+    unsafe { SendMessageW(hwnd, WM_SETICON, ICON_SMALL as WPARAM, icon) };
+  }
+
   // No input method until a text field takes it.
   input::ime_off(hwnd);
   let drops = files::register(hwnd);

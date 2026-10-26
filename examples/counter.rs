@@ -3,7 +3,8 @@
 //! The first app on the element tree with input: a count, − and + buttons and a reset, all
 //! theme widgets (hover fades, pressed fills, Tab focus and Space). Clicks are read where the
 //! buttons are built; the runtime runs the view once more right after a click, so the count
-//! above them is never a frame behind.
+//! above them is never a frame behind. Off macOS the window carries an icon made at compile
+//! time, a blue disc.
 //!
 //! `cargo run --release --example counter [-- --shot <file.png>]`
 
@@ -16,6 +17,22 @@ use nimbo::{App, Button, Config, Font, Id, Style, TextStyle, Ui, Variant, Weight
 pub struct Counter {
   pub count: i64,
 }
+
+/// The window's icon on Windows and X11: a blue disc, 64 pixels square.
+const ICON: [u8; 64 * 64 * 4] = {
+  let mut px = [0; 64 * 64 * 4];
+  let mut i = 0;
+  while i < 64 * 64 {
+    let (x, y) = ((i % 64) as i32 * 2 - 63, (i / 64) as i32 * 2 - 63);
+    if x * x + y * y <= 60 * 60 {
+      (px[i * 4], px[i * 4 + 1], px[i * 4 + 2], px[i * 4 + 3]) = (0x0a, 0x84, 0xff, 0xff);
+    }
+
+    i += 1;
+  }
+
+  px
+};
 
 pub const COUNT_ID: &str = "count";
 pub const MINUS: &str = "minus";
@@ -48,7 +65,8 @@ impl App for Counter {
 
 fn main() {
   // The shot: counted to 3, the pointer resting on + after the fade.
-  nimbo::run(Config::new("counter", 360.0, 300.0), Counter::default(), |h| {
+  let cfg = Config::new("counter", 360.0, 300.0).icon(64, &ICON);
+  nimbo::run(cfg, Counter::default(), |h| {
     h.frame();
     for _ in 0..3 {
       h.click_id(Id::of(PLUS));
