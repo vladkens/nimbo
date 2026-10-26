@@ -8,6 +8,7 @@
 //! ([post]), where the user types ([focus]), the pasteboard for a paste ([paste]) and alerts
 //! ([alert]).
 
+pub mod activity;
 pub mod autostart;
 pub mod focus;
 pub mod hotkey;

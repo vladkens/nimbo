@@ -99,6 +99,8 @@
 //! - `pub mod open` ([crate::open]): `url(&str)`, `path(&Path)` and `reveal(&Path)` (an absolute
 //!   path), each `-> Result<(), String>` without waiting for the app it starts; `file_manager() ->
 //!   &'static str`.
+//! - `pub mod activity` ([crate::activity]), from any thread: `Token: Send`, `begin(&str) ->
+//!   Token`, `end(Token)`.
 //! - `pub mod post` ([crate::keys::post]): `post(Shortcut) -> Result<(), String>`, the shortcut as
 //!   key events to the app in focus, its character (lowercase) found on the layout in use.
 //! - `pub fn clipboard() -> Option<impl Clipboard>`: the system clipboard outside a window
@@ -116,7 +118,7 @@
 //!   bool`, `secure_input() -> bool`, `microphone() -> Access`, `request_microphone(Box<dyn
 //!   FnOnce(bool) + Send>)`.
 //!
-//!   `open`, `post`, `paste`, `focus` and `permissions` live in `app/` on each OS too.
+//!   `activity`, `open`, `post`, `paste`, `focus` and `permissions` live in `app/` on each OS too.
 //! - `pub fn appearance() -> Appearance` ([crate::Appearance]): `dark`, and `accent` in sRGB or
 //!   `None` when the OS has none or the user left it to apps (macOS: `effectiveAppearance` matched
 //!   against Aqua / DarkAqua, `controlAccentColor` unless Multicolor; on the main thread only,
@@ -178,7 +180,7 @@ pub use imp::appearance;
 #[cfg(target_os = "macos")]
 pub(crate) use imp::permissions;
 pub(crate) use imp::{
-  autostart, clipboard, focus, hotkey, open, paste, perf_cores, post, shell, text, tray,
+  activity, autostart, clipboard, focus, hotkey, open, paste, perf_cores, post, shell, text, tray,
 };
 #[cfg(any(test, target_os = "windows", target_os = "linux"))]
 use keyboard_types::Code;

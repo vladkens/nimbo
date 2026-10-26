@@ -361,6 +361,7 @@ pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
   });
   let delegate = WindowDelegate::new(mtm, id);
   window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+  view.prepare();
   window.center();
   window.makeFirstResponder(Some(&view));
   let win = Win { id, window, view, _delegate: delegate, shown: false, overlay: cfg.overlay };

@@ -354,7 +354,7 @@ impl<'s> List<'s> {
       let lo = if shown.start == 0 { f32::NEG_INFINITY } else { pad_t + shown.start as f32 * h };
       let hi = if shown.end == n { f32::INFINITY } else { pad_t + shown.end as f32 * h };
       let node = ui.st.stack.last().unwrap().0;
-      ui.st.tree.partial.push((node, lo, hi));
+      ui.st.tree.partial.push((node, node, lo, hi));
     });
 
     if let Some(own) = own {

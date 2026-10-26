@@ -655,12 +655,14 @@ impl View {
   /// least content size comes down with it; a fixed window stays fixed for the user. Outside the
   /// runtime's borrow: the new frame size draws at once ([Self::render]).
   fn apply_resize(&self) {
+    // Out of its window, the size waits for it: asked again, the same size would be nothing new.
+    let Some(window) = self.window() else { return };
     let want = match self.ivars().state.try_borrow_mut().as_deref_mut() {
       Ok(Some(st)) => st.rt.take_resize(),
       _ => None,
     };
 
-    let (Some(size), Some(window)) = (want, self.window()) else { return };
+    let Some(size) = want else { return };
     let old = window.frame();
     let content = window.contentRectForFrameRect(old);
     let rect = NSRect::new(content.origin, NSSize::new(size.w as f64, size.h as f64));
@@ -825,6 +827,13 @@ impl View {
     if self.ivars().rewake.take() {
       self.wake();
     }
+  }
+
+  /// Draws the first frame before the window shows and takes the size the app asked for in it
+  /// ([crate::Ui::fit_window_height]): a window fitted to its content opens at its size.
+  pub fn prepare(&self) {
+    self.render();
+    self.after_frame();
   }
 
   /// Lets the input method's composition go when the field ended it by itself (a click, a

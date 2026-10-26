@@ -761,7 +761,7 @@ impl<A: App> Runtime<A> {
         break (ui, moved);
       }
 
-      self.ui = if short { ui.finish() } else { ui.discard() };
+      self.ui = if short { ui.relayout() } else { ui.discard() };
     };
 
     let shifted = ui.shifted();

@@ -21,6 +21,7 @@
 //! macOS 14 is the least it runs on (`NSApplication`'s `activate`, `NSView`'s display link): build
 //! apps with `MACOSX_DEPLOYMENT_TARGET=14.0`.
 
+pub mod activity;
 pub mod app;
 pub mod autostart;
 pub mod clipboard;
