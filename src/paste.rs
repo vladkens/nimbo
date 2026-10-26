@@ -87,7 +87,8 @@ pub enum NotPasted {
   Unanswered { app: String, what: &'static str, why: String },
   /// No Accessibility access (macOS): the shortcut can't be posted.
   NoAccess,
-  /// The clipboard can't be reached.
+  /// The clipboard can't be reached, or did not take the text (another app holds it open:
+  /// Windows).
   NoClipboard,
   /// The shortcut (`key`, its label) was not posted.
   NotSent { key: String, why: String },
@@ -136,7 +137,8 @@ struct Sys {
   /// The clipboard's contents, `None` also where it may not be read without asking.
   snapshot: fn() -> Option<Snapshot>,
   offer: fn(&str, Option<OnRead>) -> Option<Offer>,
-  write: fn(&str),
+  /// Writes the text as if copied; `false` when the clipboard doesn't hold it after.
+  write: fn(&str) -> bool,
   /// Puts the snapshot back if the clipboard still holds the offer; `false` when it couldn't.
   give_back: fn(Offer, &Snapshot) -> bool,
   post: fn(Shortcut) -> Result<(), String>,
@@ -151,7 +153,16 @@ struct Sys {
 const SYSTEM: Sys = Sys {
   snapshot: || SystemClipboard.readable().then(|| SystemClipboard.snapshot()).flatten(),
   offer: |text, on_read| SystemClipboard.offer(text, on_read),
-  write: |text| SystemClipboard.write(text),
+  // Windows' write does nothing while another app holds the clipboard open: the count changed,
+  // or where the OS keeps none (Linux) the text reads back.
+  write: |text| {
+    let before = SystemClipboard.change_count();
+    SystemClipboard.write(text);
+    match before {
+      Some(before) => SystemClipboard.change_count() != Some(before),
+      None => SystemClipboard.read().as_deref() == Some(text),
+    }
+  },
   give_back: |offer, old| !SystemClipboard.holds(offer) || SystemClipboard.restore(old.clone()),
   post: crate::keys::post,
   focus: focus::current,
@@ -196,10 +207,13 @@ fn paste_now(sys: Sys, text: &str, Paste { restore, target }: Paste) -> Result<(
     return Err(NotPasted::NoAccess);
   }
 
-  // The user's clipboard, not the text of a paste still waiting for its restore.
+  // The user's clipboard, not the text of a paste still waiting for its restore: one that can't
+  // be put back yet (another app holds the clipboard open) keeps its snapshot for this paste.
   settle(sys, None);
+  let waiting = PENDING.with_borrow(|p| p.as_ref().map(|p| p.2.clone()));
   // Nothing of it could be read (Paste from Other Apps not allowed): a restore would empty it.
-  let snapshot = restore.then(sys.snapshot).flatten().filter(|s| !s.unreadable());
+  let snapshot = restore.then(|| waiting.or_else(sys.snapshot)).flatten();
+  let snapshot = snapshot.filter(|s| !s.unreadable());
 
   // Right before the paste: the snapshot may take a while.
   if let Some(target) = &target {
@@ -217,7 +231,9 @@ fn paste_now(sys: Sys, text: &str, Paste { restore, target }: Paste) -> Result<(
     }
     // On Wayland only the paste's own way (the portal's clipboard) reaches the clipboard of an app
     // in the background.
-    None if !restore && !(sys.hidden)() => (sys.write)(text),
+    None if !restore && !(sys.hidden)() => {
+      (sys.write)(text).then_some(()).ok_or(NotPasted::NoClipboard)?
+    }
     // Nothing to restore: the text stays, marked for clipboard managers to skip.
     None => _ = (sys.offer)(text, None).ok_or(NotPasted::NoClipboard)?,
   }
@@ -327,7 +343,14 @@ mod tests {
         Some(Offer(w.offers))
       })
     },
-    write,
+    write: |text| {
+      let free = world(|w| w.busy == 0);
+      if free {
+        write(text);
+      }
+
+      free
+    },
     give_back: |offer, snapshot| {
       if world(|w| w.busy.checked_sub(1).map(|b| w.busy = b)).is_some() {
         return false;
@@ -460,6 +483,32 @@ mod tests {
     world(|w| w.hidden = true);
     paste(FAKE, "hello", Paste { restore: false, ..opts }).unwrap();
     assert_eq!(world(|w| (w.clip.clone(), w.holder, w.timers.len())), ("hello".into(), Some(1), 0));
+  }
+
+  /// A paste while the last one's clipboard can't be put back yet puts back the user's, not the
+  /// last one's text still on it.
+  #[test]
+  fn a_paste_keeps_a_restore_still_waiting() {
+    let opts = setup("TextEdit");
+    paste(FAKE, "one", opts.clone()).unwrap();
+    world(|w| w.busy = 1);
+    paste(FAKE, "two", opts).unwrap();
+    fire(RESTORE);
+    assert_eq!(clip(), ("two".into(), 0), "the first one's retry leaves it to this one");
+    fire(CAP);
+    assert_eq!(clip(), ("mine".into(), 1));
+    fire(CAP);
+    assert_eq!(clip(), ("mine".into(), 1));
+  }
+
+  /// Text the clipboard didn't take (another app holds it open) is not pasted.
+  #[test]
+  fn not_pasted_when_the_write_fails() {
+    let opts = setup("TextEdit");
+    world(|w| w.busy = 1);
+    let e = paste(FAKE, "hello", Paste { restore: false, ..opts }).unwrap_err();
+    assert_eq!(e, NotPasted::NoClipboard);
+    assert_eq!(world(|w| (w.clip.clone(), w.posted.len())), ("mine".into(), 0));
   }
 
   /// A clipboard another app holds open is put back at a later try.

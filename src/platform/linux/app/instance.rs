@@ -9,8 +9,8 @@ use std::io::{self, ErrorKind, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, mpsc};
 use std::time::Instant;
 
 use crate::instance::{MAX_LINE, READ_TIMEOUT, hash};
@@ -143,22 +143,56 @@ fn private(dir: PathBuf, make: bool) -> io::Result<PathBuf> {
 
 /// Sends `line` to the instance for `dir`: in the runtime folder, or the fallback where the
 /// instance had none (started from another session); the first one's error when neither takes
-/// it. A line this short never blocks: no `deadline`.
-pub fn send(dir: &Path, line: &str, _deadline: Instant) -> io::Result<()> {
+/// it. By `deadline`: a connection waits for room while the instance's queue is full (Linux), so
+/// it runs on a thread of its own, left to end by itself past the deadline.
+pub fn send(dir: &Path, line: &str, deadline: Instant) -> io::Result<()> {
   let name = socket_name(dir)?;
-  let fallback = || UnixStream::connect(fallback(false)?.join(&name));
-  let mut stream = match runtime(&name).map(UnixStream::connect) {
-    Some(Ok(stream)) => stream,
-    Some(Err(e)) => fallback().map_err(|_| e)?,
-    None => fallback()?,
+  let (tx, rx) = mpsc::channel();
+  let connect = move || {
+    let fallback = || UnixStream::connect(fallback(false)?.join(&name));
+    _ = tx.send(match runtime(&name).map(UnixStream::connect) {
+      Some(Ok(stream)) => Ok(stream),
+      Some(Err(e)) => fallback().map_err(|_| e),
+      None => fallback(),
+    });
   };
 
-  stream.write_all(line.as_bytes())
+  std::thread::Builder::new().name("instance-send".into()).spawn(connect)?;
+  let left = deadline.saturating_duration_since(Instant::now());
+  let late = |_| io::Error::new(ErrorKind::TimedOut, "the app did not take the connection");
+  // A line this short fits the socket's buffer: the write doesn't wait.
+  rx.recv_timeout(left).map_err(late)??.write_all(line.as_bytes())
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  unsafe extern "C" {
+    safe fn listen(fd: i32, backlog: i32) -> i32;
+  }
+
+  /// A send gives up by its deadline while the instance's queue is full, where a connection
+  /// waits for room (Linux; macOS refuses it).
+  #[test]
+  fn a_send_keeps_its_deadline() {
+    use std::os::fd::AsRawFd;
+    use std::time::Duration;
+
+    let dir = std::env::temp_dir().join(format!("nimbo-full-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let server = Server::bind(&dir, lock_file(&dir.join("lock")).unwrap()).unwrap();
+    // A queue of one, never accepted.
+    assert_eq!(listen(server.listener.as_ref().unwrap().as_raw_fd(), 0), 0);
+    for _ in 0..3 {
+      let start = Instant::now();
+      _ = send(&dir, "open\n", start + Duration::from_millis(200));
+      assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    drop(server);
+    _ = fs::remove_dir_all(&dir);
+  }
 
   /// The folder is made the user's alone; one others may enter, or a link, is refused.
   #[test]
