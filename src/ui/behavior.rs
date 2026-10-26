@@ -48,7 +48,10 @@
 //! [FieldBehavior::blurred]: an edit in place saves on Enter or blur and drops its draft on
 //! Escape. Keys come as commands ([crate::keys]), typed text and input method events ([Ime]);
 //! the mouse places the caret, drags a selection (scrolling at the edges), double-clicks a word,
-//! triple-clicks a line, and Shift-click extends. The caret blinks on timers, so a window sleeps
+//! triple-clicks a line, and Shift-click extends. A secondary click (the right button) focuses it
+//! and asks for its edit menu ([FieldBehavior::menu], drawn by [Ui::edit_menu]), whose choice
+//! comes back as a command ([Ui::field_command]); the field keeps its focus look while the menu
+//! has the focus. The caret blinks on timers, so a window sleeps
 //! between blinks and stops when the field loses focus.
 //!
 //! An input method's composition is marked text at the caret, apart from the value: the app's
@@ -212,6 +215,13 @@ pub(crate) struct FieldState {
   /// Requests made so far.
   reveals: u32,
   focused: bool,
+  /// The edit menu as last opened, the press that opened it, and whether it is open: the field
+  /// keeps its focus look while the menu has the focus ([Ui::edit_menu]).
+  pub menu: EditMenu,
+  menu_seq: u32,
+  pub menu_open: bool,
+  /// A command from the edit menu, run as the field is built next ([Ui::field_command]).
+  queued: Option<Command>,
 }
 
 impl FieldState {
@@ -254,12 +264,38 @@ pub struct FieldBehavior {
   pub blurred: bool,
   /// A password ([super::FieldStyle::password]).
   pub password: bool,
+  /// The edit menu a secondary click asked for, or that is open.
+  pub menu: EditMenu,
   /// The selection, marked text, caret and reveal to draw, in offsets of the text shown;
   /// [Ui::field_text] fills in the colours.
   pub edit: Edit,
 }
 
+/// A text field's or selectable text's edit menu as a secondary click (the right button) opened
+/// it: where, and what it can do then ([Ui::edit_menu] draws it).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct EditMenu {
+  /// Where the click was, in the frame it came; `None` after.
+  pub at: Option<Point>,
+  /// A field, which has Cut and Paste; selectable text only copies.
+  pub editable: bool,
+  /// Cut and Copy: a selection, not in a password.
+  pub cut: bool,
+  pub copy: bool,
+  /// The clipboard has text.
+  pub paste: bool,
+  /// There is text.
+  pub select_all: bool,
+}
+
 impl Ui<'_> {
+  /// Runs `cmd` in the text field or selectable text `id` as it is built next, as if its keys
+  /// sent it (an edit menu's item); asks for that frame.
+  pub fn field_command(&mut self, id: Id, cmd: Command) {
+    self.state::<FieldState>(id).queued = Some(cmd);
+    self.request_frame_in(Duration::ZERO);
+  }
+
   /// A text field editing `text`, one line or many, or a password: typing, input methods,
   /// moves and selection by keys and mouse, the clipboard and undo; see the module's docs.
   /// Build its box under `id` with [FieldBehavior::style] and its text with [Ui::field_text].
@@ -301,7 +337,12 @@ impl Ui<'_> {
       st.ed.replace(0..st.ed.text().len(), s);
     }
 
-    let focused = self.focused(id);
+    // The edit menu takes the focus while open; the field keeps its look, ring and all.
+    let focused = self.focused(id) || st.menu_open;
+    if st.menu_open {
+      self.st.ring_on = Some(id);
+    }
+
     if !focused {
       st.ed.unmark();
     }
@@ -319,7 +360,7 @@ impl Ui<'_> {
       self.a11y(id, role).text(st.ed.text());
     }
 
-    let mut b = self.field_state(id, st.text_id, disabled);
+    let mut b = self.field_state(id, &mut st, disabled);
     (b.changed, b.submitted, b.cancelled, b.blurred) = (changed, submitted, cancelled, blurred);
     (b.password, b.edit) = (password, shown_edit(&st));
     b.edit.caret = b.focused && st.ed.sel().is_empty() && self.blink(st.blink);
@@ -353,7 +394,7 @@ impl Ui<'_> {
       reveal(&mut st);
     }
 
-    let mut b = self.field_state(id, id, disabled);
+    let mut b = self.field_state(id, &mut st, disabled);
     (b.submitted, b.cancelled, b.edit) = (submitted, cancelled, shown_edit(&st));
     b.edit.reveal = st.reveal;
     *self.state::<FieldState>(id) = st;
@@ -370,10 +411,15 @@ impl Ui<'_> {
     }
   }
 
-  /// A text behaviour's pointer and focus, for `id` drawing its text in `text_id`.
-  fn field_state(&self, id: Id, text_id: Id, disabled: bool) -> FieldBehavior {
-    let (hovered, focused) = (!disabled && self.hovered(id), !disabled && self.focus_visible(id));
-    FieldBehavior { id, text_id, disabled, hovered, focused, ..FieldBehavior::default() }
+  /// A text behaviour's pointer, focus (its edit menu's too) and edit menu, the menu's point
+  /// taken.
+  fn field_state(&self, id: Id, st: &mut FieldState, disabled: bool) -> FieldBehavior {
+    let focused = !disabled && (self.focused(id) || st.menu_open) && self.window_focused();
+    let (hovered, text_id, menu) = (!disabled && self.hovered(id), st.text_id, st.menu);
+    // Disabled, an edit menu's choice is dropped.
+    st.menu.at = None;
+    st.queued = st.queued.filter(|_| !disabled);
+    FieldBehavior { id, text_id, disabled, hovered, focused, menu, ..FieldBehavior::default() }
   }
 
   /// Whether a caret that last moved at `since` shows now; asks for the frame that toggles it.
@@ -403,7 +449,7 @@ impl Ui<'_> {
 
     let multiline = st.ed.multiline;
     let (mut submitted, mut cancelled) = (false, false);
-    if let Some(c) = self.command(id) {
+    if let Some(c) = self.command(id).or(st.queued.take()) {
       let c = if st.secure { by_lines(c) } else { c };
       let used = match c {
         // Enter while composing completes the composition, and only that.
@@ -480,6 +526,21 @@ impl Ui<'_> {
 
     if outside {
       self.request_frame_in(AUTOSCROLL);
+    }
+
+    // A secondary click focuses it and asks for its edit menu there, as it goes down, or as it
+    // is let go when no view saw it down.
+    let right = |on: Id, b: MouseButton| on == id && b == MouseButton::Right;
+    let press = self.st.input.press.filter(|p| right(p.id, p.button)).map(|p| (p.pos, p.seq));
+    let click = self.st.input.click.filter(|c| right(c.id, c.button)).map(|c| (c.pos, c.seq));
+    if let Some((pos, seq)) = press.or(click).filter(|p| p.1 != st.menu_seq) {
+      self.focus(Some(id));
+      let (editable, copy) = (st.editable, !st.ed.sel().is_empty() && !st.secure);
+      let (paste, select_all) =
+        (editable && self.st.clipboard.has_text(), !st.ed.text().is_empty());
+      st.menu =
+        EditMenu { at: Some(pos), editable, cut: copy && editable, copy, paste, select_all };
+      st.menu_seq = seq;
     }
 
     (submitted, cancelled)

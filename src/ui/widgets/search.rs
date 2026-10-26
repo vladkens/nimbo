@@ -192,6 +192,43 @@ mod tests {
     h.rect(Id::of("s").key("clear"))
   }
 
+  /// Ctrl-V pastes into a search on Windows, empty or with text (its keys grabbed then).
+  #[test]
+  fn ctrl_v_pastes_on_windows() {
+    let mut h = find("");
+    h.set_os(crate::Os::Windows);
+    h.rt.clipboard().write("moon");
+    h.click_id(Id::of("s"));
+    h.key('v', Modifiers::CONTROL);
+    assert_eq!(h.app().text, "moon");
+    h.key('v', Modifiers::CONTROL);
+    assert_eq!(h.app().text, "moonmoon");
+  }
+
+  /// A right-click on a search opens its edit menu; Paste pastes.
+  #[test]
+  fn a_right_click_pastes_into_a_search() {
+    let mut h = find("");
+    h.rt.clipboard().write("moon");
+    let r = h.rect(Id::of("s")).unwrap();
+    h.right_click(r.x + 40.0, r.y + 10.0);
+    h.frame();
+    h.frame();
+    h.click_id(Id::of("s").key("edit").key("Paste"));
+    h.frame();
+    assert_eq!((h.app().text.as_str(), h.app().changes), ("moon", 1));
+    assert_eq!(h.focused(), Some(Id::of("s")));
+
+    // Escape closes the menu before the app's own Escape, and leaves the text.
+    h.right_click(r.x + 40.0, r.y + 10.0);
+    h.frame();
+    h.frame();
+    assert!(h.key(NamedKey::Escape, NONE));
+    h.frame();
+    assert!(h.rect(Id::of("s").key("edit").key("menu")).is_none());
+    assert_eq!((h.app().text.as_str(), h.app().cancels), ("moon", 0));
+  }
+
   #[test]
   fn the_clear_mark_shows_with_text_and_clears_it() {
     let mut h = find("");

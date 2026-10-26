@@ -756,7 +756,7 @@ impl Win {
       unsafe { (g.gtk_im_context_reset)(self.input.im) };
     }
 
-    if let Some(c) = crate::keys::pc(&k) {
+    if let Some(c) = crate::keys::Os::Linux.command(&k) {
       self.send(Event::Command(c));
     }
   }

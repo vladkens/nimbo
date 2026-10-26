@@ -58,7 +58,7 @@ use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
 pub use a11y::{A11yNode, A11yTree, Action, Props, Role, State, Value};
-pub use behavior::{Behavior, FieldBehavior};
+pub use behavior::{Behavior, EditMenu, FieldBehavior};
 pub use containers::{
   List, ListResponse, PopUp, Row, Selection, Split, SplitBehavior, Tabs, TypeSelect,
 };
@@ -79,7 +79,7 @@ pub use widgets::{Button, Choice, FieldStyle, Icon, Select, TextInput};
 use self::input::{Deliver, Input, ScrollState};
 use self::store::{Anim, Store};
 use crate::app::{Appearance, Clipboard, Event, MouseButton, Waker};
-use crate::keys::{Binding, Command, KeyEvent};
+use crate::keys::{Binding, Command, KeyEvent, Os};
 use crate::scene::{Frame, ImageId, Images, Point, Rect, Size};
 use crate::text::{Font, FxHasher, Metrics, TextSystem};
 
@@ -222,6 +222,11 @@ pub struct UiState {
   /// The element that takes key presses before any binding ([Ui::grab_keys]), as the view
   /// built last asked.
   pub(crate) grab: Option<Id>,
+  /// The element ringed in place of the focused one, as the view built last asked: a field
+  /// whose edit menu has the focus.
+  pub(crate) ring_on: Option<Id>,
+  /// Whose keys bindings and text fields follow: the platform's, or the one a test plays.
+  pub(crate) os: Os,
 }
 
 /// What the runtime's last frame cost, for a status bar or a frame meter ([Ui::last_frame]).
@@ -270,6 +275,8 @@ impl Default for UiState {
       titlebar: None,
       pictures: Vec::new(),
       grab: None,
+      ring_on: None,
+      os: Os::CURRENT,
     }
   }
 }
@@ -563,7 +570,7 @@ impl<'a> Ui<'a> {
     st.stack.push((0, 0));
     st.animating = false;
     st.input.moves = false;
-    st.grab = None;
+    (st.grab, st.ring_on) = (None, None);
     st.input.now = now;
     let (next_id, next_float, next_keymap) = (None, None, None);
     let canvases = Vec::new();
@@ -1258,7 +1265,7 @@ impl<'a> Ui<'a> {
   pub fn paint(mut self, f: &mut Frame) -> UiState {
     let st = &self.st;
     let ring = st.ring.filter(|_| st.window_focused()).and_then(|r| {
-      let i = st.tree.find(st.input.focus?)?;
+      let i = st.tree.find(st.ring_on.or(st.input.focus)?)?;
       // Boxes get it, not selectable text.
       let n = &st.tree.nodes[i as usize];
       let boxed = !matches!(n.kind, Kind::Text { .. });

@@ -37,7 +37,7 @@ use windows_sys::Win32::Foundation::{
   CloseHandle, FILETIME, HANDLE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
 };
 use windows_sys::Win32::Graphics::Gdi::*;
-use windows_sys::Win32::System::DataExchange::EmptyClipboard;
+use windows_sys::Win32::System::DataExchange::{EmptyClipboard, IsClipboardFormatAvailable};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Ole::RevokeDragDrop;
 use windows_sys::Win32::System::SystemInformation::{
@@ -955,6 +955,10 @@ impl Clipboard for WinClipboard {
       unsafe { EmptyClipboard() };
       paste::set(CF_TEXT_UTF16, &paste::utf16_bytes(&wide(s)));
     }
+  }
+
+  fn has_text(&self) -> bool {
+    unsafe { IsClipboardFormatAvailable(CF_TEXT_UTF16) != 0 }
   }
 }
 

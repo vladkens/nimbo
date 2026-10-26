@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use keyboard_types::{Code, Modifiers};
 
 use crate::file_dialog::FileDialog;
-use crate::keys::{self, Binding, Command, KeyEvent, Move};
+use crate::keys::{Binding, Command, KeyEvent, Move};
 use crate::scene::{Color, Frame, Images, Point, Rect, Scene, Size};
 use crate::text::TextSystem;
 use crate::ui::{Action, Click, Cursor, FrameStats, Id, Role, Sys, TextInput, Ui, UiState};
@@ -239,6 +239,12 @@ impl Clock {
 pub trait Clipboard {
   fn read(&self) -> Option<String>;
   fn write(&mut self, s: &str);
+
+  /// Whether it holds text, without reading it (macOS asks the user before an app reads what
+  /// another one copied): an edit menu's Paste.
+  fn has_text(&self) -> bool {
+    self.read().is_some_and(|s| !s.is_empty())
+  }
 }
 
 /// An in-memory clipboard: the harness uses it so tests never touch the real pasteboard.
@@ -673,11 +679,11 @@ impl<A: App> Runtime<A> {
       return true;
     }
 
-    let mut at = self.ui.focus().and_then(|id| self.ui.last.find(id));
+    let (os, mut at) = (self.ui.os, self.ui.focus().and_then(|id| self.ui.last.find(id)));
     while let Some(i) = at {
       let n = &self.ui.last.nodes[i as usize];
       let (id, parent) = (n.id, n.parent);
-      if let Some(cmd) = self.ui.last.keymap(i).and_then(|m| keys::lookup(m, &k))
+      if let Some(cmd) = self.ui.last.keymap(i).and_then(|m| os.lookup(m, &k))
         && self.deliver(id, Event::Command(cmd))
       {
         return true;
@@ -685,7 +691,7 @@ impl<A: App> Runtime<A> {
       at = (i != 0).then_some(parent);
     }
 
-    if let Some(cmd) = keys::lookup(self.app.keymap(), &k)
+    if let Some(cmd) = os.lookup(self.app.keymap(), &k)
       && self.app_event(&Event::Command(cmd))
     {
       return true;
@@ -877,7 +883,7 @@ mod tests {
   use std::sync::mpsc;
 
   use super::*;
-  use crate::keys::{CMD, Key};
+  use crate::keys::{self, CMD, Key};
   use crate::scene::Rect;
   use crate::ui::{Kind, Style, Theme, Transition, px};
 

@@ -7,7 +7,9 @@
 //! password's dots, clipboard and input method; the placeholder, the disabled field, selectable
 //! text, and the caret's blink timers only while a field has focus (the first one from the
 //! start). Assistive technology reads the fields' text as shown, a composition in it, never the
-//! password's, and sets it, over a value the app set while composing.
+//! password's, and sets it, over a value the app set while composing. Windows' and Linux's keys
+//! (Ctrl, Insert, Home and End) and macOS's, each played on any host; the edit menu of a
+//! right-click, its items enabled as they can act, and what it runs.
 
 #[path = "../examples/fields.rs"]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
@@ -21,9 +23,12 @@ use std::time::Duration;
 use common::reads;
 use fields::*;
 use nimbo::ui::Action;
-use nimbo::{CMD, Command, Event, Harness, Id, Key, Modifiers, NamedKey, Sel};
+use nimbo::{CMD, Command, Event, Harness, Id, Key, Modifiers, NamedKey, Os, Sel};
 
 const NONE: Modifiers = Modifiers::empty();
+const CTRL: Modifiers = Modifiers::CONTROL;
+const SHIFT: Modifiers = Modifiers::SHIFT;
+const META: Modifiers = Modifiers::META;
 
 fn text_of(id: &str) -> Id {
   Id::of(id).key("text")
@@ -42,6 +47,102 @@ fn fields() -> Harness<Fields> {
   let mut h = Harness::new(Fields::new(), SIZE, 2.0);
   h.frame();
   h
+}
+
+/// The fields with `os`'s keys, the name field focused with `text` in it and the clipboard
+/// holding `clip`.
+fn fields_on(os: Os, text: &str, clip: &str) -> Harness<Fields> {
+  let mut h = fields();
+  h.set_os(os);
+  h.rt.clipboard().write(clip);
+  h.click_id(Id::of(NAME));
+  h.type_text(text);
+  h
+}
+
+/// Ctrl-V pastes on Windows and Linux, as do Shift-Insert; Ctrl-A, Ctrl-C and Ctrl-X select all,
+/// copy and cut, as do Ctrl-Insert and Shift-Delete. The Windows or Super key does none of it.
+#[test]
+fn pc_keys_paste_copy_and_cut() {
+  for os in [Os::Windows, Os::Linux] {
+    let h = &mut fields_on(os, "", "pasted");
+    h.key(Key::Char('v'), CTRL);
+    assert_eq!(h.app().name, "pasted", "{os:?}");
+    h.key(NamedKey::Insert, SHIFT);
+    assert_eq!(h.app().name, "pastedpasted", "{os:?}");
+    h.key(Key::Char('v'), META);
+    assert_eq!(h.app().name, "pastedpasted", "{os:?}: the Windows key");
+
+    h.key(Key::Char('a'), CTRL);
+    h.key(Key::Char('x'), CTRL);
+    assert_eq!((clipboard(h).as_deref(), h.app().name.as_str()), (Some("pastedpasted"), ""));
+    h.type_text("one");
+    h.key(Key::Char('a'), CTRL);
+    h.key(NamedKey::Insert, CTRL);
+    assert_eq!(clipboard(h).as_deref(), Some("one"), "{os:?}");
+    h.key(Key::Char('c'), CTRL);
+    h.key(NamedKey::Delete, SHIFT);
+    assert_eq!((clipboard(h).as_deref(), h.app().name.as_str()), (Some("one"), ""));
+  }
+}
+
+/// macOS pastes with ⌘V; Ctrl-V there is Emacs' page down, no paste.
+#[test]
+fn mac_keys_paste_with_cmd() {
+  let h = &mut fields_on(Os::Mac, "", "pasted");
+  h.key(Key::Char('v'), CTRL);
+  assert_eq!(h.app().name, "");
+  h.key(Key::Char('v'), META);
+  assert_eq!(h.app().name, "pasted");
+  h.key(Key::Char('a'), META);
+  h.key(Key::Char('x'), META);
+  assert_eq!((clipboard(h).as_deref(), h.app().name.as_str()), (Some("pasted"), ""));
+}
+
+/// On Windows and Linux Ctrl moves and deletes by words, with Shift selecting; Home and End go
+/// to the line's ends, with Ctrl the text's.
+#[test]
+fn pc_keys_move_and_delete_by_words() {
+  for os in [Os::Windows, Os::Linux] {
+    let h = &mut fields_on(os, "alpha beta gamma", "");
+    h.key(NamedKey::ArrowLeft, CTRL);
+    assert_eq!(sel(h, NAME), Sel::caret(11), "{os:?}");
+    h.key(NamedKey::ArrowLeft, CTRL | SHIFT);
+    assert_eq!(sel(h, NAME), Sel::new(11, 6), "{os:?}");
+    h.key(NamedKey::Home, NONE);
+    assert_eq!(sel(h, NAME), Sel::caret(0), "{os:?}");
+    h.key(NamedKey::ArrowRight, CTRL);
+    assert_eq!(sel(h, NAME), Sel::caret(5), "{os:?}");
+    h.key(NamedKey::End, SHIFT);
+    assert_eq!(sel(h, NAME), Sel::new(5, 16), "{os:?}");
+    h.key(NamedKey::Home, CTRL);
+    assert_eq!(sel(h, NAME), Sel::caret(0), "{os:?}");
+    h.key(NamedKey::End, CTRL);
+    assert_eq!(sel(h, NAME), Sel::caret(16), "{os:?}");
+
+    h.key(NamedKey::Backspace, CTRL);
+    assert_eq!(h.app().name, "alpha beta ", "{os:?}");
+    h.key(NamedKey::Home, NONE);
+    h.key(NamedKey::Delete, CTRL);
+    assert_eq!(h.app().name, " beta ", "{os:?}");
+  }
+}
+
+/// Ctrl-Z undoes on Windows and Linux; Ctrl-Y and Ctrl-Shift-Z redo.
+#[test]
+fn pc_keys_undo_and_redo() {
+  for os in [Os::Windows, Os::Linux] {
+    let h = &mut fields_on(os, "one", "");
+    h.key(Key::Char('a'), CTRL);
+    h.type_text("two");
+    h.key(Key::Char('z'), CTRL);
+    assert_eq!(h.app().name, "one", "{os:?}");
+    h.key(Key::Char('y'), CTRL);
+    assert_eq!(h.app().name, "two", "{os:?}");
+    h.key(Key::Char('z'), CTRL);
+    h.key(Key::Char('z'), CTRL | SHIFT);
+    assert_eq!(h.app().name, "two", "{os:?}");
+  }
 }
 
 /// The first field has the focus from the start, its caret blinking on timers.
@@ -381,4 +482,97 @@ fn a_composition_reads_as_the_field_shows_it() {
   let dump = h.a11y();
   reads(&dump, &["secure text field \"Password\" focused"]);
   assert!(!dump.contains("xy"), "{dump}");
+}
+
+/// A right-click at the left of `id`'s box, the menu it opens laid out and placed.
+fn right_click(h: &mut Harness<Fields>, id: &str) {
+  let r = h.rect(Id::of(id)).unwrap();
+  h.right_click(r.x + 12.0, r.y + 8.0);
+  h.frame();
+  h.frame();
+}
+
+/// The edit menu's items as assistive technology reads them: `Cut` or `Cut disabled`.
+fn menu(h: &Harness<Fields>) -> Vec<String> {
+  let tree = h.a11y();
+  let items = tree.lines().filter_map(|l| l.trim().strip_prefix("menu item ")).map(|l| {
+    let (name, rest) = l.trim_start_matches('"').split_once('"').unwrap();
+    format!("{name}{rest}")
+  });
+  items.collect()
+}
+
+/// Chooses `label` in the edit menu of `id`; the field runs it as it is built next.
+fn choose(h: &mut Harness<Fields>, id: &str, label: &str) {
+  h.click_id(Id::of(id).key("edit").key(label));
+  h.frame();
+}
+
+/// A right-click on a field opens its edit menu at the pointer, each item enabled as it can act;
+/// the field keeps its focus and its ring meanwhile, and gets them back as the menu closes.
+#[test]
+fn a_right_click_opens_the_edit_menu() {
+  let h = &mut fields_on(Os::Windows, "hello", "moon");
+  h.click_id(Id::of(EMAIL));
+  right_click(h, NAME);
+  assert_eq!(menu(h), ["Cut disabled", "Copy disabled", "Paste", "Select All"]);
+  let (m, r) = (h.rect(Id::of(NAME).key("edit").key("menu")).unwrap(), h.rect(Id::of(NAME)));
+  assert_eq!((m.x, m.y), (r.unwrap().x + 12.0, r.unwrap().y + 8.0), "at the pointer");
+  // The ring stays on the field.
+  let ring = h.render().pixel(r.unwrap().x + 30.0, r.unwrap().y - 2.0);
+  assert!(ring[2] > ring[0] + 40, "{ring:?}");
+
+  h.key(NamedKey::Escape, NONE);
+  h.frame();
+  assert!(menu(h).is_empty());
+  assert_eq!(h.focused(), Some(Id::of(NAME)));
+  right_click(h, NAME);
+  choose(h, NAME, "Select All");
+  assert_eq!(sel(h, NAME), Sel::new(0, 5));
+  right_click(h, NAME);
+  assert_eq!(menu(h), ["Cut", "Copy", "Paste", "Select All"]);
+  choose(h, NAME, "Cut");
+  assert_eq!((clipboard(h).as_deref(), h.app().name.as_str()), (Some("hello"), ""));
+  assert_eq!(h.app().changes.last(), Some(&NAME));
+}
+
+/// Paste in the edit menu pastes the clipboard's text; with none it is disabled.
+#[test]
+fn the_edit_menus_paste_pastes() {
+  let h = &mut fields_on(Os::Linux, "", "moon");
+  right_click(h, NAME);
+  choose(h, NAME, "Paste");
+  assert_eq!(h.app().name, "moon");
+  assert_eq!(h.focused(), Some(Id::of(NAME)));
+
+  h.rt.clipboard().write("");
+  right_click(h, NAME);
+  assert_eq!(menu(h), ["Cut disabled", "Copy disabled", "Paste disabled", "Select All"]);
+}
+
+/// A password's edit menu copies and cuts nothing, its text selected or not.
+#[test]
+fn a_passwords_edit_menu_has_no_copy_or_cut() {
+  let h = &mut fields_on(Os::Mac, "", "moon");
+  h.click_id(Id::of(PASSWORD));
+  h.type_text("secret");
+  h.key(Key::Char('a'), Os::Mac.cmd());
+  right_click(h, PASSWORD);
+  assert_eq!(menu(h), ["Cut disabled", "Copy disabled", "Paste", "Select All"]);
+  choose(h, PASSWORD, "Copy");
+  assert_eq!(clipboard(h).as_deref(), Some("moon"));
+}
+
+/// Selectable text's edit menu has Copy and Select All only.
+#[test]
+fn selectable_texts_edit_menu_copies() {
+  let h = &mut fields();
+  right_click(h, ABOUT);
+  assert_eq!(menu(h), ["Copy disabled", "Select All"]);
+  assert_eq!(h.focused(), Some(Id::of(ABOUT).key("edit").key("menu")));
+  choose(h, ABOUT, "Select All");
+  right_click(h, ABOUT);
+  assert_eq!(menu(h), ["Copy", "Select All"]);
+  choose(h, ABOUT, "Copy");
+  assert_eq!(clipboard(h).as_deref(), Some(TEXT));
 }
