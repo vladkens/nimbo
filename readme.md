@@ -11,22 +11,39 @@
 
 </div>
 
-`nimbo` is a desktop UI toolkit for Rust that draws its own widgets, on the CPU, with one look on macOS, Windows and Linux. Work in progress: the API changes from one pull request to the next.
+`nimbo` is a desktop UI toolkit for Rust that draws every widget itself, on the CPU, over a thin native layer for the window, the input and the text: AppKit and CoreText on macOS, Win32 and DirectWrite on Windows, GTK 3 with FreeType and HarfBuzz on Linux. The look follows macOS System Settings, measured from its screenshots, in light and dark. A settings window, a tray app or a HUD takes a few hundred lines and 13 crates, and the whole toolkit builds from scratch in about 10 seconds.
 
 ## 🌟 Features
 
-- 🖌️ **One look** on macOS, Windows and Linux, after macOS System Settings
-- 🔤 **The system's text**: shaping, emoji, input methods
-- 🖥️ **Drawn on the CPU**: no GPU stack to ship
-- 🧩 **Widgets**: buttons, switches, fields, lists of 100k rows, tabs, dialogs
-- 🛎️ **Tray apps**: tray menu, global hotkeys, launch at login, overlays
-- 📂 **Files**: open and save panels, drag and drop
-- 🧪 **Headless tests**: click, type and check pixels without a window
-- 📦 **Few crates**: 13 on macOS, 4 on Windows, 2 on Linux
+- 🖌️ **One look on three systems**, measured from macOS System Settings, in light and dark and the system's accent colour
+- 🔤 **The system's text stack**: CoreText, DirectWrite or FreeType with HarfBuzz; shaping, subpixel positioning, colour emoji, input methods
+- 🖥️ **A CPU renderer**: no GPU, shaders or drivers to ship; frames paced to the display, an idle window asleep
+- 🧩 **Widgets as headless behaviours** plus a theme: buttons, switches, fields, selects, tabs, splits, dialogs, a list of 100k rows; or your own look over the same behaviour
+- 🛎️ **Tray and HUD apps**: a tray menu, global hotkeys, launch at login, overlays that never take the focus, the system's permissions
+- 📂 **Files**: the system's open and save panels, files dragged onto a window
+- 🧪 **A headless harness**: every example renders to a PNG without a window; tests click, type and check pixels, in parallel
+- 📦 **13 crates on macOS, 4 on Windows, 2 on Linux**: GTK is loaded at run time, nothing to link
 
 <div align="center">
   <img src="docs/settings.png" alt="the settings example in a macOS window" width="700" />
 </div>
+
+## 🧭 Why nimbo
+
+It started with a dictation app. The one in use, Handy, is Tauri over a webview and idles at **565 MB**. The rewrite in egui on wgpu pulled in 226 crates and an 18 MB binary, and still didn't look like macOS: egui draws its own text, and its "strong" text changed the colour, not the weight. Four more tries put the same app on egui (glow, then wgpu) and on GPUI (directly, then through a component kit): **337 to 911 crates** in the lockfile, GPUI building only with a vendored patch, and a GPU surface and a text stack of their own for what was a settings window. The same window in plain AppKit idled at **13 MB**.
+
+Native controls on each OS kept those 13 MB, but every feature was built three times, 79% of the code was per-platform glue, and a waveform had nowhere to go. So the next toolkit went Sublime Text's way: draw the UI yourself, take the window, the input and the text from the OS. On Metal it opened a window in under 200 ms (Zed: 299 ms), idled at 0.08% CPU and drew text within a few percent of AppKit's coverage. Then came Windows and Linux, where Vulkan alone cost **55–148 MB** of memory; the CPU renderer cost 5 MB, drew a full 2560×1600 frame within 8.3 ms on 8 threads, and an interactive one in 0.02–0.7 ms with damage tracking. The CPU became the renderer everywhere, and GTK 3 loaded at run time replaced a Wayland and X11 layer of our own: 4847 lines and 15 crates down to 2158 lines and none. nimbo is that toolkit, rebuilt as a library.
+
+| | Crates | Clean build | Binary | Accessibility |
+|---|---:|---:|---:|---|
+| GPUI | 391 | 56 s | 5.0 MiB | AccessKit |
+| Slint | 302 | 42 s | 14.7 MiB | AccessKit |
+| Tauri | 204 | 36 s | 8.0 MiB + webview | the webview's |
+| egui | 156 | 27 s | 12.0 MiB | AccessKit |
+| iced | 140 | 22 s | 9.9 MiB | none yet |
+| **nimbo** | **13** | **10 s** | **1.1 MiB** | none yet |
+
+The others: a small todo app, clean release build on an M4 Pro, from the [RCN study](https://github.com/GoldStrikeArch/rust-gui-desktop-ecosystem-state/blob/main/report/10-empirical-results.md) (2026-07-07); nimbo: the `counter` example on an M2, measured here (2026-10-25), crates on macOS. What nimbo doesn't have yet: accessibility, rich text, mobile and web.
 
 ## 🤖 How it's made
 
@@ -87,30 +104,25 @@ cargo run --release --example gallery                          # every widget, l
 cargo run --release --example gallery -- --shot gallery.png    # the same, rendered without a window
 ```
 
-| Example | What it shows |
-|---|---|
-| `counter` | buttons, hover, focus |
-| `gallery` | every widget, light and dark |
-| `settings` | a macOS-style settings window |
-| `files` | open and save panels, drag and drop |
-| `lists` | a list of 100,000 rows, menus, tabs, a split |
-| `fields` | text fields and input methods |
-| `text` | fonts, scripts, emoji |
-| `shapes` | what the renderer draws |
-| `input` | mouse, keys, clipboard |
-| `tray` | a tray icon, a global hotkey |
-| `hud` | an overlay over every app |
+- `counter`: buttons, hover, focus
+- `gallery`: every widget, light and dark
+- `settings`: a macOS-style settings window
+- `files`: open and save panels, drag and drop
+- `lists`: a list of 100,000 rows, menus, tabs, a split
+- `fields`: text fields and input methods
+- `text`: fonts, scripts, emoji
+- `shapes`: what the renderer draws
+- `input`: mouse, keys, clipboard
+- `tray`: a tray icon, a global hotkey
+- `hud`: an overlay over every app
 
 ## 📏 Size
 
-Measured on an **Apple M2**, rustc 1.99, 2026-10-25, without a compiler cache:
+Measured on an Apple M2, rustc 1.99, 2026-10-25, without a compiler cache:
 
-| | |
-|---|---:|
-| Clean build, `counter` example, release | 10.1 s |
-| Clean build, `counter` example, debug | 8.3 s |
-| `counter` binary, release (stripped) | 1.1 MB (0.87 MB) |
-| Crates in the build, nimbo excluded: macOS / Windows / Linux | 13 / 4 / 2 |
+- **10.1 s** a clean release build of the `counter` example (8.3 s debug)
+- **1.1 MB** its release binary (0.87 MB stripped)
+- **13 / 4 / 2** crates in the build on macOS / Windows / Linux, nimbo excluded
 
 ## 🤝 Contributing
 
