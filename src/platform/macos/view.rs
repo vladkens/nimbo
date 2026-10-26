@@ -923,7 +923,11 @@ impl View {
     let scale = self.window().map_or(1.0, |w| w.backingScaleFactor() as f32);
     let bounds = self.bounds().size;
     let size = Size::new(bounds.width as f32, bounds.height as f32);
-    let Ok(mut state) = self.ivars().state.try_borrow_mut() else { return };
+    // Busy up the stack (resized during a frame): drawn again once the runtime is free.
+    let Ok(mut state) = self.ivars().state.try_borrow_mut() else {
+      self.ivars().rewake.set(true);
+      return;
+    };
     let Some(st) = state.as_mut() else { return };
     self.ivars().last_frame.set(Some(st.rt.now()));
     // A wake set before this frame is let go: [Self::after_frame] sets the next, a refresh after
