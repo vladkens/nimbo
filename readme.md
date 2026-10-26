@@ -41,25 +41,11 @@ cargo add nimbo --git https://github.com/vladkens/nimbo
 ```
 
 <details>
-<summary>macOS</summary>
+<summary>Requirements per OS</summary>
 
-It runs on macOS 14 or later; an app built with it sets `MACOSX_DEPLOYMENT_TARGET=14.0`, as this repository does in `.cargo/config.toml`.
-
-</details>
-
-<details>
-<summary>Windows</summary>
-
-An app built with it sets `#![cfg_attr(windows, windows_subsystem = "windows")]` in its `main.rs`, as the examples do, so that no console opens next to its window.
-
-</details>
-
-<details>
-<summary>Linux</summary>
-
-It needs GTK 3 at run time (`libgtk-3.so.0`, on every desktop install), which it loads for the window, as Sublime Text does; nothing is linked at build time. It runs on Wayland and X11, and `GDK_BACKEND=x11` picks X11 in a Wayland session.
-
-An overlay (`Config::overlay`) is placed at its anchor on X11; on Wayland it needs `libgtk-layer-shell` (wlroots compositors, KDE) to sit above other windows at its anchor, else the compositor places it as any window (GNOME). A tray icon shows where the panel hosts StatusNotifierItems (KDE Plasma, Xfce, Cinnamon, MATE, LXQt; GNOME with the AppIndicator extension, which Ubuntu ships on), and global hotkeys need the GlobalShortcuts portal (KDE Plasma, GNOME 48+), which asks the user to approve them. The open and save panels are the desktop's FileChooser portal, which GNOME and KDE ship.
+- **macOS** 14 or later: an app sets `MACOSX_DEPLOYMENT_TARGET=14.0`, as `.cargo/config.toml` here does.
+- **Windows**: `#![cfg_attr(windows, windows_subsystem = "windows")]` in `main.rs`, so no console opens with the window.
+- **Linux**: GTK 3 at run time (every desktop has it), on Wayland or X11. Overlays on Wayland need `libgtk-layer-shell`, the tray icon a panel with StatusNotifierItems, hotkeys and file panels the desktop's portals (GNOME, KDE).
 
 </details>
 
@@ -92,7 +78,7 @@ fn main() {
 }
 ```
 
-`nimbo::run` opens a window; with `--shot counter.png` it renders the frame in the headless harness instead (dark unless `--appearance light`), after the script in its last argument has clicked and typed.
+`nimbo::run` opens the window; `-- --shot counter.png` renders it to a file without one.
 
 ### Examples
 
@@ -103,17 +89,17 @@ cargo run --release --example gallery -- --shot gallery.png    # the same, rende
 
 | Example | What it shows |
 |---|---|
-| `counter` | a count with buttons on the element tree: hover, press, Tab focus, the theme |
-| `gallery` | every widget, in light and dark side by side over the same state |
-| `settings` | a settings window in macOS System Settings' look: the title over toolbar tabs, pages of plates |
-| `files` | Open… and Save… with the system's panels, and a zone to drop files on, lit while they are dragged over it |
-| `lists` | a list of 100,000 rows with selection and keys, a menu, a pop-up button, tabs, a split and a scroll area with fading edges |
-| `fields` | text fields, a password, notes over lines and selectable text, with the system's input methods |
-| `text` | the system fonts in sizes, weights and scripts, emoji, subpixel positions |
-| `shapes` | every shape the renderer draws |
-| `input` | a square to drag, move with the arrows, resize with the wheel, copy and paste |
-| `tray` | no window of its own: a tray icon whose menu opens the counter, a global hotkey that opens and closes it, launch at login |
-| `hud` | an overlay: a recording pill over every app at the bottom of the screen with the pointer, never taking the focus, the mouse going through it |
+| `counter` | buttons, hover, focus |
+| `gallery` | every widget, light and dark |
+| `settings` | a macOS-style settings window |
+| `files` | open and save panels, drag and drop |
+| `lists` | a list of 100,000 rows, menus, tabs, a split |
+| `fields` | text fields and input methods |
+| `text` | fonts, scripts, emoji |
+| `shapes` | what the renderer draws |
+| `input` | mouse, keys, clipboard |
+| `tray` | a tray icon, a global hotkey |
+| `hud` | an overlay over every app |
 
 ## 📏 Size
 
@@ -143,4 +129,3 @@ Distributed under the [MIT License](LICENSE).
 - [zed-industries/zed](https://github.com/zed-industries/zed) – GPUI, the GPU-drawn toolkit of the Zed editor.
 - [emilk/egui](https://github.com/emilk/egui) – An immediate-mode GUI in Rust, for the web and native.
 - [iced-rs/iced](https://github.com/iced-rs/iced) – A cross-platform GUI library in Rust, inspired by Elm.
-- [Sublime Merge](https://www.sublimemerge.com) – The feel nimbo aims for: a custom-drawn UI that starts instantly.
