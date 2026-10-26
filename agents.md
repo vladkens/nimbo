@@ -35,7 +35,7 @@ A small, fast, custom-drawn desktop UI toolkit in Rust, in the spirit of Sublime
 
 - A control's width never changes for the text beside it; notes and descriptions wrap onto their own lines and the row grows.
 - Rows in a list keep one height in every state (idle, in progress, failed, selected).
-- Every clickable element shows the pointing hand and a hover; transitions are short (120–170 ms) and animated.
+- Every clickable element shows the pointing hand and a hover (the toolbar's tabs only the hand, as System Settings' toolbar); transitions are short (120–170 ms) and animated.
 - A mark or icon is optically centred like its neighbours; check alignment against them, not alone.
 
 ## Testing

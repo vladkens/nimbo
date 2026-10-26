@@ -101,7 +101,6 @@ pub struct FormStyle {
   pub tab_stroke: f32,
   pub tab_on: Style,
   pub tab_glass: Option<Glass>,
-  pub tab_over: Color,
   /// The footer under the last plate ([Ui::form_footer]): its box, right-aligned buttons and
   /// their gap.
   pub footer: Style,
@@ -241,7 +240,6 @@ impl FormStyle {
       tab_stroke: 1.4,
       tab_on,
       tab_glass,
-      tab_over: t.ghost,
       footer: Style::new()
         .w(grow())
         .pads([10.0, 0.0, 0.0, 0.0])
@@ -564,11 +562,11 @@ impl Ui<'_> {
   }
 
   /// A toolbar of tabs, one per `(value, icon, label)`, centred: the icon over the label, the
-  /// one equal to `cur` raised on a tile, in the accent ([FormStyle::tab_on]), a grey tile under
-  /// the pointer. A click picks a tab; so do Left and Right while the toolbar has focus (Tab gives
-  /// it, ringing the selected tab). `changed` when `cur` changed. Tabs are `id.key(i)`. Under a
-  /// title bar the app draws ([Ui::titlebar]) the window's title tops it, and a press on it
-  /// anywhere but a tab moves the window.
+  /// one equal to `cur` raised on a tile, in the accent ([FormStyle::tab_on]); no hover fill, as
+  /// System Settings' toolbar, only the pointing hand. A click picks a tab; so do Left and Right
+  /// while the toolbar has focus (Tab gives it, ringing the selected tab). `changed` when `cur`
+  /// changed. Tabs are `id.key(i)`. Under a title bar the app draws ([Ui::titlebar]) the window's
+  /// title tops it, and a press on it anywhere but a tab moves the window.
   pub fn toolbar_tabs<T: PartialEq + Copy>(
     &mut self,
     fs: &FormStyle,
@@ -611,10 +609,10 @@ impl Ui<'_> {
         for (i, &(v, icon, label)) in items.iter().enumerate() {
           let tab = id.key(i);
           let on = v == *cur;
-          let hot = ui.hot(tab, !on && !b.disabled && ui.hovered(tab));
+          // No hover fill, as System Settings' toolbar: the pointing hand says it's a tab.
           let (tile, color) = match on {
             true => (fs.tab_on, t.accent),
-            false => (fs.tab.bg(mix(alpha(fs.tab_over, 0.0), fs.tab_over, hot)), fs.tab_text.color),
+            false => (fs.tab, fs.tab_text.color),
           };
 
           let radius = fs.tab.radii[0];
