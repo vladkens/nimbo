@@ -12,12 +12,15 @@
 //!
 //! An app with no window, or more than one, starts with [app]: windows on demand ([Main::open])
 //! and overlays, HUDs over every app ([Config::overlay]), work from other threads ([Proxy]), and
-//! what a tray app needs besides: an icon with a menu ([tray]), global hotkeys ([hotkey]), its
-//! folders ([paths]), launch at login ([autostart]), its launcher entry on Linux ([desktop]) and
-//! alerts ([Main::alert]); and to reach other apps: links and files opened or shown ([open]), the
-//! OS's permissions ([permissions]), where the user types ([focus]), keys posted to the app in
-//! focus ([keys::post]) and the clipboard, also taken and put back around a paste of the app's own
-//! ([SystemClipboard]).
+//! what a tray app needs besides: an icon with a menu ([tray]), global hotkeys ([hotkey]), one
+//! instance that takes commands from a second launch ([instance], [Main::serve]), its folders and
+//! the user's Downloads ([paths]), launch at login ([autostart]), its launcher entry on Linux
+//! ([desktop]), alerts ([Main::alert]), its command line's console on Windows
+//! ([attach_console]) and an uninstall that undoes what nimbo set up ([uninstall]); and to reach
+//! other apps: links and files opened or shown ([open]), the OS's permissions ([permissions]),
+//! where the user types ([focus]), keys posted to the app in focus ([keys::post]), the clipboard,
+//! also taken and put back around a paste of the app's own ([SystemClipboard]), and that paste
+//! itself, which gives the clipboard back ([paste]).
 //!
 //! macOS 14 is the least it runs on (`NSApplication`'s `activate`, `NSView`'s display link): build
 //! apps with `MACOSX_DEPLOYMENT_TARGET=14.0`.
@@ -32,8 +35,10 @@ mod file_dialog;
 pub mod focus;
 pub mod harness;
 pub mod hotkey;
+pub mod instance;
 pub mod keys;
 pub mod open;
+pub mod paste;
 pub mod paths;
 pub mod permissions;
 pub mod platform;
@@ -44,6 +49,7 @@ pub mod svg;
 pub mod text;
 pub mod tray;
 pub mod ui;
+pub mod uninstall;
 
 use std::path::PathBuf;
 
@@ -64,7 +70,7 @@ pub use keys::{
 pub use scene::{
   Color, Frame, ImageId, Images, Point, Quad, Rect, Scene, Segment, Size, alpha, mix, rgb,
 };
-pub use shell::{Anchor, AppInfo, Main, Presence, Proxy, Window, WindowId, app};
+pub use shell::{Anchor, AppInfo, Main, Presence, Proxy, Window, WindowId, app, attach_console};
 pub use text::edit::{Editor, Lines, Mono, Sel};
 pub use text::{Font, Weight};
 pub use ui::{

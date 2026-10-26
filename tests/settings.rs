@@ -100,7 +100,16 @@ fn general_switches_select_and_recorder() {
   h.click_id(rec);
   h.event(Event::Modifier { key: Code::AltRight, down: true });
   h.event(Event::Modifier { key: Code::AltRight, down: false });
-  assert_eq!(h.app().hotkey, Some(Hotkey::Modifier(Code::AltRight)));
+  // Where the platform grabs no modifier alone (Linux) it records nothing, and Escape stops it.
+  let lone = match nimbo::hotkey::modifier_alone() {
+    true => "right_option",
+    false => {
+      key(&mut h, NamedKey::Escape);
+      "ctrl+shift+k"
+    }
+  };
+
+  assert_eq!(hotkey(&h).as_deref(), Some(lone));
   // A plain key is taken and records nothing; a modifier with another one between isn't alone.
   h.click_id(rec);
   assert!(h.key('a', Modifiers::empty()));
@@ -114,7 +123,7 @@ fn general_switches_select_and_recorder() {
 
   // Escape stops it unchanged, Backspace clears it.
   key(&mut h, NamedKey::Escape);
-  assert_eq!(hotkey(&h).as_deref(), Some("right_option"));
+  assert_eq!(hotkey(&h).as_deref(), Some(lone));
   assert_ne!(h.focused(), Some(rec));
   h.click_id(rec);
   key(&mut h, NamedKey::Backspace);

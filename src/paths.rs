@@ -8,15 +8,18 @@
 //! | [data_dir] | `~/Library/Application Support/<id>` | `%LOCALAPPDATA%\<id>` | `$XDG_DATA_HOME/<id>` (`~/.local/share`) |
 //! | [config_dir] | `~/Library/Application Support/<id>` | `%APPDATA%\<id>` | `$XDG_CONFIG_HOME/<id>` (`~/.config`) |
 //! | [cache_dir] | `~/Library/Caches/<id>` | `%LOCALAPPDATA%\<id>\cache` | `$XDG_CACHE_HOME/<id>` (`~/.cache`) |
+//! | [downloads] | `~/Downloads` | the Known Folder | `XDG_DOWNLOAD_DIR` in `user-dirs.dirs`, else `~/Downloads` |
 //!
-//! Only the environment is read: nothing is created. [display] writes a path as the user
+//! Nothing is created: the app's folders come from the environment alone, [downloads] reads
+//! the user's settings too and is only a folder that exists. [display] writes a path as the user
 //! reads it: `~/…` under the home folder on macOS and Linux.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+/// The OS whose layout a path follows: [OS] in use, another in tests.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Os {
+pub(crate) enum Os {
   Mac,
   Windows,
   Linux,
@@ -29,7 +32,7 @@ enum Kind {
   Cache,
 }
 
-const OS: Os = match () {
+pub(crate) const OS: Os = match () {
   _ if cfg!(target_os = "macos") => Os::Mac,
   _ if cfg!(windows) => Os::Windows,
   _ => Os::Linux,
@@ -48,6 +51,19 @@ pub fn config_dir(id: &str) -> PathBuf {
 /// What the app can make again; the OS may clear it.
 pub fn cache_dir(id: &str) -> PathBuf {
   dir(OS, Kind::Cache, id, &|k| std::env::var_os(k))
+}
+
+/// The user's Downloads folder, where an app saves what the user fetched, or `None` when there's
+/// none on disk. macOS: `~/Downloads`. Windows: the Known Folder, wherever the user moved it.
+/// Linux: `XDG_DOWNLOAD_DIR` from `$XDG_CONFIG_HOME/user-dirs.dirs` (`~/.config`), as
+/// xdg-user-dirs names it in the session's language (`~/Загрузки`), else `~/Downloads`; none
+/// where it is the home folder itself (xdg-user-dirs' way to turn a folder off).
+pub fn downloads() -> Option<PathBuf> {
+  #[cfg(windows)]
+  let dir = crate::platform::downloads();
+  #[cfg(not(windows))]
+  let dir = downloads_in(OS, &|k| std::env::var_os(k), &|p| std::fs::read_to_string(p).ok());
+  dir.filter(|d| d.is_dir())
 }
 
 /// `path` as the user reads it: under the home folder `~/…` on macOS and Linux (`~` itself for
@@ -93,6 +109,52 @@ fn dir(os: Os, kind: Kind, id: &str, env: &dyn Fn(&str) -> Option<OsString>) -> 
       var(name).unwrap_or_else(|| home().join(fallback)).join(id)
     }
   }
+}
+
+/// [downloads] off Windows, with the environment and the files `read` gives, before it is checked
+/// on disk.
+#[cfg(not(windows))]
+fn downloads_in(
+  os: Os,
+  env: &dyn Fn(&str) -> Option<OsString>,
+  read: &dyn Fn(&Path) -> Option<String>,
+) -> Option<PathBuf> {
+  let home = env("HOME").map(PathBuf::from).filter(|h| h.is_absolute())?;
+  let file = dir(os, Kind::Config, "user-dirs.dirs", env);
+  let set = (os == Os::Linux).then(|| read(&file)).flatten();
+  let dir = set.and_then(|t| user_dir(&t, "XDG_DOWNLOAD_DIR", &home));
+  Some(dir.unwrap_or_else(|| home.join("Downloads"))).filter(|d| *d != home)
+}
+
+/// The folder `key` names in `text`, a `user-dirs.dirs`
+/// (<https://www.freedesktop.org/wiki/Software/xdg-user-dirs/>, as of 2026-10): `KEY="$HOME/yyy"`
+/// or `KEY="/yyy"`, shell-escaped in double quotes; the last line wins, as for the shell that
+/// sources it. Another form is skipped, as the spec supports no other.
+#[cfg(not(windows))]
+fn user_dir(text: &str, key: &str, home: &Path) -> Option<PathBuf> {
+  let unescape = |s: &str| {
+    let (mut out, mut chars) = (String::new(), s.chars());
+    while let Some(c) = chars.next() {
+      out.push(if c == '\\' { chars.next().unwrap_or(c) } else { c });
+    }
+
+    out
+  };
+
+  let mut found = None;
+  for line in text.lines() {
+    let value = line.trim().strip_prefix(key).and_then(|v| v.strip_prefix("=\""));
+    let Some(v) = value.and_then(|v| v.strip_suffix('"')) else { continue };
+    found = match v.strip_prefix("$HOME") {
+      Some(rest) if rest.is_empty() || rest.starts_with('/') => {
+        Some(home.join(unescape(rest.trim_start_matches('/'))))
+      }
+      _ if v.starts_with('/') => Some(PathBuf::from(unescape(v))),
+      _ => found,
+    };
+  }
+
+  found
 }
 
 #[cfg(test)]
@@ -165,5 +227,50 @@ mod tests {
       dir(Os::Windows, Kind::Cache, id, &env),
       PathBuf::from(r"D:\Local\com.example.app\cache")
     );
+  }
+
+  /// A `user-dirs.dirs` as xdg-user-dirs writes it, localized, escaped, or turned off.
+  #[cfg(unix)]
+  #[test]
+  fn downloads_from_user_dirs() {
+    let home = Path::new("/home/me");
+    let dir = |text: &str| user_dir(text, "XDG_DOWNLOAD_DIR", home);
+    let file = "# written by xdg-user-dirs-update\nXDG_DESKTOP_DIR=\"$HOME/Рабочий стол\"\n\
+      XDG_DOWNLOAD_DIR=\"$HOME/Загрузки\"\n";
+    assert_eq!(dir(file), Some(home.join("Загрузки")));
+    assert_eq!(
+      dir(r#"XDG_DOWNLOAD_DIR="/data/my \"dl\"""#),
+      Some(PathBuf::from(r#"/data/my "dl""#))
+    );
+    assert_eq!(dir("XDG_DOWNLOAD_DIR=\"$HOME/\""), Some(home.into()));
+    assert_eq!(
+      dir("XDG_DOWNLOAD_DIR=\"$HOME/a\"\nXDG_DOWNLOAD_DIR=\"$HOME/b\""),
+      Some(home.join("b"))
+    );
+    for skipped in [
+      "",
+      "# XDG_DOWNLOAD_DIR=\"/x\"",
+      "XDG_DOWNLOAD_DIRS=\"/x\"",
+      "XDG_DOWNLOAD_DIR=x",
+      "XDG_DOWNLOAD_DIR=\"$HOMEx\"",
+      "XDG_DOWNLOAD_DIR=\"rel\"",
+    ] {
+      assert_eq!(dir(skipped), None, "{skipped}");
+    }
+
+    // The file under XDG_CONFIG_HOME, read on Linux only; ~/Downloads without the entry, none
+    // where the entry is the home folder.
+    let env = |k: &str| match k {
+      "HOME" => Some(OsString::from("/home/me")),
+      "XDG_CONFIG_HOME" => Some(OsString::from("/cfg")),
+      _ => None,
+    };
+    let read = |p: &Path| (p == Path::new("/cfg/user-dirs.dirs")).then(|| file.to_string());
+    assert_eq!(downloads_in(Os::Linux, &env, &read), Some(home.join("Загрузки")));
+    assert_eq!(downloads_in(Os::Mac, &env, &read), Some(home.join("Downloads")));
+    assert_eq!(downloads_in(Os::Linux, &env, &|_| None), Some(home.join("Downloads")));
+    let off = |_: &Path| Some("XDG_DOWNLOAD_DIR=\"$HOME\"".to_string());
+    assert_eq!(downloads_in(Os::Linux, &env, &off), None);
+    assert_eq!(downloads_in(Os::Linux, &|_| None, &read), None, "no home");
   }
 }

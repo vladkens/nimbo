@@ -27,7 +27,9 @@
 //!     (where the OS lets an app place itself) and shows it without activating anything; a size the
 //!     app asks for keeps it at its anchor;
 //!   - `set_presence(Presence)`, `terminating() -> bool`, `quit()`; a second launch, where the OS
-//!     tells (macOS), runs `crate::shell::reopened`;
+//!     tells (macOS), runs `crate::shell::reopened`; a window shown or brought to the front comes
+//!     with `crate::shell::token()`, the activation token of the command being served, where the OS
+//!     takes one (Linux: `gtk_window_set_startup_id`);
 //!   - `post(delay: Duration, f: Box<dyn FnOnce() + Send>)` from any thread, run by the loop also
 //!     in modal loops (a menu open, a live resize); `is_main() -> bool`.
 //!
@@ -90,7 +92,9 @@
 //!   when the OS can't take it), `start(&mut self) -> Result<(), String>` (the listener),
 //!   `escape(&mut self, on: bool)` (Escape taken from every app as `Edge::Escape`), and
 //!   `status(&self, &mut Status)` filling the listener, fallback, secure input, counts and, while
-//!   Escape is on, why it is not taken (`escape_error`).
+//!   Escape is on, why it is not taken (`escape_error`). Besides, `modifier_alone() -> bool` (a
+//!   modifier key alone can be the hotkey) and `start_asks() -> bool` (`start` shows the desktop's
+//!   dialog).
 //! - `pub mod autostart` ([crate::autostart]): `available()`, `state(&AppInfo)`, `set(&AppInfo,
 //!   on)`, `open_settings()`.
 //! - `pub mod desktop` ([crate::desktop]): `install(&AppInfo, &Launcher) -> Result<bool, String>`
@@ -101,6 +105,15 @@
 //! - `pub mod open` ([crate::open]): `url(&str)`, `path(&Path)` and `reveal(&Path)` (an absolute
 //!   path), each `-> Result<(), String>` without waiting for the app it starts; `file_manager() ->
 //!   &'static str`.
+//! - `pub(crate) mod instance` ([crate::instance]), one file for every Unix
+//!   (`linux/app/instance.rs`) and Windows' (`windows/app/instance.rs`): `lock_file(&Path) ->
+//!   io::Result<File>`, `Server` with `bind(dir, lock)` and `serve(on: impl Fn(&str) + Send)`, a
+//!   thread that calls `on` with each line, both let go on drop, and `send(dir, line, deadline:
+//!   Instant)`, `NotFound` or `ConnectionRefused` when nothing listens.
+//! - `pub mod uninstall` ([crate::uninstall]): `steps(&AppInfo) -> Vec<Step>`, what the OS keeps
+//!   for the app besides launch at login, undone (macOS its permissions and defaults, Linux the
+//!   launcher entry and the portal's token), and `busy(&io::Error) -> bool`, an error a removal may
+//!   pass when tried again.
 //! - `pub mod activity` ([crate::activity]), from any thread: `Token: Send`, `begin(&str) ->
 //!   Token`, `end(Token)`.
 //! - `pub mod post` ([crate::keys::post]): `post(Shortcut) -> Result<(), String>`, the shortcut as
@@ -112,15 +125,21 @@
 //!   `offer(&str, Option<Box<dyn FnMut()>>) -> Option<u64>` (the text marked for clipboard managers
 //!   to skip, handed out at a read that runs the callback when there is one) and `holds(u64) ->
 //!   bool` (nothing was written since that offer).
-//! - `pub mod focus` ([crate::focus]): `current() -> Option<Focused>` and `Window: Clone + Debug +
-//!   PartialEq + Send + Sync`, another app's window by identity.
+//! - `pub mod focus` ([crate::focus]): `current() -> Option<Focused>`, `hidden() -> bool` (the OS
+//!   hides the focus: `current` is always `None`) and `Window: Clone + Debug + PartialEq + Send +
+//!   Sync`, another app's window by identity.
 //! - `shell::alert(title: &str, message: &str)` ([crate::Main::alert]): a modal alert on the main
 //!   thread, returning once dismissed.
+//! - Windows only, `downloads() -> Option<PathBuf>` (the Known Folder, [crate::paths::downloads])
+//!   and `attach_console()` ([crate::attach_console]), in `app/`.
+//! - Linux only, `startup_complete(token: &str)`: the launcher's busy cursor stops for a launch
+//!   whose command ([crate::Main::serve]) brought no window forward.
 //! - macOS only, `pub mod permissions` ([crate::permissions]): `accessibility(prompt: bool) ->
 //!   bool`, `secure_input() -> bool`, `microphone() -> Access`, `request_microphone(Box<dyn
 //!   FnOnce(bool) + Send>)`.
 //!
-//!   `activity`, `open`, `post`, `paste`, `focus` and `permissions` live in `app/` on each OS too.
+//!   `activity`, `open`, `post`, `paste`, `focus`, `permissions` and `uninstall` live in `app/` on
+//!   each OS too.
 //! - `pub fn appearance() -> Appearance` ([crate::Appearance]): `dark`, and `accent` in sRGB or
 //!   `None` when the OS has none or the user left it to apps (macOS: `effectiveAppearance` matched
 //!   against Aqua / DarkAqua, `controlAccentColor` unless Multicolor; on the main thread only,
@@ -172,6 +191,11 @@ mod linux;
 #[cfg(target_os = "linux")]
 use linux as imp;
 
+/// One instance ([crate::instance]): Linux's Unix socket on macOS too, a named pipe on Windows.
+#[cfg_attr(unix, path = "linux/app/instance.rs")]
+#[cfg_attr(windows, path = "windows/app/instance.rs")]
+pub(crate) mod instance;
+
 /// Linux's, for its files in the user's folders: on every Unix for [crate::desktop]'s tests.
 #[cfg(any(all(test, unix), target_os = "linux"))]
 #[path = "linux/app/write.rs"]
@@ -186,10 +210,14 @@ use std::time::{Duration, Instant};
 pub use imp::appearance;
 #[cfg(target_os = "macos")]
 pub(crate) use imp::permissions;
+#[cfg(target_os = "linux")]
+pub(crate) use imp::startup_complete;
 pub(crate) use imp::{
   activity, autostart, clipboard, desktop, focus, hotkey, open, paste, perf_cores, post, shell,
-  text, tray,
+  text, tray, uninstall,
 };
+#[cfg(target_os = "windows")]
+pub(crate) use imp::{attach_console, downloads};
 #[cfg(any(test, target_os = "windows", target_os = "linux"))]
 use keyboard_types::Code;
 

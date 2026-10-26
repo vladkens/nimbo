@@ -15,6 +15,7 @@
 //! binds the shortcut with the chord only as a preference: the desktop asks the user, who may
 //! pick another. Without the portal (older GNOME) X11's grab through XWayland stands in, which
 //! hears the chord only while an X11 app has the keyboard ([Status::listener_error] says so).
+//! [modifier_alone] and [start_asks] tell an app what this platform can do before it asks.
 //!
 //! [Hotkeys::escape] takes Escape from every app for a while (to cancel what the hotkey started)
 //! and reports it as [Edge::Escape]: on macOS the event tap swallows it, and Carbon's hotkey takes
@@ -26,6 +27,21 @@ use std::time::Instant;
 
 use crate::keys::Hotkey;
 use crate::platform::hotkey as imp;
+
+/// A modifier key alone can be the hotkey ([Hotkey::Modifier]): on macOS and Windows; Linux's
+/// grab and portal take only chords, so the shortcut recorder ([crate::Ui::shortcut]) records none
+/// there.
+pub fn modifier_alone() -> bool {
+  imp::modifier_alone()
+}
+
+/// [Hotkeys::start] shows the desktop's dialog: on Linux in a Wayland session, where the
+/// GlobalShortcuts portal asks the user to approve the shortcut (a desktop without the portal
+/// falls back to X11's grab and asks nothing). An app then starts the listener when the user asks
+/// for it, or at a launch after the user approved it once, never unasked at every launch.
+pub fn start_asks() -> bool {
+  imp::start_asks()
+}
 
 /// What the hotkey did, on the hotkeys' thread.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

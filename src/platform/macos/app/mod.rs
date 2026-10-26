@@ -5,8 +5,8 @@
 //! fallback), launch at login ([autostart]: SMAppService), work from other threads on the main
 //! queue ([post()]), and the Dock ([Presence]); links and files opened ([open]), Accessibility,
 //! Secure Input and the microphone ([permissions]), shortcuts posted to the app in focus
-//! ([post]), where the user types ([focus]), the pasteboard for a paste ([paste]) and alerts
-//! ([alert]).
+//! ([post]), where the user types ([focus]), the pasteboard for a paste ([paste]), alerts
+//! ([alert]) and what an uninstall resets ([uninstall]).
 
 pub mod activity;
 pub mod autostart;
@@ -18,6 +18,7 @@ pub mod paste;
 pub mod permissions;
 pub mod post;
 pub mod tray;
+pub mod uninstall;
 
 use std::cell::Cell;
 use std::time::Duration;

@@ -16,8 +16,13 @@ use crate::focus::{self, Focused};
 #[derive(Clone, Debug, PartialEq)]
 pub struct Window(c_ulong);
 
+/// Wayland: no app sees where the user types in another.
+pub fn hidden() -> bool {
+  std::env::var_os("WAYLAND_DISPLAY").is_some()
+}
+
 pub fn current() -> Option<Focused> {
-  if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+  if hidden() {
     return None;
   }
 

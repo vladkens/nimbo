@@ -36,7 +36,9 @@ use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-pub use self::app::{activity, autostart, desktop, focus, hotkey, open, paste, post, shell, tray};
+pub use self::app::{
+  activity, autostart, desktop, focus, hotkey, open, paste, post, shell, tray, uninstall,
+};
 use self::dl::{Lib, fns};
 use self::input::Input;
 pub use self::settings::appearance;
@@ -125,6 +127,9 @@ fns!(Gtk {
   fn gtk_widget_add_events(w: P, mask: c_int);
   fn gtk_widget_show_all(w: P);
   fn gtk_window_present(w: P);
+  fn gtk_window_set_startup_id(w: P, id: S);
+  fn gdk_notify_startup_complete();
+  fn gdk_notify_startup_complete_with_id(id: S);
   fn gtk_window_is_active(w: P) -> c_int;
   fn gtk_widget_destroy(w: P);
   fn gtk_dialog_run(d: P) -> c_int;
@@ -485,7 +490,8 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Result<u64, std::ffi::NulError> {
 
 /// Shows window `id` in front, an overlay at its anchor ([overlay]); the first time, follows its
 /// frame clock and sets its input up (shown, the window is realized: its frame clock and the
-/// area's GdkWindow exist).
+/// area's GdkWindow exist). A window, not an overlay, comes with the activation token of the
+/// command being served ([crate::shell::token]): the compositor lets it to the front.
 fn front(id: u64) {
   let g = gtk();
   let Some((window, area, first, overlay, size)) = slot(id, |s| {
@@ -498,8 +504,14 @@ fn front(id: u64) {
     overlay::place(window, size, anchor, true);
   }
 
+  let token = overlay.is_none().then(crate::shell::token).flatten();
+  let token = token.and_then(|t| CString::new(t).ok());
   // SAFETY: GTK's calls on a window of ours.
   unsafe {
+    if let Some(token) = token {
+      (g.gtk_window_set_startup_id)(window, token.as_ptr());
+    }
+
     if first {
       (g.gtk_widget_show_all)(window);
       let clock = (g.gtk_widget_get_frame_clock)(window);
@@ -518,6 +530,25 @@ fn front(id: u64) {
       }
       None => (g.gtk_window_present)(window),
     }
+  }
+}
+
+/// The app started: the launcher stops its busy cursor, unless a window shows (its first show
+/// tells it then).
+fn started() {
+  if !WINS.with_borrow(|ws| ws.iter().any(|s| s.shown)) {
+    // SAFETY: GDK's call on the main thread, after `init` opened the display.
+    unsafe { (gtk().gdk_notify_startup_complete)() };
+  }
+}
+
+/// A command with the launch's `token` was served and no window came forward with it
+/// ([crate::shell]): the launcher stops its busy cursor for that launch.
+pub(crate) fn startup_complete(token: &str) {
+  let Ok(token) = CString::new(token) else { return };
+  if app::shell::running() {
+    // SAFETY: GDK's call on the main thread while the app runs, with a NUL-terminated string.
+    unsafe { (gtk().gdk_notify_startup_complete_with_id)(token.as_ptr()) };
   }
 }
 

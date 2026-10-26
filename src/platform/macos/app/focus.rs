@@ -45,6 +45,11 @@ pub struct Window(CFRetained<CFType>);
 unsafe impl Send for Window {}
 unsafe impl Sync for Window {}
 
+/// The focus is never hidden here.
+pub fn hidden() -> bool {
+  false
+}
+
 pub fn current() -> Option<Focused> {
   let pid = focused_app().or_else(|| {
     let app = NSWorkspace::sharedWorkspace().frontmostApplication()?;

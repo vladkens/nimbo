@@ -13,6 +13,7 @@
 //! A Linux panel shows the item only with a StatusNotifierItem host: KDE Plasma, Xfce, LXQt,
 //! Cinnamon and MATE have one, GNOME only with the AppIndicator extension (Ubuntu ships it on).
 //! [available] says whether the session has one; the tray waits for one that starts later.
+//! [short] fits a long name (a device, a file) to an item.
 
 #[cfg(any(test, not(target_os = "macos")))]
 mod icon;
@@ -259,6 +260,47 @@ pub fn available() -> Result<(), String> {
   imp::available()
 }
 
+/// `name` as a menu item shows it, at most `max` characters, so the menu keeps its width whatever
+/// the app lists (a device, a file): a longer one cut at a word with `…`, inside its brackets
+/// where the part before them leaves room (`System Default (MacBook Pro…)`). From wavo-app's
+/// `src/menu.rs` (`short`) and `src/history.rs` (`shorten`).
+pub fn short(name: &str, max: usize) -> String {
+  let len = |s: &str| s.chars().count();
+  if len(name) <= max {
+    return name.to_owned();
+  }
+
+  match name.strip_suffix(')').and_then(|n| n.split_once(" (")) {
+    Some((head, inner)) if len(head) + 12 <= max => {
+      format!("{head} ({})", shorten(inner, max - len(head) - 4))
+    }
+    _ => shorten(name, max.saturating_sub(1)),
+  }
+}
+
+/// `text` on one line, its first words up to `max` characters and `…` where it is cut (a word
+/// longer than that cut inside), with no punctuation before it.
+fn shorten(text: &str, max: usize) -> String {
+  let mut start = String::new();
+  for (i, w) in text.split_whitespace().enumerate() {
+    if start.chars().count() + usize::from(i > 0) + w.chars().count() > max {
+      if start.is_empty() {
+        start = w.chars().take(max).collect();
+      }
+
+      return format!("{}…", start.trim_end_matches([',', ';', ':', '.', '—', '-']));
+    }
+
+    if i > 0 {
+      start.push(' ');
+    }
+
+    start.push_str(w);
+  }
+
+  start
+}
+
 /// For the tray scenario (`tests/tray.rs`): a tray with nothing on screen, the menu as the OS
 /// got it, and its items chosen without opening it.
 #[doc(hidden)]
@@ -292,6 +334,25 @@ impl Tray {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// Names cut at a word to fit, inside their brackets where there is room.
+  #[test]
+  fn long_names_cut_at_a_word() {
+    assert_eq!(
+      short("System Default (MacBook Pro Microphone)", 32),
+      "System Default (MacBook Pro…)"
+    );
+    assert_eq!(
+      short("a-very-long-model-name-for-the-menu-q8", 32),
+      "a-very-long-model-name-for-the…"
+    );
+    assert_eq!(short("Elgato Wave:3 Microphone Array", 32), "Elgato Wave:3 Microphone Array");
+    assert_eq!(short("Large v3, Turbo, quantized to eight bits", 24), "Large v3, Turbo…");
+    // No room inside the brackets: cut as a whole.
+    assert_eq!(short("A Rather Long Device Name (USB)", 24), "A Rather Long Device…");
+    assert_eq!(short("Ünïcödé wörds ärë cöüntëd äs chärs", 20), "Ünïcödé wörds ärë…");
+    assert_eq!(short("anything", 0), "…");
+  }
 
   /// An SVG file's ring of two paths fills even-odd, as the file draws it.
   #[test]

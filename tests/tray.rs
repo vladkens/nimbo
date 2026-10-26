@@ -41,3 +41,12 @@ fn the_example() {
   nimbo::svg::flatten(example::ICON, 1.0, &mut rings).unwrap();
   assert_eq!(rings.len(), 2, "a ring: two circles");
 }
+
+/// Showing the counter when it is closed (a second launch's "open", a reopen) opens it, which
+/// borrows the state again: the lookup lets its borrow go first.
+#[test]
+fn a_closed_counter_is_looked_up_without_holding_the_state() {
+  let state = example::Shared::default();
+  assert!(example::open_counter(&state).is_none());
+  assert!(state.try_borrow_mut().is_ok(), "the state is free to open the counter");
+}

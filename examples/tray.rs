@@ -3,8 +3,9 @@
 //! A tray app with no window of its own: an icon in the menu bar (macOS) or the tray (Windows,
 //! Linux) whose menu opens a counter window and shows its count, a global hotkey that opens or
 //! closes that window from any app, launch at login as a check mark, and an item that pastes a
-//! line where the user types three seconds later, as a dictation app does ([paste]). On Linux it
-//! writes its launcher entry at start ([desktop]), so the dock shows its icon for the window.
+//! line where the user types three seconds later, as a dictation app does ([nimbo::paste]). On
+//! Linux it writes its launcher entry at start ([desktop]), so the dock shows its icon for the
+//! window. It runs once: a second launch has the first show its counter ([instance]), and ends.
 //!
 //! `cargo run --release --example tray [-- --shot <file.png>]`; the shot is the counter window.
 //! The hotkey is ⌃⌥Space on macOS, Ctrl+Alt+Space elsewhere (on Wayland the desktop asks first,
@@ -25,10 +26,10 @@ use std::time::Duration;
 use counter::Counter;
 use nimbo::desktop::Launcher;
 use nimbo::hotkey::{Edge, Hotkeys};
+use nimbo::instance::{self, Claim, Instance};
+use nimbo::paste::Paste;
 use nimbo::tray::{Item, Menu, Tray, TrayIcon};
-use nimbo::{
-  AppInfo, Config, Main, Presence, Shortcut, SystemClipboard, Window, autostart, desktop,
-};
+use nimbo::{AppInfo, Config, Main, Presence, Window, autostart, desktop};
 
 pub const INFO: AppInfo =
   AppInfo { id: "com.example.nimbo-tray", name: "Nimbo Tray", presence: Presence::Accessory };
@@ -64,12 +65,12 @@ pub fn menu(s: &Shown) -> Menu {
 }
 
 #[derive(Default)]
-struct State {
+pub struct State {
   window: Option<Window<Counter>>,
   hotkeys: Option<Hotkeys>,
 }
 
-type Shared = Rc<RefCell<State>>;
+pub type Shared = Rc<RefCell<State>>;
 
 fn shown(state: &Shared) -> Shown {
   let s = state.borrow();
@@ -82,10 +83,15 @@ fn shown(state: &Shared) -> Shown {
   Shown { count, login, hotkey }
 }
 
+/// The counter while it is open; the state's borrow ends before the caller opens or closes it,
+/// which borrows the state again.
+pub fn open_counter(state: &Shared) -> Option<Window<Counter>> {
+  state.borrow().window.clone().filter(|w| w.is_open())
+}
+
 /// Opens the counter, or closes it when open.
 fn toggle(main: &mut Main, state: &Shared) {
-  let open = state.borrow().window.clone().filter(|w| w.is_open());
-  match open {
+  match open_counter(state) {
     Some(w) => w.close(),
     None => {
       let cfg = Config::new("Counter", 360.0, 300.0).icon(64, &counter::ICON);
@@ -97,22 +103,21 @@ fn toggle(main: &mut Main, state: &Shared) {
   }
 }
 
-/// Pastes `text` where the user types: the clipboard taken, the text offered, the paste shortcut
-/// posted, and a second later what the clipboard held put back, unless something else was copied
-/// meanwhile.
-fn paste(main: &mut Main, text: &str) {
-  let clip = SystemClipboard;
-  let before = clip.snapshot().filter(|s| !s.unreadable());
-  let Some(offer) = clip.offer(text, None) else { return eprintln!("paste: no clipboard") };
-  if let Err(e) = Shortcut::parse("cmd+v").map_err(|e| e.to_string()).and_then(nimbo::keys::post) {
+/// Shows the counter, opening it when closed.
+fn show(main: &mut Main, state: &Shared) {
+  match open_counter(state) {
+    Some(w) => w.front(),
+    None => toggle(main, state),
+  }
+}
+
+/// Pastes `text` where the user types now: the clipboard comes back after the paste, unless
+/// something else was copied meanwhile.
+fn paste(text: &str) {
+  let opts = Paste { restore: true, target: nimbo::focus::current() };
+  if let Err(e) = nimbo::paste::text(text, opts) {
     eprintln!("paste: {e}");
   }
-
-  main.proxy().after(Duration::from_secs(1), move |_| {
-    if let Some(before) = before.filter(|_| clip.holds(offer)) {
-      clip.restore(before);
-    }
-  });
 }
 
 thread_local! {
@@ -120,7 +125,7 @@ thread_local! {
   static STATE: Shared = Shared::default();
 }
 
-fn start(main: &mut Main) {
+fn start(main: &mut Main, instance: Option<Instance>) {
   // Nothing off Linux; there the entry is written once, again when the executable moves.
   let icon = (64, &counter::ICON[..]);
   let launcher = Launcher { comment: "A tray app made with nimbo", categories: &["Utility"], icon };
@@ -171,13 +176,22 @@ fn start(main: &mut Main) {
           eprintln!("launch at login: {e}");
         }
       }
-      "paste" => main.proxy().after(Duration::from_secs(3), |main| paste(main, "Hello from nimbo")),
+      "paste" => main.proxy().after(Duration::from_secs(3), |_| paste("Hello from nimbo")),
       "quit" => main.quit(),
       _ => {}
     }
 
     refresh(t, &state);
   });
+
+  // A second launch's "open" shows the counter, as opening the app again does on macOS.
+  main.on_reopen(|main| STATE.with(|s| show(main, s)));
+  // "quit" (an uninstaller's) quits after the handler: the tray has no commands of its own.
+  if let Some(instance) = instance
+    && let Err(e) = main.serve(instance, |_, _| {})
+  {
+    eprintln!("instance: {e}");
+  }
 
   // The tray lives as long as the app; the hotkeys are in its state.
   main.on_quit(move |_| drop(tray));
@@ -188,5 +202,17 @@ fn main() {
     return nimbo::run(Config::new("Counter", 360.0, 300.0), Counter::default(), |h| _ = h.frame());
   }
 
-  nimbo::app(INFO, start);
+  // One instance: a second launch asks the first to show the counter, and ends.
+  let instance = match instance::claim(&INFO) {
+    Ok(Claim::Primary(instance)) => Some(instance),
+    Ok(Claim::Running) => {
+      return instance::send(&INFO, instance::OPEN).unwrap_or_else(|e| eprintln!("instance: {e}"));
+    }
+    Err(e) => {
+      eprintln!("instance: {e}");
+      None
+    }
+  };
+
+  nimbo::app(INFO, |main| start(main, instance));
 }

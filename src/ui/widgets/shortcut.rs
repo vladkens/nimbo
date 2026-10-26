@@ -1,7 +1,7 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The shortcut recorder: a capsule showing a global [Hotkey] that records a new one, a chord
-//! or a modifier key alone.
+//! or a modifier key alone where the platform can grab one ([crate::hotkey::modifier_alone]).
 //!
 //! ```ignore
 //! if ui.id("hotkey").shortcut(&mut self.hotkey).changed { self.save() }
@@ -53,14 +53,20 @@ pub fn hotkey_of(k: &KeyEvent) -> Option<Hotkey> {
 
 impl Ui<'_> {
   /// A shortcut recorder over `value`: a click, or Space while focused, starts recording (`on`)
-  /// and focuses it; the next chord typed ([hotkey_of]), or a modifier key pressed and released
-  /// with nothing else between ([crate::Event::Modifier]: left or right, fn), becomes the value
-  /// and stops it, `changed`. Escape stops it unchanged, Backspace or Delete clear the value; a
-  /// click again or elsewhere, or focus moving away, stop it unchanged. With `clear`, a click
-  /// on `id.key("clear")` (a ⊗ the look draws) clears the value too. Every key is taken
-  /// while recording, before the app's bindings ([Ui::grab_keys]), so none reaches anything
-  /// else: Cmd-Z records, it doesn't undo.
-  pub fn shortcut_behavior(&mut self, id: Id, value: &mut Option<Hotkey>, clear: bool) -> Behavior {
+  /// and focuses it; the next chord typed ([hotkey_of]), or with `lone` a modifier key pressed
+  /// and released with nothing else between ([crate::Event::Modifier]: left or right, fn),
+  /// becomes the value and stops it, `changed`. Escape stops it unchanged, Backspace or Delete
+  /// clear the value; a click again or elsewhere, or focus moving away, stop it unchanged. With
+  /// `clear`, a click on `id.key("clear")` (a ⊗ the look draws) clears the value too. Every key
+  /// is taken while recording, before the app's bindings ([Ui::grab_keys]), so none reaches
+  /// anything else: Cmd-Z records, it doesn't undo.
+  pub fn shortcut_behavior(
+    &mut self,
+    id: Id,
+    value: &mut Option<Hotkey>,
+    clear: bool,
+    lone: bool,
+  ) -> Behavior {
     // A button whose value is the hotkey, as the platform writes it.
     let shown = |v: &Option<Hotkey>| v.map(|h| h.label()).unwrap_or_default();
     if let Some(b) = self.begin(id, Role::Button) {
@@ -85,7 +91,7 @@ impl Ui<'_> {
       if let Some((key, down)) = self.modifier_key(id).filter(|m| is_modifier(m.0)) {
         match down {
           true => {
-            rec.lone = (rec.held == 0).then_some(key);
+            rec.lone = (rec.held == 0 && lone).then_some(key);
             rec.held += 1;
           }
           false => {
@@ -143,7 +149,8 @@ impl Ui<'_> {
     b
   }
 
-  /// A shortcut recorder over `value` ([Ui::shortcut_behavior]), 160 wide whatever it shows: a
+  /// A shortcut recorder over `value` ([Ui::shortcut_behavior]; a modifier key alone where
+  /// [crate::hotkey::modifier_alone]), 160 wide whatever it shows: a
   /// capsule with the hotkey ([Hotkey::label]), "Record Shortcut" when empty, and a ⊗ that
   /// clears it (`id.key("clear")`) where the theme has one ([crate::Theme::shortcut_clear]: not
   /// the plates themes, whose recorder sits by a reset button); recording, the ground with an
@@ -153,7 +160,8 @@ impl Ui<'_> {
     let t = self.theme();
     let id = self.take_id();
     let clear = id.key("clear");
-    let b = self.shortcut_behavior(id, value, t.shortcut_clear);
+    let lone = crate::hotkey::modifier_alone();
+    let b = self.shortcut_behavior(id, value, t.shortcut_clear, lone);
     let hot = self.ctl_hot(id, b.hovered);
     let h = t.sizes.control_h;
     let bg = match (b.on, b.pressed) {
@@ -235,6 +243,32 @@ mod tests {
     // Stopped, the app has its shortcut back.
     h.key('z', CMD);
     assert_eq!(h.app().undos, 2);
+  }
+
+  /// A recorder's behaviour where a modifier key alone can't be the hotkey (Linux).
+  #[derive(Default)]
+  struct Chords(Option<Hotkey>);
+
+  impl App for Chords {
+    fn view(&mut self, ui: &mut Ui) {
+      let b = ui.shortcut_behavior(Id::of("rec"), &mut self.0, false, false);
+      ui.with_id(b.id).el(b.style(Style::new().w(px(W)).h(px(22.0))));
+    }
+  }
+
+  #[test]
+  fn no_modifier_alone_where_the_platform_grabs_none() {
+    let mut h = Harness::new(Chords::default(), Size::new(300.0, 100.0), 1.0);
+    h.frame();
+    h.click_id(Id::of("rec"));
+    for down in [true, false] {
+      h.event(Event::Modifier { key: Code::AltRight, down });
+    }
+
+    assert_eq!((h.app().0, h.focused()), (None, Some(Id::of("rec"))), "still recording");
+    h.key('k', Modifiers::CONTROL);
+    let ctrl_k = Hotkey::Shortcut(Shortcut { key: Key::Char('k'), mods: Modifiers::CONTROL });
+    assert_eq!(h.app().0, Some(ctrl_k));
   }
 
   fn hk(key: impl Into<Key>, mods: Modifiers) -> Option<String> {

@@ -32,11 +32,11 @@ KINDS = ("code", "docs", "comments", "tests", "blank")
 # paint, theme), its widgets and containers (ui/widgets, ui/containers: add-ons over it), the
 # text system (text/: shaping, the glyph atlas, the editing model), the app platform (its
 # portable part: the shell, tray, hotkeys, paths, launch at login, the launcher entry, opening,
-# permissions, the system clipboard, the focus of other apps; and each OS's platform/<os>/app),
-# the accessibility model (ui/a11y.rs: roles, records, assembly) and the core (the rest of
-# src/). A budget is whole hundreds (STEP): a change that doesn't fit is written tighter, or the
-# budget goes up by a hundred, a decision recorded in its PR; never by the few lines one change
-# needs.
+# permissions, the system clipboard, the focus of other apps, the one instance, the uninstall,
+# the paste; and each OS's platform/<os>/app), the accessibility model (ui/a11y.rs: roles,
+# records, assembly) and the core (the rest of src/). A budget is whole hundreds (STEP): a change that
+# doesn't fit is written tighter, or the budget goes up by a hundred, a decision recorded in its
+# PR; never by the few lines one change needs.
 STEP = 100
 BUDGETS = {
   "platform/macos": 2500,
@@ -46,10 +46,10 @@ BUDGETS = {
   "widgets": 3300,
   "text": 1200,
   "core": 3700,
-  "app/shared": 1000,
+  "app/shared": 1500,
   "app/macos": 1600,
-  "app/windows": 1500,
-  "app/linux": 2000,
+  "app/windows": 1600,
+  "app/linux": 2100,
   "a11y": 400,
 }
 # Modules that count against a budget of another name ("app", src/app.rs, is the core's seams).
@@ -61,7 +61,7 @@ PARTS = {
   "ui/form": "widgets",
   "ui/dialog": "widgets",
   "ui/a11y": "a11y",
-  **{m: "app/shared" for m in ("shell", "tray", "hotkey", "paths", "autostart", "desktop", "open", "permissions", "clipboard", "focus")},
+  **{m: "app/shared" for m in ("shell", "tray", "hotkey", "paths", "autostart", "desktop", "open", "permissions", "clipboard", "focus", "instance", "uninstall", "paste")},
 }
 
 

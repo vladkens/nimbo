@@ -5,8 +5,9 @@
 //! the default main context, which GLib makes safe to add from any thread and wakes for.
 //!
 //! Linux has no Dock: [Presence] changes nothing, the panel's task list shows the windows. A
-//! second launch is a second process (the reopen hook never runs), and the session's
-//! end (SIGTERM) is not caught: the quit hook runs after [quit] only.
+//! second launch is a second process (the reopen hook runs for its "open" to the instance
+//! [Main::serve] keeps), and the session's end (SIGTERM) is not caught: the quit hook runs after
+//! [quit] only.
 
 use std::any::TypeId;
 use std::cell::Cell;
@@ -46,6 +47,7 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
 
   INFO.set(Some(*info));
   start(&mut Main::here());
+  super::super::started();
   super::super::main_loop();
   crate::shell::finish(|id| closed(id, false));
 

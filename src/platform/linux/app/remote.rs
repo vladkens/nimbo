@@ -238,8 +238,11 @@ pub(super) fn granted() -> bool {
   SESSION.with_borrow(Option::is_some) || saved
 }
 
+/// The file in the app's config folder that keeps the desktop's approval.
+pub(super) const TOKEN: &str = "remote-desktop.token";
+
 fn token_file() -> PathBuf {
-  crate::paths::config_dir(super::shell::info().id).join("remote-desktop.token")
+  crate::paths::config_dir(super::shell::info().id).join(TOKEN)
 }
 
 // MARK: Keys

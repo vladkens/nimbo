@@ -50,6 +50,12 @@ pub fn current() -> Option<Focused> {
   imp::current()
 }
 
+/// The OS hides where the user types from other apps, so [current] is always `None`: Linux on
+/// Wayland. A paste there goes wherever the focus is, unchecked.
+pub fn hidden() -> bool {
+  imp::hidden()
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;

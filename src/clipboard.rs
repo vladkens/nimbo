@@ -7,7 +7,7 @@
 //! A paste goes: [SystemClipboard::snapshot], [SystemClipboard::offer] the text, post the paste
 //! shortcut ([crate::keys::post]), and once the text was read (or after a while) put the snapshot
 //! back with [SystemClipboard::restore] if the clipboard still [holds](SystemClipboard::holds) the
-//! offer: what the user copied meanwhile stays.
+//! offer: what the user copied meanwhile stays. [crate::paste::text] does it all.
 //!
 //! Per OS (all on the main thread, while the app runs on Windows and Linux): macOS the general
 //! `NSPasteboard`, every item with every type (UTIs), its `changeCount`, and an offer as a promise
