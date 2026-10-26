@@ -263,6 +263,8 @@ pub(crate) fn read_polled(
     line.extend_from_slice(&buf[..n]);
   }
 
+  // The first line alone: what comes after is not the command's.
+  line.truncate(line.iter().position(|&b| b == b'\n').map_or(line.len(), |i| i + 1));
   String::from_utf8(line).ok()
 }
 
@@ -483,6 +485,7 @@ mod tests {
 
     assert_eq!(polled(&["op", "en\tt", "ok\n"], false).as_deref(), Some("open\ttok\n"));
     assert_eq!(polled(&["quit"], true).as_deref(), Some("quit"), "the sender's end ends it");
+    assert_eq!(polled(&["open\nmore"], true).as_deref(), Some("open\n"), "the first line");
     assert_eq!(polled(&[], false), None, "nothing sent within the time");
     assert_eq!(polled(&["qu"], false), None, "half a line within the time");
     let long = "x".repeat(MAX_LINE + 10);

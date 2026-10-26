@@ -86,6 +86,8 @@ fn read_line(mut stream: UnixStream) -> Option<String> {
     }
   }
 
+  // The first line alone: what comes after is not the command's.
+  line.truncate(line.iter().position(|&b| b == b'\n').map_or(line.len(), |i| i + 1));
   String::from_utf8(line).ok()
 }
 
