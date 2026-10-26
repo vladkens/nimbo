@@ -221,7 +221,8 @@ mod tests {
   /// Taller than the viewport, an item is revealed from its top.
   #[test]
   fn a_tall_item_is_revealed_from_its_top() {
-    let mut h = Harness::new(Col { pre: 0.0, h: 400.0, reveal: None }, Size::new(200.0, 300.0), 1.0);
+    let mut h =
+      Harness::new(Col { pre: 0.0, h: 400.0, reveal: None }, Size::new(200.0, 300.0), 1.0);
     h.frame();
     h.app_mut().reveal = Some(1);
     settle(&mut h);
