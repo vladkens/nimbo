@@ -20,7 +20,7 @@ use std::time::Duration;
 use common::{mid, reads};
 use lists::*;
 use nimbo::ui::Action;
-use nimbo::{CMD, Event, Harness, Id, Key, Modifiers, NamedKey, Phase, Point, Size};
+use nimbo::{CMD, Event, Harness, Id, Key, Modifiers, NamedKey, Os, Phase, Point, Size};
 
 type H = Harness<Lists>;
 
@@ -135,6 +135,8 @@ fn arrows_move_and_extend_and_enter_opens() {
 #[test]
 fn keys_go_to_the_ends_and_select_all() {
   let mut h = scrolled();
+  // macOS's keys, whatever the host: ⌘-Up is the top there.
+  h.set_os(Os::Mac);
   let list = Id::of(LIST);
   h.click_id(row(101));
   h.key(NamedKey::End, NONE);
@@ -142,10 +144,10 @@ fn keys_go_to_the_ends_and_select_all() {
   assert_eq!(selected(&h), [ROWS as u64 - 1]);
   let (v, last) = (h.rt.ui.scroll(list).unwrap().viewport, h.rect(row(ROWS as u64 - 1)).unwrap());
   assert!(last.y >= v.y && last.y + last.h <= v.y + v.h + 0.5, "{last:?} in {v:?}");
-  h.key(NamedKey::ArrowUp, CMD);
+  h.key(NamedKey::ArrowUp, Os::Mac.cmd());
   h.frame();
   assert_eq!((selected(&h), offset(&h, list)), (vec![0], 0.0));
-  h.key(Key::Char('a'), CMD);
+  h.key(Key::Char('a'), Os::Mac.cmd());
   assert_eq!(h.app().sel.len(), ROWS);
 }
 

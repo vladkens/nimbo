@@ -23,12 +23,14 @@ use std::time::Duration;
 use common::reads;
 use fields::*;
 use nimbo::ui::Action;
-use nimbo::{CMD, Command, Event, Harness, Id, Key, Modifiers, NamedKey, Os, Sel};
+use nimbo::{Command, Event, Harness, Id, Key, Modifiers, NamedKey, Os, Sel};
 
 const NONE: Modifiers = Modifiers::empty();
 const CTRL: Modifiers = Modifiers::CONTROL;
 const SHIFT: Modifiers = Modifiers::SHIFT;
 const META: Modifiers = Modifiers::META;
+/// The fields play macOS's keys unless a test plays another's ([fields_on]).
+const CMD: Modifiers = Os::Mac.cmd();
 
 fn text_of(id: &str) -> Id {
   Id::of(id).key("text")
@@ -45,6 +47,7 @@ fn clipboard(h: &mut Harness<Fields>) -> Option<String> {
 /// The fields, laid out once.
 fn fields() -> Harness<Fields> {
   let mut h = Harness::new(Fields::new(), SIZE, 2.0);
+  h.set_os(Os::Mac);
   h.frame();
   h
 }
