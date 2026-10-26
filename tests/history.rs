@@ -163,6 +163,12 @@ fn a_million_rows_scroll_to_the_point() {
   let r = rect(&h, row(days - 1, last)).expect("the last row built");
   assert!(r.y >= view.y && r.y + r.h <= view.y + view.h, "{r:?} in {view:?}");
   assert_eq!(step(&h, days - 1, last - 1), ROW_H + 1.0, "a row and a hairline apart");
+  // The scrollbars, drawn in `f32`, leave the exact end where it is.
+  for _ in 0..3 {
+    h.frame();
+  }
+
+  assert_eq!(rect(&h, row(days - 1, last)), Some(r), "still at the very end");
 
   let (g, i) = (days / 2, 70);
   h.app_mut().reveal = Some((g, i));

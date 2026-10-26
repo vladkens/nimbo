@@ -847,8 +847,9 @@ pub fn printable(s: &str) -> bool {
 // MARK: Posting keys
 
 /// Whether [post] works now without asking the user: macOS has Accessibility access, Linux on
-/// Wayland has the RemoteDesktop portal's session or its saved approval, X11 has XTest; Windows
-/// always. An app offers its own "Allow Pasting…" only until it does (wavo-app).
+/// Wayland has the RemoteDesktop portal's session or its saved approval (which the user may have
+/// revoked since: only the next session tells), X11 has XTest; Windows always. An app offers its
+/// own "Allow Pasting…" only until it does (wavo-app).
 pub fn ready() -> bool {
   crate::platform::post::ready()
 }

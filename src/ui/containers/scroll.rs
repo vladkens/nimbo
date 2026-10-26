@@ -189,7 +189,8 @@ impl Ui<'_> {
       }
 
       (bars.seen, bars.over) = (sc.offset, over);
-      let mut off = sc.offset;
+      // Written back only when a drag or a click moved it: the offset in `f64` stays exact.
+      let (mut off, mut moved) = (sc.offset, false);
       let scrolls = |ax: usize| axes[ax] && geo(&sc, ax, 0.0, false).is_some();
       let both = scrolls(0) && scrolls(1);
       for (ax, g) in geos.iter_mut().enumerate() {
@@ -205,6 +206,7 @@ impl Ui<'_> {
         if let Some((p, m)) = press {
           let start = *bars.drag[ax].get_or_insert(axis(off, ax));
           off = with_axis(off, ax, start + (axis(m, ax) - axis(p.pos, ax)) * first.ratio);
+          moved = true;
         }
 
         if !held {
@@ -218,6 +220,7 @@ impl Ui<'_> {
           let page = axis(Point::new(sc.viewport.w, sc.viewport.h), ax) * 0.9;
           let dir = if axis(c.pos, ax) < start { -1.0 } else { 1.0 };
           off = with_axis(off, ax, axis(off, ax) + dir * page);
+          moved = true;
         }
 
         // The pointer moving in the track's strip shows the bars, though hidden ones take no
@@ -237,7 +240,7 @@ impl Ui<'_> {
         *g = geo(&sc, ax, axis(off, ax), both);
       }
 
-      if off != sc.offset {
+      if moved && off != sc.offset {
         self.scroll_to(id, off);
         bars.seen = off;
       }
@@ -280,6 +283,34 @@ mod tests {
         ui.el(Style::new().w(px(200.0)).h(px(self.0)).bg(rgb(0x0000ff)));
       });
     }
+  }
+
+  /// 53 million points of content under a 2-point prefix, past `f32`'s whole numbers: at the
+  /// end, frames that draw the bars leave the offset exactly there.
+  #[test]
+  fn the_bars_keep_an_offset_past_f32() {
+    struct Long;
+    impl App for Long {
+      fn view(&mut self, ui: &mut Ui) {
+        ui.id("area").scroll_area(Style::new().w(px(200.0)).h(px(300.0)), |ui| {
+          ui.el(Style::new().h(px(2.0)));
+          ui.el(Style::new().h(px(52_998_000.0)));
+          ui.el(Style::new().h(px(2_000.0)));
+        });
+      }
+    }
+
+    let mut h = Harness::new(Long, Size::new(200.0, 300.0), 2.0);
+    let area = Id::of("area");
+    h.frame();
+    h.rt.ui.store.raw::<crate::ui::input::ScrollState>(area).offset[1] = 1e12;
+    h.rt.redraw();
+    for _ in 0..3 {
+      h.frame();
+    }
+
+    let end = 2.0 + 52_998_000.0 + 2_000.0 - 300.0;
+    assert_eq!(h.rt.ui.scroll_exact(area).map(|s| s.0[1]), Some(end));
   }
 
   #[test]
