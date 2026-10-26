@@ -19,7 +19,7 @@
 - 🔤 **The system's text stack**: CoreText, DirectWrite or FreeType with HarfBuzz shape the text and rasterize each glyph once into an atlas; subpixel positioning, colour emoji, input methods
 - 🖥️ **A CPU renderer**: draws the whole window, the glyphs from that atlas too, and hands the frame to the system's 2D path (an IOSurface, a GDI bitmap, a cairo surface); no GPU API, shaders or drivers; frames paced to the display, an idle window asleep
 - 🧩 **Widgets as headless behaviours** plus a theme: buttons, switches, fields, selects, tabs, splits, dialogs, lists and form pages of 500k rows built in view only; or your own look over the same behaviour, read by VoiceOver either way
-- 🛎️ **Tray and HUD apps**: a tray menu, global hotkeys, launch at login, overlays that never take the focus, the system's permissions
+- 🛎️ **Tray and HUD apps**: a tray menu, global hotkeys, launch at login, overlays that never take the focus, the system's permissions; one instance that takes commands from a second launch, a paste into another app that gives the clipboard back, an uninstall that leaves nothing behind
 - 📂 **Files**: the system's open and save panels, files dragged onto a window
 - 🧪 **A headless harness**: every example renders to a PNG without a window; tests click, type and check pixels and what a screen reader reads, in parallel
 - 📦 **13 crates on macOS, 4 on Windows, 2 on Linux**: GTK is loaded at run time, nothing to link
@@ -117,8 +117,16 @@ cargo run --release --example gallery -- --shot gallery.png    # the same, rende
 - `text`: fonts, scripts, emoji
 - `shapes`: what the renderer draws
 - `input`: mouse, keys, clipboard
-- `tray`: a tray icon, a global hotkey
+- `tray`: a tray icon, a global hotkey, one instance, a paste into another app
 - `hud`: an overlay over every app
+
+### Packaging an app
+
+`cargo build` gives a bare binary; what each system needs around it, as [wavo-app](https://github.com/vladkens/wavo-app)'s `scripts/bundle.py` and `scripts/dist.py` do:
+
+- **macOS**: a `.app` with an `Info.plist` (the bundle id the same as `AppInfo::id`, `LSMinimumSystemVersion`, `LSUIElement` for a tray app, a usage string for each permission it asks), signed with a stable identity, such as a self-signed certificate in the login keychain: macOS keeps the permissions it granted (Accessibility, Microphone) across rebuilds, where an ad hoc signature loses them with every build.
+- **Windows**: a zip with the exe, the C runtime linked in (`-C target-feature=+crt-static` in `.cargo/config.toml`) so it runs without the Visual C++ Redistributable, and an icon resource linked in by `build.rs`, the one Explorer shows.
+- **Linux**: an AppImage with the binary, its `.desktop` entry and icon named by `AppInfo::id` (`StartupWMClass` too); GTK loads at run time, so nothing else goes in. The app calls `desktop::install` at launch, so the dock, the window's icon on Wayland and the portals find it.
 
 ## 📏 Size
 
