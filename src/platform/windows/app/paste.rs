@@ -12,6 +12,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::ptr::null_mut;
+use std::time::Duration;
 
 use windows_sys::Win32::Foundation::{GlobalFree, HWND};
 use windows_sys::Win32::System::DataExchange::{
@@ -58,8 +59,11 @@ impl Open {
     Self::by(host())
   }
 
+  /// Open for `owner`, tried a few times: another process may hold it a moment (a VM's clipboard
+  /// sync opens it after every change), as Chromium tries 5 times 5 ms apart.
   pub fn by(owner: HWND) -> Option<Self> {
-    (!owner.is_null() && unsafe { OpenClipboard(owner) } != 0).then_some(Open)
+    let mut tries = (0..5u64).map(|i| std::thread::sleep(Duration::from_millis(5 * i.min(1))));
+    tries.any(|()| !owner.is_null() && unsafe { OpenClipboard(owner) } != 0).then_some(Open)
   }
 }
 

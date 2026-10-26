@@ -48,7 +48,7 @@ BUDGETS = {
   "core": 3700,
   "app/shared": 1500,
   "app/macos": 1600,
-  "app/windows": 1600,
+  "app/windows": 1700,
   "app/linux": 2100,
   "a11y": 400,
 }

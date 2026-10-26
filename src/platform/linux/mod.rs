@@ -144,6 +144,7 @@ fns!(Gtk {
   fn gtk_clipboard_get(selection: usize) -> P;
   fn gtk_clipboard_set_text(c: P, text: S, len: c_int);
   fn gtk_clipboard_wait_for_text(c: P) -> *mut c_char;
+  fn gtk_clipboard_wait_is_text_available(c: P) -> c_int;
   fn gtk_get_current_event() -> P;
   fn gdk_event_get_event_type(ev: P) -> c_int;
   fn gdk_event_free(ev: P);
@@ -992,6 +993,11 @@ impl Clipboard for Clip {
   fn write(&mut self, s: &str) {
     let len = s.len().min(c_int::MAX as usize) as c_int;
     unsafe { (gtk().gtk_clipboard_set_text)(self.0, s.as_ptr().cast(), len) };
+  }
+
+  /// The owner asked for its targets only, not its text (a shorter nested wait).
+  fn has_text(&self) -> bool {
+    unsafe { (gtk().gtk_clipboard_wait_is_text_available)(self.0) != 0 }
   }
 }
 

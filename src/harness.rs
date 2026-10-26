@@ -46,6 +46,8 @@ impl<A: App> Harness<A> {
 
   /// Plays platform `os`'s keys from now on: what `cmd` in bindings is, and the commands keys
   /// nobody used run ([Os::command]); the host's by default.
+  /// Only those: `CMD`/`CTRL`, `KeyEvent::is`, `Shortcut::parse` and a list's Cmd-click still
+  /// follow the host.
   pub fn set_os(&mut self, os: Os) {
     self.rt.ui.os = os;
   }

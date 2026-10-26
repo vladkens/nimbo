@@ -280,9 +280,19 @@ fn fit(text: &str, max: usize) -> String {
     return text.to_owned();
   }
 
+  // The bracket that closes " (", past any inside it: `Microphone Array (Realtek(R) Audio)`.
+  let depth = |d: &mut i32, (i, c): (usize, char)| {
+    *d += match c {
+      '(' => 1,
+      ')' => -1,
+      _ => 0,
+    };
+    Some((i, *d))
+  };
   if let Some((head, rest)) = text.split_once(" (")
-    && let Some((inner, tail)) = rest.split_once(')')
+    && let Some((end, _)) = rest.char_indices().scan(1, depth).find(|&(_, d)| d == 0)
   {
+    let (inner, tail) = (&rest[..end], &rest[end + 1..]);
     // " (", "…)" around what shows of it.
     let room = max.saturating_sub(len(head) + len(tail) + 4);
     if room >= 8 {
@@ -373,6 +383,10 @@ mod tests {
     assert_eq!(fit(warning, 60), "No sound from USB Mic (Elgato Wave:3…): check the microphone");
     let error = "The last dictation failed: the engine did not answer in time and was restarted";
     assert!(fit(error, LABEL).ends_with('…') && fit(error, LABEL).chars().count() <= LABEL);
+    // Brackets inside the brackets: the outer ones close at their own.
+    assert_eq!(fit("Microphone Array (Realtek(R) Audio)", 32), "Microphone Array (Realtek(R)…)");
+    let warning = "No sound from Microphone Array (Realtek(R) Audio): check the microphone";
+    assert_eq!(fit(warning, LABEL), "No sound from Microphone Array: check the…");
     // Items fit by themselves, unless asked to show it all.
     assert_eq!(Item::new("e", error).label, fit(error, LABEL));
     assert_eq!(Item::full("e", error).label, error);
