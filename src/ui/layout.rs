@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use super::a11y::Records;
 use super::textlayout::{Edit, Stop, reveal};
 use super::{Align, Clip, Dim, Float, Id, Style, TextStyle};
 use crate::keys::Binding;
@@ -180,6 +181,8 @@ pub struct Tree {
   pub edits: Vec<Edit>,
   /// Caret stops of the editable texts' lines.
   pub stops: Vec<Stop>,
+  /// What the elements are to assistive technology, by id ([super::Ui::a11y]).
+  pub a11y: Records,
   index: HashMap<Id, u32, BuildHasherDefault<FxHasher>>,
   /// A grid's row heights while it is laid out.
   rows: Vec<f64>,
@@ -200,6 +203,7 @@ impl Tree {
     self.settle.clear();
     self.edits.clear();
     self.stops.clear();
+    self.a11y.clear();
     self.index.clear();
     let root = Style::new().w(Dim::Px(size.w)).h(Dim::Px(size.h));
     self.nodes.push(Node::new(Id::ROOT, Kind::Box, root, 1, None, 0, 1));

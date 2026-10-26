@@ -39,7 +39,7 @@ use crate::app::MouseButton;
 use crate::keys::{Binding, Command, Move, bind};
 use crate::scene::{Point, Rect, alpha};
 use crate::text::FxHasher;
-use crate::ui::{Align, Cursor, Id, Style, Ui, grow, px};
+use crate::ui::{Align, Cursor, Id, Role, State, Style, Ui, grow, px};
 
 /// Rows built past each edge of the viewport.
 const OVERSCAN: usize = 2;
@@ -311,6 +311,9 @@ impl<'s> List<'s> {
       false => style.focusable_quiet().gap(0.0),
     };
 
+    // A list of rows, the cursor's the active one.
+    let active = sel.cursor.map(|c| id.key(("row", c.0)));
+    ui.a11y(id, Role::List).state(State::Disabled, disabled).active(active);
     ui.with_id(id).scroll_area(style, |ui| {
       // The offset after the input and the scroll area's own (a thumb drag), clamped to the
       // content as it is now.
@@ -338,6 +341,7 @@ impl<'s> List<'s> {
           _ => [0.0; 4],
         };
 
+        ui.a11y(rid, Role::Row).state(State::Selected, selected);
         let cursor = sel.cursor.is_some_and(|c| c.0 == k);
         let r = Row { index: i, key: k, id: rid, selected, hover, cursor, focused };
         // Disabled, the same id (keyed in the list) taking no input.

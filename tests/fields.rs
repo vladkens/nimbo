@@ -6,16 +6,20 @@
 //! composition back to back, a value the app sets meanwhile held, Enter completing it; the
 //! password's dots, clipboard and input method; the placeholder, the disabled field, selectable
 //! text, and the caret's blink timers only while a field has focus (the first one from the
-//! start).
+//! start). Assistive technology reads the fields' text, never the password's, and sets it.
 
 #[path = "../examples/fields.rs"]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
 #[allow(dead_code, unused_attributes)]
 mod fields;
 
+mod common;
+
 use std::time::Duration;
 
+use common::reads;
 use fields::*;
+use nimbo::ui::Action;
 use nimbo::{CMD, Command, Event, Harness, Id, Key, Modifiers, NamedKey, Sel};
 
 const NONE: Modifiers = Modifiers::empty();
@@ -304,4 +308,42 @@ impl Halves for std::ops::Range<f32> {
     let n = ((self.end - self.start) * 2.0).ceil() as usize;
     (0..n).map(move |k| self.start + k as f32 * 0.5)
   }
+}
+
+/// Fields read their label and text, a password only that it is one; selectable text reads as
+/// text.
+#[test]
+fn fields_read_their_text_but_never_the_password() {
+  let h = &mut fields();
+  h.type_text("Ann");
+  h.click_id(Id::of(PASSWORD));
+  h.type_text("sécret");
+  h.frame();
+  let dump = h.a11y();
+  let lines = [
+    "text field \"Name\" value \"Ann\"",
+    "text field \"E-mail\" value \"\"",
+    "secure text field \"Password\" focused",
+    "text area \"Notes\" value \"\"",
+    "text field \"Disabled\" value \"Read only\" disabled",
+  ];
+  reads(&dump, &lines);
+  reads(&dump, &[&format!("static text {TEXT:?}")]);
+  assert!(!dump.contains("sécret") && !dump.contains('•'), "{dump}");
+}
+
+/// Assistive technology sets a field's text, and a password's without ever reading it; a
+/// disabled field refuses it.
+#[test]
+fn assistive_technology_sets_a_fields_text() {
+  let h = &mut fields();
+  assert!(h.act(Id::of(EMAIL), Action::SetValue("ann@example.com".into())));
+  assert_eq!(h.app().email, "ann@example.com");
+  reads(&h.a11y(), &["text field \"E-mail\" value \"ann@example.com\""]);
+  assert!(h.act(Id::of(PASSWORD), Action::SetValue("sécret".into())));
+  assert_eq!(h.app().password, "sécret");
+  let dump = h.a11y();
+  assert!(!dump.contains("sécret") && !dump.contains('•'), "{dump}");
+  assert!(!h.act(Id::of(OFF), Action::SetValue("x".into())));
+  assert_eq!(h.app().off, "Read only");
 }

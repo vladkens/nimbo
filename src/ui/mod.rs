@@ -35,7 +35,10 @@
 //! The rule for every widget: a headless behaviour ([behavior]: `ui.button_behavior(id)` and
 //! the like, hover, press, click, focus, keys and the value edited) plus drawing from the
 //! theme. An app that wants its own look keeps the behaviour and draws the element itself.
+//! Behaviours also record what their element is to assistive technology ([a11y]), so a look of
+//! the app's own reads as the theme's does.
 
+pub mod a11y;
 pub mod behavior;
 pub mod containers;
 pub mod dialog;
@@ -54,6 +57,7 @@ use std::fmt::{Display, Write};
 use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
+pub use a11y::{A11yNode, A11yTree, Action, Props, Role, State, Value};
 pub use behavior::{Behavior, FieldBehavior};
 pub use containers::{
   List, ListResponse, PopUp, Row, Selection, Split, SplitBehavior, Tabs, TypeSelect,
@@ -393,7 +397,7 @@ impl UiState {
   /// Scrolls every scroll container around `id` the least that shows it, innermost first, by
   /// the last frame's rects, up to an overlay placed on the window, which their offsets don't
   /// move; an overlay on its parent skips that parent's, which doesn't move it either.
-  fn reveal_in_scrolls(&mut self, id: Id) {
+  pub(crate) fn reveal_in_scrolls(&mut self, id: Id) {
     let t = &self.last;
     let Some(mut i) = t.find(id) else { return };
     let mut r = t.nodes[i as usize].rect;

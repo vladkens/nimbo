@@ -4,7 +4,7 @@
 //! in view are built, under a scroll area as tall as all of them; the end builds the last rows;
 //! rows and days sit where a whole build would put them; a selection and the rows' ids hold
 //! across scrolling; a row from the middle is revealed; a million rows, past `f32`'s whole
-//! numbers, scroll to their end and their middle a row apart.
+//! numbers, scroll to their end and their middle a row apart; rows read as rows and press.
 
 #[path = "../examples/history.rs"]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
@@ -13,8 +13,9 @@ mod history;
 
 mod common;
 
-use common::mid;
+use common::{mid, reads};
 use history::{History, LIST, PAGE, PER_DAY, ROW_H, ROWS};
+use nimbo::ui::{Action, Role};
 use nimbo::{Event, Harness, Id, Modifiers, Phase, Point, Rect, Size};
 
 type H = Harness<History>;
@@ -186,4 +187,19 @@ fn a_million_rows_scroll_to_the_point() {
     swipe(&mut h, dy);
     assert_eq!(rect(&h, row(g, i)).unwrap().y - y, dy, "moved by the swipe's {dy}");
   }
+}
+
+/// A row a click selects reads as a row named by its text and time, selected when it is, its
+/// Copy button by its icon; an assistive press selects it.
+#[test]
+fn rows_read_and_press_as_rows() {
+  let mut h = history();
+  let name = |g, i| format!("Dictation {}: what was said, on one line", entry(g, i));
+  reads(&h.a11y(), &[&format!("row {:?} desc \"23:59 · 7.0 s\"", name(0, 0)), "button \"Copy\""]);
+  let t = h.rt.ui.a11y_tree();
+  let third =
+    t.nodes.iter().find(|n| n.props.role == Role::Row && t.str(n.props.name) == name(0, 2));
+  assert!(h.act(third.unwrap().id, Action::Press));
+  assert_eq!(h.app().selected, Some(entry(0, 2)));
+  reads(&h.a11y(), &[&format!("row {:?} selected desc \"23:57 · 5.8 s\"", name(0, 2))]);
 }

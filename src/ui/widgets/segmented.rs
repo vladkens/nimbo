@@ -5,7 +5,7 @@
 
 use super::select::Choice;
 use crate::scene::alpha;
-use crate::ui::{Align, Response, Style, Ui, grow, px, rigid};
+use crate::ui::{Align, Response, Role, Style, Ui, Value, grow, px, rigid};
 
 impl Ui<'_> {
   /// Segments side by side, one selected (`cur`): view modes, zoom levels, filters with counts.
@@ -24,6 +24,7 @@ impl Ui<'_> {
     let was = *cur;
     let mut at = options.iter().position(|o| o.value() == *cur);
     let b = self.pick_behavior(id, options.len(), |i| id.key(i), &mut at);
+    self.a11y(id, Role::RadioGroup);
     if b.changed
       && let Some(i) = at
     {
@@ -57,6 +58,7 @@ impl Ui<'_> {
           (false, false) => (alpha(t.text, 0.08 * hot), t.muted()),
         };
 
+        ui.a11y(seg, Role::RadioButton).value(if on { Value::On } else { Value::Off });
         let pad = (h * 0.375).round();
         let s = Style::new().h(grow()).pad_xy(pad, 0.0).gap(5.0).center();
         let radius = if flat { t.radius } else { t.radius - 2.0 };

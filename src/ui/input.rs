@@ -114,6 +114,16 @@ pub(crate) struct Input {
   scratch: Vec<Id>,
 }
 
+impl Input {
+  /// A left click on `id` at `pos` with no press seen before it, counted as one: assistive
+  /// technology's press ([crate::Event::A11y]).
+  pub(crate) fn click_at(&mut self, id: Id, pos: Point) -> Click {
+    self.presses += 1;
+    let (button, mods, seq) = (MouseButton::Left, Modifiers::empty(), self.presses);
+    Click { id, button, clicks: 1, pos, mods, seq }
+  }
+}
+
 // MARK: Hit testing
 
 /// The interactive elements under `p`, innermost first: the topmost hit (overlays from the top

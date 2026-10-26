@@ -64,7 +64,7 @@ use keyboard_types::Modifiers;
 
 use super::input::ScrollState;
 use super::textlayout::{Edit, TextLayout};
-use super::{Cursor, Focus, Id, Style, Ui, UiState};
+use super::{Cursor, Focus, Id, Role, State, Style, Ui, UiState};
 use crate::app::{Ime, MouseButton};
 use crate::keys::{Command, Delete, Key, Move};
 use crate::scene::{Point, Rect};
@@ -137,12 +137,14 @@ impl Ui<'_> {
     }
   }
 
-  /// The disabled flag and autofocus for `id`; a disabled behaviour, or `None` to read input.
-  /// Disabled while focused, it gives focus up: its keys no longer route through it.
-  pub(super) fn begin(&mut self, id: Id) -> Option<Behavior> {
+  /// The disabled flag and autofocus for `id`, recorded for assistive technology as `role`
+  /// ([Ui::a11y]); a disabled behaviour, or `None` to read input. Disabled while focused, it
+  /// gives focus up: its keys no longer route through it.
+  pub(super) fn begin(&mut self, id: Id, role: Role) -> Option<Behavior> {
     // Autofocus reads the disabled flag, so before it is taken.
     self.take_autofocus(id);
     let off = self.take_disabled();
+    self.a11y(id, role).state(State::Disabled, off);
     if off && self.focused(id) {
       self.focus(None);
     }
@@ -172,7 +174,7 @@ impl Ui<'_> {
 
   /// A button: hover, press, and a click or Space while focused.
   pub fn button_behavior(&mut self, id: Id) -> Behavior {
-    if let Some(b) = self.begin(id) {
+    if let Some(b) = self.begin(id, Role::Button) {
       return b;
     }
 
@@ -268,7 +270,14 @@ impl Ui<'_> {
     multiline: bool,
     password: bool,
   ) -> FieldBehavior {
-    let disabled = self.begin(id).is_some();
+    // A password is a secure field, its text never exposed; one of many lines a text area.
+    let role = match (password, multiline) {
+      (true, _) => Role::SecureTextField,
+      (_, true) => Role::TextArea,
+      _ => Role::TextField,
+    };
+
+    let disabled = self.begin(id, role).is_some();
     let mut st = std::mem::take(self.state::<FieldState>(id));
     (st.text_id, st.editable, st.secure) = (id.key("text"), true, password);
     st.ed.multiline = multiline && !password;
@@ -279,6 +288,12 @@ impl Ui<'_> {
       true => (false, false),
       false => self.edit_input(id, &mut st),
     };
+
+    // A new text from assistive technology, as one edit.
+    if let Some(s) = self.a11y_value(id) {
+      st.ed.discard_marked();
+      st.ed.replace(0..st.ed.text().len(), s);
+    }
 
     let focused = self.focused(id);
     if !focused {
@@ -293,6 +308,10 @@ impl Ui<'_> {
     }
 
     st.focused = focused;
+    if !password {
+      self.a11y(id, role).text(text);
+    }
+
     let mut b = self.field_state(id, st.text_id, disabled);
     (b.changed, b.submitted, b.cancelled, b.blurred) = (changed, submitted, cancelled, blurred);
     (b.password, b.edit) = (password, shown_edit(&st));
@@ -306,7 +325,7 @@ impl Ui<'_> {
   /// click selects a word, a triple click a line; Cmd-A and Cmd-C come from its bindings
   /// ([crate::keys::SELECT_KEYS]). Build it under `id` with [Ui::field_text].
   pub fn selectable_behavior(&mut self, id: Id, text: &str) -> FieldBehavior {
-    let disabled = self.begin(id).is_some();
+    let disabled = self.begin(id, Role::StaticText).is_some();
     let mut st = std::mem::take(self.state::<FieldState>(id));
     (st.text_id, st.editable, st.secure, st.ed.multiline) = (id, false, false, true);
     if st.app != text {

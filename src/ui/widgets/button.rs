@@ -6,7 +6,7 @@
 use super::icon::{self, Icon};
 use crate::scene::mix;
 use crate::ui::theme::{ButtonStyle, ControlSize, Variant};
-use crate::ui::{Response, Style, TextStyle, Ui, px};
+use crate::ui::{Response, Role, Style, TextStyle, Ui, px};
 
 /// A button with a label, an [Icon], or both.
 #[derive(Clone, Copy, Debug)]
@@ -88,6 +88,12 @@ impl<'s> Button<'s> {
     let s = if self.selected { t.selected(s) } else { s };
     let id = ui.take_id();
     let b = ui.button_behavior(id);
+    // An icon alone names it when nothing else does.
+    let icon = self.icon.filter(|_| self.label.is_empty()).and_then(Icon::name);
+    if let Some((a, n)) = ui.a11y_of(id).zip(icon) {
+      a.name_or(n);
+    }
+
     // Ghost buttons are toolbar buttons, which macOS hovers; the others only with hover_all.
     let hot = match self.variant {
       Variant::Ghost => ui.hot(id, b.hovered),
@@ -142,6 +148,7 @@ impl Ui<'_> {
     let t = self.theme();
     let id = self.take_id();
     let b = self.button_behavior(id);
+    self.a11y(id, Role::Button).name_or("Info");
     let hot = self.ctl_hot(id, b.hovered);
     let size = (t.font.size + 3.0).round();
     let k = if b.pressed { 1.0 } else { 0.5 * hot };
@@ -158,6 +165,7 @@ impl Ui<'_> {
     let t = self.theme();
     let id = self.take_id();
     let b = self.button_behavior(id);
+    self.a11y(id, Role::Button).name_or("Help");
     let hot = self.ctl_hot(id, b.hovered);
     let d = t.sizes.control_h;
     let bg = if b.pressed { t.pressed } else { mix(t.raised, t.hover, hot) };

@@ -3,15 +3,18 @@
 //! Tests of `examples/counter.rs` through the harness: clicks change the count before the next
 //! frame, the label and pixels show it, hover fades in on virtual time and the window goes idle
 //! after, a press darkens the button, a release elsewhere is no click, and a change through
-//! `app_mut` redraws.
+//! `app_mut` redraws. Assistive technology reads the buttons by their text.
 
 #[path = "../examples/counter.rs"]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
 #[allow(dead_code, unused_attributes)]
 mod counter;
 
+mod common;
+
 use std::time::Duration;
 
+use common::reads;
 use counter::{COUNT_ID, Counter, MINUS, PLUS, RESET};
 use nimbo::harness::Image;
 use nimbo::{Harness, Id, Size};
@@ -113,4 +116,17 @@ fn a_change_through_app_mut_redraws_once_idle() {
   h.app_mut().count = 7;
   h.render();
   assert_eq!(h.text(Id::of(COUNT_ID)), Some("7"));
+}
+
+#[test]
+fn the_buttons_are_named_by_their_text() {
+  let mut h = counter();
+  h.frame();
+  reads(
+    &h.a11y(),
+    &["static text \"0\"", "button \"−\"", "button \"+\"", "button \"Reset\" disabled"],
+  );
+  h.click_id(Id::of(PLUS));
+  h.frame();
+  reads(&h.a11y(), &["static text \"1\"", "button \"Reset\""]);
 }

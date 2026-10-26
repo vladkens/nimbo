@@ -20,7 +20,7 @@ use crate::keys::Key;
 use crate::scene::mix;
 use crate::ui::behavior::FieldState;
 use crate::ui::{
-  Align, Cursor, FieldBehavior, FieldStyle, Float, Id, Response, Style, Ui, grow, px,
+  Align, Cursor, FieldBehavior, FieldStyle, Float, Id, Response, Role, Style, Ui, grow, px,
 };
 
 /// The ⊗'s side, and how far in it is from the field's right edge.
@@ -105,6 +105,7 @@ impl Ui<'_> {
           let x = id.key("clear");
           ui.el(Style::new().w(grow()));
           let s = Style::new().w(px(MARK)).h(px(MARK)).cursor(Cursor::Pointer);
+          ui.a11y(x, Role::Button).name("Clear");
           let hot = ui.ctl_hot(x, ui.hovered(x));
           let mark = mix(t.faint, t.muted, hot);
           ui.with_id(x).canvas(s, move |f, r| icon::draw(f, Icon::CLEAR, r, mark, 0.0));

@@ -25,7 +25,7 @@ use keyboard_types::{Modifiers, NamedKey};
 
 use super::theme::Variant;
 use super::widgets::{Button, Icon};
-use super::{Float, Id, Style, TextStyle, Transition, Ui, grow, pct, px};
+use super::{Float, Id, Role, State, Style, TextStyle, Transition, Ui, grow, pct, px};
 use crate::keys::Key;
 use crate::scene::alpha;
 use crate::text::Weight;
@@ -132,7 +132,7 @@ impl<'s> Dialog<'s> {
     let half = (w - card.pad[1] - card.pad[3] - 8.0) / 2.0;
     let fits = |ui: &mut Ui, label: &str| ui.measure(label, cs.text) + 2.0 * 16.0 <= half;
     let stack = !(fits(ui, self.cancel) && fits(ui, self.action));
-    ui.modal(id, b.shown, card, |ui| {
+    ui.a11y_label(self.title).modal(id, b.shown, card, |ui| {
       // The icon at the card's padding: the margin in its view box brings its ink in line
       // with the text, 6 further in.
       if let Some(icon) = self.icon {
@@ -170,12 +170,13 @@ impl<'s> Dialog<'s> {
 impl Ui<'_> {
   /// A modal dialog `id` over the window while `open`, its buttons `buttons` (the app builds
   /// them, with [super::Behavior::style] for the Tab focus and its ring): opening, it takes
-  /// focus to its backdrop, which draws no ring, and keeps it there and among the buttons: Tab
-  /// and Shift-Tab move from the `default` button, ringing the one they reach, and cycle them;
-  /// nothing else gets focus. Return chooses the default, Escape the `cancel` one, Space the
-  /// focused one, a click any; choosing closes it (`open` false) and gives focus back where it
-  /// was. Keys go nowhere else while it is open. The backdrop ([Ui::modal]) takes the pointer
-  /// and does nothing with a click, as a macOS alert. `shown` fades in from 0 as it opens.
+  /// focus to its backdrop, which draws no ring (assistive technology sees the default button
+  /// focused then), and keeps it there and among the buttons: Tab and Shift-Tab move from the
+  /// `default` button, ringing the one they reach, and cycle them; nothing else gets focus.
+  /// Return chooses the default, Escape the `cancel` one, Space the focused one, a click any;
+  /// choosing closes it (`open` false) and gives focus back where it was. Keys go nowhere else
+  /// while it is open. The backdrop ([Ui::modal]) takes the pointer and does nothing with a
+  /// click, as a macOS alert. `shown` fades in from 0 as it opens.
   pub fn dialog_behavior(
     &mut self,
     id: Id,
@@ -267,6 +268,9 @@ impl Ui<'_> {
       self.grab_keys(f);
     }
 
+    // The backdrop holds the keys; a screen reader is led to the default button.
+    self.a11y_focus(backdrop, buttons[default.min(n - 1)]);
+
     b.focus = self.focus_id().and_then(|f| buttons.iter().position(|&b| b == f));
     b.shown = self.animate(shown, 1.0, DIALOG_IN);
     *self.state::<Modal>(id) = m;
@@ -276,13 +280,15 @@ impl Ui<'_> {
   /// The backdrop of a modal dialog `id` over the whole window (`id.key("backdrop")`: it takes
   /// the pointer, so nothing under it is hovered, clicked or scrolled) and the card in the
   /// middle in `card`, built by `f`; `shown` (0 to 1, [Ui::dialog_behavior]'s) fades both in, the
-  /// card rising into place. Built anywhere in the view, it is placed on the window and enables
-  /// its widgets though a disabled scope is around it.
+  /// card rising into place. The card is a modal dialog to assistive technology. Built anywhere in
+  /// the view, it is placed on the window and enables its widgets though a disabled scope is
+  /// around it.
   pub fn modal<R>(&mut self, id: Id, shown: f32, card: Style, f: impl FnOnce(&mut Self) -> R) {
     let scrim = self.theme().scrim();
     let off = std::mem::replace(&mut self.scope_off, false);
     let cover = Style::new().w(pct(100.0)).h(pct(100.0)).tab_focusable_quiet();
     let cover = cover.bg(alpha(scrim, scrim[3] * shown));
+    self.a11y(id.key("card"), Role::Dialog).state(State::Modal, true);
     self.with_id(id.key("backdrop")).float(Float::window().z(MODAL_Z)).el(cover);
     let at = Float::window().attach(0.5, 0.5).anchor(0.5, 0.5).offset(0.0, (1.0 - shown) * 8.0);
     self.with_id(id.key("card")).float(at.z(MODAL_Z + 1)).col(card.opacity(shown), f);

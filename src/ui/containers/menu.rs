@@ -20,7 +20,9 @@ use std::time::Duration;
 use crate::keys::{Command, Move};
 use crate::scene::{Point, Rect, alpha};
 use crate::ui::containers::scroll::{Bars, MIN_THUMB};
-use crate::ui::{Align, Behavior, Button, Float, Id, Response, Style, Ui, grow, pct, px};
+use crate::ui::{
+  Align, Behavior, Button, Float, Id, Response, Role, State, Style, Ui, grow, pct, px,
+};
 
 /// Paint order of menus among overlays.
 const MENU_Z: i32 = 1000;
@@ -263,6 +265,13 @@ impl Ui<'_> {
     let area = Style::new().w(grow()).max_h((room - frame).max(MIN_THUMB)).gap(style.gap);
     self.float(fl).col(pop, |ui| ui.with_id(list).scroll_area(area, |ui| items(ui)));
     let cx = self.set_slot(outer).unwrap_or_default();
+    // A menu, its highlighted item the active one; its trigger expanded.
+    let active = st.cur.and_then(|i| cx.items.get(i)).map(|x| x.0);
+    self.a11y(menu, Role::Menu).active(active);
+    if let Some(a) = self.a11y_of(id) {
+      a.state(State::Expanded, true);
+    }
+
     // A click on an enabled item or around the menu closes it; one on its scrollbar, padding or
     // a disabled item leaves it open.
     let on_item = |c: Id| cx.items.iter().any(|&(i, on)| on && i == c);
@@ -413,6 +422,7 @@ impl Ui<'_> {
   /// label), `clicked` when clicked or run by Enter. Outside a menu, `on` while hovered.
   pub fn menu_item_behavior(&mut self, id: Id, label: &str) -> Behavior {
     let off = self.take_disabled();
+    self.a11y(id, Role::MenuItem).state(State::Disabled, off);
     // In a menu: its place among the items, and whether its keys highlight or run it.
     let (cur, run, inside) = match self.slot::<MenuCx>() {
       Some(m) => {

@@ -4,7 +4,9 @@
 //! view and scrolls by the wheel and the keys, selects by click, Shift-click, Cmd-click and the
 //! arrows, opens a row by Enter; the menu opens, moves over its enabled items and runs one,
 //! closes by Escape or a click outside; the pop-up button chooses by letters typed, closed and
-//! open; the tabs switch and keep the hidden page's scroll; the split's divider drags.
+//! open; the tabs switch and keep the hidden page's scroll; the split's divider drags. Assistive
+//! technology reads the rows, the selection and the cursor, the menu's highlight, the tabs, and
+//! presses a tab.
 
 #[path = "../examples/lists.rs"]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
@@ -15,8 +17,9 @@ mod common;
 
 use std::time::Duration;
 
-use common::mid;
+use common::{mid, reads};
 use lists::*;
+use nimbo::ui::Action;
 use nimbo::{CMD, Event, Harness, Id, Key, Modifiers, NamedKey, Phase, Point, Size};
 
 type H = Harness<Lists>;
@@ -282,4 +285,59 @@ fn the_split_divider_drags() {
   h.leave();
   h.wait(Duration::from_millis(2000));
   assert!(!h.frame(), "idle");
+}
+
+/// The list reads its rows by their text, the selected ones selected, the cursor's row as its
+/// active one.
+#[test]
+fn the_list_reads_its_rows_selection_and_cursor() {
+  let mut h = lists();
+  h.click_id(row(2));
+  h.key(NamedKey::ArrowDown, Modifiers::SHIFT);
+  h.frame();
+  let lines = [
+    "list focused active \"Item 000004 123 KB\"",
+    "row \"Item 000002 49 KB\"",
+    "row \"Item 000003 86 KB\" selected",
+    "row \"Item 000004 123 KB\" selected",
+    "static text \"Item 000004\"",
+  ];
+  reads(&h.a11y(), &lines);
+}
+
+/// An open menu reads its items, the highlighted one active, its button expanded.
+#[test]
+fn the_menu_reads_its_items_and_highlight() {
+  let mut h = lists();
+  open(&mut h, Id::of(MENU));
+  h.key(NamedKey::ArrowDown, NONE);
+  h.key(NamedKey::ArrowDown, NONE);
+  h.frame();
+  let lines = [
+    "button \"Actions\" expanded",
+    "menu focused active \"Go to Last\"",
+    "menu item \"Go to First\"",
+    "menu item \"Open\" disabled",
+  ];
+  reads(&h.a11y(), &lines);
+}
+
+/// Tabs read as a tab list, the shown one selected; the split's divider as a splitter with its
+/// share.
+#[test]
+fn the_tabs_and_the_divider_read_their_state() {
+  let mut h = lists();
+  h.click_id(Id::of(TABS).key(("tab", "Notes")));
+  h.frame();
+  let lines = ["tab list", "tab \"Details\"", "tab \"Notes\" selected", "splitter 0.45 in 0..1"];
+  reads(&h.a11y(), &lines);
+}
+
+/// Assistive technology presses a tab as a click does.
+#[test]
+fn an_assistive_press_turns_a_tab() {
+  let mut h = lists();
+  assert!(h.act(Id::of(TABS).key(("tab", "Notes")), Action::Press));
+  assert_eq!(h.app().tab, 1);
+  reads(&h.a11y(), &["tab \"Notes\" selected"]);
 }

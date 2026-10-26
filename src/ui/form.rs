@@ -41,7 +41,9 @@ use std::ops::Range;
 use super::containers::lazy::Spans;
 use super::theme::Theme;
 use super::widgets::Icon;
-use super::{Align, Dim, Float, Id, Response, Shadow, Style, TextStyle, Ui, grow, px, rigid};
+use super::{
+  Align, Dim, Float, Id, Response, Shadow, State, Style, TextStyle, Ui, grow, px, rigid,
+};
 use crate::scene::{Color, Frame, Quad, Rect, alpha, mix, rgb};
 use crate::text::{Font, Weight};
 
@@ -105,6 +107,8 @@ pub struct FormStyle {
   pub footer: Style,
   /// The ⓘ after a label ([FormRow::info]): its size, as [Ui::info_button] draws it.
   pub info: f32,
+  /// A selected row's fill ([FormRow::selected]).
+  pub selected: Color,
   /// The window's ground, under the page.
   pub bg: Color,
   /// How far the page's content fades out under the edges of its scroll area
@@ -244,6 +248,7 @@ impl FormStyle {
         .gap(10.0)
         .align(Align::End, Align::Center),
       info: (t.font.size + 3.0).round(),
+      selected: t.ghost,
       bg: t.bg,
       fade: 14.0,
     }
@@ -268,6 +273,7 @@ pub struct FormRow<'s> {
   tile: Option<Tile<'s>>,
   disabled: bool,
   one_line: bool,
+  selected: bool,
 }
 
 impl<'s> FormRow<'s> {
@@ -298,6 +304,12 @@ impl<'s> FormRow<'s> {
   /// The label stays on one line, ending in "…" where it doesn't fit (a file's path).
   pub fn one_line(self) -> Self {
     Self { one_line: true, ..self }
+  }
+
+  /// Fills the row ([FormStyle::selected]) and reads it selected when `yes`: the current one of
+  /// rows a click selects.
+  pub fn selected(self, yes: bool) -> Self {
+    Self { selected: yes, ..self }
   }
 }
 
@@ -409,8 +421,11 @@ impl Ui<'_> {
   /// first. The controls keep their width and place at the right edge, centred on the row's
   /// height; the label and description wrap in what is left, the row growing taller. A
   /// disabled row's text is [super::Theme::tertiary]. The ⓘ is `id.key("info")` of the row's
-  /// id, the description's text `id.key("caption")`. The row itself takes no input: its
-  /// controls do.
+  /// id, the label's text `id.key("label")` and the description's `id.key("caption")`. The row
+  /// takes no input, its controls do, unless [FormStyle::row] is [Style::hit]: then it is a row
+  /// a click selects, named by its label and description for assistive technology. Else the
+  /// first control recorded in it with no name of its own takes them as its name and
+  /// description ([Ui::a11y]), and they are not read again.
   pub fn form_row<R>(
     &mut self,
     fs: &FormStyle,
@@ -443,6 +458,12 @@ impl Ui<'_> {
       }
     };
     let style = fs.row.min_h(fs.row.min[1] + top).align(Align::Start, Align::Start);
+    let style = if row.selected { style.bg(fs.selected) } else { style };
+    let text = [row.label, row.caption.unwrap_or_default()];
+    if fs.row.hit {
+      self.a11y_row(id, text).state(State::Selected, row.selected).state(State::Disabled, off);
+    }
+
     // The first line's height: the least the controls' slot is, with the padding around it.
     let line_h = match fs.label.line_h > 0.0 {
       true => fs.label.line_h,
@@ -471,6 +492,7 @@ impl Ui<'_> {
         ui.col(label, |ui| {
           ui.row(Style::new().w(grow()).gap(6.0).align(Align::Start, Align::Center), |ui| {
             let s = if row.one_line { fs.label.ellipsis() } else { fs.label };
+            ui.next_id = Some((id.key("label"), false));
             ui.text(row.label, dim(s));
             if let Some(tip) = row.info {
               let info = id.key("info");
@@ -496,9 +518,13 @@ impl Ui<'_> {
           .min_h(top + 2.0 * fs.pad_y + line_h)
           .pads([top, 0.0, 0.0, 0.0])
           .align(Align::End, Align::Center);
+        let names = (!fs.row.hit).then(|| ui.form_names(id, text));
         ui.col(slot, |ui| {
           ui.row(Style::new().gap(fs.gap).align(Align::Start, Align::Center), control)
         });
+        if let Some(n) = names {
+          ui.set_slot(n);
+        }
       })
     })
   }

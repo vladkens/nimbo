@@ -97,7 +97,7 @@ impl Gallery {
         Button::new("Delete").danger().show(ui);
         Button::new("Ghost").ghost().show(ui);
         ui.disabled(true).button("Off");
-        let r = ui.id((RESET, i)).icon_button(Icon::RESET);
+        let r = ui.id((RESET, i)).a11y_label("Reset").icon_button(Icon::RESET);
         ui.tooltip(r.id, "Back to the default");
         let r = ui.info_button();
         ui.tooltip(r.id, "An ⓘ explains what one line can't");
@@ -107,19 +107,19 @@ impl Gallery {
         ui.id((CHECK, i)).checkbox(&mut self.wrap, "Wrap lines");
         ui.disabled(true).checkbox(&mut false, "Off");
         ui.id((TOGGLE, i)).toggle(&mut self.live, "Live");
-        ui.toggle_sized(&mut self.big, "", ControlSize::Large);
+        ui.a11y_label("Large").toggle_sized(&mut self.big, "", ControlSize::Large);
       });
       line(ui, "SLIDER, SELECT, SEGMENTS", |ui| {
         // Two lines under one title, as far apart as the widgets in a line.
         ui.col(Style::new().w(grow()).gap(10.0), |ui| {
           let row = Style::new().gap(10.0).align(Align::Start, Align::Center);
           ui.row(row, |ui| {
-            ui.id((SLIDER, i)).slider(&mut self.zoom, 0.0..=200.0);
+            ui.id((SLIDER, i)).a11y_label("Zoom").slider(&mut self.zoom, 0.0..=200.0);
             ui.text(format_args!("{:.0}%", self.zoom), t.muted().nowrap());
           });
           ui.row(row, |ui| {
-            ui.id((SIZE, i)).select(&mut self.size, &SIZES);
-            ui.disabled(true).select(&mut Size::Small, &SIZES);
+            ui.id((SIZE, i)).a11y_label("Size").select(&mut self.size, &SIZES);
+            ui.disabled(true).a11y_label("Size").select(&mut Size::Small, &SIZES);
             let views = [(0, "List", 128), (1, "Grid", 12), (2, "Columns", 3)];
             ui.id((VIEW, i)).segmented(&mut self.view, &views);
           });

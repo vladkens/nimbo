@@ -135,7 +135,37 @@ impl Icon {
     ("x", Self::X),
     ("accessibility", Self::ACCESSIBILITY),
   ];
+
+  /// What a button showing a built-in icon alone does, read when nothing names it: "Copy" for
+  /// [Icon::COPY]; `None` for an app's own.
+  pub fn name(self) -> Option<&'static str> {
+    Self::ALL.iter().position(|a| a.1 == self).map(|i| NAMES[i])
+  }
 }
+
+/// The built-in icons' names for assistive technology, in [Icon::ALL]'s order.
+const NAMES: [&str; Icon::ALL.len()] = [
+  "Settings",
+  "Appearance",
+  "Options",
+  "Info",
+  "Reset",
+  "Delete",
+  "Folder",
+  "Document",
+  "Open",
+  "Done",
+  "Search",
+  "Play",
+  "Clear",
+  "Copy",
+  "Download",
+  "History",
+  "Stop",
+  "Dictate",
+  "Close",
+  "Accessibility",
+];
 
 /// The side of an icon's view box.
 const VIEW: f32 = 24.0;
