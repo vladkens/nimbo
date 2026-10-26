@@ -22,20 +22,64 @@
 //!    go to the focused element, then the app; an unused Tab or Shift-Tab moves focus. A key with
 //!    Cmd that nobody used goes on to the menu (Cmd-Q), then to step 4.
 //!
-//! The harness has no AppKit: it builds key events on a US layout ([us_char]) and interprets them
-//! with [standard], the part of AppKit's standard bindings we model.
+//! Windows and Linux have no `interpretKeyEvents:`: their windows get step 4's commands from
+//! [Os::command], the keys their own text fields bind. The harness has no AppKit either: it
+//! builds key events on a US layout ([us_char]) and interprets them with [Os::command] of the
+//! platform it plays ([crate::Harness::set_os]), for macOS [standard], the part of AppKit's
+//! standard bindings we model.
 
 use keyboard_types::{Code, Modifiers, NamedKey};
 
 /// The command key, `cmd` in a shortcut in the app: ⌘ ([Modifiers::META]) on macOS, Ctrl
 /// ([Modifiers::CONTROL]) on Windows and Linux, as their shortcuts use them.
-pub const CMD: Modifiers =
-  if cfg!(target_os = "macos") { Modifiers::META } else { Modifiers::CONTROL };
+pub const CMD: Modifiers = Os::CURRENT.cmd();
 
 /// `ctrl` in a shortcut in the app: Control on macOS; the Windows or Super key elsewhere, Ctrl
 /// being [CMD].
-pub const CTRL: Modifiers =
-  if cfg!(target_os = "macos") { Modifiers::CONTROL } else { Modifiers::META };
+pub const CTRL: Modifiers = Os::CURRENT.ctrl();
+
+/// Whose keyboard conventions keys follow: what `cmd` and `ctrl` in a binding are, and the
+/// command a key nobody used runs in a text field ([Os::command]). The runtime keeps the
+/// platform's ([Os::CURRENT]); the harness may take another's
+/// ([crate::Harness::set_os]), so tests check every platform's keys on any host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Os {
+  Mac,
+  Windows,
+  Linux,
+}
+
+impl Os {
+  /// The platform built for.
+  pub const CURRENT: Os = match () {
+    _ if cfg!(target_os = "macos") => Os::Mac,
+    _ if cfg!(windows) => Os::Windows,
+    _ => Os::Linux,
+  };
+
+  /// `cmd` in a binding: ⌘ on macOS, Ctrl elsewhere.
+  pub const fn cmd(self) -> Modifiers {
+    if let Os::Mac = self { Modifiers::META } else { Modifiers::CONTROL }
+  }
+
+  /// `ctrl` in a binding: Control on macOS, the Windows or Super key elsewhere.
+  pub const fn ctrl(self) -> Modifiers {
+    if let Os::Mac = self { Modifiers::CONTROL } else { Modifiers::META }
+  }
+
+  /// The command of the first binding in `map` that matches `k`, `cmd` and `ctrl` as this
+  /// platform's.
+  pub fn lookup(self, map: &[Binding], k: &KeyEvent) -> Option<Command> {
+    let hit = |b: &&Binding| parse(b.keys, Some(self)).is_ok_and(|s| s.matches(k));
+    map.iter().find(hit).map(|b| b.command)
+  }
+
+  /// The command a key that types nothing runs in a text field when nobody used it, as the
+  /// platform's own text fields bind it: AppKit's ([standard]), or Windows' and GTK's ([pc]).
+  pub fn command(self, k: &KeyEvent) -> Option<Command> {
+    if let Os::Mac = self { standard(k) } else { pc(k, self) }
+  }
+}
 
 /// A key: the character it types, or its name. A [Copy] twin of `keyboard_types::Key`, whose
 /// characters are a `String`: a key press types one character here, and keymaps match keys in
@@ -245,7 +289,7 @@ impl std::error::Error for ShortcutError {}
 impl Shortcut {
   /// A shortcut in the app: `cmd` is the command key [CMD]; see [Shortcut].
   pub fn parse(text: &str) -> Result<Self, ShortcutError> {
-    parse(text, false)
+    parse(text, Some(Os::CURRENT))
   }
 
   /// Letters match in either case, Shift given by the modifiers: `cmd+shift+z` is Cmd-Shift-Z.
@@ -285,10 +329,12 @@ impl Shortcut {
   }
 }
 
-/// The shortcut `text` writes, in the app or `global` (where its key needs a place). Its parts are
-/// split at `+` and `-`; a separator that would leave a part empty is the key itself: `cmd++`,
-/// `cmd+-`, `-`. No allocation unless it fails: bindings are parsed on every key press.
-fn parse(text: &str, global: bool) -> Result<Shortcut, ShortcutError> {
+/// The shortcut `text` writes, in the app of platform `app` or, with `None`, global (where its
+/// key needs a place). Its parts are split at `+` and `-`; a separator that would leave a part
+/// empty is the key itself: `cmd++`, `cmd+-`, `-`. No allocation unless it fails: bindings are
+/// parsed on every key press.
+fn parse(text: &str, app: Option<Os>) -> Result<Shortcut, ShortcutError> {
+  let global = app.is_none();
   use ShortcutError::*;
   let text = text.trim();
   if text.is_empty() {
@@ -309,12 +355,12 @@ fn parse(text: &str, global: bool) -> Result<Shortcut, ShortcutError> {
       return Err(Fn);
     }
 
-    match modifier(name) {
+    match (modifier(name), app) {
       // In the app, the platform's command key and its other one.
-      Some(m) if !global && m == Modifiers::META => mods |= CMD,
-      Some(m) if !global && m == Modifiers::CONTROL => mods |= CTRL,
-      Some(m) => mods |= m,
-      None => {
+      (Some(m), Some(os)) if m == Modifiers::META => mods |= os.cmd(),
+      (Some(m), Some(os)) if m == Modifiers::CONTROL => mods |= os.ctrl(),
+      (Some(m), _) => mods |= m,
+      (None, _) => {
         let k = parse_key(part, name).filter(|&k| !global || place(k).is_some());
         let k = k.ok_or_else(|| Unknown(part.to_owned()))?;
         if let Some((_, first)) = key {
@@ -516,7 +562,7 @@ impl Hotkey {
       return Ok(Hotkey::Modifier(key));
     }
 
-    parse(text, true).map(Hotkey::Shortcut)
+    parse(text, None).map(Hotkey::Shortcut)
   }
 
   /// As the platform shows it: `⌃⌥Space`, `Right ⌥`, `fn`; `Ctrl+Alt+Space`, `Right Alt`.
@@ -576,9 +622,9 @@ pub fn shortcut(map: &[Binding], cmd: Command) -> Option<Shortcut> {
   map.iter().find(|b| b.command == cmd).and_then(|b| Shortcut::parse(b.keys).ok())
 }
 
-/// The command of the first binding in `map` that matches `k`.
+/// The command of the first binding in `map` that matches `k`, on this platform ([Os::lookup]).
 pub fn lookup(map: &[Binding], k: &KeyEvent) -> Option<Command> {
-  map.iter().find(|b| k.is(b.keys)).map(|b| b.command)
+  Os::CURRENT.lookup(map, k)
 }
 
 /// The edit menu's keys, which a text field binds on itself (AppKit gets them from the
@@ -730,7 +776,7 @@ impl Command {
 pub fn standard(k: &KeyEvent) -> Option<Command> {
   use Move::*;
   use NamedKey as N;
-  let (shift, ctrl, alt, cmd) = flags(k.mods);
+  let (shift, ctrl, alt, cmd) = flags(k.mods, Os::Mac);
   let to = |m| Some(Command::Move(m, shift));
   let del = |d| Some(Command::Delete(d));
   let Key::Named(key) = k.key else {
@@ -800,36 +846,49 @@ fn by_unit(key: NamedKey, shift: bool) -> Option<[Option<Command>; 3]> {
   })
 }
 
-/// The modifiers as shortcuts in the app name them: Shift, [CTRL], Alt, [CMD].
-pub(crate) fn flags(m: Modifiers) -> (bool, bool, bool, bool) {
-  (m.shift(), m.contains(CTRL), m.alt(), m.contains(CMD))
+/// The modifiers as shortcuts in the app of `os` name them: Shift, `ctrl`, Alt, `cmd`.
+fn flags(m: Modifiers, os: Os) -> (bool, bool, bool, bool) {
+  (m.shift(), m.contains(os.ctrl()), m.alt(), m.contains(os.cmd()))
 }
 
-/// The command a key that types nothing runs on Linux and Windows, as their text fields do
-/// (GTK, Win32 edit controls): the window gets it from here where AppKit's bindings would be.
+/// The command a key nobody used runs on Windows and Linux (`os`), as their text fields do
+/// (Win32 edit controls, GTK): the window gets it from here where AppKit's bindings would be.
 /// Ctrl is the command modifier there and arrives as `cmd`: Ctrl-Left a word, Home and End the
-/// line, Ctrl-Home the document, Ctrl-Backspace a word.
-pub fn pc(k: &KeyEvent) -> Option<Command> {
+/// line, Ctrl-Home the document, Ctrl-Backspace a word; Ctrl-Y redoes, and the old Shift-Delete,
+/// Ctrl-Insert and Shift-Insert cut, copy and paste. Ctrl-Enter does nothing on Windows.
+fn pc(k: &KeyEvent, os: Os) -> Option<Command> {
   use Move::*;
   use NamedKey as N;
-  let (shift, ctrl, alt, cmd) = flags(k.mods);
+  let (shift, ctrl, alt, cmd) = flags(k.mods, os);
   let to = |m| Some(Command::Move(m, shift));
-  let Key::Named(key) = k.key else { return None };
   if alt || ctrl {
     return None;
   }
 
+  let key = match k.key {
+    Key::Char('y' | 'Y') if cmd && !shift => return Some(Command::Redo),
+    Key::Char(_) => return None,
+    Key::Named(key) => key,
+  };
+
   if let Some([alone, word, _]) = by_unit(key, shift) {
-    return if cmd { word } else { alone };
+    return match (key, cmd, shift) {
+      (N::Delete, false, true) => Some(Command::Cut),
+      _ if cmd => word,
+      _ => alone,
+    };
   }
 
   match (key, cmd) {
+    (N::Insert, true) => Some(Command::Copy),
+    (N::Insert, false) if shift => Some(Command::Paste),
     (N::Home, false) => to(LineStart),
     (N::Home, true) => to(DocStart),
     (N::End, false) => to(LineEnd),
     (N::End, true) => to(DocEnd),
     (N::PageUp, false) => to(PageUp),
     (N::PageDown, false) => to(PageDown),
+    (N::Enter, true) if os == Os::Windows => None,
     (N::Enter, _) => Some(Command::InsertNewline),
     (N::Tab, false) if shift => Some(Command::InsertBacktab),
     (N::Tab, false) => Some(Command::InsertTab),
@@ -1258,17 +1317,16 @@ mod tests {
 
   #[test]
   fn standard_bindings_agree_with_selectors() {
-    let alt = Modifiers::ALT;
-    let ctrl = CTRL;
+    let (alt, ctrl, cmd) = (Modifiers::ALT, Modifiers::CONTROL, Modifiers::META);
     let alt_shift = Modifiers::ALT | Modifiers::SHIFT;
     // StandardKeyBinding.dict: key → selector.
     for (key, mods, selector) in [
       (Key::Named(N::ArrowLeft), Modifiers::empty(), "moveLeft:"),
       (Key::Named(N::ArrowLeft), alt_shift, "moveWordLeftAndModifySelection:"),
-      (Key::Named(N::ArrowRight), CMD, "moveToRightEndOfLine:"),
-      (Key::Named(N::ArrowUp), CMD, "moveToBeginningOfDocument:"),
+      (Key::Named(N::ArrowRight), cmd, "moveToRightEndOfLine:"),
+      (Key::Named(N::ArrowUp), cmd, "moveToBeginningOfDocument:"),
       (Key::Named(N::Backspace), alt, "deleteWordBackward:"),
-      (Key::Named(N::Backspace), CMD, "deleteToBeginningOfLine:"),
+      (Key::Named(N::Backspace), cmd, "deleteToBeginningOfLine:"),
       (Key::Named(N::Backspace), ctrl, "deleteBackward:"),
       (Key::Named(N::Delete), alt, "deleteWordForward:"),
       (Key::Char('a'), ctrl, "moveToBeginningOfParagraph:"),
@@ -1277,30 +1335,67 @@ mod tests {
       (Key::Named(N::Escape), Modifiers::empty(), "cancelOperation:"),
       (Key::Named(N::Home), Modifiers::empty(), "scrollToBeginningOfDocument:"),
     ] {
-      assert_eq!(standard(&ev(key, mods)), Command::from_selector(selector), "{selector}");
+      let want = Command::from_selector(selector);
+      assert_eq!(Os::Mac.command(&ev(key, mods)), want, "{selector}");
     }
-    assert_eq!(standard(&ev(Key::Char('c'), CMD)), None);
+    assert_eq!(standard(&ev(Key::Char('c'), cmd)), None);
     assert_eq!(standard(&ev(Key::Named(N::ArrowLeft), ctrl)), None);
-    assert_eq!(standard(&ev(Key::Named(N::Delete), CMD)), None);
+    assert_eq!(standard(&ev(Key::Named(N::Delete), cmd)), None);
   }
 
+  /// Windows' and GTK's text keys, Ctrl the command key there whatever the host.
   #[test]
   fn pc_bindings_use_ctrl_as_cmd() {
-    let cmd_shift = CMD | Modifiers::SHIFT;
-    let alt = Modifiers::ALT;
-    for (key, mods, want) in [
-      (Key::Named(N::ArrowLeft), CMD, Command::Move(Move::WordLeft, false)),
-      (Key::Named(N::Home), Modifiers::empty(), Command::Move(Move::LineStart, false)),
-      (Key::Named(N::End), cmd_shift, Command::Move(Move::DocEnd, true)),
-      (Key::Named(N::Backspace), CMD, Command::Delete(Delete::WordBackward)),
-      (Key::Named(N::Delete), Modifiers::empty(), Command::Delete(Delete::Forward)),
-      (Key::Named(N::ArrowUp), cmd_shift, Command::Move(Move::ParagraphStart, true)),
-      (Key::Named(N::Tab), Modifiers::SHIFT, Command::InsertBacktab),
-    ] {
-      assert_eq!(pc(&ev(key, mods)), Some(want), "{key:?} {mods:?}");
+    let (ctrl, shift) = (Modifiers::CONTROL, Modifiers::SHIFT);
+    for os in [Os::Windows, Os::Linux] {
+      for (key, mods, want) in [
+        (Key::Named(N::ArrowLeft), ctrl, Command::Move(Move::WordLeft, false)),
+        (Key::Named(N::ArrowRight), ctrl | shift, Command::Move(Move::WordRight, true)),
+        (Key::Named(N::Home), Modifiers::empty(), Command::Move(Move::LineStart, false)),
+        (Key::Named(N::End), ctrl | shift, Command::Move(Move::DocEnd, true)),
+        (Key::Named(N::Backspace), ctrl, Command::Delete(Delete::WordBackward)),
+        (Key::Named(N::Delete), ctrl, Command::Delete(Delete::WordForward)),
+        (Key::Named(N::Delete), Modifiers::empty(), Command::Delete(Delete::Forward)),
+        (Key::Named(N::ArrowUp), ctrl | shift, Command::Move(Move::ParagraphStart, true)),
+        (Key::Named(N::Tab), shift, Command::InsertBacktab),
+        (Key::Named(N::Enter), Modifiers::empty(), Command::InsertNewline),
+        (Key::Char('y'), ctrl, Command::Redo),
+        (Key::Named(N::Delete), shift, Command::Cut),
+        (Key::Named(N::Insert), ctrl, Command::Copy),
+        (Key::Named(N::Insert), shift, Command::Paste),
+      ] {
+        assert_eq!(os.command(&ev(key, mods)), Some(want), "{os:?} {key:?} {mods:?}");
+      }
+
+      for (key, mods) in [
+        (Key::Named(N::ArrowLeft), Modifiers::ALT),
+        (Key::Named(N::ArrowLeft), Modifiers::META),
+        (Key::Char('a'), ctrl),
+        (Key::Char('y'), ctrl | shift),
+      ] {
+        assert_eq!(os.command(&ev(key, mods)), None, "{os:?} {key:?} {mods:?}");
+      }
     }
-    assert_eq!(pc(&ev(Key::Named(N::ArrowLeft), alt)), None);
-    assert_eq!(pc(&ev(Key::Char('a'), CMD)), None);
+
+    let ctrl_enter = ev(Key::Named(N::Enter), ctrl);
+    assert_eq!(Os::Windows.command(&ctrl_enter), None);
+    assert_eq!(Os::Linux.command(&ctrl_enter), Some(Command::InsertNewline));
+  }
+
+  /// `cmd` in a binding is each platform's command key, whatever the host.
+  #[test]
+  fn bindings_follow_the_platform() {
+    let map = [bind("cmd+v", Command::Paste), bind("ctrl+a", Command::SelectAll)];
+    let (ctrl, meta) = (Modifiers::CONTROL, Modifiers::META);
+    for (os, cmd, other) in
+      [(Os::Mac, meta, ctrl), (Os::Windows, ctrl, meta), (Os::Linux, ctrl, meta)]
+    {
+      assert_eq!(os.lookup(&map, &ev(Key::Char('v'), cmd)), Some(Command::Paste), "{os:?}");
+      assert_eq!(os.lookup(&map, &ev(Key::Char('v'), other)), None, "{os:?}");
+      assert_eq!(os.lookup(&map, &ev(Key::Char('a'), other)), Some(Command::SelectAll), "{os:?}");
+    }
+
+    assert_eq!((CMD, CTRL), (Os::CURRENT.cmd(), Os::CURRENT.ctrl()));
   }
 
   #[test]

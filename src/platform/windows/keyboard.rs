@@ -1,8 +1,8 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Keys on Windows: virtual keys and scan codes to [KeyEvent]s with W3C [Code]s, the layout's
-//! characters through ToUnicodeEx, and the commands Windows' text controls give the keys that
-//! type nothing ([standard]).
+//! Keys on Windows: virtual keys and scan codes to [KeyEvent]s with W3C [Code]s, and the layout's
+//! characters through ToUnicodeEx. The commands Windows' text controls give the keys that type
+//! nothing are [crate::keys::Os::command]'s.
 //!
 //! Ctrl is the command key ([crate::keys::CMD]): bindings written `cmd+c` are Ctrl-C here, and
 //! `ctrl` is the Windows key. Alt is Alt.
@@ -15,7 +15,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
   VK_RIGHT, VK_RWIN, VK_SHIFT, VK_SNAPSHOT, VK_SPACE, VK_TAB, VK_UP,
 };
 
-use crate::keys::{self, Command, Key, KeyEvent};
+use crate::keys::{self, Key, KeyEvent};
 use crate::platform::scan_code;
 
 /// The keypad's scan codes that send navigation virtual keys with Num Lock off (7 8 9, 4 5 6,
@@ -186,29 +186,9 @@ pub fn key_event(vk: u16, scan: u16, extended: bool, repeat: bool) -> KeyEvent {
   KeyEvent { key, text, code, mods, repeat }
 }
 
-/// The command a Windows text control gives a key that types nothing (Ctrl is `cmd`): Ctrl
-/// with arrows moves by words (and paragraphs), Home and End to the line's ends and with Ctrl
-/// the document's, Page Up and Down move, Ctrl-Backspace and Ctrl-Delete delete words, Ctrl-Y
-/// redoes, and the old Shift-Delete, Ctrl-Insert and Shift-Insert cut, copy and paste; Ctrl-Enter
-/// does nothing.
-pub fn standard(k: &KeyEvent) -> Option<Command> {
-  let (shift, ctrl, alt, cmd) = keys::flags(k.mods);
-  match (k.key, cmd, shift) {
-    _ if ctrl || alt => None,
-    (Key::Named(NamedKey::Delete), false, true) => Some(Command::Cut),
-    (Key::Named(NamedKey::Insert), true, _) => Some(Command::Copy),
-    (Key::Named(NamedKey::Insert), false, true) => Some(Command::Paste),
-    (Key::Char('y' | 'Y'), true, false) => Some(Command::Redo),
-    (Key::Named(NamedKey::Enter), true, _) => None,
-    // The rest as GTK's: [keys::pc].
-    _ => keys::pc(k),
-  }
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::keys::{Delete, Move};
 
   #[test]
   fn codes_by_place() {
@@ -253,8 +233,6 @@ mod tests {
     let k = key_event(VK_INSERT, 0x52, false, false);
     let insert = Key::Named(NamedKey::Insert);
     assert_eq!((k.key, k.code), (insert, Code::Numpad0), "keypad 0 is Insert, at its place");
-    let ctrl = KeyEvent { mods: Modifiers::CONTROL, ..k };
-    assert_eq!(standard(&ctrl), Some(Command::Copy));
   }
 
   #[test]
@@ -264,31 +242,5 @@ mod tests {
     assert_eq!(decoded(1, &[0x5E, 0]), Some(('^', false)));
     assert_eq!(decoded(0, &[0x5E, 0]), None);
     assert_eq!(decoded(2, &[0x61, 0x62]), None, "two characters");
-  }
-
-  #[test]
-  fn windows_editing_keys() {
-    use NamedKey as N;
-    let ev =
-      |key, mods| KeyEvent { key, text: None, code: Code::Unidentified, mods, repeat: false };
-    let ctrl = Modifiers::CONTROL;
-    for (key, mods, want) in [
-      (Key::Named(N::ArrowLeft), ctrl, Command::Move(Move::WordLeft, false)),
-      (Key::Named(N::ArrowRight), ctrl | Modifiers::SHIFT, Command::Move(Move::WordRight, true)),
-      (Key::Named(N::Home), Modifiers::empty(), Command::Move(Move::LineStart, false)),
-      (Key::Named(N::End), ctrl, Command::Move(Move::DocEnd, false)),
-      (Key::Named(N::Backspace), ctrl, Command::Delete(Delete::WordBackward)),
-      (Key::Named(N::Delete), Modifiers::empty(), Command::Delete(Delete::Forward)),
-      (Key::Char('y'), ctrl, Command::Redo),
-      (Key::Named(N::Enter), Modifiers::empty(), Command::InsertNewline),
-      (Key::Named(N::Tab), Modifiers::SHIFT, Command::InsertBacktab),
-    ] {
-      assert_eq!(standard(&ev(key, mods)), Some(want), "{key:?} {mods:?}");
-    }
-    assert_eq!(standard(&ev(Key::Char('c'), ctrl)), None);
-    assert_eq!(standard(&ev(Key::Named(N::Enter), ctrl)), None, "Ctrl-Enter");
-    assert_eq!(standard(&ev(Key::Named(N::Delete), Modifiers::SHIFT)), Some(Command::Cut));
-    assert_eq!(standard(&ev(Key::Char('y'), ctrl | Modifiers::SHIFT)), None);
-    assert_eq!(standard(&ev(Key::Named(N::ArrowLeft), Modifiers::META)), None, "the Windows key");
   }
 }

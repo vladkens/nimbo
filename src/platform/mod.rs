@@ -62,7 +62,7 @@
 //!     [crate::Event::Modifier] (macOS: `flagsChanged:`, the side from the device-dependent flags);
 //!   - text input: a key nobody used ([crate::Runtime::event] returns false) goes to the OS's text
 //!     input and comes back as [crate::Event::Text] (typed) or [crate::Event::Command] (editing
-//!     keys; [crate::keys::standard] is the US mapping);
+//!     keys: macOS's from AppKit, Windows' and Linux's from [crate::keys::Os::command]);
 //!   - cursors: show [crate::Runtime::cursor] (a [crate::Cursor]) while the pointer is in the view;
 //!   - clipboard: plain text, an [crate::Clipboard]; a reader of ours never blocks the loop;
 //!   - frames: draw only while [crate::Runtime::needs_frame], paced by the display (≤ 120 Hz);

@@ -2,7 +2,7 @@
 
 //! Input on the window: the mouse (moves, buttons with click counts, leaving through
 //! TrackMouseEvent), the wheel and precision touchpads, keys ([keyboard]: a key nobody used
-//! goes on to TranslateMessage, whose WM_CHAR is typed text, and to [keyboard::standard] for
+//! goes on to TranslateMessage, whose WM_CHAR is typed text, and to [Os::command] for
 //! its command), the IMM32 input method while a text field that takes it has focus (the
 //! composition drawn in the field as marked text, the candidate window under the caret), and
 //! cursors.
@@ -25,7 +25,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use super::{Window, keyboard, with};
 use crate::app::{Event, Ime, MouseButton, Phase, WHEEL_LINE};
-use crate::keys::KeyEvent;
+use crate::keys::{KeyEvent, Os};
 use crate::scene::{Point, Rect};
 use crate::ui::Cursor;
 
@@ -234,7 +234,7 @@ impl Window {
       return;
     }
 
-    if let Some(cmd) = keyboard::standard(&key(vk, lp)) {
+    if let Some(cmd) = Os::Windows.command(&key(vk, lp)) {
       self.send(Event::Command(cmd));
     }
   }

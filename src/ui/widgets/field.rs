@@ -17,17 +17,19 @@
 //! (Escape) and `blurred`. A single-line field scrolls sideways to keep the caret in view, a
 //! multi-line one wraps at its width and scrolls down. Focused, the field is ringed and binds
 //! the edit menu's keys ([EDIT_KEYS]); selectable text binds select all and copy
-//! ([SELECT_KEYS]) and shows no ring, its selection dimmed while it has no focus. The focused
-//! field is what input methods ask about ([TextInput]).
+//! ([SELECT_KEYS]) and shows no ring, its selection dimmed while it has no focus. A right-click
+//! opens the edit menu at the pointer ([Ui::edit_menu]): Cut, Copy, Paste and Select All, or
+//! Copy and Select All in selectable text. The focused field is what input methods ask about
+//! ([TextInput]).
 
 use std::ops::Range;
 
-use crate::keys::{EDIT_KEYS, SELECT_KEYS};
+use crate::keys::{Command, EDIT_KEYS, SELECT_KEYS};
 use crate::scene::{Color, Point, Rect, alpha};
 use crate::text::edit::{Editor, graphemes, range_from_utf16, range_to_utf16, to_utf16, utf16_len};
 use crate::ui::behavior::{DOT, FieldState};
 use crate::ui::{
-  Align, FieldBehavior, Id, Response, Style, TextLayout, TextStyle, Ui, UiState, grow,
+  Align, FieldBehavior, Id, Response, Style, TextLayout, TextStyle, Ui, UiState, grow, px,
 };
 
 impl Ui<'_> {
@@ -62,6 +64,7 @@ impl Ui<'_> {
 
     let keys = self.keymap(EDIT_KEYS).with_id(b.id);
     let r = keys.container(axis, frame, |ui| ui.field_text(b, style, Style::new()));
+    self.edit_menu(b);
     let (changed, submitted, cancelled, blurred) = (b.changed, b.submitted, b.cancelled, b.blurred);
     Response { hovered: b.hovered, changed, submitted, cancelled, blurred, ..r }
   }
@@ -87,6 +90,7 @@ impl Ui<'_> {
   pub fn selectable_text(&mut self, id: Id, text: &str, style: &FieldStyle) -> Response {
     let b = self.selectable_behavior(id, text);
     self.keymap(SELECT_KEYS).field_text(&b, style, b.style(Style::new()));
+    self.edit_menu(&b);
     let r = self.st.response(id);
     Response { focused: b.focused, ..r }
   }
@@ -97,6 +101,40 @@ impl Ui<'_> {
     let (id, t) = (self.take_id(), self.theme());
     let style = FieldStyle { text: TextStyle::new(t.font, t.text), ..t.field() };
     self.selectable_text(id, text, &style)
+  }
+
+  /// The edit menu of a field or selectable text over its behaviour `b`, in the theme's look, at
+  /// the secondary click that opened it ([FieldBehavior::menu]): Cut, Copy, Paste and Select
+  /// All (selectable text: Copy and Select All), each enabled when it can act; the one chosen
+  /// runs in the field ([Ui::field_command]). The menu is `b.id.key("edit")`'s
+  /// ([Ui::menu_popup_at]), its items keyed by their labels.
+  pub fn edit_menu(&mut self, b: &FieldBehavior) {
+    let (id, m, t) = (b.id.key("edit"), b.menu, self.theme());
+    let items = [
+      ("Cut", Command::Cut, m.cut, m.editable),
+      ("Copy", Command::Copy, m.copy, true),
+      ("Paste", Command::Paste, m.paste, m.editable),
+      ("Select All", Command::SelectAll, m.select_all, true),
+    ];
+    // Disabled while open, it closes.
+    let (off, mut run) = ((b.disabled && self.menu_open(id)).then(Point::default), None);
+    let open = self.menu_popup_at(id, m.at.or(off), t.popup().min_w(160.0), |ui| {
+      for (label, cmd, on, _) in items.into_iter().filter(|i| i.3) {
+        // A line before Select All, as Windows and GTK have it.
+        if cmd == Command::SelectAll {
+          let line = Style::new().w(grow()).h(px(1.0)).bg(t.line);
+          ui.row(Style::new().w(grow()).pads([5.0, 10.0, 5.0, 10.0]), |ui| _ = ui.el(line));
+        }
+
+        let clicked = ui.disabled(!on).with_id(id.key(label)).menu_item(label).clicked;
+        run = run.or(clicked.then_some(cmd));
+      }
+    });
+
+    self.state::<FieldState>(b.id).menu_open = open;
+    if let Some(cmd) = run {
+      self.field_command(b.id, cmd);
+    }
   }
 
   /// The text element of a field or selectable text, as its behaviour `b` has it: the text (a
@@ -317,6 +355,76 @@ mod tests {
       let page = crate::ui::Style::new().w(crate::ui::px(200.0)).h(crate::ui::px(40.0)).scroll_y();
       ui.id("page").col(page, |ui| _ = ui.id("t").selectable(&"line\n".repeat(20)));
     }
+  }
+
+  /// Two fields without ids, the first one disabled at will.
+  #[derive(Default)]
+  struct Two {
+    texts: [String; 2],
+    off: bool,
+  }
+
+  impl App for Two {
+    fn view(&mut self, ui: &mut Ui) {
+      let [a, b] = &mut self.texts;
+      ui.disabled(self.off).field(a, "");
+      ui.field(b, "");
+    }
+  }
+
+  /// The second of two fields, and the first one's edit menu; open: whether it is.
+  fn two() -> (Harness<Two>, Id, Id) {
+    let mut h = Harness::new(Two::default(), Size::new(300.0, 200.0), 1.0);
+    h.frame();
+    let (first, second) = (h.rt.ui.last.nodes[1].id, h.rt.ui.last.nodes[3].id);
+    (h, first, second)
+  }
+
+  fn right_click(h: &mut Harness<Two>, id: Id) {
+    let r = h.rect(id).unwrap();
+    h.right_click(r.x + 10.0, r.y + 5.0);
+    h.frame();
+    h.frame();
+  }
+
+  /// An edit menu open takes no place among the field's siblings: the next field keeps its id,
+  /// and its editor with its undo.
+  #[test]
+  fn an_open_edit_menu_leaves_the_next_fields_id() {
+    let (mut h, first, second) = two();
+    h.click_id(second);
+    h.type_text("moon");
+    right_click(&mut h, first);
+    assert!(h.rect(first.key("edit").key("menu")).is_some());
+    assert!(h.rect(second).is_some(), "the second field keeps its id");
+    h.key(crate::NamedKey::Escape, crate::Modifiers::empty());
+    h.frame();
+    h.click_id(second);
+    h.key('z', crate::CMD);
+    assert_eq!(h.app().texts[1], "");
+  }
+
+  /// A field disabled while its edit menu is open closes it, and drops a choice made just
+  /// before.
+  #[test]
+  fn a_field_disabled_drops_its_edit_menu() {
+    let (mut h, first, _) = two();
+    h.rt.clipboard().write("moon");
+    right_click(&mut h, first);
+    h.app_mut().off = true;
+    h.frame();
+    h.frame();
+    assert!(h.rect(first.key("edit").key("menu")).is_none());
+
+    h.app_mut().off = false;
+    h.frame();
+    right_click(&mut h, first);
+    h.click_id(first.key("edit").key("Paste"));
+    h.app_mut().off = true;
+    h.frame();
+    h.app_mut().off = false;
+    h.frame();
+    assert_eq!(h.app().texts[0], "");
   }
 
   #[test]

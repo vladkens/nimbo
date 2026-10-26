@@ -48,6 +48,11 @@ impl Clipboard for Pasteboard {
     pb.clearContents();
     pb.setString_forType(&NSString::from_str(s), unsafe { NSPasteboardTypeString });
   }
+
+  fn has_text(&self) -> bool {
+    let types = NSArray::from_slice(&[unsafe { NSPasteboardTypeString }]);
+    NSPasteboard::generalPasteboard().availableTypeFromArray(&types).is_some()
+  }
 }
 
 /// The system clipboard outside a window: the general pasteboard.

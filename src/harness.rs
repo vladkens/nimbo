@@ -12,7 +12,7 @@ use keyboard_types::{Code, Modifiers};
 use crate::app::{App, Clock, Event, Ime, MemClipboard, MouseButton, Runtime};
 use crate::cpu::{self, Pixels};
 use crate::file_dialog::FileDialog;
-use crate::keys::{self, Key, KeyEvent};
+use crate::keys::{self, Key, KeyEvent, Os};
 use crate::scene::{Point, Rect, Size};
 use crate::text::edit::{Editor, utf16_len};
 use crate::ui::{Action, Id, Kind, Role};
@@ -44,6 +44,14 @@ impl<A: App> Harness<A> {
 
   // MARK: Input
 
+  /// Plays platform `os`'s keys from now on: what `cmd` in bindings is, and the commands keys
+  /// nobody used run ([Os::command]); the host's by default.
+  /// Only those: `CMD`/`CTRL`, `KeyEvent::is`, `Shortcut::parse` and a list's Cmd-click still
+  /// follow the host.
+  pub fn set_os(&mut self, os: Os) {
+    self.rt.ui.os = os;
+  }
+
   pub fn event(&mut self, ev: Event) -> bool {
     self.rt.event(ev)
   }
@@ -67,6 +75,15 @@ impl<A: App> Harness<A> {
     let down = self.press(x, y);
     let up = self.release(x, y);
     moved | down | up
+  }
+
+  /// A right click at (x, y): move, press, release, as for a context menu. Returns whether any
+  /// of them was used.
+  pub fn right_click(&mut self, x: f32, y: f32) -> bool {
+    let (pos, button, mods) = (Point::new(x, y), MouseButton::Right, Modifiers::empty());
+    let moved = self.move_to(x, y);
+    let down = self.event(Event::MouseDown { pos, button, clicks: 1, mods });
+    moved | down | self.event(Event::MouseUp { pos, button, mods })
   }
 
   /// Presses the left button at (x, y).
@@ -103,12 +120,12 @@ impl<A: App> Harness<A> {
   }
 
   /// Presses and releases a key as a window does: the key goes through bindings to the focused
-  /// element and the app; unused, AppKit's text input would make it text or a command, here
-  /// [keys::standard] does. Returns whether any of it was used.
+  /// element and the app; unused, the platform's text input would make it text or a command,
+  /// here [Os::command] of the platform played does. Returns whether any of it was used.
   pub fn key_event(&mut self, k: KeyEvent) -> bool {
     let mut used = self.event(Event::KeyDown(k));
     if !used {
-      used = match (k.text, keys::standard(&k)) {
+      used = match (k.text, self.rt.ui.os.command(&k)) {
         (Some(c), _) => self.event(Event::Text(c.to_string())),
         (None, Some(cmd)) => self.event(Event::Command(cmd)),
         (None, None) => false,

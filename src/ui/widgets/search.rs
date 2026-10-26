@@ -134,6 +134,8 @@ mod tests {
   use crate::{Modifiers, NamedKey};
 
   const NONE: Modifiers = Modifiers::empty();
+  /// The tests play macOS's keys on any host ([Harness::set_os]).
+  const MAC_CMD: Modifiers = crate::Os::Mac.cmd();
   /// Wider than the narrow field.
   const HINT: &str = "Search models and history";
 
@@ -184,12 +186,50 @@ mod tests {
   fn find(text: &str) -> Harness<Find> {
     let find = Find { text: text.into(), ..Find::default() };
     let mut h = Harness::new(find, Size::new(300.0, 100.0), 2.0);
+    h.set_os(crate::Os::Mac);
     h.frame();
     h
   }
 
   fn clear(h: &Harness<Find>) -> Option<Rect> {
     h.rect(Id::of("s").key("clear"))
+  }
+
+  /// Ctrl-V pastes into a search on Windows, empty or with text (its keys grabbed then).
+  #[test]
+  fn ctrl_v_pastes_on_windows() {
+    let mut h = find("");
+    h.set_os(crate::Os::Windows);
+    h.rt.clipboard().write("moon");
+    h.click_id(Id::of("s"));
+    h.key('v', Modifiers::CONTROL);
+    assert_eq!(h.app().text, "moon");
+    h.key('v', Modifiers::CONTROL);
+    assert_eq!(h.app().text, "moonmoon");
+  }
+
+  /// A right-click on a search opens its edit menu; Paste pastes.
+  #[test]
+  fn a_right_click_pastes_into_a_search() {
+    let mut h = find("");
+    h.rt.clipboard().write("moon");
+    let r = h.rect(Id::of("s")).unwrap();
+    h.right_click(r.x + 40.0, r.y + 10.0);
+    h.frame();
+    h.frame();
+    h.click_id(Id::of("s").key("edit").key("Paste"));
+    h.frame();
+    assert_eq!((h.app().text.as_str(), h.app().changes), ("moon", 1));
+    assert_eq!(h.focused(), Some(Id::of("s")));
+
+    // Escape closes the menu before the app's own Escape, and leaves the text.
+    h.right_click(r.x + 40.0, r.y + 10.0);
+    h.frame();
+    h.frame();
+    assert!(h.key(NamedKey::Escape, NONE));
+    h.frame();
+    assert!(h.rect(Id::of("s").key("edit").key("menu")).is_none());
+    assert_eq!((h.app().text.as_str(), h.app().cancels), ("moon", 0));
   }
 
   #[test]
@@ -281,7 +321,7 @@ mod tests {
     // the ⊗'s.
     let len = h.app().text.len();
     for (key, at) in [(NamedKey::ArrowRight, len), (NamedKey::ArrowLeft, 0)] {
-      h.key(key, crate::CMD);
+      h.key(key, MAC_CMD);
       h.frame();
       assert_eq!(h.editor(Id::of("s")).unwrap().sel().head, at);
       let img = h.render();
@@ -355,13 +395,13 @@ mod tests {
     h.click_id(Id::of("s").key("clear"));
     h.frame();
     assert_eq!(h.app().text, "");
-    h.key('z', crate::CMD);
+    h.key('z', MAC_CMD);
     h.frame();
     assert_eq!(h.app().text, "moon");
     h.key(NamedKey::Escape, NONE);
     h.frame();
     assert_eq!(h.app().text, "");
-    h.key('z', crate::CMD);
+    h.key('z', MAC_CMD);
     assert_eq!(h.app().text, "moon");
   }
 
@@ -373,9 +413,9 @@ mod tests {
       h.click_id(Id::of("s"));
       h.type_text("moon stars");
       match select_all {
-        true => _ = h.key('a', crate::CMD),
+        true => _ = h.key('a', MAC_CMD),
         false => {
-          h.key(NamedKey::ArrowLeft, crate::CMD);
+          h.key(NamedKey::ArrowLeft, MAC_CMD);
           h.key(NamedKey::ArrowRight, Modifiers::ALT | Modifiers::SHIFT);
         }
       }
@@ -385,7 +425,7 @@ mod tests {
       h.click_id(Id::of("s").key("clear"));
       h.frame();
       assert_eq!(h.app().text, "");
-      h.key('z', crate::CMD);
+      h.key('z', MAC_CMD);
       assert_eq!(h.app().text, "moon stars", "all selected: {select_all}");
     }
   }
@@ -397,7 +437,7 @@ mod tests {
     h.app_mut().narrow = true;
     h.frame();
     h.click_id(Id::of("s"));
-    h.key(NamedKey::ArrowRight, crate::CMD);
+    h.key(NamedKey::ArrowRight, MAC_CMD);
     h.frame();
     let scroll = |h: &Harness<Find>| h.rt.ui.last.get(Id::of("s")).unwrap().scroll[0];
     assert!(scroll(&h) > 0.0);

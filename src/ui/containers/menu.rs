@@ -1,7 +1,7 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Menus: a pop-up menu of items over the window, opened by a control (its trigger), and a
-//! button that opens one ([Ui::menu]).
+//! Menus: a pop-up menu of items over the window, opened by a control (its trigger) or at a
+//! point as a context menu ([Ui::menu_popup_at]), and a button that opens one ([Ui::menu]).
 //!
 //! ```ignore
 //! ui.id("view").menu("View", |ui| {
@@ -17,7 +17,9 @@
 
 use std::time::Duration;
 
-use crate::keys::{Command, Move};
+use keyboard_types::NamedKey;
+
+use crate::keys::{Command, Key, Move};
 use crate::scene::{Point, Rect, alpha};
 use crate::ui::containers::scroll::{Bars, MIN_THUMB};
 use crate::ui::{
@@ -100,6 +102,8 @@ struct Open {
   offset: f32,
   /// Where a menu over its trigger went when first placed: it stays there.
   at: Option<Point>,
+  /// A context menu's point ([Ui::menu_popup_at]), where it goes in place of under its trigger.
+  point: Option<Point>,
   /// The items' labels, a line each, for type-select, and the letters typed.
   labels: String,
   typed: TypeSelect,
@@ -144,7 +148,8 @@ impl Ui<'_> {
   /// input. A click on an enabled item or outside the menu closes it. The menu is
   /// `id.key("menu")`. Open, it has focus, kept from Tab: Up and Down move the highlight over
   /// the enabled items, letters typed move it to the first one their prefix starts
-  /// ([TypeSelect]), Enter or Space runs the highlighted one, Escape closes it; closed, focus
+  /// ([TypeSelect]), Enter or Space runs the highlighted one, Escape closes it before any
+  /// binding (the menu grabs the keys, [Ui::grab_keys]); closed, focus
   /// goes back where it was. A trigger disabled while its menu is open closes it with `toggle`.
   ///
   /// It stays in the window: under the trigger, or above it when it doesn't fit there and
@@ -159,7 +164,20 @@ impl Ui<'_> {
     style: Style,
     items: impl FnOnce(&mut Self) -> R,
   ) -> bool {
-    self.menu_popup_placed(id, toggle, style, None, false, items)
+    self.menu_popup_placed(id, toggle.then_some(None), style, None, false, items)
+  }
+
+  /// [Ui::menu_popup] as a context menu, opened by `at`, a secondary click's point, over `id`
+  /// (which needs no element): its top left there, or its right or bottom edge where it
+  /// doesn't fit, as AppKit, Windows and GTK place one.
+  pub fn menu_popup_at<R>(
+    &mut self,
+    id: Id,
+    at: Option<Point>,
+    style: Style,
+    items: impl FnOnce(&mut Self) -> R,
+  ) -> bool {
+    self.menu_popup_placed(id, at.map(Some), style, None, false, items)
   }
 
   /// [Ui::menu_popup] opening over the trigger, as macOS opens a pop-up button's menu: item
@@ -173,13 +191,14 @@ impl Ui<'_> {
     start: Option<usize>,
     items: impl FnOnce(&mut Self) -> R,
   ) -> bool {
-    self.menu_popup_placed(id, toggle, style, start, true, items)
+    self.menu_popup_placed(id, toggle.then_some(None), style, start, true, items)
   }
 
+  /// Opened or closed by `toggle`, with the point of a context menu.
   fn menu_popup_placed<R>(
     &mut self,
     id: Id,
-    toggle: bool,
+    toggle: Option<Option<Point>>,
     style: Style,
     start: Option<usize>,
     over: bool,
@@ -188,12 +207,12 @@ impl Ui<'_> {
     let (menu, list) = (id.key("menu"), id.key("menu").key("list"));
     let mut st = std::mem::take(self.state::<Open>(id));
     let mut close = false;
-    if toggle {
+    if let Some(point) = toggle {
       match st.open {
         true => close = true,
         false => {
           let prev = self.focus_id();
-          st = Open { open: true, cur: start, prev, reveal: true, start, ..Open::default() };
+          st = Open { open: true, cur: start, prev, reveal: true, start, point, ..Open::default() };
           // What scrolls under it stops: a trackpad's gesture, a wheel's momentum.
           self.st.halt_scrolling();
         }
@@ -203,6 +222,7 @@ impl Ui<'_> {
     let mut run = None;
     if st.open && !close {
       (close, run) = self.menu_keys(menu, &mut st);
+      self.grab_keys(menu);
     }
 
     if !st.open || close {
@@ -234,7 +254,9 @@ impl Ui<'_> {
     }
 
     // Under the menu, the whole window takes the click that closes it.
-    let away = id.key("away");
+    // Its nodes are named: the elements after it keep their places among their siblings, so
+    // their ids, open or not.
+    let (away, place) = (id.key("away"), *self.st.stack.last().unwrap());
     let cover = Style::new().w(pct(100.0)).h(pct(100.0));
     self.with_id(away).float(Float::window().z(MENU_Z)).el(cover);
     let (x, y, ay, room) = self.menu_place(id, style, over, &mut st);
@@ -264,6 +286,7 @@ impl Ui<'_> {
     let frame = style.pad[0] + style.pad[2] + style.border[0] + style.border[2];
     let area = Style::new().w(grow()).max_h((room - frame).max(MIN_THUMB)).gap(style.gap);
     self.float(fl).col(pop, |ui| ui.with_id(list).scroll_area(area, |ui| items(ui)));
+    *self.st.stack.last_mut().unwrap() = place;
     let cx = self.set_slot(outer).unwrap_or_default();
     // A menu, its highlighted item the active one; its trigger expanded.
     let active = st.cur.and_then(|i| cx.items.get(i)).map(|x| x.0);
@@ -312,6 +335,13 @@ impl Ui<'_> {
       let from = cur.map_or(if d > 0 { -1 } else { n }, |c| c as isize);
       (1..=n).map(|k| (from + d * k).rem_euclid(n.max(1)) as usize).find(|&i| st.items[i].1)
     };
+    // Escape closes it before any binding of the app's: the open menu grabs the keys.
+    match self.key_down(menu) {
+      Some(k) if k.key == Key::Named(NamedKey::Escape) && k.mods.is_empty() => return (true, None),
+      Some(_) => self.pass(menu),
+      None => {}
+    }
+
     let mut to = None;
     match self.command(menu) {
       Some(Command::Cancel) => return (true, None),
@@ -358,7 +388,10 @@ impl Ui<'_> {
   ) -> (f32, f32, f32, f32) {
     let (menu, list) = (id.key("menu"), id.key("menu").key("list"));
     let size = self.size();
-    let b = self.rect(id).unwrap_or_default();
+    // At a point, the menu goes 3 below it as under a trigger, or 3 above it flipped: the
+    // trigger's gap taken back.
+    let at = st.point.map(|p| Rect::new(p.x, p.y + 3.0, 0.0, -6.0));
+    let b = at.or(self.rect(id)).unwrap_or_default();
     let menu_w = self.rect(menu).map_or(160.0, |m| m.w);
     let frame = style.pad[0] + style.pad[2] + style.border[0] + style.border[2];
     let natural = self.scroll(list).map_or(0.0, |sc| sc.content.h + frame);

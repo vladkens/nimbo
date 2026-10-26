@@ -64,7 +64,7 @@ pub use harness::Harness;
 /// [Modifiers] the modifier keys held.
 pub use keyboard_types::{self, Code, Modifiers, NamedKey};
 pub use keys::{
-  Binding, CMD, Command, Delete, EDIT_KEYS, Hotkey, Key, KeyEvent, Move, SELECT_KEYS, Shortcut,
+  Binding, CMD, Command, Delete, EDIT_KEYS, Hotkey, Key, KeyEvent, Move, Os, SELECT_KEYS, Shortcut,
   bind, shortcut,
 };
 pub use scene::{
@@ -75,10 +75,10 @@ pub use text::edit::{Editor, Lines, Mono, Sel};
 pub use text::{Font, Weight};
 pub use ui::{
   Align, Answer, Behavior, Button, ButtonStyle, Choice, Click, Clip, ControlSize, Cursor, Dialog,
-  Dim, Ease, FieldBehavior, FieldStyle, Float, Focus, FocusRing, FormRow, FormStyle, Icon, Id,
-  List, ListResponse, PopUp, Press, Response, Row, Scroll, Select, Selection, Shadow, Sizes, Split,
-  Style, Tabs, TextInput, TextLayout, TextStyle, Theme, Tile, Tone, Transition, TypeSelect, Ui,
-  Variant, grow, pct, px, rigid,
+  Dim, Ease, EditMenu, FieldBehavior, FieldStyle, Float, Focus, FocusRing, FormRow, FormStyle,
+  Icon, Id, List, ListResponse, PopUp, Press, Response, Row, Scroll, Select, Selection, Shadow,
+  Sizes, Split, Style, Tabs, TextInput, TextLayout, TextStyle, Theme, Tile, Tone, Transition,
+  TypeSelect, Ui, Variant, grow, pct, px, rigid,
 };
 
 /// A window's title and initial content size in points; the harness renders at this size.
