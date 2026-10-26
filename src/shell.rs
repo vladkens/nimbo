@@ -183,11 +183,14 @@ pub(crate) fn token() -> Option<String> {
   hooks(|h| h.token.clone())
 }
 
-/// The app ends: its quit hook runs (once), then the platform's `close` closes each window.
+/// The app ends: its quit hook runs (once), a paste's clipboard comes back ([crate::paste]),
+/// then the platform's `close` closes each window.
 pub(crate) fn finish(close: impl Fn(u64)) {
   if let Some(f) = hooks(|h| h.quit.take()) {
     f(&mut Main::here());
   }
+
+  crate::paste::finish();
 
   for id in windows() {
     close(id);

@@ -17,7 +17,7 @@ use crate::focus::{self, Focused};
 pub struct Window(c_ulong);
 
 pub fn current() -> Option<Focused> {
-  if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+  if focus::hidden() {
     return None;
   }
 

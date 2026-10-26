@@ -3,9 +3,9 @@
 //! A tray app with no window of its own: an icon in the menu bar (macOS) or the tray (Windows,
 //! Linux) whose menu opens a counter window and shows its count, a global hotkey that opens or
 //! closes that window from any app, launch at login as a check mark, and an item that pastes a
-//! line where the user types three seconds later, as a dictation app does ([paste]). On Linux it
-//! writes its launcher entry at start ([desktop]), so the dock shows its icon for the window. It
-//! runs once: a second launch has the first show its counter ([instance]), and ends.
+//! line where the user types three seconds later, as a dictation app does ([nimbo::paste]). On
+//! Linux it writes its launcher entry at start ([desktop]), so the dock shows its icon for the
+//! window. It runs once: a second launch has the first show its counter ([instance]), and ends.
 //!
 //! `cargo run --release --example tray [-- --shot <file.png>]`; the shot is the counter window.
 //! The hotkey is ⌃⌥Space on macOS, Ctrl+Alt+Space elsewhere (on Wayland the desktop asks first,
@@ -27,10 +27,9 @@ use counter::Counter;
 use nimbo::desktop::Launcher;
 use nimbo::hotkey::{Edge, Hotkeys};
 use nimbo::instance::{self, Claim, Instance};
+use nimbo::paste::Paste;
 use nimbo::tray::{Item, Menu, Tray, TrayIcon};
-use nimbo::{
-  AppInfo, Config, Main, Presence, Shortcut, SystemClipboard, Window, autostart, desktop,
-};
+use nimbo::{AppInfo, Config, Main, Presence, Window, autostart, desktop};
 
 pub const INFO: AppInfo =
   AppInfo { id: "com.example.nimbo-tray", name: "Nimbo Tray", presence: Presence::Accessory };
@@ -107,22 +106,13 @@ fn show(main: &mut Main, state: &Shared) {
   }
 }
 
-/// Pastes `text` where the user types: the clipboard taken, the text offered, the paste shortcut
-/// posted, and a second later what the clipboard held put back, unless something else was copied
-/// meanwhile.
-fn paste(main: &mut Main, text: &str) {
-  let clip = SystemClipboard;
-  let before = clip.snapshot().filter(|s| !s.unreadable());
-  let Some(offer) = clip.offer(text, None) else { return eprintln!("paste: no clipboard") };
-  if let Err(e) = Shortcut::parse("cmd+v").map_err(|e| e.to_string()).and_then(nimbo::keys::post) {
+/// Pastes `text` where the user types now: the clipboard comes back after the paste, unless
+/// something else was copied meanwhile.
+fn paste(text: &str) {
+  let opts = Paste { restore: true, target: nimbo::focus::current() };
+  if let Err(e) = nimbo::paste::text(text, opts) {
     eprintln!("paste: {e}");
   }
-
-  main.proxy().after(Duration::from_secs(1), move |_| {
-    if let Some(before) = before.filter(|_| clip.holds(offer)) {
-      clip.restore(before);
-    }
-  });
 }
 
 thread_local! {
@@ -181,7 +171,7 @@ fn start(main: &mut Main, instance: Option<Instance>) {
           eprintln!("launch at login: {e}");
         }
       }
-      "paste" => main.proxy().after(Duration::from_secs(3), |main| paste(main, "Hello from nimbo")),
+      "paste" => main.proxy().after(Duration::from_secs(3), |_| paste("Hello from nimbo")),
       "quit" => main.quit(),
       _ => {}
     }
