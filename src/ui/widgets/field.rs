@@ -40,6 +40,11 @@ impl Ui<'_> {
 
   /// A text field's box and text in `style`'s look over its behaviour `b`.
   pub(super) fn field_box(&mut self, b: &FieldBehavior, style: &FieldStyle) -> Response {
+    // Named by its hint when nothing else names it, as a browser names a field.
+    if let Some(a) = self.a11y_of(b.id) {
+      a.name_or(style.hint);
+    }
+
     let border = match b.focused && style.focus_border[3] > 0.0 {
       true => style.focus_border,
       false => style.frame.border_color,

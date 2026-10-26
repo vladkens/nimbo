@@ -9,7 +9,7 @@
 use crate::keys::{Command, Move};
 use crate::scene::{Point, Rect, alpha, mix};
 use crate::ui::containers::menu::TypeSelect;
-use crate::ui::{Align, Behavior, Id, Response, Style, Ui, grow, px, rigid};
+use crate::ui::{Align, Behavior, Id, Response, Role, State, Style, Ui, grow, px, rigid};
 
 /// A pop-up button over `cur`, an index into `options`, as macOS 26 System Settings draws one:
 /// the current option's label 13 in from the frame and a chevron capsule after it, no box.
@@ -122,6 +122,7 @@ impl<'s> PopUp<'s> {
           .radius((t.sizes.menu_radius - 5.0).max(t.radius))
           .bg(bg);
         let mark = Some(i) == at;
+        ui.a11y(item, Role::MenuItem).state(State::Selected, mark);
         ui.with_id(item).row(ib.pointer(row), |ui| {
           let c = text.color;
           ui.canvas(Style::new().w(px(16.0)).h(px(16.0)), move |f, r| {
@@ -192,7 +193,9 @@ impl Ui<'_> {
     at: &mut Option<usize>,
   ) -> Behavior {
     let mut b = self.button_behavior(id);
+    // Its value the current option's label; expanded while open ([Ui::menu_popup]).
     if b.disabled {
+      self.a11y(id, Role::PopUpButton).text(at.map_or("", label));
       return b;
     }
 
@@ -220,6 +223,7 @@ impl Ui<'_> {
     }
 
     *self.state::<TypeSelect>(id) = ts;
+    self.a11y(id, Role::PopUpButton).text(at.map_or("", label));
     b
   }
 }

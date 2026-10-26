@@ -176,7 +176,9 @@ impl Settings {
       ui.form_row(fs, FormRow::new("Show the app"), |ui| {
         ui.id(HOTKEY).shortcut(&mut self.hotkey);
         let default = Hotkey::parse(DEFAULT_HOTKEY).ok();
-        let r = ui.disabled(self.hotkey == default).id(RESET).icon_button(Icon::RESET);
+        // An icon names itself to assistive technology only by a label.
+        let ui = ui.disabled(self.hotkey == default).a11y_label("Reset");
+        let r = ui.id(RESET).icon_button(Icon::RESET);
         ui.tooltip(r.id, "Back to the default shortcut");
         if r.clicked {
           self.hotkey = default;

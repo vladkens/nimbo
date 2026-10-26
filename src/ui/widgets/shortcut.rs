@@ -19,7 +19,7 @@ use super::icon::{self, Icon};
 use crate::keys::{Hotkey, Key, KeyEvent, Shortcut, f_key, is_modifier, us_char};
 use crate::scene::mix;
 use crate::text::Weight;
-use crate::ui::{Behavior, Cursor, Float, Id, Response, Style, Ui, px};
+use crate::ui::{Behavior, Cursor, Float, Id, Response, Role, Style, Ui, px};
 
 /// The recorder's width: the same recording, set or empty.
 const W: f32 = 160.0;
@@ -61,8 +61,11 @@ impl Ui<'_> {
   /// while recording, before the app's bindings ([Ui::grab_keys]), so none reaches anything
   /// else: Cmd-Z records, it doesn't undo.
   pub fn shortcut_behavior(&mut self, id: Id, value: &mut Option<Hotkey>, clear: bool) -> Behavior {
-    if let Some(b) = self.begin(id) {
+    // A button whose value is the hotkey, as the platform writes it.
+    let shown = |v: &Option<Hotkey>| v.map(|h| h.label()).unwrap_or_default();
+    if let Some(b) = self.begin(id, Role::Button) {
       self.state::<Rec>(id).on = false;
+      self.a11y(id, Role::Button).text(&shown(value));
       return b;
     }
 
@@ -135,6 +138,7 @@ impl Ui<'_> {
     }
 
     b.on = rec.on;
+    self.a11y(id, Role::Button).text(&shown(value));
     *self.state::<Rec>(id) = rec;
     b
   }
@@ -175,6 +179,7 @@ impl Ui<'_> {
       if value.is_some() && !b.on && !b.disabled && t.shortcut_clear {
         let at = Float::parent().attach(1.0, 0.5).anchor(1.0, 0.5).offset(-5.0, 0.0).clip();
         let s = Style::new().w(px(14.0)).h(px(14.0)).cursor(Cursor::Pointer);
+        ui.a11y(clear, Role::Button).name("Clear");
         let hot = ui.ctl_hot(clear, ui.hovered(clear));
         let mark = mix(t.faint, t.muted, hot);
         ui.with_id(clear).float(at).canvas(s, move |f, r| icon::draw(f, Icon::CLEAR, r, mark, 0.0));

@@ -30,8 +30,13 @@ impl Ui<'_> {
   /// showing, until it leaves or a button goes down. As macOS places one: its left edge at the
   /// pointer, its top 19 below it, where the pointer was when it showed; moved into the window
   /// near its edges. Call it each frame after building the target; the tip is
-  /// `target.key("tip")`, an overlay that doesn't take the pointer.
+  /// `target.key("tip")`, an overlay that doesn't take the pointer. `text` is the target's
+  /// description for assistive technology ([Ui::a11y]), shown or not.
   pub fn tooltip(&mut self, target: Id, text: &str) {
+    if let Some(a) = self.a11y_of(target) {
+      a.description(text);
+    }
+
     let t = self.theme();
     let tip = target.key("tip");
     let over = self.hovered(target) && self.press().is_none();

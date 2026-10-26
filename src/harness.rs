@@ -15,7 +15,7 @@ use crate::file_dialog::FileDialog;
 use crate::keys::{self, Key, KeyEvent};
 use crate::scene::{Point, Rect, Size};
 use crate::text::edit::{Editor, utf16_len};
-use crate::ui::{Id, Kind};
+use crate::ui::{Action, Id, Kind, Role};
 
 /// A display refresh at 120 Hz, the step of [Harness::wait].
 pub const TICK: Duration = Duration::from_nanos(8_333_333);
@@ -119,6 +119,16 @@ impl<A: App> Harness<A> {
     used
   }
 
+  /// Acts on `id` (its first node's role) as assistive technology would ([Event::A11y]), then
+  /// lets two display refreshes pass, which build the frames that show it (a menu is placed in
+  /// its second); returns whether it was taken, not refused.
+  pub fn act(&mut self, id: Id, action: Action) -> bool {
+    let role = self.rt.ui.a11y_tree().get(id).map_or(Role::Group, |n| n.props.role);
+    let taken = self.event(Event::A11y { id, role, action });
+    self.wait(2 * TICK);
+    taken
+  }
+
   /// Types `s` as text input would: one [Event::Text]. Returns whether it was used.
   pub fn type_text(&mut self, s: &str) -> bool {
     self.event(Event::Text(s.into()))
@@ -181,6 +191,12 @@ impl<A: App> Harness<A> {
   /// The editor of a text field or selectable text.
   pub fn editor(&self, id: Id) -> Option<&Editor> {
     self.rt.ui.editor(id)
+  }
+
+  /// The last frame as assistive technology sees it, one line per node indented by depth:
+  /// `switch "Open at login" off` ([crate::ui::A11yTree]).
+  pub fn a11y(&self) -> String {
+    self.rt.ui.a11y_tree().to_string()
   }
 
   // MARK: Output

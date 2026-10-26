@@ -7,7 +7,10 @@
 //! the reset puts the default back; the slider drags and steps; the dialog asks before clearing
 //! the cache and resetting all: Return chooses its default, Escape cancels, Tab and Space the
 //! action, its backdrop dims the page and takes the pointer; a row's switch keeps its width and
-//! place beside a long description that wraps.
+//! place beside a long description that wraps. Assistive technology reads the controls by their
+//! rows with their values, and the dialog as modal, its default button focused until it gives
+//! the focus back, and the focus only while the window has it; its actions flip a switch, step
+//! the slider, choose in a select, move the focus, and reach only the dialog while it is open.
 
 #[path = "../examples/settings.rs"]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
@@ -18,7 +21,8 @@ mod common;
 
 use std::time::Duration;
 
-use common::px;
+use common::{px, reads};
+use nimbo::ui::Action;
 use nimbo::{
   Appearance, Code, Event, Harness, Hotkey, Id, Key, Modifiers, NamedKey, Rect, Size, Theme,
 };
@@ -217,4 +221,164 @@ fn the_window_follows_the_page() {
   assert!((400.0..720.0).contains(&general), "{general}");
   turn(&mut h, Page::About);
   assert!(h.rt.size.h < general, "{} vs {general}", h.rt.size.h);
+}
+
+#[test]
+fn a_switch_reads_its_row_and_its_state() {
+  let mut h = start();
+  reads(&h.a11y(), &["switch \"Open at login\" on"]);
+  h.click_id(Id::of(LOGIN));
+  h.frame();
+  reads(&h.a11y(), &["switch \"Open at login\" off"]);
+}
+
+#[test]
+fn a_select_reads_its_value_and_its_open_menu() {
+  let mut h = start();
+  let caption = "desc \"Applies the next time the app starts.\"";
+  reads(&h.a11y(), &[&format!("pop up button \"Language\" value \"System Default\" {caption}")]);
+  h.click_id(Id::of(LANG));
+  h.wait(Duration::from_millis(50));
+  let lines = [
+    &format!("pop up button \"Language\" value \"System Default\" expanded {caption}"),
+    "menu focused active \"System Default\"",
+    "menu item \"System Default\" selected",
+    "menu item \"English\"",
+  ];
+  reads(&h.a11y(), &lines);
+}
+
+#[test]
+fn the_slider_reads_its_number() {
+  let mut h = start();
+  turn(&mut h, Page::Appearance);
+  reads(&h.a11y(), &["slider \"Text size\" 13 in 10..20"]);
+  h.rt.ui.set_focus(Some(Id::of(TEXT_SIZE)));
+  key(&mut h, NamedKey::ArrowRight);
+  h.frame();
+  reads(&h.a11y(), &["slider \"Text size\" 13.5 in 10..20 focused"]);
+}
+
+#[test]
+fn the_recorder_reads_its_hotkey_and_the_icon_its_label() {
+  let h = start();
+  let shown = Hotkey::parse(DEFAULT_HOTKEY).unwrap().label();
+  let lines = [
+    &format!("button \"Show the app\" value \"{shown}\""),
+    "button \"Reset\" disabled desc \"Back to the default shortcut\"",
+  ];
+  reads(&h.a11y(), &lines);
+}
+
+#[test]
+fn the_dialog_reads_modal_with_its_buttons() {
+  let mut h = start();
+  turn(&mut h, Page::Advanced);
+  h.click_id(Id::of(CLEAR_CACHE));
+  h.wait(Duration::from_millis(200));
+  let dump = h.a11y();
+  reads(&dump, &["dialog \"Clear the cache?\" modal"]);
+  // Its buttons inside it, the default one focused.
+  let buttons = "\n  button \"Cancel\" focused\n  button \"Clear\"\n";
+  assert!(dump.contains(buttons), "{dump}");
+}
+
+/// Opening, the dialog takes the focus, its default button focused to assistive technology;
+/// closed, it gives the focus back to the button that opened it.
+#[test]
+fn the_dialog_takes_the_focus_and_gives_it_back() {
+  let mut h = start();
+  turn(&mut h, Page::Advanced);
+  let (clear, confirm) = (Id::of(CLEAR_CACHE), Id::of(CONFIRM));
+  assert!(h.act(clear, Action::Focus));
+  key(&mut h, ' ');
+  h.frame();
+  assert_eq!(h.app().ask, Some(Ask::ClearCache));
+  assert_eq!(h.focused(), Some(confirm.key("backdrop")));
+  reads(&h.a11y(), &["button \"Cancel\" focused"]);
+  key(&mut h, NamedKey::Escape);
+  h.frame();
+  assert_eq!((h.app().ask, h.focused()), (None, Some(clear)));
+  reads(&h.a11y(), &["button \"Clear…\" focused"]);
+}
+
+/// Assistive technology presses a switch as a click does, the pointer left alone.
+#[test]
+fn an_assistive_press_flips_a_switch() {
+  let mut h = start();
+  assert!(h.act(Id::of(LOGIN), Action::Press));
+  assert!(!h.app().login);
+  // The pointer and the hover stay where they were: nowhere.
+  assert!(h.rt.mouse.is_none() && h.rt.ui.hover().is_empty());
+  reads(&h.a11y(), &["switch \"Open at login\" off"]);
+}
+
+/// Increment and decrement step the slider as the arrows do.
+#[test]
+fn assistive_steps_move_the_slider() {
+  let mut h = start();
+  turn(&mut h, Page::Appearance);
+  let size = Id::of(TEXT_SIZE);
+  assert!(h.act(size, Action::Increment));
+  assert_eq!(h.app().text_size, 13.5);
+  h.act(size, Action::Decrement);
+  h.act(size, Action::Decrement);
+  assert_eq!(h.app().text_size, 12.5);
+  reads(&h.a11y(), &["slider \"Text size\" 12.5 in 10..20"]);
+}
+
+/// A press opens the select's menu, a press on an item chooses it and closes the menu.
+#[test]
+fn assistive_presses_choose_in_a_select() {
+  let mut h = start();
+  let lang = Id::of(LANG);
+  assert!(h.act(lang, Action::Press));
+  reads(&h.a11y(), &["menu focused active \"System Default\"", "menu item \"English\""]);
+  assert!(h.act(lang.key(("item", 1)), Action::Press));
+  assert_eq!(h.app().lang, 1);
+  assert!(h.rect(lang.key("menu")).is_none());
+  let caption = "desc \"Applies the next time the app starts.\"";
+  reads(&h.a11y(), &[&format!("pop up button \"Language\" value \"English\" {caption}")]);
+}
+
+/// Focus moves to an enabled control, not to a disabled one.
+#[test]
+fn an_assistive_focus_moves_the_focus() {
+  let mut h = start();
+  assert!(h.act(Id::of(LANG), Action::Focus));
+  assert_eq!(h.focused(), Some(Id::of(LANG)));
+  assert!(!h.act(Id::of(RESET), Action::Focus));
+  assert_eq!(h.focused(), Some(Id::of(LANG)));
+}
+
+/// The focus reads only while the window has it: leaving and coming back change the tree, so
+/// a screen reader is told of the focus on return.
+#[test]
+fn the_focus_reads_only_in_the_focused_window() {
+  let mut h = start();
+  assert!(h.act(Id::of(LANG), Action::Focus));
+  let focused = h.a11y();
+  assert!(focused.contains(" focused"), "{focused}");
+  h.event(Event::Focus(false));
+  let away = h.a11y();
+  assert!(!away.contains(" focused"), "{away}");
+  h.event(Event::Focus(true));
+  assert_eq!(h.a11y(), focused);
+}
+
+/// An open dialog leaves the page behind it out of the tree, and a press there is refused; its
+/// own buttons are pressed.
+#[test]
+fn a_press_behind_a_modal_dialog_is_refused() {
+  let mut h = start();
+  turn(&mut h, Page::Advanced);
+  assert!(h.act(Id::of(CLEAR_CACHE), Action::Press));
+  assert_eq!(h.app().ask, Some(Ask::ClearCache));
+  let dump = h.a11y();
+  assert!(dump.starts_with("dialog \"Clear the cache?\" modal\n"), "{dump}");
+  assert!(!dump.contains("Reset"), "{dump}");
+  assert!(!h.act(Id::of(RESET_ALL), Action::Press));
+  assert_eq!(h.app().ask, Some(Ask::ClearCache));
+  assert!(h.act(Id::of(CONFIRM).key("action"), Action::Press));
+  assert_eq!((h.app().ask, h.app().cache), (None, 0));
 }

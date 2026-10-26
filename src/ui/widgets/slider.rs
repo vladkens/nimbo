@@ -5,7 +5,7 @@
 use std::ops::RangeInclusive;
 
 use crate::scene::{Quad, Rect, alpha, mix};
-use crate::ui::{Behavior, Id, Response, Style, Ui, px};
+use crate::ui::{Behavior, Id, Response, Role, Style, Ui, Value, px};
 
 impl Ui<'_> {
   /// A horizontal slider over `range` on the element `id`, its track `inset` points in from
@@ -18,11 +18,19 @@ impl Ui<'_> {
     range: RangeInclusive<f32>,
     inset: f32,
   ) -> Behavior {
-    if let Some(b) = self.begin(id) {
-      return b;
-    }
-
     let (lo, hi) = (*range.start(), *range.end());
+    let b = match self.begin(id, Role::Slider) {
+      Some(b) => b,
+      None => self.slide(id, v, (lo, hi), inset),
+    };
+
+    let (now, min, max) = (f64::from(*v), f64::from(lo), f64::from(hi));
+    self.a11y(id, Role::Slider).value(Value::Number { now, min, max });
+    b
+  }
+
+  /// [Ui::slider_behavior]'s input, enabled.
+  fn slide(&mut self, id: Id, v: &mut f32, (lo, hi): (f32, f32), inset: f32) -> Behavior {
     let was = *v;
     // Held, or released since the view last ran: a click, a drag's last move.
     let at = self.mouse().filter(|_| self.held(id)).or(self.released(id).map(|(_, p)| p));

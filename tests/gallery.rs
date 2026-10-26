@@ -6,6 +6,7 @@
 //! segment picks; an icon button's tooltip shows after a rest; a recorder records a chord; the
 //! dialog opens in the dark pane's theme, Escape closes it and the action counts. The search
 //! field is drawn in each pane's theme, and what is typed in one clears from the other's ⊗.
+//! Assistive technology reads each widget by its role.
 
 #[path = "../examples/gallery.rs"]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
@@ -16,7 +17,7 @@ mod common;
 
 use std::time::Duration;
 
-use common::{diff, mid, px};
+use common::{diff, mid, px, reads};
 use gallery::*;
 use nimbo::{Appearance, Event, Harness, Id, Modifiers, NamedKey, Rect, Size, Theme, alpha, mix};
 
@@ -145,4 +146,48 @@ fn the_search_field_in_both_themes() {
   h.frame();
   assert_eq!(h.app().search, "icons!");
   assert!(h.rect(id(SEARCH, 1).key("clear")).is_some());
+}
+
+/// Each kind of widget is what it is to assistive technology: its role, name, value and states.
+#[test]
+fn every_widget_has_its_role() {
+  let mut h = Harness::new(Gallery::default(), Size::new(1040.0, 590.0), 2.0);
+  h.frame();
+  let lines = [
+    "button \"Save\"",
+    "button \"Off\" disabled",
+    "button \"Reset\" desc \"Back to the default\"",
+    "button \"Info\" desc \"An ⓘ explains what one line can't\"",
+    "check box \"Wrap lines\" on",
+    "check box \"Off\" off disabled",
+    "switch \"Live\" off",
+    "switch \"Large\" on",
+    "slider \"Zoom\" 60 in 0..200",
+    "pop up button \"Size\" value \"Medium\"",
+    "pop up button \"Size\" value \"Small\" disabled",
+    "radio group",
+    "radio button \"List 128\" on selected",
+    "radio button \"Grid 12\" off",
+    "progress indicator 0.42 in 0..1",
+    "link \"Learn more…\"",
+    "static text \"new\"",
+    "text field \"Search widgets\" value \"Switches\"",
+    "button \"Clear\"",
+  ];
+  reads(&h.a11y(), &lines);
+}
+
+/// The ⊗ of a recorder and of a search field are beside them, not inside the leaves, where a
+/// screen reader wouldn't reach them.
+#[test]
+fn clear_marks_are_beside_their_controls() {
+  let mut h = Harness::new(Gallery::default(), Size::new(1040.0, 590.0), 2.0);
+  h.frame();
+  let dump = h.a11y();
+  // The recorder's value is the platform's label of its shortcut (⌃⌥Space, Ctrl+Alt+Space).
+  let lines: Vec<&str> = dump.lines().collect();
+  let next = |first: &str| lines.iter().rposition(|l| l.starts_with(first)).map(|i| lines[i + 1]);
+  for first in ["button value ", "text field \"Search widgets\" value \"Switches\""] {
+    assert_eq!(next(first), Some("button \"Clear\""), "{first} in\n{dump}");
+  }
 }

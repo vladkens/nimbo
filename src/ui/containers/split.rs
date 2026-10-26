@@ -12,7 +12,7 @@
 //! The split keeps its ratio in the app or in its own state; dragging the divider honours both
 //! panes' minimum sizes. The behaviour is [Ui::split_behavior].
 
-use crate::ui::{Behavior, Cursor, Float, Id, Response, Style, Ui, grow, pct, px};
+use crate::ui::{Behavior, Cursor, Float, Id, Response, Role, Style, Ui, Value, grow, pct, px};
 
 /// A split's divider ([Ui::split_behavior]): its handle's input, and the first pane's share
 /// to show and the panes' minimums, both fitted to the split's size.
@@ -129,7 +129,7 @@ impl Ui<'_> {
     struct Grab(Option<f32>);
 
     let ax = axis as usize;
-    let b = self.begin(handle).unwrap_or_else(|| self.pointer_state(handle));
+    let b = self.begin(handle, Role::Splitter).unwrap_or_else(|| self.pointer_state(handle));
     let span = self.rect(id).map(|rect| if ax == 0 { (rect.x, rect.w) } else { (rect.y, rect.h) });
     // Fitted to the last frame's size: the view runs again if the layout changes it.
     self.settle(id);
@@ -166,8 +166,10 @@ impl Ui<'_> {
     }
 
     self.state::<Grab>(id).0 = grab.filter(|_| b.held);
-    let handle = Behavior { changed: *ratio != was, ..b };
-    SplitBehavior { handle, shown: fit(*ratio), min }
+    let (handle, shown) = (Behavior { changed: *ratio != was, ..b }, fit(*ratio));
+    let share = Value::Number { now: shown.into(), min: 0.0, max: 1.0 };
+    self.a11y(handle.id, Role::Splitter).value(share);
+    SplitBehavior { handle, shown, min }
   }
 }
 

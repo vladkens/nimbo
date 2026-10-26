@@ -65,7 +65,9 @@ impl App for Fields {
             _ => &mut self.password,
           };
 
-          // The first field takes the focus as the window opens.
+          // Named by its label for assistive technology; the first field takes the focus as the
+          // window opens.
+          ui.a11y_label(title);
           let ui = if id == NAME { ui.id(id).autofocus() } else { ui.id(id) };
           let r = match id {
             PASSWORD => ui.password_field(text, "Required"),
@@ -89,14 +91,14 @@ impl App for Fields {
         let style = t.field().multiline().hint("A few lines");
         let style =
           style.frame(style.frame.h(px(84.0)).align(nimbo::Align::Start, nimbo::Align::Start));
-        if ui.text_field(Id::of(NOTES), &mut self.notes, &style).changed {
+        if ui.a11y_label("Notes").text_field(Id::of(NOTES), &mut self.notes, &style).changed {
           self.changes.push(NOTES);
         }
       });
 
       ui.row(row, |ui| {
         ui.row(label, |ui| ui.label("Disabled"));
-        ui.disabled(true).id(OFF).field(&mut self.off, "");
+        ui.disabled(true).a11y_label("Disabled").id(OFF).field(&mut self.off, "");
       });
 
       ui.id(ABOUT).selectable(TEXT);

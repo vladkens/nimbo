@@ -64,15 +64,12 @@ impl App for History {
     let note = |ui: &mut Ui, g: usize| ui.text(format!("{} dictations", groups[g].1), fs.note);
     let row = |ui: &mut Ui, g: usize, i: usize| {
       let e = self.entry(g, i);
-      let mut s = FormStyle { row: fs.row.hit(), ..fs };
-      if selected == Some(e) {
-        s.row = s.row.bg(ui.theme().ghost);
-      }
-
+      let s = FormStyle { row: fs.row.hit(), ..fs };
       let text = format!("Dictation {e}: what was said, on one line");
       let caption =
         format!("{:02}:{:02} · {}.{} s", 23 - i / 7 % 24, 59 - i % 60, 2 + e % 9, e % 10);
-      let r = ui.form_row(&s, FormRow::new(&text).caption(&caption).one_line(), |ui| {
+      let row = FormRow::new(&text).caption(&caption).one_line().selected(selected == Some(e));
+      let r = ui.form_row(&s, row, |ui| {
         if Button::icon(Icon::COPY).show(ui.key("copy")).clicked {
           copied = Some(e);
         }

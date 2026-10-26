@@ -112,29 +112,36 @@ impl Icon {
     "M7.8 10.2 12 11l4.2-.8M12 11v3.2l-2.3 3.6M12 14.2l2.3 3.6"
   ));
 
-  /// Every built-in icon, for a gallery and the tests.
-  pub const ALL: [(&'static str, Self); 20] = [
-    ("gear", Self::GEAR),
-    ("contrast", Self::CONTRAST),
-    ("sliders", Self::SLIDERS),
-    ("info", Self::INFO),
-    ("reset", Self::RESET),
-    ("trash", Self::TRASH),
-    ("folder", Self::FOLDER),
-    ("doc", Self::DOC),
-    ("external", Self::EXTERNAL),
-    ("check", Self::CHECK),
-    ("search", Self::SEARCH),
-    ("play", Self::PLAY),
-    ("clear", Self::CLEAR),
-    ("copy", Self::COPY),
-    ("download", Self::DOWNLOAD),
-    ("history", Self::HISTORY),
-    ("stop", Self::STOP),
-    ("mic", Self::MIC),
-    ("x", Self::X),
-    ("accessibility", Self::ACCESSIBILITY),
+  /// Every built-in icon, for a gallery and the tests, with what a button showing it alone does
+  /// ([Icon::name]).
+  pub const ALL: [(&'static str, Self, &'static str); 20] = [
+    ("gear", Self::GEAR, "Settings"),
+    ("contrast", Self::CONTRAST, "Appearance"),
+    ("sliders", Self::SLIDERS, "Options"),
+    ("info", Self::INFO, "Info"),
+    ("reset", Self::RESET, "Reset"),
+    ("trash", Self::TRASH, "Delete"),
+    ("folder", Self::FOLDER, "Folder"),
+    ("doc", Self::DOC, "Document"),
+    ("external", Self::EXTERNAL, "Open"),
+    ("check", Self::CHECK, "Done"),
+    ("search", Self::SEARCH, "Search"),
+    ("play", Self::PLAY, "Play"),
+    ("clear", Self::CLEAR, "Clear"),
+    ("copy", Self::COPY, "Copy"),
+    ("download", Self::DOWNLOAD, "Download"),
+    ("history", Self::HISTORY, "History"),
+    ("stop", Self::STOP, "Stop"),
+    ("mic", Self::MIC, "Dictate"),
+    ("x", Self::X, "Close"),
+    ("accessibility", Self::ACCESSIBILITY, "Accessibility"),
   ];
+
+  /// What a button showing a built-in icon alone does, read when nothing names it: "Copy" for
+  /// [Icon::COPY]; `None` for an app's own.
+  pub fn name(self) -> Option<&'static str> {
+    Self::ALL.iter().find(|a| a.1 == self).map(|a| a.2)
+  }
 }
 
 /// The side of an icon's view box.
@@ -200,7 +207,7 @@ mod tests {
 
   #[test]
   fn every_built_in_icon_parses_whole() {
-    for (name, icon) in Icon::ALL {
+    for (name, icon, _) in Icon::ALL {
       let mut out = Vec::new();
       flatten(icon.d, 2.0, &mut out).unwrap_or_else(|e| panic!("{name}: {e}"));
       assert!(!out.is_empty(), "{name}");

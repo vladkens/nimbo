@@ -5,14 +5,17 @@
 
 use crate::scene::mix;
 use crate::ui::theme::ControlSize;
-use crate::ui::{Align, Behavior, Id, Response, Shadow, Style, Transition, Ui, px, rigid};
+use crate::ui::{
+  Align, Behavior, Id, Response, Role, Shadow, Style, Transition, Ui, Value, px, rigid,
+};
 
 /// How fast the knob slides: across in 140 ms, eased.
 const SLIDE: Transition = Transition::smooth(1000.0 / 140.0);
 
 impl Ui<'_> {
   /// A check box or switch over `on`, flipped by a click or Space while focused: `changed` when
-  /// it was, `on` its value after.
+  /// it was, `on` its value after. A check box on or off to assistive technology; a switch's look
+  /// refines it.
   pub fn toggle_behavior(&mut self, id: Id, on: &mut bool) -> Behavior {
     let mut b = self.button_behavior(id);
     if b.clicked {
@@ -20,6 +23,7 @@ impl Ui<'_> {
     }
 
     (b.changed, b.on) = (b.clicked, *on);
+    self.a11y(id, Role::CheckBox).value(if *on { Value::On } else { Value::Off });
     b
   }
 
@@ -36,6 +40,8 @@ impl Ui<'_> {
     let t = self.theme();
     let id = self.take_id();
     let b = self.toggle_behavior(id, on);
+    // The check box with the switch subrole.
+    self.a11y(id, Role::Switch);
     let k = self.animate(id.key("knob"), *on as u8 as f32, SLIDE);
     let hot = self.ctl_hot(id, b.hovered);
     let rest = mix(t.track, t.track_hover, hot);

@@ -12,10 +12,11 @@
 //! ([Runtime::text_input]), it has an input context, so input methods compose marked text in the
 //! field ([Event::Ime]) and ask where its text is, placing their candidates under the caret;
 //! while they compose, keys go to them first. With no such field the view has no input context
-//! and keys stay plain.
+//! and keys stay plain. Assistive clients see its nodes, not the view itself ([a11y]).
 
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -44,13 +45,13 @@ use objc2_quartz_core::{CADisplayLink, CAFrameRateRange, CALayer, kCAGravityTopL
 
 use super::input::*;
 use super::surface::Presenter;
-use super::{keyboard, overlay};
+use super::{a11y, keyboard, overlay};
 use crate::app::{App, Event, Ime, MouseButton, Runtime, WHEEL_LINE};
 use crate::keys::{self, Command, KeyEvent};
 use crate::scene::{Point, Rect, Size};
 use crate::shell::Anchor;
 use crate::text::edit::utf16_len;
-use crate::ui::{Cursor, Id, TextInput};
+use crate::ui::{Cursor, Id, TextInput, UiState};
 
 type WeakView = Arc<MainThreadBound<Weak<View>>>;
 
@@ -101,6 +102,8 @@ pub struct Ivars {
   ime_at: Cell<Option<Rect>>,
   /// An overlay's anchor ([crate::Config::overlay]): a new size goes back to it.
   overlay: Cell<Option<Anchor>>,
+  /// What assistive clients see, from their first query ([a11y]).
+  pub(super) a11y: RefCell<Option<Rc<a11y::Shared>>>,
 }
 
 define_class!(
@@ -372,6 +375,21 @@ define_class!(
         self.after_frame();
       }
     }
+
+    #[unsafe(method_id(accessibilityChildren))]
+    fn accessibility_children(&self) -> Option<Retained<NSArray>> {
+      a11y::children(self)
+    }
+
+    #[unsafe(method_id(accessibilityFocusedUIElement))]
+    fn accessibility_focused(&self) -> Option<Retained<AnyObject>> {
+      a11y::focused(self)
+    }
+
+    #[unsafe(method_id(accessibilityHitTest:))]
+    fn accessibility_hit_test(&self, p: NSPoint) -> Option<Retained<AnyObject>> {
+      a11y::hit_test(self, p).or_else(|| unsafe { msg_send![super(self), accessibilityHitTest: p] })
+    }
   }
 
   unsafe impl NSTextInputClient for View {
@@ -538,6 +556,8 @@ impl View {
       st.link.invalidate();
       self.ivars().stopped.set(true);
     }
+
+    a11y::close(self);
   }
 
   /// Runs `f` on the runtime unless a call up the stack has it, then redraws: an app changed
@@ -580,7 +600,7 @@ impl View {
 
   /// Feeds an event to the runtime and restarts the display link if it needs a frame.
   pub fn send(&self, ev: Event) -> bool {
-    if self.ivars().state.try_borrow_mut().is_err() {
+    if self.busy() {
       // The runtime is busy up the stack (an app changed through `Window::with` fronts another
       // window, and AppKit tells this one it lost the keys): sent once it is done, in order.
       let mut waiting = self.ivars().waiting.borrow_mut();
@@ -701,8 +721,18 @@ impl View {
     st.and_then(|st| st.rt.ui.text_input()).is_some_and(|t| t.marked().is_some())
   }
 
+  /// Whether the runtime is busy up the stack: an event sent now waits ([View::send]).
+  pub(super) fn busy(&self) -> bool {
+    self.ivars().state.try_borrow_mut().is_err()
+  }
+
+  /// Lets `f` look at the view's last frame, unless the runtime is busy up the stack.
+  pub(super) fn with_ui<R>(&self, f: impl FnOnce(&UiState) -> R) -> Option<R> {
+    Some(f(&self.ivars().state.try_borrow().ok()?.as_ref()?.rt.ui))
+  }
+
   /// A rect of the view in screen coordinates (window coordinates without a window).
-  fn to_screen(&self, r: Rect) -> NSRect {
+  pub(super) fn to_screen(&self, r: Rect) -> NSRect {
     let rect =
       NSRect::new(NSPoint::new(r.x as f64, r.y as f64), NSSize::new(r.w as f64, r.h as f64));
     let rect = self.convertRect_toView(rect, None);
@@ -749,7 +779,7 @@ impl View {
   }
 
   /// Asks for a frame; busy up the stack, once the runtime is free ([Ivars::rewake]).
-  fn wake(&self) {
+  pub(super) fn wake(&self) {
     match self.ivars().state.try_borrow_mut().as_deref_mut() {
       Ok(Some(st)) => {
         st.rt.redraw();
@@ -821,6 +851,7 @@ impl View {
         }
       }
     }
+    a11y::sync(self);
     self.sync_ime();
     self.apply_resize();
     self.apply_file_dialog();

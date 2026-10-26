@@ -13,10 +13,10 @@ use std::time::{Duration, Instant};
 use keyboard_types::{Code, Modifiers};
 
 use crate::file_dialog::FileDialog;
-use crate::keys::{self, Binding, Command, KeyEvent};
+use crate::keys::{self, Binding, Command, KeyEvent, Move};
 use crate::scene::{Color, Frame, Images, Point, Rect, Scene, Size};
 use crate::text::TextSystem;
-use crate::ui::{Click, Cursor, FrameStats, Id, Sys, TextInput, Ui, UiState};
+use crate::ui::{Action, Click, Cursor, FrameStats, Id, Role, Sys, TextInput, Ui, UiState};
 
 /// An application: owns its state, reacts to events and draws the frame from it, as an element
 /// tree (`view`), by hand (`paint`), or both. A frame is built only when something changed.
@@ -170,6 +170,15 @@ pub enum Event {
   /// The file picked in the panel the window asked for ([Ui::file_dialog]); `None` when
   /// cancelled.
   FileDialog(Option<PathBuf>),
+  /// Assistive technology acting on the element `id` (VoiceOver's press, a slider's increment,
+  /// a field's new text): the runtime takes it through the input paths ([Runtime::event]),
+  /// then the app hears it, the press as a click ([Cx::clicked]). `role` is the node's, as
+  /// the client saw it: a node of `id` with another role refuses it.
+  A11y {
+    id: Id,
+    role: Role,
+    action: Action,
+  },
 }
 
 /// The OS's look: light or dark, and the accent colour the user picked, if the OS has one
@@ -526,10 +535,15 @@ impl<A: App> Runtime<A> {
   /// still gets it (an app focusing a search field on the first letter typed). A click runs
   /// the view once at once, without drawing, so the app sees it before the next frame is
   /// built; so does a key, text or command for the focused element (see [crate::keys] for
-  /// their order).
+  /// their order). An action of assistive technology ([Event::A11y]) returns whether it was
+  /// taken, not refused.
   pub fn event(&mut self, ev: Event) -> bool {
     if let Event::Appearance(a) = ev {
       return self.appearance(a);
+    }
+
+    if let Event::A11y { id, role, action } = ev {
+      return self.act(id, role, action);
     }
 
     let keys = matches!(ev, Event::KeyDown(_) | Event::Text(_) | Event::Command(_) | Event::Ime(_));
@@ -562,6 +576,44 @@ impl<A: App> Runtime<A> {
     self.told = true;
     self.ui.set_appearance(a);
     self.app_event(&Event::Appearance(a));
+    self.redraw();
+    true
+  }
+
+  /// An action of assistive technology on `id`, through the input paths, so it runs what a
+  /// click or a key runs: a press is a left click at the centre of its node, the pointer and
+  /// the hover left as they are; an increment or a decrement the Right or Left arrow delivered
+  /// to it; focus moves to it and its scroll areas show it (scrolling to it does only that); a
+  /// field's new text is delivered to it. The app hears it after. Refused (false) when the
+  /// last frame, laid out again if an event changed it, has no node `id` that takes it
+  /// ([crate::ui::A11yNode::can]): one behind a modal dialog has none.
+  fn act(&mut self, id: Id, role: Role, action: Action) -> bool {
+    self.take_wake();
+    self.fresh();
+    let tree = self.ui.a11y_tree();
+    let node = tree.nodes.iter().find(|n| n.id == id && n.props.role == role);
+    let Some(r) = node.filter(|n| n.can(&action)).map(|n| n.rect) else { return false };
+
+    match &action {
+      Action::Press => {
+        let at = Point::new(r.x + r.w / 2.0, r.y + r.h / 2.0);
+        self.ui.input.click = Some(self.ui.input.click_at(id, at));
+        self.pass();
+      }
+      Action::Increment | Action::Decrement => {
+        let to = if action == Action::Increment { Move::Right } else { Move::Left };
+        self.deliver(id, Event::Command(Command::Move(to, false)));
+      }
+      Action::Focus => {
+        self.ui.set_focus(Some(id));
+        self.ui.reveal_in_scrolls(id);
+      }
+      Action::ScrollToVisible => self.ui.reveal_in_scrolls(id),
+      Action::SetValue(_) => _ = self.deliver(id, Event::A11y { id, role, action: action.clone() }),
+    }
+
+    self.app_event(&Event::A11y { id, role, action });
+    self.ui.input.click = None;
     self.redraw();
     true
   }

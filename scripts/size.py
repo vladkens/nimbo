@@ -5,10 +5,10 @@
 """Lines per module: code, docs, comments and inline tests, apart.
 
 A module is a directory under src/ (platform/<os>, platform/<os>/app, ui/widgets and
-ui/containers each on their own, and so are the add-on files ui/form.rs and ui/dialog.rs) or a
-top-level file; examples/ and tests/ are one row each. Code is every line that is not blank, a
-comment, a doc comment or inside a `#[cfg(test)]` item. With a git ref, a column shows how code
-moved since it.
+ui/containers each on their own, and so are the add-on files ui/form.rs and ui/dialog.rs and the
+accessibility model ui/a11y.rs) or a top-level file; examples/ and tests/ are one row each. Code
+is every line that is not blank, a comment, a doc comment or inside a `#[cfg(test)]` item. With
+a git ref, a column shows how code moved since it.
 `--map` lists the files with the first sentence of each one's module doc (`//!`): what it does.
 `--check` sums the code per part against its budget (BUDGETS) and fails when one is over, or
 when a budget is not a whole number of hundreds; with `SIZE_WARN` set (CI on `main`, where two
@@ -32,31 +32,35 @@ KINDS = ("code", "docs", "comments", "tests", "blank")
 # paint, theme), its widgets and containers (ui/widgets, ui/containers: add-ons over it), the
 # text system (text/: shaping, the glyph atlas, the editing model), the app platform (its
 # portable part: the shell, tray, hotkeys, paths, launch at login, the launcher entry, opening,
-# permissions, the system clipboard, the focus of other apps; and each OS's platform/<os>/app)
-# and the core (the rest of src/). A budget is whole hundreds (STEP): a change that doesn't fit
-# is written tighter, or the budget goes up by a hundred, a decision recorded in its PR; never by
-# the few lines one change needs.
+# permissions, the system clipboard, the focus of other apps; and each OS's platform/<os>/app),
+# the accessibility model (ui/a11y.rs: roles, records, assembly) and the core (the rest of
+# src/). A budget is whole hundreds (STEP): a change that doesn't fit is written tighter, or the
+# budget goes up by a hundred, a decision recorded in its PR; never by the few lines one change
+# needs.
 STEP = 100
 BUDGETS = {
-  "platform/macos": 1900,
+  "platform/macos": 2500,
   "platform/windows": 2200,
   "platform/linux": 3200,
   "ui": 3800,
-  "widgets": 3200,
+  "widgets": 3300,
   "text": 1200,
-  "core": 3600,
+  "core": 3700,
   "app/shared": 1000,
   "app/macos": 1600,
   "app/windows": 1500,
   "app/linux": 2000,
+  "a11y": 400,
 }
 # Modules that count against a budget of another name ("app", src/app.rs, is the core's seams).
-# The settings form and the dialog are add-ons over the widgets, as the containers are.
+# The settings form and the dialog are add-ons over the widgets, as the containers are; the
+# accessibility model has its own.
 PARTS = {
   "ui/widgets": "widgets",
   "ui/containers": "widgets",
   "ui/form": "widgets",
   "ui/dialog": "widgets",
+  "ui/a11y": "a11y",
   **{m: "app/shared" for m in ("shell", "tray", "hotkey", "paths", "autostart", "desktop", "open", "permissions", "clipboard", "focus")},
 }
 
@@ -66,6 +70,8 @@ def module(path: str, files: bool) -> str:
 
   >>> [module(p, False) for p in ("src/ui/form.rs", "src/ui/theme.rs", "src/ui/widgets/x.rs")]
   ['ui/form', 'ui', 'ui/widgets']
+  >>> module("src/ui/a11y.rs", False)
+  'ui/a11y'
   """
   if files:
     return path
@@ -93,8 +99,8 @@ def part(module: str) -> str | None:
 
   >>> [part(m) for m in ("platform/linux", "ui", "ui/containers", "text", "cpu", "tests")]
   ['platform/linux', 'ui', 'widgets', 'text', 'core', None]
-  >>> [part(m) for m in ("app", "tray", "app/linux")]
-  ['core', 'app/shared', 'app/linux']
+  >>> [part(m) for m in ("app", "tray", "app/linux", "ui/a11y")]
+  ['core', 'app/shared', 'app/linux', 'a11y']
   """
   if module in BUDGETS:
     return module
