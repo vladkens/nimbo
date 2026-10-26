@@ -40,7 +40,7 @@ nimbo grew out of [wavo-app](https://github.com/vladkens/wavo-app), the dictatio
 
 ## 🤖 How it's made
 
-nimbo is written by AI agents (Claude Code, Codex) following [agents.md](agents.md); I choose what to build and review every pull request. Every visual change is checked in a harness shot, against macOS screenshots at the same scale where the look is meant to match, and a change to a platform's event loop has its frame pacing measured on each backend it touches. This isn't a weekend prompt: I've written software by hand for years — [macmon](https://github.com/vladkens/macmon) (Rust, Apple Silicon system monitor), [twscrape](https://github.com/vladkens/twscrape) (Python, X/Twitter scraping) and [ecloop](https://github.com/vladkens/ecloop) (C, low-level elliptic-curve math) — and agents are how I build now, as with [wavo](https://github.com/vladkens/wavo) (Rust, local speech-to-text on the GPU).
+nimbo is written by AI agents (Claude Code, Codex) following [agents.md](agents.md); I choose what to build, review every pull request and check every visual change in a shot. I've written software by hand for years ([macmon](https://github.com/vladkens/macmon), [twscrape](https://github.com/vladkens/twscrape), [ecloop](https://github.com/vladkens/ecloop)); agents are how I build now.
 
 ## 📥 Installation
 
