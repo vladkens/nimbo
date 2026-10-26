@@ -25,7 +25,7 @@
 - 📦 **13 crates on macOS, 4 on Windows, 2 on Linux**: GTK is loaded at run time, nothing to link
 
 <div align="center">
-  <img src="docs/settings.png" alt="the settings example in a macOS window" width="700" />
+  <img src="docs/settings.png" alt="the settings example on macOS" width="700" />
 </div>
 
 ## 🧭 Why nimbo
@@ -33,23 +33,13 @@
 I wanted a small, fast dictation app, and every stack I tried for it fell short:
 
 - **Tauri** (Handy, the app I used): a webview, **565 MB** at idle.
-- **egui and GPUI**: 337 to 911 crates, a GPU surface and a text stack of their own, and still not the macOS look.
+- **egui**: 226–391 crates, an 18 MB binary, its own text that never matched CoreText.
+- **GPUI**: 695–911 crates, and it built only with a vendored patch.
 - **AppKit alone**: **13 MB** at idle, but macOS only.
 - **Native controls on each OS**: every feature written three times, 79% of the code glue.
-- **Drawing the UI myself over the OS's window and text**: right look, small and fast; on the CPU instead of Vulkan, **5 MB** of memory instead of 55–148 MB.
+- **Drawing the UI myself over the OS's window and text**: a window on screen in under 200 ms (Zed: 299 ms), and on the CPU **5 MB** of memory where Vulkan took 55–148 MB.
 
-nimbo is that last approach, made into a library.
-
-| | Crates | Clean build | Binary | Accessibility |
-|---|---:|---:|---:|---|
-| GPUI | 391 | 56 s | 5.0 MiB | AccessKit |
-| Slint | 302 | 42 s | 14.7 MiB | AccessKit |
-| Tauri | 204 | 36 s | 8.0 MiB + webview | the webview's |
-| egui | 156 | 27 s | 12.0 MiB | AccessKit |
-| iced | 140 | 22 s | 9.9 MiB | none yet |
-| **nimbo** | **13** | **10 s** | **1.1 MiB** | none yet |
-
-The others: a small todo app, clean release build on an M4 Pro, from the [RCN study](https://github.com/GoldStrikeArch/rust-gui-desktop-ecosystem-state/blob/main/report/10-empirical-results.md) (2026-07-07); nimbo: the `counter` example on an M2, measured here (2026-10-25), crates on macOS. What nimbo doesn't have yet: accessibility, rich text, mobile and web.
+nimbo is that last approach as a library: **13 crates**, a **1.1 MB** binary, a clean build in **10 s**.
 
 ## 🤖 How it's made
 
