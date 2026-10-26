@@ -35,8 +35,8 @@ pub(super) struct Bars {
   /// The pointer was over the area last frame, and where.
   over: bool,
   mouse: Option<Point>,
-  /// The offset when a thumb drag began, per axis.
-  drag: [Option<f32>; 2],
+  /// The offset when a thumb drag began, per axis, in `f64` as the layout keeps it.
+  drag: [Option<f64>; 2],
 }
 
 /// The fade the next scroll area draws under its edges ([Ui::fade_edges]): colour and length.
@@ -189,8 +189,10 @@ impl Ui<'_> {
       }
 
       (bars.seen, bars.over) = (sc.offset, over);
-      // Written back only when a drag or a click moved it: the offset in `f64` stays exact.
-      let (mut off, mut moved) = (sc.offset, false);
+      // Moved in `f64` and written back only when a drag or a click moved it, unclamped: the
+      // layout clamps it exactly, the bars draw it in `f32`.
+      let exact = self.st.scroll_exact(id).map_or([0.0; 2], |(o, _)| o);
+      let (mut off, mut ex, mut moved) = (sc.offset, exact, false);
       let scrolls = |ax: usize| axes[ax] && geo(&sc, ax, 0.0, false).is_some();
       let both = scrolls(0) && scrolls(1);
       for (ax, g) in geos.iter_mut().enumerate() {
@@ -204,8 +206,8 @@ impl Ui<'_> {
         let held = self.held(thumb);
         let press = self.press().zip(mouse).filter(|_| held).or(self.released(thumb));
         if let Some((p, m)) = press {
-          let start = *bars.drag[ax].get_or_insert(axis(off, ax));
-          off = with_axis(off, ax, start + (axis(m, ax) - axis(p.pos, ax)) * first.ratio);
+          let start = *bars.drag[ax].get_or_insert(ex[ax]);
+          ex[ax] = start + f64::from((axis(m, ax) - axis(p.pos, ax)) * first.ratio);
           moved = true;
         }
 
@@ -219,7 +221,7 @@ impl Ui<'_> {
           let start = axis(Point::new(sc.viewport.x, sc.viewport.y), ax) + BAR_INSET + first.pos;
           let page = axis(Point::new(sc.viewport.w, sc.viewport.h), ax) * 0.9;
           let dir = if axis(c.pos, ax) < start { -1.0 } else { 1.0 };
-          off = with_axis(off, ax, axis(off, ax) + dir * page);
+          ex[ax] += f64::from(dir * page);
           moved = true;
         }
 
@@ -235,13 +237,14 @@ impl Ui<'_> {
         }
 
         pinned |= self.hovered(track);
+        off = with_axis(off, ax, ex[ax] as f32);
         let max = sc.max();
         off = Point::new(off.x.clamp(0.0, max.x), off.y.clamp(0.0, max.y));
         *g = geo(&sc, ax, axis(off, ax), both);
       }
 
-      if moved && off != sc.offset {
-        self.scroll_to(id, off);
+      if moved && ex != exact {
+        self.scroll_exact(id, ex);
         bars.seen = off;
       }
     }
@@ -305,6 +308,40 @@ mod tests {
     h.frame();
     h.rt.ui.store.raw::<crate::ui::input::ScrollState>(area).offset[1] = 1e12;
     h.rt.redraw();
+    for _ in 0..3 {
+      h.frame();
+    }
+
+    let end = 2.0 + 52_998_000.0 + 2_000.0 - 300.0;
+    assert_eq!(h.rt.ui.scroll_exact(area).map(|s| s.0[1]), Some(end));
+  }
+
+  /// The same content, its thumb dragged past the track's end: the offset reaches the end
+  /// exactly, not the nearest `f32`.
+  #[test]
+  fn a_thumb_dragged_past_the_end_reaches_it_exactly() {
+    struct Long;
+    impl App for Long {
+      fn view(&mut self, ui: &mut Ui) {
+        ui.id("area").scroll_area(Style::new().w(px(200.0)).h(px(300.0)), |ui| {
+          ui.el(Style::new().h(px(2.0)));
+          ui.el(Style::new().h(px(52_998_000.0)));
+          ui.el(Style::new().h(px(2_000.0)));
+        });
+      }
+    }
+
+    let mut h = Harness::new(Long, Size::new(200.0, 300.0), 2.0);
+    let area = Id::of("area");
+    h.frame();
+    h.move_to(195.0, 150.0);
+    h.wait(Duration::from_millis(300));
+    let thumb = h.rect(area.key(("thumb", 1usize))).expect("a thumb");
+    let (x, y) = (thumb.x + thumb.w / 2.0, thumb.y + thumb.h / 2.0);
+    h.press(x, y);
+    h.move_to(x, y + 1000.0);
+    h.frame();
+    h.release(x, y + 1000.0);
     for _ in 0..3 {
       h.frame();
     }
