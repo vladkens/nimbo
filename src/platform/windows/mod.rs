@@ -721,8 +721,8 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
   if let Some((side, px)) = cfg.icon {
     // Big and small alike, the system scales it. One per image (`'static`), the windows share it
     // for the app's life.
-    thread_local!(static ICONS: RefCell<Vec<(usize, HICON)>> = const { RefCell::new(Vec::new()) });
-    let key = px.as_ptr() as usize;
+    thread_local!(static ICONS: RefCell<Vec<((usize, u32), HICON)>> = const { RefCell::new(Vec::new()) });
+    let key = (px.as_ptr() as usize, side);
     let icon = ICONS.with_borrow_mut(|all| {
       if let Some(&(_, icon)) = all.iter().find(|i| i.0 == key) {
         return icon;
