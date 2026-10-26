@@ -221,7 +221,7 @@ mod tests {
     let mut h = Harness::new(Same { tab: 0 }, Size::new(300.0, 200.0), 1.0);
     h.frame();
     let page = Id::of(("page", 0usize));
-    h.rt.ui.store.raw::<crate::ui::input::ScrollState>(page).offset.y = 50.0;
+    h.rt.ui.store.raw::<crate::ui::input::ScrollState>(page).offset[1] = 50.0;
     h.rt.redraw();
     h.frame();
     // The second "Same" is its own tab; the first page's offset outlives it hidden.

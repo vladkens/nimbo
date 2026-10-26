@@ -20,7 +20,6 @@ use std::hash::Hash;
 use std::ops::Range;
 
 use super::super::{Id, Style, Ui, grow, px};
-use crate::scene::Rect;
 
 /// How far past the viewport items are built, in points: a wheel step and more.
 const MARGIN: f64 = 200.0;
@@ -105,11 +104,12 @@ impl<'a> Ui<'a> {
     let area =
       self.st.stack.iter().rev().map(|&(i, _)| i).find(|&i| t.nodes[i as usize].style.scroll[1]);
     let area_id = area.map(|i| t.nodes[i as usize].id);
-    let sc = area_id.and_then(|a| self.scroll(a));
+    // In `f64` throughout: a column of a million rows passes `f32`'s whole numbers.
+    let sc = area_id.and_then(|a| self.st.scroll_exact(a));
     // Placed by the offset it was laid out at, seen through the offset the input set since.
     let laid = area_id.and_then(|a| self.st.last.get(a));
-    let top = match (laid, self.rect(id)) {
-      (Some(a), Some(r)) => (r.y - a.rect.y + a.scroll.y) as f64,
+    let top = match (laid, self.st.last.get(id)) {
+      (Some(a), Some(c)) => c.pos[1] - a.pos[1] + a.scroll[1],
       _ => 0.0,
     };
 
@@ -118,17 +118,16 @@ impl<'a> Ui<'a> {
     // laid out yet.
     let n = spans.len();
     if let Some((i, tries)) = self.state::<Lazy>(id).reveal.filter(|&(i, t)| i < n && t > 0) {
-      let vp = sc.map(|sc| sc.viewport);
+      let vp = sc.map(|sc| sc.1);
       let shows = tries < TRIES
         && (vp.zip(self.rect(id.key(key(i))))).is_some_and(|(vp, r)| {
           let (top, end) = (vp.y + 0.5, vp.y + vp.h + 0.5);
           r.y >= vp.y - 0.5 && (r.y + r.h <= end || r.y <= top)
         });
       self.state::<Lazy>(id).reveal = (!shows).then_some((i, tries - 1));
-      if let (false, Some(sc)) = (shows, sc) {
+      if let (false, Some((off, _))) = (shows, sc) {
         let (from, to) = (spans.top(i), spans.top(i + 1));
-        let r = Rect::new(sc.offset.x, (top + from) as f32, 1.0, (to - from) as f32);
-        self.reveal(area_id.unwrap(), r);
+        self.reveal_exact(area_id.unwrap(), [off[0], top + from, 1.0, to - from]);
       }
 
       self.st.animating |= !shows;
@@ -136,7 +135,7 @@ impl<'a> Ui<'a> {
 
     // Before the area is laid out, a window's height from the top; outside one, everything.
     let (off, view) = match (area, sc) {
-      (Some(_), Some(sc)) => (sc.offset.y as f64, sc.viewport.h as f64),
+      (Some(_), Some((off, vp))) => (off[1], f64::from(vp.h)),
       (Some(_), None) => (0.0, self.size().h as f64),
       (None, _) => (0.0, f64::INFINITY),
     };
@@ -146,24 +145,20 @@ impl<'a> Ui<'a> {
     let (from, to, total) = (spans.top(shown.start), spans.top(shown.end), spans.top(n));
     self.next_id = Some((id, false));
     self.col(Style::new().w(grow()), |ui| {
-      if from > 0.0 {
-        ui.el(Style::new().h(px(from as f32)));
-      }
+      spacer(ui, from);
 
       for i in shown.clone() {
         let h = (spans.top(i + 1) - spans.top(i)) as f32;
         ui.key(key(i)).col(Style::new().w(grow()).h(px(h)).clip(), |ui| item(ui, i));
       }
 
-      if total > to {
-        ui.el(Style::new().h(px((total - to) as f32)));
-      }
+      spacer(ui, total - to);
 
       // What the built items cover, from the column's top, for the runtime to run the view
       // again if the layout shows more (the ends are open where the column's are).
       if let Some(area) = area {
-        let lo = if shown.start == 0 { f32::NEG_INFINITY } else { from as f32 };
-        let hi = if shown.end == n { f32::INFINITY } else { to as f32 };
+        let lo = if shown.start == 0 { f64::NEG_INFINITY } else { from };
+        let hi = if shown.end == n { f64::INFINITY } else { to };
         let node = ui.st.stack.last().unwrap().0;
         ui.st.tree.partial.push((area, node, lo, hi));
       }
@@ -176,6 +171,17 @@ impl<'a> Ui<'a> {
   /// column's next build.
   pub fn reveal_item(&mut self, id: Id, i: usize) {
     self.state::<Lazy>(id).reveal = Some((i, TRIES));
+  }
+}
+
+/// Space `h` high, if any: in two boxes, whole multiples of 4096 points and the rest, each held
+/// exactly by an `f32` height, which the layout adds in `f64`.
+fn spacer(ui: &mut Ui, h: f64) {
+  let coarse = (h / 4096.0).floor() * 4096.0;
+  for part in [coarse, h - coarse] {
+    if part > 0.0 {
+      ui.el(Style::new().h(px(part as f32)));
+    }
   }
 }
 

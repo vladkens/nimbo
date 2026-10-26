@@ -17,6 +17,10 @@ use crate::keys::{Key, Shortcut};
 /// The posted events' source user data: the hotkey tap passes them on unjudged.
 pub(super) const POSTED: i64 = u32::from_be_bytes(*b"nmbo") as i64;
 
+pub fn ready() -> bool {
+  super::permissions::accessibility(false)
+}
+
 pub fn post(s: Shortcut) -> Result<(), String> {
   // The layout's lookup (TIS) aborts the process when another thread calls it at once.
   if objc2::MainThreadMarker::new().is_none() {

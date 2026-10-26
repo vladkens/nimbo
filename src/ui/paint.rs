@@ -49,8 +49,8 @@ pub(super) fn paint(
 /// as strong as the content is scrolled away from it, full at `len` points.
 fn edge_fade(t: &Tree, p: usize, color: Color, len: f32, alpha: f32, f: &mut Frame) {
   let n = &t.nodes[p];
-  let (r, off) = (n.rect, n.scroll.y);
-  let max = (n.content[1] - r.h).max(0.0);
+  let (r, off) = (n.rect, n.scroll[1] as f32);
+  let max = (n.content[1] as f32 - r.h).max(0.0);
   let len = len.min(r.h / 2.0);
   if len <= 0.0 {
     return;

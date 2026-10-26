@@ -405,11 +405,13 @@ impl UiState {
         continue;
       }
       // In the container's content, then its offset after showing it.
-      let c = Rect::new(r.x - n.rect.x + n.scroll.x, r.y - n.rect.y + n.scroll.y, r.w, r.h);
+      let (x, y) = (f64::from(r.x - n.rect.x), f64::from(r.y - n.rect.y));
+      let c = [x + n.scroll[0], y + n.scroll[1], r.w.into(), r.h.into()];
       let off = reveal_offset(n.scroll, n.rect, c);
       let s = self.store.raw::<ScrollState>(n.id);
       (s.offset, s.pending) = (off, Point::default());
-      r = Rect::new(r.x - (off.x - n.scroll.x), r.y - (off.y - n.scroll.y), r.w, r.h);
+      let d = [(off[0] - n.scroll[0]) as f32, (off[1] - n.scroll[1]) as f32];
+      r = Rect::new(r.x - d[0], r.y - d[1], r.w, r.h);
     }
   }
 
@@ -480,15 +482,14 @@ impl UiState {
 
 /// The offset of a scroll container showing `viewport` at `off` that moves the least to show
 /// `r`, a rect of its content.
-fn reveal_offset(mut off: Point, viewport: Rect, r: Rect) -> Point {
-  let fit = |off: f32, lo: f32, len: f32, view: f32| match () {
+/// `r` is x, y, width and height, in `f64` as the offset.
+fn reveal_offset(off: [f64; 2], viewport: Rect, r: [f64; 4]) -> [f64; 2] {
+  let fit = |off: f64, lo: f64, len: f64, view: f32| match () {
     _ if lo < off => lo,
-    _ if lo + len > off + view => (lo + len - view).min(lo),
+    _ if lo + len > off + f64::from(view) => (lo + len - f64::from(view)).min(lo),
     _ => off,
   };
-  off.x = fit(off.x, r.x, r.w, viewport.w);
-  off.y = fit(off.y, r.y, r.h, viewport.h);
-  off
+  [fit(off[0], r[0], r[2], viewport.w), fit(off[1], r[1], r[3], viewport.h)]
 }
 
 /// What an interactive element got from the pointer, as its builder returns it. Hover and press
@@ -1159,6 +1160,12 @@ impl<'a> Ui<'a> {
 
   /// Scrolls `id` to `offset`, clamped by the layout; stops wheel momentum.
   pub fn scroll_to(&mut self, id: Id, offset: Point) {
+    self.scroll_exact(id, [offset.x.into(), offset.y.into()]);
+  }
+
+  /// [Ui::scroll_to] in `f64`: content past `f32`'s whole numbers (a virtual list of a million
+  /// rows) scrolls to the point.
+  pub(crate) fn scroll_exact(&mut self, id: Id, offset: [f64; 2]) {
     let s = self.state::<ScrollState>(id);
     (s.offset, s.pending) = (offset, Point::default());
   }
@@ -1166,8 +1173,13 @@ impl<'a> Ui<'a> {
   /// Scrolls `id` the least that shows `r` (in its content: (0, 0) is its top-left corner at
   /// offset 0), using the last frame's viewport: keeps a caret or a selected row visible.
   pub fn reveal(&mut self, id: Id, r: Rect) {
-    let Some(sc) = self.scroll(id) else { return };
-    self.scroll_to(id, reveal_offset(sc.offset, sc.viewport, r));
+    self.reveal_exact(id, [r.x.into(), r.y.into(), r.w.into(), r.h.into()]);
+  }
+
+  /// [Ui::reveal] of x, y, width and height in `f64`, as [Ui::scroll_exact].
+  pub(crate) fn reveal_exact(&mut self, id: Id, r: [f64; 4]) {
+    let Some((off, viewport)) = self.st.scroll_exact(id) else { return };
+    self.scroll_exact(id, reveal_offset(off, viewport, r));
   }
 
   // MARK: Frame
@@ -1178,7 +1190,7 @@ impl<'a> Ui<'a> {
     let UiState { tree, store, .. } = &mut self.st;
     for &i in &tree.scrolls {
       let n = &mut tree.nodes[i as usize];
-      n.scroll = store.peek::<ScrollState>(n.id).map_or(Point::default(), |s| s.offset);
+      n.scroll = store.peek::<ScrollState>(n.id).map_or([0.0; 2], |s| s.offset);
     }
 
     let fit_h = layout::layout(tree, self.size, scale, m);
@@ -1186,8 +1198,11 @@ impl<'a> Ui<'a> {
       let n = &tree.nodes[i as usize];
       let (s, max) = (store.raw::<ScrollState>(n.id), input::max_scroll(n));
       // Wheel momentum still to run stops at the new ends too.
-      let to = |off: f32, pend: f32, max: f32| (off + pend).clamp(0.0, max) - off;
-      let (x, y) = (to(n.scroll.x, s.pending.x, max[0]), to(n.scroll.y, s.pending.y, max[1]));
+      let to = |ax: usize, pend: f32| {
+        let off = n.scroll[ax];
+        ((off + f64::from(pend)).clamp(0.0, max[ax]) - off) as f32
+      };
+      let (x, y) = (to(0, s.pending.x), to(1, s.pending.y));
       (s.offset, s.pending) = (n.scroll, Point::new(x, y));
     }
 
@@ -1206,8 +1221,10 @@ impl<'a> Ui<'a> {
       || t.partial.iter().any(|&(i, b, lo, hi)| {
         let (n, b) = (&t.nodes[i as usize], &t.nodes[b as usize]);
         // The block's top in the container's content: 0 for the container itself.
-        let top = if std::ptr::eq(n, b) { 0.0 } else { b.rect.y - n.rect.y + n.scroll.y };
-        top + lo > n.scroll.y + 0.5 || top + hi < n.scroll.y + n.rect.h - 0.5
+        // From the positions, in `f64`: the block may be millions of points tall.
+        let top = if std::ptr::eq(n, b) { 0.0 } else { b.pos[1] - n.pos[1] + n.scroll[1] };
+        let (off, view) = (n.scroll[1], f64::from(n.rect.h));
+        top + lo > off + 0.5 || top + hi < off + view - 0.5
       })
   }
 

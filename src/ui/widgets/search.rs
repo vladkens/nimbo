@@ -398,7 +398,7 @@ mod tests {
     h.click_id(Id::of("s"));
     h.key(NamedKey::ArrowRight, crate::CMD);
     h.frame();
-    let scroll = |h: &Harness<Find>| h.rt.ui.last.get(Id::of("s")).unwrap().scroll.x;
+    let scroll = |h: &Harness<Find>| h.rt.ui.last.get(Id::of("s")).unwrap().scroll[0];
     assert!(scroll(&h) > 0.0);
     h.click_id(Id::of("s").key("clear"));
     h.frame();

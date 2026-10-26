@@ -25,6 +25,10 @@ pub(super) const POSTED: usize = u32::from_be_bytes(*b"nmbo") as usize;
 /// but neither key then reads as tapped alone (AutoHotkey's menu mask key).
 const MASK: u16 = 0xE8;
 
+pub fn ready() -> bool {
+  true
+}
+
 pub fn post(s: Shortcut) -> Result<(), String> {
   let (vk, shift) = match s.key {
     Key::Char(c) => char_key(c).ok_or(format!("no key types {c:?} without AltGr"))?,

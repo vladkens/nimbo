@@ -69,7 +69,8 @@ impl Scroll {
 /// A scroll container's state in the store.
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct ScrollState {
-  pub offset: Point,
+  /// `f64`, as [super::layout::Node::scroll].
+  pub offset: [f64; 2],
   /// Wheel distance still to cover.
   pub pending: Point,
   /// When `pending` last moved.
@@ -212,9 +213,9 @@ fn scrolls(n: &Node) -> bool {
 }
 
 /// How far a scroll container can scroll on each axis.
-pub(super) fn max_scroll(n: &Node) -> [f32; 2] {
+pub(super) fn max_scroll(n: &Node) -> [f64; 2] {
   let m = |ax: usize, view: f32| match n.style.scroll[ax] {
-    true => (n.content[ax] - view).max(0.0),
+    true => (n.content[ax] - f64::from(view)).max(0.0),
     false => 0.0,
   };
   [m(0, n.rect.w), m(1, n.rect.h)]
@@ -364,7 +365,7 @@ impl UiState {
       let sideways = !precise && n.style.scroll == [true, false] && want[0] == 0.0;
       let src = if sideways { [1, 1] } else { [0, 1] };
       let s = self.store.raw::<ScrollState>(id);
-      let (mut off, mut pend) = ([s.offset.x, s.offset.y], [s.pending.x, s.pending.y]);
+      let (mut off, mut pend) = (s.offset, [s.pending.x, s.pending.y]);
       for ax in 0..2 {
         let w = want[src[ax]];
         if !n.style.scroll[ax] || w == 0.0 {
@@ -378,14 +379,14 @@ impl UiState {
 
         // An offset set since the last layout ([Ui::scroll_to]) may be past the content.
         off[ax] = off[ax].clamp(0.0, max[ax]);
-        let from = off[ax] + pend[ax];
-        let used = (from + w).clamp(0.0, max[ax]) - from;
+        let from = off[ax] + f64::from(pend[ax]);
+        let used = ((from + f64::from(w)).clamp(0.0, max[ax]) - from) as f32;
         if used == 0.0 {
           continue;
         }
 
         match precise {
-          true => off[ax] += used,
+          true => off[ax] += f64::from(used),
           false => pend[ax] += used,
         }
 
@@ -403,7 +404,7 @@ impl UiState {
         }
       }
 
-      (s.offset, s.pending) = (Point::new(off[0], off[1]), Point::new(pend[0], pend[1]));
+      (s.offset, s.pending) = (off, Point::new(pend[0], pend[1]));
     }
 
     changed
@@ -435,16 +436,16 @@ impl UiState {
       let s = self.store.raw::<ScrollState>(id);
       let k = 1.0 - (-now.saturating_sub(s.t).as_secs_f32() / WHEEL_TAU).exp();
       s.t = now;
-      let (mut off, mut pend) = ([s.offset.x, s.offset.y], [s.pending.x, s.pending.y]);
+      let (mut off, mut pend) = (s.offset, [s.pending.x, s.pending.y]);
       for ax in 0..2 {
         // The last half point goes in one step.
         let step = if (pend[ax] * (1.0 - k)).abs() < 0.5 { pend[ax] } else { pend[ax] * k };
-        let to = (off[ax] + step).clamp(0.0, max[ax]);
-        pend[ax] = if to == off[ax] + step { pend[ax] - step } else { 0.0 };
+        let to = (off[ax] + f64::from(step)).clamp(0.0, max[ax]);
+        pend[ax] = if to == off[ax] + f64::from(step) { pend[ax] - step } else { 0.0 };
         off[ax] = to;
       }
 
-      (s.offset, s.pending) = (Point::new(off[0], off[1]), Point::new(pend[0], pend[1]));
+      (s.offset, s.pending) = (off, Point::new(pend[0], pend[1]));
       pend != [0.0; 2]
     });
     self.input.moving = moving;
@@ -453,11 +454,19 @@ impl UiState {
   /// A scroll container's offset, content and viewport, as of the last frame and the input
   /// since.
   pub fn scroll(&self, id: Id) -> Option<Scroll> {
+    let ([x, y], viewport) = self.scroll_exact(id)?;
+    let n = self.last.get(id)?;
+    let content = Size::new(n.content[0] as f32, n.content[1] as f32);
+    Some(Scroll { offset: Point::new(x as f32, y as f32), content, viewport })
+  }
+
+  /// A scroll container's offset in `f64` ([super::layout::Node::scroll]) and its viewport, as
+  /// [UiState::scroll].
+  pub(crate) fn scroll_exact(&self, id: Id) -> Option<([f64; 2], Rect)> {
     let n = self.last.get(id).filter(|n| scrolls(n))?;
     let off = self.store.peek::<ScrollState>(id).map_or(n.scroll, |s| s.offset);
     let max = max_scroll(n);
-    let offset = Point::new(off.x.clamp(0.0, max[0]), off.y.clamp(0.0, max[1]));
-    Some(Scroll { offset, content: Size::new(n.content[0], n.content[1]), viewport: n.rect })
+    Some(([off[0].clamp(0.0, max[0]), off[1].clamp(0.0, max[1])], n.rect))
   }
 }
 
@@ -731,7 +740,7 @@ mod tests {
   #[test]
   fn a_scroll_after_an_offset_past_the_end_starts_from_it() {
     let mut st = nested(UiState::default());
-    st.store.raw::<ScrollState>(Id::of("inner")).offset.y = 500.0;
+    st.store.raw::<ScrollState>(Id::of("inner")).offset[1] = 500.0;
     ev(&mut st, wheel(10.0, 10.0, 0.0, 5.0, true, Phase::None));
     assert_eq!((offset(&st, "inner"), offset(&st, "outer")), (45.0, 0.0));
   }
@@ -760,7 +769,7 @@ mod tests {
     // Back 20 by trackpad: from where the content is, down to the top, the wheel's rest gone.
     ev(&mut st, wheel(10.0, 80.0, 0.0, 20.0, true, Phase::None));
     let s = st.store.peek::<ScrollState>(outer).unwrap();
-    assert_eq!((s.offset.y, s.pending.y), (0.0, 0.0));
+    assert_eq!((s.offset[1], s.pending.y), (0.0, 0.0));
     st.tick(Duration::from_secs(1));
     assert_eq!(offset(&st, "outer"), 0.0);
   }

@@ -200,6 +200,12 @@ fn path(s: &State) -> V {
   V::O(s.session.borrow().clone())
 }
 
+/// A session runs, or the desktop's approval is saved for the next one to start without asking.
+pub(super) fn granted() -> bool {
+  let saved = std::fs::read_to_string(token_file()).is_ok_and(|t| !t.trim().is_empty());
+  SESSION.with_borrow(Option::is_some) || saved
+}
+
 fn token_file() -> PathBuf {
   crate::paths::config_dir(super::shell::info().id).join("remote-desktop.token")
 }
