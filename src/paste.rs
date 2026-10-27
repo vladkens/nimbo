@@ -67,9 +67,10 @@ pub struct Paste {
   /// when the focus moved from it since. `None` (not known) refuses it, unless the OS hides the
   /// focus ([focus::hidden]: Wayland): then it goes wherever the focus is.
   pub target: Option<Focused>,
-  /// When the caller stops waiting for the paste: past it once the clipboard is read and the focus
-  /// checked, nothing changes and no shortcut goes (a paste a minute late lands wherever the
-  /// focus is by then).
+  /// When the caller stops waiting for the paste, best about 100 ms before it gives up: past it
+  /// once the clipboard is read and the focus checked, nothing changes, and past it after the
+  /// offer (Wayland's portal dialog) the clipboard comes back; no shortcut goes either way (a
+  /// paste a minute late lands wherever the focus is by then).
   pub deadline: Option<Instant>,
 }
 
@@ -253,6 +254,12 @@ fn paste_now(sys: Sys, text: &str, opts: Paste) -> Result<(), NotPasted> {
     None => _ = (sys.offer)(text, None).ok_or(NotPasted::NoClipboard)?,
   }
 
+  // Wayland's first offer may wait for the portal's dialog.
+  if deadline.is_some_and(|d| Instant::now() >= d) {
+    settle(sys, Some(id));
+    return Err(NotPasted::Late);
+  }
+
   let key = paste_key(&target);
   (sys.post)(key).map_err(|why| {
     settle(sys, Some(id));
@@ -332,6 +339,9 @@ mod tests {
     /// The clipboard can't be put back this many more times (another app has it open).
     busy: usize,
     nested: Option<Result<(), NotPasted>>,
+    /// The snapshot takes this long, or `None` comes of it (an app that doesn't answer: macOS).
+    slow: Duration,
+    no_snapshot: bool,
   }
 
   thread_local! {
@@ -348,7 +358,8 @@ mod tests {
 
   const FAKE: Sys = Sys {
     snapshot: || {
-      let clip = world(|w| w.clip.clone().into_bytes());
+      std::thread::sleep(world(|w| w.slow));
+      let clip = world(|w| (!w.no_snapshot).then(|| w.clip.clone().into_bytes()))?;
       Some(Snapshot { items: vec![vec![("text".into(), clip)]], missing: 0 })
     },
     offer: |text, on_read| {
@@ -466,9 +477,28 @@ mod tests {
     assert_eq!(world(|w| (w.posted.len(), w.offers)), (0, 0));
     assert_eq!(clip(), ("mine".into(), 0));
 
+    // A snapshot that outlasts it.
+    world(|w| w.slow = Duration::from_millis(30));
+    let soon = Some(Instant::now() + Duration::from_millis(10));
+    assert_eq!(
+      paste(FAKE, "hello", Paste { deadline: soon, ..opts.clone() }),
+      Err(NotPasted::Late)
+    );
+    assert_eq!(world(|w| (w.posted.len(), w.offers)), (0, 0));
+
     let later = Instant::now() + Duration::from_secs(60);
     assert_eq!(paste(FAKE, "hello", Paste { deadline: Some(later), ..opts }), Ok(()));
     assert_eq!(world(|w| w.posted.len()), 1);
+  }
+
+  /// No snapshot in time: the paste goes, and the text stays.
+  #[test]
+  fn pastes_without_a_snapshot() {
+    let opts = setup("TextEdit");
+    world(|w| w.no_snapshot = true);
+    assert_eq!(paste(FAKE, "hello", opts), Ok(()));
+    let w = world(|w| (w.posted.len(), w.on_read.is_some(), w.timers.len(), w.clip.clone()));
+    assert_eq!(w, (1, false, 0, "hello".into()));
   }
 
   #[test]

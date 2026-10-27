@@ -120,11 +120,12 @@
 //!   key events to the app in focus, its character (lowercase) found on the layout in use.
 //! - `pub fn clipboard() -> Option<impl Clipboard>`: the system clipboard outside a window
 //!   ([crate::SystemClipboard]), `None` while the platform can't reach it (no app running).
-//! - `pub mod paste` ([crate::clipboard], on the main thread): `change_count() -> Option<u64>`,
-//!   `readable() -> bool`, `snapshot() -> Option<Snapshot>`, `restore(Snapshot) -> bool`,
-//!   `offer(&str, Option<Box<dyn FnMut()>>) -> Option<u64>` (the text marked for clipboard managers
-//!   to skip, handed out at a read that runs the callback when there is one) and `holds(u64) ->
-//!   bool` (nothing was written since that offer).
+//! - `pub mod paste` ([crate::clipboard], called on the main thread, which a read may leave for a
+//!   while: macOS): `change_count() -> Option<u64>`, `readable() -> bool`, `snapshot() ->
+//!   Option<Snapshot>`, `restore(Snapshot) -> bool`, `offer(&str, Option<Box<dyn FnMut()>>) ->
+//!   Option<u64>` (the text marked for clipboard managers to skip, handed out at a read that runs
+//!   the callback when there is one) and `holds(u64) -> bool` (nothing was written since that
+//!   offer).
 //! - `pub mod focus` ([crate::focus]): `current() -> Option<Focused>`, `hidden() -> bool` (the OS
 //!   hides the focus: `current` is always `None`) and `Window: Clone + Debug + PartialEq + Send +
 //!   Sync`, another app's window by identity.
