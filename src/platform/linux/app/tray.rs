@@ -6,8 +6,16 @@
 //! GDBus on the main loop. The item registers with `org.kde.StatusNotifierWatcher` whenever one
 //! appears, so a panel that starts later or restarts shows it.
 //!
-//! The icon is a template filled white on a dark appearance or GNOME (its top bar is dark in
-//! either), black on a light one, at 22 and 44 px (`IconPixmap`, ARGB in network order).
+//! The icon is a template, served by name (`IconName`) as an SVG the panel fills with its own
+//! text colour ([TrayIcon::svg]), so it follows the panel and not the app's appearance (Kubuntu's
+//! panel is dark over light apps): Plasma by its colour scheme stylesheet, GNOME's AppIndicator
+//! by the `-symbolic` name. The SVG goes in the user's icons ([crate::desktop::tray_icon]) with
+//! no `IconThemePath`: Plasma 5 colours an icon from that path with the apps' colours, one it
+//! finds itself with the panel's. Plasma draws an item's icon once, so it is sent again a moment
+//! after Plasma's settings change ([follow_plasma]). `IconPixmap` (ARGB in network order, at 22
+//! and 44 px) is the fallback for a host that reads no names, white on a dark appearance or
+//! GNOME (its top bar is dark in either), black on a light one, painted again as the appearance
+//! changes ([repaint]).
 //! `ItemIsMenu`: a click opens the menu. Panels ask `AboutToShow` as it opens
 //! ([crate::tray::Tray::on_open] runs then) and fetch the layout; a menu set while it is open
 //! waits until it closes (`Event` "closed" on the root, or a click), until the host fetches it
@@ -17,13 +25,14 @@
 //! means another item, and a click on one gone does nothing.
 
 use std::cell::{Cell, RefCell};
-use std::ffi::c_uint;
-use std::ptr::null;
-use std::rc::Rc;
+use std::ffi::{CString, c_int, c_uint};
+use std::ptr::{null, null_mut};
+use std::rc::{Rc, Weak};
 use std::sync::OnceLock;
 
 use super::super::dbus::{self, Gv, V, VTable};
-use super::super::{Fp, P, S};
+use super::super::dl::fns;
+use super::super::{Fp, P, S, connect, lib, load};
 use super::menu::{self, nodes};
 use crate::tray::{Menu, State, TrayIcon};
 
@@ -32,6 +41,14 @@ const SNI_PATH: &str = "/StatusNotifierItem";
 const MENU: &str = "com.canonical.dbusmenu";
 const MENU_PATH: &str = "/MenuBar";
 const WATCHER: &str = "org.kde.StatusNotifierWatcher";
+/// Plasma's settings its panel's colours follow: its style, and the colour scheme.
+const PLASMA: [&str; 2] = ["plasmarc", "kdeglobals"];
+
+fns!(Files {
+  fn g_file_new_for_path(path: S) -> P;
+  fn g_file_monitor_file(file: P, flags: c_int, cancel: P, err: *mut P) -> P;
+});
+
 /// The icon's sides in pixels: a panel's 22 px, and twice that at scale 2.
 const SIDES: [u32; 2] = [22, 44];
 
@@ -92,7 +109,9 @@ struct Bus {
 struct Inner {
   /// The icon at [SIDES], tinted, as `IconPixmap` sends it.
   pixmaps: RefCell<V>,
-  icon: RefCell<(u32, u32)>,
+  icon: RefCell<TrayIcon>,
+  /// `IconName`: the icon's SVG in the user's icons, empty until it is written there.
+  name: RefCell<String>,
   tooltip: RefCell<String>,
   menu: RefCell<Menu>,
   revision: Cell<u32>,
@@ -121,20 +140,25 @@ pub struct Tray(Rc<Inner>);
 
 impl Tray {
   pub fn new(icon: TrayIcon, tooltip: &str) -> Self {
-    let tray = Self::detached(icon, tooltip);
+    let tray = Self::detached(icon.clone(), tooltip);
     // A connection of its own: two trays' objects would share the paths on one.
     match dbus::private_session() {
       Ok(conn) => *tray.0.bus.borrow_mut() = Some(tray.connect(conn)),
       Err(e) => eprintln!("nimbo: the tray shows nothing: {e}"),
     }
 
+    TRAYS.with_borrow_mut(|t| t.push(Rc::downgrade(&tray.0)));
+    static FOLLOW: std::sync::Once = std::sync::Once::new();
+    FOLLOW.call_once(follow_plasma);
+    tray.paint(&icon);
     tray
   }
 
   pub fn detached(icon: TrayIcon, tooltip: &str) -> Self {
     let tray = Self(Rc::new(Inner {
       pixmaps: RefCell::new(V::Array("(iiay)", Vec::new())),
-      icon: RefCell::new((0, 0)),
+      icon: RefCell::new(icon.clone()),
+      name: RefCell::default(),
       tooltip: RefCell::new(tooltip.into()),
       menu: RefCell::default(),
       revision: Cell::new(1),
@@ -181,7 +205,7 @@ impl Tray {
     }
   }
 
-  /// The icon's pixmaps, tinted for the appearance now.
+  /// The icon's pixmaps, tinted for the appearance now, and on the bus its SVG by name.
   fn paint(&self, icon: &TrayIcon) {
     let gnome = std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| d.contains("GNOME"));
     let tint = if gnome || crate::platform::appearance().dark { [255; 3] } else { [0; 3] };
@@ -191,7 +215,20 @@ impl Tray {
       V::Tuple(vec![V::I(side as i32), V::I(side as i32), V::Bytes(argb)])
     };
     *self.0.pixmaps.borrow_mut() = V::Array("(iiay)", SIDES.map(pixmap).to_vec());
-    *self.0.icon.borrow_mut() = (SIDES[0], SIDES[0]);
+    *self.0.icon.borrow_mut() = icon.clone();
+    if self.0.bus.borrow().is_none() {
+      return;
+    }
+
+    let keep = trays().into_iter().filter(|t| !Rc::ptr_eq(t, &self.0));
+    let keep: Vec<String> = keep.map(|t| t.name.borrow().clone()).collect();
+    let (data, id) = (crate::paths::data_dir(""), super::shell::info().id);
+    let name = crate::desktop::tray_icon(&data, id, &icon.svg(SIDES[1]), &keep);
+    if let Err(e) = &name {
+      eprintln!("nimbo: the tray icon goes as pixels, its file was not written: {e}");
+    }
+
+    *self.0.name.borrow_mut() = name.unwrap_or_default();
   }
 
   pub fn set_icon(&self, icon: TrayIcon) {
@@ -264,8 +301,7 @@ impl Tray {
   }
 
   pub fn describe(&self) -> Vec<String> {
-    let (w, h) = *self.0.icon.borrow();
-    let mut out = vec![format!("icon {w}x{h}")];
+    let mut out = vec![format!("icon {0}x{0}", SIDES[0])];
     menu::describe(&nodes(&self.0.menu.borrow()), 0, 0, &mut out);
     out
   }
@@ -304,7 +340,8 @@ impl Tray {
       (SNI, "Title") => s(info.name),
       (SNI, "Status") => s("Active"),
       (SNI, "WindowId") => Some(V::I(0)),
-      (SNI, "IconName" | "OverlayIconName" | "AttentionIconName" | "AttentionMovieName") => s(""),
+      (SNI, "IconName") => s(&self.0.name.borrow()),
+      (SNI, "OverlayIconName" | "AttentionIconName" | "AttentionMovieName") => s(""),
       (SNI, "IconThemePath") => s(""),
       (SNI, "IconPixmap") => Some(self.0.pixmaps.borrow().clone()),
       (SNI, "OverlayIconPixmap" | "AttentionIconPixmap") => no_pixmaps(),
@@ -403,6 +440,66 @@ impl Tray {
     };
 
     dbus::reply(inv, out);
+  }
+}
+
+thread_local! {
+  /// The trays made, for [repaint].
+  static TRAYS: RefCell<Vec<Weak<Inner>>> = const { RefCell::new(Vec::new()) };
+  /// A [repaint] is due after Plasma's settings changed.
+  static DUE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// On KDE, watches [PLASMA] in the config folder: as either changes, the trays are painted again
+/// a second later, once Plasma has read it, for the panel to draw the icon in its new colours.
+fn follow_plasma() {
+  let kde = std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| d.contains("KDE"));
+  let Some(f) = lib().and_then(|l| Files::load(&l)).filter(|_| kde) else { return };
+
+  for name in PLASMA {
+    let Ok(path) =
+      CString::new(crate::paths::config_dir(name).into_os_string().into_encoded_bytes())
+    else {
+      continue;
+    };
+
+    // SAFETY: GIO's calls; the monitor lives as long as the process.
+    unsafe {
+      let file = (f.g_file_new_for_path)(path.as_ptr());
+      let monitor = (f.g_file_monitor_file)(file, 0, null_mut(), null_mut());
+      if !monitor.is_null() {
+        connect(monitor, c"changed", on_plasma as Fp, 0);
+      }
+    }
+  }
+}
+
+/// `changed` of a monitor: a [repaint] in a second, unless one is due.
+unsafe extern "C" fn on_plasma(_: P, _: P, _: P, _: c_int, _: P) {
+  if let Some(g) = load().filter(|_| !DUE.replace(true)) {
+    unsafe { (g.g_timeout_add)(1000, on_due as Fp, null_mut()) };
+  }
+}
+
+unsafe extern "C" fn on_due(_: P) -> c_int {
+  DUE.set(false);
+  repaint();
+  0
+}
+
+/// The trays that live.
+fn trays() -> Vec<Rc<Inner>> {
+  TRAYS.with_borrow_mut(|t| {
+    t.retain(|w| w.strong_count() > 0);
+    t.iter().filter_map(Weak::upgrade).collect()
+  })
+}
+
+/// Paints the icon of each tray again: the appearance changed, and so their pixmaps' tint.
+pub fn repaint() {
+  for t in trays().into_iter().map(Tray) {
+    let icon = t.0.icon.borrow().clone();
+    t.set_icon(icon);
   }
 }
 

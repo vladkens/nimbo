@@ -9,6 +9,8 @@
 //! | macOS, Windows | nothing: the app bundle or the exe carries its name and icon |
 //! | Linux | `$XDG_DATA_HOME/applications/<id>.desktop` (`~/.local/share` without it) and its icon, `$XDG_DATA_HOME/icons/hicolor/<side>x<side>/apps/<id>.png` |
 //!
+//! The tray's icons go in `$XDG_DATA_HOME/icons` ([tray_icon]); [uninstall] removes them too.
+//!
 //! The entry runs `$APPIMAGE` when set, else the executable running now, and names the window's
 //! class ([crate::AppInfo::id]) so the desktop matches the app's windows to it. Inside Flatpak
 //! the package has its own: not for there.
@@ -49,6 +51,47 @@ pub fn uninstall(app: &AppInfo) -> Result<(), String> {
 #[cfg(any(all(test, unix), target_os = "linux"))]
 fn entry(data: &Path, app: &AppInfo) -> PathBuf {
   data.join(format!("applications/{}.desktop", app.id))
+}
+
+/// The start of the names of app `id`'s tray icons ([tray_icon]), with no dash: KIconLoader
+/// looks for a name's shorter forms (up to a dash) in each theme first, and `<id>` alone is the
+/// launcher's icon.
+#[cfg(any(all(test, unix), target_os = "linux"))]
+fn tray_icons(id: &str) -> String {
+  format!("{}.tray", id.replace('-', "_"))
+}
+
+/// Writes a tray icon's `svg` for app `id` at the top of the data folder `data`'s `icons` (no
+/// theme's: KIconLoader and GTK look there each time, in a theme only in the folders there were
+/// as they started), named by its content, as panels keep an icon by its name, and `-symbolic`
+/// for GNOME to colour it; removes the app's others but those named in `keep` (other trays').
+/// Its name, as `IconName` gives it.
+#[cfg(any(all(test, unix), target_os = "linux"))]
+pub(crate) fn tray_icon(
+  data: &Path,
+  id: &str,
+  svg: &str,
+  keep: &[String],
+) -> Result<String, String> {
+  use std::hash::{Hash, Hasher};
+  let mut hash = std::hash::DefaultHasher::new();
+  svg.hash(&mut hash);
+  let (prefix, icons) = (tray_icons(id), data.join("icons"));
+  let name = format!("{prefix}{:016x}-symbolic", hash.finish());
+  let file = icons.join(format!("{name}.svg"));
+  if !file.exists() {
+    crate::platform::write::file(&file, svg.as_bytes())?;
+  }
+
+  for e in std::fs::read_dir(&icons).into_iter().flatten().flatten() {
+    let n = e.file_name().to_string_lossy().into_owned();
+    let stem = n.strip_suffix(".svg").unwrap_or(&n);
+    if n.starts_with(&prefix) && stem != name && !keep.iter().any(|k| k == stem) {
+      _ = std::fs::remove_file(e.path());
+    }
+  }
+
+  Ok(name)
 }
 
 /// Dates the icon theme's folder `hicolor` now, as an icon in it changed: a cache older than it
@@ -103,7 +146,7 @@ pub(crate) fn install_in(
   Ok(wrote)
 }
 
-/// [uninstall] under the data folder `data`: the entry, and the icon in every size.
+/// [uninstall] under the data folder `data`: the entry, the icon in every size and the tray's.
 #[cfg(any(all(test, unix), target_os = "linux"))]
 pub(crate) fn uninstall_in(data: &Path, app: &AppInfo) -> Result<(), String> {
   let hicolor = data.join("icons/hicolor");
@@ -115,7 +158,11 @@ pub(crate) fn uninstall_in(data: &Path, app: &AppInfo) -> Result<(), String> {
   // The size folders; the theme's cache and index are files beside them.
   let sizes = dirs.iter().map(|d| d.path()).filter(|p| p.is_dir());
   let icons = sizes.map(|p| p.join(format!("apps/{}.png", app.id)));
-  for path in icons.chain([entry(data, app)]) {
+  let tray = std::fs::read_dir(data.join("icons")).into_iter().flatten().flatten();
+  let tray = tray.map(|e| e.path()).filter(|p| {
+    p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(&tray_icons(app.id)))
+  });
+  for path in icons.chain(tray).chain([entry(data, app)]) {
     match std::fs::remove_file(&path) {
       Ok(()) if path.starts_with(&hicolor) => date(&hicolor).map_err(err)?,
       Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
@@ -130,6 +177,35 @@ pub(crate) fn uninstall_in(data: &Path, app: &AppInfo) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+  /// A tray icon is named by its content, with one dash; the app's others go, but those kept.
+  #[cfg(unix)]
+  #[test]
+  fn tray_icons_by_their_content() {
+    use super::*;
+    let data = std::env::temp_dir().join(format!("nimbo-tray-icons-{}", std::process::id()));
+    _ = std::fs::remove_dir_all(&data);
+    let a = tray_icon(&data, "com.example.my-app", "<svg>a</svg>", &[]).unwrap();
+    assert!(a.starts_with("com.example.my_app.tray") && a.ends_with("-symbolic"), "{a}");
+    assert_eq!(a.matches('-').count(), 1);
+    assert_eq!(
+      std::fs::read_to_string(data.join(format!("icons/{a}.svg"))).unwrap(),
+      "<svg>a</svg>"
+    );
+    assert_eq!(tray_icon(&data, "com.example.my-app", "<svg>a</svg>", &[]), Ok(a.clone()));
+
+    let other = data.join("icons/other.svg");
+    std::fs::write(&other, "").unwrap();
+    let b =
+      tray_icon(&data, "com.example.my-app", "<svg>b</svg>", std::slice::from_ref(&a)).unwrap();
+    assert!(b != a && data.join(format!("icons/{a}.svg")).exists(), "kept");
+    let c = tray_icon(&data, "com.example.my-app", "<svg>c</svg>", &[]).unwrap();
+    let left: Vec<_> =
+      std::fs::read_dir(data.join("icons")).unwrap().flatten().map(|e| e.file_name()).collect();
+    assert_eq!(left.len(), 2, "{left:?}");
+    assert!(other.exists() && data.join(format!("icons/{c}.svg")).exists());
+    _ = std::fs::remove_dir_all(&data);
+  }
+
   /// Unix: Windows opens no folder as a file, to date it.
   #[cfg(unix)]
   #[test]
@@ -175,11 +251,13 @@ mod tests {
     assert!(install_in(&data, &APP, &Launcher { icon: (16, &px[..4]), ..l }, "/a").is_err());
 
     std::fs::write(hicolor.join("icon-theme.cache"), b"").unwrap();
+    let tray = data.join(format!("icons/{}.svg", tray_icon(&data, APP.id, "<svg/>", &[]).unwrap()));
     std::fs::File::open(&hicolor).unwrap().set_modified(old).unwrap();
     uninstall_in(&data, &APP).unwrap();
     assert!(std::fs::metadata(&hicolor).unwrap().modified().unwrap() > old, "dated");
     assert!(!data.join("applications/com.example.app.desktop").exists());
     assert!(!data.join("icons/hicolor/16x16/apps/com.example.app.png").exists());
+    assert!(!tray.exists());
     uninstall_in(&data, &APP).unwrap();
     _ = std::fs::remove_dir_all(&data);
   }

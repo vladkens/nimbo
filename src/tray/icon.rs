@@ -2,7 +2,7 @@
 
 //! Tray icons into pixels: SVG path data ([crate::svg]) filled with 16 samples a pixel ([fill]),
 //! and RGBA images scaled by averaging ([scale_alpha]); only the alpha, the icons being
-//! templates.
+//! templates. On Linux also into an SVG a panel recolours ([symbolic]).
 
 use crate::svg::{flatten, spans};
 
@@ -58,6 +58,53 @@ pub fn scale_alpha(w: u32, h: u32, px: &[u8], side: u32) -> Vec<u8> {
   out
 }
 
+/// Alpha levels an image's pixels are grouped by in [symbolic].
+#[cfg(any(test, target_os = "linux"))]
+const LEVELS: u32 = 8;
+
+/// Paths filled with the panel's text colour: Plasma's by the `ColorScheme-Text` class of the
+/// `current-color-scheme` stylesheet it rewrites, GTK's and GNOME Shell's by filling every path
+/// of an icon named `-symbolic` (their `fill: … !important` beats the inline one); an image as
+/// runs of pixels in `side` rows, one path per alpha level at its `fill-opacity`.
+#[cfg(any(test, target_os = "linux"))]
+pub fn symbolic(size: f32, paths: &[(String, bool, f32)]) -> String {
+  let mut out = format!(
+    r#"<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 {size} {size}"><style id="current-color-scheme">.ColorScheme-Text {{ color:#232629; }}</style>"#
+  );
+  for (d, even_odd, opacity) in paths {
+    let rule = if *even_odd { "evenodd" } else { "nonzero" };
+    let d = d.replace(['<', '>', '"', '&'], "");
+    out += &format!(
+      r#"<path class="ColorScheme-Text" style="fill:currentColor" fill-rule="{rule}" fill-opacity="{opacity}" d="{d}"/>"#
+    );
+  }
+
+  out + "</svg>"
+}
+
+/// The runs of `alpha` (`side` × `side`) as path data per alpha level, from the faintest.
+#[cfg(any(test, target_os = "linux"))]
+pub fn runs(alpha: &[u8], side: usize) -> Vec<(String, bool, f32)> {
+  let level = |a: u8| ((a as u32 * LEVELS + 127) / 255) as usize;
+  let mut ds = vec![String::new(); LEVELS as usize + 1];
+  for (y, row) in alpha.chunks(side).enumerate() {
+    let mut x = 0;
+    while x < row.len() {
+      let (l, start) = (level(row[x]), x);
+      while x < row.len() && level(row[x]) == l {
+        x += 1;
+      }
+
+      if l > 0 {
+        ds[l] += &format!("M{start} {y}h{}v1H{start}z", x - start);
+      }
+    }
+  }
+
+  let paths = ds.into_iter().enumerate().filter(|(_, d)| !d.is_empty());
+  paths.map(|(l, d)| (d, false, l as f32 / LEVELS as f32)).collect()
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -73,6 +120,19 @@ mod tests {
     assert_eq!(at(&same_way, 12, 12), 255, "non-zero fills a hole drawn the same way");
     let half = fill("M0 0H1V2H0Z", 2.0, 2, false);
     assert_eq!(half, [255, 0, 255, 0]);
+  }
+
+  /// Path data goes in as it is; an image as runs of pixels by alpha level, recoloured by class.
+  #[test]
+  fn symbolic_svgs_fill_with_the_text_colour() {
+    let svg = symbolic(18.0, &[("M0 0H9\"/>".into(), true, 1.0)]);
+    assert!(svg.contains(r#"fill-rule="evenodd" fill-opacity="1" d="M0 0H9/"/>"#), "{svg}");
+    assert!(svg.contains(r#"<style id="current-color-scheme">.ColorScheme-Text"#));
+    let alpha = [255, 255, 0, 128, 0, 0, 0, 0, 0];
+    let r = runs(&alpha, 3);
+    assert_eq!(r[0], ("M0 1h1v1H0z".into(), false, 0.5));
+    assert_eq!(r[1], ("M0 0h2v1H0z".into(), false, 1.0));
+    assert_eq!(r.len(), 2);
   }
 
   #[test]

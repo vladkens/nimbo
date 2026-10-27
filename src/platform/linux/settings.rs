@@ -87,9 +87,10 @@ unsafe extern "C" fn on_portal(_: P, _: S, _: S, _: S, _: S, args: P, _: P) {
   }
 }
 
-/// Sends the appearance to every window now; while one is busy (a paste waits), again in a
-/// moment.
+/// Sends the appearance to every window now, the tray's pixmaps painted for it; while a window
+/// is busy (a paste waits), again in a moment.
 unsafe extern "C" fn deliver(_: P) -> c_int {
+  super::app::tray::repaint();
   let look = appearance();
   let missed = each(|w| {
     w.send(Event::Appearance(look));
