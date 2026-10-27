@@ -19,6 +19,7 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSArray, NSData, NSObject, NSObjectProtocol, NSString};
 
+use super::super::{READ_WAIT, within};
 use crate::clipboard::Snapshot;
 
 /// Owners kept alive after their offer (see the module docs).
@@ -106,8 +107,10 @@ fn may_read(pasteboard: &NSPasteboard) -> bool {
     || !matches!(pasteboard.accessBehavior(), Behavior::Ask | Behavior::AlwaysDeny)
 }
 
+/// Off the main thread and within [READ_WAIT]: `None` when an app that promised its data doesn't
+/// answer, so the paste goes without a restore.
 pub fn snapshot() -> Option<Snapshot> {
-  Some(take(&general()))
+  within(READ_WAIT, || take(&general()))
 }
 
 pub fn restore(snapshot: Snapshot) -> bool {
@@ -230,6 +233,11 @@ mod tests {
     };
     assert!(put(&pb.0, &want));
     assert_eq!(take(&pb.0), want, "byte for byte");
+    let name = pb.0.name().to_string();
+    let off_main = within(READ_WAIT, move || {
+      take(&NSPasteboard::pasteboardWithName(&NSString::from_str(&name)))
+    });
+    assert_eq!(off_main.as_ref(), Some(&want), "as [snapshot] reads it");
     assert!(may_read(&pb.0), "a pasteboard of its own may be read");
 
     let before = pb.0.changeCount();

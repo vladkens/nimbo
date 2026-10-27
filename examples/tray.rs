@@ -114,7 +114,7 @@ fn show(main: &mut Main, state: &Shared) {
 /// Pastes `text` where the user types now: the clipboard comes back after the paste, unless
 /// something else was copied meanwhile.
 fn paste(text: &str) {
-  let opts = Paste { restore: true, target: nimbo::focus::current() };
+  let opts = Paste { restore: true, target: nimbo::focus::current(), deadline: None };
   if let Err(e) = nimbo::paste::text(text, opts) {
     eprintln!("paste: {e}");
   }
