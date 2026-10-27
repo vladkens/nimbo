@@ -42,7 +42,7 @@ pub struct Pasteboard;
 
 impl Clipboard for Pasteboard {
   fn read(&self) -> Option<String> {
-    within(READ_WAIT, || {
+    paste::read(|| {
       let pb = NSPasteboard::generalPasteboard();
       pb.stringForType(unsafe { NSPasteboardTypeString }).map(|s| s.to_string())
     })

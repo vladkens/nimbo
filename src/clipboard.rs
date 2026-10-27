@@ -9,8 +9,9 @@
 //! back with [SystemClipboard::restore] if the clipboard still [holds](SystemClipboard::holds) the
 //! offer: what the user copied meanwhile stays. [crate::paste::text] does it all.
 //!
-//! Per OS (all on the main thread, while the app runs on Windows and Linux): macOS the general
-//! `NSPasteboard`, every item with every type (UTIs), its `changeCount`, and an offer as a promise
+//! Per OS (all called on the main thread, while the app runs on Windows and Linux): macOS the
+//! general `NSPasteboard`, read off the main thread within a second unless it holds the app's own
+//! promise, every item with every type (UTIs), its `changeCount`, and an offer as a promise
 //! its owner provides when read. Windows the clipboard through the app's hidden window, its
 //! formats as one item (format names, `#<n>` for the standard ones; GDI handles such as
 //! `CF_BITMAP` aren't bytes and are left out: `CF_DIB` brings them back), the sequence number, and

@@ -7,7 +7,7 @@
 //! once and keeps the data). Owners live a few offers longer than their promise: AppKit may still
 //! tell one that it lost the pasteboard after that.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 
 use objc2::rc::Retained;
@@ -30,6 +30,9 @@ type OnRead = Box<dyn FnMut()>;
 
 thread_local! {
   static OWNERS: RefCell<VecDeque<Retained<Owner>>> = const { RefCell::new(VecDeque::new()) };
+  /// The general pasteboard's change count at the app's last promise: it holds the promise while
+  /// the count is the same (a read handing the text out leaves it).
+  static PROMISED: Cell<Option<u64>> = const { Cell::new(None) };
 }
 
 pub struct OwnerIvars {
@@ -107,10 +110,20 @@ fn may_read(pasteboard: &NSPasteboard) -> bool {
     || !matches!(pasteboard.accessBehavior(), Behavior::Ask | Behavior::AlwaysDeny)
 }
 
-/// Off the main thread and within [READ_WAIT]: `None` when an app that promised its data doesn't
-/// answer, so the paste goes without a restore.
+/// As [read]: `None` when an app that promised its data doesn't answer within [READ_WAIT], so the
+/// paste goes without a restore.
 pub fn snapshot() -> Option<Snapshot> {
-  within(READ_WAIT, || take(&general()))
+  read(|| take(&general()))
+}
+
+/// `f`'s read of the general pasteboard: on the main thread while it holds the app's own promise,
+/// whose owner answers there (AppKit's objects aren't for other threads), and in process, never
+/// waiting on another app; off it within [READ_WAIT] otherwise.
+pub(crate) fn read<T: Send + 'static>(f: fn() -> T) -> Option<T> {
+  match PROMISED.get() == change_count() {
+    true => Some(f()),
+    false => within(READ_WAIT, f),
+  }
 }
 
 pub fn restore(snapshot: Snapshot) -> bool {
@@ -183,6 +196,10 @@ fn offer_on(pasteboard: &NSPasteboard, text: &str, on_read: Option<OnRead>) -> u
   // SAFETY: the owner provides every declared type and lives while its promise is on the
   // pasteboard (and a few offers longer: [OWNERS]).
   let count = unsafe { pasteboard.declareTypes_owner(&types, Some(object)) };
+  if std::ptr::eq(pasteboard, &*general()) {
+    PROMISED.set(Some(count as u64));
+  }
+
   OWNERS.with_borrow_mut(|owners| {
     owners.push_back(owner);
     if owners.len() > KEPT {
