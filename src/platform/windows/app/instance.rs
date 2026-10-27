@@ -19,7 +19,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{
-  ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, HANDLE, INVALID_HANDLE_VALUE, LocalFree,
+  ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, HANDLE, INVALID_HANDLE_VALUE, LocalFree, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Security::Authorization::{
   ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -32,9 +32,12 @@ use windows_sys::Win32::System::Pipes::{
   ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_BYTE,
   PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE, PIPE_WAIT, PeekNamedPipe,
 };
+use windows_sys::Win32::System::Threading::{
+  OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::{ASFW_ANY, AllowSetForegroundWindow};
 
-use crate::instance::{READ_TIMEOUT, hash, read_polled};
+use crate::instance::{READ_TIMEOUT, key, read_polled};
 
 /// How long the instance waits for its thread to end.
 const BUSY_WAIT: Duration = Duration::from_secs(2);
@@ -165,9 +168,15 @@ fn available(pipe: HANDLE) -> Option<usize> {
 
 /// One pipe per folder, by its path's hash, so a test's folder never meets the app's.
 fn pipe_path(dir: &Path) -> PathBuf {
-  let dir = dir.canonicalize().unwrap_or_else(|_| dir.to_owned());
-  let id = hash(dir.as_os_str().as_encoded_bytes());
-  PathBuf::from(format!(r"\\.\pipe\nimbo-{id:016x}"))
+  PathBuf::from(format!(r"\\.\pipe\nimbo-{:016x}", key(dir)))
+}
+
+/// Whether the process `pid` runs: its handle, not yet signalled. Another user's is not ours.
+pub fn alive(pid: u32) -> bool {
+  // SAFETY: a handle of ours, closed on drop; a pid that is gone gives none.
+  let process = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+  let process = (!process.is_null()).then(|| unsafe { OwnedHandle::from_raw_handle(process) });
+  process.is_some_and(|p| unsafe { WaitForSingleObject(p.as_raw_handle(), 0) } == WAIT_TIMEOUT)
 }
 
 /// Connects, waiting until `deadline` while the pipe serves another sender. The instance may only

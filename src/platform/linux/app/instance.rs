@@ -15,6 +15,16 @@ use std::time::Instant;
 
 use crate::instance::{MAX_LINE, READ_TIMEOUT, hash};
 
+/// Whether the process `pid` runs: `kill(pid, 0)`, which sends nothing. Another user's is not ours.
+pub fn alive(pid: u32) -> bool {
+  unsafe extern "C" {
+    fn kill(pid: i32, sig: i32) -> i32;
+  }
+
+  // SAFETY: signal 0 only checks; a pid of 0 or past i32 would name a group, never asked.
+  i32::try_from(pid).is_ok_and(|pid| pid > 0 && unsafe { kill(pid, 0) } == 0)
+}
+
 /// The lock file at `path`, this user's alone.
 pub fn lock_file(path: &Path) -> io::Result<File> {
   File::options().create(true).append(true).mode(0o600).open(path)

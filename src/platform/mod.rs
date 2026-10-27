@@ -108,12 +108,30 @@
 //! - `pub(crate) mod instance` ([crate::instance]), one file for every Unix
 //!   (`linux/app/instance.rs`) and Windows' (`windows/app/instance.rs`): `lock_file(&Path) ->
 //!   io::Result<File>`, `Server` with `bind(dir, lock)` and `serve(on: impl Fn(&str) + Send)`, a
-//!   thread that calls `on` with each line, both let go on drop, and `send(dir, line, deadline:
-//!   Instant)`, `NotFound` or `ConnectionRefused` when nothing listens.
+//!   thread that calls `on` with each line, both let go on drop, `send(dir, line, deadline:
+//!   Instant)`, `NotFound` or `ConnectionRefused` when nothing listens, and `alive(pid: u32) ->
+//!   bool`, a process of this user's running (Unix `kill(pid, 0)`, Windows `OpenProcess` and a
+//!   handle not yet signalled).
 //! - `pub mod uninstall` ([crate::uninstall]): `steps(&AppInfo) -> Vec<Step>`, what the OS keeps
 //!   for the app besides launch at login, undone (macOS its permissions and defaults, Linux the
 //!   launcher entry and the portal's token), and `busy(&io::Error) -> bool`, an error a removal may
 //!   pass when tried again.
+//! - `pub mod http` ([crate::update]), from any thread: `get(url: &str, to: &Path) ->
+//!   io::Result<()>`, a GET's body written to the file `to`, blocking until it ends; redirects
+//!   followed (GitHub sends assets to another host; on Linux only to https, http too from
+//!   loopback), no cache, the system's proxy (Linux: the `*_proxy` variables), a status other than
+//!   2xx an error from [status]; on `Err` `to` may hold a part. macOS `NSURLSession`, Windows
+//!   WinHTTP, Linux `libcurl.so.4` (`Unsupported` without).
+//! - `pub mod update` ([crate::update]), from any thread, its tools by absolute path: `unpack(file:
+//!   &Path, into: &Path) -> io::Result<()>`, the release's file into the folder `into` (macOS
+//!   `/usr/bin/ditto -x -k`, Windows `%SystemRoot%\System32\tar.exe -xf` with no console window,
+//!   Linux the AppImage itself made executable and moved in), `InvalidData` when the tool fails;
+//!   macOS also `accepts(new: &Path, app: &Path) -> io::Result<()>`, the new bundle of `app`'s id
+//!   meeting its designated requirement (`/usr/bin/codesign -v -R`), else `InvalidData`; and
+//!   `relaunch(app: &Path, var: &str) -> io::Result<()>`, the app started with `NIMBO_RELAUNCH` set
+//!   to `var` without waiting for it to end (macOS `NSWorkspace` opening a new instance that
+//!   doesn't take the focus, back once it started, `TimedOut` after 35 s; Windows the exe, Linux
+//!   the AppImage spawned).
 //! - `pub mod activity` ([crate::activity]), from any thread: `Token: Send`, `begin(&str) ->
 //!   Token`, `end(Token)`.
 //! - `pub mod post` ([crate::keys::post]): `post(Shortcut) -> Result<(), String>`, the shortcut as
@@ -139,8 +157,8 @@
 //!   bool`, `secure_input() -> bool`, `microphone() -> Access`, `request_microphone(Box<dyn
 //!   FnOnce(bool) + Send>)`.
 //!
-//!   `activity`, `open`, `post`, `paste`, `focus`, `permissions` and `uninstall` live in `app/` on
-//!   each OS too.
+//!   `activity`, `http`, `open`, `post`, `paste`, `focus`, `permissions`, `uninstall` and `update`
+//!   live in `app/` on each OS too.
 //! - `pub fn appearance() -> Appearance` ([crate::Appearance]): `dark`, and `accent` in sRGB or
 //!   `None` when the OS has none or the user left it to apps (macOS: `effectiveAppearance` matched
 //!   against Aqua / DarkAqua, `controlAccentColor` unless Multicolor; on the main thread only,
@@ -205,6 +223,7 @@ pub(crate) mod write;
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 compile_error!("nimbo runs on macOS, Windows and Linux");
 
+use std::io;
 #[cfg(any(test, target_os = "windows"))]
 use std::time::{Duration, Instant};
 
@@ -214,13 +233,22 @@ pub(crate) use imp::permissions;
 #[cfg(target_os = "linux")]
 pub(crate) use imp::startup_complete;
 pub(crate) use imp::{
-  activity, autostart, clipboard, desktop, focus, hotkey, open, paste, perf_cores, post, shell,
-  text, tray, uninstall,
+  activity, autostart, clipboard, desktop, focus, hotkey, http, open, paste, perf_cores, post,
+  shell, text, tray, uninstall, update,
 };
 #[cfg(target_os = "windows")]
 pub(crate) use imp::{attach_console, downloads};
 #[cfg(any(test, target_os = "windows", target_os = "linux"))]
 use keyboard_types::Code;
+
+/// `http::get`'s answer to the HTTP status `code` of `url`: 2xx is `Ok`, 404 `NotFound`.
+pub(crate) fn status(url: &str, code: u32) -> io::Result<()> {
+  match code {
+    200..300 => Ok(()),
+    404 => Err(io::Error::new(io::ErrorKind::NotFound, format!("{url}: HTTP 404"))),
+    _ => Err(io::Error::other(format!("{url}: HTTP {code}"))),
+  }
+}
 
 /// The points of `px` pixels at `scale`: the least that the renderer's pixels (`points × scale`,
 /// cut down: [crate::cpu::Renderer::pixel_size]) give back whole at a fractional scale, where
