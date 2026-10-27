@@ -20,15 +20,17 @@
 //!
 //! // Where the user typed when they asked (a dictation's start)...
 //! let target = nimbo::focus::current();
-//! // ...and later, on the main thread, the text goes there if the focus is still there.
-//! if let Err(e) = paste::text("Hello", Paste { restore: true, target }) {
+//! // ...and later, on the main thread, the text goes there if the focus is still there, and the
+//! // caller still waits for it.
+//! let deadline = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
+//! if let Err(e) = paste::text("Hello", Paste { restore: true, target, deadline }) {
 //!   eprintln!("not pasted: {e}");
 //! }
 //! ```
 
 use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::clipboard::{Offer, Snapshot, SystemClipboard};
 use crate::focus::{self, Focused};
@@ -65,6 +67,10 @@ pub struct Paste {
   /// when the focus moved from it since. `None` (not known) refuses it, unless the OS hides the
   /// focus ([focus::hidden]: Wayland): then it goes wherever the focus is.
   pub target: Option<Focused>,
+  /// When the caller stops waiting for the paste: past it once the clipboard is read and the focus
+  /// checked, nothing changes and no shortcut goes (a paste a minute late lands wherever the
+  /// focus is by then).
+  pub deadline: Option<Instant>,
 }
 
 /// Why [text] did not paste.
@@ -92,6 +98,8 @@ pub enum NotPasted {
   NoClipboard,
   /// The shortcut (`key`, its label) was not posted.
   NotSent { key: String, why: String },
+  /// Past [Paste::deadline] before the clipboard changed: reading it or the focus took too long.
+  Late,
 }
 
 impl std::fmt::Display for NotPasted {
@@ -106,6 +114,7 @@ impl std::fmt::Display for NotPasted {
       Self::NoAccess => write!(f, "no Accessibility access: {} can't be sent", PASTE.label()),
       Self::NoClipboard => write!(f, "the clipboard can't be reached"),
       Self::NotSent { key, why } => write!(f, "{key} was not sent: {why}"),
+      Self::Late => write!(f, "past the caller's deadline"),
     }
   }
 }
@@ -197,7 +206,8 @@ fn paste(sys: Sys, text: &str, opts: Paste) -> Result<(), NotPasted> {
   done
 }
 
-fn paste_now(sys: Sys, text: &str, Paste { restore, target }: Paste) -> Result<(), NotPasted> {
+fn paste_now(sys: Sys, text: &str, opts: Paste) -> Result<(), NotPasted> {
+  let Paste { restore, target, deadline } = opts;
   static NEXT: AtomicU64 = AtomicU64::new(1);
   if target.is_none() && !(sys.hidden)() {
     return Err(NotPasted::Unknown);
@@ -218,6 +228,11 @@ fn paste_now(sys: Sys, text: &str, Paste { restore, target }: Paste) -> Result<(
   // Right before the paste: the snapshot may take a while.
   if let Some(target) = &target {
     check_focus(sys, target)?;
+  }
+
+  // The snapshot and the focus may each take seconds with an app that doesn't answer.
+  if deadline.is_some_and(|d| Instant::now() >= d) {
+    return Err(NotPasted::Late);
   }
 
   let id = NEXT.fetch_add(1, Ordering::Relaxed);
@@ -387,7 +402,7 @@ mod tests {
   fn setup(name: &str) -> Paste {
     PENDING.take();
     world(|w| *w = World { clip: "mine".into(), focus: Some(app(7, name)), ..World::default() });
-    Paste { restore: true, target: Some(app(7, name)) }
+    Paste { restore: true, target: Some(app(7, name)), deadline: None }
   }
 
   /// Runs the timers of `delay` due now.
@@ -440,6 +455,20 @@ mod tests {
     assert_eq!(clip(), ("mine".into(), 1));
     fire(CAP);
     assert_eq!(clip(), ("mine".into(), 1), "once");
+  }
+
+  /// Past the caller's deadline the clipboard stays and no shortcut goes.
+  #[test]
+  fn nothing_is_posted_past_the_deadline() {
+    let opts = setup("TextEdit");
+    let past = Paste { deadline: Some(Instant::now()), ..opts.clone() };
+    assert_eq!(paste(FAKE, "hello", past), Err(NotPasted::Late));
+    assert_eq!(world(|w| (w.posted.len(), w.offers)), (0, 0));
+    assert_eq!(clip(), ("mine".into(), 0));
+
+    let later = Instant::now() + Duration::from_secs(60);
+    assert_eq!(paste(FAKE, "hello", Paste { deadline: Some(later), ..opts }), Ok(()));
+    assert_eq!(world(|w| w.posted.len()), 1);
   }
 
   #[test]
@@ -532,7 +561,7 @@ mod tests {
     let opts = setup("TextEdit");
     let nested = Sys {
       snapshot: || {
-        let inner = paste(FAKE, "inner", Paste { restore: true, target: None });
+        let inner = paste(FAKE, "inner", Paste { restore: true, target: None, deadline: None });
         world(|w| w.nested = Some(inner));
         (FAKE.snapshot)()
       },
@@ -576,14 +605,14 @@ mod tests {
     assert_eq!(refused(opts), NotPasted::NoAccess);
 
     setup("TextEdit");
-    assert_eq!(refused(Paste { restore: true, target: None }), NotPasted::Unknown);
+    assert_eq!(refused(Paste { restore: true, target: None, deadline: None }), NotPasted::Unknown);
   }
 
   #[test]
   fn goes_where_the_focus_is_when_the_os_hides_it() {
     setup("TextEdit");
     world(|w| (w.focus, w.hidden) = (None, true));
-    assert_eq!(paste(FAKE, "hello", Paste { restore: true, target: None }), Ok(()));
+    assert_eq!(paste(FAKE, "hello", Paste { restore: true, target: None, deadline: None }), Ok(()));
     assert_eq!(world(|w| w.posted.clone()), [PASTE]);
   }
 
@@ -619,7 +648,7 @@ mod tests {
   /// The system's paste refuses a thread other than the main one, before it reaches anything.
   #[test]
   fn refused_off_the_main_thread() {
-    let opts = Paste { restore: true, target: None };
+    let opts = Paste { restore: true, target: None, deadline: None };
     let got = std::thread::spawn(move || text("hello", opts)).join().unwrap();
     assert_eq!(got, Err(NotPasted::NotMain));
   }

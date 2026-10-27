@@ -20,6 +20,9 @@ mod surface;
 pub mod text;
 
 use std::cell::Cell;
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 
 use block2::StackBlock;
 use objc2::MainThreadMarker;
@@ -39,8 +42,11 @@ pub struct Pasteboard;
 
 impl Clipboard for Pasteboard {
   fn read(&self) -> Option<String> {
-    let pb = NSPasteboard::generalPasteboard();
-    pb.stringForType(unsafe { NSPasteboardTypeString }).map(|s| s.to_string())
+    within(READ_WAIT, || {
+      let pb = NSPasteboard::generalPasteboard();
+      pb.stringForType(unsafe { NSPasteboardTypeString }).map(|s| s.to_string())
+    })
+    .flatten()
   }
 
   fn write(&mut self, s: &str) {
@@ -53,6 +59,21 @@ impl Clipboard for Pasteboard {
     let types = NSArray::from_slice(&[unsafe { NSPasteboardTypeString }]);
     NSPasteboard::generalPasteboard().availableTypeFromArray(&types).is_some()
   }
+}
+
+/// How long a read of the pasteboard may hold the main thread: an app that promised its data and
+/// doesn't answer (a remote desktop's shared clipboard) holds a read up to NSPasteboard's 60 s.
+pub(crate) const READ_WAIT: Duration = Duration::from_secs(1);
+
+/// `f`'s result if it ends within `wait`, run on a thread of its own, which is left to end by
+/// itself after.
+pub(crate) fn within<T: Send + 'static>(
+  wait: Duration,
+  f: impl FnOnce() -> T + Send + 'static,
+) -> Option<T> {
+  let (tx, rx) = mpsc::channel();
+  thread::spawn(move || _ = tx.send(f()));
+  rx.recv_timeout(wait).ok()
 }
 
 /// The system clipboard outside a window: the general pasteboard.
@@ -126,5 +147,14 @@ mod tests {
   #[test]
   fn perf_cores_are_found() {
     assert!(perf_cores().is_some_and(|n| n >= 1));
+  }
+
+  /// A read that doesn't answer leaves the caller within the wait.
+  #[test]
+  fn a_read_that_hangs_gives_up() {
+    let took = std::time::Instant::now();
+    assert_eq!(within(Duration::from_millis(50), || thread::sleep(Duration::from_secs(5))), None);
+    assert!(took.elapsed() < Duration::from_secs(1));
+    assert_eq!(within(Duration::from_secs(1), || 7), Some(7));
   }
 }

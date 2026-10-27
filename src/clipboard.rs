@@ -87,8 +87,9 @@ impl SystemClipboard {
   }
 
   /// The clipboard's contents now; it may take a while (an app that provides its data lazily).
-  /// `None` where it can't be reached (no app running on Windows and Linux); an owner that does
-  /// not answer counts as [missing](Snapshot::missing).
+  /// `None` where it can't be reached (no app running on Windows and Linux) or, on macOS, when it
+  /// takes over a second (an app that promised its data and doesn't answer); an owner that does
+  /// not answer counts as [missing](Snapshot::missing) elsewhere.
   pub fn snapshot(&self) -> Option<Snapshot> {
     imp::snapshot()
   }
