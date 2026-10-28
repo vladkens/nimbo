@@ -65,11 +65,13 @@ const LEVELS: u32 = 8;
 /// Paths filled with the panel's text colour: Plasma's by the `ColorScheme-Text` class of the
 /// `current-color-scheme` stylesheet it rewrites, GTK's and GNOME Shell's by filling every path
 /// of an icon named `-symbolic` (their `fill: … !important` beats the inline one); an image as
-/// runs of pixels in `side` rows, one path per alpha level at its `fill-opacity`.
+/// runs of pixels in `side` rows, one path per alpha level at its `fill-opacity`. `tint` is the
+/// colour where Plasma's icon theme doesn't follow the colour scheme (`FollowsColorScheme`).
 #[cfg(any(test, target_os = "linux"))]
-pub fn symbolic(size: f32, paths: &[(String, bool, f32)]) -> String {
+pub fn symbolic(size: f32, paths: &[(String, bool, f32)], tint: [u8; 3]) -> String {
+  let [r, g, b] = tint;
   let mut out = format!(
-    r#"<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 {size} {size}"><style id="current-color-scheme">.ColorScheme-Text {{ color:#232629; }}</style>"#
+    r#"<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 {size} {size}"><style id="current-color-scheme">.ColorScheme-Text {{ color:#{r:02x}{g:02x}{b:02x}; }}</style>"#
   );
   for (d, even_odd, opacity) in paths {
     let rule = if *even_odd { "evenodd" } else { "nonzero" };
@@ -125,9 +127,11 @@ mod tests {
   /// Path data goes in as it is; an image as runs of pixels by alpha level, recoloured by class.
   #[test]
   fn symbolic_svgs_fill_with_the_text_colour() {
-    let svg = symbolic(18.0, &[("M0 0H9\"/>".into(), true, 1.0)]);
+    let svg = symbolic(18.0, &[("M0 0H9\"/>".into(), true, 1.0)], [255; 3]);
     assert!(svg.contains(r#"fill-rule="evenodd" fill-opacity="1" d="M0 0H9/"/>"#), "{svg}");
-    assert!(svg.contains(r#"<style id="current-color-scheme">.ColorScheme-Text"#));
+    assert!(
+      svg.contains(r#"<style id="current-color-scheme">.ColorScheme-Text { color:#ffffff; }"#)
+    );
     let alpha = [255, 255, 0, 128, 0, 0, 0, 0, 0];
     let r = runs(&alpha, 3);
     assert_eq!(r[0], ("M0 1h1v1H0z".into(), false, 0.5));

@@ -77,20 +77,21 @@ pub fn watch() {
 }
 
 unsafe extern "C" fn on_changed(_: P, _: P, _: P) {
+  super::app::tray::repaint();
   unsafe { deliver(null_mut()) };
 }
 
 /// `SettingChanged(namespace, key, value)`: one in the appearance namespace.
 unsafe extern "C" fn on_portal(_: P, _: S, _: S, _: S, _: S, args: P, _: P) {
   if Gv::borrowed(args).child(0).str() == NAMESPACE {
+    super::app::tray::repaint();
     unsafe { deliver(null_mut()) };
   }
 }
 
-/// Sends the appearance to every window now, the tray's pixmaps painted for it; while a window
-/// is busy (a paste waits), again in a moment.
+/// Sends the appearance to every window now; while one is busy (a paste waits), again in a
+/// moment.
 unsafe extern "C" fn deliver(_: P) -> c_int {
-  super::app::tray::repaint();
   let look = appearance();
   let missed = each(|w| {
     w.send(Event::Appearance(look));

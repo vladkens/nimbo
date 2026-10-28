@@ -65,13 +65,16 @@ impl TrayIcon {
   /// The icon as an SVG a Linux panel fills with its text colour ([icon::symbolic]): path data
   /// as it is, an image as its alpha at `side` pixels.
   #[cfg(any(test, target_os = "linux"))]
-  pub(crate) fn svg(&self, side: u32) -> String {
+  pub(crate) fn svg(&self, side: u32, tint: [u8; 3]) -> String {
     match self {
       TrayIcon::Rgba { w, h, px, .. } => icon::symbolic(
         side as f32,
         &icon::runs(&icon::scale_alpha(*w, *h, px, side), side as usize),
+        tint,
       ),
-      TrayIcon::Path { size, d, even_odd } => icon::symbolic(*size, &[(d.clone(), *even_odd, 1.0)]),
+      TrayIcon::Path { size, d, even_odd } => {
+        icon::symbolic(*size, &[(d.clone(), *even_odd, 1.0)], tint)
+      }
     }
   }
 }
@@ -458,14 +461,14 @@ mod tests {
   #[test]
   fn icons_as_svgs() {
     let ring = TrayIcon::Path { size: 18.0, d: "M0 0H9V9Z".into(), even_odd: true };
-    let svg = ring.svg(44);
+    let svg = ring.svg(44, [0; 3]);
     assert!(
       svg.contains(r#"viewBox="0 0 18 18""#)
         && svg.contains(r#"evenodd" fill-opacity="1" d="M0 0H9V9Z""#),
       "{svg}"
     );
     let dot = TrayIcon::Rgba { w: 1, h: 1, scale: 1.0, px: vec![0, 0, 0, 255] };
-    assert!(dot.svg(2).contains(r#"d="M0 0h2v1H0zM0 1h2v1H0z""#), "{}", dot.svg(2));
+    assert!(dot.svg(2, [0; 3]).contains(r#"d="M0 0h2v1H0zM0 1h2v1H0z""#), "{}", dot.svg(2, [0; 3]));
   }
 
   #[test]

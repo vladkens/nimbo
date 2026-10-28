@@ -205,9 +205,13 @@ impl Tray {
     }
   }
 
-  /// The icon's pixmaps, tinted for the appearance now, and on the bus its SVG by name.
+  /// The icon's pixmaps, tinted for the appearance now, and on KDE's bus its SVG by name.
+  /// Elsewhere only the pixmaps: GNOME's AppIndicator shows a name it can't find yet (its shell
+  /// looks at the folder again only after 5 s) as a placeholder, and in Flatpak or a Snap the
+  /// panel can't reach the app's data folder.
   fn paint(&self, icon: &TrayIcon) {
     let gnome = std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| d.contains("GNOME"));
+    let boxed = ["FLATPAK_ID", "SNAP"].iter().any(|v| std::env::var_os(v).is_some());
     let tint = if gnome || crate::platform::appearance().dark { [255; 3] } else { [0; 3] };
     let pixmap = |side: u32| {
       let rgba = icon.pixels(side, tint);
@@ -216,15 +220,15 @@ impl Tray {
     };
     *self.0.pixmaps.borrow_mut() = V::Array("(iiay)", SIDES.map(pixmap).to_vec());
     *self.0.icon.borrow_mut() = icon.clone();
-    if self.0.bus.borrow().is_none() {
+    if self.0.bus.borrow().is_none() || !kde() || boxed {
       return;
     }
 
-    let keep = trays().into_iter().filter(|t| !Rc::ptr_eq(t, &self.0));
-    let keep: Vec<String> = keep.map(|t| t.name.borrow().clone()).collect();
-    let (data, id) = (crate::paths::data_dir(""), super::shell::info().id);
-    let name = crate::desktop::tray_icon(&data, id, &icon.svg(SIDES[1]), &keep);
-    if let Err(e) = &name {
+    static FIRST: std::sync::Once = std::sync::Once::new();
+    let (data, id, mut first) = (crate::paths::data_dir(""), super::shell::info().id, false);
+    FIRST.call_once(|| first = true);
+    let name = crate::desktop::tray_icon(&data, id, &icon.svg(SIDES[1], tint), first);
+    if let (Err(e), true) = (&name, first) {
       eprintln!("nimbo: the tray icon goes as pixels, its file was not written: {e}");
     }
 
@@ -452,9 +456,13 @@ thread_local! {
 
 /// On KDE, watches [PLASMA] in the config folder: as either changes, the trays are painted again
 /// a second later, once Plasma has read it, for the panel to draw the icon in its new colours.
+/// The panel is Plasma's.
+fn kde() -> bool {
+  std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| d.contains("KDE"))
+}
+
 fn follow_plasma() {
-  let kde = std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| d.contains("KDE"));
-  let Some(f) = lib().and_then(|l| Files::load(&l)).filter(|_| kde) else { return };
+  let Some(f) = lib().and_then(|l| Files::load(&l)).filter(|_| kde()) else { return };
 
   for name in PLASMA {
     let Ok(path) =

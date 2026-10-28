@@ -61,18 +61,20 @@ fn tray_icons(id: &str) -> String {
   format!("{}.tray", id.replace('-', "_"))
 }
 
+/// The file `name` is one of app `id`'s tray icons: its start, 16 hex digits, `-symbolic.svg`.
+#[cfg(any(all(test, unix), target_os = "linux"))]
+fn is_tray_icon(name: &str, id: &str) -> bool {
+  let hash = name.strip_prefix(&tray_icons(id)).and_then(|n| n.strip_suffix("-symbolic.svg"));
+  hash.is_some_and(|h| h.len() == 16 && h.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
 /// Writes a tray icon's `svg` for app `id` at the top of the data folder `data`'s `icons` (no
 /// theme's: KIconLoader and GTK look there each time, in a theme only in the folders there were
 /// as they started), named by its content, as panels keep an icon by its name, and `-symbolic`
-/// for GNOME to colour it; removes the app's others but those named in `keep` (other trays').
-/// Its name, as `IconName` gives it.
+/// for GNOME to colour it; with `clean` (the run's first) removes the app's others, as a host
+/// may still ask for one of this run's. Its name, as `IconName` gives it.
 #[cfg(any(all(test, unix), target_os = "linux"))]
-pub(crate) fn tray_icon(
-  data: &Path,
-  id: &str,
-  svg: &str,
-  keep: &[String],
-) -> Result<String, String> {
+pub(crate) fn tray_icon(data: &Path, id: &str, svg: &str, clean: bool) -> Result<String, String> {
   use std::hash::{Hash, Hasher};
   let mut hash = std::hash::DefaultHasher::new();
   svg.hash(&mut hash);
@@ -83,10 +85,9 @@ pub(crate) fn tray_icon(
     crate::platform::write::file(&file, svg.as_bytes())?;
   }
 
-  for e in std::fs::read_dir(&icons).into_iter().flatten().flatten() {
+  for e in std::fs::read_dir(&icons).into_iter().flatten().flatten().filter(|_| clean) {
     let n = e.file_name().to_string_lossy().into_owned();
-    let stem = n.strip_suffix(".svg").unwrap_or(&n);
-    if n.starts_with(&prefix) && stem != name && !keep.iter().any(|k| k == stem) {
+    if is_tray_icon(&n, id) && n != format!("{name}.svg") {
       _ = std::fs::remove_file(e.path());
     }
   }
@@ -159,9 +160,9 @@ pub(crate) fn uninstall_in(data: &Path, app: &AppInfo) -> Result<(), String> {
   let sizes = dirs.iter().map(|d| d.path()).filter(|p| p.is_dir());
   let icons = sizes.map(|p| p.join(format!("apps/{}.png", app.id)));
   let tray = std::fs::read_dir(data.join("icons")).into_iter().flatten().flatten();
-  let tray = tray.map(|e| e.path()).filter(|p| {
-    p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(&tray_icons(app.id)))
-  });
+  let tray = tray
+    .map(|e| e.path())
+    .filter(|p| p.file_name().is_some_and(|n| is_tray_icon(&n.to_string_lossy(), app.id)));
   for path in icons.chain(tray).chain([entry(data, app)]) {
     match std::fs::remove_file(&path) {
       Ok(()) if path.starts_with(&hicolor) => date(&hicolor).map_err(err)?,
@@ -177,32 +178,30 @@ pub(crate) fn uninstall_in(data: &Path, app: &AppInfo) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-  /// A tray icon is named by its content, with one dash; the app's others go, but those kept.
+  /// A tray icon is named by its content, with one dash; the run's first removes the app's
+  /// others, and no other app's.
   #[cfg(unix)]
   #[test]
   fn tray_icons_by_their_content() {
     use super::*;
     let data = std::env::temp_dir().join(format!("nimbo-tray-icons-{}", std::process::id()));
     _ = std::fs::remove_dir_all(&data);
-    let a = tray_icon(&data, "com.example.my-app", "<svg>a</svg>", &[]).unwrap();
+    let id = "com.example.my-app";
+    let a = tray_icon(&data, id, "<svg>a</svg>", false).unwrap();
     assert!(a.starts_with("com.example.my_app.tray") && a.ends_with("-symbolic"), "{a}");
     assert_eq!(a.matches('-').count(), 1);
-    assert_eq!(
-      std::fs::read_to_string(data.join(format!("icons/{a}.svg"))).unwrap(),
-      "<svg>a</svg>"
-    );
-    assert_eq!(tray_icon(&data, "com.example.my-app", "<svg>a</svg>", &[]), Ok(a.clone()));
+    let file = |n: &str| data.join(format!("icons/{n}.svg"));
+    assert_eq!(std::fs::read_to_string(file(&a)).unwrap(), "<svg>a</svg>");
+    assert_eq!(tray_icon(&data, id, "<svg>a</svg>", false), Ok(a.clone()));
 
-    let other = data.join("icons/other.svg");
-    std::fs::write(&other, "").unwrap();
-    let b =
-      tray_icon(&data, "com.example.my-app", "<svg>b</svg>", std::slice::from_ref(&a)).unwrap();
-    assert!(b != a && data.join(format!("icons/{a}.svg")).exists(), "kept");
-    let c = tray_icon(&data, "com.example.my-app", "<svg>c</svg>", &[]).unwrap();
-    let left: Vec<_> =
-      std::fs::read_dir(data.join("icons")).unwrap().flatten().map(|e| e.file_name()).collect();
-    assert_eq!(left.len(), 2, "{left:?}");
-    assert!(other.exists() && data.join(format!("icons/{c}.svg")).exists());
+    let b = tray_icon(&data, id, "<svg>b</svg>", false).unwrap();
+    assert!(file(&a).exists() && file(&b).exists(), "the run's are kept");
+    let other = tray_icon(&data, "com.example.my-app.tray", "<svg>o</svg>", false).unwrap();
+    std::fs::write(data.join("icons/other.svg"), "").unwrap();
+    let c = tray_icon(&data, id, "<svg>c</svg>", true).unwrap();
+    assert!(!file(&a).exists() && !file(&b).exists() && file(&c).exists());
+    assert!(file(&other).exists() && file("other").exists(), "only the app's go");
+    assert!(!is_tray_icon("com.example.my_app.tray0123-symbolic.svg", id));
     _ = std::fs::remove_dir_all(&data);
   }
 
@@ -251,7 +250,8 @@ mod tests {
     assert!(install_in(&data, &APP, &Launcher { icon: (16, &px[..4]), ..l }, "/a").is_err());
 
     std::fs::write(hicolor.join("icon-theme.cache"), b"").unwrap();
-    let tray = data.join(format!("icons/{}.svg", tray_icon(&data, APP.id, "<svg/>", &[]).unwrap()));
+    let tray =
+      data.join(format!("icons/{}.svg", tray_icon(&data, APP.id, "<svg/>", false).unwrap()));
     std::fs::File::open(&hicolor).unwrap().set_modified(old).unwrap();
     uninstall_in(&data, &APP).unwrap();
     assert!(std::fs::metadata(&hicolor).unwrap().modified().unwrap() > old, "dated");
