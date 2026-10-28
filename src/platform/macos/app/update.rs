@@ -1,19 +1,19 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The update's process calls on macOS: the release's `.zip` unpacked with `ditto`, the new
-//! bundle held to the running one's id and designated requirement with `codesign`, swapped in,
-//! then opened by LaunchServices in the old one's place.
+//! bundle held to the running one's id and designated requirement by Security.framework, the two
+//! exchanged in one step, the new one opened by LaunchServices in the old one's place.
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::{CString, OsStr, OsString, c_char};
 use std::io;
+use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::process::Command;
-use std::sync::mpsc::{self, RecvTimeoutError};
-use std::time::{Duration, Instant};
+use std::ptr::{self, NonNull};
 
-use block2::RcBlock;
-use objc2_app_kit::{NSRunningApplication, NSWorkspace, NSWorkspaceOpenConfiguration};
-use objc2_foundation::{NSArray, NSBundle, NSError, NSString, NSURL};
+use objc2_core_foundation::{CFRetained, CFURL, Type};
+use objc2_foundation::{NSBundle, NSString};
+use objc2_security::{SecCSFlags, SecCode, SecStaticCode, kSecCSCheckAllArchitectures};
 
 pub use crate::platform::process::{alive, detach, wait_exit};
 use crate::update::bad;
@@ -21,12 +21,12 @@ use crate::update::bad;
 /// Unpacks the `.zip` `file` into the folder `into`, as `ditto -c -k --keepParent` packed it.
 pub fn unpack(file: &Path, into: &Path) -> io::Result<()> {
   run("/usr/bin/ditto", &["-x".as_ref(), "-k".as_ref(), file.as_os_str(), into.as_os_str()])
-    .map(drop)
 }
 
 /// Whether the bundle `new` may replace the bundle `app`: the same bundle id, and signed so that
-/// it meets `app`'s designated requirement (an ad-hoc app's is its own cdhash, which no other
-/// build meets); `InvalidData` if not.
+/// it meets `app`'s designated requirement, checked for every architecture as Sparkle's
+/// `SUCodeSigningVerifier` does (an ad-hoc app's is its own cdhash, which no other build meets);
+/// `InvalidData` with Security's reason if not.
 pub fn accepts(new: &Path, app: &Path) -> io::Result<()> {
   let id = |p: &Path| {
     let bundle = NSBundle::bundleWithPath(&NSString::from_str(&p.to_string_lossy()));
@@ -36,70 +36,80 @@ pub fn accepts(new: &Path, app: &Path) -> io::Result<()> {
     return Err(bad(format!("{} is not the app of {}", new.display(), app.display())));
   }
 
-  let req = run("/usr/bin/codesign", &["-d".as_ref(), "-r-".as_ref(), app.as_os_str()])?;
-  // Implicit, as an ad-hoc signature's is, it comes as a comment: `# designated => cdhash H"…"`.
-  let req = req.trim().trim_start_matches("# ").strip_prefix("designated => ");
-  let req = req.ok_or_else(|| bad(format!("{} has no requirement", app.display())))?;
-  let req = format!("-R={req}");
-  run("/usr/bin/codesign", &["-v".as_ref(), req.as_ref(), new.as_os_str()]).map(drop)
+  let (code, mut req, mut err) = (static_code(app)?, ptr::null_mut(), ptr::null_mut());
+  // SAFETY: the code lives through the call, `req` an out pointer it sets on success.
+  let status = unsafe {
+    SecCode::copy_designated_requirement(&code, SecCSFlags::DefaultFlags, NonNull::from(&mut req))
+  };
+  let req = owned(app, status, req)?;
+  let flags = SecCSFlags(kSecCSCheckAllArchitectures);
+  // SAFETY: the code and requirement live through the call, `err` an out pointer.
+  let status = unsafe { static_code(new)?.check_validity_with_errors(flags, Some(&req), &mut err) };
+  if status == 0 {
+    return Ok(());
+  }
+
+  // SAFETY: an error the call made, ours to release.
+  let why = NonNull::new(err).and_then(|e| unsafe { CFRetained::from_raw(e) }.description());
+  let why = why.map_or(format!("status {status}"), |d| d.to_string());
+  Err(bad(format!("{} doesn't meet {}'s requirement: {why}", new.display(), app.display())))
 }
 
-/// Exchanges the paths `a` and `b` in one step; `Unsupported` for now, so the swap renames twice.
-pub fn exchange(_: &Path, _: &Path) -> io::Result<()> {
-  Err(io::ErrorKind::Unsupported.into())
+/// The signed code of the bundle at `path`.
+fn static_code(path: &Path) -> io::Result<CFRetained<SecStaticCode>> {
+  let url = CFURL::from_directory_path(path);
+  let url = url.ok_or_else(|| bad(format!("{} is not a path", path.display())))?;
+  let mut code = ptr::null();
+  // SAFETY: the URL lives through the call, `code` an out pointer it sets on success.
+  let status = unsafe {
+    SecStaticCode::create_with_path(&url, SecCSFlags::DefaultFlags, NonNull::from(&mut code))
+  };
+  owned(path, status, code.cast_mut())
 }
 
-/// Runs `cmd` to its end, what it wrote to stdout; `InvalidData` with its stderr if it failed.
-fn run(cmd: &str, args: &[&OsStr]) -> io::Result<String> {
-  let out = Command::new(cmd).args(args).output()?;
-  match out.status.success() {
-    true => Ok(String::from_utf8_lossy(&out.stdout).into_owned()),
-    false => Err(bad(format!("{cmd}: {}", String::from_utf8_lossy(&out.stderr).trim()))),
+/// What a Security call of `status` made at `made`, ours to release; `InvalidData` if it failed.
+fn owned<T: Type>(path: &Path, status: i32, made: *mut T) -> io::Result<CFRetained<T>> {
+  let made = NonNull::new(made).filter(|_| status == 0);
+  // SAFETY: an object the call made with a retain count of one.
+  let made = made.map(|m| unsafe { CFRetained::from_raw(m) });
+  made.ok_or_else(|| bad(format!("{}: Security's status {status}", path.display())))
+}
+
+/// Exchanges the paths `a` and `b` in one step, `renamex_np` with `RENAME_SWAP`, as Sparkle's
+/// `SUFileManager` does on APFS; `Unsupported` on a volume without it (HFS+).
+pub fn exchange(a: &Path, b: &Path) -> io::Result<()> {
+  unsafe extern "C" {
+    fn renamex_np(from: *const c_char, to: *const c_char, flags: u32) -> i32;
+  }
+
+  const RENAME_SWAP: u32 = 2;
+  const ENOTSUP: i32 = 45;
+  let path = |p: &Path| CString::new(p.as_os_str().as_bytes()).map_err(io::Error::from);
+  let (a, b) = (path(a)?, path(b)?);
+  // SAFETY: two C strings that live through the call.
+  if unsafe { renamex_np(a.as_ptr(), b.as_ptr(), RENAME_SWAP) } == 0 {
+    return Ok(());
+  }
+
+  match io::Error::last_os_error() {
+    e if e.raw_os_error() == Some(ENOTSUP) => Err(io::ErrorKind::Unsupported.into()),
+    e => Err(e),
   }
 }
 
-/// Opens the bundle `app` as a new instance with `args`, without taking the focus: started by
-/// launchd, it is its own responsible process for TCC, and gets launchd's environment, not this
-/// process's. Back with LaunchServices' error, or once a new process of the bundle's id runs or
-/// the app has finished launching. `TimedOut` when neither comes in 35 s, a new process that
-/// comes as it does ended, so the swap is undone.
+/// Opens the bundle `app` as a new instance with `args` without taking the focus, by `open -n
+/// -g`: started by launchd, it is its own responsible process for TCC and gets launchd's
+/// environment, not this process's. `InvalidData` with `open`'s error if LaunchServices fails.
 pub fn start(app: &Path, args: &[OsString]) -> io::Result<()> {
-  let path = NSString::from_str(&app.to_string_lossy());
-  let id = NSBundle::bundleWithPath(&path).and_then(|b| b.bundleIdentifier());
-  let apps = || {
-    let apps = id.as_deref().map(NSRunningApplication::runningApplicationsWithBundleIdentifier);
-    apps.map_or(Vec::new(), |a| a.to_vec())
-  };
-  let before = apps();
-  let config = NSWorkspaceOpenConfiguration::configuration();
-  config.setCreatesNewApplicationInstance(true);
-  config.setActivates(false);
-  let args = args.iter().map(|a| NSString::from_str(&a.to_string_lossy()));
-  config.setArguments(&NSArray::from_retained_slice(&args.collect::<Vec<_>>()));
-  let (tx, rx) = mpsc::channel();
-  let done = RcBlock::new(move |_: *mut NSRunningApplication, err: *mut NSError| {
-    // SAFETY: null or an error that lives through the call.
-    let _ = tx.send(unsafe { err.as_ref() }.map(|e| e.localizedDescription().to_string()));
-  });
+  let head = ["-n", "-g"].map(OsStr::new).into_iter().chain([app.as_os_str(), "--args".as_ref()]);
+  run("/usr/bin/open", &head.chain(args.iter().map(OsString::as_os_str)).collect::<Vec<_>>())
+}
 
-  let url = NSURL::fileURLWithPath(&path);
-  let ws = NSWorkspace::sharedWorkspace();
-  ws.openApplicationAtURL_configuration_completionHandler(&url, &config, Some(&done));
-  let deadline = Instant::now() + Duration::from_secs(35);
-  loop {
-    match rx.recv_timeout(Duration::from_millis(50)) {
-      Ok(None) => return Ok(()),
-      Ok(Some(e)) => return Err(io::Error::other(format!("{}: {e}", app.display()))),
-      Err(RecvTimeoutError::Timeout) if apps().iter().any(|a| !before.contains(a)) => return Ok(()),
-      Err(RecvTimeoutError::Timeout) if Instant::now() > deadline => {
-        apps().iter().filter(|a| !before.contains(a)).for_each(|a| _ = a.forceTerminate());
-        let e = format!("{}: LaunchServices started nothing in 35 s", app.display());
-        return Err(io::Error::new(io::ErrorKind::TimedOut, e));
-      }
-      Err(RecvTimeoutError::Timeout) => {}
-      Err(RecvTimeoutError::Disconnected) => {
-        return Err(io::Error::other(format!("{}: LaunchServices never answered", app.display())));
-      }
-    }
+/// Runs `cmd` to its end; `InvalidData` with its stderr if it failed.
+fn run(cmd: &str, args: &[&OsStr]) -> io::Result<()> {
+  let out = Command::new(cmd).args(args).output()?;
+  match out.status.success() {
+    true => Ok(()),
+    false => Err(bad(format!("{cmd}: {}", String::from_utf8_lossy(&out.stderr).trim()))),
   }
 }

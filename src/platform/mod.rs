@@ -126,17 +126,20 @@
 //!   &Path, into: &Path) -> io::Result<()>`, the release's file into the folder `into` (macOS
 //!   `/usr/bin/ditto -x -k`, Windows `%SystemRoot%\System32\tar.exe -xf` with no console window,
 //!   Linux the AppImage itself made executable and moved in), `InvalidData` when the tool fails;
-//!   `start(app: &Path, args: &[OsString]) -> io::Result<()>`, the app started with `args` without
-//!   waiting for it (macOS `NSWorkspace` opening a new instance that doesn't take the focus, in
-//!   launchd's environment; Windows the app folder's exe of this one's name; Linux the AppImage
-//!   without the installer's AppImage variables); `wait_exit(pid: u32, cap: Duration) -> bool`, the
-//!   process `pid` ended within `cap` (Unix: this one's parent, by `getppid`; Windows its handle);
-//!   `alive(pid: u32) -> bool`; `detach(&mut Command) -> io::Result<Child>`, the installer spawned
-//!   apart from the app (Unix its own process group, Windows no console and out of the job where it
-//!   may). macOS also `accepts(new: &Path, app: &Path) -> io::Result<()>`, the new bundle of
-//!   `app`'s id meeting its designated requirement (`/usr/bin/codesign -v -R`), else `InvalidData`,
-//!   and `exchange(a: &Path, b: &Path) -> io::Result<()>`, the two swapped in one step, else
-//!   `Unsupported`. On Unix `wait_exit`, `alive` and `detach` are `linux/app/process.rs`'s.
+//!   `detach(&mut Command) -> io::Result<Child>`, the installer spawned apart from the app (Unix
+//!   its own process group, Windows `DETACHED_PROCESS | CREATE_NO_WINDOW`, out of the job where it
+//!   may); `wait_exit(pid: u32, cap: Duration) -> bool`, the process `pid` ended within `cap`
+//!   (Unix: this one's parent, by `getppid`, so a reused pid can't fool it; Windows its handle);
+//!   `alive(pid: u32) -> bool`, for the staging folders of ended installers; `start(app: &Path,
+//!   args: &[OsString]) -> io::Result<()>`, the installed app started with `args` without waiting
+//!   for it (macOS `/usr/bin/open -n -g … --args`, by LaunchServices in launchd's environment and
+//!   without the focus; Windows the app folder's exe of this one's name; Linux the AppImage without
+//!   the installer's AppImage variables). macOS also `accepts(new: &Path, app: &Path) ->
+//!   io::Result<()>`, the new bundle of `app`'s id meeting its designated requirement for every
+//!   architecture (Security.framework's `SecStaticCodeCheckValidityWithErrors`), else `InvalidData`
+//!   with its reason, and `exchange(a: &Path, b: &Path) -> io::Result<()>`, the two swapped in one
+//!   step (`renamex_np` with `RENAME_SWAP`), `Unsupported` on a volume without it. On Unix
+//!   `detach`, `wait_exit` and `alive` are `linux/app/process.rs`'s.
 //! - `pub mod activity` ([crate::activity]), from any thread: `Token: Send`, `begin(&str) ->
 //!   Token`, `end(Token)`.
 //! - `pub mod post` ([crate::keys::post]): `post(Shortcut) -> Result<(), String>`, the shortcut as

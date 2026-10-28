@@ -2,8 +2,9 @@
 
 //! Updating an app in place, as Sparkle does: [check] fetches a signed feed and [read]s it for a
 //! newer [Release], [download] fetches its file beside the running app, [Release::verify]s and
-//! unpacks it, [install] swaps it in. They block: an app runs them on a thread of its own and
-//! posts the result back.
+//! unpacks it, [install] hands it to an installer that swaps it in once the app has quit, and
+//! [finish], first in `main`, is that installer. They block: an app runs them on a thread of its
+//! own and posts the result back.
 //!
 //! The feed is one text file, `update.txt`, signed, hosted anywhere: on GitHub as a release asset,
 //! `https://github.com/<owner>/<repo>/releases/latest/download/update.txt`. It is UTF-8, one record
@@ -40,19 +41,30 @@
 //! size and SHA-512 are the feed's; nothing is unpacked before. Redirects are followed by the
 //! system (on Linux only to https, on Windows not from https to http, on macOS by the shared
 //! session's defaults); the signature and the hash guard what comes. The package holds exactly one
-//! entry, named as the app's own:
+//! entry, named as the app's own.
 //!
-//! | OS | package | unpacked with | swapped |
-//! |---|---|---|---|
-//! | macOS | a `.zip` of the `.app` (`ditto -c -k --keepParent`) | `/usr/bin/ditto` | the same bundle id, and signed so that it meets the running app's designated requirement; relaunched by LaunchServices |
-//! | Windows | a `.zip` of the app's folder | `tar.exe` of System32 | each file beside its `<file>.nimbo-old`; a file a release drops stays (the running app's folder can't be renamed) |
-//! | Linux | the AppImage | none | over `$APPIMAGE` |
+//! The app is never swapped while it runs. [install] starts the new version as an installer apart
+//! from the app (its own process group on Unix; no console and out of the app's job on Windows),
+//! waits up to 10 s for its sign and returns; the app then quits within 30 s. The installer waits
+//! for the old process to end, swaps the whole app in one step (below), starts it with the old
+//! one's arguments and removes the old copy and the staging folder. If the swap or the start
+//! fails, it undoes the swap, starts the old app again and leaves its error beside the app, which
+//! [finish] returns at the next launch. What an installer stopped midway left, the next
+//! [download] removes. The staging folder, `.nimbo-update-<pid>-<nanos>`, is beside the app:
 //!
-//! What it replaces moves aside to `.<name>.nimbo-old` on macOS and Linux. A failure undoes every
-//! rename. The relaunched app gets the old one's arguments (on macOS not its environment). On
-//! macOS the grants (microphone, Accessibility) survive an update only when every release is signed
-//! with one stable identity: an ad-hoc signature's requirement is its own build, so [download]
-//! refuses the next one.
+//! | OS | package | unpacked with | checked | swapped, and undone | started |
+//! |---|---|---|---|---|---|
+//! | macOS | a `.zip` of the `.app` (`ditto -c -k --keepParent`) | `/usr/bin/ditto` | the same bundle id, signed so that it meets the running app's designated requirement (Security.framework) | `renamex_np` with `RENAME_SWAP`, undone by the same; on a volume without it (HFS+) the app renamed to `.<name>.nimbo-old`, the new one renamed in | `open -n -g`, by LaunchServices: no focus taken, launchd's environment |
+//! | Windows | a `.zip` of the app's folder | `tar.exe` of System32 | the folder's name, the exe in it | the folder renamed to `<name>.nimbo-old`, the new one renamed in, each tried again while busy; undone in reverse | the folder's exe of the running one's name |
+//! | Linux | the AppImage | none | none | linked to `.<name>.nimbo-old`, the new one renamed over it in one step; undone by renaming the link back | the AppImage, without the installer's AppImage variables |
+//!
+//! On Windows a folder holding a running exe can't be renamed, so the installer is a copy of the
+//! new exe alone at `<staging>\<exe>`, and stays there for the next [download] to remove. A
+//! Windows app's exe must therefore start with no DLLs from its own folder. Whatever the app keeps
+//! in its own folder is replaced with it, and a file a release drops is gone. On macOS the grants
+//! (microphone, Accessibility) survive an update only when every release is signed with one stable
+//! identity: an ad-hoc signature's requirement is its own build, so [download] refuses the next
+//! one.
 
 use std::ffi::OsString;
 use std::fs::{self, File};
@@ -1081,6 +1093,11 @@ mod tests {
       assert_eq!(e.kind(), io::ErrorKind::InvalidData, "{other}: {e}");
     }
 
+    // The exchange on the temp dir's APFS: each path holds the other's bundle.
+    let plist = |p: &str| fs::read_to_string(root.join(p).join("Contents/Info.plist")).unwrap();
+    let (v1, v2) = (plist("A.app"), plist("v2/A.app"));
+    imp::exchange(&app, &root.join("v2/A.app")).unwrap();
+    assert_eq!((plist("A.app"), plist("v2/A.app")), (v2, v1));
     fs::remove_dir_all(root).unwrap();
   }
 

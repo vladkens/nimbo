@@ -2,8 +2,9 @@
 
 //! A console app that updates itself in place ([nimbo::update]), with no window: it prints its
 //! version, the release a feed offers, or downloads and installs that release and ends, as the
-//! new version starts in its place. It runs once ([instance]), so the relaunched version waits
-//! for this one to end and removes what the update left.
+//! new version starts in its place. Its first call is [update::finish], which is the installer
+//! when the update started it and else prints the error the last one left. It runs once
+//! ([instance]): a second run is refused.
 //!
 //! `UPDATE_VERSION=1.0.0 cargo build --release --example update` sets the version (the crate's
 //! without it); `scripts/update-feed.py` makes a feed, `update.txt`, and with `--public-key`
@@ -11,10 +12,9 @@
 //! the feed offers, `update --update <feed url> <key>` updates, printing the download's
 //! percentage.
 
+use std::env;
 use std::io::{self, ErrorKind};
 use std::process::ExitCode;
-use std::time::Duration;
-use std::{env, thread};
 
 use nimbo::instance::{self, Claim};
 use nimbo::update::{self, Feed};
@@ -27,9 +27,6 @@ pub const VERSION: &str = match option_env!("UPDATE_VERSION") {
   None => env!("CARGO_PKG_VERSION"),
 };
 const USAGE: &str = "usage: update [--check | --update <feed url> <key>]";
-/// How long a relaunched version stays, with the arguments of the one it replaces: the update's
-/// leftovers go on a thread of their own, tried again for up to 5 s while a file stays busy.
-const TIDY: Duration = Duration::from_secs(6);
 
 /// What the arguments ask: the version; the release the feed offers; that release installed.
 fn run(args: &[String]) -> io::Result<()> {
@@ -66,9 +63,11 @@ fn run(args: &[String]) -> io::Result<()> {
 }
 
 fn main() -> ExitCode {
-  // Started by an update's relaunch.
-  let relaunched = env::var_os("NIMBO_RELAUNCH").is_some();
-  // Held to the end: the relaunched version waits for it to go.
+  // First, before the arguments: the installer runs here and exits.
+  if let Some(e) = update::finish() {
+    eprintln!("{e}");
+  }
+
   let _instance = match instance::claim(&INFO) {
     Ok(Claim::Primary(instance)) => instance,
     Ok(Claim::Running) => {
@@ -81,12 +80,7 @@ fn main() -> ExitCode {
     }
   };
 
-  let ran = run(&env::args().skip(1).collect::<Vec<_>>());
-  if relaunched {
-    thread::sleep(TIDY);
-  }
-
-  match ran {
+  match run(&env::args().skip(1).collect::<Vec<_>>()) {
     Ok(()) => ExitCode::SUCCESS,
     // The library's errors say they are the update's.
     Err(e) => {
