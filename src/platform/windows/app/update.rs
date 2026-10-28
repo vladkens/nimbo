@@ -61,7 +61,9 @@ pub fn detach(cmd: &mut Command) -> io::Result<Child> {
 }
 
 /// Starts the app's folder `app` by its exe, named as this one's, with `args`, not waiting for it.
+/// The installer has no console to share, so a console app would get a window of its own, in
+/// Windows Terminal or conhost: it gets a console with none (a windowed app is unaffected).
 pub fn start(app: &Path, args: &[OsString]) -> io::Result<()> {
-  let exe = env::current_exe()?;
-  Command::new(app.join(exe.file_name().unwrap_or_default())).args(args).spawn().map(drop)
+  let exe = app.join(env::current_exe()?.file_name().unwrap_or_default());
+  Command::new(exe).args(args).creation_flags(CREATE_NO_WINDOW).spawn().map(drop)
 }

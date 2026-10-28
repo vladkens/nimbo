@@ -295,10 +295,21 @@ fn apply(os: Os, job: &Job, s: &Seams) -> io::Result<()> {
     }),
   };
 
-  // On Windows the installer runs from the staging folder, which can't go while it does: the next
-  // download removes what is left there.
-  let dir = if os == Os::Windows { job.dir.join("new") } else { job.dir.clone() };
-  let _ = (uninstall::remove(&old(os, &job.target)), uninstall::remove(&dir));
+  let _ = uninstall::remove(&old(os, &job.target));
+  if os != Os::Windows {
+    let _ = uninstall::remove(&job.dir);
+    return done;
+  }
+
+  // On Windows the installer runs from the staging folder, which can't go while it does: all but
+  // its exe goes, and the next download removes that.
+  let exe = env::current_exe().ok().and_then(|e| e.file_name().map(OsString::from));
+  for e in fs::read_dir(&job.dir).into_iter().flatten().flatten() {
+    if Some(e.file_name()) != exe {
+      let _ = uninstall::remove(&e.path());
+    }
+  }
+
   done
 }
 
@@ -970,12 +981,16 @@ mod tests {
         let _: () = started.borrow_mut().push((app.to_owned(), args.to_vec()));
         Ok(())
       };
+      // The installer's exe, which Windows' keeps for the next download, and the package.
+      let exe = job.dir.join(env::current_exe().unwrap().file_name().unwrap());
+      write(&job.dir, &[(exe.to_str().unwrap(), "2"), ("download", "2")]);
       apply(os, &job, &Seams { wait: &wait, start: &start, ..SEAMS }).unwrap();
       assert_eq!(waited.get(), Some((7, QUIT, true)), "the mark written first");
       installed(&root, os, true, "installed");
       assert_eq!(*started.borrow(), [(job.target.clone(), vec![OsString::from("-x")])]);
       assert!(!old(os, &job.target).exists() && noted(&job.target).is_none(), "{os:?}");
-      assert_eq!(job.dir.exists(), os == Os::Windows, "{os:?}: the staging folder");
+      let left = fs::read_dir(&job.dir).map(|d| d.flatten().map(|e| e.path()).collect::<Vec<_>>());
+      assert_eq!(left.ok(), (os == Os::Windows).then(|| vec![exe]), "{os:?}: the staging folder");
       fs::remove_dir_all(root).unwrap();
     }
   }
@@ -1337,12 +1352,13 @@ mod tests {
     let (data, sig) = signed(FEED).unwrap();
     assert_eq!((data.len(), sig.len()), (FEED.len() - 133, 128));
     verify(KEY, data, sig).unwrap();
-    assert!(read_feed(FEED).unwrap().is_some());
+    // A release only where the feed has a line for this platform (not on ARM Windows or Linux).
+    read_feed(FEED).unwrap();
     // The same lines ended in CRLF, the `sig` line too or not, or with no line end.
     let crlf = String::from_utf8(data.to_vec()).unwrap().replace('\n', "\r\n");
     for end in ["\r\n", "\n", ""] {
       let feed = format!("{crlf}sig {CRLF_SIG}{end}");
-      assert!(read_feed(feed.as_bytes()).unwrap().is_some(), "{end:?}");
+      assert_eq!(read_feed(feed.as_bytes()).unwrap(), read_feed(FEED).unwrap(), "{end:?}");
     }
   }
 
