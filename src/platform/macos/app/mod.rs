@@ -6,13 +6,14 @@
 //! queue ([post()]), and the Dock ([Presence]); links and files opened ([open]), Accessibility,
 //! Secure Input and the microphone ([permissions]), shortcuts posted to the app in focus
 //! ([post]), where the user types ([focus]), the pasteboard for a paste ([paste]), alerts
-//! ([alert]), files fetched over HTTP ([http]), an update unpacked and checked ([update]) and what
-//! an uninstall resets ([uninstall]).
+//! ([alert]), files fetched over HTTP ([http]), an update unpacked and checked ([update]), what
+//! an uninstall resets ([uninstall]), and a microphone's transport and the lid ([hardware]).
 
 pub mod activity;
 pub mod autostart;
 pub mod desktop;
 pub mod focus;
+pub mod hardware;
 pub mod hotkey;
 pub mod http;
 pub mod open;

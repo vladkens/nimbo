@@ -20,7 +20,8 @@
 //! other apps: links and files opened or shown ([open]), the OS's permissions ([permissions]),
 //! where the user types ([focus]), keys posted to the app in focus ([keys::post]), the clipboard,
 //! also taken and put back around a paste of the app's own ([SystemClipboard]), and that paste
-//! itself, which gives the clipboard back ([paste]).
+//! itself, which gives the clipboard back ([paste]); and the hardware: how a microphone is
+//! attached and the laptop's lid ([hardware]).
 //!
 //! macOS 14 is the least it runs on (`NSApplication`'s `activate`, `NSView`'s display link): build
 //! apps with `MACOSX_DEPLOYMENT_TARGET=14.0`.
@@ -33,6 +34,7 @@ pub mod cpu;
 pub mod desktop;
 mod file_dialog;
 pub mod focus;
+pub mod hardware;
 pub mod harness;
 pub mod hotkey;
 pub mod instance;

@@ -159,8 +159,14 @@
 //!   bool`, `secure_input() -> bool`, `microphone() -> Access`, `request_microphone(Box<dyn
 //!   FnOnce(bool) + Send>)`.
 //!
-//!   `activity`, `http`, `open`, `post`, `paste`, `focus`, `permissions`, `uninstall` and `update`
-//!   live in `app/` on each OS too.
+//! - `pub mod hardware` ([crate::hardware]), from any thread: `transport(id: &str) -> Transport`,
+//!   an audio device's by the id cpal gives (macOS the CoreAudio UID, its transport type to
+//!   `hardware::core_audio`; Windows the IMMDevice endpoint id, its PnP enumerator to
+//!   `hardware::pnp`; Linux `Unknown`), and `lid_closed() -> Option<bool>` (macOS IOPMrootDomain's
+//!   `AppleClamshellState`; `None` without a lid, on Windows and Linux).
+//!
+//!   `activity`, `hardware`, `http`, `open`, `post`, `paste`, `focus`, `permissions`, `uninstall`
+//!   and `update` live in `app/` on each OS too.
 //! - `pub fn appearance() -> Appearance` ([crate::Appearance]): `dark`, and `accent` in sRGB or
 //!   `None` when the OS has none or the user left it to apps (macOS: `effectiveAppearance` matched
 //!   against Aqua / DarkAqua, `controlAccentColor` unless Multicolor; on the main thread only,
@@ -235,8 +241,8 @@ pub(crate) use imp::permissions;
 #[cfg(target_os = "linux")]
 pub(crate) use imp::startup_complete;
 pub(crate) use imp::{
-  activity, autostart, clipboard, desktop, focus, hotkey, http, open, paste, perf_cores, post,
-  shell, text, tray, uninstall, update,
+  activity, autostart, clipboard, desktop, focus, hardware, hotkey, http, open, paste, perf_cores,
+  post, shell, text, tray, uninstall, update,
 };
 #[cfg(target_os = "windows")]
 pub(crate) use imp::{attach_console, downloads};

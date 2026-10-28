@@ -6,13 +6,14 @@
 //! through the registry ([autostart]), links and files opened ([open]), shortcuts posted to the
 //! app in front ([post]), where the user types ([focus]) and the clipboard for a paste ([paste]),
 //! files fetched over HTTP ([http]) and an update unpacked ([update]); the Downloads folder
-//! ([downloads]), the console of the command line ([attach_console]) and the uninstall's retries
-//! ([uninstall]).
+//! ([downloads]), the console of the command line ([attach_console]), the uninstall's retries
+//! ([uninstall]) and a microphone's transport ([hardware]).
 
 pub mod activity;
 pub mod autostart;
 pub mod desktop;
 pub mod focus;
+pub mod hardware;
 pub mod hotkey;
 pub mod http;
 pub mod open;
