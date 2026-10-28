@@ -5,13 +5,14 @@
 //! area icon ([tray]), global hotkeys on a thread of their own ([hotkey]), launch at login
 //! through the registry ([autostart]), links and files opened ([open]), shortcuts posted to the
 //! app in front ([post]), where the user types ([focus]) and the clipboard for a paste ([paste]);
-//! the Downloads folder ([downloads]), the console of the command line ([attach_console]) and
-//! the uninstall's retries ([uninstall]).
+//! the Downloads folder ([downloads]), the console of the command line ([attach_console]), the
+//! uninstall's retries ([uninstall]) and a microphone's transport ([hardware]).
 
 pub mod activity;
 pub mod autostart;
 pub mod desktop;
 pub mod focus;
+pub mod hardware;
 pub mod hotkey;
 pub mod open;
 pub mod paste;
