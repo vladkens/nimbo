@@ -5,23 +5,35 @@
 //! unpacks it, [install] swaps it in. They block: an app runs them on a thread of its own and
 //! posts the result back.
 //!
-//! The feed is one JSON file, `update.json`, beside its signature `update.json.sig` (Ed25519 over
-//! the JSON's bytes, in base64), hosted anywhere: on GitHub as release assets,
-//! `https://github.com/<owner>/<repo>/releases/latest/download/update.json`. Its shape, keyed by
-//! `<OS>-<ARCH>` from [std::env::consts]:
+//! The feed is one text file, `update.txt`, beside its signature `update.txt.sig`, hosted
+//! anywhere: on GitHub as release assets,
+//! `https://github.com/<owner>/<repo>/releases/latest/download/update.txt`. It is UTF-8, one record
+//! per line, its fields split by single spaces: exactly one `version`, and per platform, keyed by
+//! `<OS>-<ARCH>` from [std::env::consts], the file's size in bytes, its SHA-512 in hex and its URL:
 //!
-//! ```json
-//! {"version": "1.2.0", "notes": "…", "platforms": {"macos-aarch64": {"url": "https://…", "size": 1234, "sha512": "<hex>"}}}
+//! ```text
+//! version 1.2.0
+//! macos-aarch64 394788 <sha512 hex> https://…/App-macos.zip
+//! windows-x86_64 285930 <sha512 hex> https://…/App-windows.zip
 //! ```
 //!
-//! `size` is the file's bytes: the download stops past it, and [download]'s progress counts to it.
-//! The feed may be 1 MiB, its signature 1 KiB; a signature that fails is fetched again with the
-//! feed once, as a release may have been published between the two.
+//! A line of another first word is skipped, so the format may grow; a first word repeated, or a
+//! malformed `version` or line of this platform, is `InvalidData`. The download stops past the
+//! size, and [download]'s progress counts to it. The feed may be 1 MiB, its signature 1 KiB; a
+//! signature that fails is fetched again with the feed once, as a release may have been published
+//! between the two.
 //!
-//! Signed with `openssl` 3: `openssl genpkey -algorithm ed25519 -out update.pem` once, keeping
-//! `update.pem` secret; `openssl pkey -in update.pem -pubout` gives the public key, whose base64
-//! line is [Feed::key]; each release signs with `openssl pkeyutl -sign -inkey update.pem -rawin
-//! -in update.json | base64 > update.json.sig`; `scripts/update-feed.py` writes both.
+//! The signature is Ed25519 over the feed's exact bytes, in 128 hex digits; [Feed::key] is the
+//! public key's 32 bytes in 64. Made with `openssl` 3, the key once and kept secret:
+//!
+//! ```sh
+//! openssl genpkey -algorithm ed25519 -out update.pem
+//! openssl pkey -in update.pem -pubout -outform DER | tail -c 32 | xxd -p -c 32  # Feed::key
+//! openssl pkeyutl -sign -inkey update.pem -rawin -in update.txt | xxd -p -c 64 > update.txt.sig
+//! ```
+//!
+//! `scripts/update-feed.py` writes the feed and its signature, and with `--public-key` prints the
+//! key.
 //!
 //! Only a newer version is taken, over https (http on loopback only), and its file only when its
 //! size and SHA-512 are the feed's; nothing is unpacked before. Redirects are followed by the
@@ -57,13 +69,13 @@ use crate::paths::{OS, Os};
 use crate::platform::{http, update as imp};
 use crate::uninstall::{self, Env};
 
-/// Where an app's updates come from: its feed's URL and the base64 Ed25519 public key that
-/// signs it, both from consts in the app.
+/// Where an app's updates come from: its feed's URL and the Ed25519 public key that signs it,
+/// both from consts in the app.
 #[derive(Clone, Copy, Debug)]
 pub struct Feed<'a> {
-  /// `update.json`'s URL; its signature is at the same URL with `.sig` added to the path ([sig]).
+  /// `update.txt`'s URL; its signature is at the same URL with `.sig` added to the path ([sig]).
   pub url: &'a str,
-  /// The public key in base64: its 32 bytes, or the line of `openssl pkey -pubout`.
+  /// The public key's 32 bytes in 64 hex digits.
   pub key: &'a str,
 }
 
@@ -72,8 +84,6 @@ pub struct Feed<'a> {
 #[non_exhaustive]
 pub struct Release {
   pub version: String,
-  /// What changed, as the feed says it; empty when it says nothing.
-  pub notes: String,
   /// The file to download, https (or loopback).
   pub url: String,
   /// The file's size in bytes.
@@ -128,16 +138,16 @@ pub fn check(feed: &Feed, current: &str) -> io::Result<Option<Release>> {
   };
   let fetch = || {
     Ok::<_, io::Error>((
-      get(feed.url, "update.json", 1 << 20)?,
-      get(&sig(feed.url), "update.json.sig", 1 << 10)?,
+      get(feed.url, "update.txt", 1 << 20)?,
+      get(&sig(feed.url), "update.txt.sig", 1 << 10)?,
     ))
   };
-  let (mut json, mut sig) = fetch()?;
-  if verify(feed.key, &json, &sig).is_err() {
-    (json, sig) = fetch()?;
+  let (mut text, mut sig) = fetch()?;
+  if verify(feed.key, &text, &sig).is_err() {
+    (text, sig) = fetch()?;
   }
 
-  read(feed, &json, &sig, current)
+  read(feed, &text, &sig, current)
 }
 
 /// The URL of the signature of the feed at `url`: `.sig` after its path, before a query or
@@ -456,25 +466,19 @@ impl Drop for Folder {
   }
 }
 
-/// The release a fetched feed offers this platform when it is newer than `current`: `json` the
+/// The release a fetched feed offers this platform when it is newer than `current`: `text` the
 /// feed's bytes, `sig` its signature file's. The signature is checked first (`InvalidData` if it
-/// is wrong), the JSON read after; a version not newer, or none for this platform, is `None`.
-pub fn read(feed: &Feed, json: &[u8], sig: &[u8], current: &str) -> io::Result<Option<Release>> {
-  verify(feed.key, json, sig)?;
-  release(json, current, &format!("{}-{}", env::consts::OS, env::consts::ARCH))
+/// is wrong), the feed read after; a version not newer, or none for this platform, is `None`.
+pub fn read(feed: &Feed, text: &[u8], sig: &[u8], current: &str) -> io::Result<Option<Release>> {
+  verify(feed.key, text, sig)?;
+  release(text, current, &format!("{}-{}", env::consts::OS, env::consts::ARCH))
 }
 
-/// The DER of an Ed25519 public key in a SubjectPublicKeyInfo before its 32 bytes, as `openssl
-/// pkey -pubout` writes it.
-const SPKI: [u8; 12] = [0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00];
-
-/// Checks `sig`, the base64 Ed25519 signature of `data`, by `key`.
+/// Checks `sig`, the hex Ed25519 signature of `data` (whitespace around it trimmed), by `key`.
 fn verify(key: &str, data: &[u8], sig: &[u8]) -> io::Result<()> {
-  let key = base64(key).unwrap_or_default();
-  let key = PublicKey::from_slice(key.strip_prefix(SPKI.as_slice()).unwrap_or(&key));
-  let key = key.map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "update: a bad key"))?;
-  let sig = std::str::from_utf8(sig).ok().and_then(base64);
-  let sig = sig.and_then(|s| Signature::from_slice(&s).ok());
+  let key = hex(key).map(PublicKey::new);
+  let key = key.ok_or_else(|| error(io::ErrorKind::InvalidInput, "a bad key"))?;
+  let sig = std::str::from_utf8(sig).ok().and_then(|s| hex(s.trim())).map(Signature::new);
   sig.and_then(|s| key.verify(data, &s).ok()).ok_or_else(|| bad("the feed's signature is wrong"))
 }
 
@@ -491,30 +495,44 @@ fn sha512(path: &Path) -> io::Result<[u8; 64]> {
   }
 }
 
-/// The release in the feed `json` for `platform` when its version is newer than `current`.
-fn release(json: &[u8], current: &str, platform: &str) -> io::Result<Option<Release>> {
-  let feed = Json::parse(std::str::from_utf8(json).map_err(|_| bad("the feed is not UTF-8"))?)?;
-  let field = |v: &Json, k: &str| {
-    let s = v.get(k).and_then(Json::str).map(String::from);
-    s.ok_or_else(|| bad(format!("the feed has no {k}")))
-  };
-  let version = field(&feed, "version")?;
-  match newer(&version, current) {
+/// The release in the feed `text` for `platform` when its version is newer than `current`: each
+/// line's first word once, `version` one more, the platform's `<size> <sha512> <url>`; other
+/// words skipped.
+fn release(text: &[u8], current: &str, platform: &str) -> io::Result<Option<Release>> {
+  let text = std::str::from_utf8(text).map_err(|_| bad("the feed is not UTF-8"))?;
+  let (mut seen, mut version, mut file) = (Vec::new(), None, None);
+  for line in text.lines() {
+    let (word, rest) = line.split_once(' ').unwrap_or((line, ""));
+    if word.is_empty() || seen.contains(&word) {
+      return Err(bad(format!("the feed's line {line:?} is empty or repeated")));
+    }
+
+    seen.push(word);
+    match word {
+      "version" => version = Some(rest),
+      _ if word == platform => file = Some(rest),
+      _ => {}
+    }
+  }
+
+  let version = version.filter(|v| !v.is_empty() && !v.contains(' '));
+  let version = version.ok_or_else(|| bad("the feed has no version, or a bad one"))?;
+  match newer(version, current) {
     None => return Err(bad(format!("versions {version} and {current} don't compare"))),
     Some(false) => return Ok(None),
     Some(true) => {}
   }
 
-  let Some(file) = feed.get("platforms").and_then(|p| p.get(platform)) else { return Ok(None) };
-  let url = field(file, "url")?;
-  if !secure(&url) {
+  let Some(file) = file else { return Ok(None) };
+  let what = || bad(format!("the feed's {platform} line is not <size> <sha512> <url>"));
+  let [size, sha512, url] = file.split(' ').collect::<Vec<_>>()[..] else { return Err(what()) };
+  let size = size.parse().ok().filter(|_| size.bytes().all(|b| b.is_ascii_digit()));
+  let (Some(size), Some(sha512)) = (size, hex(sha512)) else { return Err(what()) };
+  if !secure(url) {
     return Err(bad(format!("{url} is not https")));
   }
 
-  let Some(&Json::Int(size)) = file.get("size") else { return Err(bad("the feed has no size")) };
-  let sha512 = hex(&field(file, "sha512")?).ok_or_else(|| bad("a bad sha512"))?;
-  let notes = field(&feed, "notes").unwrap_or_default();
-  Ok(Some(Release { version, notes, url, size, sha512 }))
+  Ok(Some(Release { version: version.into(), url: url.into(), size, sha512 }))
 }
 
 /// `url` is https, or http on [loopback] (tests, a VM serving from its own host).
@@ -560,33 +578,14 @@ fn newer(v: &str, than: &str) -> Option<bool> {
   Some(key(v)? > key(than)?)
 }
 
-/// 64 bytes from 128 hex digits.
-fn hex(s: &str) -> Option<[u8; 64]> {
-  let bytes = (0..s.len()).step_by(2).map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok());
-  bytes.collect::<Option<Vec<u8>>>()?.try_into().ok()
-}
-
-/// Standard base64, its padding optional and whitespace skipped.
-fn base64(s: &str) -> Option<Vec<u8>> {
-  let (mut out, mut acc, mut bits) = (Vec::new(), 0u32, 0);
-  for c in s.trim_end().trim_end_matches('=').bytes().filter(|c| !c.is_ascii_whitespace()) {
-    let v = match c {
-      b'A'..=b'Z' => c - b'A',
-      b'a'..=b'z' => c - b'a' + 26,
-      b'0'..=b'9' => c - b'0' + 52,
-      b'+' => 62,
-      b'/' => 63,
-      _ => return None,
-    };
-
-    (acc, bits) = (acc << 6 | v as u32, bits + 6);
-    if bits >= 8 {
-      bits -= 8;
-      out.push((acc >> bits) as u8);
-    }
+/// `N` bytes from exactly `2 * N` hex digits, of either case.
+fn hex<const N: usize>(s: &str) -> Option<[u8; N]> {
+  if s.len() != 2 * N || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+    return None;
   }
 
-  Some(out)
+  let bytes = (0..N).map(|i| u8::from_str_radix(&s[2 * i..2 * i + 2], 16).ok());
+  bytes.collect::<Option<Vec<u8>>>()?.try_into().ok()
 }
 
 /// An `InvalidData` error of the update.
@@ -599,182 +598,31 @@ fn error(kind: io::ErrorKind, what: impl fmt::Display) -> io::Error {
   io::Error::new(kind, format!("update: {what}"))
 }
 
-/// A JSON value as the feed needs it: objects, strings and whole numbers; other numbers, literals
-/// and arrays are read and dropped, so the feed may grow.
-enum Json {
-  Str(String),
-  Obj(Vec<(String, Json)>),
-  Int(u64),
-  Other,
-}
-
-impl Json {
-  fn parse(s: &str) -> io::Result<Json> {
-    let mut r = Reader { s, at: 0 };
-    let v = r.value()?;
-    match r.peek() {
-      None => Ok(v),
-      Some(_) => Err(bad(format!("the feed goes on at {}", r.at))),
-    }
-  }
-
-  fn get(&self, key: &str) -> Option<&Json> {
-    let Json::Obj(fields) = self else { return None };
-    fields.iter().find(|(k, _)| k == key).map(|(_, v)| v)
-  }
-
-  fn str(&self) -> Option<&str> {
-    match self {
-      Json::Str(s) => Some(s),
-      _ => None,
-    }
-  }
-}
-
-/// Reads JSON from `s` at byte `at`.
-struct Reader<'a> {
-  s: &'a str,
-  at: usize,
-}
-
-impl Reader<'_> {
-  /// The next byte past whitespace, not taken.
-  fn peek(&mut self) -> Option<u8> {
-    let rest = self.s[self.at..].trim_start_matches([' ', '\t', '\n', '\r']);
-    self.at = self.s.len() - rest.len();
-    rest.bytes().next()
-  }
-
-  fn eat(&mut self, b: u8) -> bool {
-    let next = self.peek() == Some(b);
-    self.at += next as usize;
-    next
-  }
-
-  fn expect(&mut self, b: u8) -> io::Result<()> {
-    match self.eat(b) {
-      true => Ok(()),
-      false => Err(bad(format!("the feed has no {} at {}", b as char, self.at))),
-    }
-  }
-
-  fn value(&mut self) -> io::Result<Json> {
-    let open = match self.peek() {
-      Some(b'"') => return self.string().map(Json::Str),
-      Some(open @ (b'{' | b'[')) => open,
-      _ => return self.scalar(),
-    };
-
-    // `}` and `]` are two past `{` and `[`.
-    let (mut items, close) = (Vec::new(), open + 2);
-    self.at += 1;
-    while !self.eat(close) {
-      if !items.is_empty() {
-        self.expect(b',')?;
-      }
-
-      let key = match open {
-        b'{' => self.string().and_then(|k| self.expect(b':').map(|_| k))?,
-        _ => String::new(),
-      };
-
-      items.push((key, self.value()?));
-    }
-
-    Ok(if open == b'{' { Json::Obj(items) } else { Json::Other })
-  }
-
-  /// A number, `true`, `false` or `null`.
-  fn scalar(&mut self) -> io::Result<Json> {
-    let rest = &self.s[self.at..];
-    let n = rest.find(|c: char| !c.is_ascii_alphanumeric() && !"+-.".contains(c));
-    let word = &rest[..n.unwrap_or(rest.len())];
-    self.at += word.len();
-    match ["true", "false", "null"].contains(&word) || word.parse::<f64>().is_ok() {
-      true => Ok(word.parse().map_or(Json::Other, Json::Int)),
-      false => Err(bad(format!("the feed has no value at {}", self.at - word.len()))),
-    }
-  }
-
-  fn string(&mut self) -> io::Result<String> {
-    self.expect(b'"')?;
-    let mut out = String::new();
-    loop {
-      let rest = &self.s[self.at..];
-      let end = rest.find(['"', '\\']).ok_or_else(|| bad("the feed ends in a string"))?;
-      out.push_str(&rest[..end]);
-      self.at += end + 1;
-      if rest.as_bytes()[end] == b'"' {
-        return Ok(out);
-      }
-
-      let esc = self.s.as_bytes().get(self.at).copied();
-      self.at += 1;
-      out.push(match esc {
-        Some(b'"') => '"',
-        Some(b'\\') => '\\',
-        Some(b'/') => '/',
-        Some(b'b') => '\x08',
-        Some(b'f') => '\x0c',
-        Some(b'n') => '\n',
-        Some(b'r') => '\r',
-        Some(b't') => '\t',
-        Some(b'u') => self.unicode()?,
-        _ => return Err(bad(format!("the feed has a bad escape at {}", self.at - 1))),
-      });
-    }
-  }
-
-  /// The character of a `\u` escape, after the `u`: a surrogate pair takes two.
-  fn unicode(&mut self) -> io::Result<char> {
-    let c = match self.hex4() {
-      Some(hi @ 0xd800..0xdc00) => {
-        let pair = self.s[self.at..].starts_with("\\u");
-        self.at += 2 * pair as usize;
-        let lo = pair.then(|| self.hex4()).flatten().filter(|lo| (0xdc00..0xe000).contains(lo));
-        lo.map(|lo| 0x10000 + (hi - 0xd800) * 0x400 + (lo - 0xdc00))
-      }
-      c => c,
-    };
-
-    c.and_then(char::from_u32).ok_or_else(|| bad("the feed has a bad \\u escape"))
-  }
-
-  fn hex4(&mut self) -> Option<u32> {
-    let h = self.s.get(self.at..self.at + 4).filter(|h| h.bytes().all(|b| b.is_ascii_hexdigit()));
-    self.at += 4;
-    u32::from_str_radix(h?, 16).ok()
-  }
-}
-
 #[cfg(test)]
 mod tests {
   use std::cell::Cell;
 
   use super::*;
 
-  /// A feed signed with `openssl pkeyutl -sign -rawin` by the key whose public half is [KEY].
-  const FEED: &[u8] = br#"{
-  "version": "1.2.0",
-  "notes": "Faster \u00e9\ud83d\ude00\nfixes",
-  "size": -1.5e3, "tags": [1, true, null, {}],
-  "platforms": {
-    "macos-aarch64": {"url": "https://example.com/app.zip", "size": 3, "sha512": "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"},
-    "linux-x86_64": {"url": "https://example.com/app.AppImage", "size": 3, "sha512": "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"},
-    "windows-x86_64": {"url": "https://example.com/app.zip", "size": 3, "sha512": "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"},
-    "test-http": {"url": "http://example.com/app.zip", "size": 3, "sha512": "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"}
-  }
-}"#;
-  /// `openssl pkey -pubout`'s base64 line.
-  const KEY: &str = "MCowBQYDK2VwAyEAHaSiWSuMh49UC43FVPcYPVeF+pAmH8SGK5lI7nrYpmQ=";
-  const SIG: &[u8] =
-    b"FWL7HPbAZaak5Otl6bMzrcu16jwjnFjHYXaiLou2APK4j9Bzt52G6QhucBiTxkpOFzI4BbJRM0uYjPAZa0eJBQ==\n";
+  /// A feed signed with `openssl pkeyutl -sign -rawin` by the key whose public half is [KEY]; its
+  /// `tags` line is a word nimbo doesn't know.
+  const FEED: &[u8] = concat!(
+    "version 1.2.0\n",
+    "tags beta\n",
+    "macos-aarch64 3 ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f https://example.com/app.zip\n",
+    "linux-x86_64 3 ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f https://example.com/app.AppImage\n",
+    "windows-x86_64 3 ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f https://example.com/app.zip\n",
+    "test-http 3 ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f http://example.com/app.zip\n",
+  )
+  .as_bytes();
+  /// The last 32 bytes of `openssl pkey -pubout -outform DER`, in hex.
+  const KEY: &str = "9c7d9964c71e1ed5faf0192b7c75acbecf94f491c702235b1f871fbc80ad4de3";
+  const SIG: &[u8] = b"da82c9d4621e6f6816bbf780f55e1de222ca8ddecf7ecc31b180602370a9698515077f7d355374029a0df297cd5c89961abd81416a3435c5c69d4a52983d5e02\n";
   /// The SHA-512 of `abc` (FIPS 180-2).
   const ABC: &str = "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f";
   /// RFC 8032's test 1: the public key and the signature of the empty message.
-  const RFC_KEY: &str = "11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=";
-  const RFC_SIG: &[u8] =
-    b"5VZDAMNgrHKQhuLMgG6CioSHfx645dl02HPgZSJJAVVfuIIVkKM7rMYeOXAc+bRr0lv18FlbviRlUUFDjnoQCw==";
+  const RFC_KEY: &str = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+  const RFC_SIG: &[u8] = b"e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b";
 
   fn temp(name: &str, data: &[u8]) -> PathBuf {
     let path = env::temp_dir().join(format!("nimbo-update-{}-{name}", std::process::id()));
@@ -827,7 +675,7 @@ mod tests {
     let root = dir("read-only");
     fs::set_permissions(&root, fs::Permissions::from_mode(0o555)).unwrap();
     let url = "http://127.0.0.1:9/a".into();
-    let r = Release { version: "2".into(), notes: String::new(), url, size: 1, sha512: [0; 64] };
+    let r = Release { version: "2".into(), url, size: 1, sha512: [0; 64] };
     let e = fetch(&r, &root, &mut |_, _| {}).unwrap_err();
     fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
     assert_eq!(e.kind(), io::ErrorKind::PermissionDenied, "{e}");
@@ -1022,9 +870,9 @@ mod tests {
 
   #[test]
   fn the_signature_is_beside_the_feed_before_a_query() {
-    assert_eq!(sig("https://a/update.json"), "https://a/update.json.sig");
-    assert_eq!(sig("https://a/update.json?token=x"), "https://a/update.json.sig?token=x");
-    assert_eq!(sig("https://a/update.json#v?2"), "https://a/update.json.sig#v?2");
+    assert_eq!(sig("https://a/update.txt"), "https://a/update.txt.sig");
+    assert_eq!(sig("https://a/update.txt?token=x"), "https://a/update.txt.sig?token=x");
+    assert_eq!(sig("https://a/update.txt#v?2"), "https://a/update.txt.sig#v?2");
   }
 
   /// A bundle of the id `id` at `app`, signed ad hoc; `build` tells two builds apart.
@@ -1098,9 +946,9 @@ mod tests {
     fs::remove_dir_all(root).unwrap();
   }
 
-  /// A server on loopback, its URL: `/update.json` a 302 to `/feed/update.json`, which with
-  /// `/update.json.sig` and `/abc` it serves; `/race.json` a feed its `.sig` is not of the first
-  /// time, as when a release is published between the two; `/bad.json` that always; anything
+  /// A server on loopback, its URL: `/update.txt` a 302 to `/feed/update.txt`, which with
+  /// `/update.txt.sig` and `/abc` it serves; `/race.txt` a feed its `.sig` is not of the first
+  /// time, as when a release is published between the two; `/bad.txt` that always; anything
   /// else a 404.
   fn serve() -> String {
     use std::io::Write;
@@ -1121,15 +969,15 @@ mod tests {
 
         let req = String::from_utf8_lossy(&req);
         let (status, body): (_, &[u8]) = match req.split(' ').nth(1).unwrap_or_default() {
-          "/update.json" => ("302 Found\r\nLocation: /feed/update.json", b""),
-          "/feed/update.json" => ("200 OK", FEED),
-          "/race.json" if !raced => {
+          "/update.txt" => ("302 Found\r\nLocation: /feed/update.txt", b""),
+          "/feed/update.txt" => ("200 OK", FEED),
+          "/race.txt" if !raced => {
             raced = true;
             ("200 OK", old.as_slice())
           }
-          "/race.json" => ("200 OK", FEED),
-          "/bad.json" => ("200 OK", old.as_slice()),
-          "/update.json.sig" | "/race.json.sig" | "/bad.json.sig" => ("200 OK", SIG),
+          "/race.txt" => ("200 OK", FEED),
+          "/bad.txt" => ("200 OK", old.as_slice()),
+          "/update.txt.sig" | "/race.txt.sig" | "/bad.txt.sig" => ("200 OK", SIG),
           "/abc" => ("200 OK", b"abc"),
           _ => ("404 Not Found", b"none"),
         };
@@ -1146,14 +994,13 @@ mod tests {
   fn get_follows_a_redirect_and_fails_on_a_404() {
     let (url, to) = (serve(), temp("get", b""));
     let mut seen = Vec::new();
-    http::get(&format!("{url}/update.json"), &to, FEED.len() as u64, &mut |n| seen.push(n))
-      .unwrap();
+    http::get(&format!("{url}/update.txt"), &to, FEED.len() as u64, &mut |n| seen.push(n)).unwrap();
     assert_eq!(fs::read(&to).unwrap(), FEED);
     assert!(seen.is_sorted() && seen.last() == Some(&(FEED.len() as u64)), "{seen:?}");
     let none = &mut |_| {};
     let missing = http::get(&format!("{url}/none"), &to, 1 << 10, none).unwrap_err();
     assert_eq!(missing.kind(), io::ErrorKind::NotFound, "{missing}");
-    let big = http::get(&format!("{url}/update.json"), &to, FEED.len() as u64 - 1, none);
+    let big = http::get(&format!("{url}/update.txt"), &to, FEED.len() as u64 - 1, none);
     let big = big.unwrap_err();
     assert_eq!(big.kind(), io::ErrorKind::InvalidData, "{big}");
     let _ = fs::remove_file(to);
@@ -1162,24 +1009,23 @@ mod tests {
   #[test]
   fn check_and_download_over_http() {
     let url = serve();
-    let feed = Feed { url: &format!("{url}/update.json"), key: KEY };
+    let feed = Feed { url: &format!("{url}/update.txt"), key: KEY };
     let platform = format!("{}-{}", env::consts::OS, env::consts::ARCH);
     assert_eq!(check(&feed, "1.0").unwrap(), release(FEED, "1.0", &platform).unwrap());
     assert_eq!(check(&feed, "1.2.0").unwrap(), None);
-    let feed = Feed { url: &format!("{url}/none.json"), key: KEY };
+    let feed = Feed { url: &format!("{url}/none.txt"), key: KEY };
     assert_eq!(check(&feed, "1.0").unwrap_err().kind(), io::ErrorKind::NotFound);
-    let feed = Feed { url: "http://example.com/update.json", key: KEY };
+    let feed = Feed { url: "http://example.com/update.txt", key: KEY };
     assert_eq!(check(&feed, "1.0").unwrap_err().kind(), io::ErrorKind::InvalidData);
     // A signature that fails is fetched again once with its feed.
-    let feed = Feed { url: &format!("{url}/race.json"), key: KEY };
+    let feed = Feed { url: &format!("{url}/race.txt"), key: KEY };
     assert_eq!(check(&feed, "1.0").unwrap(), release(FEED, "1.0", &platform).unwrap());
-    let feed = Feed { url: &format!("{url}/bad.json"), key: KEY };
+    let feed = Feed { url: &format!("{url}/bad.txt"), key: KEY };
     assert_eq!(check(&feed, "1.0").unwrap_err().kind(), io::ErrorKind::InvalidData);
 
     let parent = dir("parent");
     let mut r = Release {
       version: "2".into(),
-      notes: String::new(),
       url: format!("{url}/abc"),
       size: 3,
       sha512: hex(ABC).unwrap(),
@@ -1220,8 +1066,9 @@ mod tests {
   fn a_feed_gives_its_release() {
     let r = release(FEED, "1.1.9", "macos-aarch64").unwrap().unwrap();
     assert_eq!((r.version.as_str(), r.url.as_str()), ("1.2.0", "https://example.com/app.zip"));
-    assert_eq!(r.notes, "Faster é😀\nfixes");
     assert_eq!((r.size, r.sha512), (3, hex(ABC).unwrap()));
+    let crlf = format!("version 2\r\np 1 {ABC} https://a\r\n");
+    assert_eq!(release(crlf.as_bytes(), "1", "p").unwrap().unwrap().url, "https://a", "CRLF");
   }
 
   #[test]
@@ -1230,45 +1077,42 @@ mod tests {
   }
 
   #[test]
-  fn broken_json_is_refused() {
-    let ok =
-      br#"{"version": "2", "platforms": {"p": {"url": "https://a", "size": 1, "sha512": "00"}}}"#;
-    assert!(release(ok, "1", "p").is_err(), "a short sha512");
-    for size in ["", r#""size": -1, "#, r#""size": 1.5, "#, r#""size": "1", "#] {
-      let json = format!(
-        r#"{{"version": "2", "platforms": {{"p": {{{size}"url": "https://a", "sha512": "{ABC}"}}}}}}"#
-      );
-      let e = release(json.as_bytes(), "1", "p").unwrap_err();
-      assert_eq!(e.kind(), io::ErrorKind::InvalidData, "{size}: {e}");
+  fn a_malformed_feed_is_refused() {
+    let line = |file: &str| format!("version 2\np {file}\n");
+    let files =
+      ["1 00 https://a", "-1 {ABC} https://a", "+1 {ABC} https://a", "1.5 {ABC} https://a"];
+    let more = ["{ABC} https://a", "1 {ABC}", "1 {ABC} https://a x", "1  {ABC} https://a", ""];
+    for file in files.into_iter().chain(more) {
+      let feed = line(&file.replace("{ABC}", ABC));
+      let e = release(feed.as_bytes(), "1", "p").unwrap_err();
+      assert_eq!(e.kind(), io::ErrorKind::InvalidData, "{file}: {e}");
     }
 
-    for json in [
-      &b""[..],
-      b"{",
-      br#"{"version": "2",}"#,
-      br#"{"version": "2"} x"#,
-      br#"{"version": 2}"#,
-      br#"{"version": "2", "a": [1 2]}"#,
-      br#"{"version": "2", "a": tru}"#,
-      br#"{"version": "2", "a": "\x"}"#,
-      br#"{"version": "2", "a": "\ud83d"}"#,
-      br#"{"version": "2", "a": "\u12"}"#,
-      br#"{"version": "2"#,
-      b"{\"version\": \"\xff\"}",
-      br#"["version", "2"]"#,
+    let ok = line(&format!("1 {ABC} https://a"));
+    for feed in [
+      "".to_owned(),
+      "p 1 x\n".to_owned(),
+      "version\n".to_owned(),
+      "version 2 3\n".to_owned(),
+      format!("{ok}version 3\n"),
+      format!("{ok}p 1 {ABC} https://b\n"),
+      format!("{ok}\n"),
+      format!(" {ok}"),
     ] {
-      assert!(release(json, "1", "p").is_err(), "{}", String::from_utf8_lossy(json));
+      assert!(release(feed.as_bytes(), "1", "p").is_err(), "{feed:?}");
     }
+
+    assert!(release(b"version \xff\n", "1", "p").is_err(), "not UTF-8");
+    let other = format!("{ok}q 1 x\nwhatever comes later\n");
+    assert!(release(other.as_bytes(), "1", "p").unwrap().is_some(), "other lines are skipped");
   }
 
   #[test]
-  fn base64_vectors() {
-    // RFC 4648 section 10, then whitespace and no padding.
-    let vectors = ["", "Zg==", "Zm8=", "Zm9v", "Zm9vYg==", "Zm9vYmE=", "Zm9vYmFy", " Zm9v\nYg"];
-    let decoded = vectors.map(|v| String::from_utf8(base64(v).unwrap()).unwrap());
-    assert_eq!(decoded, ["", "f", "fo", "foo", "foob", "fooba", "foobar", "foob"]);
-    assert_eq!(base64("Zm9v-"), None);
-    assert_eq!(base64("Zm=9v"), None);
+  fn hex_of_either_case() {
+    assert_eq!(hex("00fF7a"), Some([0, 255, 122]));
+    for s in ["00ff", "00ff7a0", "00ff7a00", "+0ff7a", "00ffxx", "00ffé", ""] {
+      assert_eq!(hex::<3>(s), None, "{s}");
+    }
   }
 
   #[test]
@@ -1314,7 +1158,7 @@ mod tests {
   #[test]
   fn an_openssl_signed_feed_verifies() {
     verify(KEY, FEED, SIG).unwrap();
-    let feed = Feed { url: "https://example.com/update.json", key: KEY };
+    let feed = Feed { url: "https://example.com/update.txt", key: KEY };
     assert!(read(&feed, FEED, SIG, "1.0").is_ok());
   }
 
@@ -1325,9 +1169,9 @@ mod tests {
     let kind = |r: io::Result<()>| r.unwrap_err().kind();
     assert_eq!(kind(verify(KEY, &feed, SIG)), io::ErrorKind::InvalidData);
     assert_eq!(kind(verify(RFC_KEY, FEED, SIG)), io::ErrorKind::InvalidData);
-    assert_eq!(kind(verify(KEY, FEED, b"not base64!")), io::ErrorKind::InvalidData);
+    assert_eq!(kind(verify(KEY, FEED, b"not hex!")), io::ErrorKind::InvalidData);
     assert_eq!(kind(verify("AAAA", FEED, SIG)), io::ErrorKind::InvalidInput);
-    // The signature is checked before the JSON is read.
+    // The signature is checked before the feed is read.
     let feed = Feed { url: "", key: KEY };
     assert_eq!(read(&feed, b"{", SIG, "1").unwrap_err().kind(), io::ErrorKind::InvalidData);
   }

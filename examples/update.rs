@@ -6,9 +6,10 @@
 //! for this one to end and removes what the update left.
 //!
 //! `UPDATE_VERSION=1.0.0 cargo build --release --example update` sets the version (the crate's
-//! without it); `scripts/update-feed.py` makes a feed. Then `update` prints the version,
-//! `update --check <feed url> <key>` what the feed offers, `update --update <feed url> <key>`
-//! updates, printing the download's percentage.
+//! without it); `scripts/update-feed.py` makes a feed, `update.txt`, and with `--public-key`
+//! prints the key in hex. Then `update` prints the version, `update --check <feed url> <key>` what
+//! the feed offers, `update --update <feed url> <key>` updates, printing the download's
+//! percentage.
 
 use std::io::{self, ErrorKind};
 use std::process::ExitCode;
@@ -40,7 +41,7 @@ fn run(args: &[String]) -> io::Result<()> {
     }
     [flag, url, key] if flag == "--check" => {
       match update::check(&feed(url, key), VERSION)? {
-        Some(r) => println!("{} at {}\n{}", r.version, r.url, r.notes),
+        Some(r) => println!("{} at {}", r.version, r.url),
         None => println!("{VERSION} is the latest"),
       }
 
