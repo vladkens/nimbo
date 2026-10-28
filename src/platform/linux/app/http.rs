@@ -108,6 +108,11 @@ pub fn get(url: &str, to: &Path, max: u64) -> io::Result<()> {
     done
   };
 
+  // A 404's page may be past `max`: the status tells first.
+  if code != 0 {
+    crate::platform::status(url, code as u32)?;
+  }
+
   let big = out.1.as_ref().is_some_and(|e| e.kind() == io::ErrorKind::InvalidData);
   out.1.map_or(Ok(()), |e| Err(if big { crate::platform::too_big(url, max) } else { e }))?;
 
