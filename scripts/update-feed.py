@@ -44,6 +44,7 @@ def main() -> None:
 
   platforms = {p: file(u, f) for p, u, f in packages}
   pld = {"version": args.version, "notes": args.notes, "platforms": platforms}
+  args.out.mkdir(parents=True, exist_ok=True)
   feed = args.out / "update.json"
   feed.write_text(json.dumps(pld, indent=2) + "\n")
 
