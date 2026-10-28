@@ -108,10 +108,8 @@
 //! - `pub(crate) mod instance` ([crate::instance]), one file for every Unix
 //!   (`linux/app/instance.rs`) and Windows' (`windows/app/instance.rs`): `lock_file(&Path) ->
 //!   io::Result<File>`, `Server` with `bind(dir, lock)` and `serve(on: impl Fn(&str) + Send)`, a
-//!   thread that calls `on` with each line, both let go on drop, `send(dir, line, deadline:
-//!   Instant)`, `NotFound` or `ConnectionRefused` when nothing listens, and `alive(pid: u32) ->
-//!   bool`, a process of this user's running (Unix `kill(pid, 0)`, Windows `OpenProcess` and a
-//!   handle not yet signalled).
+//!   thread that calls `on` with each line, both let go on drop, and `send(dir, line, deadline:
+//!   Instant)`, `NotFound` or `ConnectionRefused` when nothing listens.
 //! - `pub mod uninstall` ([crate::uninstall]): `steps(&AppInfo) -> Vec<Step>`, what the OS keeps
 //!   for the app besides launch at login, undone (macOS its permissions and defaults, Linux the
 //!   launcher entry and the portal's token), and `busy(&io::Error) -> bool`, an error a removal may

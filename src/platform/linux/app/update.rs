@@ -8,7 +8,7 @@ use std::path::Path;
 use std::process::Command;
 use std::{env, fs, io};
 
-use crate::instance::RELAUNCH;
+use crate::update::RELAUNCH;
 
 /// Makes the AppImage downloaded as `file` executable and moves it into the folder `into`.
 pub fn unpack(file: &Path, into: &Path) -> io::Result<()> {

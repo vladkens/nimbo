@@ -15,8 +15,7 @@ use block2::RcBlock;
 use objc2_app_kit::{NSRunningApplication, NSWorkspace, NSWorkspaceOpenConfiguration};
 use objc2_foundation::{NSArray, NSBundle, NSDictionary, NSError, NSString, NSURL};
 
-use crate::instance::RELAUNCH;
-use crate::update::bad;
+use crate::update::{RELAUNCH, bad};
 
 /// Unpacks the `.zip` `file` into the folder `into`, as `ditto -c -k --keepParent` packed it.
 pub fn unpack(file: &Path, into: &Path) -> io::Result<()> {

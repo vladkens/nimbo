@@ -75,10 +75,6 @@ fn main() -> ExitCode {
       eprintln!("update: another instance runs");
       return ExitCode::FAILURE;
     }
-    Ok(Claim::Replaced) => {
-      eprintln!("update: the old version never ended");
-      return ExitCode::FAILURE;
-    }
     Err(e) => {
       eprintln!("update: instance: {e}");
       return ExitCode::FAILURE;

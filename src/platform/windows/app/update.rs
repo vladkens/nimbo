@@ -10,8 +10,7 @@ use std::{env, io};
 
 use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 
-use crate::instance::RELAUNCH;
-use crate::update::bad;
+use crate::update::{RELAUNCH, bad};
 
 /// Unpacks the `.zip` `file` into the folder `into` with `%SystemRoot%\System32\tar.exe`, never
 /// one from `PATH`, and with no console window.

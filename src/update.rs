@@ -5,35 +5,36 @@
 //! unpacks it, [install] swaps it in. They block: an app runs them on a thread of its own and
 //! posts the result back.
 //!
-//! The feed is one text file, `update.txt`, beside its signature `update.txt.sig`, hosted
-//! anywhere: on GitHub as release assets,
+//! The feed is one text file, `update.txt`, signed, hosted anywhere: on GitHub as a release asset,
 //! `https://github.com/<owner>/<repo>/releases/latest/download/update.txt`. It is UTF-8, one record
-//! per line, its fields split by single spaces: exactly one `version`, and per platform, keyed by
-//! `<OS>-<ARCH>` from [std::env::consts], the file's size in bytes, its SHA-512 in hex and its URL:
+//! per line, its fields split by single spaces: exactly one `version`, per platform, keyed by
+//! `<OS>-<ARCH>` from [std::env::consts], the file's size in bytes, its SHA-512 in hex and its
+//! URL, and last the signature:
 //!
 //! ```text
 //! version 1.2.0
 //! macos-aarch64 394788 <sha512 hex> https://…/App-macos.zip
 //! windows-x86_64 285930 <sha512 hex> https://…/App-windows.zip
+//! sig <signature hex>
 //! ```
 //!
 //! A line of another first word is skipped, so the format may grow; a first word repeated, or a
 //! malformed `version` or line of this platform, is `InvalidData`. The download stops past the
-//! size, and [download]'s progress counts to it. The feed may be 1 MiB, its signature 1 KiB; a
-//! signature that fails is fetched again with the feed once, as a release may have been published
-//! between the two.
+//! size, and [download]'s progress counts to it. The feed may be 1 MiB.
 //!
-//! The signature is Ed25519 over the feed's exact bytes, in 128 hex digits; [Feed::key] is the
-//! public key's 32 bytes in 64. Made with `openssl` 3, the key once and kept secret:
+//! The signature is Ed25519 over every byte before the `sig` line, in 128 hex digits; that line is
+//! the last and comes once, else the feed is `InvalidData`. [Feed::key] is the public key's 32
+//! bytes in 64. Made with `openssl` 3, the key once and kept secret:
 //!
 //! ```sh
 //! openssl genpkey -algorithm ed25519 -out update.pem
 //! openssl pkey -in update.pem -pubout -outform DER | tail -c 32 | xxd -p -c 32  # Feed::key
-//! openssl pkeyutl -sign -inkey update.pem -rawin -in update.txt | xxd -p -c 64 > update.txt.sig
+//! echo "sig $(openssl pkeyutl -sign -inkey update.pem -rawin -in update.txt | xxd -p -c 64)" \
+//!   >> update.txt
 //! ```
 //!
-//! `scripts/update-feed.py` writes the feed and its signature, and with `--public-key` prints the
-//! key.
+//! `scripts/update-feed.py` writes the feed with its `sig` line, and with `--public-key` prints
+//! the key.
 //!
 //! Only a newer version is taken, over https (http on loopback only), and its file only when its
 //! size and SHA-512 are the feed's; nothing is unpacked before. Redirects are followed by the
@@ -48,23 +49,21 @@
 //! | Linux | the AppImage | none | over `$APPIMAGE` |
 //!
 //! What it replaces moves aside to `.<name>.nimbo-old` on macOS and Linux. A failure undoes every
-//! rename. The relaunched app, with the old one's arguments (on macOS not its environment), waits
-//! in [crate::instance] for the old one to end, and removes what it left. On macOS the grants
-//! (microphone, Accessibility) survive an update only when every release is signed with one stable
-//! identity: an ad-hoc signature's requirement is its own build, so [download] refuses the next
-//! one.
+//! rename. The relaunched app gets the old one's arguments (on macOS not its environment). On
+//! macOS the grants (microphone, Accessibility) survive an update only when every release is signed
+//! with one stable identity: an ad-hoc signature's requirement is its own build, so [download]
+//! refuses the next one.
 
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use std::{env, fmt, thread};
+use std::{env, fmt};
 
 use ed25519_compact::sha512::Hash;
 use ed25519_compact::{PublicKey, Signature};
 
-use crate::instance;
 use crate::paths::{OS, Os};
 use crate::platform::{http, update as imp};
 use crate::uninstall::{self, Env};
@@ -73,7 +72,7 @@ use crate::uninstall::{self, Env};
 /// both from consts in the app.
 #[derive(Clone, Copy, Debug)]
 pub struct Feed<'a> {
-  /// `update.txt`'s URL; its signature is at the same URL with `.sig` added to the path ([sig]).
+  /// `update.txt`'s URL.
   pub url: &'a str,
   /// The public key's 32 bytes in 64 hex digits.
   pub key: &'a str,
@@ -124,37 +123,17 @@ const _: () = {
   send::<io::Result<Option<Release>>>();
 };
 
-/// The release `feed` offers this platform when it is newer than `current`: the feed and its
-/// signature fetched over the OS's HTTP, again once if the signature fails, then [read].
+/// The release `feed` offers this platform when it is newer than `current`: the feed fetched over
+/// the OS's HTTP, then [read].
 pub fn check(feed: &Feed, current: &str) -> io::Result<Option<Release>> {
   if !secure(feed.url) {
     return Err(bad(format!("{} is not https", feed.url)));
   }
 
   let dir = Folder::new(&env::temp_dir())?;
-  let get = |url: &str, name, max| {
-    let to = dir.0.join(name);
-    http::get(url, &to, max, &mut |_| {}).and_then(|()| fs::read(to))
-  };
-  let fetch = || {
-    Ok::<_, io::Error>((
-      get(feed.url, "update.txt", 1 << 20)?,
-      get(&sig(feed.url), "update.txt.sig", 1 << 10)?,
-    ))
-  };
-  let (mut text, mut sig) = fetch()?;
-  if verify(feed.key, &text, &sig).is_err() {
-    (text, sig) = fetch()?;
-  }
-
-  read(feed, &text, &sig, current)
-}
-
-/// The URL of the signature of the feed at `url`: `.sig` after its path, before a query or
-/// fragment.
-fn sig(url: &str) -> String {
-  let (path, rest) = url.split_at(url.find(['?', '#']).unwrap_or(url.len()));
-  format!("{path}.sig{rest}")
+  let to = dir.0.join("update.txt");
+  http::get(feed.url, &to, 1 << 20, &mut |_| {})?;
+  read(feed, &fs::read(to)?, current)
 }
 
 /// Downloads `release`'s file beside the running app, checks its SHA-512 (`InvalidData` if it
@@ -185,18 +164,21 @@ pub fn download(release: &Release, mut progress: impl FnMut(u64, u64)) -> io::Re
 /// Puts the [Staged] app in the running one's place and starts it: what it replaces renamed to
 /// its [old] name (on Windows each file, as the folder of a running exe can't move), the new one
 /// moved in, each rename undone on an error, also when the new app doesn't start; one that can't
-/// be undone keeps the staged folder under a name [tidy] leaves and the error says where the files
-/// are. The app must quit promptly after `Ok`: the new one waits for it up to 60 s
-/// ([instance::claim_in], [instance::Claim::Replaced] past that), then removes the [old] names.
+/// be undone keeps the staged folder and the error says where the files are. The app must quit
+/// promptly after `Ok`.
 pub fn install(staged: Staged) -> io::Result<()> {
-  put(OS, staged, &|a, b| fs::rename(a, b), &|app| imp::relaunch(app, &instance::relaunch()?))
+  let pid = std::process::id().to_string();
+  put(OS, staged, &|a, b| fs::rename(a, b), &|app| imp::relaunch(app, &pid))
 }
+
+/// What the relaunch sets to this process's pid in the new one; a seam until the installer
+/// replaces the relaunch.
+pub(crate) const RELAUNCH: &str = "NIMBO_RELAUNCH";
 
 /// [download]'s progress: the bytes done, the total.
 type Progress<'a> = &'a mut dyn FnMut(u64, u64);
 
-/// What starts the new app, [imp::relaunch] with [instance::relaunch]'s value, or one that fails
-/// in tests.
+/// What starts the new app, [imp::relaunch], or one that fails in tests.
 type Relaunch<'a> = &'a dyn Fn(&Path) -> io::Result<()>;
 
 /// [install] on `os`, with `rename` and `relaunch`.
@@ -214,74 +196,6 @@ fn put(os: Os, staged: Staged, rename: Rename, relaunch: Relaunch) -> io::Result
      under their {OLD} names, the update kept in {}",
     dir.display()
   )))
-}
-
-/// Removes what updates left beside the running app ([leftovers]), on a thread of its own: a file
-/// may stay busy a moment after the old process ends. A relaunch's `old` process, which may still
-/// be ending, is waited for up to 10 s first. Nothing left costs one listing.
-pub(crate) fn tidy(old: Option<u32>) {
-  let Ok(exe) = env::current_exe() else { return };
-  let Ok(target) = target(OS, &exe, &|k| env::var_os(k)) else { return };
-  let alive = crate::platform::instance::alive;
-  if old.is_none() && leftovers(OS, &target, &exe, old, &alive).is_empty() {
-    return;
-  }
-
-  let tidy = move || {
-    let until = Instant::now() + Duration::from_secs(10);
-    while old.is_some_and(alive) && Instant::now() < until {
-      thread::sleep(Duration::from_millis(50));
-    }
-
-    leftovers(OS, &target, &exe, old, &alive).iter().for_each(|p| drop(uninstall::remove(p)));
-  };
-  let _ = thread::Builder::new().name("update".into()).spawn(tidy);
-}
-
-/// What updates of `target` left: the staging folders ([Folder]) of processes no longer `alive`,
-/// and, unless the `old` process still is, its [old] name; on Windows, once the running `exe`'s
-/// [old] name is there (an update always replaces the exe), each `<name>.nimbo-old` in its folders
-/// beside a `<name>`. Nothing while a kept folder is there: a half-swapped app's old files are the
-/// way back.
-fn leftovers(os: Os, target: &Path, exe: &Path, old: Option<u32>, alive: Alive) -> Vec<PathBuf> {
-  let stale = |name: &OsStr| {
-    let pid = name.to_str().and_then(|n| n.strip_prefix(STAGING)?.split_once('-')?.0.parse().ok());
-    pid.is_some_and(|pid| !alive(pid))
-  };
-  let all: Vec<_> = fs::read_dir(beside(os, target)).into_iter().flatten().flatten().collect();
-  let kept = format!("{STAGING}kept-");
-  if all.iter().any(|e| e.file_name().to_string_lossy().starts_with(&kept)) {
-    return Vec::new();
-  }
-
-  let mut out: Vec<_> = all.iter().filter(|e| stale(&e.file_name())).map(|e| e.path()).collect();
-  match os {
-    _ if old.is_some_and(alive) => {}
-    Os::Windows if self::old(os, exe).exists() => out.extend(olds(target)),
-    Os::Windows => {}
-    _ => out.extend(Some(self::old(os, target)).filter(|p| p.exists())),
-  }
-
-  out
-}
-
-/// Whether a process runs, [crate::platform::instance::alive] or one of tests.
-type Alive<'a> = &'a dyn Fn(u32) -> bool;
-
-/// Each `<name>.nimbo-old` beside a `<name>` in the folder `dir` and those in it.
-fn olds(dir: &Path) -> Vec<PathBuf> {
-  let mut out = Vec::new();
-  for e in fs::read_dir(dir).into_iter().flatten().flatten() {
-    let (path, name) = (e.path(), e.file_name());
-    let of = name.to_str().and_then(|n| n.strip_suffix(OLD)).filter(|n| !n.is_empty());
-    match of.is_some_and(|n| dir.join(n).exists()) {
-      true => out.push(path),
-      false if e.file_type().is_ok_and(|t| t.is_dir()) => out.extend(olds(&path)),
-      false => {}
-    }
-  }
-
-  out
 }
 
 /// Where [download] stages the update of `target`: beside it, on its volume, so the swap only
@@ -450,8 +364,8 @@ impl Folder {
     Ok(Self(dir))
   }
 
-  /// Its path, the folder kept and renamed to `.nimbo-update-kept-…`, whose pid [tidy] can't
-  /// read; the empty path left behind can't be removed.
+  /// Its path, the folder kept and renamed to `.nimbo-update-kept-…`; the empty path left behind
+  /// can't be removed.
   fn keep(mut self) -> PathBuf {
     let dir = std::mem::take(&mut self.0);
     let name = dir.file_name().and_then(OsStr::to_str).and_then(|n| n.strip_prefix(STAGING));
@@ -466,19 +380,35 @@ impl Drop for Folder {
   }
 }
 
-/// The release a fetched feed offers this platform when it is newer than `current`: `text` the
-/// feed's bytes, `sig` its signature file's. The signature is checked first (`InvalidData` if it
-/// is wrong), the feed read after; a version not newer, or none for this platform, is `None`.
-pub fn read(feed: &Feed, text: &[u8], sig: &[u8], current: &str) -> io::Result<Option<Release>> {
-  verify(feed.key, text, sig)?;
-  release(text, current, &format!("{}-{}", env::consts::OS, env::consts::ARCH))
+/// The release a fetched feed offers this platform when it is newer than `current`, `text` the
+/// feed's bytes. Its `sig` line is checked first (`InvalidData` if it is not the last line, comes
+/// twice or is wrong), the feed read after; a version not newer, or none for this platform, is
+/// `None`.
+pub fn read(feed: &Feed, text: &[u8], current: &str) -> io::Result<Option<Release>> {
+  let (data, sig) = signed(text)?;
+  verify(feed.key, data, sig)?;
+  release(data, current, &format!("{}-{}", env::consts::OS, env::consts::ARCH))
 }
 
-/// Checks `sig`, the hex Ed25519 signature of `data` (whitespace around it trimmed), by `key`.
-fn verify(key: &str, data: &[u8], sig: &[u8]) -> io::Result<()> {
+/// The feed `text` split at its last line, `sig <signature>`: the bytes before that line and the
+/// signature's hex; `InvalidData` if the last line is not that or another line is too.
+fn signed(text: &[u8]) -> io::Result<(&[u8], &str)> {
+  let text = std::str::from_utf8(text).map_err(|_| bad("the feed is not UTF-8"))?;
+  let end = text.strip_suffix('\n').unwrap_or(text);
+  let start = end.rfind('\n').map_or(0, |i| i + 1);
+  let (data, last) = (&text[..start], &end[start..]);
+  let sig = last.strip_suffix('\r').unwrap_or(last).strip_prefix("sig ");
+  match sig.filter(|_| !data.lines().any(|l| l.split(' ').next() == Some("sig"))) {
+    Some(sig) => Ok((data.as_bytes(), sig)),
+    None => Err(bad("the feed's last line is not its one `sig` line")),
+  }
+}
+
+/// Checks `sig`, the hex Ed25519 signature of `data`, by `key`.
+fn verify(key: &str, data: &[u8], sig: &str) -> io::Result<()> {
   let key = hex(key).map(PublicKey::new);
   let key = key.ok_or_else(|| error(io::ErrorKind::InvalidInput, "a bad key"))?;
-  let sig = std::str::from_utf8(sig).ok().and_then(|s| hex(s.trim())).map(Signature::new);
+  let sig = hex(sig).map(Signature::new);
   sig.and_then(|s| key.verify(data, &s).ok()).ok_or_else(|| bad("the feed's signature is wrong"))
 }
 
@@ -613,16 +543,18 @@ mod tests {
     "linux-x86_64 3 ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f https://example.com/app.AppImage\n",
     "windows-x86_64 3 ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f https://example.com/app.zip\n",
     "test-http 3 ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f http://example.com/app.zip\n",
+    "sig e965a7ea705bcf508b05a6c8ba1c74bf3737f91f0da936a7b5ce4b729a17f67dce041429b42008d440c5715c70fd1ae473e1e179b4b76b8641748b095442b105\n",
   )
   .as_bytes();
   /// The last 32 bytes of `openssl pkey -pubout -outform DER`, in hex.
-  const KEY: &str = "9c7d9964c71e1ed5faf0192b7c75acbecf94f491c702235b1f871fbc80ad4de3";
-  const SIG: &[u8] = b"da82c9d4621e6f6816bbf780f55e1de222ca8ddecf7ecc31b180602370a9698515077f7d355374029a0df297cd5c89961abd81416a3435c5c69d4a52983d5e02\n";
+  const KEY: &str = "6bf026c9174d547c1d68f3ec8267273426167628161897f3661a4677a6c24b6f";
+  /// [FEED]'s lines before `sig` ended in CRLF, signed so.
+  const CRLF_SIG: &str = "894a66f5a20e1013bef7720bdcfd2ecad93f289bd483adaca9f7ead1a450201e23f4282df9f4cc03c361ddac43db127f8be20ba9bb2a32779d9ffb61adc2e008";
   /// The SHA-512 of `abc` (FIPS 180-2).
   const ABC: &str = "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f";
   /// RFC 8032's test 1: the public key and the signature of the empty message.
   const RFC_KEY: &str = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
-  const RFC_SIG: &[u8] = b"e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b";
+  const RFC_SIG: &str = "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b";
 
   fn temp(name: &str, data: &[u8]) -> PathBuf {
     let path = env::temp_dir().join(format!("nimbo-update-{}-{name}", std::process::id()));
@@ -751,54 +683,6 @@ mod tests {
       &[("W/res/x", "2"), ("W/res/x.nimbo-old", "1"), ("W/res/y", "2"), ("W/lib/z", "2")],
       "",
     );
-
-    // The next launch removes the old names, and only those: not a user's `.old`.
-    write(&root, &[("W/b.nimbo-old", "0"), ("W/a.exe.old", "0"), (".A.app.old", "0")]);
-    let apps = [(Os::Mac, "A.app"), (Os::Linux, "A.AppImage"), (Os::Windows, "W")];
-    let left =
-      |&(os, t): &(Os, &str)| leftovers(os, &root.join(t), &root.join("W/a.exe"), None, &|_| true);
-    let mut left: Vec<_> = apps.iter().flat_map(left).collect();
-    left.sort();
-    let names =
-      [".A.AppImage", ".A.app", "W/a.dll", "W/a.exe", "W/res/x"].map(|n| n.to_owned() + OLD);
-    assert_eq!(left, names.map(|n| root.join(n)));
-    fs::remove_dir_all(root).unwrap();
-  }
-
-  #[test]
-  fn what_updates_left_is_found() {
-    let root = dir("tidy");
-    write(&root, &[("W/a.exe", "1"), ("W/res/x", "1"), ("W/res/x.nimbo-old", "0")]);
-    write(&root, &[("W/b.nimbo-old", "0"), ("W/res/x.old", "0"), ("W.nimbo-old/a.exe", "0")]);
-    write(&root, &[("W/.nimbo-update-7-1/d", ""), ("W/.nimbo-update-8-1/d", "")]);
-    write(
-      &root,
-      &[("W/.nimbo-update-x-1/d", ""), (".A.app.nimbo-old/x", ""), (".A.app.old/x", "")],
-    );
-    write(&root, &[(".nimbo-update-7-2/d", ""), (".nimbo-update-8-2/d", "")]);
-    // Process 8 runs, 7 has ended.
-    let left = |os, target: &str, exe: &str| {
-      let mut left = leftovers(os, &root.join(target), &root.join(exe), None, &|pid| pid == 8);
-      left.sort();
-      left
-    };
-    let names = |names: &[&str]| names.iter().map(|n| root.join(n)).collect::<Vec<_>>();
-    // On Windows the exe's old name marks an update's, not the folder's.
-    assert_eq!(left(Os::Windows, "W", "W/a.exe"), names(&["W/.nimbo-update-7-1"]));
-    write(&root, &[("W/a.exe.nimbo-old", "0")]);
-    let all = ["W/.nimbo-update-7-1", "W/a.exe.nimbo-old", "W/res/x.nimbo-old"];
-    assert_eq!(left(Os::Windows, "W", "W/a.exe"), names(&all), "W/b.nimbo-old has no W/b");
-    let mac = left(Os::Mac, "A.app", "A.app/Contents/MacOS/a");
-    assert_eq!(mac, names(&[".A.app.nimbo-old", ".nimbo-update-7-2"]));
-    assert_eq!(left(Os::Linux, "A.AppImage", "a"), names(&[".nimbo-update-7-2"]));
-    // While the relaunch's old process ends, its old names stay; its staging folder is its own.
-    for (os, target, exe) in
-      [(Os::Mac, "A.app", "A.app/Contents/MacOS/a"), (Os::Windows, "W", "W/a.exe")]
-    {
-      let left = leftovers(os, &root.join(target), &root.join(exe), Some(8), &|pid| pid == 8);
-      assert!(left.iter().all(|p| !p.to_string_lossy().ends_with(OLD)), "{os:?}: {left:?}");
-    }
-
     fs::remove_dir_all(root).unwrap();
   }
 
@@ -850,29 +734,6 @@ mod tests {
     assert!(e.to_string().contains("half-swapped"), "{e}");
     assert!(e.to_string().contains(&kept.display().to_string()), "{e}");
     fs::remove_dir_all(root).unwrap();
-  }
-
-  #[test]
-  fn a_kept_folder_outlives_later_launches() {
-    let root = dir("kept");
-    let live = Folder::new(&root).unwrap();
-    write(&root, &[(".A.app.nimbo-old/x", "")]);
-    let left = || leftovers(Os::Mac, &root.join("A.app"), &root.join("A.app/a"), None, &|_| false);
-    assert_eq!(left().len(), 2, "every process has ended");
-
-    // Half-swapped: nothing goes, the old app least of all.
-    let kept = Folder::new(&root).unwrap().keep();
-    assert_eq!(left(), Vec::<PathBuf>::new());
-    assert!(kept.is_dir() && kept.starts_with(&root), "{}", kept.display());
-    drop(live);
-    fs::remove_dir_all(root).unwrap();
-  }
-
-  #[test]
-  fn the_signature_is_beside_the_feed_before_a_query() {
-    assert_eq!(sig("https://a/update.txt"), "https://a/update.txt.sig");
-    assert_eq!(sig("https://a/update.txt?token=x"), "https://a/update.txt.sig?token=x");
-    assert_eq!(sig("https://a/update.txt#v?2"), "https://a/update.txt.sig#v?2");
   }
 
   /// A bundle of the id `id` at `app`, signed ad hoc; `build` tells two builds apart.
@@ -946,18 +807,15 @@ mod tests {
     fs::remove_dir_all(root).unwrap();
   }
 
-  /// A server on loopback, its URL: `/update.txt` a 302 to `/feed/update.txt`, which with
-  /// `/update.txt.sig` and `/abc` it serves; `/race.txt` a feed its `.sig` is not of the first
-  /// time, as when a release is published between the two; `/bad.txt` that always; anything
-  /// else a 404.
+  /// A server on loopback, its URL: `/update.txt` a 302 to `/feed/update.txt`, which with `/abc`
+  /// it serves; `/bad.txt` a feed changed after it was signed; anything else a 404.
   fn serve() -> String {
     use std::io::Write;
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
-    let mut old = FEED.to_vec();
-    old[20] ^= 1;
+    let mut bad = FEED.to_vec();
+    bad[20] ^= 1;
     std::thread::spawn(move || {
-      let mut raced = false;
       for mut s in listener.incoming().flatten() {
         let (mut req, mut buf) = (Vec::new(), [0; 1024]);
         while !req.ends_with(b"\r\n\r\n") {
@@ -971,13 +829,7 @@ mod tests {
         let (status, body): (_, &[u8]) = match req.split(' ').nth(1).unwrap_or_default() {
           "/update.txt" => ("302 Found\r\nLocation: /feed/update.txt", b""),
           "/feed/update.txt" => ("200 OK", FEED),
-          "/race.txt" if !raced => {
-            raced = true;
-            ("200 OK", old.as_slice())
-          }
-          "/race.txt" => ("200 OK", FEED),
-          "/bad.txt" => ("200 OK", old.as_slice()),
-          "/update.txt.sig" | "/race.txt.sig" | "/bad.txt.sig" => ("200 OK", SIG),
+          "/bad.txt" => ("200 OK", bad.as_slice()),
           "/abc" => ("200 OK", b"abc"),
           _ => ("404 Not Found", b"none"),
         };
@@ -1017,9 +869,6 @@ mod tests {
     assert_eq!(check(&feed, "1.0").unwrap_err().kind(), io::ErrorKind::NotFound);
     let feed = Feed { url: "http://example.com/update.txt", key: KEY };
     assert_eq!(check(&feed, "1.0").unwrap_err().kind(), io::ErrorKind::InvalidData);
-    // A signature that fails is fetched again once with its feed.
-    let feed = Feed { url: &format!("{url}/race.txt"), key: KEY };
-    assert_eq!(check(&feed, "1.0").unwrap(), release(FEED, "1.0", &platform).unwrap());
     let feed = Feed { url: &format!("{url}/bad.txt"), key: KEY };
     assert_eq!(check(&feed, "1.0").unwrap_err().kind(), io::ErrorKind::InvalidData);
 
@@ -1155,25 +1004,61 @@ mod tests {
     assert!(verify(RFC_KEY, b"x", RFC_SIG).is_err());
   }
 
+  /// [FEED] read with [KEY].
+  fn read_feed(text: &[u8]) -> io::Result<Option<Release>> {
+    read(&Feed { url: "https://example.com/update.txt", key: KEY }, text, "1.0")
+  }
+
   #[test]
   fn an_openssl_signed_feed_verifies() {
-    verify(KEY, FEED, SIG).unwrap();
-    let feed = Feed { url: "https://example.com/update.txt", key: KEY };
-    assert!(read(&feed, FEED, SIG, "1.0").is_ok());
+    let (data, sig) = signed(FEED).unwrap();
+    assert_eq!((data.len(), sig.len()), (FEED.len() - 133, 128));
+    verify(KEY, data, sig).unwrap();
+    assert!(read_feed(FEED).unwrap().is_some());
+    // The same lines ended in CRLF, the `sig` line too or not, or with no line end.
+    let crlf = String::from_utf8(data.to_vec()).unwrap().replace('\n', "\r\n");
+    for end in ["\r\n", "\n", ""] {
+      let feed = format!("{crlf}sig {CRLF_SIG}{end}");
+      assert!(read_feed(feed.as_bytes()).unwrap().is_some(), "{end:?}");
+    }
+  }
+
+  #[test]
+  fn the_sig_line_is_last_and_once() {
+    let (data, sig) = signed(FEED).unwrap();
+    let data = std::str::from_utf8(data).unwrap();
+    for feed in [
+      data.to_owned(),
+      format!("{data}sig {sig}\n\n"),
+      format!("{data}sig {sig}\nsig {sig}\n"),
+      format!("sig {sig}\n{data}sig {sig}\n"),
+      format!("{data}sig\nsig {sig}\n"),
+      format!("{data}sig {sig}\nversion 1.3\n"),
+      format!("{data}sig  {sig}\n"),
+      format!("{data}sig {sig} \n"),
+    ] {
+      let e = read_feed(feed.as_bytes()).unwrap_err();
+      assert_eq!(e.kind(), io::ErrorKind::InvalidData, "{feed:?}: {e}");
+    }
   }
 
   #[test]
   fn a_changed_feed_or_another_key_is_refused() {
-    let mut feed = FEED.to_vec();
-    feed[20] ^= 1;
+    let (data, sig) = signed(FEED).unwrap();
+    // Each byte the signature covers: a line's text, its line end, the line before `sig`.
+    for at in [0, 20, data.len() - 2, data.len() - 1] {
+      let mut feed = FEED.to_vec();
+      feed[at] ^= 1;
+      assert_eq!(read_feed(&feed).unwrap_err().kind(), io::ErrorKind::InvalidData, "{at}");
+    }
+
     let kind = |r: io::Result<()>| r.unwrap_err().kind();
-    assert_eq!(kind(verify(KEY, &feed, SIG)), io::ErrorKind::InvalidData);
-    assert_eq!(kind(verify(RFC_KEY, FEED, SIG)), io::ErrorKind::InvalidData);
-    assert_eq!(kind(verify(KEY, FEED, b"not hex!")), io::ErrorKind::InvalidData);
-    assert_eq!(kind(verify("AAAA", FEED, SIG)), io::ErrorKind::InvalidInput);
+    assert_eq!(kind(verify(RFC_KEY, data, sig)), io::ErrorKind::InvalidData);
+    assert_eq!(kind(verify(KEY, data, "not hex!")), io::ErrorKind::InvalidData);
+    assert_eq!(kind(verify("AAAA", data, sig)), io::ErrorKind::InvalidInput);
     // The signature is checked before the feed is read.
-    let feed = Feed { url: "", key: KEY };
-    assert_eq!(read(&feed, b"{", SIG, "1").unwrap_err().kind(), io::ErrorKind::InvalidData);
+    let e = read_feed(format!("{{\nsig {sig}\n").as_bytes()).unwrap_err();
+    assert!(e.to_string().contains("signature"), "{e}");
   }
 
   #[test]

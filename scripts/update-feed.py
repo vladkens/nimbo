@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.11"
 # ///
-"""Makes an update feed (src/update.rs): update.txt and its Ed25519 signature update.txt.sig.
+"""Makes an update feed (src/update.rs): update.txt, its last line its Ed25519 signature.
 
 Each package is `<platform> <url> <file>`: the platform key (`<os>-<arch>`, the os `macos`,
 `windows` or `linux`, the arch `x86_64` or `aarch64`), where the file will be served, and the
@@ -62,9 +62,12 @@ def main() -> None:
   feed = args.out / "update.txt"
   feed.write_bytes("".join(f"{line}\n" for line in lines).encode())
 
+  # The signature covers every byte before its line; openssl signs Ed25519 only from a file.
   sig = openssl("pkeyutl", "-sign", "-inkey", str(args.key), "-rawin", "-in", str(feed))
-  (args.out / "update.txt.sig").write_bytes(sig.hex().encode() + b"\n")
-  print(f"{feed} and its .sig: {args.version} for {', '.join(p for p, _, _ in packages)}")
+  with feed.open("ab") as f:
+    f.write(f"sig {sig.hex()}\n".encode())
+
+  print(f"{feed}: {args.version} for {', '.join(p for p, _, _ in packages)}, signed")
 
 
 if __name__ == "__main__":
