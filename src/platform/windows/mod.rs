@@ -28,8 +28,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use app::paste::Open;
 pub use app::{
-  activity, attach_console, autostart, desktop, downloads, focus, hotkey, open, paste, post, shell,
-  tray, uninstall,
+  activity, attach_console, autostart, desktop, downloads, focus, hardware, hotkey, open, paste,
+  post, shell, tray, uninstall,
 };
 use keyboard_types::Modifiers;
 pub use settings::appearance;

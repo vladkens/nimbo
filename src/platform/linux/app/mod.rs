@@ -7,13 +7,14 @@
 //! to the app in focus ([post]) and where the user types on X11 ([focus]), and the clipboard for a
 //! paste ([paste]), both through the RemoteDesktop portal on Wayland ([remote]); the tray, the
 //! portals and the file manager speak D-Bus through GIO ([super::dbus]); what an uninstall
-//! removes ([uninstall]).
+//! removes ([uninstall]); no hardware read yet ([hardware]).
 
 pub mod activity;
 pub mod autostart;
 pub mod desktop;
 pub mod focus;
 mod grab;
+pub mod hardware;
 pub mod hotkey;
 mod menu;
 pub mod open;
