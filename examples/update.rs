@@ -26,8 +26,8 @@ pub const VERSION: &str = match option_env!("UPDATE_VERSION") {
   None => env!("CARGO_PKG_VERSION"),
 };
 const USAGE: &str = "usage: update [--check | --update <feed url> <key>]";
-/// How long a relaunched version stays: the update's leftovers go on a thread of their own,
-/// tried again for up to 5 s while a file stays busy.
+/// How long a relaunched version stays, with the arguments of the one it replaces: the update's
+/// leftovers go on a thread of their own, tried again for up to 5 s while a file stays busy.
 const TIDY: Duration = Duration::from_secs(6);
 
 /// What the arguments ask: the version; the release the feed offers; that release installed.
@@ -36,10 +36,6 @@ fn run(args: &[String]) -> io::Result<()> {
   match args {
     [] => {
       println!("{VERSION}");
-      if env::var_os("NIMBO_RELAUNCH").is_some() {
-        thread::sleep(TIDY);
-      }
-
       Ok(())
     }
     [flag, url, key] if flag == "--check" => {
@@ -66,11 +62,17 @@ fn run(args: &[String]) -> io::Result<()> {
 }
 
 fn main() -> ExitCode {
+  // Started by an update's relaunch.
+  let relaunched = env::var_os("NIMBO_RELAUNCH").is_some();
   // Held to the end: the relaunched version waits for it to go.
   let _instance = match instance::claim(&INFO) {
     Ok(Claim::Primary(instance)) => instance,
     Ok(Claim::Running) => {
       eprintln!("update: another instance runs");
+      return ExitCode::FAILURE;
+    }
+    Ok(Claim::Replaced) => {
+      eprintln!("update: the old version never ended");
       return ExitCode::FAILURE;
     }
     Err(e) => {
@@ -79,7 +81,12 @@ fn main() -> ExitCode {
     }
   };
 
-  match run(&env::args().skip(1).collect::<Vec<_>>()) {
+  let ran = run(&env::args().skip(1).collect::<Vec<_>>());
+  if relaunched {
+    thread::sleep(TIDY);
+  }
+
+  match ran {
     Ok(()) => ExitCode::SUCCESS,
     // The library's errors say they are the update's.
     Err(e) => {

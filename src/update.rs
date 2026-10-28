@@ -11,8 +11,12 @@
 //! `<OS>-<ARCH>` from [std::env::consts]:
 //!
 //! ```json
-//! {"version": "1.2.0", "notes": "…", "platforms": {"macos-aarch64": {"url": "https://…", "sha512": "<hex>"}}}
+//! {"version": "1.2.0", "notes": "…", "platforms": {"macos-aarch64": {"url": "https://…", "size": 1234, "sha512": "<hex>"}}}
 //! ```
+//!
+//! `size` is the file's bytes: the download stops past it. The feed may be 1 MiB, its signature
+//! 1 KiB; a signature that fails is fetched again with the feed once, as a release may have been
+//! published between the two.
 //!
 //! Signed with `openssl` 3: `openssl genpkey -algorithm ed25519 -out update.pem` once, keeping
 //! `update.pem` secret; `openssl pkey -in update.pem -pubout` gives the public key, whose base64
@@ -20,8 +24,10 @@
 //! -in update.json | base64 > update.json.sig`; `scripts/update-feed.py` writes both.
 //!
 //! Only a newer version is taken, over https (http on loopback only), and its file only when its
-//! SHA-512 is the feed's; nothing is unpacked before. The package holds exactly one entry, named
-//! as the app's own:
+//! size and SHA-512 are the feed's; nothing is unpacked before. Redirects are followed by the
+//! system (on Linux only to https, on Windows not from https to http, on macOS by the shared
+//! session's defaults); the signature and the hash guard what comes. The package holds exactly one
+//! entry, named as the app's own:
 //!
 //! | OS | package | unpacked with | swapped |
 //! |---|---|---|---|
@@ -30,16 +36,17 @@
 //! | Linux | the AppImage | none | over `$APPIMAGE` |
 //!
 //! What it replaces moves aside to `.<name>.nimbo-old` on macOS and Linux. A failure undoes every
-//! rename. The relaunched app waits in [crate::instance] for the old one to end, and removes what
-//! it left. On macOS the grants (microphone, Accessibility) survive an update only when every
-//! release is signed with one stable identity: an ad-hoc signature's requirement is its own build,
-//! so [download] refuses the next one.
+//! rename. The relaunched app, with the old one's arguments (on macOS not its environment), waits
+//! in [crate::instance] for the old one to end, and removes what it left. On macOS the grants
+//! (microphone, Accessibility) survive an update only when every release is signed with one stable
+//! identity: an ad-hoc signature's requirement is its own build, so [download] refuses the next
+//! one.
 
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{env, fmt, thread};
 
 use ed25519_compact::sha512::Hash;
@@ -60,23 +67,26 @@ pub struct Feed<'a> {
   pub key: &'a str,
 }
 
-/// A newer version the feed offers this platform.
+/// A newer version the feed offers this platform, made by [check] and [read] alone.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Release {
   pub version: String,
   /// What changed, as the feed says it; empty when it says nothing.
   pub notes: String,
   /// The file to download, https (or loopback).
   pub url: String,
+  /// The file's size in bytes.
+  pub size: u64,
   /// The file's SHA-512.
   pub sha512: [u8; 64],
 }
 
 impl Release {
-  /// Checks the file downloaded for the release against its SHA-512: `InvalidData` if it
-  /// differs.
+  /// Checks the file downloaded for the release against its size and SHA-512: `InvalidData` if
+  /// either differs.
   pub fn verify(&self, file: &Path) -> io::Result<()> {
-    match sha512(file)? == self.sha512 {
+    match fs::metadata(file)?.len() == self.size && sha512(file)? == self.sha512 {
       true => Ok(()),
       false => Err(bad(format!("{} is not the file of {}", file.display(), self.version))),
     }
@@ -105,17 +115,29 @@ const _: () = {
 };
 
 /// The release `feed` offers this platform when it is newer than `current`: the feed and its
-/// signature fetched over the OS's HTTP, then [read].
+/// signature fetched over the OS's HTTP, again once if the signature fails, then [read].
 pub fn check(feed: &Feed, current: &str) -> io::Result<Option<Release>> {
   if !secure(feed.url) {
     return Err(bad(format!("{} is not https", feed.url)));
   }
 
   let dir = Folder::new(&env::temp_dir())?;
-  let (json, sig) = (dir.0.join("update.json"), dir.0.join("update.json.sig"));
-  http::get(feed.url, &json)?;
-  http::get(&self::sig(feed.url), &sig)?;
-  read(feed, &fs::read(json)?, &fs::read(sig)?, current)
+  let get = |url: &str, name, max| {
+    let to = dir.0.join(name);
+    http::get(url, &to, max).and_then(|()| fs::read(to))
+  };
+  let fetch = || {
+    Ok::<_, io::Error>((
+      get(feed.url, "update.json", 1 << 20)?,
+      get(&sig(feed.url), "update.json.sig", 1 << 10)?,
+    ))
+  };
+  let (mut json, mut sig) = fetch()?;
+  if verify(feed.key, &json, &sig).is_err() {
+    (json, sig) = fetch()?;
+  }
+
+  read(feed, &json, &sig, current)
 }
 
 /// The URL of the signature of the feed at `url`: `.sig` after its path, before a query or
@@ -152,19 +174,20 @@ pub fn download(release: &Release) -> io::Result<Staged> {
 /// moved in, each rename undone on an error, also when the new app doesn't start; one that can't
 /// be undone keeps the staged folder under a name [tidy] leaves and the error says where the files
 /// are. The app must quit promptly after `Ok`: the new one waits for it up to 60 s
-/// ([instance::claim_in]), then removes the [old] names.
+/// ([instance::claim_in], [instance::Claim::Replaced] past that), then removes the [old] names.
 pub fn install(staged: Staged) -> io::Result<()> {
-  put(OS, staged, &|a, b| fs::rename(a, b), &imp::relaunch)
+  put(OS, staged, &|a, b| fs::rename(a, b), &|app| imp::relaunch(app, &instance::relaunch()?))
 }
 
-/// What starts the new app, [imp::relaunch] or one that fails in tests.
-type Relaunch<'a> = &'a dyn Fn(&Path, &str) -> io::Result<()>;
+/// What starts the new app, [imp::relaunch] with [instance::relaunch]'s value, or one that fails
+/// in tests.
+type Relaunch<'a> = &'a dyn Fn(&Path) -> io::Result<()>;
 
 /// [install] on `os`, with `rename` and `relaunch`.
 fn put(os: Os, staged: Staged, rename: Rename, relaunch: Relaunch) -> io::Result<()> {
   let (pairs, mut done) = (pairs(os, &staged.new, &staged.target)?, Vec::new());
   let started = swap(os, &pairs, rename, &mut done);
-  let Err(e) = started.and_then(|()| relaunch(&staged.run, &instance::relaunch())) else {
+  let Err(e) = started.and_then(|()| relaunch(&staged.run)) else {
     return Ok(());
   };
 
@@ -178,22 +201,33 @@ fn put(os: Os, staged: Staged, rename: Rename, relaunch: Relaunch) -> io::Result
 }
 
 /// Removes what updates left beside the running app ([leftovers]), on a thread of its own: a file
-/// may stay busy a moment after the old process ends. Nothing left costs one listing.
-pub(crate) fn tidy() {
+/// may stay busy a moment after the old process ends. A relaunch's `old` process, which may still
+/// be ending, is waited for up to 10 s first. Nothing left costs one listing.
+pub(crate) fn tidy(old: Option<u32>) {
   let Ok(exe) = env::current_exe() else { return };
   let Ok(target) = target(OS, &exe, &|k| env::var_os(k)) else { return };
-  let left = leftovers(OS, &target, &exe, &crate::platform::instance::alive);
-  if !left.is_empty() {
-    let tidy = move || left.iter().for_each(|p| drop(uninstall::remove(p)));
-    let _ = thread::Builder::new().name("update".into()).spawn(tidy);
+  let alive = crate::platform::instance::alive;
+  if old.is_none() && leftovers(OS, &target, &exe, old, &alive).is_empty() {
+    return;
   }
+
+  let tidy = move || {
+    let until = Instant::now() + Duration::from_secs(10);
+    while old.is_some_and(alive) && Instant::now() < until {
+      thread::sleep(Duration::from_millis(50));
+    }
+
+    leftovers(OS, &target, &exe, old, &alive).iter().for_each(|p| drop(uninstall::remove(p)));
+  };
+  let _ = thread::Builder::new().name("update".into()).spawn(tidy);
 }
 
 /// What updates of `target` left: the staging folders ([Folder]) of processes no longer `alive`,
-/// and its [old] name; on Windows, once the running `exe`'s [old] name is there (an update always
-/// replaces the exe), each `<name>.nimbo-old` in its folders beside a `<name>`. Nothing while a
-/// kept folder is there: a half-swapped app's old files are the way back.
-fn leftovers(os: Os, target: &Path, exe: &Path, alive: &dyn Fn(u32) -> bool) -> Vec<PathBuf> {
+/// and, unless the `old` process still is, its [old] name; on Windows, once the running `exe`'s
+/// [old] name is there (an update always replaces the exe), each `<name>.nimbo-old` in its folders
+/// beside a `<name>`. Nothing while a kept folder is there: a half-swapped app's old files are the
+/// way back.
+fn leftovers(os: Os, target: &Path, exe: &Path, old: Option<u32>, alive: Alive) -> Vec<PathBuf> {
   let stale = |name: &OsStr| {
     let pid = name.to_str().and_then(|n| n.strip_prefix(STAGING)?.split_once('-')?.0.parse().ok());
     pid.is_some_and(|pid| !alive(pid))
@@ -206,13 +240,17 @@ fn leftovers(os: Os, target: &Path, exe: &Path, alive: &dyn Fn(u32) -> bool) -> 
 
   let mut out: Vec<_> = all.iter().filter(|e| stale(&e.file_name())).map(|e| e.path()).collect();
   match os {
-    Os::Windows if old(os, exe).exists() => out.extend(olds(target)),
+    _ if old.is_some_and(alive) => {}
+    Os::Windows if self::old(os, exe).exists() => out.extend(olds(target)),
     Os::Windows => {}
-    _ => out.extend(Some(old(os, target)).filter(|p| p.exists())),
+    _ => out.extend(Some(self::old(os, target)).filter(|p| p.exists())),
   }
 
   out
 }
+
+/// Whether a process runs, [crate::platform::instance::alive] or one of tests.
+type Alive<'a> = &'a dyn Fn(u32) -> bool;
 
 /// Each `<name>.nimbo-old` beside a `<name>` in the folder `dir` and those in it.
 fn olds(dir: &Path) -> Vec<PathBuf> {
@@ -256,12 +294,16 @@ fn target(os: Os, exe: &Path, env: Env) -> io::Result<PathBuf> {
   }
 }
 
-/// The release's file fetched and verified into a fresh folder under `parent`, gone again on an
-/// error; one the user can't write fails first.
+/// The release's file fetched over https (or loopback) and verified into a fresh folder under
+/// `parent`, gone again on an error; one the user can't write fails first.
 fn fetch(release: &Release, parent: &Path) -> io::Result<(Folder, PathBuf)> {
+  if !secure(&release.url) {
+    return Err(bad(format!("{} is not https", release.url)));
+  }
+
   let dir = Folder::new(parent)?;
   let file = dir.0.join("download");
-  http::get(&release.url, &file)?;
+  http::get(&release.url, &file, release.size)?;
   release.verify(&file)?;
   Ok((dir, file))
 }
@@ -280,7 +322,9 @@ fn package(os: Os, into: &Path, target: &Path, exe: &Path) -> io::Result<PathBuf
     Os::Linux => kind.is_file(),
   };
 
-  match (app, os == Os::Windows && new.file_name() != target.file_name()) {
+  // Windows matches names whatever their case.
+  let (name, of) = (new.file_name().unwrap_or_default(), target.file_name().unwrap_or_default());
+  match (app, os == Os::Windows && !name.eq_ignore_ascii_case(of)) {
     (false, _) => Err(bad(format!("{} is not the app of {}", new.display(), exe.display()))),
     (true, true) => Err(error(
       io::ErrorKind::Unsupported,
@@ -316,17 +360,18 @@ type Pairs = Vec<(PathBuf, PathBuf)>;
 type Rename<'a> = &'a dyn Fn(&Path, &Path) -> io::Result<()>;
 
 /// Moves each new path over its target with `rename`, a target there first renamed to its [old]
-/// name (a stale one removed); each rename made goes to `done`, in order, for [undo].
+/// name (a stale one removed), each tried again while it may pass ([uninstall::retry]); each
+/// rename made goes to `done`, in order, for [undo].
 fn swap(os: Os, pairs: &Pairs, rename: Rename, done: &mut Pairs) -> io::Result<()> {
   for (new, target) in pairs {
     if target.exists() {
       let old = old(os, target);
       uninstall::remove(&old)?;
-      rename(target, &old)?;
+      uninstall::retry(|| rename(target, &old))?;
       done.push((target.clone(), old));
     }
 
-    rename(new, target)?;
+    uninstall::retry(|| rename(new, target))?;
     done.push((new.clone(), target.clone()));
   }
 
@@ -448,9 +493,10 @@ fn release(json: &[u8], current: &str, platform: &str) -> io::Result<Option<Rele
     return Err(bad(format!("{url} is not https")));
   }
 
+  let Some(&Json::Int(size)) = file.get("size") else { return Err(bad("the feed has no size")) };
   let sha512 = hex(&field(file, "sha512")?).ok_or_else(|| bad("a bad sha512"))?;
   let notes = field(&feed, "notes").unwrap_or_default();
-  Ok(Some(Release { version, notes, url, sha512 }))
+  Ok(Some(Release { version, notes, url, size, sha512 }))
 }
 
 /// `url` is https, or http on [loopback] (tests, a VM serving from its own host).
@@ -535,11 +581,12 @@ fn error(kind: io::ErrorKind, what: impl fmt::Display) -> io::Error {
   io::Error::new(kind, format!("update: {what}"))
 }
 
-/// A JSON value as the feed needs it: objects and strings; numbers, literals and arrays are read
-/// and dropped, so the feed may grow.
+/// A JSON value as the feed needs it: objects, strings and whole numbers; other numbers, literals
+/// and arrays are read and dropped, so the feed may grow.
 enum Json {
   Str(String),
   Obj(Vec<(String, Json)>),
+  Int(u64),
   Other,
 }
 
@@ -626,7 +673,7 @@ impl Reader<'_> {
     let word = &rest[..n.unwrap_or(rest.len())];
     self.at += word.len();
     match ["true", "false", "null"].contains(&word) || word.parse::<f64>().is_ok() {
-      true => Ok(Json::Other),
+      true => Ok(word.parse().map_or(Json::Other, Json::Int)),
       false => Err(bad(format!("the feed has no value at {}", self.at - word.len()))),
     }
   }
@@ -694,16 +741,16 @@ mod tests {
   "notes": "Faster \u00e9\ud83d\ude00\nfixes",
   "size": -1.5e3, "tags": [1, true, null, {}],
   "platforms": {
-    "macos-aarch64": {"url": "https://example.com/app.zip", "sha512": "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"},
-    "linux-x86_64": {"url": "https://example.com/app.AppImage", "sha512": "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"},
-    "windows-x86_64": {"url": "https://example.com/app.zip", "sha512": "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"},
-    "test-http": {"url": "http://example.com/app.zip", "sha512": "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"}
+    "macos-aarch64": {"url": "https://example.com/app.zip", "size": 3, "sha512": "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"},
+    "linux-x86_64": {"url": "https://example.com/app.AppImage", "size": 3, "sha512": "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"},
+    "windows-x86_64": {"url": "https://example.com/app.zip", "size": 3, "sha512": "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"},
+    "test-http": {"url": "http://example.com/app.zip", "size": 3, "sha512": "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"}
   }
 }"#;
   /// `openssl pkey -pubout`'s base64 line.
-  const KEY: &str = "MCowBQYDK2VwAyEAyypD7zrJnVR/R9UvNKe4jyqPmjOXNnvvPIC1kG5Xi48=";
+  const KEY: &str = "MCowBQYDK2VwAyEAHaSiWSuMh49UC43FVPcYPVeF+pAmH8SGK5lI7nrYpmQ=";
   const SIG: &[u8] =
-    b"kIl7CxYevSEOhBe//Rw4Rnkv7o6G494GVmrQZp2W+yfLsJQjOTPtSZe9FeYcFUKGnEcpuwssZ2oiyWnXcs0zCA==\n";
+    b"FWL7HPbAZaak5Otl6bMzrcu16jwjnFjHYXaiLou2APK4j9Bzt52G6QhucBiTxkpOFzI4BbJRM0uYjPAZa0eJBQ==\n";
   /// The SHA-512 of `abc` (FIPS 180-2).
   const ABC: &str = "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f";
   /// RFC 8032's test 1: the public key and the signature of the empty message.
@@ -762,7 +809,7 @@ mod tests {
     let root = dir("read-only");
     fs::set_permissions(&root, fs::Permissions::from_mode(0o555)).unwrap();
     let url = "http://127.0.0.1:9/a".into();
-    let r = Release { version: "2".into(), notes: String::new(), url, sha512: [0; 64] };
+    let r = Release { version: "2".into(), notes: String::new(), url, size: 1, sha512: [0; 64] };
     let e = fetch(&r, &root).unwrap_err();
     fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
     assert_eq!(e.kind(), io::ErrorKind::PermissionDenied, "{e}");
@@ -793,9 +840,11 @@ mod tests {
   fn a_mismatched_name_is_refused() {
     let root = dir("name");
     write(&root, &[("ok/W/a.exe", ""), ("other/V/a.exe", ""), ("no-exe/W/b.exe", "")]);
+    write(&root, &[("case/w/a.exe", "")]);
     let (target, exe) = (root.join("W"), root.join("W/a.exe"));
     let package = |into: &str| package(Os::Windows, &root.join(into), &target, &exe);
     assert_eq!(package("ok").unwrap(), root.join("ok/W"));
+    assert_eq!(package("case").unwrap(), root.join("case/w"), "Windows ignores the case");
     assert_eq!(package("other").unwrap_err().kind(), io::ErrorKind::Unsupported);
     assert_eq!(package("no-exe").unwrap_err().kind(), io::ErrorKind::InvalidData);
     fs::remove_dir_all(root).unwrap();
@@ -841,7 +890,7 @@ mod tests {
     write(&root, &[("W/b.nimbo-old", "0"), ("W/a.exe.old", "0"), (".A.app.old", "0")]);
     let apps = [(Os::Mac, "A.app"), (Os::Linux, "A.AppImage"), (Os::Windows, "W")];
     let left =
-      |&(os, t): &(Os, &str)| leftovers(os, &root.join(t), &root.join("W/a.exe"), &|_| true);
+      |&(os, t): &(Os, &str)| leftovers(os, &root.join(t), &root.join("W/a.exe"), None, &|_| true);
     let mut left: Vec<_> = apps.iter().flat_map(left).collect();
     left.sort();
     let names =
@@ -863,7 +912,7 @@ mod tests {
     write(&root, &[(".nimbo-update-7-2/d", ""), (".nimbo-update-8-2/d", "")]);
     // Process 8 runs, 7 has ended.
     let left = |os, target: &str, exe: &str| {
-      let mut left = leftovers(os, &root.join(target), &root.join(exe), &|pid| pid == 8);
+      let mut left = leftovers(os, &root.join(target), &root.join(exe), None, &|pid| pid == 8);
       left.sort();
       left
     };
@@ -876,6 +925,14 @@ mod tests {
     let mac = left(Os::Mac, "A.app", "A.app/Contents/MacOS/a");
     assert_eq!(mac, names(&[".A.app.nimbo-old", ".nimbo-update-7-2"]));
     assert_eq!(left(Os::Linux, "A.AppImage", "a"), names(&[".nimbo-update-7-2"]));
+    // While the relaunch's old process ends, its old names stay; its staging folder is its own.
+    for (os, target, exe) in
+      [(Os::Mac, "A.app", "A.app/Contents/MacOS/a"), (Os::Windows, "W", "W/a.exe")]
+    {
+      let left = leftovers(os, &root.join(target), &root.join(exe), Some(8), &|pid| pid == 8);
+      assert!(left.iter().all(|p| !p.to_string_lossy().ends_with(OLD)), "{os:?}: {left:?}");
+    }
+
     fs::remove_dir_all(root).unwrap();
   }
 
@@ -896,7 +953,7 @@ mod tests {
     let root = dir("undo");
     let files = [("W/a.exe", "1"), ("W/a.dll", "1"), ("W/.u/W/a.exe", "2"), ("W/.u/W/a.dll", "2")];
     write(&root, &files);
-    let relaunch = |_: &Path, _: &str| Err(io::Error::other("busy"));
+    let relaunch = |_: &Path| Err(io::Error::other("busy"));
     // Four renames: the exe and the DLL each aside, then in; with none failing, the relaunch.
     for fail in [1, 2, 3, 4, 0] {
       let n = Cell::new(0);
@@ -934,7 +991,7 @@ mod tests {
     let root = dir("kept");
     let live = Folder::new(&root).unwrap();
     write(&root, &[(".A.app.nimbo-old/x", "")]);
-    let left = || leftovers(Os::Mac, &root.join("A.app"), &root.join("A.app/a"), &|_| false);
+    let left = || leftovers(Os::Mac, &root.join("A.app"), &root.join("A.app/a"), None, &|_| false);
     assert_eq!(left().len(), 2, "every process has ended");
 
     // Half-swapped: nothing goes, the old app least of all.
@@ -1024,12 +1081,17 @@ mod tests {
   }
 
   /// A server on loopback, its URL: `/update.json` a 302 to `/feed/update.json`, which with
-  /// `/update.json.sig` and `/abc` it serves; anything else a 404.
+  /// `/update.json.sig` and `/abc` it serves; `/race.json` a feed its `.sig` is not of the first
+  /// time, as when a release is published between the two; `/bad.json` that always; anything
+  /// else a 404.
   fn serve() -> String {
     use std::io::Write;
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
+    let mut old = FEED.to_vec();
+    old[20] ^= 1;
     std::thread::spawn(move || {
+      let mut raced = false;
       for mut s in listener.incoming().flatten() {
         let (mut req, mut buf) = (Vec::new(), [0; 1024]);
         while !req.ends_with(b"\r\n\r\n") {
@@ -1043,7 +1105,13 @@ mod tests {
         let (status, body): (_, &[u8]) = match req.split(' ').nth(1).unwrap_or_default() {
           "/update.json" => ("302 Found\r\nLocation: /feed/update.json", b""),
           "/feed/update.json" => ("200 OK", FEED),
-          "/update.json.sig" => ("200 OK", SIG),
+          "/race.json" if !raced => {
+            raced = true;
+            ("200 OK", old.as_slice())
+          }
+          "/race.json" => ("200 OK", FEED),
+          "/bad.json" => ("200 OK", old.as_slice()),
+          "/update.json.sig" | "/race.json.sig" | "/bad.json.sig" => ("200 OK", SIG),
           "/abc" => ("200 OK", b"abc"),
           _ => ("404 Not Found", b"none"),
         };
@@ -1059,10 +1127,12 @@ mod tests {
   #[test]
   fn get_follows_a_redirect_and_fails_on_a_404() {
     let (url, to) = (serve(), temp("get", b""));
-    http::get(&format!("{url}/update.json"), &to).unwrap();
+    http::get(&format!("{url}/update.json"), &to, FEED.len() as u64).unwrap();
     assert_eq!(fs::read(&to).unwrap(), FEED);
-    let missing = http::get(&format!("{url}/none"), &to).unwrap_err();
+    let missing = http::get(&format!("{url}/none"), &to, 1 << 10).unwrap_err();
     assert_eq!(missing.kind(), io::ErrorKind::NotFound, "{missing}");
+    let big = http::get(&format!("{url}/update.json"), &to, FEED.len() as u64 - 1).unwrap_err();
+    assert_eq!(big.kind(), io::ErrorKind::InvalidData, "{big}");
     let _ = fs::remove_file(to);
   }
 
@@ -1077,12 +1147,18 @@ mod tests {
     assert_eq!(check(&feed, "1.0").unwrap_err().kind(), io::ErrorKind::NotFound);
     let feed = Feed { url: "http://example.com/update.json", key: KEY };
     assert_eq!(check(&feed, "1.0").unwrap_err().kind(), io::ErrorKind::InvalidData);
+    // A signature that fails is fetched again once with its feed.
+    let feed = Feed { url: &format!("{url}/race.json"), key: KEY };
+    assert_eq!(check(&feed, "1.0").unwrap(), release(FEED, "1.0", &platform).unwrap());
+    let feed = Feed { url: &format!("{url}/bad.json"), key: KEY };
+    assert_eq!(check(&feed, "1.0").unwrap_err().kind(), io::ErrorKind::InvalidData);
 
     let parent = dir("parent");
     let mut r = Release {
       version: "2".into(),
       notes: String::new(),
       url: format!("{url}/abc"),
+      size: 3,
       sha512: hex(ABC).unwrap(),
     };
     let (staged, file) = fetch(&r, &parent).unwrap();
@@ -1095,8 +1171,19 @@ mod tests {
     }
 
     drop(staged);
-    r.sha512[0] ^= 1;
-    assert_eq!(fetch(&r, &parent).unwrap_err().kind(), io::ErrorKind::InvalidData);
+    // Shorter than the feed says, longer, another file, not https.
+    let changes: [fn(&mut Release); 4] = [
+      |r| r.size = 4,
+      |r| r.size = 2,
+      |r| r.sha512[0] ^= 1,
+      |r| r.url = "http://example.com/abc".into(),
+    ];
+    for change in changes {
+      let mut r = r.clone();
+      change(&mut r);
+      assert_eq!(fetch(&r, &parent).unwrap_err().kind(), io::ErrorKind::InvalidData, "{r:?}");
+    }
+
     r.url = format!("{url}/none");
     assert_eq!(fetch(&r, &parent).unwrap_err().kind(), io::ErrorKind::NotFound);
     assert_eq!(fs::read_dir(&parent).unwrap().count(), 0, "no folder is left");
@@ -1108,7 +1195,7 @@ mod tests {
     let r = release(FEED, "1.1.9", "macos-aarch64").unwrap().unwrap();
     assert_eq!((r.version.as_str(), r.url.as_str()), ("1.2.0", "https://example.com/app.zip"));
     assert_eq!(r.notes, "Faster é😀\nfixes");
-    assert_eq!(r.sha512, hex(ABC).unwrap());
+    assert_eq!((r.size, r.sha512), (3, hex(ABC).unwrap()));
   }
 
   #[test]
@@ -1118,8 +1205,17 @@ mod tests {
 
   #[test]
   fn broken_json_is_refused() {
-    let ok = br#"{"version": "2", "platforms": {"p": {"url": "https://a", "sha512": "00"}}}"#;
+    let ok =
+      br#"{"version": "2", "platforms": {"p": {"url": "https://a", "size": 1, "sha512": "00"}}}"#;
     assert!(release(ok, "1", "p").is_err(), "a short sha512");
+    for size in ["", r#""size": -1, "#, r#""size": 1.5, "#, r#""size": "1", "#] {
+      let json = format!(
+        r#"{{"version": "2", "platforms": {{"p": {{{size}"url": "https://a", "sha512": "{ABC}"}}}}}}"#
+      );
+      let e = release(json.as_bytes(), "1", "p").unwrap_err();
+      assert_eq!(e.kind(), io::ErrorKind::InvalidData, "{size}: {e}");
+    }
+
     for json in [
       &b""[..],
       b"{",

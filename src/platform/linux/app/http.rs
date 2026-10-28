@@ -59,28 +59,26 @@ fn curl() -> Option<&'static Curl> {
   CURL.get_or_init(load).as_ref()
 }
 
-/// The file a transfer writes to, and the error that stopped it.
-type Out = (File, Option<io::Error>);
+/// The file a transfer writes to, the error that stopped it (a bare `InvalidData` past the
+/// bytes it may take) and those bytes.
+type Out = (File, Option<io::Error>, u64);
 
 /// curl's `CURLOPT_WRITEFUNCTION`: `size × n` bytes at `data`, all taken or the transfer stops.
 unsafe extern "C" fn write(data: *const u8, size: usize, n: usize, out: P) -> usize {
   // SAFETY: curl passes the `Out` set as `CURLOPT_WRITEDATA` and that many bytes.
-  let ((file, err), data) =
+  let ((file, err, left), data) =
     unsafe { (&mut *out.cast::<Out>(), std::slice::from_raw_parts(data, size * n)) };
-  match file.write_all(data) {
-    Ok(()) => size * n,
-    Err(e) => {
-      *err = Some(e);
-      0
-    }
-  }
+  let fits = left.checked_sub(data.len() as u64).ok_or(io::ErrorKind::InvalidData.into());
+  // Called no more once it took nothing.
+  *err = fits.and_then(|l| file.write_all(data).map(|()| *left = l)).err();
+  if err.is_some() { 0 } else { size * n }
 }
 
-pub fn get(url: &str, to: &Path) -> io::Result<()> {
+pub fn get(url: &str, to: &Path, max: u64) -> io::Result<()> {
   let none = || io::Error::new(io::ErrorKind::Unsupported, "libcurl.so.4 is not installed");
   let c = curl().ok_or_else(none)?;
   let c_url = CString::new(url).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, url))?;
-  let (mut out, mut code): (Out, c_long) = ((File::create(to)?, None), 0);
+  let (mut out, mut code): (Out, c_long) = ((File::create(to)?, None, max), 0);
   // SAFETY: a handle of its own, its options of their documented types, cleaned up before `out`
   // and the URL go.
   let done = unsafe {
@@ -110,7 +108,9 @@ pub fn get(url: &str, to: &Path) -> io::Result<()> {
     done
   };
 
-  out.1.map_or(Ok(()), Err)?;
+  let big = out.1.as_ref().is_some_and(|e| e.kind() == io::ErrorKind::InvalidData);
+  out.1.map_or(Ok(()), |e| Err(if big { crate::platform::too_big(url, max) } else { e }))?;
+
   if done != 0 {
     // SAFETY: curl's static message for its code.
     let why = unsafe { CStr::from_ptr((c.f.curl_easy_strerror)(done)) };

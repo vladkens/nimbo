@@ -24,7 +24,8 @@ pub fn unpack(file: &Path, into: &Path) -> io::Result<()> {
   out.status.success().then_some(()).ok_or_else(err)
 }
 
-/// Starts the exe `app` with [RELAUNCH] set to `var`, not waiting for it.
+/// Starts the exe `app` with this process's arguments and [RELAUNCH] set to `var`, not waiting
+/// for it.
 pub fn relaunch(app: &Path, var: &str) -> io::Result<()> {
-  Command::new(app).env(RELAUNCH, var).spawn().map(drop)
+  Command::new(app).args(env::args_os().skip(1)).env(RELAUNCH, var).spawn().map(drop)
 }

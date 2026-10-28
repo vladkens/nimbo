@@ -4,8 +4,9 @@
 # ///
 """Makes an update feed (src/update.rs): update.json and its Ed25519 signature update.json.sig.
 
-Each package is `<platform> <url> <file>`: the platform key (`macos-aarch64`, `windows-x86_64`,
-`linux-x86_64`), where the file will be served, and the file, hashed here. Signs with openssl 3
+Each package is `<platform> <url> <file>`: the platform key (`<os>-<arch>`, the os `macos`,
+`windows` or `linux`, the arch `x86_64` or `aarch64`), where the file will be served, and the
+file, whose size and SHA-512 go in the feed. Signs with openssl 3
 and the private key from `openssl genpkey -algorithm ed25519 -out update.pem`.
 
 uv run scripts/update-feed.py <key.pem> <version> [--notes <text>] [--out <dir>] <package>...
@@ -17,6 +18,8 @@ import hashlib
 import json
 import subprocess
 from pathlib import Path
+
+PLATFORMS = {f"{os}-{arch}" for os in ("macos", "windows", "linux") for arch in ("x86_64", "aarch64")}
 
 
 def main() -> None:
@@ -30,11 +33,16 @@ def main() -> None:
   if len(args.package) % 3:
     ap.error("each package is <platform> <url> <file>")
 
-  def sha512(path: str) -> str:
-    return hashlib.sha512(Path(path).read_bytes()).hexdigest()
+  def file(url: str, path: str) -> dict:
+    data = Path(path).read_bytes()
+    return {"url": url, "size": len(data), "sha512": hashlib.sha512(data).hexdigest()}
 
   it = iter(args.package)
-  platforms = {p: {"url": u, "sha512": sha512(f)} for p, u, f in zip(it, it, it)}
+  packages = list(zip(it, it, it))
+  if bad := sorted({p for p, _, _ in packages} - PLATFORMS):
+    ap.error(f"unknown platform {', '.join(bad)}: one of {', '.join(sorted(PLATFORMS))}")
+
+  platforms = {p: file(u, f) for p, u, f in packages}
   pld = {"version": args.version, "notes": args.notes, "platforms": platforms}
   feed = args.out / "update.json"
   feed.write_text(json.dumps(pld, indent=2) + "\n")

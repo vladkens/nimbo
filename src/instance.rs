@@ -24,6 +24,8 @@
 //! let instance = match instance::claim(&INFO) {
 //!   Ok(Claim::Primary(instance)) => Some(instance),
 //!   Ok(Claim::Running) => return instance::send(&INFO, instance::OPEN).unwrap_or_default(),
+//!   // An update's relaunch that the old instance never let go of: it still runs.
+//!   Ok(Claim::Replaced) => return,
 //!   Err(_) => None,
 //! };
 //!
@@ -42,9 +44,9 @@
 
 use std::fs::{self, TryLockError};
 use std::io::{self, ErrorKind};
-use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, PoisonError};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{env, thread};
 
 use crate::AppInfo;
@@ -70,12 +72,19 @@ pub(crate) const READ_TIMEOUT: Duration = Duration::from_secs(1);
 /// The longest line taken: a command and an activation token.
 pub(crate) const MAX_LINE: usize = 1024;
 /// What an update's relaunch ([crate::update::install]) starts the new process with:
-/// `<old pid>:<the hex key of the old instance's folder>` ([relaunch]), for [claim_in] to wait.
+/// `<old pid>:<the hex key of the old instance's folder>:<a nonce>` ([relaunch]), for [claim_in]
+/// to wait.
 pub(crate) const RELAUNCH: &str = "NIMBO_RELAUNCH";
+/// The one-shot token beside the lock: [RELAUNCH]'s value, written by [relaunch], taken by the
+/// first [claim_in] that has it, so that the new process's children don't wait as it did.
+const TOKEN: &str = "relaunch";
 /// The longest a relaunched process waits for the one it replaces.
 const RELAUNCH_WAIT: Duration = Duration::from_secs(60);
-/// The [key] of the folder this process is the instance for, 0 before it is.
-static CLAIMED: AtomicU64 = AtomicU64::new(0);
+/// How long a relaunched process still tries the lock once the old one has ended: Windows may
+/// let it go late.
+const RELAUNCH_LATE: Duration = Duration::from_secs(3);
+/// The folder this process is the instance for, `None` before it is.
+static CLAIMED: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 /// What [claim] found.
 pub enum Claim {
@@ -83,6 +92,10 @@ pub enum Claim {
   Primary(Instance),
   /// Another process is: [send] it what this launch wanted.
   Running,
+  /// This process is an update's relaunch ([RELAUNCH] and its token) and the instance it replaces
+  /// never let go: it ran on past 60 s, or ended with the lock still held 3 s later. The app ends
+  /// quietly, sending nothing.
+  Replaced,
 }
 
 /// The app's one instance: its lock and the place commands come to, let go when dropped.
@@ -154,43 +167,80 @@ pub fn claim(app: &AppInfo) -> io::Result<Claim> {
 
 /// Becomes the instance for the folder `dir`, which exists, unless another process is: the lock
 /// `instance.lock` in it, and the place commands come to. Relaunched by an update of the app
-/// ([RELAUNCH]), it first waits up to 60 s for the old process to end or let the lock go; once
-/// the instance, it removes what an update left beside the app ([crate::update::tidy]).
+/// ([RELAUNCH], while the token `relaunch` in `dir` holds its value), it first waits up to 60 s for
+/// the old process to end and let the lock go ([Claim::Replaced] if it doesn't), and removes the
+/// token; once the instance, it removes what an update left beside the app
+/// ([crate::update::tidy]).
 pub fn claim_in(dir: &Path) -> io::Result<Claim> {
-  claim_until(dir, env::var(RELAUNCH).ok().as_deref().and_then(relaunched))
+  claim_until(dir, env::var(RELAUNCH).ok().as_deref(), RELAUNCH_WAIT, RELAUNCH_LATE)
 }
 
-/// [claim_in], waiting while the process `wait` names (its pid and the [key] of its folder) runs
-/// and holds the lock, when that folder is `dir`; another's is not waited for.
-fn claim_until(dir: &Path, wait: Option<(u32, u64)>) -> io::Result<Claim> {
-  let (lock, deadline) = (imp::lock_file(&dir.join(LOCK))?, Instant::now() + RELAUNCH_WAIT);
+/// [claim_in], waiting up to `most` while the process the [RELAUNCH] value `wait` names (its pid
+/// and the [key] of its folder) runs and holds the lock, and `late` once it has ended, when that
+/// folder is `dir` and its token holds `wait`; another's is not waited for.
+fn claim_until(
+  dir: &Path,
+  wait: Option<&str>,
+  most: Duration,
+  late: Duration,
+) -> io::Result<Claim> {
+  let (lock, mut until, mut ended) =
+    (imp::lock_file(&dir.join(LOCK))?, Instant::now() + most, false);
+  let token = dir.join(TOKEN);
+  let mine = |v: &&str| fs::read_to_string(&token).is_ok_and(|t| t == *v);
+  let wait = wait.filter(mine).and_then(relaunched);
   let wait = wait.filter(|&(_, k)| k == key(dir)).map(|(pid, _)| pid);
-  loop {
+  let replaced = loop {
     // Looked at before the lock is tried: the process lets it go as it ends.
-    let old = wait.is_some_and(imp::alive) && Instant::now() < deadline;
+    if let Some(pid) = wait
+      && !ended
+      && !imp::alive(pid)
+    {
+      (ended, until) = (true, Instant::now() + late);
+    }
+
     match lock.try_lock() {
-      Ok(()) => break,
-      Err(TryLockError::WouldBlock) if old => thread::sleep(Duration::from_millis(20)),
-      Err(TryLockError::WouldBlock) => return Ok(Claim::Running),
+      Ok(()) => break false,
+      Err(TryLockError::WouldBlock) if wait.is_none() => return Ok(Claim::Running),
+      Err(TryLockError::WouldBlock) if Instant::now() >= until => break true,
+      Err(TryLockError::WouldBlock) => thread::sleep(Duration::from_millis(20)),
       Err(TryLockError::Error(e)) => return Err(e),
     }
+  };
+
+  // Taken: the new process's children inherit the value, not the wait.
+  if wait.is_some() {
+    _ = fs::remove_file(&token);
+  }
+
+  if replaced {
+    return Ok(Claim::Replaced);
   }
 
   let instance = Instance(imp::Server::bind(dir, lock)?);
-  CLAIMED.store(key(dir), Ordering::Relaxed);
-  crate::update::tidy();
+  *CLAIMED.lock().unwrap_or_else(PoisonError::into_inner) = Some(dir.to_owned());
+  crate::update::tidy(wait);
   Ok(Claim::Primary(instance))
 }
 
-/// [RELAUNCH]'s value for a process this one starts: its pid and the [key] of the folder it is the
-/// instance for (0, waited for by none, when it isn't one).
-pub(crate) fn relaunch() -> String {
-  format!("{}:{:016x}", std::process::id(), CLAIMED.load(Ordering::Relaxed))
+/// [RELAUNCH]'s value for a process this one starts: its pid, the [key] of the folder it is the
+/// instance for and the time in nanoseconds, also written to the folder's token; with no folder
+/// the key is 0, waited for by none.
+pub(crate) fn relaunch() -> io::Result<String> {
+  let dir = CLAIMED.lock().unwrap_or_else(PoisonError::into_inner).clone();
+  let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+  let v = format!("{}:{:016x}:{nonce}", std::process::id(), dir.as_deref().map_or(0, key));
+  if let Some(dir) = dir {
+    fs::write(dir.join(TOKEN), &v)?;
+  }
+
+  Ok(v)
 }
 
 /// The pid and folder key in [RELAUNCH]'s value.
 fn relaunched(v: &str) -> Option<(u32, u64)> {
-  let (pid, key) = v.split_once(':')?;
+  let mut parts = v.split(':');
+  let (pid, key, _nonce) = (parts.next()?, parts.next()?, parts.next()?);
   Some((pid.parse().ok()?, u64::from_str_radix(key, 16).ok()?))
 }
 
@@ -536,34 +586,75 @@ mod tests {
     assert_eq!(polled(&[&long], false).map(|l| l.len()), Some(MAX_LINE));
   }
 
-  /// A relaunch waits for the instance of its folder to let go, not for another folder's or for
-  /// a process that has ended.
+  /// [RELAUNCH]'s value for the process `pid` and the folder key `k`, its token written in `dir`.
+  fn token(dir: &Path, pid: u32, k: u64) -> String {
+    let v = format!("{pid}:{k:016x}:1");
+    fs::write(dir.join(TOKEN), &v).unwrap();
+    v
+  }
+
+  /// A relaunch waits for the instance of its folder to let go, not for another folder's, and
+  /// takes the token; a value without its token, as a relaunch's children inherit it, isn't waited
+  /// on.
   #[test]
   fn a_relaunch_waits_for_the_old_instance() {
     let dir = Dir::new("relaunch");
     let Ok(Claim::Primary(first)) = claim_in(&dir.0) else { panic!("not the first") };
     let (me, k) = (std::process::id(), key(&dir.0));
+    let claim = |wait: &str, most, late| claim_until(&dir.0, Some(wait), most, late).unwrap();
+    let (short, long) = (Duration::from_millis(100), Duration::from_secs(5));
     let took = Instant::now();
-    assert!(matches!(claim_until(&dir.0, Some((me, k ^ 1))).unwrap(), Claim::Running));
+    let other = token(&dir.0, me, k ^ 1);
+    assert!(matches!(claim(&other, long, long), Claim::Running), "another folder's");
+    let old = token(&dir.0, me, k);
+    fs::write(dir.0.join(TOKEN), format!("{me}:{k:016x}:2")).unwrap();
+    assert!(matches!(claim(&old, long, long), Claim::Running), "another token");
+    fs::remove_file(dir.0.join(TOKEN)).unwrap();
+    assert!(matches!(claim(&old, long, long), Claim::Running), "no token");
+    assert!(took.elapsed() < short, "{:?}", took.elapsed());
+
+    let wait = token(&dir.0, me, k);
+    let quit = thread::spawn(move || {
+      thread::sleep(Duration::from_millis(200));
+      drop(first);
+    });
+    assert!(matches!(claim(&wait, long, long), Claim::Primary(_)));
+    assert!(took.elapsed() >= Duration::from_millis(200));
+    assert!(!dir.0.join(TOKEN).exists(), "the token is taken");
+    quit.join().unwrap();
+  }
+
+  /// A relaunch whose old instance ran on, or ended with its lock still held, is
+  /// [Claim::Replaced] once its time is up, its token taken; a lock let go late (Windows) is still
+  /// taken.
+  #[test]
+  fn a_relaunch_gives_up_on_an_instance_that_never_lets_go() {
+    let dir = Dir::new("replaced");
+    let Ok(Claim::Primary(first)) = claim_in(&dir.0) else { panic!("not the first") };
     // No process of its own: one spawned here would hold other tests' locks for a moment.
-    let ended = i32::MAX as u32;
-    assert!(matches!(claim_until(&dir.0, Some((ended, k))).unwrap(), Claim::Running));
-    assert!(took.elapsed() < Duration::from_secs(1), "{:?}", took.elapsed());
+    let (me, ended, k) = (std::process::id(), i32::MAX as u32, key(&dir.0));
+    let claim = |pid, most, late| claim_until(&dir.0, Some(&token(&dir.0, pid, k)), most, late);
+    let (short, long) = (Duration::from_millis(100), Duration::from_secs(5));
+    for (pid, most, late) in [(me, short, long), (ended, long, short)] {
+      let took = Instant::now();
+      assert!(matches!(claim(pid, most, late).unwrap(), Claim::Replaced), "{pid}");
+      let took = took.elapsed();
+      assert!(took >= short && took < Duration::from_secs(2), "{pid}: {took:?}");
+      assert!(!dir.0.join(TOKEN).exists(), "{pid}: the token is taken");
+    }
 
     let quit = thread::spawn(move || {
       thread::sleep(Duration::from_millis(200));
       drop(first);
     });
-    assert!(matches!(claim_until(&dir.0, Some((me, k))).unwrap(), Claim::Primary(_)));
-    assert!(took.elapsed() >= Duration::from_millis(200));
+    assert!(matches!(claim(ended, short, long).unwrap(), Claim::Primary(_)), "the late lock");
     quit.join().unwrap();
   }
 
   #[test]
   fn relaunch_values_parse() {
-    assert_eq!(relaunched("12:00ab"), Some((12, 0xab)));
-    assert_eq!(relaunched(&relaunch()).map(|(pid, _)| pid), Some(std::process::id()));
-    for bad in ["", "12", "12:", ":ab", "x:ab", "12:xy", "-1:ab"] {
+    assert_eq!(relaunched("12:00ab:345"), Some((12, 0xab)));
+    for bad in ["", "12", "12:", ":ab", "x:ab:1", "12:xy:1", "-1:ab:1", "12:00ab"] {
       assert_eq!(relaunched(bad), None, "{bad:?}");
     }
   }

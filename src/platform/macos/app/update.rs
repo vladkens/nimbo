@@ -5,15 +5,15 @@
 //! by LaunchServices in the old one's place.
 
 use std::ffi::OsStr;
-use std::io;
 use std::path::Path;
 use std::process::Command;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
+use std::{env, io};
 
 use block2::RcBlock;
 use objc2_app_kit::{NSRunningApplication, NSWorkspace, NSWorkspaceOpenConfiguration};
-use objc2_foundation::{NSBundle, NSDictionary, NSError, NSString, NSURL};
+use objc2_foundation::{NSArray, NSBundle, NSDictionary, NSError, NSString, NSURL};
 
 use crate::instance::RELAUNCH;
 use crate::update::bad;
@@ -53,12 +53,13 @@ fn run(cmd: &str, args: &[&OsStr]) -> io::Result<String> {
   }
 }
 
-/// Opens the bundle `app` as a new instance beside the running one, with [RELAUNCH] set to `var`
-/// and without taking the focus: started by launchd, it is its own responsible process for TCC.
-/// Back with LaunchServices' error, or once a new process of the bundle's id runs: its answer
-/// waits until the app has finished launching, which the new one, waiting in [crate::instance]
-/// for this one to end, would only do after LaunchServices gives up (30 s). `TimedOut` when
-/// neither comes in 35 s, so the swap is undone.
+/// Opens the bundle `app` as a new instance beside the running one, with this process's arguments
+/// and [RELAUNCH] set to `var`, without taking the focus: started by launchd, it is its own
+/// responsible process for TCC, and gets launchd's environment, not this process's. Back with
+/// LaunchServices' error, or once a new process of the bundle's id runs: its answer waits until
+/// the app has finished launching, which the new one, waiting in [crate::instance] for this one
+/// to end, would only do after LaunchServices gives up (30 s). `TimedOut` when neither comes in
+/// 35 s, a new process that comes as it does ended, so the swap is undone.
 pub fn relaunch(app: &Path, var: &str) -> io::Result<()> {
   let path = NSString::from_str(&app.to_string_lossy());
   let id = NSBundle::bundleWithPath(&path).and_then(|b| b.bundleIdentifier());
@@ -72,6 +73,8 @@ pub fn relaunch(app: &Path, var: &str) -> io::Result<()> {
   config.setActivates(false);
   let (k, v) = (NSString::from_str(RELAUNCH), NSString::from_str(var));
   config.setEnvironment(&NSDictionary::from_slices(&[&*k], &[&*v]));
+  let args = env::args_os().skip(1).map(|a| NSString::from_str(&a.to_string_lossy()));
+  config.setArguments(&NSArray::from_retained_slice(&args.collect::<Vec<_>>()));
   let (tx, rx) = mpsc::channel();
   let done = RcBlock::new(move |_: *mut NSRunningApplication, err: *mut NSError| {
     // SAFETY: null or an error that lives through the call.
@@ -88,6 +91,7 @@ pub fn relaunch(app: &Path, var: &str) -> io::Result<()> {
       Ok(Some(e)) => return Err(io::Error::other(format!("{}: {e}", app.display()))),
       Err(RecvTimeoutError::Timeout) if apps().iter().any(|a| !before.contains(a)) => return Ok(()),
       Err(RecvTimeoutError::Timeout) if Instant::now() > deadline => {
+        apps().iter().filter(|a| !before.contains(a)).for_each(|a| _ = a.forceTerminate());
         let e = format!("{}: LaunchServices started nothing in 35 s", app.display());
         return Err(io::Error::new(io::ErrorKind::TimedOut, e));
       }

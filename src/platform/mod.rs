@@ -116,22 +116,23 @@
 //!   for the app besides launch at login, undone (macOS its permissions and defaults, Linux the
 //!   launcher entry and the portal's token), and `busy(&io::Error) -> bool`, an error a removal may
 //!   pass when tried again.
-//! - `pub mod http` ([crate::update]), from any thread: `get(url: &str, to: &Path) ->
-//!   io::Result<()>`, a GET's body written to the file `to`, blocking until it ends; redirects
-//!   followed (GitHub sends assets to another host; on Linux only to https, http too from
-//!   loopback), no cache, the system's proxy (Linux: the `*_proxy` variables), a status other than
-//!   2xx an error from [status]; on `Err` `to` may hold a part. macOS `NSURLSession`, Windows
-//!   WinHTTP, Linux `libcurl.so.4` (`Unsupported` without).
+//! - `pub mod http` ([crate::update]), from any thread: `get(url: &str, to: &Path, max: u64) ->
+//!   io::Result<()>`, a GET's body written to the file `to`, blocking until it ends, stopped past
+//!   `max` bytes ([too_big]); redirects followed (GitHub sends assets to another host; on Linux
+//!   only to https, http too from loopback; on macOS by the shared session's defaults, http too),
+//!   no cache, the system's proxy (Linux: the `*_proxy` variables), a status other than 2xx an
+//!   error from [status]; on `Err` `to` may hold a part. macOS `NSURLSession`, Windows WinHTTP,
+//!   Linux `libcurl.so.4` (`Unsupported` without).
 //! - `pub mod update` ([crate::update]), from any thread, its tools by absolute path: `unpack(file:
 //!   &Path, into: &Path) -> io::Result<()>`, the release's file into the folder `into` (macOS
 //!   `/usr/bin/ditto -x -k`, Windows `%SystemRoot%\System32\tar.exe -xf` with no console window,
 //!   Linux the AppImage itself made executable and moved in), `InvalidData` when the tool fails;
 //!   macOS also `accepts(new: &Path, app: &Path) -> io::Result<()>`, the new bundle of `app`'s id
 //!   meeting its designated requirement (`/usr/bin/codesign -v -R`), else `InvalidData`; and
-//!   `relaunch(app: &Path, var: &str) -> io::Result<()>`, the app started with `NIMBO_RELAUNCH` set
-//!   to `var` without waiting for it to end (macOS `NSWorkspace` opening a new instance that
-//!   doesn't take the focus, back once it started, `TimedOut` after 35 s; Windows the exe, Linux
-//!   the AppImage spawned).
+//!   `relaunch(app: &Path, var: &str) -> io::Result<()>`, the app started with this process's
+//!   arguments and `NIMBO_RELAUNCH` set to `var` without waiting for it to end (macOS `NSWorkspace`
+//!   opening a new instance that doesn't take the focus, in launchd's environment, back once it
+//!   started, `TimedOut` after 35 s; Windows the exe, Linux the AppImage spawned).
 //! - `pub mod activity` ([crate::activity]), from any thread: `Token: Send`, `begin(&str) ->
 //!   Token`, `end(Token)`.
 //! - `pub mod post` ([crate::keys::post]): `post(Shortcut) -> Result<(), String>`, the shortcut as
@@ -240,6 +241,11 @@ pub(crate) use imp::{
 pub(crate) use imp::{attach_console, downloads};
 #[cfg(any(test, target_os = "windows", target_os = "linux"))]
 use keyboard_types::Code;
+
+/// `http::get`'s error for a body of more than `max` bytes.
+pub(crate) fn too_big(url: &str, max: u64) -> io::Error {
+  io::Error::new(io::ErrorKind::InvalidData, format!("{url}: more than {max} bytes"))
+}
 
 /// `http::get`'s answer to the HTTP status `code` of `url`: 2xx is `Ok`, 404 `NotFound`.
 pub(crate) fn status(url: &str, code: u32) -> io::Result<()> {

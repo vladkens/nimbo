@@ -37,7 +37,7 @@ fn ok(done: BOOL) -> io::Result<()> {
   if done == 0 { Err(io::Error::last_os_error()) } else { Ok(()) }
 }
 
-pub fn get(url: &str, to: &Path) -> io::Result<()> {
+pub fn get(url: &str, to: &Path, max: u64) -> io::Result<()> {
   let w = wide(url);
   let mut parts = URL_COMPONENTS {
     dwStructSize: size_of::<URL_COMPONENTS>() as u32,
@@ -73,13 +73,13 @@ pub fn get(url: &str, to: &Path) -> io::Result<()> {
     let query = WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER;
     ok(WinHttpQueryHeaders(req.0, query, null(), (&raw mut code).cast(), &mut len, null_mut()))?;
     crate::platform::status(url, code)?;
-    read(&req, to)
+    read(&req, to, url, max)
   }
 }
 
-/// The body of the request `req` into a new file at `to`.
-fn read(req: &Handle, to: &Path) -> io::Result<()> {
-  let (mut file, mut buf) = (File::create(to)?, vec![0u8; 1 << 16]);
+/// The body of the request `req` for `url` into a new file at `to`, up to `max` bytes.
+fn read(req: &Handle, to: &Path, url: &str, max: u64) -> io::Result<()> {
+  let (mut file, mut buf, mut left) = (File::create(to)?, vec![0u8; 1 << 16], max);
   loop {
     let mut n = 0;
     // SAFETY: a buffer of its length.
@@ -88,6 +88,7 @@ fn read(req: &Handle, to: &Path) -> io::Result<()> {
       return file.sync_all();
     }
 
+    left = left.checked_sub(n as u64).ok_or_else(|| crate::platform::too_big(url, max))?;
     file.write_all(&buf[..n as usize])?;
   }
 }

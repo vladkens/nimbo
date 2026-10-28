@@ -208,6 +208,8 @@ fn main() {
     Ok(Claim::Running) => {
       return instance::send(&INFO, instance::OPEN).unwrap_or_else(|e| eprintln!("instance: {e}"));
     }
+    // An update's relaunch whose old instance runs on.
+    Ok(Claim::Replaced) => return,
     Err(e) => {
       eprintln!("instance: {e}");
       None

@@ -1,10 +1,13 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! A file fetched over HTTP on macOS: an `NSURLSession` download task, its file moved into place
-//! by the completion handler, which runs on the session's queue while the caller waits.
+//! by the completion handler, which runs on the session's queue while the caller waits. The shared
+//! session follows redirects by its defaults, to http too: the feed's signature and the file's
+//! hash guard what comes.
 
 use std::path::Path;
-use std::sync::mpsc;
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::time::Duration;
 use std::{fs, io};
 
 use block2::RcBlock;
@@ -13,7 +16,7 @@ use objc2_foundation::{
   NSURLResponse, NSURLSession,
 };
 
-pub fn get(url: &str, to: &Path) -> io::Result<()> {
+pub fn get(url: &str, to: &Path, max: u64) -> io::Result<()> {
   let bad = || io::Error::new(io::ErrorKind::InvalidInput, format!("{url} is not a URL"));
   let u = NSURL::URLWithString(&NSString::from_str(url)).ok_or_else(bad)?;
   let policy = NSURLRequestCachePolicy::ReloadIgnoringLocalCacheData;
@@ -31,6 +34,8 @@ pub fn get(url: &str, to: &Path) -> io::Result<()> {
       (None, Some(from)) => crate::platform::status(&link, code as u32).and_then(|_| {
         // The task's file is removed once the handler returns; it may be on another volume.
         let from = from.to_string();
+        let fits = fs::metadata(&from)?.len() <= max;
+        fits.then_some(()).ok_or_else(|| crate::platform::too_big(&link, max))?;
         fs::rename(&from, &to).or_else(|_| fs::copy(&from, &to).map(drop))
       }),
     };
@@ -39,9 +44,20 @@ pub fn get(url: &str, to: &Path) -> io::Result<()> {
   });
 
   // SAFETY: the handler only owns sendable values (a channel's sender, two strings).
-  unsafe {
+  let task = unsafe {
     NSURLSession::sharedSession().downloadTaskWithRequest_completionHandler(&request, &done)
+  };
+  task.resume();
+  // Stopped once past `max`; the handler checks the file it got.
+  let never = || io::Error::other(format!("{url}: the task never ended"));
+  loop {
+    match rx.recv_timeout(Duration::from_millis(50)) {
+      Ok(r) => return r,
+      Err(RecvTimeoutError::Timeout) if task.countOfBytesReceived() as u64 <= max => {}
+      Err(RecvTimeoutError::Timeout) => break task.cancel(),
+      Err(RecvTimeoutError::Disconnected) => return Err(never()),
+    }
   }
-  .resume();
-  rx.recv().unwrap_or_else(|_| Err(io::Error::other(format!("{url}: the task never ended"))))
+
+  Err(crate::platform::too_big(url, max))
 }
