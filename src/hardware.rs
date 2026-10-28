@@ -52,6 +52,8 @@ pub(crate) fn core_audio(kind: [u8; 4], internal: bool) -> Transport {
     b"usb " => Usb,
     b"blue" | b"blea" => Bluetooth,
     b"virt" | b"grup" | b"fgrp" => Virtual,
+    // `kAudioDeviceTransportTypeUnknown`.
+    [0, 0, 0, 0] => Unknown,
     _ => Other,
   }
 }
@@ -95,6 +97,7 @@ mod tests {
       (b"grup", false, Virtual),
       (b"fgrp", false, Virtual),
       (b"hdmi", false, Other),
+      (&[0; 4], false, Unknown),
     ];
     for (kind, internal, want) in cases {
       assert_eq!(core_audio(*kind, internal), want, "{kind:?}");
