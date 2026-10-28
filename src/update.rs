@@ -315,7 +315,7 @@ fn fetch(release: &Release, parent: &Path, progress: Progress) -> io::Result<(Fo
   let file = dir.0.join("download");
   let (total, mut told) = (release.size, None::<Instant>);
   let mut tell = |done| {
-    if done < total && told.is_none_or(|t| t.elapsed() >= TICK) {
+    if 0 < done && done < total && told.is_none_or(|t| t.elapsed() >= TICK) {
       told = Some(Instant::now());
       progress(done, total);
     }
