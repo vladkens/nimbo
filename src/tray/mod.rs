@@ -6,7 +6,7 @@
 //!
 //! | | macOS | Windows | Linux |
 //! |---|---|---|---|
-//! | icon | NSStatusItem, a template NSImage | `Shell_NotifyIconW`, tinted for the taskbar | StatusNotifierItem over D-Bus (GIO) |
+//! | icon | NSStatusItem, a template NSImage | `Shell_NotifyIconW`, tinted for the taskbar | StatusNotifierItem over D-Bus (GIO), an SVG the panel colours |
 //! | menu | NSMenu | `TrackPopupMenu` | `com.canonical.dbusmenu` |
 //! | opens on | a click | a left or right click | as the panel shows menus (KDE: a click) |
 //!
@@ -24,8 +24,8 @@ use crate::Main;
 use crate::platform::tray as imp;
 
 /// The icon, a template: only its alpha counts, and the OS's colour fills it (macOS tints it
-/// for the menu bar and the highlight; Windows and Linux fill it white on a dark taskbar or
-/// panel, black on a light one).
+/// for the menu bar and the highlight; Windows fills it white on a dark taskbar, black on a light
+/// one; a Linux panel with its text colour).
 #[derive(Clone, Debug, PartialEq)]
 pub enum TrayIcon {
   /// Straight (not premultiplied) RGBA, rows top-down, `scale` pixels per point (2 for an image
@@ -60,6 +60,22 @@ impl TrayIcon {
     };
 
     alpha.iter().flat_map(|&a| [tint[0], tint[1], tint[2], a]).collect()
+  }
+
+  /// The icon as an SVG a Linux panel fills with its text colour ([icon::symbolic]): path data
+  /// as it is, an image as its alpha at `side` pixels.
+  #[cfg(any(test, target_os = "linux"))]
+  pub(crate) fn svg(&self, side: u32, tint: [u8; 3]) -> String {
+    match self {
+      TrayIcon::Rgba { w, h, px, .. } => icon::symbolic(
+        side as f32,
+        &icon::runs(&icon::scale_alpha(*w, *h, px, side), side as usize),
+        tint,
+      ),
+      TrayIcon::Path { size, d, even_odd } => {
+        icon::symbolic(*size, &[(d.clone(), *even_odd, 1.0)], tint)
+      }
+    }
   }
 }
 
@@ -439,6 +455,20 @@ mod tests {
     let label = if cfg!(target_os = "macos") { "⌘Q" } else { "Ctrl+Q" };
     assert_eq!(menu.items[3].key_label(), label);
     assert_eq!(Item::new("x", "X").key("cmd+nope").key_label(), "");
+  }
+
+  /// Path data goes in an icon's SVG as it is, an image as runs of its alpha.
+  #[test]
+  fn icons_as_svgs() {
+    let ring = TrayIcon::Path { size: 18.0, d: "M0 0H9V9Z".into(), even_odd: true };
+    let svg = ring.svg(44, [0; 3]);
+    assert!(
+      svg.contains(r#"viewBox="0 0 18 18""#)
+        && svg.contains(r#"evenodd" fill-opacity="1" d="M0 0H9V9Z""#),
+      "{svg}"
+    );
+    let dot = TrayIcon::Rgba { w: 1, h: 1, scale: 1.0, px: vec![0, 0, 0, 255] };
+    assert!(dot.svg(2, [0; 3]).contains(r#"d="M0 0h2v1H0zM0 1h2v1H0z""#), "{}", dot.svg(2, [0; 3]));
   }
 
   #[test]
