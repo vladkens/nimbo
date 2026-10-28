@@ -14,9 +14,9 @@
 //! {"version": "1.2.0", "notes": "…", "platforms": {"macos-aarch64": {"url": "https://…", "size": 1234, "sha512": "<hex>"}}}
 //! ```
 //!
-//! `size` is the file's bytes: the download stops past it. The feed may be 1 MiB, its signature
-//! 1 KiB; a signature that fails is fetched again with the feed once, as a release may have been
-//! published between the two.
+//! `size` is the file's bytes: the download stops past it, and [download]'s progress counts to it.
+//! The feed may be 1 MiB, its signature 1 KiB; a signature that fails is fetched again with the
+//! feed once, as a release may have been published between the two.
 //!
 //! Signed with `openssl` 3: `openssl genpkey -algorithm ed25519 -out update.pem` once, keeping
 //! `update.pem` secret; `openssl pkey -in update.pem -pubout` gives the public key, whose base64
@@ -124,7 +124,7 @@ pub fn check(feed: &Feed, current: &str) -> io::Result<Option<Release>> {
   let dir = Folder::new(&env::temp_dir())?;
   let get = |url: &str, name, max| {
     let to = dir.0.join(name);
-    http::get(url, &to, max).and_then(|()| fs::read(to))
+    http::get(url, &to, max, &mut |_| {}).and_then(|()| fs::read(to))
   };
   let fetch = || {
     Ok::<_, io::Error>((
@@ -154,10 +154,13 @@ fn sig(url: &str) -> String {
 /// (`PermissionDenied`: `/Applications` for a standard user, Program Files, a translocated app).
 /// On Windows only the archive names the app's folder, so a build's (`target\debug`) is refused
 /// once unpacked (`Unsupported`).
-pub fn download(release: &Release) -> io::Result<Staged> {
+///
+/// `progress` gets the bytes done and the total, `release.size`, on the calling thread: at most
+/// about 4 times a second while the file comes, then once with the total when it is verified.
+pub fn download(release: &Release, mut progress: impl FnMut(u64, u64)) -> io::Result<Staged> {
   let exe = env::current_exe()?;
   let target = target(OS, &exe, &|k| env::var_os(k))?;
-  let (dir, file) = fetch(release, beside(OS, &target))?;
+  let (dir, file) = fetch(release, beside(OS, &target), &mut progress)?;
   let into = dir.0.join("new");
   fs::create_dir(&into)?;
   imp::unpack(&file, &into)?;
@@ -178,6 +181,9 @@ pub fn download(release: &Release) -> io::Result<Staged> {
 pub fn install(staged: Staged) -> io::Result<()> {
   put(OS, staged, &|a, b| fs::rename(a, b), &|app| imp::relaunch(app, &instance::relaunch()?))
 }
+
+/// [download]'s progress: the bytes done, the total.
+type Progress<'a> = &'a mut dyn FnMut(u64, u64);
 
 /// What starts the new app, [imp::relaunch] with [instance::relaunch]'s value, or one that fails
 /// in tests.
@@ -294,17 +300,29 @@ fn target(os: Os, exe: &Path, env: Env) -> io::Result<PathBuf> {
   }
 }
 
+/// How often [download]'s progress is told at most.
+const TICK: Duration = Duration::from_millis(250);
+
 /// The release's file fetched over https (or loopback) and verified into a fresh folder under
-/// `parent`, gone again on an error; one the user can't write fails first.
-fn fetch(release: &Release, parent: &Path) -> io::Result<(Folder, PathBuf)> {
+/// `parent`, gone again on an error; one the user can't write fails first. `progress` as
+/// [download]'s.
+fn fetch(release: &Release, parent: &Path, progress: Progress) -> io::Result<(Folder, PathBuf)> {
   if !secure(&release.url) {
     return Err(bad(format!("{} is not https", release.url)));
   }
 
   let dir = Folder::new(parent)?;
   let file = dir.0.join("download");
-  http::get(&release.url, &file, release.size)?;
+  let (total, mut told) = (release.size, None::<Instant>);
+  let mut tell = |done| {
+    if done < total && told.is_none_or(|t| t.elapsed() >= TICK) {
+      told = Some(Instant::now());
+      progress(done, total);
+    }
+  };
+  http::get(&release.url, &file, total, &mut tell)?;
   release.verify(&file)?;
+  progress(total, total);
   Ok((dir, file))
 }
 
@@ -810,7 +828,7 @@ mod tests {
     fs::set_permissions(&root, fs::Permissions::from_mode(0o555)).unwrap();
     let url = "http://127.0.0.1:9/a".into();
     let r = Release { version: "2".into(), notes: String::new(), url, size: 1, sha512: [0; 64] };
-    let e = fetch(&r, &root).unwrap_err();
+    let e = fetch(&r, &root, &mut |_, _| {}).unwrap_err();
     fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
     assert_eq!(e.kind(), io::ErrorKind::PermissionDenied, "{e}");
     fs::remove_dir(root).unwrap();
@@ -1127,11 +1145,16 @@ mod tests {
   #[test]
   fn get_follows_a_redirect_and_fails_on_a_404() {
     let (url, to) = (serve(), temp("get", b""));
-    http::get(&format!("{url}/update.json"), &to, FEED.len() as u64).unwrap();
+    let mut seen = Vec::new();
+    http::get(&format!("{url}/update.json"), &to, FEED.len() as u64, &mut |n| seen.push(n))
+      .unwrap();
     assert_eq!(fs::read(&to).unwrap(), FEED);
-    let missing = http::get(&format!("{url}/none"), &to, 1 << 10).unwrap_err();
+    assert!(seen.is_sorted() && seen.last() == Some(&(FEED.len() as u64)), "{seen:?}");
+    let none = &mut |_| {};
+    let missing = http::get(&format!("{url}/none"), &to, 1 << 10, none).unwrap_err();
     assert_eq!(missing.kind(), io::ErrorKind::NotFound, "{missing}");
-    let big = http::get(&format!("{url}/update.json"), &to, FEED.len() as u64 - 1).unwrap_err();
+    let big = http::get(&format!("{url}/update.json"), &to, FEED.len() as u64 - 1, none);
+    let big = big.unwrap_err();
     assert_eq!(big.kind(), io::ErrorKind::InvalidData, "{big}");
     let _ = fs::remove_file(to);
   }
@@ -1161,8 +1184,10 @@ mod tests {
       size: 3,
       sha512: hex(ABC).unwrap(),
     };
-    let (staged, file) = fetch(&r, &parent).unwrap();
+    let mut seen = Vec::new();
+    let (staged, file) = fetch(&r, &parent, &mut |done, total| seen.push((done, total))).unwrap();
     assert_eq!(fs::read(&file).unwrap(), b"abc");
+    assert_eq!(seen, [(3, 3)], "only the end within a tick");
     #[cfg(unix)]
     {
       use std::os::unix::fs::PermissionsExt;
@@ -1181,11 +1206,12 @@ mod tests {
     for change in changes {
       let mut r = r.clone();
       change(&mut r);
-      assert_eq!(fetch(&r, &parent).unwrap_err().kind(), io::ErrorKind::InvalidData, "{r:?}");
+      let e = fetch(&r, &parent, &mut |_, _| {}).unwrap_err();
+      assert_eq!(e.kind(), io::ErrorKind::InvalidData, "{r:?}");
     }
 
     r.url = format!("{url}/none");
-    assert_eq!(fetch(&r, &parent).unwrap_err().kind(), io::ErrorKind::NotFound);
+    assert_eq!(fetch(&r, &parent, &mut |_, _| {}).unwrap_err().kind(), io::ErrorKind::NotFound);
     assert_eq!(fs::read_dir(&parent).unwrap().count(), 0, "no folder is left");
     fs::remove_dir(parent).unwrap();
   }

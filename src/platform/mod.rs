@@ -116,13 +116,14 @@
 //!   for the app besides launch at login, undone (macOS its permissions and defaults, Linux the
 //!   launcher entry and the portal's token), and `busy(&io::Error) -> bool`, an error a removal may
 //!   pass when tried again.
-//! - `pub mod http` ([crate::update]), from any thread: `get(url: &str, to: &Path, max: u64) ->
-//!   io::Result<()>`, a GET's body written to the file `to`, blocking until it ends, stopped past
-//!   `max` bytes ([too_big]); redirects followed (GitHub sends assets to another host; on Linux
-//!   only to https, http too from loopback; on macOS by the shared session's defaults, http too),
-//!   no cache, the system's proxy (Linux: the `*_proxy` variables), a status other than 2xx an
-//!   error from [status]; on `Err` `to` may hold a part. macOS `NSURLSession`, Windows WinHTTP,
-//!   Linux `libcurl.so.4` (`Unsupported` without).
+//! - `pub mod http` ([crate::update]), from any thread: `get(url: &str, to: &Path, max: u64,
+//!   progress: &mut dyn FnMut(u64)) -> io::Result<()>`, a GET's body written to the file `to`,
+//!   blocking until it ends, stopped past `max` bytes ([too_big]), `progress` told the bytes so far
+//!   on the calling thread as they come (unthrottled) and, on `Ok`, at the end; redirects followed
+//!   (GitHub sends assets to another host; on Linux only to https, http too from loopback; on macOS
+//!   by the shared session's defaults, http too), no cache, the system's proxy (Linux: the
+//!   `*_proxy` variables), a status other than 2xx an error from [status]; on `Err` `to` may hold a
+//!   part. macOS `NSURLSession`, Windows WinHTTP, Linux `libcurl.so.4` (`Unsupported` without).
 //! - `pub mod update` ([crate::update]), from any thread, its tools by absolute path: `unpack(file:
 //!   &Path, into: &Path) -> io::Result<()>`, the release's file into the folder `into` (macOS
 //!   `/usr/bin/ditto -x -k`, Windows `%SystemRoot%\System32\tar.exe -xf` with no console window,

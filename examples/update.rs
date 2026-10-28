@@ -8,7 +8,7 @@
 //! `UPDATE_VERSION=1.0.0 cargo build --release --example update` sets the version (the crate's
 //! without it); `scripts/update-feed.py` makes a feed. Then `update` prints the version,
 //! `update --check <feed url> <key>` what the feed offers, `update --update <feed url> <key>`
-//! updates.
+//! updates, printing the download's percentage.
 
 use std::io::{self, ErrorKind};
 use std::process::ExitCode;
@@ -53,7 +53,10 @@ fn run(args: &[String]) -> io::Result<()> {
       };
 
       println!("{VERSION} -> {}: downloading {}", release.version, release.url);
-      update::install(update::download(&release)?)?;
+      let staged = update::download(&release, |done, total| {
+        println!("{}%", done * 100 / total.max(1));
+      })?;
+      update::install(staged)?;
       println!("installed {}, it starts as this one ends", release.version);
       Ok(())
     }

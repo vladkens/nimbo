@@ -5,9 +5,11 @@
 //! too from loopback) ([libcurl-easy](https://curl.se/libcurl/c/libcurl-easy.html), as of
 //! 2026-10).
 
+use std::any::Any;
 use std::ffi::{CStr, CString, c_int, c_long, c_void};
 use std::fs::File;
 use std::io::{self, Write};
+use std::panic::{self, AssertUnwindSafe};
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -60,25 +62,28 @@ fn curl() -> Option<&'static Curl> {
 }
 
 /// The file a transfer writes to, the error that stopped it (a bare `InvalidData` past the
-/// bytes it may take) and those bytes.
-type Out = (File, Option<io::Error>, u64);
+/// bytes it may take), those bytes, what is told the bytes left after each write, and its panic.
+type Out<'a> = (File, Option<io::Error>, u64, &'a mut dyn FnMut(u64), Option<Box<dyn Any + Send>>);
 
 /// curl's `CURLOPT_WRITEFUNCTION`: `size × n` bytes at `data`, all taken or the transfer stops.
 unsafe extern "C" fn write(data: *const u8, size: usize, n: usize, out: P) -> usize {
   // SAFETY: curl passes the `Out` set as `CURLOPT_WRITEDATA` and that many bytes.
-  let ((file, err, left), data) =
+  let ((file, err, left, tell, panicked), data) =
     unsafe { (&mut *out.cast::<Out>(), std::slice::from_raw_parts(data, size * n)) };
   let fits = left.checked_sub(data.len() as u64).ok_or(io::ErrorKind::InvalidData.into());
   // Called no more once it took nothing.
   *err = fits.and_then(|l| file.write_all(data).map(|()| *left = l)).err();
-  if err.is_some() { 0 } else { size * n }
+  // A panic can't unwind through curl: it stops the transfer and goes on past it.
+  *panicked = panic::catch_unwind(AssertUnwindSafe(|| tell(*left))).err();
+  if err.is_some() || panicked.is_some() { 0 } else { size * n }
 }
 
-pub fn get(url: &str, to: &Path, max: u64) -> io::Result<()> {
+pub fn get(url: &str, to: &Path, max: u64, progress: &mut dyn FnMut(u64)) -> io::Result<()> {
   let none = || io::Error::new(io::ErrorKind::Unsupported, "libcurl.so.4 is not installed");
   let c = curl().ok_or_else(none)?;
   let c_url = CString::new(url).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, url))?;
-  let (mut out, mut code): (Out, c_long) = ((File::create(to)?, None, max), 0);
+  let tell = &mut |left| progress(max - left);
+  let (mut out, mut code): (Out, c_long) = ((File::create(to)?, None, max, tell, None), 0);
   // SAFETY: a handle of its own, its options of their documented types, cleaned up before `out`
   // and the URL go.
   let done = unsafe {
@@ -107,6 +112,10 @@ pub fn get(url: &str, to: &Path, max: u64) -> io::Result<()> {
     (c.f.curl_easy_cleanup)(h);
     done
   };
+
+  if let Some(p) = out.4 {
+    panic::resume_unwind(p);
+  }
 
   // A 404's page may be past `max`: the status tells first.
   if code != 0 {

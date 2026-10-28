@@ -16,7 +16,7 @@ use objc2_foundation::{
   NSURLResponse, NSURLSession,
 };
 
-pub fn get(url: &str, to: &Path, max: u64) -> io::Result<()> {
+pub fn get(url: &str, to: &Path, max: u64, progress: &mut dyn FnMut(u64)) -> io::Result<()> {
   let bad = || io::Error::new(io::ErrorKind::InvalidInput, format!("{url} is not a URL"));
   let u = NSURL::URLWithString(&NSString::from_str(url)).ok_or_else(bad)?;
   let policy = NSURLRequestCachePolicy::ReloadIgnoringLocalCacheData;
@@ -48,14 +48,14 @@ pub fn get(url: &str, to: &Path, max: u64) -> io::Result<()> {
     NSURLSession::sharedSession().downloadTaskWithRequest_completionHandler(&request, &done)
   };
   task.resume();
-  // Stopped once past `max`; the handler checks the file it got.
+  // The bytes so far told and stopped once past `max`; the handler checks the file it got.
   let never = || io::Error::other(format!("{url}: the task never ended"));
   loop {
-    match rx.recv_timeout(Duration::from_millis(50)) {
-      Ok(r) => return r,
-      Err(RecvTimeoutError::Timeout) if task.countOfBytesReceived() as u64 <= max => {}
-      Err(RecvTimeoutError::Timeout) => break task.cancel(),
-      Err(RecvTimeoutError::Disconnected) => return Err(never()),
+    match (rx.recv_timeout(Duration::from_millis(50)), task.countOfBytesReceived() as u64) {
+      (Ok(r), n) => return r.map(|()| progress(n)),
+      (Err(RecvTimeoutError::Timeout), n) if n <= max => progress(n),
+      (Err(RecvTimeoutError::Timeout), _) => break task.cancel(),
+      (Err(RecvTimeoutError::Disconnected), _) => return Err(never()),
     }
   }
 
