@@ -1,21 +1,22 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The update's process calls on macOS: the release's `.zip` unpacked with `ditto`, the new
-//! bundle held to the running one's id and designated requirement with `codesign`, then opened
-//! by LaunchServices in the old one's place.
+//! bundle held to the running one's id and designated requirement with `codesign`, swapped in,
+//! then opened by LaunchServices in the old one's place.
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
+use std::io;
 use std::path::Path;
 use std::process::Command;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::{Duration, Instant};
-use std::{env, io};
 
 use block2::RcBlock;
 use objc2_app_kit::{NSRunningApplication, NSWorkspace, NSWorkspaceOpenConfiguration};
-use objc2_foundation::{NSArray, NSBundle, NSDictionary, NSError, NSString, NSURL};
+use objc2_foundation::{NSArray, NSBundle, NSError, NSString, NSURL};
 
-use crate::update::{RELAUNCH, bad};
+pub use crate::platform::process::{alive, detach, wait_exit};
+use crate::update::bad;
 
 /// Unpacks the `.zip` `file` into the folder `into`, as `ditto -c -k --keepParent` packed it.
 pub fn unpack(file: &Path, into: &Path) -> io::Result<()> {
@@ -43,6 +44,11 @@ pub fn accepts(new: &Path, app: &Path) -> io::Result<()> {
   run("/usr/bin/codesign", &["-v".as_ref(), req.as_ref(), new.as_os_str()]).map(drop)
 }
 
+/// Exchanges the paths `a` and `b` in one step; `Unsupported` for now, so the swap renames twice.
+pub fn exchange(_: &Path, _: &Path) -> io::Result<()> {
+  Err(io::ErrorKind::Unsupported.into())
+}
+
 /// Runs `cmd` to its end, what it wrote to stdout; `InvalidData` with its stderr if it failed.
 fn run(cmd: &str, args: &[&OsStr]) -> io::Result<String> {
   let out = Command::new(cmd).args(args).output()?;
@@ -52,14 +58,12 @@ fn run(cmd: &str, args: &[&OsStr]) -> io::Result<String> {
   }
 }
 
-/// Opens the bundle `app` as a new instance beside the running one, with this process's arguments
-/// and [RELAUNCH] set to `var`, without taking the focus: started by launchd, it is its own
-/// responsible process for TCC, and gets launchd's environment, not this process's. Back with
-/// LaunchServices' error, or once a new process of the bundle's id runs: its answer waits until
-/// the app has finished launching, which the new one, waiting in [crate::instance] for this one
-/// to end, would only do after LaunchServices gives up (30 s). `TimedOut` when neither comes in
-/// 35 s, a new process that comes as it does ended, so the swap is undone.
-pub fn relaunch(app: &Path, var: &str) -> io::Result<()> {
+/// Opens the bundle `app` as a new instance with `args`, without taking the focus: started by
+/// launchd, it is its own responsible process for TCC, and gets launchd's environment, not this
+/// process's. Back with LaunchServices' error, or once a new process of the bundle's id runs or
+/// the app has finished launching. `TimedOut` when neither comes in 35 s, a new process that
+/// comes as it does ended, so the swap is undone.
+pub fn start(app: &Path, args: &[OsString]) -> io::Result<()> {
   let path = NSString::from_str(&app.to_string_lossy());
   let id = NSBundle::bundleWithPath(&path).and_then(|b| b.bundleIdentifier());
   let apps = || {
@@ -70,9 +74,7 @@ pub fn relaunch(app: &Path, var: &str) -> io::Result<()> {
   let config = NSWorkspaceOpenConfiguration::configuration();
   config.setCreatesNewApplicationInstance(true);
   config.setActivates(false);
-  let (k, v) = (NSString::from_str(RELAUNCH), NSString::from_str(var));
-  config.setEnvironment(&NSDictionary::from_slices(&[&*k], &[&*v]));
-  let args = env::args_os().skip(1).map(|a| NSString::from_str(&a.to_string_lossy()));
+  let args = args.iter().map(|a| NSString::from_str(&a.to_string_lossy()));
   config.setArguments(&NSArray::from_retained_slice(&args.collect::<Vec<_>>()));
   let (tx, rx) = mpsc::channel();
   let done = RcBlock::new(move |_: *mut NSRunningApplication, err: *mut NSError| {
