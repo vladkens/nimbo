@@ -4,7 +4,8 @@
 //! newer [Release], [download] fetches its file beside the running app, [Release::verify]s and
 //! stages it, [install] hands it to an installer that puts it in once the app has quit, and
 //! [finish], first in `main`, is that installer. They block: an app runs them on a thread of its
-//! own and posts the result back.
+//! own and posts the result back. [dialog] is what the person sees: one menu item and a window,
+//! as Sparkle's.
 //!
 //! The feed is one text file, `update.txt`, signed, hosted anywhere: on GitHub as a release asset,
 //! `https://github.com/<owner>/<repo>/releases/latest/download/update.txt`. It is UTF-8, one record
@@ -86,6 +87,8 @@ use ed25519_compact::{PublicKey, Signature};
 use crate::paths::{OS, Os};
 use crate::platform::{http, update as imp};
 use crate::uninstall::{self, Env};
+
+pub mod dialog;
 
 /// Where an app's updates come from: its feed's URL and the Ed25519 public key that signs it,
 /// both from consts in the app.
