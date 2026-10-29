@@ -44,6 +44,17 @@ DEB_ARCH = {"x86_64": "amd64", "aarch64": "arm64"}
 SIZES = (512, 256)
 
 
+# The libraries nimbo loads at run time, by their Debian names (t64 since Ubuntu 24.04).
+NIMBO = [
+  "libgtk-3-0 | libgtk-3-0t64",
+  "libgtk-layer-shell0",
+  "libfontconfig1",
+  "libfreetype6",
+  "libharfbuzz0b",
+  "libx11-6",
+  "libxtst6",
+]
+
 def desktop(cfg: Config) -> str:
   """The .desktop entry: the app started by its binary's name, on the PATH."""
   lines = ["[Desktop Entry]", "Type=Application", f"Name={cfg.name}"]
@@ -196,7 +207,8 @@ def deb(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
       "Maintainer": next(iter(cfg.authors), "") or cfg.publisher or cfg.name,
       "Installed-Size": str(size // 1024 + 1),
       "Depends": ", ".join(cfg.linux.get("deb-depends", [])),
-      "Recommends": ", ".join(cfg.linux.get("deb-recommends", [])),
+      # What nimbo loads at run time (GTK and the text stack), then the app's own.
+      "Recommends": ", ".join(dict.fromkeys(NIMBO + cfg.linux.get("deb-recommends", []))),
       "Section": "utils",
       "Priority": "optional",
       "Description": cfg.comment or cfg.name,

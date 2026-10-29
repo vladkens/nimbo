@@ -237,11 +237,14 @@ def feed(key: bytes, version: str, url: str, files: list[str], out: Path) -> Pat
     sys.exit("pack: the version and the urls hold no whitespace")
 
   out.mkdir(parents=True, exist_ok=True)
-  path = out / "update.txt"
-  path.write_bytes(body(version, packages))
-  sig = sign(key, path)
-  with path.open("ab") as f:
+  # Signed beside it, then in place: a failed signature leaves the feed that was there.
+  path, part = out / "update.txt", out / "update.txt.part"
+  part.write_bytes(body(version, packages))
+  sig = sign(key, part)
+  with part.open("ab") as f:
     f.write(f"sig {sig.hex()}\n".encode())
+
+  part.replace(path)
 
   print(f"{path}: {version} for {', '.join(p for p, _, _ in packages)}, signed")
   return path
@@ -265,11 +268,18 @@ def clipboard() -> list[str]:
 
 
 def feed_key(repo: str | None) -> None:
+  # Never a second key: every app shipped trusts the first one's public half only.
+  where = ["--repo", repo] if repo else []
+  names = run("gh", "secret", "list", *where, capture_output=True, text=True).stdout.split()
+  if "UPDATE_KEY" in names:
+    sys.exit("pack: UPDATE_KEY is set already; the apps shipped trust it: delete it by hand first")
+
   copy = clipboard()
   key = openssl("genpkey", "-algorithm", "ed25519")
   seed = openssl("pkey", "-outform", "DER", input=key)[-32:].hex()
-  run("gh", "secret", "set", "UPDATE_KEY", *(["--repo", repo] if repo else []), input=seed.encode())
+  # The clipboard first: a key only in the secret could never be read back.
   run(*copy, input=seed.encode())
+  run("gh", "secret", "set", "UPDATE_KEY", *where, input=seed.encode())
   print(
     "pack: the private key is set as UPDATE_KEY and on the clipboard: keep it in Bitwarden",
     file=sys.stderr,

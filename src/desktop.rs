@@ -55,6 +55,17 @@ pub(crate) fn packaged(exe: &Path, home: Option<&Path>) -> bool {
   !home.is_some_and(|h| h.is_absolute() && h.parent().is_some() && exe.starts_with(h))
 }
 
+/// Removes the launcher entry under the data folder `data`, if there is one; the icons stay, as
+/// a running tray may use its own.
+#[cfg(any(all(test, unix), target_os = "linux"))]
+pub(crate) fn unlist(data: &Path, app: &AppInfo) -> Result<(), String> {
+  let path = entry(data, app);
+  match std::fs::remove_file(&path) {
+    Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("{}: {e}", path.display())),
+    _ => Ok(()),
+  }
+}
+
 /// The launcher entry under the data folder `data`.
 #[cfg(any(all(test, unix), target_os = "linux"))]
 fn entry(data: &Path, app: &AppInfo) -> PathBuf {
@@ -226,6 +237,17 @@ mod tests {
     assert!(!packaged(Path::new("/home/me/Apps/App.AppImage"), home));
     assert!(packaged(Path::new("/home/me/app"), None));
     assert!(packaged(Path::new("/app"), Some(Path::new("/"))));
+
+    // What an earlier run wrote goes; once gone, that's no error.
+    let data = std::env::temp_dir().join(format!("nimbo-unlist-{}", std::process::id()));
+    let app =
+      AppInfo { id: "com.example.unlist", name: "Unlist", presence: crate::Presence::Regular };
+    std::fs::create_dir_all(data.join("applications")).unwrap();
+    std::fs::write(entry(&data, &app), "").unwrap();
+    assert_eq!(unlist(&data, &app), Ok(()));
+    assert!(!entry(&data, &app).exists());
+    assert_eq!(unlist(&data, &app), Ok(()));
+    _ = std::fs::remove_dir_all(&data);
   }
 
   /// Unix: Windows opens no folder as a file, to date it.
