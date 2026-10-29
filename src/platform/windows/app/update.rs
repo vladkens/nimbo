@@ -1,7 +1,7 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The update's process calls on Windows: the installer started apart from the app and waiting
-//! for it to end, the release's NSIS `setup.exe` run silently, the installed exe started.
+//! for it to end, the release's NSIS setup run silently, the installed exe started.
 
 use std::ffi::OsString;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};

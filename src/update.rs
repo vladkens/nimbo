@@ -15,7 +15,7 @@
 //! ```text
 //! version 1.2.0
 //! macos-aarch64 394788 <sha512 hex> https://…/App-macos.dmg
-//! windows-x86_64 285930 <sha512 hex> https://…/App-windows-x86_64-setup.exe
+//! windows-x86_64 285930 <sha512 hex> https://…/App-windows-x64-setup.exe
 //! linux-x86_64 412204 <sha512 hex> https://…/App-x86_64.AppImage
 //! sig <signature hex>
 //! ```
@@ -42,7 +42,7 @@
 //! size and SHA-512 are the feed's; nothing is opened before. Redirects are followed by the system
 //! (on Linux only to https, on Windows not from https to http, on macOS by the shared session's
 //! defaults); the signature and the hash guard what comes. The file is the one people download
-//! for the first install: the notarized `.dmg`, the per-user NSIS `setup.exe`, the AppImage.
+//! for the first install: the notarized `.dmg`, the per-user NSIS setup, the AppImage.
 //!
 //! The app is never replaced while it runs. [install] starts the installer apart from the app (its
 //! own process group on Unix; no console and out of the app's job on Windows), waits up to 10 s
@@ -60,7 +60,7 @@
 //! | OS | the app | staged | checked | put in, and undone | started |
 //! |---|---|---|---|---|---|
 //! | macOS | the `.app` | the `.dmg` attached read-only inside the staging folder (`hdiutil`), its one `.app` at the top copied out with `ditto`, detached (forced if it must be) | the same bundle id, signed so that it meets the running app's designated requirement (Security.framework) | `renamex_np` with `RENAME_SWAP` (APFS), undone by the same | `open -n -g`, by LaunchServices: no focus taken, launchd's environment |
-//! | Windows | the exe's folder in `%LOCALAPPDATA%\Programs` | the `setup.exe` as it came | the size and hash alone | the setup run silent (`/S`, into the folder it recorded) with no window, awaited; an exit code other than 0 is the error (1 cancelled, 2 aborted by its script, as on a wrong architecture) | the folder's exe of the running one's name, whatever the setup left |
+//! | Windows | the exe's folder in `%LOCALAPPDATA%\Programs` | the setup as it came, named as its URL ends (a plain `.exe`, not the app's name) rather than `setup.exe`, which Windows loads compatibility shims into | the size and hash alone | the setup run silent (`/S`, into the folder it recorded) with no window, awaited; an exit code other than 0 is the error (1 cancelled, 2 aborted by its script, as on a wrong architecture) | the folder's exe of the running one's name, whatever the setup left |
 //! | Linux | the AppImage | made executable | the size and hash alone | linked to `.<name>.nimbo-old`, the new one renamed over it in one step; undone by renaming the link back | the AppImage, without the installer's AppImage variables |
 //!
 //! On Windows the installer is a copy of the running exe, named as it is (Windows asks to elevate
@@ -70,7 +70,7 @@
 //! when every release is signed with one stable identity: an ad-hoc signature's requirement is its
 //! own build, so [download] refuses the next one.
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
@@ -490,12 +490,10 @@ fn fetch(release: &Release, parent: &Path, progress: Progress) -> io::Result<(Fo
     return Err(bad(format!("{} is not https", release.url)));
   }
 
+  let exe = env::current_exe()?;
+  let name = staged(OS, &release.url, exe.file_name().unwrap_or_default())?;
   let dir = Folder::new(parent)?;
-  let file = dir.0.join(match OS {
-    Os::Mac => "update.dmg",
-    Os::Windows => "setup.exe",
-    Os::Linux => "app.AppImage",
-  });
+  let file = dir.0.join(name);
   let (total, mut told) = (release.size, None::<Instant>);
   let mut tell = |done| {
     if 0 < done && done < total && told.is_none_or(|t| t.elapsed() >= TICK) {
@@ -507,6 +505,26 @@ fn fetch(release: &Release, parent: &Path, progress: Progress) -> io::Result<(Fo
   release.verify(&file)?;
   progress(total, total);
   Ok((dir, file))
+}
+
+/// The name the release's file at `url` is staged by. On Windows its own, the last part of the
+/// URL's path: a plain `<name>.exe` other than the running `exe`'s, whose copy, the installer,
+/// goes beside it (`InvalidData` else). Windows loads compatibility shims into an exe named
+/// `setup.exe` (makensis' warning 9000), and `pack.py setup` names none so.
+fn staged<'a>(os: Os, url: &'a str, exe: &OsStr) -> io::Result<&'a str> {
+  let path = url.split(['?', '#']).next().unwrap_or_default();
+  let name = match os {
+    Os::Mac => return Ok("update.dmg"),
+    Os::Linux => return Ok("app.AppImage"),
+    Os::Windows => path.rsplit('/').next().unwrap_or_default(),
+  };
+
+  let plain = !name.contains(|c: char| c.is_control() || r#"\:*?"<>|"#.contains(c));
+  let ext = Path::new(name).extension().is_some_and(|e| e.eq_ignore_ascii_case("exe"));
+  match plain && ext && !OsStr::new(name).eq_ignore_ascii_case(exe) {
+    true => Ok(name),
+    false => Err(bad(format!("{url} names no setup to stage"))),
+  }
 }
 
 /// Where a swap moves what it replaces: `.<name>.nimbo-old` beside it, a suffix only nimbo makes,
@@ -973,11 +991,15 @@ mod tests {
       let root = dir(&format!("setup-{i}"));
       write(
         &root,
-        &[("W/a.exe", "1"), (".nimbo-update-9/setup.exe", "2"), (".nimbo-update-9/ready", "")],
+        &[
+          ("W/a.exe", "1"),
+          (".nimbo-update-9/A-v2-windows-x64-setup.exe", "2"),
+          (".nimbo-update-9/ready", ""),
+        ],
       );
       fs::write(root.join(".nimbo-update-9").join(&exe), "1").unwrap();
       let (job, ran, started) = (
-        install_job(&root, ".nimbo-update-9/setup.exe", "W"),
+        install_job(&root, ".nimbo-update-9/A-v2-windows-x64-setup.exe", "W"),
         RefCell::new(Vec::new()),
         Started::default(),
       );
@@ -992,7 +1014,12 @@ mod tests {
       );
       assert_eq!(*ran.borrow(), std::slice::from_ref(&job.new));
       let note = done.err().map(|e| e.to_string());
-      let why = ["", "setup.exe exited with 1", "setup.exe exited with 2", "no setup"][i];
+      let why = [
+        "",
+        "A-v2-windows-x64-setup.exe exited with 1",
+        "A-v2-windows-x64-setup.exe exited with 2",
+        "no setup",
+      ][i];
       assert!(note.as_ref().map_or(i == 0, |n| i > 0 && n.contains(why)), "{note:?}");
       assert_eq!(*started.borrow(), [(job.target.clone(), vec![OsString::from("-x")], note)]);
       let left =
@@ -1186,7 +1213,7 @@ mod tests {
           "/update.txt" => ("302 Found\r\nLocation: /feed/update.txt", b""),
           "/feed/update.txt" => ("200 OK", FEED),
           "/bad.txt" => ("200 OK", bad.as_slice()),
-          "/abc" => ("200 OK", b"abc"),
+          "/abc.exe" => ("200 OK", b"abc"),
           _ => ("404 Not Found", b"none"),
         };
 
@@ -1231,7 +1258,7 @@ mod tests {
     let parent = dir("parent");
     let mut r = Release {
       version: "2".into(),
-      url: format!("{url}/abc"),
+      url: format!("{url}/abc.exe"),
       size: 3,
       sha512: hex(ABC).unwrap(),
     };
@@ -1252,7 +1279,7 @@ mod tests {
       |r| r.size = 4,
       |r| r.size = 2,
       |r| r.sha512[0] ^= 1,
-      |r| r.url = "http://example.com/abc".into(),
+      |r| r.url = "http://example.com/abc.exe".into(),
     ];
     for change in changes {
       let mut r = r.clone();
@@ -1261,10 +1288,25 @@ mod tests {
       assert_eq!(e.kind(), io::ErrorKind::InvalidData, "{r:?}");
     }
 
-    r.url = format!("{url}/none");
+    r.url = format!("{url}/none.exe");
     assert_eq!(fetch(&r, &parent, &mut |_, _| {}).unwrap_err().kind(), io::ErrorKind::NotFound);
     assert_eq!(fs::read_dir(&parent).unwrap().count(), 0, "no folder is left");
     fs::remove_dir(parent).unwrap();
+  }
+
+  #[test]
+  fn a_setup_is_staged_by_its_own_name() {
+    let (url, exe) = ("https://h/d/v2/A-v2-windows-x64-setup.exe?x=1#y", OsStr::new("A.exe"));
+    assert_eq!(staged(Os::Windows, url, exe).unwrap(), "A-v2-windows-x64-setup.exe");
+    assert_eq!(staged(Os::Windows, "https://h/B.EXE", exe).unwrap(), "B.EXE");
+    assert_eq!(staged(Os::Mac, url, exe).unwrap(), "update.dmg");
+    assert_eq!(staged(Os::Linux, url, exe).unwrap(), "app.AppImage");
+    // Not an exe, the app's own name (its installer's copy), a name Windows refuses, none.
+    let bad = ["a.zip", "a.exe/", ".exe", "a.exe.", "a.EXE", "a:b.exe", "a\\b.exe", "a\n.exe"];
+    for name in bad {
+      let e = staged(Os::Windows, &format!("https://h/{name}"), OsStr::new("a.exe")).unwrap_err();
+      assert_eq!(e.kind(), io::ErrorKind::InvalidData, "{name:?}");
+    }
   }
 
   #[test]

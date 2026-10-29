@@ -982,10 +982,10 @@ def setup(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
     if license.is_file():
       shutil.copy(license, tmp / "LICENSE.txt")
 
-    (tmp / "setup.nsi").write_text(nsi(cfg, arch, license.is_file()), encoding="utf-8")
+    (tmp / "setup.nsi").write_text(nsi(cfg, arch, license.is_file(), out.name), encoding="utf-8")
     run(makensis, "-V2", "-WX", "-INPUTCHARSET", "UTF8", tmp / "setup.nsi")
     # A signature later: here, the setup's, once makensis has written it.
-    shutil.move(str(tmp / "setup.exe"), out)
+    shutil.move(str(tmp / out.name), out)
 
   return out
 
@@ -999,17 +999,21 @@ def nsis(s: str) -> str:
   return " ".join(s.replace("$", "$$").replace('"', '$\\"').split("\n")).strip()
 
 
-def nsi(cfg: Config, arch: str, license: bool) -> str:
+def nsi(cfg: Config, arch: str, license: bool, out: str) -> str:
   r"""The setup's .nsi: it packs `app.exe`, `app.ico` and, with `license`, `LICENSE.txt` from its
-  folder and writes `setup.exe` there. Its `.onInit` exits 2 on a Windows of another arch; the stub
-  is x86, so that runs on both. The uninstaller keeps the app's data.
+  folder and writes the setup there as `out`, its final name: never `setup.exe`, which Windows
+  loads compatibility shims into (makensis -WX fails on it, warning 9000). Its `.onInit` exits 2
+  on a Windows of another arch; the stub is x86, so that runs on both. The uninstaller keeps the
+  app's data.
 
   >>> from types import SimpleNamespace as N
   >>> cfg = N(id="me.vladkens.counter", name="Counter", version="1.2.0-3-gabc", comment="Counts",
   ...   windows={}, publisher="", bin="counter")
-  >>> text = nsi(cfg, "aarch64", True)
-  >>> keys = ("Install", "VIProduct", "!define MUI_F", "${", "File", "Delete", "CreateS", "Message")
+  >>> text = nsi(cfg, "aarch64", True, "Counter-dev-windows-arm64-setup.exe")
+  >>> keys = ("Out", "Install", "VIProduct", "!define MUI_F", "${", "File", "Delete", "CreateS",
+  ...   "Message")
   >>> print("\n".join(l.strip() for l in text.splitlines() if l.strip().startswith(keys)))
+  OutFile "Counter-dev-windows-arm64-setup.exe"
   InstallDir "$LOCALAPPDATA\Programs\Counter"
   InstallDirRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\{e65f79c2-5031-5421-a3d1-3c434f820e5d}" "InstallLocation"
   !define MUI_FINISHPAGE_RUN "$INSTDIR\Counter.exe"
@@ -1030,7 +1034,7 @@ def nsi(cfg: Config, arch: str, license: bool) -> str:
   >>> print("\n".join(l.split("}\" ")[1] for l in text.splitlines() if "UninstallString" in l))
   "UninstallString" "$\"$INSTDIR\Uninstall.exe$\""
   "QuietUninstallString" "$\"$INSTDIR\Uninstall.exe$\" /S"
-  >>> x64 = nsi(cfg, "x86_64", False)
+  >>> x64 = nsi(cfg, "x86_64", False, "Counter-dev-windows-x64-setup.exe")
   >>> "  ${IfNot} ${IsNativeAMD64}\n  ${AndIfNot} ${IsNativeARM64}" in x64, "LICENSE" in x64
   (True, False)
   """
@@ -1063,7 +1067,7 @@ def nsi(cfg: Config, arch: str, license: bool) -> str:
     "RequestExecutionLevel user",
     "SetCompressor /SOLID lzma",
     f'Name "{name}" "{name.replace("&", "&&")}"',
-    'OutFile "setup.exe"',
+    f'OutFile "{nsis(out)}"',
     f'InstallDir "$LOCALAPPDATA\\Programs\\{name}"',
     "; An update lands in the folder the first install chose.",
     f'InstallDirRegKey HKCU "{key}" "InstallLocation"',
