@@ -130,7 +130,8 @@ impl Config {
   }
 
   /// The icon in the window's title bar and taskbar entry on Windows and X11: `side` × `side`
-  /// pixels of straight RGBA, rows top-down (256 serves every size the system shows). macOS
+  /// pixels of straight RGBA, rows top-down (256 serves every size the system shows), as
+  /// `nimbo_build::app()` writes it to `$OUT_DIR/window-icon.rgba` from the app's config. macOS
   /// shows the bundle's icon; Wayland the one of the app's `.desktop` entry, found by the app id
   /// ([AppInfo::id]).
   pub const fn icon(self, side: u32, px: &'static [u8]) -> Self {

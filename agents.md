@@ -17,6 +17,7 @@ A small, fast, custom-drawn desktop UI toolkit in Rust, in the spirit of Sublime
 - `src/ui/a11y.rs` the accessibility model: each behaviour records its role, name, value and states by id while the view builds (widgets refine them, `Ui::a11y_label` names what nothing else does), assembled from the last frame on demand; assistive actions come in as `Event::A11y` through the input paths. `src/platform/macos/a11y.rs` exposes it to VoiceOver and the other AX clients (an `NSAccessibilityElement` per node, the notifications from a diff after each frame); Windows and Linux follow on the same model.
 - `Theme` is a plain value: an app edits the default plates look (`Theme::PLATES_LIGHT` / `PLATES_DARK`) or builds its own and sets it with `Ui::set_theme`.
 - `src/platform/<os>/` everything OS-dependent, its contract in the docs of `src/platform/mod.rs`: AppKit and CoreText, Win32 and DirectWrite, GTK 3 (on Wayland or X11) with fontconfig, FreeType and HarfBuzz, all loaded at run time on Linux.
+- `build/` the `nimbo-build` crate, a workspace member an app takes as a build-dependency, never in its binary: `nimbo_build::app()` in `build.rs` makes the window icon and the Windows exe's icon, version and manifest from `[package.metadata.nimbo]`; its crates are build-time only.
 - Examples are `examples/<name>.rs` and start through `nimbo::run`, which opens a window, or with `--shot <file.png>` renders in the harness instead (`--appearance light|dark`).
 
 ## Code

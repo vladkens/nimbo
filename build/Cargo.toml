@@ -1,0 +1,16 @@
+[package]
+name = "nimbo-build"
+version = "0.0.1"
+edition = "2024"
+description = "The build script of a nimbo app: the window icon, and on Windows the exe's icon, version and manifest."
+authors = ["vladkens"]
+license = "MIT"
+repository = "https://github.com/vladkens/nimbo"
+keywords = ["build", "icon", "windows", "resources", "nimbo"]
+categories = ["development-tools::build-utils"]
+
+[dependencies]
+embed-resource = "3.0.12"
+ico = "0.6.0"
+png = "0.18.1"
+toml = "1.1.8"

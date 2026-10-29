@@ -6,9 +6,9 @@
 
 A module is a directory under src/ (platform/<os>, platform/<os>/app, ui/widgets and
 ui/containers each on their own, and so are the add-on files ui/form.rs and ui/dialog.rs and the
-accessibility model ui/a11y.rs) or a top-level file; examples/ and tests/ are one row each. Code
-is every line that is not blank, a comment, a doc comment or inside a `#[cfg(test)]` item. With
-a git ref, a column shows how code moved since it.
+accessibility model ui/a11y.rs) or a top-level file; build/ (nimbo-build), examples/ and tests/
+are one row each. Code is every line that is not blank, a comment, a doc comment or inside a
+`#[cfg(test)]` item. With a git ref, a column shows how code moved since it.
 `--map` lists the files with the first sentence of each one's module doc (`//!`): what it does.
 `--check` sums the code per part against its budget (BUDGETS) and fails when one is over, or
 when a budget is not a whole number of hundreds; with `SIZE_WARN` set (CI on `main`, where two
@@ -25,7 +25,7 @@ from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DIRS = ("src", "examples", "tests")
+DIRS = ("src", "build", "examples", "tests")
 EXTS = (".rs",)
 KINDS = ("code", "docs", "comments", "tests", "blank")
 # The code lines each part may have: a platform, the UI core (ui/: the tree, layout, input,
@@ -34,9 +34,10 @@ KINDS = ("code", "docs", "comments", "tests", "blank")
 # portable part: the shell, tray, hotkeys, paths, launch at login, the launcher entry, opening,
 # permissions, the system clipboard, the focus of other apps, the one instance, the uninstall,
 # the paste, the hardware; and each OS's platform/<os>/app), the accessibility model (ui/a11y.rs: roles,
-# records, assembly) and the core (the rest of src/). A budget is whole hundreds (STEP): a change that
-# doesn't fit is written tighter, or the budget goes up by a hundred, a decision recorded in its
-# PR; never by the few lines one change needs.
+# records, assembly), an app's build script (build/, the nimbo-build crate) and the core (the rest of
+# src/). A budget is whole hundreds (STEP): a change that doesn't fit is written tighter, or the
+# budget goes up by a hundred, a decision recorded in its PR; never by the few lines one change
+# needs.
 STEP = 100
 BUDGETS = {
   "platform/macos": 2500,
@@ -52,6 +53,7 @@ BUDGETS = {
   "app/linux": 2400,
   "a11y": 400,
   "update": 500,
+  "build": 200,
 }
 # Modules that count against a budget of another name ("app", src/app.rs, is the core's seams).
 # The settings form and the dialog are add-ons over the widgets, as the containers are; the

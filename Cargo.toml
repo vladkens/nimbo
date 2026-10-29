@@ -13,6 +13,10 @@ include = ["/src/**/*.rs", "/Cargo.toml", "/Cargo.lock", "/LICENSE", "/readme.md
 keywords = ["gui", "ui", "desktop", "widgets", "toolkit"]
 categories = ["gui"]
 
+# nimbo-build, the build script helper apps take as a build-dependency.
+[workspace]
+members = ["build"]
+
 [dependencies]
 ed25519-compact = { version = "2.6.0", default-features = false }
 keyboard-types = { version = "0.8.3", default-features = false }
