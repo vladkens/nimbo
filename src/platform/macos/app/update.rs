@@ -102,24 +102,19 @@ fn owned<T: Type>(path: &Path, status: i32, made: *mut T) -> io::Result<CFRetain
 }
 
 /// Exchanges the paths `a` and `b` in one step, `renamex_np` with `RENAME_SWAP`, as Sparkle's
-/// `SUFileManager` does on APFS; `Unsupported` on a volume without it (HFS+).
+/// `SUFileManager` does on APFS, which macOS 14 runs from.
 pub fn exchange(a: &Path, b: &Path) -> io::Result<()> {
   unsafe extern "C" {
     fn renamex_np(from: *const c_char, to: *const c_char, flags: u32) -> i32;
   }
 
   const RENAME_SWAP: u32 = 2;
-  const ENOTSUP: i32 = 45;
   let path = |p: &Path| CString::new(p.as_os_str().as_bytes()).map_err(io::Error::from);
   let (a, b) = (path(a)?, path(b)?);
   // SAFETY: two C strings that live through the call.
-  if unsafe { renamex_np(a.as_ptr(), b.as_ptr(), RENAME_SWAP) } == 0 {
-    return Ok(());
-  }
-
-  match io::Error::last_os_error() {
-    e if e.raw_os_error() == Some(ENOTSUP) => Err(io::ErrorKind::Unsupported.into()),
-    e => Err(e),
+  match unsafe { renamex_np(a.as_ptr(), b.as_ptr(), RENAME_SWAP) } {
+    0 => Ok(()),
+    _ => Err(io::Error::last_os_error()),
   }
 }
 

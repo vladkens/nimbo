@@ -132,8 +132,9 @@
 //!   spawned apart from the app (Unix its own process group, Windows `DETACHED_PROCESS |
 //!   CREATE_NO_WINDOW`, out of the job where it may); `wait_exit(pid: u32, cap: Duration) -> bool`,
 //!   the process `pid` ended within `cap` (Unix: this one's parent, by `getppid`, so a reused pid
-//!   can't fool it; Windows its handle); `alive(pid: u32) -> bool`, for the staging folders of
-//!   ended installers; `start(app: &Path, args: &[OsString], note: Option<&str>) ->
+//!   can't fool it; Windows `wait_exit(pid: u32) -> impl Fn(u32, Duration) -> bool`, its handle
+//!   opened at the call, before the installer's mark); `alive(pid: u32) -> bool`, for the staging
+//!   folders of ended installers; `start(app: &Path, args: &[OsString], note: Option<&str>) ->
 //!   io::Result<()>`, the installed app started with `args`, and `note` in its `NIMBO_UPDATE_ERROR`
 //!   ([crate::update::NOTE]), without waiting for it (macOS `/usr/bin/open -n -g [--env …] …
 //!   --args`, by LaunchServices in launchd's environment, in `/` and without the focus; Windows the
@@ -144,8 +145,8 @@
 //!   &Path) -> io::Result<()>`, the new bundle of `app`'s id meeting its designated requirement for
 //!   every architecture (Security.framework's `SecStaticCodeCheckValidityWithErrors`), else
 //!   `InvalidData` with its reason, and `exchange(a: &Path, b: &Path) -> io::Result<()>`, the two
-//!   swapped in one step (`renamex_np` with `RENAME_SWAP`), `Unsupported` on a volume without it.
-//!   On Unix `detach`, `wait_exit` and `alive` are `linux/app/process.rs`'s.
+//!   swapped in one step (`renamex_np` with `RENAME_SWAP`). On Unix `detach`, `wait_exit` and
+//!   `alive` are `linux/app/process.rs`'s.
 //! - `pub mod activity` ([crate::activity]), from any thread: `Token: Send`, `begin(&str) ->
 //!   Token`, `end(Token)`.
 //! - `pub mod post` ([crate::keys::post]): `post(Shortcut) -> Result<(), String>`, the shortcut as

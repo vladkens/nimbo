@@ -51,13 +51,14 @@
 //! old one's working directory (on macOS LaunchServices starts it in `/`, as Finder does) and
 //! removes the old copy and the staging folder. If that fails, it undoes the swap and starts the
 //! old app again with its error in `NIMBO_UPDATE_ERROR`, which [finish] returns. What an installer
-//! stopped midway left, the next [download] removes; on Windows, where the installer runs from the
-//! staging folder and can't remove it, the app it started does, a few seconds in. The staging
-//! folder, `.nimbo-update-<pid>-<nanos>`, is beside the app:
+//! stopped midway left, the next [download] removes, once the app and the installer have ended; on
+//! Windows, where the installer runs from the staging folder and can't remove it, the app it
+//! started does, a few seconds in. The staging folder, `.nimbo-update-<pid>-<nanos>` of the app's
+//! pid, is beside the app, and its sign `ready` holds the installer's pid:
 //!
 //! | OS | the app | staged | checked | put in, and undone | started |
 //! |---|---|---|---|---|---|
-//! | macOS | the `.app` | the `.dmg` attached read-only inside the staging folder (`hdiutil`), its one `.app` at the top copied out with `ditto`, detached (forced if it must be) | the same bundle id, signed so that it meets the running app's designated requirement (Security.framework) | `renamex_np` with `RENAME_SWAP`, undone by the same; on a volume without it (HFS+) the app renamed to `.<name>.nimbo-old`, the new one renamed in | `open -n -g`, by LaunchServices: no focus taken, launchd's environment |
+//! | macOS | the `.app` | the `.dmg` attached read-only inside the staging folder (`hdiutil`), its one `.app` at the top copied out with `ditto`, detached (forced if it must be) | the same bundle id, signed so that it meets the running app's designated requirement (Security.framework) | `renamex_np` with `RENAME_SWAP` (APFS), undone by the same | `open -n -g`, by LaunchServices: no focus taken, launchd's environment |
 //! | Windows | the exe's folder in `%LOCALAPPDATA%\Programs` | the `setup.exe` as it came | the size and hash alone | the setup run `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER` with no window, awaited; an exit code other than 0 is the error | the folder's exe of the running one's name, whatever the setup left |
 //! | Linux | the AppImage | made executable | the size and hash alone | linked to `.<name>.nimbo-old`, the new one renamed over it in one step; undone by renaming the link back | the AppImage, without the installer's AppImage variables |
 //!
@@ -137,8 +138,13 @@ const _: () = {
 };
 
 /// The release `feed` offers this platform when it is newer than `current`: the feed fetched over
-/// the OS's HTTP, then [read].
+/// the OS's HTTP, then [read]. A pre-release `current` (a dev build, `0.1.0-5-gabc`) gets none,
+/// nothing fetched.
 pub fn check(feed: &Feed, current: &str) -> io::Result<Option<Release>> {
+  if current.contains('-') {
+    return Ok(None);
+  }
+
   if !secure(feed.url) {
     return Err(bad(format!("{} is not https", feed.url)));
   }
@@ -206,6 +212,9 @@ pub fn install(staged: Staged) -> io::Result<()> {
 /// the environment: so this runs before any thread does.
 pub fn finish() -> Option<io::Error> {
   let Some(job) = job(&env::args_os().skip(1).collect::<Vec<_>>()) else {
+    let note = env::var(NOTE).ok();
+    // SAFETY: first in `main`, before any other thread runs.
+    unsafe { env::remove_var(NOTE) };
     // Windows' installer can't remove the folder it runs from: the app does, once it has ended.
     #[cfg(windows)]
     thread::spawn(|| {
@@ -216,13 +225,15 @@ pub fn finish() -> Option<io::Error> {
       }
     });
 
-    let note = env::var(NOTE).ok()?;
-    // SAFETY: first in `main`, before any other thread runs.
-    unsafe { env::remove_var(NOTE) };
-    return Some(io::Error::other(note));
+    return note.map(io::Error::other);
   };
 
   let Some(job) = job else { std::process::exit(2) };
+  // Windows' wait holds the old process's handle from here, before the mark lets it quit.
+  #[cfg(windows)]
+  let wait = imp::wait_exit(job.pid);
+  #[cfg(not(windows))]
+  let wait = imp::wait_exit;
   #[cfg(target_os = "macos")]
   let exchange = imp::exchange;
   #[cfg(not(target_os = "macos"))]
@@ -232,7 +243,7 @@ pub fn finish() -> Option<io::Error> {
   #[cfg(not(windows))]
   let setup = |_: &Path| -> io::Result<i32> { Err(io::ErrorKind::Unsupported.into()) };
   let rename = |a: &Path, b: &Path| fs::rename(a, b);
-  let (wait, start) = (&imp::wait_exit, &imp::start);
+  let (wait, start) = (&wait, &imp::start);
   let os = Seams { wait, exchange: &exchange, rename: &rename, setup: &setup, start };
   std::process::exit(apply(OS, &job, &os).map_or(1, |()| 0))
 }
@@ -246,7 +257,7 @@ const INSTALL: &str = "--nimbo-install";
 const READY: Duration = Duration::from_secs(10);
 /// How long the installer waits for the old app to end.
 const QUIT: Duration = Duration::from_secs(30);
-/// The installer's mark in the staging folder: it runs.
+/// The installer's mark in the staging folder, its pid: it runs.
 const MARK: &str = "ready";
 
 /// What an installer does: waits for `pid` to end, puts `new`, in the staging folder `dir`, in
@@ -287,9 +298,9 @@ fn job(args: &[OsString]) -> Option<Option<Job>> {
 
 /// What the installer does to the system: the OS's, or a test's.
 struct Seams<'a> {
-  /// Whether the process ended within the time ([imp::wait_exit]).
+  /// Whether the old app ended within the time ([imp::wait_exit]).
   wait: &'a dyn Fn(u32, Duration) -> bool,
-  /// Two paths exchanged in one step, `Unsupported` where they can't be: macOS' alone.
+  /// Two paths exchanged in one step: macOS' alone.
   exchange: Rename<'a>,
   rename: Rename<'a>,
   /// Windows' setup run to its end, its exit code ([imp::setup]).
@@ -305,7 +316,7 @@ type Start<'a> = &'a dyn Fn(&Path, &[OsString], Option<&str>) -> io::Result<()>;
 /// nothing changed), the new app put in and started; on a failure the swap undone and the old app
 /// started again with the error in its [NOTE]. What is left is removed either way.
 fn apply(os: Os, job: &Job, s: &Seams) -> io::Result<()> {
-  fs::write(job.dir.join(MARK), "")?;
+  fs::write(job.dir.join(MARK), std::process::id().to_string())?;
   let done = match (s.wait)(job.pid, QUIT) {
     false => Err(error(io::ErrorKind::TimedOut, format!("the app didn't quit in {QUIT:?}"))),
     true => put(os, job, s).map_err(|e| {
@@ -349,39 +360,20 @@ fn put(os: Os, job: &Job, s: &Seams) -> io::Result<()> {
 }
 
 /// Swaps the app `new` in for `target` whole: on macOS in one exchange, which left `new` holding
-/// the old app; else (and on a volume with no exchange) `target` moved to its [old] name, on Linux
-/// linked there so the rename over it replaces it in one step, and `new` renamed in, each tried
-/// again while it may pass. A failing second step restores the target. What undoes it: the
-/// exchange or the rename, and its steps in order.
+/// the old app; on Linux `target` linked to its [old] name and `new` renamed over it in one step,
+/// tried again while it may pass. Failing, the target is as it was (Linux' link is removed with
+/// what is left). What undoes it: the exchange or the rename, and its steps in order.
 fn swap<'a>(os: Os, new: &Path, target: &Path, s: &Seams<'a>) -> io::Result<Back<'a>> {
   let (new, target) = (new.to_owned(), target.to_owned());
   if os == Os::Mac {
-    match (s.exchange)(&new, &target) {
-      Err(e) if e.kind() == io::ErrorKind::Unsupported => {}
-      done => return done.map(|()| (s.exchange, vec![(new, target)])),
-    }
+    return (s.exchange)(&new, &target).map(|()| (s.exchange, vec![(new, target)]));
   }
 
   let old = old(&target);
   uninstall::remove(&old)?;
-  match os {
-    Os::Linux => fs::hard_link(&target, &old)?,
-    _ => uninstall::retry(|| (s.rename)(&target, &old))?,
-  }
-
-  if let Err(e) = uninstall::retry(|| (s.rename)(&new, &target)) {
-    // Linux' target is still there, its link removed with what is left.
-    let back =
-      if os == Os::Linux { Ok(()) } else { uninstall::retry(|| (s.rename)(&old, &target)) };
-    return Err(also(e, back));
-  }
-
-  let back = match os {
-    Os::Linux => vec![(old, target)],
-    _ => vec![(target.clone(), new), (old, target)],
-  };
-
-  Ok((s.rename, back))
+  fs::hard_link(&target, &old)?;
+  uninstall::retry(|| (s.rename)(&new, &target))?;
+  Ok((s.rename, vec![(old, target)]))
 }
 
 /// How a swap is undone: with what, the paths from and to in order.
@@ -418,13 +410,14 @@ fn handshake<K: FnOnce()>(
 }
 
 /// Removes what an installer stopped midway left beside `target`: its [old] copy, and the staging
-/// folders of processes that ended (by `alive`).
+/// folders whose app and installer (the pid in its [MARK]) both ended (by `alive`).
 fn tidy(target: &Path, alive: &dyn Fn(u32) -> bool) {
   let all = target.parent().and_then(|p| fs::read_dir(p).ok()).into_iter().flatten().flatten();
   for e in all {
     let name = e.file_name();
     let pid = name.to_str().and_then(|n| n.strip_prefix(STAGING)?.split('-').next()?.parse().ok());
-    if pid.is_some_and(|p| !alive(p)) {
+    let installer = fs::read_to_string(e.path().join(MARK)).ok().and_then(|p| p.parse().ok());
+    if pid.is_some_and(|p| !alive(p)) && !installer.is_some_and(alive) {
       let _ = uninstall::remove(&e.path());
     }
   }
@@ -796,10 +789,6 @@ mod tests {
     fs::rename(a, b)
   }
 
-  fn unsupported(_: &Path, _: &Path) -> io::Result<()> {
-    Err(io::ErrorKind::Unsupported.into())
-  }
-
   /// The OS's renames, the exchange, an app that quits, a setup that installs, an app that starts.
   const SEAMS: Seams = Seams {
     wait: &|_, _| true,
@@ -880,34 +869,14 @@ mod tests {
   }
 
   #[test]
-  fn macos_renames_twice_without_the_exchange() {
-    let root = dir("fallback");
-    let [(os, new, target), _] = apps(&root);
-    let seams = Seams { exchange: &unsupported, ..SEAMS };
-    let (_, back) = swap(os, &root.join(new), &root.join(target), &seams).unwrap();
-    holds(&root, &[("A.app/gone", ""), (".A.app.nimbo-old/gone", "1")], "renamed");
-    assert_eq!(back.len(), 2, "both renames undone");
-    fs::remove_dir_all(root).unwrap();
-  }
-
-  #[test]
-  fn a_failing_second_rename_restores_the_target() {
-    let root = dir("second");
+  fn a_failing_swap_leaves_the_target() {
+    let root = dir("swap-fails");
+    let busy = |_: &Path, _: &Path| Err(io::Error::other("busy"));
     for (os, new, target) in apps(&root) {
-      // Linux links first, then renames once.
-      let n = Cell::new(0);
-      let fail = |a: &Path, b: &Path| {
-        n.set(n.get() + 1);
-        if n.get() == 2 || os == Os::Linux {
-          Err(io::Error::other("busy"))
-        } else {
-          fs::rename(a, b)
-        }
-      };
-      let seams = Seams { exchange: &unsupported, rename: &fail, ..SEAMS };
+      let seams = Seams { exchange: &busy, rename: &busy, ..SEAMS };
       let e = swap(os, &root.join(new), &root.join(target), &seams).map(drop).unwrap_err();
       assert_eq!(e.to_string(), "busy", "{os:?}");
-      installed(&root, os, false, "restored");
+      installed(&root, os, false, "unchanged");
     }
 
     holds(&root, &[(".nimbo-update-9/app", "2")], "");
@@ -957,11 +926,12 @@ mod tests {
       let (job, waited, started) =
         (install_job(&root, new, target), Cell::new(None), Started::default());
       let wait = |pid, cap| {
-        waited.set(Some((pid, cap, job.dir.join(MARK).exists())));
+        let mark = fs::read_to_string(job.dir.join(MARK)).unwrap_or_default();
+        waited.set(Some((pid, cap, mark == std::process::id().to_string())));
         true
       };
       apply(os, &job, &Seams { wait: &wait, start: &starts(&started, false), ..SEAMS }).unwrap();
-      assert_eq!(waited.get(), Some((7, QUIT, true)), "the mark written first");
+      assert_eq!(waited.get(), Some((7, QUIT, true)), "the mark, the installer's pid, first");
       installed(&root, os, true, "installed");
       assert_eq!(*started.borrow(), [(job.target.clone(), vec![OsString::from("-x")], None)]);
       assert!(!old(&job.target).exists() && !job.dir.exists(), "{os:?}: what is left");
@@ -1048,10 +1018,14 @@ mod tests {
   fn download_removes_what_an_ended_installer_left() {
     let root = dir("tidy");
     write(&root, &[(".nimbo-update-1-5/x", ""), (".nimbo-update-2-5/x", "")]);
+    // The app ended, its installer runs (2) or ended (3).
+    write(&root, &[(".nimbo-update-1-6/ready", "2"), (".nimbo-update-1-7/ready", "3")]);
     write(&root, &[(".A.app.nimbo-old/x", ""), ("other/x", "")]);
     tidy(&root.join("A.app"), &|pid| pid == 2);
-    let names = [".nimbo-update-1-5", ".nimbo-update-2-5", ".A.app.nimbo-old", "other"];
-    assert_eq!(names.map(|n| root.join(n).exists()), [false, true, false, true]);
+    let names =
+      [".nimbo-update-1-5", ".nimbo-update-2-5", ".nimbo-update-1-6", ".nimbo-update-1-7"];
+    assert_eq!(names.map(|n| root.join(n).exists()), [false, true, true, false]);
+    assert_eq!([".A.app.nimbo-old", "other"].map(|n| root.join(n).exists()), [false, true]);
     fs::remove_dir_all(root).unwrap();
   }
 
@@ -1265,6 +1239,15 @@ mod tests {
     assert_eq!(fetch(&r, &parent, &mut |_, _| {}).unwrap_err().kind(), io::ErrorKind::NotFound);
     assert_eq!(fs::read_dir(&parent).unwrap().count(), 0, "no folder is left");
     fs::remove_dir(parent).unwrap();
+  }
+
+  #[test]
+  fn a_dev_build_gets_no_update() {
+    // A feed that fails once fetched: nothing is.
+    let feed = Feed { url: "http://example.com/update.txt", key: KEY };
+    for dev in ["0.1.0-5-gabc", "1.2.0-rc.1"] {
+      assert_eq!(check(&feed, dev).unwrap(), None, "{dev}");
+    }
   }
 
   #[test]
