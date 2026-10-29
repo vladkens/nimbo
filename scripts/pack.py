@@ -611,8 +611,9 @@ def put(path: Path, data: bytes) -> None:
 
 def deb(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
   """`<package>_<version>_<amd64|arm64>.deb` by dpkg-deb: /usr/bin/<bin>, the .desktop entry, the
-  icon in hicolor's 1024x1024 and pixmaps, the LICENSE as the copyright. `linux.deb-package` names
-  it (else the binary), `linux.deb-depends` and `deb-recommends` add to its relations."""
+  icon in hicolor's 512x512 (hicolor has no 1024 folder; GTK scales it) and pixmaps, the LICENSE
+  as the copyright. `linux.deb-package` names it (else the binary), `linux.deb-depends` and
+  `deb-recommends` add to its relations."""
   author = next(iter(cfg.authors), "")
   if not re.search(r"<.+@.+>", author):
     sys.exit("pack: deb needs `authors` in Cargo.toml (its Maintainer)")
@@ -626,7 +627,7 @@ def deb(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
     share = root / "usr/share"
     put(root / "usr/bin" / cfg.bin, binary.read_bytes())
     put(share / f"applications/{cfg.id}.desktop", desktop(cfg).encode())
-    for dir in ("icons/hicolor/1024x1024/apps", "pixmaps"):
+    for dir in ("icons/hicolor/512x512/apps", "pixmaps"):
       put(share / dir / f"{cfg.id}.png", cfg.icon.read_bytes())
 
     license = cfg.root / "LICENSE"
