@@ -890,7 +890,8 @@ def nsi(cfg: Config, arch: str, license: bool, out: str, kib: int) -> str:
   folder and writes the setup there as `out`, its final name: never `setup.exe`, which Windows
   loads compatibility shims into (makensis -WX fails on it, warning 9000). Its `.onInit` exits 2
   on a Windows of another arch; the stub is x86, so that runs on both. Settings › Apps shows `kib`,
-  the packed files' size. The uninstaller keeps the app's data."""
+  the packed files' size. The uninstaller removes the install folder whole, with what the updater
+  left in it (src/update.rs stages there), and keeps the app's data."""
   name, exe = nsis(cfg.name), f"$INSTDIR\\{nsis(cfg.name)}.exe"
   key, value = f"{UNINSTALL}\\{app_id(cfg)}", f'"{nsis(cfg.id)}"'
   version = ".".join(map(str, quad(cfg.version)))
@@ -957,18 +958,10 @@ def nsi(cfg: Config, arch: str, license: bool, out: str, kib: int) -> str:
     f'  WriteRegDWORD HKCU "{key}" "EstimatedSize" {kib}',
     "SectionEnd",
     "",
-    # The files and the shortcut, nimbo's launch at login, which would start a deleted exe, and the
-    # updater's staging folders beside the install, which its installer couldn't remove.
+    # The folder with the updater's staging, which its installer couldn't remove, the shortcut,
+    # and nimbo's launch at login, which would start a deleted exe.
     'Section "Uninstall"',
-    *(f'  Delete "$INSTDIR\\{nsis(to)}"' for _, to in files),
-    '  Delete "$INSTDIR\\Uninstall.exe"',
-    '  RMDir "$INSTDIR"',
-    '  FindFirst $0 $1 "$INSTDIR\\..\\.nimbo-update-*"',
-    '  ${DoWhile} $1 != ""',
-    '    RMDir /r "$INSTDIR\\..\\$1"',
-    "    FindNext $0 $1",
-    "  ${Loop}",
-    "  FindClose $0",
+    '  RMDir /r "$INSTDIR"',
     f'  Delete "$SMPROGRAMS\\{name}.lnk"',
     f'  DeleteRegValue HKCU "{RUN}" {value}',
     f'  DeleteRegValue HKCU "{APPROVED}" {value}',
