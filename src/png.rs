@@ -29,10 +29,13 @@ pub fn encode_rgba(w: usize, h: usize, rows: &[u8]) -> Vec<u8> {
   let mut best = Vec::with_capacity(w * 4);
   let mut cand = Vec::with_capacity(w * 4);
   for row in rows.chunks_exact(w * 4) {
-    let mut kind = 0;
-    let mut least = u64::MAX;
+    let (mut kind, mut least) = (0, u64::MAX);
     for k in 0..5 {
-      filter(k, row, &prev, &mut cand);
+      cand.clear();
+      for i in 0..row.len() {
+        cand.push(row[i].wrapping_sub(predict(k, row, &prev, i, 4)));
+      }
+
       let sum = cand.iter().map(|&b| (b as i8).unsigned_abs() as u64).sum();
       if sum < least {
         (least, kind) = (sum, k);
@@ -46,9 +49,7 @@ pub fn encode_rgba(w: usize, h: usize, rows: &[u8]) -> Vec<u8> {
   }
 
   let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
-  let mut ihdr = Vec::with_capacity(13);
-  ihdr.extend((w as u32).to_be_bytes());
-  ihdr.extend((h as u32).to_be_bytes());
+  let mut ihdr = [(w as u32).to_be_bytes(), (h as u32).to_be_bytes()].concat();
   // 8 bits per channel, colour type 6 (RGBA), deflate, adaptive filters, no interlace.
   ihdr.extend([8, 6, 0, 0, 0]);
   chunk(&mut out, b"IHDR", &ihdr);
@@ -74,21 +75,17 @@ fn rgba_rows(px: &Pixels) -> Vec<u8> {
   out
 }
 
-/// Filters `row` with PNG filter `kind` (0 none, 1 sub, 2 up, 3 average, 4 Paeth) into `out`.
-fn filter(kind: u8, row: &[u8], prev: &[u8], out: &mut Vec<u8>) {
-  out.clear();
-  for i in 0..row.len() {
-    let a = if i >= 4 { row[i - 4] } else { 0 };
-    let (b, c) = (prev[i], if i >= 4 { prev[i - 4] } else { 0 });
-    let pred = match kind {
-      0 => 0,
-      1 => a,
-      2 => b,
-      3 => ((a as u16 + b as u16) / 2) as u8,
-      _ => paeth(a, b, c),
-    };
-
-    out.push(row[i].wrapping_sub(pred));
+/// PNG filter `kind`'s guess at byte `i` of `row` (0 none, 1 sub, 2 up, 3 average, 4 Paeth), from
+/// the bytes left of it, above it in `prev` and up-left, `bpp` bytes a pixel: none for the first.
+#[inline(always)]
+fn predict(kind: u8, row: &[u8], prev: &[u8], i: usize, bpp: usize) -> u8 {
+  let (a, b, c) = if i >= bpp { (row[i - bpp], prev[i], prev[i - bpp]) } else { (0, prev[i], 0) };
+  match kind {
+    0 => 0,
+    1 => a,
+    2 => b,
+    3 => ((a as u16 + b as u16) / 2) as u8,
+    _ => paeth(a, b, c),
   }
 }
 
@@ -105,12 +102,8 @@ fn paeth(a: u8, b: u8, c: u8) -> u8 {
 }
 
 fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
-  out.extend((data.len() as u32).to_be_bytes());
-  let at = out.len();
-  out.extend_from_slice(kind);
-  out.extend_from_slice(data);
-  let crc = crc32(&out[at..]);
-  out.extend(crc.to_be_bytes());
+  let body = [&kind[..], data].concat();
+  out.extend([&(data.len() as u32).to_be_bytes()[..], &body, &crc32(&body).to_be_bytes()].concat());
 }
 
 // MARK: Deflate
@@ -132,8 +125,7 @@ fn zlib(data: &[u8]) -> Vec<u8> {
   };
   let mut i = 0;
   while i < data.len() {
-    let mut len = 0;
-    let mut dist = 0;
+    let (mut len, mut dist) = (0, 0);
     if i + 4 <= data.len() {
       let h = hash(i);
       let cand = head[h] as usize;
@@ -278,12 +270,9 @@ pub fn decode(file: &[u8]) -> Result<(usize, usize, Vec<u8>), String> {
   };
   let w = u32::from_be_bytes([w0, w1, w2, w3]) as usize;
   let h = u32::from_be_bytes([h0, h1, h2, h3]) as usize;
-  let bpp = match color {
-    0 | 3 => 1,
-    4 => 2,
-    2 => 3,
-    6 => 4,
-    _ => return Err(format!("PNG colour type {color}")),
+  // Bytes a pixel by colour type: grey, none, RGB, palette, grey and alpha, none, RGBA.
+  let Some(&bpp @ 1..) = [1, 0, 3, 1, 2, 0, 4].get(color as usize) else {
+    return Err(format!("PNG colour type {color}"));
   };
 
   if w == 0 || h == 0 || w.saturating_mul(h) > 1 << 26 {
@@ -296,31 +285,25 @@ pub fn decode(file: &[u8]) -> Result<(usize, usize, Vec<u8>), String> {
     return bad("its size");
   }
 
-  let mut rows = vec![0u8; stride * h];
-  let zero = vec![0u8; stride];
+  // A row of zeros above the first, dropped after.
+  let mut rows = vec![0u8; stride * (h + 1)];
   for (y, line) in raw.chunks_exact(stride + 1).enumerate() {
-    let (above, row) = rows.split_at_mut(y * stride);
-    let prev = if y == 0 { &zero[..] } else { &above[(y - 1) * stride..] };
-    let (kind, row) = (line[0], &mut row[..stride]);
+    let (above, row) = rows.split_at_mut((y + 1) * stride);
+    let (kind, prev, row) = (line[0], &above[y * stride..], &mut row[..stride]);
+    if kind > 4 {
+      return bad("a row's filter");
+    }
+
     row.copy_from_slice(&line[1..]);
-    // Left, up and up-left: none for the first pixel.
-    let near = |row: &[u8], i: usize| if i >= bpp { (row[i - bpp], prev[i - bpp]) } else { (0, 0) };
+    // Up alone, the commonest, as one pass the compiler vectorizes.
     match kind {
       0 => {}
-      1 => (bpp..stride).for_each(|i| row[i] = row[i].wrapping_add(row[i - bpp])),
       2 => row.iter_mut().zip(prev).for_each(|(r, &b)| *r = r.wrapping_add(b)),
-      3 => (0..stride).for_each(|i| {
-        let a = near(row, i).0;
-        row[i] = row[i].wrapping_add(((a as u16 + prev[i] as u16) / 2) as u8);
-      }),
-      4 => (0..stride).for_each(|i| {
-        let (a, c) = near(row, i);
-        row[i] = row[i].wrapping_add(paeth(a, prev[i], c));
-      }),
-      _ => return bad("a row's filter"),
+      _ => (0..stride).for_each(|i| row[i] = row[i].wrapping_add(predict(kind, row, prev, i, bpp))),
     }
   }
 
+  rows.drain(..stride);
   // tRNS: an alpha per palette entry, or the one grey or RGB that is transparent.
   let key: Vec<u16> = trns.as_chunks().0.iter().map(|&k| u16::from_be_bytes(k)).collect();
   let alpha =
@@ -331,16 +314,11 @@ pub fn decode(file: &[u8]) -> Result<(usize, usize, Vec<u8>), String> {
     0 => rows.iter().map(|&g| [g, g, g, alpha(&[g])]).collect(),
     2 => rows.as_chunks().0.iter().map(|&[r, g, b]| [r, g, b, alpha(&[r, g, b])]).collect(),
     _ => {
-      let mut lut = [[0u8; 4]; 256];
-      for (i, &[r, g, b]) in palette.as_chunks().0.iter().take(256).enumerate() {
-        lut[i] = [r, g, b, trns.get(i).copied().unwrap_or(255)];
-      }
-
-      if rows.iter().any(|&i| i as usize >= palette.len() / 3) {
-        return bad("a colour not in its palette");
-      }
-
-      rows.iter().map(|&i| lut[i as usize]).collect()
+      let lut: Vec<[u8; 4]> = (palette.as_chunks().0.iter().enumerate())
+        .map(|(i, &[r, g, b])| [r, g, b, trns.get(i).copied().unwrap_or(255)])
+        .collect();
+      let colours = rows.iter().map(|&i| lut.get(i as usize).copied()).collect::<Option<_>>();
+      colours.ok_or("a broken PNG: a colour not in its palette")?
     }
   };
 
@@ -354,19 +332,17 @@ fn bad<T>(what: &str) -> Result<T, String> {
 /// The data of the zlib stream `z` (RFC 1950) of deflate blocks (RFC 1951), at most `cap` bytes.
 fn inflate(z: &[u8], cap: usize) -> Result<Vec<u8>, String> {
   // Deflate, no preset dictionary, the header's check.
-  if z.len() < 6
-    || z[0] & 0x0f != 8
-    || z[1] & 0x20 != 0
-    || !u16::from_be_bytes([z[0], z[1]]).is_multiple_of(31)
-  {
+  let &[cmf, flg, _, _, _, _, ..] = z else { return bad("not a zlib stream") };
+  if cmf & 0x0f != 8 || flg & 0x20 != 0 || !u16::from_be_bytes([cmf, flg]).is_multiple_of(31) {
     return bad("not a zlib stream");
   }
 
   let mut r = Reader { data: &z[2..], at: 0, acc: 0, n: 0 };
   let mut out = Vec::with_capacity(cap);
-  loop {
-    let last = r.take(1) == 1;
-    match r.take(2) {
+  let mut last = false;
+  while !last && !r.over() {
+    last = r.take(1) == 1;
+    let (lit, dist) = match r.take(2) {
       0 => {
         r.take(r.n % 8);
         let len = r.take(16);
@@ -375,23 +351,45 @@ fn inflate(z: &[u8], cap: usize) -> Result<Vec<u8>, String> {
         }
 
         out.extend((0..len).map(|_| r.take(8) as u8));
+        continue;
       }
       1 => {
         let mut lens = [8u8; 288 + 32];
         lens[144..256].fill(9);
         lens[256..280].fill(7);
         lens[288..].fill(5);
-        codes(&mut r, &mut out, &Huffman::new(&lens[..288])?, &Huffman::new(&lens[288..])?, cap)?;
+        (Huffman::new(&lens[..288])?, Huffman::new(&lens[288..])?)
       }
-      2 => {
-        let (lit, dist) = dynamic(&mut r)?;
-        codes(&mut r, &mut out, &lit, &dist, cap)?;
-      }
+      2 => dynamic(&mut r)?,
       _ => return bad("a block of type 3"),
-    }
+    };
 
-    if last || r.over() {
-      break;
+    // Literals, and lengths with their distances, up to the end code.
+    loop {
+      match lit.decode(&mut r)? {
+        sym @ 0..256 => out.push(sym as u8),
+        256 => break,
+        sym => {
+          let &(len, extra) = LENGTHS.get(sym - 257).ok_or("a broken PNG: a length")?;
+          let len = len + r.take(extra) as usize;
+          let &(d, extra) =
+            DISTANCES.get(dist.decode(&mut r)?).ok_or("a broken PNG: a distance")?;
+          let from =
+            out.len().checked_sub(d + r.take(extra) as usize).ok_or("a broken PNG: far")?;
+          // A copy that overlaps repeats what it wrote: in rounds, each twice the last.
+          let mut left = len;
+          while left > 0 {
+            let n = left.min(out.len() - from);
+            out.extend_from_within(from..from + n);
+            left -= n;
+          }
+        }
+      }
+
+      // Past the end the stream reads zeros, which only make more: the size ends it.
+      if out.len() > cap {
+        return bad("its size");
+      }
     }
   }
 
@@ -428,40 +426,6 @@ fn dynamic(r: &mut Reader) -> Result<(Huffman, Huffman), String> {
   }
 
   Ok((Huffman::new(&lens[..lit])?, Huffman::new(&lens[lit..])?))
-}
-
-/// A block's symbols into `out` up to its end code: literals, and lengths with their distances.
-fn codes(
-  r: &mut Reader,
-  out: &mut Vec<u8>,
-  lit: &Huffman,
-  dist: &Huffman,
-  cap: usize,
-) -> Result<(), String> {
-  loop {
-    match lit.decode(r)? {
-      sym @ 0..256 => out.push(sym as u8),
-      256 => return Ok(()),
-      sym => {
-        let &(len, extra) = LENGTHS.get(sym - 257).ok_or("a broken PNG: a length")?;
-        let len = len + r.take(extra) as usize;
-        let &(d, extra) = DISTANCES.get(dist.decode(r)?).ok_or("a broken PNG: a distance")?;
-        let from = out.len().checked_sub(d + r.take(extra) as usize).ok_or("a broken PNG: far")?;
-        // A copy that overlaps repeats what it wrote: in rounds, each twice the last.
-        let mut left = len;
-        while left > 0 {
-          let n = left.min(out.len() - from);
-          out.extend_from_within(from..from + n);
-          left -= n;
-        }
-      }
-    }
-
-    // Past the end the stream reads zeros, which only make more: the size ends it.
-    if out.len() > cap {
-      return bad("its size");
-    }
-  }
 }
 
 /// A Huffman code as a table over the stream's next `bits` bits: each entry its symbol and
@@ -522,18 +486,9 @@ struct Reader<'a> {
 impl Reader<'_> {
   /// The next `k` bits (up to 16), not taken.
   fn peek(&mut self, k: u32) -> u32 {
-    if self.n < k {
-      // Eight bytes at once where there are (Giesen's refill), else one by one.
-      if let Some(b) = self.data.get(self.at..self.at + 8) {
-        self.acc |= u64::from_le_bytes(b.try_into().unwrap()) << self.n;
-        self.at += (63 - self.n as usize) / 8;
-        self.n |= 56;
-      } else {
-        while self.n <= 56 {
-          self.acc |= (self.data.get(self.at).copied().unwrap_or(0) as u64) << self.n;
-          (self.at, self.n) = (self.at + 1, self.n + 8);
-        }
-      }
+    while self.n < k {
+      self.acc |= (self.data.get(self.at).copied().unwrap_or(0) as u64) << self.n;
+      (self.at, self.n) = (self.at + 1, self.n + 8);
     }
 
     (self.acc & ((1 << k) - 1)) as u32
@@ -593,8 +548,8 @@ impl Png {
 
   /// Its width, height and straight RGBA pixels, rows top-down: decoded on the first call (a
   /// 1024 px icon in ~4 ms in a release build, ~7 cut to its tile at 256 px), the same pixels
-  /// after. Panics when the file is not
-  /// a PNG this reads (the module's doc): the app's own file, which its first run shows.
+  /// after. Panics when the file is not a PNG this reads (the module's doc): the app's own file,
+  /// which its first run shows.
   pub fn rgba(&self) -> (u32, u32, &'static [u8]) {
     type Decoded = ((usize, usize, u32, bool), (u32, u32, &'static [u8]));
     static DECODED: Mutex<Vec<Decoded>> = Mutex::new(Vec::new());
@@ -657,12 +612,9 @@ fn cropped(w: usize, h: usize, rgba: &[u8]) -> (usize, Vec<u8>) {
   let top = (y0 + y1 + 1) as isize / 2 - side as isize / 2;
   let (from, to) = (left.max(0) as usize, (left + side as isize).min(w as isize) as usize);
   let mut tile = vec![0; side * side * 4];
-  for (y, line) in tile.chunks_exact_mut(side * 4).enumerate() {
-    let Ok(sy) = usize::try_from(top + y as isize) else { continue };
-    if sy < h {
-      let at = (from as isize - left) as usize * 4;
-      line[at..at + (to - from) * 4].copy_from_slice(&rgba[(sy * w + from) * 4..(sy * w + to) * 4]);
-    }
+  for y in top.max(0) as usize..(top + side as isize).min(h as isize) as usize {
+    let at = ((y as isize - top) as usize * side + (from as isize - left) as usize) * 4;
+    tile[at..at + (to - from) * 4].copy_from_slice(&rgba[(y * w + from) * 4..(y * w + to) * 4]);
   }
 
   (side, tile)

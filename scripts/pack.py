@@ -4,16 +4,14 @@ the AppImage and .deb, and the signed update feed (src/update.rs).
 
 The config is the package's `[package.metadata.nimbo]` (`id`, `name`, `icon`, a 1024 px PNG,
 `comment`, the tables `macos`, `linux` and `windows`), its version, binary and `repository`, read
-by `cargo metadata --no-deps`, which compiles nothing: a plain `python3` (3.9+) with the standard
-library runs this, beside cargo and the tools below; the icons, the Mach-O reading and the Windows
-exe's resources are its own. The binary is built already, by default
+by `cargo metadata --no-deps`: a plain `python3` (3.9+) with the standard library runs this, beside
+cargo and the tools below. The binary is built already, by default
 `<target dir>/<triple>/dist/<bin>`, the target this machine's arch on the command's OS. The files,
 in `--out` (`<target dir>/distrib`), are `<Name>-v<version>-<platform>.<ext>`, or
-`<Name>-<label>-<platform>.<ext>` with `--label` (`dev`, or a release's `vX.Y.Z`). `app` writes
+`<Name>-<label>-…` with `--label` (`dev`, or a release's `vX.Y.Z`). `app` writes
 `<target dir>/<Name>.app`, which `dmg` packs, or the one `--app` gives, never signed again. `dist`
 runs this OS's steps locally: `app` and `dmg`, `setup`, or `appimage` and `deb`. On a Mac codesign
-signs, with no timestamp locally, so a Developer ID signs offline, and with one in CI (`$CI`). One
-table per OS:
+signs, with a timestamp only in CI (`$CI`), so a Developer ID signs offline. One table per OS:
 
   [package.metadata.nimbo]
   id = "me.vladkens.wavo"
@@ -33,14 +31,13 @@ table per OS:
   deb-package = "wavo"
   deb-depends = ["libasound2 | libasound2t64"]
 
-In CI one Ubuntu job (`apt-get install nsis hfsprogs`) makes every file from bare binaries. Three
-build jobs, on macOS, Windows and Linux, each run `cargo build` for both arches and copy each
-binary to `target/distrib/<triple>/<bin>[.exe]`, nothing else; the publish job downloads them into
-its `target/distrib` and runs `release` there with the secrets in its env. That reads only
-`<triple>/<bin>[.exe]` (anything else fails it: the build jobs ran dependencies' build scripts) and
-writes beside them, per triple, the DMG, the setup, or the AppImage and .deb, then with `--tag`
-update.txt, its urls `<repository>/releases/download/<tag>/<file>`. An app's Makefile finds
-nimbo's checkout, the rev its Cargo.lock pins, by `cargo metadata`:
+In CI three build jobs (macOS, Windows, Linux) only `cargo build` both arches and copy each binary
+to `target/distrib/<triple>/<bin>[.exe]`; one Ubuntu job (`apt-get install nsis hfsprogs`)
+downloads them there and runs `release` with the secrets in its env: anything else there fails it
+(the build jobs ran dependencies' build scripts). It writes beside them, per triple, the DMG, the
+setup, or the AppImage and .deb, then with `--tag` update.txt, its urls
+`<repository>/releases/download/<tag>/<file>`. An app's Makefile finds nimbo's checkout, the rev
+its Cargo.lock pins, by `cargo metadata`:
 
   NIMBO = $(shell cargo metadata --format-version 1 --locked | python3 -c 'import json, os, sys; \
     print(next(os.path.dirname(p["manifest_path"]) for p in json.load(sys.stdin)["packages"] \
@@ -49,12 +46,12 @@ nimbo's checkout, the rev its Cargo.lock pins, by `cargo metadata`:
   	python3 $(NIMBO)/scripts/pack.py release target/distrib --label $(LABEL) \
   	  $(if $(TAG),--tag $(TAG))
 
-There `app` and `dmg` use no Apple tool: rcodesign signs the app with APPLE_CERTIFICATE (a base64
-.p12) and APPLE_CERTIFICATE_PASSWORD for notarization, else ad hoc; the DMG is an HFS+ image by
-`mkfs.hfsplus` (hfsprogs) and libdmg-hfsplus's `hfsplus` and `dmg` ($NIMBO_TOOLS, a directory with
-both, else fetched), then rcodesign signs it and, with APPLE_API_KEY (the .p8's text),
-APPLE_API_KEY_ID and APPLE_API_ISSUER, notarizes and staples it. `setup` is NSIS's, built by
-makensis (also Homebrew's on a Mac). A `v*` label is a release: a missing secret fails it.
+Off macOS `app` and `dmg` use no Apple tool: rcodesign signs the app with APPLE_CERTIFICATE (a
+base64 .p12) and APPLE_CERTIFICATE_PASSWORD for notarization, else ad hoc; the DMG is an HFS+
+image by `mkfs.hfsplus` (hfsprogs) and libdmg-hfsplus's `hfsplus` and `dmg` (from $NIMBO_TOOLS,
+else fetched), then rcodesign signs it and, with APPLE_API_KEY (the .p8's text), APPLE_API_KEY_ID
+and APPLE_API_ISSUER, notarizes and staples it. `setup` is NSIS's, by makensis (Homebrew's on a
+Mac). A `v*` label is a release: a missing secret fails it.
 
 `feed` writes update.txt: `version <v>`, a line per file, `<platform> <size> <sha512> <url>`, and
 last `sig <hex>`, the Ed25519 signature of every byte before it. A file's platform is in its name
@@ -214,6 +211,11 @@ def arch(target: str) -> str:
   return name
 
 
+def here() -> str:
+  """This machine's arch, as Rust names it."""
+  return arch(host.machine())
+
+
 def align(n: int, to: int) -> int:
   return -(-n // to) * to
 
@@ -320,22 +322,16 @@ def unfilter(kind: int, line: bytes, prev: bytes, bpp: int) -> bytes:
   if kind not in (3, 4):
     raise ValueError(f"no PNG filter {kind}")
 
-  out = bytearray(line)
-  # Average and Paeth, byte by byte: each takes the byte left of it as it is decoded.
-  for i in range(bpp):
-    out[i] = (out[i] + (prev[i] >> 1 if kind == 3 else prev[i])) & 255
-
+  # Average and Paeth, byte by byte: each takes the byte left of it as it is decoded, none (a
+  # zero) left of the first pixel.
+  out, up = bytearray(bpp) + line, bytes(bpp) + prev
   for i in range(bpp, len(out)):
-    a, b = out[i - bpp], prev[i]
-    if kind == 3:
-      out[i] = (out[i] + ((a + b) >> 1)) & 255
-      continue
-
-    c = prev[i - bpp]
+    a, b, c = out[i - bpp], up[i], up[i - bpp]
     pa, pb, pc = abs(b - c), abs(a - c), abs(a + b - c - c)
-    out[i] = (out[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+    paeth = a if pa <= pb and pa <= pc else b if pb <= pc else c
+    out[i] = (out[i] + ((a + b) >> 1 if kind == 3 else paeth)) & 255
 
-  return bytes(out)
+  return bytes(out[bpp:])
 
 
 def bytewise(x: bytes, y: bytes, plus: bool) -> bytes:
@@ -471,7 +467,7 @@ def cropped(w: int, h: int, rgba: bytes) -> tuple[int, bytes]:
   return side, bytes(tile)
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def picture(path: Path) -> tuple[int, int, bytes]:
   try:
     return png_decode(path.read_bytes())
@@ -515,20 +511,25 @@ def icns(images: dict[int, bytes]) -> bytes:
   return b"icns" + struct.pack(">I", 8 + len(body)) + body
 
 
-def ico(images: dict[int, bytes]) -> bytes:
-  """The .ico of the icon's RGBA by size, each a PNG entry (Windows Vista and later).
+def icon_dir(pngs: dict[int, bytes], ends: list[bytes]) -> bytes:
+  """An icon directory of the PNGs by size, each entry ending in `ends`'s bytes: in an .ico the
+  PNG's offset, in an exe's RT_GROUP_ICON its RT_ICON's id."""
+  head = struct.pack("<3H", 0, 1, len(pngs))
+  for (n, png), end in zip(pngs.items(), ends):
+    head += struct.pack("<4B2HI", n % 256, n % 256, 0, 0, 1, 32, len(png)) + end
 
-  >>> data = ico({16: bytes(16 * 16 * 4), 256: bytes(256 * 256 * 4)})
+  return head
+
+
+def ico(pngs: dict[int, bytes]) -> bytes:
+  """The .ico of the PNGs by size (Windows Vista and later).
+
+  >>> data = ico({n: png_encode(n, n, bytes(n * n * 4)) for n in (16, 256)})
   >>> struct.unpack("<3H", data[:6]), data[6], data[22], data[38:42] == PNG[:4]
   ((0, 1, 2), 16, 0, True)
   """
-  pngs = [(n, png_encode(n, n, px)) for n, px in images.items()]
-  at, head, body = 6 + 16 * len(pngs), struct.pack("<3H", 0, 1, len(pngs)), b""
-  for n, png in pngs:
-    head += struct.pack("<4B2H2I", n % 256, n % 256, 0, 0, 1, 32, len(png), at + len(body))
-    body += png
-
-  return head + body
+  at = accumulate([len(png) for png in pngs.values()], initial=6 + 16 * len(pngs))
+  return icon_dir(pngs, [struct.pack("<I", n) for n in at]) + b"".join(pngs.values())
 
 
 # MARK: macOS
@@ -605,16 +606,13 @@ def macho(data: bytes) -> list[tuple[str, str]]:
   view = memoryview(data)
   magic = bytes(view[:4])
   if magic in (b"\xca\xfe\xba\xbe", b"\xca\xfe\xba\xbf"):
-    wide, slices = magic[3] == 0xBF, []
+    # fat_arch, or fat_arch_64 (FAT_MAGIC_64): the offset and size after the CPU type and subtype.
+    (fmt, step), out = (">8xQQ", 32) if magic[3] == 0xBF else (">8xII", 20), []
     for i in range(struct.unpack_from(">I", view, 4)[0]):
-      if wide:
-        at, size = struct.unpack_from(">8xQQ", view, 8 + 32 * i)
-      else:
-        at, size = struct.unpack_from(">8xII", view, 8 + 20 * i)
+      at, size = struct.unpack_from(fmt, view, 8 + step * i)
+      out += macho(view[at : at + size])
 
-      slices += macho(view[at : at + size])
-
-    return slices
+    return out
 
   if magic != b"\xcf\xfa\xed\xfe":
     raise ValueError("not a 64-bit Mach-O binary")
@@ -643,11 +641,6 @@ def slices(binary: Path) -> list[tuple[str, str]]:
     return macho(binary.read_bytes())
   except (OSError, ValueError, struct.error) as e:
     sys.exit(f"pack: {binary}: {e}")
-
-
-def minos(binary: Path) -> str:
-  """The macOS every slice of the binary runs on: the highest any needs."""
-  return max((v for _, v in slices(binary)), key=lambda v: [int(n) for n in v.split(".")])
 
 
 def identities(valid: bool) -> list[str]:
@@ -727,26 +720,27 @@ def app(cfg: Config, binary: Path) -> Path:
   images = icons(cfg.icon, {n for _, n in ICNS}, False)
   (bundle / f"Contents/Resources/{cfg.name}.icns").write_bytes(icns(images))
   (bundle / "Contents/PkgInfo").write_text("APPL????")
-  (bundle / "Contents/Info.plist").write_bytes(plistlib.dumps(info(cfg, minos(binary))))
+  # The macOS every slice runs on: the highest any needs.
+  minos = max((v for _, v in slices(binary)), key=lambda v: [int(n) for n in v.split(".")])
+  (bundle / "Contents/Info.plist").write_bytes(plistlib.dumps(info(cfg, minos)))
   entitlements = cfg.macos.get("entitlements")
-  if not MAC:
+  if MAC:
+    run("xattr", "-cr", bundle)
+    sign = ["--force", "--sign", sha, "--options", "runtime", stamp(sha)]
+    sign += ["--entitlements", cfg.root / entitlements] if entitlements else []
+    try:
+      run("codesign", *sign, bundle, timeout=60)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+      shutil.rmtree(bundle, ignore_errors=True)
+      sys.exit(f'pack: codesign with "{name}" failed ({e}): no bundle')
+
+    run("codesign", "--verify", "--strict", bundle)
+  else:
     signed = name != "ad hoc"
     args = ["--code-signature-flags", "runtime", *(["--for-notarization"] if signed else [])]
     args += ["--entitlements-xml-file", cfg.root / entitlements] if entitlements else []
     rsign(cfg, bundle, signed, *args)
-    print(f"{bundle}: {cfg.name} {cfg.version}, signed: {name}")
-    return bundle
 
-  run("xattr", "-cr", bundle)
-  sign = ["--force", "--sign", sha, "--options", "runtime", stamp(sha)]
-  sign += ["--entitlements", cfg.root / entitlements] if entitlements else []
-  try:
-    run("codesign", *sign, bundle, timeout=60)
-  except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
-    shutil.rmtree(bundle, ignore_errors=True)
-    sys.exit(f'pack: codesign with "{name}" failed ({e}): no bundle')
-
-  run("codesign", "--verify", "--strict", bundle)
   print(f"{bundle}: {cfg.name} {cfg.version}, signed: {name}")
   return bundle
 
@@ -963,9 +957,10 @@ def setup(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
   with tempfile.TemporaryDirectory() as tmp:
     # The files by fixed names beside the script, which makensis reads from there: no path in it.
     tmp = Path(tmp)
+    pngs = {n: png_encode(n, n, px) for n, px in icons(cfg.icon, ICO, True).items()}
     # A signature later: here, the exe's, before makensis packs it.
-    exe_resources(binary, tmp / "app.exe", cfg)
-    (tmp / "app.ico").write_bytes(ico(icons(cfg.icon, ICO, True)))
+    exe_resources(binary, tmp / "app.exe", cfg, pngs)
+    (tmp / "app.ico").write_bytes(ico(pngs))
     if license.is_file():
       shutil.copy(license, tmp / "LICENSE.txt")
 
@@ -993,7 +988,7 @@ def nsi(cfg: Config, arch: str, license: bool) -> str:
 
   >>> from types import SimpleNamespace as N
   >>> cfg = N(id="me.vladkens.counter", name="Counter", version="1.2.0-3-gabc", comment="Counts",
-  ...   windows={}, publisher="")
+  ...   windows={}, publisher="", bin="counter")
   >>> text = nsi(cfg, "aarch64", True)
   >>> keys = ("Install", "VIProduct", "!define MUI_F", "${", "File", "Delete", "CreateS", "Message")
   >>> print("\n".join(l.strip() for l in text.splitlines() if l.strip().startswith(keys)))
@@ -1029,14 +1024,9 @@ def nsi(cfg: Config, arch: str, license: bool) -> str:
   if arch == "x86_64":
     check = ["${IfNot} ${IsNativeAMD64}", "${AndIfNot} ${IsNativeARM64}"]
 
-  strings = {
-    "ProductName": cfg.name,
-    "ProductVersion": cfg.version,
-    "FileVersion": cfg.version,
-    "FileDescription": f"{cfg.name} Setup",
-    "CompanyName": publisher(cfg),
-    "LegalCopyright": cfg.windows.get("copyright") or f"© {publisher(cfg)}",
-  }
+  every = {**version_strings(cfg), "FileDescription": f"{cfg.name} Setup"}
+  keys = "ProductName ProductVersion FileVersion FileDescription CompanyName LegalCopyright"
+  strings = {k: every[k] for k in keys.split()}
   entries = {
     "DisplayName": name,
     "DisplayVersion": nsis(cfg.version),
@@ -1182,18 +1172,14 @@ MANIFEST = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 """
 
 
-def exe_resources(exe: Path, out: Path, cfg: Config) -> Path:
-  """`exe` as `out` with the app's resources: its icon (the tile at ICO's sizes), the version and
-  the names Explorer and Task Manager show, and the manifest (asInvoker, Windows 10 and 11,
-  PerMonitorV2, Common Controls 6). Those types replace the linker's; its other resources stay."""
-  pngs = {n: png_encode(n, n, px) for n, px in icons(cfg.icon, ICO, True).items()}
-  group = struct.pack("<3H", 0, 1, len(pngs))
-  for i, (n, png) in enumerate(pngs.items(), 1):
-    group += struct.pack("<4B2HIH", n % 256, n % 256, 0, 0, 1, 32, len(png), i)
-
+def exe_resources(exe: Path, out: Path, cfg: Config, pngs: dict[int, bytes]) -> Path:
+  """`exe` as `out` with the app's resources: its icon (`pngs`, the tile at ICO's sizes), the
+  version and the names Explorer and Task Manager show, and the manifest (asInvoker, Windows 10
+  and 11, PerMonitorV2, Common Controls 6). Those types replace the linker's; the rest stay."""
+  ids = [struct.pack("<H", i) for i in range(1, len(pngs) + 1)]
   ours = {
     RT_ICON: {i: {LANG: png} for i, png in enumerate(pngs.values(), 1)},
-    RT_GROUP_ICON: {1: {LANG: group}},
+    RT_GROUP_ICON: {1: {LANG: icon_dir(pngs, ids)}},
     RT_VERSION: {1: {LANG: version_info(cfg)}},
     RT_MANIFEST: {1: {LANG: MANIFEST.encode()}},
   }
@@ -1221,10 +1207,23 @@ def pad4(data: bytes) -> bytes:
   return data + bytes(-len(data) % 4)
 
 
+def version_strings(cfg: Config) -> dict[str, str]:
+  """The exe's version strings: the app's name its FileDescription, which Task Manager shows,
+  `windows.copyright` its LegalCopyright, else "© <publisher>"."""
+  return {
+    "CompanyName": publisher(cfg),
+    "FileDescription": cfg.name,
+    "FileVersion": cfg.version,
+    "InternalName": cfg.bin,
+    "LegalCopyright": cfg.windows.get("copyright") or f"© {publisher(cfg)}",
+    "OriginalFilename": f"{cfg.name}.exe",
+    "ProductName": cfg.name,
+    "ProductVersion": cfg.version,
+  }
+
+
 def version_info(cfg: Config) -> bytes:
-  r"""The RT_VERSION: the version as numbers (1.2.0.0 of 1.2.0-beta.1) and the strings, the app's
-  name its FileDescription, which Task Manager shows. `windows.copyright` is its LegalCopyright,
-  else "© <publisher>".
+  r"""The RT_VERSION: the version as numbers (1.2.0.0 of 1.2.0-beta.1) and `version_strings`.
 
   >>> from types import SimpleNamespace as N
   >>> cfg = N(id="me.a.b", name="B", version="1.2.3-beta.1", bin="b", windows={}, publisher="")
@@ -1238,18 +1237,8 @@ def version_info(cfg: Config) -> bytes:
   ms, ls = a << 16 | b, c << 16 | d
   # VS_FIXEDFILEINFO: VOS_NT_WINDOWS32, VFT_APP.
   fixed = struct.pack("<13I", 0xFEEF04BD, 0x10000, ms, ls, ms, ls, 0x3F, 0, 0x40004, 1, 0, 0, 0)
-  strings = {
-    "CompanyName": publisher(cfg),
-    "FileDescription": cfg.name,
-    "FileVersion": cfg.version,
-    "InternalName": cfg.bin,
-    "LegalCopyright": cfg.windows.get("copyright") or f"© {publisher(cfg)}",
-    "OriginalFilename": f"{cfg.name}.exe",
-    "ProductName": cfg.name,
-    "ProductVersion": cfg.version,
-  }
   # The strings in en-US, Unicode (1200), as the translation says.
-  table = node(f"{LANG:04X}04B0", children=[node(k, v) for k, v in strings.items()])
+  table = node(f"{LANG:04X}04B0", children=[node(k, v) for k, v in version_strings(cfg).items()])
   var = node("Translation", struct.pack("<2H", LANG, 1200))
   children = [node("StringFileInfo", children=[table]), node("VarFileInfo", children=[var])]
   return node("VS_VERSION_INFO", fixed, children)
@@ -1352,12 +1341,9 @@ def rsrc(tree: dict, rva: int) -> bytes:
 
     rows.append(row)
 
-  at, starts, names = 0, [], {}
-  for row in rows:
-    starts.append(at)
-    at += 16 + 8 * len(row)
-
-  strings, names_at = b"", at
+  starts = list(accumulate((16 + 8 * len(row) for row in rows), initial=0))
+  at = names_at = starts.pop()
+  strings, names = b"", {}
   for key in (k for row in rows for k, _, _ in row if isinstance(k, str)):
     if key not in names:
       names[key] = at + len(strings)
@@ -1389,12 +1375,8 @@ def rsrc(tree: dict, rva: int) -> bytes:
 def checksum(data: bytes, at: int) -> int:
   """The PE checksum, the one at `at` taken as 0: the 16-bit words summed, the carries folded in,
   plus the length."""
-  raw = bytes(data[:at]) + bytes(4) + bytes(data[at + 4 :])
-  words = array.array("H", raw + bytes(len(raw) % 2))
-  if sys.byteorder == "big":
-    words.byteswap()
-
-  total = sum(words)
+  raw = bytes(data[:at]) + bytes(4) + bytes(data[at + 4 :]) + bytes(len(data) % 2)
+  total = sum(struct.unpack(f"<{len(raw) // 2}H", raw))
   while total >> 16:
     total = (total & 0xFFFF) + (total >> 16)
 
@@ -1518,17 +1500,14 @@ SHA256 = {
   "appimagetool-aarch64": "f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158",
   "runtime-x86_64": "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d",
   "runtime-aarch64": "00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444",
-  # RCODESIGN's, as its release's SHA256SUMS gives them.
-  "apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz": (
-    "dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002"
-  ),
-  "apple-codesign-0.29.0-aarch64-unknown-linux-musl.tar.gz": (
-    "4af92c87ddf52f5f2d1258a3b4e56c7dcb8f1b2468df744976c5f139e031961f"
-  ),
-  "apple-codesign-0.29.0-aarch64-apple-darwin.tar.gz": (
-    "d1a532150adaf90048260d76359261aa716abafc45c53c5dc18845029184334a"
-  ),
 }
+# RCODESIGN's by the triple it runs on, as its release's SHA256SUMS gives them.
+RCODESIGN_SHA256 = {
+  "x86_64-unknown-linux-musl": "dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002",
+  "aarch64-unknown-linux-musl": "4af92c87ddf52f5f2d1258a3b4e56c7dcb8f1b2468df744976c5f139e031961f",
+  "aarch64-apple-darwin": "d1a532150adaf90048260d76359261aa716abafc45c53c5dc18845029184334a",
+}
+SHA256 |= {RCODESIGN.format(triple=t).rsplit("/")[-1]: v for t, v in RCODESIGN_SHA256.items()}
 DEB_ARCH = {"x86_64": "amd64", "aarch64": "arm64"}
 # The libraries nimbo loads at run time, by their Debian names (t64 since Ubuntu 24.04).
 NIMBO = [
@@ -1564,12 +1543,6 @@ def deb_version(version: str) -> str:
   ('1.2.0~beta.1', '1.2.0')
   """
   return version.replace("-", "~", 1)
-
-
-def here() -> str:
-  """This machine's arch, as Rust names it."""
-  machine = host.machine().lower()
-  return {"amd64": "x86_64", "arm64": "aarch64"}.get(machine, machine)
 
 
 def fetch(url: str, path: Path) -> Path:
@@ -1622,10 +1595,10 @@ def put(path: Path, data: bytes) -> None:
 
 
 def deb(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
-  """`<stem>-linux-<arch>.deb` (apt installs it by any name) by dpkg-deb: /usr/bin/<bin>, the .desktop entry, the
-  icon in hicolor's 512x512 (hicolor has no 1024 folder; GTK scales it) and pixmaps, the LICENSE
-  as the copyright. `linux.deb-package` names it (else the binary), `linux.deb-depends` and
-  `deb-recommends` add to its relations."""
+  """`<stem>-linux-<arch>.deb` (apt installs it by any name) by dpkg-deb: /usr/bin/<bin>, the
+  .desktop entry, the icon in hicolor's 512x512 (hicolor has no 1024 folder; GTK scales it) and
+  pixmaps, the LICENSE as the copyright. `linux.deb-package` names it (else the binary),
+  `linux.deb-depends` and `deb-recommends` add to its relations."""
   author = next(iter(cfg.authors), "")
   if not re.search(r"<.+@.+>", author):
     sys.exit("pack: deb needs `authors` in Cargo.toml (its Maintainer)")
@@ -1861,7 +1834,6 @@ def binary_kind(path: Path) -> tuple[str, str] | None:
   """The OS and arch a binary is for by its format, as a triple names them: Mach-O (one slice), PE
   or ELF.
 
-  >>> import tempfile
   >>> elf = Path(tempfile.mkdtemp()) / "a"
   >>> _ = elf.write_bytes(b"\\x7fELF" + bytes(14) + struct.pack("<H", 0xB7))
   >>> binary_kind(elf)
@@ -1925,16 +1897,10 @@ def release(cfg: Config, dir: Path, tag: str | None) -> None:
 def main():
   ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
   ap.add_argument("command", choices=("dist", *OS, "release", "feed", "feed-key"))
-  ap.add_argument(
-    "files",
-    nargs="*",
-    help="dmg: the .app (or --app); release: the folder; feed: [<platform>=]<file>",
-  )
+  ap.add_argument("files", nargs="*", help="dmg: the .app; release: the folder; feed: the files")
   ap.add_argument("--manifest", type=Path, default=Path("Cargo.toml"), help="the app's Cargo.toml")
   ap.add_argument("--target", help="the target triple, by default this machine's arch")
-  ap.add_argument(
-    "--bin", type=Path, help="the binary, by default <target dir>/<triple>/dist/<bin>"
-  )
+  ap.add_argument("--bin", type=Path, help="the binary, else <target dir>/<triple>/dist/<bin>")
   ap.add_argument("--app", type=Path, help="dmg: the .app, by default <target dir>/<Name>.app")
   ap.add_argument("--label", help="the files' <Name>-<label>-…, by default <Name>-v<version>-…")
   ap.add_argument("--out", type=Path, help="where the files go, by default <target dir>/distrib")
@@ -2006,7 +1972,7 @@ def main():
   if not steps:
     sys.exit(f"pack: dist runs on macOS, Windows and Linux, not {sys.platform}")
 
-  target = args.target or f"{arch(host.machine())}-{OS[steps[0]]}"
+  target = args.target or f"{here()}-{OS[steps[0]]}"
   exe = cfg.bin + (".exe" if "windows" in target else "")
   binary = args.bin or cfg.target / target / "dist" / exe
   if not binary.is_file():
