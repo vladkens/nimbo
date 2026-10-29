@@ -669,9 +669,65 @@ def app(cfg: Config, binary: Path) -> Path:
   return bundle
 
 
+# The records and the layout as dmgbuild's core.py writes them with its ds_store (MIT,
+# Copyright (c) 2014 Alastair Houghton, github.com/dmgbuild/ds_store: buddy.py, store.py), the
+# format as Wim Lewis's DSStoreFormat.pod documents it.
+DS_HEAD = bytes.fromhex("0000100c000000870000200b00000000")
+
+
+def ds_store(app: str) -> bytes:
+  """The DMG's .DS_Store: a 640×400 window with no toolbar, sidebar or background, `app` and
+  Applications as 128 px icons side by side. A "Bud1" file: the header, the allocator's block 0
+  (the block offsets, `DSDB` in its contents, the free lists of the 2 GiB space by width) at
+  2048, block 1 (the B-tree's header) at 32 and block 2 (its one leaf, the records sorted by name
+  in lower case, then code) at 4096, each offset or'd with its log2 size, 4 bytes into the file.
+
+  >>> data = ds_store("Counter.app")
+  >>> len(data), data[:8], data[4 + 4096 : 4 + 4104]
+  (8196, b'\\x00\\x00\\x00\\x01Bud1', b'\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x06')
+  >>> data.find("Applications".encode("utf-16-be")) < data.find("Counter".encode("utf-16-be"))
+  True
+  """
+  blob = lambda data: struct.pack(">I", len(data)) + data
+  plist = lambda d: blob(plistlib.dumps(d, fmt=plistlib.FMT_BINARY))
+  at = lambda x, y: blob(struct.pack(">4I", x, y, 0xFFFFFFFF, 0xFFFF0000))
+  window = {"WindowBounds": "{{200, 120}, {640, 400}}", "SidebarWidth": 180}
+  window |= dict.fromkeys(("ContainerShowSidebar", "PreviewPaneVisibility"), False)
+  window |= {f"Show{b}": False for b in ("Toolbar", "Sidebar", "StatusBar", "Pathbar", "TabView")}
+  view = {"viewOptionsVersion": 1, "backgroundType": 0, "arrangeBy": "none", "gridSpacing": 100.0}
+  view |= {"iconSize": 128.0, "textSize": 13.0, "labelOnBottom": True, "showIconPreview": True}
+  view |= {"showItemInfo": False, **{f"backgroundColor{c}": 1.0 for c in ("Red", "Green", "Blue")}}
+  view |= {f"{k}{a}": 0.0 for k in ("gridOffset", "scrollPosition") for a in "XY"}
+  records = [
+    (".", b"bwsp", b"blob", plist(window)),
+    (".", b"icvl", b"type", b"icnv"),
+    (".", b"icvp", b"blob", plist(view)),
+    (".", b"vSrn", b"long", struct.pack(">I", 1)),
+    (app, b"Iloc", b"blob", at(160, 170)),
+    ("Applications", b"Iloc", b"blob", at(480, 170)),
+  ]
+  records.sort(key=lambda r: (r[0].lower(), r[1]))
+  name = lambda u: struct.pack(">I", len(u) // 2) + u
+  leaf = b"".join(name(n.encode("utf-16-be")) + b"".join(r) for n, *r in records)
+  leaf = struct.pack(">II", 0, len(records)) + leaf
+  assert len(leaf) <= 4096, f"{app}: too long a name for the .DS_Store's one leaf"
+
+  free = [[1 << w] if 5 < w < 31 and w not in (11, 12) else [] for w in range(32)]
+  root = struct.pack(">II256I", 3, 0, 2048 | 11, 32 | 5, 4096 | 12, *[0] * 253)
+  root += struct.pack(">IB4sI", 1, 4, b"DSDB", 1)
+  root += b"".join(struct.pack(f">I{len(f)}I", len(f), *f) for f in free)
+  space = bytearray(8192)
+  space[:32] = struct.pack(">4sIII16s", b"Bud1", 2048, 2048, 2048, DS_HEAD)
+  space[32:52] = struct.pack(">5I", 2, 0, len(records), 1, 4096)
+  space[2048 : 2048 + len(root)] = root
+  space[4096 : 4096 + len(leaf)] = leaf
+  return struct.pack(">I", 1) + bytes(space)
+
+
 def dmg(cfg: Config, bundle: Path, arch: str, out_dir: Path) -> Path:
-  """`<stem>-macos-<arch>.dmg` of `bundle`, as it is signed, and an /Applications link: on a Mac
-  UDZO by hdiutil, signed by a Developer ID if the keychain has one; off macOS `hfs_dmg`'s."""
+  """`<stem>-macos-<arch>.dmg` of `bundle`, as it is signed, an /Applications link and the
+  window `ds_store` lays out: on a Mac UDZO by hdiutil, signed by a Developer ID if the keychain
+  has one; off macOS `hfs_dmg`'s."""
   out = out_dir / f"{stem(cfg)}-macos-{arch}.dmg"
   if not MAC:
     return hfs_dmg(cfg, bundle, out)
@@ -682,6 +738,7 @@ def dmg(cfg: Config, bundle: Path, arch: str, out_dir: Path) -> Path:
     # ditto keeps the signature, the links and the modes as they are.
     run("ditto", bundle, stage / bundle.name)
     (stage / "Applications").symlink_to("/Applications")
+    (stage / ".DS_Store").write_bytes(ds_store(bundle.name))
     # hdiutil, which macOS 27 deprecates for `diskutil image`: the runners up to macOS 15 lack that.
     image = ["-volname", cfg.name, "-srcfolder", stage, "-format", "UDZO", "-ov"]
     run("hdiutil", "create", *image, out, capture_output=True)
@@ -809,6 +866,8 @@ def hfs_dmg(cfg: Config, bundle: Path, out: Path) -> Path:
     run(hfsplus, image, "mkdir", f"/{bundle.name}", **quiet)
     run(hfsplus, image, "addall", bundle, f"/{bundle.name}", **quiet)
     run(hfsplus, image, "symlink", "/Applications", "/Applications", **quiet)
+    (Path(tmp) / ".DS_Store").write_bytes(ds_store(bundle.name))
+    run(hfsplus, image, "add", Path(tmp) / ".DS_Store", "/.DS_Store", **quiet)
     out.unlink(missing_ok=True)
     run(tool(cfg, "dmg"), "--compression", "lzma", "build", image, out, **quiet)
 
