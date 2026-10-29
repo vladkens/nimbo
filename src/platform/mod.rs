@@ -140,13 +140,13 @@
 //!   [--env …] … --args`, by LaunchServices in launchd's environment, in `/` and without the focus;
 //!   Windows the app folder's exe of this one's name; Linux the AppImage without the installer's
 //!   AppImage variables), else in this process's working directory. Windows also `setup(exe: &Path)
-//!   -> io::Result<i32>`, the per-user Inno Setup run `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART
-//!   /CURRENTUSER` with no window to its end, its exit code. macOS also `accepts(new: &Path, app:
-//!   &Path) -> io::Result<()>`, the new bundle of `app`'s id meeting its designated requirement for
-//!   every architecture (Security.framework's `SecStaticCodeCheckValidityWithErrors`), else
-//!   `InvalidData` with its reason, and `exchange(a: &Path, b: &Path) -> io::Result<()>`, the two
-//!   swapped in one step (`renamex_np` with `RENAME_SWAP`). On Unix `detach`, `wait_exit` and
-//!   `alive` are `linux/app/process.rs`'s.
+//!   -> io::Result<i32>`, the per-user NSIS setup run silent (`/S`, into the folder its
+//!   `InstallDirRegKey` kept) with no window to its end, its exit code. macOS also `accepts(new:
+//!   &Path, app: &Path) -> io::Result<()>`, the new bundle of `app`'s id meeting its designated
+//!   requirement for every architecture (Security.framework's
+//!   `SecStaticCodeCheckValidityWithErrors`), else `InvalidData` with its reason, and `exchange(a:
+//!   &Path, b: &Path) -> io::Result<()>`, the two swapped in one step (`renamex_np` with
+//!   `RENAME_SWAP`). On Unix `detach`, `wait_exit` and `alive` are `linux/app/process.rs`'s.
 //! - `pub mod activity` ([crate::activity]), from any thread: `Token: Send`, `begin(&str) ->
 //!   Token`, `end(Token)`.
 //! - `pub mod post` ([crate::keys::post]): `post(Shortcut) -> Result<(), String>`, the shortcut as

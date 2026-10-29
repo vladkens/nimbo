@@ -42,7 +42,7 @@
 //! size and SHA-512 are the feed's; nothing is opened before. Redirects are followed by the system
 //! (on Linux only to https, on Windows not from https to http, on macOS by the shared session's
 //! defaults); the signature and the hash guard what comes. The file is the one people download
-//! for the first install: the notarized `.dmg`, the per-user Inno Setup `setup.exe`, the AppImage.
+//! for the first install: the notarized `.dmg`, the per-user NSIS `setup.exe`, the AppImage.
 //!
 //! The app is never replaced while it runs. [install] starts the installer apart from the app (its
 //! own process group on Unix; no console and out of the app's job on Windows), waits up to 10 s
@@ -60,7 +60,7 @@
 //! | OS | the app | staged | checked | put in, and undone | started |
 //! |---|---|---|---|---|---|
 //! | macOS | the `.app` | the `.dmg` attached read-only inside the staging folder (`hdiutil`), its one `.app` at the top copied out with `ditto`, detached (forced if it must be) | the same bundle id, signed so that it meets the running app's designated requirement (Security.framework) | `renamex_np` with `RENAME_SWAP` (APFS), undone by the same | `open -n -g`, by LaunchServices: no focus taken, launchd's environment |
-//! | Windows | the exe's folder in `%LOCALAPPDATA%\Programs` | the `setup.exe` as it came | the size and hash alone | the setup run `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER` with no window, awaited; an exit code other than 0 is the error | the folder's exe of the running one's name, whatever the setup left |
+//! | Windows | the exe's folder in `%LOCALAPPDATA%\Programs` | the `setup.exe` as it came | the size and hash alone | the setup run silent (`/S`, into the folder it recorded) with no window, awaited; an exit code other than 0 is the error (1 cancelled, 2 aborted by its script, as on a wrong architecture) | the folder's exe of the running one's name, whatever the setup left |
 //! | Linux | the AppImage | made executable | the size and hash alone | linked to `.<name>.nimbo-old`, the new one renamed over it in one step; undone by renaming the link back | the AppImage, without the installer's AppImage variables |
 //!
 //! On Windows the installer is a copy of the running exe, named as it is (Windows asks to elevate
@@ -969,7 +969,7 @@ mod tests {
   fn windows_runs_the_setup_then_starts_what_it_left() {
     // The installer's exe, which stays for the next download.
     let exe = env::current_exe().unwrap().file_name().unwrap().to_owned();
-    for (i, code) in [Some(0), Some(2), None].into_iter().enumerate() {
+    for (i, code) in [Some(0), Some(1), Some(2), None].into_iter().enumerate() {
       let root = dir(&format!("setup-{i}"));
       write(
         &root,
@@ -992,7 +992,7 @@ mod tests {
       );
       assert_eq!(*ran.borrow(), std::slice::from_ref(&job.new));
       let note = done.err().map(|e| e.to_string());
-      let why = ["", "setup.exe exited with 2", "no setup"][i];
+      let why = ["", "setup.exe exited with 1", "setup.exe exited with 2", "no setup"][i];
       assert!(note.as_ref().map_or(i == 0, |n| i > 0 && n.contains(why)), "{note:?}");
       assert_eq!(*started.borrow(), [(job.target.clone(), vec![OsString::from("-x")], note)]);
       let left =
