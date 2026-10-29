@@ -170,6 +170,13 @@ pub enum Event {
   /// The file picked in the panel the window asked for ([Ui::file_dialog]); `None` when
   /// cancelled.
   FileDialog(Option<PathBuf>),
+  /// The item chosen in the context menu of `on` ([Ui::context_menu]) the platform showed, by
+  /// its id; `None` when dismissed. Delivered to `on` in a view pass, then to the app when no
+  /// view took it.
+  Menu {
+    on: Id,
+    item: Option<String>,
+  },
   /// Assistive technology acting on the element `id` (VoiceOver's press, a slider's increment,
   /// a field's new text): the runtime takes it through the input paths ([Runtime::event]),
   /// then the app hears it, the press as a click ([Cx::clicked]). `role` is the node's, as
@@ -517,6 +524,19 @@ impl<A: App> Runtime<A> {
     self.ui.file_dialog.take()
   }
 
+  /// The platform shows context menus itself ([Ui::context_menu]): the view asks for them
+  /// ([Runtime::take_context_menu]) instead of drawing them.
+  pub fn set_native_menus(&mut self, on: bool) {
+    self.ui.native_menus = on;
+  }
+
+  /// The context menu the view asked for, once: its element, the point in the window and the
+  /// menu. The platform shows it after an event or a frame and sends the answer as
+  /// [Event::Menu].
+  pub fn take_context_menu(&mut self) -> Option<(Id, Point, crate::Menu)> {
+    self.ui.context_menu.take()
+  }
+
   /// The content size the app asked the window for ([Ui::set_window_size]), once: the platform
   /// resizes the window to it after an event or a frame, then reports the new size by
   /// [Runtime::resize] as it does for any.
@@ -553,7 +573,7 @@ impl<A: App> Runtime<A> {
     }
 
     let keys = matches!(ev, Event::KeyDown(_) | Event::Text(_) | Event::Command(_) | Event::Ime(_));
-    let keys = keys || matches!(ev, Event::Modifier { .. });
+    let keys = keys || matches!(ev, Event::Modifier { .. } | Event::Menu { .. });
     if keys {
       self.take_wake();
       self.fresh();
@@ -562,6 +582,8 @@ impl<A: App> Runtime<A> {
     let focus = self.ui.focus();
     let used = match ev {
       Event::KeyDown(k) => self.key_down(k),
+      // A context menu's answer: the element it is for, then the app.
+      Event::Menu { on, .. } => self.deliver(on, ev.clone()) || self.app_event(&ev),
       Event::Text(_) | Event::Command(_) | Event::Ime(_) | Event::Modifier { .. } => self.typed(ev),
       ev => self.pointer(ev),
     };

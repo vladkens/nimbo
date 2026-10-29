@@ -99,8 +99,9 @@ pub fn layout(nodes: &[Node], id: usize, depth: i32, base: i32) -> V {
   V::Tuple(vec![V::I(id), props(node), V::Array("v", kids)])
 }
 
-/// The menu as the tray's `describe` shows it: `label|key|on or off|enabled or disabled`, `-`
-/// a separator, a submenu's items indented.
+/// The menu as the tray's `describe` shows it: `label|key|on or off|enabled or disabled`, then
+/// `|header` for a header (served as a disabled item), `-` a separator, a submenu's items
+/// indented.
 pub fn describe(nodes: &[Node], id: usize, depth: usize, out: &mut Vec<String>) {
   for &c in &nodes[id].children {
     let Some(it) = nodes[c].item else { continue };
@@ -112,7 +113,8 @@ pub fn describe(nodes: &[Node], id: usize, depth: usize, out: &mut Vec<String>) 
 
     let on = if it.checked { "on" } else { "off" };
     let enabled = if it.enabled { "enabled" } else { "disabled" };
-    out.push(format!("{pad}{}|{}|{on}|{enabled}", it.label, it.key_label()));
+    let head = if it.header { "|header" } else { "" };
+    out.push(format!("{pad}{}|{}|{on}|{enabled}{head}", it.label, it.key_label()));
     describe(nodes, c, depth + 1, out);
   }
 }
@@ -125,7 +127,7 @@ mod tests {
     let sub =
       Menu::new(vec![Item::new("a", "A_1").checked(true), Item::new("b", "B").checked(false)]);
     Menu::new(vec![
-      Item::new("head", "Head").enabled(false),
+      Item::header("Head"),
       Item::separator(),
       Item::new("sub", "Sub").submenu(sub),
       Item::new("quit", "Quit").key("cmd+q"),
@@ -176,7 +178,7 @@ mod tests {
     let mut out = Vec::new();
     describe(&nodes(&m), 0, 0, &mut out);
     let want = [
-      "Head||off|disabled",
+      "Head||off|disabled|header",
       "-",
       "Sub||off|enabled",
       "  A_1||on|enabled",

@@ -170,7 +170,7 @@ fn chevrons(f: &mut crate::scene::Frame, r: Rect, c: crate::scene::Color) {
 }
 
 /// A check mark in `r`, a 16-point box.
-fn check(f: &mut crate::scene::Frame, r: Rect, c: crate::scene::Color) {
+pub(super) fn check(f: &mut crate::scene::Frame, r: Rect, c: crate::scene::Color) {
   let p = |x: f32, y: f32| Point::new(r.x + x * r.w / 14.0, r.y + y * r.h / 14.0);
   f.polyline(&[p(3.5, 7.3), p(6.0, 9.8), p(10.6, 4.4)], 1.6, c);
 }

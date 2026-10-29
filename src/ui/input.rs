@@ -17,6 +17,7 @@ use keyboard_types::Modifiers;
 use super::layout::{Node, Tree};
 use super::{Focus, Id, Ui, UiState};
 use crate::app::{Event, MouseButton, Phase};
+use crate::keys::Os;
 use crate::scene::{Point, Rect, Size};
 
 /// Time constant of wheel momentum: a wheel step's distance is covered exponentially, 95% of it
@@ -244,6 +245,33 @@ impl Ui<'_> {
   /// change: an open menu, whose highlight follows the pointer within an item.
   pub fn track_moves(&mut self) {
     self.st.input.moves = true;
+  }
+
+  /// Where a secondary press (the right button) on `id` or inside it opens `id`'s context menu,
+  /// once a press: as it goes down, or as it is let go when no view saw it down, as AppKit and
+  /// GTK open one; on Windows as it is let go (`WM_CONTEXTMENU` follows `WM_RBUTTONUP`, as in
+  /// Explorer). The innermost element with a menu, by the last frame's parent chain, takes it;
+  /// `id` has one from this call ([Ui::context_menu]).
+  pub fn context_press(&mut self, id: Id) -> Option<Point> {
+    self.st.tree.menus.push(id);
+    let (input, right) = (&self.st.input, |b: MouseButton| b == MouseButton::Right);
+    let up = input.click.filter(|c| right(c.button)).map(|c| (c.id, c.pos, c.seq));
+    let down = input.press.filter(|p| right(p.button) && self.st.os != Os::Windows);
+    let down = down.map(|p| (p.id, p.pos, p.seq));
+    let (on, at, seq) = down.or(up).filter(|p| p.2 != self.st.menu_seq)?;
+    let t = &self.st.last;
+    let mut i = t.find(on)?;
+    while t.nodes[i as usize].id != id {
+      let n = &t.nodes[i as usize];
+      if i == 0 || t.menus.contains(&n.id) {
+        return None;
+      }
+
+      i = n.parent;
+    }
+
+    self.st.menu_seq = seq;
+    Some(at)
   }
 
   /// Runs the view again before this frame is painted if the layout moves or resizes `id` or

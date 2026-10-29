@@ -22,11 +22,12 @@
 //! stays right when rows scroll out, are inserted above or the list is re-sorted. It lives in
 //! the app ([List::selection]) or the list's own state. A press selects; with [List::multi],
 //! Cmd-click (Ctrl-click on Windows and Linux) toggles a row and Shift-click selects from the
-//! anchor. Keys, while the list has focus (a press gives it), come as the platform's commands:
-//! Up and Down (Shift extends), Page Up and Page Down, Home and End or Cmd-Up and Cmd-Down,
-//! Cmd-A, and Enter, which activates the row, as a double click does. The row the keys moved
-//! to scrolls into view; so does [Ui::reveal_row]. Disabled ([Ui::disabled]), it takes no input
-//! or focus and dims.
+//! anchor; a secondary click selects the row alone unless it is selected, for the app's context
+//! menu ([Ui::context_menu]). Keys, while the list has focus (a press gives it), come as the
+//! platform's commands: Up and Down (Shift extends), Page Up and Page Down, Home and End or Cmd-Up
+//! and Cmd-Down, Cmd-A, and Enter, which activates the row, as a double click does. The row the
+//! keys moved to scrolls into view; so does [Ui::reveal_row]. Disabled ([Ui::disabled]), it takes
+//! no input or focus and dims.
 //!
 //! The list is the behaviour, its rows' fills the look: [List::unstyled] leaves the fills to
 //! the app, which draws them from [Row].
@@ -36,7 +37,7 @@ use std::hash::BuildHasherDefault;
 use std::ops::Range;
 
 use crate::app::MouseButton;
-use crate::keys::{Binding, Command, Move, bind};
+use crate::keys::{Binding, Command, Move, Os, bind};
 use crate::scene::{Point, Rect, alpha};
 use crate::text::FxHasher;
 use crate::ui::{Align, Cursor, Id, Role, State, Style, Ui, grow, px};
@@ -456,7 +457,9 @@ impl<'a> Ui<'a> {
   }
 
   /// A press on a row selects it (a click when no frame saw its press: a quick one), as the
-  /// modifiers ask; a double click activates it.
+  /// modifiers ask; a double click activates it. A secondary one, as a context menu opens
+  /// ([Ui::context_press]), focuses the list and selects the row alone unless it is selected
+  /// (Finder's rule): the app's [Ui::context_menu] after it reads that selection.
   #[allow(clippy::too_many_arguments)]
   fn list_press(
     &mut self,
@@ -468,29 +471,40 @@ impl<'a> Ui<'a> {
     multi: bool,
     key: &dyn Fn(usize) -> u64,
   ) {
-    let press = self.press().filter(|p| p.button == MouseButton::Left);
+    // The secondary button's press, on Windows its release.
+    let (win, right) = (self.st.os == Os::Windows, MouseButton::Right);
+    let press = self.press().filter(|p| p.button == MouseButton::Left || p.button == right && !win);
     // A press is seen once; a click whose press no pass saw (a quick one) stands for it.
-    let click = self.st.input.click.filter(|c| c.button == MouseButton::Left);
+    let both = |b| matches!(b, MouseButton::Left | MouseButton::Right);
+    let click = self.st.input.click.filter(|c| both(c.button));
     let hit = match (press, click) {
-      (Some(p), _) if st.pressed != Some(p.seq) => Some((p.id, p.mods, p.clicks)),
-      (None, Some(c)) if st.pressed != Some(c.seq) => Some((c.id, c.mods, c.clicks)),
+      (Some(p), _) if st.pressed != Some(p.seq) => Some((p.id, p.mods, p.clicks, p.button)),
+      (None, Some(c)) if st.pressed != Some(c.seq) => Some((c.id, c.mods, c.clicks, c.button)),
       _ => None,
     };
 
     st.pressed = press.map(|p| p.seq).or(click.map(|c| c.seq)).or(st.pressed);
-    let Some((at, mods, clicks)) = hit else { return };
+    let Some((at, mods, clicks, button)) = hit else { return };
     // Its index as built, a hint that saves a scan unless the rows moved since.
     let Some(at) = st.shown.iter().position(|&k| id.key(("row", k)) == at) else { return };
     let k = st.shown[at];
     let Some(i) = find((k, st.from + at), n, key) else { return };
     match (multi, mods.contains(crate::keys::CMD), mods.shift()) {
+      _ if button == right => {
+        self.focus(Some(id));
+        if sel.contains(k) {
+          return;
+        }
+
+        sel.select(k, i);
+      }
       (true, true, _) => sel.toggle(k, i),
       (true, _, true) => sel.extend(i, n, key),
       _ => sel.select(k, i),
     }
 
     (out.pressed, out.changed) = (Some(i), true);
-    if clicks == 2 {
+    if clicks == 2 && button != right {
       out.activated = Some(i);
     }
   }

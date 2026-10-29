@@ -292,7 +292,8 @@ impl Tray {
           let menu = self.0.menu.borrow();
           let n = nodes(&menu);
           let it = self.index(id, n.len()).and_then(|i| n[i].item);
-          it.filter(|it| !it.separator && it.submenu.is_none()).map(|it| it.id.clone())
+          it.filter(|it| !it.separator && !it.header && it.submenu.is_none())
+            .map(|it| it.id.clone())
         };
         self.closed();
         if let Some(choice) = choice {

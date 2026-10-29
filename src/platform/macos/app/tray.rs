@@ -221,6 +221,11 @@ impl Tray {
           continue;
         }
 
+        if item.isSectionHeader() {
+          out.push(format!("{pad}{}||off|disabled|header", item.title()));
+          continue;
+        }
+
         let key = item.keyEquivalent().to_string();
         let mods = item.keyEquivalentModifierMask();
         let held = [
@@ -291,6 +296,12 @@ fn fill(
   for it in items {
     if it.separator {
       menu.addItem(&NSMenuItem::separatorItem(mtm));
+      continue;
+    }
+
+    // macOS 14's section header, as the deployment target allows.
+    if it.header {
+      menu.addItem(&NSMenuItem::sectionHeaderWithTitle(&NSString::from_str(&it.label), mtm));
       continue;
     }
 

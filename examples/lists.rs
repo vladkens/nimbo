@@ -1,9 +1,9 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! Lists and containers: a virtualized list of 100,000 rows (several selected by Cmd- and
-//! Shift-click or Shift-arrows, Enter opens one) beside tabs, in a split to drag; a toolbar with
-//! a menu button and a pop-up button (letters typed choose its option), and a page of notes in
-//! a scroll area whose text fades under its edges.
+//! Shift-click or Shift-arrows, Enter opens one, a right-click shows their menu) beside tabs, in a
+//! split to drag; a toolbar with a menu button and a pop-up button (letters typed choose its
+//! option), and a page of notes in a scroll area whose text fades under its edges.
 //!
 //! `cargo run --release --example lists [-- --shot <file.png>]`
 
@@ -13,7 +13,8 @@
 use std::time::Duration;
 
 use nimbo::{
-  Align, App, Config, Id, List, Modifiers, Selection, Split, Style, Tabs, TextStyle, Ui, grow,
+  Align, App, Config, Id, Item, List, Menu, Modifiers, Selection, Split, Style, Tabs, TextStyle,
+  Ui, grow,
 };
 
 pub const ROWS: usize = 100_000;
@@ -42,11 +43,48 @@ pub struct Lists {
   pub side: f32,
   /// The menu's items run, by index.
   pub ran: Vec<usize>,
+  /// The rows show their sizes (the row menu's check).
+  pub sizes: bool,
+  /// The row menu's items chosen, each with the rows selected then.
+  pub chosen: Vec<(String, Vec<u64>)>,
 }
 
 impl Lists {
   pub fn new() -> Self {
-    Self { side: 0.45, ..Self::default() }
+    Self { side: 0.45, sizes: true, ..Self::default() }
+  }
+
+  /// The selected rows' context menu.
+  pub fn row_menu(&self) -> Menu {
+    let n = self.sel.len();
+    let title = match self.sel.cursor() {
+      Some(k) if n == 1 => format!("Item {:06}", k + 1),
+      _ => format!("{n} Items"),
+    };
+
+    let sort = |(i, s): (usize, &&str)| Item::new(&format!("sort-{i}"), s).checked(i == self.sort);
+    Menu::new(vec![
+      Item::header(&title),
+      Item::new("open", "Open").key("cmd+o"),
+      Item::new("sizes", "Show Sizes").checked(self.sizes),
+      Item::new("rename", "Rename…").enabled(n == 1),
+      Item::new("sort", "Sort By").submenu(Menu::new(SORTS.iter().enumerate().map(sort).collect())),
+      Item::separator(),
+      Item::new("delete", "Delete").destructive(),
+    ])
+  }
+
+  /// Runs the row menu's item `item` on the selected rows.
+  fn choose(&mut self, item: &str) {
+    let mut rows: Vec<u64> = self.sel.keys().collect();
+    rows.sort();
+    match item {
+      "open" => self.opened = self.sel.cursor().map(|k| k as usize),
+      "sizes" => self.sizes = !self.sizes,
+      _ => self.sort = item.strip_prefix("sort-").and_then(|i| i.parse().ok()).unwrap_or(self.sort),
+    }
+
+    self.chosen.push((item.to_owned(), rows));
   }
 
   fn toolbar(&mut self, ui: &mut Ui) {
@@ -93,7 +131,7 @@ impl Lists {
     let t = ui.theme();
     let name = t.label();
     // In the name's font, as Finder's columns: a smaller one would sit off its baseline.
-    let size = t.muted();
+    let (size, sizes) = (t.muted(), self.sizes);
     let r = List::new(ROWS, ROW_H)
       .multi()
       .selection(&mut self.sel)
@@ -101,10 +139,16 @@ impl Lists {
       .show(ui.id(LIST), |ui, row| {
         ui.text(format_args!("Item {:06}", row.index + 1), name);
         ui.spacer();
-        ui.text(format_args!("{} KB", (row.index * 37) % 900 + 12), size.nowrap());
+        if sizes {
+          ui.text(format_args!("{} KB", (row.index * 37) % 900 + 12), size.nowrap());
+        }
       });
     if r.activated.is_some() {
       self.opened = r.activated;
+    }
+
+    if let Some(item) = ui.context_menu(r.id, || self.row_menu()) {
+      self.choose(&item);
     }
   }
 

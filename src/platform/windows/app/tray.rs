@@ -348,9 +348,9 @@ fn build(items: &[Item], next: &mut u32) -> HMENU {
   for it in items {
     let text = wide(&text(it));
     let flags = flags(it);
-    // A separator is only that, whatever else it carries.
+    // A separator is only that, whatever else it carries; a header, greyed, chooses nothing.
     let id = match &it.submenu {
-      _ if it.separator => 0,
+      _ if it.separator || it.header => 0,
       Some(sub) => build(&sub.items, next) as usize,
       None => {
         *next += 1;
@@ -403,7 +403,7 @@ fn describe(menu: HMENU, depth: usize, out: &mut Vec<String>) {
     let mut buf = [0u16; 256];
     let mut mi: MENUITEMINFOW = unsafe { std::mem::zeroed() };
     mi.cbSize = size_of::<MENUITEMINFOW>() as u32;
-    mi.fMask = MIIM_FTYPE | MIIM_STATE | MIIM_SUBMENU | MIIM_STRING;
+    mi.fMask = MIIM_FTYPE | MIIM_ID | MIIM_STATE | MIIM_SUBMENU | MIIM_STRING;
     mi.dwTypeData = buf.as_mut_ptr();
     mi.cch = buf.len() as u32 - 1;
     if unsafe { GetMenuItemInfoW(menu, i, 1, &mut mi) } == 0 {
@@ -419,7 +419,8 @@ fn describe(menu: HMENU, depth: usize, out: &mut Vec<String>) {
     let (label, key) = s.split_once('\t').unwrap_or((&s, ""));
     let on = if mi.fState & MFS_CHECKED != 0 { "on" } else { "off" };
     let enabled = if mi.fState & MFS_DISABLED != 0 { "disabled" } else { "enabled" };
-    out.push(format!("{pad}{label}|{key}|{on}|{enabled}"));
+    let head = if mi.wID == 0 && mi.hSubMenu.is_null() { "|header" } else { "" };
+    out.push(format!("{pad}{label}|{key}|{on}|{enabled}{head}"));
     if !mi.hSubMenu.is_null() {
       describe(mi.hSubMenu, depth + 1, out);
     }

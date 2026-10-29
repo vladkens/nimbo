@@ -3,7 +3,9 @@
 //! Tests of `examples/lists.rs` through the harness: the 100k-row list builds only the rows in
 //! view and scrolls by the wheel and the keys, selects by click, Shift-click, Cmd-click and the
 //! arrows, opens a row by Enter; the menu opens, moves over its enabled items and runs one,
-//! closes by Escape or a click outside; the pop-up button chooses by letters typed, closed and
+//! closes by Escape or a click outside; a right-click keeps a selection it is inside or selects
+//! its row, and opens the row menu (drawn, or asked of the platform) on the press or, on
+//! Windows, the release; the pop-up button chooses by letters typed, closed and
 //! open; the tabs switch and keep the hidden page's scroll; the split's divider drags. Assistive
 //! technology reads the rows, the selection and the cursor, the menu's highlight, the tabs,
 //! presses a tab and scrolls a cut row into view.
@@ -20,7 +22,9 @@ use std::time::Duration;
 use common::{mid, reads};
 use lists::*;
 use nimbo::ui::Action;
-use nimbo::{CMD, Event, Harness, Id, Key, Modifiers, NamedKey, Os, Phase, Point, Size};
+use nimbo::{
+  CMD, Event, Harness, Id, Key, Modifiers, MouseButton, NamedKey, Os, Phase, Point, Size,
+};
 
 type H = Harness<Lists>;
 
@@ -195,6 +199,81 @@ fn escape_or_a_click_outside_closes_the_menu() {
   h.click(700.0, 400.0);
   h.frame();
   assert!(h.rect(popup).is_none() && h.app().ran.is_empty());
+}
+
+/// The secondary button at the middle of `id`, going down or (`up`) being let go, and the
+/// frames that place what it opened.
+fn right(h: &mut H, id: Id, up: bool) {
+  let (x, y) = mid(h.rect(id).unwrap());
+  let (pos, button, mods) = (Point::new(x, y), MouseButton::Right, NONE);
+  h.move_to(x, y);
+  h.event(match up {
+    true => Event::MouseUp { pos, button, mods },
+    false => Event::MouseDown { pos, button, clicks: 1, mods },
+  });
+  h.frame();
+  h.frame();
+}
+
+/// A right-click on a row inside a multi-selection keeps it, on one outside selects that row
+/// alone; the row menu opens on the press on macOS, on the release on Windows, and the item
+/// chosen reaches the app with the selection, from the drawn menu and from the platform's.
+#[test]
+fn a_right_click_opens_the_row_menu_over_the_selection() {
+  for os in [Os::Mac, Os::Windows] {
+    let h = &mut scrolled();
+    h.set_os(os);
+    let popup = Id::of(LIST).key("menu");
+    select_some(h);
+    right(h, row(103), false);
+    // macOS opens it as the button goes down, Windows as it is let go.
+    assert_eq!(h.rect(popup).is_some(), os == Os::Mac, "{os:?}");
+    right(h, row(103), true);
+    assert_eq!(selected(h), [101, 103, 104], "{os:?}: inside, kept");
+    assert!(h.rect(popup).is_some() && h.focused() == Some(popup));
+    h.click_id(Id::of(LIST).key("open"));
+    h.frame();
+    assert_eq!(h.app().chosen, [("open".to_string(), vec![101, 103, 104])], "{os:?}");
+    assert!(h.rect(popup).is_none());
+
+    right(h, row(105), false);
+    let pressed = if os == Os::Mac { vec![105] } else { vec![101, 103, 104] };
+    assert_eq!(selected(h), pressed, "{os:?}");
+    right(h, row(105), true);
+    assert_eq!(selected(h), [105], "{os:?}: outside, that row alone");
+    h.key(NamedKey::Escape, NONE);
+    h.frame();
+    assert!(h.rect(popup).is_none());
+
+    // The platform's menu: asked for, not drawn, with the selection's items.
+    h.native_menus();
+    right(h, row(102), false);
+    right(h, row(102), true);
+    assert!(h.rect(popup).is_none(), "{os:?}");
+    let (_, menu) = h.context_menu(Some("delete")).expect("a menu asked for");
+    assert_eq!((menu.items[0].label.as_str(), menu.items[0].header), ("Item 000103", true));
+    assert_eq!(h.app().chosen.last(), Some(&("delete".to_string(), vec![102])), "{os:?}");
+  }
+}
+
+/// The row menu as the harness draws it: its header, the check column, a shortcut, a disabled
+/// item, the submenu's items under its label and the destructive item red.
+#[test]
+fn the_row_menu_draws_its_model() {
+  let h = &mut scrolled();
+  select_some(h);
+  right(h, row(103), false);
+  right(h, row(103), true);
+  let dump = h.a11y();
+  for line in
+    ["menu item \"Open\"", "menu item \"Rename…\" disabled", "menu item \"Name\" selected"]
+  {
+    assert!(dump.contains(line), "{line}: {dump}");
+  }
+
+  let (r, img) = (h.rect(Id::of(LIST).key("delete")).unwrap(), h.render());
+  let red = (0..r.w as usize).map(|x| img.pixel(r.x + x as f32, r.y + r.h / 2.0));
+  assert!(red.into_iter().any(|p| p[0] > p[1] + 80), "red text");
 }
 
 /// Letters typed highlight the item they start: "go" the first, which Space runs, the first row

@@ -1,11 +1,12 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The tray's menu as each OS gets it, with nothing on screen (a detached tray: no status item,
-//! notify icon or D-Bus item): built from a [Menu] (labels, shortcuts, check marks, disabled
-//! items, separators, a submenu), rebuilt as it opens, kept while open (a new one waits for it
-//! to close), and items chosen through the OS's own path, reaching the app by id; icons from
-//! RGBA and from path data. A plain test on Windows and Linux (`tests/tray.rs`); on macOS the
-//! NSMenu and NSImage are main thread only, which the test harness isn't.
+//! notify icon or D-Bus item): built from a [Menu] (a header, labels, shortcuts, check marks,
+//! disabled and destructive items, separators, a submenu), rebuilt as it opens, kept while open
+//! (a new one waits for it to close), and items chosen through the OS's own path, reaching the
+//! app by id; icons from RGBA and from path data. A plain test on Windows and Linux
+//! (`tests/tray.rs`); on macOS the NSMenu and NSImage are main thread only, which the test
+//! harness isn't.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -16,10 +17,11 @@ fn menu(n: u32) -> Menu {
   let sizes =
     Menu::new(vec![Item::new("small", "Small").checked(true), Item::new("large", "Large")]);
   Menu::new(vec![
-    Item::new("header", &format!("Status {n}")).enabled(false),
+    Item::header(&format!("Status {n}")),
     Item::separator(),
     Item::new("size", "Size").submenu(sizes),
     Item::new("settings", "Settings…").key("cmd+comma"),
+    Item::new("reset", "Reset").destructive(),
     Item::new("quit", "Quit").key("cmd+q"),
   ])
 }
@@ -34,12 +36,14 @@ pub fn run() {
   };
 
   let want = [
-    "Status 0||off|disabled".to_string(),
+    "Status 0||off|disabled|header".to_string(),
     "-".into(),
     "Size||off|enabled".into(),
     "  Small||on|enabled".into(),
     "  Large||off|enabled".into(),
     format!("Settings…|{comma}|off|enabled"),
+    // No destructive style in the OS's menus: a plain item.
+    "Reset||off|enabled".into(),
     format!("Quit|{q}|off|enabled"),
   ];
   let items = |t: &Tray| t.describe()[1..].to_vec();
@@ -57,24 +61,27 @@ pub fn run() {
   let c = chosen.clone();
   tray.on_item(move |_, _, id| c.borrow_mut().push(id.to_owned()));
   tray.opening();
-  assert_eq!((*opened.borrow(), items(&tray)[0].as_str()), (1, "Status 1||off|disabled"));
+  assert_eq!((*opened.borrow(), items(&tray)[0].as_str()), (1, "Status 1||off|disabled|header"));
   tray.choose(&[3]);
   tray.choose(&[2, 1]);
+  // A header chooses nothing.
+  tray.choose(&[0]);
   tray.choose(&[4]);
-  assert_eq!(*chosen.borrow(), ["settings", "large", "quit"]);
+  tray.choose(&[5]);
+  assert_eq!(*chosen.borrow(), ["settings", "large", "reset", "quit"]);
 
   // Open, the menu stays as it is (its submenus too); the last one set comes as it closes.
   // (A click closes the menu on Linux: it is opened again first.)
   tray.closing();
   tray.opening();
-  assert_eq!(items(&tray)[0], "Status 2||off|disabled", "the refresh as it opens");
+  assert_eq!(items(&tray)[0], "Status 2||off|disabled|header", "the refresh as it opens");
   tray.set_menu(&menu(7));
   tray.set_menu(&menu(8));
-  assert_eq!(items(&tray)[0], "Status 2||off|disabled");
+  assert_eq!(items(&tray)[0], "Status 2||off|disabled|header");
   tray.closing();
-  assert_eq!(items(&tray)[0], "Status 8||off|disabled");
+  assert_eq!(items(&tray)[0], "Status 8||off|disabled|header");
   tray.set_menu(&menu(9));
-  assert_eq!(items(&tray)[0], "Status 9||off|disabled", "closed: at once");
+  assert_eq!(items(&tray)[0], "Status 9||off|disabled|header", "closed: at once");
 
   tray.set_icon(TrayIcon::path(24.0, "M2 2H22V22Z"));
   assert!(tray.describe()[0].starts_with("icon "));

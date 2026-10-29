@@ -1,7 +1,9 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! Menus: a pop-up menu of items over the window, opened by a control (its trigger) or at a
-//! point as a context menu ([Ui::menu_popup_at]), and a button that opens one ([Ui::menu]).
+//! point as a context menu ([Ui::menu_popup_at]), a button that opens one ([Ui::menu]), and
+//! the context menu of any element from a [Menu] ([Ui::context_menu]): the platform's own in a
+//! window, drawn from the model in the harness.
 //!
 //! ```ignore
 //! ui.id("view").menu("View", |ui| {
@@ -19,11 +21,14 @@ use std::time::Duration;
 
 use keyboard_types::NamedKey;
 
+use crate::app::Event;
 use crate::keys::{Command, Key, Move};
+use crate::menu::{Item, Menu};
 use crate::scene::{Point, Rect, alpha};
+use crate::ui::containers::popup::check as check_mark;
 use crate::ui::containers::scroll::{Bars, MIN_THUMB};
 use crate::ui::{
-  Align, Behavior, Button, Float, Id, Response, Role, State, Style, Ui, grow, pct, px,
+  Align, Behavior, Button, Float, Id, Response, Role, State, Style, Ui, UiState, grow, pct, px,
 };
 
 /// Paint order of menus among overlays.
@@ -137,9 +142,10 @@ impl Ui<'_> {
 
   /// Whether the menu of the control `id` ([Ui::menu_popup]) is open now: as the input since
   /// the last frame left it, not as that frame laid it out, so a trigger drawn before its menu
-  /// shows it closed in the very frame it closes.
+  /// shows it closed in the very frame it closes. A native context menu ([Ui::context_menu]) is
+  /// open until its answer comes.
   pub fn menu_open(&self, id: Id) -> bool {
-    self.st.store.peek::<Open>(id).is_some_and(|o| o.open)
+    self.st.menu_open(id)
   }
 
   /// The menu of the control `id` (its trigger, built before), opened and closed by `toggle`
@@ -477,6 +483,134 @@ impl Ui<'_> {
     let on = cur || !inside && self.hovered(id);
     Behavior { on, clicked: self.clicked(id) || run, ..self.pointer_state(id) }
   }
+}
+
+impl Ui<'_> {
+  /// The context menu of the element `id`, built before or after it: a secondary press on it or
+  /// inside it ([Ui::context_press]) opens `menu()` at the pointer (the closure runs only then,
+  /// and while a drawn one is open); returns the id of the item chosen. In a window the
+  /// platform shows its own menu ([crate::Runtime::set_native_menus]), free to go past the
+  /// window's edges, and the answer comes in a later pass as [Event::Menu]; in the harness it is
+  /// drawn ([Ui::menu_popup_at] of `id`): a check column, headers in secondary text, shortcuts
+  /// at the right, destructive items red, a submenu's items under its label; each item
+  /// `id.key(item.id)`.
+  pub fn context_menu(&mut self, id: Id, menu: impl FnOnce() -> Menu) -> Option<String> {
+    let at = self.context_press(id);
+    self.context_menu_at(id, at, menu)
+  }
+
+  /// [Ui::context_menu] opened at `at` by a behaviour that saw the press itself (a field's edit
+  /// menu, [crate::EditMenu]).
+  pub fn context_menu_at(
+    &mut self,
+    id: Id,
+    at: Option<Point>,
+    menu: impl FnOnce() -> Menu,
+  ) -> Option<String> {
+    let answer = self.st.take(id, |e| match e {
+      Event::Menu { item, .. } => Some(item.clone()),
+      _ => None,
+    });
+    if let Some(item) = answer {
+      self.state::<Open>(id).open = false;
+      return item;
+    }
+
+    // Asked for, it stays open until the answer comes.
+    if self.st.native_menus {
+      if at.is_some() || self.menu_open(id) {
+        self.state::<Open>(id).open = true;
+      }
+
+      if let Some(at) = at {
+        self.st.context_menu = Some((id, at, menu()));
+      }
+
+      return None;
+    }
+
+    let t = self.theme();
+    let menu = (at.is_some() || self.menu_open(id)).then(menu);
+    let (check, mut chosen) = (menu.as_ref().is_some_and(|m| checks(&m.items)), None);
+    self.menu_popup_at(id, at, t.popup().min_w(160.0), |ui| {
+      for it in menu.iter().flat_map(|m| &m.items) {
+        ui.model_item(id, it, check, &mut chosen);
+      }
+    });
+    chosen
+  }
+
+  /// An item of a drawn context menu from its model: a line, a header (a submenu's label, its
+  /// items under it), or an item `id.key(it.id)` with its check column, its label (red when
+  /// destructive) and its shortcut; `chosen` takes its id when clicked.
+  fn model_item(&mut self, id: Id, it: &Item, check: bool, chosen: &mut Option<String>) {
+    let t = self.theme();
+    let row = |left: f32| {
+      let s = Style::new().w(grow()).h(px(t.sizes.item_h)).pads([0.0, 10.0, 0.0, left]);
+      s.gap(4.0).align(Align::Start, Align::Center)
+    };
+    if it.separator {
+      let line = Style::new().w(grow()).h(px(1.0)).bg(t.line);
+      self.row(Style::new().w(grow()).pads([5.0, 10.0, 5.0, 10.0]), |ui| _ = ui.el(line));
+      return;
+    }
+
+    // Under the check column, the item's text.
+    if it.header || it.submenu.is_some() {
+      self.row(row(if check { 26.0 } else { 10.0 }), |ui| ui.text(&it.label, t.section()));
+      for sub in it.submenu.iter().flat_map(|m| &m.items) {
+        self.model_item(id, sub, check, chosen);
+      }
+
+      return;
+    }
+
+    // Named by its label alone, its shortcut apart as in the OS's menus.
+    let item = id.key(it.id.as_str());
+    let b = self.a11y_label(&it.label).disabled(!it.enabled).menu_item_behavior(item, &it.label);
+    let (bg, ink) = match b.on {
+      true => (t.accent, t.on_accent),
+      false => (alpha(t.accent, 0.0), if it.destructive { t.danger } else { t.text }),
+    };
+
+    let s = row(if check { 6.0 } else { 10.0 })
+      .radius((t.sizes.menu_radius - 5.0).max(t.radius))
+      .bg(bg)
+      .opacity(if b.disabled { t.disabled } else { 1.0 });
+    let (on, key) = (it.checked, it.key_label());
+    self.a11y(item, Role::MenuItem).state(State::Selected, on);
+    self.with_id(item).row(b.pointer(s), |ui| {
+      if check {
+        ui.canvas(Style::new().w(px(16.0)).h(px(16.0)), move |f, r| {
+          if on {
+            check_mark(f, r, ink);
+          }
+        });
+      }
+
+      ui.text(&it.label, t.label().color(ink));
+      if !key.is_empty() {
+        ui.el(Style::new().w(grow()).min_w(20.0));
+        ui.text(&key, t.label().color(if b.on { ink } else { t.muted }).nowrap());
+      }
+    });
+    if b.clicked {
+      *chosen = Some(it.id.clone());
+    }
+  }
+}
+
+impl UiState {
+  /// [Ui::menu_open] as the last frame and the input since left it.
+  pub fn menu_open(&self, id: Id) -> bool {
+    self.store.peek::<Open>(id).is_some_and(|o| o.open)
+  }
+}
+
+/// Whether any of `items` has a check mark to show, in a submenu too: the menu has a column
+/// for them then.
+fn checks(items: &[Item]) -> bool {
+  items.iter().any(|it| it.checkable || it.submenu.as_ref().is_some_and(|m| checks(&m.items)))
 }
 
 #[cfg(test)]

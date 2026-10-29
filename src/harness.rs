@@ -13,6 +13,7 @@ use crate::app::{App, Clock, Event, Ime, MemClipboard, MouseButton, Runtime};
 use crate::cpu::{self, Pixels};
 use crate::file_dialog::FileDialog;
 use crate::keys::{self, Key, KeyEvent, Os};
+use crate::menu::Menu;
 use crate::scene::{Point, Rect, Size};
 use crate::text::edit::{Editor, utf16_len};
 use crate::ui::{Action, Id, Kind, Role};
@@ -63,6 +64,21 @@ impl<A: App> Harness<A> {
     let asked = self.rt.take_file_dialog()?;
     self.event(Event::FileDialog(answer.map(Path::to_path_buf)));
     Some(asked)
+  }
+
+  /// Plays a platform that shows context menus itself ([crate::Runtime::set_native_menus]):
+  /// they are asked for, not drawn, and [Harness::context_menu] answers them.
+  pub fn native_menus(&mut self) {
+    self.rt.set_native_menus(true);
+  }
+
+  /// Answers the context menu the app asked for ([crate::Ui::context_menu]) as the person
+  /// would, choosing the item of id `answer` (`None` dismisses it), and returns where and what
+  /// it asked; `None` and no answer when it asked for none.
+  pub fn context_menu(&mut self, answer: Option<&str>) -> Option<(Point, Menu)> {
+    let (on, at, menu) = self.rt.take_context_menu()?;
+    self.event(Event::Menu { on, item: answer.map(str::to_owned) });
+    Some((at, menu))
   }
 
   pub fn move_to(&mut self, x: f32, y: f32) -> bool {

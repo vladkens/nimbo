@@ -214,6 +214,11 @@ pub struct UiState {
   asked: Option<Size>,
   /// The file panel asked for ([Ui::file_dialog]), until the platform takes it.
   pub(crate) file_dialog: Option<crate::FileDialog>,
+  /// The platform shows context menus ([crate::Runtime::set_native_menus]); the one asked for
+  /// ([Ui::context_menu]) until it takes it; the press that opened one last.
+  pub(crate) native_menus: bool,
+  pub(crate) context_menu: Option<(Id, Point, crate::Menu)>,
+  pub(crate) menu_seq: u32,
   /// The height of the title bar over the content and the window's title ([Ui::titlebar]).
   pub(crate) titlebar: Option<(f32, &'static str)>,
   /// The images [Ui::rgba_image] added: their pixels' hash, the image, and whether a view built
@@ -272,6 +277,9 @@ impl Default for UiState {
       resize: None,
       asked: None,
       file_dialog: None,
+      native_menus: false,
+      context_menu: None,
+      menu_seq: 0,
       titlebar: None,
       pictures: Vec::new(),
       grab: None,
