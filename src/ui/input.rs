@@ -112,6 +112,8 @@ pub(crate) struct Input {
   pub ended: Option<(Press, Point)>,
   /// The view asked for every pointer move ([super::Ui::track_moves]).
   pub moves: bool,
+  /// A Control-click is down on the Mac: the right button's until it is let go.
+  control: bool,
   scratch: Vec<Id>,
 }
 
@@ -254,13 +256,10 @@ impl Ui<'_> {
   /// `id` has one from this call ([Ui::context_menu]).
   pub fn context_press(&mut self, id: Id) -> Option<Point> {
     self.st.tree.menus.push(id);
-    let (input, mac) = (&self.st.input, self.st.os == Os::Mac);
-    // Control-click is the Mac's secondary click too.
-    let right = |b: MouseButton, m: Modifiers| {
-      b == MouseButton::Right || mac && b == MouseButton::Left && m == Modifiers::CONTROL
-    };
-    let up = input.click.filter(|c| right(c.button, c.mods)).map(|c| (c.id, c.pos, c.seq));
-    let down = input.press.filter(|p| right(p.button, p.mods) && self.st.os != Os::Windows);
+    let input = &self.st.input;
+    let right = MouseButton::Right;
+    let up = input.click.filter(|c| c.button == right).map(|c| (c.id, c.pos, c.seq));
+    let down = input.press.filter(|p| p.button == right && self.st.os != Os::Windows);
     let down = down.map(|p| (p.id, p.pos, p.seq));
     let (on, at, seq) = down.or(up).filter(|p| p.2 != self.st.menu_seq)?;
     let t = &self.st.last;
@@ -294,6 +293,23 @@ impl UiState {
   /// follows isn't the user's. Returns whether there was one.
   pub(crate) fn cancel_press(&mut self) -> bool {
     self.input.press.take().is_some()
+  }
+
+  /// On the Mac a Control-click is the secondary click from its press to its release: the
+  /// right button's, so no left press or release reaches a field or a button under it.
+  pub(crate) fn secondary(&mut self, ev: Event) -> Event {
+    let ctrl = |m: Modifiers| self.os == Os::Mac && m == Modifiers::CONTROL;
+    match ev {
+      Event::MouseDown { pos, button: MouseButton::Left, clicks, mods } if ctrl(mods) => {
+        self.input.control = true;
+        Event::MouseDown { pos, button: MouseButton::Right, clicks, mods }
+      }
+      Event::MouseUp { pos, button: MouseButton::Left, mods } if self.input.control => {
+        self.input.control = false;
+        Event::MouseUp { pos, button: MouseButton::Right, mods }
+      }
+      ev => ev,
+    }
   }
 
   /// Routes a pointer event through the last frame's tree: hover, press, click, focus and

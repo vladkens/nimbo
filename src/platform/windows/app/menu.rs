@@ -77,11 +77,12 @@ fn flags(it: &Item) -> MENU_ITEM_FLAGS {
     return MF_SEPARATOR;
   }
 
-  let on = |c: bool, f| if c { f } else { 0 };
+  // A header is a greyed line of text, whatever else it carries: no submenu, no check.
+  let (on, head) = (|c: bool, f| if c { f } else { 0 }, it.header);
   MF_STRING
-    | on(it.submenu.is_some(), MF_POPUP)
-    | on(it.checked, MF_CHECKED)
-    | on(!it.enabled, MF_GRAYED)
+    | on(it.submenu.is_some() && !head, MF_POPUP)
+    | on(it.checked && !head, MF_CHECKED)
+    | on(!it.enabled || head, MF_GRAYED)
 }
 
 /// An item's text: its label with `&` doubled (one alone marks the access key), then its key
@@ -107,5 +108,7 @@ mod tests {
     );
     assert_eq!(flags(&Item::separator()), MF_SEPARATOR);
     assert_eq!(flags(&Item::new("s", "S").submenu(Menu::default())), MF_STRING | MF_POPUP);
+    let head = Item::header("H").enabled(true).checked(true).submenu(Menu::default());
+    assert_eq!(flags(&head), MF_STRING | MF_GRAYED, "a header, whatever it carries");
   }
 }

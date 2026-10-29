@@ -25,7 +25,7 @@ pub fn nodes(menu: &Menu) -> Vec<Node<'_>> {
       let id = out.len();
       out.push(Node { item: Some(it), children: Vec::new() });
       ids.push(id);
-      if let Some(sub) = it.submenu.as_ref().filter(|_| !it.separator) {
+      if let Some(sub) = it.submenu.as_ref().filter(|_| !it.separator && !it.header) {
         out[id].children = add(&sub.items, out);
       }
     }
@@ -52,8 +52,9 @@ pub fn props(node: &Node) -> V {
     return V::dict(vec![("type", V::s("separator"))]);
   }
 
-  let mut p = vec![("label", V::S(it.label.replace('_', "__"))), ("enabled", V::B(it.enabled))];
-  if it.checkable || it.checked {
+  let mut p =
+    vec![("label", V::S(it.label.replace('_', "__"))), ("enabled", V::B(it.enabled && !it.header))];
+  if !it.header && (it.checkable || it.checked) {
     p.extend([("toggle-type", V::s("checkmark")), ("toggle-state", V::I(it.checked as i32))]);
   }
 
@@ -142,6 +143,17 @@ mod tests {
     assert_eq!(n[0].children, [1, 2, 3, 6]);
     assert_eq!(n[3].children, [4, 5]);
     assert_eq!((at(&n, &[2, 1]), at(&n, &[3]), at(&n, &[9])), (Some(5), Some(6), None));
+  }
+
+  #[test]
+  fn a_header_is_disabled_and_has_no_items() {
+    let sub = Menu::new(vec![Item::new("a", "A")]);
+    let m = Menu::new(vec![Item::header("Head").enabled(true).submenu(sub)]);
+    let n = nodes(&m);
+    assert_eq!((n.len(), n[1].children.len()), (2, 0));
+    let entry = |k: &str, v: V| V::Entry(Box::new(V::s(k)), Box::new(V::Var(Box::new(v))));
+    let V::Array(_, head) = props(&n[1]) else { panic!() };
+    assert!(head.contains(&entry("enabled", V::B(false))));
   }
 
   #[test]

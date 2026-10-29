@@ -245,6 +245,11 @@ define_class!(
         self.send(Event::Ime(Ime::Unmark));
       }
 
+      // A Control-click is the secondary click: its press is the context menu's event.
+      if mods(event) == Modifiers::CONTROL {
+        self.ivars().press.replace(Some(event.retain()));
+      }
+
       self.button(event, true);
     }
 
@@ -689,6 +694,8 @@ impl View {
       let p = self.location(e);
       (p.x - at.x).abs().max((p.y - at.y).abs()) < 1.0
     });
+    // The window lives while its menu is open, even if the app closes it meanwhile.
+    let _window = self.window();
     let item = super::app::menu::popup(self, press.as_deref(), at, &menu);
     // Any button the menu took the release of: the right one, the left of a Control-click.
     let held = self.ivars().held.get();

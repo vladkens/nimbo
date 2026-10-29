@@ -559,7 +559,8 @@ impl Ui<'_> {
     // Under the check column, the item's text.
     if it.header || it.submenu.is_some() {
       self.row(row(if check { 26.0 } else { 10.0 }), |ui| ui.text(&it.label, t.section()));
-      for sub in it.submenu.iter().flat_map(|m| &m.items) {
+      // A header is only its title, whatever else it carries.
+      for sub in it.submenu.iter().filter(|_| !it.header).flat_map(|m| &m.items) {
         self.model_item(id, sub, check, on && it.enabled, chosen);
       }
 
@@ -825,6 +826,46 @@ mod tests {
     h.click_id(Id::of("el").key("a"));
     h.frame();
     assert_eq!(h.app().chosen, None);
+  }
+
+  /// A button inside an element with a menu; its clicks counted.
+  #[derive(Default)]
+  struct Boxed {
+    clicks: usize,
+  }
+
+  impl App for Boxed {
+    fn view(&mut self, ui: &mut Ui) {
+      let r = ui.id("box").row(Style::new().w(px(200.0)).h(px(60.0)).pad(10.0), |ui| {
+        if ui.id("b").button("B").clicked {
+          self.clicks += 1;
+        }
+      });
+      ui.context_menu(r.id, || Menu::new(vec![Item::new("x", "X")]));
+    }
+  }
+
+  #[test]
+  fn a_control_click_on_a_button_is_no_click_on_the_mac() {
+    use crate::keys::Os;
+    let mut h = Harness::new(Boxed::default(), Size::new(300.0, 300.0), 1.0);
+    h.set_os(Os::Mac);
+    h.native_menus();
+    h.frame();
+    let r = h.rect(Id::of("b")).unwrap();
+    let pos = Point::new(r.x + r.w / 2.0, r.y + r.h / 2.0);
+    let (button, mods) = (crate::app::MouseButton::Left, Modifiers::CONTROL);
+    h.move_to(pos.x, pos.y);
+    h.event(Event::MouseDown { pos, button, clicks: 1, mods });
+    h.frame();
+    h.event(Event::MouseUp { pos, button, mods });
+    h.frame();
+    assert!(h.context_menu(None).is_some(), "the box's menu");
+    h.frame();
+    assert_eq!(h.app().clicks, 0);
+    h.click(pos.x, pos.y);
+    h.frame();
+    assert_eq!(h.app().clicks, 1, "a plain click still clicks");
   }
 
   #[test]

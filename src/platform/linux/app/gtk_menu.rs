@@ -1,9 +1,10 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! Context menus on Linux as GtkMenus ([crate::Ui::context_menu]): the menu a window asked for
-//! ([crate::Runtime::take_context_menu]) is built and popped up from an idle, with no window
-//! borrowed, at the point asked, the secondary press that asked for it as its trigger event
-//! (the seat and button GTK grabs with, which Wayland's `xdg_popup` grab needs).
+//! ([crate::Runtime::take_context_menu]) is built as it asks, which runs none of our callbacks,
+//! and popped up from an idle, with no window borrowed, at the point asked, the secondary press
+//! that asked for it as its trigger event (the seat and button GTK grabs with, which Wayland's
+//! `xdg_popup` grab needs).
 //!
 //! GTK doesn't block while the menu is up: frames and timers go on. It emits `deactivate` before
 //! the chosen item's `activate` (`gtk_menu_shell_activate_item` in GTK 3.24's `gtkmenushell.c`,

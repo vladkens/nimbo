@@ -672,6 +672,7 @@ impl<A: App> Runtime<A> {
   /// The pointer follows the mouse's events; a scroll or pinch carries its own position and
   /// may come after the pointer left (macOS momentum goes on to the view it started in).
   fn pointer(&mut self, ev: Event) -> bool {
+    let ev = self.ui.secondary(ev);
     match ev {
       Event::MouseMove { pos, .. } | Event::MouseDown { pos, .. } | Event::MouseUp { pos, .. } => {
         self.mouse = Some(pos)

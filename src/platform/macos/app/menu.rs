@@ -13,7 +13,7 @@ use objc2_app_kit::{
   NSControlStateValueOff, NSControlStateValueOn, NSEvent, NSEventModifierFlags, NSMenu, NSMenuItem,
   NSView,
 };
-use objc2_foundation::{NSObject, NSPoint, NSString};
+use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSString};
 
 use crate::keys::{Key, Shortcut, f_key};
 use crate::menu::{Item, Menu, choices};
@@ -46,8 +46,8 @@ define_class!(
 /// dismissed, and at once while another menu is open. With the secondary press that asked for
 /// it as a context menu (`popUpContextMenu:withEvent:forView:`), else at `at` in the view. The
 /// chosen item's action comes before the call returns, from its tracking loop (the plan's VM
-/// check confirms it). A destructive item shows plain: NSMenuItem has no such style (Apple's
-/// NSMenuItem docs, 2026-10-29).
+/// check confirms it). Only the menu's items show. A destructive item shows plain: NSMenuItem has
+/// no such style (Apple's NSMenuItem docs, 2026-10-29).
 pub fn popup(view: &NSView, press: Option<&NSEvent>, at: Point, menu: &Menu) -> Option<String> {
   if OPEN.replace(true) {
     return None;
@@ -58,9 +58,21 @@ pub fn popup(view: &NSView, press: Option<&NSEvent>, at: Point, menu: &Menu) -> 
   let target: Retained<Target> = unsafe { msg_send![super(target), init] };
   let ns = NSMenu::new(mtm);
   ns.setAutoenablesItems(false);
+  // No plug-in items, nor Writing Tools' where macOS has them (15.2+, Apple's NSMenu docs,
+  // 2026-10-30).
+  ns.setAllowsContextMenuPlugIns(false);
+  if ns.respondsToSelector(sel!(setAutomaticallyInsertsWritingToolsItems:)) {
+    ns.setAutomaticallyInsertsWritingToolsItems(false);
+  }
+
   fill(mtm, &ns, &menu.items, &target, &mut 0);
+  // For the window's frame view, not ours: for a view that takes text AppKit adds its own
+  // items (AutoFill, Writing Tools, Services), as Electron's menus show none for a view that
+  // isn't a web page's (electron/electron#45138, 2025-03-28); its user defaults
+  // (`NSAutoFillHeuristicsEnabled`) leave the AutoFill item there (macOS 27, 2026-10-30).
+  let frame = unsafe { view.superview() };
   match press {
-    Some(e) => NSMenu::popUpContextMenu_withEvent_forView(&ns, e, view),
+    Some(e) => NSMenu::popUpContextMenu_withEvent_forView(&ns, e, frame.as_deref().unwrap_or(view)),
     None => {
       let p = NSPoint::new(at.x as f64, at.y as f64);
       ns.popUpMenuPositioningItem_atLocation_inView(None, p, Some(view));

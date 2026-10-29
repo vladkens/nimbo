@@ -574,6 +574,26 @@ fn a_native_edit_menu_is_asked_for_and_answered() {
   assert!(h.context_menu(None).is_none(), "asked once");
 }
 
+/// On the Mac a Control-click is the secondary click from its press on: the selection stays as
+/// it was (the press neither moves the caret nor selects as it is let go), and the menu's Paste
+/// replaces only the selection.
+#[test]
+fn a_control_click_keeps_the_selection_for_its_menu() {
+  let h = &mut fields_on(Os::Mac, "hello world", "XY");
+  h.native_menus();
+  h.key(NamedKey::ArrowLeft, Modifiers::ALT | SHIFT);
+  let r = h.rect(Id::of(NAME)).unwrap();
+  let (pos, button) = (nimbo::Point::new(r.x + 12.0, r.y + 8.0), nimbo::MouseButton::Left);
+  h.move_to(pos.x, pos.y);
+  h.event(Event::MouseDown { pos, button, clicks: 1, mods: CTRL });
+  h.frame();
+  h.event(Event::MouseUp { pos, button, mods: CTRL });
+  h.frame();
+  assert!(h.context_menu(Some("paste")).is_some(), "its menu asked for");
+  h.frame();
+  assert_eq!(h.app().name, "hello XY");
+}
+
 /// Paste in the edit menu pastes the clipboard's text; with none it is disabled.
 #[test]
 fn the_edit_menus_paste_pastes() {

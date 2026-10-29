@@ -36,8 +36,6 @@ use std::collections::HashSet;
 use std::hash::BuildHasherDefault;
 use std::ops::Range;
 
-use keyboard_types::Modifiers;
-
 use crate::app::MouseButton;
 use crate::keys::{Binding, Command, Move, Os, bind};
 use crate::scene::{Point, Rect, alpha};
@@ -476,11 +474,8 @@ impl<'a> Ui<'a> {
     multi: bool,
     key: &dyn Fn(usize) -> u64,
   ) {
-    // The secondary button's press, on Windows its release; a Control-click is the Mac's.
-    let (win, mac) = (self.st.os == Os::Windows, self.st.os == Os::Mac);
-    let second = |b: MouseButton, m: Modifiers| {
-      b == MouseButton::Right || mac && b == MouseButton::Left && m == Modifiers::CONTROL
-    };
+    // The secondary button's press, on Windows its release (a Control-click is the Mac's).
+    let win = self.st.os == Os::Windows;
     let press = self
       .press()
       .filter(|p| p.button == MouseButton::Left || p.button == MouseButton::Right && !win);
@@ -497,7 +492,7 @@ impl<'a> Ui<'a> {
 
     st.pressed = press.map(|p| p.seq).or(click.map(|c| c.seq)).or(st.pressed);
     let Some((on, mods, clicks, button, seq)) = hit else { return };
-    let right = second(button, mods);
+    let right = button == MouseButton::Right;
     // Its index as built, a hint that saves a scan unless the rows moved since; a secondary
     // press on an element in a row is the row's, unless that element has a menu of its own.
     let row = |on: Id| st.shown.iter().position(|&k| id.key(("row", k)) == on);
@@ -525,8 +520,9 @@ impl<'a> Ui<'a> {
     let Some((k, i)) =
       at.and_then(|at| Some((st.shown[at], find((st.shown[at], st.from + at), n, key)?)))
     else {
-      // Off the rows (the scrollbar, the padding) it opens no menu: the list's is a row's.
-      if right && self.st.last.within(on, id) {
+      // Off the rows (the scrollbar, the padding) the list's menu, a row's, opens none; with
+      // none of its own, its parent's does.
+      if right && self.st.last.menus.contains(&id) && self.st.last.within(on, id) {
         self.st.menu_seq = seq;
       }
 
@@ -787,5 +783,30 @@ mod tests {
     h.frame();
     assert_eq!(asked(&mut h).as_deref(), Some("own"));
     assert_eq!(h.app().sel.cursor(), Some(2));
+  }
+
+  /// Two rows in a list with no menu, inside an element with one.
+  struct Inside;
+
+  impl crate::App for Inside {
+    fn view(&mut self, ui: &mut Ui) {
+      let r = ui.id("outer").col(Style::new().w(px(200.0)).h(px(200.0)), |ui| {
+        let list = List::new(2, 20.0).style(Style::new().grow());
+        list.show(ui.id("list"), |ui, _| ui.label("row"));
+      });
+      ui.context_menu(r.id, || crate::Menu::new(vec![crate::Item::new("outer", "Outer")]));
+    }
+  }
+
+  #[test]
+  fn a_list_with_no_menu_leaves_the_press_off_its_rows_to_its_parent() {
+    use crate::harness::Harness;
+    let mut h = Harness::new(Inside, Size::new(300.0, 300.0), 1.0);
+    h.native_menus();
+    h.frame();
+    h.right_click(100.0, 150.0);
+    h.frame();
+    let asked = h.context_menu(None).map(|(_, m)| m.items[0].id.clone());
+    assert_eq!(asked.as_deref(), Some("outer"));
   }
 }
