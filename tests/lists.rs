@@ -222,9 +222,10 @@ fn right(h: &mut H, id: Id, up: bool) {
 fn a_right_click_opens_the_row_menu_over_the_selection() {
   for os in [Os::Mac, Os::Windows] {
     let h = &mut scrolled();
+    // Selected first: a list's Cmd-click is the host's, Ctrl off the Mac, a right-click on it.
+    select_some(h);
     h.set_os(os);
     let popup = Id::of(LIST).key("menu");
-    select_some(h);
     right(h, row(103), false);
     // macOS opens it as the button goes down, Windows as it is let go.
     assert_eq!(h.rect(popup).is_some(), os == Os::Mac, "{os:?}");
@@ -262,9 +263,9 @@ fn a_right_click_opens_the_row_menu_over_the_selection() {
 fn a_right_click_off_the_rows_opens_no_menu() {
   for os in [Os::Mac, Os::Windows] {
     let h = &mut scrolled();
+    select_some(h);
     h.set_os(os);
     let (popup, thumb) = (Id::of(LIST).key("menu"), Id::of(LIST).key(("thumb", 1usize)));
-    select_some(h);
     right(h, thumb, false);
     right(h, thumb, true);
     assert!(h.rect(popup).is_none(), "{os:?}: drawn");
