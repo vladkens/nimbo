@@ -719,9 +719,12 @@ def platform(name: str) -> str | None:
   ('macos-aarch64', 'windows-aarch64')
   >>> platform("Wavo-dev-linux-x86_64.AppImage"), platform("Wavo-dev-linux-aarch64.deb")
   ('linux-x86_64', 'linux-aarch64')
+  >>> platform("Wavo-linux-x86_64-macos-aarch64.dmg")
+  'macos-aarch64'
   """
-  m = re.search(r"-(macos|windows|linux)-(x86_64|aarch64|x64|arm64)(?=[-.]|$)", name)
-  return f"{m[1]}-{arch(m[2].replace('x64', 'x86_64'))}" if m else None
+  # The last: a label may look like one.
+  found = re.findall(r"-(macos|windows|linux)-(x86_64|aarch64|x64|arm64)(?=[-.]|$)", name)
+  return f"{found[-1][0]}-{arch(found[-1][1].replace('x64', 'x86_64'))}" if found else None
 
 
 def body(version: str, packages: list[tuple[str, str, bytes]]) -> bytes:
