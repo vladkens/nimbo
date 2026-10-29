@@ -1,19 +1,19 @@
 # Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
-"""Makes an app's release files from its Cargo.toml: the macOS app and DMG, the Windows
-installer, the AppImage and .deb, and the signed update feed (src/update.rs).
+"""Makes an app's release files from its Cargo.toml: the macOS app and DMG, the Windows setup,
+the AppImage and .deb, and the signed update feed (src/update.rs).
 
 The config is the package's `[package.metadata.nimbo]` (`id`, `name`, `icon`, a 1024 px PNG,
-`comment`, the tables `macos`, `linux` and `windows`), its version and binary, read by `cargo
-metadata --no-deps`, which compiles nothing: a plain `python3` (3.9+) with the standard library runs
-this, beside cargo and the OS's tools (on macOS the Command Line Tools' `codesign`); the icons,
-the Mach-O reading and the Windows exe's resources are its own. The binary is built already, by
-default `<target dir>/<triple>/dist/<bin>`, the target this machine's arch on the command's OS. The
-files, in `--out` (`<target dir>/distrib`), are `<Name>-v<version>-<platform>.<ext>`, or
-`<Name>-<label>-<platform>.<ext>` with `--label` (`dev`, which rust-publish renames `-vX.Y.Z` on a
-release). `app` writes `<target dir>/<Name>.app`, which `dmg` packs, or the one `--app` gives,
-never signed again. `dist` runs this OS's steps: `app` and `dmg`, `setup`, or `appimage` and `deb`.
-Locally codesign takes no timestamp, so a Developer ID signs offline; in CI (`$CI`) it does, and
-macos-sign signs with one anyway. One table per OS:
+`comment`, the tables `macos`, `linux` and `windows`), its version, binary and `repository`, read
+by `cargo metadata --no-deps`, which compiles nothing: a plain `python3` (3.9+) with the standard
+library runs this, beside cargo and the tools below; the icons, the Mach-O reading and the Windows
+exe's resources are its own. The binary is built already, by default
+`<target dir>/<triple>/dist/<bin>`, the target this machine's arch on the command's OS. The files,
+in `--out` (`<target dir>/distrib`), are `<Name>-v<version>-<platform>.<ext>`, or
+`<Name>-<label>-<platform>.<ext>` with `--label` (`dev`, or a release's `vX.Y.Z`). `app` writes
+`<target dir>/<Name>.app`, which `dmg` packs, or the one `--app` gives, never signed again. `dist`
+runs this OS's steps locally: `app` and `dmg`, `setup`, or `appimage` and `deb`. On a Mac codesign
+signs, with no timestamp locally, so a Developer ID signs offline, and with one in CI (`$CI`). One
+table per OS:
 
   [package.metadata.nimbo]
   id = "me.vladkens.wavo"
@@ -33,25 +33,28 @@ macos-sign signs with one anyway. One table per OS:
   deb-package = "wavo"
   deb-depends = ["libasound2 | libasound2t64"]
 
-The macOS sign job compiles nothing: it checks nimbo out at the rev the app's Cargo.lock pins
-(`git+https://github.com/vladkens/nimbo…#<sha>`) and runs `app` and `dmg` from there, which sign
-with its Developer ID; vladkens/actions' macos-sign notarizes and staples the DMG. An app's
-Makefile finds nimbo's checkout by `cargo metadata` and runs a line per target:
+In CI one Ubuntu job (`apt-get install nsis hfsprogs`) makes every file from bare binaries. Three
+build jobs, on macOS, Windows and Linux, each run `cargo build` for both arches and copy each
+binary to `target/distrib/<triple>/<bin>[.exe]`, nothing else; the publish job downloads them into
+its `target/distrib` and runs `release` there with the secrets in its env. That reads only
+`<triple>/<bin>[.exe]` (anything else fails it: the build jobs ran dependencies' build scripts) and
+writes beside them, per triple, the DMG, the setup, or the AppImage and .deb, then with `--tag`
+update.txt, its urls `<repository>/releases/download/<tag>/<file>`. An app's Makefile finds
+nimbo's checkout, the rev its Cargo.lock pins, by `cargo metadata`:
 
   NIMBO = $(shell cargo metadata --format-version 1 --locked | python3 -c 'import json, os, sys; \
     print(next(os.path.dirname(p["manifest_path"]) for p in json.load(sys.stdin)["packages"] \
     if p["name"] == "nimbo"))')
-  dist:
-  	cargo build --locked --profile dist --target aarch64-apple-darwin
-  	python3 $(NIMBO)/scripts/pack.py dist --label dev --target aarch64-apple-darwin
+  release:
+  	python3 $(NIMBO)/scripts/pack.py release target/distrib --label $(LABEL) \
+  	  $(if $(TAG),--tag $(TAG))
 
-Off macOS (the Ubuntu publish job) `app` and `dmg` make the same files with no Apple tool:
-rcodesign signs the app with APPLE_CERTIFICATE (a base64 .p12) and APPLE_CERTIFICATE_PASSWORD
-for notarization, else ad hoc; the DMG is an HFS+ image by `mkfs.hfsplus` (apt's hfsprogs) and
-libdmg-hfsplus's `hfsplus` and `dmg` ($NIMBO_TOOLS, a directory with both, else fetched), then
-rcodesign signs it and, with APPLE_API_KEY (the .p8's text), APPLE_API_KEY_ID and
-APPLE_API_ISSUER, notarizes and staples it. A `v*` label is a release: a missing secret fails it.
-`setup` is NSIS's, built by makensis (apt's nsis, Homebrew's makensis on a Mac).
+There `app` and `dmg` use no Apple tool: rcodesign signs the app with APPLE_CERTIFICATE (a base64
+.p12) and APPLE_CERTIFICATE_PASSWORD for notarization, else ad hoc; the DMG is an HFS+ image by
+`mkfs.hfsplus` (hfsprogs) and libdmg-hfsplus's `hfsplus` and `dmg` ($NIMBO_TOOLS, a directory with
+both, else fetched), then rcodesign signs it and, with APPLE_API_KEY (the .p8's text),
+APPLE_API_KEY_ID and APPLE_API_ISSUER, notarizes and staples it. `setup` is NSIS's, built by
+makensis (also Homebrew's on a Mac). A `v*` label is a release: a missing secret fails it.
 
 `feed` writes update.txt: `version <v>`, a line per file, `<platform> <size> <sha512> <url>`, and
 last `sig <hex>`, the Ed25519 signature of every byte before it. A file's platform is in its name
@@ -61,6 +64,7 @@ version) and its name. The key, `--key <file>` or `$UPDATE_KEY`, is its seed in 
 the clipboard to keep (Bitwarden), the public key printed in hex, the app's `Feed::key`. Both need
 OpenSSL 3 (macOS's own openssl is LibreSSL).
 
+python3 scripts/pack.py release <dir> --label <dev|vX.Y.Z> [--tag <tag>] [--manifest <Cargo.toml>]
 python3 scripts/pack.py dist|app|setup|appimage|deb [--target <triple>] [--bin <path>] [--label <l>] [--out <dir>] [--manifest <Cargo.toml>]
 python3 scripts/pack.py dmg [--app <Name>.app] [--target <triple>] [--label <l>] [--out <dir>] [--manifest <Cargo.toml>]
 python3 scripts/pack.py feed [--key <file>] --url <base> [--out <dir>] [<platform>=]<file>...
@@ -124,6 +128,7 @@ class Config:
   root: Path
   target: Path
   label: str | None = None
+  repository: str = ""
 
 
 def stem(cfg: Config) -> str:
@@ -191,6 +196,7 @@ def parse(meta: dict, manifest: Path) -> Config:
     authors=authors,
     root=manifest.parent,
     target=Path(meta.get("target_directory") or manifest.parent / "target"),
+    repository=(pkg.get("repository") or "").rstrip("/").removesuffix(".git"),
   )
 
 
@@ -1810,13 +1816,120 @@ def feed_key(repo: str | None) -> None:
   print(public_key(pem(seed)))
 
 
+# MARK: Release
+# The release files of the build jobs' bare binaries, made on one job, which holds the secrets.
+
+OSES = ("apple-darwin", "pc-windows-msvc", "unknown-linux-gnu")
+TRIPLES = [f"{a}-{o}" for o in OSES for a in NAMES]
+LABEL = r"dev|v\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?"
+
+
+def binaries(cfg: Config, dir: Path) -> list[tuple[str, Path]]:
+  """The binaries in `dir`, each `<triple>/<bin>[.exe]`, in TRIPLES' order. Anything else there
+  exits, as does a binary of another OS or arch: the build jobs ran dependencies' build scripts,
+  and nothing but what they were to leave gets packed and signed."""
+  if not dir.is_dir():
+    sys.exit(f"pack: no folder {dir}")
+
+  found, bad = [], []
+  for entry in sorted(dir.iterdir()):
+    exe = cfg.bin + (".exe" if "-windows-" in entry.name else "")
+    kids = sorted(entry.iterdir()) if entry.is_dir() and not entry.is_symlink() else []
+    names = [k.name for k in kids]
+    if entry.name not in TRIPLES or names != [exe] or kids[0].is_symlink() or not kids[0].is_file():
+      bad.append(entry.name + (f" ({', '.join(names)})" if names else ""))
+      continue
+
+    kind = binary_kind(kids[0])
+    if kind != (entry.name.split("-", 1)[1], arch(entry.name)):
+      built = f"built for {kind[1]}-{kind[0]}" if kind else "no binary pack reads"
+      bad.append(f"{entry.name}/{exe}, {built}")
+      continue
+
+    found.append((entry.name, kids[0]))
+
+  if bad or not found:
+    sys.exit(
+      f"pack: {dir} holds only <x86_64|aarch64>-<{'|'.join(OSES)}>/{cfg.bin}[.exe]: refused "
+      + ("; ".join(bad) if bad else "an empty folder")
+    )
+
+  return sorted(found, key=lambda f: TRIPLES.index(f[0]))
+
+
+def binary_kind(path: Path) -> tuple[str, str] | None:
+  """The OS and arch a binary is for by its format, as a triple names them: Mach-O (one slice), PE
+  or ELF.
+
+  >>> import tempfile
+  >>> elf = Path(tempfile.mkdtemp()) / "a"
+  >>> _ = elf.write_bytes(b"\\x7fELF" + bytes(14) + struct.pack("<H", 0xB7))
+  >>> binary_kind(elf)
+  ('unknown-linux-gnu', 'aarch64')
+  """
+  data = path.read_bytes()
+  try:
+    if data[:4] == b"\x7fELF":
+      machine = {0x3E: "x86_64", 0xB7: "aarch64"}.get(struct.unpack_from("<H", data, 18)[0])
+      return ("unknown-linux-gnu", machine) if machine else None
+
+    if data[:2] == b"MZ":
+      opt = pe_headers(data)[0]
+      machine = struct.unpack_from("<H", data, opt - 20)[0]
+      return "pc-windows-msvc", "x86_64" if machine == 0x8664 else "aarch64"
+
+    (cpu, _), *more = macho(data)
+    cpu = {"arm64": "aarch64", "x86_64": "x86_64"}.get(cpu)
+    return ("apple-darwin", cpu) if cpu and not more else None
+  except (ValueError, struct.error):
+    return None
+
+
+def release(cfg: Config, dir: Path, tag: str | None) -> None:
+  """Per triple in `dir` its files at `dir`'s top level: the app's DMG, the setup, or the AppImage
+  and .deb; then, with `tag`, update.txt, signed by UPDATE_KEY, its urls the GitHub release's."""
+  if cfg.label.startswith("v") and cfg.label != f"v{cfg.version}":
+    sys.exit(f"pack: the label {cfg.label} is not Cargo.toml's version, {cfg.version}")
+
+  key = os.environ.get("UPDATE_KEY")
+  if tag and not key:
+    sys.exit("pack: --tag writes update.txt, signed: set UPDATE_KEY")
+
+  if tag and not cfg.repository.startswith("https://github.com/"):
+    sys.exit("pack: --tag: the feed's urls are the GitHub release's: `repository` in Cargo.toml")
+
+  files = []
+  for triple, binary in binaries(cfg, dir):
+    a = arch(triple)
+    if "darwin" in triple:
+      files.append(dmg(cfg, app(cfg, binary), triple, dir))
+      continue
+
+    if "windows" in triple:
+      made = [setup(cfg, binary, a, dir)]
+    else:
+      made = [appimage(cfg, binary, a, dir), deb(cfg, binary, a, dir)]
+
+    print(*made, sep="\n")
+    files += made
+
+  if tag:
+    # The updater takes the AppImage on Linux; a .deb is apt's.
+    url = f"{cfg.repository}/releases/download/{tag}"
+    feed(pem(key), cfg.version, url, [str(f) for f in files if f.suffix != ".deb"], dir)
+
+
 # MARK: Command line
 
 
 def main():
   ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-  ap.add_argument("command", choices=("dist", *OS, "feed", "feed-key"))
-  ap.add_argument("files", nargs="*", help="dmg: the .app (or --app); feed: [<platform>=]<file>")
+  ap.add_argument("command", choices=("dist", *OS, "release", "feed", "feed-key"))
+  ap.add_argument(
+    "files",
+    nargs="*",
+    help="dmg: the .app (or --app); release: the folder; feed: [<platform>=]<file>",
+  )
   ap.add_argument("--manifest", type=Path, default=Path("Cargo.toml"), help="the app's Cargo.toml")
   ap.add_argument("--target", help="the target triple, by default this machine's arch")
   ap.add_argument(
@@ -1827,6 +1940,7 @@ def main():
   ap.add_argument("--out", type=Path, help="where the files go, by default <target dir>/distrib")
   ap.add_argument("--key", type=Path, help="feed: the private key's file, else $UPDATE_KEY")
   ap.add_argument("--url", help="feed: where the files will be served, {version} the version")
+  ap.add_argument("--tag", help="release: the GitHub release's tag, for update.txt's urls")
   ap.add_argument("--public-key", action="store_true", help="feed: print the key's public half")
   ap.add_argument("--repo", help="feed-key: the secret's GitHub repo, by default the current one")
   args = ap.parse_intermixed_args()
@@ -1849,9 +1963,26 @@ def main():
   if args.label and not re.fullmatch(r"[A-Za-z0-9.-]+", args.label):
     ap.error("--label is letters, digits, dots and hyphens")
 
+  if args.command == "release":
+    if len(args.files) != 1 or args.target or args.bin or args.app or args.out:
+      ap.error("release takes the folder of the binaries, and no --target, --bin, --app or --out")
+
+    if not re.fullmatch(LABEL, args.label or ""):
+      ap.error("release needs --label dev or v<version>")
+
+    if args.tag and not re.fullmatch(r"[A-Za-z0-9._-]+", args.tag):
+      ap.error("--tag is letters, digits, dots, hyphens and underscores")
+
+  elif args.tag:
+    ap.error("--tag is release's")
+
   cfg = load(args.manifest)
   cfg.label = args.label
   out = args.out or cfg.target / "distrib"
+  if args.command == "release":
+    release(cfg, Path(args.files[0]), args.tag)
+    return
+
   if args.command == "feed":
     feed(pem(key), cfg.version, args.url, args.files, out)
     return
