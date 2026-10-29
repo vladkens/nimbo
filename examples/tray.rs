@@ -29,7 +29,7 @@ use nimbo::hotkey::{Edge, Hotkeys};
 use nimbo::instance::{self, Claim, Instance};
 use nimbo::paste::Paste;
 use nimbo::tray::{Item, Menu, Tray, TrayIcon};
-use nimbo::{AppInfo, Config, Main, Presence, Window, autostart, desktop};
+use nimbo::{AppInfo, Config, Main, Png, Presence, Window, autostart, desktop};
 
 pub const INFO: AppInfo =
   AppInfo { id: "com.example.nimbo-tray", name: "Nimbo Tray", presence: Presence::Accessory };
@@ -126,8 +126,9 @@ thread_local! {
 }
 
 fn start(main: &mut Main, instance: Option<Instance>) {
-  // Nothing off Linux; there the entry is written once, again when the executable moves.
-  let icon = (64, &counter::ICON[..]);
+  // Nothing off Linux; there the entry is written once, again when the executable moves, and
+  // only then is the icon decoded.
+  let icon = Png::icon(include_bytes!("../docs/brand/mark-iris.png"));
   let launcher = Launcher { comment: "A tray app made with nimbo", categories: &["Utility"], icon };
   if let Err(e) = desktop::install(&INFO, &launcher) {
     eprintln!("desktop: {e}");

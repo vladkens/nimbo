@@ -1,8 +1,8 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Images from RGBA pixels ([Ui::rgba_image]): added to the window's [Images] the first frame a
-//! view builds one, by their pixels' hash, and dropped after a frame that doesn't, so a view
-//! shows a logo without keeping an [crate::ImageId].
+//! Images from RGBA pixels ([Ui::rgba_image]) or a PNG file ([Ui::png_image]): added to the
+//! window's [Images] the first frame a view builds one, by their pixels' hash, and dropped after a
+//! frame that doesn't, so a view shows a logo without keeping an [crate::ImageId].
 
 use crate::scene::Images;
 use crate::ui::{Id, Response, Style, Ui, UiState};
@@ -27,6 +27,13 @@ impl Ui<'_> {
     };
 
     self.image(image, style)
+  }
+
+  /// [Ui::rgba_image] of a PNG the app ships ([crate::Png]), decoded the first frame a view
+  /// builds it: `Png::new(include_bytes!("logo.png")).side(128)` for a logo 64 points wide.
+  pub fn png_image(&mut self, png: crate::Png, style: Style) -> Response {
+    let (w, h, px) = png.rgba();
+    self.rgba_image(w as usize, h as usize, px, style)
   }
 }
 

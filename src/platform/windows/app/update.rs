@@ -1,7 +1,7 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The update's process calls on Windows: the installer started apart from the app and waiting
-//! for it to end, the release's Inno Setup `setup.exe` run silently, the installed exe started.
+//! for it to end, the release's NSIS setup run silently, the installed exe started.
 
 use std::ffi::OsString;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
@@ -24,11 +24,10 @@ pub fn unpack(file: &Path, _: &Path) -> io::Result<PathBuf> {
   Ok(file.to_owned())
 }
 
-/// Runs the per-user Inno Setup `exe` with no window or message box, not restarting Windows, to
-/// its end; its exit code (Inno's: 0 when it installed).
+/// Runs the per-user NSIS `exe` silently (`/S`, into `%LOCALAPPDATA%\Programs\<name>`) with
+/// no window, to its end; its exit code (NSIS': 0 installed, 1 cancelled, 2 aborted by the script).
 pub fn setup(exe: &Path) -> io::Result<i32> {
-  let args = ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER"];
-  let done = Command::new(exe).args(args).creation_flags(CREATE_NO_WINDOW).status()?;
+  let done = Command::new(exe).arg("/S").creation_flags(CREATE_NO_WINDOW).status()?;
   Ok(done.code().unwrap_or(-1))
 }
 

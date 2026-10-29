@@ -15,7 +15,7 @@
 //! ```text
 //! version 1.2.0
 //! macos-aarch64 394788 <sha512 hex> https://…/App-macos.dmg
-//! windows-x86_64 285930 <sha512 hex> https://…/App-windows-x86_64-setup.exe
+//! windows-x86_64 285930 <sha512 hex> https://…/App-windows-x64-setup.exe
 //! linux-x86_64 412204 <sha512 hex> https://…/App-x86_64.AppImage
 //! sig <signature hex>
 //! ```
@@ -42,7 +42,7 @@
 //! size and SHA-512 are the feed's; nothing is opened before. Redirects are followed by the system
 //! (on Linux only to https, on Windows not from https to http, on macOS by the shared session's
 //! defaults); the signature and the hash guard what comes. The file is the one people download
-//! for the first install: the notarized `.dmg`, the per-user Inno Setup `setup.exe`, the AppImage.
+//! for the first install: the notarized `.dmg`, the per-user NSIS setup, the AppImage.
 //!
 //! The app is never replaced while it runs. [install] starts the installer apart from the app (its
 //! own process group on Unix; no console and out of the app's job on Windows), waits up to 10 s
@@ -55,12 +55,13 @@
 //! stopped midway left, the next [download] removes, once the app and the installer have ended; on
 //! Windows, where the installer runs from the staging folder and can't remove it, the app it
 //! started does, a few seconds in. The staging folder, `.nimbo-update-<pid>-<nanos>` of the app's
-//! pid, is beside the app, and its sign `ready` holds the installer's pid:
+//! pid, is beside the app (on Windows inside its folder, which the uninstaller removes whole), and
+//! its sign `ready` holds the installer's pid:
 //!
 //! | OS | the app | staged | checked | put in, and undone | started |
 //! |---|---|---|---|---|---|
 //! | macOS | the `.app` | the `.dmg` attached read-only inside the staging folder (`hdiutil`), its one `.app` at the top copied out with `ditto`, detached (forced if it must be) | the same bundle id, signed so that it meets the running app's designated requirement (Security.framework) | `renamex_np` with `RENAME_SWAP` (APFS), undone by the same | `open -n -g`, by LaunchServices: no focus taken, launchd's environment |
-//! | Windows | the exe's folder in `%LOCALAPPDATA%\Programs` | the `setup.exe` as it came | the size and hash alone | the setup run `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER` with no window, awaited; an exit code other than 0 is the error | the folder's exe of the running one's name, whatever the setup left |
+//! | Windows | the exe's folder in `%LOCALAPPDATA%\Programs` | the setup as it came, named as its URL ends (a plain `.exe`, not the app's name) rather than `setup.exe`, which Windows loads compatibility shims into | the size and hash alone | the setup run silent (`/S`, into `%LOCALAPPDATA%\Programs\<name>`) with no window, awaited; an exit code other than 0 is the error (1 cancelled, 2 aborted by its script, as on a wrong architecture) | the folder's exe of the running one's name, whatever the setup left |
 //! | Linux | the AppImage | made executable | the size and hash alone | linked to `.<name>.nimbo-old`, the new one renamed over it in one step; undone by renaming the link back | the AppImage, without the installer's AppImage variables |
 //!
 //! On Windows the installer is a copy of the running exe, named as it is (Windows asks to elevate
@@ -70,7 +71,7 @@
 //! when every release is signed with one stable identity: an ad-hoc signature's requirement is its
 //! own build, so [download] refuses the next one.
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
@@ -174,10 +175,10 @@ pub fn supported() -> io::Result<()> {
   installed().map(drop)
 }
 
-/// The app an update replaces ([target]), its folder writable: a staging folder made there.
+/// The app an update replaces ([target]), its [home] writable: a staging folder made there.
 fn installed() -> io::Result<PathBuf> {
   let target = target(OS, &env::current_exe()?, &|k| env::var_os(k))?;
-  Folder::new(target.parent().unwrap_or(&target))?;
+  Folder::new(home(OS, &target).unwrap_or(&target))?;
   Ok(target)
 }
 
@@ -190,8 +191,8 @@ fn installed() -> io::Result<PathBuf> {
 /// about 4 times a second while the file comes, then once with the total when it is verified.
 pub fn download(release: &Release, mut progress: impl FnMut(u64, u64)) -> io::Result<Staged> {
   let target = installed()?;
-  tidy(&target, &imp::alive);
-  let (dir, file) = fetch(release, target.parent().unwrap_or(&target), &mut progress)?;
+  tidy(OS, &target, &imp::alive);
+  let (dir, file) = fetch(release, home(OS, &target).unwrap_or(&target), &mut progress)?;
   let new = imp::unpack(&file, &target)?;
   Ok(Staged { new, target, dir })
 }
@@ -235,7 +236,7 @@ pub fn install(staged: Staged) -> io::Result<()> {
 /// would show it too.
 pub fn finish() -> Option<io::Error> {
   static DONE: AtomicBool = AtomicBool::new(false);
-  let Some(job) = job(&env::args_os().skip(1).collect::<Vec<_>>()) else {
+  let Some(job) = job(OS, &env::args_os().skip(1).collect::<Vec<_>>()) else {
     if DONE.swap(true, Ordering::Relaxed) {
       return None;
     }
@@ -247,7 +248,7 @@ pub fn finish() -> Option<io::Error> {
       thread::sleep(Duration::from_secs(5));
       let found = env::current_exe().and_then(|exe| target(OS, &exe, &|k| env::var_os(k)));
       if let Ok(target) = found {
-        tidy(&target, &imp::alive);
+        tidy(OS, &target, &imp::alive);
       }
     });
 
@@ -299,8 +300,8 @@ struct Job {
 
 /// The installer's job `args` (the program's own skipped) ask: `None` for an app's own arguments,
 /// `Some(None)` for malformed ones. They are [INSTALL] `<pid> <new> <target> -- <the app's>`,
-/// `target` absolute, `new` inside a staging folder beside it.
-fn job(args: &[OsString]) -> Option<Option<Job>> {
+/// `target` absolute, `new` inside a staging folder in its [home].
+fn job(os: Os, args: &[OsString]) -> Option<Option<Job>> {
   let [flag, rest @ ..] = args else { return None };
   if flag != INSTALL {
     return None;
@@ -309,13 +310,13 @@ fn job(args: &[OsString]) -> Option<Option<Job>> {
   let [pid, new, target, dash, args @ ..] = rest else { return Some(None) };
   let pid = pid.to_str().and_then(|p| p.parse().ok());
   let (new, target) = (PathBuf::from(new), PathBuf::from(target));
-  let inside =
-    target.parent().filter(|_| target.is_absolute()).and_then(|p| new.strip_prefix(p).ok());
+  let home = home(os, &target).filter(|_| target.is_absolute());
+  let inside = home.and_then(|p| new.strip_prefix(p).ok());
   let inside = inside.filter(|r| r.components().count() > 1);
   let inside = inside.filter(|r| r.components().all(|c| matches!(c, Component::Normal(_))));
   let dir =
     inside.and_then(|r| r.iter().next()).filter(|d| d.to_string_lossy().starts_with(STAGING));
-  let dir = dir.map(|d| target.with_file_name(d));
+  let dir = home.zip(dir).map(|(h, d)| h.join(d));
   Some(match (pid, dir, dash == "--") {
     (Some(pid), Some(dir), true) => Some(Job { pid, new, target, dir, args: args.to_vec() }),
     _ => None,
@@ -352,9 +353,8 @@ fn apply(os: Os, job: &Job, s: &Seams) -> io::Result<()> {
     }),
   };
 
-  let _ = uninstall::remove(&old(&job.target));
   if os != Os::Windows {
-    let _ = uninstall::remove(&job.dir);
+    let _ = (uninstall::remove(&old(&job.target)), uninstall::remove(&job.dir));
     return done;
   }
 
@@ -435,10 +435,11 @@ fn handshake<K: FnOnce()>(
   Ok(())
 }
 
-/// Removes what an installer stopped midway left beside `target`: its [old] copy, and the staging
-/// folders whose app and installer (the pid in its [MARK]) both ended (by `alive`).
-fn tidy(target: &Path, alive: &dyn Fn(u32) -> bool) {
-  let all = target.parent().and_then(|p| fs::read_dir(p).ok()).into_iter().flatten().flatten();
+/// Removes what an installer stopped midway left of `target`: its [old] copy (none on Windows),
+/// and the staging folders in its [home] whose app and installer (the pid in its [MARK]) both
+/// ended (by `alive`).
+fn tidy(os: Os, target: &Path, alive: &dyn Fn(u32) -> bool) {
+  let all = home(os, target).and_then(|p| fs::read_dir(p).ok()).into_iter().flatten().flatten();
   for e in all {
     let name = e.file_name();
     let pid = name.to_str().and_then(|n| n.strip_prefix(STAGING)?.split('-').next()?.parse().ok());
@@ -448,7 +449,19 @@ fn tidy(target: &Path, alive: &dyn Fn(u32) -> bool) {
     }
   }
 
-  let _ = uninstall::remove(&old(target));
+  if os != Os::Windows {
+    let _ = uninstall::remove(&old(target));
+  }
+}
+
+/// Where `target`'s staging folders go: on Windows in the app's folder, which the setup writes
+/// into file by file and the uninstaller removes whole, so no other app's are reached; elsewhere
+/// beside the target, which the swap renames.
+fn home(os: Os, target: &Path) -> Option<&Path> {
+  match os {
+    Os::Windows => Some(target),
+    _ => target.parent(),
+  }
 }
 
 /// The app an update replaces, of the running `exe`: the `.app` bundle on macOS and the AppImage
@@ -490,12 +503,10 @@ fn fetch(release: &Release, parent: &Path, progress: Progress) -> io::Result<(Fo
     return Err(bad(format!("{} is not https", release.url)));
   }
 
+  let exe = env::current_exe()?;
+  let name = staged(OS, &release.url, exe.file_name().unwrap_or_default())?;
   let dir = Folder::new(parent)?;
-  let file = dir.0.join(match OS {
-    Os::Mac => "update.dmg",
-    Os::Windows => "setup.exe",
-    Os::Linux => "app.AppImage",
-  });
+  let file = dir.0.join(name);
   let (total, mut told) = (release.size, None::<Instant>);
   let mut tell = |done| {
     if 0 < done && done < total && told.is_none_or(|t| t.elapsed() >= TICK) {
@@ -507,6 +518,26 @@ fn fetch(release: &Release, parent: &Path, progress: Progress) -> io::Result<(Fo
   release.verify(&file)?;
   progress(total, total);
   Ok((dir, file))
+}
+
+/// The name the release's file at `url` is staged by. On Windows its own, the last part of the
+/// URL's path: a plain `<name>.exe` other than the running `exe`'s, whose copy, the installer,
+/// goes beside it (`InvalidData` else). Windows loads compatibility shims into an exe named
+/// `setup.exe` (makensis' warning 9000), and `pack.py release` names none so.
+fn staged<'a>(os: Os, url: &'a str, exe: &OsStr) -> io::Result<&'a str> {
+  let path = url.split(['?', '#']).next().unwrap_or_default();
+  let name = match os {
+    Os::Mac => return Ok("update.dmg"),
+    Os::Linux => return Ok("app.AppImage"),
+    Os::Windows => path.rsplit('/').next().unwrap_or_default(),
+  };
+
+  let plain = !name.contains(|c: char| c.is_control() || r#"\:*?"<>|"#.contains(c));
+  let ext = Path::new(name).extension().is_some_and(|e| e.eq_ignore_ascii_case("exe"));
+  match plain && ext && !OsStr::new(name).eq_ignore_ascii_case(exe) {
+    true => Ok(name),
+    false => Err(bad(format!("{url} names no setup to stage"))),
+  }
 }
 
 /// Where a swap moves what it replaces: `.<name>.nimbo-old` beside it, a suffix only nimbo makes,
@@ -847,9 +878,9 @@ mod tests {
     vec![INSTALL.into(), pid.into(), new, target, "--".into(), "-x".into()]
   }
 
-  /// The installer's job of `new` and `target` under `root`.
-  fn install_job(root: &Path, new: &str, target: &str) -> Job {
-    job(&args(root, "7", new, target)).unwrap().unwrap()
+  /// `os`' installer's job of `new` and `target` under `root`.
+  fn install_job(root: &Path, os: Os, new: &str, target: &str) -> Job {
+    job(os, &args(root, "7", new, target)).unwrap().unwrap()
   }
 
   /// A macOS and a Linux app under `root` and their new versions in a staging folder: a bundle
@@ -915,7 +946,7 @@ mod tests {
       let root = dir(&format!("start-{i}"));
       let (os, new, target) = apps(&root)[i];
       let started = Started::default();
-      let job = install_job(&root, new, target);
+      let job = install_job(&root, os, new, target);
       let e = apply(os, &job, &Seams { start: &starts(&started, true), ..SEAMS }).unwrap_err();
       assert!(e.to_string().contains("no start"), "{e}");
       installed(&root, os, false, "undone");
@@ -932,7 +963,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     let root = dir("read-only-install");
     for (os, new, target) in apps(&root) {
-      let (started, job) = (Started::default(), install_job(&root, new, target));
+      let (started, job) = (Started::default(), install_job(&root, os, new, target));
       fs::set_permissions(&root, fs::Permissions::from_mode(0o555)).unwrap();
       let e = apply(os, &job, &Seams { start: &starts(&started, false), ..SEAMS }).unwrap_err();
       fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
@@ -950,7 +981,7 @@ mod tests {
       let root = dir(&format!("install-{i}"));
       let (os, new, target) = apps(&root)[i];
       let (job, waited, started) =
-        (install_job(&root, new, target), Cell::new(None), Started::default());
+        (install_job(&root, os, new, target), Cell::new(None), Started::default());
       let wait = |pid, cap| {
         let mark = fs::read_to_string(job.dir.join(MARK)).unwrap_or_default();
         waited.set(Some((pid, cap, mark == std::process::id().to_string())));
@@ -969,15 +1000,19 @@ mod tests {
   fn windows_runs_the_setup_then_starts_what_it_left() {
     // The installer's exe, which stays for the next download.
     let exe = env::current_exe().unwrap().file_name().unwrap().to_owned();
-    for (i, code) in [Some(0), Some(2), None].into_iter().enumerate() {
+    for (i, code) in [Some(0), Some(1), Some(2), None].into_iter().enumerate() {
       let root = dir(&format!("setup-{i}"));
       write(
         &root,
-        &[("W/a.exe", "1"), (".nimbo-update-9/setup.exe", "2"), (".nimbo-update-9/ready", "")],
+        &[
+          ("W/a.exe", "1"),
+          ("W/.nimbo-update-9/A-v2-windows-x64-setup.exe", "2"),
+          ("W/.nimbo-update-9/ready", ""),
+        ],
       );
-      fs::write(root.join(".nimbo-update-9").join(&exe), "1").unwrap();
+      fs::write(root.join("W/.nimbo-update-9").join(&exe), "1").unwrap();
       let (job, ran, started) = (
-        install_job(&root, ".nimbo-update-9/setup.exe", "W"),
+        install_job(&root, Os::Windows, "W/.nimbo-update-9/A-v2-windows-x64-setup.exe", "W"),
         RefCell::new(Vec::new()),
         Started::default(),
       );
@@ -992,7 +1027,12 @@ mod tests {
       );
       assert_eq!(*ran.borrow(), std::slice::from_ref(&job.new));
       let note = done.err().map(|e| e.to_string());
-      let why = ["", "setup.exe exited with 2", "no setup"][i];
+      let why = [
+        "",
+        "A-v2-windows-x64-setup.exe exited with 1",
+        "A-v2-windows-x64-setup.exe exited with 2",
+        "no setup",
+      ][i];
       assert!(note.as_ref().map_or(i == 0, |n| i > 0 && n.contains(why)), "{note:?}");
       assert_eq!(*started.borrow(), [(job.target.clone(), vec![OsString::from("-x")], note)]);
       let left =
@@ -1006,7 +1046,7 @@ mod tests {
   fn an_app_that_doesnt_quit_changes_nothing() {
     let root = dir("stays");
     let [(os, new, target), _] = apps(&root);
-    let (job, started) = (install_job(&root, new, target), Started::default());
+    let (job, started) = (install_job(&root, os, new, target), Started::default());
     let seams = Seams { wait: &|_, _| false, start: &starts(&started, false), ..SEAMS };
     assert_eq!(apply(os, &job, &seams).unwrap_err().kind(), io::ErrorKind::TimedOut);
     installed(&root, os, false, "after the wait");
@@ -1017,11 +1057,13 @@ mod tests {
   #[test]
   fn the_installers_arguments() {
     let root = env::temp_dir();
-    let job = install_job(&root, ".nimbo-update-1-2/new/A.app", "A.app");
+    let job = install_job(&root, Os::Mac, ".nimbo-update-1-2/new/A.app", "A.app");
     assert_eq!((job.pid, &job.new), (7, &root.join(".nimbo-update-1-2/new/A.app")));
     assert_eq!((&job.dir, &job.args[..]), (&root.join(".nimbo-update-1-2"), &["-x".into()][..]));
-    assert_eq!(super::job(&["-x".into()]), None, "an app's own");
-    assert_eq!(super::job(&[]), None);
+    let job = install_job(&root, Os::Windows, "W/.nimbo-update-1-2/s.exe", "W");
+    assert_eq!(job.dir, root.join("W/.nimbo-update-1-2"), "Windows' inside the app's folder");
+    assert_eq!(super::job(Os::Mac, &["-x".into()]), None, "an app's own");
+    assert_eq!(super::job(Os::Mac, &[]), None);
     let new = ".nimbo-update-1/new/A.app";
     let mut no_dash = args(&root, "7", new, "A.app");
     no_dash[4] = "-x".into();
@@ -1036,8 +1078,11 @@ mod tests {
       no_dash,
       relative,
     ] {
-      assert_eq!(super::job(&args), Some(None), "{args:?}");
+      assert_eq!(super::job(Os::Mac, &args), Some(None), "{args:?}");
     }
+
+    let beside = args(&root, "7", ".nimbo-update-1/s.exe", "W");
+    assert_eq!(super::job(Os::Windows, &beside), Some(None), "Windows' beside the folder");
   }
 
   #[test]
@@ -1047,11 +1092,17 @@ mod tests {
     // The app ended, its installer runs (2) or ended (3).
     write(&root, &[(".nimbo-update-1-6/ready", "2"), (".nimbo-update-1-7/ready", "3")]);
     write(&root, &[(".A.app.nimbo-old/x", ""), ("other/x", "")]);
-    tidy(&root.join("A.app"), &|pid| pid == 2);
+    tidy(Os::Mac, &root.join("A.app"), &|pid| pid == 2);
     let names =
       [".nimbo-update-1-5", ".nimbo-update-2-5", ".nimbo-update-1-6", ".nimbo-update-1-7"];
     assert_eq!(names.map(|n| root.join(n).exists()), [false, true, true, false]);
     assert_eq!([".A.app.nimbo-old", "other"].map(|n| root.join(n).exists()), [false, true]);
+
+    // Windows' in the app's folder alone: another app's beside it stays.
+    write(&root, &[("W/.nimbo-update-1-5/x", ""), (".nimbo-update-1-5/x", "")]);
+    tidy(Os::Windows, &root.join("W"), &|pid| pid == 2);
+    let names = ["W/.nimbo-update-1-5", ".nimbo-update-1-5", ".nimbo-update-2-5"];
+    assert_eq!(names.map(|n| root.join(n).exists()), [false, true, true]);
     fs::remove_dir_all(root).unwrap();
   }
 
@@ -1186,7 +1237,7 @@ mod tests {
           "/update.txt" => ("302 Found\r\nLocation: /feed/update.txt", b""),
           "/feed/update.txt" => ("200 OK", FEED),
           "/bad.txt" => ("200 OK", bad.as_slice()),
-          "/abc" => ("200 OK", b"abc"),
+          "/abc.exe" => ("200 OK", b"abc"),
           _ => ("404 Not Found", b"none"),
         };
 
@@ -1231,7 +1282,7 @@ mod tests {
     let parent = dir("parent");
     let mut r = Release {
       version: "2".into(),
-      url: format!("{url}/abc"),
+      url: format!("{url}/abc.exe"),
       size: 3,
       sha512: hex(ABC).unwrap(),
     };
@@ -1252,7 +1303,7 @@ mod tests {
       |r| r.size = 4,
       |r| r.size = 2,
       |r| r.sha512[0] ^= 1,
-      |r| r.url = "http://example.com/abc".into(),
+      |r| r.url = "http://example.com/abc.exe".into(),
     ];
     for change in changes {
       let mut r = r.clone();
@@ -1261,10 +1312,25 @@ mod tests {
       assert_eq!(e.kind(), io::ErrorKind::InvalidData, "{r:?}");
     }
 
-    r.url = format!("{url}/none");
+    r.url = format!("{url}/none.exe");
     assert_eq!(fetch(&r, &parent, &mut |_, _| {}).unwrap_err().kind(), io::ErrorKind::NotFound);
     assert_eq!(fs::read_dir(&parent).unwrap().count(), 0, "no folder is left");
     fs::remove_dir(parent).unwrap();
+  }
+
+  #[test]
+  fn a_setup_is_staged_by_its_own_name() {
+    let (url, exe) = ("https://h/d/v2/A-v2-windows-x64-setup.exe?x=1#y", OsStr::new("A.exe"));
+    assert_eq!(staged(Os::Windows, url, exe).unwrap(), "A-v2-windows-x64-setup.exe");
+    assert_eq!(staged(Os::Windows, "https://h/B.EXE", exe).unwrap(), "B.EXE");
+    assert_eq!(staged(Os::Mac, url, exe).unwrap(), "update.dmg");
+    assert_eq!(staged(Os::Linux, url, exe).unwrap(), "app.AppImage");
+    // Not an exe, the app's own name (its installer's copy), a name Windows refuses, none.
+    let bad = ["a.zip", "a.exe/", ".exe", "a.exe.", "a.EXE", "a:b.exe", "a\\b.exe", "a\n.exe"];
+    for name in bad {
+      let e = staged(Os::Windows, &format!("https://h/{name}"), OsStr::new("a.exe")).unwrap_err();
+      assert_eq!(e.kind(), io::ErrorKind::InvalidData, "{name:?}");
+    }
   }
 
   #[test]

@@ -70,6 +70,7 @@ pub use keys::{
   Binding, CMD, Command, Delete, EDIT_KEYS, Hotkey, Key, KeyEvent, Move, Os, SELECT_KEYS, Shortcut,
   bind, shortcut,
 };
+pub use png::Png;
 pub use scene::{
   Color, Frame, ImageId, Images, Point, Quad, Rect, Scene, Segment, Size, alpha, mix, rgb,
 };
@@ -99,9 +100,11 @@ pub struct Config {
   /// The content runs under the title bar ([Config::unified]).
   pub unified: bool,
   /// The window's icon off macOS ([Config::icon]): its side and straight RGBA pixels, `side`²
-  /// of them, as only the builder checks.
+  /// of them, as only the builder checks; or a PNG's ([Config::png_icon]).
   #[cfg_attr(target_os = "macos", allow(dead_code))]
   pub(crate) icon: Option<(u32, &'static [u8])>,
+  #[cfg_attr(target_os = "macos", allow(dead_code))]
+  pub(crate) png_icon: Option<Png>,
 }
 
 impl Config {
@@ -111,7 +114,7 @@ impl Config {
   pub const fn new(title: &'static str, w: f32, h: f32) -> Self {
     let (size, min_size) = (Size::new(w, h), Self::MIN_SIZE);
     let (resizable, hidden, overlay, unified, icon) = (true, false, None, false, None);
-    Self { title, size, min_size, resizable, hidden, overlay, unified, icon }
+    Self { title, size, min_size, resizable, hidden, overlay, unified, icon, png_icon: None }
   }
 
   /// The least content size the user can resize the window to, [Config::MIN_SIZE] unless set.
@@ -135,7 +138,19 @@ impl Config {
   /// ([AppInfo::id]).
   pub const fn icon(self, side: u32, px: &'static [u8]) -> Self {
     assert!(px.len() == side as usize * side as usize * 4, "an icon is side² RGBA pixels");
-    Self { icon: Some((side, px)), ..self }
+    Self { icon: Some((side, px)), png_icon: None, ..self }
+  }
+
+  /// [Config::icon] from a square PNG the app ships, decoded as the first window opens (not on
+  /// macOS): `Png::icon(include_bytes!("icon.png"))` for the app's icon, its margin cut.
+  pub const fn png_icon(self, png: Png) -> Self {
+    Self { png_icon: Some(png), icon: None, ..self }
+  }
+
+  /// The window's icon: its side and pixels, a PNG's decoded now.
+  #[cfg_attr(target_os = "macos", allow(dead_code))]
+  pub(crate) fn window_icon(&self) -> Option<(u32, &'static [u8])> {
+    self.icon.or_else(|| self.png_icon.map(|png| png.square()))
   }
 
   /// A window [Main::open] makes without showing it, until [Window::front].

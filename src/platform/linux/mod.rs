@@ -413,7 +413,7 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Result<u64, std::ffi::NulError> {
     let area = (g.gtk_drawing_area_new)();
     (g.gtk_window_set_title)(window, title.as_ptr());
     // X11's `_NET_WM_ICON`; Wayland has no such request (the `.desktop` entry's icon shows).
-    if let Some((side, px)) = cfg.icon {
+    if let Some((side, px)) = cfg.window_icon() {
       let s = side as c_int;
       let pixbuf =
         (g.gdk_pixbuf_new_from_data)(px.as_ptr(), 0, TRUE, 8, s, s, s * 4, null_mut(), null_mut());
