@@ -866,7 +866,9 @@ def setup(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
     if license.is_file():
       shutil.copy(license, tmp / "LICENSE.txt")
 
-    (tmp / "setup.nsi").write_text(nsi(cfg, arch, license.is_file(), out.name), encoding="utf-8")
+    # Settings › Apps' size: the installed files', not the icon's.
+    kib = -(-sum(f.stat().st_size for f in tmp.iterdir() if f.suffix != ".ico") // 1024)
+    (tmp / "setup.nsi").write_text(nsi(cfg, arch, license.is_file(), out.name, kib), "utf-8")
     run(makensis, "-V2", "-WX", "-INPUTCHARSET", "UTF8", tmp / "setup.nsi")
     # A signature later: here, the setup's, once makensis has written it.
     shutil.move(str(tmp / out.name), out)
@@ -883,12 +885,12 @@ def nsis(s: str) -> str:
   return " ".join(s.replace("$", "$$").replace('"', '$\\"').split("\n")).strip()
 
 
-def nsi(cfg: Config, arch: str, license: bool, out: str) -> str:
+def nsi(cfg: Config, arch: str, license: bool, out: str, kib: int) -> str:
   r"""The setup's .nsi: it packs `app.exe`, `app.ico` and, with `license`, `LICENSE.txt` from its
   folder and writes the setup there as `out`, its final name: never `setup.exe`, which Windows
   loads compatibility shims into (makensis -WX fails on it, warning 9000). Its `.onInit` exits 2
-  on a Windows of another arch; the stub is x86, so that runs on both. The uninstaller keeps the
-  app's data."""
+  on a Windows of another arch; the stub is x86, so that runs on both. Settings › Apps shows `kib`,
+  the packed files' size. The uninstaller keeps the app's data."""
   name, exe = nsis(cfg.name), f"$INSTDIR\\{nsis(cfg.name)}.exe"
   key, value = f"{UNINSTALL}\\{app_id(cfg)}", f'"{nsis(cfg.id)}"'
   version = ".".join(map(str, quad(cfg.version)))
@@ -952,13 +954,21 @@ def nsi(cfg: Config, arch: str, license: bool, out: str) -> str:
     *(f'  WriteRegStr HKCU "{key}" "{k}" "{v}"' for k, v in entries.items()),
     f'  WriteRegDWORD HKCU "{key}" "NoModify" 1',
     f'  WriteRegDWORD HKCU "{key}" "NoRepair" 1',
+    f'  WriteRegDWORD HKCU "{key}" "EstimatedSize" {kib}',
     "SectionEnd",
     "",
-    # The files and the shortcut, and nimbo's launch at login, which would start a deleted exe.
+    # The files and the shortcut, nimbo's launch at login, which would start a deleted exe, and the
+    # updater's staging folders beside the install, which its installer couldn't remove.
     'Section "Uninstall"',
     *(f'  Delete "$INSTDIR\\{nsis(to)}"' for _, to in files),
     '  Delete "$INSTDIR\\Uninstall.exe"',
     '  RMDir "$INSTDIR"',
+    '  FindFirst $0 $1 "$INSTDIR\\..\\.nimbo-update-*"',
+    '  ${DoWhile} $1 != ""',
+    '    RMDir /r "$INSTDIR\\..\\$1"',
+    "    FindNext $0 $1",
+    "  ${Loop}",
+    "  FindClose $0",
     f'  Delete "$SMPROGRAMS\\{name}.lnk"',
     f'  DeleteRegValue HKCU "{RUN}" {value}',
     f'  DeleteRegValue HKCU "{APPROVED}" {value}',
