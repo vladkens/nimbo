@@ -17,7 +17,6 @@ pub const ICON: Png = Png::icon(include_bytes!("../docs/brand/mark-iris.png"));
 /// The window's state and what the person chose in it.
 pub struct Updater {
   pub state: State,
-  pub auto: bool,
   pub acts: Vec<Act>,
 }
 
@@ -38,12 +37,11 @@ pub fn state(name: &str) -> Option<State> {
 impl App for Updater {
   fn view(&mut self, ui: &mut Ui) {
     let about = About { name: "Counter", version: "1.1.0", icon: Some(ICON) };
-    let Some(act) = dialog::view(ui, &about, &self.state, self.auto) else { return };
+    let Some(act) = dialog::view(ui, &about, &self.state) else { return };
     self.acts.push(act);
     match act {
       Act::Install => self.state = state("downloading").unwrap(),
       Act::Retry => self.state = State::Checking,
-      Act::Auto(on) => self.auto = on,
       Act::Later | Act::Skip | Act::Notes | Act::Close => {}
     }
   }
@@ -61,6 +59,6 @@ fn main() {
     std::process::exit(2);
   };
 
-  let app = Updater { state, auto: true, acts: Vec::new() };
+  let app = Updater { state, acts: Vec::new() };
   nimbo::run_args(dialog::config("Software Update"), app, |h| _ = h.frame(), &args);
 }

@@ -1,7 +1,7 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! Tests of `examples/updater.rs` through the harness: the update's window offers the release
-//! with its three choices, the notes and the checkbox, a failure offers Retry and Close, and each
+//! with its three choices and the notes, a failure offers Retry and Close, and each
 //! state shows its title.
 
 #[path = "../examples/updater.rs"]
@@ -14,17 +14,16 @@ use nimbo::{Harness, Id, Size};
 use updater::{Updater, state};
 
 fn window(name: &str) -> Harness<Updater> {
-  let app = Updater { state: state(name).unwrap(), auto: true, acts: Vec::new() };
+  let app = Updater { state: state(name).unwrap(), acts: Vec::new() };
   Harness::new(app, Size::new(dialog::SIZE.0, dialog::SIZE.1), 2.0)
 }
 
 #[test]
-fn an_offer_has_its_three_choices_the_notes_and_the_checkbox() {
+fn an_offer_has_its_three_choices_and_the_notes() {
   for (id, act) in [
     (dialog::SKIP, Act::Skip),
     (dialog::LATER, Act::Later),
     (dialog::NOTES, Act::Notes),
-    (dialog::AUTO, Act::Auto(false)),
     (dialog::INSTALL, Act::Install),
   ] {
     let mut h = window("available");

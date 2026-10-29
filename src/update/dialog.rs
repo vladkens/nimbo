@@ -1,12 +1,13 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The update as the person sees it, after Sparkle: one item in the app's menu says what the
-//! updater does and opens its window, which offers the release, shows the download and the
-//! restart, or why it failed. Nothing opens by itself: an update found waits in the menu item.
+//! The update as the person sees it, after Sparkle: a row in the app's menu says what the updater
+//! has, and it and Check for Updates… open its window, which offers the release, shows the
+//! download and the restart, or why it failed. Nothing opens by itself: an update found waits in
+//! the menu.
 //!
 //! [Updater] is the state without the network: the app runs [check](super::check),
 //! [download](super::download) and [install](super::install) on threads of its own and brings
-//! their results back to it; [menu_item] and [view] draw it.
+//! their results back to it; [menu_item], [check_item] and [view] draw it.
 
 use std::io::{self, ErrorKind};
 use std::time::{Duration, SystemTime};
@@ -31,7 +32,6 @@ pub const SKIP: &str = "update-skip";
 pub const NOTES: &str = "update-notes";
 pub const RETRY: &str = "update-retry";
 pub const CLOSE: &str = "update-close";
-pub const AUTO: &str = "update-auto";
 
 /// `v1.2.0`, as an app shows a version.
 fn shown(version: &str) -> String {
@@ -119,7 +119,7 @@ impl Updater {
     start
   }
 
-  /// The menu item opened the window: whether to start a check, when there is nothing to show
+  /// A menu item opened the window: whether to start a check, when there is nothing to show
   /// but how one goes.
   pub fn open(&mut self) -> bool {
     let nothing = matches!(self.state, State::Idle | State::UpToDate | State::Failed(None, _));
@@ -212,7 +212,7 @@ impl Updater {
   }
 
   /// The window closed: what it said about a check is done with, and a check the person waited
-  /// for goes on quietly; a release on offer or on its way stays in the menu item.
+  /// for goes on quietly; a release on offer or on its way stays in the menu.
   pub fn closed(&mut self) {
     if self.checking == Some(true) {
       self.checking = Some(false);
@@ -231,19 +231,25 @@ pub fn percent(done: u64, total: u64) -> u8 {
 
 // MARK: Menu
 
-/// The app's one menu item for the updater, `id`: Check for Updates… while there is nothing to
-/// show, else what goes on. Each opens the window ([Updater::open]).
-pub fn menu_item(id: &str, state: &State) -> Item {
+/// The update's row in the app's menu, `id`, while it has news: a release on offer, its download,
+/// the restart, a failure; it opens the window.
+pub fn menu_item(id: &str, state: &State) -> Option<Item> {
   let label = match state {
-    State::Idle | State::UpToDate => "Check for Updates…".to_owned(),
-    State::Checking => "Checking for Updates…".to_owned(),
     State::Available(r) => format!("Update Available: {}…", shown(&r.version)),
     State::Downloading(_, done) => format!("Downloading Update: {done}%"),
     State::Restarting(_) => "Restarting to Update…".to_owned(),
     State::Failed(..) => "Update Failed…".to_owned(),
+    State::Idle | State::Checking | State::UpToDate => return None,
   };
 
-  Item::new(id, &label)
+  Some(Item::new(id, &label))
+}
+
+/// The app's Check for Updates… item, `id`, which opens the window ([Updater::open]).
+pub fn check_item(id: &str, state: &State) -> Item {
+  let label =
+    if *state == State::Checking { "Checking for Updates…" } else { "Check for Updates…" };
+  Item::new(id, label)
 }
 
 // MARK: Window
@@ -262,8 +268,6 @@ pub enum Act {
   Notes,
   /// OK, Cancel, Hide: the window closes.
   Close,
-  /// Check for updates automatically, set or cleared.
-  Auto(bool),
 }
 
 /// The app the window is about.
@@ -282,8 +286,8 @@ pub fn config(title: &'static str) -> Config {
 }
 
 /// The window's content for `state`: the app's icon, what goes on and its buttons; returns what
-/// the person chose. `auto`: whether the app checks by itself, a checkbox under an offer.
-pub fn view(ui: &mut Ui, app: &About, state: &State, auto: bool) -> Option<Act> {
+/// the person chose.
+pub fn view(ui: &mut Ui, app: &About, state: &State) -> Option<Act> {
   let t = ui.theme();
   let (name, current) = (app.name, shown(app.version));
   let (title, text) = match state {
@@ -336,11 +340,6 @@ pub fn view(ui: &mut Ui, app: &About, state: &State, auto: bool) -> Option<Act> 
           State::Available(_) => {
             if ui.id(NOTES).link("Release notes", t.body().color(t.link)).clicked {
               act = Some(Act::Notes);
-            }
-
-            let mut on = auto;
-            if ui.id(AUTO).checkbox(&mut on, "Check for updates automatically").changed {
-              act = Some(Act::Auto(on));
             }
           }
           State::UpToDate | State::Failed(..) => {}
@@ -498,7 +497,7 @@ mod tests {
     assert_eq!(u.state, State::Available(r("1.2.0")), "asked, a skipped one shows too");
     assert!(!u.open(), "the offer shows as it is");
     u.closed();
-    assert_eq!(u.state, State::Available(r("1.2.0")), "the menu item keeps it");
+    assert_eq!(u.state, State::Available(r("1.2.0")), "the menu keeps it");
   }
 
   /// The window closed during the person's check: it goes on quietly.
@@ -566,15 +565,17 @@ mod tests {
   }
 
   #[test]
-  fn the_menu_item_says_what_goes_on() {
-    let label = |s: State| menu_item("update", &s).label;
-    assert_eq!(label(State::Idle), "Check for Updates…");
-    assert_eq!(label(State::UpToDate), "Check for Updates…");
-    assert_eq!(label(State::Checking), "Checking for Updates…");
-    assert_eq!(label(State::Available(r("1.2.0"))), "Update Available: v1.2.0…");
-    assert_eq!(label(State::Downloading(r("1.2.0"), 42)), "Downloading Update: 42%");
-    assert_eq!(label(State::Restarting(r("1.2.0"))), "Restarting to Update…");
-    assert_eq!(label(State::Failed(None, "offline".into())), "Update Failed…");
-    assert_eq!(menu_item("update", &State::Idle).id, "update");
+  fn the_menu_items_say_what_goes_on() {
+    let label = |s: State| menu_item("update", &s).map(|i| i.label);
+    assert_eq!([State::Idle, State::Checking, State::UpToDate].map(label), [None, None, None]);
+    assert_eq!(label(State::Available(r("1.2.0"))).unwrap(), "Update Available: v1.2.0…");
+    assert_eq!(label(State::Downloading(r("1.2.0"), 42)).unwrap(), "Downloading Update: 42%");
+    assert_eq!(label(State::Restarting(r("1.2.0"))).unwrap(), "Restarting to Update…");
+    assert_eq!(label(State::Failed(None, "offline".into())).unwrap(), "Update Failed…");
+
+    let check = |s: State| check_item("check", &s).label;
+    assert_eq!(check(State::Idle), "Check for Updates…");
+    assert_eq!(check(State::Checking), "Checking for Updates…");
+    assert_eq!(check(State::Available(r("1.2.0"))), "Check for Updates…");
   }
 }
