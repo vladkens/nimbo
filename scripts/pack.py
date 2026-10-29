@@ -705,10 +705,9 @@ RCODESIGN = (
   "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign/0.29.0/"
   "apple-codesign-0.29.0-{triple}.tar.gz"
 )
-# PLACEHOLDER until vladkens/actions' tools.yml has made its tools-<date> release: the URL of its
-# tarball of libdmg-hfsplus's `dmg` and `hfsplus` (mozilla/libdmg-hfsplus e18579b39195, x86_64
-# Linux), its sha256 in SHA256 by the file's name. Until then $NIMBO_TOOLS gives them.
-LIBDMG = None
+# libdmg-hfsplus's `dmg` and `hfsplus` (mozilla/libdmg-hfsplus e18579b39195, static x86_64 Linux),
+# as vladkens/actions' tools.yml released them, by the name, pinned in SHA256.
+LIBDMG = "https://github.com/vladkens/actions/releases/download/tools-20261029/{name}"
 
 
 def secrets(cfg: Config, names: tuple[str, ...]) -> bool:
@@ -722,7 +721,8 @@ def secrets(cfg: Config, names: tuple[str, ...]) -> bool:
 
 def tool(cfg: Config, name: str) -> Path:
   """rcodesign, fetched for this host into <target dir>/tools, or libdmg-hfsplus's `dmg` and
-  `hfsplus`, from $NIMBO_TOOLS when it is set, else fetched too; the tarballs pinned in SHA256."""
+  `hfsplus`, from $NIMBO_TOOLS when it is set, else fetched there too on x86_64 Linux; all pinned
+  in SHA256."""
   where = os.environ.get("NIMBO_TOOLS")
   if name != "rcodesign" and where:
     path = Path(where) / name
@@ -731,15 +731,16 @@ def tool(cfg: Config, name: str) -> Path:
 
     return path
 
-  if name == "rcodesign":
-    triple = here() + ("-apple-darwin" if sys.platform == "darwin" else "-unknown-linux-musl")
-    url = RCODESIGN.format(triple=triple)
-  elif LIBDMG:
-    url = LIBDMG
-  else:
-    sys.exit("pack: dmg and hfsplus: run vladkens/actions tools.yml and pin its hashes (LIBDMG)")
+  tools = cfg.target / "tools"
+  if name != "rcodesign":
+    if (here(), sys.platform) != ("x86_64", "linux"):
+      sys.exit(f"pack: {name} is pinned for x86_64 Linux only: set $NIMBO_TOOLS")
 
-  tarball = cfg.target / "tools" / url.rsplit("/", 1)[1]
+    return fetch(LIBDMG.format(name=name), tools / name)
+
+  triple = here() + ("-apple-darwin" if sys.platform == "darwin" else "-unknown-linux-musl")
+  url = RCODESIGN.format(triple=triple)
+  tarball = tools / url.rsplit("/", 1)[1]
   if tarball.name not in SHA256:
     sys.exit(f"pack: no {name} is pinned for {here()} {sys.platform}")
 
@@ -1225,6 +1226,11 @@ RCODESIGN_SHA256 = {
   "aarch64-apple-darwin": "d1a532150adaf90048260d76359261aa716abafc45c53c5dc18845029184334a",
 }
 SHA256 |= {RCODESIGN.format(triple=t).rsplit("/")[-1]: v for t, v in RCODESIGN_SHA256.items()}
+# LIBDMG's, as its release's SHA256SUMS gives them.
+SHA256 |= {
+  "dmg": "b238e3739f101db61c533e0b7d64591195514f13cdd8b82eba41e4d1d0096b34",
+  "hfsplus": "f85887ab739f7ff0ddb477e81fbde391ad296de7f31ae589ca60c9d731f23270",
+}
 DEB_ARCH = {"x86_64": "amd64", "aarch64": "arm64"}
 # The libraries nimbo loads at run time, by their Debian names (t64 since Ubuntu 24.04).
 NIMBO = [
