@@ -3,3 +3,4 @@ target/
 .claude/
 .worktrees/
 .DS_Store
+__pycache__/
