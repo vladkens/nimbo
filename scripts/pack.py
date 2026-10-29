@@ -12,7 +12,24 @@ target this machine's arch on the command's OS. The files, in `--out` (`<target 
 which rust-publish renames `-vX.Y.Z` on a release). `app` writes `<target dir>/<Name>.app`, which
 `dmg` packs, or the one `--app` gives, never signed again. `dist` runs this OS's steps: `app` and
 `dmg`, `setup`, or `appimage` and `deb`. Locally codesign takes no timestamp, so a Developer ID
-signs offline; in CI (`$CI`) it does, and macos-sign signs with one anyway.
+signs offline; in CI (`$CI`) it does, and macos-sign signs with one anyway. One table per OS:
+
+  [package.metadata.nimbo]
+  id = "me.vladkens.wavo"
+  name = "Wavo"
+  icon = "assets/icon.png"
+  comment = "Local dictation"
+  [package.metadata.nimbo.macos]
+  accessory = true                 # a tray app: no Dock icon, never ended by macOS on its own
+  entitlements = "assets/wavo.entitlements"
+  plist.NSMicrophoneUsageDescription = "…"
+  plist.LSEnvironment.MallocSpaceEfficient = "1"
+  [package.metadata.nimbo.windows]
+  app-id = "314a56a8-8a8b-4c18-954d-b930203f086d"
+  [package.metadata.nimbo.linux]
+  categories = ["Utility"]
+  deb-package = "wavo"
+  deb-depends = ["libasound2 | libasound2t64"]
 
 The macOS sign job compiles nothing: it checks nimbo out at the rev the app's Cargo.lock pins
 (`git+https://github.com/vladkens/nimbo…#<sha>`) and runs `app` and `dmg` from there, which sign
@@ -175,18 +192,21 @@ def arch(target: str) -> str:
 
 # MARK: macOS
 
-KEYS = {"accessory", "usage", "plist", "entitlements"}
+KEYS = {"accessory", "plist", "entitlements"}
 
 
 def info(cfg: Config, minos: str) -> dict:
-  """The Info.plist: the bundle from the config, then its `usage` strings and `plist` keys over it.
+  """The Info.plist: the bundle from the config, then its `plist` keys (usage strings among them)
+  over it. An `accessory` app (a tray's) has no Dock icon and is never ended by macOS on its own.
 
-  >>> mac = {"accessory": True, "usage": {"NSMicrophoneUsageDescription": "m"}, "plist": {"X": 1}}
+  >>> mac = {"accessory": True, "plist": {"NSMicrophoneUsageDescription": "m", "X": 1}}
   >>> cfg = Config("me.a", "A", Path("i.png"), "", "1.2.0-beta.1", "a", mac, {}, {}, "", [],
   ...   Path("."), Path("target"))
   >>> p = info(cfg, "14.0")
   >>> p["CFBundleExecutable"], p["CFBundleVersion"], p["LSUIElement"], p["X"]
   ('a', '1.2.0', True, 1)
+  >>> p["NSSupportsSuddenTermination"], p["NSMicrophoneUsageDescription"]
+  (False, 'm')
   >>> p["LSMinimumSystemVersion"]
   '14.0'
   """
@@ -212,9 +232,13 @@ def info(cfg: Config, minos: str) -> dict:
     "NSHighResolutionCapable": True,
   }
   if cfg.macos.get("accessory"):
-    plist["LSUIElement"] = True
+    plist |= {
+      "LSUIElement": True,
+      "NSSupportsAutomaticTermination": False,
+      "NSSupportsSuddenTermination": False,
+    }
 
-  return {**plist, **cfg.macos.get("usage", {}), **cfg.macos.get("plist", {})}
+  return {**plist, **cfg.macos.get("plist", {})}
 
 
 def minos(binary: Path) -> str:
