@@ -50,7 +50,8 @@
 //! process to end, puts the new version in (below), starts it with the old one's arguments in the
 //! old one's working directory (on macOS LaunchServices starts it in `/`, as Finder does) and
 //! removes the old copy and the staging folder. If that fails, it undoes the swap and starts the
-//! old app again with its error in `NIMBO_UPDATE_ERROR`, which [finish] returns. What an installer
+//! old app again with its error in `NIMBO_UPDATE_ERROR`, which [finish] returns once (the variable
+//! stays in the app's environment, and a nimbo app it starts would show it too). What an installer
 //! stopped midway left, the next [download] removes, once the app and the installer have ended; on
 //! Windows, where the installer runs from the staging folder and can't remove it, the app it
 //! started does, a few seconds in. The staging folder, `.nimbo-update-<pid>-<nanos>` of the app's
@@ -74,6 +75,7 @@ use std::fs::{self, File};
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{env, fmt, thread};
 
@@ -108,6 +110,13 @@ pub struct Release {
 }
 
 impl Release {
+  /// A release of `version` alone, for an app's own tests: no file (an empty URL, size 0, a zero
+  /// hash), so [download] refuses it.
+  #[doc(hidden)]
+  pub fn test(version: &str) -> Self {
+    Self { version: version.into(), url: String::new(), size: 0, sha512: [0; 64] }
+  }
+
   /// Checks the file downloaded for the release against its size and SHA-512: `InvalidData` if
   /// either differs.
   pub fn verify(&self, file: &Path) -> io::Result<()> {
@@ -138,11 +147,12 @@ const _: () = {
 };
 
 /// The release `feed` offers this platform when it is newer than `current`: the feed fetched over
-/// the OS's HTTP, then [read]. A pre-release `current` (a dev build, `0.1.0-5-gabc`) gets none,
-/// nothing fetched.
+/// the OS's HTTP, then [read]; `None` when it is up to date. A pre-release `current` (a dev
+/// build, `0.1.0-5-gabc`) is `Unsupported`, nothing fetched.
 pub fn check(feed: &Feed, current: &str) -> io::Result<Option<Release>> {
   if current.contains('-') {
-    return Ok(None);
+    let what = format!("{current} is a dev build, which takes no update");
+    return Err(error(io::ErrorKind::Unsupported, what));
   }
 
   if !secure(feed.url) {
@@ -155,19 +165,31 @@ pub fn check(feed: &Feed, current: &str) -> io::Result<Option<Release>> {
   read(feed, &fs::read(to)?, current)
 }
 
+/// Whether the running app can update in place, checked with no network, so an app can hide its
+/// update up front: not without an installed app to replace (`Unsupported`: a build, a Windows exe
+/// outside `%LOCALAPPDATA%\Programs`, a Linux one not run as an AppImage, as a .deb's in /usr) or
+/// one whose folder the user can't write (`PermissionDenied`: `/Applications` for a standard user,
+/// `/opt`, a translocated app).
+pub fn supported() -> io::Result<()> {
+  installed().map(drop)
+}
+
+/// The app an update replaces ([target]), its folder writable: a staging folder made there.
+fn installed() -> io::Result<PathBuf> {
+  let target = target(OS, &env::current_exe()?, &|k| env::var_os(k))?;
+  Folder::new(target.parent().unwrap_or(&target))?;
+  Ok(target)
+}
+
 /// Downloads `release`'s file beside the running app, checks its SHA-512 (`InvalidData` if it
 /// differs) and stages it: on macOS the one `.app` on the image (`InvalidData` for more or none),
 /// held to the running bundle's id and designated requirement. Before a byte is fetched it fails
-/// without an installed app to replace (`Unsupported`: a build, a Windows exe outside
-/// `%LOCALAPPDATA%\Programs`, a Linux one not run as an AppImage, as a .deb's in /usr) or one whose
-/// folder the user can't write (`PermissionDenied`: `/Applications` for a standard user, `/opt`, a
-/// translocated app), and removes what an installer stopped midway left ([tidy]).
+/// as [supported] does and removes what an installer stopped midway left ([tidy]).
 ///
 /// `progress` gets the bytes done and the total, `release.size`, on the calling thread: at most
 /// about 4 times a second while the file comes, then once with the total when it is verified.
 pub fn download(release: &Release, mut progress: impl FnMut(u64, u64)) -> io::Result<Staged> {
-  let exe = env::current_exe()?;
-  let target = target(OS, &exe, &|k| env::var_os(k))?;
+  let target = installed()?;
   tidy(&target, &imp::alive);
   let (dir, file) = fetch(release, target.parent().unwrap_or(&target), &mut progress)?;
   let new = imp::unpack(&file, &target)?;
@@ -208,13 +230,17 @@ pub fn install(staged: Staged) -> io::Result<()> {
 /// and before any window or [crate::instance] call. Started by [install] (`--nimbo-install` the
 /// first argument), it is the installer and never returns: it waits for the old app to end, puts
 /// the new one in, starts it and exits (status 0, 1 on a failure, 2 for malformed arguments).
-/// Otherwise the error of the installer that started this app, in [NOTE], which it removes from
-/// the environment: so this runs before any thread does.
+/// Otherwise the error of the installer that started this app, in [NOTE], the first time it is
+/// called and `None` after; the variable stays in the environment, so a nimbo app this one starts
+/// would show it too.
 pub fn finish() -> Option<io::Error> {
+  static DONE: AtomicBool = AtomicBool::new(false);
   let Some(job) = job(&env::args_os().skip(1).collect::<Vec<_>>()) else {
+    if DONE.swap(true, Ordering::Relaxed) {
+      return None;
+    }
+
     let note = env::var(NOTE).ok();
-    // SAFETY: first in `main`, before any other thread runs.
-    unsafe { env::remove_var(NOTE) };
     // Windows' installer can't remove the folder it runs from: the app does, once it has ended.
     #[cfg(windows)]
     thread::spawn(|| {
@@ -1242,12 +1268,30 @@ mod tests {
   }
 
   #[test]
-  fn a_dev_build_gets_no_update() {
+  fn a_dev_build_is_unsupported() {
     // A feed that fails once fetched: nothing is.
     let feed = Feed { url: "http://example.com/update.txt", key: KEY };
     for dev in ["0.1.0-5-gabc", "1.2.0-rc.1"] {
-      assert_eq!(check(&feed, dev).unwrap(), None, "{dev}");
+      let e = check(&feed, dev).unwrap_err();
+      assert_eq!(e.kind(), io::ErrorKind::Unsupported, "{dev}");
+      assert!(e.to_string().contains("dev build"), "{e}");
     }
+  }
+
+  #[test]
+  fn a_test_release_is_refused() {
+    let (r, parent) = (Release::test("2.0"), dir("test-release"));
+    assert_eq!((r.version.as_str(), r.size), ("2.0", 0));
+    let e = fetch(&r, &parent, &mut |_, _| {}).unwrap_err();
+    assert_eq!(e.kind(), io::ErrorKind::InvalidData, "{e}");
+    assert!(download(&r, |_, _| {}).is_err(), "a build, and no file");
+    assert_eq!(fs::read_dir(&parent).unwrap().count(), 0, "nothing fetched");
+    fs::remove_dir(parent).unwrap();
+  }
+
+  #[test]
+  fn a_build_is_unsupported() {
+    assert_eq!(supported().unwrap_err().kind(), io::ErrorKind::Unsupported);
   }
 
   #[test]
