@@ -51,6 +51,7 @@ for notarization, else ad hoc; the DMG is an HFS+ image by `mkfs.hfsplus` (apt's
 libdmg-hfsplus's `hfsplus` and `dmg` ($NIMBO_TOOLS, a directory with both, else fetched), then
 rcodesign signs it and, with APPLE_API_KEY (the .p8's text), APPLE_API_KEY_ID and
 APPLE_API_ISSUER, notarizes and staples it. A `v*` label is a release: a missing secret fails it.
+`setup` is NSIS's, built by makensis (apt's nsis, Homebrew's makensis on a Mac).
 
 `feed` writes update.txt: `version <v>`, a line per file, `<platform> <size> <sha512> <url>`, and
 last `sig <hex>`, the Ed25519 signature of every byte before it. A file's platform is in its name
@@ -935,49 +936,181 @@ def notarize(cfg: Config, dmg: Path) -> None:
 # MARK: Windows
 
 NAMES = {"x86_64": "x64", "aarch64": "arm64"}
-# Inno's architecture identifiers: x64compatible (6.3+) takes x64 Windows and ARM64's emulation.
-ARCHES = {"x86_64": "x64compatible", "aarch64": "arm64"}
 RUN = r"Software\Microsoft\Windows\CurrentVersion\Run"
 APPROVED = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
+UNINSTALL = r"Software\Microsoft\Windows\CurrentVersion\Uninstall"
 
 
 def setup(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
-  r"""`<stem>-windows-<x64|arm64>-setup.exe`, compiled by Inno Setup 6's ISCC, of the exe with
-  its resources (`exe_resources`): a per-user install, no administrator, into
-  `%LOCALAPPDATA%\Programs\<Name>` with a Start menu entry and the uninstaller in Settings › Apps
-  (which shows the exe's own icon; the setup shows Inno's). The updater (src/update.rs) runs it as
-  `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER` once the app has quit; an interactive
-  install offers to start it."""
-  iscc = compiler()
+  r"""`<stem>-windows-<x64|arm64>-setup.exe`, NSIS's, of the exe with its resources
+  (`exe_resources`), built by makensis (apt's nsis, Homebrew's makensis): a per-user install, no
+  administrator, into `%LOCALAPPDATA%\Programs\<Name>` with a Start menu entry and the uninstaller
+  in Settings › Apps, the app's icon on all of them. The updater (src/update.rs) runs it as `/S`
+  once the app has quit; an interactive install offers to start it."""
+  makensis = shutil.which("makensis")
+  if not makensis:
+    sys.exit("pack: no makensis: `apt-get install nsis`, on a Mac `brew install makensis`")
+
   out_dir.mkdir(parents=True, exist_ok=True)
-  base = f"{stem(cfg)}-windows-{NAMES[arch]}-setup"
+  out = out_dir / f"{stem(cfg)}-windows-{NAMES[arch]}-setup.exe"
+  license = cfg.root / "LICENSE"
   with tempfile.TemporaryDirectory() as tmp:
-    iss, exe = Path(tmp) / f"{cfg.name}.iss", Path(tmp) / f"{cfg.name}.exe"
-    exe_resources(binary, exe, cfg)
-    text = script(cfg, exe.resolve(), arch, out_dir.resolve(), base, cfg.root / "LICENSE")
-    # Inno reads UTF-8 with its byte-order mark: a name may not be ASCII.
-    iss.write_text(text, encoding="utf-8-sig")
-    run(iscc, "/Q", iss)
+    # The files by fixed names beside the script, which makensis reads from there: no path in it.
+    tmp = Path(tmp)
+    # A signature later: here, the exe's, before makensis packs it.
+    exe_resources(binary, tmp / "app.exe", cfg)
+    (tmp / "app.ico").write_bytes(ico(icons(cfg.icon, ICO, True)))
+    if license.is_file():
+      shutil.copy(license, tmp / "LICENSE.txt")
 
-  return out_dir / f"{base}.exe"
+    (tmp / "setup.nsi").write_text(nsi(cfg, arch, license.is_file()), encoding="utf-8")
+    run(makensis, "-V2", "-WX", "-INPUTCHARSET", "UTF8", tmp / "setup.nsi")
+    # A signature later: here, the setup's, once makensis has written it.
+    shutil.move(str(tmp / "setup.exe"), out)
+
+  return out
 
 
-def compiler() -> str:
-  """ISCC: GitHub's Windows runners have it preinstalled (6.7.1 on windows-latest, image
-  20261021); else on PATH; else exits naming how to install it."""
-  where = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
-  iscc = where / "Inno Setup 6" / "ISCC.exe"
-  found = str(iscc) if iscc.is_file() else shutil.which("iscc")
-  if not found:
-    sys.exit(
-      f"pack: no Inno Setup 6 at {iscc} or ISCC on PATH; install it: choco install innosetup"
-    )
+def nsis(s: str) -> str:
+  """`s` in an NSIS string: `$` doubled (a define's `${` too), a quote `$\\"`, no line breaks.
 
-  return found
+  >>> print(nsis('a "$b" ${c}\\n'))
+  a $\\"$$b$\\" $${c}
+  """
+  return " ".join(s.replace("$", "$$").replace('"', '$\\"').split("\n")).strip()
+
+
+def nsi(cfg: Config, arch: str, license: bool) -> str:
+  r"""The setup's .nsi: it packs `app.exe`, `app.ico` and, with `license`, `LICENSE.txt` from its
+  folder and writes `setup.exe` there. Its `.onInit` exits 2 on a Windows of another arch; the stub
+  is x86, so that runs on both. The uninstaller keeps the app's data.
+
+  >>> from types import SimpleNamespace as N
+  >>> cfg = N(id="me.vladkens.counter", name="Counter", version="1.2.0-3-gabc", comment="Counts",
+  ...   windows={}, publisher="")
+  >>> text = nsi(cfg, "aarch64", True)
+  >>> keys = ("Install", "VIProduct", "!define MUI_F", "${", "File", "Delete", "CreateS", "Message")
+  >>> print("\n".join(l.strip() for l in text.splitlines() if l.strip().startswith(keys)))
+  InstallDir "$LOCALAPPDATA\Programs\Counter"
+  InstallDirRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\{e65f79c2-5031-5421-a3d1-3c434f820e5d}" "InstallLocation"
+  !define MUI_FINISHPAGE_RUN "$INSTDIR\Counter.exe"
+  VIProductVersion 1.2.0.0
+  ${IfNot} ${IsNativeARM64}
+  MessageBox MB_ICONSTOP "This setup of Counter is for arm64 Windows." /SD IDOK
+  ${EndIf}
+  File "/oname=Counter.exe" "app.exe"
+  File "/oname=LICENSE.txt" "LICENSE.txt"
+  CreateShortcut "$SMPROGRAMS\Counter.lnk" "$INSTDIR\Counter.exe" "" "$INSTDIR\Counter.exe" 0 SW_SHOWNORMAL "" "Counts"
+  Delete "$INSTDIR\Counter.exe"
+  Delete "$INSTDIR\LICENSE.txt"
+  Delete "$INSTDIR\Uninstall.exe"
+  Delete "$SMPROGRAMS\Counter.lnk"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "me.vladkens.counter"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" "me.vladkens.counter"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\{e65f79c2-5031-5421-a3d1-3c434f820e5d}"
+  >>> print("\n".join(l.split("}\" ")[1] for l in text.splitlines() if "UninstallString" in l))
+  "UninstallString" "$\"$INSTDIR\Uninstall.exe$\""
+  "QuietUninstallString" "$\"$INSTDIR\Uninstall.exe$\" /S"
+  >>> x64 = nsi(cfg, "x86_64", False)
+  >>> "  ${IfNot} ${IsNativeAMD64}\n  ${AndIfNot} ${IsNativeARM64}" in x64, "LICENSE" in x64
+  (True, False)
+  """
+  name, exe = nsis(cfg.name), f"$INSTDIR\\{nsis(cfg.name)}.exe"
+  key, value = f"{UNINSTALL}\\{app_id(cfg)}", f'"{nsis(cfg.id)}"'
+  version = ".".join(map(str, quad(cfg.version)))
+  files = [("app.exe", f"{name}.exe")] + ([("LICENSE.txt", "LICENSE.txt")] if license else [])
+  check = ["${IfNot} ${IsNativeARM64}"]
+  if arch == "x86_64":
+    check = ["${IfNot} ${IsNativeAMD64}", "${AndIfNot} ${IsNativeARM64}"]
+
+  strings = {
+    "ProductName": cfg.name,
+    "ProductVersion": cfg.version,
+    "FileVersion": cfg.version,
+    "FileDescription": f"{cfg.name} Setup",
+    "CompanyName": publisher(cfg),
+    "LegalCopyright": cfg.windows.get("copyright") or f"© {publisher(cfg)}",
+  }
+  entries = {
+    "DisplayName": name,
+    "DisplayVersion": nsis(cfg.version),
+    "Publisher": nsis(publisher(cfg)),
+    "DisplayIcon": exe,
+    "InstallLocation": "$INSTDIR",
+    "UninstallString": r"$\"$INSTDIR\Uninstall.exe$\"",
+    "QuietUninstallString": r"$\"$INSTDIR\Uninstall.exe$\" /S",
+  }
+  lines = [
+    f"; {name}'s setup, written by nimbo's scripts/pack.py, built by makensis -INPUTCHARSET UTF8.",
+    "; A signature later: the exe signed before makensis packs it, the setup once it is written,",
+    "; the uninstaller by `!uninstfinalize 'sign \"%1\"'`.",
+    "Unicode true",
+    "ManifestDPIAware true",
+    "RequestExecutionLevel user",
+    "SetCompressor /SOLID lzma",
+    f'Name "{name}" "{name.replace("&", "&&")}"',
+    'OutFile "setup.exe"',
+    f'InstallDir "$LOCALAPPDATA\\Programs\\{name}"',
+    "; An update lands in the folder the first install chose.",
+    f'InstallDirRegKey HKCU "{key}" "InstallLocation"',
+    "",
+    "!include MUI2.nsh",
+    "!include x64.nsh",
+    "",
+    '!define MUI_ICON "app.ico"',
+    '!define MUI_UNICON "app.ico"',
+    "; The finish page's \"Run\": a silent install (the updater's) shows no page, starts nothing.",
+    f'!define MUI_FINISHPAGE_RUN "{exe}"',
+    "!insertmacro MUI_PAGE_INSTFILES",
+    "!insertmacro MUI_PAGE_FINISH",
+    "!insertmacro MUI_UNPAGE_CONFIRM",
+    "!insertmacro MUI_UNPAGE_INSTFILES",
+    '!insertmacro MUI_LANGUAGE "English"',
+    "",
+    f"VIProductVersion {version}",
+    f"VIFileVersion {version}",
+    *(f'VIAddVersionKey /LANG=${{LANG_ENGLISH}} "{k}" "{nsis(v)}"' for k, v in strings.items()),
+    "",
+    "Function .onInit",
+    "  SetShellVarContext current",
+    *(f"  {line}" for line in check),
+    f'    MessageBox MB_ICONSTOP "This setup of {name} is for {NAMES[arch]} Windows." /SD IDOK',
+    "    SetErrorLevel 2",
+    "    Abort",
+    "  ${EndIf}",
+    "FunctionEnd",
+    "",
+    "Function un.onInit",
+    "  SetShellVarContext current",
+    "FunctionEnd",
+    "",
+    "Section",
+    '  SetOutPath "$INSTDIR"',
+    *(f'  File "/oname={nsis(to)}" "{src}"' for src, to in files),
+    '  WriteUninstaller "$INSTDIR\\Uninstall.exe"',
+    f'  CreateShortcut "$SMPROGRAMS\\{name}.lnk" "{exe}" "" "{exe}" 0 SW_SHOWNORMAL ""'
+    f' "{nsis(cfg.comment)}"',
+    *(f'  WriteRegStr HKCU "{key}" "{k}" "{v}"' for k, v in entries.items()),
+    f'  WriteRegDWORD HKCU "{key}" "NoModify" 1',
+    f'  WriteRegDWORD HKCU "{key}" "NoRepair" 1',
+    "SectionEnd",
+    "",
+    "; The files and the shortcut, and nimbo's launch at login, which would start a deleted exe.",
+    'Section "Uninstall"',
+    *(f'  Delete "$INSTDIR\\{nsis(to)}"' for _, to in files),
+    '  Delete "$INSTDIR\\Uninstall.exe"',
+    '  RMDir "$INSTDIR"',
+    f'  Delete "$SMPROGRAMS\\{name}.lnk"',
+    f'  DeleteRegValue HKCU "{RUN}" {value}',
+    f'  DeleteRegValue HKCU "{APPROVED}" {value}',
+    f'  DeleteRegKey HKCU "{key}"',
+    "SectionEnd",
+  ]
+  return "\n".join(lines) + "\n"
 
 
 def app_id(cfg: Config) -> str:
-  """The installer's AppId, the same in every version, so a newer setup replaces the install:
+  """The setup's AppId, the same in every version, so a newer setup replaces the install:
   `windows.app-id`, else a GUID made from the app's id. Never changed.
 
   >>> from types import SimpleNamespace as N
@@ -1095,11 +1228,7 @@ def version_info(cfg: Config) -> bytes:
   >>> "1.2.3-beta.1\0" in data.decode("utf-16-le"), "© a\0" in data.decode("utf-16-le")
   (True, True)
   """
-  nums = [int(n) for n in re.match(r"\d+(\.\d+){0,3}", cfg.version)[0].split(".")]
-  if max(nums) > 65535:
-    sys.exit(f"pack: version {cfg.version}: Windows takes numbers up to 65535")
-
-  a, b, c, d = (nums + [0, 0, 0])[:4]
+  a, b, c, d = quad(cfg.version)
   ms, ls = a << 16 | b, c << 16 | d
   # VS_FIXEDFILEINFO: VOS_NT_WINDOWS32, VFT_APP.
   fixed = struct.pack("<13I", 0xFEEF04BD, 0x10000, ms, ls, ms, ls, 0x3F, 0, 0x40004, 1, 0, 0, 0)
@@ -1118,6 +1247,19 @@ def version_info(cfg: Config) -> bytes:
   var = node("Translation", struct.pack("<2H", LANG, 1200))
   children = [node("StringFileInfo", children=[table]), node("VarFileInfo", children=[var])]
   return node("VS_VERSION_INFO", fixed, children)
+
+
+def quad(version: str) -> tuple[int, ...]:
+  """The version as Windows' four numbers.
+
+  >>> quad("1.2.3-beta.1"), quad("2")
+  ((1, 2, 3, 0), (2, 0, 0, 0))
+  """
+  nums = [int(n) for n in re.match(r"\d+(\.\d+){0,3}", version)[0].split(".")]
+  if max(nums) > 65535:
+    sys.exit(f"pack: version {version}: Windows takes numbers up to 65535")
+
+  return tuple((nums + [0, 0, 0])[:4])
 
 
 def pe_headers(data: bytes) -> tuple[int, int, list[list]]:
@@ -1355,117 +1497,6 @@ def pe_resources(data: bytes, ours: dict) -> bytes:
   struct.pack_into("<I", out, opt + 8, initialized & 0xFFFFFFFF)
   struct.pack_into("<I", out, opt + 64, checksum(out, opt + 64))
   return bytes(out)
-
-
-def script(cfg: Config, binary: Path, arch: str, out_dir: Path, base: str, license: Path) -> str:
-  r"""The .iss for the installer `base` in `out_dir`.
-
-  >>> from types import SimpleNamespace as N
-  >>> cfg = N(id="me.vladkens.counter", name="Counter", version="1.2.0-3-gabc", comment="Counts",
-  ...   windows={}, publisher="")
-  >>> iss = script(cfg, Path("c.exe"), "aarch64", Path("out"), "b", Path("-"))
-  >>> keys = ("AppId", "AppVersion", "VersionInfo", "Priv", "DefaultDir", "Arch", "Close", "Source")
-  >>> print("\n".join(l for l in iss.splitlines() if l.startswith(keys)))
-  AppId={{e65f79c2-5031-5421-a3d1-3c434f820e5d}
-  AppVersion=1.2.0-3-gabc
-  VersionInfoVersion=1.2.0
-  PrivilegesRequired=lowest
-  DefaultDirName={userpf}\Counter
-  ArchitecturesAllowed=arm64
-  ArchitecturesInstallIn64BitMode=arm64
-  CloseApplications=no
-  Source: "c.exe"; DestDir: "{app}"; DestName: "Counter.exe"; Flags: ignoreversion
-  >>> "Flags: nowait postinstall skipifsilent" in iss, "Mutex" in iss or "LICENSE" in iss
-  (True, False)
-  """
-  exe = f"{cfg.name}.exe"
-  name, app = esc(cfg.name), r"{app}" + "\\" + esc(exe)
-  numeric = re.match(r"\d+(\.\d+){0,3}", cfg.version)
-  files = [(binary, exe)] + ([(license.resolve(), "LICENSE.txt")] if license.is_file() else [])
-  files = [f'Source: {q(str(src))}; DestDir: "{{app}}"; DestName: {q(to)}' for src, to in files]
-  entry = q(r"{autoprograms}" + "\\" + name, False)
-  # A Pascal string: an apostrophe is doubled.
-  value = "'" + cfg.id.replace("'", "''") + "'"
-  lines = [
-    "[Setup]",
-    f"AppId={esc(app_id(cfg))}",
-    f"AppName={name}",
-    f"AppVersion={esc(cfg.version)}",
-    *([f"VersionInfoVersion={numeric.group()}"] if numeric else []),
-    f"AppPublisher={esc(publisher(cfg))}",
-    f"AppComments={esc(cfg.comment)}",
-    "PrivilegesRequired=lowest",
-    # %LOCALAPPDATA%\Programs\<Name>.
-    rf"DefaultDirName={{userpf}}\{name}",
-    "DisableDirPage=yes",
-    "DisableProgramGroupPage=yes",
-    f"ArchitecturesAllowed={ARCHES[arch]}",
-    f"ArchitecturesInstallIn64BitMode={ARCHES[arch]}",
-    f"UninstallDisplayName={name}",
-    f"UninstallDisplayIcon={app}",
-    # The updater runs it once the app has quit; an interactive install over a running copy asks
-    # to close it by hand.
-    "CloseApplications=no",
-    "RestartApplications=no",
-    f"OutputDir={esc(str(out_dir))}",
-    f"OutputBaseFilename={esc(base)}",
-    "Compression=lzma2",
-    "SolidCompression=yes",
-    "WizardStyle=modern",
-    "",
-    "[Files]",
-    *(f"{line}; Flags: ignoreversion" for line in files),
-    "",
-    "[Icons]",
-    f"Name: {entry}; Filename: {q(app, False)}; Comment: {q(cfg.comment)}",
-    "",
-    "; An interactive install only: a silent one is the updater's, which starts the app itself.",
-    "[Run]",
-    # A constant's argument ends at a comma or a brace: those %-encoded.
-    f'Filename: {q(app, False)}; Description: "{{cm:LaunchProgram,{arg(cfg.name)}}}"; '
-    + "Flags: nowait postinstall skipifsilent",
-    "",
-    "; nimbo's launch at login, which would start a deleted exe.",
-    "[Code]",
-    "procedure CurUninstallStepChanged(Step: TUninstallStep);",
-    "begin",
-    "  if Step = usPostUninstall then begin",
-    f"    RegDeleteValue(HKCU, '{RUN}', {value});",
-    f"    RegDeleteValue(HKCU, '{APPROVED}', {value});",
-    "  end;",
-    "end;",
-  ]
-  return "\n".join(lines) + "\n"
-
-
-def esc(s: str) -> str:
-  """`s` in an .iss value, where a brace starts a constant: doubled.
-
-  >>> esc("{a}")
-  '{{a}'
-  """
-  return s.replace("{", "{{")
-
-
-def q(s: str, plain: bool = True) -> str:
-  """`s` as a quoted parameter, its quotes doubled; escaped as well when `plain` (no constants).
-
-  >>> q('say "hi" {x}')
-  '"say ""hi"" {{x}"'
-  """
-  return '"' + (esc(s) if plain else s).replace('"', '""') + '"'
-
-
-def arg(s: str) -> str:
-  """`s` as a constant's argument: `%`, `,`, `|` and `}` %-encoded, `{` doubled.
-
-  >>> arg("A, {b}")
-  'A%2c {{b%7d'
-  """
-  for c in "%,|}":
-    s = s.replace(c, f"%{ord(c):02x}")
-
-  return esc(s).replace('"', '""')
 
 
 # MARK: Linux
