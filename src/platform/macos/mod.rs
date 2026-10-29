@@ -33,8 +33,8 @@ use objc2_app_kit::{
 use objc2_foundation::{NSArray, NSString, NSUserDefaults, ns_string};
 
 pub use self::app::{
-  activity, autostart, desktop, focus, hardware, hotkey, open, paste, permissions, post, tray,
-  uninstall,
+  activity, autostart, desktop, focus, hardware, hotkey, http, open, paste, permissions, post,
+  tray, uninstall, update,
 };
 use crate::app::{Appearance, Clipboard};
 

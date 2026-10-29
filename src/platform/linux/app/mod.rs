@@ -7,7 +7,8 @@
 //! to the app in focus ([post]) and where the user types on X11 ([focus]), and the clipboard for a
 //! paste ([paste]), both through the RemoteDesktop portal on Wayland ([remote]); the tray, the
 //! portals and the file manager speak D-Bus through GIO ([super::dbus]); what an uninstall
-//! removes ([uninstall]); no hardware read yet ([hardware]).
+//! removes ([uninstall]); files fetched over HTTP with libcurl ([http]), an update's AppImage
+//! made executable ([update]); no hardware read yet ([hardware]).
 
 pub mod activity;
 pub mod autostart;
@@ -16,6 +17,7 @@ pub mod focus;
 mod grab;
 pub mod hardware;
 pub mod hotkey;
+pub mod http;
 mod menu;
 pub mod open;
 pub mod paste;
@@ -24,6 +26,7 @@ mod remote;
 pub mod shell;
 pub mod tray;
 pub mod uninstall;
+pub mod update;
 
 use std::ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void};
 use std::ptr::null_mut;
