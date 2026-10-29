@@ -75,6 +75,9 @@ def run(*args, **kw) -> subprocess.CompletedProcess:
 
 
 def metadata(manifest: Path) -> dict:
+  if not shutil.which("cargo"):
+    sys.exit("pack: cargo not found: `cargo metadata` reads the config")
+
   out = run("cargo", "metadata", "--format-version", "1", "--no-deps", "--manifest-path", manifest, capture_output=True)
   return json.loads(out.stdout)
 
@@ -86,8 +89,8 @@ def parse(meta: dict, manifest: Path) -> Config:
   >>> pkg = {"name": "a", "version": "1.2.0", "manifest_path": "/x/Cargo.toml", "default_run": None}
   >>> pkg |= {"targets": [{"name": "a", "kind": ["bin"]}], "metadata": {"nimbo": {"id": "me.a", "name": "A", "icon": "i.png"}}}
   >>> c = parse({"packages": [pkg]}, Path("/x/Cargo.toml"))
-  >>> c.bin, c.version, c.icon, c.macos
-  ('a', '1.2.0', PosixPath('/x/i.png'), {})
+  >>> c.bin, c.version, c.icon.name, c.macos
+  ('a', '1.2.0', 'i.png', {})
   """
   manifest = manifest.resolve()
   pkg = next((p for p in meta["packages"] if Path(p["manifest_path"]).resolve() == manifest), None)
@@ -311,11 +314,11 @@ def main():
   elif args.command == "setup":
     import pack_windows
 
-    pack_windows.setup(cfg, binary, arch(target), out)
+    print(pack_windows.setup(cfg, binary, arch(target), out))
   else:
     import pack_linux
 
-    getattr(pack_linux, args.command)(cfg, binary, arch(target), out)
+    print(getattr(pack_linux, args.command)(cfg, binary, arch(target), out))
 
 
 if __name__ == "__main__":
