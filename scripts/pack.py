@@ -239,7 +239,7 @@ ICNS = (
 
 def png_decode(data: bytes) -> tuple[int, int, bytes]:
   """A PNG's `(width, height, RGBA)`, 8 bits a channel, straight alpha: grey or RGB, with or
-  without alpha, at 8 or 16 bits, or an 8-bit palette with its tRNS; never interlaced.
+  without alpha, at 8 or 16 bits, or an 8-bit palette, each with its tRNS; never interlaced.
 
   >>> px = bytes(range(32))
   >>> png_decode(png_encode(4, 2, px)) == (4, 2, px)
@@ -249,6 +249,14 @@ def png_decode(data: bytes) -> tuple[int, int, bytes]:
   >>> img = PNG + chunk(b"IHDR", head) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
   >>> png_decode(img)
   (1, 2, b'\\x07\\x07\\x07\\xff\\x08\\x08\\x08\\xff')
+  >>> def keyed(depth, color, px, key):  # one row, unfiltered, with a tRNS colour key
+  ...   head = struct.pack(">IIBBBBB", 2, 1, depth, color, 0, 0, 0)
+  ...   parts = (b"IHDR", head), (b"tRNS", key), (b"IDAT", zlib.compress(b"\\0" + px))
+  ...   return png_decode(PNG + b"".join(chunk(*c) for c in parts) + chunk(b"IEND", b""))
+  >>> keyed(8, 2, bytes([1, 2, 3, 4, 5, 6]), bytes([0, 4, 0, 5, 0, 6]))  # RGB: the second clear
+  (2, 1, b'\\x01\\x02\\x03\\xff\\x04\\x05\\x06\\x00')
+  >>> keyed(16, 0, bytes([1, 2, 1, 3]), bytes([1, 3]))  # 16-bit grey: both bytes compared
+  (2, 1, b'\\x01\\x01\\x01\\xff\\x01\\x01\\x01\\x00')
   """
   if data[:8] != PNG:
     raise ValueError("not a PNG")
@@ -283,7 +291,8 @@ def png_decode(data: bytes) -> tuple[int, int, bytes]:
     rows.append(prev)
 
   # 16 bits: the high byte of each.
-  px = b"".join(rows)[:: depth // 8]
+  full = b"".join(rows)
+  px = full[:: depth // 8]
   if color == 3:
     plte, trns = chunks[b"PLTE"], chunks.get(b"tRNS", b"")
     table = [bytes(plte[c::3]).ljust(256, b"\0") for c in range(3)]
@@ -294,7 +303,16 @@ def png_decode(data: bytes) -> tuple[int, int, bytes]:
       channels = channels[:1] * 3 + channels[1:]
 
     if len(channels) == 3:
-      channels.append(b"\xff" * (w * h))
+      # tRNS: the one grey or RGB that is clear, as 16-bit samples; at 8 bits, of their low bytes.
+      key = chunks.get(b"tRNS", b"")[: 2 if color == 0 else 6]
+      if depth == 8:
+        key = b"" if any(key[::2]) else key[1::2]
+
+      if len(key) == bpp:
+        pixels = range(0, len(full), bpp)
+        channels.append(bytes(0 if full[i : i + bpp] == key else 255 for i in pixels))
+      else:
+        channels.append(b"\xff" * (w * h))
 
   out = bytearray(w * h * 4)
   for c, plane in enumerate(channels):
@@ -716,7 +734,7 @@ def app(cfg: Config, binary: Path) -> Path:
   shutil.rmtree(bundle, ignore_errors=True)
   (bundle / "Contents/MacOS").mkdir(parents=True)
   (bundle / "Contents/Resources").mkdir(parents=True)
-  shutil.copy2(binary, bundle / "Contents/MacOS" / cfg.bin)
+  executable(binary, bundle / "Contents/MacOS" / cfg.bin)
   images = icons(cfg.icon, {n for _, n in ICNS}, False)
   (bundle / f"Contents/Resources/{cfg.name}.icns").write_bytes(icns(images))
   (bundle / "Contents/PkgInfo").write_text("APPL????")
@@ -1577,7 +1595,7 @@ def appimage(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
   with tempfile.TemporaryDirectory() as tmp:
     appdir = Path(tmp) / f"{cfg.name}.AppDir"
     (appdir / "usr/bin").mkdir(parents=True)
-    shutil.copy2(binary, appdir / "usr/bin" / cfg.bin)
+    executable(binary, appdir / "usr/bin" / cfg.bin)
     (appdir / "AppRun").symlink_to(f"usr/bin/{cfg.bin}")
     (appdir / f"{cfg.id}.desktop").write_text(desktop(cfg))
     shutil.copy2(cfg.icon, appdir / f"{cfg.id}.png")
@@ -1592,6 +1610,20 @@ def appimage(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
 def put(path: Path, data: bytes) -> None:
   path.parent.mkdir(parents=True, exist_ok=True)
   path.write_bytes(data)
+
+
+def executable(binary: Path, path: Path) -> None:
+  """`binary` copied to `path` at 0755, whatever its own mode: GitHub's artifacts lose it.
+
+  >>> src = Path(tempfile.mkdtemp()) / "a"
+  >>> _ = src.write_bytes(b"x")
+  >>> src.chmod(0o644)
+  >>> executable(src, src.with_name("b"))
+  >>> oct(src.with_name("b").stat().st_mode & 0o777)
+  '0o755'
+  """
+  shutil.copy2(binary, path)
+  path.chmod(0o755)
 
 
 def deb(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
