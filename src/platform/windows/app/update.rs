@@ -63,11 +63,12 @@ pub fn detach(cmd: &mut Command) -> io::Result<Child> {
 }
 
 /// Starts the app's folder `app` by its exe, named as this one's, with `args` and `note` in its
-/// [NOTE], not waiting for it. The installer has no console to share, so a console app would get
-/// a window of its own, in Windows Terminal or conhost: it gets a console with none (a windowed app
-/// is unaffected).
+/// [NOTE] (none inherited), not waiting for it. The installer has no console to share, so a console
+/// app would get a window of its own, in Windows Terminal or conhost: it gets a console with none
+/// (a windowed app is unaffected).
 pub fn start(app: &Path, args: &[OsString], note: Option<&str>) -> io::Result<()> {
   let exe = app.join(env::current_exe()?.file_name().unwrap_or_default());
   let mut cmd = Command::new(exe);
-  cmd.envs(note.map(|n| (NOTE, n))).args(args).creation_flags(CREATE_NO_WINDOW).spawn().map(drop)
+  cmd.env_remove(NOTE).envs(note.map(|n| (NOTE, n))).args(args).creation_flags(CREATE_NO_WINDOW);
+  cmd.spawn().map(drop)
 }

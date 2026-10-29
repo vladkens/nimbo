@@ -1033,6 +1033,29 @@ mod tests {
     hwnd
   }
 
+  /// Shows `hwnd` without the user seeing it: cloaked by DWM, a tool window (no taskbar button),
+  /// not activated; whether it is visible to Windows then, which SSH's window station never lets
+  /// a window be. Not shown at all when it can't be cloaked.
+  fn unseen(hwnd: HWND) -> bool {
+    use windows_sys::Win32::Graphics::Dwm::{DWMWA_CLOAK, DwmSetWindowAttribute};
+
+    let on = 1i32;
+    let flags = SWP_SHOWWINDOW | SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER;
+    // Never shown uncloaked: a window DWM can't cloak is not shown.
+    if unsafe { DwmSetWindowAttribute(hwnd, DWMWA_CLOAK as u32, (&raw const on).cast(), 4) } < 0 {
+      return false;
+    }
+
+    unsafe {
+      let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) | WS_EX_TOOLWINDOW as isize;
+      SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex);
+      SetWindowPos(hwnd, null_mut(), 0, 0, 0, 0, flags);
+    }
+
+    shown(hwnd);
+    unsafe { IsWindowVisible(hwnd) != 0 }
+  }
+
   struct Busy;
   impl App for Busy {
     fn paint(&mut self, f: &mut crate::Frame) {
@@ -1321,8 +1344,8 @@ mod tests {
   }
 
   /// A size the app asks for in a frame draws another through WM_SIZE: the loop's sleep follows
-  /// that one, so the timer it sets wakes the loop, not the next message. The window is never
-  /// shown.
+  /// that one, so the timer it sets wakes the loop, not the next message. WM_SIZE draws only a
+  /// visible window, so this one is shown cloaked, on no screen ([unseen]).
   #[test]
   fn a_frame_after_an_asked_size_keeps_its_timer() {
     use std::cell::Cell;
@@ -1344,6 +1367,12 @@ mod tests {
 
     let grow = Rc::new(Cell::new(false));
     let hwnd = open(&Config::new("grow", 200.0, 100.0), Box::new(Grow(grow.clone())));
+    if !unseen(hwnd) {
+      eprintln!("skipped: no window can be visible here (SSH); run it in the desktop session");
+      unsafe { DestroyWindow(hwnd) };
+      return;
+    }
+
     for _ in 0..10 {
       if settle(hwnd).is_none() {
         break;

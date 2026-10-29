@@ -136,11 +136,11 @@
 //!   opened at the call, before the installer's mark); `alive(pid: u32) -> bool`, for the staging
 //!   folders of ended installers; `start(app: &Path, args: &[OsString], note: Option<&str>) ->
 //!   io::Result<()>`, the installed app started with `args`, and `note` in its `NIMBO_UPDATE_ERROR`
-//!   ([crate::update::NOTE]), without waiting for it (macOS `/usr/bin/open -n -g [--env …] …
-//!   --args`, by LaunchServices in launchd's environment, in `/` and without the focus; Windows the
-//!   app folder's exe of this one's name; Linux the AppImage without the installer's AppImage
-//!   variables), else in this process's working directory. Windows also `setup(exe: &Path) ->
-//!   io::Result<i32>`, the per-user Inno Setup run `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+//!   ([crate::update::NOTE], none inherited), without waiting for it (macOS `/usr/bin/open -n -g
+//!   [--env …] … --args`, by LaunchServices in launchd's environment, in `/` and without the focus;
+//!   Windows the app folder's exe of this one's name; Linux the AppImage without the installer's
+//!   AppImage variables), else in this process's working directory. Windows also `setup(exe: &Path)
+//!   -> io::Result<i32>`, the per-user Inno Setup run `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 //!   /CURRENTUSER` with no window to its end, its exit code. macOS also `accepts(new: &Path, app:
 //!   &Path) -> io::Result<()>`, the new bundle of `app`'s id meeting its designated requirement for
 //!   every architecture (Security.framework's `SecStaticCodeCheckValidityWithErrors`), else
