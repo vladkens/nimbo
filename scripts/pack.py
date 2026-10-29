@@ -2,29 +2,27 @@
 """Makes an app's release files from its Cargo.toml: the macOS app and DMG, the Windows
 installer, the AppImage and .deb, and the signed update feed (src/update.rs).
 
-The app describes itself in `[package.metadata.nimbo]` (`id`, `name`, `icon`, `comment`, and the
-tables `macos` and `linux`); the version and the binary's name are the package's. All of it comes
-from `cargo metadata --no-deps`, which compiles nothing, so this runs on a plain `python3` (3.9,
-macOS's own) with the standard library. The binary is already built, by default
-`<target dir>/<triple>/dist/<bin>`; the target defaults to this machine's arch on the command's
-OS. Each OS's files are made by its module: pack_macos.py, pack_windows.py, pack_linux.py. Names:
-`<Name>-v<version>-<platform>.<ext>`, the .deb as Debian names it.
+The config is the package's `[package.metadata.nimbo]` (`id`, `name`, `icon`, a 1024 px PNG,
+`comment`, the tables `macos`, `linux` and `windows`), its version and binary, read by `cargo
+metadata --no-deps`, which compiles nothing: a plain `python3` (3.9, macOS's own) with the standard
+library runs this. The binary is built already, by default `<target dir>/<triple>/dist/<bin>`, the
+target this machine's arch on the command's OS. The files are `<Name>-v<version>-<platform>.<ext>`,
+the .deb named as Debian names it.
 
-A job that signs compiles nothing: the macOS one (vladkens/actions' macos-sign) finds nimbo at
-the rev the app's Cargo.lock pins (`source = "git+https://github.com/vladkens/nimbo…#<sha>"`),
-checks it out and runs this `pack.py dmg` from there.
+The macOS sign job compiles nothing: it checks nimbo out at the rev the app's Cargo.lock pins
+(`git+https://github.com/vladkens/nimbo…#<sha>`) and runs `app` and `dmg` from there, which sign
+with its Developer ID; vladkens/actions' macos-sign notarizes and staples the DMG.
 
 `feed` writes update.txt: `version <v>`, a line per file, `<platform> <size> <sha512> <url>`, and
-last `sig <hex>`, the Ed25519 signature of every byte before it. A file's platform comes from its
-name (`linux-aarch64`, `windows-x64`) or is given, `<platform>=<file>`; its url is `--url` (where
-`{version}` is the version) and the file's name. The private key, from `--key <file>` or
-`$UPDATE_KEY`, is its 32-byte seed in hex (as `feed-key` makes it) or a PEM; openssl 3 signs.
-`feed-key` makes the one key, in memory only: it sets the repo's secret UPDATE_KEY (gh), puts the
-private key on the clipboard to keep (Bitwarden) and prints the public key in hex, the app's
-`Feed::key`. `feed --public-key` prints that of a key it is given.
+last `sig <hex>`, the Ed25519 signature of every byte before it. A file's platform is in its name
+(`linux-aarch64`, `windows-x64`) or given, `<platform>=<file>`; its url is `--url` (`{version}` the
+version) and its name. The key, `--key <file>` or `$UPDATE_KEY`, is its seed in hex or a PEM.
+`feed-key` makes the one key, in memory only: the repo's secret UPDATE_KEY (gh), the private key on
+the clipboard to keep (Bitwarden), the public key printed in hex, the app's `Feed::key`. Both need
+OpenSSL 3 (macOS's own openssl is LibreSSL).
 
 python3 scripts/pack.py app|setup|appimage|deb [--target <triple>] [--bin <path>] [--out <dir>] [--manifest <Cargo.toml>]
-python3 scripts/pack.py dmg [<Name>.app] [--out <dir>] [--manifest <Cargo.toml>]
+python3 scripts/pack.py dmg [<Name>.app] [--target <triple>] [--out <dir>] [--manifest <Cargo.toml>]
 python3 scripts/pack.py feed [--key <file>] --url <base> [--out <dir>] [<platform>=]<file>...
 python3 scripts/pack.py feed [--key <file>] --public-key
 python3 scripts/pack.py feed-key [--repo <owner/name>]
@@ -34,21 +32,22 @@ from __future__ import annotations
 
 import argparse
 import base64
+import functools
 import hashlib
 import json
 import os
 import platform as host
+import plistlib
 import re
 import shutil
-import struct
 import subprocess
 import sys
 import tempfile
-import zlib
+import urllib.request
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-PLATFORMS = {f"{o}-{a}" for o in ("macos", "windows", "linux") for a in ("x86_64", "aarch64")}
 # The triple's OS of each command, for the default target.
 OS = {
   "app": "apple-darwin",
@@ -57,9 +56,6 @@ OS = {
   "appimage": "unknown-linux-gnu",
   "deb": "unknown-linux-gnu",
 }
-# An Ed25519 private key's PKCS#8 DER (RFC 8410) before its 32-byte seed.
-SEED_DER = bytes.fromhex("302e020100300506032b657004220420")
-PNG = b"\x89PNG\r\n\x1a\n"
 
 
 @dataclass
@@ -83,18 +79,16 @@ def run(*args, **kw) -> subprocess.CompletedProcess:
   return subprocess.run([str(a) for a in args], check=True, **kw)
 
 
-def metadata(manifest: Path) -> dict:
+def load(manifest: Path) -> Config:
   if not shutil.which("cargo"):
     sys.exit("pack: cargo not found: `cargo metadata` reads the config")
 
   args = ["--format-version", "1", "--no-deps", "--manifest-path", manifest]
-  out = run("cargo", "metadata", *args, capture_output=True)
-  return json.loads(out.stdout)
+  return parse(json.loads(run("cargo", "metadata", *args, capture_output=True).stdout), manifest)
 
 
 def parse(meta: dict, manifest: Path) -> Config:
-  """The config of the package at `manifest` in `cargo metadata`'s output, its paths under the
-  manifest's folder.
+  """The config of the package at `manifest` in `cargo metadata`'s output.
 
   >>> pkg = {"name": "a", "version": "1.2.0", "manifest_path": "/x/Cargo.toml", "default_run": None}
   >>> pkg["targets"] = [{"name": "a", "kind": ["bin"]}]
@@ -130,16 +124,12 @@ def parse(meta: dict, manifest: Path) -> Config:
     macos=nimbo.get("macos", {}),
     linux=nimbo.get("linux", {}),
     windows=nimbo.get("windows", {}),
-    # `[package.metadata.nimbo] publisher`, else the first author without the mail.
+    # The config's, else the first author without the mail.
     publisher=nimbo.get("publisher") or next(iter(authors), "").split(" <")[0],
     authors=authors,
     root=manifest.parent,
     target=Path(meta.get("target_directory") or manifest.parent / "target"),
   )
-
-
-def load(manifest: Path) -> Config:
-  return parse(metadata(manifest), manifest)
 
 
 def arch(target: str) -> str:
@@ -156,13 +146,542 @@ def arch(target: str) -> str:
   return name
 
 
+# MARK: macOS
+
+KEYS = {"accessory", "usage", "plist", "entitlements"}
+
+
+def info(cfg: Config, minos: str) -> dict:
+  """The Info.plist: the bundle from the config, then its `usage` strings and `plist` keys over it.
+
+  >>> mac = {"accessory": True, "usage": {"NSMicrophoneUsageDescription": "m"}, "plist": {"X": 1}}
+  >>> cfg = Config("me.a", "A", Path("i.png"), "", "1.2.0-beta.1", "a", mac, {}, {}, "", [],
+  ...   Path("."), Path("target"))
+  >>> p = info(cfg, "14.0")
+  >>> p["CFBundleExecutable"], p["CFBundleVersion"], p["LSUIElement"], p["X"]
+  ('a', '1.2.0', True, 1)
+  >>> p["LSMinimumSystemVersion"]
+  '14.0'
+  """
+  bad = set(cfg.macos) - KEYS
+  if bad:
+    bad, known = ", ".join(sorted(bad)), ", ".join(sorted(KEYS))
+    sys.exit(f"pack: unknown [package.metadata.nimbo.macos] keys {bad}: one of {known}")
+
+  # Both versions are numbers and dots only: 1.2.0 of 1.2.0-beta.1.
+  version = re.match(r"\d+(\.\d+)*", cfg.version)[0]
+  plist = {
+    "CFBundleIdentifier": cfg.id,
+    "CFBundleName": cfg.name,
+    "CFBundleDisplayName": cfg.name,
+    "CFBundleExecutable": cfg.bin,
+    "CFBundleIconFile": cfg.name,
+    "CFBundlePackageType": "APPL",
+    "CFBundleShortVersionString": version,
+    "CFBundleVersion": version,
+    "CFBundleInfoDictionaryVersion": "6.0",
+    "CFBundleDevelopmentRegion": "en",
+    "LSMinimumSystemVersion": minos,
+    "NSHighResolutionCapable": True,
+  }
+  if cfg.macos.get("accessory"):
+    plist["LSUIElement"] = True
+
+  return {**plist, **cfg.macos.get("usage", {}), **cfg.macos.get("plist", {})}
+
+
+def minos(binary: Path) -> str:
+  out = run("vtool", "-show-build", binary, capture_output=True, text=True).stdout
+  return next(ln.split()[1] for ln in out.splitlines() if ln.split()[:1] == ["minos"])
+
+
+def icns(png: Path, out: Path) -> None:
+  with tempfile.TemporaryDirectory(suffix=".iconset") as tmp:
+    for size in (16, 32, 128, 256, 512):
+      for scale, suffix in ((1, ""), (2, "@2x")):
+        px = str(size * scale)
+        icon = Path(tmp) / f"icon_{size}x{size}{suffix}.png"
+        run("sips", "-z", px, px, png, "--out", icon, capture_output=True)
+
+    run("iconutil", "-c", "icns", "-o", out, tmp)
+
+
+def identities(valid: bool) -> list[str]:
+  args = ["find-identity", *(["-v"] if valid else []), "-p", "codesigning"]
+  out = run("security", *args, capture_output=True, text=True).stdout
+  return [ln for ln in out.splitlines() if '"' in ln]
+
+
+def make_identity(name: str) -> None:
+  """A self-signed code signing certificate in the login keychain, codesign allowed to use it."""
+  with tempfile.TemporaryDirectory() as tmp:
+    key, cert, p12 = (Path(tmp) / n for n in ("key.pem", "cert.pem", "identity.p12"))
+    # macOS's own openssl (LibreSSL): `security import` reads its PKCS#12, not OpenSSL 3's.
+    openssl = "/usr/bin/openssl"
+    new = ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "3650", "-subj", f"/CN={name}"]
+    new += ["-addext", "keyUsage=critical,digitalSignature"]
+    new += ["-addext", "extendedKeyUsage=critical,codeSigning"]
+    run(openssl, *new, "-keyout", key, "-out", cert, capture_output=True)
+    export = ["pkcs12", "-export", "-inkey", key, "-in", cert, "-out", p12]
+    run(openssl, *export, "-passout", "pass:nimbo", capture_output=True)
+    keychain = Path.home() / "Library/Keychains/login.keychain-db"
+    trust = ["-P", "nimbo", "-T", "/usr/bin/codesign"]
+    run("security", "import", p12, "-k", keychain, *trust, capture_output=True)
+
+  if not any(f'"{name}"' in ln for ln in identities(False)):
+    sys.exit(f'pack: made "{name}", but `security find-identity` does not list it')
+
+  print(f'pack: made the code signing identity "{name}" in the login keychain', file=sys.stderr)
+
+
+def given() -> tuple[str, str] | None:
+  """The release's identity, as codesign takes it and as it is said: $NIMBO_SIGN_IDENTITY (`-` ad
+  hoc), else a Developer ID in the keychain by its hash (two, a renewal, are ambiguous by name)."""
+  name = os.environ.get("NIMBO_SIGN_IDENTITY")
+  if name:
+    return name, "ad hoc" if name == "-" else name
+
+  dev = [ln for ln in identities(True) if '"Developer ID Application:' in ln]
+  return (dev[0].split()[1], dev[0].split('"')[1]) if dev else None
+
+
+def identity(cfg: Config) -> tuple[str, str, bool]:
+  """What signs the app, as `given` says it, and whether it is a release's (timestamped): the
+  given one, else ad hoc in CI, else "<Name> Local Signing", made once in the login keychain: its
+  designated requirement names the bundle id and the certificate, not the code hash, so the
+  permissions macOS grants survive rebuilds."""
+  found = given()
+  if found:
+    return (*found, found[0] != "-")
+
+  if os.environ.get("CI"):
+    return "-", "ad hoc (CI)", False
+
+  name = f"{cfg.name} Local Signing"
+  if not any(f'"{name}"' in ln for ln in identities(False)):
+    make_identity(name)
+
+  return name, name, False
+
+
+def app(cfg: Config, binary: Path, out_dir: Path) -> Path:
+  """`<Name>.app`: the binary, the icns (sips) and the Info.plist, signed by `identity` with the
+  hardened runtime and `macos.entitlements`. One codesign fails on (or a keychain dialog nobody
+  answers stops) is no bundle, never one signed ad hoc, whose grants would last that build only."""
+  sha, name, release = identity(cfg)
+  bundle = out_dir / f"{cfg.name}.app"
+  shutil.rmtree(bundle, ignore_errors=True)
+  (bundle / "Contents/MacOS").mkdir(parents=True)
+  (bundle / "Contents/Resources").mkdir(parents=True)
+  shutil.copy2(binary, bundle / "Contents/MacOS" / cfg.bin)
+  icns(cfg.icon, bundle / f"Contents/Resources/{cfg.name}.icns")
+  (bundle / "Contents/PkgInfo").write_text("APPL????")
+  plist = bundle / "Contents/Info.plist"
+  plist.write_bytes(plistlib.dumps(info(cfg, minos(binary))))
+  run("plutil", "-lint", "-s", plist)
+  run("xattr", "-cr", bundle)
+  entitlements = cfg.macos.get("entitlements")
+  # Notarization needs a secure timestamp.
+  sign = ["--force", "--sign", sha, "--options", "runtime"]
+  sign += ["--timestamp" if release else "--timestamp=none"]
+  sign += ["--entitlements", cfg.root / entitlements] if entitlements else []
+  try:
+    run("codesign", *sign, bundle, timeout=60)
+  except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+    shutil.rmtree(bundle, ignore_errors=True)
+    sys.exit(f'pack: codesign with "{name}" failed ({e}): no bundle')
+
+  run("codesign", "--verify", "--strict", bundle)
+  print(f"{bundle}: {cfg.name} {cfg.version}, signed: {name}")
+  return bundle
+
+
+def dmg(cfg: Config, bundle: Path, target: str | None, out_dir: Path) -> Path:
+  """`<Name>-v<version>-macos-<arch>.dmg` (UDZO) of `bundle` and an /Applications link, the arch
+  `target`'s, else the bundle's binary's (lipo); signed as `given` says unless that is ad hoc."""
+  plist = bundle / "Contents/Info.plist"
+  if not plist.is_file():
+    sys.exit(f"pack: {bundle} is no app bundle")
+
+  exe = bundle / "Contents/MacOS" / plistlib.loads(plist.read_bytes())["CFBundleExecutable"]
+  lipo = run("lipo", "-archs", exe, capture_output=True, text=True).stdout.split()
+  archs = [target] if target else lipo
+  if len(archs) != 1:
+    sys.exit(f"pack: {exe} is built for {' and '.join(archs)}: give --target")
+
+  out = out_dir / f"{cfg.name}-v{cfg.version}-macos-{arch(archs[0])}.dmg"
+  out_dir.mkdir(parents=True, exist_ok=True)
+  with tempfile.TemporaryDirectory() as tmp:
+    stage = Path(tmp) / cfg.name
+    stage.mkdir()
+    # ditto keeps the signature, the links and the modes as they are.
+    run("ditto", bundle, stage / bundle.name)
+    (stage / "Applications").symlink_to("/Applications")
+    # hdiutil, which macOS 27 deprecates for `diskutil image`: the runners up to macOS 15 lack that.
+    image = ["-volname", cfg.name, "-srcfolder", stage, "-format", "UDZO", "-ov"]
+    run("hdiutil", "create", *image, out, capture_output=True)
+
+  found = given()
+  signed = found[1] if found and found[0] != "-" else "no"
+  if found and found[0] != "-":
+    run("codesign", "--force", "--sign", found[0], "--timestamp", out, timeout=60)
+
+  print(f"{out}: {cfg.name} {cfg.version}, signed: {signed}")
+  return out
+
+
+# MARK: Windows
+
+NAMES = {"x86_64": "x64", "aarch64": "arm64"}
+# Inno's architecture identifiers: x64compatible (6.3+) takes x64 Windows and ARM64's emulation.
+ARCHES = {"x86_64": "x64compatible", "aarch64": "arm64"}
+RUN = r"Software\Microsoft\Windows\CurrentVersion\Run"
+APPROVED = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
+
+
+def setup(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
+  r"""`<Name>-v<version>-windows-<x64|arm64>-setup.exe`, compiled by Inno Setup 6's ISCC: a
+  per-user install, no administrator, into `%LOCALAPPDATA%\Programs\<Name>` with a Start menu
+  entry and the uninstaller in Settings › Apps (which shows the exe's own icon; the setup shows
+  Inno's). The updater (src/update.rs) runs it as `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+  /CURRENTUSER` once the app has quit; an interactive install offers to start it."""
+  iscc = compiler()
+  out_dir.mkdir(parents=True, exist_ok=True)
+  base = f"{cfg.name}-v{cfg.version}-windows-{NAMES[arch]}-setup"
+  with tempfile.TemporaryDirectory() as tmp:
+    iss = Path(tmp) / f"{cfg.name}.iss"
+    text = script(cfg, binary.resolve(), arch, out_dir.resolve(), base, cfg.root / "LICENSE")
+    # Inno reads UTF-8 with its byte-order mark: a name may not be ASCII.
+    iss.write_text(text, encoding="utf-8-sig")
+    run(iscc, "/Q", iss)
+
+  return out_dir / f"{base}.exe"
+
+
+def compiler() -> str:
+  """ISCC: GitHub's Windows runners have it preinstalled (6.7.1 on windows-latest, image
+  20261021); else on PATH; else exits naming how to install it."""
+  where = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
+  iscc = where / "Inno Setup 6" / "ISCC.exe"
+  found = str(iscc) if iscc.is_file() else shutil.which("iscc")
+  if not found:
+    sys.exit(
+      f"pack: no Inno Setup 6 at {iscc} or ISCC on PATH; install it: choco install innosetup"
+    )
+
+  return found
+
+
+def app_id(cfg: Config) -> str:
+  """The installer's AppId, the same in every version, so a newer setup replaces the install:
+  `windows.app-id`, else a GUID made from the app's id. Never changed.
+
+  >>> from types import SimpleNamespace as N
+  >>> app_id(N(id="me.vladkens.wavo", windows={}))
+  '{a754b18f-b91c-5def-b91e-a32c2017c75f}'
+  >>> app_id(N(id="x", windows={"app-id": "314a56a8-8a8b-4c18-954d-b930203f086d"}))
+  '{314a56a8-8a8b-4c18-954d-b930203f086d}'
+  """
+  given = cfg.windows.get("app-id")
+  guid = uuid.UUID(given) if given else uuid.uuid5(uuid.NAMESPACE_DNS, cfg.id)
+  return "{" + str(guid) + "}"
+
+
+def publisher(cfg: Config) -> str:
+  """Who Settings › Apps names: the config's publisher, else the id's owner (`me.vladkens.x`)."""
+  if cfg.publisher:
+    return cfg.publisher
+
+  parts = cfg.id.split(".")
+  return parts[1] if len(parts) > 2 else parts[0]
+
+
+def script(cfg: Config, binary: Path, arch: str, out_dir: Path, base: str, license: Path) -> str:
+  r"""The .iss for the installer `base` in `out_dir`.
+
+  >>> from types import SimpleNamespace as N
+  >>> cfg = N(id="me.vladkens.counter", name="Counter", version="1.2.0-3-gabc", comment="Counts",
+  ...   windows={}, publisher="")
+  >>> iss = script(cfg, Path("c.exe"), "aarch64", Path("out"), "b", Path("-"))
+  >>> keys = ("AppId", "AppVersion", "VersionInfo", "Priv", "DefaultDir", "Arch", "Close", "Source")
+  >>> print("\n".join(l for l in iss.splitlines() if l.startswith(keys)))
+  AppId={{e65f79c2-5031-5421-a3d1-3c434f820e5d}
+  AppVersion=1.2.0-3-gabc
+  VersionInfoVersion=1.2.0
+  PrivilegesRequired=lowest
+  DefaultDirName={userpf}\Counter
+  ArchitecturesAllowed=arm64
+  ArchitecturesInstallIn64BitMode=arm64
+  CloseApplications=no
+  Source: "c.exe"; DestDir: "{app}"; DestName: "Counter.exe"; Flags: ignoreversion
+  >>> "Flags: nowait postinstall skipifsilent" in iss, "Mutex" in iss or "LICENSE" in iss
+  (True, False)
+  """
+  exe = f"{cfg.name}.exe"
+  name, app = esc(cfg.name), r"{app}" + "\\" + esc(exe)
+  numeric = re.match(r"\d+(\.\d+){0,3}", cfg.version)
+  files = [(binary, exe)] + ([(license.resolve(), "LICENSE.txt")] if license.is_file() else [])
+  files = [f'Source: {q(str(src))}; DestDir: "{{app}}"; DestName: {q(to)}' for src, to in files]
+  entry = q(r"{autoprograms}" + "\\" + name, False)
+  # A Pascal string: an apostrophe is doubled.
+  value = "'" + cfg.id.replace("'", "''") + "'"
+  lines = [
+    "[Setup]",
+    f"AppId={esc(app_id(cfg))}",
+    f"AppName={name}",
+    f"AppVersion={esc(cfg.version)}",
+    *([f"VersionInfoVersion={numeric.group()}"] if numeric else []),
+    f"AppPublisher={esc(publisher(cfg))}",
+    f"AppComments={esc(cfg.comment)}",
+    "PrivilegesRequired=lowest",
+    # %LOCALAPPDATA%\Programs\<Name>.
+    rf"DefaultDirName={{userpf}}\{name}",
+    "DisableDirPage=yes",
+    "DisableProgramGroupPage=yes",
+    f"ArchitecturesAllowed={ARCHES[arch]}",
+    f"ArchitecturesInstallIn64BitMode={ARCHES[arch]}",
+    f"UninstallDisplayName={name}",
+    f"UninstallDisplayIcon={app}",
+    # The updater runs it once the app has quit; an interactive install over a running copy asks
+    # to close it by hand.
+    "CloseApplications=no",
+    "RestartApplications=no",
+    f"OutputDir={esc(str(out_dir))}",
+    f"OutputBaseFilename={esc(base)}",
+    "Compression=lzma2",
+    "SolidCompression=yes",
+    "WizardStyle=modern",
+    "",
+    "[Files]",
+    *(f"{line}; Flags: ignoreversion" for line in files),
+    "",
+    "[Icons]",
+    f"Name: {entry}; Filename: {q(app, False)}; Comment: {q(cfg.comment)}",
+    "",
+    "; An interactive install only: a silent one is the updater's, which starts the app itself.",
+    "[Run]",
+    # A constant's argument ends at a comma or a brace: those %-encoded.
+    f'Filename: {q(app, False)}; Description: "{{cm:LaunchProgram,{arg(cfg.name)}}}"; '
+    + "Flags: nowait postinstall skipifsilent",
+    "",
+    "; nimbo's launch at login, which would start a deleted exe.",
+    "[Code]",
+    "procedure CurUninstallStepChanged(Step: TUninstallStep);",
+    "begin",
+    "  if Step = usPostUninstall then begin",
+    f"    RegDeleteValue(HKCU, '{RUN}', {value});",
+    f"    RegDeleteValue(HKCU, '{APPROVED}', {value});",
+    "  end;",
+    "end;",
+  ]
+  return "\n".join(lines) + "\n"
+
+
+def esc(s: str) -> str:
+  """`s` in an .iss value, where a brace starts a constant: doubled.
+
+  >>> esc("{a}")
+  '{{a}'
+  """
+  return s.replace("{", "{{")
+
+
+def q(s: str, plain: bool = True) -> str:
+  """`s` as a quoted parameter, its quotes doubled; escaped as well when `plain` (no constants).
+
+  >>> q('say "hi" {x}')
+  '"say ""hi"" {{x}"'
+  """
+  return '"' + (esc(s) if plain else s).replace('"', '""') + '"'
+
+
+def arg(s: str) -> str:
+  """`s` as a constant's argument: `%`, `,`, `|` and `}` %-encoded, `{` doubled.
+
+  >>> arg("A, {b}")
+  'A%2c {{b%7d'
+  """
+  for c in "%,|}":
+    s = s.replace(c, f"%{ord(c):02x}")
+
+  return esc(s).replace('"', '""')
+
+
+# MARK: Linux
+# Ported from wavo-app's scripts/dist.py. The .desktop entry is named by the app id, nimbo's X11
+# WM_CLASS and Wayland app id, so desktops find it, and its icon, from the window.
+
+APPIMAGETOOL = (
+  "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-{arch}.AppImage"
+)
+RUNTIME = "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-{arch}"
+SHA256 = {
+  "appimagetool-x86_64": "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0",
+  "appimagetool-aarch64": "f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158",
+  "runtime-x86_64": "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d",
+  "runtime-aarch64": "00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444",
+}
+DEB_ARCH = {"x86_64": "amd64", "aarch64": "arm64"}
+# The libraries nimbo loads at run time, by their Debian names (t64 since Ubuntu 24.04).
+NIMBO = [
+  "libgtk-3-0 | libgtk-3-0t64",
+  "libgtk-layer-shell0",
+  "libfontconfig1",
+  "libfreetype6",
+  "libharfbuzz0b",
+  "libx11-6",
+  "libxtst6",
+]
+
+
+def desktop(cfg: Config) -> str:
+  """The .desktop entry: the app started by its binary's name, on the PATH."""
+  lines = ["[Desktop Entry]", "Type=Application", f"Name={cfg.name}"]
+  if cfg.comment:
+    lines.append(f"Comment={cfg.comment}")
+
+  lines += [f"Exec={cfg.bin}", f"Icon={cfg.id}", f"StartupWMClass={cfg.id}", "StartupNotify=true"]
+  categories = cfg.linux.get("categories", [])
+  if categories:
+    lines.append("Categories=" + "".join(f"{c};" for c in categories))
+
+  lines.append("Terminal=false")
+  return "\n".join(lines) + "\n"
+
+
+def deb_version(version: str) -> str:
+  """The Cargo version as Debian orders it: a pre-release sorts before its release.
+
+  >>> deb_version("1.2.0-beta.1"), deb_version("1.2.0")
+  ('1.2.0~beta.1', '1.2.0')
+  """
+  return version.replace("-", "~", 1)
+
+
+def fetch(url: str, path: Path) -> Path:
+  """`url` into `path`, once, checked against SHA256 by the file's name."""
+  if not path.exists():
+    path.parent.mkdir(parents=True, exist_ok=True)
+    part = path.with_suffix(".part")
+    with urllib.request.urlopen(url, timeout=60) as r, open(part, "wb") as f:
+      shutil.copyfileobj(r, f)
+
+    part.rename(path)
+
+  digest = hashlib.sha256(path.read_bytes()).hexdigest()
+  if digest != SHA256[path.name]:
+    path.unlink()
+    sys.exit(f"pack: {path.name}: SHA-256 {digest}, expected {SHA256[path.name]}")
+
+  path.chmod(0o755)
+  return path
+
+
+def appimage(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
+  """`<Name>-v<version>-linux-<arch>.AppImage`: an AppDir of the binary, AppRun, the .desktop
+  entry and the icon, packed by appimagetool with the static type2 runtime (no libfuse2), both
+  pinned and fetched into <target dir>/appimage. nimbo links only glibc and loads the rest."""
+  # The tool runs here; the runtime is the AppImage's own, of its arch.
+  here = arch(host.machine())
+  tools = cfg.target / "appimage"
+  tool = fetch(APPIMAGETOOL.format(arch=here), tools / f"appimagetool-{here}")
+  runtime = fetch(RUNTIME.format(arch=arch), tools / f"runtime-{arch}")
+  out_dir.mkdir(parents=True, exist_ok=True)
+  out = out_dir / f"{cfg.name}-v{cfg.version}-linux-{arch}.AppImage"
+  with tempfile.TemporaryDirectory() as tmp:
+    appdir = Path(tmp) / f"{cfg.name}.AppDir"
+    (appdir / "usr/bin").mkdir(parents=True)
+    shutil.copy2(binary, appdir / "usr/bin" / cfg.bin)
+    (appdir / "AppRun").symlink_to(f"usr/bin/{cfg.bin}")
+    (appdir / f"{cfg.id}.desktop").write_text(desktop(cfg))
+    shutil.copy2(cfg.icon, appdir / f"{cfg.id}.png")
+    (appdir / ".DirIcon").symlink_to(f"{cfg.id}.png")
+    # Runs without FUSE (CI has none): the tool unpacks itself.
+    env = {**os.environ, "APPIMAGE_EXTRACT_AND_RUN": "1", "ARCH": arch}
+    run(tool, "--no-appstream", "--runtime-file", runtime, appdir, out, env=env)
+
+  return out
+
+
+def put(path: Path, data: bytes) -> None:
+  path.parent.mkdir(parents=True, exist_ok=True)
+  path.write_bytes(data)
+
+
+def deb(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
+  """`<package>_<version>_<amd64|arm64>.deb` by dpkg-deb: /usr/bin/<bin>, the .desktop entry, the
+  icon in hicolor's 1024x1024 and pixmaps, the LICENSE as the copyright. `linux.deb-package` names
+  it (else the binary), `linux.deb-depends` and `deb-recommends` add to its relations."""
+  author = next(iter(cfg.authors), "")
+  if not re.search(r"<.+@.+>", author):
+    sys.exit("pack: deb needs `authors` in Cargo.toml (its Maintainer)")
+
+  pkg = cfg.linux.get("deb-package") or cfg.bin.lower().replace("_", "-")
+  version = deb_version(cfg.version)
+  out_dir.mkdir(parents=True, exist_ok=True)
+  out = out_dir / f"{pkg}_{version}_{DEB_ARCH[arch]}.deb"
+  with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp) / pkg
+    share = root / "usr/share"
+    put(root / "usr/bin" / cfg.bin, binary.read_bytes())
+    put(share / f"applications/{cfg.id}.desktop", desktop(cfg).encode())
+    for dir in ("icons/hicolor/1024x1024/apps", "pixmaps"):
+      put(share / dir / f"{cfg.id}.png", cfg.icon.read_bytes())
+
+    license = cfg.root / "LICENSE"
+    if license.is_file():
+      put(share / f"doc/{pkg}/copyright", license.read_bytes())
+
+    # dpkg-deb takes the modes as they are: 0755 for the directories and the binary.
+    size = 0
+    for dir, _, files in os.walk(root):
+      os.chmod(dir, 0o755)
+      for name in files:
+        path = Path(dir) / name
+        path.chmod(0o755 if path == root / "usr/bin" / cfg.bin else 0o644)
+        size += path.stat().st_size
+
+    control = {
+      "Package": pkg,
+      "Version": version,
+      "Architecture": DEB_ARCH[arch],
+      "Maintainer": author,
+      "Installed-Size": str(size // 1024 + 1),
+      "Depends": ", ".join(cfg.linux.get("deb-depends", [])),
+      # What nimbo loads at run time (GTK and the text stack), then the app's own.
+      "Recommends": ", ".join(dict.fromkeys(NIMBO + cfg.linux.get("deb-recommends", []))),
+      "Section": "utils",
+      "Priority": "optional",
+      "Description": cfg.comment or cfg.name,
+    }
+    (root / "DEBIAN").mkdir(mode=0o755)
+    (root / "DEBIAN/control").write_text("".join(f"{k}: {v}\n" for k, v in control.items() if v))
+    # xz, not Ubuntu's default zstd, which older dpkg can't read.
+    run("dpkg-deb", "-Zxz", "--root-owner-group", "--build", root, out)
+
+  return out
+
+
+# MARK: Feed
+
+PLATFORMS = {f"{o}-{a}" for o in ("macos", "windows", "linux") for a in ("x86_64", "aarch64")}
+# An Ed25519 private key's PKCS#8 DER (RFC 8410) before its 32-byte seed.
+SEED_DER = bytes.fromhex("302e020100300506032b657004220420")
+# Homebrew's OpenSSL 3, on Apple silicon and on Intel, when the PATH's is LibreSSL.
+OPENSSL = (
+  "openssl",
+  "/opt/homebrew/opt/openssl@3/bin/openssl",
+  "/usr/local/opt/openssl@3/bin/openssl",
+)
+
+
 def platform(name: str) -> str | None:
   """A file's feed platform by its name, None when the name doesn't say.
 
   >>> platform("Wavo-v1.2.0-linux-aarch64.AppImage"), platform("Wavo-v1.2.0-windows-x64-setup.exe")
   ('linux-aarch64', 'windows-x86_64')
-  >>> platform("Wavo-v1.2.0-macos.zip") is None
-  True
+  >>> platform("Wavo-v1.2.0-macos-aarch64.dmg"), platform("Wavo-v1.2.0-macos.zip")
+  ('macos-aarch64', None)
   """
   m = re.search(r"-(macos|windows|linux)-(x86_64|aarch64|x64|arm64)(?=[-.]|$)", name)
   return f"{m[1]}-{arch(m[2].replace('x64', 'x86_64'))}" if m else None
@@ -181,8 +700,23 @@ def body(version: str, packages: list[tuple[str, str, bytes]]) -> bytes:
   return "".join(f"{line}\n" for line in lines).encode()
 
 
+@functools.cache
+def openssl3() -> str:
+  """The first OpenSSL 3 or newer of OPENSSL; exits naming how to install it."""
+  for tool in filter(None, map(shutil.which, OPENSSL)):
+    out = subprocess.run([tool, "version"], capture_output=True, text=True).stdout
+    m = re.match(r"OpenSSL (\d+)\.", out)
+    if m and int(m[1]) >= 3:
+      return tool
+
+  sys.exit(
+    "pack: Ed25519 needs OpenSSL 3, and macOS's openssl is LibreSSL: `brew install openssl@3`"
+    f" puts it at {OPENSSL[1]} ({OPENSSL[2]} on Intel)"
+  )
+
+
 def openssl(*args, input: bytes | None = None) -> bytes:
-  return run("openssl", *args, input=input, capture_output=True).stdout
+  return run(openssl3(), *args, input=input, capture_output=True).stdout
 
 
 def pem(key: str) -> bytes:
@@ -202,18 +736,6 @@ def pem(key: str) -> bytes:
 def public_key(key: bytes) -> str:
   # The DER of an Ed25519 public key ends in its 32 bytes.
   return openssl("pkey", "-pubout", "-outform", "DER", input=key)[-32:].hex()
-
-
-def sign(key: bytes, file: Path) -> bytes:
-  # openssl signs Ed25519 only from files: the key's is 0600 (mkstemp) and gone at once.
-  fd, path = tempfile.mkstemp(suffix=".pem")
-  try:
-    with os.fdopen(fd, "wb") as f:
-      f.write(key)
-
-    return openssl("pkeyutl", "-sign", "-inkey", path, "-rawin", "-in", file)
-  finally:
-    os.unlink(path)
 
 
 def feed(key: bytes, version: str, url: str, files: list[str], out: Path) -> Path:
@@ -240,7 +762,8 @@ def feed(key: bytes, version: str, url: str, files: list[str], out: Path) -> Pat
   # Signed beside it, then in place: a failed signature leaves the feed that was there.
   path, part = out / "update.txt", out / "update.txt.part"
   part.write_bytes(body(version, packages))
-  sig = sign(key, part)
+  # Ed25519 signs only a file: the feed is one, the key comes on stdin.
+  sig = openssl("pkeyutl", "-sign", "-inkey", "/dev/stdin", "-rawin", "-in", part, input=key)
   with part.open("ab") as f:
     f.write(f"sig {sig.hex()}\n".encode())
 
@@ -250,23 +773,6 @@ def feed(key: bytes, version: str, url: str, files: list[str], out: Path) -> Pat
   return path
 
 
-def clipboard() -> list[str]:
-  wayland = os.environ.get("WAYLAND_DISPLAY")
-  tools = (
-    ["pbcopy"],
-    ["clip"],
-    *([["wl-copy"]] if wayland else []),
-    ["xclip", "-selection", "clipboard"],
-  )
-  found = next((t for t in tools if shutil.which(t[0])), None)
-  if found is None:
-    sys.exit(
-      "pack: no clipboard (pbcopy, clip, wl-copy or xclip) to hand the private key over: no key made"
-    )
-
-  return found
-
-
 def feed_key(repo: str | None) -> None:
   # Never a second key: every app shipped trusts the first one's public half only.
   where = ["--repo", repo] if repo else []
@@ -274,137 +780,19 @@ def feed_key(repo: str | None) -> None:
   if "UPDATE_KEY" in names:
     sys.exit("pack: UPDATE_KEY is set already; the apps shipped trust it: delete it by hand first")
 
-  copy = clipboard()
+  if not shutil.which("pbcopy"):
+    sys.exit("pack: feed-key runs on a Mac: pbcopy hands the private key over")
+
   key = openssl("genpkey", "-algorithm", "ed25519")
   seed = openssl("pkey", "-outform", "DER", input=key)[-32:].hex()
   # The clipboard first: a key only in the secret could never be read back.
-  run(*copy, input=seed.encode())
+  run("pbcopy", input=seed.encode())
   run("gh", "secret", "set", "UPDATE_KEY", *where, input=seed.encode())
   print(
-    "pack: the private key is set as UPDATE_KEY and on the clipboard: keep it in Bitwarden",
+    "pack: the private key is UPDATE_KEY and on the clipboard: keep it in Bitwarden",
     file=sys.stderr,
   )
   print(public_key(pem(seed)))
-
-
-# MARK: PNG
-
-
-def chunks(png: bytes):
-  """The PNG's chunks, type and data."""
-  at = 8
-  while at < len(png):
-    (n,) = struct.unpack(">I", png[at : at + 4])
-    yield png[at + 4 : at + 8], png[at + 8 : at + 8 + n]
-    at += 12 + n
-
-
-def decode(png: bytes) -> tuple[int, int, bytearray] | None:
-  """Width, height and RGBA bytes of an 8-bit (or paletted) non-interlaced PNG; `None` else.
-
-  >>> decode(encode(2, bytes([255, 0, 0, 255, 0, 0, 0, 0] * 2)))[2][:8]
-  bytearray(b'\\xff\\x00\\x00\\xff\\x00\\x00\\x00\\x00')
-  """
-  if png[:8] != PNG:
-    return None
-
-  head, data, palette, trns = b"", [], b"", b""
-  for kind, body in chunks(png):
-    if kind == b"IHDR":
-      head = body
-    elif kind == b"IDAT":
-      data.append(body)
-    elif kind == b"PLTE":
-      palette = body
-    elif kind == b"tRNS":
-      trns = body
-
-  w, h, depth, color, _, _, interlace = struct.unpack(">IIBBBBB", head)
-  channels = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}.get(color)
-  if not channels or interlace or not (depth == 8 or (color == 3 and depth in (1, 2, 4))):
-    return None
-
-  bpp = max(1, channels * depth // 8)
-  stride = (w * channels * depth + 7) // 8
-  raw = unfiltered(zlib.decompress(b"".join(data)), stride, h, bpp)
-  if color == 3:
-    alphas = trns + b"\xff" * (256 - len(trns))
-    table = [palette[i * 3 : i * 3 + 3] + alphas[i : i + 1] for i in range(len(palette) // 3)]
-    per = 8 // depth
-    mask = (1 << depth) - 1
-    rgba = bytearray()
-    for y in range(h):
-      row = raw[y * stride : (y + 1) * stride]
-      if depth == 8:
-        idx = row
-      else:
-        idx = [(row[x // per] >> (8 - depth * (x % per + 1))) & mask for x in range(w)]
-
-      rgba += b"".join(table[i] for i in idx)
-
-    return w, h, rgba
-
-  rgba = bytearray(w * h * 4)
-  if color == 6:
-    rgba[:] = raw
-  elif color == 2:
-    for c in range(3):
-      rgba[c::4] = raw[c::3]
-
-    rgba[3::4] = b"\xff" * (w * h)
-  elif color == 4:
-    for c in range(3):
-      rgba[c::4] = raw[0::2]
-
-    rgba[3::4] = raw[1::2]
-  else:
-    for c in range(3):
-      rgba[c::4] = raw
-
-    rgba[3::4] = b"\xff" * (w * h)
-
-  return w, h, rgba
-
-
-def unfiltered(data: bytes, stride: int, h: int, bpp: int) -> bytearray:
-  """The scanlines of `data` without their filter bytes, each filter undone (PNG spec §9)."""
-  out = bytearray(stride * h)
-  prev = bytearray(stride)
-  for y in range(h):
-    kind = data[y * (stride + 1)]
-    row = bytearray(data[y * (stride + 1) + 1 : (y + 1) * (stride + 1)])
-    if kind == 1:
-      for i in range(bpp, stride):
-        row[i] = (row[i] + row[i - bpp]) & 255
-    elif kind == 2:
-      row = bytearray((a + b) & 255 for a, b in zip(row, prev))
-    elif kind == 3:
-      for i in range(stride):
-        row[i] = (row[i] + ((row[i - bpp] if i >= bpp else 0) + prev[i]) // 2) & 255
-    elif kind == 4:
-      for i in range(stride):
-        a, b = (row[i - bpp] if i >= bpp else 0), prev[i]
-        c = prev[i - bpp] if i >= bpp else 0
-        p = a + b - c
-        pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
-        row[i] = (row[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
-
-    out[y * stride : (y + 1) * stride] = row
-    prev = row
-
-  return out
-
-
-def encode(n: int, rgba: bytes) -> bytes:
-  """An `n` × `n` RGBA PNG, unfiltered."""
-
-  def chunk(kind: bytes, body: bytes) -> bytes:
-    return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
-
-  rows = b"".join(b"\0" + rgba[y * n * 4 : (y + 1) * n * 4] for y in range(n))
-  head = struct.pack(">IIBBBBB", n, n, 8, 6, 0, 0, 0)
-  body = chunk(b"IHDR", head) + chunk(b"IDAT", zlib.compress(rows, 9)) + chunk(b"IEND", b"")
-  return PNG + body
 
 
 # MARK: Command line
@@ -415,24 +803,16 @@ def main():
   ap.add_argument("command", choices=(*OS, "feed", "feed-key"))
   ap.add_argument("files", nargs="*", help="dmg: the .app; feed: [<platform>=]<file>, each")
   ap.add_argument("--manifest", type=Path, default=Path("Cargo.toml"), help="the app's Cargo.toml")
+  ap.add_argument("--target", help="the target triple, by default this machine's arch")
   ap.add_argument(
-    "--target", help="the target triple, by default this machine's arch on the command's OS"
-  )
-  ap.add_argument(
-    "--bin", type=Path, help="the built binary, by default <target dir>/<triple>/dist/<bin>"
+    "--bin", type=Path, help="the binary, by default <target dir>/<triple>/dist/<bin>"
   )
   ap.add_argument("--out", type=Path, help="where the files go, by default <target dir>/distrib")
   ap.add_argument("--key", type=Path, help="feed: the private key's file, else $UPDATE_KEY")
   ap.add_argument("--url", help="feed: where the files will be served, {version} the version")
-  ap.add_argument(
-    "--public-key", action="store_true", help="feed: print the key's public half in hex"
-  )
-  ap.add_argument(
-    "--repo", help="feed-key: the GitHub repo of the secret, by default the current one"
-  )
+  ap.add_argument("--public-key", action="store_true", help="feed: print the key's public half")
+  ap.add_argument("--repo", help="feed-key: the secret's GitHub repo, by default the current one")
   args = ap.parse_intermixed_args()
-  # The OS modules import this file as `pack`: the same module, not a second copy.
-  sys.modules.setdefault("pack", sys.modules[__name__])
   if args.command == "feed-key":
     feed_key(args.repo)
     return
@@ -456,12 +836,10 @@ def main():
     return
 
   if args.command == "dmg":
-    import pack_macos
-
     if len(args.files) > 1:
       ap.error("dmg takes one .app")
 
-    pack_macos.dmg(cfg, Path(args.files[0]) if args.files else out / f"{cfg.name}.app", out)
+    dmg(cfg, Path(args.files[0]) if args.files else out / f"{cfg.name}.app", args.target, out)
     return
 
   if args.files:
@@ -475,17 +853,10 @@ def main():
 
   out.mkdir(parents=True, exist_ok=True)
   if args.command == "app":
-    import pack_macos
-
-    pack_macos.app(cfg, binary, out)
-  elif args.command == "setup":
-    import pack_windows
-
-    print(pack_windows.setup(cfg, binary, arch(target), out))
+    app(cfg, binary, out)
   else:
-    import pack_linux
-
-    print(getattr(pack_linux, args.command)(cfg, binary, arch(target), out))
+    make = {"setup": setup, "appimage": appimage, "deb": deb}[args.command]
+    print(make(cfg, binary, arch(target), out))
 
 
 if __name__ == "__main__":
