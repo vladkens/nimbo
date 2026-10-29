@@ -274,7 +274,7 @@ mod tests {
       StartupWMClass=com.example.app\nStartupNotify=true\n";
     assert_eq!(text, want);
     let png = std::fs::read(data.join("icons/hicolor/16x16/apps/com.example.app.png")).unwrap();
-    assert_eq!(crate::png::decode(&png).unwrap(), (16, 16, px.clone()));
+    assert_eq!(crate::png::decode(&png), (16, 16, px.clone()));
 
     assert_eq!(install_in(&data, &APP, &l, "/opt/Ex ample/app"), Ok(false), "the same: kept");
     // A new icon dates the theme's folder, which a cache is checked against.

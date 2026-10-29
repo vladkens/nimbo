@@ -60,7 +60,7 @@
 //! | OS | the app | staged | checked | put in, and undone | started |
 //! |---|---|---|---|---|---|
 //! | macOS | the `.app` | the `.dmg` attached read-only inside the staging folder (`hdiutil`), its one `.app` at the top copied out with `ditto`, detached (forced if it must be) | the same bundle id, signed so that it meets the running app's designated requirement (Security.framework) | `renamex_np` with `RENAME_SWAP` (APFS), undone by the same | `open -n -g`, by LaunchServices: no focus taken, launchd's environment |
-//! | Windows | the exe's folder in `%LOCALAPPDATA%\Programs` | the setup as it came, named as its URL ends (a plain `.exe`, not the app's name) rather than `setup.exe`, which Windows loads compatibility shims into | the size and hash alone | the setup run silent (`/S`, into the folder it recorded) with no window, awaited; an exit code other than 0 is the error (1 cancelled, 2 aborted by its script, as on a wrong architecture) | the folder's exe of the running one's name, whatever the setup left |
+//! | Windows | the exe's folder in `%LOCALAPPDATA%\Programs` | the setup as it came, named as its URL ends (a plain `.exe`, not the app's name) rather than `setup.exe`, which Windows loads compatibility shims into | the size and hash alone | the setup run silent (`/S`, into `%LOCALAPPDATA%\Programs\<name>`) with no window, awaited; an exit code other than 0 is the error (1 cancelled, 2 aborted by its script, as on a wrong architecture) | the folder's exe of the running one's name, whatever the setup left |
 //! | Linux | the AppImage | made executable | the size and hash alone | linked to `.<name>.nimbo-old`, the new one renamed over it in one step; undone by renaming the link back | the AppImage, without the installer's AppImage variables |
 //!
 //! On Windows the installer is a copy of the running exe, named as it is (Windows asks to elevate
@@ -510,7 +510,7 @@ fn fetch(release: &Release, parent: &Path, progress: Progress) -> io::Result<(Fo
 /// The name the release's file at `url` is staged by. On Windows its own, the last part of the
 /// URL's path: a plain `<name>.exe` other than the running `exe`'s, whose copy, the installer,
 /// goes beside it (`InvalidData` else). Windows loads compatibility shims into an exe named
-/// `setup.exe` (makensis' warning 9000), and `pack.py setup` names none so.
+/// `setup.exe` (makensis' warning 9000), and `pack.py release` names none so.
 fn staged<'a>(os: Os, url: &'a str, exe: &OsStr) -> io::Result<&'a str> {
   let path = url.split(['?', '#']).next().unwrap_or_default();
   let name = match os {

@@ -4,8 +4,8 @@
 //! RGBA tagged sRGB, each row filtered with the PNG filter that sums smallest (the usual
 //! heuristic), compressed by a small deflate (LZ77 over one hash slot per 4 bytes, fixed Huffman
 //! codes); checked on macOS against ImageIO's shots (2026-10-18): the same pixels, files ~4%
-//! larger, written in ~2x the time. Read for the images an app ships ([Png]): 8-bit grey, RGB,
-//! palette, grey and alpha or RGBA, not interlaced, inflated with fixed and dynamic Huffman codes.
+//! larger, written in ~2x the time. Read for the images an app ships ([Png]): 8-bit RGB, RGBA or a
+//! palette with its tRNS, not interlaced, inflated with fixed and dynamic Huffman codes.
 
 use std::path::Path;
 use std::sync::{Mutex, PoisonError};
@@ -237,22 +237,16 @@ fn bucket(table: &[(usize, u32)], v: usize) -> (usize, usize, u32) {
 
 // MARK: Reading
 
-/// The size and straight RGBA pixels, rows top-down, of the PNG `file`: 8-bit grey, RGB,
-/// palette, grey and alpha or RGBA, its tRNS transparency applied, not interlaced. Each chunk is
-/// checked by its CRC, the pixels by zlib's Adler-32; another kind of PNG, or a broken one, is an
-/// `Err` that says so.
-pub fn decode(file: &[u8]) -> Result<(usize, usize, Vec<u8>), String> {
-  let mut at = file.strip_prefix(b"\x89PNG\r\n\x1a\n").ok_or("not a PNG file")?;
+/// The size and straight RGBA pixels, rows top-down, of the PNG `file`: 8-bit RGB, RGBA or a
+/// palette with its tRNS, not interlaced. Panics on another kind of PNG or a broken one: the app's
+/// own file ([Png]), which its first run shows.
+pub fn decode(file: &[u8]) -> (usize, usize, Vec<u8>) {
+  let mut at = file.strip_prefix(b"\x89PNG\r\n\x1a\n").expect("nimbo: not a PNG file");
   let (mut head, mut palette, mut trns, mut idat) = (&[][..], &[][..], &[][..], Vec::new());
   loop {
-    let n = u32::from_be_bytes(*at.first_chunk().ok_or("a PNG cut short")?) as usize;
-    let (body, crc) = at.get(4..n + 12).ok_or("a PNG cut short")?.split_at(n + 4);
-    if crc32(body).to_be_bytes() != crc {
-      return bad("a chunk's CRC");
-    }
-
-    let data = &body[4..];
-    match &body[..4] {
+    let n = u32::from_be_bytes(at[..4].try_into().unwrap()) as usize;
+    let data = &at[8..n + 8];
+    match &at[4..8] {
       b"IHDR" => head = data,
       b"PLTE" => palette = data,
       b"tRNS" => trns = data,
@@ -264,36 +258,22 @@ pub fn decode(file: &[u8]) -> Result<(usize, usize, Vec<u8>), String> {
     at = &at[n + 12..];
   }
 
-  // 8 bits a channel, deflate, the five filters, no interlace.
-  let &[w0, w1, w2, w3, h0, h1, h2, h3, 8, color, 0, 0, 0] = head else {
-    return Err("not an 8-bit, non-interlaced PNG".into());
+  // 8 bits a channel, RGB, palette or RGBA, deflate, the five filters, no interlace.
+  let &[w0, w1, w2, w3, h0, h1, h2, h3, 8, color @ (2 | 3 | 6), 0, 0, 0] = head else {
+    panic!("nimbo: a PNG other than 8-bit RGB, RGBA or a palette, not interlaced");
   };
   let w = u32::from_be_bytes([w0, w1, w2, w3]) as usize;
   let h = u32::from_be_bytes([h0, h1, h2, h3]) as usize;
-  // Bytes a pixel by colour type: grey, none, RGB, palette, grey and alpha, none, RGBA.
-  let Some(&bpp @ 1..) = [1, 0, 3, 1, 2, 0, 4].get(color as usize) else {
-    return Err(format!("PNG colour type {color}"));
-  };
-
-  if w == 0 || h == 0 || w.saturating_mul(h) > 1 << 26 {
-    return Err(format!("a {w} × {h} PNG"));
-  }
-
+  let bpp = [3, 1, 0, 0, 4][color as usize - 2];
   let stride = w * bpp;
-  let raw = inflate(&idat, (stride + 1) * h)?;
-  if raw.len() != (stride + 1) * h {
-    return bad("its size");
-  }
-
+  let raw = inflate(&idat);
+  assert_eq!(raw.len(), (stride + 1) * h, "nimbo: a broken PNG");
   // A row of zeros above the first, dropped after.
   let mut rows = vec![0u8; stride * (h + 1)];
   for (y, line) in raw.chunks_exact(stride + 1).enumerate() {
     let (above, row) = rows.split_at_mut((y + 1) * stride);
     let (kind, prev, row) = (line[0], &above[y * stride..], &mut row[..stride]);
-    if kind > 4 {
-      return bad("a row's filter");
-    }
-
+    assert!(kind <= 4, "nimbo: a broken PNG");
     row.copy_from_slice(&line[1..]);
     // Up alone, the commonest, as one pass the compiler vectorizes.
     match kind {
@@ -304,52 +284,33 @@ pub fn decode(file: &[u8]) -> Result<(usize, usize, Vec<u8>), String> {
   }
 
   rows.drain(..stride);
-  // tRNS: an alpha per palette entry, or the one grey or RGB that is transparent.
-  let key: Vec<u16> = trns.as_chunks().0.iter().map(|&k| u16::from_be_bytes(k)).collect();
-  let alpha =
-    |px: &[u8]| if px.iter().map(|&c| c as u16).eq(key.iter().copied()) { 0 } else { 255 };
   let out: Vec<[u8; 4]> = match color {
-    6 => return Ok((w, h, rows)),
-    4 => rows.as_chunks().0.iter().map(|&[g, a]| [g, g, g, a]).collect(),
-    0 => rows.iter().map(|&g| [g, g, g, alpha(&[g])]).collect(),
-    2 => rows.as_chunks().0.iter().map(|&[r, g, b]| [r, g, b, alpha(&[r, g, b])]).collect(),
+    6 => return (w, h, rows),
+    2 => rows.as_chunks().0.iter().map(|&[r, g, b]| [r, g, b, 255]).collect(),
     _ => {
+      // tRNS: an alpha per palette entry.
       let lut: Vec<[u8; 4]> = (palette.as_chunks().0.iter().enumerate())
         .map(|(i, &[r, g, b])| [r, g, b, trns.get(i).copied().unwrap_or(255)])
         .collect();
-      let colours = rows.iter().map(|&i| lut.get(i as usize).copied()).collect::<Option<_>>();
-      colours.ok_or("a broken PNG: a colour not in its palette")?
+      rows.iter().map(|&i| lut[i as usize]).collect()
     }
   };
 
-  Ok((w, h, out.into_flattened()))
+  (w, h, out.into_flattened())
 }
 
-fn bad<T>(what: &str) -> Result<T, String> {
-  Err(format!("a broken PNG: {what}"))
-}
-
-/// The data of the zlib stream `z` (RFC 1950) of deflate blocks (RFC 1951), at most `cap` bytes.
-fn inflate(z: &[u8], cap: usize) -> Result<Vec<u8>, String> {
-  // Deflate, no preset dictionary, the header's check.
-  let &[cmf, flg, _, _, _, _, ..] = z else { return bad("not a zlib stream") };
-  if cmf & 0x0f != 8 || flg & 0x20 != 0 || !u16::from_be_bytes([cmf, flg]).is_multiple_of(31) {
-    return bad("not a zlib stream");
-  }
-
+/// The data of the zlib stream `z` (RFC 1950) of deflate blocks (RFC 1951).
+fn inflate(z: &[u8]) -> Vec<u8> {
   let mut r = Reader { data: &z[2..], at: 0, acc: 0, n: 0 };
-  let mut out = Vec::with_capacity(cap);
+  let mut out = Vec::new();
   let mut last = false;
-  while !last && !r.over() {
+  while !last {
     last = r.take(1) == 1;
     let (lit, dist) = match r.take(2) {
       0 => {
         r.take(r.n % 8);
         let len = r.take(16);
-        if r.take(16) != !len & 0xffff || out.len() + len as usize > cap {
-          return bad("a stored block");
-        }
-
+        r.take(16);
         out.extend((0..len).map(|_| r.take(8) as u8));
         continue;
       }
@@ -358,24 +319,22 @@ fn inflate(z: &[u8], cap: usize) -> Result<Vec<u8>, String> {
         lens[144..256].fill(9);
         lens[256..280].fill(7);
         lens[288..].fill(5);
-        (Huffman::new(&lens[..288])?, Huffman::new(&lens[288..])?)
+        (Huffman::new(&lens[..288]), Huffman::new(&lens[288..]))
       }
-      2 => dynamic(&mut r)?,
-      _ => return bad("a block of type 3"),
+      2 => dynamic(&mut r),
+      _ => panic!("nimbo: a broken PNG"),
     };
 
     // Literals, and lengths with their distances, up to the end code.
     loop {
-      match lit.decode(&mut r)? {
+      match lit.decode(&mut r) {
         sym @ 0..256 => out.push(sym as u8),
         256 => break,
         sym => {
-          let &(len, extra) = LENGTHS.get(sym - 257).ok_or("a broken PNG: a length")?;
+          let (len, extra) = LENGTHS[sym - 257];
           let len = len + r.take(extra) as usize;
-          let &(d, extra) =
-            DISTANCES.get(dist.decode(&mut r)?).ok_or("a broken PNG: a distance")?;
-          let from =
-            out.len().checked_sub(d + r.take(extra) as usize).ok_or("a broken PNG: far")?;
+          let (d, extra) = DISTANCES[dist.decode(&mut r)];
+          let from = out.len() - (d + r.take(extra) as usize);
           // A copy that overlaps repeats what it wrote: in rounds, each twice the last.
           let mut left = len;
           while left > 0 {
@@ -385,47 +344,35 @@ fn inflate(z: &[u8], cap: usize) -> Result<Vec<u8>, String> {
           }
         }
       }
-
-      // Past the end the stream reads zeros, which only make more: the size ends it.
-      if out.len() > cap {
-        return bad("its size");
-      }
     }
   }
 
-  r.take(r.n % 8);
-  let sum = (0..4).fold(0, |s, _| s << 8 | r.take(8));
-  if r.over() || sum != adler32(&out) {
-    return bad("cut short, or its Adler-32");
-  }
-
-  Ok(out)
+  out
 }
 
 /// A dynamic block's codes (RFC 1951, 3.2.7): the literal/length one and the distance one.
-fn dynamic(r: &mut Reader) -> Result<(Huffman, Huffman), String> {
+fn dynamic(r: &mut Reader) -> (Huffman, Huffman) {
   const ORDER: [usize; 19] = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
   let (lit, dist, n) = (r.take(5) as usize + 257, r.take(5) as usize + 1, r.take(4) as usize + 4);
   let mut cl = [0u8; 19];
   ORDER[..n].iter().for_each(|&i| cl[i] = r.take(3) as u8);
-  let cl = Huffman::new(&cl)?;
+  let cl = Huffman::new(&cl);
   let mut lens = vec![0u8; lit + dist];
   let mut i = 0;
   while i < lens.len() {
-    let (len, times) = match cl.decode(r)? {
-      16 if i > 0 => (lens[i - 1], 3 + r.take(2)),
+    let (len, times) = match cl.decode(r) {
+      16 => (lens[i - 1], 3 + r.take(2)),
       17 => (0, 3 + r.take(3)),
       18 => (0, 11 + r.take(7)),
-      sym @ 0..16 => (sym as u8, 1),
-      _ => return bad("a repeat of no length"),
+      sym => (sym as u8, 1),
     };
 
     let to = i + times as usize;
-    lens.get_mut(i..to).ok_or("a broken PNG: code lengths")?.fill(len);
+    lens[i..to].fill(len);
     i = to;
   }
 
-  Ok((Huffman::new(&lens[..lit])?, Huffman::new(&lens[lit..])?))
+  (Huffman::new(&lens[..lit]), Huffman::new(&lens[lit..]))
 }
 
 /// A Huffman code as a table over the stream's next `bits` bits: each entry its symbol and
@@ -437,7 +384,7 @@ struct Huffman {
 
 impl Huffman {
   /// The canonical code of the code lengths `lens` (RFC 1951, 3.2.2).
-  fn new(lens: &[u8]) -> Result<Self, String> {
+  fn new(lens: &[u8]) -> Self {
     let bits = lens.iter().copied().max().unwrap_or(0) as u32;
     let mut count = [0u32; 16];
     lens.iter().for_each(|&l| count[l as usize] += 1);
@@ -451,31 +398,23 @@ impl Huffman {
     for (sym, &l) in lens.iter().enumerate().filter(|s| *s.1 > 0) {
       let code = next[l as usize];
       next[l as usize] += 1;
-      if code >> l != 0 {
-        return bad("a Huffman code");
-      }
-
       // The stream holds codes most significant bit first: the table is by the reversed code.
       let rev = (code.reverse_bits() >> (32 - l as u32)) as usize;
       table[rev..].iter_mut().step_by(1 << l).for_each(|e| *e = (sym << 4) as u16 | l as u16);
     }
 
-    Ok(Self { table, bits })
+    Self { table, bits }
   }
 
-  fn decode(&self, r: &mut Reader) -> Result<usize, String> {
+  fn decode(&self, r: &mut Reader) -> usize {
     let e = self.table[r.peek(self.bits) as usize];
-    if e == 0 {
-      return bad("a code not in its table");
-    }
-
-    (r.acc, r.n) = (r.acc >> (e & 15), r.n - u32::from(e & 15));
-    Ok(usize::from(e >> 4))
+    assert!(e != 0, "nimbo: a broken PNG");
+    r.take(u32::from(e & 15));
+    usize::from(e >> 4)
   }
 }
 
-/// Deflate's bit reader, least significant bit first; past the end it reads zeros, which
-/// [Reader::over] tells.
+/// Deflate's bit reader, least significant bit first: it panics on taking bits past the end.
 struct Reader<'a> {
   data: &'a [u8],
   at: usize,
@@ -497,12 +436,8 @@ impl Reader<'_> {
   fn take(&mut self, k: u32) -> u32 {
     let v = self.peek(k);
     (self.acc, self.n) = (self.acc >> k, self.n - k);
+    assert!(self.at * 8 - self.n as usize <= self.data.len() * 8, "nimbo: a PNG cut short");
     v
-  }
-
-  /// It read past the end.
-  fn over(&self) -> bool {
-    self.at * 8 - self.n as usize > self.data.len() * 8
   }
 }
 
@@ -511,8 +446,7 @@ impl Reader<'_> {
 /// An image the app ships as a PNG file, `Png::new(include_bytes!("logo.png"))`: decoded the
 /// first time its pixels are asked for ([Png::rgba]), then kept for the app's life. For the
 /// windows' icon ([crate::Config::png_icon]), the launcher's ([Png::square]), a view's image
-/// ([crate::Ui::png_image]) or the tray's ([crate::tray::TrayIcon::png]); [Png::tile] and
-/// [Png::side] shape it first.
+/// ([crate::Ui::png_image]); [Png::tile] and [Png::side] shape it first.
 #[derive(Clone, Copy)]
 pub struct Png {
   file: &'static [u8],
@@ -559,7 +493,7 @@ impl Png {
       return image;
     }
 
-    let (mut w, mut h, mut px) = decode(self.file).unwrap_or_else(|e| panic!("nimbo: {e}"));
+    let (mut w, mut h, mut px) = decode(self.file);
     if self.tile {
       let (side, tile) = cropped(w, h, &px);
       (w, h, px) = (side, side, tile);
@@ -687,8 +621,7 @@ mod tests {
     let noise: Vec<u8> =
       (0..70_000u32).map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8).collect();
     for data in [&b""[..], b"a", b"abcabcabcabc", &text, &flat, &noise] {
-      let z = zlib(data);
-      assert_eq!(inflate(&z, data.len()).unwrap(), data);
+      assert_eq!(inflate(&zlib(data)), data);
     }
 
     assert!(zlib(&flat).len() < 1000);
@@ -708,82 +641,48 @@ mod tests {
 
     let px = Pixels { w, h, data };
     let want = rgba_rows(&px);
-    assert_eq!(decode(&encode(&px)).unwrap(), (w, h, want.clone()));
+    assert_eq!(decode(&encode(&px)), (w, h, want.clone()));
     // Premultiplied BGRA to straight RGBA.
     assert_eq!(want[16..20], [32, 64, 128, 128]);
   }
 
-  /// Fixtures of each colour type, 40 × 30, their rows through the five filters in turn,
-  /// compressed by Python's zlib at level 9 (dynamic Huffman codes; fixed ones for the grey) and
-  /// level 0 (stored blocks); Pillow reads the same pixels.
-  #[test]
-  fn decodes_each_colour_type() {
-    let rgb = |x: usize, y: usize| [(x * 6 % 256) as u8, (y * 8) as u8, (x * y * 9 % 256) as u8];
-    let grey = |x: usize, y: usize| ((x * 30 + y * 11) % 256) as u8;
-    let palette = |i: usize| [(i * 25) as u8, (200 - i * 20) as u8, (i * i) as u8];
-    type Case<'a> = (&'a [u8], &'a dyn Fn(usize, usize) -> [u8; 4]);
-    let cases: [Case; 6] = [
-      // tRNS: the grey of (3, 2) and the RGB of (5, 1) are transparent.
-      (include_bytes!("../tests/png/gray.png"), &|x, y| {
-        let g = grey(x, y);
-        [g, g, g, if g == grey(3, 2) { 0 } else { 255 }]
-      }),
-      (include_bytes!("../tests/png/rgb.png"), &|x, y| {
-        let [r, g, b] = rgb(x, y);
-        [r, g, b, if [r, g, b] == rgb(5, 1) { 0 } else { 255 }]
-      }),
-      // Ten colours, the first four with tRNS alphas.
-      (include_bytes!("../tests/png/palette.png"), &|x, y| {
-        let i = (x * 3 + y) % 10;
-        let [r, g, b] = palette(i);
-        [r, g, b, [0, 64, 128, 200].get(i).copied().unwrap_or(255)]
-      }),
-      (include_bytes!("../tests/png/gray-alpha.png"), &|x, y| {
-        let g = grey(x, y);
-        [g, g, g, (x * y * 13 % 256) as u8]
-      }),
-      (include_bytes!("../tests/png/rgba.png"), &|x, y| {
-        let [r, g, b] = rgb(x, y);
-        [r, g, b, (255 - x * 4 - y * 2) as u8]
-      }),
-      (include_bytes!("../tests/png/rgba-stored.png"), &|x, y| {
-        let [r, g, b] = rgb(x, y);
-        [r, g, b, (255 - x * 4 - y * 2) as u8]
-      }),
-    ];
-    for (n, (file, want)) in cases.iter().enumerate() {
-      let want: Vec<u8> = (0..30).flat_map(|y| (0..40).flat_map(move |x| want(x, y))).collect();
-      assert_eq!(decode(file).unwrap(), (40, 30, want), "case {n}");
-    }
+  /// A `w` × 1 PNG of colour type `color`, its IDAT `idat` and the `extra` chunks before it.
+  fn png(w: u8, color: u8, idat: &[u8], extra: &[(&[u8; 4], &[u8])]) -> Vec<u8> {
+    let mut file = b"\x89PNG\r\n\x1a\n".to_vec();
+    chunk(&mut file, b"IHDR", &[0, 0, 0, w, 0, 0, 0, 1, 8, color, 0, 0, 0]);
+    extra.iter().for_each(|&(kind, data)| chunk(&mut file, kind, data));
+    chunk(&mut file, b"IDAT", idat);
+    chunk(&mut file, b"IEND", &[]);
+    file
   }
 
-  /// Real files (a palette and tRNS, as png-squash leaves them) read as Pillow reads them: the
-  /// CRC-32 of its RGBA.
+  #[test]
+  fn decodes_rgb_and_palettes() {
+    // Two RGB pixels through Sub, in a stored block: its length, then the length's complement.
+    let stored = [0x78, 0x01, 0x01, 7, 0, !7, 0xff, 1, 10, 20, 30, 5, 5, 5];
+    assert_eq!(decode(&png(2, 2, &stored, &[])), (2, 1, vec![10, 20, 30, 255, 15, 25, 35, 255]));
+    // Three palette entries through Paeth, the first two with tRNS alphas.
+    let idat = zlib(&[4, 0, 1, 1]);
+    let extra: [(&[u8; 4], &[u8]); 2] =
+      [(b"PLTE", &[1, 2, 3, 4, 5, 6, 7, 8, 9]), (b"tRNS", &[0, 128])];
+    let want = vec![1, 2, 3, 0, 4, 5, 6, 128, 7, 8, 9, 255];
+    assert_eq!(decode(&png(3, 3, &idat, &extra)), (3, 1, want));
+  }
+
+  #[test]
+  #[should_panic(expected = "nimbo: a PNG other than 8-bit RGB, RGBA or a palette")]
+  fn panics_on_grey() {
+    decode(&png(1, 0, &zlib(&[0, 0]), &[]));
+  }
+
+  /// Real files (a palette and tRNS, as png-squash leaves them, in dynamic Huffman codes) read as
+  /// Pillow reads them: the CRC-32 of its RGBA.
   #[test]
   fn decodes_the_brand_marks() {
-    let mark = decode(include_bytes!("../docs/brand/mark-iris.png")).unwrap();
+    let mark = decode(include_bytes!("../docs/brand/mark-iris.png"));
     assert_eq!((mark.0, mark.1, crc32(&mark.2)), (512, 512, 0x2156_f163));
-    let header = decode(include_bytes!("../docs/brand/header-iris.png")).unwrap();
+    let header = decode(include_bytes!("../docs/brand/header-iris.png"));
     assert_eq!((header.0, header.1, crc32(&header.2)), (1200, 300, 0xe44f_a414));
-  }
-
-  #[test]
-  fn refuses_what_it_does_not_read() {
-    let file = include_bytes!("../tests/png/rgb.png");
-    let err = |f: &[u8]| decode(f).unwrap_err();
-    assert_eq!(err(b"GIF89a"), "not a PNG file");
-    assert_eq!(err(&file[..file.len() - 20]), "a PNG cut short");
-    // A pixel byte of the IDAT changed: its CRC; with the CRC fixed, the Adler-32.
-    let mut broken = file.to_vec();
-    let at = broken.windows(4).position(|w| w == b"IDAT").unwrap();
-    broken[at + 30] ^= 1;
-    assert_eq!(err(&broken), "a broken PNG: a chunk's CRC");
-    // 16 bits a channel.
-    let mut deep = file.to_vec();
-    deep[24] = 16;
-    let crc = crc32(&deep[12..29]);
-    deep[29..33].copy_from_slice(&crc.to_be_bytes());
-    assert_eq!(err(&deep), "not an 8-bit, non-interlaced PNG");
   }
 
   #[test]

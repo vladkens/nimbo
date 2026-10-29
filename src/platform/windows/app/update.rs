@@ -24,7 +24,7 @@ pub fn unpack(file: &Path, _: &Path) -> io::Result<PathBuf> {
   Ok(file.to_owned())
 }
 
-/// Runs the per-user NSIS `exe` silently (`/S`, into the folder its `InstallDirRegKey` kept) with
+/// Runs the per-user NSIS `exe` silently (`/S`, into `%LOCALAPPDATA%\Programs\<name>`) with
 /// no window, to its end; its exit code (NSIS': 0 installed, 1 cancelled, 2 aborted by the script).
 pub fn setup(exe: &Path) -> io::Result<i32> {
   let done = Command::new(exe).arg("/S").creation_flags(CREATE_NO_WINDOW).status()?;

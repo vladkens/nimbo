@@ -43,12 +43,6 @@ impl TrayIcon {
     Self::Path { size, d: d.into(), even_odd: false }
   }
 
-  /// A PNG the app ships ([crate::Png]), `scale` pixels per point, as [TrayIcon::Rgba].
-  pub fn png(png: crate::Png, scale: f32) -> Self {
-    let (w, h, px) = png.rgba();
-    Self::Rgba { w, h, scale, px: px.to_vec() }
-  }
-
   /// An icon file: an SVG of `<path>`s in a square view box ([crate::svg::document] says what
   /// it reads), drawn as [TrayIcon::Path].
   pub fn from_svg(svg: &str) -> Result<Self, String> {
