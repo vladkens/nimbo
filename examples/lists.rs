@@ -84,6 +84,8 @@ impl Lists {
       _ => self.sort = item.strip_prefix("sort-").and_then(|i| i.parse().ok()).unwrap_or(self.sort),
     }
 
+    // What a check outside the harness reads.
+    eprintln!("menu: {item} {rows:?}");
     self.chosen.push((item.to_owned(), rows));
   }
 
