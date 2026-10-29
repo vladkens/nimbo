@@ -151,10 +151,10 @@ const _: () = {
 };
 
 /// The release `feed` offers this platform when it is newer than `current`: the feed fetched over
-/// the OS's HTTP, then [read]; `None` when it is up to date. A pre-release `current` (a dev
-/// build, `0.1.0-5-gabc`) is `Unsupported`, nothing fetched.
+/// the OS's HTTP, then [read]; `None` when it is up to date. A [dev] build's `current` is
+/// `Unsupported`, nothing fetched.
 pub fn check(feed: &Feed, current: &str) -> io::Result<Option<Release>> {
-  if current.contains('-') {
+  if dev(current) {
     let what = format!("{current} is a dev build, which takes no update");
     return Err(error(io::ErrorKind::Unsupported, what));
   }
@@ -167,6 +167,11 @@ pub fn check(feed: &Feed, current: &str) -> io::Result<Option<Release>> {
   let to = dir.0.join("update.txt");
   http::get(feed.url, &to, 1 << 20, &mut |_| {})?;
   read(feed, &fs::read(to)?, current)
+}
+
+/// A pre-release version, a dev build's (`0.1.0-5-gabc`), which takes no update.
+pub fn dev(version: &str) -> bool {
+  version.contains('-')
 }
 
 /// Whether the running app can update in place, checked with no network, so an app can hide its

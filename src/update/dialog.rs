@@ -80,13 +80,12 @@ pub struct Updater {
   checking: Option<bool>,
   /// When a check last got an answer.
   answered: Option<SystemTime>,
-  /// The app can't update itself ([super::supported] at launch, or a dev build's check): nothing
-  /// shows and no check runs.
+  /// The app can't update itself: nothing shows and no check runs.
   off: bool,
 }
 
 impl Updater {
-  /// `on`: [super::supported] at launch.
+  /// `on`: [super::supported] at launch, and not a [super::dev] build.
   pub fn new(on: bool) -> Self {
     Self { state: State::Idle, checking: None, answered: None, off: !on }
   }
@@ -120,16 +119,16 @@ impl Updater {
   }
 
   /// A menu item opened the window: whether to start a check, when there is nothing to show
-  /// but how one goes.
+  /// but how one goes (a failure shows first, Retry checks).
   pub fn open(&mut self) -> bool {
-    let nothing = matches!(self.state, State::Idle | State::UpToDate | State::Failed(None, _));
-    nothing && self.check(true)
+    matches!(self.state, State::Idle | State::UpToDate) && self.check(true)
   }
 
-  /// A check's answer at `now`. A dev build's (`Unsupported`) turns the updater off. A missing feed
-  /// (404) and one whose signature or content is wrong count as no update. A newer release shows
-  /// unless it is the version `skipped` and nobody asked; nothing newer and an error show only to
-  /// the person waiting in the window.
+  /// A check's answer at `now`. A missing feed (404) and one whose signature or content is wrong
+  /// count as no update. A newer release shows unless it is the version `skipped` and nobody
+  /// asked; nothing newer takes back an offer the feed no longer makes; nothing newer and an
+  /// error show only to the person waiting in the window. A failed download or install stays
+  /// until the person sees it.
   pub fn checked(
     &mut self,
     found: io::Result<Option<Release>>,
@@ -138,10 +137,6 @@ impl Updater {
   ) {
     let Some(manual) = self.checking.take() else { return };
     let found = match found {
-      Err(e) if e.kind() == ErrorKind::Unsupported => {
-        (self.off, self.state) = (true, State::Idle);
-        return;
-      }
       Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::InvalidData) => Ok(None),
       found => found,
     };
@@ -150,13 +145,16 @@ impl Updater {
       self.answered = Some(now);
     }
 
-    if self.state.busy() {
+    let failed = matches!(self.state, State::Failed(Some(_), _));
+    if self.state.busy() || failed && !manual {
       return;
     }
 
+    let offered = matches!(self.state, State::Available(_));
     self.state = match found {
       Ok(Some(r)) if manual || skipped != Some(&r.version) => State::Available(r),
       Ok(_) if manual => State::UpToDate,
+      Ok(_) if offered => State::Idle,
       Err(e) if manual => State::Failed(None, e.to_string()),
       _ => return,
     };
@@ -436,8 +434,8 @@ mod tests {
     assert!(u.due(NOW - Duration::from_secs(1)), "the clock set back");
   }
 
-  /// An app that can't update shows nothing and checks nothing: as said at launch, or as its
-  /// check says for a dev build.
+  /// An app that can't update shows nothing and checks nothing; an `Unsupported` check (Linux
+  /// without libcurl) is an error as any, not a dev build.
   #[test]
   fn an_app_that_cant_update_shows_nothing() {
     let mut u = Updater::new(false);
@@ -447,8 +445,8 @@ mod tests {
     let mut u = Updater::new(true);
     assert_eq!(u.showing(), Some(&State::Idle));
     checked(&mut u, true, error(ErrorKind::Unsupported), None);
-    assert_eq!(u.showing(), None);
-    assert!(!u.due(NOW) && !u.check(true));
+    assert_eq!(u.showing(), Some(&State::Failed(None, "offline".into())));
+    assert!(super::super::dev("0.1.0-5-gabc") && !super::super::dev("0.1.0"));
   }
 
   #[test]
@@ -465,6 +463,11 @@ mod tests {
     assert_eq!(u.state, State::Idle);
     checked(&mut u, false, found("1.3.0"), Some("1.2.0"));
     assert_eq!(u.state, State::Available(r("1.3.0")), "put off until the next check");
+    checked(&mut u, false, error(ErrorKind::TimedOut), None);
+    assert_eq!(u.state, State::Available(r("1.3.0")), "offline: the offer stays");
+    checked(&mut u, false, Ok(None), None);
+    assert_eq!(u.state, State::Idle, "the feed took it back");
+    checked(&mut u, false, found("1.3.0"), None);
     assert_eq!(u.skip().as_deref(), Some("1.3.0"));
     assert_eq!((u.state.clone(), u.skip()), (State::Idle, None));
   }
@@ -491,8 +494,9 @@ mod tests {
     assert!(u.open());
     u.checked(error(ErrorKind::TimedOut), None, NOW);
     assert_eq!(u.state, State::Failed(None, "offline".into()));
+    assert!(!u.open(), "the failure shows first");
     assert_eq!(u.install(), None, "nothing to download: Retry checks again");
-    assert!(u.open());
+    assert!(u.check(true));
     u.checked(found("1.2.0"), Some("1.2.0"), NOW);
     assert_eq!(u.state, State::Available(r("1.2.0")), "asked, a skipped one shows too");
     assert!(!u.open(), "the offer shows as it is");
@@ -542,7 +546,10 @@ mod tests {
 
     let e = io::Error::other("1.2.0 is not the file");
     u.failed(&e);
-    assert_eq!(u.state, State::Failed(Some(r("1.2.0")), "1.2.0 is not the file".into()));
+    let failed = State::Failed(Some(r("1.2.0")), "1.2.0 is not the file".into());
+    assert_eq!(u.state, failed);
+    checked(&mut u, false, found("1.2.0"), None);
+    assert_eq!(u.state, failed, "an automatic check leaves the failure be");
     assert_eq!(u.install(), Some(r("1.2.0")), "Retry");
     u.downloaded();
     assert_eq!(u.state, State::Restarting(r("1.2.0")));
