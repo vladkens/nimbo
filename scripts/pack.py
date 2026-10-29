@@ -1,5 +1,5 @@
 # Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
-"""Makes an app's release files from its Cargo.toml: the macOS app and DMG, the Windows setup,
+r"""Makes an app's release files from its Cargo.toml: the macOS app and DMG, the Windows setup,
 the AppImage and .deb, and the signed update feed (src/update.rs).
 
 The config is the package's `[package.metadata.nimbo]` (`id`, `name`, `icon`, a 1024 px PNG,
@@ -28,13 +28,13 @@ by `cargo metadata --no-deps`: a plain `python3` (3.9+) with the standard librar
 names, which rust-publish renames to `<Name>-<tag>-…` on a release. `--tag` is a release: then
 update.txt (that name kept), signed by UPDATE_KEY, lists the files by their renamed names, at
 `<repository>/releases/download/<tag>/<Name>-<tag>-…`, the same bytes.
-In CI it runs on Ubuntu (`apt-get install nsis hfsprogs`), from the app's Makefile:
+In CI it runs on Ubuntu (`apt-get install nsis hfsprogs`), from the app's Makefile: this file
+alone, at the nimbo commit Cargo.lock pins, so no crate's source reaches the job with the secrets.
 
-  NIMBO = $(shell cargo metadata --format-version 1 --locked | python3 -c 'import json, os, sys; \
-    print(next(os.path.dirname(p["manifest_path"]) for p in json.load(sys.stdin)["packages"] \
-    if p["name"] == "nimbo"))')
+  NIMBO_REV = $(shell sed -n 's|^source = "git+https://github.com/vladkens/nimbo?.*#\([0-9a-f]\{40\}\)"$$|\1|p' Cargo.lock)
   release:
-  	python3 $(NIMBO)/scripts/pack.py release target/distrib $(if $(TAG),--tag $(TAG))
+  	curl -fsSLO https://raw.githubusercontent.com/vladkens/nimbo/$(NIMBO_REV)/scripts/pack.py
+  	python3 pack.py release target/distrib $(if $(TAG),--tag $(TAG))
 
 Off macOS rcodesign signs the app with APPLE_CERTIFICATE (a base64 .p12) and
 APPLE_CERTIFICATE_PASSWORD, else ad hoc; the DMG is made by `mkfs.hfsplus` and libdmg-hfsplus

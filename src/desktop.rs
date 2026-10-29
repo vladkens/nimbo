@@ -18,20 +18,20 @@
 #[cfg(any(all(test, unix), target_os = "linux"))]
 use std::path::{Path, PathBuf};
 
-use crate::AppInfo;
 use crate::platform::desktop as imp;
+use crate::{AppInfo, Png};
 
 /// What the launcher shows besides the app's name.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub struct Launcher<'a> {
   /// A tooltip's line: what the app does.
   pub comment: &'a str,
   /// The menu's categories by the Desktop Menu spec: `Utility`, `AudioVideo`, `Development`.
   pub categories: &'a [&'a str],
-  /// `side` × `side` pixels of straight RGBA, rows top-down ([crate::Config::icon]); `side` one
-  /// of the icon theme's sizes ([SIDES]), 256 for every size the desktop shows. From the app's
-  /// PNG: `Png::icon(include_bytes!("icon.png")).square()` ([crate::Png::square]).
-  pub icon: (u32, &'a [u8]),
+  /// The app's icon, square, its side one of the icon theme's sizes ([SIDES]), 256 for every
+  /// size the desktop shows: `Png::icon(include_bytes!("icon.png"))`. Decoded only when [install]
+  /// writes it, not on a launch that finds the entry current.
+  pub icon: Png,
 }
 
 /// The icon sides the hicolor theme looks under.
@@ -123,7 +123,8 @@ fn date(hicolor: &Path) -> std::io::Result<()> {
   std::fs::File::open(hicolor)?.set_modified(std::time::SystemTime::now())
 }
 
-/// [install] under the data folder `data`, for the executable `exe`.
+/// [install] under the data folder `data`, for the executable `exe`. The entry names the icon
+/// file's hash: an entry the same, with an icon there, finds the icon current undecoded.
 #[cfg(any(all(test, unix), target_os = "linux"))]
 pub(crate) fn install_in(
   data: &Path,
@@ -131,11 +132,10 @@ pub(crate) fn install_in(
   l: &Launcher,
   exe: &str,
 ) -> Result<bool, String> {
-  let ((side, px), id) = (l.icon, app.id);
-  if !SIDES.contains(&side) || px.len() != side as usize * side as usize * 4 {
-    return Err(format!("an icon is side² RGBA pixels, the side one of {SIDES:?}"));
-  }
-
+  use std::hash::{Hash, Hasher};
+  let mut hash = std::hash::DefaultHasher::new();
+  l.icon.hash(&mut hash);
+  let (stamp, id) = (format!("{:016x}", hash.finish()), app.id);
   let categories: String = l.categories.iter().map(|c| format!("{c};")).collect();
   // Startup notification: GLib hands a launch its activation token, which a second launch sends
   // to the instance ([crate::instance]) for its window to come to the front.
@@ -144,14 +144,27 @@ pub(crate) fn install_in(
     ("Categories", &categories),
     ("StartupWMClass", id),
     ("StartupNotify", "true"),
+    ("X-Nimbo-Icon", &stamp),
   ];
-  let entry_text = crate::autostart::desktop_entry(app, exe, &keys);
+  let entry_text = crate::autostart::desktop_entry(app, exe, &keys).into_bytes();
   let hicolor = data.join("icons/hicolor");
+  let icon_in = |d: std::fs::DirEntry| d.path().join(format!("apps/{id}.png")).exists();
+  if std::fs::read(entry(data, app)).is_ok_and(|b| b == entry_text)
+    && std::fs::read_dir(&hicolor).into_iter().flatten().flatten().any(icon_in)
+  {
+    return Ok(false);
+  }
+
+  let (side, h, px) = l.icon.rgba();
+  if side != h || !SIDES.contains(&side) {
+    return Err(format!("a {side} × {h} icon: square, its side one of {SIDES:?}"));
+  }
+
   let icon = hicolor.join(format!("{side}x{side}/apps/{id}.png"));
   let png = crate::png::encode_rgba(side as usize, side as usize, px);
   // The icon first: the entry, once there, finds it.
   let mut wrote = false;
-  for (path, bytes) in [(icon, png), (entry(data, app), entry_text.into_bytes())] {
+  for (path, bytes) in [(icon, png), (entry(data, app), entry_text)] {
     if std::fs::read(&path).is_ok_and(|b| b == bytes) {
       continue;
     }
@@ -262,28 +275,33 @@ mod tests {
     let data = std::env::temp_dir().join(format!("nimbo-desktop-{}", std::process::id()));
     _ = std::fs::remove_dir_all(&data);
     let px: Vec<u8> = (0..16 * 16 * 4).map(|i| (i * 7) as u8).collect();
+    let png = |w, h, px: &[u8]| Png::new(crate::png::encode_rgba(w, h, px).leak());
     let l = Launcher {
       comment: "Counts\nC:\\things",
       categories: &["Utility", "Office"],
-      icon: (16, &px),
+      icon: png(16, 16, &px),
     };
     assert_eq!(install_in(&data, &APP, &l, "/opt/Ex ample/app"), Ok(true));
     let text = std::fs::read_to_string(data.join("applications/com.example.app.desktop")).unwrap();
     let want = "[Desktop Entry]\nType=Application\nName=Example\nExec=\"/opt/Ex ample/app\"\n\
       Icon=com.example.app\nTerminal=false\nComment=Counts C:\\\\things\nCategories=Utility;Office;\n\
-      StartupWMClass=com.example.app\nStartupNotify=true\n";
-    assert_eq!(text, want);
-    let png = std::fs::read(data.join("icons/hicolor/16x16/apps/com.example.app.png")).unwrap();
-    assert_eq!(crate::png::decode(&png), (16, 16, px.clone()));
+      StartupWMClass=com.example.app\nStartupNotify=true\nX-Nimbo-Icon=";
+    let stamp = text.strip_prefix(want).and_then(|t| t.strip_suffix('\n')).unwrap_or_default();
+    assert!(stamp.len() == 16 && stamp.bytes().all(|b| b.is_ascii_hexdigit()), "{text}");
+    let icon = data.join("icons/hicolor/16x16/apps/com.example.app.png");
+    assert_eq!(crate::png::decode(&std::fs::read(&icon).unwrap()), (16, 16, px.clone()));
 
     assert_eq!(install_in(&data, &APP, &l, "/opt/Ex ample/app"), Ok(false), "the same: kept");
+    std::fs::remove_file(&icon).unwrap();
+    assert_eq!(install_in(&data, &APP, &l, "/opt/Ex ample/app"), Ok(true), "the icon gone");
+    assert!(icon.exists());
     // A new icon dates the theme's folder, which a cache is checked against.
     let hicolor = data.join("icons/hicolor");
     let old = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1);
     std::fs::File::open(&hicolor).unwrap().set_modified(old).unwrap();
     let px2 = vec![9; px.len()];
     assert_eq!(
-      install_in(&data, &APP, &Launcher { icon: (16, &px2), ..l }, "/opt/Ex ample/app"),
+      install_in(&data, &APP, &Launcher { icon: png(16, 16, &px2), ..l }, "/opt/Ex ample/app"),
       Ok(true)
     );
     assert!(std::fs::metadata(&hicolor).unwrap().modified().unwrap() > old);
@@ -292,8 +310,9 @@ mod tests {
     let text = std::fs::read_to_string(data.join("applications/com.example.app.desktop")).unwrap();
     assert!(text.contains("Exec=\"/home/me/app\"\n"), "{text}");
 
-    assert!(install_in(&data, &APP, &Launcher { icon: (15, &px[..900]), ..l }, "/a").is_err());
-    assert!(install_in(&data, &APP, &Launcher { icon: (16, &px[..4]), ..l }, "/a").is_err());
+    for icon in [png(15, 15, &px[..900]), png(16, 8, &px[..512])] {
+      assert!(install_in(&data, &APP, &Launcher { icon, ..l }, "/a").is_err());
+    }
 
     std::fs::write(hicolor.join("icon-theme.cache"), b"").unwrap();
     let tray =

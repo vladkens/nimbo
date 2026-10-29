@@ -445,9 +445,9 @@ impl Reader<'_> {
 
 /// An image the app ships as a PNG file, `Png::new(include_bytes!("logo.png"))`: decoded the
 /// first time its pixels are asked for ([Png::rgba]), then kept for the app's life. For the
-/// windows' icon ([crate::Config::png_icon]), the launcher's ([Png::square]), a view's image
-/// ([crate::Ui::png_image]); [Png::tile] and [Png::side] shape it first.
-#[derive(Clone, Copy)]
+/// windows' icon ([crate::Config::png_icon]), the launcher's ([crate::desktop::Launcher::icon]),
+/// a view's image ([crate::Ui::png_image]); [Png::tile] and [Png::side] shape it first.
+#[derive(Clone, Copy, Hash)]
 pub struct Png {
   file: &'static [u8],
   side: u32,
@@ -510,9 +510,9 @@ impl Png {
     image
   }
 
-  /// [Png::rgba] of a square image, as an icon is given: its side and pixels, for
-  /// [crate::desktop::Launcher::icon]. Panics when it is not square.
-  pub fn square(&self) -> (u32, &'static [u8]) {
+  /// [Png::rgba] of a square image, as a window's icon is given ([crate::Config::icon]): its
+  /// side and pixels. Panics when it is not square.
+  pub(crate) fn square(&self) -> (u32, &'static [u8]) {
     let (w, h, px) = self.rgba();
     assert_eq!(w, h, "nimbo: a {w} × {h} icon is not square");
     (w, px)
@@ -714,8 +714,8 @@ mod tests {
     let (w, h, px) = MARK.rgba();
     assert_eq!((w, h, px.as_ptr()), (512, 512, MARK.rgba().2.as_ptr()));
     assert_eq!(MARK.side(128).rgba().0, 128);
-    let (side, icon) = Png::icon(MARK.file).square();
-    assert_eq!((side, icon.len()), (256, 256 * 256 * 4));
+    let (w, h, icon) = Png::icon(MARK.file).rgba();
+    assert_eq!((w, h, icon.len()), (256, 256, 256 * 256 * 4));
     let header = Png::new(include_bytes!("../docs/brand/header-iris.png")).side(600).rgba();
     assert_eq!((header.0, header.1), (600, 150));
   }
