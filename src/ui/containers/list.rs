@@ -23,11 +23,11 @@
 //! the app ([List::selection]) or the list's own state. A press selects; with [List::multi],
 //! Cmd-click (Ctrl-click on Windows and Linux) toggles a row and Shift-click selects from the
 //! anchor; a secondary click selects the row alone unless it is selected, for the app's context
-//! menu ([Ui::context_menu]). Keys, while the list has focus (a press gives it), come as the
-//! platform's commands: Up and Down (Shift extends), Page Up and Page Down, Home and End or Cmd-Up
-//! and Cmd-Down, Cmd-A, and Enter, which activates the row, as a double click does. The row the
-//! keys moved to scrolls into view; so does [Ui::reveal_row]. Disabled ([Ui::disabled]), it takes
-//! no input or focus and dims.
+//! menu ([Ui::context_menu]), which one off the rows (the scrollbar) doesn't open. Keys, while the
+//! list has focus (a press gives it), come as the platform's commands: Up and Down (Shift extends),
+//! Page Up and Page Down, Home and End or Cmd-Up and Cmd-Down, Cmd-A, and Enter, which activates
+//! the row, as a double click does. The row the keys moved to scrolls into view; so does
+//! [Ui::reveal_row]. Disabled ([Ui::disabled]), it takes no input or focus and dims.
 //!
 //! The list is the behaviour, its rows' fills the look: [List::unstyled] leaves the fills to
 //! the app, which draws them from [Row].
@@ -35,6 +35,8 @@
 use std::collections::HashSet;
 use std::hash::BuildHasherDefault;
 use std::ops::Range;
+
+use keyboard_types::Modifiers;
 
 use crate::app::MouseButton;
 use crate::keys::{Binding, Command, Move, Os, bind};
@@ -276,6 +278,9 @@ impl<'s> List<'s> {
     let view_h = sc.map_or(ui.size().h, |s| s.viewport.h);
     if n > 0 && !disabled {
       ui.list_keys(id, &mut st, sel, &mut out, (n, h, view_h, multi), &key);
+    }
+
+    if !disabled {
       ui.list_press(id, &mut st, sel, &mut out, n, multi, &key);
     }
 
@@ -471,26 +476,42 @@ impl<'a> Ui<'a> {
     multi: bool,
     key: &dyn Fn(usize) -> u64,
   ) {
-    // The secondary button's press, on Windows its release.
-    let (win, right) = (self.st.os == Os::Windows, MouseButton::Right);
-    let press = self.press().filter(|p| p.button == MouseButton::Left || p.button == right && !win);
+    // The secondary button's press, on Windows its release; a Control-click is the Mac's.
+    let (win, mac) = (self.st.os == Os::Windows, self.st.os == Os::Mac);
+    let second = |b: MouseButton, m: Modifiers| {
+      b == MouseButton::Right || mac && b == MouseButton::Left && m == Modifiers::CONTROL
+    };
+    let press = self
+      .press()
+      .filter(|p| p.button == MouseButton::Left || p.button == MouseButton::Right && !win);
     // A press is seen once; a click whose press no pass saw (a quick one) stands for it.
     let both = |b| matches!(b, MouseButton::Left | MouseButton::Right);
     let click = self.st.input.click.filter(|c| both(c.button));
     let hit = match (press, click) {
-      (Some(p), _) if st.pressed != Some(p.seq) => Some((p.id, p.mods, p.clicks, p.button)),
-      (None, Some(c)) if st.pressed != Some(c.seq) => Some((c.id, c.mods, c.clicks, c.button)),
+      (Some(p), _) if st.pressed != Some(p.seq) => Some((p.id, p.mods, p.clicks, p.button, p.seq)),
+      (None, Some(c)) if st.pressed != Some(c.seq) => {
+        Some((c.id, c.mods, c.clicks, c.button, c.seq))
+      }
       _ => None,
     };
 
     st.pressed = press.map(|p| p.seq).or(click.map(|c| c.seq)).or(st.pressed);
-    let Some((at, mods, clicks, button)) = hit else { return };
+    let Some((on, mods, clicks, button, seq)) = hit else { return };
+    let right = second(button, mods);
     // Its index as built, a hint that saves a scan unless the rows moved since.
-    let Some(at) = st.shown.iter().position(|&k| id.key(("row", k)) == at) else { return };
-    let k = st.shown[at];
-    let Some(i) = find((k, st.from + at), n, key) else { return };
+    let at = st.shown.iter().position(|&k| id.key(("row", k)) == on);
+    let Some((k, i)) =
+      at.and_then(|at| Some((st.shown[at], find((st.shown[at], st.from + at), n, key)?)))
+    else {
+      // Off the rows (the scrollbar, the padding) it opens no menu: the list's is a row's.
+      if right && self.st.last.within(on, id) {
+        self.st.menu_seq = seq;
+      }
+
+      return;
+    };
     match (multi, mods.contains(crate::keys::CMD), mods.shift()) {
-      _ if button == right => {
+      _ if right => {
         self.focus(Some(id));
         if sel.contains(k) {
           return;
@@ -504,7 +525,7 @@ impl<'a> Ui<'a> {
     }
 
     (out.pressed, out.changed) = (Some(i), true);
-    if clicks == 2 && button != right {
+    if clicks == 2 && !right {
       out.activated = Some(i);
     }
   }

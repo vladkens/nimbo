@@ -5,10 +5,10 @@
 //! arrows, opens a row by Enter; the menu opens, moves over its enabled items and runs one,
 //! closes by Escape or a click outside; a right-click keeps a selection it is inside or selects
 //! its row, and opens the row menu (drawn, or asked of the platform) on the press or, on
-//! Windows, the release; the pop-up button chooses by letters typed, closed and
-//! open; the tabs switch and keep the hidden page's scroll; the split's divider drags. Assistive
-//! technology reads the rows, the selection and the cursor, the menu's highlight, the tabs,
-//! presses a tab and scrolls a cut row into view.
+//! Windows, the release, never off the rows; the pop-up button chooses by letters typed, closed
+//! and open; the tabs switch and keep the hidden page's scroll; the split's divider drags.
+//! Assistive technology reads the rows, the selection and the cursor, the menu's highlight, the
+//! tabs, presses a tab and scrolls a cut row into view.
 
 #[path = "../examples/lists.rs"]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
@@ -253,6 +253,30 @@ fn a_right_click_opens_the_row_menu_over_the_selection() {
     let (_, menu) = h.context_menu(Some("delete")).expect("a menu asked for");
     assert_eq!((menu.items[0].label.as_str(), menu.items[0].header), ("Item 000103", true));
     assert_eq!(h.app().chosen.last(), Some(&("delete".to_string(), vec![102])), "{os:?}");
+  }
+}
+
+/// A right-click on the list's scrollbar, inside the list but on no row, opens no menu, drawn
+/// or the platform's, and keeps the selection; a row's still opens it after.
+#[test]
+fn a_right_click_off_the_rows_opens_no_menu() {
+  for os in [Os::Mac, Os::Windows] {
+    let h = &mut scrolled();
+    h.set_os(os);
+    let (popup, thumb) = (Id::of(LIST).key("menu"), Id::of(LIST).key(("thumb", 1usize)));
+    select_some(h);
+    right(h, thumb, false);
+    right(h, thumb, true);
+    assert!(h.rect(popup).is_none(), "{os:?}: drawn");
+    assert_eq!(selected(h), [101, 103, 104], "{os:?}");
+
+    h.native_menus();
+    right(h, thumb, false);
+    right(h, thumb, true);
+    assert!(h.context_menu(None).is_none(), "{os:?}: asked of the platform");
+    right(h, row(103), false);
+    right(h, row(103), true);
+    assert!(h.context_menu(None).is_some(), "{os:?}: a row's");
   }
 }
 

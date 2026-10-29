@@ -26,7 +26,8 @@ Goal: a context menu is the OS's own menu, shown at the pointer and free to go p
   - Result: `src/platform/windows/app/menu.rs` (`build`/`flags`/`text` from the tray, `track`, `apply` beside `files::apply`): `TrackPopupMenuEx(TPM_RETURNCMD | TPM_RIGHTBUTTON)` at the client point outside the borrow, `WM_ENTERMENULOOP` keeping frames; light in dark mode (no documented API for dark menus), left for later.
 - [x] 5. Linux (`src/platform/linux/app/gtk_menu.rs` ~150 new; `input.rs`/`mod.rs` ~20): GTK menu functions in `fns!` (`gtk_menu_new`, `gtk_menu_item_new_with_label`, `gtk_check_menu_item_new_with_label`, `gtk_separator_menu_item_new`, `gtk_menu_shell_append`, `gtk_menu_item_set_submenu`, `gtk_widget_set_sensitive`, `gtk_accel_label_set_accel` with `hotkey::keysym`, `gtk_menu_attach_to_widget`, `gtk_menu_popup_at_pointer`); `Win::button` keeps a `gdk_event_copy` of the last secondary press (freed when replaced and on drop): the trigger event Wayland's `xdg_popup` grab needs; `Win::sync` moves the request to a thread-local and `with`/`each` pop it up after dropping the borrow; `activate` records the item, `deactivate` sends `Event::Menu` from an idle (GTK deactivates before it activates) through `with_data`. Check: `make check` (clippy for Linux).
   - Result: `src/platform/linux/app/gtk_menu.rs`: the press's `gdk_event_copy` kept, a `GtkMenu` popped up from an idle with `gtk_menu_popup_at_rect` (a 1×1 rect at the asked point, the press as its trigger: what `at_pointer` does in GTK 3.24), the answer from an idle after `deactivate`; a menu that never shows answers none. `app/linux` 2400 → 2500.
-- [ ] 6. Example and budgets: `examples/lists.rs` gets a row menu (header, Open with ⌘O, a check, a disabled item, a submenu, a separator, Delete destructive) and `examples/fields.rs` is unchanged; each chosen item goes to stderr as `menu: <id> <rows>` for the VM checks. Budgets as the numbers land, by whole hundreds, recorded in the PR: expected `app/macos` 1800→1900, `app/windows` 1800→1900, `app/linux` 2400→2500, `widgets` 3400→3500, `core` 3700→3800; `make size ARGS=--check` passes; report the crate count only if it changed (it shouldn't).
+- [x] 6. Example and budgets: `examples/lists.rs` gets a row menu (header, Open with ⌘O, a check, a disabled item, a submenu, a separator, Delete destructive) and `examples/fields.rs` is unchanged; each chosen item goes to stderr as `menu: <id> <rows>` for the VM checks. Budgets as the numbers land, by whole hundreds, recorded in the PR: expected `app/macos` 1800→1900, `app/windows` 1800→1900, `app/linux` 2400→2500, `widgets` 3400→3500, `core` 3700→3800; `make size ARGS=--check` passes; report the crate count only if it changed (it shouldn't).
+  - Result: `examples/lists.rs` has the row menu (header, Open ⌘O, Show Sizes checked, Rename… enabled for one row, Sort By's submenu, a separator, Delete destructive) and prints `menu: <id> [rows]` and, closed with nothing chosen, `menu: none`; a right-click off the rows (the scrollbar) opens no menu (`List` takes the press, `Tree::within`); `examples/fields.rs` unchanged. Budgets: `app/macos` 1800→1900, `app/linux` 2400→2500, `widgets` 3400→3500, `core` 3700→3800; `app/windows` fits its 1800; `make size ARGS=--check` passes; the crate count unchanged.
 
 ## VM checks (in parallel at the end)
 
@@ -36,6 +37,14 @@ One agent per guest, each with `examples/lists` and `examples/fields` built for 
 - Windows: `./vm prepare windows`, the example in the interactive session, input by `SendInput` from a PowerShell script there, the menu window found as class `#32768` and its rect compared with the app's.
 - Linux X11 (GNOME, `./vm prepare ubuntu`, X11 by default): `xdotool`, `xwininfo` for the menu's rect.
 - Linux Wayland, GNOME (`WaylandEnable=true` in the ubuntu VM, ask before restarting GDM) and KDE (`./vm prepare kubuntu`, its Wayland session): pointer and keys over the RemoteDesktop portal (Mutter's absolute motion needs a ScreenCast stream), the screen by UTM window capture.
+
+### Results (2026-10-29)
+
+- Windows 11: all pass; the menu opens on the release at the pointer, past the window's bottom and right edges; pace 58 fps and 0 wakeups.
+- KDE Plasma 5.27 Wayland: all pass; at the pointer, past the bottom edge, flipping up near the screen's bottom; no grab refused.
+- macOS 27: right-click and Control-click open it at the pointer, past the edges; the action fires before `popUpContextMenu` returns; Escape and a click outside close it. Fields' Copy and the caret not run: UTM crashed, left open.
+- Ubuntu X11: lists all pass; fields' menu opens past the right edge. Copy and pace not run: UTM crashed, left open.
+- GNOME Wayland: not run: UTM crashed, left open.
 
 ## Risks
 

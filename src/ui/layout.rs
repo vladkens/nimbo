@@ -226,6 +226,20 @@ impl Tree {
     self.index.get(&id).copied()
   }
 
+  /// Whether the node `on` is `id` or inside it.
+  pub fn within(&self, on: Id, id: Id) -> bool {
+    let Some(mut i) = self.find(on) else { return false };
+    while self.nodes[i as usize].id != id {
+      if i == 0 {
+        return false;
+      }
+
+      i = self.nodes[i as usize].parent;
+    }
+
+    true
+  }
+
   /// The index in [Tree::edits] of node `i`'s selection, when it is an editable text.
   pub fn edit(&self, i: u32) -> Option<usize> {
     if self.edits.is_empty() {

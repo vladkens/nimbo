@@ -47,6 +47,8 @@ pub struct Lists {
   pub sizes: bool,
   /// The row menu's items chosen, each with the rows selected then.
   pub chosen: Vec<(String, Vec<u64>)>,
+  /// The row menu was open as the view last ran: closed with nothing chosen, it says so.
+  menu_open: bool,
 }
 
 impl Lists {
@@ -149,9 +151,13 @@ impl Lists {
       self.opened = r.activated;
     }
 
-    if let Some(item) = ui.context_menu(r.id, || self.row_menu()) {
-      self.choose(&item);
+    match ui.context_menu(r.id, || self.row_menu()) {
+      Some(item) => self.choose(&item),
+      None if self.menu_open && !ui.menu_open(r.id) => eprintln!("menu: none"),
+      None => {}
     }
+
+    self.menu_open = ui.menu_open(r.id);
   }
 
   fn details(&self, ui: &mut Ui) {
