@@ -30,9 +30,36 @@ pub fn wait_exit(pid: u32, cap: Duration) -> bool {
 }
 
 /// Spawns `cmd` in a process group of its own, so the terminal's hangup that ends the app doesn't
-/// reach it.
+/// reach it; on Linux with nothing inherited past stderr ([closed]).
 pub fn detach(cmd: &mut Command) -> std::io::Result<Child> {
-  cmd.process_group(0).spawn()
+  closed(cmd.process_group(0)).spawn()
+}
+
+/// `cmd` started with no descriptor past stderr: an AppImage's runtime leaves its FUSE daemon's
+/// pipe open in the app, and the app started by the update would keep the old one mounted.
+#[cfg(target_os = "linux")]
+pub fn closed(cmd: &mut Command) -> &mut Command {
+  unsafe extern "C" {
+    fn close_range(first: u32, last: u32, flags: i32) -> i32;
+    fn close(fd: i32) -> i32;
+  }
+
+  // SAFETY: only `close`, async-signal-safe, between fork and exec; close_range is glibc 2.34's,
+  // the loop the older kernels' way.
+  unsafe {
+    cmd.pre_exec(|| {
+      if close_range(3, u32::MAX, 0) != 0 {
+        (3..1024).for_each(|fd| _ = close(fd));
+      }
+
+      Ok(())
+    })
+  }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn closed(cmd: &mut Command) -> &mut Command {
+  cmd
 }
 
 #[cfg(test)]

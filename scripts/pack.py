@@ -4,8 +4,8 @@ installer, the AppImage and .deb, and the signed update feed (src/update.rs).
 
 The config is the package's `[package.metadata.nimbo]` (`id`, `name`, `icon`, a 1024 px PNG,
 `comment`, the tables `macos`, `linux` and `windows`), its version and binary, read by `cargo
-metadata --no-deps`, which compiles nothing: a plain `python3` (3.9, macOS's own) with the standard
-library runs this. The binary is built already, by default `<target dir>/<triple>/dist/<bin>`, the
+metadata --no-deps`, which compiles nothing: a plain `python3` (3.9+) with the standard library runs
+this, beside cargo and the OS's tools (on macOS the Command Line Tools: `vtool`, `lipo`, `codesign`). The binary is built already, by default `<target dir>/<triple>/dist/<bin>`, the
 target this machine's arch on the command's OS. The files are `<Name>-v<version>-<platform>.<ext>`,
 the .deb named as Debian names it.
 
@@ -541,9 +541,9 @@ def desktop(cfg: Config) -> str:
     lines.append(f"Comment={cfg.comment}")
 
   lines += [f"Exec={cfg.bin}", f"Icon={cfg.id}", f"StartupWMClass={cfg.id}", "StartupNotify=true"]
-  categories = cfg.linux.get("categories", [])
-  if categories:
-    lines.append("Categories=" + "".join(f"{c};" for c in categories))
+  # appimagetool refuses an entry with none.
+  categories = cfg.linux.get("categories") or ["Utility"]
+  lines.append("Categories=" + "".join(f"{c};" for c in categories))
 
   lines.append("Terminal=false")
   return "\n".join(lines) + "\n"

@@ -21,5 +21,6 @@ pub fn unpack(file: &Path, _: &Path) -> io::Result<PathBuf> {
 pub fn start(app: &Path, args: &[OsString], note: Option<&str>) -> io::Result<()> {
   let mut cmd = Command::new(app);
   let cmd = ["APPIMAGE", "APPDIR", "ARGV0", "OWD"].iter().fold(&mut cmd, |c, k| c.env_remove(k));
+  let cmd = crate::platform::process::closed(cmd);
   cmd.envs(note.map(|n| (crate::update::NOTE, n))).args(args).spawn().map(drop)
 }

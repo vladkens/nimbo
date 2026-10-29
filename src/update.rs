@@ -152,9 +152,9 @@ pub fn check(feed: &Feed, current: &str) -> io::Result<Option<Release>> {
 /// differs) and stages it: on macOS the one `.app` on the image (`InvalidData` for more or none),
 /// held to the running bundle's id and designated requirement. Before a byte is fetched it fails
 /// without an installed app to replace (`Unsupported`: a build, a Windows exe outside
-/// `%LOCALAPPDATA%\Programs`) or one whose folder the user can't write (`PermissionDenied`:
-/// `/Applications` for a standard user, `/opt`, a translocated app), and removes what an installer
-/// stopped midway left ([tidy]).
+/// `%LOCALAPPDATA%\Programs`, a Linux one not run as an AppImage, as a .deb's in /usr) or one whose
+/// folder the user can't write (`PermissionDenied`: `/Applications` for a standard user, `/opt`, a
+/// translocated app), and removes what an installer stopped midway left ([tidy]).
 ///
 /// `progress` gets the bytes done and the total, `release.size`, on the calling thread: at most
 /// about 4 times a second while the file comes, then once with the total when it is verified.
