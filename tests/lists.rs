@@ -256,6 +256,22 @@ fn a_right_click_opens_the_row_menu_over_the_selection() {
   }
 }
 
+/// On the Mac a control-click opens the row menu as a right-click does; elsewhere it doesn't.
+#[test]
+fn a_control_click_is_the_macs_right_click() {
+  for os in [Os::Mac, Os::Linux] {
+    let h = &mut scrolled();
+    h.set_os(os);
+    let (x, y) = mid(h.rect(row(102)).unwrap());
+    let (pos, button, mods) = (Point::new(x, y), MouseButton::Left, Modifiers::CONTROL);
+    h.move_to(x, y);
+    h.event(Event::MouseDown { pos, button, clicks: 1, mods });
+    h.frame();
+    h.frame();
+    assert_eq!(h.rect(Id::of(LIST).key("menu")).is_some(), os == Os::Mac, "{os:?}");
+  }
+}
+
 /// The row menu as the harness draws it: its header, the check column, a shortcut, a disabled
 /// item, the submenu's items under its label and the destructive item red.
 #[test]

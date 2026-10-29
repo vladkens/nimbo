@@ -502,9 +502,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     let res = handle(hwnd, msg, wp, lp);
     // A size the app asked for in the live move or resize loop (a timer's frame) is applied
     // now, not when the loop ends; outside the window's borrow, as SetWindowPos sends WM_SIZE.
-    // So is a file dialog asked for, which runs the messages until it closes.
+    // So are a file dialog and a context menu asked for, which run the messages until closed.
     apply_resize(hwnd);
     files::apply(hwnd);
+    app::menu::apply(hwnd);
     with(|w| w.sync_modal());
     res
   })
@@ -745,6 +746,7 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
 
   let scale = unsafe { GetDpiForWindow(hwnd) } as f32 / 96.0;
   let mut rt = Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(WinClipboard::new(hwnd)));
+  rt.set_native_menus(true);
   // The title bar's mode before the window shows, so it never flashes light.
   let look = appearance();
   settings::title_bar(hwnd, look.dark);
@@ -866,13 +868,14 @@ fn place(hwnd: HWND, anchor: Anchor, pointer: bool) {
 }
 
 /// Draws the frame due and applies a size the app asked for, before it and in it, then a file
-/// dialog; returns how long the loop may sleep (`None`: until a message). A size asked for in
-/// the frame draws another through WM_SIZE, as a dialog's answer wants one, and the sleep
-/// follows that: what it wants (an animation, a timer) would otherwise wait for the next message.
+/// dialog or a context menu; returns how long the loop may sleep (`None`: until a message). A size
+/// asked for in the frame draws another through WM_SIZE, as a dialog's answer wants one, and the
+/// sleep follows that: what it wants (an animation, a timer) would otherwise wait for the next
+/// message.
 fn settle(hwnd: HWND) -> Option<Duration> {
   apply_resize(hwnd);
   let wait = with(|w| w.tick()).flatten();
-  match apply_resize(hwnd) | files::apply(hwnd) {
+  match apply_resize(hwnd) | files::apply(hwnd) | app::menu::apply(hwnd) {
     true => with(|w| w.wait()).flatten(),
     false => wait,
   }

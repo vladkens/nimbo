@@ -14,16 +14,12 @@ use std::rc::{Rc, Weak};
 
 use block2::RcBlock;
 use dispatch2::{DispatchQueue, MainThreadBound};
-use keyboard_types::{Modifiers, NamedKey};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool, ProtocolObject};
-use objc2::{
-  AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel,
-};
+use objc2::{AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{
-  NSBezierPath, NSColor, NSControlStateValueOff, NSControlStateValueOn, NSEventModifierFlags,
-  NSImage, NSMenu, NSMenuDelegate, NSMenuItem, NSStatusBar, NSStatusItem,
-  NSVariableStatusItemLength, NSWindingRule,
+  NSBezierPath, NSColor, NSControlStateValueOn, NSEventModifierFlags, NSImage, NSMenu,
+  NSMenuDelegate, NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength, NSWindingRule,
 };
 use objc2_core_foundation::CFRunLoop;
 use objc2_core_graphics::{
@@ -33,9 +29,10 @@ use objc2_core_graphics::{
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
 
 use super::super::mtm;
-use crate::keys::{Key, Shortcut, f_key};
+use super::menu::fill;
+use crate::menu::choices;
 use crate::svg::flatten;
-use crate::tray::{Item, Menu, State, TrayIcon};
+use crate::tray::{Menu, State, TrayIcon};
 
 /// The menu bar's icon box, in points.
 const SIZE: NSSize = NSSize::new(18.0, 18.0);
@@ -202,10 +199,9 @@ impl Tray {
   }
 
   fn build(&self, menu: &Menu) {
-    let mut ids = Vec::new();
     self.0.menu.removeAllItems();
-    fill(self.0.mtm, &self.0.menu, &menu.items, &self.0.delegate, &mut ids);
-    *self.0.ids.borrow_mut() = ids;
+    fill(self.0.mtm, &self.0.menu, &menu.items, &self.0.delegate, &mut 0);
+    *self.0.ids.borrow_mut() = choices(menu);
   }
 
   pub fn state(&self) -> &State {
@@ -282,102 +278,6 @@ impl Tray {
 
     menu.performActionForItemAtIndex(*last as isize);
   }
-}
-
-/// Adds `items` to `menu`; the chosen ones send `chosen:` to `target` with their tag, an index
-/// into `ids`.
-fn fill(
-  mtm: MainThreadMarker,
-  menu: &NSMenu,
-  items: &[Item],
-  target: &Delegate,
-  ids: &mut Vec<String>,
-) {
-  for it in items {
-    if it.separator {
-      menu.addItem(&NSMenuItem::separatorItem(mtm));
-      continue;
-    }
-
-    // macOS 14's section header, as the deployment target allows.
-    if it.header {
-      menu.addItem(&NSMenuItem::sectionHeaderWithTitle(&NSString::from_str(&it.label), mtm));
-      continue;
-    }
-
-    let action = it.submenu.is_none().then_some(sel!(chosen:));
-    let none = (String::new(), NSEventModifierFlags::empty());
-    let (key, mods) = it.key.as_deref().and_then(key_equivalent).unwrap_or(none);
-    // SAFETY: the action is the target's, which lives as long as the tray.
-    let item = unsafe {
-      NSMenuItem::initWithTitle_action_keyEquivalent(
-        NSMenuItem::alloc(mtm),
-        &NSString::from_str(&it.label),
-        action,
-        &NSString::from_str(&key),
-      )
-    };
-    if action.is_some() {
-      let target: &AnyObject = target;
-      unsafe { item.setTarget(Some(target)) };
-      item.setTag(ids.len() as isize);
-      ids.push(it.id.clone());
-    }
-
-    if !key.is_empty() {
-      item.setKeyEquivalentModifierMask(mods);
-    }
-
-    item.setEnabled(it.enabled);
-    item.setState(if it.checked { NSControlStateValueOn } else { NSControlStateValueOff });
-    if let Some(sub) = &it.submenu {
-      let submenu = NSMenu::new(mtm);
-      submenu.setAutoenablesItems(false);
-      fill(mtm, &submenu, &sub.items, target, ids);
-      item.setSubmenu(Some(&submenu));
-    }
-
-    menu.addItem(&item);
-  }
-}
-
-/// A menu item's key equivalent for a shortcut as [Shortcut::parse] spells it: the character
-/// AppKit matches (`NSF1FunctionKey` and the like for keys that type none) and the modifiers.
-fn key_equivalent(text: &str) -> Option<(String, NSEventModifierFlags)> {
-  let s = Shortcut::parse(text).ok()?;
-  let fkey = |n: u32| char::from_u32(n);
-  let c = match s.key {
-    Key::Char(c) => Some(c),
-    Key::Named(k) => match k {
-      NamedKey::Enter => Some('\r'),
-      NamedKey::Tab => Some('\t'),
-      NamedKey::Backspace => Some('\u{8}'),
-      NamedKey::Delete => Some('\u{7f}'),
-      NamedKey::Escape => Some('\u{1b}'),
-      NamedKey::ArrowUp => fkey(0xF700),
-      NamedKey::ArrowDown => fkey(0xF701),
-      NamedKey::ArrowLeft => fkey(0xF702),
-      NamedKey::ArrowRight => fkey(0xF703),
-      NamedKey::Home => fkey(0xF729),
-      NamedKey::End => fkey(0xF72B),
-      NamedKey::PageUp => fkey(0xF72C),
-      NamedKey::PageDown => fkey(0xF72D),
-      k => (1..=20u32)
-        .find(|&n| f_key(n as u8).is_some_and(|f| f.1 == k))
-        .and_then(|n| fkey(0xF703 + n)),
-    },
-  }?;
-  let flags = [
-    (Modifiers::CONTROL, NSEventModifierFlags::Control),
-    (Modifiers::ALT, NSEventModifierFlags::Option),
-    (Modifiers::SHIFT, NSEventModifierFlags::Shift),
-    (Modifiers::META, NSEventModifierFlags::Command),
-  ];
-  let mods = flags
-    .iter()
-    .filter(|(m, _)| s.mods.contains(*m))
-    .fold(NSEventModifierFlags::empty(), |a, f| a | f.1);
-  Some((c.to_string(), mods))
 }
 
 // MARK: Icons
@@ -460,21 +360,4 @@ fn vector(size: f32, d: &str, even_odd: bool) -> Retained<NSImage> {
   });
   // Flipped: the path's y grows downward.
   NSImage::imageWithSize_flipped_drawingHandler(SIZE, true, &draw)
-}
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  #[test]
-  fn key_equivalents() {
-    let cmd = NSEventModifierFlags::Command;
-    assert_eq!(key_equivalent("cmd+comma"), Some((",".into(), cmd)));
-    assert_eq!(key_equivalent("cmd+q"), Some(("q".into(), cmd)));
-    let all = NSEventModifierFlags::Control | NSEventModifierFlags::Shift | cmd;
-    assert_eq!(key_equivalent("ctrl+shift+cmd+F2"), Some(("\u{F705}".into(), all)));
-    assert_eq!(key_equivalent("option+left").map(|k| k.0), Some("\u{F702}".into()));
-    assert_eq!(key_equivalent("right_option"), None, "no modifier alone");
-    assert_eq!(key_equivalent("cmd+nope"), None);
-  }
 }

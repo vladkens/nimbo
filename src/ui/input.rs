@@ -254,9 +254,13 @@ impl Ui<'_> {
   /// `id` has one from this call ([Ui::context_menu]).
   pub fn context_press(&mut self, id: Id) -> Option<Point> {
     self.st.tree.menus.push(id);
-    let (input, right) = (&self.st.input, |b: MouseButton| b == MouseButton::Right);
-    let up = input.click.filter(|c| right(c.button)).map(|c| (c.id, c.pos, c.seq));
-    let down = input.press.filter(|p| right(p.button) && self.st.os != Os::Windows);
+    let (input, mac) = (&self.st.input, self.st.os == Os::Mac);
+    // Control-click is the Mac's secondary click too.
+    let right = |b: MouseButton, m: Modifiers| {
+      b == MouseButton::Right || mac && b == MouseButton::Left && m == Modifiers::CONTROL
+    };
+    let up = input.click.filter(|c| right(c.button, c.mods)).map(|c| (c.id, c.pos, c.seq));
+    let down = input.press.filter(|p| right(p.button, p.mods) && self.st.os != Os::Windows);
     let down = down.map(|p| (p.id, p.pos, p.seq));
     let (on, at, seq) = down.or(up).filter(|p| p.2 != self.st.menu_seq)?;
     let t = &self.st.last;

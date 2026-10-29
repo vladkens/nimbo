@@ -29,7 +29,8 @@ use keyboard_types::Modifiers;
 use objc2::rc::{Retained, Weak};
 use objc2::runtime::{AnyObject, ProtocolObject, Sel};
 use objc2::{
-  AllocAnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel,
+  AllocAnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, Message, define_class, msg_send,
+  sel,
 };
 use objc2_app_kit::{
   NSDragOperation, NSDraggingInfo, NSEvent, NSEventModifierFlags, NSPasteboardTypeFileURL,
@@ -102,6 +103,8 @@ pub struct Ivars {
   ime_at: Cell<Option<Rect>>,
   /// An overlay's anchor ([crate::Config::overlay]): a new size goes back to it.
   overlay: Cell<Option<Anchor>>,
+  /// The last secondary press, which pops up the context menu it asks for ([View::show_menu]).
+  press: RefCell<Option<Retained<NSEvent>>>,
   /// What assistive clients see, from their first query ([a11y]).
   pub(super) a11y: RefCell<Option<Rc<a11y::Shared>>>,
 }
@@ -252,6 +255,7 @@ define_class!(
 
     #[unsafe(method(rightMouseDown:))]
     fn right_mouse_down(&self, event: &NSEvent) {
+      self.ivars().press.replace(Some(event.retain()));
       self.button(event, true);
     }
 
@@ -650,6 +654,7 @@ impl View {
 
     self.apply_resize();
     self.apply_file_dialog();
+    self.show_menu();
     if self.ivars().rewake.take() {
       self.wake();
     }
@@ -667,6 +672,35 @@ impl View {
     if let (Some(d), Some(window)) = (d, self.window()) {
       super::files::show(self, &window, d);
     }
+  }
+
+  /// Pops up the context menu the app asked for ([Runtime::take_context_menu]) and sends the
+  /// answer once it closes: frames go on meanwhile (the display link runs in every mode). The
+  /// menu took the press's release: the app gets it after the menu.
+  fn show_menu(&self) {
+    let want = match self.ivars().state.try_borrow_mut().as_deref_mut() {
+      Ok(Some(st)) => st.rt.take_context_menu(),
+      _ => None,
+    };
+
+    let Some((on, at, menu)) = want else { return };
+    // The press at the menu's point; one at another is no context for it.
+    let press = self.ivars().press.take().filter(|e| {
+      let p = self.location(e);
+      (p.x - at.x).abs().max((p.y - at.y).abs()) < 1.0
+    });
+    let item = super::app::menu::popup(self, press.as_deref(), at, &menu);
+    let held = self.ivars().held.get();
+    if held & 2 != 0 && NSEvent::pressedMouseButtons() & 2 == 0 {
+      let p = self.window().map_or(NSPoint::ZERO, |w| w.mouseLocationOutsideOfEventStream());
+      let p = self.convertPoint_fromView(p, None);
+      let (pos, mods) =
+        (Point::new(p.x as f32, p.y as f32), flags_mods(NSEvent::modifierFlags_class()));
+      self.ivars().held.set(held & !2);
+      self.send(Event::MouseUp { pos, button: MouseButton::Right, mods });
+    }
+
+    self.send(Event::Menu { on, item });
   }
 
   /// Resizes the window's content to the size the app asked for ([Runtime::take_resize]),
@@ -855,6 +889,7 @@ impl View {
     self.sync_ime();
     self.apply_resize();
     self.apply_file_dialog();
+    self.show_menu();
     if self.ivars().rewake.take() {
       self.wake();
     }

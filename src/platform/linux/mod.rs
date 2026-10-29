@@ -12,7 +12,7 @@
 //! so a live resize never stretches. Nothing runs while idle or minimized: timers are GLib
 //! timeouts, a wake from another thread an idle source. Input is in [input] (keys in [keys]),
 //! light or dark in [settings], the text stack in [text] (fontconfig, FreeType, HarfBuzz),
-//! overlays in [overlay], file panels and drops in [files].
+//! overlays in [overlay], file panels and drops in [files], context menus in [app::gtk_menu].
 //! GTK 3 scales by whole numbers only.
 //!
 //! Windows open and close on demand while GTK's main loop runs ([app] has the loop, the tray,
@@ -446,6 +446,7 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Result<u64, std::ffi::NulError> {
 
   let clip = Box::new(Clip(unsafe { (g.gtk_clipboard_get)(CLIPBOARD) }));
   let mut rt = Runtime::new(app, size, 1.0, Clock::real(), clip);
+  rt.set_native_menus(true);
   let mut renderer = Renderer::new();
   renderer.transparent = cfg.overlay.is_some();
   rt.event(Event::Appearance(appearance()));
@@ -627,8 +628,9 @@ impl Win {
     self.rt.event(ev)
   }
 
-  /// After every callback: the size and the file panel the app asked for ([files]), the
-  /// cursor, quitting, and what runs the loop next ([next]).
+  /// After every callback: the size, the file panel ([files]) and the context menu
+  /// ([app::gtk_menu]) the app asked for, the cursor, quitting, and what runs the loop next
+  /// ([next]).
   fn sync(&mut self) {
     let g = gtk();
     self.drain_ime();
@@ -639,6 +641,11 @@ impl Win {
     {
       eprintln!("nimbo: {e}");
       self.send(Event::FileDialog(None));
+    }
+
+    if let Some((on, at, menu)) = self.rt.take_context_menu() {
+      let press = std::mem::replace(&mut self.input.press, null_mut());
+      app::gtk_menu::ask(self.id, self.area, press, on, at, &menu);
     }
 
     self.sync_cursor();

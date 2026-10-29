@@ -82,6 +82,11 @@
 //!     dark setting or accent colour changes (macOS: `viewDidChangeEffectiveAppearance`,
 //!     `NSSystemColorsDidChangeNotification`); the runtime drops repeats. The theme follows it
 //!     unless the app set one.
+//!   - context menus: `Runtime::set_native_menus(true)` when the window opens; after an event or a
+//!     frame, outside the window's borrow, `Runtime::take_context_menu()` gives `(on, at, Menu)` to
+//!     show as the OS's menu at `at` (macOS `popUpContextMenu` with the press kept, Windows
+//!     `TrackPopupMenuEx` on the release, Linux a `GtkMenu` from the press's `GdkEvent`); its
+//!     answer, an item's id or none, goes back as `Event::Menu { on, item }`.
 //! - `pub mod tray` ([crate::tray]): `Tray: Clone` with `new(icon, tooltip)`, `detached(icon,
 //!   tooltip)` (nothing on screen, for tests), `set_icon`, `set_tooltip`, `set_menu(&Menu)` (held
 //!   while the menu is open, the last one set when it closes: `tray::State` holds it), `state() ->

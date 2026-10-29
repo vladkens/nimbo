@@ -354,6 +354,7 @@ pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
   let scale = window.backingScaleFactor() as f32;
   let mut rt = Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(Pasteboard));
   rt.event(Event::Appearance(appearance()));
+  rt.set_native_menus(true);
   // The title bar over the content: the frame's height over the layout rect's.
   let bar = (window.frame().size.height - window.contentLayoutRect().size.height) as f32;
   rt.set_titlebar(cfg.unified.then_some((bar, cfg.title)));
