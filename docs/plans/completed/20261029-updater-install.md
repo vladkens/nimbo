@@ -1,5 +1,7 @@
 # Updater install, the Sparkle way
 
+Done: 2026-10-29
+
 Goal: `install` no longer swaps the app while it runs. It starts the new version's binary from the staging folder as a separate installer, returns, and the app quits; the installer waits for the old process to end, swaps the whole app in one step, starts it with the old arguments, removes what is left and exits. That drops the instance wait, `NIMBO_RELAUNCH`, its token, `Claim::Replaced`, the 60 s cap, the per-file Windows swap, the per-file `.nimbo-old` names, the kept folders and the launch-time cleanup. Decided by the person 2026-10-29, on PR #48 (branch `feat/updater`).
 
 ## Decisions
@@ -70,7 +72,8 @@ Goal: `install` no longer swaps the app while it runs. It starts the new version
     - Done: Ubuntu 24.04 ARM64 AppImage: all six checks passed (wait, same path with the args, a separate process, staging and the old copy gone, the second launch refused, sig/size/oversize/root/bare refused, a failed start undone with the note); two findings fixed here.
 - [x] 8. **wavo-app**: tell its agent about the API change above (`finish` first in `main`, install at the moment of quitting, `Claim::Replaced` and `INSTALLED_QUIT` gone, a single `update.txt` asset), with the PR link.
   - Done 2026-10-29: sent with the PR link, the `download` progress and the packages it installs from.
-- [ ] 9. **VM run from the real packages**: pack.py's DMG (macOS), per-user `setup.exe` (Windows) and AppImage (Ubuntu) of v1 and v2, the update from a loopback feed made by `pack.py feed`, in parallel on the three VMs: v2 runs from the same place, and a tampered feed is refused.
+- [x] 9. **VM run from the real packages**: pack.py's DMG (macOS), per-user `setup.exe` (Windows) and AppImage (Ubuntu) of v1 and v2, the update from a loopback feed made by `pack.py feed`, in parallel on the three VMs: v2 runs from the same place, and a tampered feed is refused.
+  - Done 2026-10-29, in parallel: macOS 27 from pack.py's DMG signed with a self-signed identity (v1 copied out of its DMG into /Applications, v2 attached, checked, swapped and started by LaunchServices with v1's arguments; a changed feed byte and a DMG with two apps refused); Windows 11 ARM64 from pack.py's per-user setup (v2's setup run silently, v2 started from `Programs\app\app.exe` with v1's arguments, Settings › Apps at 2.0.0, nothing else started); Ubuntu 24.04 from pack.py's AppImage (v2 from the same path with the arguments, the old copy and staging gone; a .deb's `/usr/bin` refused `Unsupported` before downloading). Fixed: the started app inherits no descriptor on Linux (the AppImage runtime's FUSE pipes kept old mounts), the app removes the Windows installer's folder a few seconds in, pack.py's default `Categories=Utility;`.
 
 ## From the files people download
 
@@ -85,3 +88,7 @@ Decided by the person 2026-10-29, passed on by wavo-app's agent: the update inst
 - [x] Platform: macOS `unpack` by `hdiutil` and `ditto`, Windows `setup`, `start` with the note everywhere, `tar` gone; `platform/mod.rs`'s contract, the example's and `update-feed.py`'s docs.
 - [x] Tests: the Windows target rule; the setup's exit codes and a setup that doesn't start, with an injected runner; a real `hdiutil create` image of an ad-hoc bundle attached, copied and checked, refused with two apps or none; a read-only folder still gives the started app its error. The archive, folder-name, Windows swap and `tar` tests gone.
 - [x] `make prepare`, `make check`, `make test`; budgets unchanged.
+
+## Result
+
+The update installs after the app quits, as Sparkle does: `install` starts the new version (on Windows a copy of this one) as the installer and the app quits; `finish()`, first in `main`, waits for it, swaps the whole app (macOS `renamex_np`, Linux a rename, Windows the per-user setup run silently), starts it with the old arguments, and hands a failure to the restarted old app once. It installs from the files people download (the DMG, the setup, the AppImage), checked by a plain signed `update.txt`, the size and SHA-512, and on macOS the running app's designated requirement through Security.framework. `Claim::Replaced` and the instance wait are gone; verified on macOS, Windows and Ubuntu VMs from zips first and then from pack.py's real packages.
