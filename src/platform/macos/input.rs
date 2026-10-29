@@ -12,7 +12,7 @@ use objc2_app_kit::{NSCursor, NSEvent, NSEventModifierFlags, NSEventPhase};
 use objc2_foundation::{NSAttributedString, NSNotFound, NSRange, NSRangePointer, NSString};
 
 use super::keyboard;
-use crate::app::Phase;
+use crate::app::{MouseButton, Phase};
 use crate::keys::{self, Key, KeyEvent};
 use crate::scene::{Point, Size};
 use crate::ui::Cursor;
@@ -123,6 +123,16 @@ pub fn ns_cursor(c: Cursor) -> Retained<NSCursor> {
     Cursor::Grab => NSCursor::openHandCursor(),
     Cursor::Grabbing => NSCursor::closedHandCursor(),
     Cursor::NotAllowed => NSCursor::operationNotAllowedCursor(),
+  }
+}
+
+/// AppKit's button `number` (`buttonNumber`, a bit of `pressedMouseButtons`).
+pub fn button(number: isize) -> MouseButton {
+  match number {
+    0 => MouseButton::Left,
+    1 => MouseButton::Right,
+    2 => MouseButton::Middle,
+    n => MouseButton::Other(n as u8),
   }
 }
 

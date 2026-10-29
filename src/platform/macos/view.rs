@@ -47,7 +47,7 @@ use objc2_quartz_core::{CADisplayLink, CAFrameRateRange, CALayer, kCAGravityTopL
 use super::input::*;
 use super::surface::Presenter;
 use super::{a11y, keyboard, overlay};
-use crate::app::{App, Event, Ime, MouseButton, Runtime, WHEEL_LINE};
+use crate::app::{App, Event, Ime, Runtime, WHEEL_LINE};
 use crate::keys::{self, Command, KeyEvent};
 use crate::scene::{Point, Rect, Size};
 use crate::shell::Anchor;
@@ -690,14 +690,18 @@ impl View {
       (p.x - at.x).abs().max((p.y - at.y).abs()) < 1.0
     });
     let item = super::app::menu::popup(self, press.as_deref(), at, &menu);
+    // Any button the menu took the release of: the right one, the left of a Control-click.
     let held = self.ivars().held.get();
-    if held & 2 != 0 && NSEvent::pressedMouseButtons() & 2 == 0 {
+    let gone = held & !(NSEvent::pressedMouseButtons() as u64);
+    if gone != 0 {
       let p = self.window().map_or(NSPoint::ZERO, |w| w.mouseLocationOutsideOfEventStream());
       let p = self.convertPoint_fromView(p, None);
       let (pos, mods) =
         (Point::new(p.x as f32, p.y as f32), flags_mods(NSEvent::modifierFlags_class()));
-      self.ivars().held.set(held & !2);
-      self.send(Event::MouseUp { pos, button: MouseButton::Right, mods });
+      self.ivars().held.set(held & !gone);
+      for n in (0..64).filter(|n| gone >> n & 1 != 0) {
+        self.send(Event::MouseUp { pos, button: button(n), mods });
+      }
     }
 
     self.send(Event::Menu { on, item });
@@ -938,13 +942,7 @@ impl View {
 
   fn button(&self, event: &NSEvent, down: bool) {
     let (pos, mods) = (self.location(event), mods(event));
-    let button = match event.buttonNumber() {
-      0 => MouseButton::Left,
-      1 => MouseButton::Right,
-      2 => MouseButton::Middle,
-      n => MouseButton::Other(n as u8),
-    };
-
+    let button = button(event.buttonNumber());
     let held = buttons(self.ivars().held.get(), event.buttonNumber(), down);
     self.ivars().held.set(held);
     if down {

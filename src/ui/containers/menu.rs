@@ -534,7 +534,7 @@ impl Ui<'_> {
     let (check, mut chosen) = (menu.as_ref().is_some_and(|m| checks(&m.items)), None);
     self.menu_popup_at(id, at, t.popup().min_w(160.0), |ui| {
       for it in menu.iter().flat_map(|m| &m.items) {
-        ui.model_item(id, it, check, &mut chosen);
+        ui.model_item(id, it, check, true, &mut chosen);
       }
     });
     chosen
@@ -542,8 +542,9 @@ impl Ui<'_> {
 
   /// An item of a drawn context menu from its model: a line, a header (a submenu's label, its
   /// items under it), or an item `id.key(it.id)` with its check column, its label (red when
-  /// destructive) and its shortcut; `chosen` takes its id when clicked.
-  fn model_item(&mut self, id: Id, it: &Item, check: bool, chosen: &mut Option<String>) {
+  /// destructive) and its shortcut; `chosen` takes its id when clicked. Under a disabled
+  /// submenu (`on` false) none is.
+  fn model_item(&mut self, id: Id, it: &Item, check: bool, on: bool, chosen: &mut Option<String>) {
     let t = self.theme();
     let row = |left: f32| {
       let s = Style::new().w(grow()).h(px(t.sizes.item_h)).pads([0.0, 10.0, 0.0, left]);
@@ -559,7 +560,7 @@ impl Ui<'_> {
     if it.header || it.submenu.is_some() {
       self.row(row(if check { 26.0 } else { 10.0 }), |ui| ui.text(&it.label, t.section()));
       for sub in it.submenu.iter().flat_map(|m| &m.items) {
-        self.model_item(id, sub, check, chosen);
+        self.model_item(id, sub, check, on && it.enabled, chosen);
       }
 
       return;
@@ -567,7 +568,8 @@ impl Ui<'_> {
 
     // Named by its label alone, its shortcut apart as in the OS's menus.
     let item = id.key(it.id.as_str());
-    let b = self.a11y_label(&it.label).disabled(!it.enabled).menu_item_behavior(item, &it.label);
+    let off = !(on && it.enabled);
+    let b = self.a11y_label(&it.label).disabled(off).menu_item_behavior(item, &it.label);
     let (bg, ink) = match b.on {
       true => (t.accent, t.on_accent),
       false => (alpha(t.accent, 0.0), if it.destructive { t.danger } else { t.text }),
@@ -791,6 +793,38 @@ mod tests {
     h.frame();
     let m = h.rect(Id::of("m").key("menu")).unwrap();
     assert!(m.x >= 0.0 && m.x + m.w <= 200.0, "{m:?}");
+  }
+
+  /// An element whose context menu has a disabled submenu, its items "a" and "b".
+  #[derive(Default)]
+  struct Sub {
+    chosen: Option<String>,
+  }
+
+  impl App for Sub {
+    fn view(&mut self, ui: &mut Ui) {
+      let el = ui.id("el").el(Style::new().w(px(100.0)).h(px(40.0)));
+      let items = vec![Item::new("a", "A"), Item::new("b", "B")];
+      let sub = Item::new("sub", "Sub").submenu(Menu::new(items)).enabled(false);
+      if let Some(item) = ui.context_menu(el.id, || Menu::new(vec![Item::new("x", "X"), sub])) {
+        self.chosen = Some(item);
+      }
+    }
+  }
+
+  #[test]
+  fn a_disabled_submenus_items_are_disabled_when_drawn() {
+    let mut h = Harness::new(Sub::default(), Size::new(300.0, 300.0), 1.0);
+    h.frame();
+    h.right_click(50.0, 20.0);
+    h.frame();
+    h.frame();
+    let dump = h.a11y();
+    assert!(dump.contains("menu item \"A\" disabled"), "{dump}");
+    assert!(dump.contains("menu item \"X\"") && !dump.contains("\"X\" disabled"), "{dump}");
+    h.click_id(Id::of("el").key("a"));
+    h.frame();
+    assert_eq!(h.app().chosen, None);
   }
 
   #[test]

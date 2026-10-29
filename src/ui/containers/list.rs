@@ -498,8 +498,30 @@ impl<'a> Ui<'a> {
     st.pressed = press.map(|p| p.seq).or(click.map(|c| c.seq)).or(st.pressed);
     let Some((on, mods, clicks, button, seq)) = hit else { return };
     let right = second(button, mods);
-    // Its index as built, a hint that saves a scan unless the rows moved since.
-    let at = st.shown.iter().position(|&k| id.key(("row", k)) == on);
+    // Its index as built, a hint that saves a scan unless the rows moved since; a secondary
+    // press on an element in a row is the row's, unless that element has a menu of its own.
+    let row = |on: Id| st.shown.iter().position(|&k| id.key(("row", k)) == on);
+    let (t, mut own) = (&self.st.last, false);
+    let mut up = t.find(on).filter(|_| right);
+    let at = row(on).or_else(|| {
+      loop {
+        let n = &t.nodes[up? as usize];
+        if let Some(at) = row(n.id) {
+          break Some(at);
+        }
+
+        if n.id == id || up == Some(0) {
+          break None;
+        }
+
+        own |= t.menus.contains(&n.id);
+        up = Some(n.parent);
+      }
+    });
+    if own {
+      return;
+    }
+
     let Some((k, i)) =
       at.and_then(|at| Some((st.shown[at], find((st.shown[at], st.from + at), n, key)?)))
     else {
@@ -721,5 +743,49 @@ mod tests {
     let (st, shown, short) = frame(st, 5, -1.0);
     assert_eq!((shown, short), (5, true));
     assert_eq!(st.scroll(id).unwrap().offset.y, 0.0);
+  }
+
+  /// Rows with a button each, an odd row's with a menu of its own, under the list's row menu.
+  #[derive(Default)]
+  struct Buttons {
+    sel: Selection,
+  }
+
+  impl crate::App for Buttons {
+    fn view(&mut self, ui: &mut Ui) {
+      let list = List::new(10, 20.0).multi().selection(&mut self.sel).style(Style::new().grow());
+      let r = list.show(ui.id("list"), |ui, row| {
+        let b = ui.id(("b", row.index)).button("B");
+        if row.index % 2 == 1 {
+          ui.context_menu(b.id, || crate::Menu::new(vec![crate::Item::new("own", "Own")]));
+        }
+      });
+      ui.context_menu(r.id, || crate::Menu::new(vec![crate::Item::new("row", "Row")]));
+    }
+  }
+
+  #[test]
+  fn a_right_click_on_a_rows_element_is_the_rows_unless_it_has_a_menu() {
+    use crate::harness::Harness;
+    let mut h = Harness::new(Buttons::default(), Size::new(200.0, 200.0), 1.0);
+    h.native_menus();
+    h.frame();
+    let at = |h: &Harness<Buttons>, i: usize| {
+      let r = h.rect(Id::of(("b", i))).unwrap();
+      (r.x + r.w / 2.0, r.y + r.h / 2.0)
+    };
+    let asked = |h: &mut Harness<Buttons>| h.context_menu(None).map(|(_, m)| m.items[0].id.clone());
+    // A button with no menu: its row's menu, that row selected.
+    let (x, y) = at(&h, 2);
+    h.right_click(x, y);
+    h.frame();
+    assert_eq!(asked(&mut h).as_deref(), Some("row"));
+    assert_eq!(h.app().sel.cursor(), Some(2));
+    // One with its own: that menu, the selection as it was.
+    let (x, y) = at(&h, 3);
+    h.right_click(x, y);
+    h.frame();
+    assert_eq!(asked(&mut h).as_deref(), Some("own"));
+    assert_eq!(h.app().sel.cursor(), Some(2));
   }
 }
