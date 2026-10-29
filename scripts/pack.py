@@ -24,22 +24,24 @@ by `cargo metadata --no-deps`: a plain `python3` (3.9+) with the standard librar
   deb-depends = ["libasound2 | libasound2t64"]
 
 `release <dir>` packs the build jobs' binaries, `<dir>/<triple>/<bin>[.exe]`, into
-`<dir>/<Name>-<label>-<platform>.<ext>`: the DMG, the setup, or the AppImage and .deb, then with
-`--tag` update.txt, its urls `<repository>/releases/download/<tag>/<file>`, signed by UPDATE_KEY.
+`<dir>/<Name>-dev-<platform>.<ext>`: the DMG, the setup, or the AppImage and .deb, rust-build's
+names, which rust-publish renames to `<Name>-<tag>-…` on a release. `--tag` is a release: then
+update.txt (that name kept), signed by UPDATE_KEY, lists the files by their renamed names, at
+`<repository>/releases/download/<tag>/<Name>-<tag>-…`, the same bytes.
 In CI it runs on Ubuntu (`apt-get install nsis hfsprogs`), from the app's Makefile:
 
   NIMBO = $(shell cargo metadata --format-version 1 --locked | python3 -c 'import json, os, sys; \
     print(next(os.path.dirname(p["manifest_path"]) for p in json.load(sys.stdin)["packages"] \
     if p["name"] == "nimbo"))')
   release:
-  	python3 $(NIMBO)/scripts/pack.py release target/distrib --label $(LABEL) \
-  	  $(if $(TAG),--tag $(TAG))
+  	python3 $(NIMBO)/scripts/pack.py release target/distrib $(if $(TAG),--tag $(TAG))
 
 Off macOS rcodesign signs the app with APPLE_CERTIFICATE (a base64 .p12) and
 APPLE_CERTIFICATE_PASSWORD, else ad hoc; the DMG is made by `mkfs.hfsplus` and libdmg-hfsplus
 (from $NIMBO_TOOLS, else fetched), then signed and, with APPLE_API_KEY (the .p8's text),
-APPLE_API_KEY_ID and APPLE_API_ISSUER, notarized. A `v*` label is a release: a missing secret
-fails it. `app --bin <binary>` writes `<target dir>/<Name>.app` alone, on a Mac signed by codesign.
+APPLE_API_KEY_ID and APPLE_API_ISSUER, notarized. A release (`--tag`) fails on a missing secret.
+A dev build's .deb is `<version>~dev`, which apt orders before the release. `app --bin <binary>`
+writes `<target dir>/<Name>.app` alone, on a Mac signed by codesign.
 
 `feed` writes `<target dir>/distrib/update.txt`: `version <v>`, a line per file, `<platform> <size>
 <sha512> <url>`, and last `sig <hex>`, the Ed25519 signature of every byte before it. A file's
@@ -49,8 +51,8 @@ seed in hex or a PEM. `feed-key` makes the one key, in memory only: the repo's s
 (gh), the private key on the clipboard to keep (Bitwarden), the public key printed in hex, the app's
 `Feed::key`. Both need OpenSSL 3 (macOS's own openssl is LibreSSL).
 
-python3 scripts/pack.py release <dir> --label <dev|vX.Y.Z> [--tag <tag>] [--manifest <Cargo.toml>]
-python3 scripts/pack.py app --bin <binary> [--label <l>] [--manifest <Cargo.toml>]
+python3 scripts/pack.py release <dir> [--tag vX.Y.Z] [--manifest <Cargo.toml>]
+python3 scripts/pack.py app --bin <binary> [--manifest <Cargo.toml>]
 python3 scripts/pack.py feed [--key <file>] --url <base> [<platform>=]<file>... | --public-key
 python3 scripts/pack.py feed-key [--repo <owner/name>]
 """
@@ -100,13 +102,18 @@ class Config:
   authors: list
   root: Path
   target: Path
-  label: str | None = None
+  tag: str | None = None
   repository: str = ""
 
 
-def stem(cfg: Config) -> str:
-  """A file's name before its platform."""
-  return f"{cfg.name}-{cfg.label}"
+def stem(cfg: Config, tag: str = "dev") -> str:
+  """A file's name before its platform: rust-build's `<Name>-dev`, `<Name>-<tag>` once renamed.
+
+  >>> from types import SimpleNamespace as N
+  >>> stem(N(name="Wavo")), stem(N(name="Wavo"), "v1.2.0")
+  ('Wavo-dev', 'Wavo-v1.2.0')
+  """
+  return f"{cfg.name}-{tag}"
 
 
 def run(*args, **kw) -> subprocess.CompletedProcess:
@@ -705,10 +712,10 @@ LIBDMG = None
 
 
 def secrets(cfg: Config, names: tuple[str, ...]) -> bool:
-  """Whether every one of `names` is set; a release (a `v*` label) without one fails."""
+  """Whether every one of `names` is set; a release (a tag) without one fails."""
   missing = [n for n in names if not os.environ.get(n)]
-  if missing and (cfg.label or "").startswith("v"):
-    sys.exit(f"pack: {cfg.label} is a release, signed and notarized: set {', '.join(missing)}")
+  if missing and cfg.tag:
+    sys.exit(f"pack: {cfg.tag} is a release, signed and notarized: set {', '.join(missing)}")
 
   return not missing
 
@@ -1243,13 +1250,15 @@ def desktop(cfg: Config) -> str:
   return "\n".join(lines) + "\n"
 
 
-def deb_version(version: str) -> str:
-  """The Cargo version as Debian orders it: a pre-release sorts before its release.
+def deb_version(version: str, dev: bool) -> str:
+  """The Cargo version as Debian orders it: a pre-release, or a dev build, sorts before its release.
 
-  >>> deb_version("1.2.0-beta.1"), deb_version("1.2.0")
+  >>> deb_version("1.2.0-beta.1", False), deb_version("1.2.0", False)
   ('1.2.0~beta.1', '1.2.0')
+  >>> deb_version("1.2.0", True), deb_version("1.2.0-beta.1", True)
+  ('1.2.0~dev', '1.2.0~beta.1~dev')
   """
-  return version.replace("-", "~", 1)
+  return version.replace("-", "~", 1) + "~dev" * dev
 
 
 def fetch(url: str, path: Path) -> Path:
@@ -1316,7 +1325,7 @@ def deb(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
     sys.exit("pack: deb needs `authors` in Cargo.toml (its Maintainer)")
 
   pkg = cfg.linux.get("deb-package") or cfg.bin.lower().replace("_", "-")
-  version = deb_version(cfg.version)
+  version = deb_version(cfg.version, not cfg.tag)
   out = out_dir / f"{stem(cfg)}-linux-{arch}.deb"
   with tempfile.TemporaryDirectory() as tmp:
     root = Path(tmp) / pkg
@@ -1375,7 +1384,7 @@ OPENSSL = (
 
 def platform(name: str) -> str | None:
   """A file's feed platform by its name, None when the name doesn't say."""
-  # The last: a label may look like one.
+  # The last: the name or tag may look like one.
   found = re.findall(r"-(macos|windows|linux)-(x86_64|aarch64|x64|arm64)(?=[-.]|$)", name)
   return f"{found[-1][0]}-{arch(found[-1][1].replace('x64', 'x86_64'))}" if found else None
 
@@ -1431,7 +1440,8 @@ def public_key(key: bytes) -> str:
   return openssl("pkey", "-pubout", "-outform", "DER", input=key)[-32:].hex()
 
 
-def feed(key: bytes, version: str, url: str, files: list[str], out: Path) -> Path:
+def feed(key: bytes, version: str, url: str, files: list[str], out: Path, name=None) -> Path:
+  """`out`/update.txt of `files`, each at `<url>/<name>`, `name(file's name)` when given."""
   base = url.replace("{version}", version).rstrip("/")
   packages = []
   for arg in files:
@@ -1443,7 +1453,7 @@ def feed(key: bytes, version: str, url: str, files: list[str], out: Path) -> Pat
       sys.exit(f"pack: {arg}: its name doesn't say its platform, give it: <platform>=<file>")
 
     file = Path(path)
-    packages.append((p, f"{base}/{file.name}", file.read_bytes()))
+    packages.append((p, f"{base}/{name(file.name) if name else file.name}", file.read_bytes()))
 
   if len({p for p, _, _ in packages}) < len(packages):
     sys.exit("pack: a platform is given twice")
@@ -1505,11 +1515,13 @@ def binaries(cfg: Config, dir: Path) -> list[tuple[str, Path]]:
   return found
 
 
-def release(cfg: Config, dir: Path, tag: str | None) -> None:
-  """Per triple in `dir` its files at `dir`'s top level: the app's DMG, the setup, or the AppImage
-  and .deb; then, with `tag`, update.txt, signed by UPDATE_KEY, its urls the GitHub release's."""
-  if cfg.label.startswith("v") and cfg.label != f"v{cfg.version}":
-    sys.exit(f"pack: the label {cfg.label} is not Cargo.toml's version, {cfg.version}")
+def release(cfg: Config, dir: Path) -> None:
+  """Per triple in `dir` its files at `dir`'s top level, `<Name>-dev-…`: the app's DMG, the
+  setup, or the AppImage and .deb; then, with `cfg.tag`, update.txt, signed by UPDATE_KEY, of the
+  files as the GitHub release names and serves them, `<Name>-<tag>-…`."""
+  tag = cfg.tag
+  if tag and tag != f"v{cfg.version}":
+    sys.exit(f"pack: the tag {tag} is not Cargo.toml's version, v{cfg.version}")
 
   key = os.environ.get("UPDATE_KEY")
   if tag and not key:
@@ -1534,9 +1546,12 @@ def release(cfg: Config, dir: Path, tag: str | None) -> None:
     files += made
 
   if tag:
-    # The updater takes the AppImage on Linux; a .deb is apt's.
+    # The updater takes the AppImage on Linux; a .deb is apt's. rust-publish renames
+    # `<Name>-dev-…` to `<Name>-<tag>-…`, the same bytes.
     url = f"{cfg.repository}/releases/download/{tag}"
-    feed(pem(key), cfg.version, url, [str(f) for f in files if f.suffix != ".deb"], dir)
+    files = [str(f) for f in files if f.suffix != ".deb"]
+    renamed = stem(cfg, tag)
+    feed(pem(key), cfg.version, url, files, dir, lambda n: renamed + n.removeprefix(stem(cfg)))
 
 
 # MARK: Command line
@@ -1548,8 +1563,7 @@ def main():
   ap.add_argument("files", nargs="*", help="release: the binaries' folder; feed: the files")
   ap.add_argument("--manifest", type=Path, default=Path("Cargo.toml"), help="the app's Cargo.toml")
   ap.add_argument("--bin", type=Path, help="app: the binary")
-  ap.add_argument("--label", help="the files' <Name>-<label>-…: dev, or a release's v<version>")
-  ap.add_argument("--tag", help="release: the GitHub release's tag, for update.txt's urls")
+  ap.add_argument("--tag", help="release: the GitHub release's tag, v<version>, for update.txt")
   ap.add_argument("--key", type=Path, help="feed: the private key's file, else $UPDATE_KEY")
   ap.add_argument("--url", help="feed: where the files will be served, {version} the version")
   ap.add_argument("--public-key", action="store_true", help="feed: print the key's public half")
@@ -1571,16 +1585,16 @@ def main():
     if not args.url or not args.files:
       ap.error("feed needs --url and the files")
 
-  if args.command == "release" and (len(args.files) != 1 or not args.label):
-    ap.error("release takes the binaries' folder and --label dev or v<version>")
+  if args.command == "release" and len(args.files) != 1:
+    ap.error("release takes the binaries' folder")
 
   if args.command == "app" and not args.bin:
     ap.error("app takes --bin, the binary")
 
   cfg = load(args.manifest)
-  cfg.label = args.label
+  cfg.tag = args.tag
   if args.command == "release":
-    release(cfg, Path(args.files[0]), args.tag)
+    release(cfg, Path(args.files[0]))
   elif args.command == "feed":
     feed(pem(key), cfg.version, args.url, args.files, cfg.target / "distrib")
   else:
