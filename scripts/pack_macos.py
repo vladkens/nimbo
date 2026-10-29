@@ -38,7 +38,7 @@ def info(cfg: Config, minos: str) -> dict:
   """The Info.plist: the bundle from the config, then its `usage` strings and `plist` keys over it.
 
   >>> mac = {"accessory": True, "usage": {"NSMicrophoneUsageDescription": "m"}, "plist": {"X": 1}}
-  >>> p = info(Config("me.a", "A", Path("i.png"), "", "1.2.0-beta.1", "a", mac, {}, {}, "", [], Path(".")), "14.0")
+  >>> p = info(Config("me.a", "A", Path("i.png"), "", "1.2.0-beta.1", "a", mac, {}, {}, "", [], Path("."), Path("target")), "14.0")
   >>> p["CFBundleExecutable"], p["CFBundleVersion"], p["LSUIElement"], p["X"], p["LSMinimumSystemVersion"]
   ('a', '1.2.0', True, 1, '14.0')
   """

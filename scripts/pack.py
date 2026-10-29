@@ -67,6 +67,7 @@ class Config:
   publisher: str
   authors: list
   root: Path
+  target: Path
 
 
 def run(*args, **kw) -> subprocess.CompletedProcess:
@@ -118,6 +119,7 @@ def parse(meta: dict, manifest: Path) -> Config:
     publisher=nimbo.get("publisher") or next(iter(pkg.get("authors") or []), "").split(" <")[0],
     authors=pkg.get("authors") or [],
     root=manifest.parent,
+    target=Path(meta.get("target_directory") or manifest.parent / "target"),
   )
 
 
@@ -278,8 +280,7 @@ def main():
 
   meta = metadata(args.manifest)
   cfg = parse(meta, args.manifest)
-  target_dir = Path(meta["target_directory"])
-  out = args.out or target_dir / "distrib"
+  out = args.out or cfg.target / "distrib"
   if args.command == "feed":
     feed(pem(key), cfg.version, args.url, args.files, out)
     return
@@ -298,7 +299,7 @@ def main():
 
   target = args.target or f"{arch(host.machine())}-{OS[args.command]}"
   exe = cfg.bin + (".exe" if "windows" in target else "")
-  binary = args.bin or target_dir / target / "dist" / exe
+  binary = args.bin or cfg.target / target / "dist" / exe
   if not binary.is_file():
     sys.exit(f"pack: no binary at {binary}: build it, or give --bin")
 

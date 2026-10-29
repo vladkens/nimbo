@@ -98,7 +98,7 @@ def appimage(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
   # The tool runs here; the runtime is the AppImage's own, of its arch.
   host = platform.machine().lower()
   host = {"amd64": "x86_64", "arm64": "aarch64"}.get(host, host)
-  tools = cfg.root / "target" / "appimage"
+  tools = cfg.target / "appimage"
   tool = fetch(APPIMAGETOOL.format(arch=host), tools / f"appimagetool-{host}")
   runtime = fetch(RUNTIME.format(arch=arch), tools / f"runtime-{arch}")
 
