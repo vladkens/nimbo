@@ -47,7 +47,7 @@ BUDGETS = {
   "text": 1200,
   "core": 4000,
   "app/shared": 1700,
-  "app/macos": 1800,
+  "app/macos": 1900,
   "app/windows": 1800,
   "app/linux": 2400,
   "a11y": 400,

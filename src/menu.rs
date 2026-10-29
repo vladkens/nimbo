@@ -96,7 +96,7 @@ impl Item {
 
 /// The items of `menu` that can be chosen, depth first, in the order they show: the item
 /// numbers the OS menus use (an index here is a tag, a command id or a D-Bus menu id).
-#[cfg(any(test, windows))]
+#[cfg(any(test, windows, target_os = "macos", target_os = "linux"))]
 pub(crate) fn choices(menu: &Menu) -> Vec<String> {
   fn walk(items: &[Item], out: &mut Vec<String>) {
     for it in items.iter().filter(|it| !it.separator && !it.header) {
