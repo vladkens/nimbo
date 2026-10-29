@@ -721,7 +721,7 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
     )
   };
   assert!(!hwnd.is_null(), "nimbo: CreateWindowExW failed");
-  if let Some((side, px)) = cfg.icon {
+  if let Some((side, px)) = cfg.window_icon() {
     // Big and small alike, the system scales it. One per image (`'static`), the windows share it
     // for the app's life.
     thread_local!(static ICONS: RefCell<Vec<((usize, u32), HICON)>> = const { RefCell::new(Vec::new()) });

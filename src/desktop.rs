@@ -29,7 +29,8 @@ pub struct Launcher<'a> {
   /// The menu's categories by the Desktop Menu spec: `Utility`, `AudioVideo`, `Development`.
   pub categories: &'a [&'a str],
   /// `side` × `side` pixels of straight RGBA, rows top-down ([crate::Config::icon]); `side` one
-  /// of the icon theme's sizes ([SIDES]), 256 for every size the desktop shows.
+  /// of the icon theme's sizes ([SIDES]), 256 for every size the desktop shows. From the app's
+  /// PNG: `Png::icon(include_bytes!("icon.png")).square()` ([crate::Png::square]).
   pub icon: (u32, &'a [u8]),
 }
 
@@ -273,7 +274,7 @@ mod tests {
       StartupWMClass=com.example.app\nStartupNotify=true\n";
     assert_eq!(text, want);
     let png = std::fs::read(data.join("icons/hicolor/16x16/apps/com.example.app.png")).unwrap();
-    assert_eq!(crate::png::tests::decode(&png), (16, 16, px.clone()));
+    assert_eq!(crate::png::decode(&png).unwrap(), (16, 16, px.clone()));
 
     assert_eq!(install_in(&data, &APP, &l, "/opt/Ex ample/app"), Ok(false), "the same: kept");
     // A new icon dates the theme's folder, which a cache is checked against.
