@@ -582,7 +582,8 @@ def appimage(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
   entry and the icon, packed by appimagetool with the static type2 runtime (no libfuse2), both
   pinned and fetched into <target dir>/appimage. nimbo links only glibc and loads the rest."""
   # The tool runs here; the runtime is the AppImage's own, of its arch.
-  here = arch(host.machine())
+  machine = host.machine().lower()
+  here = {"amd64": "x86_64", "arm64": "aarch64"}.get(machine, machine)
   tools = cfg.target / "appimage"
   tool = fetch(APPIMAGETOOL.format(arch=here), tools / f"appimagetool-{here}")
   runtime = fetch(RUNTIME.format(arch=arch), tools / f"runtime-{arch}")
