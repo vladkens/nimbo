@@ -8,10 +8,10 @@
 //!
 //! `UPDATE_VERSION=1.0.0 cargo build --release --example update` sets the version (the crate's
 //! without it). The release's file is what people download: on macOS the example bundled as
-//! `Update.app`, signed with the identity v1 has, in a disk image made by `hdiutil create
-//! -srcfolder Update.app -format UDZO Update.dmg`; on Windows a per-user Inno Setup `setup.exe`
-//! that installs it as `app.exe` (Windows asks to elevate an `update.exe`) in
-//! `%LOCALAPPDATA%\Programs\Update`; on Linux the AppImage. `scripts/pack.py feed` makes a feed
+//! `Update.app`, signed with the identity v1 has, in its DMG (`scripts/pack.py app` and `dmg`); on
+//! Windows the per-user Inno Setup `setup.exe` of `pack.py setup`, with the config's `name` "app"
+//! so it installs `%LOCALAPPDATA%\Programs\app\app.exe` (Windows asks to elevate an
+//! `update.exe`); on Linux the AppImage of `pack.py appimage`. `scripts/pack.py feed` makes a feed
 //! of them, `update.txt`, and `feed --public-key` prints the key in hex. Then `update` prints the
 //! version, `update --check <feed url> <key>` what the feed offers, `update --update <feed url>
 //! <key>` updates, printing the download's percentage.

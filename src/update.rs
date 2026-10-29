@@ -51,8 +51,9 @@
 //! old one's working directory (on macOS LaunchServices starts it in `/`, as Finder does) and
 //! removes the old copy and the staging folder. If that fails, it undoes the swap and starts the
 //! old app again with its error in `NIMBO_UPDATE_ERROR`, which [finish] returns. What an installer
-//! stopped midway left, the next [download] removes. The staging folder,
-//! `.nimbo-update-<pid>-<nanos>`, is beside the app:
+//! stopped midway left, the next [download] removes; on Windows, where the installer runs from the
+//! staging folder and can't remove it, the app it started does, a few seconds in. The staging
+//! folder, `.nimbo-update-<pid>-<nanos>`, is beside the app:
 //!
 //! | OS | the app | staged | checked | put in, and undone | started |
 //! |---|---|---|---|---|---|
@@ -205,6 +206,16 @@ pub fn install(staged: Staged) -> io::Result<()> {
 /// the environment: so this runs before any thread does.
 pub fn finish() -> Option<io::Error> {
   let Some(job) = job(&env::args_os().skip(1).collect::<Vec<_>>()) else {
+    // Windows' installer can't remove the folder it runs from: the app does, once it has ended.
+    #[cfg(windows)]
+    thread::spawn(|| {
+      thread::sleep(Duration::from_secs(5));
+      let found = env::current_exe().and_then(|exe| target(OS, &exe, &|k| env::var_os(k)));
+      if let Ok(target) = found {
+        tidy(&target, &imp::alive);
+      }
+    });
+
     let note = env::var(NOTE).ok()?;
     // SAFETY: first in `main`, before any other thread runs.
     unsafe { env::remove_var(NOTE) };
