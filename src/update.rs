@@ -35,8 +35,8 @@
 //!   >> update.txt
 //! ```
 //!
-//! `scripts/update-feed.py` writes the feed with its `sig` line, and with `--public-key` prints
-//! the key.
+//! `scripts/pack.py feed` writes the feed with its `sig` line (`feed --public-key` prints the key,
+//! `feed-key` makes one), from the files `pack.py` packs.
 //!
 //! Only a newer version is taken, over https (http on loopback only), and its file only when its
 //! size and SHA-512 are the feed's; nothing is opened before. Redirects are followed by the system

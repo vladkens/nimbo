@@ -11,8 +11,8 @@
 //! `Update.app`, signed with the identity v1 has, in a disk image made by `hdiutil create
 //! -srcfolder Update.app -format UDZO Update.dmg`; on Windows a per-user Inno Setup `setup.exe`
 //! that installs it as `app.exe` (Windows asks to elevate an `update.exe`) in
-//! `%LOCALAPPDATA%\Programs\Update`; on Linux the AppImage. `scripts/update-feed.py` makes a feed
-//! of them, `update.txt`, and with `--public-key` prints the key in hex. Then `update` prints the
+//! `%LOCALAPPDATA%\Programs\Update`; on Linux the AppImage. `scripts/pack.py feed` makes a feed
+//! of them, `update.txt`, and `feed --public-key` prints the key in hex. Then `update` prints the
 //! version, `update --check <feed url> <key>` what the feed offers, `update --update <feed url>
 //! <key>` updates, printing the download's percentage.
 

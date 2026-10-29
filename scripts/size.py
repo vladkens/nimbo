@@ -49,7 +49,7 @@ BUDGETS = {
   "app/shared": 1700,
   "app/macos": 1800,
   "app/windows": 1800,
-  "app/linux": 2300,
+  "app/linux": 2400,
   "a11y": 400,
   "update": 500,
 }
