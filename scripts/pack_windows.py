@@ -87,14 +87,14 @@ def app_id(cfg) -> str:
   >>> app_id(N(id="x", windows={"app-id": "314a56a8-8a8b-4c18-954d-b930203f086d"}))
   '{314a56a8-8a8b-4c18-954d-b930203f086d}'
   """
-  given = (getattr(cfg, "windows", None) or {}).get("app-id")
+  given = cfg.windows.get("app-id")
   guid = uuid.UUID(given) if given else uuid.uuid5(uuid.NAMESPACE_DNS, cfg.id)
   return "{" + str(guid) + "}"
 
 
 def publisher(cfg) -> str:
   """Who Settings › Apps names: the config's publisher, else the id's owner (`me.vladkens.x`)."""
-  given = getattr(cfg, "publisher", None)
+  given = cfg.publisher
   if given:
     return given
 
@@ -106,7 +106,8 @@ def script(cfg, binary: Path, arch: str, out_dir: Path, base: str, icon: Path, l
   r"""The .iss for the installer `base` in `out_dir`.
 
   >>> from types import SimpleNamespace as N
-  >>> cfg = N(id="me.vladkens.counter", name="Counter", version="1.2.0-3-gabc", comment="Counts")
+  >>> cfg = N(id="me.vladkens.counter", name="Counter", version="1.2.0-3-gabc", comment="Counts",
+  ...   windows={}, publisher="")
   >>> iss = script(cfg, Path("c.exe"), "aarch64", Path("out"), "b", Path("i.ico"), Path("-"))
   >>> keys = ("AppId", "AppVersion", "VersionInfo", "Priv", "DefaultDir", "Arch", "Close", "Source")
   >>> print("\n".join(l for l in iss.splitlines() if l.startswith(keys)))

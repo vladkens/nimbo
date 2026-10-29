@@ -37,7 +37,9 @@ pub struct Launcher<'a> {
 pub const SIDES: [u32; 10] = [16, 22, 24, 32, 48, 64, 96, 128, 256, 512];
 
 /// Writes the app's launcher entry and icon where they differ from what is there (first run, the
-/// AppImage moved): `true` when it wrote. Quiet: an error is returned, never shown.
+/// AppImage moved): `true` when it wrote. Nothing for an executable outside the home folder
+/// (/usr, /opt, /snap): its package brings its own entry, which one here would outlive. Quiet: an
+/// error is returned, never shown.
 pub fn install(app: &AppInfo, launcher: &Launcher) -> Result<bool, String> {
   imp::install(app, launcher)
 }
@@ -45,6 +47,12 @@ pub fn install(app: &AppInfo, launcher: &Launcher) -> Result<bool, String> {
 /// Removes the entry and its icons; what is missing already is fine.
 pub fn uninstall(app: &AppInfo) -> Result<(), String> {
   imp::uninstall(app)
+}
+
+/// The executable `exe` is a package's: outside the home folder `home`, or with no home to tell.
+#[cfg(any(all(test, unix), target_os = "linux"))]
+pub(crate) fn packaged(exe: &Path, home: Option<&Path>) -> bool {
+  !home.is_some_and(|h| h.is_absolute() && h.parent().is_some() && exe.starts_with(h))
 }
 
 /// The launcher entry under the data folder `data`.
@@ -203,6 +211,21 @@ mod tests {
     assert!(file(&other).exists() && file("other").exists(), "only the app's go");
     assert!(!is_tray_icon("com.example.my_app.tray0123-symbolic.svg", id));
     _ = std::fs::remove_dir_all(&data);
+  }
+
+  /// A package's executable gets no entry of the app's own: anywhere outside the home folder.
+  #[cfg(unix)]
+  #[test]
+  fn none_for_a_package() {
+    use super::*;
+    let home = Some(Path::new("/home/me"));
+    for exe in ["/usr/bin/app", "/opt/App/app", "/snap/app/1/app", "/home/meg/app"] {
+      assert!(packaged(Path::new(exe), home), "{exe}");
+    }
+
+    assert!(!packaged(Path::new("/home/me/Apps/App.AppImage"), home));
+    assert!(packaged(Path::new("/home/me/app"), None));
+    assert!(packaged(Path::new("/app"), Some(Path::new("/"))));
   }
 
   /// Unix: Windows opens no folder as a file, to date it.

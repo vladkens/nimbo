@@ -63,6 +63,9 @@ class Config:
   bin: str
   macos: dict
   linux: dict
+  windows: dict
+  publisher: str
+  authors: list
   root: Path
 
 
@@ -110,6 +113,10 @@ def parse(meta: dict, manifest: Path) -> Config:
     bin=bin,
     macos=nimbo.get("macos", {}),
     linux=nimbo.get("linux", {}),
+    windows=nimbo.get("windows", {}),
+    # `[package.metadata.nimbo] publisher`, else the first author without the mail.
+    publisher=nimbo.get("publisher") or next(iter(pkg.get("authors") or []), "").split(" <")[0],
+    authors=pkg.get("authors") or [],
     root=manifest.parent,
   )
 

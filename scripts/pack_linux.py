@@ -270,8 +270,8 @@ def deb(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
         path.chmod(0o755 if path == root / "usr/bin" / cfg.bin else 0o644)
         size += path.stat().st_size
 
-    # The package's authors once Config carries them (cargo metadata has them), else the name.
-    authors = ", ".join(getattr(cfg, "authors", None) or []) or cfg.name
+    # The package's first author, as Debian wants one maintainer; else the publisher or the name.
+    authors = next(iter(cfg.authors), "") or cfg.publisher or cfg.name
     control = {
       "Package": pkg,
       "Version": version,
