@@ -26,12 +26,12 @@ import os
 import re
 import shutil
 import struct
-import subprocess
 import sys
 import tempfile
 import uuid
-import zlib
 from pathlib import Path
+
+from pack import Config, decode, encode, run
 
 NAMES = {"x86_64": "x64", "aarch64": "arm64"}
 # Inno's architecture identifiers: x64compatible takes x64 Windows and ARM64's x64 emulation.
@@ -41,7 +41,7 @@ RUN = r"Software\Microsoft\Windows\CurrentVersion\Run"
 APPROVED = r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"
 
 
-def setup(cfg, binary: Path, arch: str, out_dir: Path) -> Path:
+def setup(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
   """Compiles the installer of `binary` (built for `arch`, x86_64 or aarch64) into `out_dir`."""
   if not binary.is_file() or binary.stat().st_size == 0:
     sys.exit(f"pack: no app to install at {binary}: build it first")
@@ -58,7 +58,7 @@ def setup(cfg, binary: Path, arch: str, out_dir: Path) -> Path:
     text = script(cfg, binary.resolve(), arch, out_dir.resolve(), base, icon, license)
     # Inno reads UTF-8 with its byte-order mark: a name may not be ASCII.
     iss.write_text(text, encoding="utf-8-sig")
-    subprocess.run([iscc, "/Q", str(iss)], check=True)
+    run(iscc, "/Q", iss)
 
   return out_dir / f"{base}.exe"
 
@@ -77,7 +77,7 @@ def compiler() -> str:
   sys.exit(f"pack: no Inno Setup 6 at {iscc} or ISCC on PATH; install it: choco install innosetup")
 
 
-def app_id(cfg) -> str:
+def app_id(cfg: Config) -> str:
   """The installer's AppId, the same in every version: `windows.app-id` of the config, else a
   GUID made from the app's id. Never changed: an update and the uninstall find the app by it.
 
@@ -92,17 +92,18 @@ def app_id(cfg) -> str:
   return "{" + str(guid) + "}"
 
 
-def publisher(cfg) -> str:
+def publisher(cfg: Config) -> str:
   """Who Settings › Apps names: the config's publisher, else the id's owner (`me.vladkens.x`)."""
-  given = cfg.publisher
-  if given:
-    return given
+  if cfg.publisher:
+    return cfg.publisher
 
   parts = cfg.id.split(".")
   return parts[1] if len(parts) > 2 else parts[0]
 
 
-def script(cfg, binary: Path, arch: str, out_dir: Path, base: str, icon: Path, license: Path):
+def script(
+  cfg: Config, binary: Path, arch: str, out_dir: Path, base: str, icon: Path, license: Path
+) -> str:
   r"""The .iss for the installer `base` in `out_dir`.
 
   >>> from types import SimpleNamespace as N
@@ -169,7 +170,7 @@ def script(cfg, binary: Path, arch: str, out_dir: Path, base: str, icon: Path, l
     "[Run]",
     # A constant's argument ends at a comma or a brace: those %-encoded.
     f'Filename: {q(app, False)}; Description: "{{cm:LaunchProgram,{arg(cfg.name)}}}"; '
-    "Flags: nowait postinstall skipifsilent",
+    + "Flags: nowait postinstall skipifsilent",
     "",
     "; nimbo's launch at login, which would start a deleted exe.",
     "[Code]",
@@ -241,110 +242,6 @@ def icon_file(entries: list[tuple[int, bytes]]) -> bytes:
   return b"".join(out + [data for _, data in entries])
 
 
-def chunks(png: bytes):
-  """The PNG's chunks, type and data."""
-  at = 8
-  while at < len(png):
-    (n,) = struct.unpack(">I", png[at : at + 4])
-    yield png[at + 4 : at + 8], png[at + 8 : at + 8 + n]
-    at += 12 + n
-
-
-def decode(png: bytes) -> tuple[int, int, bytearray] | None:
-  """Width, height and RGBA bytes of an 8-bit (or paletted) non-interlaced PNG; `None` else.
-
-  >>> decode(encode(2, bytes([255, 0, 0, 255, 0, 0, 0, 0] * 2)))[2][:8]
-  bytearray(b'\\xff\\x00\\x00\\xff\\x00\\x00\\x00\\x00')
-  """
-  if png[:8] != b"\x89PNG\r\n\x1a\n":
-    return None
-
-  head, data, palette, trns = b"", [], b"", b""
-  for kind, body in chunks(png):
-    if kind == b"IHDR":
-      head = body
-    elif kind == b"IDAT":
-      data.append(body)
-    elif kind == b"PLTE":
-      palette = body
-    elif kind == b"tRNS":
-      trns = body
-
-  w, h, depth, color, _, _, interlace = struct.unpack(">IIBBBBB", head)
-  channels = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}.get(color)
-  if not channels or interlace or not (depth == 8 or (color == 3 and depth in (1, 2, 4))):
-    return None
-
-  bpp = max(1, channels * depth // 8)
-  stride = (w * channels * depth + 7) // 8
-  raw = unfiltered(zlib.decompress(b"".join(data)), stride, h, bpp)
-  if color == 3:
-    alphas = trns + b"\xff" * (256 - len(trns))
-    table = [palette[i * 3 : i * 3 + 3] + alphas[i : i + 1] for i in range(len(palette) // 3)]
-    per = 8 // depth
-    mask = (1 << depth) - 1
-    rgba = bytearray()
-    for y in range(h):
-      row = raw[y * stride : (y + 1) * stride]
-      if depth == 8:
-        idx = row
-      else:
-        idx = [(row[x // per] >> (8 - depth * (x % per + 1))) & mask for x in range(w)]
-      rgba += b"".join(table[i] for i in idx)
-
-    return w, h, rgba
-
-  rgba = bytearray(w * h * 4)
-  if color == 6:
-    rgba[:] = raw
-  elif color == 2:
-    for c in range(3):
-      rgba[c::4] = raw[c::3]
-
-    rgba[3::4] = b"\xff" * (w * h)
-  elif color == 4:
-    for c in range(3):
-      rgba[c::4] = raw[0::2]
-
-    rgba[3::4] = raw[1::2]
-  else:
-    for c in range(3):
-      rgba[c::4] = raw
-
-    rgba[3::4] = b"\xff" * (w * h)
-
-  return w, h, rgba
-
-
-def unfiltered(data: bytes, stride: int, h: int, bpp: int) -> bytearray:
-  """The scanlines of `data` without their filter bytes, each filter undone (PNG spec §9)."""
-  out = bytearray(stride * h)
-  prev = bytearray(stride)
-  for y in range(h):
-    kind = data[y * (stride + 1)]
-    row = bytearray(data[y * (stride + 1) + 1 : (y + 1) * (stride + 1)])
-    if kind == 1:
-      for i in range(bpp, stride):
-        row[i] = (row[i] + row[i - bpp]) & 255
-    elif kind == 2:
-      row = bytearray((a + b) & 255 for a, b in zip(row, prev))
-    elif kind == 3:
-      for i in range(stride):
-        row[i] = (row[i] + ((row[i - bpp] if i >= bpp else 0) + prev[i]) // 2) & 255
-    elif kind == 4:
-      for i in range(stride):
-        a, b = (row[i - bpp] if i >= bpp else 0), prev[i]
-        c = prev[i - bpp] if i >= bpp else 0
-        p = a + b - c
-        pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
-        row[i] = (row[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
-
-    out[y * stride : (y + 1) * stride] = row
-    prev = row
-
-  return out
-
-
 def visible(w: int, h: int, rgba: bytearray) -> tuple[int, int, int]:
   """The square around the pixels that show, centred on them: its left, top and side.
 
@@ -393,15 +290,3 @@ def resized(w: int, h: int, rgba: bytearray, left: int, top: int, side: int, n: 
     out[i * 4 + 3] = min(255, round(a / (count[i // n] * count[i % n])))
 
   return bytes(out)
-
-
-def encode(n: int, rgba: bytes) -> bytes:
-  """An `n` × `n` RGBA PNG, unfiltered."""
-
-  def chunk(kind: bytes, body: bytes) -> bytes:
-    return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
-
-  rows = b"".join(b"\0" + rgba[y * n * 4 : (y + 1) * n * 4] for y in range(n))
-  head = struct.pack(">IIBBBBB", n, n, 8, 6, 0, 0, 0)
-  body = chunk(b"IHDR", head) + chunk(b"IDAT", zlib.compress(rows, 9)) + chunk(b"IEND", b"")
-  return b"\x89PNG\r\n\x1a\n" + body

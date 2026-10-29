@@ -38,13 +38,18 @@ def info(cfg: Config, minos: str) -> dict:
   """The Info.plist: the bundle from the config, then its `usage` strings and `plist` keys over it.
 
   >>> mac = {"accessory": True, "usage": {"NSMicrophoneUsageDescription": "m"}, "plist": {"X": 1}}
-  >>> p = info(Config("me.a", "A", Path("i.png"), "", "1.2.0-beta.1", "a", mac, {}, {}, "", [], Path("."), Path("target")), "14.0")
-  >>> p["CFBundleExecutable"], p["CFBundleVersion"], p["LSUIElement"], p["X"], p["LSMinimumSystemVersion"]
-  ('a', '1.2.0', True, 1, '14.0')
+  >>> cfg = Config("me.a", "A", Path("i.png"), "", "1.2.0-beta.1", "a", mac, {}, {}, "", [],
+  ...   Path("."), Path("target"))
+  >>> p = info(cfg, "14.0")
+  >>> p["CFBundleExecutable"], p["CFBundleVersion"], p["LSUIElement"], p["X"]
+  ('a', '1.2.0', True, 1)
+  >>> p["LSMinimumSystemVersion"]
+  '14.0'
   """
   bad = set(cfg.macos) - KEYS
   if bad:
-    sys.exit(f"pack: unknown [package.metadata.nimbo.macos] keys {', '.join(sorted(bad))}: one of {', '.join(sorted(KEYS))}")
+    bad, known = ", ".join(sorted(bad)), ", ".join(sorted(KEYS))
+    sys.exit(f"pack: unknown [package.metadata.nimbo.macos] keys {bad}: one of {known}")
 
   # Both versions are numbers and dots only: 1.2.0 of 1.2.0-beta.1.
   version = re.match(r"\d+(\.\d+)*", cfg.version)[0]
@@ -78,13 +83,17 @@ def icns(png: Path, out: Path) -> None:
     for size in (16, 32, 128, 256, 512):
       for scale, suffix in ((1, ""), (2, "@2x")):
         px = str(size * scale)
-        run("sips", "-z", px, px, png, "--out", Path(tmp) / f"icon_{size}x{size}{suffix}.png", capture_output=True)
+        icon = Path(tmp) / f"icon_{size}x{size}{suffix}.png"
+        run("sips", "-z", px, px, png, "--out", icon, capture_output=True)
 
     run("iconutil", "-c", "icns", "-o", out, tmp)
 
 
 def identities(valid: bool) -> list[str]:
-  out = run("security", "find-identity", *(["-v"] if valid else []), "-p", "codesigning", capture_output=True, text=True)
+  flags = ["-v"] if valid else []
+  out = run(
+    "security", "find-identity", *flags, "-p", "codesigning", capture_output=True, text=True
+  )
   return [ln for ln in out.stdout.splitlines() if '"' in ln]
 
 
@@ -94,12 +103,15 @@ def make_identity(name: str) -> None:
     key, cert, p12 = (Path(tmp) / n for n in ("key.pem", "cert.pem", "identity.p12"))
     # macOS's own openssl (LibreSSL): `security import` reads its PKCS#12, not OpenSSL 3's.
     openssl = "/usr/bin/openssl"
-    run(openssl, "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "3650", "-subj", f"/CN={name}",
-        "-addext", "keyUsage=critical,digitalSignature", "-addext", "extendedKeyUsage=critical,codeSigning",
-        "-keyout", key, "-out", cert, capture_output=True)
-    run(openssl, "pkcs12", "-export", "-inkey", key, "-in", cert, "-out", p12, "-passout", "pass:nimbo", capture_output=True)
+    new = ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "3650", "-subj", f"/CN={name}"]
+    new += ["-addext", "keyUsage=critical,digitalSignature"]
+    new += ["-addext", "extendedKeyUsage=critical,codeSigning"]
+    run(openssl, *new, "-keyout", key, "-out", cert, capture_output=True)
+    export = ["pkcs12", "-export", "-inkey", key, "-in", cert, "-out", p12]
+    run(openssl, *export, "-passout", "pass:nimbo", capture_output=True)
     keychain = Path.home() / "Library/Keychains/login.keychain-db"
-    run("security", "import", p12, "-k", keychain, "-P", "nimbo", "-T", "/usr/bin/codesign", capture_output=True)
+    trust = ["-P", "nimbo", "-T", "/usr/bin/codesign"]
+    run("security", "import", p12, "-k", keychain, *trust, capture_output=True)
 
   if not any(f'"{name}"' in ln for ln in identities(False)):
     sys.exit(f'pack: made "{name}", but `security find-identity` does not list it')
@@ -144,9 +156,10 @@ def app(cfg: Config, binary: Path, out_dir: Path) -> Path:
   run("plutil", "-lint", "-s", plist)
   run("xattr", "-cr", bundle)
   entitlements = cfg.macos.get("entitlements")
-  extra = ["--entitlements", cfg.root / entitlements] if entitlements else []
+  sign = ["--force", "--sign", sha, "--options", "runtime"]
+  sign += ["--entitlements", cfg.root / entitlements] if entitlements else []
   try:
-    run("codesign", "--force", "--sign", sha, "--options", "runtime", *extra, "--timestamp=none", bundle, timeout=60)
+    run("codesign", *sign, "--timestamp=none", bundle, timeout=60)
   except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
     shutil.rmtree(bundle, ignore_errors=True)
     sys.exit(f'pack: codesign with "{name}" failed ({e}): no bundle')
@@ -169,7 +182,8 @@ def dmg(cfg: Config, app: Path, out_dir: Path) -> Path:
     run("ditto", app, stage / app.name)
     (stage / "Applications").symlink_to("/Applications")
     # hdiutil, which macOS 27 deprecates for `diskutil image`: the runners up to macOS 15 lack that.
-    run("hdiutil", "create", "-volname", cfg.name, "-srcfolder", stage, "-format", "UDZO", "-ov", out, capture_output=True)
+    image = ["-volname", cfg.name, "-srcfolder", stage, "-format", "UDZO", "-ov"]
+    run("hdiutil", "create", *image, out, capture_output=True)
 
   print(f"{out}: {cfg.name} {cfg.version}")
   return out

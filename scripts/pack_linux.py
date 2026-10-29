@@ -22,15 +22,16 @@ import hashlib
 import os
 import platform
 import shutil
-import struct
+import sys
 import tempfile
 import urllib.request
-import zlib
 from pathlib import Path
 
-from pack import Config, run
+from pack import Config, decode, encode, run
 
-APPIMAGETOOL = "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-{arch}.AppImage"
+APPIMAGETOOL = (
+  "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-{arch}.AppImage"
+)
 RUNTIME = "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-{arch}"
 SHA256 = {
   "appimagetool-x86_64": "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0",
@@ -41,9 +42,6 @@ SHA256 = {
 DEB_ARCH = {"x86_64": "amd64", "aarch64": "arm64"}
 # The hicolor sizes of the .deb's icon, halved down from the 1024 px PNG.
 SIZES = (512, 256)
-PNG = b"\x89PNG\r\n\x1a\n"
-# The samples per pixel of each PNG colour type: grey, RGB, palette, grey and alpha, RGBA.
-CHANNELS = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
 
 
 def desktop(cfg: Config) -> str:
@@ -88,7 +86,7 @@ def fetch(url: str, path: Path) -> Path:
   digest = hashlib.sha256(path.read_bytes()).hexdigest()
   if digest != SHA256[path.name]:
     path.unlink()
-    raise SystemExit(f"{path.name}: SHA-256 {digest}, expected {SHA256[path.name]}")
+    sys.exit(f"pack: {path.name}: SHA-256 {digest}, expected {SHA256[path.name]}")
 
   path.chmod(0o755)
   return path
@@ -110,7 +108,7 @@ def appimage(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
     shutil.copy2(binary, appdir / "usr" / "bin" / cfg.bin)
     (appdir / "AppRun").symlink_to(f"usr/bin/{cfg.bin}")
     (appdir / f"{cfg.id}.desktop").write_text(desktop(cfg))
-    shutil.copy2(cfg.root / cfg.icon, appdir / f"{cfg.id}.png")
+    shutil.copy2(cfg.icon, appdir / f"{cfg.id}.png")
     (appdir / ".DirIcon").symlink_to(f"{cfg.id}.png")
 
     # Runs without FUSE (CI has none): the tool unpacks itself.
@@ -120,86 +118,11 @@ def appimage(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
   return out
 
 
-# MARK: PNG
-
-
-def png_read(path: Path) -> tuple[int, int, bytearray] | None:
-  """The size and RGBA pixels of a PNG, not interlaced, 8-bit or a palette's; else None."""
-  data = path.read_bytes()
-  if data[:8] != PNG:
-    return None
-
-  pos, chunks, idat = 8, {}, []
-  while pos < len(data):
-    n, kind = struct.unpack(">I4s", data[pos : pos + 8])
-    chunks[kind] = data[pos + 8 : pos + 8 + n]
-    pos += 12 + n
-    if kind == b"IDAT":
-      idat.append(chunks[kind])
-
-  w, h, depth, color, _, _, interlace = struct.unpack(">IIBBBBB", chunks[b"IHDR"])
-  if color not in CHANNELS or interlace or depth != 8 and color != 3:
-    return None
-
-  bits = CHANNELS[color] * depth
-  bpp, stride = max(1, bits // 8), (w * bits + 7) // 8
-  raw = zlib.decompress(b"".join(idat))
-  px = bytearray(h * stride)
-  prev = bytearray(stride)
-  # Undoes each row's filter (PNG spec, 9.2): Sub, Up, Average, Paeth.
-  for y in range(h):
-    at = y * (stride + 1)
-    kind, row = raw[at], bytearray(raw[at + 1 : at + 1 + stride])
-    if kind == 1:
-      for i in range(bpp, stride):
-        row[i] = (row[i] + row[i - bpp]) & 255
-    elif kind == 2:
-      row = bytearray((x + b) & 255 for x, b in zip(row, prev))
-    elif kind == 3:
-      for i in range(stride):
-        row[i] = (row[i] + ((row[i - bpp] if i >= bpp else 0) + prev[i]) // 2) & 255
-    elif kind == 4:
-      for i in range(stride):
-        a, b, c = (row[i - bpp], prev[i], prev[i - bpp]) if i >= bpp else (0, prev[i], 0)
-        pa, pb, pc = abs(b - c), abs(a - c), abs(a + b - 2 * c)
-        row[i] = (row[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
-
-    px[y * stride : (y + 1) * stride] = row
-    prev = row
-
-  if color == 3:
-    # Indexes, `depth` bits each from the high ones, a row padded to a byte; alpha from tRNS.
-    plte, trns = chunks[b"PLTE"], chunks.get(b"tRNS", b"")
-    alpha = trns + b"\xff" * (len(plte) // 3)
-    table = [plte[3 * i : 3 * i + 3] + alpha[i : i + 1] for i in range(len(plte) // 3)]
-    shifts, mask = range(8 - depth, -1, -depth), (1 << depth) - 1
-    rows = (px[y * stride : (y + 1) * stride] for y in range(h))
-    index = px
-    if depth < 8:
-      index = [i for r in rows for i in [b >> s & mask for b in r for s in shifts][:w]]
-
-    return w, h, bytearray(b"".join(table[i] for i in index))
-
-  # Grey, grey and alpha, RGB, RGBA: the channel each of R, G, B, A comes from.
-  n, rgba = CHANNELS[color], bytearray(b"\xff" * (w * h * 4))
-  for c, src in enumerate({0: (0, 0, 0), 2: (0, 1, 2), 4: (0, 0, 0, 1), 6: (0, 1, 2, 3)}[color]):
-    rgba[c::4] = px[src::n]
-
-  return w, h, rgba
-
-
-def png_write(path: Path, w: int, h: int, px: bytearray) -> None:
-  def chunk(kind: bytes, body: bytes) -> bytes:
-    return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
-
-  rows = b"".join(b"\0" + px[y * w * 4 : (y + 1) * w * 4] for y in range(h))
-  head = struct.pack(">IIBBBBB", w, h, 8, 6, 0, 0, 0)
-  body = chunk(b"IHDR", head) + chunk(b"IDAT", zlib.compress(rows, 9)) + chunk(b"IEND", b"")
-  path.write_bytes(PNG + body)
+# MARK: deb
 
 
 def halve(w: int, h: int, px: bytearray) -> tuple[int, int, bytearray]:
-  """RGBA pixels at half the size, each the alpha-weighted mean of four: clear ones add no colour."""
+  """RGBA pixels at half the size, each the alpha-weighted mean of four: clear ones add none."""
   w2, h2 = w // 2, h // 2
   out = bytearray(w2 * h2 * 4)
   for y in range(h2):
@@ -219,12 +142,9 @@ def halve(w: int, h: int, px: bytearray) -> tuple[int, int, bytearray]:
   return w2, h2, out
 
 
-# MARK: deb
-
-
 def icons(src: Path, root: Path, id: str) -> None:
   """The icon in hicolor under `root`, halved down to SIZES; a PNG this can't read as is."""
-  png = png_read(src)
+  png = decode(src.read_bytes())
   if png is None or png[0] != png[1]:
     print(f"pack: {src.name}: not a square PNG this reads (16-bit, interlaced); not scaled")
     for dir in ("icons/hicolor/1024x1024/apps", "pixmaps"):
@@ -236,9 +156,7 @@ def icons(src: Path, root: Path, id: str) -> None:
   while w > SIZES[-1]:
     w, h, px = halve(w, h, px)
     if w in SIZES:
-      dir = root / f"usr/share/icons/hicolor/{w}x{w}/apps"
-      dir.mkdir(parents=True, exist_ok=True)
-      png_write(dir / f"{id}.png", w, h, px)
+      put(root / f"usr/share/icons/hicolor/{w}x{w}/apps/{id}.png", encode(w, px))
 
 
 def put(path: Path, data: bytes) -> None:
@@ -256,7 +174,7 @@ def deb(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
     root = Path(tmp) / pkg
     put(root / "usr/bin" / cfg.bin, binary.read_bytes())
     put(root / f"usr/share/applications/{cfg.id}.desktop", desktop(cfg).encode())
-    icons(cfg.root / cfg.icon, root, cfg.id)
+    icons(cfg.icon, root, cfg.id)
     license = cfg.root / "LICENSE"
     if license.is_file():
       put(root / f"usr/share/doc/{pkg}/copyright", license.read_bytes())
@@ -270,13 +188,12 @@ def deb(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
         path.chmod(0o755 if path == root / "usr/bin" / cfg.bin else 0o644)
         size += path.stat().st_size
 
-    # The package's first author, as Debian wants one maintainer; else the publisher or the name.
-    authors = next(iter(cfg.authors), "") or cfg.publisher or cfg.name
     control = {
       "Package": pkg,
       "Version": version,
       "Architecture": DEB_ARCH[arch],
-      "Maintainer": authors,
+      # The package's first author, as Debian wants one; else the publisher or the name.
+      "Maintainer": next(iter(cfg.authors), "") or cfg.publisher or cfg.name,
       "Installed-Size": str(size // 1024 + 1),
       "Depends": ", ".join(cfg.linux.get("deb-depends", [])),
       "Recommends": ", ".join(cfg.linux.get("deb-recommends", [])),
