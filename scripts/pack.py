@@ -45,6 +45,13 @@ Makefile finds nimbo's checkout by `cargo metadata` and runs a line per target:
   	cargo build --locked --profile dist --target aarch64-apple-darwin
   	python3 $(NIMBO)/scripts/pack.py dist --label dev --target aarch64-apple-darwin
 
+Off macOS (the Ubuntu publish job) `app` and `dmg` make the same files with no Apple tool:
+rcodesign signs the app with APPLE_CERTIFICATE (a base64 .p12) and APPLE_CERTIFICATE_PASSWORD
+for notarization, else ad hoc; the DMG is an HFS+ image by `mkfs.hfsplus` (apt's hfsprogs) and
+libdmg-hfsplus's `hfsplus` and `dmg` ($NIMBO_TOOLS, a directory with both, else fetched), then
+rcodesign signs it and, with APPLE_API_KEY (the .p8's text), APPLE_API_KEY_ID and
+APPLE_API_ISSUER, notarizes and staples it. A `v*` label is a release: a missing secret fails it.
+
 `feed` writes update.txt: `version <v>`, a line per file, `<platform> <size> <sha512> <url>`, and
 last `sig <hex>`, the Ed25519 signature of every byte before it. A file's platform is in its name
 (`linux-aarch64`, `windows-x64`) or given, `<platform>=<file>`; its url is `--url` (`{version}` the
@@ -76,6 +83,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import tarfile
 import tempfile
 import urllib.request
 import uuid
@@ -95,6 +103,8 @@ OS = {
 }
 # The commands `dist` runs on each OS, in order.
 DIST = {"darwin": ("app", "dmg"), "win32": ("setup",), "linux": ("appimage", "deb")}
+# The app and DMG by codesign and hdiutil, else by rcodesign and libdmg-hfsplus.
+MAC = sys.platform == "darwin"
 
 
 @dataclass
@@ -700,8 +710,8 @@ def app(cfg: Config, binary: Path) -> Path:
   """`<target dir>/<Name>.app`: the binary, the icns and the Info.plist, signed by
   `identity` with the hardened runtime and `macos.entitlements`. One codesign fails on (or a
   keychain dialog nobody answers stops) is no bundle, never one signed ad hoc, whose grants would
-  last that build only."""
-  sha, name = identity(cfg)
+  last that build only. Off macOS rcodesign signs it, with APPLE_CERTIFICATE for notarization."""
+  sha, name = identity(cfg) if MAC else ("", "Developer ID" if secrets(cfg, CERT) else "ad hoc")
   bundle = cfg.target / f"{cfg.name}.app"
   shutil.rmtree(bundle, ignore_errors=True)
   (bundle / "Contents/MacOS").mkdir(parents=True)
@@ -710,11 +720,17 @@ def app(cfg: Config, binary: Path) -> Path:
   images = icons(cfg.icon, {n for _, n in ICNS}, False)
   (bundle / f"Contents/Resources/{cfg.name}.icns").write_bytes(icns(images))
   (bundle / "Contents/PkgInfo").write_text("APPL????")
-  plist = bundle / "Contents/Info.plist"
-  plist.write_bytes(plistlib.dumps(info(cfg, minos(binary))))
-  run("plutil", "-lint", "-s", plist)
-  run("xattr", "-cr", bundle)
+  (bundle / "Contents/Info.plist").write_bytes(plistlib.dumps(info(cfg, minos(binary))))
   entitlements = cfg.macos.get("entitlements")
+  if not MAC:
+    signed = name != "ad hoc"
+    args = ["--code-signature-flags", "runtime", *(["--for-notarization"] if signed else [])]
+    args += ["--entitlements-xml-file", cfg.root / entitlements] if entitlements else []
+    rsign(cfg, bundle, signed, *args)
+    print(f"{bundle}: {cfg.name} {cfg.version}, signed: {name}")
+    return bundle
+
+  run("xattr", "-cr", bundle)
   sign = ["--force", "--sign", sha, "--options", "runtime", stamp(sha)]
   sign += ["--entitlements", cfg.root / entitlements] if entitlements else []
   try:
@@ -731,7 +747,7 @@ def app(cfg: Config, binary: Path) -> Path:
 def dmg(cfg: Config, bundle: Path, target: str | None, out_dir: Path) -> Path:
   """`<stem>-macos-<arch>.dmg` (UDZO) of `bundle`, as it is signed, and an /Applications link,
   the arch `target`'s, else the bundle's binary's; the DMG alone signed as `given` says
-  unless that is ad hoc."""
+  unless that is ad hoc. Off macOS `hfs_dmg` makes it."""
   plist = bundle / "Contents/Info.plist"
   if not plist.is_file():
     sys.exit(f"pack: {bundle} is no app bundle")
@@ -743,6 +759,9 @@ def dmg(cfg: Config, bundle: Path, target: str | None, out_dir: Path) -> Path:
 
   out = out_dir / f"{stem(cfg)}-macos-{arch(archs[0])}.dmg"
   out_dir.mkdir(parents=True, exist_ok=True)
+  if not MAC:
+    return hfs_dmg(cfg, bundle, out)
+
   with tempfile.TemporaryDirectory() as tmp:
     stage = Path(tmp) / cfg.name
     stage.mkdir()
@@ -760,6 +779,157 @@ def dmg(cfg: Config, bundle: Path, target: str | None, out_dir: Path) -> Path:
 
   print(f"{out}: {cfg.name} {cfg.version}, signed: {signed}")
   return out
+
+
+# MARK: macOS on Linux
+# The app signed by rcodesign and the DMG made the way Firefox's mozpack/dmg.py makes it, both with
+# no Apple tool, as the Ubuntu publish job does. libdmg-hfsplus is GPL-3: run, never linked.
+
+CERT = ("APPLE_CERTIFICATE", "APPLE_CERTIFICATE_PASSWORD")
+NOTARY = ("APPLE_API_KEY", "APPLE_API_KEY_ID", "APPLE_API_ISSUER")
+# apple-codesign 0.29.0 (2024-11-29), by the triple it runs on, pinned in SHA256.
+RCODESIGN = (
+  "https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign/0.29.0/"
+  "apple-codesign-0.29.0-{triple}.tar.gz"
+)
+# PLACEHOLDER until vladkens/actions' tools.yml has made its tools-<date> release: the URL of its
+# tarball of libdmg-hfsplus's `dmg` and `hfsplus` (mozilla/libdmg-hfsplus e18579b39195, x86_64
+# Linux), its sha256 in SHA256 by the file's name. Until then $NIMBO_TOOLS gives them.
+LIBDMG = None
+
+
+def secrets(cfg: Config, names: tuple[str, ...]) -> bool:
+  """Whether every one of `names` is set; a release (a `v*` label) without one fails.
+
+  >>> cfg = Config("me.a", "A", Path("i.png"), "", "1.2.0", "a", {}, {}, {}, "", [], Path("."),
+  ...   Path("target"), "dev")
+  >>> secrets(cfg, ("NIMBO_NO_SUCH_SECRET",))
+  False
+  >>> secrets(Config(**{**cfg.__dict__, "label": "v1.2.0"}), ("NIMBO_NO_SUCH_SECRET",))
+  Traceback (most recent call last):
+  SystemExit: pack: v1.2.0 is a release, signed and notarized: set NIMBO_NO_SUCH_SECRET
+  """
+  missing = [n for n in names if not os.environ.get(n)]
+  if missing and (cfg.label or "").startswith("v"):
+    sys.exit(f"pack: {cfg.label} is a release, signed and notarized: set {', '.join(missing)}")
+
+  return not missing
+
+
+def tool(cfg: Config, name: str) -> Path:
+  """rcodesign, fetched for this host into <target dir>/tools, or libdmg-hfsplus's `dmg` and
+  `hfsplus`, from $NIMBO_TOOLS when it is set, else fetched too; the tarballs pinned in SHA256."""
+  where = os.environ.get("NIMBO_TOOLS")
+  if name != "rcodesign" and where:
+    path = Path(where) / name
+    if not path.is_file():
+      sys.exit(f"pack: no {name} in $NIMBO_TOOLS ({where})")
+
+    return path
+
+  if name == "rcodesign":
+    triple = here() + ("-apple-darwin" if sys.platform == "darwin" else "-unknown-linux-musl")
+    url = RCODESIGN.format(triple=triple)
+  elif LIBDMG:
+    url = LIBDMG
+  else:
+    sys.exit("pack: dmg and hfsplus: run vladkens/actions tools.yml and pin its hashes (LIBDMG)")
+
+  tarball = cfg.target / "tools" / url.rsplit("/", 1)[1]
+  if tarball.name not in SHA256:
+    sys.exit(f"pack: no {name} is pinned for {here()} {sys.platform}")
+
+  with tarfile.open(fetch(url, tarball)) as tar:
+    member = next((m for m in tar if m.isfile() and Path(m.name).name == name), None)
+    if member is None:
+      sys.exit(f"pack: {tarball.name} has no {name}")
+
+    path = tarball.parent / name
+    path.write_bytes(tar.extractfile(member).read())
+
+  path.chmod(0o755)
+  return path
+
+
+def private(path: Path, data: bytes) -> Path:
+  """`data` in a new file only its owner reads: a key, a certificate."""
+  with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as f:
+    f.write(data)
+
+  return path
+
+
+def certificate(tmp: Path) -> Path:
+  """APPLE_CERTIFICATE's key and certificate as a PEM in `tmp`: rcodesign rejects a .p12 in
+  OpenSSL 3's defaults (rcodesign #315), and OpenSSL 3 reads an older one's RC2 only `-legacy`."""
+  p12 = private(tmp / "id.p12", base64.b64decode(os.environ["APPLE_CERTIFICATE"]))
+  args = [openssl3(), "pkcs12", "-in", p12, "-nodes", "-passin", "env:APPLE_CERTIFICATE_PASSWORD"]
+  for legacy in ([], ["-legacy"]):
+    done = subprocess.run([str(a) for a in args + legacy], capture_output=True)
+    if done.returncode == 0:
+      return private(tmp / "id.pem", done.stdout)
+
+  sys.exit(f"pack: APPLE_CERTIFICATE: openssl reads no .p12: {done.stderr.decode().strip()}")
+
+
+def rsign(cfg: Config, path: Path, signed: bool, *args) -> None:
+  """rcodesign signs `path` in place: with APPLE_CERTIFICATE's Developer ID, else ad hoc."""
+  with tempfile.TemporaryDirectory() as tmp:
+    key = ["--pem-file", certificate(Path(tmp))] if signed else []
+    try:
+      run(tool(cfg, "rcodesign"), "sign", *key, *args, path, stdout=subprocess.DEVNULL)
+    except subprocess.CalledProcessError as e:
+      sys.exit(f"pack: rcodesign could not sign {path.name} (exit {e.returncode}), as it says")
+
+
+def hfs_dmg(cfg: Config, bundle: Path, out: Path) -> Path:
+  """The DMG as mozpack/dmg.py makes it: an HFS+ image a tenth and 4 MiB over the app's size
+  by `mkfs.hfsplus`, the app and the /Applications link put in by `hfsplus`, compressed by `dmg`
+  (LZMA, which macOS reads since 10.15). rcodesign signs it with APPLE_CERTIFICATE, then with the
+  App Store Connect API key notarizes and staples it."""
+  signed = secrets(cfg, CERT)
+  notarized = secrets(cfg, NOTARY) and signed
+  mkfs = shutil.which("mkfs.hfsplus")
+  if not mkfs:
+    sys.exit("pack: no mkfs.hfsplus: `apt-get install hfsprogs`")
+
+  hfsplus, quiet = tool(cfg, "hfsplus"), {"stdout": subprocess.DEVNULL}
+  with tempfile.TemporaryDirectory() as tmp:
+    image = Path(tmp) / "image.hfs"
+    kib = int(run("du", "-sk", bundle, capture_output=True, text=True).stdout.split()[0])
+    with image.open("wb") as f:
+      f.truncate((kib * 11 // 10 + 4096) * 1024)
+
+    run(mkfs, "-v", cfg.name, image, **quiet)
+    run(hfsplus, image, "mkdir", f"/{bundle.name}", **quiet)
+    run(hfsplus, image, "addall", bundle, f"/{bundle.name}", **quiet)
+    run(hfsplus, image, "symlink", "/Applications", "/Applications", **quiet)
+    out.unlink(missing_ok=True)
+    run(tool(cfg, "dmg"), "--compression", "lzma", "build", image, out, **quiet)
+
+  if signed:
+    rsign(cfg, out, True)
+
+  if notarized:
+    notarize(cfg, out)
+
+  state = "notarized" if notarized else "Developer ID" if signed else "no"
+  print(f"{out}: {cfg.name} {cfg.version}, signed: {state}")
+  return out
+
+
+def notarize(cfg: Config, dmg: Path) -> None:
+  """rcodesign submits the DMG to Apple's notary service, waits up to 20 minutes and staples the
+  ticket, the API key encoded into a JSON only its owner reads. It prints Apple's log itself."""
+  env, rcodesign = os.environ, tool(cfg, "rcodesign")
+  with tempfile.TemporaryDirectory() as tmp:
+    p8 = private(Path(tmp) / "key.p8", env["APPLE_API_KEY"].encode())
+    encode = [rcodesign, "encode-app-store-connect-api-key", env["APPLE_API_ISSUER"]]
+    key = run(*encode, env["APPLE_API_KEY_ID"], p8, capture_output=True).stdout
+    path = private(Path(tmp) / "key.json", key)
+    submit = ["--api-key-file", path, "--staple", "--max-wait-seconds", "1200", dmg]
+    if subprocess.run([str(a) for a in [rcodesign, "notary-submit", *submit]]).returncode:
+      sys.exit(f"pack: notarizing {dmg.name} failed: rcodesign's log is above")
 
 
 # MARK: Windows
@@ -1311,6 +1481,16 @@ SHA256 = {
   "appimagetool-aarch64": "f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158",
   "runtime-x86_64": "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d",
   "runtime-aarch64": "00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444",
+  # RCODESIGN's, as its release's SHA256SUMS gives them.
+  "apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz": (
+    "dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002"
+  ),
+  "apple-codesign-0.29.0-aarch64-unknown-linux-musl.tar.gz": (
+    "4af92c87ddf52f5f2d1258a3b4e56c7dcb8f1b2468df744976c5f139e031961f"
+  ),
+  "apple-codesign-0.29.0-aarch64-apple-darwin.tar.gz": (
+    "d1a532150adaf90048260d76359261aa716abafc45c53c5dc18845029184334a"
+  ),
 }
 DEB_ARCH = {"x86_64": "amd64", "aarch64": "arm64"}
 # The libraries nimbo loads at run time, by their Debian names (t64 since Ubuntu 24.04).
@@ -1349,6 +1529,12 @@ def deb_version(version: str) -> str:
   return version.replace("-", "~", 1)
 
 
+def here() -> str:
+  """This machine's arch, as Rust names it."""
+  machine = host.machine().lower()
+  return {"amd64": "x86_64", "arm64": "aarch64"}.get(machine, machine)
+
+
 def fetch(url: str, path: Path) -> Path:
   """`url` into `path`, once, checked against SHA256 by the file's name."""
   if not path.exists():
@@ -1373,10 +1559,8 @@ def appimage(cfg: Config, binary: Path, arch: str, out_dir: Path) -> Path:
   entry and the icon, packed by appimagetool with the static type2 runtime (no libfuse2), both
   pinned and fetched into <target dir>/appimage. nimbo links only glibc and loads the rest."""
   # The tool runs here; the runtime is the AppImage's own, of its arch.
-  machine = host.machine().lower()
-  here = {"amd64": "x86_64", "arm64": "aarch64"}.get(machine, machine)
   tools = cfg.target / "appimage"
-  tool = fetch(APPIMAGETOOL.format(arch=here), tools / f"appimagetool-{here}")
+  tool = fetch(APPIMAGETOOL.format(arch=here()), tools / f"appimagetool-{here()}")
   runtime = fetch(RUNTIME.format(arch=arch), tools / f"runtime-{arch}")
   out_dir.mkdir(parents=True, exist_ok=True)
   out = out_dir / f"{stem(cfg)}-linux-{arch}.AppImage"
