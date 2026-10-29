@@ -123,23 +123,29 @@
 //!   `*_proxy` variables), a status other than 2xx an error from [status]; on `Err` `to` may hold a
 //!   part. macOS `NSURLSession`, Windows WinHTTP, Linux `libcurl.so.4` (`Unsupported` without).
 //! - `pub mod update` ([crate::update]), from any thread, its tools by absolute path: `unpack(file:
-//!   &Path, into: &Path) -> io::Result<()>`, the release's file into the folder `into` (macOS
-//!   `/usr/bin/ditto -x -k`, Windows `%SystemRoot%\System32\tar.exe -xf` with no console window,
-//!   Linux the AppImage itself made executable and moved in), `InvalidData` when the tool fails;
-//!   `detach(&mut Command) -> io::Result<Child>`, the installer spawned apart from the app (Unix
-//!   its own process group, Windows `DETACHED_PROCESS | CREATE_NO_WINDOW`, out of the job where it
-//!   may); `wait_exit(pid: u32, cap: Duration) -> bool`, the process `pid` ended within `cap`
-//!   (Unix: this one's parent, by `getppid`, so a reused pid can't fool it; Windows its handle);
-//!   `alive(pid: u32) -> bool`, for the staging folders of ended installers; `start(app: &Path,
-//!   args: &[OsString]) -> io::Result<()>`, the installed app started with `args` without waiting
-//!   for it (macOS `/usr/bin/open -n -g … --args`, by LaunchServices in launchd's environment and
-//!   without the focus; Windows the app folder's exe of this one's name; Linux the AppImage without
-//!   the installer's AppImage variables). macOS also `accepts(new: &Path, app: &Path) ->
-//!   io::Result<()>`, the new bundle of `app`'s id meeting its designated requirement for every
-//!   architecture (Security.framework's `SecStaticCodeCheckValidityWithErrors`), else `InvalidData`
-//!   with its reason, and `exchange(a: &Path, b: &Path) -> io::Result<()>`, the two swapped in one
-//!   step (`renamex_np` with `RENAME_SWAP`), `Unsupported` on a volume without it. On Unix
-//!   `detach`, `wait_exit` and `alive` are `linux/app/process.rs`'s.
+//!   &Path, app: &Path) -> io::Result<PathBuf>`, the new app from the release's file, in the
+//!   staging folder that holds it (macOS the `.dmg` attached read-only at `<staging>/volume` by
+//!   `/usr/bin/hdiutil`, its one `.app` at the top held to `app` by `accepts` and copied to
+//!   `<staging>/new` by `/usr/bin/ditto`, then detached, forced if it must be; Windows the setup as
+//!   it came; Linux the AppImage made executable), `InvalidData` when the image holds more than one
+//!   app or none, or a tool fails; `detach(&mut Command) -> io::Result<Child>`, the installer
+//!   spawned apart from the app (Unix its own process group, Windows `DETACHED_PROCESS |
+//!   CREATE_NO_WINDOW`, out of the job where it may); `wait_exit(pid: u32, cap: Duration) -> bool`,
+//!   the process `pid` ended within `cap` (Unix: this one's parent, by `getppid`, so a reused pid
+//!   can't fool it; Windows its handle); `alive(pid: u32) -> bool`, for the staging folders of
+//!   ended installers; `start(app: &Path, args: &[OsString], note: Option<&str>) ->
+//!   io::Result<()>`, the installed app started with `args`, and `note` in its `NIMBO_UPDATE_ERROR`
+//!   ([crate::update::NOTE]), without waiting for it (macOS `/usr/bin/open -n -g [--env …] …
+//!   --args`, by LaunchServices in launchd's environment, in `/` and without the focus; Windows the
+//!   app folder's exe of this one's name; Linux the AppImage without the installer's AppImage
+//!   variables), else in this process's working directory. Windows also `setup(exe: &Path) ->
+//!   io::Result<i32>`, the per-user Inno Setup run `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+//!   /CURRENTUSER` with no window to its end, its exit code. macOS also `accepts(new: &Path, app:
+//!   &Path) -> io::Result<()>`, the new bundle of `app`'s id meeting its designated requirement for
+//!   every architecture (Security.framework's `SecStaticCodeCheckValidityWithErrors`), else
+//!   `InvalidData` with its reason, and `exchange(a: &Path, b: &Path) -> io::Result<()>`, the two
+//!   swapped in one step (`renamex_np` with `RENAME_SWAP`), `Unsupported` on a volume without it.
+//!   On Unix `detach`, `wait_exit` and `alive` are `linux/app/process.rs`'s.
 //! - `pub mod activity` ([crate::activity]), from any thread: `Token: Send`, `begin(&str) ->
 //!   Token`, `end(Token)`.
 //! - `pub mod post` ([crate::keys::post]): `post(Shortcut) -> Result<(), String>`, the shortcut as

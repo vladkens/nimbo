@@ -1,7 +1,7 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The update's process calls on Windows: the release's `.zip` unpacked by the system's `tar`,
-//! the installer started apart from the app and waiting for it to end, the new exe started.
+//! The update's process calls on Windows: the installer started apart from the app and waiting
+//! for it to end, the release's Inno Setup `setup.exe` run silently, the installed exe started.
 
 use std::ffi::OsString;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
@@ -17,17 +17,19 @@ use windows_sys::Win32::System::Threading::{
   WaitForSingleObject,
 };
 
-use crate::update::bad;
+use crate::update::NOTE;
 
-/// Unpacks the `.zip` `file` into the folder `into` with `%SystemRoot%\System32\tar.exe`, never
-/// one from `PATH`, and with no console window.
-pub fn unpack(file: &Path, into: &Path) -> io::Result<()> {
-  let root = env::var_os("SystemRoot").map_or(PathBuf::from(r"C:\Windows"), PathBuf::from);
-  let mut tar = Command::new(root.join(r"System32\tar.exe"));
-  let out = tar.arg("-xf").arg(file).arg("-C").arg(into).creation_flags(CREATE_NO_WINDOW);
-  let out = out.output()?;
-  let err = || bad(format!("tar: {}", String::from_utf8_lossy(&out.stderr).trim()));
-  out.status.success().then_some(()).ok_or_else(err)
+/// The setup downloaded as `file`, run as it came: the new app, for any target.
+pub fn unpack(file: &Path, _: &Path) -> io::Result<PathBuf> {
+  Ok(file.to_owned())
+}
+
+/// Runs the per-user Inno Setup `exe` with no window or message box, not restarting Windows, to
+/// its end; its exit code (Inno's: 0 when it installed).
+pub fn setup(exe: &Path) -> io::Result<i32> {
+  let args = ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CURRENTUSER"];
+  let done = Command::new(exe).args(args).creation_flags(CREATE_NO_WINDOW).status()?;
+  Ok(done.code().unwrap_or(-1))
 }
 
 /// Whether the process `pid` runs.
@@ -60,10 +62,12 @@ pub fn detach(cmd: &mut Command) -> io::Result<Child> {
   }
 }
 
-/// Starts the app's folder `app` by its exe, named as this one's, with `args`, not waiting for it.
-/// The installer has no console to share, so a console app would get a window of its own, in
-/// Windows Terminal or conhost: it gets a console with none (a windowed app is unaffected).
-pub fn start(app: &Path, args: &[OsString]) -> io::Result<()> {
+/// Starts the app's folder `app` by its exe, named as this one's, with `args` and `note` in its
+/// [NOTE], not waiting for it. The installer has no console to share, so a console app would get
+/// a window of its own, in Windows Terminal or conhost: it gets a console with none (a windowed app
+/// is unaffected).
+pub fn start(app: &Path, args: &[OsString], note: Option<&str>) -> io::Result<()> {
   let exe = app.join(env::current_exe()?.file_name().unwrap_or_default());
-  Command::new(exe).args(args).creation_flags(CREATE_NO_WINDOW).spawn().map(drop)
+  let mut cmd = Command::new(exe);
+  cmd.envs(note.map(|n| (NOTE, n))).args(args).creation_flags(CREATE_NO_WINDOW).spawn().map(drop)
 }

@@ -6,7 +6,8 @@
 
 Each package is `<platform> <url> <file>`: the platform key (`<os>-<arch>`, the os `macos`,
 `windows` or `linux`, the arch `x86_64` or `aarch64`), where the file will be served, and the
-file, whose size and SHA-512 go in the feed. Signs with openssl 3 and the private key from
+file, whose size and SHA-512 go in the feed: the one people download for the first install (the
+notarized `.dmg`, the per-user Inno Setup `setup.exe` of that arch, the AppImage). Signs with openssl 3 and the private key from
 `openssl genpkey -algorithm ed25519 -out update.pem`; `--public-key` prints its public half in
 hex, the app's `Feed::key`.
 

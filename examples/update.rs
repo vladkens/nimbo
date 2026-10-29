@@ -3,14 +3,18 @@
 //! A console app that updates itself in place ([nimbo::update]), with no window: it prints its
 //! version, the release a feed offers, or downloads and installs that release and ends, as the
 //! new version starts in its place. Its first call is [update::finish], which is the installer
-//! when the update started it and else prints the error the last one left. It runs once
-//! ([instance]): a second run is refused.
+//! when the update started it and else prints the error of the installer that started this run.
+//! It runs once ([instance]): a second run is refused.
 //!
 //! `UPDATE_VERSION=1.0.0 cargo build --release --example update` sets the version (the crate's
-//! without it); `scripts/update-feed.py` makes a feed, `update.txt`, and with `--public-key`
-//! prints the key in hex. Then `update` prints the version, `update --check <feed url> <key>` what
-//! the feed offers, `update --update <feed url> <key>` updates, printing the download's
-//! percentage.
+//! without it). The release's file is what people download: on macOS the example bundled as
+//! `Update.app`, signed with the identity v1 has, in a disk image made by `hdiutil create
+//! -srcfolder Update.app -format UDZO Update.dmg`; on Windows a per-user Inno Setup `setup.exe`
+//! that installs it as `app.exe` (Windows asks to elevate an `update.exe`) in
+//! `%LOCALAPPDATA%\Programs\Update`; on Linux the AppImage. `scripts/update-feed.py` makes a feed
+//! of them, `update.txt`, and with `--public-key` prints the key in hex. Then `update` prints the
+//! version, `update --check <feed url> <key>` what the feed offers, `update --update <feed url>
+//! <key>` updates, printing the download's percentage.
 
 use std::env;
 use std::io::{self, ErrorKind};

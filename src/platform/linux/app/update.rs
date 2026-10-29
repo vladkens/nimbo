@@ -5,21 +5,21 @@
 
 use std::ffi::OsString;
 use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::{fs, io};
 
 pub use crate::platform::process::{alive, detach, wait_exit};
 
-/// Makes the AppImage downloaded as `file` executable and moves it into the folder `into`.
-pub fn unpack(file: &Path, into: &Path) -> io::Result<()> {
-  fs::set_permissions(file, fs::Permissions::from_mode(0o755))?;
-  fs::rename(file, into.join("app.AppImage"))
+/// Makes the AppImage downloaded as `file` executable: the new app, for any target.
+pub fn unpack(file: &Path, _: &Path) -> io::Result<PathBuf> {
+  fs::set_permissions(file, fs::Permissions::from_mode(0o755)).map(|()| file.to_owned())
 }
 
-/// Starts the AppImage `app` with `args`, not waiting for it, without the installer's AppImage
-/// variables, which the runtime sets again for its own.
-pub fn start(app: &Path, args: &[OsString]) -> io::Result<()> {
-  let vars = ["APPIMAGE", "APPDIR", "ARGV0", "OWD"];
-  vars.iter().fold(&mut Command::new(app), |c, k| c.env_remove(k)).args(args).spawn().map(drop)
+/// Starts the AppImage `app` with `args` and `note` in its [crate::update::NOTE], not waiting for
+/// it, without the installer's AppImage variables, which the runtime sets again for its own.
+pub fn start(app: &Path, args: &[OsString], note: Option<&str>) -> io::Result<()> {
+  let mut cmd = Command::new(app);
+  let cmd = ["APPIMAGE", "APPDIR", "ARGV0", "OWD"].iter().fold(&mut cmd, |c, k| c.env_remove(k));
+  cmd.envs(note.map(|n| (crate::update::NOTE, n))).args(args).spawn().map(drop)
 }

@@ -2,7 +2,7 @@
 
 //! Updating an app in place, as Sparkle does: [check] fetches a signed feed and [read]s it for a
 //! newer [Release], [download] fetches its file beside the running app, [Release::verify]s and
-//! unpacks it, [install] hands it to an installer that swaps it in once the app has quit, and
+//! stages it, [install] hands it to an installer that puts it in once the app has quit, and
 //! [finish], first in `main`, is that installer. They block: an app runs them on a thread of its
 //! own and posts the result back.
 //!
@@ -14,8 +14,9 @@
 //!
 //! ```text
 //! version 1.2.0
-//! macos-aarch64 394788 <sha512 hex> https://…/App-macos.zip
-//! windows-x86_64 285930 <sha512 hex> https://…/App-windows.zip
+//! macos-aarch64 394788 <sha512 hex> https://…/App-macos.dmg
+//! windows-x86_64 285930 <sha512 hex> https://…/App-windows-x86_64-setup.exe
+//! linux-x86_64 412204 <sha512 hex> https://…/App-x86_64.AppImage
 //! sig <signature hex>
 //! ```
 //!
@@ -38,33 +39,33 @@
 //! the key.
 //!
 //! Only a newer version is taken, over https (http on loopback only), and its file only when its
-//! size and SHA-512 are the feed's; nothing is unpacked before. Redirects are followed by the
-//! system (on Linux only to https, on Windows not from https to http, on macOS by the shared
-//! session's defaults); the signature and the hash guard what comes. The package holds exactly one
-//! entry, named as the app's own.
+//! size and SHA-512 are the feed's; nothing is opened before. Redirects are followed by the system
+//! (on Linux only to https, on Windows not from https to http, on macOS by the shared session's
+//! defaults); the signature and the hash guard what comes. The file is the one people download
+//! for the first install: the notarized `.dmg`, the per-user Inno Setup `setup.exe`, the AppImage.
 //!
-//! The app is never swapped while it runs. [install] starts the new version as an installer apart
-//! from the app (its own process group on Unix; no console and out of the app's job on Windows),
-//! waits up to 10 s for its sign and returns; the app then quits within 30 s. The installer waits
-//! for the old process to end, swaps the whole app in one step (below), starts it with the old
-//! one's arguments and removes the old copy and the staging folder. If the swap or the start
-//! fails, it undoes the swap, starts the old app again and leaves its error beside the app, which
-//! [finish] returns at the next launch. What an installer stopped midway left, the next
-//! [download] removes. The staging folder, `.nimbo-update-<pid>-<nanos>`, is beside the app:
+//! The app is never replaced while it runs. [install] starts the installer apart from the app (its
+//! own process group on Unix; no console and out of the app's job on Windows), waits up to 10 s
+//! for its sign and returns; the app then quits within 30 s. The installer waits for the old
+//! process to end, puts the new version in (below), starts it with the old one's arguments in the
+//! old one's working directory (on macOS LaunchServices starts it in `/`, as Finder does) and
+//! removes the old copy and the staging folder. If that fails, it undoes the swap and starts the
+//! old app again with its error in `NIMBO_UPDATE_ERROR`, which [finish] returns. What an installer
+//! stopped midway left, the next [download] removes. The staging folder,
+//! `.nimbo-update-<pid>-<nanos>`, is beside the app:
 //!
-//! | OS | package | unpacked with | checked | swapped, and undone | started |
+//! | OS | the app | staged | checked | put in, and undone | started |
 //! |---|---|---|---|---|---|
-//! | macOS | a `.zip` of the `.app` (`ditto -c -k --keepParent`) | `/usr/bin/ditto` | the same bundle id, signed so that it meets the running app's designated requirement (Security.framework) | `renamex_np` with `RENAME_SWAP`, undone by the same; on a volume without it (HFS+) the app renamed to `.<name>.nimbo-old`, the new one renamed in | `open -n -g`, by LaunchServices: no focus taken, launchd's environment |
-//! | Windows | a `.zip` of the app's folder | `tar.exe` of System32 | the folder's name, the exe in it | the folder renamed to `<name>.nimbo-old`, the new one renamed in, each tried again while busy; undone in reverse | the folder's exe of the running one's name |
-//! | Linux | the AppImage | none | none | linked to `.<name>.nimbo-old`, the new one renamed over it in one step; undone by renaming the link back | the AppImage, without the installer's AppImage variables |
+//! | macOS | the `.app` | the `.dmg` attached read-only inside the staging folder (`hdiutil`), its one `.app` at the top copied out with `ditto`, detached (forced if it must be) | the same bundle id, signed so that it meets the running app's designated requirement (Security.framework) | `renamex_np` with `RENAME_SWAP`, undone by the same; on a volume without it (HFS+) the app renamed to `.<name>.nimbo-old`, the new one renamed in | `open -n -g`, by LaunchServices: no focus taken, launchd's environment |
+//! | Windows | the exe's folder in `%LOCALAPPDATA%\Programs` | the `setup.exe` as it came | the size and hash alone | the setup run `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER` with no window, awaited; an exit code other than 0 is the error | the folder's exe of the running one's name, whatever the setup left |
+//! | Linux | the AppImage | made executable | the size and hash alone | linked to `.<name>.nimbo-old`, the new one renamed over it in one step; undone by renaming the link back | the AppImage, without the installer's AppImage variables |
 //!
-//! On Windows a folder holding a running exe can't be renamed, so the installer is a copy of the
-//! new exe alone at `<staging>\<exe>`, and stays there for the next [download] to remove. A
-//! Windows app's exe must therefore start with no DLLs from its own folder. Whatever the app keeps
-//! in its own folder is replaced with it, and a file a release drops is gone. On macOS the grants
-//! (microphone, Accessibility) survive an update only when every release is signed with one stable
-//! identity: an ad-hoc signature's requirement is its own build, so [download] refuses the next
-//! one.
+//! On Windows the installer is a copy of the running exe, named as it is (Windows asks to elevate
+//! an exe named `setup`, `update` or `install` that has no manifest), at `<staging>\<exe>`, and
+//! stays there for the next [download] to remove. An exe outside `%LOCALAPPDATA%\Programs` (a
+//! build) is `Unsupported`. On macOS the grants (microphone, Accessibility) survive an update only
+//! when every release is signed with one stable identity: an ad-hoc signature's requirement is its
+//! own build, so [download] refuses the next one.
 
 use std::ffi::OsString;
 use std::fs::{self, File};
@@ -115,11 +116,11 @@ impl Release {
   }
 }
 
-/// A release's app downloaded, verified and unpacked beside the running one, for [install]; its
+/// A release's app downloaded, verified and staged beside the running one, for [install]; its
 /// folder is removed on drop, unless [install] handed it to the installer.
 #[derive(Debug)]
 pub struct Staged {
-  /// The new app: the `.app` bundle, the folder holding the exe, the AppImage.
+  /// The new app: the `.app` bundle copied from the image, the setup, the AppImage.
   new: PathBuf,
   /// The app it replaces ([target]).
   target: PathBuf,
@@ -148,45 +149,40 @@ pub fn check(feed: &Feed, current: &str) -> io::Result<Option<Release>> {
 }
 
 /// Downloads `release`'s file beside the running app, checks its SHA-512 (`InvalidData` if it
-/// differs) and unpacks it: held to the archive contract ([package]), on macOS to the running
-/// bundle's id and designated requirement. Before a byte is fetched it fails without an app to
-/// replace (`Unsupported`: a build on macOS and Linux) or one whose folder the user can't write
-/// (`PermissionDenied`: `/Applications` for a standard user, Program Files, a translocated app),
-/// and removes what an installer stopped midway left ([tidy]). On Windows only the archive names
-/// the app's folder, so a build's (`target\debug`) is refused once unpacked (`Unsupported`).
+/// differs) and stages it: on macOS the one `.app` on the image (`InvalidData` for more or none),
+/// held to the running bundle's id and designated requirement. Before a byte is fetched it fails
+/// without an installed app to replace (`Unsupported`: a build, a Windows exe outside
+/// `%LOCALAPPDATA%\Programs`) or one whose folder the user can't write (`PermissionDenied`:
+/// `/Applications` for a standard user, `/opt`, a translocated app), and removes what an installer
+/// stopped midway left ([tidy]).
 ///
 /// `progress` gets the bytes done and the total, `release.size`, on the calling thread: at most
 /// about 4 times a second while the file comes, then once with the total when it is verified.
 pub fn download(release: &Release, mut progress: impl FnMut(u64, u64)) -> io::Result<Staged> {
   let exe = env::current_exe()?;
   let target = target(OS, &exe, &|k| env::var_os(k))?;
-  tidy(OS, &target, &imp::alive);
+  tidy(&target, &imp::alive);
   let (dir, file) = fetch(release, target.parent().unwrap_or(&target), &mut progress)?;
-  let into = dir.0.join("new");
-  fs::create_dir(&into)?;
-  imp::unpack(&file, &into)?;
-  let new = package(OS, &into, &target, &exe)?;
-  #[cfg(target_os = "macos")]
-  imp::accepts(&new, &target)?;
+  let new = imp::unpack(&file, &target)?;
   Ok(Staged { new, target, dir })
 }
 
-/// Starts the [Staged] app's installer, the new version's [finish], and returns once it runs; the
-/// app must then quit within 30 s. The installer waits for this process to end, swaps the whole
-/// app in, starts it with this process's arguments and removes what is left; an error of those
-/// comes from [finish] at the next launch. `TimedOut` when the installer gives no sign in 10 s,
-/// nothing swapped. The staging folder is the installer's from here on: on an error the next
-/// [download] removes it.
+/// Starts the [Staged] app's installer, the new version's [finish] (on Windows this one's), and
+/// returns once it runs; the app must then quit within 30 s. The installer waits for this process
+/// to end, puts the new version in, starts it with this process's arguments and removes what is
+/// left; an error of those comes from [finish] in the app it starts. `TimedOut` when the installer
+/// gives no sign in 10 s, nothing swapped. The staging folder is the installer's from here on: on
+/// an error the next [download] removes it.
 pub fn install(staged: Staged) -> io::Result<()> {
   let Staged { new, target, dir } = staged;
   let (dir, exe) = (dir.keep(), env::current_exe()?);
   let name = exe.file_name().unwrap_or_default();
   let installer = match OS {
     Os::Mac => new.join("Contents/MacOS").join(name),
-    // A folder holding a running exe can't be renamed: the installer runs from a copy of it.
+    // The setup replaces the exe: the installer runs from a copy of it, named as it is.
     Os::Windows => {
       let copy = dir.join(name);
-      fs::copy(new.join(name), &copy)?;
+      fs::copy(&exe, &copy)?;
       copy
     }
     Os::Linux => new.clone(),
@@ -203,26 +199,35 @@ pub fn install(staged: Staged) -> io::Result<()> {
 
 /// The update's step at an app's launch, called first in `main`: before its arguments are parsed
 /// and before any window or [crate::instance] call. Started by [install] (`--nimbo-install` the
-/// first argument), it is the installer and never returns: it waits for the old app to end, swaps
+/// first argument), it is the installer and never returns: it waits for the old app to end, puts
 /// the new one in, starts it and exits (status 0, 1 on a failure, 2 for malformed arguments).
-/// Otherwise the error the last installer left beside the app, once.
+/// Otherwise the error of the installer that started this app, in [NOTE], which it removes from
+/// the environment: so this runs before any thread does.
 pub fn finish() -> Option<io::Error> {
   let Some(job) = job(&env::args_os().skip(1).collect::<Vec<_>>()) else {
-    return noted(&target(OS, &env::current_exe().ok()?, &|k| env::var_os(k)).ok()?);
+    let note = env::var(NOTE).ok()?;
+    // SAFETY: first in `main`, before any other thread runs.
+    unsafe { env::remove_var(NOTE) };
+    return Some(io::Error::other(note));
   };
 
   let Some(job) = job else { std::process::exit(2) };
-  // Explorer starts an app in its own folder, which can't be renamed then.
-  let _ = env::set_current_dir(job.target.parent().unwrap_or(&job.target));
   #[cfg(target_os = "macos")]
   let exchange = imp::exchange;
   #[cfg(not(target_os = "macos"))]
   let exchange = |_: &Path, _: &Path| -> io::Result<()> { Err(io::ErrorKind::Unsupported.into()) };
+  #[cfg(windows)]
+  let setup = imp::setup;
+  #[cfg(not(windows))]
+  let setup = |_: &Path| -> io::Result<i32> { Err(io::ErrorKind::Unsupported.into()) };
   let rename = |a: &Path, b: &Path| fs::rename(a, b);
-  let os =
-    Seams { wait: &imp::wait_exit, exchange: &exchange, rename: &rename, start: &imp::start };
+  let (wait, start) = (&imp::wait_exit, &imp::start);
+  let os = Seams { wait, exchange: &exchange, rename: &rename, setup: &setup, start };
   std::process::exit(apply(OS, &job, &os).map_or(1, |()| 0))
 }
+
+/// The environment variable that carries an installer's error to the app it starts.
+pub(crate) const NOTE: &str = "NIMBO_UPDATE_ERROR";
 
 /// The argument that makes [finish] the installer.
 const INSTALL: &str = "--nimbo-install";
@@ -276,26 +281,30 @@ struct Seams<'a> {
   /// Two paths exchanged in one step, `Unsupported` where they can't be: macOS' alone.
   exchange: Rename<'a>,
   rename: Rename<'a>,
-  /// The app at a path started with arguments ([imp::start]).
-  start: &'a dyn Fn(&Path, &[OsString]) -> io::Result<()>,
+  /// Windows' setup run to its end, its exit code ([imp::setup]).
+  setup: &'a dyn Fn(&Path) -> io::Result<i32>,
+  /// The app at a path started with arguments and an error for its [NOTE] ([imp::start]).
+  start: Start<'a>,
 }
 
+/// An app started with arguments and an error for its [NOTE].
+type Start<'a> = &'a dyn Fn(&Path, &[OsString], Option<&str>) -> io::Result<()>;
+
 /// The installer's steps: its [MARK] written, the old app's end awaited (`TimedOut` past [QUIT],
-/// nothing changed), the new app swapped in and started; on a failure the swap undone, the old
-/// app started again and the error left in its [note]. What is left is removed either way.
+/// nothing changed), the new app put in and started; on a failure the swap undone and the old app
+/// started again with the error in its [NOTE]. What is left is removed either way.
 fn apply(os: Os, job: &Job, s: &Seams) -> io::Result<()> {
   fs::write(job.dir.join(MARK), "")?;
   let done = match (s.wait)(job.pid, QUIT) {
     false => Err(error(io::ErrorKind::TimedOut, format!("the app didn't quit in {QUIT:?}"))),
     true => put(os, job, s).map_err(|e| {
       let e = error(e.kind(), format!("installing {}: {e}", job.target.display()));
-      let _ = fs::write(note(&job.target), e.to_string());
-      let _ = (s.start)(&job.target, &job.args);
+      let _ = (s.start)(&job.target, &job.args, Some(&e.to_string()));
       e
     }),
   };
 
-  let _ = uninstall::remove(&old(os, &job.target));
+  let _ = uninstall::remove(&old(&job.target));
   if os != Os::Windows {
     let _ = uninstall::remove(&job.dir);
     return done;
@@ -313,11 +322,19 @@ fn apply(os: Os, job: &Job, s: &Seams) -> io::Result<()> {
   done
 }
 
-/// The new app swapped into the target's place and started, the swap undone if it doesn't start.
+/// The new app put in the target's place and started: Windows' setup run, an exit code other
+/// than 0 an error; else swapped in, the swap undone if it doesn't start.
 fn put(os: Os, job: &Job, s: &Seams) -> io::Result<()> {
+  if os == Os::Windows {
+    return match (s.setup)(&job.new)? {
+      0 => (s.start)(&job.target, &job.args, None),
+      code => Err(io::Error::other(format!("{} exited with {code}", job.new.display()))),
+    };
+  }
+
   let (rename, back) = swap(os, &job.new, &job.target, s)?;
   let undo = |e| also(e, back.iter().try_for_each(|(a, b)| uninstall::retry(|| rename(a, b))));
-  (s.start)(&job.target, &job.args).map_err(undo)
+  (s.start)(&job.target, &job.args, None).map_err(undo)
 }
 
 /// Swaps the app `new` in for `target` whole: on macOS in one exchange, which left `new` holding
@@ -334,7 +351,7 @@ fn swap<'a>(os: Os, new: &Path, target: &Path, s: &Seams<'a>) -> io::Result<Back
     }
   }
 
-  let old = old(os, &target);
+  let old = old(&target);
   uninstall::remove(&old)?;
   match os {
     Os::Linux => fs::hard_link(&target, &old)?,
@@ -389,17 +406,9 @@ fn handshake<K: FnOnce()>(
   Ok(())
 }
 
-/// The error the last installer left beside `target`, once: the note is removed.
-fn noted(target: &Path) -> Option<io::Error> {
-  let note = note(target);
-  let text = fs::read_to_string(&note).ok()?;
-  let _ = fs::remove_file(note);
-  Some(io::Error::other(text))
-}
-
 /// Removes what an installer stopped midway left beside `target`: its [old] copy, and the staging
 /// folders of processes that ended (by `alive`).
-fn tidy(os: Os, target: &Path, alive: &dyn Fn(u32) -> bool) {
+fn tidy(target: &Path, alive: &dyn Fn(u32) -> bool) {
   let all = target.parent().and_then(|p| fs::read_dir(p).ok()).into_iter().flatten().flatten();
   for e in all {
     let name = e.file_name();
@@ -409,16 +418,21 @@ fn tidy(os: Os, target: &Path, alive: &dyn Fn(u32) -> bool) {
     }
   }
 
-  let _ = uninstall::remove(&old(os, target));
+  let _ = uninstall::remove(&old(target));
 }
 
 /// The app an update replaces, of the running `exe`: the `.app` bundle on macOS and the AppImage
-/// on Linux ([uninstall::app_path]'s rules), the exe's folder on Windows; `Unsupported` for none
-/// (a build), `PermissionDenied` for a bundle macOS translocated (run from a read-only copy, as
-/// it does for one downloaded and not moved).
+/// on Linux ([uninstall::app_path]'s rules), on Windows the exe's folder under
+/// `%LOCALAPPDATA%\Programs`, where the per-user setup installs, whatever the case; `Unsupported`
+/// for none (a build), `PermissionDenied` for a bundle macOS translocated (run from a read-only
+/// copy, as it does for one downloaded and not moved).
 fn target(os: Os, exe: &Path, env: Env) -> io::Result<PathBuf> {
+  let folded =
+    |p: &Path| -> Vec<_> { p.components().map(|c| c.as_os_str().to_ascii_lowercase()).collect() };
+  let programs = env("LOCALAPPDATA").map(|l| folded(&Path::new(&l).join("Programs")));
+  let under = |f: &Path| f.ancestors().skip(1).any(|a| Some(folded(a)) == programs);
   let target = match os {
-    Os::Windows => exe.parent().map(Path::to_owned),
+    Os::Windows => exe.parent().filter(|f| under(f)).map(Path::to_owned),
     _ => uninstall::app_of(os, exe, env),
   };
 
@@ -447,7 +461,11 @@ fn fetch(release: &Release, parent: &Path, progress: Progress) -> io::Result<(Fo
   }
 
   let dir = Folder::new(parent)?;
-  let file = dir.0.join("download");
+  let file = dir.0.join(match OS {
+    Os::Mac => "update.dmg",
+    Os::Windows => "setup.exe",
+    Os::Linux => "app.AppImage",
+  });
   let (total, mut told) = (release.size, None::<Instant>);
   let mut tell = |done| {
     if 0 < done && done < total && told.is_none_or(|t| t.elapsed() >= TICK) {
@@ -461,49 +479,12 @@ fn fetch(release: &Release, parent: &Path, progress: Progress) -> io::Result<(Fo
   Ok((dir, file))
 }
 
-/// The app unpacked into `into`, held to the archive contract: exactly one entry, a `.app` folder
-/// on macOS, the AppImage on Linux, on Windows a folder of the target's name (`Unsupported` if
-/// not: a build's `target\debug`) holding a file of the running exe's name; `InvalidData` else.
-fn package(os: Os, into: &Path, target: &Path, exe: &Path) -> io::Result<PathBuf> {
-  let mut all = fs::read_dir(into)?.collect::<io::Result<Vec<_>>>()?;
-  let one = all.pop().filter(|_| all.is_empty());
-  let one = one.ok_or_else(|| bad("the archive holds more than one app, or none"))?;
-  let (new, kind) = (one.path(), one.file_type()?);
-  let app = match os {
-    Os::Mac => kind.is_dir() && new.extension().is_some_and(|e| e == "app"),
-    Os::Windows => kind.is_dir() && exe.file_name().is_some_and(|n| new.join(n).is_file()),
-    Os::Linux => kind.is_file(),
-  };
-
-  // Windows matches names whatever their case.
-  let (name, of) = (new.file_name().unwrap_or_default(), target.file_name().unwrap_or_default());
-  match (app, os == Os::Windows && !name.eq_ignore_ascii_case(of)) {
-    (false, _) => Err(bad(format!("{} is not the app of {}", new.display(), exe.display()))),
-    (true, true) => Err(error(
-      io::ErrorKind::Unsupported,
-      format!("{} is not the app's folder", target.display()),
-    )),
-    (true, false) => Ok(new),
-  }
-}
-
-/// Where an update moves what it replaces: `<name>.nimbo-old` beside it, hidden as
-/// `.<name>.nimbo-old` on macOS and Linux; a suffix only nimbo makes, so cleanup removes no
-/// user's `.old`.
-fn old(os: Os, target: &Path) -> PathBuf {
-  beside(target, os != Os::Windows, ".nimbo-old")
-}
-
-/// Where the installer leaves its error for [finish]: `.<name>.nimbo-update-error` beside `target`.
-fn note(target: &Path) -> PathBuf {
-  beside(target, true, ".nimbo-update-error")
-}
-
-/// `target`'s name with `suffix` beside it, `hidden` with a leading `.`.
-fn beside(target: &Path, hidden: bool, suffix: &str) -> PathBuf {
-  let mut name = OsString::from(if hidden { "." } else { "" });
+/// Where a swap moves what it replaces: `.<name>.nimbo-old` beside it, a suffix only nimbo makes,
+/// so cleanup removes no user's `.old`.
+fn old(target: &Path) -> PathBuf {
+  let mut name = OsString::from(".");
   name.push(target.file_name().unwrap_or_default());
-  name.push(suffix);
+  name.push(".nimbo-old");
   target.with_file_name(name)
 }
 
@@ -751,11 +732,32 @@ mod tests {
     let target = |os, exe: &str| target(os, Path::new(exe), &none);
     let app = target(Os::Mac, "/Applications/A.app/Contents/MacOS/a").unwrap();
     assert_eq!(app, Path::new("/Applications/A.app"));
-    assert_eq!(target(Os::Windows, "C:/A/a.exe").unwrap(), Path::new("C:/A"));
     let moved = "/private/var/folders/x/T/AppTranslocation/1-2/d/A.app/Contents/MacOS/a";
     assert_eq!(target(Os::Mac, moved).unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+    let windows = "C:/Users/Me/AppData/Local/Programs/W/a.exe";
     for (os, exe) in [(Os::Mac, "/Users/me/a/target/debug/a"), (Os::Linux, "/usr/bin/a")] {
       assert_eq!(target(os, exe).unwrap_err().kind(), io::ErrorKind::Unsupported);
+    }
+
+    assert_eq!(target(Os::Windows, windows).unwrap_err().kind(), io::ErrorKind::Unsupported);
+  }
+
+  #[test]
+  fn a_windows_app_is_one_the_setup_installed() {
+    let local = |k: &str| (k == "LOCALAPPDATA").then(|| "C:/Users/Me/AppData/Local".into());
+    let target = |exe: &str| target(Os::Windows, Path::new(exe), &local);
+    let programs = "C:/Users/Me/AppData/Local/Programs";
+    assert_eq!(target(&format!("{programs}/W/a.exe")).unwrap(), Path::new(programs).join("W"));
+    let case = "c:/users/me/appdata/local/PROGRAMS/W";
+    assert_eq!(target(&format!("{case}/a.exe")).unwrap(), Path::new(case), "whatever the case");
+    assert!(target(&format!("{programs}/V/W/a.exe")).is_ok(), "a folder deeper");
+    for exe in [
+      format!("{programs}/a.exe"),
+      format!("{programs}X/W/a.exe"),
+      "C:/Users/Me/src/w/target/release/a.exe".into(),
+      "C:/Program Files/W/a.exe".into(),
+    ] {
+      assert_eq!(target(&exe).unwrap_err().kind(), io::ErrorKind::Unsupported, "{exe}");
     }
   }
 
@@ -773,40 +775,6 @@ mod tests {
     fs::remove_dir(root).unwrap();
   }
 
-  #[test]
-  fn an_archive_holds_exactly_one_app() {
-    let root = dir("one");
-    let files = [("mac/A.app/Contents/Info.plist", ""), ("two/A.app/x", ""), ("two/B.app/x", "")];
-    write(&root, &files);
-    write(&root, &[("file/A.app", ""), ("win/W/a.exe", ""), ("win/x", ""), ("linux/app", "")]);
-    fs::create_dir(root.join("empty")).unwrap();
-    let (target, exe) = (root.join("W"), root.join("W/a.exe"));
-    let package = |os, into: &str| package(os, &root.join(into), &target, &exe);
-    assert_eq!(package(Os::Mac, "mac").unwrap(), root.join("mac/A.app"));
-    assert_eq!(package(Os::Linux, "linux").unwrap(), root.join("linux/app"));
-    let bad = [(Os::Mac, "two"), (Os::Mac, "file"), (Os::Mac, "empty"), (Os::Windows, "win")];
-    for (os, into) in bad.into_iter().chain([(Os::Windows, "linux"), (Os::Linux, "mac")]) {
-      let e = package(os, into).unwrap_err();
-      assert_eq!(e.kind(), io::ErrorKind::InvalidData, "{os:?} {into}: {e}");
-    }
-
-    fs::remove_dir_all(root).unwrap();
-  }
-
-  #[test]
-  fn a_mismatched_name_is_refused() {
-    let root = dir("name");
-    write(&root, &[("ok/W/a.exe", ""), ("other/V/a.exe", ""), ("no-exe/W/b.exe", "")]);
-    write(&root, &[("case/w/a.exe", "")]);
-    let (target, exe) = (root.join("W"), root.join("W/a.exe"));
-    let package = |into: &str| package(Os::Windows, &root.join(into), &target, &exe);
-    assert_eq!(package("ok").unwrap(), root.join("ok/W"));
-    assert_eq!(package("case").unwrap(), root.join("case/w"), "Windows ignores the case");
-    assert_eq!(package("other").unwrap_err().kind(), io::ErrorKind::Unsupported);
-    assert_eq!(package("no-exe").unwrap_err().kind(), io::ErrorKind::InvalidData);
-    fs::remove_dir_all(root).unwrap();
-  }
-
   /// macOS' exchange as three renames, through a name of its own.
   fn exchange(a: &Path, b: &Path) -> io::Result<()> {
     let via = a.with_extension("via");
@@ -821,9 +789,31 @@ mod tests {
     Err(io::ErrorKind::Unsupported.into())
   }
 
-  /// The OS's renames, the exchange, an app that quits and one that starts.
-  const SEAMS: Seams =
-    Seams { wait: &|_, _| true, exchange: &exchange, rename: &rename, start: &|_, _| Ok(()) };
+  /// The OS's renames, the exchange, an app that quits, a setup that installs, an app that starts.
+  const SEAMS: Seams = Seams {
+    wait: &|_, _| true,
+    exchange: &exchange,
+    rename: &rename,
+    setup: &|_| Ok(0),
+    start: &|_, _, _| Ok(()),
+  };
+
+  /// What a start was given: the app, its arguments, the note.
+  type Started = RefCell<Vec<(PathBuf, Vec<OsString>, Option<String>)>>;
+
+  /// A start that records what it was given in `started`, failing the first time if `fail`.
+  fn starts(
+    started: &Started,
+    fail: bool,
+  ) -> impl Fn(&Path, &[OsString], Option<&str>) -> io::Result<()> {
+    move |app, args, note| {
+      started.borrow_mut().push((app.to_owned(), args.to_vec(), note.map(String::from)));
+      match fail && started.borrow().len() == 1 {
+        true => Err(io::Error::other("no start")),
+        false => Ok(()),
+      }
+    }
+  }
 
   /// The installer's arguments of `pid`, `new` and `target` under `root`, the app's `-x`.
   fn args(root: &Path, pid: &str, new: &str, target: &str) -> Vec<OsString> {
@@ -836,32 +826,17 @@ mod tests {
     job(&args(root, "7", new, target)).unwrap().unwrap()
   }
 
-  /// An app of each OS under `root` and its new version in a staging folder: a bundle, an
-  /// AppImage and a Windows folder with an exe, a DLL and a subfolder; each holds a file `gone`
-  /// that the new version drops.
-  fn apps(root: &Path) -> [(Os, &'static str, &'static str); 3] {
-    write(root, &[("A.app/Contents/MacOS/a", "1"), ("A.app/gone", "1")]);
-    write(root, &[("A.AppImage", "1"), ("W/a.exe", "1"), ("W/a.dll", "1"), ("W/res/x", "1")]);
+  /// A macOS and a Linux app under `root` and their new versions in a staging folder: a bundle
+  /// holding a file `gone` that the new version drops, and an AppImage.
+  fn apps(root: &Path) -> [(Os, &'static str, &'static str); 2] {
+    write(root, &[("A.app/Contents/MacOS/a", "1"), ("A.app/gone", "1"), ("A.AppImage", "1")]);
     write(
       root,
-      &[
-        ("W/gone", "1"),
-        (".nimbo-update-9/new/A.app/Contents/MacOS/a", "2"),
-        (".nimbo-update-9/new/app", "2"),
-      ],
-    );
-    write(
-      root,
-      &[
-        (".nimbo-update-9/new/W/a.exe", "2"),
-        (".nimbo-update-9/new/W/a.dll", "2"),
-        (".nimbo-update-9/new/W/res/x", "2"),
-      ],
+      &[(".nimbo-update-9/new/A.app/Contents/MacOS/a", "2"), (".nimbo-update-9/app", "2")],
     );
     [
       (Os::Mac, ".nimbo-update-9/new/A.app", "A.app"),
-      (Os::Linux, ".nimbo-update-9/new/app", "A.AppImage"),
-      (Os::Windows, ".nimbo-update-9/new/W", "W"),
+      (Os::Linux, ".nimbo-update-9/app", "A.AppImage"),
     ]
   }
 
@@ -869,9 +844,8 @@ mod tests {
   fn installed(root: &Path, os: Os, new: bool, when: &str) {
     let (v, gone) = if new { ("2", "") } else { ("1", "1") };
     let files = match os {
-      Os::Mac => vec![("A.app/Contents/MacOS/a", v), ("A.app/gone", gone)],
       Os::Linux => vec![("A.AppImage", v)],
-      Os::Windows => vec![("W/a.exe", v), ("W/a.dll", v), ("W/res/x", v), ("W/gone", gone)],
+      _ => vec![("A.app/Contents/MacOS/a", v), ("A.app/gone", gone)],
     };
 
     holds(root, &files, &format!("{os:?} {when}"));
@@ -888,21 +862,16 @@ mod tests {
     let files = [
       (".nimbo-update-9/new/A.app/gone", "1"),
       (".A.AppImage.nimbo-old", "1"),
-      (".nimbo-update-9/new/app", ""),
+      (".nimbo-update-9/app", ""),
     ];
     holds(&root, &files, "the old apps aside");
-    holds(
-      &root,
-      &[("W.nimbo-old/gone", "1"), (".nimbo-update-9/new/W/a.exe", "")],
-      "Windows' aside",
-    );
     fs::remove_dir_all(root).unwrap();
   }
 
   #[test]
   fn macos_renames_twice_without_the_exchange() {
     let root = dir("fallback");
-    let [(os, new, target), ..] = apps(&root);
+    let [(os, new, target), _] = apps(&root);
     let seams = Seams { exchange: &unsupported, ..SEAMS };
     let (_, back) = swap(os, &root.join(new), &root.join(target), &seams).unwrap();
     holds(&root, &[("A.app/gone", ""), (".A.app.nimbo-old/gone", "1")], "renamed");
@@ -930,67 +899,98 @@ mod tests {
       installed(&root, os, false, "restored");
     }
 
-    holds(
-      &root,
-      &[
-        (".nimbo-update-9/new/app", "2"),
-        (".nimbo-update-9/new/W/a.exe", "2"),
-        ("W.nimbo-old/a.exe", ""),
-      ],
-      "",
-    );
+    holds(&root, &[(".nimbo-update-9/app", "2")], "");
     fs::remove_dir_all(root).unwrap();
   }
 
   #[test]
   fn a_failing_start_undoes_the_swap_and_starts_the_old_app() {
-    for i in 0..3 {
+    for i in 0..2 {
       let root = dir(&format!("start-{i}"));
       let (os, new, target) = apps(&root)[i];
-      let started = RefCell::new(Vec::new());
-      let start = |app: &Path, args: &[OsString]| {
-        started.borrow_mut().push((app.to_owned(), args.to_vec()));
-        if started.borrow().len() == 1 { Err(io::Error::other("no start")) } else { Ok(()) }
-      };
+      let started = Started::default();
       let job = install_job(&root, new, target);
-      let e = apply(os, &job, &Seams { start: &start, ..SEAMS }).unwrap_err();
+      let e = apply(os, &job, &Seams { start: &starts(&started, true), ..SEAMS }).unwrap_err();
       assert!(e.to_string().contains("no start"), "{e}");
       installed(&root, os, false, "undone");
-      assert_eq!(*started.borrow(), vec![(job.target.clone(), vec![OsString::from("-x")]); 2]);
-      assert_eq!(noted(&job.target).unwrap().to_string(), e.to_string(), "the note");
-      assert!(noted(&job.target).is_none(), "read once");
-      assert!(!old(os, &job.target).exists(), "{os:?}: the old copy");
-      // Windows' installer runs from it: the next download removes it.
-      assert_eq!(job.dir.exists(), os == Os::Windows, "{os:?}: the staging folder");
+      let start = |note| (job.target.clone(), vec![OsString::from("-x")], note);
+      assert_eq!(*started.borrow(), [start(None), start(Some(e.to_string()))], "the note");
+      assert!(!old(&job.target).exists() && !job.dir.exists(), "{os:?}: what is left");
+      fs::remove_dir_all(root).unwrap();
+    }
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn an_app_in_a_read_only_folder_still_gets_its_error() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = dir("read-only-install");
+    for (os, new, target) in apps(&root) {
+      let (started, job) = (Started::default(), install_job(&root, new, target));
+      fs::set_permissions(&root, fs::Permissions::from_mode(0o555)).unwrap();
+      let e = apply(os, &job, &Seams { start: &starts(&started, false), ..SEAMS }).unwrap_err();
+      fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
+      assert_eq!(e.kind(), io::ErrorKind::PermissionDenied, "{os:?}: {e}");
+      assert_eq!(started.borrow()[0].2, Some(e.to_string()), "{os:?}");
+      installed(&root, os, false, "unchanged");
+    }
+
+    fs::remove_dir_all(root).unwrap();
+  }
+
+  #[test]
+  fn an_install_waits_for_the_app_then_swaps_and_starts_it() {
+    for i in 0..2 {
+      let root = dir(&format!("install-{i}"));
+      let (os, new, target) = apps(&root)[i];
+      let (job, waited, started) =
+        (install_job(&root, new, target), Cell::new(None), Started::default());
+      let wait = |pid, cap| {
+        waited.set(Some((pid, cap, job.dir.join(MARK).exists())));
+        true
+      };
+      apply(os, &job, &Seams { wait: &wait, start: &starts(&started, false), ..SEAMS }).unwrap();
+      assert_eq!(waited.get(), Some((7, QUIT, true)), "the mark written first");
+      installed(&root, os, true, "installed");
+      assert_eq!(*started.borrow(), [(job.target.clone(), vec![OsString::from("-x")], None)]);
+      assert!(!old(&job.target).exists() && !job.dir.exists(), "{os:?}: what is left");
       fs::remove_dir_all(root).unwrap();
     }
   }
 
   #[test]
-  fn an_install_waits_for_the_app_then_swaps_and_starts_it() {
-    for i in 0..3 {
-      let root = dir(&format!("install-{i}"));
-      let (os, new, target) = apps(&root)[i];
-      let job = install_job(&root, new, target);
-      let (waited, started) = (Cell::new(None), RefCell::new(Vec::new()));
-      let wait = |pid, cap| {
-        waited.set(Some((pid, cap, job.dir.join(MARK).exists())));
-        true
+  fn windows_runs_the_setup_then_starts_what_it_left() {
+    // The installer's exe, which stays for the next download.
+    let exe = env::current_exe().unwrap().file_name().unwrap().to_owned();
+    for (i, code) in [Some(0), Some(2), None].into_iter().enumerate() {
+      let root = dir(&format!("setup-{i}"));
+      write(
+        &root,
+        &[("W/a.exe", "1"), (".nimbo-update-9/setup.exe", "2"), (".nimbo-update-9/ready", "")],
+      );
+      fs::write(root.join(".nimbo-update-9").join(&exe), "1").unwrap();
+      let (job, ran, started) = (
+        install_job(&root, ".nimbo-update-9/setup.exe", "W"),
+        RefCell::new(Vec::new()),
+        Started::default(),
+      );
+      let setup = |exe: &Path| {
+        ran.borrow_mut().push(exe.to_owned());
+        code.ok_or_else(|| io::Error::other("no setup"))
       };
-      let start = |app: &Path, args: &[OsString]| {
-        let _: () = started.borrow_mut().push((app.to_owned(), args.to_vec()));
-        Ok(())
-      };
-      // The installer's exe, which Windows' keeps for the next download, and the package.
-      let exe = job.dir.join(env::current_exe().unwrap().file_name().unwrap());
-      write(&job.dir, &[(exe.to_str().unwrap(), "2"), ("download", "2")]);
-      apply(os, &job, &Seams { wait: &wait, start: &start, ..SEAMS }).unwrap();
-      assert_eq!(waited.get(), Some((7, QUIT, true)), "the mark written first");
-      installed(&root, os, true, "installed");
-      assert_eq!(*started.borrow(), [(job.target.clone(), vec![OsString::from("-x")])]);
-      assert!(!old(os, &job.target).exists() && noted(&job.target).is_none(), "{os:?}");
-      let left = fs::read_dir(&job.dir).map(|d| d.flatten().map(|e| e.path()).collect::<Vec<_>>());
-      assert_eq!(left.ok(), (os == Os::Windows).then(|| vec![exe]), "{os:?}: the staging folder");
+      let done = apply(
+        Os::Windows,
+        &job,
+        &Seams { setup: &setup, start: &starts(&started, false), ..SEAMS },
+      );
+      assert_eq!(*ran.borrow(), std::slice::from_ref(&job.new));
+      let note = done.err().map(|e| e.to_string());
+      let why = ["", "setup.exe exited with 2", "no setup"][i];
+      assert!(note.as_ref().map_or(i == 0, |n| i > 0 && n.contains(why)), "{note:?}");
+      assert_eq!(*started.borrow(), [(job.target.clone(), vec![OsString::from("-x")], note)]);
+      let left =
+        fs::read_dir(&job.dir).unwrap().flatten().map(|e| e.file_name()).collect::<Vec<_>>();
+      assert_eq!(left, std::slice::from_ref(&exe), "all but the installer's exe goes");
       fs::remove_dir_all(root).unwrap();
     }
   }
@@ -998,20 +998,12 @@ mod tests {
   #[test]
   fn an_app_that_doesnt_quit_changes_nothing() {
     let root = dir("stays");
-    let [(os, new, target), ..] = apps(&root);
-    let job = install_job(&root, new, target);
-    let started = Cell::new(false);
-    let seams = Seams {
-      wait: &|_, _| false,
-      start: &|_, _| {
-        started.set(true);
-        Ok(())
-      },
-      ..SEAMS
-    };
+    let [(os, new, target), _] = apps(&root);
+    let (job, started) = (install_job(&root, new, target), Started::default());
+    let seams = Seams { wait: &|_, _| false, start: &starts(&started, false), ..SEAMS };
     assert_eq!(apply(os, &job, &seams).unwrap_err().kind(), io::ErrorKind::TimedOut);
     installed(&root, os, false, "after the wait");
-    assert!(!started.get() && !job.dir.exists() && noted(&job.target).is_none());
+    assert!(started.borrow().is_empty() && !job.dir.exists());
     fs::remove_dir_all(root).unwrap();
   }
 
@@ -1046,7 +1038,7 @@ mod tests {
     let root = dir("tidy");
     write(&root, &[(".nimbo-update-1-5/x", ""), (".nimbo-update-2-5/x", "")]);
     write(&root, &[(".A.app.nimbo-old/x", ""), ("other/x", "")]);
-    tidy(Os::Mac, &root.join("A.app"), &|pid| pid == 2);
+    tidy(&root.join("A.app"), &|pid| pid == 2);
     let names = [".nimbo-update-1-5", ".nimbo-update-2-5", ".A.app.nimbo-old", "other"];
     assert_eq!(names.map(|n| root.join(n).exists()), [false, true, false, true]);
     fs::remove_dir_all(root).unwrap();
@@ -1086,20 +1078,10 @@ mod tests {
 
   #[cfg(target_os = "macos")]
   #[test]
-  fn a_bundle_unpacks_and_must_be_the_app_signed_alike() {
+  fn a_bundle_must_be_the_app_signed_alike() {
     let root = dir("bundle");
     let app = root.join("A.app");
     bundle(&app, "com.example.a", "1");
-    let mut zip = std::process::Command::new("/usr/bin/ditto");
-    zip.args(["-c", "-k", "--keepParent"]).arg(&app).arg(root.join("a.zip"));
-    assert!(zip.status().unwrap().success());
-    fs::create_dir(root.join("new")).unwrap();
-    imp::unpack(&root.join("a.zip"), &root.join("new")).unwrap();
-    let new = package(Os::Mac, &root.join("new"), &app, &app).unwrap();
-    imp::accepts(&new, &app).unwrap();
-    let not_zip = imp::unpack(&app.join("Contents/Info.plist"), &root).unwrap_err();
-    assert_eq!(not_zip.kind(), io::ErrorKind::InvalidData);
-
     // Another build signed ad hoc meets no requirement but its own; another app is refused.
     bundle(&root.join("v2/A.app"), "com.example.a", "2");
     bundle(&root.join("b/A.app"), "com.example.b", "1");
@@ -1116,32 +1098,57 @@ mod tests {
     fs::remove_dir_all(root).unwrap();
   }
 
+  #[cfg(target_os = "macos")]
+  #[test]
+  fn a_disk_image_gives_its_one_app() {
+    use std::process::Command;
+    let root = dir("dmg");
+    let app = root.join("A.app");
+    bundle(&app, "com.example.a", "1");
+    // A staging folder `name` with `update.dmg` made of `apps`, copies of the app, and a file.
+    let image = |name: &str, apps: &[&str]| {
+      let src = root.join(name).join("src");
+      write(&src, &[("readme", "")]);
+      for a in apps {
+        assert!(
+          Command::new("/usr/bin/ditto").arg(&app).arg(src.join(a)).status().unwrap().success()
+        );
+      }
+
+      let dmg = root.join(name).join("update.dmg");
+      let mut make = Command::new("/usr/bin/hdiutil");
+      make.args(["create", "-quiet", "-format", "UDZO", "-srcfolder"]).arg(src).arg(&dmg);
+      assert!(make.status().unwrap().success());
+      dmg
+    };
+
+    let new = imp::unpack(&image("one", &["A.app"]), &app).unwrap();
+    assert_eq!(new, root.join("one/new/A.app"));
+    let plist = |p: &Path| fs::read(p.join("Contents/Info.plist")).unwrap();
+    assert_eq!(plist(&new), plist(&app), "copied out");
+    imp::accepts(&new, &app).unwrap();
+    for (name, apps) in [("one", &[][..]), ("two", &["A.app", "B.app"]), ("none", &[])] {
+      if name != "one" {
+        let e = imp::unpack(&image(name, apps), &app).unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::InvalidData, "{name}: {e}");
+      }
+
+      assert!(!root.join(name).join("volume/readme").exists(), "{name}: detached");
+    }
+
+    let not_image = imp::unpack(&app.join("Contents/Info.plist"), &app).unwrap_err();
+    assert_eq!(not_image.kind(), io::ErrorKind::InvalidData);
+    fs::remove_dir_all(root).unwrap();
+  }
+
   #[cfg(target_os = "linux")]
   #[test]
   fn an_appimage_is_made_executable() {
     use std::os::unix::fs::PermissionsExt;
     let root = dir("appimage");
-    write(&root, &[("download", "2")]);
-    fs::create_dir(root.join("new")).unwrap();
-    imp::unpack(&root.join("download"), &root.join("new")).unwrap();
-    let new = package(Os::Linux, &root.join("new"), &root, &root).unwrap();
+    write(&root, &[("app.AppImage", "2")]);
+    let new = imp::unpack(&root.join("app.AppImage"), &root).unwrap();
     assert_eq!(fs::metadata(new).unwrap().permissions().mode() & 0o777, 0o755);
-    fs::remove_dir_all(root).unwrap();
-  }
-
-  #[cfg(windows)]
-  #[test]
-  fn a_zip_unpacks_with_tar() {
-    let root = dir("tar");
-    write(&root, &[("W/a.exe", "2"), ("W/res/x", "2")]);
-    let tar = Path::new(&env::var_os("SystemRoot").unwrap()).join(r"System32\tar.exe");
-    let mut zip = std::process::Command::new(tar);
-    zip.arg("-a").arg("-cf").arg(root.join("a.zip")).arg("-C").arg(&root).arg("W");
-    assert!(zip.status().unwrap().success());
-    fs::create_dir(root.join("new")).unwrap();
-    imp::unpack(&root.join("a.zip"), &root.join("new")).unwrap();
-    let new = package(Os::Windows, &root.join("new"), &root.join("W"), &root.join("W/a.exe"));
-    holds(&new.unwrap(), &[("a.exe", "2"), ("res/x", "2")], "unpacked");
     fs::remove_dir_all(root).unwrap();
   }
 

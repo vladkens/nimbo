@@ -5,7 +5,7 @@
 //! area icon ([tray]), global hotkeys on a thread of their own ([hotkey]), launch at login
 //! through the registry ([autostart]), links and files opened ([open]), shortcuts posted to the
 //! app in front ([post]), where the user types ([focus]) and the clipboard for a paste ([paste]),
-//! files fetched over HTTP ([http]) and an update unpacked ([update]); the Downloads folder
+//! files fetched over HTTP ([http]) and an update's setup run ([update]); the Downloads folder
 //! ([downloads]), the console of the command line ([attach_console]), the uninstall's retries
 //! ([uninstall]) and a microphone's transport ([hardware]).
 
