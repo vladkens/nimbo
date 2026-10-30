@@ -6,7 +6,7 @@ The in-place updater (`src/update.rs` and its platform code) and the packer (`sc
 
 - [x] `src/update.rs` (check, download, install, finish, supported, dev, `Feed`, `Staged`), `http` and `update` on each OS, `linux/app/process.rs`, their contract in `src/platform/mod.rs`, `examples/update.rs`: removed.
 - [x] `scripts/pack.py` and its doctest in `make check`: removed. CI never packed.
-- [x] `ed25519-compact` and `objc2-security` removed; `objc2-foundation` without `NSURLSession`, `NSURLRequest`, `NSURLResponse`, `NSDate`, `block2`; `windows-sys` without `Win32_Networking_WinHttp`. Crates 22 → 20 (`objc2-security` was only the updater's; Windows 6 → 5, Linux 4 → 3).
+- [x] `ed25519-compact` and `objc2-security` removed; `objc2-foundation` without `NSURLSession`, `NSURLRequest`, `NSURLResponse`, `NSDate`, `block2`; `windows-sys` without `Win32_Networking_WinHttp`. Crates per target, nimbo excluded (the count in `agents.md`): 15 → 13 on macOS (`objc2-security` was only the updater's), 5 → 4 on Windows, 3 → 2 on Linux.
 - [x] `uninstall` as it was before the updater: `app_of`, the `Env` type and `retry` private again (`remove` was always public).
 - [x] The window moved to wavo-app: `src/update.rs` (`Release`), `src/update/dialog.rs`, `examples/updater.rs`, `tests/updater.rs` removed, and `pub mod update` from `lib.rs`.
 - [x] Every API the window used stays: compiled as code of another crate against `nimbo::` alone, it builds and its tests pass, so nothing had to be made public.
