@@ -264,7 +264,7 @@ pub(crate) fn unwatch() {
 
 /// The OS refused `kind` after [watch] returned (a registration made off the main thread): no
 /// longer watched, so a later watch tries again.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg_attr(windows, allow(dead_code))]
 pub(crate) fn refused(kind: Change, why: &str) {
   WATCHER.unwatch(kind);
   eprintln!("nimbo: system: {kind:?}: {why}");

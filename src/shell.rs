@@ -406,7 +406,10 @@ impl Main {
   /// Watches the system's changes of `kinds` (besides those watched already) until the loop
   /// ends ([crate::system]): each, a burst of one kind coalesced into one, runs `f` on the main
   /// thread (replacing an earlier one), then reaches every open window as [Event::System]. `Err`
-  /// names the kinds the OS refused; the rest are watched.
+  /// names the kinds the OS refused; the rest are watched. A kind registered off the main thread
+  /// (macOS's audio, whose first call costs tens of milliseconds) or refused later (a sound
+  /// server's subscription) can't come back here: it goes to stderr and is no longer watched,
+  /// so a later call tries again.
   pub fn watch(
     &mut self,
     kinds: &[Change],

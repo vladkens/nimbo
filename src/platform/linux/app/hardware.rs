@@ -17,7 +17,7 @@ use super::super::dbus::{self, Gv};
 use super::super::dl::{Lib, fns};
 use super::super::{Fp, P, S};
 use crate::hardware::Transport;
-use crate::system::{Change, notice};
+use crate::system::{Change, notice, refused};
 
 const UPOWER: &str = "org.freedesktop.UPower";
 const UPOWER_PATH: &str = "/org/freedesktop/UPower";
@@ -257,7 +257,8 @@ unsafe extern "C" fn on_state(c: P, _: P) {
   match unsafe { (p.pa_context_get_state)(c) } {
     READY => {
       unsafe { (p.pa_context_set_subscribe_callback)(c, on_event as Fp, null_mut()) };
-      unsafe { (p.pa_operation_unref)((p.pa_context_subscribe)(c, MASK, null(), null_mut())) };
+      let op = unsafe { (p.pa_context_subscribe)(c, MASK, subscribed as Fp, null_mut()) };
+      unsafe { (p.pa_operation_unref)(op) };
       server_info(p, c);
       notice(Change::AudioInputs);
       notice(Change::DefaultInput);
@@ -267,6 +268,16 @@ unsafe extern "C" fn on_state(c: P, _: P) {
       unsafe { (p.pa_mainloop_api_once)(api, reconnect as Fp, null_mut()) };
     }
     _ => {}
+  }
+}
+
+/// The subscription's answer: refused (it never is, short of a broken server), neither audio
+/// kind is watched any more, so a later watch tries again.
+unsafe extern "C" fn subscribed(_: P, success: c_int, _: P) {
+  if success == 0 {
+    for kind in [Change::AudioInputs, Change::DefaultInput] {
+      refused(kind, "PulseAudio refused the subscription");
+    }
   }
 }
 
