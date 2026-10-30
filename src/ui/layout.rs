@@ -1271,6 +1271,27 @@ pub(crate) mod tests {
     }
   }
 
+  /// Each layout ends the memos' turn: once they are past their cap, what the last layout
+  /// didn't use goes, and a text shown again is measured again in full.
+  #[test]
+  fn layouts_drop_kept_text_they_no_longer_use() {
+    let frame = |st: UiState, s: &str| {
+      let mut ui = Ui::new(st, Size::new(400.0, 300.0), None, Duration::ZERO);
+      ui.col(Style::new().w(px(60.0)), |ui| ui.text(s, T));
+      let mut m = Counted(0);
+      ui.layout(&mut m, 1.0);
+      (ui.finish(), m.0)
+    };
+    let first = "a text that wraps at sixty points";
+    let (mut st, fresh) = frame(UiState::default(), first);
+    for i in 0..5000 {
+      st = frame(st, &format!("text {i} that wraps at sixty points")).0;
+    }
+
+    // Its least width and its lines both measured again, as the first time.
+    assert_eq!(frame(st, first).1, fresh);
+  }
+
   #[test]
   fn a_steady_layout_measures_only_the_lines_widths() {
     let text = "a quick brown fox jumps over the lazy dog\nand a second line of it";

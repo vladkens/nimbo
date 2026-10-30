@@ -3,7 +3,8 @@
 //! What the layout computes from a text in a font (its least width, its lines wrapped at a
 //! width), kept across frames, so a steady frame looks it up instead of measuring it again. Each
 //! is computed once per (font, text, key) by the caller's function, so it is the same as before;
-//! bounded as the shaped-line cache is: past its cap, a layout drops what it didn't use.
+//! bounded: past a count of entries or of bytes of text, a layout drops what it didn't use (a
+//! long text edited makes an entry per keystroke).
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry as Slot;
@@ -13,6 +14,8 @@ use super::{Font, FxHasher};
 
 /// Entries kept before a layout starts dropping those it didn't use.
 const CAP: usize = 4096;
+/// Bytes of text kept before a layout starts dropping what it didn't use.
+const BYTES: usize = 4 << 20;
 
 struct Entry<V> {
   font: Font,
@@ -29,12 +32,15 @@ pub(crate) struct Memo<V> {
   map: HashMap<u64, Entry<V>, BuildHasherDefault<FxHasher>>,
   /// Layouts so far ([Memo::end]).
   now: u64,
+  /// The text's bytes in the entries, the dropped included until a layout drops what it didn't
+  /// use.
+  bytes: usize,
   cap: usize,
 }
 
 impl<V> Default for Memo<V> {
   fn default() -> Self {
-    Self { map: HashMap::default(), now: 0, cap: CAP }
+    Self { map: HashMap::default(), now: 0, bytes: 0, cap: CAP }
   }
 }
 
@@ -48,6 +54,7 @@ impl<V> Memo<V> {
     let e = match self.map.entry(h.finish()) {
       Slot::Occupied(o) if same(o.get()) => o.into_mut(),
       slot => {
+        self.bytes += text.len();
         let e = Entry { font, text: text.into(), key, value: f(), used: 0 };
         slot.insert_entry(e).into_mut()
       }
@@ -57,11 +64,12 @@ impl<V> Memo<V> {
     &e.value
   }
 
-  /// Ends a layout: past the cap, drops what it didn't use.
+  /// Ends a layout: past either cap, drops what it didn't use.
   pub fn end(&mut self) {
-    if self.map.len() > self.cap {
+    if self.map.len() > self.cap || self.bytes > BYTES {
       let now = self.now;
       self.map.retain(|_, e| e.used == now);
+      self.bytes = self.map.values().map(|e| e.text.len()).sum();
     }
 
     self.now += 1;
@@ -109,5 +117,20 @@ mod tests {
     kept.sort();
     assert_eq!(kept, ["a", "d"]);
     assert_eq!(*memo.get(font, "b", 0, || 7), 7);
+  }
+
+  /// A long text edited: an entry per keystroke, bounded by its bytes long before its count.
+  #[test]
+  fn past_its_bytes_a_layout_drops_what_it_did_not_use() {
+    let (mut memo, font) = (Memo::default(), Font::ui(13.0));
+    let mut text = "w".repeat(50_000);
+    for _ in 0..1000 {
+      text.push('x');
+      memo.get(font, &text, 0, || 0);
+      memo.end();
+      assert!(memo.bytes <= BYTES + text.len(), "{} bytes kept", memo.bytes);
+    }
+
+    assert!(memo.map.len() < 100, "{} entries kept", memo.map.len());
   }
 }
