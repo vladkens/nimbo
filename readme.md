@@ -38,10 +38,6 @@ nimbo grew out of [wavo-app](https://github.com/vladkens/wavo-app), the dictatio
 - **Native controls on each system**: the lightest on memory, but the controls differ everywhere, the design came out different on each system, and every feature was written three times.
 - **The Sublime Text and Sublime Merge way**: a small UI I draw myself over the system's window, input and text. The middle ground, and this library came out of it.
 
-## 🤖 How it's made
-
-nimbo is written by AI agents (Claude Code, Codex) following [agents.md](agents.md); I choose what to build, review every pull request and check every visual change in a shot. I've written software by hand for years ([macmon](https://github.com/vladkens/macmon), [twscrape](https://github.com/vladkens/twscrape), [ecloop](https://github.com/vladkens/ecloop)); agents are how I build now.
-
 ## 📥 Installation
 
 nimbo isn't released yet; take it from git:
@@ -139,6 +135,10 @@ Pull requests are welcome, including ones made with agents: point yours at [agen
 ## 🙏 Credits
 
 - [dwrite-hlsl](https://github.com/lhecker/dwrite-hlsl) (MIT): DirectWrite's gamma ratios, used to blend text on Windows.
+
+## 🤖 How it's made
+
+nimbo is written by AI agents (Claude Code, Codex) following [agents.md](agents.md); I choose what to build and review every pull request. I check every visual change in a shot. I've written software by hand for years ([macmon](https://github.com/vladkens/macmon), [twscrape](https://github.com/vladkens/twscrape), [ecloop](https://github.com/vladkens/ecloop)); agents are how I build now. Releases are rare; the CLI and data formats stay compatible, the API may still change before 1.0, and every break is listed in the changelog.
 
 ## 📝 License
 
