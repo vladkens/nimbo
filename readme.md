@@ -128,6 +128,12 @@ Measured on an Apple M2, rustc 1.99, 2026-10-25, without a compiler cache:
 - **1.1 MB** its release binary (0.87 MB stripped)
 - **13 / 4 / 2** crates in the build on macOS / Windows / Linux, nimbo excluded
 
+## 🗺️ Roadmap
+
+- **0.1.0**: what nimbo has today
+- **Next**: translations (i18n with plural forms) and right-to-left layout (Arabic, Hebrew)
+- **Later**: a Metal GPU renderer on macOS
+
 ## 🤝 Contributing
 
 Pull requests are welcome, including ones made with agents: point yours at [agents.md](agents.md).
