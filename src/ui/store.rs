@@ -28,7 +28,7 @@ struct Entry {
 }
 
 #[derive(Default)]
-pub struct Store {
+pub(crate) struct Store {
   map: HashMap<(Id, TypeId), Entry, BuildHasherDefault<FxHasher>>,
   frame: u64,
   retained: Vec<Id>,

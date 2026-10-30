@@ -56,8 +56,8 @@ fn centroid(img: &Image, area: Rect, bg: [u8; 4]) -> f32 {
 /// The line box of `s` at `x`: from the ascent above the baseline to the descent below, as
 /// wide as its advance.
 fn line_box(h: &mut Harness<Text>, x: f32, s: &Sample) -> Rect {
-  let m = h.rt.text.metrics(s.font);
-  let w = h.rt.text.measure(s.text, s.font);
+  let m = h.text_system().metrics(s.font);
+  let w = h.text_system().measure(s.text, s.font);
   Rect::new(x, s.y - m.ascent, w, m.ascent + m.descent)
 }
 
@@ -76,7 +76,7 @@ fn inside_its_box(h: &mut Harness<Text>, img: &Image, x: f32, s: &Sample, bg: [u
 
 /// Whether a font in the system has every glyph of `s` (no glyph 0, the missing one).
 fn has_glyphs(h: &mut Harness<Text>, s: &Sample) -> bool {
-  h.rt.text.layout(s.text, s.font).glyphs.iter().all(|g| g.id != 0)
+  h.text_system().layout(s.text, s.font).glyphs.iter().all(|g| g.id != 0)
 }
 
 fn check(h: &mut Harness<Text>, p: &Palette) {
@@ -94,8 +94,8 @@ fn check(h: &mut Harness<Text>, p: &Palette) {
   // cap height.
   let marks = &SCRIPTS[1];
   let q = marks.text.find('Q').unwrap();
-  let x0 = X + h.rt.text.measure(&marks.text[..q], marks.font);
-  let cap = h.rt.text.metrics(marks.font).cap_height;
+  let x0 = X + h.text_system().measure(&marks.text[..q], marks.font);
+  let cap = h.text_system().metrics(marks.font).cap_height;
   let above = Rect::new(x0, marks.y - cap - 6.0, 16.0, 4.0);
   assert!(ink_box(&img, above, bg).is_some(), "no circumflex over the Q");
 
@@ -124,7 +124,7 @@ fn check(h: &mut Harness<Text>, p: &Palette) {
   // measured from the baseline to the cap height, clear of the descenders of the row above.
   // DirectWrite moves light text on a dark ground unevenly (0.36, 0.44 and 0.09 pixels at scale
   // 2), so on Windows only dark text on the light ground is checked.
-  let cap = h.rt.text.metrics(SUBPIXEL_FONT).cap_height;
+  let cap = h.text_system().metrics(SUBPIXEL_FONT).cap_height;
   let rows: Vec<f32> = SUBPIXEL_Y
     .iter()
     .enumerate()
@@ -142,13 +142,13 @@ fn check(h: &mut Harness<Text>, p: &Palette) {
 
   // The rocket in colour where the system has a colour emoji font: some pixel of it has
   // channels far apart.
-  let line = h.rt.text.layout(SCRIPTS[2].text, SCRIPTS[2].font);
+  let line = h.text_system().layout(SCRIPTS[2].text, SCRIPTS[2].font);
   let at = line.clusters.iter().position(|&c| c as usize == EMOJI_AT.len()).unwrap();
   let (g, next) = (line.glyphs[at], line.glyphs[at + 1]);
   // About an em wide, in any font: a colour one, or the missing glyph's box.
   let em = SCRIPTS[2].font.size;
   assert!((0.5 * em..2.0 * em).contains(&(next.x - g.x)), "{g:?} {next:?}");
-  let color = h.rt.text.glyph(g.face, g.id, 0, [1.0; 4]).is_some_and(|a| a.color);
+  let color = h.text_system().is_color(g);
   if cfg!(target_os = "linux") && !color {
     eprintln!("no colour emoji font: skipped");
   } else {
@@ -166,7 +166,7 @@ fn check(h: &mut Harness<Text>, p: &Palette) {
 #[test]
 fn measures_hold_for_any_font() {
   let mut h = Harness::new(Text::default(), SIZE, 2.0);
-  let t = &mut h.rt.text;
+  let t = h.text_system();
   let ui = Font::ui(13.0);
   assert!(t.measure("Hello, world", ui) > t.measure("Hello", ui));
   assert!(t.measure("Hello", ui.weight(Weight::Bold)) > t.measure("Hello", ui));

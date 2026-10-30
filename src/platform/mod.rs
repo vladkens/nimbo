@@ -35,21 +35,21 @@
 //!     in modal loops (a menu open, a live resize); `is_main() -> bool`.
 //!
 //!   [crate::run] is one window whose close quits ([crate::shell] `window`). A window's app that
-//!   quits ([crate::Cx::quit]) quits the app. Each window owns a [crate::Runtime] made with
+//!   quits ([crate::Cx::quit]) quits the app. Each window owns a `Runtime` made with
 //!   `Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(<its clipboard>))`, and:
 //!   - window: `cfg.title`, `cfg.size` in points (content area), `cfg.resizable`, the least content
 //!     size `cfg.min()` (macOS: `contentMinSize`, Windows: `WM_GETMINMAXINFO`, Linux: the drawing
 //!     area's size request); minimal app menu where the OS has one (macOS: Quit);
 //!   - title bar: where `cfg.unified` and the OS draws the content under it (macOS: a full-size
-//!     content view under a transparent title bar, its title hidden),
-//!     [crate::Runtime::set_titlebar] with its height and `cfg.title`; a left press where
-//!     [crate::Runtime::drags_window] moves the window (macOS: `performWindowDragWithEvent:`, a
-//!     double-click as `AppleActionOnDoubleClick` says) and never reaches the app;
-//!   - window size from the app: after each event and frame, [crate::Runtime::take_resize] is a
-//!     content size the app asked for ([crate::Ui::set_window_size]); resize the window to it,
-//!     resizable or not, lowering the least size with it (macOS: `setFrame:display:` keeping the
-//!     top edge; Windows: `SetWindowPos` keeping the top-left corner; Linux: `gtk_window_resize`, a
-//!     fixed window's area's size request);
+//!     content view under a transparent title bar, its title hidden), `Runtime::set_titlebar` with
+//!     its height and `cfg.title`; a left press where `Runtime::drags_window` moves the window
+//!     (macOS: `performWindowDragWithEvent:`, a double-click as `AppleActionOnDoubleClick` says)
+//!     and never reaches the app;
+//!   - window size from the app: after each event and frame, `Runtime::take_resize` is a content
+//!     size the app asked for ([crate::Ui::set_window_size]); resize the window to it, resizable or
+//!     not, lowering the least size with it (macOS: `setFrame:display:` keeping the top edge;
+//!     Windows: `SetWindowPos` keeping the top-left corner; Linux: `gtk_window_resize`, a fixed
+//!     window's area's size request);
 //!   - input: OS events to [crate::Event] in points, y down from the view's top left: mouse (moves,
 //!     buttons with click counts, exit), scroll (`precise` and phases for trackpads, wheel lines ×
 //!     [crate::WHEEL_LINE]), pinch, modifiers (none once the focus goes: their changes then go to
@@ -61,19 +61,19 @@
 //!     layout's character is the ASCII-capable layout's, so shortcuts work: macOS `keyboard.rs`),
 //!     `text` the printable character it types; a modifier key going down or up also sends
 //!     [crate::Event::Modifier] (macOS: `flagsChanged:`, the side from the device-dependent flags);
-//!   - text input: a key nobody used ([crate::Runtime::event] returns false) goes to the OS's text
-//!     input and comes back as [crate::Event::Text] (typed) or [crate::Event::Command] (editing
-//!     keys: macOS's from AppKit, Windows' and Linux's from [crate::keys::Os::command]);
-//!   - cursors: show [crate::Runtime::cursor] (a [crate::Cursor]) while the pointer is in the view;
+//!   - text input: a key nobody used (`Runtime::event` returns false) goes to the OS's text input
+//!     and comes back as [crate::Event::Text] (typed) or [crate::Event::Command] (editing keys:
+//!     macOS's from AppKit, Windows' and Linux's from [crate::keys::Os::command]);
+//!   - cursors: show `Runtime::cursor` (a [crate::Cursor]) while the pointer is in the view;
 //!   - clipboard: plain text, an [crate::Clipboard]; a reader of ours never blocks the loop;
-//!   - frames: draw only while [crate::Runtime::needs_frame], paced by the display (≤ 120 Hz);
-//!     idle, sleep until the next timer ([crate::Runtime::due_in]) or a wake: set
-//!     `rt.waker().set_notify(f)`, `f` called from any thread to wake the loop; no frames while the
-//!     window is hidden (minimized, covered), one when it shows again;
-//!   - scale: the backing scale factor, given to [crate::Runtime::resize] with the size before each
-//!     frame (a change refills the glyph atlas);
-//!   - present: [crate::Runtime::frame], then `cpu::Renderer::sync(&mut rt.text, &mut rt.images)`
-//!     and the CPU frame into the window: `prepare(scene, size, scale)`, `damage(&shown_tiles)`,
+//!   - frames: draw only while `Runtime::needs_frame`, paced by the display (≤ 120 Hz); idle, sleep
+//!     until the next timer (`Runtime::due_in`) or a wake: set `rt.waker().set_notify(f)`, `f`
+//!     called from any thread to wake the loop; no frames while the window is hidden (minimized,
+//!     covered), one when it shows again;
+//!   - scale: the backing scale factor, given to `Runtime::resize` with the size before each frame
+//!     (a change refills the glyph atlas);
+//!   - present: `Runtime::frame`, then `cpu::Renderer::sync(&mut rt.text, &mut rt.images)` and the
+//!     CPU frame into the window: `prepare(scene, size, scale)`, `damage(&shown_tiles)`,
 //!     `draw(scene, px, stride, &rects)` into a buffer the OS shows, keeping `tiles()` with each
 //!     buffer (macOS: IOSurfaces as the layer's contents, `surface.rs`; Windows: a DIB section and
 //!     BitBlt; Linux: a cairo image surface GTK paints). Draw synchronously during a live resize so
@@ -169,7 +169,7 @@
 //!   `color-scheme` and `accent-color`, changes by its `SettingChanged` signal; else GtkSettings'
 //!   dark preference or theme name.
 //! - `pub fn perf_cores() -> Option<usize>`: the performance cores, to size the CPU renderer's
-//!   threads ([crate::cpu::pool]); `None` falls back to `available_parallelism` capped at 4.
+//!   threads (`cpu::pool`); `None` falls back to `available_parallelism` capped at 4.
 //! - `pub mod text`, the text backend under [crate::text] (its atlas and line cache are portable):
 //!   - `pub struct Face: Clone + PartialEq`: a font at a point size; equal faces are one.
 //!   - `pub fn face(font: Font) -> Face`: the system UI font or its monospaced one, at the size and

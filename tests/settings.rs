@@ -93,7 +93,7 @@ fn general_switches_select_and_recorder() {
   // The select: letters typed while it has focus choose an option; open, its menu is over it
   // and letters move the highlight, Enter picks.
   let launch = Id::of(LAUNCH);
-  h.rt.ui.set_focus(Some(launch));
+  h.set_focus(Some(launch));
   key(&mut h, 'o');
   assert_eq!(h.app().launch, Launch::Window);
   h.click_id(launch);
@@ -178,29 +178,29 @@ fn appearance_row_width_slider_and_look() {
   h.frame();
   h.release(s.x + s.w + 20.0, s.y + s.h / 2.0);
   assert_eq!(h.app().text_size, 20.0);
-  h.rt.ui.set_focus(Some(Id::of(TEXT_SIZE)));
+  h.set_focus(Some(Id::of(TEXT_SIZE)));
   key(&mut h, NamedKey::ArrowLeft);
   assert_eq!(h.app().text_size, 19.5);
   // The look applies at once.
   h.click_id(Id::of(LOOK).key(2));
   h.wait(Duration::from_millis(50));
-  assert!(h.render().pixel(4.0, h.rt.size.h - 4.0)[0] < 64);
+  assert!(h.render().pixel(4.0, h.size().h - 4.0)[0] < 64);
 }
 
 #[test]
 fn advanced_asks_in_a_dialog() {
   let mut h = start();
   h.app_mut().login = false;
-  h.rt.redraw();
+  h.redraw();
   // Advanced: the dialog asks before clearing the cache, over a dimmed page.
   turn(&mut h, Page::Advanced);
   let confirm = Id::of(CONFIRM);
   let clear = rect(&h, CLEAR_CACHE);
-  let ground = h.render().pixel(4.0, h.rt.size.h - 4.0);
+  let ground = h.render().pixel(4.0, h.size().h - 4.0);
   h.click_id(Id::of(CLEAR_CACHE));
   h.wait(Duration::from_millis(200));
   assert!(h.rect(confirm.key("card")).is_some());
-  let dimmed = h.render().pixel(4.0, h.rt.size.h - 4.0);
+  let dimmed = h.render().pixel(4.0, h.size().h - 4.0);
   assert!(dimmed[0] < ground[0], "{dimmed:?} over {ground:?}");
   // A click on the page under it does nothing; Return chooses Cancel (the action is
   // destructive) and closes it.
@@ -243,10 +243,10 @@ fn advanced_asks_in_a_dialog() {
 fn the_window_follows_the_page() {
   // It takes the page's height.
   let mut h = start();
-  let general = h.rt.size.h;
+  let general = h.size().h;
   assert!((400.0..720.0).contains(&general), "{general}");
   turn(&mut h, Page::About);
-  assert!(h.rt.size.h < general, "{} vs {general}", h.rt.size.h);
+  assert!(h.size().h < general, "{} vs {general}", h.size().h);
 }
 
 #[test]
@@ -279,7 +279,7 @@ fn the_slider_reads_its_number() {
   let mut h = start();
   turn(&mut h, Page::Appearance);
   reads(&h.a11y(), &["slider \"Text size\" 13 in 10..20"]);
-  h.rt.ui.set_focus(Some(Id::of(TEXT_SIZE)));
+  h.set_focus(Some(Id::of(TEXT_SIZE)));
   key(&mut h, NamedKey::ArrowRight);
   h.frame();
   reads(&h.a11y(), &["slider \"Text size\" 13.5 in 10..20 focused"]);
@@ -335,7 +335,7 @@ fn an_assistive_press_flips_a_switch() {
   assert!(h.act(Id::of(LOGIN), Action::Press));
   assert!(!h.app().login);
   // The pointer and the hover stay where they were: nowhere.
-  assert!(h.rt.mouse.is_none() && h.rt.ui.hover().is_empty());
+  assert!(h.mouse().is_none() && h.hover().is_empty());
   reads(&h.a11y(), &["switch \"Open at login\" off"]);
 }
 
@@ -448,7 +448,7 @@ fn a_warning_and_a_tip_show_in_one_tooltip() {
   reads(&h.a11y(), &[&format!("button \"Warning\" desc {both:?}")]);
   // Another shortcut: nothing to warn of.
   h.app_mut().hotkey = Hotkey::parse("ctrl+shift+k").ok();
-  h.rt.redraw();
+  h.redraw();
   h.frame();
   assert_eq!(tip(&mut h, HOTKEY_ROW), TIP_HOTKEY);
   reads(&h.a11y(), &[&format!("button \"Info\" desc {TIP_HOTKEY:?}")]);

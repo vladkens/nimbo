@@ -140,7 +140,7 @@ impl App for Shapes {
     f.quad(Quad::new(LIFTED, p.surface).radius(12.0).borders([0.0, 0.0, 0.0, ACCENT_W], AMBER));
     f.quad(Quad::new(DOWN, BLUE).radius(12.0).gradient(GREEN, true));
     f.quad(Quad::new(ACROSS, RED).radius(12.0).gradient(alpha(RED, 0.0), false));
-    let image = *self.image.get_or_insert_with(|| f.images.add(IMAGE_N, IMAGE_N, &disc()));
+    let image = *self.image.get_or_insert_with(|| f.images().add(IMAGE_N, IMAGE_N, &disc()));
     f.image(image, PICTURE, 1.0);
 
     for (y, w) in LINES {

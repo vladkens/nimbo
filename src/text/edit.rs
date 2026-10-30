@@ -4,9 +4,9 @@
 //! head, byte offsets on grapheme cluster boundaries), caret moves by character, word, line,
 //! page and document, inserts and deletes, the clipboard through the [Clipboard] seam, undo and
 //! redo that group a typing run into one step, and an input method's marked text. Moves by
-//! visual line ask [Lines]: a text field's laid-out text ([crate::ui::TextLayout]) implements
-//! it, [Mono] counts columns. Grapheme cluster boundaries are here too, which the layout breaks
-//! words at; the UTF-16 helpers translate the ranges input methods speak in.
+//! visual line ask [Lines]: a text field's laid-out text implements it, [Mono] counts columns.
+//! Grapheme cluster boundaries are here too, which the layout breaks words at; the UTF-16
+//! helpers translate the ranges input methods speak in.
 //!
 //! The buffer's line break is `\n`: inserted `\r\n` and `\r` become `\n`, and a single-line
 //! editor turns line breaks into spaces.
