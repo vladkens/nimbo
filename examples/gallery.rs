@@ -1,10 +1,11 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! Every widget, in the light theme and the dark one side by side over the same state: buttons
-//! (variants, an icon button with a tooltip, ⓘ and "?"), check boxes, switches in both sizes, a
-//! slider, selects, a segmented control with counts, progress bars and a spinner, a link,
-//! badges in every tone, shortcut recorders (with and without the ⊗ that clears one), search
-//! fields, the icons (stroked; play and ⊗ filled), and a button that asks in a modal dialog.
+//! (variants, an icon button with a tooltip, ⓘ, the warning mark and "?"), check boxes, switches in
+//! both sizes, a slider, selects, a segmented control with counts, progress bars and a spinner, a
+//! link, badges in every tone, shortcut recorders (with and without the ⊗ that clears one), search
+//! fields, the icons (stroked; play, ⊗ and the warning filled), and a button that asks in a modal
+//! dialog.
 //!
 //! `cargo run --release --example gallery [-- --shot <file.png>]`
 
@@ -101,6 +102,8 @@ impl Gallery {
         ui.tooltip(r.id, "Back to the default");
         let r = ui.info_button();
         ui.tooltip(r.id, "An ⓘ explains what one line can't");
+        let r = ui.warning_button();
+        ui.tooltip(r.id, "A warning tells what is wrong");
         ui.help_button();
       });
       line(ui, "CHECK BOXES AND SWITCHES", |ui| {
@@ -150,7 +153,7 @@ impl Gallery {
         ui.disabled(true).search(&mut String::new(), "Off");
       });
       line(ui, "ICONS", |ui| {
-        ui.grid(10, Style::new().gap(10.0), |ui| {
+        ui.grid(11, Style::new().gap(10.0), |ui| {
           for (_, icon, _) in Icon::ALL {
             ui.icon_stroke(icon, 20.0, t.text, 1.6);
           }

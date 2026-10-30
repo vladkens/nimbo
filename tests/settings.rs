@@ -7,7 +7,9 @@
 //! the reset puts the default back; the slider drags and steps; the dialog asks before clearing
 //! the cache and resetting all: Return chooses its default, Escape cancels, Tab and Space the
 //! action, its backdrop dims the page and takes the pointer; a row's switch keeps its width and
-//! place beside a long description that wraps. Assistive technology reads the controls by their
+//! place beside a long description that wraps. A row's warning takes its ⓘ's place, in the
+//! theme's warning colour, and shows in one tooltip with the ⓘ's tip under it; a disabled row's
+//! ⓘ stays enabled and shows its tip. Assistive technology reads the controls by their
 //! rows with their values, and the dialog as modal, its default button focused until it gives
 //! the focus back, and the focus only while the window has it; its actions flip a switch, step
 //! the slider, choose in a select, move the focus, and reach only the dialog while it is open.
@@ -21,7 +23,7 @@ mod common;
 
 use std::time::Duration;
 
-use common::{px, reads};
+use common::{mid, px, reads};
 use nimbo::ui::Action;
 use nimbo::{
   Appearance, Code, Event, Harness, Hotkey, Id, Key, Modifiers, NamedKey, Rect, Size, Theme,
@@ -44,6 +46,21 @@ fn turn(h: &mut H, page: Page) {
   h.click_id(Id::of(TABS).key(i));
   h.wait(Duration::from_millis(50));
   assert_eq!(h.app().page, page);
+}
+
+/// The mark of row `row`: its ⓘ, or the warning in its place.
+fn mark(h: &H, row: &str) -> Rect {
+  h.rect(Id::of(row).key("info")).unwrap_or_else(|| panic!("no mark in {row}"))
+}
+
+/// Rests the pointer on the mark of row `row` until its tooltip shows; the tooltip's text.
+fn tip(h: &mut H, row: &str) -> String {
+  let (x, y) = mid(mark(h, row));
+  h.move_to(x, y);
+  h.wait(Duration::from_millis(400));
+  let tip = Id::of(row).key("info").key("tip");
+  assert!(h.rect(tip).is_some(), "no tooltip on the mark of {row}");
+  h.text(tip.nth(0)).unwrap_or_default().to_owned()
 }
 
 fn hotkey(h: &H) -> Option<String> {
@@ -390,4 +407,69 @@ fn a_press_behind_a_modal_dialog_is_refused() {
   assert_eq!(h.app().ask, Some(Ask::ClearCache));
   assert!(h.act(Id::of(CONFIRM).key("action"), Action::Press));
   assert_eq!((h.app().ask, h.app().cache), (None, 0));
+}
+
+/// A row's warning takes its ⓘ's place, as big, in the theme's warning colour with the "!" cut
+/// out of it, in both appearances; it reads as a warning, and goes with what it warns of.
+#[test]
+fn a_warning_marks_its_row_in_the_warning_colour() {
+  let mut h = start();
+  let looks = [(Appearance::LIGHT, Theme::PLATES_LIGHT), (Appearance::DARK, Theme::PLATES_DARK)];
+  for (look, t) in looks {
+    h.event(Event::Appearance(look));
+    h.wait(Duration::from_millis(50));
+    let (r, img) = (mark(&h, LOGIN_ROW), h.render());
+    // In its 24-unit view box: the fill either side of the "!"'s dot, and the ground through
+    // the middle of its stem.
+    let at = |x: f32, y: f32| img.pixel(r.x + x / 24.0 * r.w, r.y + y / 24.0 * r.h);
+    assert_eq!(at(7.0, 17.0), px(t.warning));
+    assert_eq!(at(17.0, 17.0), px(t.warning));
+    let ground = (-2..=2).any(|i| at(12.0 + i as f32 * 0.2, 11.0) == px(t.plate));
+    assert!(ground, "the plate through the \"!\": {:?}", at(12.0, 11.0));
+    let info = mark(&h, LAUNCH_ROW);
+    assert_eq!((r.w, r.h), (info.w, info.h), "as big as the ⓘ");
+  }
+
+  let warning = format!("button \"Warning\" desc {LOGIN_WARNING:?}");
+  reads(&h.a11y(), &[&warning, &format!("button \"Info\" desc {TIP_LAUNCH:?}")]);
+  h.click_id(Id::of(LOGIN));
+  h.frame();
+  assert!(h.rect(Id::of(LOGIN_ROW).key("info")).is_none());
+}
+
+/// A row's warning shows its text on a rest; with the ⓘ's tip too, both in one tooltip, the
+/// warning first, read so; without the warning, the ⓘ and its tip alone.
+#[test]
+fn a_warning_and_a_tip_show_in_one_tooltip() {
+  let mut h = start();
+  assert_eq!(tip(&mut h, LOGIN_ROW), LOGIN_WARNING);
+  let both = format!("{HOTKEY_WARNING}\n\n{TIP_HOTKEY}");
+  assert_eq!(tip(&mut h, HOTKEY_ROW), both);
+  reads(&h.a11y(), &[&format!("button \"Warning\" desc {both:?}")]);
+  // Another shortcut: nothing to warn of.
+  h.app_mut().hotkey = Hotkey::parse("ctrl+shift+k").ok();
+  h.rt.redraw();
+  h.frame();
+  assert_eq!(tip(&mut h, HOTKEY_ROW), TIP_HOTKEY);
+  reads(&h.a11y(), &[&format!("button \"Info\" desc {TIP_HOTKEY:?}")]);
+}
+
+/// A disabled row's ⓘ stays enabled: as dark as an enabled row's, it reads enabled beside the
+/// row's disabled switch and shows its tip on a rest.
+#[test]
+fn a_disabled_rows_info_shows_its_tip() {
+  let mut h = start();
+  h.click_id(Id::of(UPDATES));
+  h.frame();
+  assert!(!h.app().updates);
+  let img = h.render();
+  let darkest = |r: Rect| {
+    let px = (0..(r.w * 2.0) as i32).flat_map(|x| (0..(r.h * 2.0) as i32).map(move |y| (x, y)));
+    px.map(|(x, y)| img.pixel(r.x + x as f32 / 2.0, r.y + y as f32 / 2.0)[0]).min().unwrap()
+  };
+  let (off, on) = (darkest(mark(&h, DOWNLOAD_ROW)), darkest(mark(&h, LAUNCH_ROW)));
+  assert!(off.abs_diff(on) <= 8, "the ⓘ at {off} in a disabled row, {on} in an enabled one");
+  let info = format!("button \"Info\" desc {TIP_DOWNLOAD:?}");
+  reads(&h.a11y(), &[&info, "switch \"Download them in the background\" off disabled"]);
+  assert_eq!(tip(&mut h, DOWNLOAD_ROW), TIP_DOWNLOAD);
 }

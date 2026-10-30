@@ -1,10 +1,11 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The button: a label or an icon over the button behaviour, drawn from the theme's
-//! variants and sizes; the ⓘ that explains a row and the round "?" that opens a page's help.
+//! variants and sizes; the ⓘ that explains a row, the warning mark that tells what is wrong with
+//! it, and the round "?" that opens a page's help.
 
 use super::icon::{self, Icon};
-use crate::scene::mix;
+use crate::scene::{Color, mix};
 use crate::ui::theme::{ButtonStyle, ControlSize, Variant};
 use crate::ui::{Response, Role, Style, TextStyle, Ui, px};
 
@@ -143,18 +144,35 @@ impl Ui<'_> {
 
   /// An ⓘ, 16 points, muted, in the label colour while held, halfway there under the pointer
   /// where the theme hovers controls ([crate::Theme::hover_all]): with a [Ui::tooltip], an
-  /// explanation longer than a line. A button by its behaviour.
+  /// explanation longer than a line. A button by its behaviour, named "Info".
   pub fn info_button(&mut self) -> Response {
+    let t = self.theme();
+    self.mark_button(Icon::INFO, [t.muted, t.text])
+  }
+
+  /// A warning mark in the ⓘ's size and place ([Ui::info_button]): a triangle with a "!" cut out
+  /// of it ([Icon::WARNING]) in the theme's warning colour ([crate::Theme::warning]), a third of
+  /// the way to the label colour while held: with a [Ui::tooltip], what is wrong. A button by its
+  /// behaviour, named "Warning".
+  pub fn warning_button(&mut self) -> Response {
+    let t = self.theme();
+    self.mark_button(Icon::WARNING, [t.warning, mix(t.warning, t.text, 0.33)])
+  }
+
+  /// A mark 16 points square over the button behaviour, named by its icon ([Icon::name]): in
+  /// `ink[0]`, `ink[1]` while held, halfway there under the pointer where the theme hovers
+  /// controls.
+  fn mark_button(&mut self, icon: Icon, ink: [Color; 2]) -> Response {
     let t = self.theme();
     let id = self.take_id();
     let b = self.button_behavior(id);
-    self.a11y(id, Role::Button).name_or("Info");
+    self.a11y(id, Role::Button).name_or(icon.name().unwrap_or_default());
     let hot = self.ctl_hot(id, b.hovered);
     let size = (t.font.size + 3.0).round();
     let k = if b.pressed { 1.0 } else { 0.5 * hot };
-    let color = self.dim(mix(t.muted, t.text, k), b.disabled);
+    let color = self.dim(mix(ink[0], ink[1], k), b.disabled);
     let s = self.control(Style::new().w(px(size)).h(px(size)).radius(size / 2.0), &b);
-    let mut r = self.with_id(id).canvas(s, move |f, r| icon::draw(f, Icon::INFO, r, color, 1.5));
+    let mut r = self.with_id(id).canvas(s, move |f, r| icon::draw(f, icon, r, color, 1.5));
     r.clicked = b.clicked;
     r
   }
