@@ -316,7 +316,6 @@ pub(in super::super) fn destroyed(hwnd: HWND) {
   }
 }
 
-/// Runs `f` on window `id`'s app if it is not busy, then redraws the window.
 /// Sends `ev` to window `id`'s runtime, its modal timer following; `None` when it is busy up
 /// the stack or gone.
 pub fn send(id: u64, ev: Event) -> Option<bool> {
@@ -327,6 +326,7 @@ pub fn send(id: u64, ev: Event) -> Option<bool> {
   })
 }
 
+/// Runs `f` on window `id`'s app if it is not busy, then redraws the window.
 pub fn with_app(id: u64, f: &mut dyn FnMut(&mut dyn App)) -> bool {
   let Some(hwnd) = hwnd(id) else { return false };
   let done = with_window(hwnd, |w| {

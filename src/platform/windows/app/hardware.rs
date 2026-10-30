@@ -266,8 +266,10 @@ pub(super) fn power(setting: &POWERBROADCAST_SETTING) {
 /// Whether the lid is open (its `Data`: 0 closed, 1 open) when `setting` is the lid's.
 fn lid_open(setting: &POWERBROADCAST_SETTING) -> Option<bool> {
   let ours = iid(&setting.PowerSetting) == LID_SWITCH && setting.DataLength >= 4;
-  // SAFETY: a DWORD of `DataLength` bytes follows the header.
-  ours.then(|| unsafe { setting.Data.as_ptr().cast::<u32>().read_unaligned() } != 0)
+  // SAFETY: a DWORD of `DataLength` bytes at `Data`, within the setting's size (its padding).
+  let data = std::mem::offset_of!(POWERBROADCAST_SETTING, Data);
+  let at = (&raw const *setting).cast::<u8>().wrapping_add(data).cast::<u32>();
+  ours.then(|| unsafe { at.read_unaligned() } != 0)
 }
 
 /// Keeps the lid open or closed: whether it changed (from unknown too).
@@ -298,8 +300,9 @@ mod tests {
   /// The power notification's lid: the first value and each change told once.
   #[test]
   fn the_lid_from_power_settings() {
+    // The header and a DWORD of data, aligned as the setting is.
     let setting = |guid: u128, v: u32| {
-      let mut s = [0u8; size_of::<POWERBROADCAST_SETTING>() + 4];
+      let mut s = [0u32; size_of::<POWERBROADCAST_SETTING>() / 4 + 1];
       let p = s.as_mut_ptr().cast::<POWERBROADCAST_SETTING>();
       unsafe {
         (*p).PowerSetting = GUID::from_u128(guid);
@@ -309,7 +312,7 @@ mod tests {
 
       s
     };
-    let read = |s: &[u8]| lid_open(unsafe { &*s.as_ptr().cast::<POWERBROADCAST_SETTING>() });
+    let read = |s: &[u32]| lid_open(unsafe { &*s.as_ptr().cast::<POWERBROADCAST_SETTING>() });
     assert_eq!(read(&setting(LID_SWITCH, 1)), Some(true));
     assert_eq!(read(&setting(LID_SWITCH, 0)), Some(false));
     assert_eq!(read(&setting(IID_UNKNOWN, 0)), None);
