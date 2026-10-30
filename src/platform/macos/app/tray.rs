@@ -217,7 +217,13 @@ impl Tray {
           continue;
         }
 
-        if item.isSectionHeader() {
+        // Below macOS 14 a header is the one item with no action and no submenu ([fill]).
+        let header = match objc2::available!(macos = 14.0) {
+          true => item.isSectionHeader(),
+          false => item.action().is_none() && item.submenu().is_none(),
+        };
+
+        if header {
           out.push(format!("{pad}{}||off|disabled|header", item.title()));
           continue;
         }
