@@ -1,7 +1,8 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Launch at login through `SMAppService.mainApp` (macOS 13+), which registers the app bundle the
-//! process runs from. Registering shows the system's "Login Item Added" notification.
+//! Launch at login through `SMAppService.mainApp` (macOS 13+; unavailable below), which registers
+//! the app bundle the process runs from. Registering shows the system's "Login Item Added"
+//! notification.
 
 use objc2::rc::Retained;
 use objc2_foundation::{NSBundle, NSError};
@@ -17,6 +18,10 @@ fn in_bundle() -> bool {
 }
 
 pub fn available() -> Result<(), String> {
+  if !objc2::available!(macos = 13.0) {
+    return Err("launch at login needs macOS 13 or later".into());
+  }
+
   match in_bundle() {
     true => Ok(()),
     false => Err("launch at login needs the app bundle; this runs as a bare binary".into()),
@@ -65,9 +70,12 @@ pub fn set(app: &AppInfo, on: bool) -> Result<State, String> {
   state(app)
 }
 
+/// Nothing below macOS 13, which has no `SMAppService`.
 pub fn open_settings() {
-  // SAFETY: a plain class method.
-  unsafe { SMAppService::openSystemSettingsLoginItems() };
+  if objc2::available!(macos = 13.0) {
+    // SAFETY: a plain class method.
+    unsafe { SMAppService::openSystemSettingsLoginItems() };
+  }
 }
 
 #[cfg(test)]

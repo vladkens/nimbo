@@ -59,7 +59,7 @@ impl Item {
     Self { separator: true, ..Self::new("", "") }
   }
 
-  /// A section title, never chosen: macOS 14's section header, a disabled item elsewhere.
+  /// A section title, never chosen: a section header on macOS 14+, a disabled item elsewhere.
   pub fn header(label: &str) -> Self {
     Self { header: true, enabled: false, ..Self::new("", label) }
   }

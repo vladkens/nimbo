@@ -40,7 +40,7 @@ KINDS = ("code", "docs", "comments", "tests", "blank")
 # lines one change needs.
 STEP = 100
 BUDGETS = {
-  "platform/macos": 2500,
+  "platform/macos": 2900,
   "platform/windows": 2200,
   "platform/linux": 3200,
   "ui": 3900,
@@ -48,11 +48,10 @@ BUDGETS = {
   "text": 1200,
   "core": 4000,
   "app/shared": 1900,
-  "app/macos": 2000,
-  "app/windows": 2000,
-  "app/linux": 2800,
+  "app/macos": 1900,
+  "app/windows": 1900,
+  "app/linux": 2700,
   "a11y": 400,
-  "update": 800,
 }
 # Modules that count against a budget of another name ("app", src/app.rs, is the core's seams).
 # The settings form and the dialog are add-ons over the widgets, as the containers are; the

@@ -81,6 +81,15 @@ impl Icon {
     "M16.70 9.28L13.98 12L16.70 14.72L14.72 16.70L12 13.98L9.28 16.70L7.30 14.72L10.02 12",
     "L7.30 9.28L9.28 7.30L12 10.02L14.72 7.30Z"
   ));
+  /// A filled triangle with round corners and a "!" cut out of it, the ground showing through:
+  /// a warning, as SF Symbols' `exclamationmark.triangle.fill`. Wider than the ⓘ and its apex
+  /// higher, its base level with the ⓘ's bottom, so the two read one size.
+  pub const WARNING: Self = Self::filled(concat!(
+    "M9.92 2.8A2.4 2.4 0 0 1 14.08 2.8L22.51 17.4A2.4 2.4 0 0 1 20.43 21H3.57",
+    "A2.4 2.4 0 0 1 1.49 17.4Z",
+    "M10.5 8.6 10.85 13.8a1.15 1.15 0 0 0 2.3 0l.35-5.2a1.5 1.5 0 0 0-3 0Z",
+    "M10.5 17.7a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0Z"
+  ));
   /// A filled triangle with round corners: play.
   pub const PLAY: Self =
     Self::filled("M8 5.8v12.4a.8.8 0 0 0 1.2.7l10-6.2a.8.8 0 0 0 0-1.4l-10-6.2A.8.8 0 0 0 8 5.8z");
@@ -114,11 +123,12 @@ impl Icon {
 
   /// Every built-in icon, for a gallery and the tests, with what a button showing it alone does
   /// ([Icon::name]).
-  pub const ALL: [(&'static str, Self, &'static str); 20] = [
+  pub const ALL: [(&'static str, Self, &'static str); 21] = [
     ("gear", Self::GEAR, "Settings"),
     ("contrast", Self::CONTRAST, "Appearance"),
     ("sliders", Self::SLIDERS, "Options"),
     ("info", Self::INFO, "Info"),
+    ("warning", Self::WARNING, "Warning"),
     ("reset", Self::RESET, "Reset"),
     ("trash", Self::TRASH, "Delete"),
     ("folder", Self::FOLDER, "Folder"),

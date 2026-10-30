@@ -6,8 +6,7 @@
 //! on the main queue ([post()]), and the Dock ([Presence]); links and files opened ([open]),
 //! Accessibility, Secure Input and the microphone ([permissions]), shortcuts posted to the app in
 //! focus ([post]), where the user types ([focus]), the pasteboard for a paste ([paste]), alerts
-//! ([alert]), files fetched over HTTP ([http]), an update's disk image opened and checked
-//! ([update]), what an uninstall resets ([uninstall]), and a microphone's transport and the lid
+//! ([alert]), what an uninstall resets ([uninstall]), and a microphone's transport and the lid
 //! and their changes ([hardware]).
 
 pub mod activity;
@@ -16,7 +15,6 @@ pub mod desktop;
 pub mod focus;
 pub mod hardware;
 pub mod hotkey;
-pub mod http;
 pub mod menu;
 pub mod open;
 pub mod paste;
@@ -24,7 +22,6 @@ pub mod permissions;
 pub mod post;
 pub mod tray;
 pub mod uninstall;
-pub mod update;
 
 use std::cell::Cell;
 use std::time::Duration;
@@ -85,6 +82,6 @@ pub fn alert(title: &str, message: &str) {
   let alert = NSAlert::new(mtm);
   alert.setMessageText(&NSString::from_str(title));
   alert.setInformativeText(&NSString::from_str(message));
-  NSApplication::sharedApplication(mtm).activate();
+  super::activate(mtm);
   alert.runModal();
 }

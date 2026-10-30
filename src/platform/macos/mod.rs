@@ -1,11 +1,11 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The macOS platform: NSApplication and its windows ([shell]), each window's content our NSView
-//! ([view]: input, cursors, display link and timers, occlusion, present through [surface]) and its
-//! nodes for assistive clients ([a11y]), the keyboard layout ([keyboard]), overlay panels
-//! ([overlay]), the clipboard on NSPasteboard, the CoreText text backend ([text]) and the
-//! performance cores; the tray, global hotkeys and launch at login in [app]. macOS 14 or later: the
-//! app's activation and the view's display link need it.
+//! ([view]: input, cursors, timers, occlusion, present through [surface]; its display link in
+//! [link]) and its nodes for assistive clients ([a11y]), the keyboard layout ([keyboard]), overlay
+//! panels ([overlay]), the clipboard on NSPasteboard, the CoreText text backend ([text]) and the
+//! performance cores; the tray, global hotkeys and launch at login in [app]. macOS 11 or later,
+//! with the newer APIs behind run-time checks.
 
 mod view;
 
@@ -14,6 +14,7 @@ mod app;
 mod files;
 mod input;
 mod keyboard;
+mod link;
 mod overlay;
 pub mod shell;
 mod surface;
@@ -33,8 +34,8 @@ use objc2_app_kit::{
 use objc2_foundation::{NSArray, NSString, NSUserDefaults, ns_string};
 
 pub use self::app::{
-  activity, autostart, desktop, focus, hardware, hotkey, http, open, paste, permissions, post,
-  tray, uninstall, update,
+  activity, autostart, desktop, focus, hardware, hotkey, open, paste, permissions, post, tray,
+  uninstall,
 };
 use crate::app::{Appearance, Clipboard};
 
@@ -87,6 +88,17 @@ fn mtm() -> MainThreadMarker {
   MainThreadMarker::new().expect("nimbo: AppKit is main thread only")
 }
 
+/// Brings the app to the front: `activate` on macOS 14+, `activateIgnoringOtherApps:` below it.
+fn activate(mtm: MainThreadMarker) {
+  let app = NSApplication::sharedApplication(mtm);
+  if objc2::available!(macos = 14.0) {
+    app.activate();
+  } else {
+    #[allow(deprecated)]
+    app.activateIgnoringOtherApps(true);
+  }
+}
+
 /// The app's effective appearance (light or dark Aqua, as System Settings sets it unless the
 /// app overrides it) and the accent colour, `None` for Multicolor: `AppleAccentColor` is then
 /// unset and controls use the app's own. The accent is `controlAccentColor` resolved in that
@@ -112,7 +124,8 @@ pub fn appearance() -> Appearance {
   Appearance { dark, accent: accent.get() }
 }
 
-/// The performance cores of an Apple Silicon Mac (`hw.perflevel0.physicalcpu`).
+/// The performance cores of an Apple Silicon Mac (`hw.perflevel0.physicalcpu`); `None` on macOS
+/// 11, which has no such sysctl (it came in 12), so the renderer counts the cores itself.
 pub fn perf_cores() -> Option<usize> {
   use std::ffi::{c_char, c_int, c_void};
 

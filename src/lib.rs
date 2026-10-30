@@ -24,8 +24,9 @@
 //! attached and the laptop's lid ([hardware]), and the system's changes, such as a microphone
 //! plugged or the lid closed, as they come ([system], [Main::watch]).
 //!
-//! macOS 14 is the least it runs on (`NSApplication`'s `activate`, `NSView`'s display link): build
-//! apps with `MACOSX_DEPLOYMENT_TARGET=14.0`.
+//! macOS 11 is the least it runs on, rustc's default deployment target, so an app sets none;
+//! newer APIs are used where the system has them (the activation, the display link and menu
+//! section headers on 14+, launch at login on 13+).
 
 pub mod activity;
 pub mod app;
@@ -55,7 +56,6 @@ pub mod text;
 pub mod tray;
 pub mod ui;
 pub mod uninstall;
-pub mod update;
 
 use std::path::PathBuf;
 

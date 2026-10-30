@@ -3,12 +3,12 @@
 //! Settings windows in macOS 26 System Settings' look ([FormStyle::plates], measured from
 //! its screenshots): toolbar tabs of an icon over a label ([Ui::toolbar_tabs]), and pages
 //! of sections, each a bold title (and an optional grey line under it) over a grey rounded plate
-//! of rows. A row is a label with an optional ⓘ tooltip and a grey description under it at the
-//! left, the controls at the right, a leading tile (a letter or an icon) when it lists things,
-//! and a hairline above it inset from both sides of the plate. A footer row under the last plate
-//! holds the page's buttons and a round "?" that opens its help ([Ui::form_footer],
-//! [Ui::form_help]). Rows pitch 37.5 points, 53 with a one-line description, over
-//! [super::Sizes::PLATES]; draw it with [super::Theme::PLATES_LIGHT] or
+//! of rows. A row is a label with an optional ⓘ tooltip (or a warning mark in its place) and a
+//! grey description under it at the left, the controls at the right, a leading tile (a letter or an
+//! icon) when it lists things, and a hairline above it inset from both sides of the plate. A footer
+//! row under the last plate holds the page's buttons and a round "?" that opens its help
+//! ([Ui::form_footer], [Ui::form_help]). Rows pitch 37.5 points, 53 with a one-line description,
+//! over [super::Sizes::PLATES]; draw it with [super::Theme::PLATES_LIGHT] or
 //! [super::Theme::PLATES_DARK], or the OS's of the two ([super::Theme::system], the default).
 //!
 //! The controls keep their own width ([super::Dim::Rigid]) and sit at the row's right edge
@@ -32,10 +32,11 @@
 //! }));
 //! ```
 //!
-//! A disabled row dims its label and disables every widget in it ([Ui::disabled_scope]). The
-//! toolbar is a pick ([Ui::pick_behavior]): a click, or the arrows while it has focus (Tab), choose
-//! a tab.
+//! A disabled row dims its label and disables every widget in it ([Ui::disabled_scope]) but its ⓘ
+//! or warning mark, whose tooltip reads all the same. The toolbar is a pick ([Ui::pick_behavior]):
+//! a click, or the arrows while it has focus (Tab), choose a tab.
 
+use std::borrow::Cow;
 use std::ops::Range;
 
 use super::containers::lazy::Spans;
@@ -104,7 +105,8 @@ pub struct FormStyle {
   /// The footer under the last plate ([Ui::form_footer]): its box, right-aligned buttons and
   /// their gap.
   pub footer: Style,
-  /// The ⓘ after a label ([FormRow::info]): its size, as [Ui::info_button] draws it.
+  /// The ⓘ after a label ([FormRow::info]) or the warning mark in its place
+  /// ([FormRow::warning]): its size, as [Ui::info_button] and [Ui::warning_button] draw them.
   pub info: f32,
   /// A selected row's fill ([FormRow::selected]).
   pub selected: Color,
@@ -261,12 +263,13 @@ pub enum Tile<'s> {
   Icon(Icon),
 }
 
-/// A row of a form section ([Ui::form_row]): its label, an optional ⓘ tooltip, description and
-/// leading tile, and whether it is disabled.
+/// A row of a form section ([Ui::form_row]): its label, an optional ⓘ tooltip or warning,
+/// description and leading tile, and whether it is disabled.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FormRow<'s> {
   label: &'s str,
   info: Option<&'s str>,
+  warning: Option<&'s str>,
   caption: Option<&'s str>,
   tile: Option<Tile<'s>>,
   disabled: bool,
@@ -284,6 +287,13 @@ impl<'s> FormRow<'s> {
     Self { info: Some(tip), ..self }
   }
 
+  /// A warning mark in the ⓘ's place ([Ui::warning_button]), showing `text` on hover, and the
+  /// [FormRow::info] tip under it when the row has one: what is wrong with the setting, as
+  /// System Settings marks one.
+  pub fn warning(self, text: &'s str) -> Self {
+    Self { warning: Some(text), ..self }
+  }
+
   /// Grey text under the label, wrapping onto as many lines as it needs.
   pub fn caption(self, caption: &'s str) -> Self {
     Self { caption: Some(caption), ..self }
@@ -294,7 +304,9 @@ impl<'s> FormRow<'s> {
     Self { tile: Some(tile), ..self }
   }
 
-  /// Dims the label and disables the row's widgets when `yes`.
+  /// Dims the label and disables the row's widgets when `yes`, but its ⓘ or warning mark, whose
+  /// tooltip reads all the same. In a row a click selects ([Style::hit]) assistive technology
+  /// reads the mark disabled with its row; on screen it stays enabled.
   pub fn disabled(self, yes: bool) -> Self {
     Self { disabled: yes, ..self }
   }
@@ -418,12 +430,14 @@ impl Ui<'_> {
   /// left, what `control` builds at the right, 8 apart, and a hairline above it unless it is the
   /// first. The controls keep their width and place at the right edge, centred on the row's
   /// height; the label and description wrap in what is left, the row growing taller. A
-  /// disabled row's text is [super::Theme::tertiary]. The ⓘ is `id.key("info")` of the row's
-  /// id, the label's text `id.key("label")` and the description's `id.key("caption")`. The row
-  /// takes no input, its controls do, unless [FormStyle::row] is [Style::hit]: then it is a row
-  /// a click selects, named by its label and description for assistive technology. Else the
-  /// first control recorded in it with no name of its own takes them as its name and
-  /// description ([Ui::a11y]), and they are not read again.
+  /// disabled row's text is [super::Theme::tertiary]; its ⓘ or warning mark stays enabled (in a
+  /// row a click selects, assistive technology reads it disabled with its row). The
+  /// mark, the ⓘ or the warning in its place, is `id.key("info")` of the row's id, the label's text
+  /// `id.key("label")` and the description's `id.key("caption")`. The row takes no input, its
+  /// controls do, unless [FormStyle::row] is [Style::hit]: then it is a row a click selects,
+  /// named by its label and description for assistive technology. Else the first control recorded
+  /// in it with no name of its own takes them as its name and description ([Ui::a11y]), and they
+  /// are not read again.
   pub fn form_row<R>(
     &mut self,
     fs: &FormStyle,
@@ -492,13 +506,25 @@ impl Ui<'_> {
             let s = if row.one_line { fs.label.ellipsis() } else { fs.label };
             ui.next_id = Some((id.key("label"), false));
             ui.text(row.label, dim(s));
-            if let Some(tip) = row.info {
-              let info = id.key("info");
+            // One tip: the warning, then the ⓘ's.
+            let tip = match (row.warning, row.info) {
+              (Some(w), Some(i)) => Some(Cow::Owned(format!("{w}\n\n{i}"))),
+              (w, i) => w.or(i).map(Cow::Borrowed),
+            };
+
+            if let Some(tip) = tip {
+              let mark = id.key("info");
               let shift = ui.mark_shift(fs.label);
               let size = Style::new().w(px(fs.info)).h(px(fs.info));
               let at = Float::parent().offset(0.0, shift).clip();
-              ui.row(size, |ui| _ = ui.with_id(info).float(at).info_button());
-              ui.tooltip(info, tip);
+              // Enabled in a disabled row: help reads all the same.
+              let off = std::mem::replace(&mut ui.scope_off, false);
+              ui.row(size, |ui| {
+                let ui = ui.with_id(mark).float(at);
+                _ = if row.warning.is_some() { ui.warning_button() } else { ui.info_button() };
+              });
+              ui.scope_off = off;
+              ui.tooltip(mark, &tip);
             }
           });
           if let Some(c) = row.caption {

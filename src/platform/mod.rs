@@ -120,39 +120,6 @@
 //!   for the app besides launch at login, undone (macOS its permissions and defaults, Linux the
 //!   launcher entry and the portal's token), and `busy(&io::Error) -> bool`, an error a removal may
 //!   pass when tried again.
-//! - `pub mod http` ([crate::update]), from any thread: `get(url: &str, to: &Path, max: u64,
-//!   progress: &mut dyn FnMut(u64)) -> io::Result<()>`, a GET's body written to the file `to`,
-//!   blocking until it ends, stopped past `max` bytes ([too_big]), `progress` told the bytes so far
-//!   on the calling thread as they come (unthrottled) and, on `Ok`, at the end; redirects followed
-//!   (GitHub sends assets to another host; on Linux only to https, http too from loopback; on macOS
-//!   by the shared session's defaults, http too), no cache, the system's proxy (Linux: the
-//!   `*_proxy` variables), a status other than 2xx an error from [status]; on `Err` `to` may hold a
-//!   part. macOS `NSURLSession`, Windows WinHTTP, Linux `libcurl.so.4` (`Unsupported` without).
-//! - `pub mod update` ([crate::update]), from any thread, its tools by absolute path: `unpack(file:
-//!   &Path, app: &Path) -> io::Result<PathBuf>`, the new app from the release's file, in the
-//!   staging folder that holds it (macOS the `.dmg` attached read-only at `<staging>/volume` by
-//!   `/usr/bin/hdiutil`, its one `.app` at the top held to `app` by `accepts` and copied to
-//!   `<staging>/new` by `/usr/bin/ditto`, then detached, forced if it must be; Windows the setup as
-//!   it came; Linux the AppImage made executable), `InvalidData` when the image holds more than one
-//!   app or none, or a tool fails; `detach(&mut Command) -> io::Result<Child>`, the installer
-//!   spawned apart from the app (Unix its own process group, Windows `DETACHED_PROCESS |
-//!   CREATE_NO_WINDOW`, out of the job where it may); `wait_exit(pid: u32, cap: Duration) -> bool`,
-//!   the process `pid` ended within `cap` (Unix: this one's parent, by `getppid`, so a reused pid
-//!   can't fool it; Windows `wait_exit(pid: u32) -> impl Fn(u32, Duration) -> bool`, its handle
-//!   opened at the call, before the installer's mark); `alive(pid: u32) -> bool`, for the staging
-//!   folders of ended installers; `start(app: &Path, args: &[OsString], note: Option<&str>) ->
-//!   io::Result<()>`, the installed app started with `args`, and `note` in its `NIMBO_UPDATE_ERROR`
-//!   ([crate::update::NOTE], none inherited), without waiting for it (macOS `/usr/bin/open -n -g
-//!   [--env …] … --args`, by LaunchServices in launchd's environment, in `/` and without the focus;
-//!   Windows the app folder's exe of this one's name; Linux the AppImage without the installer's
-//!   AppImage variables), else in this process's working directory. Windows also `setup(exe: &Path)
-//!   -> io::Result<i32>`, the per-user NSIS setup run silent (`/S`, into
-//!   `%LOCALAPPDATA%\Programs\<name>`) with no window to its end, its exit code. macOS also
-//!   `accepts(new: &Path, app: &Path) -> io::Result<()>`, the new bundle of `app`'s id meeting its
-//!   designated requirement for every architecture (Security.framework's
-//!   `SecStaticCodeCheckValidityWithErrors`), else `InvalidData` with its reason, and `exchange(a:
-//!   &Path, b: &Path) -> io::Result<()>`, the two swapped in one step (`renamex_np` with
-//!   `RENAME_SWAP`). On Unix `detach`, `wait_exit` and `alive` are `linux/app/process.rs`'s.
 //! - `pub mod activity` ([crate::activity]), from any thread: `Token: Send`, `begin(&str) ->
 //!   Token`, `end(Token)`.
 //! - `pub mod post` ([crate::keys::post]): `post(Shortcut) -> Result<(), String>`, the shortcut as
@@ -190,8 +157,8 @@
 //!   `IMMNotificationClient` and the power setting to the shell's window; Linux PulseAudio's
 //!   subscription and UPower's `PropertiesChanged`), and `unwatch()` stops them all.
 //!
-//!   `activity`, `hardware`, `http`, `open`, `post`, `paste`, `focus`, `permissions`, `uninstall`
-//!   and `update` live in `app/` on each OS too.
+//!   `activity`, `hardware`, `open`, `post`, `paste`, `focus`, `permissions` and `uninstall` live
+//!   in `app/` on each OS too.
 //! - `pub fn appearance() -> Appearance` ([crate::Appearance]): `dark`, and `accent` in sRGB or
 //!   `None` when the OS has none or the user left it to apps (macOS: `effectiveAppearance` matched
 //!   against Aqua / DarkAqua, `controlAccentColor` unless Multicolor; on the main thread only,
@@ -248,11 +215,6 @@ use linux as imp;
 #[cfg_attr(windows, path = "windows/app/instance.rs")]
 pub(crate) mod instance;
 
-/// The update's processes on every Unix, in macOS' and Linux' `update`.
-#[cfg(unix)]
-#[path = "linux/app/process.rs"]
-pub(crate) mod process;
-
 /// Linux's, for its files in the user's folders: on every Unix for [crate::desktop]'s tests.
 #[cfg(any(all(test, unix), target_os = "linux"))]
 #[path = "linux/app/write.rs"]
@@ -261,7 +223,6 @@ pub(crate) mod write;
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 compile_error!("nimbo runs on macOS, Windows and Linux");
 
-use std::io;
 #[cfg(any(test, target_os = "windows"))]
 use std::time::{Duration, Instant};
 
@@ -271,27 +232,13 @@ pub(crate) use imp::permissions;
 #[cfg(target_os = "linux")]
 pub(crate) use imp::startup_complete;
 pub(crate) use imp::{
-  activity, autostart, clipboard, desktop, focus, hardware, hotkey, http, open, paste, perf_cores,
-  post, shell, text, tray, uninstall, update,
+  activity, autostart, clipboard, desktop, focus, hardware, hotkey, open, paste, perf_cores, post,
+  shell, text, tray, uninstall,
 };
 #[cfg(target_os = "windows")]
 pub(crate) use imp::{attach_console, downloads};
 #[cfg(any(test, target_os = "windows", target_os = "linux"))]
 use keyboard_types::Code;
-
-/// `http::get`'s error for a body of more than `max` bytes.
-pub(crate) fn too_big(url: &str, max: u64) -> io::Error {
-  io::Error::new(io::ErrorKind::InvalidData, format!("{url}: more than {max} bytes"))
-}
-
-/// `http::get`'s answer to the HTTP status `code` of `url`: 2xx is `Ok`, 404 `NotFound`.
-pub(crate) fn status(url: &str, code: u32) -> io::Result<()> {
-  match code {
-    200..300 => Ok(()),
-    404 => Err(io::Error::new(io::ErrorKind::NotFound, format!("{url}: HTTP 404"))),
-    _ => Err(io::Error::other(format!("{url}: HTTP {code}"))),
-  }
-}
 
 /// The points of `px` pixels at `scale`: the least that the renderer's pixels (`points × scale`,
 /// cut down: [crate::cpu::Renderer::pixel_size]) give back whole at a fractional scale, where
