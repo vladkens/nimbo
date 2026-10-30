@@ -106,6 +106,7 @@ pub struct Quad {
 }
 
 impl Quad {
+  /// A filled rect in points: square corners, no border, no blur.
   pub const fn new(rect: Rect, color: Color) -> Self {
     let z = [0.0; 4];
     let (blur, gradient, _pad) = (0.0, 0.0, [0.0; 2]);
@@ -121,18 +122,24 @@ impl Quad {
     Self { border_color: to, borders: [0.0; 4], gradient, ..self }
   }
 
+  /// Every corner rounded by `r` points.
   pub const fn radius(self, r: f32) -> Self {
     Self { radii: [r; 4], ..self }
   }
 
+  /// Corner radii in points, clockwise from the top-left, as in CSS: top-left, top-right,
+  /// bottom-right, bottom-left.
   pub const fn radii(self, radii: [f32; 4]) -> Self {
     Self { radii, ..self }
   }
 
+  /// A border `w` points wide on every side, inside the rect.
   pub const fn border(self, w: f32, color: Color) -> Self {
     Self { borders: [w; 4], border_color: color, ..self }
   }
 
+  /// Border widths in points, inside the rect, clockwise from the top, as in CSS: top, right,
+  /// bottom, left.
   pub const fn borders(self, borders: [f32; 4], color: Color) -> Self {
     Self { borders, border_color: color, ..self }
   }
@@ -465,7 +472,8 @@ impl Frame<'_> {
 
   /// The shaping API for custom paint, such as a text widget of the app's own: shaped lines and
   /// their glyphs ([TextSystem::layout]), caret positions ([TextSystem::carets]), measures and
-  /// metrics, in points.
+  /// metrics, in points; also whether a kept line is still current, whether a glyph draws in
+  /// colour, the scale and whether glyphs are smoothed.
   pub fn text_system(&mut self) -> &mut TextSystem {
     self.text
   }
