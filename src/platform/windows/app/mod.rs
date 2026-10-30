@@ -7,7 +7,8 @@
 //! shortcuts posted to the app in front ([post]), where the user types ([focus]) and the clipboard
 //! for a paste ([paste]), files fetched over HTTP ([http]) and an update's setup run ([update]);
 //! the Downloads folder ([downloads]), the console of the command line ([attach_console]), the
-//! uninstall's retries ([uninstall]) and a microphone's transport ([hardware]).
+//! uninstall's retries ([uninstall]) and a microphone's transport, the lid and their changes
+//! ([hardware]).
 
 pub mod activity;
 pub mod autostart;

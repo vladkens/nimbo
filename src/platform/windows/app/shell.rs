@@ -5,8 +5,9 @@
 //! out of the taskbar) that runs posted work ([post]: a message carrying the boxed closure, or a
 //! timer for a delay), takes the tray's callbacks and the broadcasts only top-level windows get:
 //! the session ending (`WM_ENDSESSION`, which runs the quit hook and exits), `TaskbarCreated`
-//! (Explorer restarted: the tray icons are added again) and colour changes (the icons retinted).
-//! Modal loops (a menu, a live resize) dispatch its messages too, so posts run under them.
+//! (Explorer restarted: the tray icons are added again) and colour changes (the icons retinted);
+//! and the lid's power setting while it is watched ([hardware]). Modal loops (a menu, a live
+//! resize) dispatch its messages too, so posts run under them.
 //!
 //! Windows has no Dock: the taskbar shows the windows only, so [set_presence] changes nothing; a
 //! second launch starts a second process (the reopen hook never runs yet).
