@@ -215,11 +215,21 @@ fn handle(main: &mut Main, cmd: &Command, quit: &dyn Fn(&mut Main)) {
 /// A watched change of the system ([Main::watch]): the hook, then every open window. One that
 /// comes while the hook runs (a nested loop up the stack) is queued and delivered after it.
 pub(crate) fn changed(main: &mut Main, change: Change) {
-  deliver(main, change, &imp::send);
+  deliver(main, change, imp::send, post);
 }
 
-/// [changed] with the platform's `send` to a window (`None` when it is busy up the stack).
-fn deliver(main: &mut Main, change: Change, send: &dyn Fn(u64, Event) -> Option<bool>) {
+/// The platform's send of an event to a window: `None` when it is busy up the stack or gone.
+type SendFn = fn(u64, Event) -> Option<bool>;
+/// Work for the main thread after a delay: [Proxy::after], a fake in tests.
+type PostFn = fn(Duration, Later);
+type Later = Box<dyn FnOnce() + Send>;
+
+fn post(delay: Duration, f: Later) {
+  Proxy(()).after(delay, move |_| f());
+}
+
+/// [changed] with the platform's `send` to a window and the loop's `post`.
+fn deliver(main: &mut Main, change: Change, send: SendFn, post: PostFn) {
   let busy = hooks(|h| h.changes.as_mut().map(|q| q.push_back(change)).is_some());
   if busy {
     return;
@@ -234,32 +244,22 @@ fn deliver(main: &mut Main, change: Change, send: &dyn Fn(u64, Event) -> Option<
       hooks(|h| _ = h.change.get_or_insert(f));
     }
 
-    let missed = send_all(windows(), change, send);
-    if !missed.is_empty() {
-      retry(missed, change);
-    }
-
+    retry(windows(), change, send, post);
     next = hooks(|h| h.changes.as_mut().and_then(VecDeque::pop_front));
   }
 
   hooks(|h| h.changes = None);
 }
 
-/// Sends `change` to windows `ids`: the ids of those busy.
-fn send_all(ids: Vec<u64>, change: Change, send: &dyn Fn(u64, Event) -> Option<bool>) -> Vec<u64> {
-  ids.into_iter().filter(|&id| send(id, Event::System(change)).is_none()).collect()
-}
-
-/// Tries windows `ids`, busy a moment ago, again in a moment, until they take `change` or close.
-fn retry(ids: Vec<u64>, change: Change) {
-  Proxy(()).after(system::RETRY, move |_| {
-    let open = windows();
-    let missed =
-      send_all(ids.into_iter().filter(|id| open.contains(id)).collect(), change, &imp::send);
-    if !missed.is_empty() {
-      retry(missed, change);
-    }
-  });
+/// Sends `change` to the windows `ids` still open; those busy are tried again after
+/// [system::RETRY], until they take it or close.
+fn retry(ids: Vec<u64>, change: Change, send: SendFn, post: PostFn) {
+  let open = windows();
+  let ids = ids.into_iter().filter(|id| open.contains(id));
+  let missed: Vec<_> = ids.filter(|&id| send(id, Event::System(change)).is_none()).collect();
+  if !missed.is_empty() {
+    post(system::RETRY, Box::new(move || retry(missed, change, send, post)));
+  }
 }
 
 /// The activation token of the command being handled, for a window that shows or comes to the
@@ -649,29 +649,54 @@ mod tests {
     HOOKS.take();
   }
 
-  /// A change runs the hook, then each window, a busy one missed (tried again in a moment); one
-  /// delivered while the hook runs (a nested loop up the stack) waits for it.
+  thread_local! {
+    static SEEN: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    static BUSY: Cell<u32> = const { Cell::new(0) };
+    static POSTED: RefCell<Vec<(Duration, Later)>> = RefCell::default();
+  }
+
+  fn seen(s: impl Into<String>) {
+    SEEN.with_borrow_mut(|v| v.push(s.into()));
+  }
+
+  /// Window 2 is busy the first [BUSY] times it's sent to.
+  fn send_busy(id: u64, ev: Event) -> Option<bool> {
+    seen(format!("{id} {ev:?}"));
+    let busy = id == 2 && BUSY.get() > 0;
+    BUSY.set(BUSY.get().saturating_sub(busy as u32));
+    (!busy).then_some(true)
+  }
+
+  fn post_later(delay: Duration, f: Later) {
+    POSTED.with_borrow_mut(|p| p.push((delay, f)));
+  }
+
+  fn run_posted() -> Vec<Duration> {
+    let run = |(d, f): (Duration, Later)| {
+      f();
+      d
+    };
+    POSTED.take().into_iter().map(run).collect()
+  }
+
+  fn two_windows() {
+    hooks(|h| h.windows.extend([(1, TypeId::of::<u8>(), None), (2, TypeId::of::<u8>(), None)]));
+  }
+
+  /// A change runs the hook, then each window; one delivered while the hook runs (a nested loop
+  /// up the stack) waits for it.
   #[test]
   fn changes_run_the_hook_then_the_windows() {
-    let seen = Rc::new(RefCell::new(Vec::new()));
-    let s = seen.clone();
     let hook = move |main: &mut Main, c: Change| {
-      s.borrow_mut().push(format!("hook {c:?}"));
+      seen(format!("hook {c:?}"));
       if c == Change::AudioInputs {
-        deliver(main, Change::Lid, &|_, _| None);
-        s.borrow_mut().push("hook done".into());
+        deliver(main, Change::Lid, |_, _| None, post_later);
+        seen("hook done");
       }
     };
-    hooks(|h| {
-      h.change = Some(Box::new(hook));
-      h.windows.extend([(1, TypeId::of::<u8>(), None), (2, TypeId::of::<u8>(), None)]);
-    });
-    let s = seen.clone();
-    let send = move |id: u64, ev: Event| {
-      s.borrow_mut().push(format!("{id} {ev:?}"));
-      (id == 1).then_some(true)
-    };
-    deliver(&mut Main::here(), Change::AudioInputs, &send);
+    hooks(|h| h.change = Some(Box::new(hook)));
+    two_windows();
+    deliver(&mut Main::here(), Change::AudioInputs, send_busy, post_later);
     let want = [
       "hook AudioInputs",
       "hook done",
@@ -681,25 +706,43 @@ mod tests {
       "1 System(Lid)",
       "2 System(Lid)",
     ];
-    assert_eq!(*seen.borrow(), want);
-    assert_eq!(send_all(vec![1, 2], Change::Lid, &|id, _| (id == 2).then_some(false)), [1]);
+    assert_eq!(SEEN.take(), want);
+    assert!(POSTED.take().is_empty(), "no window busy");
+    HOOKS.take();
+  }
+
+  /// A busy window is tried again after the retry's delay until it takes the change; a window
+  /// closed meanwhile isn't.
+  #[test]
+  fn a_busy_window_gets_the_change_later() {
+    two_windows();
+    BUSY.set(2);
+    deliver(&mut Main::here(), Change::Lid, send_busy, post_later);
+    assert_eq!(SEEN.take(), ["1 System(Lid)", "2 System(Lid)"]);
+    assert_eq!(run_posted(), [system::RETRY]);
+    assert_eq!(SEEN.take(), ["2 System(Lid)"], "still busy");
+    assert_eq!(run_posted(), [system::RETRY]);
+    assert_eq!(SEEN.take(), ["2 System(Lid)"], "taken");
+    assert!(POSTED.with_borrow(Vec::is_empty));
+
+    BUSY.set(1);
+    deliver(&mut Main::here(), Change::Lid, send_busy, post_later);
+    SEEN.take();
+    closed(2);
+    run_posted();
+    assert!(SEEN.take().is_empty(), "closed: not tried again");
     HOOKS.take();
   }
 
   /// A hook that watches again with another keeps the other.
   #[test]
   fn a_hook_replaced_by_itself_stays_replaced() {
-    let seen = Rc::new(RefCell::new(Vec::new()));
-    let s = seen.clone();
     Main::here()
-      .watch(&[], move |main, _| {
-        let s = s.clone();
-        _ = main.watch(&[], move |_, _| s.borrow_mut().push("second"));
-      })
+      .watch(&[], move |main, _| _ = main.watch(&[], move |_, _| seen("second")))
       .unwrap();
-    deliver(&mut Main::here(), Change::Lid, &|_, _| Some(true));
-    deliver(&mut Main::here(), Change::Lid, &|_, _| Some(true));
-    assert_eq!(*seen.borrow(), ["second"]);
+    deliver(&mut Main::here(), Change::Lid, |_, _| Some(true), post_later);
+    deliver(&mut Main::here(), Change::Lid, |_, _| Some(true), post_later);
+    assert_eq!(SEEN.take(), ["second"]);
     HOOKS.take();
   }
 

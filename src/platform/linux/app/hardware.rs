@@ -8,10 +8,11 @@
 //! (master, read 2026-10-30).
 
 use std::cell::{Cell, RefCell};
-use std::ffi::{CStr, c_int, c_uint};
+use std::ffi::{CStr, c_int, c_long, c_uint};
 use std::ptr::{null, null_mut};
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::super::dbus::{self, Gv};
 use super::super::dl::{Lib, fns};
@@ -189,16 +190,46 @@ static LOOP: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(null_mut());
 static API: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(null_mut());
 static CONTEXT: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(null_mut());
 
+/// The context reached `READY`: its failure (the server died) reconnects at once; one that
+/// never was (a server named by `PULSE_SERVER` or client.conf that isn't there, which NOFAIL
+/// doesn't wait for) tries again after [RETRY_S], not in a busy loop.
+static READIED: AtomicBool = AtomicBool::new(false);
+/// The subscription was refused: a later watch starts it all again.
+static REFUSED: AtomicBool = AtomicBool::new(false);
+const RETRY_S: u64 = 1;
+
+/// `pa_mainloop_api` up to `time_free`, for a timer.
+#[repr(C)]
+struct Api {
+  _userdata: P,
+  _io: [Fp; 4],
+  time_new: unsafe extern "C" fn(P, *const Timeval, Fp, P) -> P,
+  _time_restart: Fp,
+  time_free: unsafe extern "C" fn(P),
+}
+
+/// `struct timeval`, wall-clock time as `pa_mainloop` takes it.
+#[repr(C)]
+struct Timeval {
+  sec: c_long,
+  usec: c_long,
+}
+
 thread_local! {
-  /// On pulse's thread: the default source as last read, and whether a context was ready.
+  /// On pulse's thread: the default source as last read.
   static DEFAULT: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
-/// Pulse's main loop on its own thread, with a context connecting; `Err` only without
-/// `libpulse.so.0` (no server yet is waited for).
+/// Pulse's main loop on its own thread, with a context connecting: `Err` without
+/// `libpulse.so.0`, or when a named server refuses at once (the default one is waited for).
+/// Watched already, it starts again only after a refused subscription.
 fn watch_audio() -> Result<(), String> {
   if !LOOP.load(Ordering::Acquire).is_null() {
-    return Ok(());
+    if !REFUSED.swap(false, Ordering::AcqRel) {
+      return Ok(());
+    }
+
+    unwatch_audio();
   }
 
   let p = pulse().ok_or("libpulse.so.0 not found")?;
@@ -249,10 +280,8 @@ fn unwatch_context(p: &Pulse) {
 }
 
 fn unwatch_audio() {
-  let (Some(p), m) = (pulse(), LOOP.swap(null_mut(), Ordering::AcqRel)) else { return };
-  if m.is_null() {
-    return;
-  }
+  let m = LOOP.swap(null_mut(), Ordering::AcqRel);
+  let Some(p) = pulse().filter(|_| !m.is_null()) else { return };
 
   unsafe { (p.pa_threaded_mainloop_lock)(m) };
   unwatch_context(p);
@@ -263,22 +292,32 @@ fn unwatch_audio() {
 
 /// The context's state, on pulse's thread: ready, it subscribes, reads the default source and
 /// tells both kinds, as the server's devices may differ from what the app read before (no
-/// server then, or one restarted); failed (the server died), a new context is made outside
-/// this callback.
+/// server then, or one restarted); failed, a new context is made outside this callback, at
+/// once after a ready one ([READIED]), else after [RETRY_S].
 unsafe extern "C" fn on_state(c: P, _: P) {
   let Some(p) = pulse() else { return };
   match unsafe { (p.pa_context_get_state)(c) } {
     READY => {
       unsafe { (p.pa_context_set_subscribe_callback)(c, on_event as Fp, null_mut()) };
-      let op = unsafe { (p.pa_context_subscribe)(c, MASK, subscribed as Fp, null_mut()) };
-      unsafe { (p.pa_operation_unref)(op) };
+      unref(p, unsafe { (p.pa_context_subscribe)(c, MASK, subscribed as Fp, null_mut()) });
       server_info(p, c);
+      READIED.store(true, Ordering::Release);
       notice(Change::AudioInputs);
       notice(Change::DefaultInput);
     }
     FAILED | TERMINATED if CONTEXT.load(Ordering::Acquire) == c => {
       let api = API.load(Ordering::Acquire);
-      unsafe { (p.pa_mainloop_api_once)(api, reconnect as Fp, null_mut()) };
+      if READIED.swap(false, Ordering::AcqRel) {
+        unsafe { (p.pa_mainloop_api_once)(api, reconnect as Fp, null_mut()) };
+        return;
+      }
+
+      let at = SystemTime::now() + Duration::from_secs(RETRY_S);
+      let at = at.duration_since(UNIX_EPOCH).unwrap_or_default();
+      let tv = Timeval { sec: at.as_secs() as c_long, usec: at.subsec_micros() as c_long };
+      // SAFETY: the threaded main loop's API, whose table starts as `Api` declares.
+      let a = unsafe { &*api.cast::<Api>() };
+      unsafe { (a.time_new)(api, &tv, later as Fp, null_mut()) };
     }
     _ => {}
   }
@@ -288,18 +327,32 @@ unsafe extern "C" fn on_state(c: P, _: P) {
 /// kind is watched any more, so a later watch tries again.
 unsafe extern "C" fn subscribed(_: P, success: c_int, _: P) {
   if success == 0 {
+    REFUSED.store(true, Ordering::Release);
     for kind in [Change::AudioInputs, Change::DefaultInput] {
       refused(kind, "PulseAudio refused the subscription");
     }
   }
 }
 
-/// Replaces the failed context with a new one, which waits for the server to come back.
+/// Replaces the failed context with a new one, which waits for the default server to come back
+/// (a named one that refuses fails it again, and [on_state] tries later).
 unsafe extern "C" fn reconnect(_: P, _: P) {
   let Some(p) = pulse() else { return };
   unwatch_context(p);
-  if let Err(e) = connect(p) {
-    eprintln!("nimbo: system: PulseAudio: {e}");
+  _ = connect(p);
+}
+
+/// [RETRY_S] passed after a context that never was ready failed: its timer let go, a new one.
+unsafe extern "C" fn later(api: P, e: P, _: *const Timeval, _: P) {
+  // SAFETY: the timer made in `on_state` on this API, freed once here.
+  unsafe { ((*api.cast::<Api>()).time_free)(e) };
+  unsafe { reconnect(api, null_mut()) };
+}
+
+/// Lets go of an operation's handle; null when the call failed (the context gone).
+fn unref(p: &Pulse, op: P) {
+  if !op.is_null() {
+    unsafe { (p.pa_operation_unref)(op) };
   }
 }
 
@@ -314,7 +367,7 @@ unsafe extern "C" fn on_event(c: P, t: c_uint, _: u32, _: P) {
 }
 
 fn server_info(p: &Pulse, c: P) {
-  unsafe { (p.pa_operation_unref)((p.pa_context_get_server_info)(c, on_info as Fp, null_mut())) };
+  unref(p, unsafe { (p.pa_context_get_server_info)(c, on_info as Fp, null_mut()) });
 }
 
 /// The server's info: its default source compared with the last one read.

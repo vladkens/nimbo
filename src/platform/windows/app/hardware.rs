@@ -204,6 +204,13 @@ pub fn watch(kind: Change) -> Result<(), String> {
   }
 }
 
+/// Our client unregistered, if it was registered here.
+fn unwatch_audio() {
+  if let Some(devices) = DEVICES.take() {
+    unsafe { call!(devices, UNREGISTER, (*mut c_void) -> HRESULT; client()) };
+  }
+}
+
 fn watch_audio() -> Result<(), String> {
   if DEVICES.with_borrow(Option::is_some) {
     return Ok(());
@@ -242,10 +249,7 @@ fn watch_lid() -> Result<(), String> {
 
 /// Stops both: the client unregistered (never from its own callbacks), the lid forgotten.
 pub fn unwatch() {
-  if let Some(devices) = DEVICES.take() {
-    unsafe { call!(devices, UNREGISTER, (*mut c_void) -> HRESULT; client()) };
-  }
-
+  unwatch_audio();
   let h = POWER.replace(0);
   if h != 0 {
     unsafe { UnregisterPowerSettingNotification(h) };
@@ -342,7 +346,8 @@ mod tests {
       // Registered by the window: revoked here once.
       assert_eq!(unsafe { RevokeDragDrop(hwnd) }, 0, "watched: {watched:?}");
       unsafe { DestroyWindow(hwnd) };
-      unwatch();
+      // The audio client only: the lid's state is the process's, which another test reads.
+      unwatch_audio();
     })
     .join()
     .unwrap();

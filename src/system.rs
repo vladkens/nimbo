@@ -149,8 +149,12 @@ impl Watcher {
 
   /// The job at `now`: the kinds due, in order, their bits cleared first (a notice during their
   /// delivery starts a new burst), and how long until the next job when the caller posts one.
+  /// `scheduled` is cleared by a read-modify-write, as [Watcher::notice] sets it: the two are
+  /// ordered on it, so either this job reads the bit that notice set before, or notice reads
+  /// `scheduled` clear and posts a job of its own. A plain store here could let both read old
+  /// values (store buffering), leaving a bit with no job to deliver it.
   pub(crate) fn take(&self, now: u64) -> (Vec<Change>, Option<Duration>) {
-    self.scheduled.store(false, Ordering::Release);
+    self.scheduled.swap(false, Ordering::AcqRel);
     let pending = self.pending.load(Ordering::Acquire);
     let (mut ready, mut wait) = (Vec::new(), None::<Duration>);
     for kind in Change::ALL.into_iter().filter(|k| pending & k.bit() != 0) {
@@ -250,10 +254,7 @@ pub(crate) fn watch(kinds: &[Change]) -> Result<(), String> {
 
 /// Stops watching everything: the loop ends.
 pub(crate) fn unwatch() {
-  if Change::ALL.iter().any(|k| WATCHER.watching(*k)) {
-    imp::unwatch();
-  }
-
+  imp::unwatch();
   for kind in Change::ALL {
     WATCHER.unwatch(kind);
   }

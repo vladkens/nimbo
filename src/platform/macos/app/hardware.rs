@@ -155,9 +155,10 @@ thread_local! {
 /// call connects to coreaudiod, 35–75 ms in the macOS 27 VM (2026-10-30), which the app's first
 /// window shouldn't wait for.
 fn audio() -> &'static DispatchQueue {
-  static QUEUE: OnceLock<DispatchRetained<DispatchQueue>> = OnceLock::new();
   QUEUE.get_or_init(|| DispatchQueue::new("nimbo.audio", None))
 }
+
+static QUEUE: OnceLock<DispatchRetained<DispatchQueue>> = OnceLock::new();
 
 /// The system object's property that tells `kind`: its device list or its default input.
 fn address(kind: Change) -> Option<(usize, Address)> {
@@ -223,7 +224,9 @@ fn watch_lid() -> Result<(), String> {
 
 /// Stops every listener and the clamshell's notification.
 pub fn unwatch() {
-  audio().exec_async(|| {
+  // Nothing was added without the queue: none made for the loop's end.
+  let Some(audio) = QUEUE.get() else { return unwatch_lid() };
+  audio.exec_async(|| {
     let on = AUDIO.swap(0, Ordering::AcqRel);
     for (i, at) in [Change::AudioInputs, Change::DefaultInput].into_iter().filter_map(address) {
       if on & 1 << i != 0 {
@@ -232,6 +235,10 @@ pub fn unwatch() {
       }
     }
   });
+  unwatch_lid();
+}
+
+fn unwatch_lid() {
   if let Some((port, note)) = LID.take() {
     // SAFETY: the notification and its port, made by `watch_lid`, released once.
     unsafe { IOObjectRelease(note) };
