@@ -34,7 +34,7 @@ use objc2_foundation::{
 
 pub use super::app::{alert, is_main, post, set_presence};
 use super::view::View;
-use super::{Pasteboard, appearance, mtm, overlay};
+use super::{Pasteboard, activate, appearance, mtm, overlay};
 use crate::Config;
 use crate::app::{App, Clock, Event, Runtime};
 use crate::shell::{Anchor, AppInfo, Main, Presence};
@@ -207,7 +207,7 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
   shell(|s| *s = Shell::default());
   super::app::set_presence(info.presence);
   if info.presence == Presence::Regular {
-    ns_app.activate();
+    activate(mtm);
   }
 
   start(&mut Main::here());
@@ -306,6 +306,13 @@ define_class!(
     fn did_change_occlusion(&self, _note: &NSNotification) {
       if let Some(view) = view(self.ivars().id.get()) {
         view.occlusion_changed();
+      }
+    }
+
+    #[unsafe(method(windowDidChangeScreen:))]
+    fn did_change_screen(&self, _note: &NSNotification) {
+      if let Some(view) = view(self.ivars().id.get()) {
+        view.screen_changed();
       }
     }
 
@@ -412,7 +419,7 @@ pub fn front(id: u64) {
   }
 
   window.makeKeyAndOrderFront(None);
-  NSApplication::sharedApplication(mtm).activate();
+  activate(mtm);
 }
 
 /// Orders the window out; the Dock follows.
@@ -448,7 +455,7 @@ fn closed(id: u64) {
     return;
   };
   let on_close = crate::shell::closed(id);
-  win.view.stop();
+  win.view.close();
   win.window.setDelegate(None);
   let Win { window, view, _delegate, .. } = win;
   shell(|s| s.gone.push(Gone { window, _view: view, _delegate }));

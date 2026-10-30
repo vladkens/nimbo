@@ -23,8 +23,9 @@
 //! itself, which gives the clipboard back ([paste]); and the hardware: how a microphone is
 //! attached and the laptop's lid ([hardware]).
 //!
-//! macOS 14 is the least it runs on (`NSApplication`'s `activate`, `NSView`'s display link): build
-//! apps with `MACOSX_DEPLOYMENT_TARGET=14.0`.
+//! macOS 11 is the least it runs on, rustc's default deployment target, so an app sets none;
+//! newer APIs are used where the system has them (the activation, the display link and menu
+//! section headers on 14+, launch at login on 13+).
 
 pub mod activity;
 pub mod app;

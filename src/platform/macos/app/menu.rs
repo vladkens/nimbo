@@ -99,9 +99,26 @@ pub fn fill(
       continue;
     }
 
-    // macOS 14's section header, as the deployment target allows.
+    // A section header on macOS 14+; below it a disabled item with the title and no action, as
+    // Windows and Linux show one.
     if it.header {
-      menu.addItem(&NSMenuItem::sectionHeaderWithTitle(&NSString::from_str(&it.label), mtm));
+      let title = NSString::from_str(&it.label);
+      if objc2::available!(macos = 14.0) {
+        menu.addItem(&NSMenuItem::sectionHeaderWithTitle(&title, mtm));
+        continue;
+      }
+
+      // SAFETY: no action.
+      let item = unsafe {
+        NSMenuItem::initWithTitle_action_keyEquivalent(
+          NSMenuItem::alloc(mtm),
+          &title,
+          None,
+          &NSString::new(),
+        )
+      };
+      item.setEnabled(false);
+      menu.addItem(&item);
       continue;
     }
 

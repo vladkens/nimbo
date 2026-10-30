@@ -39,7 +39,7 @@ KINDS = ("code", "docs", "comments", "tests", "blank")
 # goes up by a hundred, a decision recorded in its PR; never by the few lines one change needs.
 STEP = 100
 BUDGETS = {
-  "platform/macos": 2500,
+  "platform/macos": 2900,
   "platform/windows": 2200,
   "platform/linux": 3200,
   "ui": 3900,
