@@ -4,11 +4,11 @@ nimbo draws every pixel of its windows itself, on the CPU. The OS gives it a win
 
 ## In short
 
-- **CPU rendering, no GPU.** A scene of quads, lines, images and glyphs is rasterized into a BGRA buffer by `src/cpu/`; the OS's compositor only shows it.
+- **CPU rendering, no GPU path yet.** A scene of quads, lines, images and glyphs is rasterized into a BGRA buffer by `src/cpu/`; the OS's compositor only shows it.
 - **Immediate mode.** The app's `view` describes the whole window from its state on every frame that redraws; nimbo lays that tree out, paints it into a scene and keeps it for the next frame's hit testing.
-- **Damage by tiles.** The frame is cut into 64×64 px tiles, each with a hash of everything drawn over it. Only the tiles whose hash differs from what a buffer already holds are drawn again, and only those rects are presented.
+- **Damage by tiles.** The frame is cut into 64×64 px tiles, each with a hash of everything drawn over it. Only the tiles whose hash differs from what a buffer already holds are drawn again; Windows and Linux copy only those rects to the window, and macOS hands the window server the whole surface they were drawn into.
 - **Threads for big damage.** Small damage is drawn on the calling thread; above 256K px the rows are shared with a pool on the performance cores.
-- **The OS's text.** CoreText, DirectWrite or FreeType with HarfBuzz shape the text and rasterize each glyph once into an atlas.
+- **The OS's text.** CoreText, DirectWrite or FreeType with HarfBuzz shape the text and rasterize each glyph into an atlas, once per variant it is drawn in.
 - **Idle is idle.** With nothing to do a window builds no frames and has no wakeups.
 
 ## A frame, end to end
@@ -35,19 +35,19 @@ The portable half (`Runtime::frame` in `src/app.rs`, `src/ui/`, `src/cpu/`) is t
 
 A window draws only when `Runtime::needs_frame` says so (`src/app.rs`), which is when one of these holds:
 
-- **An event changed something.** `Runtime::event` routes it through the last frame's laid-out tree. It asks for a frame when the event was used, when the hover, press or focus changed, or when the app returned `true` from `App::event` or called `cx.redraw()`. A mouse move that changes none of these draws nothing.
-- **An animation is running**: an `ui.animate` value hasn't reached its target, a spinner or a menu is moving, or `App::paint` called `f.animate()`.
+- **An event changed something.** `Runtime::event` routes it through the last frame's laid-out tree. It asks for a frame when the event was used, when the hover, press or focus changed, or when the app returned `true` from `App::event` or called `cx.redraw()`. A move with a button held (a drag) or while the view tracks the pointer (`Ui::track_moves`) redraws too; any other mouse move that changes none of these draws nothing.
+- **An animation is running**: an `ui.animate` value hasn't reached its target, a progress spinner turns, wheel momentum still scrolls, a virtual column is still bringing a row into view, or `App::paint` called `f.animate()`. A menu that just opened asks for one more frame to place itself.
 - **A timer is due**: `ui.request_frame_in`, `cx.after`, a caret's next blink, the end of a flash.
 - **A waker fired**: `Waker::wake` from any thread, for work done in the background.
-- **The last frame asks for one more**: the window resized or an overlay opened or closed (what the view read from the last frame is a frame behind), or the glyph atlas filled up and was reset.
+- **The last frame asks for one more**: the window resized or an overlay opened or closed (what the view read from the last frame is a frame behind), the hover moved again under the frame's own layout (once, not over and over), or the glyph atlas filled up and was reset.
 
 The platform paces these frames to the display and sleeps otherwise:
 
-- **macOS** (`src/platform/macos/view.rs`, `link.rs`): a display link calls the view on each refresh while the runtime needs frames and is paused as soon as it doesn't. It is `CADisplayLink` on macOS 14 and later and a `CVDisplayLink` per display below 14. A timer the app asked for sleeps on the main queue and draws its one frame there, without waking the display link.
-- **Windows** (`src/platform/windows/mod.rs`): the message loop sleeps in `MsgWaitForMultipleObjectsEx` until input, a wake or a high-resolution waitable timer, set to the next timer or, while something animates, to the next refresh of the window's display.
+- **macOS** (`src/platform/macos/view.rs`, `link.rs`): a display link calls the view on each refresh while the runtime needs frames and is paused as soon as it doesn't. It is `CADisplayLink` on macOS 14 and later. Below 14 it is a `CVDisplayLink` per display, whose ticks reach the view through a run-loop source on the main run loop, so they come during menu tracking too; without CoreVideo the view ticks every 1/60 s from a dispatch timer. A timer the app asked for sleeps on the main queue and draws its one frame there, without waking the display link.
+- **Windows** (`src/platform/windows/mod.rs`): the message loop sleeps in `MsgWaitForMultipleObjectsEx` until input, a wake or a high-resolution waitable timer, set to the next timer or, while something animates, to the next refresh of the window's display. Inside the system's modal loops (a live move or resize, an open menu) frames come from a `WM_TIMER` instead.
 - **Linux** (`src/platform/linux/mod.rs`): frames follow GTK's `GdkFrameClock`, built after GTK's layout at the size it just gave, so a live resize never stretches. Timers are GLib timeouts.
 
-A minimized or fully covered window draws nothing until it shows again.
+A window that isn't shown draws nothing until it shows again: on macOS one that is minimized, fully covered or on another space; on Windows one that is minimized or hidden; on Linux one that is withdrawn or iconified.
 
 ## How events and wakes reach the loop
 
@@ -70,15 +70,15 @@ if ui.button("Add one").clicked {
 }
 ```
 
-Every element gets an `Id` (its index among its siblings hashed with its parent's, or a key or name the app gives it). Input reaches the view as state: the runtime keeps the last frame's laid-out tree (`UiState.last`) and hit tests the pointer on it, so when the view builds an element again it can answer whether it is hovered, pressed, focused or was just clicked. That answer comes back as a `Response` (`hovered`, `pressed`, `focused`, `clicked`, and for text fields `changed`, `submitted`, `cancelled`, `blurred`).
+Every element gets an `Id`: its index among its siblings or a key the app gives it, hashed with its parent's id, or a frame-wide name (`ui.id("save")`, found again with `Id::of`). Input reaches the view as state: the runtime keeps the last frame's laid-out tree (`UiState.last`) and hit tests the pointer on it, so when the view builds an element again it can answer whether it is hovered, pressed, focused or was just clicked. That answer comes back as a `Response` (`hovered`, `pressed`, `focused`, `clicked`, and for text fields `changed`, `submitted`, `cancelled`, `blurred`).
 
-State the app shouldn't hold (scroll offsets, animations, text cursors, a widget's internal state) lives in a store keyed by id (`src/ui/store.rs`). An entry lives while its id is built in each frame and is dropped after the first frame without it, unless an ancestor is kept with `ui.retain` (a hidden tab).
+State the app shouldn't hold (scroll offsets, animations, text cursors, a widget's internal state) lives in a store keyed by id (`src/ui/store.rs`). An entry lives while its id is built or its state used in each frame and is dropped after the first frame with neither, unless an ancestor is kept with `ui.retain` (a hidden tab).
 
 `view` can run more than once per frame, and between frames:
 
 - **After a click.** `Runtime::event` runs the view once at once, without layout or paint (`Runtime::pass`), so `.clicked` is seen and the app's state changes before the next frame is built. Keys, text and input methods for the focused element are delivered through such a pass too, after the view is laid out again if an event changed it since the last frame (`Runtime::fresh`), so they see the text as it is.
 - **When the layout moved the hover.** After layout the pointer is hit tested on the new tree; if the hovered element changed (content scrolled, the window resized), the view runs again so hover is never a frame behind.
-- **When a virtual list shows rows it didn't build.** Its viewport grew or its offset was clamped; the view runs again on the new layout, up to three passes.
+- **When a virtual list shows rows it didn't build, or the layout moved what the view drew from.** A list's viewport grew or its offset was clamped, or an element the view read the last frame's rect of (`Ui::settle`: a split's panes, a scrollbar's thumb) moved or resized; the view runs again on the new layout, up to three passes.
 
 So `view` should build the tree from state and not do work that counts on running once per frame. Heavy work belongs in the app's state or on a thread, with `view` reading its result.
 
@@ -89,7 +89,7 @@ So `view` should build the tree from state and not do work that counts on runnin
 The whole tree is laid out on every frame, but the expensive part, text, is mostly looked up rather than measured:
 
 - **Shaped lines** (`src/text/mod.rs`): each (face, text) is shaped once by the OS's text stack (kerning, ligatures, font fallback) and kept. Past 4096 lines, those the last frame didn't use are evicted.
-- **Least widths and wrapped lines** (`Kept` in `src/ui/layout/wrap.rs`, over `src/text/memo.rs`): a wrapping text's least width (its widest character) and its lines broken at a given width are computed once per font and text and kept across frames. Past 4096 entries or 4 MB, a layout drops what it didn't use.
+- **Least widths and wrapped lines** (`Kept` in `src/ui/layout/wrap.rs`, over `src/text/memo.rs`): a wrapping text's least width (its widest character) and its lines broken at a given width are computed once per font and text and kept across frames. Past 4096 entries or 4 MiB, a layout drops what it didn't use.
 
 ## Paint
 
@@ -97,13 +97,13 @@ The paint pass (`src/ui/paint.rs`) walks the laid-out tree into the frame's `Sce
 
 Elements outside the window or their clip are skipped, and a long text paints only the lines whose ink reaches into the clip. The scene's buffers are cleared, not dropped, so a steady frame allocates nothing.
 
-Glyphs are drawn from atlases (`src/text/atlas.rs`): the OS's text backend rasterizes each glyph once, at the pixel size, into an R8 coverage atlas with four horizontal subpixel positions, or into an RGBA atlas for colour emoji. New bitmaps queue as uploads, and `Renderer::sync` copies them into the renderer's atlases before the frame is drawn.
+Glyphs are drawn from atlases (`src/text/atlas.rs`): the OS's text backend rasterizes each glyph on first use, at the pixel size, into an R8 coverage atlas with four horizontal subpixel positions (and, with font smoothing, apart for dark text on a light ground and light text on a dark one), or into an RGBA atlas for colour emoji. The atlases start over when the scale or the smoothing changes, when one fills up, or past 256 faces. New bitmaps queue as uploads, and `Renderer::sync` copies them into the renderer's atlases before the frame is drawn.
 
 ## Raster
 
 The CPU renderer (`src/cpu/mod.rs`) draws a scene in three steps:
 
-1. **Prepare.** Every primitive gets its pixel bounds under its layer's clip and, for a solid quad, the opaque rect it covers. It is binned into the 32-row bands it touches, and its hash (its kind, its fields, its clipped rect) is folded into the hash of every 64×64 tile it touches, in drawing order. The tiles start from a seed of the frame's size, scale and atlas generation, so a resize or an atlas reset changes every tile.
+1. **Prepare.** Every primitive gets its pixel bounds under its layer's clip and, for a solid quad, the opaque rect it covers. It is binned into the 32-row bands it touches, and its hash (its kind, its fields, its clipped rect) is folded into the hash of every 64×64 tile it touches, in drawing order. The tiles start from a seed of the frame's size and scale, a generation bumped when atlas or image pixels change under the same coordinates (an atlas reset, an image id reused), and whether the frame clears to transparent, so a resize or an atlas reset changes every tile.
 2. **Damage.** The tile hashes are compared with those of the frame the target buffer already holds. The tiles that differ are merged into disjoint rects; a buffer of another size gets the whole frame.
 3. **Draw.** Only the damaged rects are cleared and drawn, band by band, in 256-px chunks. Each chunk starts at the last primitive that covers it with an opaque colour, so a panel hides what lies under it without drawing it. Coverage is computed per pixel centre and blended premultiplied into BGRA8 (`src/cpu/raster.rs`), with NEON for the blend on 64-bit ARM (Apple Silicon).
 
@@ -156,4 +156,4 @@ On macOS (`src/platform/macos/a11y.rs`) nothing runs until an assistive client s
 - **The cost follows what `view` builds, not what changed.** Every frame that redraws runs `view` and lays out the whole tree, so content that is built but off screen costs on every frame, a hover tick included. Long content belongs in the containers that build only what is in view: `ui.list` / `List` (`src/ui/containers/list.rs`), `ui.virtual_col` (`src/ui/containers/lazy.rs`) and `ui.form_list` (`src/ui/form.rs`). A form of 500,000 rows takes about 0.4 ms of view and layout per frame on an M2.
 - **A scroll or resize frame often runs `view` twice**: when the elements under the pointer change with the new layout, the view runs again.
 - **No subtree caching**: there is no way yet to keep a static part of the tree laid out across frames.
-- **No GPU path yet.** A full repaint (a resize, the first frame, a scroll of a big area) costs in proportion to the pixels, which on a large high-DPI screen or a slow CPU is where a frame gets tight. A scroll redraws the scrolled area rather than moving the pixels already drawn. A Metal renderer behind the same scene is a possible future, not planned work.
+- **No GPU path yet.** A full repaint (a resize, the first frame, a scroll of a big area) costs in proportion to the pixels, which on a large high-DPI screen or a slow CPU is where a frame gets tight. A scroll redraws the scrolled area rather than moving the pixels already drawn. A Metal renderer on macOS is planned for later; the first version ships without one because the CPU renderer measured fast enough.

@@ -102,7 +102,7 @@ It suits settings windows, tray and HUD apps and tools with long lists. A change
 
 ### How it draws
 
-nimbo renders on the CPU, with no GPU path. Each frame that redraws, `view` rebuilds the element tree, which is laid out and painted into a flat scene. The renderer cuts the frame into 64×64 px tiles, each with a hash of what is drawn over it, and draws again only the tiles whose hash differs from the frame the buffer holds, on the performance cores when the damage is big. Only those tiles reach the screen: drawn into an IOSurface on macOS, copied by BitBlt on Windows, queued as GTK's damage on Linux. Text goes through the OS's stack (CoreText, DirectWrite, FreeType with HarfBuzz), and an idle window draws no frames. [docs/rendering.md](docs/rendering.md) follows a frame step by step.
+nimbo renders on the CPU, with no GPU path yet: the frame is cut into 64×64 px tiles, each hashed by what is drawn over it, and only the tiles that changed are drawn again (on the performance cores when many did); Windows and Linux copy only those to the window. [docs/rendering.md](docs/rendering.md) follows a frame step by step.
 
 ### Examples
 
