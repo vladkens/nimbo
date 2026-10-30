@@ -1,11 +1,11 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The macOS platform: NSApplication and its windows ([shell]), each window's content our NSView
-//! ([view]: input, cursors, display link and timers, occlusion, present through [surface]) and its
-//! nodes for assistive clients ([a11y]), the keyboard layout ([keyboard]), overlay panels
-//! ([overlay]), the clipboard on NSPasteboard, the CoreText text backend ([text]) and the
-//! performance cores; the tray, global hotkeys and launch at login in [app]. macOS 14 or later: the
-//! app's activation and the view's display link need it.
+//! ([view]: input, cursors, timers, occlusion, present through [surface]; its display link in
+//! [link]) and its nodes for assistive clients ([a11y]), the keyboard layout ([keyboard]), overlay
+//! panels ([overlay]), the clipboard on NSPasteboard, the CoreText text backend ([text]) and the
+//! performance cores; the tray, global hotkeys and launch at login in [app]. macOS 11 or later,
+//! with the newer APIs behind run-time checks.
 
 mod view;
 
@@ -124,7 +124,8 @@ pub fn appearance() -> Appearance {
   Appearance { dark, accent: accent.get() }
 }
 
-/// The performance cores of an Apple Silicon Mac (`hw.perflevel0.physicalcpu`).
+/// The performance cores of an Apple Silicon Mac (`hw.perflevel0.physicalcpu`); `None` on macOS
+/// 11, which has no such sysctl (it came in 12), so the renderer counts the cores itself.
 pub fn perf_cores() -> Option<usize> {
   use std::ffi::{c_char, c_int, c_void};
 

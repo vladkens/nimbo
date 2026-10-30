@@ -4,7 +4,7 @@ A small custom-drawn desktop UI toolkit in Rust: its own CPU renderer draws ever
 
 ## Boundaries
 
-- macOS (Apple Silicon) comes first, then Windows and Linux. macOS 14 is the minimum (`MACOSX_DEPLOYMENT_TARGET` in `.cargo/config.toml`), with no fallbacks for older systems. The CPU renderer draws everywhere.
+- macOS (Apple Silicon) comes first, then Windows and Linux. macOS 11 is the minimum, rustc's default deployment target, so an app sets none: an API newer than 11 runs behind `objc2::available!` or `respondsToSelector:` with a fallback (or its feature reports itself unavailable), and no C symbol newer than 11 is linked. The CPU renderer draws everywhere.
 - Every crate needs a reason: the `objc2` family on macOS, `windows-sys` on Windows, none on Linux (GTK 3 and the system libraries load at run time), plus a handful of small crates. Change dependencies only with `cargo add` / `cargo remove` / `cargo upgrade`, never by hand. When the crate count changes, update every crate count in the readme (macOS / Windows / Linux, nimbo excluded), counted per target with `cargo tree -e normal --target <triple> --prefix none --no-dedupe | sort -u | grep -v '^nimbo ' | wc -l` for `aarch64-apple-darwin`, `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu`. Frameworks with hundreds of crates (GPUI, egui, iced) are references to read, not to build on.
 - Raising a code budget (`BUDGETS` in `scripts/size.py`) is a decision recorded in the PR.
 - Keep third-party checkouts in `3rd/` (gitignored), never modify them, and name the source file in a comment when porting from one, keeping its license.
@@ -35,9 +35,10 @@ A small custom-drawn desktop UI toolkit in Rust: its own CPU renderer draws ever
 - Verify every visual change by looking at its harness shot yourself (`cargo run --example <name> -- --shot <file.png>`, `--appearance light|dark`): open the image, cropped for text detail, and compare it with the macOS references (`docs/settings.png`) at the same scale when the look is meant to match.
 - A PR that touches the macOS accessibility adapter runs `scripts/ax-check.py`; harness tests assert the model with `Harness::a11y()`.
 - A PR that touches a platform's event loop or present path runs `make pace` on each backend it touches: GTK on Wayland and X11 (`GDK_BACKEND=wayland|x11`), Windows; CI runs it on X11 under Xvfb.
+- Once `~/Code/vm` has a macOS 12 profile, a change to a fallback for an older macOS gets a smoke run there (12 is the oldest Apple Silicon can run): a couple of examples start, come to the front, animate and quit; nothing heavier.
 
 ## Workflow
 
 - For multi-step work keep a checklist in `docs/plans/yyyymmdd-<name>.md` and tick it during the work; when done add `Done: yyyy-mm-dd` and a short `## Result`, and move it to `docs/plans/completed/`.
-- `make check` (it needs nightly rustfmt and `rustup target add x86_64-pc-windows-msvc x86_64-unknown-linux-gnu`) and `make test` pass before a commit; `make prepare` formats the code, adds the blank lines `make check` asks for and applies clippy's fixes.
+- `make check` (it needs nightly rustfmt, `rustup target add x86_64-pc-windows-msvc x86_64-unknown-linux-gnu` and, on a Mac, Xcode's clang for `scripts/macos-min.py`) and `make test` pass before a commit; `make prepare` formats the code, adds the blank lines `make check` asks for and applies clippy's fixes.
 - A commit is one short lowercase line, `<area>: <what changed>`, with no body; docs go in the same commit.

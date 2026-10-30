@@ -5,7 +5,7 @@
 //!
 //! | | where | when not [available] |
 //! |---|---|---|
-//! | macOS | `SMAppService.mainApp` (macOS 13+): System Settings → General → Login Items | a bare binary: it registers the app bundle the process runs from |
+//! | macOS | `SMAppService.mainApp` (macOS 13+): System Settings → General → Login Items | below macOS 13, or a bare binary: it registers the app bundle the process runs from |
 //! | Windows | the `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` value named by the app's id; Task Manager's Startup apps can turn it off ([State::RequiresApproval]) | — |
 //! | Linux | `$XDG_CONFIG_HOME/autostart/<id>.desktop` (XDG Autostart), run by the session | — |
 //!
@@ -31,8 +31,8 @@ impl State {
   }
 }
 
-/// `Err` with the reason when this process cannot launch at login (macOS: not run from an app
-/// bundle).
+/// `Err` with the reason when this process cannot launch at login (macOS: below 13, or not run
+/// from an app bundle).
 pub fn available() -> Result<(), String> {
   imp::available()
 }
