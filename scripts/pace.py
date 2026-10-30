@@ -7,7 +7,9 @@
 Runs the pace example (examples/pace.rs, release build) traced, counts the frames presented
 while its bar moves and the wakeups once it is still, prints both and fails when frames come
 slower than PACE_MIN fps (55; at 60 Hz, frames paced from their end come at about 40) or the
-still window wakes at all.
+still window wakes at all. Both are timed from its first frame, not from the launch: a CI
+runner's cold first launch takes 0.1-1.2 s and at times more, which left the bar moving in a
+still window timed from the launch.
 
 It runs in the session's display: on Linux Wayland if WAYLAND_DISPLAY is set, else X11
 (`xvfb-run -a uv run scripts/pace.py` headless), or on Windows in the desktop session. Wakeups
@@ -26,9 +28,11 @@ import tempfile
 import time
 from pathlib import Path
 
-# The bar moves for 3 s from the first frame: still well after 4 s.
+# The bar moves for 3 s from the first frame: still well after 4 s of it.
 SETTLE = 4.5
 IDLE = 2
+# How long the first frame may take after the launch, in s.
+LAUNCH = 15
 
 
 def switches(pid: int) -> int:
@@ -83,6 +87,22 @@ def fps(log: str) -> str:
   return f"{n * 1000 / (WINDOW[1] - WINDOW[0]):.1f}"
 
 
+def first_frame(log: Path, app: subprocess.Popen) -> float | None:
+  """When the first frame in `log` was presented (unix time, s), once it is there; `None` when
+  none comes within LAUNCH s or the app ends first (`app.poll()` tells which). Only whole
+  lines count: the app may be writing the last one."""
+  end = time.monotonic() + LAUNCH
+  while time.monotonic() < end and app.poll() is None:
+    for line in log.read_text(errors="replace").split("\n")[:-1]:
+      f = line.split()
+      if len(f) >= 3 and f[1] == "presented":
+        return float(f[2]) / 1000
+
+    time.sleep(0.02)
+
+  return None
+
+
 def main() -> int:
   if platform.system() == "Darwin":
     print("pace: macOS paces by its display link, and opens no test windows here", file=sys.stderr)
@@ -97,27 +117,55 @@ def main() -> int:
   least = os.environ.get("PACE_MIN", "55")
   env = {**os.environ, "NIMBO_TRACE": "1"}
 
-  with tempfile.TemporaryFile("w+") as log:
-    app = subprocess.Popen([binary], stderr=log, env=env)
+  # The log is read as the app writes it, by a handle of its own (a shared one's offset would
+  # move under the app's writes).
+  with tempfile.TemporaryDirectory() as tmp:
+    log = Path(tmp) / "trace.log"
+    with log.open("w") as out:
+      launched = time.time()
+      app = subprocess.Popen([binary], stderr=out, env=env)
+
+    # The app must last the whole run: once it ends, its counts stand still (or go, with its
+    # threads) and would pass as no wakeups.
+    ended = None
     try:
-      time.sleep(SETTLE)
-      c0 = switches(app.pid)
-      time.sleep(IDLE)
-      wakeups = switches(app.pid) - c0
+      first = first_frame(log, app)
+      if first is not None:
+        time.sleep(max(0.0, first + SETTLE - time.time()))
+        c0 = switches(app.pid)
+        time.sleep(IDLE)
+        wakeups = switches(app.pid) - c0
+
+      ended = app.poll()
     finally:
       app.kill()
       app.wait()
 
-    log.seek(0)
-    text = log.read()
+    text = log.read_text(errors="replace")
+
+  lines = text.splitlines()
+  if ended is not None:
+    print(f"pace: FAIL (the app ended before the run did, exit code {ended})", file=sys.stderr)
+    print(text, file=sys.stderr)
+    return 1
+
+  if first is None:
+    print(f"pace: FAIL (no frame within {LAUNCH} s)", file=sys.stderr)
+    print(text, file=sys.stderr)
+    return 1
 
   rate = fps(text)
-  lines = text.splitlines()
-  frames = sum(" presented " in line for line in lines)
+  fields = [line.split() for line in lines]
+  times = [float(f[2]) / 1000 for f in fields if len(f) >= 3 and f[1] == "presented"]
+  frames = len(times)
+  start = (first - launched) * 1000
   summary = f"pace: {rate} fps while moving ({frames} frames), {wakeups} wakeups in {IDLE} s still"
-  print(summary, flush=True)
-  if float(rate) < float(least) or wakeups > 0:
+  print(f"{summary}; the first frame {start:.0f} ms after the launch", flush=True)
+  # Fewer switches than at the start: a thread ended in the still window, not still either.
+  if float(rate) < float(least) or wakeups != 0:
     print(f"pace: FAIL (needs at least {least} fps and no wakeups)", file=sys.stderr)
+    late = sum(t >= first + SETTLE for t in times)
+    print(f"pace: {late} frames presented in the still window", file=sys.stderr)
     for line in lines:
       if " presented " not in line:
         print(line, file=sys.stderr)
