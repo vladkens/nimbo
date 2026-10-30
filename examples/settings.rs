@@ -2,13 +2,14 @@
 
 //! A demo app's settings window in macOS 26 System Settings' look ([nimbo::FormStyle::plates]):
 //! toolbar tabs (General, Appearance, Advanced, About) over pages of grey plates, in a window
-//! 680 wide whose height follows the page. General has switches, pop-ups (one with an ⓘ
-//! tooltip, one with a description and a separator), a shortcut recorder with its reset, a row
-//! disabled by another setting and a segmented control; Appearance the look (which applies at
-//! once), a slider and a switch with a long description that wraps beside it; Advanced tiles,
-//! badges, a task's progress and buttons, two of which ask in a modal dialog first, and a footer
-//! with the "?"; About the app and its licenses. Pages fade out under the edges of their scroll
-//! area; light or dark and in the accent the system has.
+//! 680 wide whose height follows the page. General has switches (one with a warning while it is
+//! on), pop-ups (one with an ⓘ tooltip, one with a description and a separator), a shortcut
+//! recorder with its reset (a warning and an ⓘ in one tooltip while it is the default), a row
+//! disabled by another setting whose ⓘ still shows its tooltip, and a segmented control; Appearance
+//! the look (which applies at once), a slider and a switch with a long description that wraps
+//! beside it; Advanced tiles, badges, a task's progress and buttons, two of which ask in a modal
+//! dialog first, and a footer with the "?"; About the app and its licenses. Pages fade out under
+//! the edges of their scroll area; light or dark and in the accent the system has.
 //!
 //! `cargo run --release --example settings [-- --shot <file.png>]`: the shot rests the pointer
 //! on the ⓘ of "On launch" until its tooltip shows.
@@ -25,13 +26,16 @@ use nimbo::{
 
 pub const TABS: &str = "tabs";
 pub const LOGIN: &str = "login";
+pub const LOGIN_ROW: &str = "login-row";
 pub const LAUNCH: &str = "launch";
 pub const LAUNCH_ROW: &str = "launch-row";
 pub const LANG: &str = "lang";
 pub const HOTKEY: &str = "hotkey";
+pub const HOTKEY_ROW: &str = "hotkey-row";
 pub const RESET: &str = "reset";
 pub const UPDATES: &str = "updates";
 pub const DOWNLOAD: &str = "download";
+pub const DOWNLOAD_ROW: &str = "download-row";
 pub const CHANNEL: &str = "channel";
 pub const LOOK: &str = "look";
 pub const TEXT_SIZE: &str = "text-size";
@@ -107,6 +111,12 @@ pub const LOGGING: [(u8, &str); 3] = [(0, "Errors only"), (1, "Warnings"), (2, "
 
 pub const TIP_LAUNCH: &str = "What the app shows when it starts. Restoring the last session \
   reopens its windows where they were.";
+pub const LOGIN_WARNING: &str = "Waits for your approval in System Settings, under General, Login \
+  Items.";
+pub const TIP_HOTKEY: &str = "Shows the app's window from any other app, and hides it again.";
+pub const HOTKEY_WARNING: &str = "macOS switches input sources with it too.";
+pub const TIP_DOWNLOAD: &str = "Each update downloads when it comes out and installs when the app \
+  quits.";
 pub const MOTION_NOTE: &str = "Turns off the animations of switches, menus and tooltips, and keeps \
   the window still while it resizes. Applies to every window of the app at once.";
 
@@ -164,7 +174,9 @@ impl Default for Settings {
 impl Settings {
   fn general(&mut self, ui: &mut Ui, fs: &FormStyle) {
     ui.form_section(fs, "Startup", |ui| {
-      ui.form_row(fs, FormRow::new("Open at login"), |ui| ui.id(LOGIN).toggle(&mut self.login, ""));
+      let row = FormRow::new("Open at login");
+      let row = if self.login { row.warning(LOGIN_WARNING) } else { row };
+      ui.id(LOGIN_ROW).form_row(fs, row, |ui| ui.id(LOGIN).toggle(&mut self.login, ""));
       let row = FormRow::new("On launch").info(TIP_LAUNCH);
       ui.id(LAUNCH_ROW).form_row(fs, row, |ui| ui.id(LAUNCH).select(&mut self.launch, &LAUNCHES));
       let row = FormRow::new("Language").caption("Applies the next time the app starts.");
@@ -173,9 +185,11 @@ impl Settings {
       });
     });
     ui.form_section_sub(fs, "Shortcuts", "Work in every app, while this one runs.", |ui| {
-      ui.form_row(fs, FormRow::new("Show the app"), |ui| {
+      let default = Hotkey::parse(DEFAULT_HOTKEY).ok();
+      let row = FormRow::new("Show the app").info(TIP_HOTKEY);
+      let row = if self.hotkey == default { row.warning(HOTKEY_WARNING) } else { row };
+      ui.id(HOTKEY_ROW).form_row(fs, row, |ui| {
         ui.id(HOTKEY).shortcut(&mut self.hotkey);
-        let default = Hotkey::parse(DEFAULT_HOTKEY).ok();
         // An icon names itself to assistive technology only by a label.
         let ui = ui.disabled(self.hotkey == default).a11y_label("Reset");
         let r = ui.id(RESET).icon_button(Icon::RESET);
@@ -188,8 +202,9 @@ impl Settings {
     ui.form_section(fs, "Updates", |ui| {
       let row = FormRow::new("Check for updates automatically");
       ui.form_row(fs, row, |ui| ui.id(UPDATES).toggle(&mut self.updates, ""));
-      let row = FormRow::new("Download them in the background").disabled(!self.updates);
-      ui.form_row(fs, row, |ui| ui.id(DOWNLOAD).toggle(&mut self.download, ""));
+      let row = FormRow::new("Download them in the background").info(TIP_DOWNLOAD);
+      let row = row.disabled(!self.updates);
+      ui.id(DOWNLOAD_ROW).form_row(fs, row, |ui| ui.id(DOWNLOAD).toggle(&mut self.download, ""));
       let channels = [(Channel::Stable, "Stable"), (Channel::Beta, "Beta")];
       ui.form_row(fs, FormRow::new("Channel"), |ui| {
         ui.id(CHANNEL).segmented(&mut self.channel, &channels)
