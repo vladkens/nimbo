@@ -279,15 +279,20 @@ fn unwatch_context(p: &Pulse) {
   }
 }
 
+/// Pulse's loop stopped first (its thread joined, so no timer or reconnect of it runs after),
+/// then its context let go and the loop freed; nothing loaded when it never ran.
 fn unwatch_audio() {
   let m = LOOP.swap(null_mut(), Ordering::AcqRel);
-  let Some(p) = pulse().filter(|_| !m.is_null()) else { return };
+  if m.is_null() {
+    return;
+  }
 
-  unsafe { (p.pa_threaded_mainloop_lock)(m) };
-  unwatch_context(p);
-  unsafe { (p.pa_threaded_mainloop_unlock)(m) };
+  let Some(p) = pulse() else { return };
   unsafe { (p.pa_threaded_mainloop_stop)(m) };
+  unwatch_context(p);
   unsafe { (p.pa_threaded_mainloop_free)(m) };
+  READIED.store(false, Ordering::Release);
+  REFUSED.store(false, Ordering::Release);
 }
 
 /// The context's state, on pulse's thread: ready, it subscribes, reads the default source and
