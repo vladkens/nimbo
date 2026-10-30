@@ -179,7 +179,6 @@ static CONTEXT: AtomicPtr<std::ffi::c_void> = AtomicPtr::new(null_mut());
 thread_local! {
   /// On pulse's thread: the default source as last read, and whether a context was ready.
   static DEFAULT: RefCell<Option<String>> = const { RefCell::new(None) };
-  static READIED: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Pulse's main loop on its own thread, with a context connecting; `Err` only without
@@ -196,11 +195,14 @@ fn watch_audio() -> Result<(), String> {
   }
 
   API.store(unsafe { (p.pa_threaded_mainloop_get_api)(m) }, Ordering::Release);
-  connect(p);
-  if unsafe { (p.pa_threaded_mainloop_start)(m) } < 0 {
+  let started = connect(p).and_then(|()| match unsafe { (p.pa_threaded_mainloop_start)(m) } {
+    0.. => Ok(()),
+    _ => Err("pa_threaded_mainloop_start failed".into()),
+  });
+  if let Err(e) = started {
     unwatch_context(p);
     unsafe { (p.pa_threaded_mainloop_free)(m) };
-    return Err("pa_threaded_mainloop_start failed".into());
+    return Err(e);
   }
 
   LOOP.store(m, Ordering::Release);
@@ -208,16 +210,19 @@ fn watch_audio() -> Result<(), String> {
 }
 
 /// A new context, connecting (before the loop runs, or on its thread).
-fn connect(p: &Pulse) {
+fn connect(p: &Pulse) -> Result<(), String> {
   let api = API.load(Ordering::Acquire);
   let c = unsafe { (p.pa_context_new)(api, c"nimbo".as_ptr()) };
   if c.is_null() {
-    return;
+    return Err("pa_context_new failed".into());
   }
 
   unsafe { (p.pa_context_set_state_callback)(c, on_state as Fp, null_mut()) };
-  unsafe { (p.pa_context_connect)(c, null(), FLAGS, null_mut()) };
   CONTEXT.store(c, Ordering::Release);
+  match unsafe { (p.pa_context_connect)(c, null(), FLAGS, null_mut()) } {
+    0.. => Ok(()),
+    e => Err(format!("pa_context_connect failed ({e})")),
+  }
 }
 
 /// The context let go (the loop stopped, or on its thread).
@@ -243,9 +248,10 @@ fn unwatch_audio() {
   unsafe { (p.pa_threaded_mainloop_free)(m) };
 }
 
-/// The context's state, on pulse's thread: ready, it subscribes and reads the default source
-/// (a ready after the first, a server come back, tells the inputs); failed (the server died),
-/// a new context is made outside this callback.
+/// The context's state, on pulse's thread: ready, it subscribes, reads the default source and
+/// tells both kinds, as the server's devices may differ from what the app read before (no
+/// server then, or one restarted); failed (the server died), a new context is made outside
+/// this callback.
 unsafe extern "C" fn on_state(c: P, _: P) {
   let Some(p) = pulse() else { return };
   match unsafe { (p.pa_context_get_state)(c) } {
@@ -253,9 +259,8 @@ unsafe extern "C" fn on_state(c: P, _: P) {
       unsafe { (p.pa_context_set_subscribe_callback)(c, on_event as Fp, null_mut()) };
       unsafe { (p.pa_operation_unref)((p.pa_context_subscribe)(c, MASK, null(), null_mut())) };
       server_info(p, c);
-      if READIED.replace(true) {
-        notice(Change::AudioInputs);
-      }
+      notice(Change::AudioInputs);
+      notice(Change::DefaultInput);
     }
     FAILED | TERMINATED if CONTEXT.load(Ordering::Acquire) == c => {
       let api = API.load(Ordering::Acquire);
@@ -269,7 +274,9 @@ unsafe extern "C" fn on_state(c: P, _: P) {
 unsafe extern "C" fn reconnect(_: P, _: P) {
   let Some(p) = pulse() else { return };
   unwatch_context(p);
-  connect(p);
+  if let Err(e) = connect(p) {
+    eprintln!("nimbo: system: PulseAudio: {e}");
+  }
 }
 
 /// A subscription event, on pulse's thread.

@@ -257,6 +257,17 @@ pub(crate) fn unwatch() {
   for kind in Change::ALL {
     WATCHER.unwatch(kind);
   }
+
+  // A job posted to the loop that ended never runs: the next loop posts its own.
+  WATCHER.scheduled.store(false, Ordering::Release);
+}
+
+/// The OS refused `kind` after [watch] returned (a registration made off the main thread): no
+/// longer watched, so a later watch tries again.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn refused(kind: Change, why: &str) {
+  WATCHER.unwatch(kind);
+  eprintln!("nimbo: system: {kind:?}: {why}");
 }
 
 #[cfg(test)]

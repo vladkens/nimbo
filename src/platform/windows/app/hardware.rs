@@ -255,7 +255,8 @@ pub fn unwatch() {
 }
 
 /// `WM_POWERBROADCAST`'s `PBT_POWERSETTINGCHANGE` to the shell's window: the lid's state kept,
-/// and a change noticed (the first value, sent as it registers, only kept).
+/// and a change noticed, the first value too (sent once Windows finds the lid, after the app
+/// may have read `None`).
 pub(super) fn power(setting: &POWERBROADCAST_SETTING) {
   if lid_open(setting).is_some_and(lid) {
     notice(Change::Lid);
@@ -269,11 +270,10 @@ fn lid_open(setting: &POWERBROADCAST_SETTING) -> Option<bool> {
   ours.then(|| unsafe { setting.Data.as_ptr().cast::<u32>().read_unaligned() } != 0)
 }
 
-/// Keeps the lid open or closed: whether it changed from a known state.
+/// Keeps the lid open or closed: whether it changed (from unknown too).
 fn lid(open: bool) -> bool {
   let new = if open { OPEN } else { CLOSED };
-  let old = LID.swap(new, Ordering::AcqRel);
-  old != UNKNOWN && old != new
+  LID.swap(new, Ordering::AcqRel) != new
 }
 
 #[cfg(test)]
@@ -295,7 +295,7 @@ mod tests {
     assert_eq!(unsafe { (CLIENT.0.default)(client(), CAPTURE, 0, null()) }, 0);
   }
 
-  /// The power notification's lid: the first value kept, then a change told once.
+  /// The power notification's lid: the first value and each change told once.
   #[test]
   fn the_lid_from_power_settings() {
     let setting = |guid: u128, v: u32| {
@@ -314,7 +314,7 @@ mod tests {
     assert_eq!(read(&setting(LID_SWITCH, 0)), Some(false));
     assert_eq!(read(&setting(IID_UNKNOWN, 0)), None);
     assert_eq!(lid_closed(), None);
-    assert!(!lid(true), "the first value only kept");
+    assert!(lid(true), "the first value, after `None`");
     assert_eq!(lid_closed(), Some(false));
     assert!(lid(false));
     assert!(!lid(false));

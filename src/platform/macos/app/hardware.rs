@@ -17,7 +17,7 @@ use dispatch2::{DispatchQueue, DispatchRetained};
 use objc2_core_foundation::{CFBoolean, CFRetained, CFString, CFType};
 
 use crate::hardware::Transport;
-use crate::system::{Change, notice};
+use crate::system::{Change, notice, refused};
 
 /// `AudioObjectPropertyAddress`.
 #[repr(C)]
@@ -178,7 +178,8 @@ fn told(selector: u32) -> Option<Change> {
 }
 
 /// Watches `kind` (on the main thread): a listener on the system object, added on [audio]'s
-/// queue, whose rare failure goes to stderr as it can't come back; or the clamshell.
+/// queue, then one change told, as what the app read before it listened may be old (a rare
+/// failure can't come back as `Err`: [crate::system::refused]); or the clamshell.
 pub fn watch(kind: Change) -> Result<(), String> {
   if kind == Change::Lid {
     return watch_lid();
@@ -188,8 +189,11 @@ pub fn watch(kind: Change) -> Result<(), String> {
   audio().exec_async(move || {
     // SAFETY: the system object, a property of it, a listener that lives as long as the process.
     match unsafe { AudioObjectAddPropertyListener(1, &at, listener, null_mut()) } {
-      0 => _ = AUDIO.fetch_or(1 << i, Ordering::AcqRel),
-      e => eprintln!("nimbo: system: CoreAudio's listener for {kind:?} failed ({e})"),
+      0 => {
+        AUDIO.fetch_or(1 << i, Ordering::AcqRel);
+        notice(kind);
+      }
+      e => refused(kind, &format!("CoreAudio's listener failed ({e})")),
     }
   });
   Ok(())
