@@ -225,9 +225,9 @@ impl TextSystem {
     self.smooth
   }
 
-  /// Turns font smoothing of coverage glyphs on or off (on by default); the
-  /// atlas refills.
-  pub fn set_smoothing(&mut self, smooth: bool) {
+  /// Turns font smoothing of coverage glyphs on or off (on by default); the atlas refills.
+  #[cfg(test)]
+  pub(crate) fn set_smoothing(&mut self, smooth: bool) {
     if smooth == self.smooth {
       return;
     }

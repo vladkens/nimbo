@@ -463,6 +463,13 @@ impl Frame<'_> {
     self.images
   }
 
+  /// The shaping API for custom paint, such as a text widget of the app's own: shaped lines and
+  /// their glyphs ([TextSystem::layout]), caret positions ([TextSystem::carets]), measures and
+  /// metrics, in points.
+  pub fn text_system(&mut self) -> &mut TextSystem {
+    self.text
+  }
+
   /// Draws `s`, anything `Display` (formatted into a buffer the frame keeps), with its baseline
   /// at `y`, placed by `anchor`: 0 starts it at `x`, 0.5 centres it there, 1 ends it there
   /// (numbers right-aligned in a column, an axis label). Returns the advance width in points.
