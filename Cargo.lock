@@ -29,12 +29,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ed25519-compact"
-version = "2.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1454db4f2edb7f0e8fe0c5b375b0c978fc63244cc9f010d160e417eb10139aa8"
-
-[[package]]
 name = "keyboard-types"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -49,7 +43,6 @@ version = "0.0.1"
 dependencies = [
  "block2",
  "dispatch2",
- "ed25519-compact",
  "keyboard-types",
  "objc2",
  "objc2-app-kit",
@@ -58,7 +51,6 @@ dependencies = [
  "objc2-core-text",
  "objc2-foundation",
  "objc2-quartz-core",
- "objc2-security",
  "objc2-service-management",
  "windows-sys",
 ]
@@ -135,7 +127,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3e0adef53c21f888deb4fa59fc59f7eb17404926ee8a6f59f5df0fd7f9f3272"
 dependencies = [
  "bitflags",
- "block2",
  "objc2",
  "objc2-core-foundation",
 ]

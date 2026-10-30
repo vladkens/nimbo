@@ -53,7 +53,6 @@ pub mod text;
 pub mod tray;
 pub mod ui;
 pub mod uninstall;
-pub mod update;
 
 use std::path::PathBuf;
 
