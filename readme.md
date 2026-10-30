@@ -53,7 +53,7 @@ cargo add nimbo --git https://github.com/vladkens/nimbo
 <details>
 <summary>Requirements per OS</summary>
 
-- **macOS** 14 or later: an app sets `MACOSX_DEPLOYMENT_TARGET=14.0`, as `.cargo/config.toml` here does.
+- **macOS** 11 or later: rustc's default deployment target, so an app sets nothing.
 - **Windows**: `#![cfg_attr(windows, windows_subsystem = "windows")]` in `main.rs`, so no console opens with the window.
 - **Linux**: GTK 3 at run time (every desktop has it), on Wayland or X11. Overlays on Wayland need `libgtk-layer-shell`, the tray icon a panel with StatusNotifierItems, file panels the desktop's portals (GNOME, KDE), and on Wayland hotkeys and a paste into another app the portals too (X11 grabs the hotkey and types with XTest).
 
@@ -95,10 +95,14 @@ fn main() {
 The API is immediate-mode, like egui: `view` builds the whole tree from the app's state, and a widget answers right where it's built. There are no signals, no `Rc<RefCell>` and no message enums: the state is a plain struct, a switch gets `&mut self.field`. What keeps the cost down:
 
 - **`view` runs only on frames that redraw**: after input, during an animation, when a timer is due. An idle window runs and draws nothing.
-- **What lives between frames**: the last laid-out tree (for hit testing), each widget's own state by its id (scroll, focus, caret, animations), shaped text lines.
+- **What lives between frames**: the last laid-out tree (for hit testing), each widget's own state by its id (scroll, focus, caret, animations), shaped text and its wrapped lines.
 - **Long content is built in view only**: a form of 500,000 rows takes about 0.4 ms of view and layout per frame on an M2.
 
 It suits settings windows, tray and HUD apps and tools with long lists. A change runs the whole `view` again, where a reactive toolkit (SwiftUI, Xilem) would rebuild one branch. So heavy work belongs in the app's state or on a thread, and `view` only reads its result.
+
+### How it draws
+
+nimbo renders on the CPU, with no GPU path. Each frame that redraws, `view` rebuilds the element tree, which is laid out and painted into a flat scene. The renderer cuts the frame into 64×64 px tiles, each with a hash of what is drawn over it, and draws again only the tiles whose hash differs from the frame the buffer holds, on the performance cores when the damage is big. Only those tiles reach the screen: drawn into an IOSurface on macOS, copied by BitBlt on Windows, queued as GTK's damage on Linux. Text goes through the OS's stack (CoreText, DirectWrite, FreeType with HarfBuzz), and an idle window draws no frames. [docs/rendering.md](docs/rendering.md) follows a frame step by step.
 
 ### Examples
 
@@ -130,7 +134,7 @@ Measured on an Apple M2, rustc 1.99, 2026-10-25, without a compiler cache:
 
 ## 🤝 Contributing
 
-Pull requests are welcome, and so are your agents: point them at [agents.md](agents.md). `make check` and `make test` pass before a commit; `make prepare` formats the code.
+Pull requests are welcome, including ones made with agents: point yours at [agents.md](agents.md).
 
 ## 🙏 Credits
 
