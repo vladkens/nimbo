@@ -20,7 +20,7 @@ use nimbo::{Anchor, Harness};
 /// The HUD as `--shot` renders it: transparent, as its config is an overlay's.
 fn hud() -> Harness<Hud> {
   let mut h = Harness::new(Hud::default(), CONFIG.size, 2.0);
-  h.cpu.transparent = CONFIG.overlay.is_some();
+  h.set_transparent(CONFIG.overlay.is_some());
   hud::shot(&mut h);
   h
 }
@@ -59,7 +59,7 @@ fn the_meter_moves_while_recording() {
     (0..40).map(|y| img.pixel(p.x + 35.0, p.y + y as f32)).collect::<Vec<_>>()
   };
   let before = bars(&mut h);
-  assert!(h.rt.needs_frame(), "it animates");
+  assert!(h.needs_frame(), "it animates");
   assert!(h.wait(Duration::from_millis(250)) >= 25, "a frame every refresh");
   assert_ne!(bars(&mut h), before);
 }

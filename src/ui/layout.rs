@@ -28,7 +28,7 @@ const EPS: f32 = 0.01;
 pub const ELLIPSIS: &str = "…";
 
 /// Text and image sizes for the layout; the runtime's measures with CoreText, tests fake it.
-pub trait Measure {
+pub(crate) trait Measure {
   /// Advance width of `s` in points.
   fn width(&mut self, s: &str, font: Font) -> f32;
   /// The advance width of `s` as a line and how far its ink reaches, which the paint pass culls
@@ -56,7 +56,7 @@ pub trait Measure {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Kind {
+pub(crate) enum Kind {
   Box,
   /// `range` is the text in [Tree::text]; the layout fills the rest.
   Text {
@@ -83,7 +83,7 @@ pub enum Kind {
 /// lines of an editable text cover it all: a soft-wrapped line keeps the spaces it broke at, and
 /// its caret stops start at `stop` in [Tree::stops].
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Line {
+pub(crate) struct Line {
   pub start: u32,
   pub end: u32,
   pub width: f32,
@@ -92,7 +92,7 @@ pub struct Line {
 }
 
 #[derive(Clone, Debug)]
-pub struct Node {
+pub(crate) struct Node {
   pub id: Id,
   pub kind: Kind,
   pub style: Style,
@@ -159,7 +159,7 @@ pub type Seen = (Rect, [f64; 2]);
 
 /// One frame's elements; node 0 is the root, the window.
 #[derive(Default)]
-pub struct Tree {
+pub(crate) struct Tree {
   pub nodes: Vec<Node>,
   /// The text of every text element, back to back.
   pub text: String,

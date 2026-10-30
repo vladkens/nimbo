@@ -1,6 +1,7 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The element tree an app builds each frame it redraws ([crate::App::view]), its flex layout
+//! The element tree an app builds each frame it redraws ([crate::App::view], which says how
+//! often that is and what a view may change), its flex layout
 //! ([layout]) and the paint pass that turns it into the frame's scene ([paint]).
 //!
 //! ```ignore
@@ -67,14 +68,14 @@ pub use dialog::{Answer, Dialog, DialogBehavior};
 pub use form::{FormRow, FormStyle, Glass, Tile};
 pub use id::Id;
 pub(crate) use input::drags_window;
-pub use input::{Click, Press, Scroll, hit};
-pub(crate) use layout::Sys;
-pub use layout::{Kind, Line, Measure, Node, Tree};
+pub use input::{Click, Press, Scroll};
+pub(crate) use layout::{Kind, Measure, Node, Sys, Tree};
 pub use store::{Ease, Transition};
 pub use style::{
   Align, Clip, Cursor, Dim, Float, Focus, FocusRing, Shadow, Style, TextStyle, grow, pct, px, rigid,
 };
-pub use textlayout::{Edit, Stop, TextLayout};
+pub use textlayout::Edit;
+pub(crate) use textlayout::TextLayout;
 pub use theme::{ButtonStyle, ControlSize, Sizes, SwitchSize, Theme, Tone, Variant};
 pub use widgets::{Button, Choice, FieldStyle, Icon, Select, TextInput};
 
@@ -91,11 +92,11 @@ const FLASH: Duration = Duration::from_millis(120);
 // MARK: Builder
 
 /// Paints a canvas element: gets the frame and the element's laid-out rect.
-pub type Canvas<'a> = Box<dyn FnOnce(&mut Frame, Rect) + 'a>;
+pub(crate) type Canvas<'a> = Box<dyn FnOnce(&mut Frame, Rect) + 'a>;
 
 /// What a [Ui] keeps between frames: the tree being built and the last one laid out, pointer
 /// state, the per-id store and timers, so a steady frame allocates nothing.
-pub struct UiState {
+pub(crate) struct UiState {
   tree: Tree,
   /// The last frame's tree, laid out: ids and rects for hit testing.
   pub last: Tree,
@@ -150,7 +151,9 @@ pub struct UiState {
 }
 
 /// What the runtime's last frame cost, for a status bar or a frame meter ([Ui::last_frame]).
+/// More figures may come in a minor release, so it is read, never built.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct FrameStats {
   /// Time in the app's view (every pass), the layout and painting the tree (canvases too).
   pub view: Duration,
@@ -449,7 +452,9 @@ pub struct Response {
 }
 
 /// The element tree builder an app's `view` gets each frame it redraws. `'a` lets canvas
-/// callbacks borrow the app's data: `fn view<'a>(&'a mut self, ui: &mut Ui<'a>)`.
+/// callbacks borrow the app's data: `fn view<'a>(&'a mut self, ui: &mut Ui<'a>)`. The view
+/// may run several times for a frame, or not at all: it changes the app's state only in answer
+/// to what a pass reports ([crate::App::view]).
 ///
 /// Input reaches the view as state: [Ui::hovered] and [Ui::pressed] hold while they last, a
 /// click is seen once ([Ui::clicked], or [Response::clicked] from the element's builder). The
@@ -488,7 +493,7 @@ pub struct Ui<'a> {
 
 impl<'a> Ui<'a> {
   /// Starts a frame's tree in `st` for a window of `size`.
-  pub fn new(mut st: UiState, size: Size, mouse: Option<Point>, now: Duration) -> Self {
+  pub(crate) fn new(mut st: UiState, size: Size, mouse: Option<Point>, now: Duration) -> Self {
     st.tree.clear(size);
     st.stack.clear();
     st.stack.push((0, 0));
@@ -610,7 +615,8 @@ impl<'a> Ui<'a> {
   }
 
   /// The tree built so far this frame.
-  pub fn tree(&self) -> &Tree {
+  #[cfg(test)]
+  pub(crate) fn tree(&self) -> &Tree {
     &self.st.tree
   }
 
@@ -962,7 +968,8 @@ impl<'a> Ui<'a> {
     self.st.clicked(id)
   }
 
-  /// Shows `id` pressed for a moment ([UiState::flash]).
+  /// Shows `id` pressed for a moment, as a click would: a key on a keypad typed on the keyboard,
+  /// a button activated by Space.
   pub fn flash(&mut self, id: Id) {
     self.st.flash(id, self.now);
   }
@@ -1122,7 +1129,7 @@ impl<'a> Ui<'a> {
   /// Lays the tree out for the window, rects snapped to pixels at `scale`, with scroll
   /// offsets from the store (clamped to the new content, and kept so). Texts' least widths and
   /// wrapped lines are kept across frames per font and text: `m` measures the same each frame.
-  pub fn layout(&mut self, m: &mut dyn Measure, scale: f32) {
+  pub(crate) fn layout(&mut self, m: &mut dyn Measure, scale: f32) {
     let UiState { tree, store, kept, .. } = &mut self.st;
     for &i in &tree.scrolls {
       let n = &mut tree.nodes[i as usize];
@@ -1150,7 +1157,7 @@ impl<'a> Ui<'a> {
   /// Whether content built only in part ([Tree::partial]) doesn't cover what the layout just
   /// showed of it (its viewport grew, its offset was clamped), or the layout moved what the view
   /// drew from ([Ui::settle]): the view should run again before this frame is painted.
-  pub fn partial_short(&self) -> bool {
+  pub(crate) fn partial_short(&self) -> bool {
     let t = &self.st.tree;
     let moved = t.settle.iter().any(|&(id, seen)| t.get(id).map(|n| (n.rect, n.content)) != seen);
     moved
@@ -1166,7 +1173,7 @@ impl<'a> Ui<'a> {
 
   /// Hit tests the pointer on the tree just laid out; returns whether the hover changed, so
   /// the view should run again before this frame is painted.
-  pub fn rehover(&mut self) -> bool {
+  pub(crate) fn rehover(&mut self) -> bool {
     self.st.hover_at(self.mouse, true)
   }
 
@@ -1174,7 +1181,7 @@ impl<'a> Ui<'a> {
   /// it ([Ui::rect], hover): an overlay opened or closed (a menu, a dialog, a tooltip) or the
   /// window changed size. What the view drew from the last frame is then a frame behind, so
   /// the runtime builds one more.
-  pub fn shifted(&self) -> bool {
+  pub(crate) fn shifted(&self) -> bool {
     let (now, last) = (&self.st.tree, &self.st.last);
     if last.nodes.is_empty() {
       return false;
@@ -1187,7 +1194,7 @@ impl<'a> Ui<'a> {
   }
 
   /// Paints the laid-out tree, then keeps it as the last frame's.
-  pub fn paint(mut self, f: &mut Frame) -> UiState {
+  pub(crate) fn paint(mut self, f: &mut Frame) -> UiState {
     let st = &self.st;
     let ring = st.ring.filter(|_| st.window_focused()).and_then(|r| {
       let i = st.tree.find(st.ring_on.or(st.input.focus)?)?;
@@ -1203,7 +1210,7 @@ impl<'a> Ui<'a> {
 
   /// Ends the frame without painting; the tree becomes the last frame's and the store drops
   /// what the frame did not use. Focus on an element the frame did not build clears.
-  pub fn finish(mut self) -> UiState {
+  pub(crate) fn finish(mut self) -> UiState {
     self.st.input.ended = None;
     std::mem::swap(&mut self.st.tree, &mut self.st.last);
     self.st.store.gc(&self.st.last);
@@ -1216,7 +1223,7 @@ impl<'a> Ui<'a> {
 
   /// Keeps this tree as the last for a pass run again on its layout ([Ui::partial_short]),
   /// keeping the state and focus of what it left out: the pass after builds them.
-  pub fn relayout(mut self) -> UiState {
+  pub(crate) fn relayout(mut self) -> UiState {
     self.st.input.ended = None;
     std::mem::swap(&mut self.st.tree, &mut self.st.last);
     self.st
@@ -1224,7 +1231,7 @@ impl<'a> Ui<'a> {
 
   /// Drops this tree, keeping the last frame's: a pass that only delivers input to the view,
   /// or one run again.
-  pub fn discard(mut self) -> UiState {
+  pub(crate) fn discard(mut self) -> UiState {
     self.st.input.ended = None;
     self.st
   }

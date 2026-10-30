@@ -56,7 +56,7 @@ fn swipe(h: &mut H, dy: f32) {
 }
 
 fn built(h: &H) -> usize {
-  h.rt.ui.last.nodes.len()
+  h.built()
 }
 
 #[test]
@@ -64,7 +64,7 @@ fn only_the_rows_in_view_are_built() {
   let h = history();
   assert!(rect(&h, row(0, 0)).is_some() && rect(&h, row(0, 20)).is_none());
   assert!(built(&h) < 400, "{} nodes", built(&h));
-  let sc = h.rt.ui.scroll(Id::of(PAGE)).unwrap();
+  let sc = h.scroll(Id::of(PAGE)).unwrap();
   assert!(sc.content.h > ROWS as f32 * ROW_H, "content {} high", sc.content.h);
 }
 
@@ -196,7 +196,7 @@ fn rows_read_and_press_as_rows() {
   let mut h = history();
   let name = |g, i| format!("Dictation {}: what was said, on one line", entry(g, i));
   reads(&h.a11y(), &[&format!("row {:?} desc \"23:59 · 7.0 s\"", name(0, 0)), "button \"Copy\""]);
-  let t = h.rt.ui.a11y_tree();
+  let t = h.a11y_tree();
   let third =
     t.nodes.iter().find(|n| n.props.role == Role::Row && t.str(n.props.name) == name(0, 2));
   assert!(h.act(third.unwrap().id, Action::Press));

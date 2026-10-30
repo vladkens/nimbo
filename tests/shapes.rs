@@ -134,7 +134,7 @@ fn frames_only_when_something_changed() {
   h.render();
   assert!(!h.move_to(5.0, 5.0));
   assert!(!h.frame());
-  let waker = h.rt.waker().clone();
+  let waker = h.waker().clone();
   std::thread::spawn(move || waker.wake()).join().unwrap();
   assert!(h.frame());
   assert!(!h.frame());

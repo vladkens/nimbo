@@ -19,8 +19,8 @@
 //! ui.a11y(b.id, Role::Button);
 //! ```
 //!
-//! Records live beside the tree ([Tree::a11y]) and are cleared with it, so a frame built in
-//! several passes has the last pass's, once. [UiState::a11y_tree] joins them to the last frame's
+//! Records live beside the tree (`Tree::a11y`) and are cleared with it, so a frame built in
+//! several passes has the last pass's, once. `UiState::a11y_tree` joins them to the last frame's
 //! laid-out nodes when asked: each node nested under its nearest recorded ancestor (an overlay
 //! under its own parent), its rect in window points clipped to the scroll areas around it, and
 //! a node clipped away entirely left out; an open modal dialog leaves out what is behind it. A
@@ -186,7 +186,7 @@ impl Props {
 
 /// A frame's records, by id, as the view made them ([Ui::a11y]).
 #[derive(Default)]
-pub struct Records {
+pub(crate) struct Records {
   list: Vec<(Id, Props)>,
   /// Each id's place in the list.
   index: HashMap<Id, usize, BuildHasherDefault<FxHasher>>,
@@ -365,7 +365,7 @@ pub struct A11yNode {
   /// The [Action]s it takes, as [Action::bit]s ([A11yNode::can]).
   pub actions: u8,
   /// The overlay it shows in, by z: 0 the window's tree, else one past its place in
-  /// [Tree::floats] ([A11yTree::at]).
+  /// `Tree::floats` ([A11yTree::at]).
   pub layer: u16,
 }
 
@@ -391,7 +391,7 @@ fn actions(p: &Props, focusable: bool) -> u8 {
   can.iter().zip(0..).fold(Action::ScrollToVisible.bit(), |b, (&c, k)| b | u8::from(c && on) << k)
 }
 
-/// The last frame as assistive technology sees it ([UiState::a11y_tree]). Its [Display] is one
+/// The last frame as assistive technology sees it (`UiState::a11y_tree`). Its [Display] is one
 /// line per node, indented by depth: `switch "Open at login" off`.
 #[derive(Clone, Debug, Default)]
 pub struct A11yTree {

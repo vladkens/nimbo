@@ -9,21 +9,25 @@ use std::time::Duration;
 
 use keyboard_types::{Code, Modifiers};
 
-use crate::app::{App, Clock, Event, Ime, MemClipboard, MouseButton, Runtime};
-use crate::cpu::{self, Pixels};
+use crate::app::{App, Clipboard, Clock, Event, Ime, MemClipboard, MouseButton, Runtime, Waker};
+use crate::cpu;
+pub use crate::cpu::Pixels;
 use crate::file_dialog::FileDialog;
 use crate::keys::{self, Key, KeyEvent, Os};
 use crate::menu::Menu;
 use crate::scene::{Point, Rect, Size};
+use crate::text::TextSystem;
 use crate::text::edit::{Editor, utf16_len};
-use crate::ui::{Action, Id, Kind, Role};
+use crate::ui::{A11yTree, Action, Cursor, Id, Kind, Role, Scroll, TextInput};
 
 /// A display refresh at 120 Hz, the step of [Harness::wait].
 pub const TICK: Duration = Duration::from_nanos(8_333_333);
 
+/// Runs an app headless: scripted input in, app state, the last frame's elements and rendered
+/// pixels out, all from the public API, so the frame's internals can change under the tests.
 pub struct Harness<A> {
-  pub rt: Runtime<A>,
-  pub cpu: cpu::Renderer,
+  pub(crate) rt: Runtime<A>,
+  pub(crate) cpu: cpu::Renderer,
 }
 
 impl<A: App> Harness<A> {
@@ -53,6 +57,42 @@ impl<A: App> Harness<A> {
     self.rt.ui.os = os;
   }
 
+  /// Plays the window's title bar over the content ([crate::Config::unified]): its height and
+  /// the window's title, which [crate::Ui::titlebar] reports; the next frame shows it.
+  pub fn set_titlebar(&mut self, bar: Option<(f32, &'static str)>) {
+    self.rt.set_titlebar(bar);
+    self.rt.redraw();
+  }
+
+  /// Renders transparent where the app draws nothing, as an overlay's window does
+  /// ([crate::Config::overlay]), instead of on black.
+  pub fn set_transparent(&mut self, yes: bool) {
+    self.cpu.transparent = yes;
+  }
+
+  /// Gives the element `id` the key focus, or takes it from all (`None`); the next frame shows
+  /// it.
+  pub fn set_focus(&mut self, id: Option<Id>) {
+    self.rt.ui.set_focus(id);
+    self.rt.redraw();
+  }
+
+  /// Resizes the view to `size` points at `scale`, as a window resized or moved to another
+  /// screen does.
+  pub fn resize(&mut self, size: Size, scale: f32) {
+    self.rt.resize(size, scale);
+  }
+
+  /// Asks for a frame though nothing changed, as a window's expose does.
+  pub fn redraw(&mut self) {
+    self.rt.redraw();
+  }
+
+  /// Wakes the app from another thread, as [crate::Proxy] does: [Self::wait] builds the frame.
+  pub fn waker(&self) -> &Waker {
+    self.rt.waker()
+  }
+
   pub fn event(&mut self, ev: Event) -> bool {
     self.rt.event(ev)
   }
@@ -66,8 +106,8 @@ impl<A: App> Harness<A> {
     Some(asked)
   }
 
-  /// Plays a platform that shows context menus itself ([crate::Runtime::set_native_menus]):
-  /// they are asked for, not drawn, and [Harness::context_menu] answers them.
+  /// Plays a platform that shows context menus itself: they are asked for, not drawn, and
+  /// [Harness::context_menu] answers them.
   pub fn native_menus(&mut self) {
     self.rt.set_native_menus(true);
   }
@@ -227,9 +267,79 @@ impl<A: App> Harness<A> {
   }
 
   /// The last frame as assistive technology sees it, one line per node indented by depth:
-  /// `switch "Open at login" off` ([crate::ui::A11yTree]).
+  /// `switch "Open at login" off` ([Self::a11y_tree]).
   pub fn a11y(&self) -> String {
-    self.rt.ui.a11y_tree().to_string()
+    self.a11y_tree().to_string()
+  }
+
+  /// The last frame as assistive technology sees it: its nodes, roles, names and values.
+  pub fn a11y_tree(&self) -> A11yTree {
+    self.rt.ui.a11y_tree()
+  }
+
+  /// The view's size in points: the config's, or the one the app or [Self::resize] set.
+  pub fn size(&self) -> Size {
+    self.rt.size
+  }
+
+  /// The pointer in points, `None` when it is outside the view.
+  pub fn mouse(&self) -> Option<Point> {
+    self.rt.mouse
+  }
+
+  /// The interactive elements under the pointer, innermost first.
+  pub fn hover(&self) -> &[Id] {
+    self.rt.ui.hover()
+  }
+
+  /// The pointer's cursor: the pressed or hovered element's.
+  pub fn cursor(&self) -> Cursor {
+    self.rt.cursor()
+  }
+
+  /// A scroll area's offset, viewport and content as of the last frame and the input since
+  /// ([crate::Ui::scroll]): the offset includes wheel, keys and `scroll_to` that came after the
+  /// frame, clamped to the last frame's content.
+  pub fn scroll(&self, id: Id) -> Option<Scroll> {
+    self.rt.ui.scroll(id)
+  }
+
+  /// Whether the menu of `id` is open.
+  pub fn menu_open(&self, id: Id) -> bool {
+    self.rt.ui.menu_open(id)
+  }
+
+  /// The elements the last frame built: a list builds only the rows in view.
+  pub fn built(&self) -> usize {
+    self.rt.ui.last.nodes.len()
+  }
+
+  /// The focused text field as an input method sees it ([crate::ui::TextInput]); `None` unless
+  /// an editable field that takes input methods has the focus. Runs the view and the layout
+  /// first when something changed since the last layout, as a window's input method query does.
+  pub fn text_input(&mut self) -> Option<TextInput<'_>> {
+    self.rt.text_input()
+  }
+
+  /// The clipboard the app reads and writes: in memory, never the system's.
+  pub fn clipboard(&mut self) -> &mut dyn Clipboard {
+    self.rt.clipboard()
+  }
+
+  /// The text system the frames shape and measure with, at the harness's scale.
+  pub fn text_system(&mut self) -> &mut TextSystem {
+    &mut self.rt.text
+  }
+
+  /// Whether the next display refresh would build a frame: something changed, an animation
+  /// runs, a timer is due or a waker fired.
+  pub fn needs_frame(&mut self) -> bool {
+    self.rt.needs_frame()
+  }
+
+  /// Time until the next timer the app or a widget set (a caret's blink), if any.
+  pub fn due_in(&self) -> Option<Duration> {
+    self.rt.due_in()
   }
 
   // MARK: Output

@@ -7,7 +7,7 @@
 use std::fmt::{Display, Write};
 use std::time::Duration;
 
-use crate::text::{Font, TextSystem};
+use crate::text::{Font, Metrics, TextSystem};
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -90,22 +90,23 @@ pub const fn mix(a: Color, b: Color, t: f32) -> Color {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Quad {
-  pub rect: Rect,
-  pub color: Color,
-  pub border_color: Color,
+  pub(crate) rect: Rect,
+  pub(crate) color: Color,
+  pub(crate) border_color: Color,
   /// Corner radii: top-left, top-right, bottom-right, bottom-left.
-  pub radii: [f32; 4],
+  pub(crate) radii: [f32; 4],
   /// Border widths inside the rect: top, right, bottom, left.
-  pub borders: [f32; 4],
+  pub(crate) borders: [f32; 4],
   /// Blur radius; a quad with a blur draws only its soft shadow.
-  pub blur: f32,
+  pub(crate) blur: f32,
   /// A linear gradient from `color` to `border_color` ([Quad::gradient]): 1 down the rect, 2
   /// across it, 0 none.
-  pub gradient: f32,
-  pub _pad: [f32; 2],
+  pub(crate) gradient: f32,
+  pub(crate) _pad: [f32; 2],
 }
 
 impl Quad {
+  /// A filled rect in points: square corners, no border, no blur.
   pub const fn new(rect: Rect, color: Color) -> Self {
     let z = [0.0; 4];
     let (blur, gradient, _pad) = (0.0, 0.0, [0.0; 2]);
@@ -121,18 +122,24 @@ impl Quad {
     Self { border_color: to, borders: [0.0; 4], gradient, ..self }
   }
 
+  /// Every corner rounded by `r` points.
   pub const fn radius(self, r: f32) -> Self {
     Self { radii: [r; 4], ..self }
   }
 
+  /// Corner radii in points, clockwise from the top-left, as in CSS: top-left, top-right,
+  /// bottom-right, bottom-left.
   pub const fn radii(self, radii: [f32; 4]) -> Self {
     Self { radii, ..self }
   }
 
+  /// A border `w` points wide on every side, inside the rect.
   pub const fn border(self, w: f32, color: Color) -> Self {
     Self { borders: [w; 4], border_color: color, ..self }
   }
 
+  /// Border widths in points, inside the rect, clockwise from the top, as in CSS: top, right,
+  /// bottom, left.
   pub const fn borders(self, borders: [f32; 4], color: Color) -> Self {
     Self { borders, border_color: color, ..self }
   }
@@ -147,7 +154,7 @@ impl Quad {
 /// their colour, images and emoji as a tint.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Sprite {
+pub(crate) struct Sprite {
   pub rect: Rect,
   pub uv: Rect,
   pub color: Color,
@@ -156,7 +163,7 @@ pub struct Sprite {
 /// A thick antialiased line from `a` to `b`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Segment {
+pub(crate) struct Segment {
   pub a: Point,
   pub b: Point,
   pub color: Color,
@@ -169,11 +176,11 @@ pub struct Segment {
 
 /// An RGBA image added through [Images].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct ImageId(pub u32);
+pub struct ImageId(pub(crate) u32);
 
 /// What a layer draws, in this order: quads, images, lines, glyphs, colour emoji.
 #[derive(Default)]
-pub struct Layer {
+pub(crate) struct Layer {
   pub clip: Option<Rect>,
   pub quads: Vec<Quad>,
   pub images: Vec<Sprite>,
@@ -204,8 +211,9 @@ impl Layer {
 }
 
 /// Instance counts of a frame.
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Counts {
+pub(crate) struct Counts {
   pub quads: usize,
   pub images: usize,
   pub lines: usize,
@@ -215,7 +223,7 @@ pub struct Counts {
 /// The layers of one frame and the clip stack. Cleared, not dropped, between frames: `layers`
 /// keeps every `Vec` it ever grew and `len` says how many are in use.
 #[derive(Default)]
-pub struct Scene {
+pub(crate) struct Scene {
   layers: Vec<Layer>,
   len: usize,
   clips: Vec<Rect>,
@@ -298,6 +306,7 @@ impl Scene {
     self.top().emoji.push(s);
   }
 
+  #[cfg(test)]
   pub fn counts(&self) -> Counts {
     let sum = |f: fn(&Layer) -> usize| self.layers().iter().map(f).sum();
     Counts {
@@ -312,7 +321,7 @@ impl Scene {
 // MARK: Images
 
 /// A new image waiting for the renderer: premultiplied RGBA rows, top row first.
-pub struct ImageUpload {
+pub(crate) struct ImageUpload {
   pub id: ImageId,
   pub w: usize,
   pub h: usize,
@@ -371,8 +380,8 @@ impl Images {
 
 // MARK: Paint API
 
-/// What `App::paint` draws with: the scene, the text system, the images and the frame's
-/// inputs.
+/// What `App::paint` draws with: the frame's inputs, and its draw list, text and images
+/// behind the paint API.
 pub struct Frame<'a> {
   pub size: Size,
   /// Pixels per point.
@@ -381,9 +390,9 @@ pub struct Frame<'a> {
   pub mouse: Option<Point>,
   /// Time from the runtime's clock: real in a window, virtual in the harness.
   pub now: Duration,
-  pub scene: &'a mut Scene,
-  pub text: &'a mut TextSystem,
-  pub images: &'a mut Images,
+  pub(crate) scene: &'a mut Scene,
+  pub(crate) text: &'a mut TextSystem,
+  pub(crate) images: &'a mut Images,
   pub(crate) animate: bool,
 }
 
@@ -398,8 +407,8 @@ impl Frame<'_> {
   }
 
   /// Starts a new layer over everything drawn so far. Within a layer each kind draws in a fixed
-  /// order, not the order of the calls: quads, images, lines, glyphs, colour emoji ([Layer]);
-  /// so a quad drawn after a line (a label over a plot's lines) needs a layer of its own.
+  /// order, not the order of the calls: quads, images, lines, glyphs, colour emoji; so a quad
+  /// drawn after a line (a label over a plot's lines) needs a layer of its own.
   pub fn layer(&mut self) {
     self.scene.layer();
   }
@@ -449,6 +458,24 @@ impl Frame<'_> {
   /// The advance width of `s` in points.
   pub fn measure(&mut self, s: &str, font: Font) -> f32 {
     self.text.measure(s, font)
+  }
+
+  /// `font`'s ascent, descent, cap and x height in points: where to put a baseline.
+  pub fn metrics(&mut self, font: Font) -> Metrics {
+    self.text.metrics(font)
+  }
+
+  /// The images [Frame::image] draws: add one once and keep its id, they last across frames.
+  pub fn images(&mut self) -> &mut Images {
+    self.images
+  }
+
+  /// The shaping API for custom paint, such as a text widget of the app's own: shaped lines and
+  /// their glyphs ([TextSystem::layout]), caret positions ([TextSystem::carets]), measures and
+  /// metrics, in points; also whether a kept line is still current, whether a glyph draws in
+  /// colour, the scale and whether glyphs are smoothed.
+  pub fn text_system(&mut self) -> &mut TextSystem {
+    self.text
   }
 
   /// Draws `s`, anything `Display` (formatted into a buffer the frame keeps), with its baseline

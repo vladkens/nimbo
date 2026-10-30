@@ -528,7 +528,7 @@ mod tests {
     assert_eq!((layers[1].quads.len(), layers[1].quads[0].color), (1, [1.0; 4]));
     // Children take the pointer, innermost first.
     let mut hits = Vec::new();
-    crate::ui::hit(&st.last, crate::scene::Point::new(20.0, 20.0), &mut hits);
+    crate::ui::input::hit(&st.last, crate::scene::Point::new(20.0, 20.0), &mut hits);
     assert_eq!(hits, [Id::of("plot"), Id::of("chart")]);
   }
 }

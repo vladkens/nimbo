@@ -40,6 +40,18 @@ pub trait App {
   /// Builds the frame's element tree, which is then laid out and painted. Write it as
   /// `fn view(&mut self, ui: &mut Ui)`, or with `<'a>` on `self` and `Ui` when canvas callbacks
   /// borrow the app's data.
+  ///
+  /// The view describes the screen from the app's state; it does not decide when it runs. The
+  /// runtime may run it any number of times: once or more for an event even when no frame
+  /// follows (a pass that delivers a click, a key delivered up the focus chain, a fresh layout
+  /// before a key, an input method's query or an assistive action), and up to three passes
+  /// within a frame (again when the new layout moved the hover or a virtual list shows rows it
+  /// didn't build); and it may skip it, or parts of it, when nothing they read changed. So the
+  /// view changes state only in answer to what this pass reports: a [crate::Response]'s
+  /// `clicked`, `changed`, `submitted` or the like, [Ui::clicked], a widget's returned value,
+  /// each reported to one pass only; or [App::event] does. Never unconditionally: no counter
+  /// bumped per call, no work started or I/O done because it ran. Time comes from [Ui::now], a
+  /// later frame from [Ui::request_frame_in] or [Cx::after].
   fn view<'a>(&'a mut self, ui: &mut Ui<'a>) {
     let _ = ui;
   }
@@ -91,8 +103,10 @@ pub enum Phase {
   Cancelled,
 }
 
-/// Input in view coordinates (points, y down), independent of NSEvent.
+/// Input in view coordinates (points, y down), independent of NSEvent. More kinds may come in a
+/// minor release: a `match` on it ends with `_ =>`.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum Event {
   /// Pointer moved, with or without a button held (drag).
   MouseMove {
@@ -181,9 +195,9 @@ pub enum Event {
     item: Option<String>,
   },
   /// Assistive technology acting on the element `id` (VoiceOver's press, a slider's increment,
-  /// a field's new text): the runtime takes it through the input paths ([Runtime::event]),
-  /// then the app hears it, the press as a click ([Cx::clicked]). `role` is the node's, as
-  /// the client saw it: a node of `id` with another role refuses it.
+  /// a field's new text): the runtime takes it through the input paths, then the app hears it,
+  /// the press as a click ([Cx::clicked]). `role` is the node's, as the client saw it: a node
+  /// of `id` with another role refuses it.
   A11y {
     id: Id,
     role: Role,
@@ -228,7 +242,7 @@ pub const WHEEL_LINE: f32 = 18.0;
 
 /// Real time in a window, virtual time in the harness (moved only by `Runtime::advance`).
 #[derive(Clone, Copy, Debug)]
-pub enum Clock {
+pub(crate) enum Clock {
   Real(Instant),
   Virtual(Duration),
 }
@@ -350,11 +364,6 @@ impl Cx<'_> {
     self.ui.set_focus(id);
   }
 
-  /// Pointer state and the last frame's tree (`cx.ui().last`).
-  pub fn ui(&self) -> &UiState {
-    self.ui
-  }
-
   /// An element's rect in the last frame.
   pub fn rect(&self, id: Id) -> Option<Rect> {
     self.ui.last.rect(id)
@@ -379,7 +388,7 @@ impl Cx<'_> {
     self.ui.clicked(id)
   }
 
-  /// Shows `id` pressed for a moment: the button a key stands for ([UiState::flash]).
+  /// Shows `id` pressed for a moment: the button a key stands for.
   pub fn flash(&mut self, id: Id) {
     self.ui.flash(id, self.now);
   }
@@ -398,7 +407,7 @@ impl Cx<'_> {
 
 /// Drives an app: feeds it events, tracks the pointer and size, and builds a scene when
 /// something changed. The window and the harness both own one.
-pub struct Runtime<A> {
+pub(crate) struct Runtime<A> {
   pub app: A,
   pub size: Size,
   pub scale: f32,
@@ -498,6 +507,7 @@ impl<A: App> Runtime<A> {
   /// The OS took the pointer while a button was held (another window captured it): the press
   /// ends without a click. The platform then sends the button's [Event::MouseUp] as usual, which
   /// ends the app's drags.
+  #[cfg_attr(target_os = "macos", allow(dead_code))]
   pub fn cancel_press(&mut self) {
     let cancelled = self.ui.cancel_press();
     self.ask(cancelled);
@@ -511,6 +521,7 @@ impl<A: App> Runtime<A> {
 
   /// Whether a press at `p` moves the window ([crate::Ui::drags_window]): the platform then
   /// moves it (or zooms it on a double-click) instead of sending the press.
+  #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
   pub fn drags_window(&self, p: Point) -> bool {
     crate::ui::drags_window(&self.ui.last, p)
   }
