@@ -113,8 +113,6 @@ fns!(Pulse {
   fn pa_threaded_mainloop_start(m: P) -> c_int;
   fn pa_threaded_mainloop_stop(m: P);
   fn pa_threaded_mainloop_free(m: P);
-  fn pa_threaded_mainloop_lock(m: P);
-  fn pa_threaded_mainloop_unlock(m: P);
   fn pa_mainloop_api_once(api: P, f: Fp, data: P);
   fn pa_context_new(api: P, name: S) -> P;
   fn pa_context_unref(c: P);
