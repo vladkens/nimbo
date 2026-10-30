@@ -89,8 +89,8 @@ def fps(log: str) -> str:
 
 def first_frame(log: Path, app: subprocess.Popen) -> float | None:
   """When the first frame in `log` was presented (unix time, s), once it is there; `None` when
-  none comes within LAUNCH s or the app ends first. Only whole lines count: the app may be
-  writing the last one."""
+  none comes within LAUNCH s or the app ends first (`app.poll()` tells which). Only whole
+  lines count: the app may be writing the last one."""
   end = time.monotonic() + LAUNCH
   while time.monotonic() < end and app.poll() is None:
     for line in log.read_text(errors="replace").split("\n")[:-1]:
@@ -125,6 +125,9 @@ def main() -> int:
       launched = time.time()
       app = subprocess.Popen([binary], stderr=out, env=env)
 
+    # The app must last the whole run: once it ends, its counts stand still (or go, with its
+    # threads) and would pass as no wakeups.
+    ended = None
     try:
       first = first_frame(log, app)
       if first is not None:
@@ -132,6 +135,8 @@ def main() -> int:
         c0 = switches(app.pid)
         time.sleep(IDLE)
         wakeups = switches(app.pid) - c0
+
+      ended = app.poll()
     finally:
       app.kill()
       app.wait()
@@ -139,8 +144,13 @@ def main() -> int:
     text = log.read_text(errors="replace")
 
   lines = text.splitlines()
+  if ended is not None:
+    print(f"pace: FAIL (the app ended before the run did, exit code {ended})", file=sys.stderr)
+    print(text, file=sys.stderr)
+    return 1
+
   if first is None:
-    print(f"pace: FAIL (no frame within {LAUNCH} s, or the app ended first)", file=sys.stderr)
+    print(f"pace: FAIL (no frame within {LAUNCH} s)", file=sys.stderr)
     print(text, file=sys.stderr)
     return 1
 
@@ -151,7 +161,8 @@ def main() -> int:
   start = (first - launched) * 1000
   summary = f"pace: {rate} fps while moving ({frames} frames), {wakeups} wakeups in {IDLE} s still"
   print(f"{summary}; the first frame {start:.0f} ms after the launch", flush=True)
-  if float(rate) < float(least) or wakeups > 0:
+  # Fewer switches than at the start: a thread ended in the still window, not still either.
+  if float(rate) < float(least) or wakeups != 0:
     print(f"pace: FAIL (needs at least {least} fps and no wakeups)", file=sys.stderr)
     late = sum(t >= first + SETTLE for t in times)
     print(f"pace: {late} frames presented in the still window", file=sys.stderr)
