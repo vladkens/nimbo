@@ -608,6 +608,13 @@ impl UiState {
   pub fn menu_open(&self, id: Id) -> bool {
     self.store.peek::<Open>(id).is_some_and(|o| o.open)
   }
+
+  /// Closes `id`'s menu: the platform's answered it.
+  pub(crate) fn close_menu(&mut self, id: Id) {
+    if let Some(o) = self.store.peek_mut::<Open>(id) {
+      o.open = false;
+    }
+  }
 }
 
 /// Whether any of `items` has a check mark to show, in a submenu too: the menu has a column
@@ -854,18 +861,57 @@ mod tests {
     h.frame();
     let r = h.rect(Id::of("b")).unwrap();
     let pos = Point::new(r.x + r.w / 2.0, r.y + r.h / 2.0);
-    let (button, mods) = (crate::app::MouseButton::Left, Modifiers::CONTROL);
+    let button = crate::app::MouseButton::Left;
     h.move_to(pos.x, pos.y);
-    h.event(Event::MouseDown { pos, button, clicks: 1, mods });
-    h.frame();
-    h.event(Event::MouseUp { pos, button, mods });
-    h.frame();
-    assert!(h.context_menu(None).is_some(), "the box's menu");
-    h.frame();
-    assert_eq!(h.app().clicks, 0);
+    for mods in [Modifiers::CONTROL, Modifiers::CONTROL | Modifiers::SHIFT] {
+      h.event(Event::MouseDown { pos, button, clicks: 1, mods });
+      h.frame();
+      h.event(Event::MouseUp { pos, button, mods });
+      h.frame();
+      assert!(h.context_menu(None).is_some(), "{mods:?}: the box's menu");
+      h.frame();
+      assert_eq!(h.app().clicks, 0, "{mods:?}");
+    }
+
     h.click(pos.x, pos.y);
     h.frame();
     assert_eq!(h.app().clicks, 1, "a plain click still clicks");
+  }
+
+  /// An element with a menu, built only while `shown`, its state kept meanwhile.
+  struct Gone {
+    shown: bool,
+  }
+
+  impl App for Gone {
+    fn view(&mut self, ui: &mut Ui) {
+      if !self.shown {
+        // Kept as a hidden tab keeps its page.
+        ui.retain(Id::of("el"));
+        return;
+      }
+
+      let el = ui.id("el").el(Style::new().w(px(100.0)).h(px(40.0)));
+      ui.context_menu(el.id, || Menu::new(vec![Item::new("x", "X")]));
+    }
+  }
+
+  #[test]
+  fn a_native_menu_answered_while_its_element_is_gone_is_closed() {
+    let mut h = Harness::new(Gone { shown: true }, Size::new(300.0, 300.0), 1.0);
+    h.native_menus();
+    h.frame();
+    h.right_click(50.0, 20.0);
+    h.frame();
+    assert!(h.rt.ui.menu_open(Id::of("el")));
+    let (on, ..) = h.rt.take_context_menu().unwrap();
+    h.app_mut().shown = false;
+    h.frame();
+    h.event(Event::Menu { on, item: None });
+    h.frame();
+    h.app_mut().shown = true;
+    h.frame();
+    assert!(!h.rt.ui.menu_open(Id::of("el")));
   }
 
   #[test]

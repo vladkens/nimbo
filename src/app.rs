@@ -582,8 +582,12 @@ impl<A: App> Runtime<A> {
     let focus = self.ui.focus();
     let used = match ev {
       Event::KeyDown(k) => self.key_down(k),
-      // A context menu's answer: the element it is for, then the app.
-      Event::Menu { on, .. } => self.deliver(on, ev.clone()) || self.app_event(&ev),
+      // A context menu's answer: the element it is for, then the app; the menu is closed
+      // whether or not the element is there to take it.
+      Event::Menu { on, .. } => {
+        self.ui.close_menu(on);
+        self.deliver(on, ev.clone()) || self.app_event(&ev)
+      }
       Event::Text(_) | Event::Command(_) | Event::Ime(_) | Event::Modifier { .. } => self.typed(ev),
       ev => self.pointer(ev),
     };

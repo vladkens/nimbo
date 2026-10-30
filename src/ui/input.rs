@@ -295,10 +295,11 @@ impl UiState {
     self.input.press.take().is_some()
   }
 
-  /// On the Mac a Control-click is the secondary click from its press to its release: the
-  /// right button's, so no left press or release reaches a field or a button under it.
+  /// On the Mac a Control-click (with other modifiers too) is the secondary
+  /// click from its press to its release: the right button's, so no left press or release
+  /// reaches a field or a button under it.
   pub(crate) fn secondary(&mut self, ev: Event) -> Event {
-    let ctrl = |m: Modifiers| self.os == Os::Mac && m == Modifiers::CONTROL;
+    let ctrl = |m: Modifiers| self.os == Os::Mac && m.contains(Modifiers::CONTROL);
     match ev {
       Event::MouseDown { pos, button: MouseButton::Left, clicks, mods } if ctrl(mods) => {
         self.input.control = true;

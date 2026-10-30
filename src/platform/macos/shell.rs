@@ -28,8 +28,8 @@ use objc2_app_kit::{
   NSWindow, NSWindowDelegate, NSWindowStyleMask, NSWindowTitleVisibility,
 };
 use objc2_foundation::{
-  NSNotification, NSNotificationCenter, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize,
-  NSString,
+  NSDictionary, NSNotification, NSNotificationCenter, NSNumber, NSObject, NSObjectProtocol,
+  NSPoint, NSRect, NSSize, NSString, NSUserDefaults, ns_string,
 };
 
 pub use super::app::{alert, is_main, post, set_presence};
@@ -175,6 +175,20 @@ fn main_menu(mtm: MainThreadMarker, name: &str, delegate: &Delegate) -> Retained
 
 /// Sets the app up, runs `start`, then the AppKit loop until [quit].
 pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
+  // AppKit's AutoFill heuristics off before any text input: a nimbo field is never a login,
+  // address or one-time-code form, and with them on macOS starts an "AutoFill (<app>)" helper
+  // process once a field takes focus. The keys are undocumented:
+  // `NSAutoFillHeuristicControllerEnabled` (found in AppKit by Ghostty, ghostty-org/ghostty#8625,
+  // 2025-09-14; Zed and Chromium set it too) and `NSAutoFillHeuristicsEnabled`, reportedly the
+  // one macOS 27 reads (kstackhq/kstack#510). Registered, not written: a value the person set
+  // wins.
+  let no = NSNumber::new_bool(false);
+  let keys =
+    [ns_string!("NSAutoFillHeuristicControllerEnabled"), ns_string!("NSAutoFillHeuristicsEnabled")];
+  let defaults =
+    NSDictionary::<NSString, AnyObject>::from_slices(&keys, &[no.as_ref(), no.as_ref()]);
+  // SAFETY: strings to numbers, property list values as the registration domain takes them.
+  unsafe { NSUserDefaults::standardUserDefaults().registerDefaults(&defaults) };
   let mtm = mtm();
   let ns_app = NSApplication::sharedApplication(mtm);
   let delegate = Delegate::new(mtm);

@@ -246,7 +246,7 @@ define_class!(
       }
 
       // A Control-click is the secondary click: its press is the context menu's event.
-      if mods(event) == Modifiers::CONTROL {
+      if mods(event).contains(Modifiers::CONTROL) {
         self.ivars().press.replace(Some(event.retain()));
       }
 
