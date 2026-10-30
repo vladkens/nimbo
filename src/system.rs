@@ -230,9 +230,14 @@ pub(crate) fn watch(kinds: &[Change]) -> Result<(), String> {
   for &kind in kinds.iter().filter(|k| !WATCHER.watching(**k)) {
     // Watched first: the OS may tell as it registers.
     WATCHER.watch(kind);
+    let at = Instant::now();
     if let Err(e) = imp::watch(kind) {
       WATCHER.unwatch(kind);
       errors.push(format!("{kind:?}: {e}"));
+    }
+
+    if TRACE.load(Ordering::Relaxed) {
+      eprintln!("nimbo: system watch {kind:?} in {:.1} ms", at.elapsed().as_secs_f64() * 1e3);
     }
   }
 
