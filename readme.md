@@ -131,7 +131,7 @@ Measured on an Apple M2, rustc 1.99, 2026-10-25, without a compiler cache:
 ## 🗺️ Roadmap
 
 - **0.1.0**: what nimbo has today
-- **Next**: translations (i18n with plural forms) and right-to-left layout (Arabic, Hebrew)
+- **Next**: translations (i18n with plural forms) and right-to-left layout (Arabic, Hebrew); more widgets, after SwiftUI's set (steppers, date pickers, disclosure groups)
 - **Later**: a Metal GPU renderer on macOS
 
 ## 🤝 Contributing
