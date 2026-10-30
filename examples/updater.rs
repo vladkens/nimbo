@@ -22,7 +22,8 @@ pub struct Updater {
 
 /// The state a name stands for, `None` for an unknown one.
 pub fn state(name: &str) -> Option<State> {
-  let release = Release::test("1.2.0");
+  let notes = Some("https://github.com/vladkens/nimbo/releases".into());
+  let release = Release { version: "1.2.0".into(), notes, size: 12_400_000 };
   Some(match name {
     "available" => State::Available(release),
     "checking" => State::Checking,

@@ -5,11 +5,10 @@
 //! download and the restart, or why it failed. Nothing opens by itself: an update found waits in
 //! the menu.
 //!
-//! [Updater] is the state without the network: the app runs [check](super::check),
-//! [download](super::download) and [install](super::install) on threads of its own and brings
-//! their results back to it; [menu_item], [check_item] and [view] draw it.
+//! [Updater] is the state without the network: the app's updater checks, downloads and installs
+//! on threads of the app's own, and the app brings each result back to it as a [Release] or an
+//! error's text; [menu_item], [check_item] and [view] draw it.
 
-use std::io::{self, ErrorKind};
 use std::time::{Duration, SystemTime};
 
 use super::Release;
@@ -85,7 +84,8 @@ pub struct Updater {
 }
 
 impl Updater {
-  /// `on`: [super::supported] at launch, and not a [super::dev] build.
+  /// `on`: this app can update in place, as its updater tells at launch (shipo's `supported()`),
+  /// and is not a dev build.
   pub fn new(on: bool) -> Self {
     Self { state: State::Idle, checking: None, answered: None, off: !on }
   }
@@ -124,23 +124,20 @@ impl Updater {
     matches!(self.state, State::Idle | State::UpToDate) && self.check(true)
   }
 
-  /// A check's answer at `now`. A missing feed (404) and one whose signature or content is wrong
-  /// count as no update. A newer release shows unless it is the version `skipped` and nobody
-  /// asked; nothing newer takes back an offer the feed no longer makes; nothing newer and an
-  /// error show only to the person waiting in the window. A failed download or install stays
-  /// until the person sees it.
+  /// A check's answer at `now`: the newer release, none, or why the check failed. A missing feed
+  /// (404) and one whose signature or content is wrong are no update, `Ok(None)`, which the app
+  /// passes for them (shipo's `Error::Http { status: Some(404), .. }`, `Error::Feed` and
+  /// `Error::Signature`): an error is tried again at the next [TICK]. A newer release shows unless
+  /// it is the version `skipped` and nobody asked; nothing newer takes back an offer the feed no
+  /// longer makes; nothing newer and an error show only to the person waiting in the window. A
+  /// failed download or install stays until the person sees it.
   pub fn checked(
     &mut self,
-    found: io::Result<Option<Release>>,
+    found: Result<Option<Release>, String>,
     skipped: Option<&str>,
     now: SystemTime,
   ) {
     let Some(manual) = self.checking.take() else { return };
-    let found = match found {
-      Err(e) if matches!(e.kind(), ErrorKind::NotFound | ErrorKind::InvalidData) => Ok(None),
-      found => found,
-    };
-
     if found.is_ok() {
       self.answered = Some(now);
     }
@@ -155,7 +152,7 @@ impl Updater {
       Ok(Some(r)) if manual || skipped != Some(&r.version) => State::Available(r),
       Ok(_) if manual => State::UpToDate,
       Ok(_) if offered => State::Idle,
-      Err(e) if manual => State::Failed(None, e.to_string()),
+      Err(e) if manual => State::Failed(None, e),
       _ => return,
     };
   }
@@ -196,17 +193,17 @@ impl Updater {
     }
   }
 
-  /// The download or the install failed.
-  pub fn failed(&mut self, e: &io::Error) {
+  /// The download or the install failed, `why`.
+  pub fn failed(&mut self, why: &str) {
     if let State::Downloading(r, _) | State::Restarting(r) = &self.state {
-      self.state = State::Failed(Some(r.clone()), e.to_string());
+      self.state = State::Failed(Some(r.clone()), why.into());
     }
   }
 
-  /// The update that started this app failed ([super::finish]): this one is the old version
-  /// again, and Retry checks again.
-  pub fn relaunched(&mut self, e: &io::Error) {
-    self.state = State::Failed(None, e.to_string());
+  /// The update that started this app failed, `why` (shipo's `finish()`): this one is the old
+  /// version again, and Retry checks again.
+  pub fn relaunched(&mut self, why: &str) {
+    self.state = State::Failed(None, why.into());
   }
 
   /// The window closed: what it said about a check is done with, and a check the person waited
@@ -262,7 +259,7 @@ pub enum Act {
   Later,
   /// Skip This Version.
   Skip,
-  /// The release's notes, which the app opens.
+  /// The release's notes, [Release::notes], which the app opens.
   Notes,
   /// OK, Cancel, Hide: the window closes.
   Close,
@@ -335,12 +332,12 @@ pub fn view(ui: &mut Ui, app: &About, state: &State) -> Option<Act> {
             ui.el(Style::new().h(px(2.0)));
             ui.progress(None);
           }
-          State::Available(_) => {
+          State::Available(r) if r.notes.is_some() => {
             if ui.id(NOTES).link("Release notes", t.body().color(t.link)).clicked {
               act = Some(Act::Notes);
             }
           }
-          State::UpToDate | State::Failed(..) => {}
+          State::Available(_) | State::UpToDate | State::Failed(..) => {}
         }
       });
     });
@@ -392,22 +389,22 @@ mod tests {
   const NOW: SystemTime = SystemTime::UNIX_EPOCH;
 
   fn r(v: &str) -> Release {
-    Release::test(v)
+    Release::new(v)
   }
 
-  fn found(v: &str) -> io::Result<Option<Release>> {
+  fn found(v: &str) -> Result<Option<Release>, String> {
     Ok(Some(r(v)))
   }
 
-  fn error(kind: ErrorKind) -> io::Result<Option<Release>> {
-    Err(io::Error::new(kind, "offline"))
+  fn error() -> Result<Option<Release>, String> {
+    Err("offline".into())
   }
 
   /// `u` after an automatic or a manual check answered `found`.
   fn checked(
     u: &mut Updater,
     manual: bool,
-    found: io::Result<Option<Release>>,
+    found: Result<Option<Release>, String>,
     skip: Option<&str>,
   ) {
     assert!(u.check(manual));
@@ -426,7 +423,7 @@ mod tests {
     assert!(u.due(NOW), "at launch");
     assert!(u.check(false));
     assert!(!u.due(NOW) && !u.check(false), "one at a time");
-    u.checked(error(ErrorKind::TimedOut), None, NOW);
+    u.checked(error(), None, NOW);
     assert!(u.due(NOW), "no answer: again at the next tick");
 
     checked(&mut u, false, Ok(None), None);
@@ -434,8 +431,8 @@ mod tests {
     assert!(u.due(NOW - Duration::from_secs(1)), "the clock set back");
   }
 
-  /// An app that can't update shows nothing and checks nothing; an `Unsupported` check (Linux
-  /// without libcurl) is an error as any, not a dev build.
+  /// An app that can't update shows nothing and checks nothing; one that can shows a failed check
+  /// the person asked for.
   #[test]
   fn an_app_that_cant_update_shows_nothing() {
     let mut u = Updater::new(false);
@@ -444,16 +441,15 @@ mod tests {
 
     let mut u = Updater::new(true);
     assert_eq!(u.showing(), Some(&State::Idle));
-    checked(&mut u, true, error(ErrorKind::Unsupported), None);
+    checked(&mut u, true, error(), None);
     assert_eq!(u.showing(), Some(&State::Failed(None, "offline".into())));
-    assert!(super::super::dev("0.1.0-5-gabc") && !super::super::dev("0.1.0"));
   }
 
   #[test]
   fn an_automatic_check_shows_only_what_is_new() {
     let mut u = Updater::new(true);
     checked(&mut u, false, Ok(None), None);
-    checked(&mut u, false, error(ErrorKind::ConnectionRefused), None);
+    checked(&mut u, false, error(), None);
     checked(&mut u, false, found("1.2.0"), Some("1.2.0"));
     assert_eq!(u.state, State::Idle, "nothing new, offline, skipped: quiet");
 
@@ -463,7 +459,7 @@ mod tests {
     assert_eq!(u.state, State::Idle);
     checked(&mut u, false, found("1.3.0"), Some("1.2.0"));
     assert_eq!(u.state, State::Available(r("1.3.0")), "put off until the next check");
-    checked(&mut u, false, error(ErrorKind::TimedOut), None);
+    checked(&mut u, false, error(), None);
     assert_eq!(u.state, State::Available(r("1.3.0")), "offline: the offer stays");
     checked(&mut u, false, Ok(None), None);
     assert_eq!(u.state, State::Idle, "the feed took it back");
@@ -484,15 +480,9 @@ mod tests {
     u.closed();
     assert_eq!(u.state, State::Idle);
 
-    // A missing feed and a wrong signature are no update; another error shows, Retry checks again.
-    for kind in [ErrorKind::NotFound, ErrorKind::InvalidData] {
-      assert!(u.open());
-      u.checked(error(kind), None, NOW);
-      assert_eq!(u.state, State::UpToDate, "{kind:?}");
-    }
-
+    // An error shows, Retry checks again.
     assert!(u.open());
-    u.checked(error(ErrorKind::TimedOut), None, NOW);
+    u.checked(error(), None, NOW);
     assert_eq!(u.state, State::Failed(None, "offline".into()));
     assert!(!u.open(), "the failure shows first");
     assert_eq!(u.install(), None, "nothing to download: Retry checks again");
@@ -544,8 +534,8 @@ mod tests {
     u.closed();
     assert_eq!(u.state, State::Downloading(r("1.2.0"), 41), "hidden, it goes on");
 
-    let e = io::Error::other("1.2.0 is not the file");
-    u.failed(&e);
+    let e = "1.2.0 is not the file";
+    u.failed(e);
     let failed = State::Failed(Some(r("1.2.0")), "1.2.0 is not the file".into());
     assert_eq!(u.state, failed);
     checked(&mut u, false, found("1.2.0"), None);
@@ -553,12 +543,12 @@ mod tests {
     assert_eq!(u.install(), Some(r("1.2.0")), "Retry");
     u.downloaded();
     assert_eq!(u.state, State::Restarting(r("1.2.0")));
-    u.failed(&e);
+    u.failed(e);
     u.later();
     assert_eq!(u.state, State::Idle, "a failure put off");
 
     // The update that started this app failed: Retry checks again.
-    u.relaunched(&io::Error::other("the new app did not start"));
+    u.relaunched("the new app did not start");
     assert_eq!(u.state, State::Failed(None, "the new app did not start".into()));
     assert_eq!(u.install(), None);
     u.later();

@@ -1,14 +1,15 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! Tests of `examples/updater.rs` through the harness: the update's window offers the release
-//! with its three choices and the notes, a failure offers Retry and Close, and each
-//! state shows its title.
+//! with its three choices and the notes (no link without them), a failure offers Retry and Close,
+//! and each state shows its title.
 
 #[path = "../examples/updater.rs"]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
 #[allow(dead_code, unused_attributes)]
 mod updater;
 
+use nimbo::update::Release;
 use nimbo::update::dialog::{self, Act, State};
 use nimbo::{Harness, Id, Size};
 use updater::{Updater, state};
@@ -37,6 +38,16 @@ fn an_offer_has_its_three_choices_and_the_notes() {
   h.click_id(Id::of(dialog::INSTALL));
   h.render();
   assert!(matches!(h.app().state, State::Downloading(..)), "Install downloads");
+}
+
+/// A release without notes is offered without a link to them.
+#[test]
+fn an_offer_without_notes_has_no_link() {
+  let mut h = window("available");
+  h.app_mut().state = State::Available(Release::new("1.2.0"));
+  h.render();
+  assert!(h.rect(Id::of(dialog::NOTES)).is_none());
+  assert!(h.rect(Id::of(dialog::INSTALL)).is_some());
 }
 
 #[test]

@@ -84,10 +84,7 @@ pub fn app_path() -> Option<PathBuf> {
   app_of(OS, &std::env::current_exe().ok()?, &|k| std::env::var_os(k))
 }
 
-/// An environment variable by its name: [std::env::var_os], or a test's.
-pub(crate) type Env<'a> = &'a dyn Fn(&str) -> Option<OsString>;
-
-pub(crate) fn app_of(os: Os, exe: &Path, env: Env) -> Option<PathBuf> {
+fn app_of(os: Os, exe: &Path, env: &dyn Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
   match os {
     // By its layout: `<name>.app/Contents/MacOS/<exe>`.
     Os::Mac => {
@@ -121,22 +118,15 @@ pub fn outermost(paths: impl IntoIterator<Item = PathBuf>) -> Vec<PathBuf> {
 /// it is emptied ("not empty"); on Windows the app that just quit may hold its files open a
 /// moment after its lock is free (a sharing or lock violation, access denied while deleting).
 pub fn remove(path: &Path) -> io::Result<()> {
-  let removed = retry(|| match path.is_dir() {
-    true => fs::remove_dir_all(path),
-    false => fs::remove_file(path),
-  });
-
-  match removed {
-    Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
-    done => done,
-  }
-}
-
-/// `step` tried again for up to 5 s while its error may pass ([remove]'s); its last result.
-pub(crate) fn retry(mut step: impl FnMut() -> io::Result<()>) -> io::Result<()> {
   let deadline = Instant::now() + Duration::from_secs(5);
   loop {
-    match step() {
+    let done = match path.is_dir() {
+      true => fs::remove_dir_all(path),
+      false => fs::remove_file(path),
+    };
+
+    match done {
+      Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
       Err(e) if imp::busy(&e) && Instant::now() < deadline => {
         thread::sleep(Duration::from_millis(50))
       }
