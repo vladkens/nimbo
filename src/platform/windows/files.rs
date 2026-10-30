@@ -153,13 +153,19 @@ struct TargetVtbl {
 static TARGET: TargetVtbl =
   TargetVtbl { query, add_ref, release, enter, over, leave, drop: dropped };
 
-/// Takes files dragged onto window `hwnd`, OLE started on its thread first (once a thread: it
-/// lasts as long as the app), which calls the target there; the window's reference.
-pub(super) fn register(hwnd: HWND) -> Cell<This> {
+/// Starts OLE on this thread, once (it lasts as long as the app): the apartment drops need, so
+/// it comes before any other COM start here ([super::app::hardware]).
+pub(super) fn ole() {
   thread_local!(static OLE: Cell<bool> = const { Cell::new(false) });
   if !OLE.replace(true) {
     unsafe { OleInitialize(null()) };
   }
+}
+
+/// Takes files dragged onto window `hwnd`, OLE started on its thread first ([ole]), which calls
+/// the target there; the window's reference.
+pub(super) fn register(hwnd: HWND) -> Cell<This> {
+  ole();
 
   let paths = RefCell::default();
   let target = Box::into_raw(Box::new(Target { vtbl: &TARGET, hwnd, paths, refs: Cell::new(1) }));

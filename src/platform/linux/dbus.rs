@@ -15,8 +15,11 @@ use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 use super::dl::fns;
 use super::{Fp, P, S, lib};
 
-/// `G_BUS_TYPE_SESSION`.
+/// `G_BUS_TYPE_SYSTEM` and `G_BUS_TYPE_SESSION`.
+const SYSTEM: c_int = 1;
 const SESSION: c_int = 2;
+/// `G_DBUS_CALL_FLAGS_NO_AUTO_START`.
+const NO_AUTO_START: c_int = 1;
 
 fns!(Gio {
   fn g_bus_get_sync(bus: c_int, cancel: P, err: *mut P) -> P;
@@ -135,20 +138,30 @@ pub fn error(err: P) -> String {
 /// with GIO's reason.
 pub fn session() -> Result<P, String> {
   static BUS: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
-  let bus = BUS.load(Ordering::Acquire);
+  shared(SESSION, &BUS)
+}
+
+/// The system bus, as [session].
+pub fn system() -> Result<P, String> {
+  static BUS: AtomicPtr<c_void> = AtomicPtr::new(null_mut());
+  shared(SYSTEM, &BUS)
+}
+
+fn shared(kind: c_int, slot: &AtomicPtr<c_void>) -> Result<P, String> {
+  let bus = slot.load(Ordering::Acquire);
   if !bus.is_null() {
     return Ok(bus);
   }
 
   let gio = gio().ok_or("GTK 3's GIO did not load")?;
   let mut err = null_mut();
-  let bus = unsafe { (gio.g_bus_get_sync)(SESSION, null_mut(), &mut err) };
+  let bus = unsafe { (gio.g_bus_get_sync)(kind, null_mut(), &mut err) };
   if bus.is_null() {
-    return Err(format!("no session bus: {}", error(err)));
+    return Err(format!("no D-Bus bus {kind}: {}", error(err)));
   }
 
   // Another thread's reference, if it got there first, is GIO's shared connection too.
-  BUS.store(bus, Ordering::Release);
+  slot.store(bus, Ordering::Release);
   Ok(bus)
 }
 
@@ -211,7 +224,15 @@ pub fn call(
   args: V,
   ms: c_int,
 ) -> Result<Gv, String> {
-  call_with(bus, [dest, path, iface, method], args, ms, null_mut())
+  call_with(bus, [dest, path, iface, method], args, ms, 0, null_mut())
+}
+
+/// The properties of `iface` at `dest`'s `path` (`GetAll`'s `a{sv}`), waiting at most `ms`,
+/// without starting `dest` when it isn't running.
+pub fn properties(bus: P, dest: &str, path: &str, iface: &str, ms: c_int) -> Result<Gv, String> {
+  let names = [dest, path, "org.freedesktop.DBus.Properties", "GetAll"];
+  let args = V::Tuple(vec![V::s(iface)]);
+  Ok(call_with(bus, names, args, ms, NO_AUTO_START, null_mut())?.child(0))
 }
 
 /// Calls `method`, whose reply is a file descriptor (`h`, as the clipboard portal's
@@ -226,7 +247,7 @@ pub fn call_fd(
   ms: c_int,
 ) -> Result<OwnedFd, String> {
   let mut fds = null_mut();
-  let reply = call_with(bus, [dest, path, iface, method], args, ms, &mut fds)?;
+  let reply = call_with(bus, [dest, path, iface, method], args, ms, 0, &mut fds)?;
   if fds.is_null() {
     return Err(format!("{method} gave no file descriptor"));
   }
@@ -243,8 +264,15 @@ pub fn call_fd(
   }
 }
 
-/// [call], with the reply's file descriptors in `fds` unless it is null.
-fn call_with(bus: P, names: [&str; 4], args: V, ms: c_int, fds: *mut P) -> Result<Gv, String> {
+/// [call] with `flags` (`GDBusCallFlags`), the reply's file descriptors in `fds` unless it is null.
+fn call_with(
+  bus: P,
+  names: [&str; 4],
+  args: V,
+  ms: c_int,
+  flags: c_int,
+  fds: *mut P,
+) -> Result<Gv, String> {
   let [d, p, i, m] = names.map(cstr);
   let mut err = null_mut();
   let args = args.build();
@@ -257,7 +285,7 @@ fn call_with(bus: P, names: [&str; 4], args: V, ms: c_int, fds: *mut P) -> Resul
       m.as_ptr(),
       args,
       null_mut(),
-      0,
+      flags,
       ms,
       null_mut(),
       fds,

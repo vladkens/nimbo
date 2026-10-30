@@ -6,8 +6,8 @@
 //! ([hotkey]), launch at login through the registry ([autostart]), links and files opened ([open]),
 //! shortcuts posted to the app in front ([post]), where the user types ([focus]) and the clipboard
 //! for a paste ([paste]); the Downloads folder ([downloads]), the console of the command line
-//! ([attach_console]), the uninstall's retries ([uninstall]) and a microphone's transport
-//! ([hardware]).
+//! ([attach_console]), the uninstall's retries ([uninstall]) and a microphone's transport, the
+//! lid and their changes ([hardware]).
 
 pub mod activity;
 pub mod autostart;

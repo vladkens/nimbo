@@ -2,15 +2,17 @@
 
 //! The computer's hardware as an app sees it: how an audio device is attached ([transport]) and
 //! whether a laptop's lid is closed ([lid_closed]), for a recorder to pick a microphone that
-//! hears. Both from any thread.
+//! hears. Both from any thread; their changes come through [crate::system].
 //!
 //! | | transport | lid |
 //! |---|---|---|
 //! | macOS | CoreAudio's transport type by the device's UID, the computer's own microphone told from a headset on the jack | IOPMrootDomain's `AppleClamshellState` |
-//! | Windows | the endpoint's PnP enumerator by its IMMDevice id: Bluetooth or USB, else unknown | none yet |
-//! | Linux | unknown yet | none yet |
+//! | Windows | the endpoint's PnP enumerator by its IMMDevice id: Bluetooth or USB, else unknown | the power setting's last value, while [Change::Lid] is watched |
+//! | Linux | unknown yet | UPower's `LidIsPresent` and `LidIsClosed`, over the system bus |
 
 use crate::platform::hardware as imp;
+#[cfg(doc)]
+use crate::system::Change;
 
 /// How an audio device is attached.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -36,8 +38,9 @@ pub fn transport(id: &str) -> Transport {
   imp::transport(id)
 }
 
-/// Whether the laptop's lid is closed; `None` without a lid (a desktop) and on Windows and Linux,
-/// which aren't read yet.
+/// Whether the laptop's lid is closed; `None` without a lid (a desktop). Windows tells it only
+/// while [Change::Lid] is watched ([crate::Main::watch]), `None` before; on Linux it asks UPower
+/// over the system bus (about a millisecond; `None` without it).
 pub fn lid_closed() -> Option<bool> {
   imp::lid_closed()
 }

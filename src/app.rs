@@ -154,6 +154,9 @@ pub enum Event {
   /// The OS's light or dark setting or accent colour changed, or is first known (before the
   /// first frame): the theme follows it unless the app set one ([Ui::set_theme]).
   Appearance(Appearance),
+  /// A change in the system the app watches ([crate::Main::watch]), to read again
+  /// ([crate::system]); redraws when the app uses it.
+  System(crate::system::Change),
   /// Files dragged over the window, the pointer at `pos`; the hover follows it, so
   /// [Cx::hovered] tells where they would go.
   DragOver {
@@ -1126,6 +1129,31 @@ mod tests {
     assert_eq!(ground(&mut h), px(MINE.bg));
     assert_eq!(h.app().seen.last(), Some(&(true, MINE.accent)));
     assert_eq!(h.rt.ui.appearance(), Appearance::LIGHT);
+  }
+
+  /// A change of the system the app shows redraws; one it ignores doesn't.
+  #[test]
+  fn a_system_change_redraws_when_used() {
+    use crate::system::Change;
+
+    #[derive(Default)]
+    struct Lid(u32);
+    impl App for Lid {
+      fn event(&mut self, _: &mut Cx, ev: &Event) -> bool {
+        let lid = matches!(ev, Event::System(Change::Lid));
+        self.0 += lid as u32;
+        lid
+      }
+    }
+
+    let mut h = crate::Harness::new(Lid::default(), Size::new(40.0, 40.0), 1.0);
+    h.frame();
+    assert!(h.event(Event::System(Change::Lid)));
+    assert!(h.rt.needs_frame());
+    h.frame();
+    assert!(!h.event(Event::System(Change::AudioInputs)));
+    assert!(!h.rt.needs_frame());
+    assert_eq!(h.app().0, 1);
   }
 
   #[test]

@@ -19,7 +19,8 @@
 //!     `cfg.hidden`; `front(id)`, `hide(id)` (off screen, no frames, its app kept: `front` shows it
 //!     again), `close(id)` (its runtime dropped, then its close callback from
 //!     `crate::shell::closed(id)`), `with_app(id, f: &mut dyn FnMut(&mut dyn App)) -> bool` (not
-//!     while the window is busy up the stack; redraws);
+//!     while the window is busy up the stack; redraws), `send(id, ev: Event) -> Option<bool>` (the
+//!     event to its runtime, as input is; `None` while it is busy up the stack or gone);
 //!   - an overlay (`cfg.overlay`, [crate::Config::overlay]): no frame, transparent (the renderer's
 //!     `transparent`, the buffer's alpha composited), click-through, never key or active, above
 //!     full-screen apps on every Space or workspace, not in the Dock, taskbar or window cycling;
@@ -148,7 +149,13 @@
 //!   an audio device's by the id cpal gives (macOS the CoreAudio UID, its transport type to
 //!   `hardware::core_audio`; Windows the IMMDevice endpoint id, its PnP enumerator to
 //!   `hardware::pnp`; Linux `Unknown`), and `lid_closed() -> Option<bool>` (macOS IOPMrootDomain's
-//!   `AppleClamshellState`; `None` without a lid, on Windows and Linux).
+//!   `AppleClamshellState`; Windows the last `GUID_LIDSWITCH_STATE_CHANGE` while the lid is
+//!   watched; Linux UPower's `LidIsPresent` and `LidIsClosed`; `None` without a lid). On the main
+//!   thread, `watch(kind: system::Change) -> Result<(), String>` starts telling the kind's changes,
+//!   each to `crate::system::notice(kind)` from any thread, which must never block (macOS
+//!   CoreAudio's listeners on the system object and IOPMrootDomain's clamshell message; Windows an
+//!   `IMMNotificationClient` and the power setting to the shell's window; Linux PulseAudio's
+//!   subscription and UPower's `PropertiesChanged`), and `unwatch()` stops them all.
 //!
 //!   `activity`, `hardware`, `open`, `post`, `paste`, `focus`, `permissions` and `uninstall` live
 //!   in `app/` on each OS too.
