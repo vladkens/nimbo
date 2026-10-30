@@ -38,6 +38,8 @@ nimbo grew out of [wavo-app](https://github.com/vladkens/wavo-app), the dictatio
 - **Native controls on each system**: the lightest on memory, but the controls differ everywhere, the design came out different on each system, and every feature was written three times.
 - **The Sublime Text and Sublime Merge way**: a small UI I draw myself over the system's window, input and text. The middle ground, and this library came out of it.
 
+I keep nimbo small on purpose: a core of windows, input, text, layout, a renderer and the widgets a desktop app needs, and nothing bundled that most apps don't use (no Markdown or HTML renderer, charts, code editor, dock system or scripting runtime). That limits the library, not the apps: anything bigger is built on the same core, in the app or as an add-on.
+
 ## 📥 Installation
 
 nimbo isn't released yet; take it from git:
