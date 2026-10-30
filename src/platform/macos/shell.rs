@@ -34,7 +34,7 @@ use objc2_foundation::{
 
 pub use super::app::{alert, is_main, post, set_presence};
 use super::view::View;
-use super::{Pasteboard, appearance, mtm, overlay};
+use super::{Pasteboard, activate, appearance, mtm, overlay};
 use crate::Config;
 use crate::app::{App, Clock, Event, Runtime};
 use crate::shell::{Anchor, AppInfo, Main, Presence};
@@ -207,7 +207,7 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
   shell(|s| *s = Shell::default());
   super::app::set_presence(info.presence);
   if info.presence == Presence::Regular {
-    ns_app.activate();
+    activate(mtm);
   }
 
   start(&mut Main::here());
@@ -412,7 +412,7 @@ pub fn front(id: u64) {
   }
 
   window.makeKeyAndOrderFront(None);
-  NSApplication::sharedApplication(mtm).activate();
+  activate(mtm);
 }
 
 /// Orders the window out; the Dock follows.

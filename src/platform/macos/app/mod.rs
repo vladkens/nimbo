@@ -76,6 +76,6 @@ pub fn alert(title: &str, message: &str) {
   let alert = NSAlert::new(mtm);
   alert.setMessageText(&NSString::from_str(title));
   alert.setInformativeText(&NSString::from_str(message));
-  NSApplication::sharedApplication(mtm).activate();
+  super::activate(mtm);
   alert.runModal();
 }

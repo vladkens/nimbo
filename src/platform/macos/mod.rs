@@ -87,6 +87,17 @@ fn mtm() -> MainThreadMarker {
   MainThreadMarker::new().expect("nimbo: AppKit is main thread only")
 }
 
+/// Brings the app to the front: `activate` on macOS 14+, `activateIgnoringOtherApps:` below it.
+fn activate(mtm: MainThreadMarker) {
+  let app = NSApplication::sharedApplication(mtm);
+  if objc2::available!(macos = 14.0) {
+    app.activate();
+  } else {
+    #[allow(deprecated)]
+    app.activateIgnoringOtherApps(true);
+  }
+}
+
 /// The app's effective appearance (light or dark Aqua, as System Settings sets it unless the
 /// app overrides it) and the accent colour, `None` for Multicolor: `AppleAccentColor` is then
 /// unset and controls use the app's own. The accent is `controlAccentColor` resolved in that
