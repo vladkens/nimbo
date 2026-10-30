@@ -489,7 +489,7 @@ impl Ui<'_> {
   /// The context menu of the element `id`, built before or after it: a secondary press on it or
   /// inside it ([Ui::context_press]) opens `menu()` at the pointer (the closure runs only then,
   /// and while a drawn one is open); returns the id of the item chosen. In a window the
-  /// platform shows its own menu ([crate::Runtime::set_native_menus]), free to go past the
+  /// platform shows its own menu (`Runtime::set_native_menus`), free to go past the
   /// window's edges, and the answer comes in a later pass as [Event::Menu]; in the harness it is
   /// drawn ([Ui::menu_popup_at] of `id`): a check column, headers in secondary text, shortcuts
   /// at the right, destructive items red, a submenu's items under its label; each item

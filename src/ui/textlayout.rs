@@ -23,7 +23,7 @@ const BREAK_W: f32 = 4.0;
 /// Where a caret goes in a line: a grapheme boundary, as a byte offset of the element's text,
 /// and its x from the element's left edge.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Stop {
+pub(crate) struct Stop {
   pub at: u32,
   pub x: f32,
 }
@@ -46,15 +46,17 @@ pub struct Edit {
   /// The text shown is a placeholder for an empty one.
   pub placeholder: bool,
   /// The text element.
+  #[doc(hidden)]
   pub node: u32,
-  /// Its caret stops in [Tree::stops], filled by the layout.
+  /// Its caret stops in `Tree::stops`, filled by the layout.
+  #[doc(hidden)]
   pub stops: (u32, u32),
 }
 
 impl Ui<'_> {
   /// Text with a selection, caret and marked text ([Edit]), laid out over its whole text with
-  /// caret stops ([TextLayout]); `node` styles the element (cursor, focus, input). What text
-  /// fields and selectable text build on.
+  /// caret stops; `node` styles the element (cursor, focus, input). What text fields and
+  /// selectable text build on.
   pub fn edit_text(&mut self, s: &str, style: TextStyle, edit: Edit, node: Style) -> Response {
     let text = &mut self.st.tree.text;
     let start = text.len() as u32;
@@ -75,7 +77,7 @@ impl Ui<'_> {
 
 /// An editable or selectable text element of a laid-out tree.
 #[derive(Clone, Copy, Debug)]
-pub struct TextLayout<'t> {
+pub(crate) struct TextLayout<'t> {
   /// The element's text; empty when it shows a placeholder.
   pub text: &'t str,
   /// The element's box in the window.
@@ -94,7 +96,7 @@ pub struct TextLayout<'t> {
 
 impl<'t> TextLayout<'t> {
   /// The text element `id` of a laid-out tree, if it is editable or selectable.
-  pub fn of(t: &'t Tree, id: Id) -> Option<Self> {
+  pub(crate) fn of(t: &'t Tree, id: Id) -> Option<Self> {
     Self::at(t, t.find(id)?)
   }
 
@@ -118,10 +120,6 @@ impl<'t> TextLayout<'t> {
   /// The number of visual lines.
   pub fn len(&self) -> usize {
     if self.placeholder { 1 } else { self.lines.len() }
-  }
-
-  pub fn is_empty(&self) -> bool {
-    self.text.is_empty()
   }
 
   /// Visual line `k`: a byte range without its line break.

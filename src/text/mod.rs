@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::rc::Rc;
 
-pub use atlas::{ATLAS_SIZE, AtlasGlyph, COLOR_ATLAS_SIZE, Upload};
+pub(crate) use atlas::{ATLAS_SIZE, AtlasGlyph, COLOR_ATLAS_SIZE, Upload};
 
 use self::atlas::Atlas;
 pub(crate) use self::memo::Memo;
@@ -26,7 +26,7 @@ const LINE_CAP: usize = 4096;
 /// over: an app animating a font size makes a face per size.
 const FACE_CAP: usize = 256;
 /// Font smoothing by default: it matched AppKit's text best in a side-by-side comparison.
-pub const SMOOTH: bool = true;
+pub(crate) const SMOOTH: bool = true;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Weight {
@@ -81,16 +81,18 @@ impl Metrics {
 /// A glyph's bitmap in pixels, from the backend: `left` right of the pen position and `bottom`
 /// above the baseline (y up), `w` x `h` pixels with rows top-down.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct GlyphBox {
+pub(crate) struct GlyphBox {
   pub left: i32,
   pub bottom: i32,
   pub w: usize,
   pub h: usize,
 }
 
-/// How glyphs are rasterized.
+/// How glyphs are rasterized; each backend reads what it uses (macOS no `text`, Linux no `smooth`
+/// or `dark`).
 #[derive(Clone, Copy, Debug)]
-pub struct Raster {
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) struct Raster {
   pub scale: f32,
   /// Font smoothing (CoreGraphics' stem darkening on current macOS).
   pub smooth: bool,
@@ -135,7 +137,7 @@ pub struct Line {
   pub ink: Ink,
   /// The faces its glyphs index: they start over past [FACE_CAP], and a line kept from before
   /// is no longer [TextSystem::is_current].
-  pub epoch: u32,
+  pub(crate) epoch: u32,
 }
 
 struct Entry {
@@ -181,7 +183,7 @@ pub struct TextSystem {
 }
 
 impl TextSystem {
-  pub fn new(scale: f32) -> Self {
+  pub(crate) fn new(scale: f32) -> Self {
     Self {
       scale,
       fonts: Vec::new(),
@@ -209,7 +211,7 @@ impl TextSystem {
 
   /// Drops the glyph bitmaps made at the old scale; the atlas refills from the start. Shaped
   /// lines are in points and stay.
-  pub fn set_scale(&mut self, scale: f32) {
+  pub(crate) fn set_scale(&mut self, scale: f32) {
     if scale == self.scale {
       return;
     }
@@ -223,9 +225,9 @@ impl TextSystem {
     self.smooth
   }
 
-  /// Turns font smoothing of coverage glyphs on or off (default [SMOOTH]); the
-  /// atlas refills.
-  pub fn set_smoothing(&mut self, smooth: bool) {
+  /// Turns font smoothing of coverage glyphs on or off (on by default); the atlas refills.
+  #[cfg(test)]
+  pub(crate) fn set_smoothing(&mut self, smooth: bool) {
     if smooth == self.smooth {
       return;
     }
@@ -235,13 +237,13 @@ impl TextSystem {
   }
 
   /// Atlas pixels rasterized since the last call, for the renderer to copy into its textures.
-  pub fn uploads(&mut self) -> std::vec::Drain<'_, Upload> {
+  pub(crate) fn uploads(&mut self) -> std::vec::Drain<'_, Upload> {
     self.uploads.drain(..)
   }
 
   /// The uploads [Self::uploads] would drain, left in place: a second renderer reads them
   /// first.
-  pub fn pending(&self) -> &[Upload] {
+  pub(crate) fn pending(&self) -> &[Upload] {
     &self.uploads
   }
 
@@ -249,7 +251,7 @@ impl TextSystem {
   /// there are too many faces, and resets a full atlas. Returns true when glyphs were dropped
   /// this frame, so it must be drawn again; not twice in a row, so a frame whose glyphs don't fit
   /// the atlas draws with some missing instead of looping.
-  pub fn end_frame(&mut self) -> bool {
+  pub(crate) fn end_frame(&mut self) -> bool {
     if self.lines.len() > self.line_cap {
       let frame = self.frame;
       self.lines.retain(|_, e| e.frame == frame);
@@ -335,7 +337,7 @@ impl TextSystem {
   }
 
   /// Shapes `s` (kerning, ligatures, font fallback), cached per (font, text). A line kept past
-  /// [Self::end_frame] is laid out again when it is no longer [Self::is_current]: its faces
+  /// the frame's end is laid out again when it is no longer [Self::is_current]: its faces
   /// may have started over.
   pub fn layout(&mut self, s: &str, font: Font) -> Rc<Line> {
     let face = self.face(font);
@@ -360,24 +362,20 @@ impl TextSystem {
     line.epoch == self.epoch
   }
 
-  /// The atlas slot of a glyph at one of 4 horizontal subpixel offsets (colour glyphs have
+  /// The atlas slot of a glyph at one of 4 horizontal subpixel offsets, `sub` (colour glyphs have
   /// one), rasterized on first use for text of `color`: dark text (on a light background) or
   /// light gets its own coverage, and a colour glyph with layers in the text's colour its own
   /// bitmap per colour. A colour face's monochrome glyph is a coverage one, tinted like text.
   /// `None` for glyphs with no pixels (spaces), when the atlas is full, or for a face there is
   /// no more (a stale line's: [Self::is_current]).
-  pub fn glyph(&mut self, face: u16, id: u16, subpixel: u8, color: Color) -> Option<AtlasGlyph> {
+  pub(crate) fn glyph(&mut self, face: u16, id: u16, sub: u8, color: Color) -> Option<AtlasGlyph> {
+    let paint = self.paint(face, id);
     let font = self.faces.get(face as usize)?;
     // Rec. 709 luma of the sRGB colour: dark text gets the glyphs smoothed for light grounds.
     // Only smoothing depends on the text's polarity.
     let dark = 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2] < 0.5 && self.smooth;
     let text = [0, 1, 2].map(|i| (color[i].clamp(0.0, 1.0) * 255.0).round() as u8);
     let raster = Raster { scale: self.scale, smooth: self.smooth, dark, text };
-    let paint = match self.color_faces[face as usize] {
-      true => *self.color_glyphs.entry((face, id)).or_insert_with(|| sys::color_glyph(font, id)),
-      false => None,
-    };
-
     match paint {
       Some(tinted) => {
         let [r, g, b] = text;
@@ -389,10 +387,21 @@ impl TextSystem {
         self.color_atlas.glyph(font, raster, (face, id, variant), &mut self.uploads)
       }
       None => {
-        let key = (face, id, (subpixel | (dark as u8) << 2) as u32);
+        let key = (face, id, (sub | (dark as u8) << 2) as u32);
         self.atlas.glyph(font, raster, key, &mut self.uploads)
       }
     }
+  }
+
+  /// How a colour face's glyph draws ([sys::color_glyph]); `None` for a coverage glyph.
+  fn paint(&mut self, face: u16, id: u16) -> Option<bool> {
+    let font = self.faces.get(face as usize).filter(|_| self.color_faces[face as usize])?;
+    *self.color_glyphs.entry((face, id)).or_insert_with(|| sys::color_glyph(font, id))
+  }
+
+  /// Whether a shaped glyph draws in its own colours (an emoji), not in the text's.
+  pub fn is_color(&mut self, g: Glyph) -> bool {
+    self.paint(g.face, g.id).is_some()
   }
 
   fn face(&mut self, font: Font) -> u16 {
@@ -455,7 +464,7 @@ impl TextSystem {
 
 /// FxHash (rustc's hasher): a multiply and a rotate per word, enough for cache keys.
 #[derive(Clone, Copy, Default)]
-pub struct FxHasher(u64);
+pub(crate) struct FxHasher(u64);
 
 impl FxHasher {
   fn add(&mut self, word: u64) {

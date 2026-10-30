@@ -1,8 +1,8 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The app around the windows: an event loop that runs with no window ([app]), windows opened and
-//! closed on demand ([Main::open]), each with its own [Runtime](crate::Runtime), where the app
-//! shows besides them ([Presence]), and the way other threads reach the main thread ([Proxy]).
+//! closed on demand ([Main::open]), each with its own runtime, where the app shows besides them
+//! ([Presence]), and the way other threads reach the main thread ([Proxy]).
 //! [crate::run] is one window on top of it, quitting when it closes.
 //!
 //! Everything here runs on the main thread: [Main] is its token, given to the start closure, to

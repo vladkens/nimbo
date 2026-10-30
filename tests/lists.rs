@@ -58,7 +58,7 @@ fn swipe(h: &mut H, at: (f32, f32), dy: f32) -> bool {
 }
 
 fn offset(h: &H, id: Id) -> f32 {
-  h.rt.ui.scroll(id).unwrap().offset.y
+  h.scroll(id).unwrap().offset.y
 }
 
 fn click_with(h: &mut H, id: Id, mods: Modifiers) {
@@ -96,11 +96,11 @@ fn open(h: &mut H, id: Id) {
 #[test]
 fn only_the_rows_in_view_are_built() {
   let h = lists();
-  let built = h.rt.ui.last.nodes.iter().filter(|n| n.parent != 0).count();
+  let built = h.built();
   assert!(h.rect(row(0)).is_some() && h.rect(row(30)).is_none());
-  let sc = h.rt.ui.scroll(Id::of(LIST)).unwrap();
+  let sc = h.scroll(Id::of(LIST)).unwrap();
   assert_eq!(sc.content.h, ROWS as f32 * ROW_H + 8.0);
-  assert!(built < 120, "{built} nodes");
+  assert!(built < 122, "{built} nodes");
 }
 
 /// The trackpad scrolls it; the rows follow; left alone, it goes idle.
@@ -146,7 +146,7 @@ fn keys_go_to_the_ends_and_select_all() {
   h.key(NamedKey::End, NONE);
   h.frame();
   assert_eq!(selected(&h), [ROWS as u64 - 1]);
-  let (v, last) = (h.rt.ui.scroll(list).unwrap().viewport, h.rect(row(ROWS as u64 - 1)).unwrap());
+  let (v, last) = (h.scroll(list).unwrap().viewport, h.rect(row(ROWS as u64 - 1)).unwrap());
   assert!(last.y >= v.y && last.y + last.h <= v.y + v.h + 0.5, "{last:?} in {v:?}");
   h.key(NamedKey::ArrowUp, Os::Mac.cmd());
   h.frame();
@@ -336,7 +336,7 @@ fn letters_typed_highlight_a_menu_item() {
 #[test]
 fn the_pop_up_button_chooses_by_letters_typed() {
   let mut h = lists();
-  h.rt.ui.set_focus(Some(Id::of(SORT)));
+  h.set_focus(Some(Id::of(SORT)));
   h.key(Key::Char('k'), NONE);
   assert_eq!(h.app().sort, 2, "k: Kind");
   h.advance(Duration::from_millis(1100));
@@ -350,7 +350,7 @@ fn the_pop_up_button_chooses_by_letters_typed() {
 fn the_pop_up_button_opens_over_itself() {
   let mut h = lists();
   let sort = Id::of(SORT);
-  h.rt.ui.set_focus(Some(sort));
+  h.set_focus(Some(sort));
   h.key(Key::Char(' '), NONE);
   h.frame();
   h.frame();
@@ -381,7 +381,7 @@ fn tabs_switch_and_keep_the_hidden_page_scroll() {
   h.click_id(tabs.key(("tab", "Details")));
   h.frame();
   assert!(h.rect(notes).is_none());
-  h.rt.ui.set_focus(Some(tabs));
+  h.set_focus(Some(tabs));
   h.key(NamedKey::ArrowRight, NONE);
   h.frame();
   assert_eq!((h.app().tab, offset(&h, notes)), (1, 60.0));

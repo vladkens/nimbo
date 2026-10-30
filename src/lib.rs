@@ -5,9 +5,11 @@
 //! on Windows, GTK 3 with fontconfig, FreeType and HarfBuzz on Linux), nothing else.
 //!
 //! An [App] gets [Event]s and builds each frame as an element tree on a [Ui] (laid out and painted
-//! by [ui]) and/or paints a [Scene] and [text] through a [Frame]; a [Runtime] drives it, fed by
-//! the window ([platform]) or by the headless [Harness], both drawing with the CPU renderer
-//! ([cpu]). Examples start with [run], which opens a window, or with `--shot <file.png>` runs the
+//! by [ui]; [App::view] says how often a view runs and what it may change) and/or paints shapes,
+//! images and [text] through a [Frame]; the runtime drives it, fed by the window ([platform]) or
+//! by the headless [Harness], both drawing with nimbo's CPU renderer. The scene, the renderer
+//! and the laid-out tree are the crate's own, so they can change without breaking an app.
+//! Examples start with [run], which opens a window, or with `--shot <file.png>` runs the
 //! harness instead (in the dark appearance unless `--appearance light`).
 //!
 //! An app with no window, or more than one, starts with [app]: windows on demand ([Main::open])
@@ -32,7 +34,7 @@ pub mod activity;
 pub mod app;
 pub mod autostart;
 pub mod clipboard;
-pub mod cpu;
+pub(crate) mod cpu;
 pub mod desktop;
 mod file_dialog;
 pub mod focus;
@@ -60,8 +62,7 @@ pub mod uninstall;
 use std::path::PathBuf;
 
 pub use app::{
-  App, Appearance, Clipboard, Clock, Cx, Event, Ime, MemClipboard, MouseButton, Phase, Runtime,
-  WHEEL_LINE, Waker,
+  App, Appearance, Clipboard, Cx, Event, Ime, MemClipboard, MouseButton, Phase, WHEEL_LINE, Waker,
 };
 pub use clipboard::SystemClipboard;
 pub use file_dialog::FileDialog;
@@ -75,9 +76,7 @@ pub use keys::{
 };
 pub use menu::{Item, Menu};
 pub use png::Png;
-pub use scene::{
-  Color, Frame, ImageId, Images, Point, Quad, Rect, Scene, Segment, Size, alpha, mix, rgb,
-};
+pub use scene::{Color, Frame, ImageId, Images, Point, Quad, Rect, Size, alpha, mix, rgb};
 pub use shell::{Anchor, AppInfo, Main, Presence, Proxy, Window, WindowId, app, attach_console};
 pub use text::edit::{Editor, Lines, Mono, Sel};
 pub use text::{Font, Weight};
@@ -85,8 +84,8 @@ pub use ui::{
   Align, Answer, Behavior, Button, ButtonStyle, Choice, Click, Clip, ControlSize, Cursor, Dialog,
   Dim, Ease, EditMenu, FieldBehavior, FieldStyle, Float, Focus, FocusRing, FormRow, FormStyle,
   Icon, Id, List, ListResponse, PopUp, Press, Response, Row, Scroll, Select, Selection, Shadow,
-  Sizes, Split, Style, Tabs, TextInput, TextLayout, TextStyle, Theme, Tile, Tone, Transition,
-  TypeSelect, Ui, Variant, grow, pct, px, rigid,
+  Sizes, Split, Style, Tabs, TextInput, TextStyle, Theme, Tile, Tone, Transition, TypeSelect, Ui,
+  Variant, grow, pct, px, rigid,
 };
 
 /// A window's title and initial content size in points; the harness renders at this size.
@@ -175,11 +174,11 @@ impl Config {
   }
 
   /// An overlay, a HUD over everything: no frame, transparent where the app draws nothing
-  /// ([cpu::Renderer::transparent]), of a fixed size; it never activates the app or takes the
-  /// keys, the mouse goes through it, it shows on every Space and over full-screen apps.
-  /// [Window::front] shows it at `anchor` on the screen with the pointer (again at each call),
-  /// [Window::hide] hides it. Size it to the widest the app draws, as it draws its own shape and
-  /// shadow inside.
+  /// (so is its shot: [Harness::set_transparent]), of a fixed size; it never activates the app or
+  /// takes the keys, the mouse goes through it, it shows on every Space and over full-screen
+  /// apps. [Window::front] shows it at `anchor` on the screen with the pointer (again at each
+  /// call), [Window::hide] hides it. Size it to the widest the app draws, as it draws its own
+  /// shape and shadow inside.
   ///
   /// Per OS: macOS a borderless non-activating `NSPanel` at the status bar level. Windows a
   /// layered, click-through, topmost tool window with no activation, shown on the current
@@ -300,9 +299,9 @@ pub fn run_args<A: App + 'static>(
 /// appearance, dark unless `--appearance` says otherwise, as a window tells it the OS's.
 fn harness<A: App>(cfg: &Config, app: A, args: &Args) -> Harness<A> {
   let mut h = Harness::new(app, args.size.unwrap_or(cfg.size), args.scale);
-  h.cpu.transparent = cfg.overlay.is_some();
+  h.set_transparent(cfg.overlay.is_some());
   // A unified window's title bar as high as macOS 26's.
-  h.rt.set_titlebar(cfg.unified.then_some((32.0, cfg.title)));
+  h.set_titlebar(cfg.unified.then_some((32.0, cfg.title)));
   h.event(Event::Appearance(args.appearance.unwrap_or(Appearance::DARK)));
   h
 }

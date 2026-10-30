@@ -6,7 +6,7 @@
 //! become ([Command]), named after AppKit's key binding selectors (`moveWordLeft:`,
 //! `deleteBackward:`, `insertNewline:`).
 //!
-//! A key press travels in this order (the runtime routes it, [crate::Runtime::event]):
+//! A key press travels in this order (the runtime routes it, `Runtime::event`):
 //!
 //! 0. A focused element that grabs the keys ([crate::Ui::grab_keys]: a shortcut recorder recording,
 //!    a modal dialog) gets the key itself first.

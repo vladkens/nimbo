@@ -50,7 +50,7 @@ struct Item {
   opaque: IRect,
 }
 
-/// BGRA pixels of a frame (premultiplied), top row first.
+/// BGRA pixels of a frame (premultiplied), top row first: a harness shot's ([crate::harness]).
 pub struct Pixels {
   pub w: usize,
   pub h: usize,
@@ -347,6 +347,7 @@ impl Renderer {
   }
 
   /// Draws the whole prepared frame.
+  #[cfg(test)]
   pub fn draw_full(&mut self, scene: &Scene, px: &mut [u32], stride: usize) {
     let r = IRect::new(0, 0, self.size.0 as i32, self.size.1 as i32);
     self.draw(scene, px, stride, &[r]);

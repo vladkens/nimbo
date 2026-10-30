@@ -49,7 +49,7 @@ fn a_change_redraws_the_window() {
   assert_eq!(h.text(Id::of(LAST)), Some("None"));
 
   assert!(h.event(Event::System(Change::AudioInputs)));
-  assert!(h.rt.needs_frame());
+  assert!(h.needs_frame());
   let after = h.render();
   assert_eq!(h.text(count(Change::AudioInputs)), Some("1"));
   assert_eq!(h.text(Id::of(LAST)), Some("Audio inputs"));

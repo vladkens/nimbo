@@ -41,7 +41,7 @@ fn sel(h: &Harness<Fields>, id: &str) -> Sel {
 }
 
 fn clipboard(h: &mut Harness<Fields>) -> Option<String> {
-  h.rt.clipboard().read()
+  h.clipboard().read()
 }
 
 /// The fields, laid out once.
@@ -57,7 +57,7 @@ fn fields() -> Harness<Fields> {
 fn fields_on(os: Os, text: &str, clip: &str) -> Harness<Fields> {
   let mut h = fields();
   h.set_os(os);
-  h.rt.clipboard().write(clip);
+  h.clipboard().write(clip);
   h.click_id(Id::of(NAME));
   h.type_text(text);
   h
@@ -154,7 +154,7 @@ fn the_first_field_has_the_focus_from_the_start() {
   let mut h = fields();
   assert!(!h.frame(), "a frame without changes");
   assert_eq!(h.focused(), Some(Id::of(NAME)));
-  assert_eq!(h.rt.due_in(), Some(Duration::from_millis(500)));
+  assert_eq!(h.due_in(), Some(Duration::from_millis(500)));
 }
 
 #[test]
@@ -163,14 +163,14 @@ fn typing_word_moves_undo_and_the_clipboard() {
   let name = Id::of(NAME);
   h.click_id(name);
   assert_eq!(h.focused(), Some(name));
-  assert!(h.rt.text_input().is_some(), "a field takes input methods");
+  assert!(h.text_input().is_some(), "a field takes input methods");
   assert!(h.type_text("Hello world"));
   assert_eq!(h.app().name, "Hello world");
   assert_eq!(h.app().changes, [NAME]);
   h.frame();
   assert_eq!(h.text(text_of(NAME)), Some("Hello world"));
   // The caret blinks on timers while the field has focus.
-  assert!(h.rt.due_in().is_some_and(|d| d <= Duration::from_millis(500)));
+  assert!(h.due_in().is_some_and(|d| d <= Duration::from_millis(500)));
 
   // Alt-Left a word, Cmd-Left the line's start, Shift-Alt-Right selects a word.
   h.key(NamedKey::ArrowLeft, Modifiers::ALT);
@@ -265,7 +265,7 @@ fn the_caret_stays_in_view() {
   h.key(Key::Char('a'), CMD);
   h.type_text(&"a long name that does not fit the field ".repeat(3));
   h.frame();
-  let off = |h: &Harness<Fields>| h.rt.ui.last.get(name).unwrap().scroll[0];
+  let off = |h: &Harness<Fields>| h.scroll(name).unwrap().offset.x;
   assert!(off(h) > 0.0, "the end in view");
   h.key(NamedKey::ArrowLeft, CMD);
   h.frame();
@@ -295,11 +295,11 @@ fn input_methods_compose_apart_from_the_value() {
   assert!(h.ime_mark("ni"));
   assert_eq!(h.app().notes, "ab");
   assert_eq!(h.editor(notes).unwrap().text(), "abni");
-  assert_eq!(h.rt.text_input().unwrap().marked(), Some(2..4));
-  assert!(h.rt.text_input().unwrap().caret_rect().is_some(), "where the candidates go");
+  assert_eq!(h.text_input().unwrap().marked(), Some(2..4));
+  assert!(h.text_input().unwrap().caret_rect().is_some(), "where the candidates go");
   let img = h.render();
   let t = h.rect(text_of(NOTES)).unwrap();
-  let r = h.rt.text_input().unwrap().rect(2..4).unwrap().0;
+  let r = h.text_input().unwrap().rect(2..4).unwrap().0;
   let under = (r.y + r.h - 1.5..r.y + r.h + 0.5).step_by_half().any(|y| {
     let p = img.pixel(r.x + r.w / 2.0, y);
     p[0] > 0xa0
@@ -351,7 +351,7 @@ fn a_password_shows_dots_and_keeps_its_secret() {
   let h = &mut fields();
   let pw = Id::of(PASSWORD);
   h.click_id(pw);
-  assert!(h.rt.text_input().is_none(), "no input method in a password");
+  assert!(h.text_input().is_none(), "no input method in a password");
   h.type_text("sécret");
   h.frame();
   assert_eq!(h.app().password, "sécret");
@@ -391,7 +391,7 @@ fn placeholder_disabled_and_selectable() {
   h.release(r.x + 20.0, r.y + 8.0);
   assert_eq!(h.focused(), Some(about));
   assert_eq!(h.editor(about).unwrap().selected(), "Selectable");
-  assert!(h.rt.text_input().is_none(), "selectable text takes no input method");
+  assert!(h.text_input().is_none(), "selectable text takes no input method");
   h.key(Key::Char('c'), CMD);
   assert_eq!(clipboard(h).as_deref(), Some("Selectable"));
   h.type_text("x");
@@ -399,7 +399,7 @@ fn placeholder_disabled_and_selectable() {
   // Without a focused field the window sleeps: no caret, no timer.
   h.click(SIZE.w - 4.0, SIZE.h - 4.0);
   h.wait(Duration::from_millis(600));
-  assert_eq!((h.focused(), h.rt.due_in()), (None, None));
+  assert_eq!((h.focused(), h.due_in()), (None, None));
   assert!(!h.frame());
 }
 
@@ -478,7 +478,7 @@ fn a_composition_reads_as_the_field_shows_it() {
   h.type_text("old");
   h.ime_mark("ni");
   assert_eq!(h.app().name, "old");
-  assert_eq!(h.rt.text_input().unwrap().selected(), 5..5);
+  assert_eq!(h.text_input().unwrap().selected(), 5..5);
   reads(&h.a11y(), &["text field \"Name\" value \"oldni\" focused"]);
   h.click_id(Id::of(PASSWORD));
   h.ime_mark("xy");
@@ -561,15 +561,15 @@ fn a_native_edit_menu_is_asked_for_and_answered() {
   assert_eq!(clipboard(h).as_deref(), Some("hello"));
 
   // Open until it answers: the field keeps its focus look, then its focus.
-  h.rt.clipboard().write("");
+  h.clipboard().write("");
   h.key(NamedKey::ArrowRight, NONE);
   right_click(h, NAME);
-  assert!(h.rt.ui.menu_open(Id::of(NAME).key("edit")));
+  assert!(h.menu_open(Id::of(NAME).key("edit")));
   let (_, asked) = h.context_menu(None).unwrap();
   let on: Vec<_> = asked.items.iter().filter(|i| !i.separator).map(|i| i.enabled).collect();
   assert_eq!(on, [false, false, false, true], "nothing selected, nothing to paste");
   h.frame();
-  assert!(!h.rt.ui.menu_open(Id::of(NAME).key("edit")));
+  assert!(!h.menu_open(Id::of(NAME).key("edit")));
   assert_eq!((h.focused(), h.app().name.as_str()), (Some(Id::of(NAME)), "hello"));
   assert!(h.context_menu(None).is_none(), "asked once");
 }
@@ -603,7 +603,7 @@ fn the_edit_menus_paste_pastes() {
   assert_eq!(h.app().name, "moon");
   assert_eq!(h.focused(), Some(Id::of(NAME)));
 
-  h.rt.clipboard().write("");
+  h.clipboard().write("");
   right_click(h, NAME);
   assert_eq!(menu(h), ["Cut disabled", "Copy disabled", "Paste disabled", "Select All"]);
 }

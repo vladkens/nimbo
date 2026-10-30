@@ -13,7 +13,7 @@
 //!
 //! The column's place in its scroll area is the last frame's; when the layout shows more of it
 //! than was built (the first frame, the viewport grew, content above moved it) the view runs
-//! again at once ([Ui::partial_short]), so a frame never shows a gap. [List](super::List) is the
+//! again at once (`Ui::partial_short`), so a frame never shows a gap. [List](super::List) is the
 //! same for a list that is its own scroll area, with selection and keys.
 
 use std::hash::Hash;

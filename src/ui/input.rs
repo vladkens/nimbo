@@ -132,7 +132,7 @@ impl Input {
 /// The interactive elements under `p`, innermost first: the topmost hit (overlays from the top
 /// by z, then the tree back to front, inside every clip on the way) and its interactive
 /// ancestors.
-pub fn hit(t: &Tree, p: Point, out: &mut Vec<Id>) {
+pub(crate) fn hit(t: &Tree, p: Point, out: &mut Vec<Id>) {
   out.clear();
   let Some(mut i) = top(t, p) else { return };
   loop {
@@ -151,7 +151,7 @@ pub fn hit(t: &Tree, p: Point, out: &mut Vec<Id>) {
 
 /// Whether a press at `p` moves the window: the topmost interactive node there drags it
 /// ([super::Ui::drags_window]).
-pub fn drags_window(t: &Tree, p: Point) -> bool {
+pub(crate) fn drags_window(t: &Tree, p: Point) -> bool {
   top(t, p).is_some_and(|i| t.drags.binary_search(&i).is_ok())
 }
 
