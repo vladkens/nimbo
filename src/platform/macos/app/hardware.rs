@@ -10,8 +10,10 @@
 use std::cell::Cell;
 use std::ffi::{c_char, c_void};
 use std::ptr::{NonNull, null, null_mut};
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU8, Ordering};
 
-use dispatch2::DispatchQueue;
+use dispatch2::{DispatchQueue, DispatchRetained};
 use objc2_core_foundation::{CFBoolean, CFRetained, CFString, CFType};
 
 use crate::hardware::Transport;
@@ -141,10 +143,20 @@ fn root_domain() -> Option<u32> {
 /// `sys_iokit` being `err_system(0x38)` and the family `err_sub(13)`.
 const CLAMSHELL: u32 = 0xe003_4100;
 
+/// The audio kinds whose listeners are on, a bit each (`address`'s index), on [audio]'s queue.
+static AUDIO: AtomicU8 = AtomicU8::new(0);
+
 thread_local! {
-  /// The kinds whose listeners are on, and the lid's port and notification while watched.
-  static AUDIO: Cell<[bool; 2]> = const { Cell::new([false; 2]) };
+  /// The lid's port and notification while it is watched.
   static LID: Cell<Option<(*mut c_void, u32)>> = const { Cell::new(None) };
+}
+
+/// CoreAudio's listeners are added and removed here, in order, off the main thread: the first
+/// call connects to coreaudiod, 35–75 ms in the macOS 27 VM (2026-10-30), which the app's first
+/// window shouldn't wait for.
+fn audio() -> &'static DispatchQueue {
+  static QUEUE: OnceLock<DispatchRetained<DispatchQueue>> = OnceLock::new();
+  QUEUE.get_or_init(|| DispatchQueue::new("nimbo.audio", None))
 }
 
 /// The system object's property that tells `kind`: its device list or its default input.
@@ -165,23 +177,20 @@ fn told(selector: u32) -> Option<Change> {
     .find(|&k| address(k).is_some_and(|(_, a)| a.selector == selector))
 }
 
-/// Watches `kind` (on the main thread): a listener on the system object, or the clamshell.
+/// Watches `kind` (on the main thread): a listener on the system object, added on [audio]'s
+/// queue, whose rare failure goes to stderr as it can't come back; or the clamshell.
 pub fn watch(kind: Change) -> Result<(), String> {
   if kind == Change::Lid {
     return watch_lid();
   }
 
   let Some((i, at)) = address(kind) else { return Err("not on macOS".into()) };
-  // SAFETY: the system object, a property of it, a listener that lives as long as the process.
-  let status = unsafe { AudioObjectAddPropertyListener(1, &at, listener, null_mut()) };
-  if status != 0 {
-    return Err(format!("CoreAudio's listener failed ({status})"));
-  }
-
-  AUDIO.set({
-    let mut on = AUDIO.get();
-    on[i] = true;
-    on
+  audio().exec_async(move || {
+    // SAFETY: the system object, a property of it, a listener that lives as long as the process.
+    match unsafe { AudioObjectAddPropertyListener(1, &at, listener, null_mut()) } {
+      0 => _ = AUDIO.fetch_or(1 << i, Ordering::AcqRel),
+      e => eprintln!("nimbo: system: CoreAudio's listener for {kind:?} failed ({e})"),
+    }
   });
   Ok(())
 }
@@ -210,15 +219,15 @@ fn watch_lid() -> Result<(), String> {
 
 /// Stops every listener and the clamshell's notification.
 pub fn unwatch() {
-  for kind in [Change::AudioInputs, Change::DefaultInput] {
-    let Some((i, at)) = address(kind) else { continue };
-    if AUDIO.get()[i] {
-      // SAFETY: the listener added by `watch`, with the same address and data.
-      unsafe { AudioObjectRemovePropertyListener(1, &at, listener, null_mut()) };
+  audio().exec_async(|| {
+    let on = AUDIO.swap(0, Ordering::AcqRel);
+    for (i, at) in [Change::AudioInputs, Change::DefaultInput].into_iter().filter_map(address) {
+      if on & 1 << i != 0 {
+        // SAFETY: the listener added by `watch`, with the same address and data.
+        unsafe { AudioObjectRemovePropertyListener(1, &at, listener, null_mut()) };
+      }
     }
-  }
-
-  AUDIO.set([false; 2]);
+  });
   if let Some((port, note)) = LID.take() {
     // SAFETY: the notification and its port, made by `watch_lid`, released once.
     unsafe { IOObjectRelease(note) };
