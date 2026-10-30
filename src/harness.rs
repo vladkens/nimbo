@@ -58,9 +58,10 @@ impl<A: App> Harness<A> {
   }
 
   /// Plays the window's title bar over the content ([crate::Config::unified]): its height and
-  /// the window's title, which [crate::Ui::titlebar] reports.
+  /// the window's title, which [crate::Ui::titlebar] reports; the next frame shows it.
   pub fn set_titlebar(&mut self, bar: Option<(f32, &'static str)>) {
     self.rt.set_titlebar(bar);
+    self.rt.redraw();
   }
 
   /// Renders transparent where the app draws nothing, as an overlay's window does
@@ -69,9 +70,11 @@ impl<A: App> Harness<A> {
     self.cpu.transparent = yes;
   }
 
-  /// Gives the element `id` the key focus, or takes it from all (`None`).
+  /// Gives the element `id` the key focus, or takes it from all (`None`); the next frame shows
+  /// it.
   pub fn set_focus(&mut self, id: Option<Id>) {
     self.rt.ui.set_focus(id);
+    self.rt.redraw();
   }
 
   /// Resizes the view to `size` points at `scale`, as a window resized or moved to another
