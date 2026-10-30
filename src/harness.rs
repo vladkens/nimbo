@@ -297,7 +297,9 @@ impl<A: App> Harness<A> {
     self.rt.cursor()
   }
 
-  /// A scroll area's offset, viewport and content in the last frame ([crate::Ui::scroll]).
+  /// A scroll area's offset, viewport and content as of the last frame and the input since
+  /// ([crate::Ui::scroll]): the offset includes wheel, keys and `scroll_to` that came after the
+  /// frame, clamped to the last frame's content.
   pub fn scroll(&self, id: Id) -> Option<Scroll> {
     self.rt.ui.scroll(id)
   }
@@ -313,7 +315,8 @@ impl<A: App> Harness<A> {
   }
 
   /// The focused text field as an input method sees it ([crate::ui::TextInput]); `None` unless
-  /// an editable field that takes input methods has the focus.
+  /// an editable field that takes input methods has the focus. Runs the view and the layout
+  /// first when something changed since the last layout, as a window's input method query does.
   pub fn text_input(&mut self) -> Option<TextInput<'_>> {
     self.rt.text_input()
   }

@@ -42,9 +42,11 @@ pub trait App {
   /// borrow the app's data.
   ///
   /// The view describes the screen from the app's state; it does not decide when it runs. The
-  /// runtime may run it several times for one frame (a pass that delivers a click or a key
-  /// before the frame, another when the new layout moved the hover or a virtual list shows rows
-  /// it didn't build), and may skip it, or parts of it, when nothing they read changed. So the
+  /// runtime may run it any number of times: once or more for an event even when no frame
+  /// follows (a pass that delivers a click, a key delivered up the focus chain, a fresh layout
+  /// before a key, an input method's query or an assistive action), and up to three passes
+  /// within a frame (again when the new layout moved the hover or a virtual list shows rows it
+  /// didn't build); and it may skip it, or parts of it, when nothing they read changed. So the
   /// view changes state only in answer to what this pass reports: a [crate::Response]'s
   /// `clicked`, `changed`, `submitted` or the like, [Ui::clicked], a widget's returned value,
   /// each reported to one pass only; or [App::event] does. Never unconditionally: no counter

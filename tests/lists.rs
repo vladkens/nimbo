@@ -100,7 +100,7 @@ fn only_the_rows_in_view_are_built() {
   assert!(h.rect(row(0)).is_some() && h.rect(row(30)).is_none());
   let sc = h.scroll(Id::of(LIST)).unwrap();
   assert_eq!(sc.content.h, ROWS as f32 * ROW_H + 8.0);
-  assert!(built < 130, "{built} nodes");
+  assert!(built < 122, "{built} nodes");
 }
 
 /// The trackpad scrolls it; the rows follow; left alone, it goes idle.

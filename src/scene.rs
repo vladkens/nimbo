@@ -90,18 +90,18 @@ pub const fn mix(a: Color, b: Color, t: f32) -> Color {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Quad {
-  pub rect: Rect,
-  pub color: Color,
-  pub border_color: Color,
+  pub(crate) rect: Rect,
+  pub(crate) color: Color,
+  pub(crate) border_color: Color,
   /// Corner radii: top-left, top-right, bottom-right, bottom-left.
-  pub radii: [f32; 4],
+  pub(crate) radii: [f32; 4],
   /// Border widths inside the rect: top, right, bottom, left.
-  pub borders: [f32; 4],
+  pub(crate) borders: [f32; 4],
   /// Blur radius; a quad with a blur draws only its soft shadow.
-  pub blur: f32,
+  pub(crate) blur: f32,
   /// A linear gradient from `color` to `border_color` ([Quad::gradient]): 1 down the rect, 2
   /// across it, 0 none.
-  pub gradient: f32,
+  pub(crate) gradient: f32,
   pub(crate) _pad: [f32; 2],
 }
 
@@ -169,7 +169,7 @@ pub(crate) struct Segment {
 
 /// An RGBA image added through [Images].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct ImageId(pub u32);
+pub struct ImageId(pub(crate) u32);
 
 /// What a layer draws, in this order: quads, images, lines, glyphs, colour emoji.
 #[derive(Default)]
