@@ -186,6 +186,8 @@ pub struct UiState {
   tree: Tree,
   /// The last frame's tree, laid out: ids and rects for hit testing.
   pub last: Tree,
+  /// Text measures the layout keeps across frames.
+  kept: layout::Kept,
   /// Open containers: node index and the number of children so far.
   stack: Vec<(u32, u32)>,
   pub(crate) input: Input,
@@ -261,6 +263,7 @@ impl Default for UiState {
     Self {
       tree: Tree::default(),
       last: Tree::default(),
+      kept: layout::Kept::default(),
       stack: Vec::new(),
       input: Input::default(),
       store: Store::default(),
@@ -716,7 +719,7 @@ impl<'a> Ui<'a> {
   pub fn measure_wrapped(&mut self, s: &str, style: TextStyle, width: f32) -> f32 {
     let Some(text) = self.text.as_mut() else { return 0.0 };
     let mut m = Sys { text, images: &self.images, scale: 1.0 };
-    layout::wrapped_width(s, style, width, &mut m)
+    layout::wrapped_width(s, style, width, &mut m, &mut self.st.kept)
   }
 
   /// Vertical metrics of `font` as the layout uses them: to set a mark beside text by its
@@ -1204,15 +1207,16 @@ impl<'a> Ui<'a> {
   // MARK: Frame
 
   /// Lays the tree out for the window, rects snapped to pixels at `scale`, with scroll
-  /// offsets from the store (clamped to the new content, and kept so).
+  /// offsets from the store (clamped to the new content, and kept so). Texts' least widths and
+  /// wrapped lines are kept across frames per font and text: `m` measures the same each frame.
   pub fn layout(&mut self, m: &mut dyn Measure, scale: f32) {
-    let UiState { tree, store, .. } = &mut self.st;
+    let UiState { tree, store, kept, .. } = &mut self.st;
     for &i in &tree.scrolls {
       let n = &mut tree.nodes[i as usize];
       n.scroll = store.peek::<ScrollState>(n.id).map_or([0.0; 2], |s| s.offset);
     }
 
-    let fit_h = layout::layout(tree, self.size, scale, m);
+    let fit_h = layout::layout(tree, self.size, scale, m, kept);
     for &i in &tree.scrolls {
       let n = &tree.nodes[i as usize];
       let (s, max) = (store.raw::<ScrollState>(n.id), input::max_scroll(n));

@@ -9,12 +9,16 @@ use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+mod wrap;
+
+pub(crate) use self::wrap::{Kept, wrapped_width};
+use self::wrap::{text_width, wrap};
 use super::a11y::Records;
 use super::textlayout::{Edit, Stop, reveal};
 use super::{Align, Clip, Dim, Float, Id, Style, TextStyle};
 use crate::keys::Binding;
 use crate::scene::{Color, ImageId, Images, Rect, Size};
-use crate::text::edit::{graphemes, next_grapheme};
+use crate::text::edit::next_grapheme;
 use crate::text::{Font, FxHasher, Ink, Metrics, TextSystem};
 
 /// Slack for float sums when comparing sizes, in points.
@@ -298,16 +302,18 @@ impl Tree {
 /// Lays out `t` in a window of `win`, snapping edges to pixels at `scale` (0 doesn't snap),
 /// sorts the overlays by z and indexes the nodes by id. Returns the height the root's content
 /// takes at its fit size, scroll areas at their content's ([super::Ui::fit_window_height]).
-pub fn layout(t: &mut Tree, win: Size, scale: f32, m: &mut dyn Measure) -> f32 {
+/// A text's least width and wrapped lines come from `kept` when it has them for its font and
+/// text: `m` measures them the same each time.
+pub fn layout(t: &mut Tree, win: Size, scale: f32, m: &mut dyn Measure, kept: &mut Kept) -> f32 {
   let n = t.nodes.len() as u32;
   let root = &mut t.nodes[0];
   root.end = n;
   root.style.size = [Dim::Px(win.w), Dim::Px(win.h)];
 
-  fit(t, 0, m);
+  fit(t, 0, m, kept);
   grow(t, 0, win);
-  wrap(t, m);
-  fit(t, 1, m);
+  wrap(t, m, kept);
+  fit(t, 1, m, kept);
   let fit_h = t.nodes[0].content[1] as f32;
   grow(t, 1, win);
   place(t, win, scale);
@@ -315,6 +321,8 @@ pub fn layout(t: &mut Tree, win: Size, scale: f32, m: &mut dyn Measure) -> f32 {
 
   let nodes = &t.nodes;
   t.floats.sort_unstable_by_key(|&i| (float_z(nodes, i), i));
+  kept.least.end();
+  kept.lines.end();
   t.index.clear();
   for (i, n) in t.nodes.iter().enumerate() {
     if t.index.insert(n.id, i as u32).is_some() {
@@ -380,11 +388,11 @@ fn each(t: &mut Tree, i: usize, mut f: impl FnMut(&mut Node)) {
 // MARK: Sizes
 
 /// Bottom-up: each box's size from its content, clamped to its min and max.
-fn fit(t: &mut Tree, ax: usize, m: &mut dyn Measure) {
+fn fit(t: &mut Tree, ax: usize, m: &mut dyn Measure, kept: &mut Kept) {
   for i in (0..t.nodes.len()).rev() {
     let (content, least) = match t.nodes[i].kind {
       Kind::Text { range, style, .. } if ax == 0 => {
-        let (w, least) = text_width(&t.text[range.0 as usize..range.1 as usize], style, m);
+        let (w, least) = text_width(&t.text[range.0 as usize..range.1 as usize], style, m, kept);
         (w.into(), least.into())
       }
       Kind::Text { lines, line_h, .. } => {
@@ -435,35 +443,6 @@ fn children_fit(t: &Tree, i: usize, ax: usize) -> (f64, f64) {
   let gaps = if along && count > 1 { f64::from(n.style.gap) * (count - 1) as f64 } else { 0.0 };
   let (a, b) = pads(&n.style, ax);
   (size + gaps + a + b, least + gaps + a + b)
-}
-
-/// The preferred width of a text (its widest line) and its least: when it wraps, its widest
-/// character (grapheme), as a word that doesn't fit a line breaks between characters
-/// ([wrap_text]).
-fn text_width(s: &str, style: TextStyle, m: &mut dyn Measure) -> (f32, f32) {
-  if style.ellipsis && !s.contains('\n') {
-    let w = m.width(s, style.font);
-    return (w, w.min(m.width(ELLIPSIS, style.font)));
-  }
-
-  let (mut pref, mut least) = (0.0f32, 0.0f32);
-  for line in s.split('\n') {
-    let w = m.width(line, style.font);
-    pref = pref.max(w);
-    if !style.wrap {
-      least = least.max(w);
-      continue;
-    }
-
-    // Every word's: a narrow word can hold the widest one ("iiii W").
-    for word in line.split(' ') {
-      for g in graphemes(word) {
-        least = least.max(m.width(&word[g], style.font));
-      }
-    }
-  }
-
-  (pref, least)
 }
 
 /// Top-down: sizes children from their parent's final size, along the parent's axis
@@ -655,208 +634,6 @@ impl Measure for Sys<'_> {
   fn stops(&mut self, s: &str, font: Font, base: u32, out: &mut Vec<Stop>) {
     self.text.carets(s, font, |i, x| out.push(Stop { at: base + i as u32, x }));
   }
-}
-
-// MARK: Text
-
-/// Wraps every text element at its final width and sets its line metrics; editable ones get
-/// lines that cover their text and caret stops.
-fn wrap(t: &mut Tree, m: &mut dyn Measure) {
-  t.lines.clear();
-  t.stops.clear();
-  let mut edits = t.edits.iter_mut().peekable();
-  for (i, n) in t.nodes.iter_mut().enumerate() {
-    // Text is measured in `f32`: a line is never that long.
-    let (width, wide) = (n.size[0] as f32, n.content[0] as f32);
-    let Kind::Text { range, style, lines, baseline, line_h } = &mut n.kind else { continue };
-    let met = m.metrics(style.font);
-    *line_h = if style.line_h > 0.0 { style.line_h } else { met.line_height() };
-    *baseline = (*line_h - met.ascent - met.descent) / 2.0 + met.ascent;
-    let start = t.lines.len() as u32;
-    let s = &t.text[range.0 as usize..range.1 as usize];
-    let edit = edits.next_if(|e| e.node == i as u32).filter(|e| !e.placeholder);
-    // One line that fits (or doesn't wrap): its width is the one measured for the fit.
-    let fits = !style.wrap || wide <= width + EPS;
-    let cut = style.ellipsis && edit.is_none() && wide > width + EPS;
-    let (start_at, end, cover) = (range.0, range.1, edit.is_some());
-    match fits && !s.contains('\n') {
-      // Paint adds the ellipsis after a line that ends before its text does.
-      true if cut => {
-        let (end, w) = ellipsize(s, style.font, width, m);
-        let ink = m.line(&s[..end], style.font).1;
-        t.lines.push(Line { start: start_at, end: start_at + end as u32, width: w, ink, stop: 0 })
-      }
-      true => {
-        let ink = m.line(s, style.font).1;
-        t.lines.push(Line { start: start_at, end, width: wide, ink, stop: 0 })
-      }
-      false => wrap_text(&t.text, *range, *style, width, cover, m, &mut t.lines),
-    }
-
-    *lines = (start, t.lines.len() as u32);
-    if let Some(e) = edit {
-      let first = t.stops.len() as u32;
-      for l in &mut t.lines[start as usize..] {
-        l.stop = t.stops.len() as u32;
-        let s = &t.text[l.start as usize..l.end as usize];
-        m.stops(s, style.font, l.start - range.0, &mut t.stops);
-      }
-
-      e.stops = (first, t.stops.len() as u32);
-    }
-  }
-}
-
-/// The longest prefix of `s` that fits `width` with an ellipsis after it (trailing spaces
-/// dropped), as its length in bytes and its width with the ellipsis. It ends between graphemes:
-/// an emoji sequence or a syllable stays whole.
-fn ellipsize(s: &str, font: Font, width: f32, m: &mut dyn Measure) -> (usize, f32) {
-  let dots = m.width(ELLIPSIS, font);
-  let bounds: Vec<usize> = std::iter::once(0).chain(graphemes(s).map(|g| g.end)).collect();
-
-  // Binary search over the graphemes: `lo` fits, `hi` doesn't.
-  let (mut lo, mut hi) = (0, bounds.len());
-  while hi - lo > 1 {
-    let mid = (lo + hi) / 2;
-    match m.width(&s[..bounds[mid]], font) + dots <= width + EPS {
-      true => lo = mid,
-      false => hi = mid,
-    }
-  }
-
-  let end = s[..bounds[lo]].trim_end().len();
-  (end, m.width(&s[..end], font) + dots)
-}
-
-/// The widest line of `s` in `style` wrapped at `width`, as [wrap_text] breaks it.
-pub(crate) fn wrapped_width(s: &str, style: TextStyle, width: f32, m: &mut dyn Measure) -> f32 {
-  let mut lines = Vec::new();
-  wrap_text(s, (0, s.len() as u32), style, width, false, m, &mut lines);
-  lines.iter().fold(0.0, |w, l| w.max(l.width))
-}
-
-/// Breaks the text at `range` into lines no wider than `width`: at newlines, and greedily at
-/// spaces when it wraps. A word wider than `width` starts a line and breaks between characters
-/// (graphemes), as AppKit's word wrapping does, each line at least one character. With `cover`
-/// (an editable text) the same breaks give lines that cover the text: each up to where the next
-/// starts, with the spaces it broke at, the first from the line break before it.
-fn wrap_text(
-  text: &str,
-  range: (u32, u32),
-  style: TextStyle,
-  width: f32,
-  cover: bool,
-  m: &mut dyn Measure,
-  out: &mut Vec<Line>,
-) {
-  let font = style.font;
-  let mut at = range.0 as usize;
-  for line in text[at..range.1 as usize].split('\n') {
-    let base = at;
-    at += line.len() + 1;
-    let (w, ink) = m.line(line, font);
-    if !style.wrap || w <= width + EPS {
-      let end = (base + line.len()) as u32;
-      out.push(Line { start: base as u32, end, width: w, ink, stop: 0 });
-      continue;
-    }
-
-    let space = m.width(" ", font);
-    let mut push = |m: &mut dyn Measure, a: usize, b: usize| {
-      let (width, ink) = m.line(&line[a..b], font);
-      out.push(Line { start: (base + a) as u32, end: (base + b) as u32, width, ink, stop: 0 });
-    };
-    // The line so far: start, end and width.
-    let mut cur: Option<(usize, usize, f32)> = None;
-    let mut pos = 0;
-    for word in line.split(' ') {
-      let (a, b) = (pos, pos + word.len());
-      pos = b + 1;
-      if word.is_empty() {
-        continue;
-      }
-
-      let ww = m.width(word, font);
-      if let Some((start, end, cw)) = cur {
-        let next = cw + space * (a - end) as f32 + ww;
-        if next <= width + EPS {
-          cur = Some((start, b, next));
-          continue;
-        }
-
-        push(m, start, if cover { a } else { end });
-      }
-
-      // Covering, the first line starts at the line break with the spaces after it: they count,
-      // and stay on a line of their own when the word doesn't fit after them.
-      let (mut from, mut w) = (a, ww);
-      if cover && cur.is_none() && a > 0 {
-        let pw = m.width(&line[..b], font);
-        match pw <= width + EPS {
-          true => (from, w) = (0, pw),
-          false => push(m, 0, a),
-        }
-      }
-
-      cur = Some(match w <= width + EPS {
-        true => (from, b, w),
-        // Too wide for a line: its pieces, the last one going on with the words after it.
-        false => {
-          let mut from = from;
-          for cut in breaks(word, font, width, m) {
-            push(m, from, a + cut);
-            from = a + cut;
-          }
-
-          (from, b, m.width(&line[from..b], font))
-        }
-      });
-    }
-
-    let (start, end) = cur.map_or((0, 0), |(a, b, _)| (a, b));
-    push(m, start, if cover { line.len() } else { end });
-  }
-}
-
-/// Where `word`, wider than `width`, breaks: after the longest runs of whole graphemes that fit,
-/// each at least one, as offsets in it; not at its end. Each line measures runs doubling from its
-/// start to one that doesn't fit, then halves between: about its own length, not the rest of the
-/// word's.
-fn breaks(word: &str, font: Font, width: f32, m: &mut dyn Measure) -> Vec<usize> {
-  let bounds: Vec<usize> = std::iter::once(0).chain(graphemes(word).map(|g| g.end)).collect();
-
-  let (mut cuts, mut from, last) = (Vec::new(), 0, bounds.len() - 1);
-  let fits = |m: &mut dyn Measure, a: usize, b: usize| {
-    m.width(&word[bounds[a]..bounds[b]], font) <= width + EPS
-  };
-  loop {
-    // `lo` fits (or is the one grapheme a line takes anyway), `hi` doesn't; none when the rest
-    // fits.
-    let (mut lo, mut hi, mut step) = (from + 1, None, 1);
-    while lo < last {
-      let probe = (lo + step).min(last);
-      if !fits(m, from, probe) {
-        hi = Some(probe);
-        break;
-      }
-
-      (lo, step) = (probe, step * 2);
-    }
-
-    let Some(mut hi) = hi else { break };
-    while hi - lo > 1 {
-      let mid = (lo + hi) / 2;
-      match fits(m, from, mid) {
-        true => lo = mid,
-        false => hi = mid,
-      }
-    }
-
-    cuts.push(bounds[lo]);
-    from = lo;
-  }
-
-  cuts
 }
 
 // MARK: Positions
@@ -1090,7 +867,10 @@ fn offset(align: Align, free: f64) -> f64 {
 pub(crate) mod tests {
   use std::time::Duration;
 
+  use super::wrap::{ellipsize, wrap_text};
   use super::*;
+  use crate::text::Memo;
+  use crate::text::edit::graphemes;
   use crate::ui::{Align, Float, Ui, UiState, grow, pct, px, rigid};
 
   /// Every character is 0.6 of the font size wide; ascent 0.8, descent 0.2.
@@ -1361,7 +1141,8 @@ pub(crate) mod tests {
     let measured = |n: usize| {
       let text = "a".repeat(n);
       let (mut m, mut out) = (Counted(0), Vec::new());
-      wrap_text(&text, (0, n as u32), T, 60.0, false, &mut m, &mut out);
+      let kept = &mut Memo::default();
+      wrap_text(&text, (0, n as u32), T, 60.0, false, &mut m, kept, &mut out);
       assert_eq!(out.len(), n.div_ceil(10));
       assert!(out.iter().all(|l| l.end - l.start == 10 || l.end == n as u32));
       m.0
@@ -1401,7 +1182,116 @@ pub(crate) mod tests {
   #[test]
   fn wrapped_text_is_never_narrower_than_its_widest_character() {
     // The widest word is "iiiiiiii" (16), its widest character 2; "W" is 12.
-    assert_eq!(text_width("iiiiiiii W", T, &mut Narrow), (34.0, 12.0));
+    assert_eq!(text_width("iiiiiiii W", T, &mut Narrow, &mut Kept::default()), (34.0, 12.0));
+  }
+
+  /// Texts with what the wrap and the least width look at: long words, runs of spaces, line
+  /// breaks, empty lines, graphemes of several characters.
+  const TEXTS: [&str; 6] = [
+    "iiiiiiii W",
+    "a quick brown fox jumps over the lazy dog",
+    "  lead  and   trail  ",
+    "abcdefghijklmnopqrstuvwxyz and more\n\nW iii WWWW\n",
+    "e\u{301}te\u{301} \u{1F44D}\u{1F3FD}\u{1F1FA}\u{1F1F8} ok",
+    "",
+  ];
+
+  #[test]
+  fn kept_least_widths_are_those_measured() {
+    // The loop the least width ran on every layout before it was kept.
+    fn measured(s: &str, m: &mut dyn Measure) -> f32 {
+      let mut least = 0.0f32;
+      for line in s.split('\n') {
+        for word in line.split(' ') {
+          for g in graphemes(word) {
+            least = least.max(m.width(&word[g], T.font));
+          }
+        }
+      }
+
+      least
+    }
+
+    let kept = &mut Kept::default();
+    for s in TEXTS {
+      let first = text_width(s, T, &mut Narrow, kept);
+      assert_eq!(first, text_width(s, T, &mut Narrow, &mut Kept::default()), "{s:?}");
+      assert_eq!(first.1, measured(s, &mut Narrow), "{s:?}");
+      // Kept: the same, measuring only the lines' widths.
+      let mut m = Counted(0);
+      assert_eq!(text_width(s, T, &mut m, kept).1, first.1, "{s:?}");
+      assert_eq!(m.0, s.chars().filter(|&c| c != '\n').count(), "{s:?}");
+    }
+  }
+
+  #[test]
+  fn kept_lines_are_those_wrapped() {
+    let wrapped = |s: &str, w: f32, cover: bool, m: &mut dyn Measure, kept: &mut _| {
+      let mut out = Vec::new();
+      wrap_text(s, (0, s.len() as u32), T, w, cover, m, kept, &mut out);
+      out
+    };
+    // One memo through every width and back, against a fresh one each time.
+    let kept = &mut Memo::default();
+    for round in 0..2 {
+      for w in [5.0, 7.0, 20.0, 33.0, 60.0, 61.0, 200.0, 7.0] {
+        for cover in [false, true] {
+          for s in TEXTS {
+            let want = wrapped(s, w, cover, &mut Fake, &mut Memo::default());
+            let mut m = Counted(0);
+            assert_eq!(wrapped(s, w, cover, &mut m, kept), want, "{s:?} at {w}, {cover}");
+            if round == 1 {
+              assert_eq!(m.0, 0, "{s:?} at {w}, {cover}: measured again");
+            }
+          }
+        }
+      }
+
+      kept.end();
+    }
+  }
+
+  /// With the platform's shaper: kept lines and least widths are those of a fresh layout,
+  /// widths not seen before included.
+  #[test]
+  fn kept_text_measures_as_the_system_does() {
+    let (mut text, images) = (TextSystem::new(2.0), Images::default());
+    let mut m = Sys { text: &mut text, images: &images, scale: 2.0 };
+    let para = "Wrapping text is measured once: its least width (the widest grapheme, \
+      \u{1F44D}\u{1F3FD} or W), and its lines at each width it wraps at, kept with their ink.";
+    let style = TextStyle::new(Font::ui(13.0), [1.0; 4]);
+    let kept = &mut Kept::default();
+    for w in [400.0, 120.0, 37.5, 9.0, 120.0, 400.0, 121.0] {
+      let at = |m: &mut Sys, kept: &mut Kept| {
+        let mut out = Vec::new();
+        wrap_text(para, (0, para.len() as u32), style, w, false, m, &mut kept.lines, &mut out);
+        (text_width(para, style, m, kept), out)
+      };
+      assert_eq!(at(&mut m, kept), at(&mut m, &mut Kept::default()), "at {w}");
+    }
+  }
+
+  #[test]
+  fn a_steady_layout_measures_only_the_lines_widths() {
+    let text = "a quick brown fox jumps over the lazy dog\nand a second line of it";
+    let mut st = UiState::default();
+    let frame = |st: UiState| {
+      let mut ui = Ui::new(st, Size::new(400.0, 300.0), None, Duration::ZERO);
+      ui.col(Style::new().w(px(60.0)), |ui| ui.id("t").text(text, T));
+      let mut m = Counted(0);
+      ui.layout(&mut m, 1.0);
+      let st = ui.finish();
+      let n = st.last.get(Id::of("t")).unwrap();
+      let Kind::Text { lines: (a, b), .. } = n.kind else { panic!() };
+      (st.last.lines[a as usize..b as usize].to_vec(), n.rect, m.0, st)
+    };
+    let (lines, rect, first, next) = frame(st);
+    st = next;
+    let (again, at, steady, _) = frame(st);
+    assert_eq!((again, at), (lines, rect));
+    assert!(first > 3 * steady, "{first} characters measured first, {steady} then");
+    // The preferred width's: the text's lines, once.
+    assert_eq!(steady, text.len() - 1);
   }
 
   #[test]

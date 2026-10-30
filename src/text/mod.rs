@@ -7,6 +7,7 @@
 
 mod atlas;
 pub mod edit;
+mod memo;
 
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, Hash, Hasher};
@@ -15,6 +16,7 @@ use std::rc::Rc;
 pub use atlas::{ATLAS_SIZE, AtlasGlyph, COLOR_ATLAS_SIZE, Upload};
 
 use self::atlas::Atlas;
+pub(crate) use self::memo::Memo;
 use crate::platform::text::{self as sys, Face};
 use crate::scene::Color;
 
