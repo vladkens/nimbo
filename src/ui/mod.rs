@@ -43,6 +43,7 @@ pub mod behavior;
 pub mod containers;
 pub mod dialog;
 pub mod form;
+mod id;
 pub mod input;
 mod layout;
 mod paint;
@@ -54,7 +55,7 @@ pub mod widgets;
 
 use std::any::Any;
 use std::fmt::{Display, Write};
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::time::Duration;
 
 pub use a11y::{A11yNode, A11yTree, Action, Props, Role, State, Value};
@@ -64,6 +65,7 @@ pub use containers::{
 };
 pub use dialog::{Answer, Dialog, DialogBehavior};
 pub use form::{FormRow, FormStyle, Glass, Tile};
+pub use id::Id;
 pub(crate) use input::drags_window;
 pub use input::{Click, Press, Scroll, hit};
 pub(crate) use layout::Sys;
@@ -81,99 +83,10 @@ use self::store::{Anim, Store};
 use crate::app::{Appearance, Clipboard, Event, MouseButton, Waker};
 use crate::keys::{Binding, Command, KeyEvent, Os};
 use crate::scene::{Frame, ImageId, Images, Point, Rect, Size};
-use crate::text::{Font, FxHasher, Metrics, TextSystem};
+use crate::text::{Font, Metrics, TextSystem};
 
 /// How long [UiState::flash] shows an element pressed.
 const FLASH: Duration = Duration::from_millis(120);
-
-// MARK: Ids
-
-/// An element's id, stable across frames while the app builds the same element at the same place
-/// (or with the same key or name).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Id(pub u64);
-
-impl Id {
-  /// The implicit root: the window, a column.
-  pub const ROOT: Self = Self(0);
-
-  /// A frame-wide id from a name: what [Ui::id] gives an element.
-  pub fn of(name: impl Hash) -> Self {
-    hash((2u8, name))
-  }
-
-  /// A child's id from a key unique among its siblings: what [Ui::key] gives an element.
-  pub fn key(self, key: impl Hash) -> Self {
-    hash((self.0, 1u8, key))
-  }
-
-  /// The id of the `i`-th child with no key or name.
-  pub fn nth(self, i: usize) -> Self {
-    hash((self.0, 0u8, i))
-  }
-}
-
-fn hash(v: impl Hash) -> Id {
-  // A seed: FxHash of zeros from a zero state is zero, the root's id.
-  let mut h = IdHasher(FxHasher::default());
-  h.write_u64(0x9e37_79b9_7f4a_7c15);
-  v.hash(&mut h);
-  Id(h.finish())
-}
-
-/// FxHash with every integer fed in as 64 bits, so a key doesn't depend on its integer's type:
-/// `id.key(3)`, `id.key(3usize)` and `id.key(3u8)` are one id, and so are `-1i32` and `-1i64`.
-struct IdHasher(FxHasher);
-
-impl Hasher for IdHasher {
-  fn finish(&self) -> u64 {
-    self.0.finish()
-  }
-
-  fn write(&mut self, bytes: &[u8]) {
-    self.0.write(bytes);
-  }
-
-  fn write_u8(&mut self, v: u8) {
-    self.0.write_u64(v as u64);
-  }
-
-  fn write_u16(&mut self, v: u16) {
-    self.0.write_u64(v as u64);
-  }
-
-  fn write_u32(&mut self, v: u32) {
-    self.0.write_u64(v as u64);
-  }
-
-  fn write_u64(&mut self, v: u64) {
-    self.0.write_u64(v);
-  }
-
-  fn write_usize(&mut self, v: usize) {
-    self.0.write_u64(v as u64);
-  }
-
-  fn write_i8(&mut self, v: i8) {
-    self.0.write_u64(v as i64 as u64);
-  }
-
-  fn write_i16(&mut self, v: i16) {
-    self.0.write_u64(v as i64 as u64);
-  }
-
-  fn write_i32(&mut self, v: i32) {
-    self.0.write_u64(v as i64 as u64);
-  }
-
-  fn write_i64(&mut self, v: i64) {
-    self.0.write_u64(v as u64);
-  }
-
-  fn write_isize(&mut self, v: isize) {
-    self.0.write_u64(v as i64 as u64);
-  }
-}
 
 // MARK: Builder
 
@@ -186,6 +99,8 @@ pub struct UiState {
   tree: Tree,
   /// The last frame's tree, laid out: ids and rects for hit testing.
   pub last: Tree,
+  /// Text measures the layout keeps across frames.
+  kept: layout::Kept,
   /// Open containers: node index and the number of children so far.
   stack: Vec<(u32, u32)>,
   pub(crate) input: Input,
@@ -261,6 +176,7 @@ impl Default for UiState {
     Self {
       tree: Tree::default(),
       last: Tree::default(),
+      kept: layout::Kept::default(),
       stack: Vec::new(),
       input: Input::default(),
       store: Store::default(),
@@ -716,7 +632,7 @@ impl<'a> Ui<'a> {
   pub fn measure_wrapped(&mut self, s: &str, style: TextStyle, width: f32) -> f32 {
     let Some(text) = self.text.as_mut() else { return 0.0 };
     let mut m = Sys { text, images: &self.images, scale: 1.0 };
-    layout::wrapped_width(s, style, width, &mut m)
+    layout::wrapped_width(s, style, width, &mut m, &mut self.st.kept)
   }
 
   /// Vertical metrics of `font` as the layout uses them: to set a mark beside text by its
@@ -1204,15 +1120,16 @@ impl<'a> Ui<'a> {
   // MARK: Frame
 
   /// Lays the tree out for the window, rects snapped to pixels at `scale`, with scroll
-  /// offsets from the store (clamped to the new content, and kept so).
+  /// offsets from the store (clamped to the new content, and kept so). Texts' least widths and
+  /// wrapped lines are kept across frames per font and text: `m` measures the same each frame.
   pub fn layout(&mut self, m: &mut dyn Measure, scale: f32) {
-    let UiState { tree, store, .. } = &mut self.st;
+    let UiState { tree, store, kept, .. } = &mut self.st;
     for &i in &tree.scrolls {
       let n = &mut tree.nodes[i as usize];
       n.scroll = store.peek::<ScrollState>(n.id).map_or([0.0; 2], |s| s.offset);
     }
 
-    let fit_h = layout::layout(tree, self.size, scale, m);
+    let fit_h = layout::layout(tree, self.size, scale, m, kept);
     for &i in &tree.scrolls {
       let n = &tree.nodes[i as usize];
       let (s, max) = (store.raw::<ScrollState>(n.id), input::max_scroll(n));
@@ -1353,18 +1270,5 @@ mod tests {
     let ui = Ui::new(st, Size::new(10.0, 10.0), None, Duration::ZERO);
     assert_eq!(ui.typed(id), Some("a"));
     assert_eq!(ui.finish().delivered(), (true, true));
-  }
-
-  #[test]
-  fn integer_keys_hash_alike_whatever_their_type() {
-    let list = Id::of("list");
-    assert_eq!(list.key(3), list.key(3usize));
-    assert_eq!(list.key(3u8), list.key(3u64));
-    assert_eq!(list.key(-1i32), list.key(-1i64));
-    assert_eq!(list.key(("row", 5u32)), list.key(("row", 5u64)));
-    assert_ne!(list.key(3), list.key(4));
-    assert_ne!(list.key("a"), list.key("b"));
-    assert_ne!(list.key(3), list.nth(3));
-    assert_ne!(Id::of("a"), Id::ROOT);
   }
 }
