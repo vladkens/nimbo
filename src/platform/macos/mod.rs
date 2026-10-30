@@ -14,6 +14,7 @@ mod app;
 mod files;
 mod input;
 mod keyboard;
+mod link;
 mod overlay;
 pub mod shell;
 mod surface;

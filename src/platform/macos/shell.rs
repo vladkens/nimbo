@@ -309,6 +309,13 @@ define_class!(
       }
     }
 
+    #[unsafe(method(windowDidChangeScreen:))]
+    fn did_change_screen(&self, _note: &NSNotification) {
+      if let Some(view) = view(self.ivars().id.get()) {
+        view.screen_changed();
+      }
+    }
+
     #[unsafe(method(windowWillClose:))]
     fn will_close(&self, _note: &NSNotification) {
       closed(self.ivars().id.get());

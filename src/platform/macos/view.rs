@@ -20,11 +20,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use block2::RcBlock;
-use dispatch2::{
-  _dispatch_source_type_timer, DispatchObject, DispatchQueue, DispatchRetained, DispatchSource,
-  DispatchTime, MainThreadBound,
-};
+use dispatch2::{DispatchQueue, MainThreadBound};
 use keyboard_types::Modifiers;
 use objc2::rc::{Retained, Weak};
 use objc2::runtime::{AnyObject, ProtocolObject, Sel};
@@ -39,12 +35,13 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{
   NSArray, NSAttributedString, NSAttributedStringKey, NSNotFound, NSObject, NSObjectProtocol,
-  NSPoint, NSRange, NSRangePointer, NSRect, NSRunLoop, NSRunLoopCommonModes, NSSize, NSString,
-  NSUInteger, NSUserDefaults, ns_string,
+  NSPoint, NSRange, NSRangePointer, NSRect, NSSize, NSString, NSUInteger, NSUserDefaults,
+  ns_string,
 };
-use objc2_quartz_core::{CADisplayLink, CAFrameRateRange, CALayer, kCAGravityTopLeft};
+use objc2_quartz_core::{CADisplayLink, CALayer, kCAGravityTopLeft};
 
 use super::input::*;
+use super::link::{Link, Wake, refresh};
 use super::surface::Presenter;
 use super::{a11y, keyboard, overlay};
 use crate::app::{App, Event, Ime, Runtime, WHEEL_LINE};
@@ -54,13 +51,13 @@ use crate::shell::Anchor;
 use crate::text::edit::utf16_len;
 use crate::ui::{Cursor, Id, TextInput, UiState};
 
-type WeakView = Arc<MainThreadBound<Weak<View>>>;
+pub(super) type WeakView = Arc<MainThreadBound<Weak<View>>>;
 
 pub struct State {
   rt: Runtime<Box<dyn App>>,
   /// The CPU renderer's frames, presented as the layer's contents.
   presenter: Presenter,
-  link: Retained<CADisplayLink>,
+  link: Link,
   /// The timer wake: one, set again for each new deadline.
   wake: Wake,
 }
@@ -83,8 +80,11 @@ pub struct Ivars {
   /// The cursor set while the pointer is in the view; none outside it.
   cursor: Cell<Option<Cursor>>,
   /// The display link was invalidated (the view left its window): a new one starts when it
-  /// moves to a window again.
+  /// moves to a window again ([View::wake]).
   stopped: Cell<bool>,
+  /// The window moved to another screen while the runtime was busy: the link follows at the
+  /// next wake.
+  rescreen: Cell<bool>,
   /// A wake that came while the runtime was busy up the stack (a nested run loop: a panel, a
   /// permission prompt, Finder revealing a file), done once it is free ([View::deliver],
   /// [View::after_frame]).
@@ -181,12 +181,7 @@ define_class!(
     #[unsafe(method(viewDidMoveToWindow))]
     fn did_move_to_window(&self) {
       let _: () = unsafe { msg_send![super(self), viewDidMoveToWindow] };
-      if self.window().is_some() && self.ivars().stopped.replace(false) {
-        let link = self.display_link();
-        if let Ok(Some(st)) = self.ivars().state.try_borrow_mut().as_deref_mut() {
-          st.link = link;
-        }
-
+      if self.window().is_some() && self.ivars().stopped.get() {
         self.wake();
       }
     }
@@ -363,26 +358,7 @@ define_class!(
 
     #[unsafe(method(tick:))]
     fn tick(&self, _link: &CADisplayLink) {
-      let pause = {
-        // Busy up the stack (a nested run loop): this refresh is skipped, the link runs on.
-        let Ok(mut state) = self.ivars().state.try_borrow_mut() else { return };
-        let Some(st) = state.as_mut() else { return };
-        let idle = !st.rt.needs_frame() || !self.visible();
-        if idle {
-          // Nothing changed since the last frame: stop until the next event, wake or timer. Hidden:
-          // until the window shows again.
-          st.link.setPaused(true);
-          if self.visible() {
-            self.schedule(st);
-          }
-        }
-
-        idle
-      };
-      if !pause {
-        self.render();
-        self.after_frame();
-      }
+      self.on_tick();
     }
 
     #[unsafe(method_id(accessibilityChildren))]
@@ -525,7 +501,7 @@ impl View {
       view.addTrackingArea(&area);
     }
 
-    let link = view.display_link();
+    let link = Link::new(&view);
 
     // A wake from any thread hops to the main queue and restarts the display link.
     let weak = view.weak();
@@ -549,16 +525,29 @@ impl View {
     view
   }
 
-  /// A display link calling `tick:`, at up to 120 Hz, on the main run loop in every mode.
-  fn display_link(&self) -> Retained<CADisplayLink> {
-    let link = unsafe { self.displayLinkWithTarget_selector(self, sel!(tick:)) };
-    link.setPreferredFrameRateRange(CAFrameRateRange {
-      minimum: 60.0,
-      maximum: 120.0,
-      preferred: 120.0,
-    });
-    unsafe { link.addToRunLoop_forMode(&NSRunLoop::mainRunLoop(), NSRunLoopCommonModes) };
-    link
+  /// A refresh of the display link, either kind: a frame while the runtime needs one, else the
+  /// link pauses. Busy up the stack (a nested run loop), this refresh is skipped and the link
+  /// runs on.
+  pub(super) fn on_tick(&self) {
+    let pause = {
+      let Ok(mut state) = self.ivars().state.try_borrow_mut() else { return };
+      let Some(st) = state.as_mut() else { return };
+      let idle = !st.rt.needs_frame() || !self.visible();
+      if idle {
+        // Nothing changed since the last frame: stop until the next event, wake or timer. Hidden:
+        // until the window shows again.
+        st.link.set_paused(true);
+        if self.visible() {
+          self.schedule(st);
+        }
+      }
+
+      idle
+    };
+    if !pause {
+      self.render();
+      self.after_frame();
+    }
   }
 
   /// Invalidates the display link, which releases the view (its window closed, or it left it).
@@ -580,7 +569,7 @@ impl View {
     let st = state.as_mut()?;
     let out = f(&mut st.rt);
     st.rt.redraw();
-    st.link.setPaused(false);
+    st.link.set_paused(false);
     Some(out)
   }
 
@@ -590,6 +579,19 @@ impl View {
     let shown =
       |w: Retained<NSWindow>| w.occlusionState().contains(NSWindowOcclusionState::Visible);
     self.window().is_none_or(shown)
+  }
+
+  /// The window moved to another screen: the display link follows it; busy up the stack, at the
+  /// next wake once the runtime is free.
+  pub fn screen_changed(&self) {
+    match self.ivars().state.try_borrow_mut().as_deref_mut() {
+      Ok(Some(st)) => st.link.screen_changed(),
+      Ok(None) => {}
+      Err(_) => {
+        self.ivars().rescreen.set(true);
+        self.ivars().rewake.set(true);
+      }
+    }
   }
 
   /// The window was shown or hidden: a frame that waited for it draws now.
@@ -649,7 +651,7 @@ impl View {
       let Some(st) = state.as_mut() else { return false };
       let used = st.rt.event(ev);
       match st.rt.needs_frame() {
-        true => st.link.setPaused(false),
+        true => st.link.set_paused(false),
         false => self.schedule(st),
       }
 
@@ -827,19 +829,28 @@ impl View {
     }
   }
 
-  /// Asks for a frame; busy up the stack, once the runtime is free ([Ivars::rewake]).
+  /// Asks for a frame; busy up the stack, once the runtime is free ([Ivars::rewake]). A view
+  /// back in a window after leaving it gets a new display link here, where the state is free.
   pub(super) fn wake(&self) {
     match self.ivars().state.try_borrow_mut().as_deref_mut() {
       Ok(Some(st)) => {
+        let (iv, rescreen) = (self.ivars(), self.ivars().rescreen.take());
+        if iv.stopped.get() && self.window().is_some() {
+          st.link = Link::new(self);
+          iv.stopped.set(false);
+        } else if rescreen {
+          st.link.screen_changed();
+        }
+
         st.rt.redraw();
-        st.link.setPaused(false);
+        st.link.set_paused(false);
       }
       Ok(None) => {}
       Err(_) => self.ivars().rewake.set(true),
     }
   }
 
-  fn weak(&self) -> WeakView {
+  pub(super) fn weak(&self) -> WeakView {
     Arc::new(MainThreadBound::new(Weak::new(self), self.mtm()))
   }
 
@@ -873,7 +884,7 @@ impl View {
       };
       let Some(st) = state.as_mut() else { return };
       match st.rt.needs_frame() {
-        true => st.link.isPaused(),
+        true => st.link.is_paused(),
         false => {
           self.schedule(st);
           false
@@ -893,9 +904,9 @@ impl View {
       let Ok(mut state) = self.ivars().state.try_borrow_mut() else { return };
       let Some(st) = state.as_mut() else { return };
       match st.rt.needs_frame() {
-        true => st.link.setPaused(false),
+        true => st.link.set_paused(false),
         false => {
-          st.link.setPaused(true);
+          st.link.set_paused(true);
           self.schedule(st);
         }
       }
@@ -1038,51 +1049,6 @@ fn paced(left: Duration, since: Option<Duration>, refresh: Duration) -> Duration
   since.map_or(left, |s| left.max(refresh.saturating_sub(s)))
 }
 
-/// The display's refresh interval from its link (a 120 Hz one's until it has run).
-fn refresh(link: &CADisplayLink) -> Duration {
-  let d = link.duration();
-  let d = if d > 0.0 { d.clamp(1.0 / 120.0, 1.0 / 24.0) } else { 1.0 / 120.0 };
-  Duration::from_secs_f64(d)
-}
-
-/// One timer on a queue, set again for each new deadline: it fires only at the last one, and
-/// not at all once disarmed. `dispatch_after` blocks can't be taken back: each superseded one
-/// would still wake the process when its time came.
-struct Wake(DispatchRetained<DispatchSource>);
-
-impl Wake {
-  fn new(queue: &DispatchQueue, fired: impl Fn() + 'static) -> Self {
-    let ty = (&raw const _dispatch_source_type_timer).cast_mut();
-    // SAFETY: a timer source takes no handle or mask.
-    let source = unsafe { DispatchSource::new(ty, 0, 0, Some(queue)) };
-    let block = RcBlock::new(fired);
-    // SAFETY: dispatch copies the block; it runs on `queue`, the thread `fired` was made for.
-    unsafe { source.set_event_handler_with_block(RcBlock::as_ptr(&block)) };
-    let wake = Self(source);
-    wake.disarm();
-    wake.0.activate();
-    wake
-  }
-
-  /// Fires once, `after` from now (with dispatch_after's leeway: a tenth, within 1 ms and 60 s),
-  /// instead of at any deadline set before.
-  fn arm(&self, after: Duration) {
-    let at = DispatchTime::try_from(after).unwrap_or(DispatchTime::NOW);
-    let leeway = (after / 10).clamp(Duration::from_millis(1), Duration::from_secs(60));
-    self.0.set_timer(at, DispatchTime::FOREVER.0, leeway.as_nanos() as u64);
-  }
-
-  fn disarm(&self) {
-    self.0.set_timer(DispatchTime::FOREVER, DispatchTime::FOREVER.0, 0);
-  }
-}
-
-impl Drop for Wake {
-  fn drop(&mut self) {
-    self.0.cancel();
-  }
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -1097,31 +1063,5 @@ mod tests {
     assert_eq!(paced(ms(100), Some(ms(1)), hz60), ms(100));
     assert_eq!(paced(ms(2), Some(ms(500)), hz60), ms(2));
     assert_eq!(paced(ms(2), None, hz60), ms(2));
-  }
-
-  /// A timer wake set again fires only at its last deadline, and not at all once disarmed: a
-  /// superseded deadline wakes nothing.
-  #[test]
-  fn a_wake_set_again_fires_once() {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    let fired = Arc::new(AtomicUsize::new(0));
-    let n = fired.clone();
-    let queue = DispatchQueue::new("nimbo.wake", None);
-    let wake = Wake::new(&queue, move || {
-      n.fetch_add(1, Ordering::SeqCst);
-    });
-    let ms = Duration::from_millis;
-    for t in [20, 40, 60] {
-      wake.arm(ms(t));
-    }
-
-    std::thread::sleep(ms(250));
-    assert_eq!(fired.load(Ordering::SeqCst), 1);
-
-    wake.arm(ms(20));
-    wake.disarm();
-    std::thread::sleep(ms(100));
-    assert_eq!(fired.load(Ordering::SeqCst), 1);
   }
 }
