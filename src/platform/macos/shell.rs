@@ -32,7 +32,7 @@ use objc2_foundation::{
   NSPoint, NSRect, NSSize, NSString, NSUserDefaults, ns_string,
 };
 
-pub use super::app::{alert, is_main, post, set_presence};
+pub use super::app::{alert, is_main, post, send, set_presence};
 use super::view::View;
 use super::{Pasteboard, appearance, mtm, overlay};
 use crate::Config;
@@ -323,7 +323,7 @@ impl WindowDelegate {
   }
 }
 
-fn view(id: u64) -> Option<Retained<View>> {
+pub(super) fn view(id: u64) -> Option<Retained<View>> {
   shell(|s| s.windows.iter().find(|w| w.id == id).map(|w| w.view.clone()))
 }
 

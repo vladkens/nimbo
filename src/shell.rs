@@ -22,7 +22,8 @@ use std::time::Duration;
 
 use crate::instance::{Command, Instance, OPEN, QUIT};
 use crate::platform::shell as imp;
-use crate::{App, Config, Point, Size};
+use crate::system::{self, Change};
+use crate::{App, Config, Event, Point, Size};
 
 /// The app as the OS knows it.
 #[derive(Clone, Copy, Debug)]
@@ -93,6 +94,7 @@ fn running(run: impl FnOnce()) {
   LOOP.store(LOOPS.fetch_add(1, Ordering::Relaxed) + 1, Ordering::Release);
   HOOKS.take();
   run();
+  system::unwatch();
   HOOKS.take();
   LOOP.store(0, Ordering::Release);
 }
@@ -100,11 +102,12 @@ fn running(run: impl FnOnce()) {
 pub(crate) type OnMain = Box<dyn FnOnce(&mut Main)>;
 type OnReopen = Box<dyn FnMut(&mut Main)>;
 type OnCommand = Box<dyn FnMut(&mut Main, &Command)>;
+type OnChange = Box<dyn FnMut(&mut Main, Change)>;
 
 /// What every platform's loop keeps alike: the open windows by id, each with its app's type and
 /// close callback, the reopen and quit hooks, and the instance served with its handler, the
-/// commands that came while one runs, and the activation token of the one it handles (and
-/// whether a window used it).
+/// commands that came while one runs, the activation token of the one it handles (and whether a
+/// window used it), and the hook of the system's changes with those that came while it runs.
 #[derive(Default)]
 struct Hooks {
   windows: Vec<(u64, TypeId, Option<OnMain>)>,
@@ -114,6 +117,8 @@ struct Hooks {
   command: Option<OnCommand>,
   queued: Option<VecDeque<Command>>,
   token: Option<(String, bool)>,
+  change: Option<OnChange>,
+  changes: Option<VecDeque<Change>>,
 }
 
 thread_local! {
@@ -205,6 +210,56 @@ fn handle(main: &mut Main, cmd: &Command, quit: &dyn Fn(&mut Main)) {
   if let Some((token, _)) = _unused {
     crate::platform::startup_complete(&token);
   }
+}
+
+/// A watched change of the system ([Main::watch]): the hook, then every open window. One that
+/// comes while the hook runs (a nested loop up the stack) is queued and delivered after it.
+pub(crate) fn changed(main: &mut Main, change: Change) {
+  deliver(main, change, &imp::send);
+}
+
+/// [changed] with the platform's `send` to a window (`None` when it is busy up the stack).
+fn deliver(main: &mut Main, change: Change, send: &dyn Fn(u64, Event) -> Option<bool>) {
+  let busy = hooks(|h| h.changes.as_mut().map(|q| q.push_back(change)).is_some());
+  if busy {
+    return;
+  }
+
+  hooks(|h| h.changes = Some(VecDeque::new()));
+  let mut next = Some(change);
+  while let Some(change) = next {
+    if let Some(mut f) = hooks(|h| h.change.take()) {
+      f(main, change);
+      // Kept unless the hook set another.
+      hooks(|h| _ = h.change.get_or_insert(f));
+    }
+
+    let missed = send_all(windows(), change, send);
+    if !missed.is_empty() {
+      retry(missed, change);
+    }
+
+    next = hooks(|h| h.changes.as_mut().and_then(VecDeque::pop_front));
+  }
+
+  hooks(|h| h.changes = None);
+}
+
+/// Sends `change` to windows `ids`: the ids of those busy.
+fn send_all(ids: Vec<u64>, change: Change, send: &dyn Fn(u64, Event) -> Option<bool>) -> Vec<u64> {
+  ids.into_iter().filter(|&id| send(id, Event::System(change)).is_none()).collect()
+}
+
+/// Tries windows `ids`, busy a moment ago, again in a moment, until they take `change` or close.
+fn retry(ids: Vec<u64>, change: Change) {
+  Proxy(()).after(system::RETRY, move |_| {
+    let open = windows();
+    let missed =
+      send_all(ids.into_iter().filter(|id| open.contains(id)).collect(), change, &imp::send);
+    if !missed.is_empty() {
+      retry(missed, change);
+    }
+  });
 }
 
 /// The activation token of the command being handled, for a window that shows or comes to the
@@ -348,6 +403,19 @@ impl Main {
     imp::alert(title, message);
   }
 
+  /// Watches the system's changes of `kinds` (besides those watched already) until the loop
+  /// ends ([crate::system]): each, a burst of one kind coalesced into one, runs `f` on the main
+  /// thread (replacing an earlier one), then reaches every open window as [Event::System]. `Err`
+  /// names the kinds the OS refused; the rest are watched.
+  pub fn watch(
+    &mut self,
+    kinds: &[Change],
+    f: impl FnMut(&mut Main, Change) + 'static,
+  ) -> Result<(), String> {
+    hooks(|h| h.change = Some(Box::new(f)));
+    system::watch(kinds)
+  }
+
   pub fn proxy(&self) -> Proxy {
     Proxy(())
   }
@@ -439,7 +507,7 @@ impl<A: App + 'static> Window<A> {
 /// run-loop mode; Windows: a message to the app's hidden window; Linux: a GLib source). Work
 /// posted after the loop ended is dropped unrun.
 #[derive(Clone, Debug)]
-pub struct Proxy(());
+pub struct Proxy(pub(crate) ());
 
 impl Proxy {
   /// Runs `f` on the main thread, from the loop, after the work already queued.
@@ -575,6 +643,60 @@ mod tests {
     command(&mut Main::here(), cmd("first", Some("t1")), &|_| {});
     assert_eq!(*seen.borrow(), [r#"first Some("t1")"#, r#"second Some("t2")"#]);
     assert_eq!(token(), None);
+    HOOKS.take();
+  }
+
+  /// A change runs the hook, then each window, a busy one missed (tried again in a moment); one
+  /// delivered while the hook runs (a nested loop up the stack) waits for it.
+  #[test]
+  fn changes_run_the_hook_then_the_windows() {
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let s = seen.clone();
+    let hook = move |main: &mut Main, c: Change| {
+      s.borrow_mut().push(format!("hook {c:?}"));
+      if c == Change::AudioInputs {
+        deliver(main, Change::Lid, &|_, _| None);
+        s.borrow_mut().push("hook done".into());
+      }
+    };
+    hooks(|h| {
+      h.change = Some(Box::new(hook));
+      h.windows.extend([(1, TypeId::of::<u8>(), None), (2, TypeId::of::<u8>(), None)]);
+    });
+    let s = seen.clone();
+    let send = move |id: u64, ev: Event| {
+      s.borrow_mut().push(format!("{id} {ev:?}"));
+      (id == 1).then_some(true)
+    };
+    deliver(&mut Main::here(), Change::AudioInputs, &send);
+    let want = [
+      "hook AudioInputs",
+      "hook done",
+      "1 System(AudioInputs)",
+      "2 System(AudioInputs)",
+      "hook Lid",
+      "1 System(Lid)",
+      "2 System(Lid)",
+    ];
+    assert_eq!(*seen.borrow(), want);
+    assert_eq!(send_all(vec![1, 2], Change::Lid, &|id, _| (id == 2).then_some(false)), [1]);
+    HOOKS.take();
+  }
+
+  /// A hook that watches again with another keeps the other.
+  #[test]
+  fn a_hook_replaced_by_itself_stays_replaced() {
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let s = seen.clone();
+    Main::here()
+      .watch(&[], move |main, _| {
+        let s = s.clone();
+        _ = main.watch(&[], move |_, _| s.borrow_mut().push("second"));
+      })
+      .unwrap();
+    deliver(&mut Main::here(), Change::Lid, &|_, _| Some(true));
+    deliver(&mut Main::here(), Change::Lid, &|_, _| Some(true));
+    assert_eq!(*seen.borrow(), ["second"]);
     HOOKS.take();
   }
 

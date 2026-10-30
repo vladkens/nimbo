@@ -20,7 +20,7 @@ use std::time::Duration;
 use super::super::dbus::cstr;
 use super::super::{FALSE, Fp, P, as_window, lib, load, slot};
 use crate::Config;
-use crate::app::App;
+use crate::app::{App, Event};
 use crate::shell::{AppInfo, Main, Presence};
 
 thread_local! {
@@ -81,6 +81,17 @@ fn closed(id: u64, defer: bool) {
   if let Some(f) = on_close {
     f(&mut Main::here());
   }
+}
+
+/// Sends `ev` to window `id`'s runtime; `None` when it is busy up the stack or gone.
+pub fn send(id: u64, ev: Event) -> Option<bool> {
+  let win = slot(id, |s| s.win.clone())?;
+  as_window(id, || {
+    let mut w = win.try_borrow_mut().ok()?;
+    let used = w.send(ev);
+    w.sync();
+    Some(used)
+  })
 }
 
 /// Runs `f` on window `id`'s app if it is not busy, then redraws the window.

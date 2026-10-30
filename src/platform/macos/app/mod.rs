@@ -34,6 +34,7 @@ use objc2::MainThreadMarker;
 use objc2_app_kit::{NSAlert, NSApplication, NSApplicationActivationPolicy};
 use objc2_foundation::NSString;
 
+use crate::Event;
 use crate::shell::Presence;
 
 thread_local! {
@@ -57,6 +58,11 @@ pub(super) fn sync_presence() {
   if ns_app.activationPolicy() != policy {
     ns_app.setActivationPolicy(policy);
   }
+}
+
+/// Sends `ev` to window `id`'s runtime; `None` when it is busy up the stack or gone.
+pub fn send(id: u64, ev: Event) -> Option<bool> {
+  super::shell::view(id).filter(|v| !v.busy()).map(|v| v.send(ev))
 }
 
 pub fn is_main() -> bool {

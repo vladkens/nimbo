@@ -14,12 +14,12 @@
 use std::any::TypeId;
 use std::cell::RefCell;
 use std::ptr::{null, null_mut};
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
 use std::time::Duration;
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::System::Power::POWERBROADCAST_SETTING;
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::HiDpi::{
   DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
@@ -27,9 +27,9 @@ use windows_sys::Win32::UI::HiDpi::{
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use super::super::{Timer, create, run_loop, settings, show_overlay, wide, with_window};
-use super::{paste, tray};
+use super::{hardware, paste, tray};
 use crate::Config;
-use crate::app::App;
+use crate::app::{App, Event};
 use crate::shell::{AppInfo, Main, Presence};
 
 type Job = Box<dyn FnOnce() + Send>;
@@ -63,13 +63,16 @@ fn shell<R>(f: impl FnOnce(&mut Shell) -> R) -> R {
 
 /// The thread `run` runs on.
 static MAIN: AtomicU32 = AtomicU32::new(0);
-/// The shell's window, as a number for other threads; 0 when there is none. Held while posting,
-/// so the window's end waits for a post under way.
-static HOST: Mutex<isize> = Mutex::new(0);
+/// The shell's window, as a number for other threads; 0 when there is none. An atomic, not a
+/// lock: [post] runs in callbacks that must never wait (Windows' audio notifications). A post
+/// that read the handle just before the loop ended sends to the window being destroyed: the
+/// message fails and the work is dropped, or goes with the window and its closure leaks, once,
+/// as the app ends; work posted after the loop is dropped anyway.
+static HOST: AtomicIsize = AtomicIsize::new(0);
 
 /// The shell's window: null while no app runs.
 pub(in super::super) fn host() -> HWND {
-  HOST.lock().map_or(0, |h| *h) as HWND
+  HOST.load(Ordering::Acquire) as HWND
 }
 
 pub fn is_main() -> bool {
@@ -82,9 +85,7 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
   unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
   shell(|s| *s = Shell::default());
   let hwnd = make_host(info.name);
-  if let Ok(mut h) = HOST.lock() {
-    *h = hwnd as isize;
-  }
+  HOST.store(hwnd as isize, Ordering::Release);
 
   start(&mut Main::here());
   if !shell(|s| s.quitting) {
@@ -95,9 +96,7 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
   crate::shell::finish(close);
   tray::removed();
   // Work posted after the loop is dropped unrun: the closures are let go here.
-  if let Ok(mut h) = HOST.lock() {
-    *h = 0;
-  }
+  HOST.store(0, Ordering::Release);
 
   let mut msg: MSG = unsafe { std::mem::zeroed() };
   while unsafe { PeekMessageW(&mut msg, hwnd, WM_POST, WM_POST, PM_REMOVE) } != 0 {
@@ -177,9 +176,8 @@ pub fn post(delay: Duration, f: Job) {
   };
 
   let raw = Box::into_raw(Box::new(job));
-  let sent = HOST
-    .lock()
-    .is_ok_and(|h| *h != 0 && unsafe { PostMessageW(*h as HWND, WM_POST, 0, raw as LPARAM) } != 0);
+  let h = host();
+  let sent = !h.is_null() && unsafe { PostMessageW(h, WM_POST, 0, raw as LPARAM) } != 0;
   if !sent {
     drop(unsafe { Box::from_raw(raw) });
   }
@@ -220,6 +218,11 @@ unsafe extern "system" fn host_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
     WM_TRAY => {
       tray::notify(wp, lp);
       0
+    }
+    WM_POWERBROADCAST if wp == PBT_POWERSETTINGCHANGE as WPARAM => {
+      // SAFETY: the message's setting, a header and its data.
+      hardware::power(unsafe { &*(lp as *const POWERBROADCAST_SETTING) });
+      1
     }
     WM_RENDERFORMAT | WM_RENDERALLFORMATS => {
       paste::render(hwnd, msg == WM_RENDERALLFORMATS);
@@ -313,6 +316,16 @@ pub(in super::super) fn destroyed(hwnd: HWND) {
 }
 
 /// Runs `f` on window `id`'s app if it is not busy, then redraws the window.
+/// Sends `ev` to window `id`'s runtime, its modal timer following; `None` when it is busy up
+/// the stack or gone.
+pub fn send(id: u64, ev: Event) -> Option<bool> {
+  with_window(hwnd(id)?, |w| {
+    let used = w.send(ev);
+    w.sync_modal();
+    used
+  })
+}
+
 pub fn with_app(id: u64, f: &mut dyn FnMut(&mut dyn App)) -> bool {
   let Some(hwnd) = hwnd(id) else { return false };
   let done = with_window(hwnd, |w| {
