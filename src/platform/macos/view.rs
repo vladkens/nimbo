@@ -552,7 +552,11 @@ impl View {
   /// A display link calling `tick:`, at up to 120 Hz, on the main run loop in every mode.
   fn display_link(&self) -> Retained<CADisplayLink> {
     let link = unsafe { self.displayLinkWithTarget_selector(self, sel!(tick:)) };
-    link.setPreferredFrameRateRange(CAFrameRateRange::new(60.0, 120.0, 120.0));
+    link.setPreferredFrameRateRange(CAFrameRateRange {
+      minimum: 60.0,
+      maximum: 120.0,
+      preferred: 120.0,
+    });
     unsafe { link.addToRunLoop_forMode(&NSRunLoop::mainRunLoop(), NSRunLoopCommonModes) };
     link
   }
