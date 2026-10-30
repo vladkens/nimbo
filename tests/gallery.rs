@@ -158,6 +158,7 @@ fn every_widget_has_its_role() {
     "button \"Off\" disabled",
     "button \"Reset\" desc \"Back to the default\"",
     "button \"Info\" desc \"An ⓘ explains what one line can't\"",
+    "button \"Warning\" desc \"A warning tells what is wrong\"",
     "check box \"Wrap lines\" on",
     "check box \"Off\" off disabled",
     "switch \"Live\" off",
