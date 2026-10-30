@@ -31,8 +31,8 @@ fn count(kind: Change) -> Id {
 /// How many pixels of `r` differ between two frames.
 fn changed(a: &Image, b: &Image, r: Rect) -> usize {
   let mut n = 0;
-  for y in (r.y as i32..(r.y + r.h) as i32).step_by(1) {
-    for x in (r.x as i32..(r.x + r.w) as i32).step_by(1) {
+  for y in r.y as i32..(r.y + r.h) as i32 {
+    for x in r.x as i32..(r.x + r.w) as i32 {
       n += (a.pixel(x as f32, y as f32) != b.pixel(x as f32, y as f32)) as usize;
     }
   }
