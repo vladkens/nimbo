@@ -17,6 +17,7 @@ use keyboard_types::Modifiers;
 use super::layout::{Node, Tree};
 use super::{Focus, Id, Ui, UiState};
 use crate::app::{Event, MouseButton, Phase};
+use crate::keys::Os;
 use crate::scene::{Point, Rect, Size};
 
 /// Time constant of wheel momentum: a wheel step's distance is covered exponentially, 95% of it
@@ -111,6 +112,8 @@ pub(crate) struct Input {
   pub ended: Option<(Press, Point)>,
   /// The view asked for every pointer move ([super::Ui::track_moves]).
   pub moves: bool,
+  /// A Control-click is down on the Mac: the right button's until it is let go.
+  control: bool,
   scratch: Vec<Id>,
 }
 
@@ -246,6 +249,34 @@ impl Ui<'_> {
     self.st.input.moves = true;
   }
 
+  /// Where a secondary press (the right button) on `id` or inside it opens `id`'s context menu,
+  /// once a press: as it goes down, or as it is let go when no view saw it down, as AppKit and
+  /// GTK open one; on Windows as it is let go (`WM_CONTEXTMENU` follows `WM_RBUTTONUP`, as in
+  /// Explorer). The innermost element with a menu, by the last frame's parent chain, takes it;
+  /// `id` has one from this call ([Ui::context_menu]).
+  pub fn context_press(&mut self, id: Id) -> Option<Point> {
+    self.st.tree.menus.push(id);
+    let input = &self.st.input;
+    let right = MouseButton::Right;
+    let up = input.click.filter(|c| c.button == right).map(|c| (c.id, c.pos, c.seq));
+    let down = input.press.filter(|p| p.button == right && self.st.os != Os::Windows);
+    let down = down.map(|p| (p.id, p.pos, p.seq));
+    let (on, at, seq) = down.or(up).filter(|p| p.2 != self.st.menu_seq)?;
+    let t = &self.st.last;
+    let mut i = t.find(on)?;
+    while t.nodes[i as usize].id != id {
+      let n = &t.nodes[i as usize];
+      if i == 0 || t.menus.contains(&n.id) {
+        return None;
+      }
+
+      i = n.parent;
+    }
+
+    self.st.menu_seq = seq;
+    Some(at)
+  }
+
   /// Runs the view again before this frame is painted if the layout moves or resizes `id` or
   /// its content from what [Ui::rect] and [Ui::scroll] read of the last frame, or `id` wasn't
   /// laid out then: a split's panes fitted to its size, a scrollbar's thumb to its content.
@@ -262,6 +293,24 @@ impl UiState {
   /// follows isn't the user's. Returns whether there was one.
   pub(crate) fn cancel_press(&mut self) -> bool {
     self.input.press.take().is_some()
+  }
+
+  /// On the Mac a Control-click (with other modifiers too) is the secondary
+  /// click from its press to its release: the right button's, so no left press or release
+  /// reaches a field or a button under it.
+  pub(crate) fn secondary(&mut self, ev: Event) -> Event {
+    let ctrl = |m: Modifiers| self.os == Os::Mac && m.contains(Modifiers::CONTROL);
+    match ev {
+      Event::MouseDown { pos, button: MouseButton::Left, clicks, mods } if ctrl(mods) => {
+        self.input.control = true;
+        Event::MouseDown { pos, button: MouseButton::Right, clicks, mods }
+      }
+      Event::MouseUp { pos, button: MouseButton::Left, mods } if self.input.control => {
+        self.input.control = false;
+        Event::MouseUp { pos, button: MouseButton::Right, mods }
+      }
+      ev => ev,
+    }
   }
 
   /// Routes a pointer event through the last frame's tree: hover, press, click, focus and

@@ -170,6 +170,8 @@ pub struct Tree {
   pub drags: Vec<u32>,
   /// Elements with key bindings, in tree order.
   pub keymaps: Vec<(u32, &'static [Binding])>,
+  /// Elements with a context menu ([super::Ui::context_menu]).
+  pub menus: Vec<Id>,
   /// Content built only in part (a virtual list's rows in view): its scroll container, the block
   /// built in part (the container itself, or a column inside it) and the span built, from the
   /// block's top ([super::Ui::partial_short]).
@@ -199,6 +201,7 @@ impl Tree {
     self.scrolls.clear();
     self.drags.clear();
     self.keymaps.clear();
+    self.menus.clear();
     self.partial.clear();
     self.settle.clear();
     self.edits.clear();
@@ -221,6 +224,20 @@ impl Tree {
   /// A node's index by id, once laid out.
   pub fn find(&self, id: Id) -> Option<u32> {
     self.index.get(&id).copied()
+  }
+
+  /// Whether the node `on` is `id` or inside it.
+  pub fn within(&self, on: Id, id: Id) -> bool {
+    let Some(mut i) = self.find(on) else { return false };
+    while self.nodes[i as usize].id != id {
+      if i == 0 {
+        return false;
+      }
+
+      i = self.nodes[i as usize].parent;
+    }
+
+    true
   }
 
   /// The index in [Tree::edits] of node `i`'s selection, when it is an editable text.

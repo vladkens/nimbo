@@ -1,11 +1,11 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! What a menu-bar app needs on macOS besides its windows ([super::shell]): the status item and
-//! its menu ([tray]), global hotkeys ([hotkey]: an event tap with Carbon's hotkeys as the
-//! fallback), launch at login ([autostart]: SMAppService), work from other threads on the main
-//! queue ([post()]), and the Dock ([Presence]); links and files opened ([open]), Accessibility,
-//! Secure Input and the microphone ([permissions]), shortcuts posted to the app in focus
-//! ([post]), where the user types ([focus]), the pasteboard for a paste ([paste]), alerts
+//! What a menu-bar app needs on macOS besides its windows ([super::shell]): the status item and its
+//! menu ([tray]), context menus ([menu]), global hotkeys ([hotkey]: an event tap with Carbon's
+//! hotkeys as the fallback), launch at login ([autostart]: SMAppService), work from other threads
+//! on the main queue ([post()]), and the Dock ([Presence]); links and files opened ([open]),
+//! Accessibility, Secure Input and the microphone ([permissions]), shortcuts posted to the app in
+//! focus ([post]), where the user types ([focus]), the pasteboard for a paste ([paste]), alerts
 //! ([alert]), files fetched over HTTP ([http]), an update's disk image opened and checked
 //! ([update]), what an uninstall resets ([uninstall]), and a microphone's transport and the lid
 //! ([hardware]).
@@ -17,6 +17,7 @@ pub mod focus;
 pub mod hardware;
 pub mod hotkey;
 pub mod http;
+pub mod menu;
 pub mod open;
 pub mod paste;
 pub mod permissions;

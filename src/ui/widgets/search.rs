@@ -217,7 +217,7 @@ mod tests {
     h.right_click(r.x + 40.0, r.y + 10.0);
     h.frame();
     h.frame();
-    h.click_id(Id::of("s").key("edit").key("Paste"));
+    h.click_id(Id::of("s").key("edit").key("paste"));
     h.frame();
     assert_eq!((h.app().text.as_str(), h.app().changes), ("moon", 1));
     assert_eq!(h.focused(), Some(Id::of("s")));

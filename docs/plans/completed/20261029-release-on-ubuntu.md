@@ -1,5 +1,7 @@
 # Release on Ubuntu
 
+Done: 2026-10-29
+
 Goal: an app's release files (the macOS `.app` and DMG, the Windows setup, the AppImage and `.deb`, the feed) all made and signed in one Ubuntu publish job of vladkens/actions' rust-publish, from the bare binaries the build jobs leave, with no macOS or Windows runner in the publish step. Agreed with the person 2026-10-29, from the draft of the same day.
 
 ## Decisions
@@ -24,7 +26,7 @@ Goal: an app's release files (the macOS `.app` and DMG, the Windows setup, the A
 
 ## Result
 
-All four stages done and checked locally on this Mac (the Linux path forced, stand-ins for makensis, appimagetool, dpkg-deb and `mkfs.hfsplus`): `scripts/pack.py release` makes every release file from the build jobs' bare binaries, the images, the Mach-O reader and the exe's resources in pure Python, NSIS in place of Inno. The plan stays here until the proofs pass: the real tools and notarization on Ubuntu (wavo-app's CI) and the setup on real Windows (the Windows VM).
+Shipped in #54 (2026-10-29), over the first `scripts/pack.py` of #50 and #51 (Inno Setup, sips, iconutil, codesign and hdiutil on each OS's runner) and the updater of #48 and #52: `scripts/pack.py release` makes every release file (the `.app` and DMG signed and notarized by rcodesign, the NSIS setup with the exe's resources written in Python, the AppImage and `.deb`, the signed update.txt) in one Ubuntu job from the build jobs' bare binaries, the images and the Mach-O reader in pure Python, with no Wine, no build.rs and no macOS or Windows runner in the publish step; nimbo got its own PNG decoder (`src/png.rs`, `Png::new(include_bytes!(…))`) and the core budget went 3700 → 4000 for it; the updater runs the setup `/S`. Checked on this Mac with the Linux path forced and stand-ins for makensis, appimagetool, dpkg-deb and `mkfs.hfsplus`; the real tools, rcodesign's notarization with the Developer ID and the setup on real Windows are left to wavo-app's CI proof run and the Windows VM, as #54 says.
 
 Then made smaller, with no feature lost: `scripts/pack.py` 2,028 → 1,591 lines, `src/png.rs` 503 → 457 lines of code (core 3,948 → 3,902 of 4,000). The exe's resources are append-only: a new last `.rsrc` of our id-only tree, data directory 2 pointing at it, CheckSum 0, the linker's left unused (llvm-readobj on the counter for x64, arm64 and x64 with lld-link's manifest: ours is the one pointed at, the imports, relocations, debug, load config, unwind and TLS as they were); the manifest keeps Common Controls 6 and drops dpiAware (nimbo sets PerMonitorV2 itself). The commands are `release`, `app --bin`, `feed` and `feed-key`; `release` takes `<dir>/<triple>/<bin>[.exe]` of the six triples as it finds them, the Mach-O reader is LC_BUILD_VERSION's minos of a thin binary, and on a Mac codesign signs with a Developer ID or "<Name> Local Signing", never timestamped. Both PNG readers take 8-bit RGB, RGBA and a palette with its tRNS; Rust's panics on anything else, as `Png::rgba` did, without the CRC, Adler-32 and size checks. The icns's ic10 is the icon's own file when it is 1024 px.
 

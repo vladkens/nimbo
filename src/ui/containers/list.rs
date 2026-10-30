@@ -22,11 +22,12 @@
 //! stays right when rows scroll out, are inserted above or the list is re-sorted. It lives in
 //! the app ([List::selection]) or the list's own state. A press selects; with [List::multi],
 //! Cmd-click (Ctrl-click on Windows and Linux) toggles a row and Shift-click selects from the
-//! anchor. Keys, while the list has focus (a press gives it), come as the platform's commands:
-//! Up and Down (Shift extends), Page Up and Page Down, Home and End or Cmd-Up and Cmd-Down,
-//! Cmd-A, and Enter, which activates the row, as a double click does. The row the keys moved
-//! to scrolls into view; so does [Ui::reveal_row]. Disabled ([Ui::disabled]), it takes no input
-//! or focus and dims.
+//! anchor; a secondary click selects the row alone unless it is selected, for the app's context
+//! menu ([Ui::context_menu]), which one off the rows (the scrollbar) doesn't open. Keys, while the
+//! list has focus (a press gives it), come as the platform's commands: Up and Down (Shift extends),
+//! Page Up and Page Down, Home and End or Cmd-Up and Cmd-Down, Cmd-A, and Enter, which activates
+//! the row, as a double click does. The row the keys moved to scrolls into view; so does
+//! [Ui::reveal_row]. Disabled ([Ui::disabled]), it takes no input or focus and dims.
 //!
 //! The list is the behaviour, its rows' fills the look: [List::unstyled] leaves the fills to
 //! the app, which draws them from [Row].
@@ -36,7 +37,7 @@ use std::hash::BuildHasherDefault;
 use std::ops::Range;
 
 use crate::app::MouseButton;
-use crate::keys::{Binding, Command, Move, bind};
+use crate::keys::{Binding, Command, Move, Os, bind};
 use crate::scene::{Point, Rect, alpha};
 use crate::text::FxHasher;
 use crate::ui::{Align, Cursor, Id, Role, State, Style, Ui, grow, px};
@@ -275,6 +276,9 @@ impl<'s> List<'s> {
     let view_h = sc.map_or(ui.size().h, |s| s.viewport.h);
     if n > 0 && !disabled {
       ui.list_keys(id, &mut st, sel, &mut out, (n, h, view_h, multi), &key);
+    }
+
+    if !disabled {
       ui.list_press(id, &mut st, sel, &mut out, n, multi, &key);
     }
 
@@ -456,7 +460,9 @@ impl<'a> Ui<'a> {
   }
 
   /// A press on a row selects it (a click when no frame saw its press: a quick one), as the
-  /// modifiers ask; a double click activates it.
+  /// modifiers ask; a double click activates it. A secondary one, as a context menu opens
+  /// ([Ui::context_press]), focuses the list and selects the row alone unless it is selected
+  /// (Finder's rule): the app's [Ui::context_menu] after it reads that selection.
   #[allow(clippy::too_many_arguments)]
   fn list_press(
     &mut self,
@@ -468,29 +474,76 @@ impl<'a> Ui<'a> {
     multi: bool,
     key: &dyn Fn(usize) -> u64,
   ) {
-    let press = self.press().filter(|p| p.button == MouseButton::Left);
+    // The secondary button's press, on Windows its release (a Control-click is the Mac's).
+    let win = self.st.os == Os::Windows;
+    let press = self
+      .press()
+      .filter(|p| p.button == MouseButton::Left || p.button == MouseButton::Right && !win);
     // A press is seen once; a click whose press no pass saw (a quick one) stands for it.
-    let click = self.st.input.click.filter(|c| c.button == MouseButton::Left);
+    let both = |b| matches!(b, MouseButton::Left | MouseButton::Right);
+    let click = self.st.input.click.filter(|c| both(c.button));
     let hit = match (press, click) {
-      (Some(p), _) if st.pressed != Some(p.seq) => Some((p.id, p.mods, p.clicks)),
-      (None, Some(c)) if st.pressed != Some(c.seq) => Some((c.id, c.mods, c.clicks)),
+      (Some(p), _) if st.pressed != Some(p.seq) => Some((p.id, p.mods, p.clicks, p.button, p.seq)),
+      (None, Some(c)) if st.pressed != Some(c.seq) => {
+        Some((c.id, c.mods, c.clicks, c.button, c.seq))
+      }
       _ => None,
     };
 
     st.pressed = press.map(|p| p.seq).or(click.map(|c| c.seq)).or(st.pressed);
-    let Some((at, mods, clicks)) = hit else { return };
-    // Its index as built, a hint that saves a scan unless the rows moved since.
-    let Some(at) = st.shown.iter().position(|&k| id.key(("row", k)) == at) else { return };
-    let k = st.shown[at];
-    let Some(i) = find((k, st.from + at), n, key) else { return };
+    let Some((on, mods, clicks, button, seq)) = hit else { return };
+    let right = button == MouseButton::Right;
+    // Its index as built, a hint that saves a scan unless the rows moved since; a secondary
+    // press on an element in a row is the row's, unless that element has a menu of its own.
+    let row = |on: Id| st.shown.iter().position(|&k| id.key(("row", k)) == on);
+    let (t, mut own) = (&self.st.last, false);
+    let mut up = t.find(on).filter(|_| right);
+    let at = row(on).or_else(|| {
+      loop {
+        let n = &t.nodes[up? as usize];
+        if let Some(at) = row(n.id) {
+          break Some(at);
+        }
+
+        if n.id == id || up == Some(0) {
+          break None;
+        }
+
+        own |= t.menus.contains(&n.id);
+        up = Some(n.parent);
+      }
+    });
+    if own {
+      return;
+    }
+
+    let Some((k, i)) =
+      at.and_then(|at| Some((st.shown[at], find((st.shown[at], st.from + at), n, key)?)))
+    else {
+      // Off the rows (the scrollbar, the padding) the list's menu, a row's, opens none; with
+      // none of its own, its parent's does.
+      if right && self.st.last.menus.contains(&id) && self.st.last.within(on, id) {
+        self.st.menu_seq = seq;
+      }
+
+      return;
+    };
     match (multi, mods.contains(crate::keys::CMD), mods.shift()) {
+      _ if right => {
+        self.focus(Some(id));
+        if sel.contains(k) {
+          return;
+        }
+
+        sel.select(k, i);
+      }
       (true, true, _) => sel.toggle(k, i),
       (true, _, true) => sel.extend(i, n, key),
       _ => sel.select(k, i),
     }
 
     (out.pressed, out.changed) = (Some(i), true);
-    if clicks == 2 {
+    if clicks == 2 && !right {
       out.activated = Some(i);
     }
   }
@@ -686,5 +739,74 @@ mod tests {
     let (st, shown, short) = frame(st, 5, -1.0);
     assert_eq!((shown, short), (5, true));
     assert_eq!(st.scroll(id).unwrap().offset.y, 0.0);
+  }
+
+  /// Rows with a button each, an odd row's with a menu of its own, under the list's row menu.
+  #[derive(Default)]
+  struct Buttons {
+    sel: Selection,
+  }
+
+  impl crate::App for Buttons {
+    fn view(&mut self, ui: &mut Ui) {
+      let list = List::new(10, 20.0).multi().selection(&mut self.sel).style(Style::new().grow());
+      let r = list.show(ui.id("list"), |ui, row| {
+        let b = ui.id(("b", row.index)).button("B");
+        if row.index % 2 == 1 {
+          ui.context_menu(b.id, || crate::Menu::new(vec![crate::Item::new("own", "Own")]));
+        }
+      });
+      ui.context_menu(r.id, || crate::Menu::new(vec![crate::Item::new("row", "Row")]));
+    }
+  }
+
+  #[test]
+  fn a_right_click_on_a_rows_element_is_the_rows_unless_it_has_a_menu() {
+    use crate::harness::Harness;
+    let mut h = Harness::new(Buttons::default(), Size::new(200.0, 200.0), 1.0);
+    h.native_menus();
+    h.frame();
+    let at = |h: &Harness<Buttons>, i: usize| {
+      let r = h.rect(Id::of(("b", i))).unwrap();
+      (r.x + r.w / 2.0, r.y + r.h / 2.0)
+    };
+    let asked = |h: &mut Harness<Buttons>| h.context_menu(None).map(|(_, m)| m.items[0].id.clone());
+    // A button with no menu: its row's menu, that row selected.
+    let (x, y) = at(&h, 2);
+    h.right_click(x, y);
+    h.frame();
+    assert_eq!(asked(&mut h).as_deref(), Some("row"));
+    assert_eq!(h.app().sel.cursor(), Some(2));
+    // One with its own: that menu, the selection as it was.
+    let (x, y) = at(&h, 3);
+    h.right_click(x, y);
+    h.frame();
+    assert_eq!(asked(&mut h).as_deref(), Some("own"));
+    assert_eq!(h.app().sel.cursor(), Some(2));
+  }
+
+  /// Two rows in a list with no menu, inside an element with one.
+  struct Inside;
+
+  impl crate::App for Inside {
+    fn view(&mut self, ui: &mut Ui) {
+      let r = ui.id("outer").col(Style::new().w(px(200.0)).h(px(200.0)), |ui| {
+        let list = List::new(2, 20.0).style(Style::new().grow());
+        list.show(ui.id("list"), |ui, _| ui.label("row"));
+      });
+      ui.context_menu(r.id, || crate::Menu::new(vec![crate::Item::new("outer", "Outer")]));
+    }
+  }
+
+  #[test]
+  fn a_list_with_no_menu_leaves_the_press_off_its_rows_to_its_parent() {
+    use crate::harness::Harness;
+    let mut h = Harness::new(Inside, Size::new(300.0, 300.0), 1.0);
+    h.native_menus();
+    h.frame();
+    h.right_click(100.0, 150.0);
+    h.frame();
+    let asked = h.context_menu(None).map(|(_, m)| m.items[0].id.clone());
+    assert_eq!(asked.as_deref(), Some("outer"));
   }
 }

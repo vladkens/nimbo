@@ -49,10 +49,10 @@
 //! Escape. Keys come as commands ([crate::keys]), typed text and input method events ([Ime]);
 //! the mouse places the caret, drags a selection (scrolling at the edges), double-clicks a word,
 //! triple-clicks a line, and Shift-click extends. A secondary click (the right button) focuses it
-//! and asks for its edit menu ([FieldBehavior::menu], drawn by [Ui::edit_menu]), whose choice
+//! and asks for its edit menu ([FieldBehavior::menu], opened by [Ui::edit_menu]), whose choice
 //! comes back as a command ([Ui::field_command]); the field keeps its focus look while the menu
-//! has the focus. The caret blinks on timers, so a window sleeps
-//! between blinks and stops when the field loses focus.
+//! is open. The caret blinks on timers, so a window sleeps between blinks and stops when the
+//! field loses focus.
 //!
 //! An input method's composition is marked text at the caret, apart from the value: the app's
 //! text changes only when it is committed, and a value the app sets meanwhile waits until the
@@ -70,6 +70,7 @@ use super::textlayout::{Edit, TextLayout};
 use super::{Cursor, Focus, Id, Role, State, Style, Ui, UiState};
 use crate::app::{Ime, MouseButton};
 use crate::keys::{Command, Delete, Key, Move};
+use crate::menu::{Item, Menu};
 use crate::scene::{Point, Rect};
 use crate::text::edit::{
   Editor, Lines, Mono, Sel, graphemes, para_range, range_from_utf16, snap, word_range,
@@ -215,10 +216,9 @@ pub(crate) struct FieldState {
   /// Requests made so far.
   reveals: u32,
   focused: bool,
-  /// The edit menu as last opened, the press that opened it, and whether it is open: the field
-  /// keeps its focus look while the menu has the focus ([Ui::edit_menu]).
+  /// The edit menu as last opened, and whether it is open (or a native one waits for its
+  /// answer): the field keeps its focus look meanwhile ([Ui::edit_menu]).
   pub menu: EditMenu,
-  menu_seq: u32,
   pub menu_open: bool,
   /// A command from the edit menu, run as the field is built next ([Ui::field_command]).
   queued: Option<Command>,
@@ -286,6 +286,20 @@ pub struct EditMenu {
   pub paste: bool,
   /// There is text.
   pub select_all: bool,
+}
+
+impl EditMenu {
+  /// The menu: Cut, Copy, Paste (Copy alone in selectable text), a line, Select All, each
+  /// enabled when it can act, their ids `cut`, `copy`, `paste` and `select_all`; no shortcut
+  /// labels, as AppKit's, Win32's and GTK's text menus show none.
+  pub fn items(&self) -> Menu {
+    let item = |id: &str, label: &str, on: bool| Item::new(id, label).enabled(on);
+    let (cut, paste) = (item("cut", "Cut", self.cut), item("paste", "Paste", self.paste));
+    let copy = item("copy", "Copy", self.copy);
+    let mut items = if self.editable { vec![cut, copy, paste] } else { vec![copy] };
+    items.extend([Item::separator(), item("select_all", "Select All", self.select_all)]);
+    Menu::new(items)
+  }
 }
 
 impl Ui<'_> {
@@ -528,19 +542,14 @@ impl Ui<'_> {
       self.request_frame_in(AUTOSCROLL);
     }
 
-    // A secondary click focuses it and asks for its edit menu there, as it goes down, or as it
-    // is let go when no view saw it down.
-    let right = |on: Id, b: MouseButton| on == id && b == MouseButton::Right;
-    let press = self.st.input.press.filter(|p| right(p.id, p.button)).map(|p| (p.pos, p.seq));
-    let click = self.st.input.click.filter(|c| right(c.id, c.button)).map(|c| (c.pos, c.seq));
-    if let Some((pos, seq)) = press.or(click).filter(|p| p.1 != st.menu_seq) {
+    // A secondary click focuses it and asks for its edit menu there ([Ui::context_press]).
+    if let Some(pos) = self.context_press(id) {
       self.focus(Some(id));
       let (editable, copy) = (st.editable, !st.ed.sel().is_empty() && !st.secure);
       let (paste, select_all) =
         (editable && self.st.clipboard.has_text(), !st.ed.text().is_empty());
       st.menu =
         EditMenu { at: Some(pos), editable, cut: copy && editable, copy, paste, select_all };
-      st.menu_seq = seq;
     }
 
     (submitted, cancelled)

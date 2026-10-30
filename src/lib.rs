@@ -39,6 +39,7 @@ pub mod harness;
 pub mod hotkey;
 pub mod instance;
 pub mod keys;
+mod menu;
 pub mod open;
 pub mod paste;
 pub mod paths;
@@ -70,6 +71,7 @@ pub use keys::{
   Binding, CMD, Command, Delete, EDIT_KEYS, Hotkey, Key, KeyEvent, Move, Os, SELECT_KEYS, Shortcut,
   bind, shortcut,
 };
+pub use menu::{Item, Menu};
 pub use png::Png;
 pub use scene::{
   Color, Frame, ImageId, Images, Point, Quad, Rect, Scene, Segment, Size, alpha, mix, rgb,

@@ -31,25 +31,25 @@ KINDS = ("code", "docs", "comments", "tests", "blank")
 # The code lines each part may have: a platform, the UI core (ui/: the tree, layout, input,
 # paint, theme), its widgets and containers (ui/widgets, ui/containers: add-ons over it), the
 # text system (text/: shaping, the glyph atlas, the editing model), the app platform (its
-# portable part: the shell, tray, hotkeys, paths, launch at login, the launcher entry, opening,
-# permissions, the system clipboard, the focus of other apps, the one instance, the uninstall,
-# the paste, the hardware; and each OS's platform/<os>/app), the accessibility model (ui/a11y.rs: roles,
-# records, assembly) and the core (the rest of src/). A budget is whole hundreds (STEP): a change that
-# doesn't fit is written tighter, or the budget goes up by a hundred, a decision recorded in its
-# PR; never by the few lines one change needs.
+# portable part: the shell, tray and its menu model, hotkeys, paths, launch at login, the
+# launcher entry, opening, permissions, the system clipboard, the focus of other apps, the one
+# instance, the uninstall, the paste, the hardware; and each OS's platform/<os>/app), the
+# accessibility model (ui/a11y.rs: roles, records, assembly) and the core (the rest of src/). A
+# budget is whole hundreds (STEP): a change that doesn't fit is written tighter, or the budget
+# goes up by a hundred, a decision recorded in its PR; never by the few lines one change needs.
 STEP = 100
 BUDGETS = {
   "platform/macos": 2500,
   "platform/windows": 2200,
   "platform/linux": 3200,
   "ui": 3900,
-  "widgets": 3400,
+  "widgets": 3500,
   "text": 1200,
   "core": 4000,
   "app/shared": 1700,
-  "app/macos": 1800,
+  "app/macos": 1900,
   "app/windows": 1800,
-  "app/linux": 2400,
+  "app/linux": 2500,
   "a11y": 400,
   "update": 800,
 }
@@ -62,7 +62,7 @@ PARTS = {
   "ui/form": "widgets",
   "ui/dialog": "widgets",
   "ui/a11y": "a11y",
-  **{m: "app/shared" for m in ("shell", "tray", "hotkey", "paths", "autostart", "desktop", "open", "permissions", "clipboard", "focus", "instance", "uninstall", "paste", "hardware")},
+  **{m: "app/shared" for m in ("shell", "tray", "menu", "hotkey", "paths", "autostart", "desktop", "open", "permissions", "clipboard", "focus", "instance", "uninstall", "paste", "hardware")},
 }
 
 

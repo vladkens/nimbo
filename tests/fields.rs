@@ -505,9 +505,10 @@ fn menu(h: &Harness<Fields>) -> Vec<String> {
   items.collect()
 }
 
-/// Chooses `label` in the edit menu of `id`; the field runs it as it is built next.
-fn choose(h: &mut Harness<Fields>, id: &str, label: &str) {
-  h.click_id(Id::of(id).key("edit").key(label));
+/// Chooses the item `item` (its id) in the edit menu of `id`; the field runs it as it is built
+/// next.
+fn choose(h: &mut Harness<Fields>, id: &str, item: &str) {
+  h.click_id(Id::of(id).key("edit").key(item));
   h.frame();
 }
 
@@ -530,13 +531,67 @@ fn a_right_click_opens_the_edit_menu() {
   assert!(menu(h).is_empty());
   assert_eq!(h.focused(), Some(Id::of(NAME)));
   right_click(h, NAME);
-  choose(h, NAME, "Select All");
+  choose(h, NAME, "select_all");
   assert_eq!(sel(h, NAME), Sel::new(0, 5));
   right_click(h, NAME);
   assert_eq!(menu(h), ["Cut", "Copy", "Paste", "Select All"]);
-  choose(h, NAME, "Cut");
+  choose(h, NAME, "cut");
   assert_eq!((clipboard(h).as_deref(), h.app().name.as_str()), (Some("hello"), ""));
   assert_eq!(h.app().changes.last(), Some(&NAME));
+}
+
+/// With the platform's own menus the edit menu is asked for at the pointer, not drawn: its
+/// items enabled as they can act; the answer runs in the field, and a dismissal ends it, the
+/// field keeping its focus.
+#[test]
+fn a_native_edit_menu_is_asked_for_and_answered() {
+  let h = &mut fields_on(Os::Mac, "hello", "moon");
+  h.native_menus();
+  h.key(Key::Char('a'), CMD);
+  right_click(h, NAME);
+  assert!(menu(h).is_empty(), "nothing drawn");
+  let r = h.rect(Id::of(NAME)).unwrap();
+  let (at, asked) = h.context_menu(Some("copy")).expect("a menu asked for");
+  assert_eq!((at.x, at.y), (r.x + 12.0, r.y + 8.0), "at the pointer");
+  let items: Vec<_> = asked.items.iter().map(|i| (i.id.as_str(), i.enabled)).collect();
+  let want = [("cut", true), ("copy", true), ("paste", true), ("", true), ("select_all", true)];
+  assert_eq!(items, want);
+  assert!(asked.items[3].separator);
+  h.frame();
+  assert_eq!(clipboard(h).as_deref(), Some("hello"));
+
+  // Open until it answers: the field keeps its focus look, then its focus.
+  h.rt.clipboard().write("");
+  h.key(NamedKey::ArrowRight, NONE);
+  right_click(h, NAME);
+  assert!(h.rt.ui.menu_open(Id::of(NAME).key("edit")));
+  let (_, asked) = h.context_menu(None).unwrap();
+  let on: Vec<_> = asked.items.iter().filter(|i| !i.separator).map(|i| i.enabled).collect();
+  assert_eq!(on, [false, false, false, true], "nothing selected, nothing to paste");
+  h.frame();
+  assert!(!h.rt.ui.menu_open(Id::of(NAME).key("edit")));
+  assert_eq!((h.focused(), h.app().name.as_str()), (Some(Id::of(NAME)), "hello"));
+  assert!(h.context_menu(None).is_none(), "asked once");
+}
+
+/// On the Mac a Control-click is the secondary click from its press on: the selection stays as
+/// it was (the press neither moves the caret nor selects as it is let go), and the menu's Paste
+/// replaces only the selection.
+#[test]
+fn a_control_click_keeps_the_selection_for_its_menu() {
+  let h = &mut fields_on(Os::Mac, "hello world", "XY");
+  h.native_menus();
+  h.key(NamedKey::ArrowLeft, Modifiers::ALT | SHIFT);
+  let r = h.rect(Id::of(NAME)).unwrap();
+  let (pos, button) = (nimbo::Point::new(r.x + 12.0, r.y + 8.0), nimbo::MouseButton::Left);
+  h.move_to(pos.x, pos.y);
+  h.event(Event::MouseDown { pos, button, clicks: 1, mods: CTRL });
+  h.frame();
+  h.event(Event::MouseUp { pos, button, mods: CTRL });
+  h.frame();
+  assert!(h.context_menu(Some("paste")).is_some(), "its menu asked for");
+  h.frame();
+  assert_eq!(h.app().name, "hello XY");
 }
 
 /// Paste in the edit menu pastes the clipboard's text; with none it is disabled.
@@ -544,7 +599,7 @@ fn a_right_click_opens_the_edit_menu() {
 fn the_edit_menus_paste_pastes() {
   let h = &mut fields_on(Os::Linux, "", "moon");
   right_click(h, NAME);
-  choose(h, NAME, "Paste");
+  choose(h, NAME, "paste");
   assert_eq!(h.app().name, "moon");
   assert_eq!(h.focused(), Some(Id::of(NAME)));
 
@@ -562,7 +617,7 @@ fn a_passwords_edit_menu_has_no_copy_or_cut() {
   h.key(Key::Char('a'), Os::Mac.cmd());
   right_click(h, PASSWORD);
   assert_eq!(menu(h), ["Cut disabled", "Copy disabled", "Paste", "Select All"]);
-  choose(h, PASSWORD, "Copy");
+  choose(h, PASSWORD, "copy");
   assert_eq!(clipboard(h).as_deref(), Some("moon"));
 }
 
@@ -573,9 +628,9 @@ fn selectable_texts_edit_menu_copies() {
   right_click(h, ABOUT);
   assert_eq!(menu(h), ["Copy disabled", "Select All"]);
   assert_eq!(h.focused(), Some(Id::of(ABOUT).key("edit").key("menu")));
-  choose(h, ABOUT, "Select All");
+  choose(h, ABOUT, "select_all");
   right_click(h, ABOUT);
   assert_eq!(menu(h), ["Copy", "Select All"]);
-  choose(h, ABOUT, "Copy");
+  choose(h, ABOUT, "copy");
   assert_eq!(clipboard(h).as_deref(), Some(TEXT));
 }

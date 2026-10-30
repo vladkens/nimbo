@@ -2,25 +2,25 @@
 
 //! The tray on Windows: a notification area icon (`Shell_NotifyIconW`, `NOTIFYICON_VERSION_4`)
 //! whose callbacks reach the shell's hidden window ([super::shell::WM_TRAY]), and a popup menu
-//! built from [Menu] that a left or right click opens with `TrackPopupMenuEx`, after the app's
-//! `on_open`. The chosen item comes back as its command id, one more than its index in
-//! [choices]. The icon is the template drawn white on a dark taskbar and black on a light one
+//! built from [Menu] ([super::menu]) that a left or right click opens, after the app's
+//! `on_open`. The icon is the template drawn white on a dark taskbar and black on a light one
 //! (`SystemUsesLightTheme`), at the small icon size of the system DPI; it is drawn again when
 //! the colours change, and added again when Explorer restarts (`TaskbarCreated`).
 
 use std::cell::{Cell, RefCell};
-use std::ptr::{null, null_mut};
+use std::ptr::null_mut;
 use std::rc::{Rc, Weak};
 
-use windows_sys::Win32::Foundation::{LPARAM, WPARAM};
+use windows_sys::Win32::Foundation::{LPARAM, POINT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::UI::HiDpi::{GetDpiForSystem, GetSystemMetricsForDpi};
 use windows_sys::Win32::UI::Shell::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use super::super::{settings, wide};
+use super::menu::{build, track};
 use super::shell::{WM_TRAY, host};
-use crate::tray::{Item, Menu, State, TrayIcon, choices};
+use crate::tray::{Menu, State, TrayIcon, choices};
 
 /// `NIN_KEYSELECT`: the icon chosen with the keyboard.
 const NIN_KEYSELECT: u32 = NIN_SELECT | 1;
@@ -210,22 +210,20 @@ impl Tray {
   fn show(&self, x: i32, y: i32) {
     self.opening();
     let host = host();
-    let align =
-      if unsafe { GetSystemMetrics(SM_MENUDROPALIGNMENT) } != 0 { TPM_RIGHTALIGN } else { 0 };
-    let flags = TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | align;
+    let flags = TPM_NONOTIFY | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN;
     // The menu closes when the user clicks elsewhere only if its window is in front (the docs of
     // TrackPopupMenu), and needs a message after to settle.
     let cmd = unsafe {
       SetForegroundWindow(host);
       // Its loop runs the messages: the app's windows keep drawing from their timers.
       super::super::modal(1);
-      let cmd = TrackPopupMenuEx(self.0.hmenu.get(), flags, x, y, host, null());
+      let cmd = track(self.0.hmenu.get(), flags, POINT { x, y }, host);
       super::super::modal(-1);
       PostMessageW(host, WM_NULL, 0, 0);
       cmd
     };
     // The item chosen in the menu shown, before a menu set meanwhile replaces it.
-    let id = (cmd > 0).then(|| self.id_of(cmd as u32)).flatten();
+    let id = self.id_of(cmd);
     self.closing();
     self.run(id);
   }
@@ -342,60 +340,6 @@ pub(crate) fn hicon(side: i32, px: &[u8]) -> HICON {
   }
 }
 
-/// A popup menu of `items`, their commands numbered from `next` + 1 in [choices]' order.
-fn build(items: &[Item], next: &mut u32) -> HMENU {
-  let menu = unsafe { CreatePopupMenu() };
-  for it in items {
-    let text = wide(&text(it));
-    let flags = flags(it);
-    // A separator is only that, whatever else it carries.
-    let id = match &it.submenu {
-      _ if it.separator => 0,
-      Some(sub) => build(&sub.items, next) as usize,
-      None => {
-        *next += 1;
-        *next as usize
-      }
-    };
-
-    unsafe { AppendMenuW(menu, flags, id, if it.separator { null() } else { text.as_ptr() }) };
-  }
-
-  menu
-}
-
-/// What an item is to `AppendMenuW`: a separator, a submenu, checked, greyed.
-fn flags(it: &Item) -> MENU_ITEM_FLAGS {
-  if it.separator {
-    return MF_SEPARATOR;
-  }
-
-  let mut f = MF_STRING;
-  if it.submenu.is_some() {
-    f |= MF_POPUP;
-  }
-
-  if it.checked {
-    f |= MF_CHECKED;
-  }
-
-  if !it.enabled {
-    f |= MF_GRAYED;
-  }
-
-  f
-}
-
-/// An item's text: its label with `&` doubled (one alone marks the access key), then its key
-/// after a tab, which menus show right-aligned.
-fn text(it: &Item) -> String {
-  let label = it.label.replace('&', "&&");
-  match it.key_label() {
-    key if key.is_empty() => label,
-    key => format!("{label}\t{key}"),
-  }
-}
-
 /// `menu`'s items in the tray's shared format, a submenu's indented by `depth`.
 fn describe(menu: HMENU, depth: usize, out: &mut Vec<String>) {
   let pad = "  ".repeat(depth);
@@ -403,7 +347,7 @@ fn describe(menu: HMENU, depth: usize, out: &mut Vec<String>) {
     let mut buf = [0u16; 256];
     let mut mi: MENUITEMINFOW = unsafe { std::mem::zeroed() };
     mi.cbSize = size_of::<MENUITEMINFOW>() as u32;
-    mi.fMask = MIIM_FTYPE | MIIM_STATE | MIIM_SUBMENU | MIIM_STRING;
+    mi.fMask = MIIM_FTYPE | MIIM_ID | MIIM_STATE | MIIM_SUBMENU | MIIM_STRING;
     mi.dwTypeData = buf.as_mut_ptr();
     mi.cch = buf.len() as u32 - 1;
     if unsafe { GetMenuItemInfoW(menu, i, 1, &mut mi) } == 0 {
@@ -419,7 +363,8 @@ fn describe(menu: HMENU, depth: usize, out: &mut Vec<String>) {
     let (label, key) = s.split_once('\t').unwrap_or((&s, ""));
     let on = if mi.fState & MFS_CHECKED != 0 { "on" } else { "off" };
     let enabled = if mi.fState & MFS_DISABLED != 0 { "disabled" } else { "enabled" };
-    out.push(format!("{pad}{label}|{key}|{on}|{enabled}"));
+    let head = if mi.wID == 0 && mi.hSubMenu.is_null() { "|header" } else { "" };
+    out.push(format!("{pad}{label}|{key}|{on}|{enabled}{head}"));
     if !mi.hSubMenu.is_null() {
       describe(mi.hSubMenu, depth + 1, out);
     }
@@ -429,19 +374,7 @@ fn describe(menu: HMENU, depth: usize, out: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
   use super::*;
-
-  #[test]
-  fn items_become_flags_and_text() {
-    let quit = Item::new("quit", "Save & Quit").key("cmd+q");
-    assert_eq!(text(&quit), "Save && Quit\tCtrl+Q");
-    assert_eq!(flags(&quit), MF_STRING);
-    assert_eq!(
-      flags(&Item::new("a", "A").checked(true).enabled(false)),
-      MF_STRING | MF_CHECKED | MF_GRAYED
-    );
-    assert_eq!(flags(&Item::separator()), MF_SEPARATOR);
-    assert_eq!(flags(&Item::new("s", "S").submenu(Menu::default())), MF_STRING | MF_POPUP);
-  }
+  use crate::tray::Item;
 
   /// A separator's submenu, which [Item] says is ignored, takes no command numbers.
   #[test]

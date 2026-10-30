@@ -229,6 +229,9 @@ pub struct Input {
   /// The window's id, and its input context's number ([new_ime]).
   id: u64,
   ime_n: usize,
+  /// A copy of the last secondary press, ours: the trigger of the context menu it asks for
+  /// ([super::app::gtk_menu]), whose grab takes its seat and button.
+  pub press: P,
 }
 
 impl Input {
@@ -258,6 +261,7 @@ impl Input {
       focused: false,
       id,
       ime_n,
+      press: null_mut(),
     }
   }
 
@@ -266,6 +270,14 @@ impl Input {
     self.window = window;
     for im in [self.im, self.ime] {
       unsafe { (gdk().gtk_im_context_set_client_window)(im, window) };
+    }
+  }
+
+  /// Keeps `press` (a copy, or null) as the last secondary press, the one before freed.
+  fn keep(&mut self, press: P) {
+    let old = std::mem::replace(&mut self.press, press);
+    if !old.is_null() {
+      unsafe { (gdk().gdk_event_free)(old) };
     }
   }
 
@@ -310,6 +322,8 @@ impl Drop for Input {
     for im in [self.im, self.ime] {
       unsafe { (gdk().g_object_unref)(im) };
     }
+
+    self.keep(null_mut());
   }
 }
 
@@ -523,6 +537,10 @@ impl Win {
     // A click ends a composition as typed; the input method lets go of it ([Win::sync_ime]).
     if self.rt.ui.text_input().is_some_and(|t| t.marked().is_some()) {
       self.send(Event::Ime(Ime::Unmark));
+    }
+
+    if button == MouseButton::Right {
+      self.input.keep(unsafe { (gdk().gdk_event_copy)(ev) });
     }
 
     let i = &mut self.input;

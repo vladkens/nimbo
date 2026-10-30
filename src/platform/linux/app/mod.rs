@@ -1,20 +1,21 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! What an app needs on Linux besides its windows: GTK's loop with no window and windows on
-//! demand ([shell]), a StatusNotifierItem with its menu ([tray]), hotkeys through X11's grab
-//! ([grab]) or the GlobalShortcuts portal on Wayland ([hotkey]), an XDG autostart entry
-//! ([autostart]) and launcher entry ([desktop]), links and files opened ([open]), shortcuts posted
-//! to the app in focus ([post]) and where the user types on X11 ([focus]), and the clipboard for a
-//! paste ([paste]), both through the RemoteDesktop portal on Wayland ([remote]); the tray, the
-//! portals and the file manager speak D-Bus through GIO ([super::dbus]); what an uninstall
-//! removes ([uninstall]); files fetched over HTTP with libcurl ([http]), an update's AppImage
-//! made executable ([update]); no hardware read yet ([hardware]).
+//! What an app needs on Linux besides its windows: GTK's loop with no window and windows on demand
+//! ([shell]), a StatusNotifierItem with its menu ([tray]), hotkeys through X11's grab ([grab]) or
+//! the GlobalShortcuts portal on Wayland ([hotkey]), a window's context menus ([gtk_menu]), an XDG
+//! autostart entry ([autostart]) and launcher entry ([desktop]), links and files opened ([open]),
+//! shortcuts posted to the app in focus ([post]) and where the user types on X11 ([focus]), and the
+//! clipboard for a paste ([paste]), both through the RemoteDesktop portal on Wayland ([remote]);
+//! the tray, the portals and the file manager speak D-Bus through GIO ([super::dbus]); what an
+//! uninstall removes ([uninstall]); files fetched over HTTP with libcurl ([http]), an update's
+//! AppImage made executable ([update]); no hardware read yet ([hardware]).
 
 pub mod activity;
 pub mod autostart;
 pub mod desktop;
 pub mod focus;
 mod grab;
+pub(super) mod gtk_menu;
 pub mod hardware;
 pub mod hotkey;
 pub mod http;

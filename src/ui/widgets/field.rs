@@ -19,8 +19,8 @@
 //! the edit menu's keys ([EDIT_KEYS]); selectable text binds select all and copy
 //! ([SELECT_KEYS]) and shows no ring, its selection dimmed while it has no focus. A right-click
 //! opens the edit menu at the pointer ([Ui::edit_menu]): Cut, Copy, Paste and Select All, or
-//! Copy and Select All in selectable text. The focused field is what input methods ask about
-//! ([TextInput]).
+//! Copy and Select All in selectable text, the platform's own menu in a window. The focused
+//! field is what input methods ask about ([TextInput]).
 
 use std::ops::Range;
 
@@ -29,7 +29,7 @@ use crate::scene::{Color, Point, Rect, alpha};
 use crate::text::edit::{Editor, graphemes, range_from_utf16, range_to_utf16, to_utf16, utf16_len};
 use crate::ui::behavior::{DOT, FieldState};
 use crate::ui::{
-  Align, FieldBehavior, Id, Response, Style, TextLayout, TextStyle, Ui, UiState, grow, px,
+  Align, FieldBehavior, Id, Response, Style, TextLayout, TextStyle, Ui, UiState, grow,
 };
 
 impl Ui<'_> {
@@ -103,38 +103,25 @@ impl Ui<'_> {
     self.selectable_text(id, text, &style)
   }
 
-  /// The edit menu of a field or selectable text over its behaviour `b`, in the theme's look, at
-  /// the secondary click that opened it ([FieldBehavior::menu]): Cut, Copy, Paste and Select
-  /// All (selectable text: Copy and Select All), each enabled when it can act; the one chosen
-  /// runs in the field ([Ui::field_command]). The menu is `b.id.key("edit")`'s
-  /// ([Ui::menu_popup_at]), its items keyed by their labels.
+  /// The edit menu of a field or selectable text over its behaviour `b`, at the secondary click
+  /// that opened it ([FieldBehavior::menu]): [EditMenu::items] as `b.id.key("edit")`'s context
+  /// menu ([Ui::context_menu_at]), the native one or drawn in the theme's look; the one chosen
+  /// runs in the field ([Ui::field_command]).
   pub fn edit_menu(&mut self, b: &FieldBehavior) {
-    let (id, m, t) = (b.id.key("edit"), b.menu, self.theme());
-    let items = [
-      ("Cut", Command::Cut, m.cut, m.editable),
-      ("Copy", Command::Copy, m.copy, true),
-      ("Paste", Command::Paste, m.paste, m.editable),
-      ("Select All", Command::SelectAll, m.select_all, true),
-    ];
-    // Disabled while open, it closes.
-    let (off, mut run) = ((b.disabled && self.menu_open(id)).then(Point::default), None);
-    let open = self.menu_popup_at(id, m.at.or(off), t.popup().min_w(160.0), |ui| {
-      for (label, cmd, on, _) in items.into_iter().filter(|i| i.3) {
-        // A line before Select All, as Windows and GTK have it.
-        if cmd == Command::SelectAll {
-          let line = Style::new().w(grow()).h(px(1.0)).bg(t.line);
-          ui.row(Style::new().w(grow()).pads([5.0, 10.0, 5.0, 10.0]), |ui| _ = ui.el(line));
-        }
+    let (id, m) = (b.id.key("edit"), b.menu);
+    // Disabled while open, a drawn one closes.
+    let off = b.disabled && !self.st.native_menus && self.menu_open(id);
+    let chosen = self.context_menu_at(id, m.at.or(off.then(Point::default)), || m.items());
+    self.state::<FieldState>(b.id).menu_open = self.menu_open(id);
+    let cmd = match chosen.as_deref() {
+      Some("cut") => Command::Cut,
+      Some("copy") => Command::Copy,
+      Some("paste") => Command::Paste,
+      Some("select_all") => Command::SelectAll,
+      _ => return,
+    };
 
-        let clicked = ui.disabled(!on).with_id(id.key(label)).menu_item(label).clicked;
-        run = run.or(clicked.then_some(cmd));
-      }
-    });
-
-    self.state::<FieldState>(b.id).menu_open = open;
-    if let Some(cmd) = run {
-      self.field_command(b.id, cmd);
-    }
+    self.field_command(b.id, cmd);
   }
 
   /// The text element of a field or selectable text, as its behaviour `b` has it: the text (a
@@ -419,7 +406,7 @@ mod tests {
     h.app_mut().off = false;
     h.frame();
     right_click(&mut h, first);
-    h.click_id(first.key("edit").key("Paste"));
+    h.click_id(first.key("edit").key("paste"));
     h.app_mut().off = true;
     h.frame();
     h.app_mut().off = false;
