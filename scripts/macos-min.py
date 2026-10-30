@@ -8,14 +8,16 @@ It builds the examples with MACOSX_DEPLOYMENT_TARGET removed from the environmen
 `--config`, so a deployment target set again in `.cargo/config.toml` fails it, then:
 1. each example's LC_BUILD_VERSION minos (`otool -l`) must be MIN (skipped on a non-arm64 host,
    where rustc's default is 10.12);
-2. the C symbols they import from frameworks (`nm -mu`, not libSystem, libobjc or libc++) and the
+2. the C symbols they import (`nm -mu`, libSystem's too; not libc++'s, which are C++) and the
    unmangled undefined symbols of libnimbo's rlib (`nm -u`: also the externs no example links)
-3. are referenced in one Objective-C file over the SDK's headers (FRAMEWORKS, HEADERS), compiled
-   with clang at `-mmacosx-version-min=MIN -Werror=unguarded-availability`, so the headers'
-   availability says which are newer than MIN;
+3. are referenced in one Objective-C file over the SDK's headers (FRAMEWORKS, HEADERS: those of
+   every libSystem function std and nimbo call), compiled with clang at
+   `-mmacosx-version-min=MIN -Werror=unguarded-availability`, so the headers' availability says
+   which are newer than MIN;
 4. every clang error fails, naming the symbol and the binaries importing it, except an undeclared
-   identifier that libSystem or libobjc export (the SDK's .tbd files), objc2's statics,
-   compiler-rt's (`__*`) or std's (`rust_*`).
+   identifier that libobjc exports (its .tbd; its ARC entry points have no public header),
+   objc2's statics, compiler-rt's (`__*`) or std's (`rust_*`), and UNWIND. A libSystem function
+   with no header included fails as undeclared: its header goes into HEADERS.
 Selectors are sent at run time and stay unchecked: those are for review. Off macOS it does nothing.
 
 uv run scripts/macos-min.py
@@ -33,7 +35,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MIN = "11.0"
-SYSTEM = ("libSystem", "libobjc", "libc++")
+# libc++'s imports are C++ (mangled): no C header declares them.
+CXX = "libc++"
 FRAMEWORKS = (
   "Cocoa/Cocoa.h",
   "Carbon/Carbon.h",
@@ -52,8 +55,42 @@ HEADERS = (
   "objc/message.h",
   "pthread.h",
   "dlfcn.h",
+  "Block.h",
+  "crt_externs.h",
+  "mach-o/dyld.h",
+  "unwind.h",
+  "stdlib.h",
+  "stdio.h",
+  "string.h",
+  "strings.h",
+  "unistd.h",
+  "fcntl.h",
+  "dirent.h",
+  "signal.h",
+  "sched.h",
+  "time.h",
+  "math.h",
+  "errno.h",
+  "poll.h",
+  "sys/socket.h",
+  "sys/stat.h",
+  "sys/mman.h",
+  "sys/file.h",
+  "sys/ioctl.h",
+  "sys/uio.h",
+  "sys/time.h",
+  "sys/event.h",
   "sys/sysctl.h",
+  "mach/mach.h",
+  "mach/mach_time.h",
+  "malloc/malloc.h",
+  "os/lock.h",
+  "os/log.h",
+  "os/os_sync_wait_on_address.h",
+  "CommonCrypto/CommonRandom.h",
 )
+# std's personality calls these: unwind.h marks them unavailable on arm64, libSystem exports them.
+UNWIND = ("_Unwind_GetDataRelBase", "_Unwind_GetTextRelBase")
 # objc2's statics for the classes it declares, after the Mach-O leading underscore.
 OBJC2 = ("__CLASS_", "__IVAR_OFFSET_", "__DROP_FLAG_OFFSET_")
 CLASS = re.compile(r"^OBJC_(?:META)?CLASS_\$_(\w+)$")
@@ -134,7 +171,7 @@ def imports(examples: list[Path], rlib: Path) -> dict[str, set[str]]:
   for path in examples:
     for line in run("nm", "-mu", str(path)).splitlines():
       found = nm_import(line)
-      if found and found[1] not in SYSTEM:
+      if found and found[1] != CXX:
         out[found[0]].add(path.name)
 
   # Members without symbols (lib.rmeta) only warn on stderr.
@@ -148,14 +185,21 @@ def imports(examples: list[Path], rlib: Path) -> dict[str, set[str]]:
   return out
 
 
-def exempt(sym: str, system: set[str]) -> bool:
-  """An undeclared identifier that isn't a framework's: libSystem's, objc2's, compiler-rt's, std's.
+def exempt(sym: str, msg: str, objc: set[str]) -> bool:
+  """A clang error that says nothing about availability: an undeclared identifier libobjc,
+  objc2, compiler-rt or std has, or UNWIND's unavailable.
 
-  >>> syms = ("memcpy", "__CLASS_NimboView", "__udivti3", "rust_eh_personality", "CAFoo")
-  >>> [exempt(s, {"memcpy"}) for s in syms]
+  >>> syms = ("objc_retain", "__CLASS_NimboView", "__udivti3", "rust_eh_personality", "memcpy")
+  >>> [exempt(s, "use of undeclared identifier", {"objc_retain"}) for s in syms]
   [True, True, True, True, False]
+  >>> [exempt("_Unwind_GetTextRelBase", m, set()) for m in ("is unavailable", "is only available")]
+  [True, False]
   """
-  return sym in system or sym.startswith(OBJC2) or sym.startswith(("__", "rust_"))
+  if sym in UNWIND:
+    return "is unavailable" in msg
+
+  known = sym in objc or sym.startswith(OBJC2) or sym.startswith(("__", "rust_"))
+  return "undeclared identifier" in msg and known
 
 
 def compile_check(syms: list[str]) -> list[tuple[str, str]]:
@@ -217,11 +261,10 @@ def main() -> int:
       fails += [f"MACOSX_DEPLOYMENT_TARGET is set in {p}" for p in configs()]
 
   sdk = Path(run("xcrun", "--show-sdk-path").strip())
-  tbds = [*(sdk / "usr/lib/system").glob("*.tbd"), sdk / "usr/lib/libobjc.A.tbd"]
-  system = set().union(*(tbd_symbols(p.read_text()) for p in tbds))
+  objc = tbd_symbols((sdk / "usr/lib/libobjc.A.tbd").read_text())
   syms = imports(examples, rlib)
   for sym, msg in compile_check(sorted(syms)):
-    if sym and "undeclared identifier" in msg and exempt(sym, system):
+    if sym and exempt(sym, msg, objc):
       continue
 
     fails.append(f"{sym}: {msg} ({', '.join(sorted(syms[sym]))})" if sym else msg)

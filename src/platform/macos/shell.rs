@@ -455,7 +455,7 @@ fn closed(id: u64) {
     return;
   };
   let on_close = crate::shell::closed(id);
-  win.view.stop();
+  win.view.close();
   win.window.setDelegate(None);
   let Win { window, view, _delegate, .. } = win;
   shell(|s| s.gone.push(Gone { window, _view: view, _delegate }));

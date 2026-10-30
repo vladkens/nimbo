@@ -80,8 +80,9 @@ pub struct Ivars {
   /// The cursor set while the pointer is in the view; none outside it.
   cursor: Cell<Option<Cursor>>,
   /// The display link was invalidated (the view left its window): a new one starts when it
-  /// moves to a window again ([View::wake]).
+  /// moves to a window again ([View::wake]), unless the window closed ([View::close]).
   stopped: Cell<bool>,
+  closed: Cell<bool>,
   /// The window moved to another screen while the runtime was busy: the link follows at the
   /// next wake.
   rescreen: Cell<bool>,
@@ -562,6 +563,13 @@ impl View {
     a11y::close(self);
   }
 
+  /// The window closed: its view gets no new display link, though it is in it until the shell
+  /// lets it go.
+  pub fn close(&self) {
+    self.ivars().closed.set(true);
+    self.stop();
+  }
+
   /// Runs `f` on the runtime unless a call up the stack has it, then redraws: an app changed
   /// from outside its window ([crate::Window::with]).
   pub fn try_runtime<R>(&self, f: impl FnOnce(&mut Runtime<Box<dyn App>>) -> R) -> Option<R> {
@@ -835,7 +843,7 @@ impl View {
     match self.ivars().state.try_borrow_mut().as_deref_mut() {
       Ok(Some(st)) => {
         let (iv, rescreen) = (self.ivars(), self.ivars().rescreen.take());
-        if iv.stopped.get() && self.window().is_some() {
+        if iv.stopped.get() && !iv.closed.get() && self.window().is_some() {
           st.link = Link::new(self);
           iv.stopped.set(false);
         } else if rescreen {
