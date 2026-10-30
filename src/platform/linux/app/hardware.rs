@@ -46,10 +46,11 @@ pub fn watch(kind: Change) -> Result<(), String> {
 }
 
 pub fn unwatch() {
-  if let Some(id) = LID.take()
+  if let Some((id, name)) = LID.take()
     && let Ok(bus) = dbus::system()
   {
     dbus::unsubscribe(bus, id);
+    dbus::unwatch(name);
   }
 
   unwatch_audio();
@@ -58,11 +59,12 @@ pub fn unwatch() {
 // MARK: Lid
 
 thread_local! {
-  /// UPower's subscription while the lid is watched.
-  static LID: Cell<Option<c_uint>> = const { Cell::new(None) };
+  /// UPower's subscription and its name's watch while the lid is watched.
+  static LID: Cell<Option<(c_uint, c_uint)>> = const { Cell::new(None) };
 }
 
-/// UPower's property changes, from when it runs: none on a desktop, nothing to wait for.
+/// UPower's property changes, from when it runs (none on a desktop, nothing to wait for), and
+/// UPower itself coming or going: a new daemon starts without a signal, perhaps without the lid.
 fn watch_lid() -> Result<(), String> {
   if LID.get().is_some() {
     return Ok(());
@@ -73,8 +75,19 @@ fn watch_lid() -> Result<(), String> {
   let cb = on_upower as Fp;
   let path = Some(UPOWER_PATH);
   let id = dbus::subscribe(bus, UPOWER, iface, "PropertiesChanged", path, cb, (null_mut(), null()));
-  LID.set(Some(id));
+  let (came, went) = (upower_came as Fp, upower_went as Fp);
+  let name = dbus::watch(bus, UPOWER, came, went, (null_mut(), null()));
+  LID.set(Some((id, name)));
   Ok(())
+}
+
+/// UPower's name has an owner: as it is watched, and when a new daemon starts.
+unsafe extern "C" fn upower_came(_: P, _: S, _: S, _: P) {
+  notice(Change::Lid);
+}
+
+unsafe extern "C" fn upower_went(_: P, _: S, _: P) {
+  notice(Change::Lid);
 }
 
 /// `PropertiesChanged(interface, changed, invalidated)`.
@@ -345,7 +358,7 @@ mod tests {
     assert_eq!(std::mem::offset_of!(ServerInfo, source), 56);
   }
 
-  /// UPower's `PropertiesChanged`: the lid's when it names `LidIsClosed`.
+  /// UPower's `PropertiesChanged`: the lid's when it names `LidIsClosed` or `LidIsPresent`.
   #[test]
   fn upower_changes() {
     // GIO comes with GTK, absent from a build host without it.
