@@ -367,16 +367,20 @@ fn keys(e: &mut Event) -> bool {
   let theirs = (0..MAX).filter(|i| held & 1 << i != 0).fold(0, |m, i| m | mods_of(e.chords[i]));
   let event = e.flags & MODIFIERS;
   let (mut found, mut swallow) = (held == 0, false);
-  // A key matches by its place as set now, or owed by the place it was taken at (changed since).
+  // A key matches by its place as set now, or owed by the place it was taken at (changed since);
+  // only an event at that place settles what is owed, or a claim of another key there.
   let owed = s.keys_owed.load(Ordering::Relaxed);
   let now = |j: usize| j < n && s.keys[j].load(Ordering::Acquire) & 0xffff == code;
-  let was = |j: usize| owed & 1 << j != 0 && s.owed_at[j].load(Ordering::Relaxed) == code;
-  for j in (0..MAX).filter(|&j| now(j) || was(j)) {
+  let owes = |j: usize| owed & 1 << j != 0 && s.owed_at[j].load(Ordering::Relaxed) == code;
+  for j in (0..MAX).filter(|&j| now(j) || owes(j)) {
     let mods = s.keys[j].load(Ordering::Acquire) >> 16;
     let ours = !found && now(j) && (event == mods || event & !theirs == mods);
     let bit = 1u8 << j;
-    let (on, take) = owe(owed & bit != 0, e.down, e.rep, ours);
-    mark(&s.keys_owed, bit, on);
+    let (on, take) = owe(owes(j), e.down, e.rep, ours);
+    if owes(j) || take == Take::Claim {
+      mark(&s.keys_owed, bit, on);
+    }
+
     (found, swallow) = (found || ours, swallow || take != Take::Pass);
     if take == Take::Claim {
       s.owed_at[j].store(code, Ordering::Relaxed);
@@ -977,6 +981,8 @@ mod tests {
     assert_eq!(key(&s, true, Z, FN, false), swallow(Hit::Key(0)));
     s.store_keys(&[key_value(Hotkey::parse("x").ok())]);
     assert_eq!(key(&s, true, Z, FN, true), SWALLOWED);
+    // X, set in Z's place, pressed before and released now: the app's, Z still owed.
+    assert_eq!(key(&s, false, 0x07, FN, false), Verdict::Pass);
     s.store_keys(&[]);
     assert_eq!(key(&s, false, Z, FN, false), SWALLOWED);
     assert_eq!(key(&s, true, Z, FN, false), Verdict::Pass);
