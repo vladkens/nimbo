@@ -61,6 +61,7 @@ unsafe impl RefEncode for IOSurfaceRef {
 }
 
 /// An image's texture and its premultiplied RGBA pixels.
+#[allow(dead_code, reason = "the pixels for a window's fall back, to come")]
 struct Image {
   tex: Retained<Texture>,
   w: usize,
@@ -92,6 +93,7 @@ impl Renderer {
   }
 
   /// Copies new glyph bitmaps into the atlases and adds or drops images, draining both queues.
+  #[allow(dead_code, reason = "for the window, to come")]
   pub fn sync(&mut self, text: &mut TextSystem, images: &mut Images) -> Result<(), String> {
     let done = self.sync_pending(text.pending(), images);
     text.uploads().for_each(drop);

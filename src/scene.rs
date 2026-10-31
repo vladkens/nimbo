@@ -321,6 +321,7 @@ impl Scene {
 // MARK: Images
 
 /// A new image waiting for the renderer: premultiplied RGBA rows, top row first.
+#[derive(Clone)]
 pub(crate) struct ImageUpload {
   pub id: ImageId,
   pub w: usize,

@@ -28,13 +28,21 @@ pub const TICK: Duration = Duration::from_nanos(8_333_333);
 pub struct Harness<A> {
   pub(crate) rt: Runtime<A>,
   pub(crate) cpu: cpu::Renderer,
+  /// Made at the first [Self::render_metal], then synced with every frame built.
+  #[cfg(all(feature = "metal", target_os = "macos"))]
+  metal: Option<crate::platform::macos::metal::render::Renderer>,
 }
 
 impl<A: App> Harness<A> {
   pub fn new(app: A, size: Size, scale: f32) -> Self {
     let clock = Clock::Virtual(Duration::ZERO);
     let rt = Runtime::new(app, size, scale, clock, Box::new(MemClipboard::default()));
-    Self { rt, cpu: cpu::Renderer::new() }
+    Self {
+      rt,
+      cpu: cpu::Renderer::new(),
+      #[cfg(all(feature = "metal", target_os = "macos"))]
+      metal: None,
+    }
   }
 
   pub fn app(&self) -> &A {
@@ -361,13 +369,25 @@ impl<A: App> Harness<A> {
   /// dropped glyphs (a full atlas) and must be built again.
   fn build(&mut self) -> bool {
     let mut again = self.rt.frame();
-    self.cpu.sync(&mut self.rt.text, &mut self.rt.images);
+    self.sync();
     if self.apply_resize() {
       again = self.rt.frame();
-      self.cpu.sync(&mut self.rt.text, &mut self.rt.images);
+      self.sync();
     }
 
     again
+  }
+
+  /// Hands the frame's new glyphs and images to the renderers, the CPU's last: its sync drains
+  /// them.
+  fn sync(&mut self) {
+    #[cfg(all(feature = "metal", target_os = "macos"))]
+    if let Some(m) = &mut self.metal {
+      let done = m.sync_pending(self.rt.text.pending(), &self.rt.images);
+      done.unwrap_or_else(|e| panic!("nimbo: Metal sync: {e}"));
+    }
+
+    self.cpu.sync(&mut self.rt.text, &mut self.rt.images);
   }
 
   /// Resizes the view to the size the app asked for, if it did; returns whether it did.
@@ -390,6 +410,26 @@ impl<A: App> Harness<A> {
     let (size, scale) = (self.rt.size, self.rt.scale);
     let pixels = self.cpu.snapshot(&self.rt.scene, size, scale);
     Image { scale, pixels }
+  }
+
+  /// The frame the last [Self::render] built, drawn by the Metal renderer as a window with
+  /// `NIMBO_RENDERER=metal` draws it; `None` without Metal (no device, a failed frame), the
+  /// reason on stderr. Made at the first call with the CPU renderer's glyphs and images, the
+  /// renderer is then synced with every frame built.
+  #[cfg(all(feature = "metal", target_os = "macos"))]
+  pub fn render_metal(&mut self) -> Option<Image> {
+    if self.metal.is_none() {
+      let (u, i) = self.cpu.contents();
+      let made = crate::platform::macos::metal::render::Renderer::new()
+        .and_then(|mut m| m.sync_pending(&u, &i).map(|_| m));
+      self.metal = made.map_err(|e| eprintln!("nimbo: no Metal renderer: {e}")).ok();
+    }
+
+    let m = self.metal.as_mut()?;
+    m.transparent = self.cpu.transparent;
+    let pixels = m.snapshot(&self.rt.scene, self.rt.size, self.rt.scale);
+    let pixels = pixels.map_err(|e| eprintln!("nimbo: no Metal frame: {e}")).ok()?;
+    Some(Image { scale: self.rt.scale, pixels })
   }
 
   pub fn shot(&mut self, path: &Path) -> Result<(), String> {

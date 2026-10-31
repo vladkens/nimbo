@@ -7,8 +7,6 @@
 //! reference. The device, its queue and the pipelines ([Gpu]) are made once per thread, on the
 //! first Metal frame, so an app that never draws with Metal never touches it.
 
-#![allow(dead_code, reason = "only its tests draw with it until the harness and windows do")]
-
 pub(crate) mod render;
 
 use std::cell::OnceCell;
@@ -54,6 +52,7 @@ impl Gpu {
   }
 
   /// The device's name, for the line naming the renderer (`nimbo: renderer metal (<name>)`).
+  #[allow(dead_code, reason = "for the window's line, to come")]
   pub fn name(&self) -> String {
     self.device.name().to_string()
   }

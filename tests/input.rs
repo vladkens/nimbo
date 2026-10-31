@@ -248,3 +248,19 @@ fn positions_parse_from_the_clipboard_text() {
   assert_eq!(parse_point("NaN,60"), None);
   assert_eq!(parse_point("10,inf"), None);
 }
+
+/// The Metal renderer draws the square and the focus bar as the CPU does, and again dragged,
+/// grown by the wheel and amber under Shift.
+#[cfg(all(feature = "metal", target_os = "macos"))]
+#[test]
+fn metal_draws_as_the_cpu() {
+  let mut h = input();
+  common::metal_parity(&mut h, 0.005);
+  let (x, y) = mid(h.app().square());
+  h.press(x, y);
+  h.move_to(x + 63.5, y + 21.25);
+  h.release(x + 63.5, y + 21.25);
+  wheel(&mut h, (x + 63.5, y + 21.25), 3.0);
+  h.event(Event::Mods(Modifiers::SHIFT));
+  common::metal_parity(&mut h, 0.005);
+}

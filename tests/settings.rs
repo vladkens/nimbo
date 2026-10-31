@@ -473,3 +473,16 @@ fn a_disabled_rows_info_shows_its_tip() {
   reads(&h.a11y(), &[&info, "switch \"Download them in the background\" off disabled"]);
   assert_eq!(tip(&mut h, DOWNLOAD_ROW), TIP_DOWNLOAD);
 }
+
+/// The Metal renderer draws every page as the CPU does; each page's text reaches it by the sync
+/// after the frame that first shows it.
+#[cfg(all(feature = "metal", target_os = "macos"))]
+#[test]
+fn metal_draws_as_the_cpu() {
+  let mut h = start();
+  common::metal_parity(&mut h, 0.005);
+  for (page, ..) in &PAGES[1..] {
+    turn(&mut h, *page);
+    common::metal_parity(&mut h, 0.005);
+  }
+}

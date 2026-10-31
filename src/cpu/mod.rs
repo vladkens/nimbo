@@ -14,7 +14,7 @@ use std::sync::Mutex;
 
 use self::pool::Pool;
 use self::raster::{IRect, Target, Tex};
-use crate::scene::{Images, Rect, Scene, Size};
+use crate::scene::{ImageUpload, Images, Rect, Scene, Size};
 use crate::text::{ATLAS_SIZE, COLOR_ATLAS_SIZE, TextSystem, Upload};
 
 /// Side of a damage tile in pixels.
@@ -57,17 +57,12 @@ pub struct Pixels {
   pub data: Vec<u8>,
 }
 
-struct Image {
-  w: usize,
-  h: usize,
-  data: Vec<u8>,
-}
-
 pub struct Renderer {
   /// The coverage and colour atlases, allocated on their first glyph.
   atlas: Vec<u8>,
   color_atlas: Vec<u8>,
-  images: Vec<Option<Image>>,
+  /// The images as they were added.
+  images: Vec<Option<ImageUpload>>,
   /// Threads to draw a big frame with (the calling thread and the pool's); 1 draws on the
   /// calling thread.
   pub threads: usize,
@@ -87,12 +82,6 @@ pub struct Renderer {
   bins: Vec<Vec<u32>>,
   tiles: Vec<u64>,
   tiles_w: usize,
-}
-
-impl Default for Renderer {
-  fn default() -> Self {
-    Self::new()
-  }
 }
 
 impl Renderer {
@@ -164,8 +153,23 @@ impl Renderer {
         false => self.generation += 1,
       }
 
-      self.images[i] = Some(Image { w: u.w, h: u.h, data: u.data.clone() });
+      self.images[i] = Some(u.clone());
     }
+  }
+
+  /// The atlases' rows in use, as uploads, and the images, as added: what a renderer made later
+  /// needs to draw as this one ([crate::Harness::render_metal]); read, not drained.
+  #[cfg(all(feature = "metal", target_os = "macos"))]
+  pub(crate) fn contents(&self) -> (Vec<Upload>, Images) {
+    let atlases = [(&self.atlas, ATLAS_SIZE, 1), (&self.color_atlas, COLOR_ATLAS_SIZE, 4)];
+    let uploads = atlases.into_iter().zip([false, true]).map(|((atlas, w, bpp), color)| {
+      let rows = atlas.chunks(w * bpp).rposition(|r| r.iter().any(|&b| b != 0));
+      let (epoch, h) = (self.epochs[color as usize], rows.map_or(0, |y| y + 1));
+      Upload { color, epoch, x: 0, y: 0, w, h, data: atlas[..w * h * bpp].to_vec() }
+    });
+    let mut images = Images::default();
+    images.added = self.images.iter().flatten().cloned().collect();
+    (uploads.filter(|u| u.h > 0).collect(), images)
   }
 
   /// The frame size in pixels for a view of `size` points.
@@ -409,7 +413,7 @@ impl Canvas {
 struct Job<'a> {
   scene: &'a Scene,
   items: &'a [Item],
-  images: &'a [Option<Image>],
+  images: &'a [Option<ImageUpload>],
   atlas: Tex<'a>,
   color: Tex<'a>,
   scale: f32,

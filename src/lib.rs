@@ -291,7 +291,16 @@ pub fn run_args<A: App + 'static>(
     std::fs::create_dir_all(dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
   }
 
-  h.shot(path).unwrap_or_else(|e| panic!("{e}"));
+  let img = h.render();
+  // As a window with `NIMBO_RENDERER=metal` draws; the CPU's frame when there is no Metal (why on
+  // stderr).
+  #[cfg(all(feature = "metal", target_os = "macos"))]
+  let img = match std::env::var("NIMBO_RENDERER").as_deref() {
+    Ok("metal") => h.render_metal().unwrap_or(img),
+    _ => img,
+  };
+
+  img.save_png(path).unwrap_or_else(|e| panic!("{e}"));
   println!("{}: wrote {}", cfg.title, path.display());
 }
 

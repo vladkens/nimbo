@@ -196,7 +196,7 @@
 //!   [crate::text::TextSystem] is made often and must stay cheap.
 
 #[cfg(target_os = "macos")]
-mod macos;
+pub(crate) mod macos;
 #[cfg(target_os = "macos")]
 use macos as imp;
 

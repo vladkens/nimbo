@@ -192,3 +192,25 @@ fn clear_marks_are_beside_their_controls() {
     assert_eq!(next(first), Some("button \"Clear\""), "{first} in\n{dump}");
   }
 }
+
+/// The Metal renderer draws both panes as the CPU does, and again after text typed, a select's
+/// menu and a tooltip, whose new glyphs reach it by the sync after each frame.
+#[cfg(all(feature = "metal", target_os = "macos"))]
+#[test]
+fn metal_draws_as_the_cpu() {
+  let mut h = Harness::new(Gallery::default(), Size::new(1040.0, 590.0), 2.0);
+  h.event(Event::Appearance(Appearance::LIGHT));
+  common::metal_parity(&mut h, 0.005);
+  h.click_id(id(SEARCH, 1).key("clear"));
+  h.type_text("Quixotic jabberwocky 0429");
+  h.wait(Duration::from_millis(200));
+  common::metal_parity(&mut h, 0.005);
+  h.click_id(id(SIZE, 0));
+  h.wait(Duration::from_millis(200));
+  common::metal_parity(&mut h, 0.005);
+  h.key(NamedKey::Escape, Modifiers::empty());
+  h.move_to(mid(rect(&h, RESET, 0)).0, mid(rect(&h, RESET, 0)).1);
+  h.wait(Duration::from_millis(400));
+  assert!(h.rect(id(RESET, 0).key("tip")).is_some());
+  common::metal_parity(&mut h, 0.005);
+}

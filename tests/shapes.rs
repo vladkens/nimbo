@@ -148,3 +148,18 @@ fn a_change_through_app_mut_redraws() {
   h.app_mut().light = false;
   check(&h.render(), &DARK);
 }
+
+/// The Metal renderer draws every shape as the CPU does, in both appearances at scale 2 and 1:
+/// within 2% of the pixels, for the GPU's bilinear weights in the up-scaled image and the edges
+/// of the diagonal lines.
+#[cfg(all(feature = "metal", target_os = "macos"))]
+#[test]
+fn metal_draws_as_the_cpu() {
+  let mut h = Harness::new(Shapes::default(), SIZE, 2.0);
+  let (dark, light) = (Appearance::DARK, Appearance::LIGHT);
+  for (scale, look) in [(2.0, dark), (2.0, light), (1.0, light), (1.0, dark)] {
+    h.resize(SIZE, scale);
+    h.event(Event::Appearance(look));
+    common::metal_parity(&mut h, 0.02);
+  }
+}
