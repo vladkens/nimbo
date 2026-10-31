@@ -19,6 +19,7 @@ A small custom-drawn desktop UI toolkit in Rust: its own CPU renderer draws ever
 - Reach a window's state only through `try_borrow*` or the platform's helper over it (macOS `View`, Windows `with_window`, Linux `with`), never `borrow_mut` in a callback: the system calls back in from nested run loops (panels, permission prompts, Finder). When it is busy, defer the work, never drop it.
 - Start every `.rs` file with `// Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo`, then a `//!` doc whose first sentence says what the file does; a PR's description carries the `make size ARGS=--map` lines of the files it adds or changes.
 - Keep a file within ~800 lines of code (not counting tests, docs, comments and blanks; `make size ARGS=--files` counts them) by splitting it into submodules.
+- `src/platform/macos/metal/shaders.metal` mirrors `src/cpu/raster.rs`: change them together.
 - Helper scripts go in `scripts/`: Python run with `uv run`, kebab-case names.
 
 ## UI
@@ -40,5 +41,5 @@ A small custom-drawn desktop UI toolkit in Rust: its own CPU renderer draws ever
 ## Workflow
 
 - For multi-step work keep a checklist in `docs/plans/yyyymmdd-<name>.md` and tick it during the work; when done add `Done: yyyy-mm-dd` and a short `## Result`, and move it to `docs/plans/completed/`.
-- `make check` (it needs nightly rustfmt, `rustup target add x86_64-pc-windows-msvc x86_64-unknown-linux-gnu` and, on a Mac, Xcode's clang for `scripts/macos-min.py`) and `make test` pass before a commit; `make prepare` formats the code, adds the blank lines `make check` asks for and applies clippy's fixes.
+- `make check` (it needs nightly rustfmt, `rustup target add x86_64-pc-windows-msvc x86_64-unknown-linux-gnu aarch64-apple-darwin` and, on a Mac, Xcode's clang for `scripts/macos-min.py`) and `make test` pass before a commit; `make prepare` formats the code, adds the blank lines `make check` asks for and applies clippy's fixes.
 - A commit is one short lowercase line, `<area>: <what changed>`, with no body; docs go in the same commit.

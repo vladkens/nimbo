@@ -29,6 +29,9 @@
 //! macOS 11 is the least it runs on, rustc's default deployment target, so an app sets none;
 //! newer APIs are used where the system has them (the activation, the display link and menu
 //! section headers on 14+, launch at login on 13+).
+//!
+//! The optional `metal` feature adds an opt-in Metal renderer on macOS, chosen at run time
+//! with `NIMBO_RENDERER=metal`; the CPU renderer stays the default.
 
 pub mod activity;
 pub mod app;
