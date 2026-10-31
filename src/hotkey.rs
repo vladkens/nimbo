@@ -71,7 +71,7 @@ pub fn keys_while_held() -> bool {
 /// - [Edge::Escape]: Escape pressed while [Hotkeys::escape] is on; the app in front never sees it.
 /// - [Edge::Aborted]: hotkey `which`, a modifier key alone, was pressed, then another key within a
 ///   moment: the user's own chord (⌥E), so what the press started is dropped. Its release comes as
-///   no edge.
+///   no edge. Also a hotkey changed, removed or paused while held (macOS).
 ///
 /// Exhaustive on purpose: an app's hotkey state machine should fail to build on a new edge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -259,6 +259,11 @@ impl Hotkeys {
 
 impl Book {
   fn set(&mut self, hotkeys: &[Hotkey], keys: &[Hotkey], imp: &mut impl Arm) -> Result<(), String> {
+    // A refusal is the hotkey's it was for: another one in its slot is tried afresh.
+    for i in (0..MAX).filter(|&i| self.hotkeys.get(i) != hotkeys.get(i)) {
+      self.refused[i] = None;
+    }
+
     let (invalid, bad) = check(hotkeys, keys);
     self.keys = keys.iter().zip(&bad).take(MAX).map(|(&k, e)| e.is_none().then_some(k)).collect();
     (self.hotkeys, self.invalid, self.left_out) =
@@ -462,6 +467,13 @@ mod tests {
     f.0.clear();
     assert_eq!(b.set(&hot[..1], &keys, &mut f), Err(b.left_out.clone().unwrap()));
     assert!(f.0.is_empty(), "{:?}", f.0);
+
+    // The refused F2 replaced while paused: its refusal goes with it.
+    let mut b = Book::default();
+    _ = b.set(&hot, &[], &mut f);
+    b.paused = true;
+    b.arm(&mut f);
+    assert_eq!(b.set(&[hk("fn"), hk("f3")], &[], &mut f), Ok(()));
   }
 
   #[test]

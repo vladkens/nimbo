@@ -317,8 +317,7 @@ fn lone(e: &Event, i: usize, own: bool) -> Option<Hit> {
     // Another modifier held: of another kind, or the other side of this one.
     let others = e.flags & (MODIFIERS | FN) & !general_flag(key) | e.flags & DEVICES & !flag;
     return match (pressed, held) {
-      (true, false) if others == 0 => {
-        down.fetch_or(bit, Ordering::Relaxed);
+      (true, false) if others == 0 && hold(e.s, i, e.chords[i]) => {
         e.s.since[i].store(e.at, Ordering::Relaxed);
         Some(Hit::Down { which: i, repeat: false })
       }
@@ -384,6 +383,10 @@ fn chords_of(e: &mut Event) -> bool {
     let mask = MODIFIERS | chords[i] >> 16 & FN;
     let ours = e.flags & mask == chords[i] >> 16 & mask;
     let (on, take) = owe(down.load(Ordering::Relaxed) & bit != 0, e.down, e.rep, ours);
+    if take == Take::Claim && !hold(s, i, chords[i]) {
+      continue;
+    }
+
     if take == Take::Claim {
       // A fresh press: its release is the tap's to hear.
       s.since[i].store(e.at, Ordering::Relaxed);
@@ -409,6 +412,20 @@ fn chords_of(e: &mut Event) -> bool {
   }
 
   swallow
+}
+
+/// Holds slot `i` for a fresh press of `chord`, the slot as [judge] read it: its bit set, unless
+/// the main thread stored another hotkey there meanwhile ([Shared::store_slot] stores 0, then
+/// clears the bit: a bit set after that clear sees the change here), when the press is no
+/// longer the slot's and passes. Whether it is held.
+fn hold(s: &Shared, i: usize, chord: u64) -> bool {
+  s.down.fetch_or(1 << i, Ordering::AcqRel);
+  let held = s.chords[i].load(Ordering::Acquire) == chord;
+  if !held {
+    s.down.fetch_and(!(1 << i), Ordering::AcqRel);
+  }
+
+  held
 }
 
 /// Sets `bit` of `bits` when `on`, else clears it.
@@ -928,5 +945,19 @@ mod tests {
     s.store_keys(&[key_value(Hotkey::parse("z").ok())]);
     assert_eq!(key_at(&s, 450, true, Z, FN, true), SWALLOWED);
     assert_eq!(flags_at(&s, 500, Code::Fn, 0), tell(up(0)));
+  }
+
+  /// A press judged against a slot the main thread replaced meanwhile holds nothing: its release
+  /// would match no slot.
+  #[test]
+  fn a_press_of_a_slot_replaced_meanwhile_holds_nothing() {
+    let s = with(&["f2", "fn"], &[]);
+    let (f2, fn_alone) = (s.chords[0].load(Ordering::Relaxed), s.chords[1].load(Ordering::Relaxed));
+    s.store_slot(0, slot_value(Hotkey::parse("f3").unwrap()).unwrap());
+    s.store_slot(1, 0);
+    assert!(!hold(&s, 0, f2) && !hold(&s, 1, fn_alone));
+    assert_eq!(s.down.load(Ordering::Relaxed), 0);
+    assert!(hold(&s, 0, s.chords[0].load(Ordering::Relaxed)));
+    assert_eq!(s.down.load(Ordering::Relaxed), 0b1);
   }
 }

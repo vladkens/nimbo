@@ -102,7 +102,8 @@ struct Raw {
 }
 
 /// Drops an edge when the other source reported the same kind of edge of the same slot ≤
-/// [DEDUPE] earlier: whichever source is first wins, so neither waits for the other.
+/// [DEDUPE] earlier: whichever source is first wins, so neither waits for the other. Only an
+/// edge told counts: a copy dropped never drops the next real press.
 #[derive(Debug, Default)]
 struct Dedupe {
   last: [[[Option<Instant>; MAX]; 5]; 2],
@@ -112,8 +113,12 @@ impl Dedupe {
   fn accept(&mut self, source: Source, edge: Hit, at: Instant) -> bool {
     let (kind, which) = edge.kind();
     let other = self.last[1 - source as usize][kind][which];
+    if other.is_some_and(|t| at.saturating_duration_since(t) <= DEDUPE) {
+      return false;
+    }
+
     self.last[source as usize][kind][which] = Some(at);
-    !other.is_some_and(|t| at.saturating_duration_since(t) <= DEDUPE)
+    true
   }
 }
 
@@ -167,11 +172,13 @@ impl Shared {
   }
 
   /// Slot `i` holds `value` from now on: 0 first, its held bit dropped, so the tap never sees the
-  /// new hotkey with the old one's press. Main thread only.
-  fn store_slot(&self, i: usize, value: u64) {
+  /// new hotkey with the old one's press (a press of the old one it is judging meanwhile is
+  /// dropped by [tap::hold]). Whether the old one was held. Main thread only.
+  fn store_slot(&self, i: usize, value: u64) -> bool {
     self.chords[i].store(0, Ordering::Release);
-    self.down.fetch_and(!(1 << i), Ordering::AcqRel);
+    let held = self.down.fetch_and(!(1 << i), Ordering::AcqRel) & 1 << i != 0;
     self.chords[i].store(value, Ordering::Release);
+    held
   }
 
   /// The keys from now on; a key that changed owes nothing. Main thread only.
@@ -231,12 +238,18 @@ impl Hotkeys {
 
   /// Slot `which` matches `hotkey` from now on, nothing for `None`; `Err` when it has no key code
   /// here. Carbon refusing the chord (another app has it) is no error while the tap may still see
-  /// it: the slot's fallback error.
+  /// it: the slot's fallback error. The old one held (changed, removed or paused) is dropped,
+  /// [Hit::Abort]: its release would match no slot.
   pub fn set_slot(&mut self, which: usize, hotkey: Option<Hotkey>) -> Result<(), String> {
     let value = hotkey.map(slot_value).transpose();
-    self.shared.store_slot(which, value.clone().ok().flatten().unwrap_or(0));
+    let held = self.shared.store_slot(which, value.clone().ok().flatten().unwrap_or(0));
     // A press Carbon reported of the old one is no repeat of the new one.
-    self.shared.carbon_down.fetch_and(!(1 << which), Ordering::AcqRel);
+    let carbon = self.shared.carbon_down.fetch_and(!(1 << which), Ordering::AcqRel);
+    if held || carbon & 1 << which != 0 {
+      let raw = Raw { source: Source::Tap, edge: Hit::Abort { which }, at: Instant::now() };
+      self.shared.send(&self.events, raw);
+    }
+
     self.carbon.unregister(which);
     self.carbon_errors[which] = None;
     if let (Ok(_), Some(Hotkey::Shortcut(s))) = (&value, hotkey)
@@ -330,8 +343,10 @@ fn keys_error(out: &Status, tap: bool) -> Option<String> {
   let lone =
     |s: &&Slot| s.error.is_none() && matches!(s.hotkey, Hotkey::Modifier(k) if k != Code::Fn);
   let lone = out.slots.iter().filter(lone).map(|s| s.hotkey.label());
+  let no_key = out.keys.iter().find(|&&k| key_value(Some(k)) == NO_KEY);
   match () {
     _ if out.keys.is_empty() => None,
+    _ if let Some(k) = no_key => Some(format!("{k} has no key here")),
     _ if out.secure_input => Some("Secure Input is on: the event tap sees no keys".into()),
     _ if !tap => Some("keys while held need the event tap: Accessibility access".into()),
     _ => lone
@@ -493,6 +508,7 @@ pub(super) fn mod_bits(mods: Modifiers) -> (u64, u32) {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::keys::{Key, Shortcut};
 
   #[test]
   fn the_first_source_wins_and_the_other_is_dropped_within_the_window() {
@@ -517,6 +533,8 @@ mod tests {
     assert!(d.accept(Source::Carbon, Hit::Abort { which: 0 }, ms(1_275)));
     assert!(d.accept(Source::Tap, Hit::Escape, ms(1_280)));
     assert!(!d.accept(Source::Carbon, Hit::Escape, ms(1_281)));
+    // A copy dropped counts for nothing: a real press right after the release is told.
+    assert!(d.accept(Source::Tap, Hit::Escape, ms(1_300)));
     // Nor do slots: another slot's press at once is its own.
     assert!(d.accept(Source::Carbon, Hit::Down { which: 1, repeat: false }, ms(2_000)));
     assert!(d.accept(Source::Tap, down, ms(2_001)));
@@ -569,18 +587,21 @@ mod tests {
     assert_eq!(n(&shared.key_events), 1);
   }
 
-  /// Hotkeys over a fake Carbon: nothing registered with the system, no tap.
-  fn fake() -> Hotkeys {
+  /// Hotkeys over a fake Carbon: nothing registered with the system, no tap; and what they send
+  /// the hotkey thread.
+  fn fake() -> (Hotkeys, Receiver<Raw>) {
     let shared = Arc::new(Shared::default());
-    let (events, _) = sync_channel(QUEUE);
+    let (events, rx) = sync_channel(QUEUE);
     let carbon = carbon::tests::fake(shared.clone(), events.clone());
-    Hotkeys { shared, events, carbon, carbon_errors: Default::default(), escape_error: None }
+    let h =
+      Hotkeys { shared, events, carbon, carbon_errors: Default::default(), escape_error: None };
+    (h, rx)
   }
 
   #[test]
   fn each_chord_is_registered_once_and_never_leaked() {
     let hk = |t: &str| Hotkey::parse(t).ok();
-    let mut h = fake();
+    let (mut h, rx) = fake();
     for (i, t) in ["f1", "fn", "f3", "option+space"].into_iter().enumerate() {
       assert_eq!(h.set_slot(i, hk(t)), Ok(()), "{t}");
     }
@@ -600,7 +621,11 @@ mod tests {
     h.shared.carbon_down.store(0b1, Ordering::Relaxed);
     h.set_slot(0, hk("f2")).unwrap();
     assert_eq!(h.shared.carbon_down.load(Ordering::Relaxed), 0);
+    // Held by the tap as it is removed: dropped, as its release would match no slot.
+    h.shared.down.store(0b1000, Ordering::Relaxed);
     h.set_slot(3, None).unwrap();
+    let aborts: Vec<_> = rx.try_iter().map(|r| r.edge).collect();
+    assert_eq!(aborts, [Hit::Abort { which: 0 }, Hit::Abort { which: 3 }]);
     h.escape(true);
     assert_eq!(carbon::tests::live(), [1, 0x100]);
     h.escape(false);
@@ -755,5 +780,8 @@ mod tests {
     assert!(warning.contains("Right ⌥") && !warning.contains("fn"), "{warning}");
     out.secure_input = true;
     assert!(keys_error(&out, true).is_some_and(|e| e.contains("Secure Input")));
+    // A key with no place on a Mac's keyboard: never taken, said first.
+    out.keys.push(Hotkey::Shortcut(Shortcut { key: Key::Char('é'), mods: Modifiers::empty() }));
+    assert!(keys_error(&out, true).is_some_and(|e| e.contains("é has no key here")));
   }
 }
