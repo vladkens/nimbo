@@ -130,30 +130,30 @@ Measured on an Apple M2, rustc 1.99, 2026-10-25, without a compiler cache:
 - **1.1 MB** its release binary (0.87 MB stripped)
 - **13 / 4 / 2** crates in the build on macOS / Windows / Linux, nimbo excluded
 
-## 🗺️ Roadmap
-
-- **0.1.0**: what nimbo has today
-- **Next**: translations (i18n with plural forms) and right-to-left layout (Arabic, Hebrew); more widgets, after SwiftUI's set (steppers, date pickers, disclosure groups)
-- **Later**: a Metal GPU renderer on macOS
-
-## 🤝 Contributing
-
-Pull requests are welcome, including ones made with agents: point yours at [agents.md](agents.md).
-
 ## 🙏 Credits
 
 - [dwrite-hlsl](https://github.com/lhecker/dwrite-hlsl) (MIT): DirectWrite's gamma ratios, used to blend text on Windows.
-
-## 🤖 How it's made
-
-nimbo is written by AI agents (Claude Code, Codex) following [agents.md](agents.md); I choose what to build and review every pull request. I check every visual change in a shot. I've written software by hand for years ([macmon](https://github.com/vladkens/macmon), [twscrape](https://github.com/vladkens/twscrape), [ecloop](https://github.com/vladkens/ecloop)); agents are how I build now. Releases are rare; the CLI and data formats stay compatible, the API may still change before 1.0, and every break is listed in the changelog.
-
-## 📝 License
-
-Distributed under the [MIT License](LICENSE).
 
 ## 🔍 See also
 
 - [zed-industries/zed](https://github.com/zed-industries/zed) – GPUI, the GPU-drawn toolkit of the Zed editor.
 - [emilk/egui](https://github.com/emilk/egui) – An immediate-mode GUI in Rust, for the web and native.
 - [iced-rs/iced](https://github.com/iced-rs/iced) – A cross-platform GUI library in Rust, inspired by Elm.
+
+## 🗺️ Roadmap
+
+- **0.1.0**: what nimbo has today
+- **Next**: translations (i18n with plural forms) and right-to-left layout (Arabic, Hebrew); more widgets, after SwiftUI's set (steppers, date pickers, disclosure groups)
+- **Later**: a Metal GPU renderer on macOS
+
+## 🤖 How it's made
+
+nimbo is written by AI agents (Claude Code, Codex) following [agents.md](agents.md); I choose what to build and review every pull request. I check every visual change in a shot. I've written software by hand for years ([macmon](https://github.com/vladkens/macmon), [twscrape](https://github.com/vladkens/twscrape), [ecloop](https://github.com/vladkens/ecloop)); agents are how I build now. Releases are rare; the CLI and data formats stay compatible, the API may still change before 1.0, and every break is listed in the changelog.
+
+## 🤝 Contributing
+
+Pull requests are welcome, including ones made with agents: point yours at [agents.md](agents.md).
+
+## 📝 License
+
+Distributed under the [MIT License](LICENSE).
