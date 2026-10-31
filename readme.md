@@ -100,7 +100,7 @@ It suits settings windows, tray and HUD apps and tools with long lists. A change
 
 ### How it draws
 
-nimbo renders on the CPU, with no GPU path yet: the frame is cut into 64×64 px tiles, each hashed by what is drawn over it, and only the tiles that changed are drawn again (on the performance cores when many did); Windows and Linux copy only those to the window. [docs/rendering.md](docs/rendering.md) follows a frame step by step.
+nimbo renders on the CPU, with no GPU path yet: the frame is cut into 64×64 px tiles, each hashed by what is drawn over it, and only the tiles that changed are drawn again (on the performance cores when many did); Windows and Linux copy only those to the window. [docs/rendering.md](docs/rendering.md) follows a frame step by step, and [docs/benchmarks.md](docs/benchmarks.md) measures it against Slint, iced, egui and GPUI.
 
 ### Examples
 
