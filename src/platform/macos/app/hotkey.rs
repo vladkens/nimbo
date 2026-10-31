@@ -144,6 +144,8 @@ struct Shared {
   keys: [AtomicU64; MAX],
   keys_count: AtomicU8,
   keys_owed: AtomicU8,
+  /// The place each key owed was taken at.
+  owed_at: [AtomicU64; MAX],
   /// A bit per slot: the tap owes a chord's release, or a modifier alone is held; and those whose
   /// release may have been missed (the tap was disabled, Secure Input on), checked before keys.
   down: AtomicU8,
@@ -190,13 +192,11 @@ impl Shared {
     held
   }
 
-  /// The keys from now on; a key that changed owes nothing. Main thread only.
+  /// The keys from now on; a key taken still owes its repeats and release, by the place it was
+  /// taken at ([Shared::owed_at]), also changed or gone. Main thread only.
   fn store_keys(&self, keys: &[u64]) {
     for (j, key) in self.keys.iter().enumerate() {
-      let new = keys.get(j).copied().unwrap_or(NO_KEY);
-      if key.swap(new, Ordering::AcqRel) != new {
-        self.keys_owed.fetch_and(!(1 << j), Ordering::AcqRel);
-      }
+      key.store(keys.get(j).copied().unwrap_or(NO_KEY), Ordering::Release);
     }
 
     self.keys_count.store(keys.len().min(MAX) as u8, Ordering::Release);
@@ -253,7 +253,7 @@ impl Hotkeys {
     let value = hotkey.map(slot_value).transpose();
     let held = self.shared.store_slot(which, value.clone().ok().flatten().unwrap_or(0));
     // A press Carbon reported of the old one is no repeat of the new one.
-    let carbon = self.shared.carbon_down.fetch_and(!(1 << which), Ordering::AcqRel);
+    let carbon = self.shared.carbon_down.fetch_and(!(1 << which), Ordering::SeqCst);
     if held || carbon & 1 << which != 0 {
       let raw =
         Raw { source: Source::Tap, edge: Hit::Abort { which }, at: Instant::now(), chord: 0 };
@@ -424,14 +424,6 @@ fn route(rx: &Receiver<Raw>, on: &OnEdge, shared: &Shared) {
       };
 
       counter.fetch_add(1, Ordering::Relaxed);
-      // A press of a hotkey its slot no longer holds: its release would match nothing.
-      if let Hit::Down { which, .. } = raw.edge
-        && raw.chord != 0
-        && shared.chords[which].load(Ordering::SeqCst) != raw.chord
-      {
-        continue;
-      }
-
       if raw.source == Source::Carbon {
         match raw.edge {
           // Carbon repeats the press while the key is held: an autorepeat.
@@ -440,22 +432,36 @@ fn route(rx: &Receiver<Raw>, on: &OnEdge, shared: &Shared) {
             raw.edge = Hit::Down { which, repeat: true };
           }
           Hit::Down { which, .. } => {
-            carbon_down.fetch_or(1 << which, Ordering::AcqRel);
+            carbon_down.fetch_or(1 << which, Ordering::SeqCst);
             pressed[which] = ns(raw.at);
           }
-          // The tap's press of it is over too, unless it saw a newer one (a release it missed
-          // while it was disabled would keep the key owed). Carbon's release may come before the
-          // tap's: the tap then lets the key's release through, and Carbon's is the edge.
+          // The tap's press of it is over too, unless it saw a newer one, begun after this
+          // release (a release it missed while it was disabled would keep the key owed). Carbon's
+          // release may come before the tap's: the tap then lets the key's release through, and
+          // Carbon's is the edge.
           Hit::Up { which } => {
             carbon_down.fetch_and(!(1 << which), Ordering::AcqRel);
-            if shared.since[which].load(Ordering::Relaxed)
-              <= pressed[which] + DEDUPE.as_nanos() as u64
-            {
+            let since = shared.since[which].load(Ordering::Relaxed);
+            if since <= pressed[which] + DEDUPE.as_nanos() as u64 && since < ns(raw.at) {
               shared.down.fetch_and(!(1 << which), Ordering::AcqRel);
             }
           }
           _ => {}
         }
+      }
+
+      // A press of a hotkey its slot no longer holds (set_slot meanwhile; Carbon's held bit set
+      // first, so set_slot either clears it and aborts, or the change is seen here): its release
+      // would match nothing.
+      if let Hit::Down { which, .. } = raw.edge
+        && raw.chord != 0
+        && shared.chords[which].load(Ordering::SeqCst) != raw.chord
+      {
+        if raw.source == Source::Carbon {
+          carbon_down.fetch_and(!(1 << which), Ordering::SeqCst);
+        }
+
+        continue;
       }
 
       let untold = |w: usize| told & 1 << w == 0;
@@ -716,14 +722,16 @@ mod tests {
     let now = shared.chords[0].load(Ordering::Relaxed);
     assert_ne!(old, now);
     let down = Hit::Down { which: 0, repeat: false };
-    for chord in [old, now] {
-      tx.send(Raw { source: Source::Tap, edge: down, at: Instant::now(), chord }).unwrap();
+    // Carbon's press of the old registration, queued before the change: not held either.
+    for (source, chord) in [(Source::Carbon, old), (Source::Tap, old), (Source::Tap, now)] {
+      tx.send(Raw { source, edge: down, at: Instant::now(), chord }).unwrap();
     }
 
     drop(tx);
     let (got_tx, got) = std::sync::mpsc::channel();
     route(&rx, &(Box::new(move |e| got_tx.send(e).unwrap()) as OnEdge), &shared);
     assert_eq!(got.try_iter().count(), 1);
+    assert_eq!(shared.carbon_down.load(Ordering::Relaxed), 0);
   }
 
   /// Carbon's release clears the tap's held bit of a press it missed the release of, not one of
@@ -735,14 +743,18 @@ mod tests {
     let shared = Shared::default();
     let (tx, rx) = sync_channel(QUEUE);
     // Slot 0's press seen by both, its release by Carbon only; slot 1's press by Carbon at 0,
-    // and a newer one by the tap at 1 s, before Carbon's release of the first came through.
-    shared.down.store(0b11, Ordering::Relaxed);
+    // and a newer one by the tap at 1 s, before Carbon's release of the first came through; slot
+    // 2's by Carbon at 0, released at 30 ms, and a newer one by the tap at 45 ms, in the window.
+    shared.down.store(0b111, Ordering::Relaxed);
     shared.since[0].store(ns(ms(2)), Ordering::Relaxed);
     shared.since[1].store(ns(ms(1_000)), Ordering::Relaxed);
+    shared.since[2].store(ns(ms(45)), Ordering::Relaxed);
     let raw = |edge, at| Raw { source: Source::Carbon, edge, at, chord: 0 };
     for r in [
       raw(Hit::Down { which: 0, repeat: false }, ms(0)),
       raw(Hit::Down { which: 1, repeat: false }, ms(0)),
+      raw(Hit::Down { which: 2, repeat: false }, ms(0)),
+      raw(Hit::Up { which: 2 }, ms(30)),
       raw(Hit::Up { which: 0 }, ms(400)),
       raw(Hit::Up { which: 1 }, ms(900)),
     ] {
@@ -751,7 +763,7 @@ mod tests {
 
     drop(tx);
     route(&rx, &(Box::new(|_| {}) as OnEdge), &shared);
-    assert_eq!(shared.down.load(Ordering::Relaxed), 0b10);
+    assert_eq!(shared.down.load(Ordering::Relaxed), 0b110);
   }
 
   #[test]
@@ -797,7 +809,7 @@ mod tests {
     s.store_keys(&[z, x]);
     assert_eq!(s.keys_owed.load(Ordering::Relaxed), 0b11, "the same keys owe the same");
     s.store_keys(&[z]);
-    assert_eq!(s.keys_owed.load(Ordering::Relaxed), 0b01, "X gone, Z still owed");
+    assert_eq!(s.keys_owed.load(Ordering::Relaxed), 0b11, "X gone, its release still owed");
     assert_eq!(s.keys_count.load(Ordering::Relaxed), 1);
   }
 

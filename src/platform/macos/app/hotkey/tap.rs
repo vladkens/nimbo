@@ -367,14 +367,19 @@ fn keys(e: &mut Event) -> bool {
   let theirs = (0..MAX).filter(|i| held & 1 << i != 0).fold(0, |m, i| m | mods_of(e.chords[i]));
   let event = e.flags & MODIFIERS;
   let (mut found, mut swallow) = (held == 0, false);
-  for j in (0..n).filter(|&j| s.keys[j].load(Ordering::Acquire) & 0xffff == code) {
+  // A key matches by its place as set now, or owed by the place it was taken at (changed since).
+  let owed = s.keys_owed.load(Ordering::Relaxed);
+  let now = |j: usize| j < n && s.keys[j].load(Ordering::Acquire) & 0xffff == code;
+  let was = |j: usize| owed & 1 << j != 0 && s.owed_at[j].load(Ordering::Relaxed) == code;
+  for j in (0..MAX).filter(|&j| now(j) || was(j)) {
     let mods = s.keys[j].load(Ordering::Acquire) >> 16;
-    let ours = !found && (event == mods || event & !theirs == mods);
-    let (bit, owed) = (1u8 << j, &s.keys_owed);
-    let (on, take) = owe(owed.load(Ordering::Relaxed) & bit != 0, e.down, e.rep, ours);
-    mark(owed, bit, on);
+    let ours = !found && now(j) && (event == mods || event & !theirs == mods);
+    let bit = 1u8 << j;
+    let (on, take) = owe(owed & bit != 0, e.down, e.rep, ours);
+    mark(&s.keys_owed, bit, on);
     (found, swallow) = (found || ours, swallow || take != Take::Pass);
     if take == Take::Claim {
+      s.owed_at[j].store(code, Ordering::Relaxed);
       e.push(Hit::Key(j));
       (0..MAX)
         .filter(|&i| alone(e.chords[i]))
@@ -961,6 +966,20 @@ mod tests {
     s.store_keys(&[key_value(Hotkey::parse("z").ok())]);
     assert_eq!(key_at(&s, 450, true, Z, FN, true), SWALLOWED);
     assert_eq!(flags_at(&s, 500, Code::Fn, 0), tell(up(0)));
+  }
+
+  /// A key taken, then changed or gone (`set`, a pause) before its release: its repeats and
+  /// release are still swallowed, by the place it was taken at; the next fresh press is the app's.
+  #[test]
+  fn a_key_changed_while_owed_still_owes_its_release() {
+    let s = with(&["fn"], &["z"]);
+    flags(&s, Code::Fn, FN);
+    assert_eq!(key(&s, true, Z, FN, false), swallow(Hit::Key(0)));
+    s.store_keys(&[key_value(Hotkey::parse("x").ok())]);
+    assert_eq!(key(&s, true, Z, FN, true), SWALLOWED);
+    s.store_keys(&[]);
+    assert_eq!(key(&s, false, Z, FN, false), SWALLOWED);
+    assert_eq!(key(&s, true, Z, FN, false), Verdict::Pass);
   }
 
   /// A press judged against a slot the main thread replaced meanwhile holds nothing: its release

@@ -218,7 +218,13 @@ extern "C" fn handler_fn(
   // dedupe compares the two sources' times.
   let ago = Duration::try_from_secs_f64(now - happened).unwrap_or_default().min(DEDUPE * 20);
   let at = Instant::now().checked_sub(ago).unwrap_or_else(Instant::now);
-  state.shared.send(&state.events, Raw { source: Source::Carbon, edge, at, chord: 0 });
+  // A press carries its slot's hotkey: the hotkey thread drops it if the slot changes before it.
+  let chord = match edge {
+    Hit::Down { which, .. } => state.shared.chords[which].load(Ordering::SeqCst),
+    _ => 0,
+  };
+
+  state.shared.send(&state.events, Raw { source: Source::Carbon, edge, at, chord });
   0
 }
 
