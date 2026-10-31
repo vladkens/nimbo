@@ -521,6 +521,18 @@ mod tests {
     assert!(img.pixels.data == fresh.pixels.data, "glyphs missing from the snapshot");
   }
 
+  #[cfg(all(feature = "metal", target_os = "macos"))]
+  #[test]
+  fn metal_only_with_the_first_metal_frame() {
+    use crate::platform::macos::metal::Gpu;
+
+    let mut h = Harness::new(Lines(vec![("Hello".to_string(), 13.0)]), Size::new(200.0, 50.0), 2.0);
+    h.render();
+    assert!(!Gpu::made(), "a CPU frame made a Metal device");
+    assert!(h.render_metal().is_some());
+    assert!(Gpu::made());
+  }
+
   #[test]
   fn us_keyboard() {
     let ev = us_key(Key::Char('1'), Modifiers::SHIFT);

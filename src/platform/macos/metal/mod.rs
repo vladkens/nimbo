@@ -52,6 +52,13 @@ impl Gpu {
     GPU.with(|g| g.get_or_init(|| objc2::rc::autoreleasepool(|_| Self::new()).map(Rc::new)).clone())
   }
 
+  /// Whether the calling thread made its [Gpu]: what proves Metal stays untouched until a Metal
+  /// window or snapshot asks for it.
+  #[cfg(test)]
+  pub fn made() -> bool {
+    GPU.with(|g| g.get().is_some())
+  }
+
   /// The device's name, for the line naming the renderer (`nimbo: renderer metal (<name>)`).
   pub fn name(&self) -> String {
     self.device.name().to_string()

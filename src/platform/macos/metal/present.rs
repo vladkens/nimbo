@@ -159,6 +159,7 @@ mod tests {
   use objc2_quartz_core::CALayer;
 
   use super::*;
+  use crate::platform::macos::metal::Gpu;
   use crate::platform::macos::surface::tests::{pixels, present, scene, shown};
   use crate::platform::macos::surface::{IOSurfaceDecrementUseCount, IOSurfaceIncrementUseCount};
   use crate::scene::{Frame, ImageId, Rect};
@@ -275,6 +276,24 @@ mod tests {
     f.text(10.0, 75.0, "Metal 1234", Font::ui(13.0), [1.0; 4]);
     f.image(id, Rect::new(110.0, 10.0, 30.0, 30.0), 1.0);
     scene
+  }
+
+  #[test]
+  fn metal_is_made_only_for_a_metal_window() {
+    // The CPU path, with the feature built in: no device on this thread.
+    let mut p = Presenter::new(CALayer::new(), false, false, false);
+    assert!(present(&mut p, &scene(10.0), SIZE, 2.0));
+    assert!(!Gpu::made(), "the CPU path made a Metal device");
+
+    // A Metal window makes it; its CPU renderer then holds no atlas or image pixels.
+    let mut p = metal();
+    assert!(Gpu::made());
+    let (mut text, mut images) = (TextSystem::new(2.0), Images::default());
+    let id = images.add(1, 1, &[255; 4]);
+    let s = build(10.0, &mut text, &mut images, id);
+    assert!(p.present(&s, &mut text, &mut images, SIZE, 2.0));
+    let (uploads, kept) = p.renderer.contents();
+    assert!(uploads.is_empty() && kept.added.is_empty(), "the CPU renderer holds pixels");
   }
 
   #[test]

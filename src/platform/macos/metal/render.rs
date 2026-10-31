@@ -425,7 +425,8 @@ mod tests {
 
   use super::*;
   use crate::cpu::raster::{pack, premul};
-  use crate::scene::{ImageId, Point};
+  use crate::scene::{Frame, ImageId, Point};
+  use crate::text::Font;
 
   fn renderer() -> Renderer {
     Renderer::new().unwrap_or_else(|e| panic!("Metal: {e}"))
@@ -604,6 +605,37 @@ mod tests {
     s.glyph(Sprite { rect: Rect::new(0.0, 0.0, 2.0, 2.0), uv, color: [1.0; 4] });
     let px = packed(&r.snapshot(&s, Size::new(4.0, 4.0), 1.0).unwrap());
     assert_eq!(px[0], 0xff00_0000, "the new rows are zeroed");
+  }
+
+  #[test]
+  fn atlases_start_small_and_the_colour_one_with_the_first_emoji() {
+    let mut r = renderer();
+    let (mut text, mut images) = (TextSystem::new(2.0), Images::default());
+    let sizes =
+      |r: &Renderer| r.atlases.each_ref().map(|t| t.as_ref().map(|t| (t.width(), t.height())));
+    assert_eq!(sizes(&r), [None, None], "atlases before the first glyph");
+    let mut line = |r: &mut Renderer, s: &str| {
+      let mut scene = Scene::default();
+      let mut f = Frame {
+        size: Size::new(400.0, 40.0),
+        scale: 2.0,
+        mouse: None,
+        now: Duration::ZERO,
+        scene: &mut scene,
+        text: &mut text,
+        images: &mut images,
+        animate: false,
+      };
+      f.text(10.0, 30.0, s, Font::ui(13.0), [1.0; 4]);
+      r.sync(&mut text, &mut images).unwrap();
+    };
+
+    // Text: the coverage atlas at its first rows, no colour atlas.
+    line(&mut r, "The quick brown fox jumps over the lazy dog 0123456789");
+    assert_eq!(sizes(&r), [Some((ATLAS_SIZE, ATLAS_ROWS[0])), None]);
+    // The first emoji makes the colour atlas, at its first rows too.
+    line(&mut r, "Done \u{1F600}");
+    assert_eq!(sizes(&r)[1], Some((COLOR_ATLAS_SIZE, ATLAS_ROWS[1])));
   }
 
   /// A 26x37 sprite, opaque inside a soft-edged ellipse, its colour across it.
