@@ -369,18 +369,26 @@ fn route(rx: &Receiver<Raw>, on: &OnEdge, shared: &Shared) {
   // source (the tap, Carbon, a settle) tells it first; and when to look next ([look]).
   let (mut told, mut next_look) = (0u8, Instant::now() + LOOK);
   loop {
-    let next = match shared.down.load(Ordering::Relaxed) {
-      0 => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
-      _ => rx.recv_timeout(next_look.saturating_duration_since(Instant::now())),
+    // The look is due also while events keep coming: it never waits behind them.
+    let held = shared.down.load(Ordering::Relaxed) != 0;
+    let raws = if held && Instant::now() >= next_look {
+      next_look = Instant::now() + LOOK;
+      look(shared, secure_input(), &tap::key_down)
+    } else {
+      let next = match held {
+        false => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
+        true => rx.recv_timeout(next_look.saturating_duration_since(Instant::now())),
+      };
+
+      match next {
+        Ok(raw) => std::array::from_fn(|i| (i == 0).then_some(raw)),
+        Err(RecvTimeoutError::Timeout) => continue,
+        Err(RecvTimeoutError::Disconnected) => return,
+      }
     };
 
-    let raws = match next {
-      Ok(raw) => std::array::from_fn(|i| (i == 0).then_some(raw)),
-      Err(RecvTimeoutError::Timeout) => look(shared, secure_input(), &tap::key_down),
-      Err(RecvTimeoutError::Disconnected) => return,
-    };
-
-    if shared.down.load(Ordering::Relaxed) == 0 || Instant::now() >= next_look {
+    // Idle until this event: the first look is a full wait after the press.
+    if !held {
       next_look = Instant::now() + LOOK;
     }
 
