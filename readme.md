@@ -38,9 +38,7 @@ nimbo grew out of [wavo-app](https://github.com/vladkens/wavo-app), the dictatio
 - **Native controls on each system**: the lightest on memory, but the controls differ everywhere, the design came out different on each system, and every feature was written three times.
 - **The Sublime Text and Sublime Merge way**: a small UI I draw myself over the system's window, input and text. The middle ground, and this library came out of it.
 
-## 🤖 How it's made
-
-nimbo is written by AI agents (Claude Code, Codex) following [agents.md](agents.md); I choose what to build, review every pull request and check every visual change in a shot. I've written software by hand for years ([macmon](https://github.com/vladkens/macmon), [twscrape](https://github.com/vladkens/twscrape), [ecloop](https://github.com/vladkens/ecloop)); agents are how I build now.
+I keep nimbo small on purpose: a core of windows, input, text, layout, a renderer and the widgets a desktop app needs, and nothing bundled that most apps don't use (no Markdown or HTML renderer, charts, code editor, dock system or scripting runtime). That limits the library, not the apps: anything bigger is built on the same core, in the app or as an add-on.
 
 ## 📥 Installation
 
@@ -53,7 +51,7 @@ cargo add nimbo --git https://github.com/vladkens/nimbo
 <details>
 <summary>Requirements per OS</summary>
 
-- **macOS** 14 or later: an app sets `MACOSX_DEPLOYMENT_TARGET=14.0`, as `.cargo/config.toml` here does.
+- **macOS** 11 or later: rustc's default deployment target, so an app sets nothing.
 - **Windows**: `#![cfg_attr(windows, windows_subsystem = "windows")]` in `main.rs`, so no console opens with the window.
 - **Linux**: GTK 3 at run time (every desktop has it), on Wayland or X11. Overlays on Wayland need `libgtk-layer-shell`, the tray icon a panel with StatusNotifierItems, file panels the desktop's portals (GNOME, KDE), and on Wayland hotkeys and a paste into another app the portals too (X11 grabs the hotkey and types with XTest).
 
@@ -95,10 +93,14 @@ fn main() {
 The API is immediate-mode, like egui: `view` builds the whole tree from the app's state, and a widget answers right where it's built. There are no signals, no `Rc<RefCell>` and no message enums: the state is a plain struct, a switch gets `&mut self.field`. What keeps the cost down:
 
 - **`view` runs only on frames that redraw**: after input, during an animation, when a timer is due. An idle window runs and draws nothing.
-- **What lives between frames**: the last laid-out tree (for hit testing), each widget's own state by its id (scroll, focus, caret, animations), shaped text lines.
+- **What lives between frames**: the last laid-out tree (for hit testing), each widget's own state by its id (scroll, focus, caret, animations), shaped text and its wrapped lines.
 - **Long content is built in view only**: a form of 500,000 rows takes about 0.4 ms of view and layout per frame on an M2.
 
 It suits settings windows, tray and HUD apps and tools with long lists. A change runs the whole `view` again, where a reactive toolkit (SwiftUI, Xilem) would rebuild one branch. So heavy work belongs in the app's state or on a thread, and `view` only reads its result.
+
+### How it draws
+
+nimbo renders on the CPU, with no GPU path yet: the frame is cut into 64×64 px tiles, each hashed by what is drawn over it, and only the tiles that changed are drawn again (on the performance cores when many did); Windows and Linux copy only those to the window. [docs/rendering.md](docs/rendering.md) follows a frame step by step, and [docs/benchmarks.md](docs/benchmarks.md) measures it against Slint, iced, egui and GPUI.
 
 ### Examples
 
@@ -128,20 +130,30 @@ Measured on an Apple M2, rustc 1.99, 2026-10-25, without a compiler cache:
 - **1.1 MB** its release binary (0.87 MB stripped)
 - **13 / 4 / 2** crates in the build on macOS / Windows / Linux, nimbo excluded
 
-## 🤝 Contributing
-
-Pull requests are welcome, and so are your agents: point them at [agents.md](agents.md). `make check` and `make test` pass before a commit; `make prepare` formats the code.
-
 ## 🙏 Credits
 
 - [dwrite-hlsl](https://github.com/lhecker/dwrite-hlsl) (MIT): DirectWrite's gamma ratios, used to blend text on Windows.
-
-## 📝 License
-
-Distributed under the [MIT License](LICENSE).
 
 ## 🔍 See also
 
 - [zed-industries/zed](https://github.com/zed-industries/zed) – GPUI, the GPU-drawn toolkit of the Zed editor.
 - [emilk/egui](https://github.com/emilk/egui) – An immediate-mode GUI in Rust, for the web and native.
 - [iced-rs/iced](https://github.com/iced-rs/iced) – A cross-platform GUI library in Rust, inspired by Elm.
+
+## 🗺️ Roadmap
+
+- **0.1.0**: what nimbo has today
+- **Next**: translations (i18n with plural forms) and right-to-left layout (Arabic, Hebrew); more widgets, after SwiftUI's set (steppers, date pickers, disclosure groups)
+- **Later**: a Metal GPU renderer on macOS
+
+## 🤖 How it's made
+
+nimbo is built with AI agents following [agents.md](agents.md): I choose what to build, review the changes and test them on real machines. Before agents, I wrote software by hand for years ([macmon](https://github.com/vladkens/macmon), [twscrape](https://github.com/vladkens/twscrape), [ecloop](https://github.com/vladkens/ecloop)). Releases are rare on purpose: I'd rather test and polish a set of changes than ship each one as it lands, and I try not to break your config or data.
+
+## 🤝 Contributing
+
+Pull requests are welcome, including ones made with agents: point yours at [agents.md](agents.md).
+
+## 📝 License
+
+Distributed under the [MIT License](LICENSE).
