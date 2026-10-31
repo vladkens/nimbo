@@ -217,8 +217,8 @@ extern "C" fn handler_fn(
     unsafe { (GetEventKind(event), GetEventTime(event), GetCurrentEventTime()) };
   let escape = &state.escape_down;
   let edge = match (id.id, kind) {
-    (CHORD_ID, K_EVENT_HOT_KEY_PRESSED) => Hit::Down { repeat: false },
-    (CHORD_ID, K_EVENT_HOT_KEY_RELEASED) => Hit::Up,
+    (CHORD_ID, K_EVENT_HOT_KEY_PRESSED) => Hit::Down { which: 0, repeat: false },
+    (CHORD_ID, K_EVENT_HOT_KEY_RELEASED) => Hit::Up { which: 0 },
     // Carbon repeats the press while Escape is held: told once.
     (ESCAPE_ID, K_EVENT_HOT_KEY_PRESSED) if !escape.swap(true, Ordering::Relaxed) => Hit::Escape,
     (ESCAPE_ID, K_EVENT_HOT_KEY_RELEASED) => {
