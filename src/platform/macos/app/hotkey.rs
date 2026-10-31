@@ -32,7 +32,7 @@ use objc2_core_graphics::{
 };
 
 use super::super::keyboard::{code as key_at, device_flag, kvk};
-use crate::hotkey::{Edge, Listener, OnEdge, Status};
+use crate::hotkey::{Edge, Listener, OnEdge, Status, Take, owe};
 use crate::keys::{Hotkey, is_modifier};
 
 mod carbon;
@@ -174,6 +174,10 @@ pub fn start_asks() -> bool {
   false
 }
 
+pub fn keys_while_held() -> bool {
+  false
+}
+
 /// The hotkey sources. Lives on the main thread (Carbon is registered there).
 pub struct Hotkeys {
   shared: Arc<Shared>,
@@ -203,7 +207,11 @@ impl Hotkeys {
   /// Matches `hotkey` from now on, none for `None`; `Err` when it has no key code here. Carbon
   /// refusing the chord (another app has it) is no error while the tap may still see it: the
   /// status's fallback error.
-  pub fn set(&mut self, hotkey: Option<Hotkey>) -> Result<(), String> {
+  pub fn set_slot(&mut self, which: usize, hotkey: Option<Hotkey>) -> Result<(), String> {
+    if which > 0 {
+      return hotkey.map_or(Ok(()), |_| Err("one hotkey here for now".into()));
+    }
+
     self.shared.chord.store(0, Ordering::Release);
     self.shared.chord_down.store(false, Ordering::Release);
     self.carbon.unregister();
@@ -227,6 +235,8 @@ impl Hotkeys {
 
   /// Starts the event tap thread, unless the tap runs or is starting; again after it failed (it
   /// needs Accessibility access). Returns at once: the tap's state comes in [status](Self::status).
+  pub fn set_keys(&mut self, _: &[Option<Hotkey>]) {}
+
   pub fn start(&mut self) -> Result<(), String> {
     let tap = &self.shared.tap;
     if matches!(tap.load(Ordering::Acquire), TAP_ACTIVE | TAP_STARTING) {
@@ -263,8 +273,11 @@ impl Hotkeys {
       _ => Listener::Off,
     };
     out.listener_error = s.tap_error.lock().unwrap().clone();
-    out.fallback = self.carbon.registered();
-    out.fallback_error = self.carbon_error.clone();
+    if let Some(slot) = out.slots.first_mut() {
+      slot.fallback = self.carbon.registered();
+      slot.fallback_error = self.carbon_error.clone();
+    }
+
     out.secure_input = super::permissions::secure_input();
     out.counts.listener = n(&s.tap_events);
     out.counts.fallback = n(&s.carbon_events);
@@ -283,7 +296,7 @@ impl Hotkeys {
 
 impl Drop for Hotkeys {
   fn drop(&mut self) {
-    _ = self.set(None);
+    _ = self.set_slot(0, None);
     self.escape(false);
   }
 }
@@ -323,10 +336,10 @@ fn route(rx: &Receiver<Raw>, on: &OnEdge, shared: &Shared) {
     }
 
     on(match raw.edge {
-      Hit::Down { repeat } => Edge::Down { at: raw.at, repeat },
-      Hit::Up => Edge::Up { at: raw.at },
+      Hit::Down { repeat } => Edge::Down { which: 0, at: raw.at, repeat },
+      Hit::Up => Edge::Up { which: 0, at: raw.at },
       Hit::Escape => Edge::Escape,
-      Hit::Abort => Edge::Aborted,
+      Hit::Abort => Edge::Aborted { which: 0 },
     });
   }
 }
@@ -515,10 +528,8 @@ fn judge(
   owned(&shared.escape_down, kind, &repeat, ours, edges).unwrap_or(Verdict::Pass)
 }
 
-/// A key whose fresh press `ours` claims is ours until its release, whatever the modifiers are by
-/// then: the press, its autorepeats and the release are swallowed, telling `edges`. `held`: a
-/// press of it is ours now. An autorepeat of a press the app saw stays the app's; any fresh press
-/// settles who owns the key, so a lost release is not owed for long. `None`: the app's.
+/// A key whose fresh press `ours` claims is ours until its release ([owe]), telling `edges`.
+/// `None`: the app's.
 fn owned(
   held: &AtomicBool,
   kind: KeyKind,
@@ -526,17 +537,15 @@ fn owned(
   ours: impl FnOnce() -> bool,
   [press, autorepeat, release]: [Option<Hit>; 3],
 ) -> Option<Verdict> {
-  if kind == KeyKind::Up {
-    return held.swap(false, Ordering::Relaxed).then_some(Verdict::Swallow(release));
+  let down = kind != KeyKind::Up;
+  let repeat = down && repeat();
+  let (owed, take) = owe(held.load(Ordering::Relaxed), down, repeat, down && !repeat && ours());
+  held.store(owed, Ordering::Relaxed);
+  match take {
+    Take::Pass => None,
+    Take::Swallow => Some(Verdict::Swallow(if down { autorepeat } else { release })),
+    Take::Claim => Some(Verdict::Swallow(press)),
   }
-
-  if repeat() {
-    return held.load(Ordering::Relaxed).then_some(Verdict::Swallow(autorepeat));
-  }
-
-  let ours = ours();
-  held.store(ours, Ordering::Relaxed);
-  ours.then_some(Verdict::Swallow(press))
 }
 
 /// The hotkey is modifier key `chord`'s code alone: its press (with no other modifier held) and
@@ -686,9 +695,9 @@ mod tests {
     route(&rx, &on, &shared);
     let got: Vec<Edge> = got.try_iter().collect();
     let want = [
-      Edge::Down { at: ms(0), repeat: false },
-      Edge::Down { at: ms(400), repeat: true },
-      Edge::Up { at: ms(600) },
+      Edge::Down { which: 0, at: ms(0), repeat: false },
+      Edge::Down { which: 0, at: ms(400), repeat: true },
+      Edge::Up { which: 0, at: ms(600) },
       Edge::Escape,
     ];
     assert_eq!(got, want);

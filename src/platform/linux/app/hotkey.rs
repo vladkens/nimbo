@@ -72,6 +72,11 @@ pub fn start_asks() -> bool {
   super::wayland()
 }
 
+/// Not yet: X11's active grab and the portal will take them.
+pub fn keys_while_held() -> bool {
+  false
+}
+
 pub struct Hotkeys(Rc<State>);
 
 impl Hotkeys {
@@ -105,7 +110,12 @@ impl Hotkeys {
     }))
   }
 
-  pub fn set(&mut self, hotkey: Option<Hotkey>) -> Result<(), String> {
+  /// Slot 0 only for now.
+  pub fn set_slot(&mut self, which: usize, hotkey: Option<Hotkey>) -> Result<(), String> {
+    if which > 0 {
+      return hotkey.map_or(Ok(()), |_| Err("one hotkey here for now".into()));
+    }
+
     let s = &self.0;
     let (shortcut, error) = match hotkey {
       None => (None, None),
@@ -162,7 +172,7 @@ impl Hotkeys {
           // XWayland's grab, where there is an X server: it hears the chord only while an X11
           // app has the keyboard.
           s.fallback.set(true);
-          let taken = self.set(s.hotkey.get().map(Hotkey::Shortcut));
+          let taken = self.set_slot(0, s.hotkey.get().map(Hotkey::Shortcut));
           let taken = taken.and_then(|_| grabbed(s, true, |_| Ok(())));
           s.fallback.set(s.grab.borrow().is_some());
           let only = "X11's grab hears the hotkey only while an X11 app has the keyboard";
@@ -183,6 +193,9 @@ impl Hotkeys {
     Ok(())
   }
 
+  /// No keys taken yet ([keys_while_held]).
+  pub fn set_keys(&mut self, _: &[Option<Hotkey>]) {}
+
   /// X11's grab takes Escape (with its connection, which the hotkey opens); the portal binds
   /// shortcuts the user approved, never a key taken for a while: Escape stays the focused app's,
   /// and the status says so.
@@ -200,6 +213,11 @@ impl Hotkeys {
     out.listener_error = s.error.borrow().clone();
     let grab = s.grab.borrow();
     out.counts.listener = s.events.get() + grab.as_ref().map_or(0, Grab::events);
+    if !out.keys.is_empty() {
+      out.keys.clear();
+      out.keys_error = Some("keys while a hotkey is held: not on Linux yet".into());
+    }
+
     if s.escape.get() {
       out.escape_error = match x11(s) {
         true if grab.is_none() => Some("X11's grab takes Escape once a hotkey is set".into()),
@@ -417,7 +435,9 @@ unsafe fn edge(args: P, data: P, down: bool) {
 
   s.events.set(s.events.get() + 1);
   let at = Instant::now();
-  let _ = s.tx.send(if down { Edge::Down { at, repeat: false } } else { Edge::Up { at } });
+  let edge =
+    if down { Edge::Down { which: 0, at, repeat: false } } else { Edge::Up { which: 0, at } };
+  let _ = s.tx.send(edge);
 }
 
 unsafe extern "C" fn on_activated(_: P, _: S, _: S, _: S, _: S, args: P, data: P) {

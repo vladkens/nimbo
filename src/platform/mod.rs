@@ -94,13 +94,17 @@
 //!   &State` (the app's callbacks too), and for tests `describe() -> Vec<String>`, `opening()`,
 //!   `closing()`, `choose(path: &[usize])`; `available() -> Result<(), String>`.
 //! - `pub mod hotkey` ([crate::hotkey]): `Hotkeys` with `new(on: OnEdge)` (`on` runs on a thread of
-//!   its own), `set(&mut self, Option<Hotkey>) -> Result<(), String>` (`None`: no hotkey; `Err`
-//!   when the OS can't take it), `start(&mut self) -> Result<(), String>` (the listener),
-//!   `escape(&mut self, on: bool)` (Escape taken from every app as `Edge::Escape`), and
-//!   `status(&self, &mut Status)` filling the listener, fallback, secure input, counts and, while
-//!   Escape is on, why it is not taken (`escape_error`). Besides, `modifier_alone() -> bool` (a
-//!   modifier key alone can be the hotkey) and `start_asks() -> bool` (`start` shows the desktop's
-//!   dialog).
+//!   its own), `set_slot(&mut self, which: usize, Option<Hotkey>) -> Result<(), String>` (slot
+//!   `which < MAX`, called only when it changed, a refused one again; `None`: cleared; `Err` when
+//!   the OS can't take it, which leaves the slot clear and the others as they are), `set_keys(&mut
+//!   self, &[Option<Hotkey>])` (the keys taken while a slot is held, by their index in the app's
+//!   list, `None` where refused; called only when they changed), `start(&mut self) -> Result<(),
+//!   String>` (the listener), `escape(&mut self, on: bool)` (Escape taken from every app as
+//!   `Edge::Escape`), and `status(&self, &mut Status)` filling the listener, each slot's fallback,
+//!   why the keys are not taken (`keys_error`), secure input, counts and, while Escape is on, why
+//!   it is not taken (`escape_error`). Besides, `modifier_alone() -> bool` (a modifier key alone
+//!   can be the hotkey), `start_asks() -> bool` (`start` shows the desktop's dialog) and
+//!   `keys_while_held() -> bool` (keys are taken).
 //! - `pub mod autostart` ([crate::autostart]): `available()`, `state(&AppInfo)`, `set(&AppInfo,
 //!   on)`, `open_settings()`.
 //! - `pub mod desktop` ([crate::desktop]): `install(&AppInfo, &Launcher) -> Result<bool, String>`
