@@ -218,7 +218,7 @@ extern "C" fn handler_fn(
   // dedupe compares the two sources' times.
   let ago = Duration::try_from_secs_f64(now - happened).unwrap_or_default().min(DEDUPE * 20);
   let at = Instant::now().checked_sub(ago).unwrap_or_else(Instant::now);
-  state.shared.send(&state.events, Raw { source: Source::Carbon, edge, at });
+  state.shared.send(&state.events, Raw { source: Source::Carbon, edge, at, chord: 0 });
   0
 }
 

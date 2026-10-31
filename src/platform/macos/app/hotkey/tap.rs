@@ -113,9 +113,9 @@ unsafe extern "C-unwind" fn callback(
     // Releases may have been missed while it was off: a chord whose key is up is released.
     let (s, at) = (&state.shared, Instant::now());
     s.suspect.fetch_or(s.down.load(Ordering::Relaxed), Ordering::Relaxed);
-    let up = settle(s, &std::array::from_fn(|i| s.chords[i].load(Ordering::Acquire)), &key_down);
+    let up = settle(s, &slots(s), &key_down);
     for which in (0..MAX).filter(|i| up & 1 << i != 0) {
-      s.send(&state.events, Raw { source: Source::Tap, edge: Hit::Up { which }, at });
+      s.send(&state.events, Raw { source: Source::Tap, edge: Hit::Up { which }, at, chord: 0 });
     }
 
     s.tap_reenabled.fetch_add(1, Ordering::Relaxed);
@@ -141,14 +141,21 @@ unsafe extern "C-unwind" fn callback(
   let flags = CGEvent::flags(event).0;
   let repeat = || CGEvent::integer_value_field(event, CGEventField::KeyboardEventAutorepeat) != 0;
   let at = ns(Instant::now());
-  let (hits, out) = match judge(&state.shared, kind, code, flags, at, repeat, &key_down) {
+  let chords = slots(&state.shared);
+  let (hits, out) = match judge(&state.shared, chords, kind, code, flags, at, repeat, &key_down) {
     Verdict::Pass => return pass,
     Verdict::Tell(hits) => (hits, pass),
     Verdict::Swallow(hits) => (hits, null_mut()),
   };
 
   for edge in hits.into_iter().flatten() {
-    let raw = Raw { source: Source::Tap, edge, at: Instant::now() };
+    // A press carries the hotkey it was judged against, for the hotkey thread to check.
+    let chord = match edge {
+      Hit::Down { which, repeat: false } => chords[which],
+      _ => 0,
+    };
+
+    let raw = Raw { source: Source::Tap, edge, at: Instant::now(), chord };
     state.shared.send(&state.events, raw);
   }
 
@@ -178,6 +185,11 @@ enum KeyKind {
 /// at a time, its press needs no other modifier held), the chords a missed release settles
 /// ([settle]), and the event's own.
 type Hits = [Option<Hit>; 2 + MAX];
+
+/// The slots as they are now.
+pub(super) fn slots(s: &Shared) -> [u64; MAX] {
+  std::array::from_fn(|i| s.chords[i].load(Ordering::SeqCst))
+}
 
 /// What the tap does with a key event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -222,8 +234,8 @@ impl Event<'_> {
   }
 }
 
-/// The tap's decision for a key event (`repeat` reads its autorepeat field, only for a key
-/// down), in this order:
+/// The tap's decision for a key event against the slots `chords` read before it (`repeat` reads
+/// its autorepeat field, only for a key down), in this order:
 /// 1. a modifier slot's own key going down (with no other modifier held) or up ([lone]);
 /// 2. a modifier slot held whose flag the event lacks is released (`Up`; Escape's press drops it,
 ///    `Abort`, and is the app's), before anything reads the held bits: a release missed never takes
@@ -236,8 +248,10 @@ impl Event<'_> {
 ///    is a modifier slot's own key, held past its window) is taken and told.
 ///
 /// What is taken is owed until its release ([owe]): its repeats and release are swallowed too.
+#[allow(clippy::too_many_arguments, reason = "the event's fields, as the callback reads them")]
 fn judge(
   s: &Shared,
+  chords: [u64; MAX],
   kind: KeyKind,
   code: u64,
   flags: u64,
@@ -245,7 +259,6 @@ fn judge(
   repeat: impl Fn() -> bool,
   key_down: &dyn Fn(u64) -> bool,
 ) -> Verdict {
-  let chords = std::array::from_fn(|i| s.chords[i].load(Ordering::Acquire));
   let down = kind == KeyKind::Down;
   let rep = down && repeat();
   let mut e =
@@ -383,17 +396,19 @@ fn chords_of(e: &mut Event) -> bool {
     let mask = MODIFIERS | chords[i] >> 16 & FN;
     let ours = e.flags & mask == chords[i] >> 16 & mask;
     let (on, take) = owe(down.load(Ordering::Relaxed) & bit != 0, e.down, e.rep, ours);
-    if take == Take::Claim && !hold(s, i, chords[i]) {
-      continue;
-    }
-
     if take == Take::Claim {
-      // A fresh press: its release is the tap's to hear.
+      // A fresh press, held by `hold` alone (the main thread may clear it meanwhile): its release
+      // is the tap's to hear.
+      if !hold(s, i, chords[i]) {
+        continue;
+      }
+
       s.since[i].store(e.at, Ordering::Relaxed);
       s.suspect.fetch_and(!bit, Ordering::Relaxed);
+    } else {
+      mark(down, bit, on);
     }
 
-    mark(down, bit, on);
     swallow |= take != Take::Pass;
     match take {
       Take::Pass => {}
@@ -419,10 +434,10 @@ fn chords_of(e: &mut Event) -> bool {
 /// clears the bit: a bit set after that clear sees the change here), when the press is no
 /// longer the slot's and passes. Whether it is held.
 fn hold(s: &Shared, i: usize, chord: u64) -> bool {
-  s.down.fetch_or(1 << i, Ordering::AcqRel);
-  let held = s.chords[i].load(Ordering::Acquire) == chord;
+  s.down.fetch_or(1 << i, Ordering::SeqCst);
+  let held = s.chords[i].load(Ordering::SeqCst) == chord;
   if !held {
-    s.down.fetch_and(!(1 << i), Ordering::AcqRel);
+    s.down.fetch_and(!(1 << i), Ordering::SeqCst);
   }
 
   held
@@ -536,7 +551,7 @@ mod tests {
   /// A key event `ms` after the start.
   fn key_at(s: &Shared, ms: u64, down: bool, code: u64, flags: u64, repeat: bool) -> Verdict {
     let kind = if down { KeyKind::Down } else { KeyKind::Up };
-    judge(s, kind, code, flags, ms * 1_000_000, || repeat, &|_| true)
+    judge(s, slots(s), kind, code, flags, ms * 1_000_000, || repeat, &|_| true)
   }
 
   /// A modifier key's `flagsChanged`: `flags` as they are after it.
@@ -546,7 +561,8 @@ mod tests {
 
   fn flags_at(s: &Shared, ms: u64, key: Code, flags: u64) -> Verdict {
     let code = kvk(key).unwrap();
-    judge(s, KeyKind::Flags, u64::from(code), flags, ms * 1_000_000, || false, &|_| true)
+    let at = ms * 1_000_000;
+    judge(s, slots(s), KeyKind::Flags, u64::from(code), flags, at, || false, &|_| true)
   }
 
   #[test]
@@ -788,8 +804,8 @@ mod tests {
     assert_eq!(key_at(&s, 0, true, 0x7A, NONE, false), swallow(down(0)));
     let (tx, rx) = std::sync::mpsc::sync_channel(QUEUE);
     let ms = |n| t0 + Duration::from_millis(n);
-    tx.send(Raw { source: Source::Carbon, edge: down(0), at: ms(1) }).unwrap();
-    tx.send(Raw { source: Source::Carbon, edge: up(0), at: ms(300) }).unwrap();
+    tx.send(Raw { source: Source::Carbon, edge: down(0), at: ms(1), chord: 0 }).unwrap();
+    tx.send(Raw { source: Source::Carbon, edge: up(0), at: ms(300), chord: 0 }).unwrap();
     drop(tx);
     let (got_tx, got) = std::sync::mpsc::channel();
     route(&rx, &(Box::new(move |e| got_tx.send(e).unwrap()) as OnEdge), &s);
@@ -806,18 +822,18 @@ mod tests {
     // No evidence of a missed release (the tap disabled, Secure Input): the HID state is not
     // asked, the chord is held.
     let never = &|_| -> bool { panic!("asked the HID state") };
-    let held = judge(&s, KeyKind::Down, Z, NONE, 0, || false, never);
+    let held = judge(&s, slots(&s), KeyKind::Down, Z, NONE, 0, || false, never);
     assert_eq!(held, swallow(Hit::Key(0)));
     key(&s, false, Z, NONE, false);
     // The tap was disabled meanwhile: its key is up, so it is released, its Up told, Z the app's.
     s.suspect.store(0b1, Ordering::Relaxed);
-    let up = judge(&s, KeyKind::Down, Z, NONE, 0, || false, &|_| false);
+    let up = judge(&s, slots(&s), KeyKind::Down, Z, NONE, 0, || false, &|_| false);
     assert_eq!(up, tell(Hit::Up { which: 0 }));
     assert_eq!(s.down.load(Ordering::Relaxed), 0, "settled");
     // Truly held, it does.
     s.down.store(0b1, Ordering::Relaxed);
     s.suspect.store(0b1, Ordering::Relaxed);
-    let held = judge(&s, KeyKind::Down, Z, NONE, 0, || false, &|code| code == 0x7A);
+    let held = judge(&s, slots(&s), KeyKind::Down, Z, NONE, 0, || false, &|code| code == 0x7A);
     assert_eq!(held, swallow(Hit::Key(0)));
   }
 
@@ -830,7 +846,7 @@ mod tests {
     s.down.fetch_or(0b110, Ordering::Relaxed);
     s.suspect.store(0b110, Ordering::Relaxed);
     let f2 = |code| code == 0x78;
-    let v = judge(&s, KeyKind::Down, Z, NONE, 0, || false, &f2);
+    let v = judge(&s, slots(&s), KeyKind::Down, Z, NONE, 0, || false, &f2);
     assert_eq!(v, Verdict::Swallow(hits(&[up(0), up(1), Hit::Key(0)])));
     assert_eq!((s.down.load(Ordering::Relaxed), s.suspect.load(Ordering::Relaxed)), (0b100, 0));
     // A fresh press of a chord is no longer suspect.

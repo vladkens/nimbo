@@ -55,6 +55,9 @@ const KEY_ESCAPE: u16 = 0x35;
 const SET: u64 = 1 << 63;
 /// With [SET]: the key code is a modifier key's, which is the hotkey alone.
 const LONE: u64 = 1 << 62;
+/// A slot's value counts its stores from here up to [LONE]: the same hotkey stored again is
+/// another value.
+const GEN: u32 = 48;
 /// A key as the tap compares it: key code and modifier flags as a slot's, without [SET] (the key
 /// count says which are set: `kVK_ANSI_A` is 0); a key `set` refused matches no event.
 const NO_KEY: u64 = 0xffff;
@@ -99,6 +102,9 @@ struct Raw {
   source: Source,
   edge: Hit,
   at: Instant,
+  /// The slot's value the tap judged a fresh press against, 0 for any other edge: a slot changed
+  /// since ([Hotkeys::set_slot]) makes the press no longer its.
+  chord: u64,
 }
 
 /// Drops an edge when the other source reported the same kind of edge of the same slot ≤
@@ -130,8 +136,9 @@ const TAP_STARTING: u8 = 3;
 /// State shared by the tap callback, the Carbon handler, the hotkey thread and the main thread.
 #[derive(Default)]
 struct Shared {
-  /// Each slot's hotkey ([SET], [LONE]), 0 for none.
+  /// Each slot's hotkey ([SET], [LONE], [GEN]), 0 for none; how many stores so far.
   chords: [AtomicU64; MAX],
+  stores: AtomicU64,
   /// The keys ([NO_KEY]), how many, and a bit per key whose press the tap took (its repeats and
   /// release owed).
   keys: [AtomicU64; MAX],
@@ -171,13 +178,15 @@ impl Shared {
     }
   }
 
-  /// Slot `i` holds `value` from now on: 0 first, its held bit dropped, so the tap never sees the
-  /// new hotkey with the old one's press (a press of the old one it is judging meanwhile is
-  /// dropped by [tap::hold]). Whether the old one was held. Main thread only.
+  /// Slot `i` holds `value` from now on, with a new [GEN]: 0 first, its held bit dropped, so the
+  /// tap never sees the new hotkey with the old one's press (a press of the old one it is judging
+  /// meanwhile holds nothing, [tap::hold], and is never told, [route]). Whether the old one was
+  /// held. Main thread only.
   fn store_slot(&self, i: usize, value: u64) -> bool {
-    self.chords[i].store(0, Ordering::Release);
-    let held = self.down.fetch_and(!(1 << i), Ordering::AcqRel) & 1 << i != 0;
-    self.chords[i].store(value, Ordering::Release);
+    let generation = (self.stores.fetch_add(1, Ordering::Relaxed) & 0x3fff) << GEN;
+    self.chords[i].store(0, Ordering::SeqCst);
+    let held = self.down.fetch_and(!(1 << i), Ordering::SeqCst) & 1 << i != 0;
+    self.chords[i].store(if value == 0 { 0 } else { value | generation }, Ordering::SeqCst);
     held
   }
 
@@ -246,7 +255,8 @@ impl Hotkeys {
     // A press Carbon reported of the old one is no repeat of the new one.
     let carbon = self.shared.carbon_down.fetch_and(!(1 << which), Ordering::AcqRel);
     if held || carbon & 1 << which != 0 {
-      let raw = Raw { source: Source::Tap, edge: Hit::Abort { which }, at: Instant::now() };
+      let raw =
+        Raw { source: Source::Tap, edge: Hit::Abort { which }, at: Instant::now(), chord: 0 };
       self.shared.send(&self.events, raw);
     }
 
@@ -414,6 +424,14 @@ fn route(rx: &Receiver<Raw>, on: &OnEdge, shared: &Shared) {
       };
 
       counter.fetch_add(1, Ordering::Relaxed);
+      // A press of a hotkey its slot no longer holds: its release would match nothing.
+      if let Hit::Down { which, .. } = raw.edge
+        && raw.chord != 0
+        && shared.chords[which].load(Ordering::SeqCst) != raw.chord
+      {
+        continue;
+      }
+
       if raw.source == Source::Carbon {
         match raw.edge {
           // Carbon repeats the press while the key is held: an autorepeat.
@@ -476,12 +494,9 @@ fn look(shared: &Shared, secure: bool, key_down: &dyn Fn(u64) -> bool) -> [Optio
     shared.suspect.fetch_or(shared.down.load(Ordering::Relaxed), Ordering::Relaxed);
   }
 
-  let up = tap::settle(
-    shared,
-    &std::array::from_fn(|i| shared.chords[i].load(Ordering::Acquire)),
-    key_down,
-  );
-  let raw = |which| Raw { source: Source::Tap, edge: Hit::Up { which }, at: Instant::now() };
+  let up = tap::settle(shared, &tap::slots(shared), key_down);
+  let raw =
+    |which| Raw { source: Source::Tap, edge: Hit::Up { which }, at: Instant::now(), chord: 0 };
   std::array::from_fn(|i| (up & 1 << i != 0).then(|| raw(i)))
 }
 
@@ -550,7 +565,7 @@ mod tests {
     let (tx, rx) = sync_channel(QUEUE);
     let t0 = Instant::now();
     let ms = |n| t0 + Duration::from_millis(n);
-    let raw = |source, edge, at| Raw { source, edge, at };
+    let raw = |source, edge, at| Raw { source, edge, at, chord: 0 };
     let down = |which| Hit::Down { which, repeat: false };
     for r in [
       raw(Source::Tap, down(0), ms(0)),
@@ -668,7 +683,7 @@ mod tests {
     let t0 = Instant::now();
     let ms = |n| t0 + Duration::from_millis(n);
     let (shared, (tx, rx)) = (Shared::default(), sync_channel(QUEUE));
-    let raw = |source, edge, at| Raw { source, edge, at };
+    let raw = |source, edge, at| Raw { source, edge, at, chord: 0 };
     for r in [
       raw(Source::Tap, Hit::Down { which: 0, repeat: false }, ms(0)),
       raw(Source::Carbon, Hit::Down { which: 0, repeat: false }, ms(2)),
@@ -688,6 +703,29 @@ mod tests {
     assert_eq!(ends.count(), 2);
   }
 
+  /// A press the tap judged against a slot replaced since is never told, nor one of the same
+  /// hotkey stored again (paused and back); a press of the slot as it is now is.
+  #[test]
+  fn a_press_of_a_replaced_slot_is_not_told() {
+    let (shared, (tx, rx)) = (Shared::default(), sync_channel(QUEUE));
+    let f2 = slot_value(Hotkey::parse("f2").unwrap()).unwrap();
+    shared.store_slot(0, f2);
+    let old = shared.chords[0].load(Ordering::Relaxed);
+    shared.store_slot(0, 0);
+    shared.store_slot(0, f2);
+    let now = shared.chords[0].load(Ordering::Relaxed);
+    assert_ne!(old, now);
+    let down = Hit::Down { which: 0, repeat: false };
+    for chord in [old, now] {
+      tx.send(Raw { source: Source::Tap, edge: down, at: Instant::now(), chord }).unwrap();
+    }
+
+    drop(tx);
+    let (got_tx, got) = std::sync::mpsc::channel();
+    route(&rx, &(Box::new(move |e| got_tx.send(e).unwrap()) as OnEdge), &shared);
+    assert_eq!(got.try_iter().count(), 1);
+  }
+
   /// Carbon's release clears the tap's held bit of a press it missed the release of, not one of
   /// a newer press.
   #[test]
@@ -701,7 +739,7 @@ mod tests {
     shared.down.store(0b11, Ordering::Relaxed);
     shared.since[0].store(ns(ms(2)), Ordering::Relaxed);
     shared.since[1].store(ns(ms(1_000)), Ordering::Relaxed);
-    let raw = |edge, at| Raw { source: Source::Carbon, edge, at };
+    let raw = |edge, at| Raw { source: Source::Carbon, edge, at, chord: 0 };
     for r in [
       raw(Hit::Down { which: 0, repeat: false }, ms(0)),
       raw(Hit::Down { which: 1, repeat: false }, ms(0)),
