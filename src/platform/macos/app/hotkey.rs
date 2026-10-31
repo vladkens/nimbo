@@ -199,7 +199,8 @@ pub struct Hotkeys {
   shared: Arc<Shared>,
   events: Sender<Raw>,
   carbon: Carbon,
-  carbon_error: Option<String>,
+  /// Why Carbon did not take each slot's chord.
+  carbon_errors: [Option<String>; MAX],
   /// Why Carbon did not take Escape (another app has it).
   escape_error: Option<String>,
 }
@@ -217,7 +218,7 @@ impl Hotkeys {
       .spawn(move || route(&rx, &on, &routing))
       .expect("spawn the hotkey thread");
     let carbon = Carbon::install(shared.clone(), events.clone());
-    Self { shared, events, carbon, carbon_error: None, escape_error: None }
+    Self { shared, events, carbon, carbon_errors: Default::default(), escape_error: None }
   }
 
   /// Slot `which` matches `hotkey` from now on, nothing for `None`; `Err` when it has no key code
@@ -225,16 +226,13 @@ impl Hotkeys {
   /// it: the slot's fallback error.
   pub fn set_slot(&mut self, which: usize, hotkey: Option<Hotkey>) -> Result<(), String> {
     self.shared.store_slot(which, 0);
-    if which == 0 {
-      self.carbon.unregister();
-      self.carbon_error = None;
-    }
-
+    self.carbon.unregister(which);
+    self.carbon_errors[which] = None;
     let Some(hotkey) = hotkey else { return Ok(()) };
     self.shared.store_slot(which, slot_value(hotkey)?);
-    if let (0, Hotkey::Shortcut(s)) = (which, hotkey) {
-      let code = s.code().and_then(kvk).unwrap_or_default();
-      self.carbon_error = self.carbon.register(code, carbon::modifiers(s.mods)).err();
+    if let Hotkey::Shortcut(s) = hotkey {
+      let (code, mods) = (s.code().and_then(kvk).unwrap_or_default(), carbon::modifiers(s.mods));
+      self.carbon_errors[which] = self.carbon.register(which, code, mods).err();
     }
 
     Ok(())
@@ -284,9 +282,9 @@ impl Hotkeys {
       _ => Listener::Off,
     };
     out.listener_error = s.tap_error.lock().unwrap().clone();
-    if let Some(slot) = out.slots.first_mut() {
-      slot.fallback = self.carbon.registered();
-      slot.fallback_error = self.carbon_error.clone();
+    for (i, slot) in out.slots.iter_mut().enumerate().take(MAX) {
+      (slot.fallback, slot.fallback_error) =
+        (self.carbon.registered(i), self.carbon_errors[i].clone());
     }
 
     out.secure_input = super::permissions::secure_input();
@@ -350,8 +348,8 @@ fn key_value(key: Option<Hotkey>) -> u64 {
 /// The "hotkey" thread: dedupes and hands the edges to the app.
 fn route(rx: &Receiver<Raw>, on: &OnEdge, shared: &Shared) {
   let mut dedupe = Dedupe::default();
-  // A bit per slot whose press Carbon reported, released not yet.
-  let mut carbon_down = 0u8;
+  // A bit per slot whose press Carbon reported, released not yet, and when (ns of [EPOCH]).
+  let (mut carbon_down, mut pressed) = (0u8, [0; MAX]);
   for mut raw in rx {
     let counter = match raw.source {
       Source::Tap => &shared.tap_events,
@@ -366,8 +364,19 @@ fn route(rx: &Receiver<Raw>, on: &OnEdge, shared: &Shared) {
           shared.carbon_repeats.fetch_add(1, Ordering::Relaxed);
           raw.edge = Hit::Down { which, repeat: true };
         }
-        Hit::Down { which, .. } => carbon_down |= 1 << which,
-        Hit::Up { which } => carbon_down &= !(1 << which),
+        Hit::Down { which, .. } => {
+          (carbon_down, pressed[which]) = (carbon_down | 1 << which, ns(raw.at))
+        }
+        // The tap's press of it is over too, unless it saw a newer one (a release it missed
+        // while it was disabled would keep the key owed).
+        Hit::Up { which } => {
+          carbon_down &= !(1 << which);
+          if shared.since[which].load(Ordering::Relaxed)
+            <= pressed[which] + DEDUPE.as_nanos() as u64
+          {
+            shared.down.fetch_and(!(1 << which), Ordering::AcqRel);
+          }
+        }
         _ => {}
       }
     }
@@ -389,6 +398,11 @@ fn route(rx: &Receiver<Raw>, on: &OnEdge, shared: &Shared) {
       Hit::Escape => Edge::Escape,
     });
   }
+}
+
+/// `at` in ns of [EPOCH], as the tap tells time.
+fn ns(at: Instant) -> u64 {
+  EPOCH.get().map_or(0, |e| at.saturating_duration_since(*e).as_nanos() as u64)
 }
 
 /// The event tap's modifier flags for a chord's modifiers.
@@ -479,6 +493,75 @@ mod tests {
     assert_eq!((n(&shared.duplicates), n(&shared.carbon_repeats)), (2, 2));
     assert_eq!((n(&shared.tap_events), n(&shared.carbon_events)), (4, 5));
     assert_eq!(n(&shared.key_events), 1);
+  }
+
+  /// Hotkeys over a fake Carbon: nothing registered with the system, no tap.
+  fn fake() -> Hotkeys {
+    let shared = Arc::new(Shared::default());
+    let (events, _) = sync_channel(QUEUE);
+    let carbon = carbon::tests::fake(shared.clone(), events.clone());
+    Hotkeys { shared, events, carbon, carbon_errors: Default::default(), escape_error: None }
+  }
+
+  #[test]
+  fn each_chord_is_registered_once_and_never_leaked() {
+    let hk = |t: &str| Hotkey::parse(t).ok();
+    let mut h = fake();
+    for (i, t) in ["f1", "fn", "f3", "option+space"].into_iter().enumerate() {
+      assert_eq!(h.set_slot(i, hk(t)), Ok(()), "{t}");
+    }
+
+    // Ids 1 + which; fn alone has none; slot 2 refused by "another app", alone.
+    assert_eq!(carbon::tests::live(), [1, 4]);
+    let slots = ["f1", "fn", "f3", "option+space"]
+      .map(|t| Slot { hotkey: hk(t).unwrap(), error: None, fallback: false, fallback_error: None })
+      .to_vec();
+    let mut out = Status { slots, ..Status::default() };
+    h.status(&mut out);
+    let fallback: Vec<_> =
+      out.slots.iter().map(|s| (s.fallback, s.fallback_error.is_some())).collect();
+    assert_eq!(fallback, [(true, false), (false, false), (false, true), (true, false)]);
+    // Changed: the old one goes first; removed: gone; Escape on and off.
+    h.set_slot(0, hk("f2")).unwrap();
+    h.set_slot(3, None).unwrap();
+    h.escape(true);
+    assert_eq!(carbon::tests::live(), [1, 0x100]);
+    h.escape(false);
+    // Paused (every slot cleared, as `crate::hotkey` does), then dropped: nothing left.
+    (0..MAX).for_each(|i| _ = h.set_slot(i, None));
+    assert_eq!(carbon::tests::live(), []);
+    h.set_slot(0, hk("f1")).unwrap();
+    h.escape(true);
+    drop(h);
+    assert_eq!(carbon::tests::live(), []);
+  }
+
+  /// Carbon's release clears the tap's held bit of a press it missed the release of, not one of
+  /// a newer press.
+  #[test]
+  fn carbons_release_clears_a_stale_press() {
+    let t0 = *EPOCH.get_or_init(Instant::now);
+    let ms = |n| t0 + Duration::from_millis(n);
+    let shared = Shared::default();
+    let (tx, rx) = sync_channel(QUEUE);
+    // Slot 0's press seen by both, its release by Carbon only; slot 1's press by Carbon at 0,
+    // and a newer one by the tap at 1 s, before Carbon's release of the first came through.
+    shared.down.store(0b11, Ordering::Relaxed);
+    shared.since[0].store(ns(ms(2)), Ordering::Relaxed);
+    shared.since[1].store(ns(ms(1_000)), Ordering::Relaxed);
+    let raw = |edge, at| Raw { source: Source::Carbon, edge, at };
+    for r in [
+      raw(Hit::Down { which: 0, repeat: false }, ms(0)),
+      raw(Hit::Down { which: 1, repeat: false }, ms(0)),
+      raw(Hit::Up { which: 0 }, ms(400)),
+      raw(Hit::Up { which: 1 }, ms(900)),
+    ] {
+      tx.send(r).unwrap();
+    }
+
+    drop(tx);
+    route(&rx, &(Box::new(|_| {}) as OnEdge), &shared);
+    assert_eq!(shared.down.load(Ordering::Relaxed), 0b10);
   }
 
   #[test]

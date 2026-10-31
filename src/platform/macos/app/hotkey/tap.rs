@@ -21,7 +21,7 @@ use objc2_core_graphics::{
 
 use super::super::super::keyboard::{code as key_at, device_flag};
 use super::{
-  EPOCH, Hit, KEY_ESCAPE, LONE, MODIFIERS, Raw, SET, Shared, Source, TAP_ACTIVE, TAP_FAILED,
+  Hit, KEY_ESCAPE, LONE, MODIFIERS, Raw, SET, Shared, Source, TAP_ACTIVE, TAP_FAILED, ns,
 };
 use crate::hotkey::{MAX, Take, owe};
 
@@ -132,7 +132,7 @@ unsafe extern "C-unwind" fn callback(
   let code = CGEvent::integer_value_field(event, CGEventField::KeyboardEventKeycode) as u64;
   let flags = CGEvent::flags(event).0;
   let repeat = || CGEvent::integer_value_field(event, CGEventField::KeyboardEventAutorepeat) != 0;
-  let at = EPOCH.get().map_or(0, |e| e.elapsed().as_nanos() as u64);
+  let at = ns(Instant::now());
   let (hits, out) = match judge(&state.shared, kind, code, flags, at, repeat) {
     Verdict::Pass => return pass,
     Verdict::Tell(hits) => (hits, pass),
@@ -170,8 +170,9 @@ enum Verdict {
   Swallow(Hits),
 }
 
-/// A key event as [judge] goes through it: `code`, the event's `flags`, `at` in ns of [EPOCH],
-/// `down` (a key down) and `rep` (its autorepeat), the slots as they are, the edges so far.
+/// A key event as [judge] goes through it: `code`, the event's `flags`, `at` in ns of
+/// [super::EPOCH], `down` (a key down) and `rep` (its autorepeat), the slots as they are, the edges
+/// so far.
 struct Event<'a> {
   s: &'a Shared,
   chords: [u64; MAX],
