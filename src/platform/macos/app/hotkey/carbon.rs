@@ -104,8 +104,9 @@ struct State {
 /// This app's Carbon hotkeys; main thread only.
 pub struct Carbon {
   installed: bool,
-  chords: [Option<EventHotKeyRef>; MAX],
-  escape: Option<EventHotKeyRef>,
+  /// Each slot's registration, and Escape's.
+  pub(super) chords: [Option<EventHotKeyRef>; MAX],
+  pub(super) escape: Option<EventHotKeyRef>,
   state: &'static State,
   calls: Calls,
 }
@@ -151,10 +152,6 @@ impl Carbon {
     self.chords[which].take().into_iter().for_each(self.calls.1);
   }
 
-  pub fn registered(&self, which: usize) -> bool {
-    self.chords[which].is_some()
-  }
-
   /// Escape alone registered while `on`; the error is why it is not.
   pub fn set_escape(&mut self, on: bool) -> Result<(), String> {
     if !on {
@@ -166,10 +163,6 @@ impl Carbon {
     }
 
     Ok(())
-  }
-
-  pub fn escape_registered(&self) -> bool {
-    self.escape.is_some()
   }
 }
 

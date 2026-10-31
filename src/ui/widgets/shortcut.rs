@@ -17,7 +17,7 @@
 use keyboard_types::{Code, Modifiers, NamedKey};
 
 use super::icon::{self, Icon};
-use crate::keys::{Hotkey, Key, KeyEvent, Shortcut, f_key, is_modifier, us_char};
+use crate::keys::{Hotkey, Key, KeyEvent, Shortcut, carries_fn, f_key, is_modifier, us_char};
 use crate::scene::mix;
 use crate::text::Weight;
 use crate::ui::{Behavior, Cursor, Float, Id, Response, Role, Style, Ui, px};
@@ -33,6 +33,8 @@ struct Rec {
   prev: Option<Id>,
   held: u8,
   lone: Option<Code>,
+  /// fn is held: a modifier of the chord (macOS), which key events don't carry.
+  fn_down: bool,
 }
 
 /// What a recorder records.
@@ -107,10 +109,10 @@ impl Ui<'_> {
         match down {
           true => {
             rec.lone = (rec.held == 0 && mode == Record::ChordsOrModifier).then_some(key);
-            rec.held += 1;
+            (rec.held, rec.fn_down) = (rec.held + 1, rec.fn_down || key == Code::Fn);
           }
           false => {
-            rec.held = rec.held.saturating_sub(1);
+            (rec.held, rec.fn_down) = (rec.held.saturating_sub(1), rec.fn_down && key != Code::Fn);
             if rec.lone.take() == Some(key) {
               set(&mut b, Some(Hotkey::Modifier(key)));
               stop = true;
@@ -119,11 +121,14 @@ impl Ui<'_> {
         }
       }
 
-      if let Some(k) = self.key_down(id) {
+      if let Some(mut k) = self.key_down(id) {
         rec.lone = None;
+        k.mods.set(Modifiers::FN, rec.fn_down && !carries_fn(k.key));
         match k.key {
-          Key::Named(NamedKey::Escape) if k.mods.is_empty() => stop = true,
-          Key::Named(NamedKey::Backspace | NamedKey::Delete) if k.mods.is_empty() => {
+          Key::Named(NamedKey::Escape) if (k.mods - Modifiers::FN).is_empty() => stop = true,
+          Key::Named(NamedKey::Backspace | NamedKey::Delete)
+            if (k.mods - Modifiers::FN).is_empty() =>
+          {
             set(&mut b, None);
             stop = true;
           }
@@ -189,7 +194,11 @@ impl Ui<'_> {
     let id = self.take_id();
     let clear = id.key("clear");
     let b = self.shortcut_behavior(id, value, t.shortcut_clear, mode);
-    let key = mode == Record::Key;
+    let (empty, prompt) = match mode {
+      Record::Key => ("Record Key", "Type a key…"),
+      _ => ("Record Shortcut", "Type a shortcut…"),
+    };
+
     let hot = self.ctl_hot(id, b.hovered);
     let h = t.sizes.control_h;
     let bg = match (b.on, b.pressed) {
@@ -206,11 +215,9 @@ impl Ui<'_> {
       match (b.on, *value) {
         (true, _) => {
           ui.el(Style::new().w(px(7.0)).h(px(7.0)).radius(3.5).bg(t.danger));
-          ui.text(if key { "Type a key…" } else { "Type a shortcut…" }, label.color(t.muted));
+          ui.text(prompt, label.color(t.muted));
         }
-        (_, None) => {
-          ui.text(if key { "Record Key" } else { "Record Shortcut" }, label.color(t.muted))
-        }
+        (_, None) => ui.text(empty, label.color(t.muted)),
         (_, Some(v)) => ui.text(v.label(), label.font(t.font.weight(Weight::Medium))),
       }
 
@@ -223,7 +230,7 @@ impl Ui<'_> {
         ui.with_id(clear).float(at).canvas(s, move |f, r| icon::draw(f, Icon::CLEAR, r, mark, 0.0));
       }
     });
-    (r.clicked, r.changed) = (b.clicked, b.changed);
+    (r.clicked, r.changed, r.on) = (b.clicked, b.changed, b.on);
     r
   }
 }
@@ -339,6 +346,29 @@ mod tests {
     h.click_id(Id::of("rec"));
     h.key(NamedKey::Backspace, Modifiers::empty());
     assert_eq!(h.app().0, None);
+  }
+
+  /// fn reaches the recorder as a modifier key of its own (key events don't carry it): held, it
+  /// is the chord's modifier, but not with a key that carries it anyway, nor in a key recorder.
+  #[test]
+  fn fn_held_is_a_chords_modifier() {
+    let mut h = Harness::new(Chords::default(), Size::new(300.0, 100.0), 1.0);
+    h.frame();
+    let mut record = |key: Key| {
+      h.click_id(Id::of("rec"));
+      h.event(Event::Modifier { key: Code::Fn, down: true });
+      h.key(key, Modifiers::empty());
+      h.event(Event::Modifier { key: Code::Fn, down: false });
+      h.app().0.map(|k| k.to_string())
+    };
+    assert_eq!(record('1'.into()).as_deref(), Some("fn+1"));
+    assert_eq!(record(NamedKey::F5.into()).as_deref(), Some("f5"));
+    let mut h = Harness::new(Keys::default(), Size::new(300.0, 100.0), 1.0);
+    h.frame();
+    h.click_id(Id::of("rec"));
+    h.event(Event::Modifier { key: Code::Fn, down: true });
+    h.key('z', Modifiers::empty());
+    assert_eq!(h.app().0.map(|k| k.to_string()).as_deref(), Some("z"));
   }
 
   fn hk(key: impl Into<Key>, mods: Modifiers) -> Option<String> {

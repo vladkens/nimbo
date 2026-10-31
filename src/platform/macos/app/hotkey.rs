@@ -128,8 +128,10 @@ struct Shared {
   keys: [AtomicU64; MAX],
   keys_count: AtomicU8,
   keys_owed: AtomicU8,
-  /// A bit per slot: the tap owes a chord's release, or a modifier alone is held.
+  /// A bit per slot: the tap owes a chord's release, or a modifier alone is held; and those whose
+  /// release may have been missed (the tap was disabled, Secure Input on), checked before keys.
   down: AtomicU8,
+  suspect: AtomicU8,
   /// When each slot last went down, in ns of [EPOCH]; [tap::CLOSED] once a key was taken while a
   /// modifier alone was held.
   since: [AtomicU64; MAX],
@@ -289,10 +291,14 @@ impl Hotkeys {
     out.listener_error = s.tap_error.lock().unwrap().clone();
     for (i, slot) in out.slots.iter_mut().enumerate().take(MAX) {
       (slot.fallback, slot.fallback_error) =
-        (self.carbon.registered(i), self.carbon_errors[i].clone());
+        (self.carbon.chords[i].is_some(), self.carbon_errors[i].clone());
     }
 
     out.secure_input = super::permissions::secure_input();
+    if out.secure_input {
+      s.suspect.fetch_or(s.down.load(Ordering::Relaxed), Ordering::Relaxed);
+    }
+
     let c = &mut out.counts;
     (c.listener, c.fallback, c.fallback_repeats) =
       (n(&s.tap_events), n(&s.carbon_events), n(&s.carbon_repeats));
@@ -301,7 +307,7 @@ impl Hotkeys {
     c.keys = n(&s.key_events);
     // Secure Input leaves the tap deaf, never Carbon.
     let tap = out.listener == Listener::Active && !out.secure_input;
-    if s.escape.load(Ordering::Relaxed) && !tap && !self.carbon.escape_registered() {
+    if s.escape.load(Ordering::Relaxed) && !tap && !self.carbon.escape.is_some() {
       let why = self.escape_error.as_deref().unwrap_or("not registered");
       out.escape_error = Some(format!("no event tap, and Carbon's hotkey for Escape: {why}"));
     }

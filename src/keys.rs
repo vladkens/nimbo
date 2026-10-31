@@ -396,15 +396,14 @@ fn parse(text: &str, app: Option<Os>) -> Result<Shortcut, ShortcutError> {
 }
 
 /// The key's events carry the fn flag on a Mac anyway: the F-keys, arrows, Home, End, Page Up
-/// and Down, Forward Delete. fn with one of them is no modifier of the user's.
+/// and Down, Forward Delete, Help (Insert). fn with one of them is no modifier of the user's.
 pub(crate) fn carries_fn(key: Key) -> bool {
   use NamedKey::*;
   let Key::Named(k) = key else { return false };
   let f = (1..=20).any(|n| f_key(n).is_some_and(|f| f.1 == k));
-  f || matches!(
-    k,
-    ArrowUp | ArrowDown | ArrowLeft | ArrowRight | Home | End | PageUp | PageDown | Delete
-  )
+  let keys =
+    [ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Home, End, PageUp, PageDown, Delete, Insert];
+  f || keys.contains(&k)
 }
 
 /// [Shortcut::code] of `key`.

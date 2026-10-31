@@ -110,10 +110,15 @@ unsafe extern "C-unwind" fn callback(
       CGEvent::tap_enable(unsafe { &*port }, true);
     }
 
-    // Releases missed while it was off: a chord whose key is up is held no more.
-    let chords = std::array::from_fn(|i| state.shared.chords[i].load(Ordering::Acquire));
-    settle(&state.shared, &chords, &key_down);
-    state.shared.tap_reenabled.fetch_add(1, Ordering::Relaxed);
+    // Releases may have been missed while it was off: a chord whose key is up is released.
+    let (s, at) = (&state.shared, Instant::now());
+    s.suspect.fetch_or(s.down.load(Ordering::Relaxed), Ordering::Relaxed);
+    let up = settle(s, &std::array::from_fn(|i| s.chords[i].load(Ordering::Acquire)), &key_down);
+    for which in (0..MAX).filter(|i| up & 1 << i != 0) {
+      s.send(&state.events, Raw { source: Source::Tap, edge: Hit::Up { which }, at });
+    }
+
+    s.tap_reenabled.fetch_add(1, Ordering::Relaxed);
     return pass;
   }
 
@@ -335,7 +340,8 @@ fn lone(e: &Event, i: usize, own: bool) -> Option<Hit> {
 fn keys(e: &mut Event) -> bool {
   let (s, code, n) = (e.s, e.code, usize::from(e.s.keys_count.load(Ordering::Acquire)).min(MAX));
   if e.down && !e.rep && (0..n).any(|j| s.keys[j].load(Ordering::Acquire) & 0xffff == code) {
-    settle(s, &e.chords, e.key_down);
+    let up = settle(s, &e.chords, e.key_down);
+    (0..MAX).filter(|i| up & 1 << i != 0).for_each(|which| e.push(Hit::Up { which }));
   }
 
   let held = s.down.load(Ordering::Relaxed);
@@ -372,7 +378,6 @@ fn chords_of(e: &mut Event) -> bool {
     let ours = e.flags & mask == chords[i] >> 16 & mask;
     let (on, take) = owe(down.load(Ordering::Relaxed) & bit != 0, e.down, e.rep, ours);
     if take == Take::Claim {
-      // Its time first: Carbon's release, on another thread, reads it once the bit is set.
       s.since[i].store(e.at, Ordering::Relaxed);
     }
 
@@ -403,14 +408,17 @@ fn mark(bits: &AtomicU8, bit: u8, on: bool) {
   bits.fetch_or(if on { bit } else { 0 }, Ordering::Relaxed);
 }
 
-/// A chord the tap owes the release of whose key is up (`key_down`) is held no more: its release
-/// was missed (the tap was disabled meanwhile). Only a modifier alone held or a chord truly down
-/// takes keys.
-fn settle(s: &Shared, chords: &[u64; MAX], key_down: &dyn Fn(u64) -> bool) {
-  let owed = |i: usize| s.down.load(Ordering::Relaxed) & 1 << i != 0 && !alone(chords[i]);
-  for i in (0..MAX).filter(|&i| owed(i) && !key_down(chords[i] & 0xffff)) {
-    s.down.fetch_and(!(1 << i), Ordering::Relaxed);
-  }
+/// A chord owed a release that may have been missed ([Shared::suspect]: the tap was disabled, or
+/// Secure Input was on) whose key is up (`key_down`, the HID system's state) is released: the
+/// bits cleared, for their `Up`s. No other press asks the HID system: a chord truly held takes
+/// keys.
+fn settle(s: &Shared, chords: &[u64; MAX], key_down: &dyn Fn(u64) -> bool) -> u8 {
+  let down = s.down.load(Ordering::Relaxed);
+  let suspect = s.suspect.fetch_and(down, Ordering::Relaxed) & down;
+  let gone = |i: usize| suspect & 1 << i != 0 && !alone(chords[i]) && !key_down(chords[i] & 0xffff);
+  let up = (0..MAX).filter(|&i| gone(i)).fold(0, |m, i| m | 1 << i);
+  s.down.fetch_and(!up, Ordering::Relaxed);
+  up
 }
 
 /// A press of Escape is ours (6): taking it is on, and no ⌃, ⌥ or ⌘ is held, but for a modifier
@@ -764,11 +772,20 @@ mod tests {
   fn a_stale_chord_takes_no_keys() {
     let s = with(&["f1"], &["z"]);
     s.down.store(0b1, Ordering::Relaxed);
+    // No evidence of a missed release (the tap disabled, Secure Input): the HID state is not
+    // asked, the chord is held.
+    let never = &|_| -> bool { panic!("asked the HID state") };
+    let held = judge(&s, KeyKind::Down, Z, NONE, 0, || false, never);
+    assert_eq!(held, swallow(Hit::Key(0)));
+    key(&s, false, Z, NONE, false);
+    // The tap was disabled meanwhile: its key is up, so it is released, its Up told, Z the app's.
+    s.suspect.store(0b1, Ordering::Relaxed);
     let up = judge(&s, KeyKind::Down, Z, NONE, 0, || false, &|_| false);
-    assert_eq!(up, Verdict::Pass);
+    assert_eq!(up, tell(Hit::Up { which: 0 }));
     assert_eq!(s.down.load(Ordering::Relaxed), 0, "settled");
     // Truly held, it does.
     s.down.store(0b1, Ordering::Relaxed);
+    s.suspect.store(0b1, Ordering::Relaxed);
     let held = judge(&s, KeyKind::Down, Z, NONE, 0, || false, &|code| code == 0x7A);
     assert_eq!(held, swallow(Hit::Key(0)));
   }

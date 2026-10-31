@@ -33,6 +33,7 @@
 
 use std::time::Instant;
 
+use crate::Modifiers;
 use crate::keys::{Hotkey, Shortcut};
 use crate::platform::hotkey as imp;
 
@@ -302,6 +303,9 @@ fn check(hotkeys: &[Hotkey], keys: &[Hotkey]) -> (Vec<Option<String>>, Vec<Optio
     _ if i >= MAX => Some(format!("more than {MAX} {what}s")),
     k if list[..i].contains(&k) => Some(format!("{k} is set twice")),
     k @ Hotkey::Modifier(_) if what == "key" => Some(format!("{k} is a modifier alone, no key")),
+    Hotkey::Shortcut(k) if what == "key" && k.mods.contains(Modifiers::FN) => {
+      Some(format!("{k}: fn is in no key"))
+    }
     Hotkey::Shortcut(k) if what == "key" && own(k) => Some(format!("{k} is on a hotkey's own key")),
     _ => None,
   };
@@ -379,6 +383,8 @@ mod tests {
     assert_eq!(bad(&h)[7..], [false, true, true]);
     assert_eq!(bad(&k)[7..], [false, true, true]);
     assert!(h[8].as_deref().is_some_and(|e| e.contains("more than 8")));
+    let (_, k) = check(&[], &[hk("fn+z")]);
+    assert!(k[0].as_deref().is_some_and(|e| e.contains("fn is in no key")));
     // A key on a lone hotkey's modifier is no chord's own key: F-keys as keys with fn alone.
     let (_, k) = check(&[hk("fn")], &[hk("f5"), hk("a")]);
     assert_eq!(bad(&k), [false, false]);

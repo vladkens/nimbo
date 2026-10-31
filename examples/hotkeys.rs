@@ -46,8 +46,9 @@ pub struct Demo {
   pub sent: (Vec<usize>, Vec<usize>),
   /// Why `set` refused one.
   pub error: Option<String>,
-  /// The recorder of the hotkey held, and whether a key picked the model since it went down.
-  pub held: Option<usize>,
+  /// The hotkeys held, a bit per recorder, and whether a key picked the model since the first
+  /// went down.
+  pub held: u8,
   pub keyed: bool,
   pub model: String,
   pub log: VecDeque<String>,
@@ -64,7 +65,7 @@ impl Default for Demo {
       keys: [hk("z"), hk("x"), hk("1")],
       sent: Default::default(),
       error: None,
-      held: None,
+      held: 0,
       keyed: false,
       model: "Hotkey 1's model".into(),
       log: VecDeque::new(),
@@ -119,21 +120,25 @@ impl Demo {
     let line = match e {
       Edge::Down { which, repeat: false, .. } => {
         let Some(i) = hotkey(which) else { return };
-        (self.held, self.keyed) = (Some(i), false);
-        self.model = format!("Hotkey {}'s model", i + 1);
+        // A dictation starts with the first hotkey down; another one meanwhile joins it.
+        if self.held == 0 {
+          (self.keyed, self.model) = (false, format!("Hotkey {}'s model", i + 1));
+        }
+
+        self.held |= 1 << i;
         format!("Down: hotkey {}", i + 1)
       }
       Edge::Down { .. } => return,
       Edge::Up { which, .. } | Edge::Aborted { which } => {
         let i = hotkey(which).map_or(0, |i| i + 1);
         let done = if matches!(e, Edge::Up { .. }) { "Up" } else { "Aborted" };
-        self.held = None;
+        self.held &= !(1 << hotkey(which).unwrap_or(0));
         format!("{done}: hotkey {i}")
       }
       Edge::Key { index, .. } => {
         let Some(i) = self.sent.1.get(index).copied() else { return };
         let name = self.keys[i].map(|k| k.label()).unwrap_or_default();
-        let first = self.held.is_some() && !self.keyed;
+        let first = self.held != 0 && !self.keyed;
         if first {
           self.keyed = true;
           self.model = format!("Key {}'s model ({name})", i + 1);
@@ -160,7 +165,7 @@ impl Demo {
         let row = FormRow::new(&label).caption(note);
         ui.form_row(fs, row, |ui| {
           let r = ui.id((HOTKEY, i as u8)).shortcut(&mut self.hotkeys[i]);
-          recording |= r.focused;
+          recording |= r.on;
           if r.changed {
             self.apply();
           }
@@ -173,7 +178,7 @@ impl Demo {
         let label = format!("Key {}", i + 1);
         ui.form_row(fs, FormRow::new(&label), |ui| {
           let r = ui.id((KEY, i as u8)).shortcut_key(&mut self.keys[i]);
-          recording |= r.focused;
+          recording |= r.on;
           if r.changed {
             self.apply();
           }
@@ -266,10 +271,11 @@ pub fn config() -> Config {
 }
 
 /// An edge, on the main thread: to the window, which redraws.
-fn deliver(edge: Edge) {
+fn deliver(main: &mut Main, edge: Edge) {
   let window = WINDOW.with(|w| w.try_borrow().ok().and_then(|w| w.clone()));
-  if let Some(w) = window {
-    w.with(|demo| demo.edge(edge));
+  // Busy (a nested run loop holds it): the edge comes again a moment later, never dropped.
+  if window.is_none_or(|w| w.is_open() && w.with(|demo| demo.edge(edge)).is_none()) {
+    main.proxy().after(Duration::from_millis(10), move |main| deliver(main, edge));
   }
 }
 
@@ -287,7 +293,7 @@ fn start(main: &mut Main) {
   let proxy = main.proxy();
   let hotkeys = Hotkeys::new(move |edge| {
     eprintln!("hotkeys: {}", describe(edge));
-    proxy.post(move |_| deliver(edge));
+    proxy.post(move |main| deliver(main, edge));
   });
   HOTKEYS.with(|h| *h.borrow_mut() = Some(hotkeys));
   let w = main.open(&config(), Demo::default());

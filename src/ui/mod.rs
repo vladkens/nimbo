@@ -410,10 +410,7 @@ impl UiState {
       pressed: self.pressed(id),
       focused: self.focused(id),
       clicked: self.clicked(id),
-      changed: false,
-      submitted: false,
-      cancelled: false,
-      blurred: false,
+      ..Response::default()
     }
   }
 }
@@ -449,6 +446,8 @@ pub struct Response {
   pub cancelled: bool,
   /// A text field lost focus since the view last built it.
   pub blurred: bool,
+  /// A shortcut recorder records.
+  pub on: bool,
 }
 
 /// The element tree builder an app's `view` gets each frame it redraws. `'a` lets canvas
