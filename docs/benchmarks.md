@@ -5,7 +5,7 @@ nimbo against Slint, iced, egui and GPUI, in real windows on an Apple M2, measur
 ## Setup
 
 - **Machine.** Apple M2 (4 performance and 4 efficiency cores, 10-core GPU), 24 GB, macOS 27.0.1. One external 4K display at 1920×1080 pt, scale 2, 60 Hz (no ProMotion), so nothing here measures 120 Hz pacing.
-- **Load.** Nothing else ran but a terminal, Finder, a Docker VM (about 20% of one core) and other agent sessions; the 1-minute load average was 1.2–3.2 across runs (median 2.0–2.3, the machine's own background about 1.5). Before each toolkit the runner waited for the load to drop under 2.5.
+- **Load.** Nothing else ran but a terminal, Finder, a Docker VM (about 20% of one core) and other agent sessions; the 1-minute load average was 1.2–3.2 across runs (median 2.0–2.3, the machine's own background about 1.5). Before each toolkit the runner waited for the load to drop under 2.5, at most 90 s (31 of 415 runs started above it, at most 3.22).
 - **Sizes.** Window content 1440×900 pt (2880×1800 px); the bunnies were also run once at 1880×930 pt (3760×1860 px).
 - **Builds.** Release builds, all made before measuring:
   - nimbo: `feat/metal` at ad9a3f2 (main as of #64 plus the Metal renderer), with the `metal` feature. The same binary draws on the CPU by default or with Metal under `NIMBO_RENDERER=metal`; its CPU path is main's CPU renderer.
@@ -28,7 +28,7 @@ The bench apps and the runner aren't in this repository; they are available on r
 - **Typical UI**: each scene is driven by the mouse at 60 events/s for 5 s: hover moves one row per event, scroll moves 40 px per event, and resize changes the width through Accessibility in a sawtooth, synchronously, so a slow app completes fewer steps.
 - **Cold start**: from `posix_spawn` to the window in the window list, and to the first content pixels.
 - **Idle**: the list window left for 4 s, then measured for 10 s.
-- **Repetitions**: 3 per cell (cold start 5, the 1880×930 bunnies 1); the tables show medians. The bunnies sweep stops at the first N under 8 fps.
+- **Repetitions**: 3 per cell (cold start 5, the 1880×930 bunnies 1); the tables show medians. The bunnies sweep stops at the first N under 8 fps over the whole run, so a renderer that falls under it has no cells after.
 
 ## Bunnies, 1440×900 pt
 
@@ -64,7 +64,7 @@ Process CPU % / peak footprint MB:
 
 nimbo's Metal renderer spends 0.02–0.16 ms a frame encoding, then waits for the GPU on the main thread: 4.1 ms at 100 sprites, 13 ms at 10k, 42 ms at 100k.
 
-At 1880×930 pt the results are close to these (nimbo CPU 43 fps at 1k), except for the software renderers that redraw the whole window: Slint software and iced tiny-skia lose 10–20% at small N, while nimbo's CPU renderer doesn't, because it draws only the damaged tiles.
+At 1880×930 pt the GPU renderers are close to these. The software renderers that redraw the whole window lose 10–23% at small N (Slint software 16%, 23% and 19% at 100, 300 and 1k; iced tiny-skia 20%, 16% and 10%), while nimbo's CPU renderer, which draws only the damaged tiles, stays at 60 fps at 100 and 300 and drops from 47 to 43 (about 9%) at 1k.
 
 ## Typical UI, 1440×900 pt
 
@@ -128,7 +128,7 @@ Median (min–max) ms over 5 runs, including process launch and the system's win
 | egui · glow (OpenGL) | 181 (179–203) | 214 (212–222) |
 | GPUI · Metal | 174 (172–181) | 215 (206–217) |
 
-nimbo's own first present comes 83–110 ms after launch; Metal adds 0–10 ms.
+nimbo's own first present comes 83–89 ms after its `main` starts (Metal 86–101 ms).
 
 ## Idle, a still list window
 
@@ -149,11 +149,11 @@ Footprint is the number to compare: resident memory counts the shared system fra
 ## Caveats
 
 - The frames come from different sources (presents, a rendering notifier or per-frame callbacks), and Slint software and iced have none in the UI scenes.
-- CPU % is per process and hides GPU work. nimbo's CPU renderer draws on 4 threads: 349% for 47 fps at 1k sprites, against Slint software's 97% for 37 fps, so per core Slint's software renderer is more efficient at sprites; nimbo's is faster in wall time and in the UI scenes, where it draws only the damaged tiles.
+- CPU % is per process and hides GPU work. nimbo's CPU renderer draws on 4 threads: 349% for 47 fps at 1k sprites, against Slint software's 97% for 37 fps, so per core Slint's software renderer is more efficient at sprites. nimbo's is faster in wall time only up to 1k sprites; Slint software is faster at 3k (19 against 17 fps) and 10k (10 against 5) and still runs at 30k (9). In the hover and scroll scenes nimbo's renderer draws only the damaged tiles and uses less CPU than both.
 - Resize is driven through Accessibility, and a slow app throttles the driver (egui wgpu completed 24 resizes in 5 s).
 - One machine, one 60 Hz display, a low but not zero load.
 
 ## Conclusion
 
-- **nimbo's CPU renderer**, the one that ships, is the fastest software renderer here at UI work: 0.9 ms of CPU per hover event (GPU toolkits 0.65–2.4 ms, Slint software 8.8, iced tiny-skia 16.7) and 6.2 ms per scroll event (the other CPU renderers 13–16). It shows its first pixels first (201 ms) and has the smallest idle footprint (40.8 MB; the GPU toolkits 73–145, the other CPU renderers 103–108). Its weak spot is many moving sprites: 60 fps up to 300, then 47 at 1k, 17 at 3k and 5 at 10k, on 3.5–3.8 cores.
-- **The Metal renderer in development** removes that weak spot: 60 fps up to 30k sprites (59) at 1–5% CPU, and less CPU on scroll (6.2 to 1.4 ms per event) and resize (17.8 to 11.8 ms per step). Only egui wgpu goes further (60 fps at 100k, at 80% CPU). Idle, it is the smallest of the GPU renderers here (45 MB). Its cost today is the synchronous wait for the GPU on the main thread.
+- **nimbo's CPU renderer**, the one that ships, uses the least CPU of the software renderers here on hover and scroll: 0.9 ms per hover event (GPU toolkits 0.65–2.4 ms, Slint software 8.8, iced tiny-skia 16.7) and 6.2 ms per scroll event (the other CPU renderers 13–16). On live resize Slint software uses less (15.0 ms per step against nimbo's 17.8; both complete all 300 steps). It shows its first pixels first (201 ms) and has the smallest idle footprint (40.8 MB; the GPU toolkits 73–145, the other CPU renderers 103–108). Its weak spot is many moving sprites: 60 fps up to 300, then 47 at 1k, 17 at 3k and 5 at 10k, on 3.5–3.8 cores.
+- **The Metal renderer in development** removes that weak spot: 60 fps up to 30k sprites (59) at 1–5% CPU, and less CPU on scroll (6.2 to 1.4 ms per event) and resize (17.8 to 11.8 ms per step). Both egui renderers go further: 60 fps at 100k with wgpu (at 80% CPU) and 61 with glow. Idle, it is the smallest of the GPU renderers here (45 MB). Its cost today is the synchronous wait for the GPU on the main thread.
