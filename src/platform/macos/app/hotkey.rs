@@ -365,19 +365,26 @@ fn route(rx: &Receiver<Raw>, on: &OnEdge, shared: &Shared) {
   let mut dedupe = Dedupe::default();
   // When Carbon reported each slot's press, in ns of [EPOCH].
   let (carbon_down, mut pressed) = (&shared.carbon_down, [0; MAX]);
+  // The slots whose press the app heard: a release or an abort comes once per press, whichever
+  // source (the tap, Carbon, a settle) tells it first; and when to look next ([look]).
+  let (mut told, mut next_look) = (0u8, Instant::now() + LOOK);
   loop {
     let next = match shared.down.load(Ordering::Relaxed) {
       0 => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
-      _ => rx.recv_timeout(LOOK),
+      _ => rx.recv_timeout(next_look.saturating_duration_since(Instant::now())),
     };
 
     let raws = match next {
-      Ok(raw) => vec![raw],
+      Ok(raw) => std::array::from_fn(|i| (i == 0).then_some(raw)),
       Err(RecvTimeoutError::Timeout) => look(shared, secure_input(), &tap::key_down),
       Err(RecvTimeoutError::Disconnected) => return,
     };
 
-    for mut raw in raws {
+    if shared.down.load(Ordering::Relaxed) == 0 || Instant::now() >= next_look {
+      next_look = Instant::now() + LOOK;
+    }
+
+    for mut raw in raws.into_iter().flatten() {
       let counter = match raw.source {
         Source::Tap => &shared.tap_events,
         Source::Carbon => &shared.carbon_events,
@@ -410,9 +417,17 @@ fn route(rx: &Receiver<Raw>, on: &OnEdge, shared: &Shared) {
         }
       }
 
-      if !dedupe.accept(raw.source, raw.edge, raw.at) {
+      let untold = |w: usize| told & 1 << w == 0;
+      let again = matches!(raw.edge, Hit::Up { which } | Hit::Abort { which } if untold(which));
+      if again || !dedupe.accept(raw.source, raw.edge, raw.at) {
         shared.duplicates.fetch_add(1, Ordering::Relaxed);
         continue;
+      }
+
+      match raw.edge {
+        Hit::Down { which, .. } => told |= 1 << which,
+        Hit::Up { which } | Hit::Abort { which } => told &= !(1 << which),
+        _ => {}
       }
 
       let at = raw.at;
@@ -433,7 +448,7 @@ fn route(rx: &Receiver<Raw>, on: &OnEdge, shared: &Shared) {
 /// While a slot is held, Secure Input (which keeps its release from the tap) makes it suspect,
 /// and a suspect chord whose key is up by now is released ([tap::settle]): its `Up`, as the
 /// tap's.
-fn look(shared: &Shared, secure: bool, key_down: &dyn Fn(u64) -> bool) -> Vec<Raw> {
+fn look(shared: &Shared, secure: bool, key_down: &dyn Fn(u64) -> bool) -> [Option<Raw>; MAX] {
   if secure {
     shared.suspect.fetch_or(shared.down.load(Ordering::Relaxed), Ordering::Relaxed);
   }
@@ -444,7 +459,7 @@ fn look(shared: &Shared, secure: bool, key_down: &dyn Fn(u64) -> bool) -> Vec<Ra
     key_down,
   );
   let raw = |which| Raw { source: Source::Tap, edge: Hit::Up { which }, at: Instant::now() };
-  (0..MAX).filter(|i| up & 1 << i != 0).map(raw).collect()
+  std::array::from_fn(|i| (up & 1 << i != 0).then(|| raw(i)))
 }
 
 /// `at` in ns of [EPOCH], as the tap tells time.
@@ -601,13 +616,43 @@ mod tests {
     shared.store_slot(0, slot_value(Hotkey::parse("fn+1").unwrap()).unwrap());
     shared.store_slot(1, slot_value(Hotkey::parse("f2").unwrap()).unwrap());
     shared.down.store(0b11, Ordering::Relaxed);
-    assert!(look(&shared, false, &|_| false).is_empty(), "no Secure Input: nothing asked");
+    assert!(look(&shared, false, &|_| false).iter().all(Option::is_none), "nothing asked");
     let ups = look(&shared, true, &|code| code == 0x78);
-    assert_eq!(
-      ups.iter().map(|r| (r.source, r.edge)).collect::<Vec<_>>(),
-      [(Source::Tap, Hit::Up { which: 0 })]
-    );
+    let ups: Vec<_> = ups.iter().flatten().map(|r| (r.source, r.edge)).collect();
+    assert_eq!(ups, [(Source::Tap, Hit::Up { which: 0 })]);
     assert_eq!(shared.down.load(Ordering::Relaxed), 0b10, "F2 still down");
+    // A modifier alone held through it, its flag gone by now: released too.
+    shared.store_slot(2, slot_value(Hotkey::parse("right_option").unwrap()).unwrap());
+    shared.down.store(0b100, Ordering::Relaxed);
+    let ups = look(&shared, true, &|_| false);
+    assert_eq!(ups.iter().flatten().map(|r| r.edge).collect::<Vec<_>>(), [Hit::Up { which: 2 }]);
+  }
+
+  /// One release per press, whichever source tells it first: a settle's `Up`, then Carbon's
+  /// later than the dedupe's window, is one `Up`; so is an abort then a release.
+  #[test]
+  fn one_release_per_press() {
+    let t0 = Instant::now();
+    let ms = |n| t0 + Duration::from_millis(n);
+    let (shared, (tx, rx)) = (Shared::default(), sync_channel(QUEUE));
+    let raw = |source, edge, at| Raw { source, edge, at };
+    for r in [
+      raw(Source::Tap, Hit::Down { which: 0, repeat: false }, ms(0)),
+      raw(Source::Carbon, Hit::Down { which: 0, repeat: false }, ms(2)),
+      raw(Source::Tap, Hit::Up { which: 0 }, ms(300)),
+      raw(Source::Carbon, Hit::Up { which: 0 }, ms(400)),
+      raw(Source::Tap, Hit::Down { which: 1, repeat: false }, ms(500)),
+      raw(Source::Tap, Hit::Abort { which: 1 }, ms(510)),
+      raw(Source::Tap, Hit::Up { which: 1 }, ms(700)),
+    ] {
+      tx.send(r).unwrap();
+    }
+
+    drop(tx);
+    let (got_tx, got) = std::sync::mpsc::channel();
+    route(&rx, &(Box::new(move |e| got_tx.send(e).unwrap()) as OnEdge), &shared);
+    let ends = got.try_iter().filter(|e| matches!(e, Edge::Up { .. } | Edge::Aborted { .. }));
+    assert_eq!(ends.count(), 2);
   }
 
   /// Carbon's release clears the tap's held bit of a press it missed the release of, not one of

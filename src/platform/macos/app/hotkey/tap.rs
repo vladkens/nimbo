@@ -157,7 +157,12 @@ unsafe extern "C-unwind" fn callback(
 
 /// The key at `code` is down now, as the HID system has it.
 pub(super) fn key_down(code: u64) -> bool {
-  CGEventSource::key_state(CGEventSourceStateID::HIDSystemState, code as u16)
+  let hid = CGEventSourceStateID::HIDSystemState;
+  match device_flag(key_at(code as u16)) {
+    // A modifier key, fn too: by its flag, as the HID system has them.
+    Some(flag) => CGEventSource::flags_state(hid).0 & flag != 0,
+    None => CGEventSource::key_state(hid, code as u16),
+  }
 }
 
 /// What kind of key event the tap has.
@@ -412,14 +417,14 @@ fn mark(bits: &AtomicU8, bit: u8, on: bool) {
   bits.fetch_or(if on { bit } else { 0 }, Ordering::Relaxed);
 }
 
-/// A chord owed a release that may have been missed ([Shared::suspect]: the tap was disabled, or
-/// Secure Input was on) whose key is up (`key_down`, the HID system's state) is released: the
-/// bits cleared, for their `Up`s; one whose key is down is no longer suspect. No other press asks
-/// the HID system: a chord truly held takes keys.
+/// A slot held whose release may have been missed ([Shared::suspect]: the tap was disabled, or
+/// Secure Input was on) whose key is up (`key_down`, the HID system's state; a modifier alone's
+/// by its flag) is released: the bits cleared, for their `Up`s; one whose key is down is no
+/// longer suspect. No other press asks the HID system: a chord truly held takes keys.
 pub(super) fn settle(s: &Shared, chords: &[u64; MAX], key_down: &dyn Fn(u64) -> bool) -> u8 {
   let down = s.down.load(Ordering::Relaxed);
   let suspect = s.suspect.swap(0, Ordering::Relaxed) & down;
-  let gone = |i: usize| suspect & 1 << i != 0 && !alone(chords[i]) && !key_down(chords[i] & 0xffff);
+  let gone = |i: usize| suspect & 1 << i != 0 && !key_down(chords[i] & 0xffff);
   let up = (0..MAX).filter(|&i| gone(i)).fold(0, |m, i| m | 1 << i);
   s.down.fetch_and(!up, Ordering::Relaxed);
   up
