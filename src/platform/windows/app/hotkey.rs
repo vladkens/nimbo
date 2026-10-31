@@ -30,7 +30,7 @@ use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-use crate::hotkey::{Edge, Listener, OnEdge, Status};
+use crate::hotkey::{Edge, Listener, OnEdge, Status, Take, owe};
 use crate::keys::Hotkey;
 use crate::platform::scan_code;
 
@@ -85,6 +85,11 @@ pub fn start_asks() -> bool {
   false
 }
 
+/// Not yet: the hook will take them.
+pub fn keys_while_held() -> bool {
+  false
+}
+
 /// The hotkey thread, driven from the main thread.
 pub struct Hotkeys {
   thread: u32,
@@ -117,8 +122,12 @@ impl Hotkeys {
     }
   }
 
-  /// Takes `hotkey` on the thread; the answer waits for `RegisterHotKey`'s.
-  pub fn set(&mut self, hotkey: Option<Hotkey>) -> Result<(), String> {
+  /// Takes `hotkey` on the thread; the answer waits for `RegisterHotKey`'s. Slot 0 only for now.
+  pub fn set_slot(&mut self, which: usize, hotkey: Option<Hotkey>) -> Result<(), String> {
+    if which > 0 {
+      return hotkey.map_or(Ok(()), |_| Err("one hotkey here for now".into()));
+    }
+
     let (target, err) = match hotkey.map(target).transpose() {
       Ok(t) => (t, None),
       Err(e) => (None, Some(e)),
@@ -130,6 +139,9 @@ impl Hotkeys {
     let taken = answer.unwrap_or_else(|_| Err("the hotkey thread did not answer".into()));
     err.map_or(taken, Err)
   }
+
+  /// No keys taken yet ([keys_while_held]).
+  pub fn set_keys(&mut self, _: &[Option<Hotkey>]) {}
 
   /// Installs the hook, unless it is in or going in.
   pub fn start(&mut self) -> Result<(), String> {
@@ -158,8 +170,16 @@ impl Hotkeys {
       _ => Listener::Off,
     };
     s.listener_error = sh.listener_error.lock().ok().and_then(|e| e.clone());
-    s.fallback = sh.fallback.load(Ordering::Acquire);
-    s.fallback_error = sh.fallback_error.lock().ok().and_then(|e| e.clone());
+    if let Some(slot) = s.slots.first_mut() {
+      slot.fallback = sh.fallback.load(Ordering::Acquire);
+      slot.fallback_error = sh.fallback_error.lock().ok().and_then(|e| e.clone());
+    }
+
+    if !s.keys.is_empty() {
+      s.keys.clear();
+      s.keys_error = Some("keys while a hotkey is held: not on Windows yet".into());
+    }
+
     s.counts.listener = n(&sh.listener_events);
     s.counts.fallback = n(&sh.fallback_events);
     s.counts.fallback_repeats = n(&sh.fallback_repeats);
@@ -223,7 +243,7 @@ fn run(edges: &Sender<Edge>, shared: Arc<Shared>, cmds: &Receiver<Cmd>, ready: &
           chord.timer = unsafe { SetTimer(null_mut(), 0, POLL.as_millis() as u32, None) };
         }
 
-        on(Edge::Down { at: now, repeat });
+        on(Edge::Down { which: 0, at: now, repeat });
       }
       WM_TIMER if msg.wParam == chord.timer && chord.timer != 0 => {
         let up =
@@ -231,7 +251,7 @@ fn run(edges: &Sender<Edge>, shared: Arc<Shared>, cmds: &Receiver<Cmd>, ready: &
         if up {
           unsafe { KillTimer(null_mut(), chord.timer) };
           (chord.held, chord.timer) = (None, 0);
-          on(Edge::Up { at: now });
+          on(Edge::Up { which: 0, at: now });
         }
       }
       WM_EDGE => {
@@ -339,10 +359,10 @@ unsafe extern "system" fn hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
       let (hit, taken) = h.lone.judge(on, k.vkCode, down, now);
       if let Some(hit) = hit {
         h.queue.push(match hit {
-          Hit::Down => Edge::Down { at: now, repeat: false },
-          Hit::Up => Edge::Up { at: now },
+          Hit::Down => Edge::Down { which: 0, at: now, repeat: false },
+          Hit::Up => Edge::Up { which: 0, at: now },
           Hit::Escape => Edge::Escape,
-          Hit::Aborted => Edge::Aborted,
+          Hit::Aborted => Edge::Aborted { which: 0 },
         });
         unsafe { PostThreadMessageW(h.thread, WM_EDGE, 0, 0) };
       }
@@ -434,27 +454,25 @@ impl Lone {
 
   /// Escape while taking it is `on`: a press with no Ctrl, Alt or Win held (Shift is fine, and so
   /// is the hotkey's own key, held past [CHORD_WINDOW]) is taken and told; its autorepeats and
-  /// release are taken too, also once it went off. A press the app saw stays the app's. `Some`:
-  /// swallowed, with the edge if any.
+  /// release are taken too, also once it went off ([owe]). A press the app saw stays the app's.
+  /// `Some`: swallowed, with the edge if any.
   fn escape(&mut self, on: bool, vk: u32, down: bool) -> Option<Option<Hit>> {
     if vk != VK_ESCAPE as u32 {
       return None;
     }
 
-    if !down {
-      return self.escape.take().filter(|&taken| taken).map(|_| None);
-    }
-
-    if let Some(taken) = self.escape {
-      return taken.then_some(None);
-    }
-
     let own = self.held.map(|_| self.key);
     let shift = [VK_LSHIFT as u32, VK_RSHIFT as u32];
     let chord = self.down.iter().any(|&m| Some(m) != own && !shift.contains(&m));
-    let taken = on && !chord;
-    self.escape = Some(taken);
-    taken.then_some(Some(Hit::Escape))
+    // The hook marks no autorepeat: a press while Escape is down is one.
+    let repeat = self.escape.is_some();
+    let (owed, take) = owe(self.escape == Some(true), down, repeat, on && !chord);
+    self.escape = down.then_some(owed);
+    match take {
+      Take::Pass => None,
+      Take::Swallow => Some(None),
+      Take::Claim => Some(Some(Hit::Escape)),
+    }
   }
 }
 
@@ -471,6 +489,9 @@ fn target(hotkey: Hotkey) -> Result<Target, String> {
       Code::Fn => "the fn key is not visible to Windows".to_string(),
       code => format!("{code} is no modifier key"),
     }),
+    Hotkey::Shortcut(s) if s.mods.contains(Modifiers::FN) => {
+      Err("the fn key is not visible to Windows".into())
+    }
     Hotkey::Shortcut(s) => {
       let vk =
         s.code().and_then(vk_of).ok_or_else(|| format!("{s} has no key on this keyboard"))?;
@@ -569,6 +590,7 @@ mod tests {
     assert_eq!(chord("right_option"), Ok(Target::Lone(VK_RMENU as u32)));
     assert_eq!(chord("left_cmd"), Ok(Target::Lone(VK_LWIN as u32)));
     assert!(chord("fn").is_err_and(|e| e.contains("fn")));
+    assert!(chord("fn+1").is_err_and(|e| e.contains("fn")));
     assert_eq!(
       (scan_of(Code::KeyA), scan_of(Code::Digit1), scan_of(Code::Slash)),
       (Some(0x1E), Some(0x02), Some(0x35))

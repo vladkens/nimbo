@@ -115,6 +115,8 @@ pub(crate) struct Input {
   /// A Control-click is down on the Mac: the right button's until it is let go.
   control: bool,
   scratch: Vec<Id>,
+  /// fn is held ([crate::Event::Modifier]): a hotkey recorder's chord modifier.
+  pub fn_held: bool,
 }
 
 impl Input {

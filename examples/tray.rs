@@ -78,8 +78,9 @@ fn shown(state: &Shared) -> Shown {
   let login = autostart::state(&INFO).ok().map(|st| st.wanted());
   // Read each time: the listener may fail later (Linux: the user didn't approve the shortcut).
   let status = s.hotkeys.as_ref().map(|h| h.status());
-  let bound = status.filter(|st| st.error.is_none() && st.listener_error.is_none());
-  let hotkey = bound.and_then(|st| st.hotkey).map(|h| h.label()).unwrap_or_default();
+  let bound = status.filter(|st| st.listener_error.is_none());
+  let slot = bound.and_then(|st| st.slots.into_iter().next()).filter(|s| s.error.is_none());
+  let hotkey = slot.map(|s| s.hotkey.label()).unwrap_or_default();
   Shown { count, login, hotkey }
 }
 
@@ -147,7 +148,8 @@ fn start(main: &mut Main, instance: Option<Instance>) {
       proxy.post(|main| STATE.with(|s| toggle(main, s)));
     }
   });
-  if let Err(e) = hotkeys.set(HOTKEY) {
+  let hotkey = nimbo::Hotkey::parse(HOTKEY).map_err(|e| e.to_string());
+  if let Err(e) = hotkey.and_then(|h| hotkeys.set(&[h], &[])) {
     eprintln!("hotkey: {e}");
   }
 

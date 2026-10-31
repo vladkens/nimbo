@@ -149,7 +149,8 @@ pub enum Event {
   /// A modifier key went down or up, by its place ([Code::AltRight], [Code::Fn]): what a
   /// shortcut recorder needs to take one alone (`right_option`). After the [Event::Mods] it
   /// changed; to the focused element first ([Ui::modifier_key]), then the app. Autorepeats send
-  /// none.
+  /// none. On macOS fn's comes from its flag, also as the window gains the keys (fn held then)
+  /// or loses them (fn up).
   Modifier {
     key: Code,
     down: bool,
@@ -591,6 +592,10 @@ impl<A: App> Runtime<A> {
     if keys {
       self.take_wake();
       self.fresh();
+    }
+
+    if let Event::Modifier { key: Code::Fn, down } = ev {
+      self.ui.input.fn_held = down;
     }
 
     let focus = self.ui.focus();

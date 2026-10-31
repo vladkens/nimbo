@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dispatch2::{DispatchQueue, MainThreadBound};
-use keyboard_types::Modifiers;
+use keyboard_types::{Code, Modifiers};
 use objc2::rc::{Retained, Weak};
 use objc2::runtime::{AnyObject, ProtocolObject, Sel};
 use objc2::{
@@ -94,6 +94,8 @@ pub struct Ivars {
   /// each release to the view that got the press, while `pressedMouseButtons` is the mouse's
   /// state now, ahead of the events queued and with presses in other windows.
   held: Cell<u64>,
+  /// fn is held, as the last flags had it ([View::fn_flag]).
+  fn_down: Cell<bool>,
   /// The field input methods work for and whether it had marked text, as of the last event or
   /// frame; whether the input method's own call is under way.
   ime_field: Cell<Option<Id>>,
@@ -349,12 +351,15 @@ define_class!(
     #[unsafe(method(flagsChanged:))]
     fn flags_changed(&self, event: &NSEvent) {
       self.send(Event::Mods(mods(event)));
-      // The device-dependent flags (`NX_DEVICE*KEYMASK`) tell whether the key went down.
+      // The device-dependent flags (`NX_DEVICE*KEYMASK`) tell whether the key went down; fn by
+      // its own flag, whatever the code (the Globe key's release may come with another).
       let key = keyboard::code(event.keyCode());
-      if let Some(flag) = keyboard::device_flag(key) {
+      if let Some(flag) = keyboard::device_flag(key).filter(|_| key != Code::Fn) {
         let down = event.modifierFlags().0 as u64 & flag != 0;
         self.send(Event::Modifier { key, down });
       }
+
+      self.fn_flag(event.modifierFlags());
     }
 
     #[unsafe(method(tick:))]
@@ -612,12 +617,23 @@ impl View {
   /// The window became key or resigned: modifiers that changed while another window had the
   /// keys never came here, so none while away, and those held now on return.
   pub fn focus(&self, on: bool) {
+    let flags = if on { NSEvent::modifierFlags_class() } else { NSEventModifierFlags::empty() };
     if on {
       self.send(Event::Focus(true));
-      self.send(Event::Mods(flags_mods(NSEvent::modifierFlags_class())));
+      self.send(Event::Mods(flags_mods(flags)));
     } else {
       self.send(Event::Mods(Modifiers::empty()));
       self.send(Event::Focus(false));
+    }
+
+    self.fn_flag(flags);
+  }
+
+  /// fn went down or up (its flag in `flags` changed): [Event::Modifier] for [Code::Fn].
+  fn fn_flag(&self, flags: NSEventModifierFlags) {
+    let down = flags.contains(NSEventModifierFlags::Function);
+    if self.ivars().fn_down.replace(down) != down {
+      self.send(Event::Modifier { key: Code::Fn, down });
     }
   }
 

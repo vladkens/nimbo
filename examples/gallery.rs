@@ -26,6 +26,7 @@ pub const SIZE: &str = "size";
 pub const VIEW: &str = "view";
 pub const HOTKEY: &str = "hotkey";
 pub const CLEARABLE: &str = "clearable";
+pub const KEY: &str = "key";
 pub const ASK: &str = "ask";
 pub const DIALOG: &str = "dialog";
 pub const RESET: &str = "reset";
@@ -49,6 +50,8 @@ pub struct Gallery {
   pub size: Size,
   pub view: u8,
   pub hotkey: Option<Hotkey>,
+  /// A key taken while the hotkey is held.
+  pub key: Option<Hotkey>,
   pub search: String,
   /// The pane whose button opened the dialog: it asks in that pane's theme.
   pub ask: Option<usize>,
@@ -65,6 +68,7 @@ impl Default for Gallery {
       size: Size::Medium,
       view: 0,
       hotkey: Hotkey::parse("ctrl+option+space").ok(),
+      key: Hotkey::parse("z").ok(),
       search: "Switches".to_owned(),
       ask: None,
       deleted: 0,
@@ -148,6 +152,12 @@ impl Gallery {
         ui.id((CLEARABLE, i)).shortcut(&mut self.hotkey);
         ui.set_theme(t);
       });
+      line(ui, "KEY WHILE HELD", |ui| {
+        // Any key, with or without modifiers, cleared by its ⊗.
+        ui.set_theme(Theme { shortcut_clear: true, ..t });
+        ui.id((KEY, i)).shortcut_key(&mut self.key);
+        ui.set_theme(t);
+      });
       line(ui, "SEARCH", |ui| {
         ui.id((SEARCH, i)).search(&mut self.search, "Search widgets");
         ui.disabled(true).search(&mut String::new(), "Off");
@@ -200,7 +210,7 @@ impl App for Gallery {
 
 fn main() {
   // The shot: the pointer on the light pane's switch.
-  nimbo::run(Config::new("gallery", 1040.0, 590.0), Gallery::default(), |h| {
+  nimbo::run(Config::new("gallery", 1040.0, 650.0), Gallery::default(), |h| {
     h.frame();
     let r = h.rect(Id::of((TOGGLE, 0usize))).unwrap();
     h.move_to(r.x + 10.0, r.y + r.h / 2.0);
