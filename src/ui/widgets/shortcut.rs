@@ -367,6 +367,8 @@ mod tests {
     h.click_id(Id::of("rec"));
     h.key('2', Modifiers::empty());
     assert_eq!(h.app().0.map(|k| k.to_string()).as_deref(), Some("fn+2"));
+
+    // A key recorder drops fn.
     let mut h = Harness::new(Keys::default(), Size::new(300.0, 100.0), 1.0);
     h.frame();
     h.click_id(Id::of("rec"));

@@ -132,13 +132,10 @@ impl Demo {
       }
       Edge::Down { .. } => return,
       Edge::Up { which, .. } | Edge::Aborted { which } => {
-        let i = hotkey(which).map_or(0, |i| i + 1);
+        let Some(i) = hotkey(which) else { return };
         let done = if matches!(e, Edge::Up { .. }) { "Up" } else { "Aborted" };
-        if let Some(i) = hotkey(which) {
-          self.held &= !(1 << i);
-        }
-
-        format!("{done}: hotkey {i}")
+        self.held &= !(1 << i);
+        format!("{done}: hotkey {}", i + 1)
       }
       Edge::Key { index, .. } => {
         let Some(i) = self.sent.1.get(index).copied() else { return };
@@ -333,12 +330,16 @@ fn main() {
     // fn held, Z picked its model, X came after: ignored; then fn up.
     let at = Instant::now();
     let mut demo = Demo::default();
-    for e in [Edge::Down { which: 0, at, repeat: false }, Edge::Key { index: 0, at }] {
+    let edges = [
+      Edge::Down { which: 0, at, repeat: false },
+      Edge::Key { index: 0, at },
+      Edge::Key { index: 1, at },
+      Edge::Up { which: 0, at },
+    ];
+    for e in edges {
       demo.edge(e);
     }
 
-    demo.edge(Edge::Key { index: 1, at });
-    demo.edge(Edge::Up { which: 0, at });
     return nimbo::run(config(), demo, |h| _ = h.frame());
   }
 

@@ -263,7 +263,9 @@ impl Book {
     self.keys = keys.iter().zip(&bad).take(MAX).map(|(&k, e)| e.is_none().then_some(k)).collect();
     (self.hotkeys, self.invalid, self.left_out) =
       (hotkeys.to_vec(), invalid, bad.into_iter().flatten().next());
+
     self.arm(imp);
+
     let first = self.status().slots.into_iter().find_map(|s| s.error);
     first.or(self.left_out.clone()).map_or(Ok(()), Err)
   }
@@ -458,12 +460,8 @@ mod tests {
     assert_eq!(f.0, ["0=fn", "1=f2", "keys z - x"]);
     // F2 gone, the keys the same: slot 1 alone, nothing to clear as it was refused.
     f.0.clear();
-    assert_eq!(b.set(&hot[..1], &keys, &mut f), Err(keys_err(&b)));
+    assert_eq!(b.set(&hot[..1], &keys, &mut f), Err(b.left_out.clone().unwrap()));
     assert!(f.0.is_empty(), "{:?}", f.0);
-  }
-
-  fn keys_err(b: &Book) -> String {
-    b.left_out.clone().unwrap()
   }
 
   #[test]
