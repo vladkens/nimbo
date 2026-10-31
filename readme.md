@@ -118,6 +118,7 @@ cargo run --release --example gallery -- --shot gallery.png    # the same, rende
 - `shapes`: what the renderer draws
 - `input`: mouse, keys, clipboard
 - `tray`: a tray icon, a global hotkey
+- `hotkeys`: several hotkeys and keys taken while one is held (macOS)
 - `hud`: an overlay over every app
 
 ## 📏 Size
