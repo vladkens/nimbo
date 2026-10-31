@@ -75,9 +75,10 @@
 //!   - present: `Runtime::frame`, then `cpu::Renderer::sync(&mut rt.text, &mut rt.images)` and the
 //!     CPU frame into the window: `prepare(scene, size, scale)`, `damage(&shown_tiles)`,
 //!     `draw(scene, px, stride, &rects)` into a buffer the OS shows, keeping `tiles()` with each
-//!     buffer (macOS: IOSurfaces as the layer's contents, `surface.rs`; Windows: a DIB section and
-//!     BitBlt; Linux: a cairo image surface GTK paints). Draw synchronously during a live resize so
-//!     the content never stretches.
+//!     buffer (macOS: IOSurfaces as the layer's contents, `surface.rs`, which with the `metal`
+//!     feature and `NIMBO_RENDERER=metal` the Metal renderer fills instead; Windows: a DIB section
+//!     and BitBlt; Linux: a cairo image surface GTK paints). Draw synchronously during a live
+//!     resize so the content never stretches.
 //!   - appearance: send `Event::Appearance(appearance())` ([crate::Event::Appearance]) to the
 //!     runtime right after making it, before the first frame, and again whenever the OS's light or
 //!     dark setting or accent colour changes (macOS: `viewDidChangeEffectiveAppearance`,
@@ -196,7 +197,7 @@
 //!   [crate::text::TextSystem] is made often and must stay cheap.
 
 #[cfg(target_os = "macos")]
-mod macos;
+pub(crate) mod macos;
 #[cfg(target_os = "macos")]
 use macos as imp;
 

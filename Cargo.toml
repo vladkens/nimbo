@@ -9,7 +9,7 @@ repository = "https://github.com/vladkens/nimbo"
 homepage = "https://github.com/vladkens/nimbo"
 documentation = "https://docs.rs/nimbo"
 readme = "readme.md"
-include = ["/src/**/*.rs", "/Cargo.toml", "/Cargo.lock", "/LICENSE", "/readme.md"]
+include = ["/src/**/*.rs", "/src/**/*.metal", "/Cargo.toml", "/Cargo.lock", "/LICENSE", "/readme.md"]
 keywords = ["gui", "ui", "desktop", "widgets", "toolkit"]
 categories = ["gui"]
 
@@ -25,8 +25,12 @@ objc2-core-foundation = { version = "0.3.2", default-features = false, features 
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGBitmapContext", "CGColorSpace", "CGContext", "CGImage", "CGPath", "CGEvent", "CGEventTypes", "CGEventSource", "CGRemoteOperation"] }
 objc2-core-text = { version = "0.3.2", default-features = false, features = ["std", "objc2-core-graphics", "CTFont", "CTLine", "CTRun", "CTStringAttributes", "CTFontDescriptor", "CTFontTraits"] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSGeometry", "NSRunLoop", "NSObject", "NSNotification", "NSArray", "NSUserDefaults", "NSAttributedString", "NSRange", "NSObjCRuntime", "NSBundle", "NSError", "NSEnumerator", "NSURL", "NSData", "NSProcessInfo", "NSValue", "NSDictionary"] }
+objc2-metal = { version = "0.3.2", default-features = false, features = ["std", "MTLDevice", "MTLResource", "MTLTexture", "MTLBuffer", "MTLLibrary", "MTLRenderPipeline", "MTLCommandQueue", "MTLCommandBuffer", "MTLCommandEncoder", "MTLRenderCommandEncoder", "MTLBlitCommandEncoder", "MTLRenderPass", "MTLPixelFormat", "MTLTypes"], optional = true }
 objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["std", "objc2-core-foundation", "CALayer", "CADisplayLink", "CAFrameRateRange", "CATransaction"] }
 objc2-service-management = { version = "0.3.2", default-features = false, features = ["std", "SMAppService", "objc2-foundation", "objc2"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.61.2", default-features = false, features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_IO", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Pipes", "Win32_System_Power", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_Variant", "Win32_UI_HiDpi", "Win32_UI_Input_Ime", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"] }
+
+[features]
+metal = ["dep:objc2-metal"]

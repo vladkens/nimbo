@@ -203,3 +203,16 @@ fn rows_read_and_press_as_rows() {
   assert_eq!(h.app().selected, Some(entry(0, 2)));
   reads(&h.a11y(), &[&format!("row {:?} selected desc \"23:57 · 5.8 s\"", name(0, 2))]);
 }
+
+/// The Metal renderer draws the history as the CPU does, and again scrolled into the middle and
+/// to the end, the new rows' glyphs reaching it by the sync after each frame.
+#[cfg(all(feature = "metal", target_os = "macos"))]
+#[test]
+fn metal_draws_as_the_cpu() {
+  let mut h = history();
+  common::metal_parity(&mut h, 0.005);
+  for dy in [-30_000.0, -1e9] {
+    swipe(&mut h, dy);
+    common::metal_parity(&mut h, 0.005);
+  }
+}

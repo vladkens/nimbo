@@ -5,7 +5,8 @@
 """Checks that the examples run on macOS 11 (MIN), built as an app builds them, with no target set.
 
 It builds the examples with MACOSX_DEPLOYMENT_TARGET removed from the environment and no
-`--config`, so a deployment target set again in `.cargo/config.toml` fails it, then:
+`--config`, so a deployment target set again in `.cargo/config.toml` fails it, once with the
+default features and once with each of FEATURES (the Metal renderer), then for each build:
 1. each example's LC_BUILD_VERSION minos (`otool -l`) must be MIN (skipped on a non-arm64 host,
    where rustc's default is 10.12);
 2. the C symbols they import (`nm -mu`, libSystem's too; not libc++'s, which are C++) and the
@@ -35,6 +36,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MIN = "11.0"
+# The builds besides the default one: `--features` of each.
+FEATURES = ("metal",)
 # libc++'s imports are C++ (mangled): no C header declares them.
 CXX = "libc++"
 FRAMEWORKS = (
@@ -48,6 +51,7 @@ FRAMEWORKS = (
   "IOKit/IOKitLib.h",
   "ApplicationServices/ApplicationServices.h",
   "CoreServices/CoreServices.h",
+  "Metal/Metal.h",
 )
 HEADERS = (
   "dispatch/dispatch.h",
@@ -142,10 +146,11 @@ def run(*cmd: str, **kw) -> str:
   return subprocess.run(cmd, check=True, capture_output=True, text=True, **kw).stdout
 
 
-def build() -> tuple[list[Path], Path]:
+def build(features: str | None) -> tuple[list[Path], Path]:
   """The examples and libnimbo's rlib, built with no deployment target in the environment."""
   env = {k: v for k, v in os.environ.items() if k != "MACOSX_DEPLOYMENT_TARGET"}
   cmd = ("cargo", "build", "--examples", "--message-format=json-render-diagnostics")
+  cmd += ("--features", features) if features else ()
   res = subprocess.run(cmd, cwd=ROOT, env=env, stdout=subprocess.PIPE, text=True)
   if res.returncode != 0:
     sys.exit("macos-min: the build failed")
@@ -247,22 +252,28 @@ def main() -> int:
     print("macos-min: not macOS, skipped")
     return 0
 
-  examples, rlib = build()
-  fails = []
-  if platform.machine() != "arm64":
+  fails, syms, count = [], defaultdict(set), 0
+  arm = platform.machine() == "arm64"
+  if not arm:
     print(f"macos-min: {platform.machine()} host, rustc's default isn't {MIN}: minos not checked")
-  else:
+
+  # Each build replaces the last one's binaries: they are read before the next.
+  for features in (None, *FEATURES):
+    examples, rlib = build(features)
+    count = max(count, len(examples))
     found = defaultdict(list)
-    for path in examples:
+    for path in examples if arm else []:
       found[minos(run("otool", "-l", str(path)))].append(path.name)
 
     fails += [f"minos {v}, not {MIN}: {', '.join(names)}" for v, names in found.items() if v != MIN]
-    if set(found) != {MIN}:
+    if found and set(found) != {MIN}:
       fails += [f"MACOSX_DEPLOYMENT_TARGET is set in {p}" for p in configs()]
+
+    for sym, names in imports(examples, rlib).items():
+      syms[sym] |= names
 
   sdk = Path(run("xcrun", "--show-sdk-path").strip())
   objc = tbd_symbols((sdk / "usr/lib/libobjc.A.tbd").read_text())
-  syms = imports(examples, rlib)
   for sym, msg in compile_check(sorted(syms)):
     if sym and exempt(sym, msg, objc):
       continue
@@ -276,7 +287,8 @@ def main() -> int:
     print(f"macos-min: FAIL (needs macOS {MIN})", file=sys.stderr)
     return 1
 
-  print(f"macos-min: {len(examples)} examples, {len(syms)} C symbols: macOS {MIN}")
+  builds = ", ".join(("default", *FEATURES))
+  print(f"macos-min: {count} examples ({builds}), {len(syms)} C symbols: macOS {MIN}")
   return 0
 
 

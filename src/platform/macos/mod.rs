@@ -15,6 +15,8 @@ mod files;
 mod input;
 mod keyboard;
 mod link;
+#[cfg(feature = "metal")]
+pub(crate) mod metal;
 mod overlay;
 pub mod shell;
 mod surface;

@@ -1,12 +1,14 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The NSView subclass: a layer we draw with the CPU renderer (IOSurfaces as its contents),
-//! NSEvents converted to [Event], and a display link that runs only while the runtime needs frames
-//! (input, animations); a timer the app asked for sleeps on the main queue until it is due (a
-//! refresh after the last frame at the soonest) and draws its frame there, leaving the display link
-//! paused. While the window is hidden (minimized, covered, on another space) frames wait until it
-//! shows again. Keys nobody used go through `interpretKeyEvents:`, which calls back `insertText:`
-//! and `doCommandBySelector:` (see [crate::keys]); the pointer's cursor follows the runtime's.
+//! The NSView subclass: a layer we draw with the CPU renderer or, with `NIMBO_RENDERER=metal`,
+//! with Metal ([Presenter]: IOSurfaces as its contents, Metal's spare ones let go while it
+//! pauses), NSEvents converted to [Event], and a display link that runs only while the runtime
+//! needs frames (input, animations); a timer the app asked for sleeps on the main queue until it
+//! is due (a refresh after the last frame at the soonest) and draws its frame there, leaving the
+//! display link paused. While the window is hidden (minimized, covered, on another space) frames
+//! wait until it shows again. Keys nobody used go through `interpretKeyEvents:`, which calls back
+//! `insertText:` and `doCommandBySelector:` (see [crate::keys]); the pointer's cursor follows the
+//! runtime's.
 //!
 //! The view is an `NSTextInputClient`: while a text field that takes input methods has focus
 //! ([Runtime::text_input]), it has an input context, so input methods compose marked text in the
@@ -476,9 +478,9 @@ impl View {
     view.setLayer(Some(&layer));
     view.setWantsLayer(true);
     view.registerForDraggedTypes(&NSArray::from_slice(&[unsafe { NSPasteboardTypeFileURL }]));
-    let mut presenter = Presenter::new(layer);
-    presenter.trace = std::env::var_os("NIMBO_TRACE").is_some();
-    presenter.renderer.transparent = overlay.is_some();
+    let trace = std::env::var_os("NIMBO_TRACE").is_some();
+    let metal = std::env::var("NIMBO_RENDERER").is_ok_and(|r| r == "metal");
+    let presenter = Presenter::new(layer, overlay.is_some(), trace, metal);
 
     // Mouse moves and exits for the visible rect, which AppKit keeps up to date, in an inactive
     // app too; `cursorUpdate:` in an area of its own, as AppKit sends none with `ActiveAlways`.
@@ -538,6 +540,7 @@ impl View {
         // Nothing changed since the last frame: stop until the next event, wake or timer. Hidden:
         // until the window shows again.
         st.link.set_paused(true);
+        st.presenter.idle();
         if self.visible() {
           self.schedule(st);
         }
@@ -915,6 +918,7 @@ impl View {
         true => st.link.set_paused(false),
         false => {
           st.link.set_paused(true);
+          st.presenter.idle();
           self.schedule(st);
         }
       }
@@ -1039,9 +1043,8 @@ impl View {
     st.wake.disarm();
     st.rt.resize(size, scale);
     st.rt.frame();
-    st.presenter.renderer.sync(&mut st.rt.text, &mut st.rt.images);
-    st.presenter.present(&st.rt.scene, size, scale);
-    // Every surface busy: the frame is drawn again at the next tick.
+    st.presenter.present(&st.rt.scene, &mut st.rt.text, &mut st.rt.images, size, scale);
+    // Every surface busy, or Metal failed: the frame is drawn again at the next tick.
     if st.presenter.starved {
       st.rt.redraw();
     }

@@ -475,3 +475,19 @@ fn an_assistive_scroll_shows_a_cut_row() {
   assert!(offset(&h, Id::of(LIST)) > 0.0);
   assert!(bottom(&h, k) <= list.y + list.h + 0.5, "row {k} at {:?} in {list:?}", h.rect(row(k)));
 }
+
+/// The Metal renderer draws the lists as the CPU does, and again scrolled down with rows
+/// selected and the menu open, whose new glyphs reach it by the sync after each frame.
+#[cfg(all(feature = "metal", target_os = "macos"))]
+#[test]
+fn metal_draws_as_the_cpu() {
+  let mut h = lists();
+  common::metal_parity(&mut h, 0.005);
+  let at = mid(h.rect(Id::of(LIST)).unwrap());
+  swipe(&mut h, at, -2400.0);
+  h.frame();
+  select_some(&mut h);
+  common::metal_parity(&mut h, 0.005);
+  open(&mut h, Id::of(MENU));
+  common::metal_parity(&mut h, 0.005);
+}

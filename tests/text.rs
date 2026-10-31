@@ -220,3 +220,17 @@ fn dark_at_scale_1() {
 fn light_at_scale_1() {
   check(&mut text(1.0, true), &LIGHT);
 }
+
+/// The Metal renderer draws the text as the CPU does, the emoji included, in both appearances at
+/// scale 2 and 1: the glyphs each new frame rasterizes reach it by the sync after the frame.
+#[cfg(all(feature = "metal", target_os = "macos"))]
+#[test]
+fn metal_draws_as_the_cpu() {
+  let mut h = Harness::new(Text::default(), SIZE, 2.0);
+  let (dark, light) = (Appearance::DARK, Appearance::LIGHT);
+  for (scale, look) in [(2.0, dark), (2.0, light), (1.0, light), (1.0, dark)] {
+    h.resize(SIZE, scale);
+    h.event(Event::Appearance(look));
+    common::metal_parity(&mut h, 0.005);
+  }
+}

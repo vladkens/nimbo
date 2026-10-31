@@ -217,6 +217,12 @@ impl TextSystem {
     }
 
     self.scale = scale;
+    self.reset_atlases();
+  }
+
+  /// Forgets every glyph: both atlases start over in a new epoch, so the glyphs drawn next are
+  /// rasterized and uploaded again (a renderer that takes over from another gets them all).
+  pub(crate) fn reset_atlases(&mut self) {
     self.atlas.reset();
     self.color_atlas.reset();
   }
@@ -269,8 +275,7 @@ impl TextSystem {
       self.color_glyphs.clear();
       self.ink.clear();
       self.lines.clear();
-      self.atlas.reset();
-      self.color_atlas.reset();
+      self.reset_atlases();
       // Drawn again once, not over and over when every frame asks for this many.
       let again = !self.refilled;
       self.refilled = again;

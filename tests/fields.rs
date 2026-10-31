@@ -634,3 +634,17 @@ fn selectable_texts_edit_menu_copies() {
   choose(h, ABOUT, "copy");
   assert_eq!(clipboard(h).as_deref(), Some(TEXT));
 }
+
+/// The Metal renderer draws the fields as the CPU does, and again with text typed and a part
+/// of it selected, its new glyphs reaching it by the sync after the frame.
+#[cfg(all(feature = "metal", target_os = "macos"))]
+#[test]
+fn metal_draws_as_the_cpu() {
+  let mut h = fields();
+  common::metal_parity(&mut h, 0.005);
+  h.click_id(Id::of(NAME));
+  h.type_text("Zyxt Quokka-Wobbleton");
+  h.key(NamedKey::ArrowLeft, SHIFT | META);
+  h.wait(Duration::from_millis(200));
+  common::metal_parity(&mut h, 0.005);
+}

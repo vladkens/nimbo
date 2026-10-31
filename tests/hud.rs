@@ -63,3 +63,14 @@ fn the_meter_moves_while_recording() {
   assert!(h.wait(Duration::from_millis(250)) >= 25, "a frame every refresh");
   assert_ne!(bars(&mut h), before);
 }
+
+/// The Metal renderer draws the overlay as the CPU does, transparent around the pill, and again
+/// with the meter moved on.
+#[cfg(all(feature = "metal", target_os = "macos"))]
+#[test]
+fn metal_draws_as_the_cpu() {
+  let mut h = hud();
+  common::metal_parity(&mut h, 0.005);
+  h.wait(Duration::from_millis(250));
+  common::metal_parity(&mut h, 0.005);
+}

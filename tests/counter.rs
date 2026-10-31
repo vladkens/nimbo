@@ -130,3 +130,18 @@ fn the_buttons_are_named_by_their_text() {
   h.frame();
   reads(&h.a11y(), &["static text \"1\"", "button \"Reset\""]);
 }
+
+/// The Metal renderer draws the counter as the CPU does, and again with a new count and the +
+/// button's hover fading in.
+#[cfg(all(feature = "metal", target_os = "macos"))]
+#[test]
+fn metal_draws_as_the_cpu() {
+  let mut h = counter();
+  common::metal_parity(&mut h, 0.005);
+  for _ in 0..7 {
+    h.click_id(Id::of(PLUS));
+  }
+
+  h.wait(Duration::from_millis(60));
+  common::metal_parity(&mut h, 0.005);
+}

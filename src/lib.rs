@@ -29,6 +29,9 @@
 //! macOS 11 is the least it runs on, rustc's default deployment target, so an app sets none;
 //! newer APIs are used where the system has them (the activation, the display link and menu
 //! section headers on 14+, launch at login on 13+).
+//!
+//! The optional `metal` feature adds an opt-in Metal renderer on macOS, chosen at run time
+//! with `NIMBO_RENDERER=metal`; the CPU renderer stays the default.
 
 pub mod activity;
 pub mod app;
@@ -291,7 +294,16 @@ pub fn run_args<A: App + 'static>(
     std::fs::create_dir_all(dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
   }
 
-  h.shot(path).unwrap_or_else(|e| panic!("{e}"));
+  let img = h.render();
+  // As a window with `NIMBO_RENDERER=metal` draws; the CPU's frame when there is no Metal (why on
+  // stderr).
+  #[cfg(all(feature = "metal", target_os = "macos"))]
+  let img = match std::env::var("NIMBO_RENDERER").as_deref() {
+    Ok("metal") => h.render_metal().unwrap_or(img),
+    _ => img,
+  };
+
+  img.save_png(path).unwrap_or_else(|e| panic!("{e}"));
   println!("{}: wrote {}", cfg.title, path.display());
 }
 

@@ -14,7 +14,7 @@ use std::sync::Mutex;
 
 use self::pool::Pool;
 use self::raster::{IRect, Target, Tex};
-use crate::scene::{Images, Rect, Scene, Size};
+use crate::scene::{ImageUpload, Images, Rect, Scene, Size};
 use crate::text::{ATLAS_SIZE, COLOR_ATLAS_SIZE, TextSystem, Upload};
 
 /// Side of a damage tile in pixels.
@@ -57,17 +57,12 @@ pub struct Pixels {
   pub data: Vec<u8>,
 }
 
-struct Image {
-  w: usize,
-  h: usize,
-  data: Vec<u8>,
-}
-
 pub struct Renderer {
   /// The coverage and colour atlases, allocated on their first glyph.
   atlas: Vec<u8>,
   color_atlas: Vec<u8>,
-  images: Vec<Option<Image>>,
+  /// The images as they were added.
+  images: Vec<Option<ImageUpload>>,
   /// Threads to draw a big frame with (the calling thread and the pool's); 1 draws on the
   /// calling thread.
   pub threads: usize,
@@ -87,12 +82,6 @@ pub struct Renderer {
   bins: Vec<Vec<u32>>,
   tiles: Vec<u64>,
   tiles_w: usize,
-}
-
-impl Default for Renderer {
-  fn default() -> Self {
-    Self::new()
-  }
 }
 
 impl Renderer {
@@ -164,8 +153,23 @@ impl Renderer {
         false => self.generation += 1,
       }
 
-      self.images[i] = Some(Image { w: u.w, h: u.h, data: u.data.clone() });
+      self.images[i] = Some(u.clone());
     }
+  }
+
+  /// The atlases' rows in use, as uploads, and the images, as added: what a renderer made later
+  /// needs to draw as this one ([crate::Harness::render_metal]); read, not drained.
+  #[cfg(all(feature = "metal", target_os = "macos"))]
+  pub(crate) fn contents(&self) -> (Vec<Upload>, Images) {
+    let atlases = [(&self.atlas, ATLAS_SIZE, 1), (&self.color_atlas, COLOR_ATLAS_SIZE, 4)];
+    let uploads = atlases.into_iter().zip([false, true]).map(|((atlas, w, bpp), color)| {
+      let rows = atlas.chunks(w * bpp).rposition(|r| r.iter().any(|&b| b != 0));
+      let (epoch, h) = (self.epochs[color as usize], rows.map_or(0, |y| y + 1));
+      Upload { color, epoch, x: 0, y: 0, w, h, data: atlas[..w * h * bpp].to_vec() }
+    });
+    let mut images = Images::default();
+    images.added = self.images.iter().flatten().cloned().collect();
+    (uploads.filter(|u| u.h > 0).collect(), images)
   }
 
   /// The frame size in pixels for a view of `size` points.
@@ -409,7 +413,7 @@ impl Canvas {
 struct Job<'a> {
   scene: &'a Scene,
   items: &'a [Item],
-  images: &'a [Option<Image>],
+  images: &'a [Option<ImageUpload>],
   atlas: Tex<'a>,
   color: Tex<'a>,
   scale: f32,
@@ -455,7 +459,7 @@ impl Job<'_> {
 }
 
 /// The clip in whole pixels, each edge rounded to the nearest.
-fn scissor(r: Rect, scale: f32, frame: IRect) -> IRect {
+pub(crate) fn scissor(r: Rect, scale: f32, frame: IRect) -> IRect {
   let (w, h) = (frame.x1 as f32, frame.y1 as f32);
   let x0 = (r.x * scale).round().clamp(0.0, w);
   let y0 = (r.y * scale).round().clamp(0.0, h);
@@ -517,12 +521,12 @@ fn item_hash(scene: &Scene, it: &Item) -> u64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
   use super::*;
   use crate::scene::{Point, Quad, Segment};
 
   /// Panels, a moving rounded card with a border and a shadow, a clip and a line.
-  fn scene(t: f32) -> Scene {
+  pub(crate) fn scene(t: f32) -> Scene {
     let mut s = Scene::default();
     s.quad(Quad::new(Rect::new(0.0, 0.0, 300.0, 200.0), [0.1, 0.1, 0.12, 1.0]));
     s.quad(Quad::new(Rect::new(0.0, 0.0, 80.0, 200.0), [0.15, 0.15, 0.2, 1.0]));

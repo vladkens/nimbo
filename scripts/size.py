@@ -4,9 +4,10 @@
 # ///
 """Lines per module: code, docs, comments and inline tests, apart.
 
-A module is a directory under src/ (platform/<os>, platform/<os>/app, ui/widgets and
-ui/containers each on their own, and so are the add-on files ui/form.rs and ui/dialog.rs and the
-accessibility model ui/a11y.rs) or a top-level file; examples/ and tests/ are one row each. Code
+A module is a directory under src/ (platform/<os>, platform/<os>/app, the Metal renderer
+platform/macos/metal, ui/widgets and ui/containers each on their own, and so are the add-on files
+ui/form.rs and ui/dialog.rs and the accessibility model ui/a11y.rs) or a top-level file; examples/
+and tests/ are one row each. Files are Rust and Metal shaders (EXTS), both with `//` comments. Code
 is every line that is not blank, a comment, a doc comment or inside a `#[cfg(test)]` item. With
 a git ref, a column shows how code moved since it.
 `--map` lists the files with the first sentence of each one's module doc (`//!`): what it does.
@@ -26,7 +27,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DIRS = ("src", "examples", "tests")
-EXTS = (".rs",)
+EXTS = (".rs", ".metal")
 KINDS = ("code", "docs", "comments", "tests", "blank")
 # The code lines each part may have: a platform, the UI core (ui/: the tree, layout, input,
 # paint, theme), its widgets and containers (ui/widgets, ui/containers: add-ons over it), the
@@ -34,7 +35,8 @@ KINDS = ("code", "docs", "comments", "tests", "blank")
 # portable part: the shell, tray and its menu model, hotkeys, paths, launch at login, the
 # launcher entry, opening, permissions, the system clipboard, the focus of other apps, the one
 # instance, the uninstall, the paste, the hardware and the system's changes; and each OS's
-# platform/<os>/app), the accessibility model (ui/a11y.rs: roles, records, assembly) and the core
+# platform/<os>/app), the accessibility model (ui/a11y.rs: roles, records, assembly), the Metal
+# renderer (platform/macos/metal, the `metal` feature: its Rust and its shaders) and the core
 # (the rest of src/). A budget is whole hundreds (STEP): a change that doesn't fit is written
 # tighter, or the budget goes up by a hundred, a decision recorded in its PR; never by the few
 # lines one change needs.
@@ -52,6 +54,7 @@ BUDGETS = {
   "app/windows": 1900,
   "app/linux": 2700,
   "a11y": 400,
+  "metal": 700,
 }
 # Modules that count against a budget of another name ("app", src/app.rs, is the core's seams).
 # The settings form and the dialog are add-ons over the widgets, as the containers are; the
@@ -73,6 +76,8 @@ def module(path: str, files: bool) -> str:
   ['ui/form', 'ui', 'ui/widgets']
   >>> module("src/ui/a11y.rs", False)
   'ui/a11y'
+  >>> [module(f"src/platform/macos/{p}", False) for p in ("metal/shaders.metal", "view.rs")]
+  ['metal', 'platform/macos']
   """
   if files:
     return path
@@ -83,6 +88,9 @@ def module(path: str, files: bool) -> str:
 
   if len(parts) == 2:
     return parts[1].removesuffix(".rs")
+
+  if parts[1:4] == ["platform", "macos", "metal"] and len(parts) > 4:
+    return "metal"
 
   if parts[1] == "platform" and len(parts) > 4 and parts[3] == "app":
     return f"app/{parts[2]}"
