@@ -4,8 +4,8 @@
 //! `NIMBO_RENDERER=metal`: the scene drawn on the GPU into the same IOSurfaces the CPU renderer
 //! fills ([render]). Its shaders (`shaders.metal`) are the twin of [crate::cpu::raster], function
 //! by function, so both draw the same pixels; the CPU renderer stays the default and the
-//! reference. The device, its queue and the pipelines ([Gpu]) are made once per thread, on the
-//! first Metal frame, so an app that never draws with Metal never touches it.
+//! reference. The device, its queue and the pipelines ([Gpu]) are made once per thread, with the
+//! first Metal window or snapshot, so an app that never opens one never touches Metal.
 
 pub(super) mod present;
 pub(crate) mod render;
@@ -18,7 +18,7 @@ use objc2::runtime::ProtocolObject;
 use objc2_foundation::NSString;
 use objc2_metal::{
   MTLBlendFactor, MTLCommandQueue, MTLCompileOptions, MTLCreateSystemDefaultDevice, MTLDevice,
-  MTLLanguageVersion, MTLLibrary, MTLPixelFormat, MTLRenderPipelineDescriptor,
+  MTLGPUFamily, MTLLanguageVersion, MTLLibrary, MTLPixelFormat, MTLRenderPipelineDescriptor,
   MTLRenderPipelineState,
 };
 
@@ -33,8 +33,9 @@ type Pipeline = ProtocolObject<dyn MTLRenderPipelineState>;
 pub(crate) struct Gpu {
   pub device: Retained<Device>,
   pub queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
-  /// The GPU shares the CPU's memory: textures it samples are `Shared`, else `Managed`.
-  pub unified: bool,
+  /// An Apple-family GPU (Apple silicon): its textures are `Shared`, else `Managed`, as an
+  /// Intel one reports unified memory but takes no `Shared` texture.
+  pub apple: bool,
   pub quads: Retained<Pipeline>,
   pub lines: Retained<Pipeline>,
   pub glyphs: Retained<Pipeline>,
@@ -96,7 +97,7 @@ impl Gpu {
     };
 
     Ok(Self {
-      unified: device.hasUnifiedMemory(),
+      apple: device.supportsFamily(MTLGPUFamily::Apple1),
       quads: pipeline("quad_vs", "quad_fs")?,
       lines: pipeline("line_vs", "line_fs")?,
       glyphs: pipeline("sprite_vs", "glyph_fs")?,

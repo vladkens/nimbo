@@ -16,7 +16,7 @@ check: check-targets
 
 test:
 	cargo test
-	if [ "$$(uname)" = Darwin ]; then cargo test --features metal metal; fi
+	if [ "$$(uname)" = Darwin ]; then cargo test --features metal; fi
 
 build:
 	cargo build --release --examples

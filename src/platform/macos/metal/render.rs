@@ -175,7 +175,7 @@ impl Renderer {
           &old, 0, 0, origin, size, &tex, 0, 0, origin,
         )
       };
-      if !self.gpu.unified {
+      if !self.gpu.apple {
         blit.synchronizeResource(ProtocolObject::from_ref(&*tex));
       }
 
@@ -188,7 +188,7 @@ impl Renderer {
     Ok(tex)
   }
 
-  /// A texture the shaders sample: `Shared` on a GPU with unified memory, else `Managed`.
+  /// A texture the shaders sample: `Shared` on an Apple-family GPU, else `Managed`.
   fn texture(
     &self,
     format: MTLPixelFormat,
@@ -200,7 +200,7 @@ impl Renderer {
   }
 
   fn storage(&self) -> MTLStorageMode {
-    if self.gpu.unified { MTLStorageMode::Shared } else { MTLStorageMode::Managed }
+    if self.gpu.apple { MTLStorageMode::Shared } else { MTLStorageMode::Managed }
   }
 
   /// A render target over the surface's pixels, which it keeps alive.
@@ -690,7 +690,7 @@ mod tests {
   #[test]
   fn metal_renders_into_an_iosurface() {
     let (mut cpu, mut gpu) = (cpu::Renderer::new(), renderer());
-    println!("device: {}, unified memory: {}", gpu.gpu.name(), gpu.gpu.unified);
+    println!("device: {}, Apple family: {}", gpu.gpu.name(), gpu.gpu.apple);
     for w in [300, 301] {
       let size = Size::new(w as f32, 200.0);
       let s = cpu::tests::scene(7.0);
