@@ -163,6 +163,14 @@ type Slots = [Option<Hotkey>; MAX];
 /// the hotkeys stop; the threads stay for the process.
 pub struct Hotkeys {
   imp: imp::Hotkeys,
+  book: Book,
+  escape: bool,
+}
+
+/// What [Hotkeys] keeps of `set` and `pause`, and what the platform holds: apart from the
+/// platform ([Arm]), so tests drive it with a fake.
+#[derive(Default)]
+struct Book {
   hotkeys: Vec<Hotkey>,
   /// Why `set` refused each hotkey; the keys it took (none where refused), and why it refused
   /// the first key it did.
@@ -175,16 +183,28 @@ pub struct Hotkeys {
   refused: [Option<String>; MAX],
   armed_keys: Vec<Option<Hotkey>>,
   paused: bool,
-  escape: bool,
+}
+
+/// The platform's side of [Book::arm].
+trait Arm {
+  fn set_slot(&mut self, which: usize, hotkey: Option<Hotkey>) -> Result<(), String>;
+  fn set_keys(&mut self, keys: &[Option<Hotkey>]);
+}
+
+impl Arm for imp::Hotkeys {
+  fn set_slot(&mut self, which: usize, hotkey: Option<Hotkey>) -> Result<(), String> {
+    imp::Hotkeys::set_slot(self, which, hotkey)
+  }
+
+  fn set_keys(&mut self, keys: &[Option<Hotkey>]) {
+    imp::Hotkeys::set_keys(self, keys);
+  }
 }
 
 impl Hotkeys {
   /// No hotkey until [Hotkeys::set]; the listener after [Hotkeys::start].
   pub fn new(on: impl Fn(Edge) + Send + 'static) -> Self {
-    let imp = imp::Hotkeys::new(Box::new(on));
-    let (hotkeys, invalid, keys, left_out, armed, refused, armed_keys) = Default::default();
-    let (paused, escape) = (false, false);
-    Self { imp, hotkeys, invalid, keys, left_out, armed, refused, armed_keys, paused, escape }
+    Self { imp: imp::Hotkeys::new(Box::new(on)), book: Book::default(), escape: false }
   }
 
   /// Uses `hotkeys` (each told by its index) and `keys` (taken while one is held, [Edge::Key]),
@@ -197,20 +217,14 @@ impl Hotkeys {
   /// hotkey stays held through the same lists again; a hotkey the OS refused is tried again.
   /// While paused they are taken once the pause ends.
   pub fn set(&mut self, hotkeys: &[Hotkey], keys: &[Hotkey]) -> Result<(), String> {
-    let (invalid, bad) = check(hotkeys, keys);
-    self.keys = keys.iter().zip(&bad).take(MAX).map(|(&k, e)| e.is_none().then_some(k)).collect();
-    (self.hotkeys, self.invalid, self.left_out) =
-      (hotkeys.to_vec(), invalid, bad.into_iter().flatten().next());
-    self.arm();
-    let first = self.status().slots.into_iter().find_map(|s| s.error);
-    first.or(self.left_out.clone()).map_or(Ok(()), Err)
+    self.book.set(hotkeys, keys, &mut self.imp)
   }
 
   /// While a shortcut recorder records a new hotkey, the hotkeys and keys are not matched: their
   /// keys reach the window.
   pub fn pause(&mut self, paused: bool) {
-    self.paused = paused;
-    self.arm();
+    self.book.paused = paused;
+    self.book.arm(&mut self.imp);
   }
 
   /// While on, Escape (alone or with Shift, with Shift not through macOS's fallback; a modifier
@@ -225,22 +239,6 @@ impl Hotkeys {
     }
   }
 
-  /// Hands the platform what changed: each slot alone, the keys together; none while paused.
-  fn arm(&mut self) {
-    let ok = |i: usize| !self.paused && self.invalid[i].is_none();
-    let want = std::array::from_fn(|i| self.hotkeys.get(i).copied().filter(|_| ok(i)));
-    for (i, hotkey) in diff(&self.armed, &want) {
-      self.refused[i] = self.imp.set_slot(i, hotkey).err();
-      self.armed[i] = hotkey.filter(|_| self.refused[i].is_none());
-    }
-
-    let keys = if self.paused { Vec::new() } else { self.keys.clone() };
-    if keys != self.armed_keys {
-      self.imp.set_keys(&keys);
-      self.armed_keys = keys;
-    }
-  }
-
   /// Starts the listener, unless it runs or is starting; again after it failed. Returns at once:
   /// whether it came up is in [Hotkeys::status] a moment later; the error here is only one
   /// starting it. macOS: the event tap needs Accessibility access (System Settings → Privacy &
@@ -251,15 +249,48 @@ impl Hotkeys {
   }
 
   pub fn status(&self) -> Status {
+    let mut s = self.book.status();
+    self.imp.status(&mut s);
+    finish(&mut s, self.escape, self.book.left_out.clone());
+    s
+  }
+}
+
+impl Book {
+  fn set(&mut self, hotkeys: &[Hotkey], keys: &[Hotkey], imp: &mut impl Arm) -> Result<(), String> {
+    let (invalid, bad) = check(hotkeys, keys);
+    self.keys = keys.iter().zip(&bad).take(MAX).map(|(&k, e)| e.is_none().then_some(k)).collect();
+    (self.hotkeys, self.invalid, self.left_out) =
+      (hotkeys.to_vec(), invalid, bad.into_iter().flatten().next());
+    self.arm(imp);
+    let first = self.status().slots.into_iter().find_map(|s| s.error);
+    first.or(self.left_out.clone()).map_or(Ok(()), Err)
+  }
+
+  /// Hands the platform what changed: each slot alone, the keys together; none while paused.
+  fn arm(&mut self, imp: &mut impl Arm) {
+    let ok = |i: usize| !self.paused && self.invalid[i].is_none();
+    let want = std::array::from_fn(|i| self.hotkeys.get(i).copied().filter(|_| ok(i)));
+    for (i, hotkey) in diff(&self.armed, &want) {
+      self.refused[i] = imp.set_slot(i, hotkey).err();
+      self.armed[i] = hotkey.filter(|_| self.refused[i].is_none());
+    }
+
+    let keys = if self.paused { Vec::new() } else { self.keys.clone() };
+    if keys != self.armed_keys {
+      imp.set_keys(&keys);
+      self.armed_keys = keys;
+    }
+  }
+
+  /// The slots and keys as `set` and the platform left them.
+  fn status(&self) -> Status {
     let error = |i: usize| self.invalid[i].clone().or_else(|| self.refused[i].clone());
     let slot =
       |(i, &hotkey)| Slot { hotkey, error: error(i), fallback: false, fallback_error: None };
     let slots = self.hotkeys.iter().enumerate().map(slot).collect();
     let keys = self.armed_keys.iter().flatten().copied().collect();
-    let mut s = Status { slots, keys, paused: self.paused, ..Status::default() };
-    self.imp.status(&mut s);
-    finish(&mut s, self.escape, self.left_out.clone());
-    s
+    Status { slots, keys, paused: self.paused, ..Status::default() }
   }
 }
 
@@ -372,6 +403,61 @@ mod tests {
     let moved = diff(&slots(&["f1", "f2"]), &slots(&["f2"]));
     assert_eq!(moved, [(0, None), (1, None), (0, Some(hk("f2")))]);
     assert_eq!(diff(&slots(&[]), &slots(&["f1"])), [(0, Some(hk("f1")))]);
+  }
+
+  /// The platform as [Book::arm] sees it: the calls it gets, and F2 refused (another app has it).
+  #[derive(Default)]
+  struct Fake(Vec<String>);
+
+  impl Arm for Fake {
+    fn set_slot(&mut self, which: usize, hotkey: Option<Hotkey>) -> Result<(), String> {
+      self.0.push(format!("{which}={}", hotkey.map_or("-".into(), |h| h.to_string())));
+      if hotkey == Some(hk("f2")) { Err("taken".into()) } else { Ok(()) }
+    }
+
+    fn set_keys(&mut self, keys: &[Option<Hotkey>]) {
+      let keys: Vec<String> =
+        keys.iter().map(|k| k.map_or("-".into(), |k| k.to_string())).collect();
+      self.0.push(format!("keys {}", keys.join(" ")));
+    }
+  }
+
+  #[test]
+  fn set_and_pause_hand_over_only_what_changed() {
+    let (mut b, mut f) = (Book::default(), Fake::default());
+    let (hot, keys) = ([hk("fn"), hk("f2")], [hk("z"), hk("right_option"), hk("x")]);
+    assert_eq!(b.set(&hot, &keys, &mut f), Err("taken".into()), "F2's refusal, then the key's");
+    assert_eq!(f.0, ["0=fn", "1=f2", "keys z - x"]);
+    let s = b.status();
+    assert_eq!(
+      s.slots.iter().map(|s| s.error.clone()).collect::<Vec<_>>(),
+      [None, Some("taken".into())]
+    );
+    assert_eq!(s.keys, [hk("z"), hk("x")]);
+    // The same lists: only the refused slot again.
+    f.0.clear();
+    _ = b.set(&hot, &keys, &mut f);
+    assert_eq!(f.0, ["1=f2"]);
+    // Paused: every slot cleared and no keys; resumed: armed again, F2 tried again.
+    f.0.clear();
+    b.paused = true;
+    b.arm(&mut f);
+    assert_eq!(f.0, ["0=-", "keys "]);
+    assert!(b.status().keys.is_empty());
+    // Known, cosmetic: the refusal from before the pause is still shown while paused.
+    assert_eq!(b.status().slots[1].error.as_deref(), Some("taken"));
+    f.0.clear();
+    b.paused = false;
+    b.arm(&mut f);
+    assert_eq!(f.0, ["0=fn", "1=f2", "keys z - x"]);
+    // F2 gone, the keys the same: slot 1 alone, nothing to clear as it was refused.
+    f.0.clear();
+    assert_eq!(b.set(&hot[..1], &keys, &mut f), Err(keys_err(&b)));
+    assert!(f.0.is_empty(), "{:?}", f.0);
+  }
+
+  fn keys_err(b: &Book) -> String {
+    b.left_out.clone().unwrap()
   }
 
   #[test]

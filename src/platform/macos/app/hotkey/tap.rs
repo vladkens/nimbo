@@ -8,15 +8,15 @@
 use std::ffi::c_void;
 use std::ptr::{NonNull, null_mut};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicPtr, AtomicU8, Ordering};
 use std::sync::mpsc::SyncSender as Sender;
 use std::time::{Duration, Instant};
 
 use keyboard_types::Code;
 use objc2_core_foundation::{CFMachPort, CFRetained, CFRunLoop, kCFRunLoopCommonModes};
 use objc2_core_graphics::{
-  CGEvent, CGEventField, CGEventFlags, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
-  CGEventTapProxy, CGEventType,
+  CGEvent, CGEventField, CGEventFlags, CGEventSource, CGEventSourceStateID, CGEventTapLocation,
+  CGEventTapOptions, CGEventTapPlacement, CGEventTapProxy, CGEventType,
 };
 
 use super::super::super::keyboard::{code as key_at, device_flag};
@@ -110,6 +110,9 @@ unsafe extern "C-unwind" fn callback(
       CGEvent::tap_enable(unsafe { &*port }, true);
     }
 
+    // Releases missed while it was off: a chord whose key is up is held no more.
+    let chords = std::array::from_fn(|i| state.shared.chords[i].load(Ordering::Acquire));
+    settle(&state.shared, &chords, &key_down);
     state.shared.tap_reenabled.fetch_add(1, Ordering::Relaxed);
     return pass;
   }
@@ -133,7 +136,7 @@ unsafe extern "C-unwind" fn callback(
   let flags = CGEvent::flags(event).0;
   let repeat = || CGEvent::integer_value_field(event, CGEventField::KeyboardEventAutorepeat) != 0;
   let at = ns(Instant::now());
-  let (hits, out) = match judge(&state.shared, kind, code, flags, at, repeat) {
+  let (hits, out) = match judge(&state.shared, kind, code, flags, at, repeat, &key_down) {
     Verdict::Pass => return pass,
     Verdict::Tell(hits) => (hits, pass),
     Verdict::Swallow(hits) => (hits, null_mut()),
@@ -145,6 +148,11 @@ unsafe extern "C-unwind" fn callback(
   }
 
   out
+}
+
+/// The key at `code` is down now, as the HID system has it.
+fn key_down(code: u64) -> bool {
+  CGEventSource::key_state(CGEventSourceStateID::HIDSystemState, code as u16)
 }
 
 /// What kind of key event the tap has.
@@ -183,6 +191,7 @@ struct Event<'a> {
   down: bool,
   rep: bool,
   hits: Hits,
+  key_down: &'a dyn Fn(u64) -> bool,
 }
 
 impl Event<'_> {
@@ -223,11 +232,12 @@ fn judge(
   flags: u64,
   at: u64,
   repeat: impl Fn() -> bool,
+  key_down: &dyn Fn(u64) -> bool,
 ) -> Verdict {
   let chords = std::array::from_fn(|i| s.chords[i].load(Ordering::Acquire));
   let down = kind == KeyKind::Down;
   let rep = down && repeat();
-  let mut e = Event { s, chords, kind, code, flags, at, down, rep, hits: [None; 2] };
+  let mut e = Event { s, chords, kind, code, flags, at, down, rep, hits: [None; 2], key_down };
   let own =
     (0..MAX).find(|&i| alone(chords[i]) && kind == KeyKind::Flags && code == chords[i] & 0xffff);
   for i in (0..MAX).filter(|&i| alone(chords[i])) {
@@ -324,6 +334,10 @@ fn lone(e: &Event, i: usize, own: bool) -> Option<Hit> {
 /// press is the app's and settles the key. Whether the event is swallowed.
 fn keys(e: &mut Event) -> bool {
   let (s, code, n) = (e.s, e.code, usize::from(e.s.keys_count.load(Ordering::Acquire)).min(MAX));
+  if e.down && !e.rep && (0..n).any(|j| s.keys[j].load(Ordering::Acquire) & 0xffff == code) {
+    settle(s, &e.chords, e.key_down);
+  }
+
   let held = s.down.load(Ordering::Relaxed);
   let theirs = (0..MAX).filter(|i| held & 1 << i != 0).fold(0, |m, i| m | mods_of(e.chords[i]));
   let event = e.flags & MODIFIERS;
@@ -333,11 +347,7 @@ fn keys(e: &mut Event) -> bool {
     let ours = !found && (event == mods || event & !theirs == mods);
     let (bit, owed) = (1u8 << j, &s.keys_owed);
     let (on, take) = owe(owed.load(Ordering::Relaxed) & bit != 0, e.down, e.rep, ours);
-    _ = if on {
-      owed.fetch_or(bit, Ordering::Relaxed)
-    } else {
-      owed.fetch_and(!bit, Ordering::Relaxed)
-    };
+    mark(owed, bit, on);
     (found, swallow) = (found || ours, swallow || take != Take::Pass);
     if take == Take::Claim {
       e.push(Hit::Key(j));
@@ -359,11 +369,12 @@ fn chords_of(e: &mut Event) -> bool {
     let (bit, down) = (1u8 << i, &s.down);
     let ours = e.flags & MODIFIERS == chords[i] >> 16 & MODIFIERS;
     let (on, take) = owe(down.load(Ordering::Relaxed) & bit != 0, e.down, e.rep, ours);
-    _ = if on {
-      down.fetch_or(bit, Ordering::Relaxed)
-    } else {
-      down.fetch_and(!bit, Ordering::Relaxed)
-    };
+    if take == Take::Claim {
+      // Its time first: Carbon's release, on another thread, reads it once the bit is set.
+      s.since[i].store(e.at, Ordering::Relaxed);
+    }
+
+    mark(down, bit, on);
     swallow |= take != Take::Pass;
     match take {
       Take::Pass => {}
@@ -376,13 +387,28 @@ fn chords_of(e: &mut Event) -> bool {
           e.push(Hit::Abort { which: l });
         }
 
-        s.since[i].store(e.at, Ordering::Relaxed);
         e.push(Hit::Down { which: i, repeat: false });
       }
     }
   }
 
   swallow
+}
+
+/// Sets `bit` of `bits` when `on`, else clears it.
+fn mark(bits: &AtomicU8, bit: u8, on: bool) {
+  bits.fetch_and(!bit, Ordering::Relaxed);
+  bits.fetch_or(if on { bit } else { 0 }, Ordering::Relaxed);
+}
+
+/// A chord the tap owes the release of whose key is up (`key_down`) is held no more: its release
+/// was missed (the tap was disabled meanwhile). Only a modifier alone held or a chord truly down
+/// takes keys.
+fn settle(s: &Shared, chords: &[u64; MAX], key_down: &dyn Fn(u64) -> bool) {
+  let owed = |i: usize| s.down.load(Ordering::Relaxed) & 1 << i != 0 && !alone(chords[i]);
+  for i in (0..MAX).filter(|&i| owed(i) && !key_down(chords[i] & 0xffff)) {
+    s.down.fetch_and(!(1 << i), Ordering::Relaxed);
+  }
 }
 
 /// A press of Escape is ours (6): taking it is on, and no ⌃, ⌥ or ⌘ is held, but for a modifier
@@ -469,7 +495,7 @@ mod tests {
   /// A key event `ms` after the start.
   fn key_at(s: &Shared, ms: u64, down: bool, code: u64, flags: u64, repeat: bool) -> Verdict {
     let kind = if down { KeyKind::Down } else { KeyKind::Up };
-    judge(s, kind, code, flags, ms * 1_000_000, || repeat)
+    judge(s, kind, code, flags, ms * 1_000_000, || repeat, &|_| true)
   }
 
   /// A modifier key's `flagsChanged`: `flags` as they are after it.
@@ -479,7 +505,7 @@ mod tests {
 
   fn flags_at(s: &Shared, ms: u64, key: Code, flags: u64) -> Verdict {
     let code = kvk(key).unwrap();
-    judge(s, KeyKind::Flags, u64::from(code), flags, ms * 1_000_000, || false)
+    judge(s, KeyKind::Flags, u64::from(code), flags, ms * 1_000_000, || false, &|_| true)
   }
 
   #[test]
@@ -708,6 +734,55 @@ mod tests {
     // Paused (no keys, no slots): nothing is taken.
     let s = with(&[], &[]);
     assert_eq!(key_at(&s, 0, true, Z, FN, false), Verdict::Pass);
+  }
+
+  /// Carbon's release routed before the tap sees the key's: the tap owes nothing then and lets
+  /// the release through, and the app hears one release, Carbon's.
+  #[test]
+  fn carbons_release_first() {
+    use super::super::{EPOCH, OnEdge, QUEUE, Raw, Source, route};
+
+    let t0 = *EPOCH.get_or_init(Instant::now);
+    let s = with(&["f1"], &[]);
+    assert_eq!(key_at(&s, 0, true, 0x7A, NONE, false), swallow(down(0)));
+    let (tx, rx) = std::sync::mpsc::sync_channel(QUEUE);
+    let ms = |n| t0 + Duration::from_millis(n);
+    tx.send(Raw { source: Source::Carbon, edge: down(0), at: ms(1) }).unwrap();
+    tx.send(Raw { source: Source::Carbon, edge: up(0), at: ms(300) }).unwrap();
+    drop(tx);
+    let (got_tx, got) = std::sync::mpsc::channel();
+    route(&rx, &(Box::new(move |e| got_tx.send(e).unwrap()) as OnEdge), &s);
+    let ups = got.try_iter().filter(|e| matches!(e, crate::hotkey::Edge::Up { .. })).count();
+    assert_eq!((ups, s.down.load(Ordering::Relaxed)), (1, 0));
+    assert_eq!(key_at(&s, 310, false, 0x7A, NONE, false), Verdict::Pass);
+  }
+
+  /// A chord whose release the tap missed (it was disabled) takes no keys once its key is up.
+  #[test]
+  fn a_stale_chord_takes_no_keys() {
+    let s = with(&["f1"], &["z"]);
+    s.down.store(0b1, Ordering::Relaxed);
+    let up = judge(&s, KeyKind::Down, Z, NONE, 0, || false, &|_| false);
+    assert_eq!(up, Verdict::Pass);
+    assert_eq!(s.down.load(Ordering::Relaxed), 0, "settled");
+    // Truly held, it does.
+    s.down.store(0b1, Ordering::Relaxed);
+    let held = judge(&s, KeyKind::Down, Z, NONE, 0, || false, &|code| code == 0x7A);
+    assert_eq!(held, swallow(Hit::Key(0)));
+  }
+
+  /// A slot switched between a modifier alone and a chord while held: the old press is dropped
+  /// with its bit, the new hotkey works, the old key's events are the app's.
+  #[test]
+  fn a_slot_switching_kind_while_held() {
+    let s = with(&["fn"], &[]);
+    assert_eq!(flags(&s, Code::Fn, FN), tell(down(0)));
+    s.store_slot(0, slot_value(Hotkey::parse("f1").unwrap()).unwrap());
+    assert_eq!(flags(&s, Code::Fn, 0), Verdict::Pass, "no release of fn alone owed");
+    assert_eq!(key(&s, true, 0x7A, NONE, false), swallow(down(0)));
+    s.store_slot(0, slot_value(Hotkey::parse("fn").unwrap()).unwrap());
+    assert_eq!(key(&s, false, 0x7A, NONE, false), Verdict::Pass, "F1's release, now the app's");
+    assert_eq!(flags(&s, Code::Fn, FN), tell(down(0)));
   }
 
   #[test]

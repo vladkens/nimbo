@@ -144,6 +144,8 @@ struct Shared {
   carbon_events: AtomicU64,
   /// Presses Carbon repeated while the key was held (no release in between).
   carbon_repeats: AtomicU64,
+  /// A bit per slot whose press Carbon reported, released not yet; cleared as the slot changes.
+  carbon_down: AtomicU8,
   duplicates: AtomicU64,
   tap_reenabled: AtomicU64,
   /// Events lost to a full channel.
@@ -225,17 +227,18 @@ impl Hotkeys {
   /// here. Carbon refusing the chord (another app has it) is no error while the tap may still see
   /// it: the slot's fallback error.
   pub fn set_slot(&mut self, which: usize, hotkey: Option<Hotkey>) -> Result<(), String> {
-    self.shared.store_slot(which, 0);
+    let value = hotkey.map(slot_value).transpose();
+    self.shared.store_slot(which, value.clone().ok().flatten().unwrap_or(0));
+    // A press Carbon reported of the old one is no repeat of the new one.
+    self.shared.carbon_down.fetch_and(!(1 << which), Ordering::AcqRel);
     self.carbon.unregister(which);
     self.carbon_errors[which] = None;
-    let Some(hotkey) = hotkey else { return Ok(()) };
-    self.shared.store_slot(which, slot_value(hotkey)?);
-    if let Hotkey::Shortcut(s) = hotkey {
-      let (code, mods) = (s.code().and_then(kvk).unwrap_or_default(), carbon::modifiers(s.mods));
+    if let (Ok(_), Some(Hotkey::Shortcut(s))) = (&value, hotkey) {
+      let (code, (_, mods)) = (s.code().and_then(kvk).unwrap_or_default(), mod_bits(s.mods));
       self.carbon_errors[which] = self.carbon.register(which, code, mods).err();
     }
 
-    Ok(())
+    value.map(drop)
   }
 
   /// The keys taken while a slot is held, by index; `None` where refused.
@@ -333,7 +336,7 @@ fn slot_value(hotkey: Hotkey) -> Result<u64, String> {
   let none = || format!("{hotkey} has no key here");
   Ok(match hotkey {
     Hotkey::Shortcut(s) => {
-      SET | u64::from(s.code().and_then(kvk).ok_or_else(none)?) | tap_flags(s.mods) << 16
+      SET | u64::from(s.code().and_then(kvk).ok_or_else(none)?) | mod_bits(s.mods).0 << 16
     }
     Hotkey::Modifier(key) => SET | LONE | u64::from(kvk(key).ok_or_else(none)?),
   })
@@ -342,14 +345,14 @@ fn slot_value(hotkey: Hotkey) -> Result<u64, String> {
 /// The tap's value for a key, [NO_KEY] for none or one without a key code here.
 fn key_value(key: Option<Hotkey>) -> u64 {
   let Some(Hotkey::Shortcut(s)) = key else { return NO_KEY };
-  s.code().and_then(kvk).map_or(NO_KEY, |code| u64::from(code) | tap_flags(s.mods) << 16)
+  s.code().and_then(kvk).map_or(NO_KEY, |code| u64::from(code) | mod_bits(s.mods).0 << 16)
 }
 
 /// The "hotkey" thread: dedupes and hands the edges to the app.
 fn route(rx: &Receiver<Raw>, on: &OnEdge, shared: &Shared) {
   let mut dedupe = Dedupe::default();
-  // A bit per slot whose press Carbon reported, released not yet, and when (ns of [EPOCH]).
-  let (mut carbon_down, mut pressed) = (0u8, [0; MAX]);
+  // When Carbon reported each slot's press, in ns of [EPOCH].
+  let (carbon_down, mut pressed) = (&shared.carbon_down, [0; MAX]);
   for mut raw in rx {
     let counter = match raw.source {
       Source::Tap => &shared.tap_events,
@@ -360,17 +363,19 @@ fn route(rx: &Receiver<Raw>, on: &OnEdge, shared: &Shared) {
     if raw.source == Source::Carbon {
       match raw.edge {
         // Carbon repeats the press while the key is held: an autorepeat.
-        Hit::Down { which, .. } if carbon_down & 1 << which != 0 => {
+        Hit::Down { which, .. } if carbon_down.load(Ordering::Acquire) & 1 << which != 0 => {
           shared.carbon_repeats.fetch_add(1, Ordering::Relaxed);
           raw.edge = Hit::Down { which, repeat: true };
         }
         Hit::Down { which, .. } => {
-          (carbon_down, pressed[which]) = (carbon_down | 1 << which, ns(raw.at))
+          carbon_down.fetch_or(1 << which, Ordering::AcqRel);
+          pressed[which] = ns(raw.at);
         }
         // The tap's press of it is over too, unless it saw a newer one (a release it missed
-        // while it was disabled would keep the key owed).
+        // while it was disabled would keep the key owed). Carbon's release may come before the
+        // tap's: the tap then lets the key's release through, and Carbon's is the edge.
         Hit::Up { which } => {
-          carbon_down &= !(1 << which);
+          carbon_down.fetch_and(!(1 << which), Ordering::AcqRel);
           if shared.since[which].load(Ordering::Relaxed)
             <= pressed[which] + DEDUPE.as_nanos() as u64
           {
@@ -405,15 +410,18 @@ fn ns(at: Instant) -> u64 {
   EPOCH.get().map_or(0, |e| at.saturating_duration_since(*e).as_nanos() as u64)
 }
 
-/// The event tap's modifier flags for a chord's modifiers.
-pub(super) fn tap_flags(mods: Modifiers) -> u64 {
-  let flags = [
-    (Modifiers::CONTROL, CGEventFlags::MaskControl),
-    (Modifiers::ALT, CGEventFlags::MaskAlternate),
-    (Modifiers::SHIFT, CGEventFlags::MaskShift),
-    (Modifiers::META, CGEventFlags::MaskCommand),
-  ];
-  flags.iter().filter(|(m, _)| mods.contains(*m)).fold(0, |all, (_, f)| all | f.0)
+/// Each modifier: the event tap's flag, and Carbon's bit (`controlKey`, `optionKey`,
+/// `shiftKey`, `cmdKey`).
+const MOD_BITS: [(Modifiers, u64, u32); 4] = [
+  (Modifiers::CONTROL, CGEventFlags::MaskControl.0, 1 << 12),
+  (Modifiers::ALT, CGEventFlags::MaskAlternate.0, 1 << 11),
+  (Modifiers::SHIFT, CGEventFlags::MaskShift.0, 1 << 9),
+  (Modifiers::META, CGEventFlags::MaskCommand.0, 1 << 8),
+];
+
+/// The event tap's modifier flags and Carbon's modifier bits for a chord's modifiers.
+pub(super) fn mod_bits(mods: Modifiers) -> (u64, u32) {
+  MOD_BITS.iter().filter(|m| mods.contains(m.0)).fold((0, 0), |(f, c), m| (f | m.1, c | m.2))
 }
 
 #[cfg(test)]
@@ -521,8 +529,11 @@ mod tests {
     let fallback: Vec<_> =
       out.slots.iter().map(|s| (s.fallback, s.fallback_error.is_some())).collect();
     assert_eq!(fallback, [(true, false), (false, false), (false, true), (true, false)]);
-    // Changed: the old one goes first; removed: gone; Escape on and off.
+    // Changed: the old one goes first, and a press Carbon reported of it is forgotten; removed:
+    // gone; Escape on and off.
+    h.shared.carbon_down.store(0b1, Ordering::Relaxed);
     h.set_slot(0, hk("f2")).unwrap();
+    assert_eq!(h.shared.carbon_down.load(Ordering::Relaxed), 0);
     h.set_slot(3, None).unwrap();
     h.escape(true);
     assert_eq!(carbon::tests::live(), [1, 0x100]);
@@ -569,7 +580,8 @@ mod tests {
     let Ok(Hotkey::Shortcut(s)) = Hotkey::parse("ctrl+option+cmd+F12") else { panic!() };
     assert_eq!(s.code().and_then(kvk), Some(0x6F));
     let want = CGEventFlags::MaskControl.0 | CGEventFlags::MaskAlternate.0;
-    assert_eq!(tap_flags(s.mods), want | CGEventFlags::MaskCommand.0);
+    assert_eq!(mod_bits(s.mods), (want | CGEventFlags::MaskCommand.0, 1 << 12 | 1 << 11 | 1 << 8));
+    assert_eq!(mod_bits(Modifiers::SHIFT), (CGEventFlags::MaskShift.0, 1 << 9));
     for (text, code) in
       [("a", 0x00), ("z", 0x06), ("0", 0x1D), ("9", 0x19), ("f1", 0x7A), ("f20", 0x5A)]
     {

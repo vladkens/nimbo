@@ -15,8 +15,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::SyncSender as Sender;
 use std::time::{Duration, Instant};
 
-use keyboard_types::Modifiers;
-
 use super::{DEDUPE, Hit, KEY_ESCAPE, Raw, Shared, Source};
 use crate::hotkey::MAX;
 
@@ -50,10 +48,6 @@ const TYPE_EVENT_HOT_KEY_ID: u32 = u32::from_be_bytes(*b"hkid");
 const EVENT_NOT_HANDLED_ERR: OSStatus = -9874;
 /// `eventHotKeyExistsErr`.
 const HOT_KEY_EXISTS: OSStatus = -9878;
-const CMD_KEY: u32 = 1 << 8;
-const SHIFT_KEY: u32 = 1 << 9;
-const OPTION_KEY: u32 = 1 << 11;
-const CONTROL_KEY: u32 = 1 << 12;
 
 #[link(name = "Carbon", kind = "framework")]
 unsafe extern "C" {
@@ -139,10 +133,8 @@ impl Carbon {
     Self { installed: status == 0, chords, escape: None, state, calls }
   }
 
-  /// Registers virtual key `code` with Carbon's `modifiers` as slot `which`, in place of the one
-  /// before.
+  /// Registers virtual key `code` with Carbon's `modifiers` as slot `which`, unregistered before.
   pub fn register(&mut self, which: usize, code: u16, modifiers: u32) -> Result<(), String> {
-    self.unregister(which);
     self.chords[which] = Some(self.hot_key(code, modifiers, 1 + which as u32)?);
     Ok(())
   }
@@ -255,17 +247,6 @@ fn hit(id: u32, kind: u32, escape: &AtomicBool) -> Option<Hit> {
   }
 }
 
-/// Carbon's modifier bits for a chord's modifiers.
-pub fn modifiers(mods: Modifiers) -> u32 {
-  let bits = [
-    (Modifiers::CONTROL, CONTROL_KEY),
-    (Modifiers::ALT, OPTION_KEY),
-    (Modifiers::SHIFT, SHIFT_KEY),
-    (Modifiers::META, CMD_KEY),
-  ];
-  bits.iter().filter(|(m, _)| mods.contains(*m)).fold(0, |all, (_, b)| all | b)
-}
-
 #[cfg(test)]
 pub(super) mod tests {
   use super::*;
@@ -311,12 +292,5 @@ pub(super) mod tests {
 
   pub(in super::super) fn live() -> Vec<u32> {
     LIVE.with_borrow(Clone::clone)
-  }
-
-  #[test]
-  fn modifier_bits() {
-    let all = Modifiers::CONTROL | Modifiers::ALT | Modifiers::META;
-    assert_eq!(modifiers(all), CONTROL_KEY | OPTION_KEY | CMD_KEY);
-    assert_eq!(modifiers(Modifiers::SHIFT), SHIFT_KEY);
   }
 }

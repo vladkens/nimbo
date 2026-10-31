@@ -14,7 +14,7 @@ use objc2_core_graphics::{
 };
 
 use super::super::keyboard;
-use super::hotkey::tap_flags;
+use super::hotkey::mod_bits;
 use crate::keys::{Key, Shortcut};
 
 /// The posted events' source user data: the hotkey tap passes them on unjudged.
@@ -56,7 +56,7 @@ pub fn post(s: Shortcut) -> Result<(), String> {
 
   let events = [true, false].map(|down| CGEvent::new_keyboard_event(Some(&source), key, down));
   let [Some(down), Some(up)] = events else { return Err("no key events".into()) };
-  for (e, flags) in [(&down, tap_flags(mods)), (&up, held)] {
+  for (e, flags) in [(&down, mod_bits(mods).0), (&up, held)] {
     CGEvent::set_flags(Some(e), CGEventFlags(flags));
     CGEvent::set_integer_value_field(Some(e), CGEventField::EventSourceUserData, POSTED);
     CGEvent::post(CGEventTapLocation::HIDEventTap, Some(e));
