@@ -213,12 +213,15 @@ struct SpriteOut {
   float4 color [[flat]];
 };
 
+// Nothing for a rect without positive width and height, as `sprite_bounds` (not a flipped
+// sprite).
 vertex SpriteOut sprite_vs(uint vid [[vertex_id]], uint iid [[instance_id]],
                            constant Globals &g [[buffer(0)]],
                            const device Sprite *sprites [[buffer(1)]]) {
   Sprite s = sprites[iid];
   float2 c = corners[vid];
-  return {to_clip(s.rect.xy + c * s.rect.zw, g), s.uv.xy + c * s.uv.zw, premul(s.color)};
+  float2 size = s.rect.z > 0.0 && s.rect.w > 0.0 ? s.rect.zw : 0.0;
+  return {to_clip(s.rect.xy + c * size, g), s.uv.xy + c * s.uv.zw, premul(s.color)};
 }
 
 // `glyph`: coverage from the R8 atlas, nearest texel, times the colour.

@@ -527,6 +527,22 @@ mod tests {
   }
 
   #[test]
+  fn flipped_sprites_draw_nothing() {
+    let mut r = renderer();
+    let (mut text, mut images) = (TextSystem::new(1.0), Images::default());
+    let id = images.add(1, 1, &[255; 4]);
+    r.sync(&mut text, &mut images).unwrap();
+    r.transparent = true;
+    let mut s = Scene::default();
+    let uv = Rect::new(0.0, 0.0, 1.0, 1.0);
+    for rect in [Rect::new(4.0, 1.0, -3.0, 3.0), Rect::new(1.0, 4.0, 3.0, -3.0)] {
+      s.image(id, Sprite { rect, uv, color: [1.0; 4] });
+    }
+
+    assert_eq!(packed(&r.snapshot(&s, Size::new(5.0, 5.0), 1.0).unwrap()), [0; 25]);
+  }
+
+  #[test]
   fn metal_draws_as_the_cpu() {
     let (mut cpu, mut gpu) = (cpu::Renderer::new(), renderer());
     let fractional = [(Size::new(150.7, 90.3), 1.0), (Size::new(150.7, 90.3), 1.5)];
