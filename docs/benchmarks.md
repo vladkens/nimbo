@@ -149,7 +149,7 @@ Footprint is the number to compare: resident memory counts the shared system fra
 ## Caveats
 
 - The frames come from different sources (presents, a rendering notifier or per-frame callbacks), and Slint software and iced have none in the UI scenes.
-- CPU % is per process and hides GPU work. nimbo's CPU renderer draws on 4 threads: 349% for 47 fps at 1k sprites, against Slint software's 97% for 37 fps, so per core Slint's software renderer is more efficient at sprites. nimbo's is faster in wall time only up to 1k sprites; Slint software is faster at 3k (19 against 17 fps) and 10k (10 against 5) and still runs at 30k (9). In the hover and scroll scenes nimbo's renderer draws only the damaged tiles and uses less CPU than both.
+- CPU % is per process and hides GPU work. nimbo's CPU renderer draws on 4 threads: 349% for 47 fps at 1k sprites, against Slint software's 97% for 37 fps, so per core Slint's software renderer is more efficient at sprites. nimbo's is faster in wall time only up to 1k sprites; Slint software is faster at 3k (19 against 17 fps) and 10k (10 against 5) and still runs at 30k (9). In the hover and scroll scenes nimbo's renderer draws only the damaged tiles and uses less CPU than Slint software and iced tiny-skia.
 - Resize is driven through Accessibility, and a slow app throttles the driver (egui wgpu completed 24 resizes in 5 s).
 - One machine, one 60 Hz display, a low but not zero load.
 
