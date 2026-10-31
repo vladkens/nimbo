@@ -489,6 +489,9 @@ fn target(hotkey: Hotkey) -> Result<Target, String> {
       Code::Fn => "the fn key is not visible to Windows".to_string(),
       code => format!("{code} is no modifier key"),
     }),
+    Hotkey::Shortcut(s) if s.mods.contains(Modifiers::FN) => {
+      Err("the fn key is not visible to Windows".into())
+    }
     Hotkey::Shortcut(s) => {
       let vk =
         s.code().and_then(vk_of).ok_or_else(|| format!("{s} has no key on this keyboard"))?;
@@ -587,6 +590,7 @@ mod tests {
     assert_eq!(chord("right_option"), Ok(Target::Lone(VK_RMENU as u32)));
     assert_eq!(chord("left_cmd"), Ok(Target::Lone(VK_LWIN as u32)));
     assert!(chord("fn").is_err_and(|e| e.contains("fn")));
+    assert!(chord("fn+1").is_err_and(|e| e.contains("fn")));
     assert_eq!(
       (scan_of(Code::KeyA), scan_of(Code::Digit1), scan_of(Code::Slash)),
       (Some(0x1E), Some(0x02), Some(0x35))

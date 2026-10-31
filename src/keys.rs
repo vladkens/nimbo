@@ -210,7 +210,8 @@ impl KeyEvent {
 /// A key with modifiers, as keymaps and settings write it: modifiers and one key joined by `+`
 /// (or `-`), in any order and case, spaces allowed around the parts: `cmd+shift+z`,
 /// `option+space`, `ctrl+option+cmd+F12`, `cmd++`, `escape`. Modifiers: `ctrl` (`control`),
-/// `option` (`opt`, `alt`), `shift`, `cmd` (`command`, `super`, `meta`). Keys: a character,
+/// `option` (`opt`, `alt`), `shift`, `cmd` (`command`, `super`, `meta`), and in a global hotkey
+/// `fn` (`globe`: macOS, with a key that doesn't carry it, [ShortcutError::Fn]). Keys: a character,
 /// `f1` to `f20`, or a name: `return` (`enter`), `tab`, `delete` (`backspace`, ⌫) and
 /// `forwarddelete` (⌦) as Mac keyboards name them, `escape` (`esc`), `left`, `right`, `up`, `down`,
 /// `home`, `end`, `pageup`, `pagedown`, and `space`, `minus`, `equal`, `bracketleft`,
@@ -278,7 +279,10 @@ impl std::fmt::Display for ShortcutError {
       Self::NoKey => {
         f.write_str("the hotkey has only modifiers; it needs a key, such as ctrl+option+space")
       }
-      Self::Fn => f.write_str("the fn key cannot be part of a hotkey"),
+      Self::Fn => f.write_str(
+        "fn goes only in a global hotkey, and not with a key that has it anyway (the F-keys, \
+         arrows, Home, End, Page Up and Down, Forward Delete)",
+      ),
       Self::ModifierAlone => f.write_str("a modifier key alone works as the hotkey only on macOS"),
     }
   }
@@ -296,13 +300,11 @@ impl Shortcut {
   /// Any other character matches itself, Shift or not, since the layout may need Shift to type
   /// it: `cmd++` is Cmd-Shift-= on a US layout. Named keys need the exact modifiers.
   pub fn matches(&self, k: &KeyEvent) -> bool {
-    let shift = Modifiers::SHIFT;
+    let (shift, mods, held) = (Modifiers::SHIFT, self.mods - Modifiers::FN, k.mods - Modifiers::FN);
     match (self.key, k.key) {
-      (Key::Char(a), Key::Char(b)) if !a.is_alphabetic() => {
-        a == b && self.mods - shift == k.mods - shift
-      }
-      (Key::Char(a), Key::Char(b)) => lower(a) == lower(b) && self.mods == k.mods,
-      (a, b) => a == b && self.mods == k.mods,
+      (Key::Char(a), Key::Char(b)) if !a.is_alphabetic() => a == b && mods - shift == held - shift,
+      (Key::Char(a), Key::Char(b)) => lower(a) == lower(b) && mods == held,
+      (a, b) => a == b && mods == held,
     }
   }
 
@@ -351,8 +353,10 @@ fn parse(text: &str, app: Option<Os>) -> Result<Shortcut, ShortcutError> {
     let part = text[from..to].trim();
     let mut buf = [0; 16];
     let name = ascii_lower(part, &mut buf);
-    if name == "fn" || name == "function" {
-      return Err(Fn);
+    if matches!(name, "fn" | "function" | "globe") {
+      // A global hotkey's modifier (macOS: fn+1), never an in-app shortcut's.
+      mods |= Modifiers::FN;
+      return if global { Ok(()) } else { Err(Fn) };
     }
 
     match (modifier(name), app) {
@@ -384,7 +388,23 @@ fn parse(text: &str, app: Option<Os>) -> Result<Shortcut, ShortcutError> {
 
   take(start, text.len())?;
   let (key, _) = key.ok_or(NoKey)?;
+  if mods.contains(Modifiers::FN) && carries_fn(key) {
+    return Err(Fn);
+  }
+
   Ok(Shortcut { key, mods })
+}
+
+/// The key's events carry the fn flag on a Mac anyway: the F-keys, arrows, Home, End, Page Up
+/// and Down, Forward Delete. fn with one of them is no modifier of the user's.
+pub(crate) fn carries_fn(key: Key) -> bool {
+  use NamedKey::*;
+  let Key::Named(k) = key else { return false };
+  let f = (1..=20).any(|n| f_key(n).is_some_and(|f| f.1 == k));
+  f || matches!(
+    k,
+    ArrowUp | ArrowDown | ArrowLeft | ArrowRight | Home | End | PageUp | PageDown | Delete
+  )
 }
 
 /// [Shortcut::code] of `key`.
@@ -453,6 +473,10 @@ fn parse_key(part: &str, name: &str) -> Option<Key> {
 /// The canonical spelling of a global hotkey: `ctrl+option+shift+cmd+key`, lowercase.
 impl std::fmt::Display for Shortcut {
   fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    if self.mods.contains(Modifiers::FN) {
+      f.write_str("fn+")?;
+    }
+
     for m in MODS.iter().filter(|m| self.mods.contains(m.0)) {
       write!(f, "{}+", m.1)?;
     }
@@ -489,9 +513,17 @@ pub fn modifiers_label(m: Modifiers) -> String {
   mods_label(m, cfg!(target_os = "macos"))
 }
 
+/// fn first, apart (`fn ⌥1`), as it is no glyph of the menus'.
 fn mods_label(m: Modifiers, mac: bool) -> String {
+  let globe = match (m.contains(Modifiers::FN), mac) {
+    (false, _) => "",
+    (true, true) => "fn ",
+    (true, false) => "Fn+",
+  };
+
   let held = MODS.iter().filter(|r| m.contains(r.0));
-  held.map(|r| if mac { r.2.to_string() } else { format!("{}+", r.3) }).collect()
+  globe.to_owned()
+    + &held.map(|r| if mac { r.2.into() } else { format!("{}+", r.3) }).collect::<String>()
 }
 
 fn lower(c: char) -> char {
@@ -1280,6 +1312,35 @@ mod tests {
     assert!(Hotkey::parse("right").is_ok_and(|h| h != Hotkey::Modifier(Code::AltRight)));
     assert!(Hotkey::parse("rx").is_err());
     assert!(matches!(Hotkey::parse("l+shift"), Ok(Hotkey::Shortcut(_))), "the L key with Shift");
+  }
+
+  #[test]
+  fn fn_is_a_global_hotkeys_modifier() {
+    for (text, canonical, label) in [
+      ("fn+1", "fn+1", "fn 1"),
+      ("Globe+Option+1", "fn+option+1", "fn ⌥1"),
+      ("1+fn", "fn+1", "fn 1"),
+    ] {
+      let Ok(Hotkey::Shortcut(s)) = Hotkey::parse(text) else { panic!("{text}") };
+      assert_eq!(s.mods - Modifiers::ALT, Modifiers::FN, "{text}");
+      assert_eq!(s.to_string(), canonical);
+      assert_eq!(Hotkey::parse(canonical), Ok(Hotkey::Shortcut(s)), "round trip of {text}");
+      assert_eq!(s.symbols(), label);
+    }
+
+    assert_eq!(hot("fn+1").map(|s| s.names()), Ok("Fn+1".into()));
+    // With a key whose events carry fn anyway: refused.
+    for text in ["fn+f1", "fn+f20", "fn+left", "fn+home", "fn+pagedown", "fn+forwarddelete"] {
+      assert_eq!(Hotkey::parse(text), Err(ShortcutError::Fn), "{text}");
+    }
+
+    // In the app: no fn; a key event with fn matches a shortcut without it.
+    assert_eq!(Shortcut::parse("fn+1"), Err(ShortcutError::Fn));
+    let fn_z = ev(Key::Char('z'), CMD | Modifiers::FN);
+    assert!(Shortcut::parse("cmd+z").unwrap().matches(&fn_z));
+    assert!(hot("fn+1").unwrap().matches(&ev(Key::Char('1'), Modifiers::empty())));
+    assert!(carries_fn(Key::Named(N::F5)) && !carries_fn(Key::Char('1')));
+    assert!(!carries_fn(Key::Named(N::Backspace)));
   }
 
   #[test]

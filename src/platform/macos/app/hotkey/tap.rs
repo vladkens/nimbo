@@ -367,7 +367,9 @@ fn chords_of(e: &mut Event) -> bool {
   let (s, chords, code, mut swallow) = (e.s, e.chords, e.code, false);
   for i in (0..MAX).filter(|&i| chords[i] & (SET | LONE) == SET && chords[i] & 0xffff == code) {
     let (bit, down) = (1u8 << i, &s.down);
-    let ours = e.flags & MODIFIERS == chords[i] >> 16 & MODIFIERS;
+    // fn counts only for a chord with it: F1's events carry fn anyway.
+    let mask = MODIFIERS | chords[i] >> 16 & FN;
+    let ours = e.flags & mask == chords[i] >> 16 & mask;
     let (on, take) = owe(down.load(Ordering::Relaxed) & bit != 0, e.down, e.rep, ours);
     if take == Take::Claim {
       // Its time first: Carbon's release, on another thread, reads it once the bit is set.
@@ -834,6 +836,24 @@ mod tests {
     flags(&s, Code::Fn, FN);
     assert_eq!(key_at(&s, 500, true, 0x78, FN, false), swallow(down(1)));
     assert_eq!(s.down.load(Ordering::Relaxed), 0b11);
+  }
+
+  #[test]
+  fn fn_as_a_chords_modifier() {
+    let s = with(&["fn", "fn+1", "f1"], &[]);
+    // fn+1 only with the fn flag; F1 with it (the F-row's events carry it) or without.
+    assert_eq!(key(&s, true, ONE, NONE, false), Verdict::Pass);
+    assert_eq!(key(&s, true, ONE, OPT | FN, false), Verdict::Pass);
+    assert_eq!(key(&s, true, 0x7A, FN, false), swallow(down(2)));
+    assert_eq!(key(&s, false, 0x7A, FN, false), swallow(up(2)));
+    assert_eq!(key(&s, true, 0x7A, NONE, false), swallow(down(2)));
+    assert_eq!(key(&s, false, 0x7A, NONE, false), swallow(up(2)));
+    // fn alone held, then fn+1: fn alone is dropped and fn+1 pressed, two edges.
+    assert_eq!(flags(&s, Code::Fn, FN), tell(down(0)));
+    let both = Verdict::Swallow([Some(Hit::Abort { which: 0 }), Some(down(1))]);
+    assert_eq!(key_at(&s, 50, true, ONE, FN, false), both);
+    assert_eq!(key_at(&s, 90, false, ONE, FN, false), swallow(up(1)));
+    assert_eq!(flags_at(&s, 120, Code::Fn, 0), Verdict::Pass, "aborted: no release");
   }
 
   #[test]

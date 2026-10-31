@@ -233,7 +233,9 @@ impl Hotkeys {
     self.shared.carbon_down.fetch_and(!(1 << which), Ordering::AcqRel);
     self.carbon.unregister(which);
     self.carbon_errors[which] = None;
-    if let (Ok(_), Some(Hotkey::Shortcut(s))) = (&value, hotkey) {
+    if let (Ok(_), Some(Hotkey::Shortcut(s))) = (&value, hotkey)
+      && !s.mods.contains(Modifiers::FN)
+    {
       let (code, (_, mods)) = (s.code().and_then(kvk).unwrap_or_default(), mod_bits(s.mods));
       self.carbon_errors[which] = self.carbon.register(which, code, mods).err();
     }
@@ -345,7 +347,10 @@ fn slot_value(hotkey: Hotkey) -> Result<u64, String> {
 /// The tap's value for a key, [NO_KEY] for none or one without a key code here.
 fn key_value(key: Option<Hotkey>) -> u64 {
   let Some(Hotkey::Shortcut(s)) = key else { return NO_KEY };
-  s.code().and_then(kvk).map_or(NO_KEY, |code| u64::from(code) | mod_bits(s.mods).0 << 16)
+  // fn is in no key.
+  s.code()
+    .and_then(kvk)
+    .map_or(NO_KEY, |code| u64::from(code) | (mod_bits(s.mods).0 & MODIFIERS) << 16)
 }
 
 /// The "hotkey" thread: dedupes and hands the edges to the app.
@@ -411,12 +416,13 @@ fn ns(at: Instant) -> u64 {
 }
 
 /// Each modifier: the event tap's flag, and Carbon's bit (`controlKey`, `optionKey`,
-/// `shiftKey`, `cmdKey`).
-const MOD_BITS: [(Modifiers, u64, u32); 4] = [
+/// `shiftKey`, `cmdKey`; fn has none: a chord with it is the tap's only).
+const MOD_BITS: [(Modifiers, u64, u32); 5] = [
   (Modifiers::CONTROL, CGEventFlags::MaskControl.0, 1 << 12),
   (Modifiers::ALT, CGEventFlags::MaskAlternate.0, 1 << 11),
   (Modifiers::SHIFT, CGEventFlags::MaskShift.0, 1 << 9),
   (Modifiers::META, CGEventFlags::MaskCommand.0, 1 << 8),
+  (Modifiers::FN, CGEventFlags::MaskSecondaryFn.0, 0),
 ];
 
 /// The event tap's modifier flags and Carbon's modifier bits for a chord's modifiers.
@@ -541,6 +547,9 @@ mod tests {
     // Paused (every slot cleared, as `crate::hotkey` does), then dropped: nothing left.
     (0..MAX).for_each(|i| _ = h.set_slot(i, None));
     assert_eq!(carbon::tests::live(), []);
+    // A chord with fn is the tap's only: nothing registered, no fallback error.
+    h.set_slot(1, hk("fn+1")).unwrap();
+    assert_eq!((carbon::tests::live(), &h.carbon_errors[1]), (vec![], &None));
     h.set_slot(0, hk("f1")).unwrap();
     h.escape(true);
     drop(h);

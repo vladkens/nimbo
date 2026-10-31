@@ -120,6 +120,9 @@ impl Hotkeys {
     let (shortcut, error) = match hotkey {
       None => (None, None),
       Some(Hotkey::Modifier(_)) => (None, Some("a modifier key alone is not supported".into())),
+      Some(Hotkey::Shortcut(k)) if k.mods.contains(Modifiers::FN) => {
+        (None, Some("the fn key is not visible here".into()))
+      }
       Some(Hotkey::Shortcut(k)) if !x11(s) && trigger(&k).is_none() => {
         (None, Some(format!("{k} has no key name the portal takes")))
       }

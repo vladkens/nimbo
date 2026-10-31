@@ -54,6 +54,7 @@ pub fn flags_mods(f: NSEventModifierFlags) -> Modifiers {
     (NSEventModifierFlags::Control, Modifiers::CONTROL),
     (NSEventModifierFlags::Option, Modifiers::ALT),
     (NSEventModifierFlags::Command, Modifiers::META),
+    (NSEventModifierFlags::Function, Modifiers::FN),
   ];
   flags.into_iter().filter(|(ns, _)| f.contains(*ns)).fold(Modifiers::empty(), |m, (_, k)| m | k)
 }
@@ -99,6 +100,8 @@ pub fn key_event(event: &NSEvent) -> KeyEvent {
     _ => None,
   };
 
+  // Keys whose events carry fn anyway (F-keys, arrows) have it from no key of the user's.
+  let mods = if keys::carries_fn(key) { mods - Modifiers::FN } else { mods };
   KeyEvent { key, text, code, mods, repeat: event.isARepeat() }
 }
 
