@@ -4,11 +4,12 @@
 //! texture, one instanced draw per kind of primitive per layer (and per run of one image) under
 //! the layer's scissor, then waited for: one frame in flight, so one instance buffer and no
 //! upload races a frame. Glyph atlases keep their full width and grow in height as they fill;
-//! images keep their pixels too, for a fall back to the CPU renderer.
+//! images keep their pixels too, for the CPU renderer should a frame fail ([super::present]).
 
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use objc2::encode::{Encoding, RefEncode};
 use objc2::msg_send;
@@ -27,7 +28,7 @@ use super::Gpu;
 use crate::cpu::raster::IRect;
 use crate::cpu::{self, Pixels};
 use crate::platform::macos::surface::Surface;
-use crate::scene::{Images, Layer, Quad, Rect, Scene, Segment, Size, Sprite};
+use crate::scene::{ImageUpload, Images, Layer, Quad, Rect, Scene, Segment, Size, Sprite};
 use crate::text::{ATLAS_SIZE, COLOR_ATLAS_SIZE, TextSystem, Upload};
 
 /// Rows a new atlas texture starts with, coverage and colour (256 KB each), doubled as glyphs
@@ -39,6 +40,8 @@ const MIN_BUFFER: usize = 64 * 1024;
 const ALIGN: usize = 256;
 
 pub(crate) type Texture = ProtocolObject<dyn MTLTexture>;
+/// A render target over a window's surface.
+pub(crate) type Target = Retained<Texture>;
 type Buffer = ProtocolObject<dyn MTLBuffer>;
 type Pipeline = ProtocolObject<dyn MTLRenderPipelineState>;
 
@@ -60,24 +63,16 @@ unsafe impl RefEncode for IOSurfaceRef {
   const ENCODING_REF: Encoding = Encoding::Pointer(&Encoding::Struct("__IOSurface", &[]));
 }
 
-/// An image's texture and its premultiplied RGBA pixels.
-#[allow(dead_code, reason = "the pixels for a window's fall back, to come")]
-struct Image {
-  tex: Retained<Texture>,
-  w: usize,
-  h: usize,
-  data: Vec<u8>,
-}
-
 pub(crate) struct Renderer {
-  gpu: Rc<Gpu>,
+  pub(super) gpu: Rc<Gpu>,
   /// Clears to transparent instead of opaque black: an overlay's frame.
   pub transparent: bool,
   /// The coverage and colour atlases, made at their first upload.
   atlases: [Option<Retained<Texture>>; 2],
   /// The atlas epoch each atlas holds: coverage, colour.
   epochs: [u32; 2],
-  images: Vec<Option<Image>>,
+  /// Each image's texture and its pixels as added, kept for the CPU renderer should it take over.
+  images: Vec<Option<(Retained<Texture>, ImageUpload)>>,
   /// Bumped when atlas or image pixels change under the same coordinates (an atlas reset, an
   /// image id reused): a frame drawn before differs even with the same instances.
   pub generation: u64,
@@ -92,14 +87,14 @@ impl Renderer {
     Ok(Self { gpu, transparent: false, atlases, epochs, images, generation: 0, buffer })
   }
 
-  /// Copies new glyph bitmaps into the atlases and adds or drops images, draining both queues.
-  #[allow(dead_code, reason = "for the window, to come")]
+  /// Copies new glyph bitmaps into the atlases and adds or drops images, draining both queues;
+  /// on an error they are left for the renderer that takes over.
   pub fn sync(&mut self, text: &mut TextSystem, images: &mut Images) -> Result<(), String> {
-    let done = self.sync_pending(text.pending(), images);
+    self.sync_pending(text.pending(), images)?;
     text.uploads().for_each(drop);
     images.added.clear();
     images.removed.clear();
-    done
+    Ok(())
   }
 
   /// [Self::sync] without draining, for a renderer that syncs beside another.
@@ -133,11 +128,18 @@ impl Renderer {
       let tex = (u.w > 0 && u.h > 0).then(|| self.texture(format, u.w, u.h)).transpose()?;
       self.images[i] = tex.map(|tex| {
         replace(&tex, (0, 0, u.w, u.h), 4, &u.data);
-        Image { tex, w: u.w, h: u.h, data: u.data.clone() }
+        (tex, u.clone())
       });
     }
 
     Ok(())
+  }
+
+  /// The images it keeps, as added: what the CPU renderer needs to take over.
+  pub fn kept(&self) -> Images {
+    let mut images = Images::default();
+    images.added = self.images.iter().flatten().map(|(_, u)| u.clone()).collect();
+    images
   }
 
   /// A texture of the atlas `i` with at least `rows` rows: made zeroed, or grown by doubling its
@@ -215,14 +217,14 @@ impl Renderer {
   }
 
   /// Draws the scene into `target` (its pixel size the frame's: [cpu::Renderer::pixel_size])
-  /// and waits for the GPU; the command buffer's error if it failed.
+  /// and waits for the GPU; how long it waited, or the command buffer's error if it failed.
   pub fn encode(
     &mut self,
     target: &Texture,
     scene: &Scene,
     size: Size,
     scale: f32,
-  ) -> Result<(), String> {
+  ) -> Result<Duration, String> {
     autoreleasepool(|_| self.pass(target, scene, size, scale))
   }
 
@@ -233,7 +235,7 @@ impl Renderer {
     scene: &Scene,
     size: Size,
     scale: f32,
-  ) -> Result<(), String> {
+  ) -> Result<Duration, String> {
     let bytes = |n: usize, item: usize| (n * item).next_multiple_of(ALIGN);
     let (quad, sprite, seg) = (size_of::<Quad>(), size_of::<Sprite>(), size_of::<Segment>());
     let len = |l: &Layer| {
@@ -308,8 +310,8 @@ impl Renderer {
         let at = copy(layer.images.as_ptr().cast(), layer.images.len(), sprite);
         // One draw per run of sprites of one image.
         for (i, run) in runs(&layer.image_ids) {
-          if let Some(Some(img)) = self.images.get(layer.image_ids[i].0 as usize) {
-            draw(&gpu.images, Some(&img.tex), at + i * sprite, run);
+          if let Some(Some((tex, _))) = self.images.get(layer.image_ids[i].0 as usize) {
+            draw(&gpu.images, Some(tex), at + i * sprite, run);
           }
         }
       }
@@ -375,12 +377,13 @@ fn runs<T: PartialEq>(ids: &[T]) -> impl Iterator<Item = (usize, usize)> {
   })
 }
 
-/// Commits the command buffer and waits for it; its error if it failed.
-fn finish(cmd: &ProtocolObject<dyn MTLCommandBuffer>) -> Result<(), String> {
+/// Commits the command buffer and waits for it: how long, or its error if it failed.
+fn finish(cmd: &ProtocolObject<dyn MTLCommandBuffer>) -> Result<Duration, String> {
   cmd.commit();
+  let t = Instant::now();
   cmd.waitUntilCompleted();
   match cmd.status() {
-    MTLCommandBufferStatus::Completed => Ok(()),
+    MTLCommandBufferStatus::Completed => Ok(t.elapsed()),
     s => Err(cmd.error().map_or(format!("{s:?}"), |e| e.localizedDescription().to_string())),
   }
 }
