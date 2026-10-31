@@ -455,7 +455,7 @@ impl Job<'_> {
 }
 
 /// The clip in whole pixels, each edge rounded to the nearest.
-fn scissor(r: Rect, scale: f32, frame: IRect) -> IRect {
+pub(crate) fn scissor(r: Rect, scale: f32, frame: IRect) -> IRect {
   let (w, h) = (frame.x1 as f32, frame.y1 as f32);
   let x0 = (r.x * scale).round().clamp(0.0, w);
   let y0 = (r.y * scale).round().clamp(0.0, h);
@@ -517,12 +517,12 @@ fn item_hash(scene: &Scene, it: &Item) -> u64 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
   use super::*;
   use crate::scene::{Point, Quad, Segment};
 
   /// Panels, a moving rounded card with a border and a shadow, a clip and a line.
-  fn scene(t: f32) -> Scene {
+  pub(crate) fn scene(t: f32) -> Scene {
     let mut s = Scene::default();
     s.quad(Quad::new(Rect::new(0.0, 0.0, 300.0, 200.0), [0.1, 0.1, 0.12, 1.0]));
     s.quad(Quad::new(Rect::new(0.0, 0.0, 80.0, 200.0), [0.15, 0.15, 0.2, 1.0]));

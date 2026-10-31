@@ -38,16 +38,16 @@ const SURFACES: usize = 3;
 /// `'BGRA'`, the pixel format code of `kCVPixelFormatType_32BGRA`.
 const BGRA: i32 = 0x4247_5241;
 
-struct Surface {
-  obj: CFRetained<CFType>,
-  w: usize,
-  h: usize,
+pub(super) struct Surface {
+  pub obj: CFRetained<CFType>,
+  pub w: usize,
+  pub h: usize,
   /// The tile hashes of the frame it holds.
   tiles: Vec<u64>,
 }
 
 impl Surface {
-  fn new(w: usize, h: usize) -> Option<Self> {
+  pub fn new(w: usize, h: usize) -> Option<Self> {
     let key = |s: &'static str| CFString::from_static_str(s);
     let keys =
       ["IOSurfaceWidth", "IOSurfaceHeight", "IOSurfaceBytesPerElement", "IOSurfacePixelFormat"]
@@ -63,12 +63,12 @@ impl Surface {
     Some(Self { obj, w, h, tiles: Vec::new() })
   }
 
-  fn in_use(&self) -> bool {
+  pub fn in_use(&self) -> bool {
     unsafe { IOSurfaceIsInUse(&self.obj) != 0 }
   }
 
   /// Runs `f` on the locked pixels: rows of `stride` pixels.
-  fn with_pixels(&mut self, f: impl FnOnce(&mut [u32], usize)) {
+  pub fn with_pixels(&mut self, f: impl FnOnce(&mut [u32], usize)) {
     let s = &*self.obj;
     unsafe { IOSurfaceLock(s, 0, std::ptr::null_mut()) };
     let stride = unsafe { IOSurfaceGetBytesPerRow(s) } / 4;
