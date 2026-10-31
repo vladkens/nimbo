@@ -82,6 +82,8 @@ thread_local! {
   static HOTKEYS: RefCell<Option<Hotkeys>> = RefCell::default();
   /// The window, for the edges posted to the main thread.
   static WINDOW: RefCell<Option<Window<Demo>>> = RefCell::default();
+  /// Edges not yet handed to the window (it was busy), in order; a retry is set.
+  static EDGES: RefCell<(VecDeque<Edge>, bool)> = RefCell::default();
 }
 
 /// `f` on the hotkeys, unless there are none (tests) or they are busy.
@@ -132,7 +134,10 @@ impl Demo {
       Edge::Up { which, .. } | Edge::Aborted { which } => {
         let i = hotkey(which).map_or(0, |i| i + 1);
         let done = if matches!(e, Edge::Up { .. }) { "Up" } else { "Aborted" };
-        self.held &= !(1 << hotkey(which).unwrap_or(0));
+        if let Some(i) = hotkey(which) {
+          self.held &= !(1 << i);
+        }
+
         format!("{done}: hotkey {i}")
       }
       Edge::Key { index, .. } => {
@@ -165,7 +170,7 @@ impl Demo {
         let row = FormRow::new(&label).caption(note);
         ui.form_row(fs, row, |ui| {
           let r = ui.id((HOTKEY, i as u8)).shortcut(&mut self.hotkeys[i]);
-          recording |= r.on;
+          recording |= r.recording;
           if r.changed {
             self.apply();
           }
@@ -178,7 +183,7 @@ impl Demo {
         let label = format!("Key {}", i + 1);
         ui.form_row(fs, FormRow::new(&label), |ui| {
           let r = ui.id((KEY, i as u8)).shortcut_key(&mut self.keys[i]);
-          recording |= r.on;
+          recording |= r.recording;
           if r.changed {
             self.apply();
           }
@@ -270,12 +275,32 @@ pub fn config() -> Config {
   Config::new("Hotkeys", 560.0, 880.0)
 }
 
-/// An edge, on the main thread: to the window, which redraws.
+/// An edge, on the main thread: queued, then the queue to the window in order, which redraws.
 fn deliver(main: &mut Main, edge: Edge) {
+  EDGES.with(|q| q.borrow_mut().0.push_back(edge));
+  drain(main);
+}
+
+/// Hands the queued edges to the window in order; busy (a nested run loop holds it), the rest
+/// wait for one retry a moment later, never dropped nor reordered.
+fn drain(main: &mut Main) {
   let window = WINDOW.with(|w| w.try_borrow().ok().and_then(|w| w.clone()));
-  // Busy (a nested run loop holds it): the edge comes again a moment later, never dropped.
-  if window.is_none_or(|w| w.is_open() && w.with(|demo| demo.edge(edge)).is_none()) {
-    main.proxy().after(Duration::from_millis(10), move |main| deliver(main, edge));
+  let Some(w) = window.filter(|w| w.is_open()) else {
+    return EDGES.with(|q| q.borrow_mut().0.clear());
+  };
+  while let Some(edge) = EDGES.with(|q| q.borrow().0.front().copied()) {
+    if w.with(|demo| demo.edge(edge)).is_none() {
+      if !EDGES.with(|q| std::mem::replace(&mut q.borrow_mut().1, true)) {
+        main.proxy().after(Duration::from_millis(10), |main| {
+          EDGES.with(|q| q.borrow_mut().1 = false);
+          drain(main);
+        });
+      }
+
+      return;
+    }
+
+    EDGES.with(|q| q.borrow_mut().0.pop_front());
   }
 }
 

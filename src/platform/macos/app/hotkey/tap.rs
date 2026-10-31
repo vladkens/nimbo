@@ -156,7 +156,7 @@ unsafe extern "C-unwind" fn callback(
 }
 
 /// The key at `code` is down now, as the HID system has it.
-fn key_down(code: u64) -> bool {
+pub(super) fn key_down(code: u64) -> bool {
   CGEventSource::key_state(CGEventSourceStateID::HIDSystemState, code as u16)
 }
 
@@ -169,9 +169,10 @@ enum KeyKind {
   Flags,
 }
 
-/// One event's edges: at most two, as only one modifier slot alone is held at a time (its press
-/// needs no other modifier held): one it drops or releases, and the event's own.
-type Hits = [Option<Hit>; 2];
+/// One event's edges, at most `2 + MAX`: the modifier slot alone it releases or drops (one is held
+/// at a time, its press needs no other modifier held), the chords a missed release settles
+/// ([settle]), and the event's own.
+type Hits = [Option<Hit>; 2 + MAX];
 
 /// What the tap does with a key event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -242,7 +243,8 @@ fn judge(
   let chords = std::array::from_fn(|i| s.chords[i].load(Ordering::Acquire));
   let down = kind == KeyKind::Down;
   let rep = down && repeat();
-  let mut e = Event { s, chords, kind, code, flags, at, down, rep, hits: [None; 2], key_down };
+  let mut e =
+    Event { s, chords, kind, code, flags, at, down, rep, hits: [None; 2 + MAX], key_down };
   let own =
     (0..MAX).find(|&i| alone(chords[i]) && kind == KeyKind::Flags && code == chords[i] & 0xffff);
   for i in (0..MAX).filter(|&i| alone(chords[i])) {
@@ -378,7 +380,9 @@ fn chords_of(e: &mut Event) -> bool {
     let ours = e.flags & mask == chords[i] >> 16 & mask;
     let (on, take) = owe(down.load(Ordering::Relaxed) & bit != 0, e.down, e.rep, ours);
     if take == Take::Claim {
+      // A fresh press: its release is the tap's to hear.
       s.since[i].store(e.at, Ordering::Relaxed);
+      s.suspect.fetch_and(!bit, Ordering::Relaxed);
     }
 
     mark(down, bit, on);
@@ -410,11 +414,11 @@ fn mark(bits: &AtomicU8, bit: u8, on: bool) {
 
 /// A chord owed a release that may have been missed ([Shared::suspect]: the tap was disabled, or
 /// Secure Input was on) whose key is up (`key_down`, the HID system's state) is released: the
-/// bits cleared, for their `Up`s. No other press asks the HID system: a chord truly held takes
-/// keys.
-fn settle(s: &Shared, chords: &[u64; MAX], key_down: &dyn Fn(u64) -> bool) -> u8 {
+/// bits cleared, for their `Up`s; one whose key is down is no longer suspect. No other press asks
+/// the HID system: a chord truly held takes keys.
+pub(super) fn settle(s: &Shared, chords: &[u64; MAX], key_down: &dyn Fn(u64) -> bool) -> u8 {
   let down = s.down.load(Ordering::Relaxed);
-  let suspect = s.suspect.fetch_and(down, Ordering::Relaxed) & down;
+  let suspect = s.suspect.swap(0, Ordering::Relaxed) & down;
   let gone = |i: usize| suspect & 1 << i != 0 && !alone(chords[i]) && !key_down(chords[i] & 0xffff);
   let up = (0..MAX).filter(|&i| gone(i)).fold(0, |m, i| m | 1 << i);
   s.down.fetch_and(!up, Ordering::Relaxed);
@@ -480,15 +484,20 @@ mod tests {
     s
   }
 
+  /// The edges `hits`, in order, as a verdict holds them.
+  fn hits(hits: &[Hit]) -> Hits {
+    std::array::from_fn(|i| hits.get(i).copied())
+  }
+
   fn tell(hit: Hit) -> Verdict {
-    Verdict::Tell([Some(hit), None])
+    Verdict::Tell(hits(&[hit]))
   }
 
   fn swallow(hit: Hit) -> Verdict {
-    Verdict::Swallow([Some(hit), None])
+    Verdict::Swallow(hits(&[hit]))
   }
 
-  const SWALLOWED: Verdict = Verdict::Swallow([None, None]);
+  const SWALLOWED: Verdict = Verdict::Swallow([None; 2 + MAX]);
 
   fn down(which: usize) -> Hit {
     Hit::Down { which, repeat: false }
@@ -790,6 +799,25 @@ mod tests {
     assert_eq!(held, swallow(Hit::Key(0)));
   }
 
+  /// One event with more than two edges: fn alone released (its flag gone), a chord whose release
+  /// was missed settled, and the key taken while another chord is truly held; none dropped.
+  #[test]
+  fn every_edge_of_an_event_is_kept() {
+    let s = with(&["fn", "f1", "f2"], &["z"]);
+    flags(&s, Code::Fn, FN);
+    s.down.fetch_or(0b110, Ordering::Relaxed);
+    s.suspect.store(0b110, Ordering::Relaxed);
+    let f2 = |code| code == 0x78;
+    let v = judge(&s, KeyKind::Down, Z, NONE, 0, || false, &f2);
+    assert_eq!(v, Verdict::Swallow(hits(&[up(0), up(1), Hit::Key(0)])));
+    assert_eq!((s.down.load(Ordering::Relaxed), s.suspect.load(Ordering::Relaxed)), (0b100, 0));
+    // A fresh press of a chord is no longer suspect.
+    key(&s, false, 0x78, NONE, false);
+    s.suspect.store(0b100, Ordering::Relaxed);
+    assert_eq!(key(&s, true, 0x78, NONE, false), swallow(down(2)));
+    assert_eq!(s.suspect.load(Ordering::Relaxed), 0);
+  }
+
   /// A slot switched between a modifier alone and a chord while held: the old press is dropped
   /// with its bit, the new hotkey works, the old key's events are the app's.
   #[test]
@@ -844,7 +872,7 @@ mod tests {
   fn a_chord_on_a_held_modifier_drops_it_first() {
     let s = with(&["right_option", "option+space"], &[]);
     assert_eq!(flags(&s, Code::AltRight, RIGHT_ALT), tell(down(0)));
-    let both = Verdict::Swallow([Some(Hit::Abort { which: 0 }), Some(down(1))]);
+    let both = Verdict::Swallow(hits(&[Hit::Abort { which: 0 }, down(1)]));
     assert_eq!(key_at(&s, 500, true, SPACE, RIGHT_ALT, false), both);
     assert_eq!(key_at(&s, 600, false, SPACE, RIGHT_ALT, false), swallow(up(1)));
     assert_eq!(flags(&s, Code::AltRight, 0), Verdict::Pass, "aborted: no release");
@@ -867,7 +895,7 @@ mod tests {
     assert_eq!(key(&s, false, 0x7A, NONE, false), swallow(up(2)));
     // fn alone held, then fn+1: fn alone is dropped and fn+1 pressed, two edges.
     assert_eq!(flags(&s, Code::Fn, FN), tell(down(0)));
-    let both = Verdict::Swallow([Some(Hit::Abort { which: 0 }), Some(down(1))]);
+    let both = Verdict::Swallow(hits(&[Hit::Abort { which: 0 }, down(1)]));
     assert_eq!(key_at(&s, 50, true, ONE, FN, false), both);
     assert_eq!(key_at(&s, 90, false, ONE, FN, false), swallow(up(1)));
     assert_eq!(flags_at(&s, 120, Code::Fn, 0), Verdict::Pass, "aborted: no release");

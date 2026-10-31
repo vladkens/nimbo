@@ -33,8 +33,6 @@ struct Rec {
   prev: Option<Id>,
   held: u8,
   lone: Option<Code>,
-  /// fn is held: a modifier of the chord (macOS), which key events don't carry.
-  fn_down: bool,
 }
 
 /// What a recorder records.
@@ -109,10 +107,10 @@ impl Ui<'_> {
         match down {
           true => {
             rec.lone = (rec.held == 0 && mode == Record::ChordsOrModifier).then_some(key);
-            (rec.held, rec.fn_down) = (rec.held + 1, rec.fn_down || key == Code::Fn);
+            rec.held += 1;
           }
           false => {
-            (rec.held, rec.fn_down) = (rec.held.saturating_sub(1), rec.fn_down && key != Code::Fn);
+            rec.held = rec.held.saturating_sub(1);
             if rec.lone.take() == Some(key) {
               set(&mut b, Some(Hotkey::Modifier(key)));
               stop = true;
@@ -123,7 +121,8 @@ impl Ui<'_> {
 
       if let Some(mut k) = self.key_down(id) {
         rec.lone = None;
-        k.mods.set(Modifiers::FN, rec.fn_down && !carries_fn(k.key));
+        // fn held (macOS), which key events don't carry: the chord's modifier.
+        k.mods.set(Modifiers::FN, self.st.input.fn_held && !carries_fn(k.key));
         match k.key {
           Key::Named(NamedKey::Escape) if (k.mods - Modifiers::FN).is_empty() => stop = true,
           Key::Named(NamedKey::Backspace | NamedKey::Delete)
@@ -230,7 +229,7 @@ impl Ui<'_> {
         ui.with_id(clear).float(at).canvas(s, move |f, r| icon::draw(f, Icon::CLEAR, r, mark, 0.0));
       }
     });
-    (r.clicked, r.changed, r.on) = (b.clicked, b.changed, b.on);
+    (r.clicked, r.changed, r.recording) = (b.clicked, b.changed, b.on);
     r
   }
 }
@@ -363,6 +362,11 @@ mod tests {
     };
     assert_eq!(record('1'.into()).as_deref(), Some("fn+1"));
     assert_eq!(record(NamedKey::F5.into()).as_deref(), Some("f5"));
+    // Held already as the recording starts: still the chord's.
+    h.event(Event::Modifier { key: Code::Fn, down: true });
+    h.click_id(Id::of("rec"));
+    h.key('2', Modifiers::empty());
+    assert_eq!(h.app().0.map(|k| k.to_string()).as_deref(), Some("fn+2"));
     let mut h = Harness::new(Keys::default(), Size::new(300.0, 100.0), 1.0);
     h.frame();
     h.click_id(Id::of("rec"));

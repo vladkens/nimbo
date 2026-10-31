@@ -446,8 +446,8 @@ pub struct Response {
   pub cancelled: bool,
   /// A text field lost focus since the view last built it.
   pub blurred: bool,
-  /// A shortcut recorder records.
-  pub on: bool,
+  /// A shortcut recorder is recording.
+  pub recording: bool,
 }
 
 /// The element tree builder an app's `view` gets each frame it redraws. `'a` lets canvas

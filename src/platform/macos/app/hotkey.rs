@@ -19,7 +19,7 @@
 //! allocation, no lock, no I/O.
 
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, SyncSender as Sender, sync_channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender as Sender, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -36,9 +36,13 @@ mod tap;
 
 use carbon::Carbon;
 
+use super::permissions::secure_input;
+
 /// What the tap measures time from: set before the tap exists, read without a lock.
 static EPOCH: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
 
+/// While a slot is held, the hotkey thread looks this often for Secure Input and settles ([look]).
+const LOOK: Duration = Duration::from_millis(250);
 /// An edge the other source reported this long before is the same key press.
 const DEDUPE: Duration = Duration::from_millis(50);
 /// Room for a burst of events between two runs of the hotkey thread; a full channel drops events
@@ -295,9 +299,6 @@ impl Hotkeys {
     }
 
     out.secure_input = super::permissions::secure_input();
-    if out.secure_input {
-      s.suspect.fetch_or(s.down.load(Ordering::Relaxed), Ordering::Relaxed);
-    }
 
     let c = &mut out.counts;
     (c.listener, c.fallback, c.fallback_repeats) =
@@ -307,7 +308,7 @@ impl Hotkeys {
     c.keys = n(&s.key_events);
     // Secure Input leaves the tap deaf, never Carbon.
     let tap = out.listener == Listener::Active && !out.secure_input;
-    if s.escape.load(Ordering::Relaxed) && !tap && !self.carbon.escape.is_some() {
+    if s.escape.load(Ordering::Relaxed) && !tap && self.carbon.escape.is_none() {
       let why = self.escape_error.as_deref().unwrap_or("not registered");
       out.escape_error = Some(format!("no event tap, and Carbon's hotkey for Escape: {why}"));
     }
@@ -364,56 +365,86 @@ fn route(rx: &Receiver<Raw>, on: &OnEdge, shared: &Shared) {
   let mut dedupe = Dedupe::default();
   // When Carbon reported each slot's press, in ns of [EPOCH].
   let (carbon_down, mut pressed) = (&shared.carbon_down, [0; MAX]);
-  for mut raw in rx {
-    let counter = match raw.source {
-      Source::Tap => &shared.tap_events,
-      Source::Carbon => &shared.carbon_events,
+  loop {
+    let next = match shared.down.load(Ordering::Relaxed) {
+      0 => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
+      _ => rx.recv_timeout(LOOK),
     };
 
-    counter.fetch_add(1, Ordering::Relaxed);
-    if raw.source == Source::Carbon {
-      match raw.edge {
-        // Carbon repeats the press while the key is held: an autorepeat.
-        Hit::Down { which, .. } if carbon_down.load(Ordering::Acquire) & 1 << which != 0 => {
-          shared.carbon_repeats.fetch_add(1, Ordering::Relaxed);
-          raw.edge = Hit::Down { which, repeat: true };
-        }
-        Hit::Down { which, .. } => {
-          carbon_down.fetch_or(1 << which, Ordering::AcqRel);
-          pressed[which] = ns(raw.at);
-        }
-        // The tap's press of it is over too, unless it saw a newer one (a release it missed
-        // while it was disabled would keep the key owed). Carbon's release may come before the
-        // tap's: the tap then lets the key's release through, and Carbon's is the edge.
-        Hit::Up { which } => {
-          carbon_down.fetch_and(!(1 << which), Ordering::AcqRel);
-          if shared.since[which].load(Ordering::Relaxed)
-            <= pressed[which] + DEDUPE.as_nanos() as u64
-          {
-            shared.down.fetch_and(!(1 << which), Ordering::AcqRel);
+    let raws = match next {
+      Ok(raw) => vec![raw],
+      Err(RecvTimeoutError::Timeout) => look(shared, secure_input(), &tap::key_down),
+      Err(RecvTimeoutError::Disconnected) => return,
+    };
+
+    for mut raw in raws {
+      let counter = match raw.source {
+        Source::Tap => &shared.tap_events,
+        Source::Carbon => &shared.carbon_events,
+      };
+
+      counter.fetch_add(1, Ordering::Relaxed);
+      if raw.source == Source::Carbon {
+        match raw.edge {
+          // Carbon repeats the press while the key is held: an autorepeat.
+          Hit::Down { which, .. } if carbon_down.load(Ordering::Acquire) & 1 << which != 0 => {
+            shared.carbon_repeats.fetch_add(1, Ordering::Relaxed);
+            raw.edge = Hit::Down { which, repeat: true };
           }
+          Hit::Down { which, .. } => {
+            carbon_down.fetch_or(1 << which, Ordering::AcqRel);
+            pressed[which] = ns(raw.at);
+          }
+          // The tap's press of it is over too, unless it saw a newer one (a release it missed
+          // while it was disabled would keep the key owed). Carbon's release may come before the
+          // tap's: the tap then lets the key's release through, and Carbon's is the edge.
+          Hit::Up { which } => {
+            carbon_down.fetch_and(!(1 << which), Ordering::AcqRel);
+            if shared.since[which].load(Ordering::Relaxed)
+              <= pressed[which] + DEDUPE.as_nanos() as u64
+            {
+              shared.down.fetch_and(!(1 << which), Ordering::AcqRel);
+            }
+          }
+          _ => {}
         }
-        _ => {}
       }
-    }
 
-    if !dedupe.accept(raw.source, raw.edge, raw.at) {
-      shared.duplicates.fetch_add(1, Ordering::Relaxed);
-      continue;
-    }
-
-    let at = raw.at;
-    on(match raw.edge {
-      Hit::Down { which, repeat } => Edge::Down { which, at, repeat },
-      Hit::Up { which } => Edge::Up { which, at },
-      Hit::Abort { which } => Edge::Aborted { which },
-      Hit::Key(index) => {
-        shared.key_events.fetch_add(1, Ordering::Relaxed);
-        Edge::Key { index, at }
+      if !dedupe.accept(raw.source, raw.edge, raw.at) {
+        shared.duplicates.fetch_add(1, Ordering::Relaxed);
+        continue;
       }
-      Hit::Escape => Edge::Escape,
-    });
+
+      let at = raw.at;
+      on(match raw.edge {
+        Hit::Down { which, repeat } => Edge::Down { which, at, repeat },
+        Hit::Up { which } => Edge::Up { which, at },
+        Hit::Abort { which } => Edge::Aborted { which },
+        Hit::Key(index) => {
+          shared.key_events.fetch_add(1, Ordering::Relaxed);
+          Edge::Key { index, at }
+        }
+        Hit::Escape => Edge::Escape,
+      });
+    }
   }
+}
+
+/// While a slot is held, Secure Input (which keeps its release from the tap) makes it suspect,
+/// and a suspect chord whose key is up by now is released ([tap::settle]): its `Up`, as the
+/// tap's.
+fn look(shared: &Shared, secure: bool, key_down: &dyn Fn(u64) -> bool) -> Vec<Raw> {
+  if secure {
+    shared.suspect.fetch_or(shared.down.load(Ordering::Relaxed), Ordering::Relaxed);
+  }
+
+  let up = tap::settle(
+    shared,
+    &std::array::from_fn(|i| shared.chords[i].load(Ordering::Acquire)),
+    key_down,
+  );
+  let raw = |which| Raw { source: Source::Tap, edge: Hit::Up { which }, at: Instant::now() };
+  (0..MAX).filter(|i| up & 1 << i != 0).map(raw).collect()
 }
 
 /// `at` in ns of [EPOCH], as the tap tells time.
@@ -560,6 +591,23 @@ mod tests {
     h.escape(true);
     drop(h);
     assert_eq!(carbon::tests::live(), []);
+  }
+
+  /// While a slot is held the hotkey thread looks for Secure Input: it makes the held chords
+  /// suspect, and one whose key is up by now is released, its `Up` as the tap's.
+  #[test]
+  fn secure_input_settles_a_chord_held_through_it() {
+    let shared = Shared::default();
+    shared.store_slot(0, slot_value(Hotkey::parse("fn+1").unwrap()).unwrap());
+    shared.store_slot(1, slot_value(Hotkey::parse("f2").unwrap()).unwrap());
+    shared.down.store(0b11, Ordering::Relaxed);
+    assert!(look(&shared, false, &|_| false).is_empty(), "no Secure Input: nothing asked");
+    let ups = look(&shared, true, &|code| code == 0x78);
+    assert_eq!(
+      ups.iter().map(|r| (r.source, r.edge)).collect::<Vec<_>>(),
+      [(Source::Tap, Hit::Up { which: 0 })]
+    );
+    assert_eq!(shared.down.load(Ordering::Relaxed), 0b10, "F2 still down");
   }
 
   /// Carbon's release clears the tap's held bit of a press it missed the release of, not one of

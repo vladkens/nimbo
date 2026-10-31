@@ -593,6 +593,10 @@ impl<A: App> Runtime<A> {
       self.fresh();
     }
 
+    if let Event::Modifier { key: Code::Fn, down } = ev {
+      self.ui.input.fn_held = down;
+    }
+
     let focus = self.ui.focus();
     let used = match ev {
       Event::KeyDown(k) => self.key_down(k),
