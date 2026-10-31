@@ -1,7 +1,8 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The shortcut recorder: a capsule showing a global [Hotkey] that records a new one, a chord
-//! or a modifier key alone where the platform can grab one ([crate::hotkey::modifier_alone]).
+//! or a modifier key alone where the platform can grab one ([crate::hotkey::modifier_alone]), or
+//! a key taken while a hotkey is held ([Ui::shortcut_key]: any key, with or without modifiers).
 //!
 //! ```ignore
 //! if ui.id("hotkey").shortcut(&mut self.hotkey).changed { self.save() }
@@ -10,8 +11,8 @@
 //!
 //! The hotkey is system-wide ([Hotkey::parse]): its modifiers are the keys' own (`cmd` is ⌘,
 //! the Windows or the Super key) and its key a place on the keyboard, so it reads back as typed
-//! on any layout. It shows as the platform writes it ([Hotkey::label]): `⌃⌥Space`, `Right ⌥` on
-//! macOS, `Ctrl+Alt+Space`, `Right Alt` elsewhere.
+//! on any layout. It shows as the platform writes it ([Hotkey::label]), keys as a US keyboard has
+//! them: `⌃⌥Space`, `Right ⌥`, `fn 1` on macOS, `Ctrl+Alt+Space`, `Right Alt` elsewhere.
 
 use keyboard_types::{Code, Modifiers, NamedKey};
 
@@ -34,28 +35,42 @@ struct Rec {
   lone: Option<Code>,
 }
 
+/// What a recorder records.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Record {
+  /// A chord ([hotkey_of]).
+  Chords,
+  /// A chord, or a modifier key pressed and released alone (left or right, fn).
+  ChordsOrModifier,
+  /// A key taken while a hotkey is held ([crate::hotkey::Hotkeys::set]): the next one that is no
+  /// modifier, by place, with the modifiers held but fn (`z`, `shift+z`, `option+1`, `f5`).
+  Key,
+}
+
 /// The global hotkey a key press makes, or `None` when it makes none: a key with Ctrl, Alt
-/// (Option) or Meta (⌘, Windows), or an F-key with any. The key is the physical one, as a US
+/// (Option), Meta (⌘, Windows) or fn, or an F-key with any. The key is the physical one, as a US
 /// keyboard has it (Shift-1 is `shift+1`).
 pub fn hotkey_of(k: &KeyEvent) -> Option<Hotkey> {
   let f = (1..=20).any(|n| f_key(n).is_some_and(|(c, _)| c == k.code));
-  if !(f || k.mods.intersects(Modifiers::CONTROL | Modifiers::ALT | Modifiers::META)) {
-    return None;
-  }
+  let chord = Modifiers::CONTROL | Modifiers::ALT | Modifiers::META | Modifiers::FN;
+  (f || k.mods.intersects(chord)).then(|| key_of(k, k.mods)).flatten()
+}
 
+/// The key press `k` with `mods`, its key by place.
+fn key_of(k: &KeyEvent, mods: Modifiers) -> Option<Hotkey> {
   let key = match us_char(k.code, false) {
     Some(c) => Key::Char(c),
     None => Key::named(k.code).filter(|k| *k != Key::Named(NamedKey::Unidentified))?,
   };
 
-  Some(Hotkey::Shortcut(Shortcut { key, mods: k.mods }))
+  Some(Hotkey::Shortcut(Shortcut { key, mods }))
 }
 
 impl Ui<'_> {
   /// A shortcut recorder over `value`: a click, or Space while focused, starts recording (`on`)
-  /// and focuses it; the next chord typed ([hotkey_of]), or with `lone` a modifier key pressed
-  /// and released with nothing else between ([crate::Event::Modifier]: left or right, fn),
-  /// becomes the value and stops it, `changed`. Escape stops it unchanged, Backspace or Delete
+  /// and focuses it; what `mode` records typed next (a chord, [hotkey_of]; a modifier key
+  /// pressed and released with nothing else between, [crate::Event::Modifier]; a key) becomes
+  /// the value and stops it, `changed`. Escape stops it unchanged, Backspace or Delete
   /// clear the value; a click again or elsewhere, or focus moving away, stop it unchanged. With
   /// `clear`, a click on `id.key("clear")` (a ⊗ the look draws) clears the value too. Every key
   /// is taken while recording, before the app's bindings ([Ui::grab_keys]), so none reaches
@@ -65,7 +80,7 @@ impl Ui<'_> {
     id: Id,
     value: &mut Option<Hotkey>,
     clear: bool,
-    lone: bool,
+    mode: Record,
   ) -> Behavior {
     // A button whose value is the hotkey, as the platform writes it.
     let shown = |v: &Option<Hotkey>| v.map(|h| h.label()).unwrap_or_default();
@@ -91,7 +106,7 @@ impl Ui<'_> {
       if let Some((key, down)) = self.modifier_key(id).filter(|m| is_modifier(m.0)) {
         match down {
           true => {
-            rec.lone = (rec.held == 0 && lone).then_some(key);
+            rec.lone = (rec.held == 0 && mode == Record::ChordsOrModifier).then_some(key);
             rec.held += 1;
           }
           false => {
@@ -113,7 +128,8 @@ impl Ui<'_> {
             stop = true;
           }
           _ => {
-            if let Some(h) = hotkey_of(&k) {
+            let key = || key_of(&k, k.mods - Modifiers::FN).filter(|_| !is_modifier(k.code));
+            if let Some(h) = if mode == Record::Key { key() } else { hotkey_of(&k) } {
               set(&mut b, Some(h));
               stop = true;
             }
@@ -157,11 +173,23 @@ impl Ui<'_> {
   /// accent edge and the focus ring, a red dot and "Type a shortcut…". `changed` when a hotkey
   /// was recorded or the value cleared.
   pub fn shortcut(&mut self, value: &mut Option<Hotkey>) -> Response {
+    let lone = crate::hotkey::modifier_alone();
+    self.recorder(value, if lone { Record::ChordsOrModifier } else { Record::Chords })
+  }
+
+  /// A recorder of a key taken while a hotkey is held ([Record::Key]), as [Ui::shortcut] draws
+  /// one: "Record Key" when empty, "Type a key…" recording. Escape alone stops it, Backspace or
+  /// Delete alone clear it: those three are set as text if wanted.
+  pub fn shortcut_key(&mut self, value: &mut Option<Hotkey>) -> Response {
+    self.recorder(value, Record::Key)
+  }
+
+  fn recorder(&mut self, value: &mut Option<Hotkey>, mode: Record) -> Response {
     let t = self.theme();
     let id = self.take_id();
     let clear = id.key("clear");
-    let lone = crate::hotkey::modifier_alone();
-    let b = self.shortcut_behavior(id, value, t.shortcut_clear, lone);
+    let b = self.shortcut_behavior(id, value, t.shortcut_clear, mode);
+    let key = mode == Record::Key;
     let hot = self.ctl_hot(id, b.hovered);
     let h = t.sizes.control_h;
     let bg = match (b.on, b.pressed) {
@@ -178,9 +206,11 @@ impl Ui<'_> {
       match (b.on, *value) {
         (true, _) => {
           ui.el(Style::new().w(px(7.0)).h(px(7.0)).radius(3.5).bg(t.danger));
-          ui.text("Type a shortcut…", label.color(t.muted));
+          ui.text(if key { "Type a key…" } else { "Type a shortcut…" }, label.color(t.muted));
         }
-        (_, None) => ui.text("Record Shortcut", label.color(t.muted)),
+        (_, None) => {
+          ui.text(if key { "Record Key" } else { "Record Shortcut" }, label.color(t.muted))
+        }
         (_, Some(v)) => ui.text(v.label(), label.font(t.font.weight(Weight::Medium))),
       }
 
@@ -251,7 +281,7 @@ mod tests {
 
   impl App for Chords {
     fn view(&mut self, ui: &mut Ui) {
-      let b = ui.shortcut_behavior(Id::of("rec"), &mut self.0, false, false);
+      let b = ui.shortcut_behavior(Id::of("rec"), &mut self.0, false, Record::Chords);
       ui.with_id(b.id).el(b.style(Style::new().w(px(W)).h(px(22.0))));
     }
   }
@@ -271,6 +301,46 @@ mod tests {
     assert_eq!(h.app().0, Some(ctrl_k));
   }
 
+  /// A key recorder's behaviour.
+  #[derive(Default)]
+  struct Keys(Option<Hotkey>);
+
+  impl App for Keys {
+    fn view(&mut self, ui: &mut Ui) {
+      let b = ui.shortcut_behavior(Id::of("rec"), &mut self.0, false, Record::Key);
+      ui.with_id(b.id).el(b.style(Style::new().w(px(W)).h(px(22.0))));
+    }
+  }
+
+  #[test]
+  fn a_key_recorder_records_any_key_but_fn() {
+    let mut h = Harness::new(Keys::default(), Size::new(300.0, 100.0), 1.0);
+    h.frame();
+    let mut record = |key: Key, mods| {
+      h.click_id(Id::of("rec"));
+      h.key(key, mods);
+      h.app().0.map(|k| k.to_string())
+    };
+    assert_eq!(record('z'.into(), Modifiers::empty()).as_deref(), Some("z"));
+    assert_eq!(record('Z'.into(), Modifiers::SHIFT).as_deref(), Some("shift+z"));
+    assert_eq!(record('1'.into(), Modifiers::ALT).as_deref(), Some("option+1"));
+    assert_eq!(record(NamedKey::F5.into(), Modifiers::empty()).as_deref(), Some("f5"));
+    assert_eq!(record(' '.into(), Modifiers::empty()).as_deref(), Some("space"));
+    assert_eq!(record('x'.into(), Modifiers::FN).as_deref(), Some("x"), "fn dropped");
+    // A modifier alone is ignored: still recording; Escape stops; Backspace clears.
+    h.click_id(Id::of("rec"));
+    for down in [true, false] {
+      h.event(Event::Modifier { key: Code::AltRight, down });
+    }
+
+    assert_eq!(h.focused(), Some(Id::of("rec")), "still recording");
+    h.key(NamedKey::Escape, Modifiers::empty());
+    assert_eq!((h.focused(), h.app().0.map(|k| k.to_string())), (None, Some("x".into())));
+    h.click_id(Id::of("rec"));
+    h.key(NamedKey::Backspace, Modifiers::empty());
+    assert_eq!(h.app().0, None);
+  }
+
   fn hk(key: impl Into<Key>, mods: Modifiers) -> Option<String> {
     hotkey_of(&us_key(key.into(), mods)).map(|h| h.to_string())
   }
@@ -287,6 +357,8 @@ mod tests {
     assert_eq!(hk('?', ctrl_shift).as_deref(), Some("ctrl+shift+slash"));
     assert_eq!(hk(NamedKey::Enter, Modifiers::ALT).as_deref(), Some("option+return"));
     assert_eq!(hk(NamedKey::F5, Modifiers::empty()).as_deref(), Some("f5"));
+    // fn is a chord's modifier (macOS): fn+1.
+    assert_eq!(hk('1', Modifiers::FN).as_deref(), Some("fn+1"));
     // No modifier, or Shift alone: no hotkey.
     assert_eq!(hk('a', Modifiers::empty()), None);
     assert_eq!(hk('a', Modifiers::SHIFT), None);

@@ -26,7 +26,8 @@
 //! - [Ui::slider_behavior]: a drag along the element, the arrows step a twentieth;
 //! - [Ui::pick_behavior] (tabs, segmented control, toolbar tabs): one of `n` items by a click, the
 //!   arrows step;
-//! - [Ui::shortcut_behavior]: a shortcut recorder over a global hotkey ([crate::Hotkey]);
+//! - [Ui::shortcut_behavior]: a shortcut recorder over a global hotkey ([crate::Hotkey]) or a key
+//!   taken while one is held;
 //! - [Ui::dialog_behavior]: a modal dialog's keys, focus trap and fade ([super::dialog]);
 //! - [Ui::split_behavior]: a divider's drag within both panes' minimums;
 //! - [Ui::menu_popup] and [Ui::menu_item_behavior]: a menu's open state, keys and items;

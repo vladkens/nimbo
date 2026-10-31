@@ -3,9 +3,10 @@
 //! Harness tests for `examples/gallery.rs`: both panes edit one state, each in its theme: a
 //! check box clicked in the light pane shows checked in the dark one, in its accent; a switch
 //! flips and its knob slides; the slider drags; a select opens and chooses by letters; a
-//! segment picks; an icon button's tooltip shows after a rest; a recorder records a chord; the
-//! dialog opens in the dark pane's theme, Escape closes it and the action counts. The search
-//! field is drawn in each pane's theme, and what is typed in one clears from the other's ⊗.
+//! segment picks; an icon button's tooltip shows after a rest; a recorder records a chord, the
+//! key recorder a key; the dialog opens in the dark pane's theme, Escape closes it and the action
+//! counts. The search field is drawn in each pane's theme, and what is typed in one clears from
+//! the other's ⊗.
 //! Assistive technology reads each widget by its role.
 
 #[path = "../examples/gallery.rs"]
@@ -33,14 +34,14 @@ fn rect(h: &H, name: &str, pane: usize) -> Rect {
 
 #[test]
 fn every_widget_in_both_themes() {
-  let mut h = Harness::new(Gallery::default(), Size::new(1040.0, 590.0), 2.0);
+  let mut h = Harness::new(Gallery::default(), Size::new(1040.0, 650.0), 2.0);
   h.event(Event::Appearance(Appearance::LIGHT));
   h.frame();
 
   // The panes' grounds, light and dark.
   let img = h.render();
-  assert_eq!(img.pixel(4.0, 550.0), px(Theme::PLATES_LIGHT.bg));
-  assert_eq!(img.pixel(1036.0, 550.0), px(Theme::PLATES_DARK.bg));
+  assert_eq!(img.pixel(4.0, 640.0), px(Theme::PLATES_LIGHT.bg));
+  assert_eq!(img.pixel(1036.0, 640.0), px(Theme::PLATES_DARK.bg));
 
   // A check box clicked in the light pane unchecks it in both; again, checked in the dark
   // pane's accent.
@@ -119,7 +120,7 @@ fn every_widget_in_both_themes() {
 
 #[test]
 fn the_search_field_in_both_themes() {
-  let mut h = Harness::new(Gallery::default(), Size::new(1040.0, 590.0), 2.0);
+  let mut h = Harness::new(Gallery::default(), Size::new(1040.0, 650.0), 2.0);
   h.event(Event::Appearance(Appearance::LIGHT));
   h.frame();
 
@@ -151,7 +152,7 @@ fn the_search_field_in_both_themes() {
 /// Each kind of widget is what it is to assistive technology: its role, name, value and states.
 #[test]
 fn every_widget_has_its_role() {
-  let mut h = Harness::new(Gallery::default(), Size::new(1040.0, 590.0), 2.0);
+  let mut h = Harness::new(Gallery::default(), Size::new(1040.0, 650.0), 2.0);
   h.frame();
   let lines = [
     "button \"Save\"",
@@ -182,13 +183,34 @@ fn every_widget_has_its_role() {
 /// screen reader wouldn't reach them.
 #[test]
 fn clear_marks_are_beside_their_controls() {
-  let mut h = Harness::new(Gallery::default(), Size::new(1040.0, 590.0), 2.0);
+  let mut h = Harness::new(Gallery::default(), Size::new(1040.0, 650.0), 2.0);
   h.frame();
   let dump = h.a11y();
   // The recorder's value is the platform's label of its shortcut (⌃⌥Space, Ctrl+Alt+Space).
   let lines: Vec<&str> = dump.lines().collect();
   let next = |first: &str| lines.iter().rposition(|l| l.starts_with(first)).map(|i| lines[i + 1]);
-  for first in ["button value ", "text field \"Search widgets\" value \"Switches\""] {
+  let hotkey = format!("button value \"{}\"", h.app().hotkey.unwrap().label());
+  let key = format!("button value \"{}\"", h.app().key.unwrap().label());
+  for first in [&hotkey, &key, "text field \"Search widgets\" value \"Switches\""] {
     assert_eq!(next(first), Some("button \"Clear\""), "{first} in\n{dump}");
   }
+}
+
+/// The key recorder records a key with its modifiers (no chord needed), reads it as its label,
+/// and its ⊗ clears it; recording, it asks for a key.
+#[test]
+fn a_key_recorder() {
+  let mut h = Harness::new(Gallery::default(), Size::new(1040.0, 650.0), 2.0);
+  h.frame();
+  h.click_id(id(KEY, 0));
+  h.frame();
+  assert!(h.a11y().contains("button value \"Z\""));
+  assert_eq!(h.focused(), Some(id(KEY, 0)), "recording");
+  h.key('X', Modifiers::SHIFT);
+  let key = h.app().key.expect("a key");
+  assert_eq!(key.to_string(), "shift+x");
+  h.frame();
+  reads(&h.a11y(), &[&format!("button value \"{}\"", key.label())]);
+  h.click_id(id(KEY, 1).key("clear"));
+  assert_eq!(h.app().key, None);
 }
