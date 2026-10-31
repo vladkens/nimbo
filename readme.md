@@ -148,7 +148,7 @@ Measured on an Apple M2, rustc 1.99, 2026-10-25, without a compiler cache:
 
 ## 🤖 How it's made
 
-nimbo is written by AI agents (Claude Code, Codex) following [agents.md](agents.md); I choose what to build and review every pull request. I check every visual change in a shot. I've written software by hand for years ([macmon](https://github.com/vladkens/macmon), [twscrape](https://github.com/vladkens/twscrape), [ecloop](https://github.com/vladkens/ecloop)); agents are how I build now. Releases are rare; the CLI and data formats stay compatible, the API may still change before 1.0, and every break is listed in the changelog.
+nimbo is built with AI agents following [agents.md](agents.md); I decide what to build and review every change. I've written software by hand for years ([macmon](https://github.com/vladkens/macmon), [twscrape](https://github.com/vladkens/twscrape), [ecloop](https://github.com/vladkens/ecloop)). Releases are rare; the API may change before 1.0.
 
 ## 🤝 Contributing
 
