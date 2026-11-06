@@ -4,6 +4,11 @@
 //! between two spacers that give the scroll area the whole content height, so a list of 100k
 //! rows costs what the forty on screen do and its scrollbar is right.
 //!
+//! [List] is nimbo's take on SwiftUI's `List` (with its `Section`s, selection, context menus and
+//! keyboard): its behaviour is the target to move towards, not a 1:1 copy. The app builds only
+//! what a row and a section header show; the list does the selection, the clicks, the keys and
+//! the highlight.
+//!
 //! ```ignore
 //! ui.list(Id::of("rows"), self.rows.len(), 22.0, |ui, i| ui.label(&self.rows[i]));
 //! let r = List::new(self.files.len(), 22.0)
@@ -12,7 +17,25 @@
 //!   .selection(&mut self.sel)
 //!   .show(ui.id("files"), |ui, row| ui.label(&self.files[row.index].name));
 //! if let Some(i) = r.activated { self.open(i) }
+//! if r.delete { self.ask_delete() } // the app's confirmation, then `self.sel.retain(..)`
+//!
+//! // Rows grouped by day: `starts` the first row of each day, its header 32 high.
+//! let head = |ui: &mut Ui, g: usize| {
+//!   ui.text(&self.days[g].title, t.label());
+//!   ui.spacer();
+//!   ui.text(&self.days[g].note, t.muted());
+//! };
+//! let list = List::new(self.entries.len(), 44.0).sections(&self.starts, 32.0, &head);
 //! ```
+//!
+//! Sections, as SwiftUI's `Section(header:)`: the rows stay one run of indices, `starts` says
+//! where each section begins and a header is built with `head(ui, section)` above its first row.
+//! Headers are not rows: they take no selection, focus or keys, Shift and Cmd-A cover the rows
+//! only, and all are one height, so where a row lies is still arithmetic (a binary search of
+//! `starts`) and a list of 100k rows in a thousand sections costs what one without them does. A
+//! header's box has the rows' side padding, its content at the bottom; the rows' grey plates of
+//! [Ui::form_list], if wanted, are the app's ([List::unstyled]: it knows which row ends a
+//! section).
 //!
 //! The rows to build come from the scroll offset as of the last frame and the input since,
 //! clamped to the new content; when the layout shows more than was built (the viewport grew,
@@ -23,11 +46,13 @@
 //! the app ([List::selection]) or the list's own state. A press selects; with [List::multi],
 //! Cmd-click (Ctrl-click on Windows and Linux) toggles a row and Shift-click selects from the
 //! anchor; a secondary click selects the row alone unless it is selected, for the app's context
-//! menu ([Ui::context_menu]), which one off the rows (the scrollbar) doesn't open. Keys, while the
-//! list has focus (a press gives it), come as the platform's commands: Up and Down (Shift extends),
-//! Page Up and Page Down, Home and End or Cmd-Up and Cmd-Down, Cmd-A, and Enter, which activates
-//! the row, as a double click does. The row the keys moved to scrolls into view; so does
-//! [Ui::reveal_row]. Disabled ([Ui::disabled]), it takes no input or focus and dims.
+//! menu ([Ui::context_menu]), which one off the rows (the scrollbar, a header) doesn't open. Keys,
+//! while the list has focus (a press gives it), come as the platform's commands: Up and Down (Shift
+//! extends), Page Up and Page Down, Home and End or Cmd-Up and Cmd-Down, Cmd-A, and Enter, which
+//! activates the row, as a double click does. Delete or Backspace (Cmd-Backspace too on a Mac) ask
+//! to delete the selection ([ListResponse::delete], SwiftUI's `onDeleteCommand`); Escape clears it.
+//! Either, with nothing selected, goes on to the app. The row the keys moved to scrolls into view;
+//! so does [Ui::reveal_row]. Disabled ([Ui::disabled]), it takes no input or focus and dims.
 //!
 //! The list is the behaviour, its rows' fills the look: [List::unstyled] leaves the fills to
 //! the app, which draws them from [Row].
@@ -39,7 +64,7 @@ use std::ops::Range;
 use keyboard_types::Modifiers;
 
 use crate::app::MouseButton;
-use crate::keys::{Binding, CMD, Command, Move, Os, bind};
+use crate::keys::{Binding, CMD, Command, Delete, Move, Os, bind};
 use crate::scene::{Point, Rect, alpha};
 use crate::text::FxHasher;
 use crate::ui::{Align, Cursor, Id, Role, State, Style, Ui, grow, px};
@@ -51,6 +76,9 @@ const OVERSCAN: usize = 2;
 const MULTI_KEYS: &[Binding] = &[bind("cmd+a", Command::SelectAll)];
 
 type KeySet = HashSet<u64, BuildHasherDefault<FxHasher>>;
+
+/// What builds a section's header: `head(ui, section)`.
+type Head<'s> = &'s dyn Fn(&mut Ui<'_>, usize);
 
 // MARK: Selection
 
@@ -104,6 +132,14 @@ impl Selection {
   pub fn clear(&mut self) {
     self.keys.clear();
     (self.cursor, self.anchor) = (None, None);
+  }
+
+  /// Keeps the keys `f` keeps (rows still there after a delete or a reload), the cursor and the
+  /// anchor too while theirs is kept.
+  pub fn retain(&mut self, mut f: impl FnMut(u64) -> bool) {
+    self.keys.retain(|&k| f(k));
+    self.cursor = self.cursor.filter(|c| f(c.0));
+    self.anchor = self.anchor.filter(|a| f(a.0));
   }
 
   /// Selects only row `i`, keyed `key`, with the cursor and the anchor on it.
@@ -179,9 +215,45 @@ pub struct ListResponse {
   pub pressed: Option<usize>,
   /// A row was double-clicked, or Enter pressed on the cursor row.
   pub activated: Option<usize>,
+  /// Delete or Backspace with rows selected: the app asks to delete them.
+  pub delete: bool,
   /// The rows built.
   pub shown: Range<usize>,
   pub focused: bool,
+}
+
+/// Where a list's rows lie from the top of its content: `n` rows `h` high, and a header `head`
+/// high above the first row of each section (`starts`, ascending, none empty).
+#[derive(Clone, Copy)]
+struct Spans<'s> {
+  n: usize,
+  h: f32,
+  starts: &'s [usize],
+  head: f32,
+}
+
+impl Spans<'_> {
+  /// The headers above row `i`'s own: those of the sections that start before it.
+  fn heads(&self, i: usize) -> usize {
+    self.starts.partition_point(|&s| s < i)
+  }
+
+  /// The top of row `i`, or of its section's header when it starts one; the content's height
+  /// for `n`.
+  fn top(&self, i: usize) -> f32 {
+    i as f32 * self.h + self.heads(i) as f32 * self.head
+  }
+
+  /// The row at depth `y`, or under the header there, clamped to the rows.
+  fn at(&self, y: f32) -> usize {
+    let g = self.starts.partition_point(|&s| self.top(s) <= y);
+    let (from, y) = match g {
+      0 => (0, y),
+      g => (self.starts[g - 1], y - self.top(self.starts[g - 1]) - self.head),
+    };
+
+    (from + (y / self.h).floor().max(0.0) as usize).min(self.n.saturating_sub(1))
+  }
 }
 
 /// A list's state in the store, under its id.
@@ -205,6 +277,8 @@ pub struct List<'s> {
   key: Option<&'s dyn Fn(usize) -> u64>,
   sel: Option<&'s mut Selection>,
   multi: bool,
+  /// Where each section starts, its header's height and what builds it.
+  sections: Option<(&'s [usize], f32, Head<'s>)>,
   style: Style,
   row: Style,
   /// Rows filled from the theme when selected or hovered.
@@ -220,6 +294,7 @@ impl<'s> List<'s> {
       key: None,
       sel: None,
       multi: false,
+      sections: None,
       style: Style::new().grow(),
       row: Style::new()
         .w(grow())
@@ -244,6 +319,21 @@ impl<'s> List<'s> {
   /// selects all.
   pub fn multi(self) -> Self {
     Self { multi: true, ..self }
+  }
+
+  /// Rows in sections, as SwiftUI's `Section(header:)`: section `g` starts at row `starts[g]`
+  /// (ascending, none empty), under a header `head_h` high built with `head(ui, g)`, which
+  /// takes no selection, focus or keys (see the module's docs). Rows before the first start have
+  /// none. One slice and one callback rather than a section per value: the app keeps the
+  /// starts it has, the list finds a row's place by a binary search of them, and it builds only
+  /// the headers in view, as it does the rows.
+  pub fn sections(
+    self,
+    starts: &'s [usize],
+    head_h: f32,
+    head: &'s dyn Fn(&mut Ui, usize),
+  ) -> Self {
+    Self { sections: Some((starts, head_h, head)), ..self }
   }
 
   /// The list's box (a scroll area): its size and padding; its gap is 0.
@@ -274,6 +364,8 @@ impl<'s> List<'s> {
     }
 
     let List { n, h, style, row, fill, multi, .. } = self;
+    let (starts, head_h, head) = self.sections.unwrap_or((&[], 0.0, &|_, _| {}));
+    let sp = Spans { n, h, starts, head: head_h };
     let keyf = self.key;
     let key = move |i: usize| keyf.map_or(i as u64, |k| k(i));
     let mut st = std::mem::take(ui.state::<ListState>(id));
@@ -302,8 +394,8 @@ impl<'s> List<'s> {
     match (st.reveal, sc) {
       (Some(i), Some(sc)) => {
         st.reveal = None;
-        let top = if i == 0 { 0.0 } else { style.pad[0] + i as f32 * h };
-        let end = style.pad[0] + (i + 1) as f32 * h + if i + 1 == n { style.pad[2] } else { 0.0 };
+        let top = if i == 0 { 0.0 } else { style.pad[0] + sp.top(i) };
+        let end = style.pad[0] + sp.top(i + 1) + if i + 1 == n { style.pad[2] } else { 0.0 };
         if i < n {
           ui.reveal(id, Rect::new(sc.offset.x, top, 1.0, end - top));
         }
@@ -336,20 +428,27 @@ impl<'s> List<'s> {
       // The offset after the input and the scroll area's own (a thumb drag), clamped to the
       // content as it is now.
       let (pad_t, pad_b) = (style.pad[0], style.pad[2]);
-      let total = n as f32 * h;
+      let total = sp.top(n);
       let max = (pad_t + total + pad_b - view_h).max(0.0);
       let off = ui.scroll_raw(id).y.clamp(0.0, max);
-      let at = |y: f32| ((y / h).floor().max(0.0) as usize).min(n.saturating_sub(1));
+      let at = |y: f32| sp.at(y - pad_t);
       shown = match n {
         0 => 0..0,
-        _ => {
-          at(off - pad_t).saturating_sub(OVERSCAN)..(at(off - pad_t + view_h) + 1 + OVERSCAN).min(n)
-        }
+        _ => at(off).saturating_sub(OVERSCAN)..(at(off + view_h) + 1 + OVERSCAN).min(n),
       };
-      ui.el(Style::new().h(px(shown.start as f32 * h)));
+      ui.el(Style::new().h(px(sp.top(shown.start))));
       st.shown.extend(shown.clone().map(key));
       st.from = shown.start;
+      // A header: the rows' side padding, its content at the bottom, by its first row.
+      let [_, pad_r, _, pad_l] = row.pad;
+      let hs = Style { pad: [0.0, pad_r, 4.0, pad_l], ..row }.h(px(head_h)).bg([0.0; 4]);
+      let hs = hs.align(Align::Start, Align::End);
       for (i, &k) in shown.clone().zip(&st.shown) {
+        let g = sp.heads(i);
+        if starts.get(g) == Some(&i) {
+          ui.key(("head", k)).row(hs, |ui| head(ui, g));
+        }
+
         let rid = id.key(("row", k));
         let selected = sel.contains(k);
         let hover = ui.hot(rid, !disabled && ui.hovered(rid));
@@ -370,11 +469,11 @@ impl<'s> List<'s> {
         };
       }
 
-      ui.el(Style::new().h(px(total - shown.end as f32 * h)));
+      ui.el(Style::new().h(px(total - sp.top(shown.end))));
       // What the built rows cover, for the runtime to run the view again if the layout shows
       // more (the ends are open when they reach the list's).
-      let lo = if shown.start == 0 { f32::NEG_INFINITY } else { pad_t + shown.start as f32 * h };
-      let hi = if shown.end == n { f32::INFINITY } else { pad_t + shown.end as f32 * h };
+      let lo = if shown.start == 0 { f32::NEG_INFINITY } else { pad_t + sp.top(shown.start) };
+      let hi = if shown.end == n { f32::INFINITY } else { pad_t + sp.top(shown.end) };
       let node = ui.st.stack.last().unwrap().0;
       ui.st.tree.partial.push((node, node, lo.into(), hi.into()));
     });
@@ -415,8 +514,8 @@ impl<'a> Ui<'a> {
   }
 
   /// The list's keys, as commands: the cursor moves (Shift extends a multi-select), Enter
-  /// activates, Cmd-A selects all; `geo` is the rows' count and height, the viewport's height
-  /// and whether several rows can be selected.
+  /// activates, Cmd-A selects all, Delete asks to delete the selection, Escape clears it; `geo` is
+  /// the rows' count and height, the viewport's height and whether several rows can be selected.
   fn list_keys(
     &mut self,
     id: Id,
@@ -438,6 +537,7 @@ impl<'a> Ui<'a> {
       None if d > 0 => 0,
       None => n - 1,
     };
+    use Delete::*;
     use Move::*;
     let (to, shift) = match c {
       Command::Move(Up, s) => (step(-1), s),
@@ -456,6 +556,15 @@ impl<'a> Ui<'a> {
       }
       Command::SelectAll if multi => {
         sel.select_all(n, key);
+        out.changed = true;
+        return;
+      }
+      Command::Delete(Backward | Forward | ToLineStart) if !sel.is_empty() => {
+        out.delete = true;
+        return;
+      }
+      Command::Cancel if !sel.is_empty() => {
+        sel.clear();
         out.changed = true;
         return;
       }
@@ -594,8 +703,33 @@ mod tests {
     assert!(s.contains(13) && !s.contains(1));
     s.select_all(7, &moved);
     assert_eq!(s.len(), 7);
+    // Rows gone: their keys go, the cursor with its row; the rest stays.
+    s.retain(|k| k != 13 && k != 2);
+    assert_eq!((s.len(), s.cursor()), (5, None));
+    s.select(12, 4);
+    s.retain(|k| k != 2);
+    assert_eq!((sorted(&s), s.cursor()), (vec![12], Some(12)));
     s.clear();
     assert!(s.is_empty() && s.cursor().is_none());
+  }
+
+  #[test]
+  fn rows_lie_under_their_headers() {
+    // Rows 0-2 and 3-5, 10 high, under headers 5 high.
+    let sp = Spans { n: 6, h: 10.0, starts: &[0, 3], head: 5.0 };
+    let tops: Vec<f32> = (0..=6).map(|i| sp.top(i)).collect();
+    assert_eq!(tops, [0.0, 15.0, 25.0, 35.0, 50.0, 60.0, 70.0]);
+    // A header's depth is its first row's; past the end, the last row.
+    let at = [(0.0, 0), (4.9, 0), (5.0, 0), (15.0, 1), (34.9, 2), (36.0, 3), (49.9, 3)];
+    for (y, i) in at.into_iter().chain([(50.0, 4), (1e6, 5), (-3.0, 0)]) {
+      assert_eq!(sp.at(y), i, "at {y}");
+    }
+
+    // Rows before the first section have no header; with none, rows only.
+    let sp = Spans { starts: &[2], ..sp };
+    assert_eq!((sp.top(2), sp.top(3), sp.at(26.0)), (20.0, 35.0, 2));
+    let sp = Spans { starts: &[], ..sp };
+    assert_eq!((sp.top(6), sp.at(25.0)), (60.0, 2));
   }
 
   #[test]
@@ -725,6 +859,84 @@ mod tests {
     assert_eq!((h.app().sel.cursor(), h.focused()), (Some(497), None));
     assert!(h.click_id(Id::of("b")));
     assert_eq!(h.app().clicks, 1);
+  }
+
+  /// 30 rows 20 high in three sections of ten under headers 30 high, the app holding the
+  /// selection and counting the deletes the list asked for.
+  #[derive(Default)]
+  struct Days {
+    sel: Selection,
+    deletes: usize,
+  }
+
+  impl crate::App for Days {
+    fn view(&mut self, ui: &mut Ui) {
+      let head = |ui: &mut Ui, _: usize| ui.label("head");
+      ui.col(Style::new().w(px(200.0)).h(px(200.0)), |ui| {
+        let list = List::new(30, 20.0).sections(&[0, 10, 20], 30.0, &head);
+        let r = list.multi().selection(&mut self.sel).show(ui.id("list"), |ui, _| ui.label("row"));
+        self.deletes += r.delete as usize;
+      });
+    }
+  }
+
+  #[test]
+  fn headers_take_no_selection_keys_or_cmd_a() {
+    use crate::NamedKey as K;
+    use crate::harness::Harness;
+    let mut h = Harness::new(Days::default(), Size::new(300.0, 300.0), 1.0);
+    let id = Id::of("list");
+    let (row, head) = (|k: u64| id.key(("row", k)), |k: u64| id.key(("head", k)));
+    h.frame();
+    // Each section's first row under its header.
+    let (top, r0) = (h.rect(id).unwrap().y, h.rect(row(0)).unwrap());
+    assert_eq!((h.rect(head(0)).unwrap().h, r0.y - top), (30.0, 30.0));
+    // A click on a header selects nothing.
+    h.click_id(head(0));
+    assert!(h.app().sel.is_empty());
+    // Down from a section's last row goes to the next one's first, Up back over its header;
+    // Shift extends over the rows only, Cmd-A selects the 30 rows.
+    h.click_id(row(7));
+    for _ in 0..3 {
+      h.key(K::ArrowDown, Modifiers::empty());
+    }
+
+    assert_eq!(h.app().sel.cursor(), Some(10));
+    h.frame();
+    let (r9, r10) = (h.rect(row(9)).unwrap(), h.rect(row(10)).unwrap());
+    assert_eq!(r10.y - (r9.y + r9.h), 30.0);
+    h.key(K::ArrowUp, Modifiers::SHIFT);
+    h.key(K::ArrowUp, Modifiers::SHIFT);
+    assert_eq!(sorted(&h.app().sel), [8, 9, 10]);
+    h.key(crate::Key::Char('a'), CMD);
+    assert_eq!(h.app().sel.len(), 30);
+    // End: the last row in view, under its section's header, the first rows no longer built.
+    h.key(K::End, Modifiers::empty());
+    h.frame();
+    let (v, last) = (h.rect(id).unwrap(), h.rect(row(29)).unwrap());
+    assert!(last.y + last.h <= v.y + v.h + 0.5, "{last:?} in {v:?}");
+    assert!(h.rect(head(20)).is_some() && h.rect(row(0)).is_none());
+  }
+
+  #[test]
+  fn delete_asks_and_escape_clears() {
+    use crate::NamedKey as K;
+    use crate::harness::Harness;
+    let mut h = Harness::new(Days::default(), Size::new(300.0, 300.0), 1.0);
+    let none = Modifiers::empty();
+    h.set_os(Os::Mac);
+    h.frame();
+    h.click_id(Id::of("list").key(("row", 2u64)));
+    // Backspace, Delete and Cmd-Backspace ask to delete the selection, which stays.
+    h.key(K::Backspace, none);
+    h.key(K::Delete, none);
+    h.key(K::Backspace, Os::Mac.cmd());
+    assert_eq!((h.app().deletes, h.app().sel.len()), (3, 1));
+    // Escape clears it; with nothing selected, neither key is the list's.
+    h.key(K::Escape, none);
+    assert!(h.app().sel.is_empty());
+    assert!(!h.key(K::Backspace, none) && !h.key(K::Escape, none));
+    assert_eq!(h.app().deletes, 3);
   }
 
   /// 100k rows keyed by a function that counts its calls.
