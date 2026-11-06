@@ -24,6 +24,7 @@ A small custom-drawn desktop UI toolkit in Rust: its own CPU renderer draws ever
 ## UI
 
 - The look follows macOS System Settings, measured from screenshots, and must also look right on Windows and Linux.
+- Components and their behaviour take SwiftUI as the reference (AppKit where SwiftUI has no answer): a component aims at its SwiftUI counterpart's behaviour and API shape without copying it 1:1.
 - A control's width never changes for the text beside it; notes and descriptions wrap onto their own lines and the row grows.
 - Rows in a list keep one height in every state (idle, in progress, failed, selected).
 - Every clickable element shows the pointing hand and a hover (the toolbar's tabs only the hand, as in System Settings); transitions are animated, 120–170 ms.
