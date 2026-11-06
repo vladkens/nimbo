@@ -338,12 +338,7 @@ impl<'s> List<'s> {
   /// top of `head_h`. One slice and one callback rather than a section per value: the app keeps the
   /// starts it has, the list finds a row's place by a binary search of them, and it builds only
   /// the headers in view, as it does the rows.
-  pub fn sections(
-    self,
-    starts: &'s [usize],
-    head_h: f32,
-    head: &'s dyn Fn(&mut Ui, usize),
-  ) -> Self {
+  pub fn sections(self, starts: &'s [usize], head_h: f32, head: Head<'s>) -> Self {
     Self { sections: Some((starts, head_h, head)), ..self }
   }
 
@@ -1024,8 +1019,8 @@ mod tests {
     let (row, head) = (|k: u64| id.key(("row", k)), |k: u64| id.key(("head", k)));
     h.frame();
     // Inset as a form page; the second header the gap between plates under the first plate.
-    let (list, r) = (h.rect(id).unwrap(), (0..6).map(|k| h.rect(row(k)).unwrap()));
-    let r: Vec<Rect> = r.collect();
+    let list = h.rect(id).unwrap();
+    let r: Vec<Rect> = (0..6).map(|k| h.rect(row(k)).unwrap()).collect();
     assert_eq!((r[0].x - list.x, list.x + list.w - r[0].x - r[0].w), (20.0, 20.0));
     let (h0, h3) = (h.rect(head(0)).unwrap(), h.rect(head(3)).unwrap());
     assert_eq!((h0.y - list.y, r[0].y, h3.y, h3.h), (12.0, h0.y + 20.0, r[2].y + 20.0, 50.0));
