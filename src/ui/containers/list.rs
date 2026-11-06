@@ -33,9 +33,11 @@
 //! Headers are not rows: they take no selection, focus or keys, Shift and Cmd-A cover the rows
 //! only, and all are one height, so where a row lies is still arithmetic (a binary search of
 //! `starts`) and a list of 100k rows in a thousand sections costs what one without them does. A
-//! header's box has the rows' side padding, its content at the bottom; the rows' grey plates of
-//! [Ui::form_list], if wanted, are the app's ([List::unstyled]: it knows which row ends a
-//! section).
+//! header's box has the rows' side padding, its content at the bottom.
+//!
+//! The look is a plain list, or SwiftUI's `.listStyle(.insetGrouped)` with [List::inset_grouped]:
+//! each section's rows on a rounded plate as [Ui::form_list]'s, the header over it, the list's
+//! own selection and hover filling a row's piece of the plate.
 //!
 //! The rows to build come from the scroll offset as of the last frame and the input since,
 //! clamped to the new content; when the layout shows more than was built (the viewport grew,
@@ -65,9 +67,9 @@ use keyboard_types::Modifiers;
 
 use crate::app::MouseButton;
 use crate::keys::{Binding, CMD, Command, Delete, Move, Os, bind};
-use crate::scene::{Point, Rect, alpha};
+use crate::scene::{Frame, Point, Quad, Rect, alpha};
 use crate::text::FxHasher;
-use crate::ui::{Align, Cursor, Id, Role, State, Style, Ui, grow, px};
+use crate::ui::{Align, Cursor, FormStyle, Id, Role, State, Style, Ui, grow, px};
 
 /// Rows built past each edge of the viewport.
 const OVERSCAN: usize = 2;
@@ -223,13 +225,15 @@ pub struct ListResponse {
 }
 
 /// Where a list's rows lie from the top of its content: `n` rows `h` high, and a header `head`
-/// high above the first row of each section (`starts`, ascending, none empty).
+/// high above the first row of each section (`starts`, ascending, none empty), `gap` above it
+/// unless it is at the top.
 #[derive(Clone, Copy)]
 struct Spans<'s> {
   n: usize,
   h: f32,
   starts: &'s [usize],
   head: f32,
+  gap: f32,
 }
 
 impl Spans<'_> {
@@ -241,7 +245,13 @@ impl Spans<'_> {
   /// The top of row `i`, or of its section's header when it starts one; the content's height
   /// for `n`.
   fn top(&self, i: usize) -> f32 {
-    i as f32 * self.h + self.heads(i) as f32 * self.head
+    i as f32 * self.h + self.above(self.heads(i))
+  }
+
+  /// The height of the first `k` headers with their gaps.
+  fn above(&self, k: usize) -> f32 {
+    let top = (self.starts.first() == Some(&0)) as usize;
+    k as f32 * self.head + k.saturating_sub(top) as f32 * self.gap
   }
 
   /// The row at depth `y`, or under the header there, clamped to the rows.
@@ -249,7 +259,7 @@ impl Spans<'_> {
     let g = self.starts.partition_point(|&s| self.top(s) <= y);
     let (from, y) = match g {
       0 => (0, y),
-      g => (self.starts[g - 1], y - self.top(self.starts[g - 1]) - self.head),
+      g => (self.starts[g - 1], y - self.starts[g - 1] as f32 * self.h - self.above(g)),
     };
 
     (from + (y / self.h).floor().max(0.0) as usize).min(self.n.saturating_sub(1))
@@ -279,10 +289,13 @@ pub struct List<'s> {
   multi: bool,
   /// Where each section starts, its header's height and what builds it.
   sections: Option<(&'s [usize], f32, Head<'s>)>,
-  style: Style,
-  row: Style,
+  /// The box and the rows' as the app set them, else the look's.
+  style: Option<Style>,
+  row: Option<Style>,
   /// Rows filled from the theme when selected or hovered.
   fill: bool,
+  /// Each section's rows on a plate ([List::inset_grouped]).
+  grouped: bool,
 }
 
 impl<'s> List<'s> {
@@ -295,13 +308,10 @@ impl<'s> List<'s> {
       sel: None,
       multi: false,
       sections: None,
-      style: Style::new().grow(),
-      row: Style::new()
-        .w(grow())
-        .pads([0.0, 14.0, 0.0, 10.0])
-        .gap(8.0)
-        .align(Align::Start, Align::Center),
+      style: None,
+      row: None,
       fill: true,
+      grouped: false,
     }
   }
 
@@ -324,7 +334,8 @@ impl<'s> List<'s> {
   /// Rows in sections, as SwiftUI's `Section(header:)`: section `g` starts at row `starts[g]`
   /// (ascending, none empty), under a header `head_h` high built with `head(ui, g)`, which
   /// takes no selection, focus or keys (see the module's docs). Rows before the first start have
-  /// none. One slice and one callback rather than a section per value: the app keeps the
+  /// none; inset grouped, a header but one at the top has the gap between plates above it, on
+  /// top of `head_h`. One slice and one callback rather than a section per value: the app keeps the
   /// starts it has, the list finds a row's place by a binary search of them, and it builds only
   /// the headers in view, as it does the rows.
   pub fn sections(
@@ -338,12 +349,21 @@ impl<'s> List<'s> {
 
   /// The list's box (a scroll area): its size and padding; its gap is 0.
   pub fn style(self, style: Style) -> Self {
-    Self { style, ..self }
+    Self { style: Some(style), ..self }
   }
 
   /// Each row's box: width, padding, gap and alignment; the list sets its height and fill.
   pub fn row_style(self, row: Style) -> Self {
-    Self { row, ..self }
+    Self { row: Some(row), ..self }
+  }
+
+  /// Each section's rows on a rounded plate, as SwiftUI's `.listStyle(.insetGrouped)` and
+  /// [Ui::form_list]'s plates ([FormStyle::plates]): the header above it, a hairline between
+  /// rows (inside the row's height, at its top; none beside a selected row), the selection and
+  /// hover filling a row's piece of the plate. The box is padded as a form page and the rows as
+  /// a form's, unless [List::style] or [List::row_style] say otherwise.
+  pub fn inset_grouped(self) -> Self {
+    Self { grouped: true, ..self }
   }
 
   /// Rows with no fill: the app draws selection and hover itself from [Row], the list keeps
@@ -363,9 +383,19 @@ impl<'s> List<'s> {
       ui.focus(None);
     }
 
-    let List { n, h, style, row, fill, multi, .. } = self;
+    let List { n, h, fill, multi, grouped, .. } = self;
+    let fs = FormStyle::plates(&t);
+    let row = Style::new().w(grow()).align(Align::Start, Align::Center);
+    let (style, row) = match grouped {
+      true => (Style::new().grow().pads(fs.page.pad), row.pad_xy(fs.row.pad[1], 0.0).gap(fs.gap)),
+      false => (Style::new().grow(), row.pads([0.0, 14.0, 0.0, 10.0]).gap(8.0)),
+    };
+
+    let (style, row) = (self.style.unwrap_or(style), self.row.unwrap_or(row));
     let (starts, head_h, head) = self.sections.unwrap_or((&[], 0.0, &|_, _| {}));
-    let sp = Spans { n, h, starts, head: head_h };
+    // Grouped, the space between plates above each header but one at the top.
+    let gap = if grouped { fs.page.gap + fs.head_pad[0] } else { 0.0 };
+    let sp = Spans { n, h, starts, head: head_h, gap };
     let keyf = self.key;
     let key = move |i: usize| keyf.map_or(i as u64, |k| k(i));
     let mut st = std::mem::take(ui.state::<ListState>(id));
@@ -441,11 +471,16 @@ impl<'s> List<'s> {
       st.from = shown.start;
       // A header: the rows' side padding, its content at the bottom, by its first row.
       let [_, pad_r, _, pad_l] = row.pad;
-      let hs = Style { pad: [0.0, pad_r, 4.0, pad_l], ..row }.h(px(head_h)).bg([0.0; 4]);
+      let below = if grouped { fs.head_pad[2] } else { 4.0 };
+      let hs = Style { pad: [0.0, pad_r, below, pad_l], ..row }.bg([0.0; 4]);
       let hs = hs.align(Align::Start, Align::End);
+      let dim = if disabled { t.disabled } else { 1.0 };
+      let mut above = false;
       for (i, &k) in shown.clone().zip(&st.shown) {
         let g = sp.heads(i);
-        if starts.get(g) == Some(&i) {
+        let starts_here = starts.get(g) == Some(&i);
+        if starts_here {
+          let hs = hs.h(px(sp.above(g + 1) - sp.above(g)));
           ui.key(("head", k)).row(hs, |ui| head(ui, g));
         }
 
@@ -462,11 +497,33 @@ impl<'s> List<'s> {
         let cursor = sel.cursor.is_some_and(|c| c.0 == k);
         let r = Row { index: i, key: k, id: rid, selected, hover, cursor, focused };
         // Disabled, the same id (keyed in the list) taking no input.
-        let s = row.h(px(h)).bg(bg);
-        match disabled {
-          true => ui.key(("row", k)).row(s, |ui| f(ui, r)),
-          false => ui.with_id(rid).row(s.cursor(Cursor::Pointer), |ui| f(ui, r)),
+        let ui = match disabled {
+          true => ui.key(("row", k)),
+          false => ui.with_id(rid),
         };
+
+        let s = if disabled { row.h(px(h)) } else { row.h(px(h)).cursor(Cursor::Pointer) };
+        if !grouped {
+          ui.row(s.bg(bg), |ui| f(ui, r));
+          continue;
+        }
+
+        // A piece of its section's plate, rounded at the section's ends; the fill and the
+        // hairline painted over it.
+        let first = i == 0 || starts_here;
+        let last = i + 1 == n || starts.get(sp.heads(i + 1)) == Some(&(i + 1));
+        let corner = fs.group.radii[0];
+        let (top, end) = (first as u8 as f32 * corner, last as u8 as f32 * corner);
+        let radii = [top, top, end, end];
+        let lined = (!first && !selected && !above) as u8 as f32;
+        let line = alpha(fs.divider, fs.divider[3] * dim * lined);
+        let ([l, rr], hair, bg) = (fs.inset, fs.hairline, alpha(bg, bg[3] * dim));
+        let paint = move |f: &mut Frame, at: Rect| {
+          f.quad(Quad::new(at, bg).radii(radii));
+          f.rect(Rect::new(at.x + l, at.y, (at.w - l - rr).max(0.0), hair), line, 0.0);
+        };
+        ui.canvas_row(Style { radii, ..s.bg(fs.group.bg) }, paint, |ui| f(ui, r));
+        above = selected;
       }
 
       ui.el(Style::new().h(px(total - sp.top(shown.end))));
@@ -716,7 +773,7 @@ mod tests {
   #[test]
   fn rows_lie_under_their_headers() {
     // Rows 0-2 and 3-5, 10 high, under headers 5 high.
-    let sp = Spans { n: 6, h: 10.0, starts: &[0, 3], head: 5.0 };
+    let sp = Spans { n: 6, h: 10.0, starts: &[0, 3], head: 5.0, gap: 0.0 };
     let tops: Vec<f32> = (0..=6).map(|i| sp.top(i)).collect();
     assert_eq!(tops, [0.0, 15.0, 25.0, 35.0, 50.0, 60.0, 70.0]);
     // A header's depth is its first row's; past the end, the last row.
@@ -730,6 +787,12 @@ mod tests {
     assert_eq!((sp.top(2), sp.top(3), sp.at(26.0)), (20.0, 35.0, 2));
     let sp = Spans { starts: &[], ..sp };
     assert_eq!((sp.top(6), sp.at(25.0)), (60.0, 2));
+    // A gap of 20 above each header but one at the top.
+    let sp = Spans { starts: &[0, 3], gap: 20.0, ..sp };
+    assert_eq!((sp.top(1), sp.top(3), sp.top(4), sp.top(6)), (15.0, 35.0, 70.0, 90.0));
+    assert_eq!((sp.at(50.0), sp.at(64.0), sp.at(75.0)), (3, 3, 4));
+    let sp = Spans { starts: &[2], ..sp };
+    assert_eq!((sp.top(2), sp.top(3), sp.at(30.0)), (20.0, 55.0, 2));
   }
 
   #[test]
@@ -937,6 +1000,52 @@ mod tests {
     assert!(h.app().sel.is_empty());
     assert!(!h.key(K::Backspace, none) && !h.key(K::Escape, none));
     assert_eq!(h.app().deletes, 3);
+  }
+
+  /// Two sections of three rows 20 high, inset grouped, under headers 20 high.
+  #[derive(Default)]
+  struct Plates {
+    sel: Selection,
+  }
+
+  impl crate::App for Plates {
+    fn view(&mut self, ui: &mut Ui) {
+      let head = |ui: &mut Ui, _: usize| ui.label("head");
+      let list = List::new(6, 20.0).sections(&[0, 3], 20.0, &head).inset_grouped();
+      list.selection(&mut self.sel).show(ui.id("list"), |_, _| {});
+    }
+  }
+
+  #[test]
+  fn inset_grouped_rows_lie_on_a_plate_per_section() {
+    use crate::harness::Harness;
+    let mut h = Harness::new(Plates::default(), Size::new(300.0, 300.0), 1.0);
+    let id = Id::of("list");
+    let (row, head) = (|k: u64| id.key(("row", k)), |k: u64| id.key(("head", k)));
+    h.frame();
+    // Inset as a form page; the second header the gap between plates under the first plate.
+    let (list, r) = (h.rect(id).unwrap(), (0..6).map(|k| h.rect(row(k)).unwrap()));
+    let r: Vec<Rect> = r.collect();
+    assert_eq!((r[0].x - list.x, list.x + list.w - r[0].x - r[0].w), (20.0, 20.0));
+    let (h0, h3) = (h.rect(head(0)).unwrap(), h.rect(head(3)).unwrap());
+    assert_eq!((h0.y - list.y, r[0].y, h3.y, h3.h), (12.0, h0.y + 20.0, r[2].y + 20.0, 50.0));
+    assert_eq!(r[3].y, h3.y + h3.h);
+    // The plate under each section's rows, the ground between; rounded at a section's ends.
+    let img = h.render();
+    let at = |r: Rect, dy: f32| img.pixel(r.x + r.w - 30.0, r.y + dy);
+    let (plate, ground) = (at(r[1], 10.0), img.pixel(r[2].x + 50.0, h3.y + 10.0));
+    assert_ne!(plate, ground);
+    assert_eq!((at(r[4], 10.0), at(r[2], 19.0)), (plate, plate));
+    assert_eq!(img.pixel(r[0].x + 0.5, r[0].y + 0.5), ground);
+    assert_eq!(img.pixel(r[1].x + 0.5, r[1].y + 0.5), plate);
+    // A hairline at the top of every row but a section's first, none beside a selected row.
+    assert_ne!(at(r[1], 0.5), plate);
+    assert_eq!((at(r[0], 0.5), at(r[3], 0.5)), (plate, plate));
+    h.click_id(row(1));
+    let img = h.render();
+    let at = |r: Rect, dy: f32| img.pixel(r.x + r.w - 30.0, r.y + dy);
+    assert_ne!(at(r[1], 10.0), plate);
+    assert_eq!(at(r[2], 0.5), plate);
   }
 
   /// 100k rows keyed by a function that counts its calls.
