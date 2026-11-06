@@ -36,8 +36,10 @@ use std::collections::HashSet;
 use std::hash::BuildHasherDefault;
 use std::ops::Range;
 
+use keyboard_types::Modifiers;
+
 use crate::app::MouseButton;
-use crate::keys::{Binding, Command, Move, Os, bind};
+use crate::keys::{Binding, CMD, Command, Move, Os, bind};
 use crate::scene::{Point, Rect, alpha};
 use crate::text::FxHasher;
 use crate::ui::{Align, Cursor, Id, Role, State, Style, Ui, grow, px};
@@ -128,6 +130,18 @@ impl Selection {
     self.keys.extend((a.min(i)..=a.max(i)).map(key));
     self.cursor = Some((key(i), i));
     self.anchor = Some((key(a), a));
+  }
+
+  /// What a click on row `i` of `n` rows keyed by `key` does in a multi-select [List]: Cmd
+  /// toggles it ([Self::toggle]), else Shift extends to it ([Self::extend]), else it is selected
+  /// alone ([Self::select]). A list's rows do it already; an app calls it for rows it lays out
+  /// itself, such as rows grouped under headings.
+  pub fn click(&mut self, i: usize, mods: Modifiers, n: usize, key: &dyn Fn(usize) -> u64) {
+    match (mods.contains(CMD), mods.shift()) {
+      (true, _) => self.toggle(key(i), i),
+      (_, true) => self.extend(i, n, key),
+      _ => self.select(key(i), i),
+    }
   }
 
   /// Selects all `n` rows, the cursor staying.
@@ -528,8 +542,8 @@ impl<'a> Ui<'a> {
 
       return;
     };
-    match (multi, mods.contains(crate::keys::CMD), mods.shift()) {
-      _ if right => {
+    match (right, multi) {
+      (true, _) => {
         self.focus(Some(id));
         if sel.contains(k) {
           return;
@@ -537,8 +551,7 @@ impl<'a> Ui<'a> {
 
         sel.select(k, i);
       }
-      (true, true, _) => sel.toggle(k, i),
-      (true, _, true) => sel.extend(i, n, key),
+      (_, true) => sel.click(i, mods, n, key),
       _ => sel.select(k, i),
     }
 
@@ -583,6 +596,35 @@ mod tests {
     assert_eq!(s.len(), 7);
     s.clear();
     assert!(s.is_empty() && s.cursor().is_none());
+  }
+
+  #[test]
+  fn selection_click_follows_modifiers() {
+    let key = |i: usize| [10, 11, 12, 13, 14][i];
+    let (none, shift) = (Modifiers::empty(), Modifiers::SHIFT);
+    let mut s = Selection::default();
+    // Shift with no anchor yet starts at the row.
+    s.click(2, shift, 5, &key);
+    assert_eq!(sorted(&s), [12]);
+    // A plain click selects the row alone.
+    s.select_all(5, &key);
+    s.click(2, none, 5, &key);
+    assert_eq!((sorted(&s), s.cursor()), (vec![12], Some(12)));
+    // Shift extends from the anchor, both ways, replacing the range.
+    s.click(4, shift, 5, &key);
+    assert_eq!(sorted(&s), [12, 13, 14]);
+    s.click(0, shift, 5, &key);
+    assert_eq!((sorted(&s), s.cursor()), (vec![10, 11, 12], Some(10)));
+    // Cmd toggles, out and back in, and wins over Shift.
+    s.click(1, CMD, 5, &key);
+    assert_eq!(sorted(&s), [10, 12]);
+    s.click(4, CMD | shift, 5, &key);
+    assert_eq!(sorted(&s), [10, 12, 14]);
+    s.click(4, CMD, 5, &key);
+    assert_eq!(sorted(&s), [10, 12]);
+    // Shift after Cmd extends from the row Cmd clicked last.
+    s.click(2, shift, 5, &key);
+    assert_eq!(sorted(&s), [12, 13, 14]);
   }
 
   fn sorted(s: &Selection) -> Vec<u64> {
