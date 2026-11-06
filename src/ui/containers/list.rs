@@ -137,11 +137,17 @@ impl Selection {
   }
 
   /// Keeps the keys `f` keeps (rows still there after a delete or a reload), the cursor and the
-  /// anchor too while theirs is kept.
+  /// anchor too while theirs is kept; `f` is asked once per key.
   pub fn retain(&mut self, mut f: impl FnMut(u64) -> bool) {
+    // A cursor or an anchor off the selection (Cmd-click took its row out) is asked about here;
+    // one on a selected row goes with its key.
+    let off = |at: Option<(u64, usize)>| at.map(|a| a.0).filter(|k| !self.keys.contains(k));
+    let (c, a) = (off(self.cursor), off(self.anchor));
+    let keep_c = c.map(&mut f);
+    let keep_a = if a == c { keep_c } else { a.map(&mut f) };
     self.keys.retain(|&k| f(k));
-    self.cursor = self.cursor.filter(|c| f(c.0));
-    self.anchor = self.anchor.filter(|a| f(a.0));
+    self.cursor = self.cursor.filter(|c| keep_c.unwrap_or_else(|| self.keys.contains(&c.0)));
+    self.anchor = self.anchor.filter(|a| keep_a.unwrap_or_else(|| self.keys.contains(&a.0)));
   }
 
   /// Selects only row `i`, keyed `key`, with the cursor and the anchor on it.
@@ -761,6 +767,33 @@ mod tests {
     s.select(12, 4);
     s.retain(|k| k != 2);
     assert_eq!((sorted(&s), s.cursor()), (vec![12], Some(12)));
+    // Each key is asked once: a predicate that drops 12 and would keep it when asked again
+    // leaves no cursor on it.
+    s.select_all(7, &moved);
+    let mut asked = Vec::new();
+    s.retain(|k| {
+      asked.push(k);
+      k != 12 || asked.iter().filter(|&&a| a == 12).count() > 1
+    });
+    asked.sort_unstable();
+    assert_eq!(asked, [1, 2, 10, 11, 12, 13, 14]);
+    assert!(!s.contains(12) && s.cursor().is_none());
+    // A row Cmd-click took out keeps the cursor and the anchor while `f` keeps it, asked once.
+    s.select_all(7, &moved);
+    s.toggle(13, 5);
+    asked.clear();
+    s.retain(|k| {
+      asked.push(k);
+      k != 2
+    });
+    asked.sort_unstable();
+    assert_eq!(asked, [1, 2, 10, 11, 12, 13, 14]);
+    assert_eq!((s.contains(13), s.cursor()), (false, Some(13)));
+    s.extend(6, 7, &moved);
+    assert_eq!(sorted(&s), [13, 14]);
+    s.toggle(13, 5);
+    s.retain(|k| k != 13);
+    assert_eq!((sorted(&s), s.cursor()), (vec![14], None));
     s.clear();
     assert!(s.is_empty() && s.cursor().is_none());
   }
