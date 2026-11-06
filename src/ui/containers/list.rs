@@ -412,7 +412,7 @@ impl<'s> List<'s> {
     let sc = ui.scroll(id);
     let view_h = sc.map_or(ui.size().h, |s| s.viewport.h);
     if n > 0 && !disabled {
-      ui.list_keys(id, &mut st, sel, &mut out, (n, h, view_h, multi), &key);
+      ui.list_keys(id, &mut st, sel, &mut out, (sp, view_h, multi), &key);
     }
 
     if !disabled {
@@ -573,22 +573,41 @@ impl<'a> Ui<'a> {
 
   /// The list's keys, as commands: the cursor moves (Shift extends a multi-select), Enter
   /// activates, Cmd-A selects all, Delete asks to delete the selection, Escape clears it; `geo` is
-  /// the rows' count and height, the viewport's height and whether several rows can be selected.
+  /// where the rows lie, the viewport's height and whether several rows can be selected.
   fn list_keys(
     &mut self,
     id: Id,
     st: &mut ListState,
     sel: &mut Selection,
     out: &mut ListResponse,
-    geo: (usize, f32, f32, bool),
+    geo: (Spans, f32, bool),
     key: &dyn Fn(usize) -> u64,
   ) {
-    let (n, h, view_h, multi) = geo;
+    let (sp, view_h, multi) = geo;
+    let n = sp.n;
     let Some(c) = self.command(id) else { return };
     let cur = sel.cursor_index(n, key);
+    // A page: the farthest row within a viewport of the cursor's row, by the rows' own tops
+    // (under their headers), its bottom from the cursor's top going down, its top from the
+    // cursor's bottom going up; at least one row.
     let page = |dir: isize| {
-      let rows = ((view_h / h).floor() as isize - 1).max(1);
-      (cur.unwrap_or(0) as isize + dir * rows).clamp(0, n as isize - 1) as usize
+      let c = cur.unwrap_or(0);
+      let top = |i: usize| i as f32 * sp.h + sp.above(sp.heads(i + 1));
+      let reach = view_h - sp.h;
+      match dir > 0 {
+        true => {
+          let y = top(c) + reach;
+          let i = sp.at(y);
+          let i = if top(i) > y { i.saturating_sub(1) } else { i };
+          i.max(c + 1).min(n - 1)
+        }
+        false => {
+          let y = top(c) - reach;
+          let i = sp.at(y);
+          let i = if top(i) < y { i + 1 } else { i };
+          i.min(c.saturating_sub(1))
+        }
+      }
     };
     let step = |d: isize| match cur {
       Some(c) => (c as isize + d).clamp(0, n as isize - 1) as usize,
@@ -1007,6 +1026,49 @@ mod tests {
     let (v, last) = (h.rect(id).unwrap(), h.rect(row(29)).unwrap());
     assert!(last.y + last.h <= v.y + v.h + 0.5, "{last:?} in {v:?}");
     assert!(h.rect(head(20)).is_some() && h.rect(row(0)).is_none());
+  }
+
+  /// 30 rows 20 high in sections of three under headers 30 high, the app holding the selection.
+  #[derive(Default)]
+  struct Threes {
+    sel: Selection,
+  }
+
+  impl crate::App for Threes {
+    fn view(&mut self, ui: &mut Ui) {
+      let head = |ui: &mut Ui, _: usize| ui.label("head");
+      let starts: Vec<usize> = (0..30).step_by(3).collect();
+      ui.col(Style::new().w(px(200.0)).h(px(200.0)), |ui| {
+        let list = List::new(30, 20.0).sections(&starts, 30.0, &head).selection(&mut self.sel);
+        list.show(ui.id("list"), |ui, _| ui.label("row"));
+      });
+    }
+  }
+
+  #[test]
+  fn a_page_is_a_viewport_over_the_headers() {
+    use crate::NamedKey as K;
+    use crate::harness::Harness;
+    let mut h = Harness::new(Threes::default(), Size::new(300.0, 300.0), 1.0);
+    let id = Id::of("list");
+    let row = |k: u64| id.key(("row", k));
+    h.frame();
+    h.click_id(row(0));
+    // Rows 0 to 6 span the 200 of the viewport over three headers: a page down goes to row 6,
+    // not the nine rows the height alone would give, and back up the same way; in view after.
+    let none = Modifiers::empty();
+    let mut at = Vec::new();
+    for k in [K::PageDown, K::PageDown, K::PageUp, K::PageUp] {
+      h.key(k, none);
+      h.frame();
+      at.push(h.app().sel.cursor());
+    }
+
+    assert_eq!(at, [Some(6), Some(12), Some(6), Some(0)]);
+    h.key(K::PageDown, none);
+    h.frame();
+    let (v, r6) = (h.rect(id).unwrap(), h.rect(row(6)).unwrap());
+    assert!(r6.y >= v.y && r6.y + r6.h <= v.y + v.h + 0.5, "{r6:?} in {v:?}");
   }
 
   #[test]
