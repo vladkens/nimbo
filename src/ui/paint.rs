@@ -7,7 +7,7 @@
 
 use super::layout::{ELLIPSIS, Kind, Tree};
 use super::textlayout::{Edit, TextLayout};
-use super::{Canvas, Clip, FocusRing, Style};
+use super::{Canvas, Clip, FocusRing, Style, TextStyle};
 use crate::scene::{Color, Frame, Quad, Rect};
 use crate::text::Ink;
 
@@ -160,9 +160,7 @@ fn node(
           w += f.text(r.x + w, y, ELLIPSIS, style.font, color);
         }
 
-        if style.strike && w > 0.0 {
-          strike(r.x, y, w, style.font.size, color, f);
-        }
+        rule(r.x, y, w, style, color, f);
       }
 
       if let Some(e) = edit {
@@ -265,12 +263,22 @@ fn caret(t: &Tree, i: usize, e: &Edit, text: Color, baseline: f32, alpha: f32, f
   }
 }
 
-/// A strikethrough `w` wide from `x` over a line with its baseline at `y`: at half the
-/// x-height (about 0.53 em in SF Pro), a point thick up to 14 points, on whole pixels.
-fn strike(x: f32, y: f32, w: f32, size: f32, color: Color, f: &mut Frame) {
-  let h = (size / 14.0).max(1.0);
-  let top = ((y - size * 0.27 - h / 2.0) * f.scale).round() / f.scale;
-  f.rect(Rect::new(x, top, w, h), color, 0.0);
+/// A strikethrough `w` wide from `x` over a line with its baseline at `y` ([TextStyle::strike]):
+/// at half the x-height (about 0.53 em in SF Pro), a point thick up to 14 points; and its dots
+/// ([TextStyle::dotted]), as thick and as far apart, a sixth of an em under the baseline. Each
+/// on whole pixels, so dots are even at any scale and offset.
+fn rule(x: f32, y: f32, w: f32, s: TextStyle, color: Color, f: &mut Frame) {
+  let sc = f.scale;
+  let snap = move |v: f32| (v * sc).round() / sc;
+  let (size, h) = (s.font.size, snap((s.font.size / 14.0).max(1.0)));
+  for (on, dots, dy) in [(s.strike, false, -size * 0.27 - h / 2.0), (s.dotted, true, size / 6.0)] {
+    // Dashes every `step`, half as wide: the whole line once, or dots.
+    let step = 2.0 * if dots { h } else { w };
+    let n = if on && w > 0.0 { (w / step).ceil() as usize } else { 0 };
+    for i in 0..n {
+      f.rect(Rect::new(snap(x + i as f32 * step), snap(y + dy), step / 2.0, h), color, 0.0);
+    }
+  }
 }
 
 /// Shadow, background and border.
@@ -483,6 +491,80 @@ mod tests {
       assert!(q.rect.y < base - 2.0 && q.rect.y > base - 7.0, "{:?} over {base}", q.rect);
       assert_eq!((q.rect.x, q.rect.h, q.color), (done.rect.x, 1.0, plain.color));
       assert!(q.rect.w > 20.0 && q.rect.w <= 60.0);
+    }
+  }
+
+  #[test]
+  fn dotted_text_gets_dots_under_its_baseline() {
+    let (size, scale) = (Size::new(200.0, 100.0), 2.0);
+    let (mut scene, mut text, mut images) =
+      (Scene::default(), TextSystem::new(scale), Images::default());
+    let plain = TextStyle::new(Font::ui(11.0), [1.0, 0.0, 0.0, 1.0]);
+    let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
+    ui.col(Style::new(), |ui| ui.id("wer").text("WER 4.5%", plain.dotted()));
+    let mut sys = Sys { text: &mut text, images: &images, scale };
+    ui.layout(&mut sys, scale);
+    let mut f = Frame {
+      size,
+      scale,
+      mouse: None,
+      now: Duration::ZERO,
+      scene: &mut scene,
+      text: &mut text,
+      images: &mut images,
+      animate: false,
+    };
+    let st = ui.paint(&mut f);
+    let quads = &scene.layers()[0].quads;
+    let wer = st.last.get(Id::of("wer")).unwrap();
+    let Kind::Text { baseline, .. } = wer.kind else { panic!() };
+    let base = wer.rect.y + baseline;
+    // A point square every two from the text's left, under its baseline, as far as its ink.
+    assert!(quads.len() > 10, "{} dots", quads.len());
+    for (k, q) in quads.iter().enumerate() {
+      assert_eq!((q.rect.x, q.rect.w, q.rect.h), (wer.rect.x + 2.0 * k as f32, 1.0, 1.0));
+      assert!(q.rect.y > base && q.rect.y < base + 3.0, "{:?} under {base}", q.rect);
+      assert_eq!(q.color, plain.color);
+    }
+
+    assert!(quads.last().unwrap().rect.x < wer.rect.x + wer.rect.w);
+  }
+
+  /// At 1.5× from a fractional x, struck and dotted: the line once, the dots on whole pixels,
+  /// as wide and as far apart in each.
+  #[test]
+  fn dots_keep_to_whole_pixels_with_a_strike() {
+    let (size, scale) = (Size::new(200.0, 100.0), 1.5);
+    let (mut scene, mut text, mut images) =
+      (Scene::default(), TextSystem::new(scale), Images::default());
+    let both = TextStyle::new(Font::ui(11.0), [1.0, 0.0, 0.0, 1.0]).dotted().strike();
+    let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
+    ui.row(Style::new().pads([0.0, 0.0, 0.0, 10.3]), |ui| ui.id("t").text("WER 4.5%", both));
+    let mut sys = Sys { text: &mut text, images: &images, scale };
+    ui.layout(&mut sys, scale);
+    let mut f = Frame {
+      size,
+      scale,
+      mouse: None,
+      now: Duration::ZERO,
+      scene: &mut scene,
+      text: &mut text,
+      images: &mut images,
+      animate: false,
+    };
+    ui.paint(&mut f);
+    let quads = &scene.layers()[0].quads;
+    let (line, dots) = quads.split_first().unwrap();
+    assert!(line.rect.w > 20.0, "the strike: {:?}", line.rect);
+    let px = |v: f32| v * scale;
+    let whole = |v: f32| (px(v) - px(v).round()).abs() < 1e-3;
+    assert!(dots.len() > 10);
+    for (k, q) in dots.iter().enumerate() {
+      assert!(whole(q.rect.x) && whole(q.rect.y) && whole(q.rect.w) && whole(q.rect.h), "{q:?}");
+      assert_eq!((px(q.rect.w).round(), px(q.rect.h).round()), (2.0, 2.0));
+      if k > 0 {
+        assert_eq!(px(q.rect.x - dots[k - 1].rect.x).round(), 4.0, "dot {k}");
+      }
     }
   }
 

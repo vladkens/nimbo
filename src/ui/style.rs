@@ -388,16 +388,24 @@ pub struct TextStyle {
   pub line_h: f32,
   /// A line through the middle of the lowercase letters, in the text's colour (done items).
   pub strike: bool,
+  /// A row of dots under each line, in the text's colour: a term with more on hover, SwiftUI's
+  /// `underline(pattern: .dot)`.
+  pub dotted: bool,
 }
 
 impl TextStyle {
   pub const fn new(font: Font, color: Color) -> Self {
-    Self { font, color, wrap: true, ellipsis: false, line_h: 0.0, strike: false }
+    Self { font, color, wrap: true, ellipsis: false, line_h: 0.0, strike: false, dotted: false }
   }
 
   /// Struck through: a line over each laid-out line of the text.
   pub const fn strike(self) -> Self {
     Self { strike: true, ..self }
+  }
+
+  /// Underlined with dots ([TextStyle::dotted]).
+  pub const fn dotted(self) -> Self {
+    Self { dotted: true, ..self }
   }
 
   pub const fn color(self, color: Color) -> Self {

@@ -37,15 +37,17 @@
 //! a click, or the arrows while it has focus (Tab), choose a tab.
 
 use std::borrow::Cow;
+use std::f32::consts::FRAC_PI_2;
 use std::ops::Range;
 
 use super::containers::lazy::Spans;
-use super::theme::Theme;
+use super::theme::{ControlSize, Theme, Tone};
 use super::widgets::Icon;
 use super::{
-  Align, Dim, Float, Id, Response, Shadow, State, Style, TextStyle, Ui, grow, px, rigid,
+  Align, Cursor, Dim, Float, Id, Response, Role, Shadow, State, Style, TextStyle, Ui, grow, px,
+  rigid,
 };
-use crate::scene::{Color, Frame, Quad, Rect, alpha, mix, rgb};
+use crate::scene::{Color, Frame, Point, Quad, Rect, alpha, mix, rgb};
 use crate::text::{Font, Weight};
 
 /// A settings window's look; see the module's docs. Plain values, so an app adjusts one:
@@ -263,23 +265,37 @@ pub enum Tile<'s> {
   Icon(Icon),
 }
 
-/// A row of a form section ([Ui::form_row]): its label, an optional ⓘ tooltip or warning,
-/// description and leading tile, and whether it is disabled.
+/// A row of a form section ([Ui::form_row]): its label, badges after it, an optional ⓘ tooltip or
+/// warning, description and leading tile, and whether it is disabled.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FormRow<'s> {
   label: &'s str,
+  badges: &'s [(&'s str, Tone)],
   info: Option<&'s str>,
   warning: Option<&'s str>,
   caption: Option<&'s str>,
+  parts: &'s [(&'s str, TextStyle)],
   tile: Option<Tile<'s>>,
   disabled: bool,
   one_line: bool,
   selected: bool,
+  /// Held down: a [Ui::form_disclosure]'s.
+  pressed: bool,
 }
 
 impl<'s> FormRow<'s> {
   pub fn new(label: &'s str) -> Self {
     Self { label, ..Self::default() }
+  }
+
+  /// A [Ui::badge] of each `(text, tone)` right after the label, on its line, in order: tags of
+  /// what the row is ("Beta", "New"). Not SwiftUI's `.badge`, one count or word at a list row's
+  /// trailing edge: these are several, they follow the label, and the controls keep the trailing
+  /// edge. Small ([ControlSize::Small]), the row keeps its height; a [FormRow::one_line] label
+  /// ends in "…" before them where the line is short. Each is `id.key(("badge", i))` of the
+  /// row's id, taking the pointer for a tooltip unless the row is one a click selects.
+  pub fn badges(self, badges: &'s [(&'s str, Tone)]) -> Self {
+    Self { badges, ..self }
   }
 
   /// An ⓘ after the label showing `tip` on hover: only where one line can't explain.
@@ -297,6 +313,16 @@ impl<'s> FormRow<'s> {
   /// Grey text under the label, wrapping onto as many lines as it needs.
   pub fn caption(self, caption: &'s str) -> Self {
     Self { caption: Some(caption), ..self }
+  }
+
+  /// A description on one line of `(text, style)` parts, each its own element for a tooltip,
+  /// `id.key(("caption", i))` of the row's id, as SwiftUI joins `Text`s: a term in
+  /// [TextStyle::dotted] with more on hover. A part takes the pointer unless the row is one a
+  /// click selects ([Style::hit]), so a part's tooltip doesn't show there; the line is clipped
+  /// where it is short. Assistive technology reads the parts where they stand, not as the row's
+  /// description; to read one without its separators (" · 274 MB"), name it ([Ui::a11y_label]).
+  pub fn caption_parts(self, parts: &'s [(&'s str, TextStyle)]) -> Self {
+    Self { parts, ..self }
   }
 
   /// A tile before the label: a letter or an icon.
@@ -464,7 +490,14 @@ impl Ui<'_> {
     let dim = |s: TextStyle| if off { s.color(t.tertiary) } else { s };
     let (line, hair, [l, r]) = (fs.divider, fs.hairline, fs.inset);
     let top = if first { 0.0 } else { hair };
+    // Pressed, a rounded fill inset as the hairlines are.
+    let (pressed, fill) = (row.pressed, t.pressed);
     let hairline = move |f: &mut Frame, rect: Rect| {
+      if pressed {
+        let (w, h) = (rect.w - l - r, rect.h - top - 4.0);
+        f.rect(Rect::new(rect.x + l, rect.y + top + 2.0, w, h), fill, 6.0);
+      }
+
       if !first {
         f.rect(Rect::new(rect.x + l, rect.y, (rect.w - l - r).max(0.0), hair), line, 0.0);
       }
@@ -506,6 +539,15 @@ impl Ui<'_> {
             let s = if row.one_line { fs.label.ellipsis() } else { fs.label };
             ui.next_id = Some((id.key("label"), false));
             ui.text(row.label, dim(s));
+            // Small badges in a slot as high as the line: every row keeps its height.
+            for (i, &(text, tone)) in row.badges.iter().enumerate() {
+              ui.row(Style::new().w(rigid()).h(px(line_h)).center(), |ui| {
+                // Named, it takes the pointer for a tooltip.
+                ui.next_id = Some((id.key(("badge", i)), !fs.row.hit));
+                ui.badge_sized(text, tone, ControlSize::Small)
+              });
+            }
+
             // One tip: the warning, then the ⓘ's.
             let tip = match (row.warning, row.info) {
               (Some(w), Some(i)) => Some(Cow::Owned(format!("{w}\n\n{i}"))),
@@ -514,9 +556,8 @@ impl Ui<'_> {
 
             if let Some(tip) = tip {
               let mark = id.key("info");
-              let shift = ui.mark_shift(fs.label);
               let size = Style::new().w(px(fs.info)).h(px(fs.info));
-              let at = Float::parent().offset(0.0, shift).clip();
+              let at = Float::parent().offset(0.0, ui.mark_shift(fs.label)).clip();
               // Enabled in a disabled row: help reads all the same.
               let off = std::mem::replace(&mut ui.scope_off, false);
               ui.row(size, |ui| {
@@ -530,6 +571,16 @@ impl Ui<'_> {
           if let Some(c) = row.caption {
             ui.next_id = Some((id.key("caption"), false));
             ui.text(c, dim(fs.caption));
+          }
+
+          if !row.parts.is_empty() {
+            ui.row(Style::new().w(grow()).clip(), |ui| {
+              for (i, &(text, style)) in row.parts.iter().enumerate() {
+                // Named, it takes the pointer.
+                ui.next_id = Some((id.key(("caption", i)), !fs.row.hit));
+                ui.text(text, dim(style.nowrap()));
+              }
+            });
           }
 
           below(ui);
@@ -551,6 +602,48 @@ impl Ui<'_> {
         }
       })
     })
+  }
+
+  /// A row that shows the rows `rows` builds under it, in its plate, while expanded, as SwiftUI's
+  /// `DisclosureGroup` in a `Form`: [Ui::form_row]'s label and description, a chevron at the
+  /// right turning from right to down ([super::Theme::fade]), the pointing hand and, held down,
+  /// a rounded fill inset as the hairlines, as System Settings' rows that open more, which show
+  /// no hover. A click, or Space while it has focus, toggles it; it starts
+  /// collapsed and keeps its state under its id, the chevron `id.key("chevron")`. The rows show
+  /// and go at once, not sliding as SwiftUI's. [FormRow::disabled], it dims and doesn't toggle.
+  /// Assistive technology reads a button, [State::Expanded] while open. `changed` when it
+  /// toggled.
+  pub fn form_disclosure<R>(
+    &mut self,
+    fs: &FormStyle,
+    row: FormRow,
+    rows: impl FnOnce(&mut Self) -> R,
+  ) -> Response {
+    let (id, t, off) = (self.take_id(), self.theme(), row.disabled || self.scope_off);
+    let b = self.button_behavior(id);
+    let (clicked, pressed) = (b.clicked && !off, b.pressed && !off);
+    let open = self.state::<Disclosed>(id);
+    open.0 ^= clicked;
+    let open = open.0;
+    let turn = self.animate(id.key("turn"), if open { 1.0 } else { 0.0 }, t.fade);
+    let style = match off {
+      true => fs.row.hit(),
+      false => fs.row.hit().tab_focusable().cursor(Cursor::Pointer),
+    };
+
+    let (ink, row) = (if off { t.tertiary } else { t.muted }, FormRow { pressed, ..row });
+    let mut r = self.with_id(id).form_row(&FormStyle { row: style, ..*fs }, row, |ui| {
+      let s = Style::new().w(px(14.0)).h(px(14.0));
+      ui.with_id(id.key("chevron")).canvas(s, move |f, r| chevron(f, r, turn, ink))
+    });
+    let a = self.a11y(id, Role::Button).name(row.label).state(State::Expanded, open);
+    a.description(row.caption.unwrap_or_default());
+    if open {
+      rows(self);
+    }
+
+    r.changed = clicked;
+    r
   }
 
   /// How far below the middle of a one-line label in `style` a mark centred beside it goes to
@@ -737,6 +830,18 @@ impl<'a> Ui<'a> {
   }
 }
 
+/// Whether a [Ui::form_disclosure] is expanded, under its id.
+#[derive(Default)]
+struct Disclosed(bool);
+
+/// A chevron pointing right in the middle of `r`, `turn` of the way to pointing down.
+fn chevron(f: &mut Frame, r: Rect, turn: f32, color: Color) {
+  let (c, (sin, cos)) =
+    (Point::new(r.x + r.w / 2.0, r.y + r.h / 2.0), (turn * FRAC_PI_2).sin_cos());
+  let at = |x: f32, y: f32| Point::new(c.x + x * cos - y * sin, c.y + x * sin + y * cos);
+  f.polyline(&[at(-1.5, -4.0), at(2.5, 0.0), at(-1.5, 4.0)], 1.5, color);
+}
+
 /// A [Ui::form_list]'s items, placed a section at a time, so a frame costs its sections, not its
 /// rows: where each section's items start, its top, and its title's height, then its rows, a
 /// row and a hairline apart (the first without one).
@@ -788,11 +893,17 @@ impl Spans for Sections {
 
 #[cfg(test)]
 mod tests {
+  use std::time::Duration;
+
+  use keyboard_types::Modifiers;
+
   use super::*;
   use crate::app::App;
   use crate::harness::Harness;
+  use crate::keys::Key;
   use crate::scene::{Point, Size};
   use crate::ui::Id;
+  use crate::ui::layout::Kind;
 
   /// A section of one row and a footer with the "?" alone, nothing named.
   #[derive(Default)]
@@ -819,6 +930,204 @@ mod tests {
     // The row's control is disabled with it.
     h.click_id(Id::of("t"));
     assert!(!h.app().0);
+  }
+
+  /// A row with badges after its label over one without, `.0` the label; each with Use.
+  struct Badged(&'static str);
+
+  impl App for Badged {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.set_theme(Theme::PLATES_LIGHT);
+      let fs = FormStyle::plates(&ui.theme());
+      ui.col(fs.page, |ui| {
+        ui.form_section(&fs, "Section", |ui| {
+          let row = FormRow::new(self.0).one_line().caption("Under it");
+          let badged = row.badges(&[("New", Tone::Accent), ("Beta", Tone::Neutral)]);
+          ui.id("badged").form_row(&fs, badged, |ui| ui.id("use").button("Use"));
+          ui.id("plain").form_row(&fs, row, |ui| ui.button("Use"));
+        });
+      });
+    }
+  }
+
+  /// The badges follow the label on its line, in order, clear of the controls, and the row keeps
+  /// the height of one without; a long label ends in "…" before them.
+  #[test]
+  fn badges_follow_the_label_on_its_line() {
+    // The plain row has the hairline over it.
+    let hair = FormStyle::plates(&Theme::PLATES_LIGHT).hairline;
+    let long = "A label long enough to run under the badges and the button at the right";
+    for label in ["Row", long] {
+      let mut h = Harness::new(Badged(label), Size::new(400.0, 300.0), 2.0);
+      h.frame();
+      let (badged, plain) = (h.rect(Id::of("badged")).unwrap(), h.rect(Id::of("plain")).unwrap());
+      assert_eq!(badged.h + hair, plain.h, "{label}: one height");
+
+      // The label's line as laid out: the text before its "…".
+      let tree = &h.rt.ui.last;
+      let text = Id::of("badged").key("label");
+      let Kind::Text { lines, .. } = tree.get(text).unwrap().kind else { panic!("{label}") };
+      let line = tree.lines[lines.0 as usize];
+      let shown = tree.str(line.start, line.end);
+      assert_eq!(shown.len() < label.len(), label == long, "{label}: shown {shown:?}");
+
+      // The accent pill's tint just after the label, on the line's middle, not on the plain's;
+      // the second badge ends before Use.
+      let text = h.rect(text).unwrap();
+      let new = h.rect(Id::of("badged").key(("badge", 0))).unwrap();
+      assert_eq!(new.h, 15.0, "{label}: small");
+      let (img, y) = (h.render(), text.y - badged.y + text.h / 2.0);
+      let at = |r: Rect| img.pixel(text.x + text.w + 12.0, r.y + y);
+      let (tint, ground) = (at(badged), at(plain));
+      assert!(
+        tint[2] > tint[0].saturating_add(10) && ground[0] == ground[2],
+        "{label}: {tint:?} {ground:?}"
+      );
+      let (r, n, b) = (h.a11y().find(label), h.a11y().find("\"New\""), h.a11y().find("\"Beta\""));
+      assert!(r < n && n < b, "{label}: read in order\n{}", h.a11y());
+      let clear = |x: f32| img.pixel(x, badged.y + y) == img.pixel(x, plain.y + y);
+      let at_use = h.rect(Id::of("use")).unwrap().x;
+      assert!((1..=8).all(|dx| clear(at_use - dx as f32 / 2.0)), "{label}: clear before Use");
+    }
+  }
+
+  /// A row with a caption of parts over one with the same caption whole, and a row a click
+  /// selects with parts; `.0` its clicks.
+  #[derive(Default)]
+  struct Parts(usize);
+
+  impl App for Parts {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.set_theme(Theme::PLATES_LIGHT);
+      let fs = FormStyle::plates(&ui.theme());
+      let parts = [("WER 4.5%", fs.caption.dotted()), (" · 274 MB", fs.caption)];
+      ui.col(fs.page, |ui| {
+        ui.form_section(&fs, "Section", |ui| {
+          ui.id("whole").form_row(&fs, FormRow::new("A").caption("WER 4.5% · 274 MB"), |_| {});
+          ui.id("parts").form_row(&fs, FormRow::new("A").caption_parts(&parts), |_| {});
+          ui.tooltip(Id::of("parts").key(("caption", 0)), "Word error rate");
+          let s = FormStyle { row: fs.row.hit(), ..fs };
+          let r = ui.id("pick").form_row(&s, FormRow::new("B").caption_parts(&parts), |_| {});
+          self.0 += r.clicked as usize;
+        });
+      });
+    }
+  }
+
+  /// The parts lie on one line where the whole caption would, the row as high; a part shows
+  /// its tooltip; in a row a click selects, a click on a part selects the row.
+  #[test]
+  fn a_caption_of_parts_reads_as_one() {
+    let mut h = Harness::new(Parts::default(), Size::new(400.0, 300.0), 2.0);
+    h.frame();
+    let hair = FormStyle::plates(&Theme::PLATES_LIGHT).hairline;
+    let (whole, parts) = (h.rect(Id::of("whole")).unwrap(), h.rect(Id::of("parts")).unwrap());
+    assert_eq!(whole.h + hair, parts.h, "as high");
+    let caption = h.rect(Id::of("whole").key("caption")).unwrap();
+    let part = |i: usize| h.rect(Id::of("parts").key(("caption", i))).unwrap();
+    let (a, b) = (part(0), part(1));
+    let at = (caption.x, caption.y - whole.y + hair);
+    assert_eq!((a.x, a.y - parts.y), at, "where the caption is");
+    assert!(a.x + a.w <= b.x && a.y == b.y, "on one line: {a:?} {b:?}");
+    assert!(h.a11y().contains(r#"static text "WER 4.5%""#), "{}", h.a11y());
+
+    h.move_to(a.x + 4.0, a.y + a.h / 2.0);
+    h.wait(Duration::from_millis(400));
+    let tip = Id::of("parts").key(("caption", 0)).key("tip");
+    assert!(h.rect(tip).is_some(), "the tooltip shows");
+
+    let pick = h.rect(Id::of("pick").key(("caption", 0))).unwrap();
+    h.click(pick.x + 4.0, pick.y + pick.h / 2.0);
+    h.frame();
+    assert_eq!(h.app().0, 1, "the row selected");
+  }
+
+  /// A disclosure of two rows in a section, under a plain row; `.0` its toggles.
+  #[derive(Default)]
+  struct Fold(usize);
+
+  impl App for Fold {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.set_theme(Theme::PLATES_LIGHT);
+      let fs = FormStyle::plates(&ui.theme());
+      ui.col(fs.page, |ui| {
+        ui.form_section(&fs, "Section", |ui| {
+          ui.form_row(&fs, FormRow::new("Shown"), |_| {});
+          let row = FormRow::new("Other models").caption("2 more");
+          let r = ui.id("fold").form_disclosure(&fs, row, |ui| {
+            ui.id("a").form_row(&fs, FormRow::new("A"), |_| {});
+            ui.id("b").form_row(&fs, FormRow::new("B"), |_| {});
+          });
+          self.0 += r.changed as usize;
+          let off = FormRow::new("Off").disabled(true);
+          let r =
+            ui.id("off").form_disclosure(&fs, off, |ui| ui.id("c").form_row(&fs, off, |_| {}));
+          self.0 += r.changed as usize;
+        });
+      });
+    }
+  }
+
+  /// A click opens it, its rows under it and its chevron turning down; Space while focused
+  /// closes it; assistive technology reads a button expanded or not.
+  #[test]
+  fn a_disclosure_opens_by_click_and_closes_by_space() {
+    let mut h = Harness::new(Fold::default(), Size::new(400.0, 300.0), 2.0);
+    h.frame();
+    let fold = Id::of("fold");
+    let read =
+      |h: &Harness<Fold>| h.a11y().lines().find(|l| l.contains("Other models")).map(str::to_owned);
+    assert!(h.rect(Id::of("a")).is_none(), "collapsed at first");
+    assert_eq!(read(&h).as_deref().map(str::trim), Some(r#"button "Other models" desc "2 more""#));
+    let (r, c) = (h.rect(fold).unwrap(), h.rect(fold.key("chevron")).unwrap());
+    let chevron = |h: &mut Harness<Fold>| {
+      let img = h.render();
+      // Ink at the end of the chevron's upper stroke pointing right, then pointing down.
+      let (x, y) = (c.x + c.w / 2.0, c.y + c.h / 2.0);
+      (img.pixel(x - 1.5, y - 4.0)[0], img.pixel(x + 4.0, y - 1.5)[0])
+    };
+    let right = chevron(&mut h);
+
+    h.click_id(fold);
+    h.frame();
+    h.wait(Duration::from_millis(400));
+    assert_eq!(h.app().0, 1);
+    let (a, b) = (h.rect(Id::of("a")).unwrap(), h.rect(Id::of("b")).unwrap());
+    assert!(r.y + r.h <= a.y && a.y + a.h <= b.y, "its rows under it: {r:?} {a:?} {b:?}");
+    assert_eq!(
+      read(&h).as_deref().map(str::trim),
+      Some(r#"button "Other models" expanded desc "2 more""#)
+    );
+    let down = chevron(&mut h);
+    assert!(right.0 < right.1 && down.1 < down.0, "the chevron turned: {right:?} {down:?}");
+
+    h.set_focus(Some(fold));
+    h.key(Key::Char(' '), Modifiers::empty());
+    h.frame();
+    assert_eq!(h.app().0, 2);
+    assert!(h.rect(Id::of("a")).is_none(), "closed by Space");
+
+    // No hover fill; held down, an inset one, the edge of the plate as it was.
+    let at = |h: &mut Harness<Fold>| {
+      let img = h.render();
+      [img.pixel(r.x + r.w - 40.0, r.y + r.h / 2.0), img.pixel(r.x + 4.0, r.y + r.h / 2.0)]
+    };
+    h.leave();
+    h.wait(Duration::from_millis(400));
+    let rest = at(&mut h);
+    h.move_to(r.x + r.w - 40.0, r.y + r.h / 2.0);
+    h.wait(Duration::from_millis(400));
+    assert_eq!(at(&mut h), rest, "no hover fill");
+    h.press(r.x + r.w - 40.0, r.y + r.h / 2.0);
+    h.frame();
+    let held = at(&mut h);
+    assert!(held[0] != rest[0] && held[1] == rest[1], "pressed, inset: {held:?} {rest:?}");
+    h.release(r.x + r.w - 40.0, r.y + r.h / 2.0);
+    h.frame();
+    let n = h.app().0;
+    h.click_id(Id::of("off"));
+    h.frame();
+    assert!(h.rect(Id::of("c")).is_none() && h.app().0 == n, "disabled");
   }
 
   /// Toolbar tabs, disabled or not, in the light theme.

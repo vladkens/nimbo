@@ -5,11 +5,12 @@
 //! 680 wide whose height follows the page. General has switches (one with a warning while it is
 //! on), pop-ups (one with an ⓘ tooltip, one with a description and a separator), a shortcut
 //! recorder with its reset (a warning and an ⓘ in one tooltip while it is the default), a row
-//! disabled by another setting whose ⓘ still shows its tooltip, and a segmented control; Appearance
-//! the look (which applies at once), a slider and a switch with a long description that wraps
-//! beside it; Advanced tiles, badges, a task's progress and buttons, two of which ask in a modal
-//! dialog first, and a footer with the "?"; About the app and its licenses. Pages fade out under
-//! the edges of their scroll area; light or dark and in the accent the system has.
+//! disabled by another setting, with a badge after its label, whose ⓘ still shows its tooltip, and
+//! a segmented control; Appearance the look (which applies at once), a slider and a switch with a
+//! long description that wraps beside it; Advanced tiles, badges, a task's progress and buttons,
+//! two of which ask in a modal dialog first, and a footer with the "?"; About the app and its
+//! licenses. Pages fade out under the edges of their scroll area; light or dark and in the accent
+//! the system has.
 //!
 //! `cargo run --release --example settings [-- --shot <file.png>]`: the shot rests the pointer
 //! on the ⓘ of "On launch" until its tooltip shows.
@@ -203,7 +204,7 @@ impl Settings {
       let row = FormRow::new("Check for updates automatically");
       ui.form_row(fs, row, |ui| ui.id(UPDATES).toggle(&mut self.updates, ""));
       let row = FormRow::new("Download them in the background").info(TIP_DOWNLOAD);
-      let row = row.disabled(!self.updates);
+      let row = row.badges(&[("Beta", Tone::Neutral)]).disabled(!self.updates);
       ui.id(DOWNLOAD_ROW).form_row(fs, row, |ui| ui.id(DOWNLOAD).toggle(&mut self.download, ""));
       let channels = [(Channel::Stable, "Stable"), (Channel::Beta, "Beta")];
       ui.form_row(fs, FormRow::new("Channel"), |ui| {
