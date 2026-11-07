@@ -23,6 +23,8 @@ use nimbo::{
 pub const SIDEBAR: &str = "sidebar";
 pub const PAGE: &str = "page";
 pub const DIALOG: &str = "dialog";
+/// A block alone ([Gallery::only]).
+pub const BLOCK: &str = "block";
 /// The width of a page, and of a block's picture.
 pub const WIDTH: f32 = 520.0;
 
@@ -347,9 +349,14 @@ impl Gallery {
         ui.badge("-4", Tone::Danger);
         ui.badge("Conflict", Tone::Warning);
       }),
-      "Shortcut recorder" => {
-        Self::variants(ui, Shown::Plain, |ui| _ = ui.shortcut(&mut self.hotkey))
-      }
+      "Shortcut recorder" => Self::variants(ui, Shown::Plain, |ui| {
+        ui.shortcut(&mut self.hotkey);
+        // The ⊗ that clears one, which the plates themes leave to a reset button.
+        let t = ui.theme();
+        ui.set_theme(nimbo::Theme { shortcut_clear: true, ..t });
+        ui.shortcut(&mut self.hotkey);
+        ui.set_theme(t);
+      }),
       "Help marks" => Self::variants(ui, Shown::Plain, |ui| {
         ui.help("An ⓘ explains what one line can't").info_button();
         ui.help("A warning tells what is wrong").warning_button();
@@ -530,11 +537,13 @@ impl Gallery {
 
 impl App for Gallery {
   fn view(&mut self, ui: &mut Ui) {
+    // The system's look, whatever a block set last frame.
+    ui.follow_system();
     let t = ui.theme();
     if self.only {
-      ui.fit_window_height(WIDTH, 60.0, 900.0);
+      ui.fit_window_height(WIDTH, 1.0, 900.0);
       let name = BLOCKS[self.page].name;
-      ui.col(Style::new().w(grow()).pad(20.0).bg(t.bg), |ui| self.demo(ui, name));
+      ui.id(BLOCK).col(Style::new().w(grow()).pad(20.0).bg(t.bg), |ui| self.demo(ui, name));
       return;
     }
 
