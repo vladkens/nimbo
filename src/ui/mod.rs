@@ -469,6 +469,9 @@ pub struct Ui<'a> {
   next_keymap: Option<&'static [Binding]>,
   /// The next widget is disabled ([Ui::disabled]).
   next_disabled: bool,
+  /// The next element's tooltip ([Ui::help]), and the elements with one built, by node.
+  next_help: Option<String>,
+  pub(crate) helps: Vec<(u32, String)>,
   /// Every widget built is disabled ([Ui::disabled_scope]).
   scope_off: bool,
   /// The next element takes focus when it first shows ([Ui::autofocus]).
@@ -511,6 +514,8 @@ impl<'a> Ui<'a> {
       next_float,
       next_keymap,
       next_disabled,
+      next_help: None,
+      helps: Vec::new(),
       scope_off: false,
       next_autofocus,
       next_drag: false,
@@ -686,6 +691,32 @@ impl<'a> Ui<'a> {
   pub fn span(&mut self, n: u8) -> &mut Self {
     self.next_span = n;
     self
+  }
+
+  /// The next element shows `tip` under the pointer resting on it ([Ui::tooltip]) and reads it
+  /// as its description to assistive technology, as SwiftUI's `.help`: any element, a text
+  /// (then read where it stands), a widget, a container. It takes the pointer, so a click on it
+  /// is its own, not its parent's.
+  pub fn help(&mut self, tip: &str) -> &mut Self {
+    self.next_help = Some(tip.to_owned());
+    self
+  }
+
+  /// The tooltips the view asked for with [Ui::help], after it: each element built, a text
+  /// recorded as one for assistive technology to read the tooltip with.
+  pub(crate) fn show_helps(&mut self) {
+    for (i, tip) in std::mem::take(&mut self.helps) {
+      let n = &self.st.tree.nodes[i as usize];
+      let id = n.id;
+      if let Kind::Text { range, .. } = n.kind
+        && self.a11y_of(id).is_none()
+      {
+        let text = self.st.tree.str(range.0, range.1).to_owned();
+        self.a11y_label(&text).a11y(id, Role::StaticText);
+      }
+
+      self.tooltip(id, &tip);
+    }
   }
 
   /// Disables the next widget ([widgets]) when `yes`: dimmed, not focusable, and its clicks
@@ -895,10 +926,12 @@ impl<'a> Ui<'a> {
       }
     }
 
-    let drag = std::mem::take(&mut self.next_drag);
+    let (drag, help) = (std::mem::take(&mut self.next_drag), self.next_help.take());
     let hit = style.hit || named || scrolls || focus || drag || style.cursor != Cursor::Inherit;
+    let hit = hit || help.is_some();
     let tree = &mut self.st.tree;
     let i = tree.nodes.len() as u32;
+    self.helps.extend(help.map(|tip| (i, tip)));
     tree.drags.extend(drag.then_some(i));
 
     let float = self.next_float.take();

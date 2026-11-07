@@ -913,6 +913,7 @@ fn run_view<'a, A: App>(
   ui.text = Some(std::mem::replace(text, TextSystem::new(scale)));
   std::mem::swap(images, &mut ui.images);
   app.view(ui);
+  ui.show_helps();
   std::mem::swap(images, &mut ui.images);
   if let Some(t) = ui.text.take() {
     *text = t;

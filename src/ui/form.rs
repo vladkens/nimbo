@@ -265,16 +265,59 @@ pub enum Tile<'s> {
   Icon(Icon),
 }
 
+/// A form row's description ([FormRow::caption]): a text, or what a closure builds, as
+/// SwiftUI's label takes a string or a view (egui's `impl Into<WidgetText>`); `()` for none.
+pub trait Caption<'s> {
+  /// The text that names the row with its label for assistive technology; none for one built,
+  /// whose texts are read where they stand.
+  fn text(&self) -> &'s str {
+    ""
+  }
+
+  /// Builds it under the label in `style` (dimmed in a disabled row), a text as `id`.
+  fn build(self, ui: &mut Ui, style: TextStyle, id: Id);
+}
+
+impl Caption<'_> for () {
+  fn build(self, _: &mut Ui, _: TextStyle, _: Id) {}
+}
+
+impl<'s> Caption<'s> for &'s str {
+  fn text(&self) -> &'s str {
+    self
+  }
+
+  fn build(self, ui: &mut Ui, style: TextStyle, id: Id) {
+    ui.next_id = Some((id, false));
+    ui.text(self, style);
+  }
+}
+
+impl<'s> Caption<'s> for &'s String {
+  fn text(&self) -> &'s str {
+    self.as_str()
+  }
+
+  fn build(self, ui: &mut Ui, style: TextStyle, id: Id) {
+    self.as_str().build(ui, style, id);
+  }
+}
+
+impl<F: FnOnce(&mut Ui)> Caption<'_> for F {
+  fn build(self, ui: &mut Ui, _: TextStyle, _: Id) {
+    self(ui);
+  }
+}
+
 /// A row of a form section ([Ui::form_row]): its label, badges after it, an optional ⓘ tooltip or
-/// warning, description and leading tile, and whether it is disabled.
+/// warning, description ([Caption]) and leading tile, and whether it is disabled.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct FormRow<'s> {
+pub struct FormRow<'s, C = ()> {
   label: &'s str,
   badges: &'s [(&'s str, Tone)],
   info: Option<&'s str>,
   warning: Option<&'s str>,
-  caption: Option<&'s str>,
-  parts: &'s [(&'s str, TextStyle)],
+  caption: C,
   tile: Option<Tile<'s>>,
   disabled: bool,
   one_line: bool,
@@ -287,7 +330,9 @@ impl<'s> FormRow<'s> {
   pub fn new(label: &'s str) -> Self {
     Self { label, ..Self::default() }
   }
+}
 
+impl<'s, C> FormRow<'s, C> {
   /// A [Ui::badge] of each `(text, tone)` right after the label, on its line, in order: tags of
   /// what the row is ("Beta", "New"). Not SwiftUI's `.badge`, one count or word at a list row's
   /// trailing edge: these are several, they follow the label, and the controls keep the trailing
@@ -310,19 +355,21 @@ impl<'s> FormRow<'s> {
     Self { warning: Some(text), ..self }
   }
 
-  /// Grey text under the label, wrapping onto as many lines as it needs.
-  pub fn caption(self, caption: &'s str) -> Self {
-    Self { caption: Some(caption), ..self }
-  }
-
-  /// A description on one line of `(text, style)` parts, each its own element for a tooltip,
-  /// `id.key(("caption", i))` of the row's id, as SwiftUI joins `Text`s: a term in
-  /// [TextStyle::dotted] with more on hover. A part takes the pointer unless the row is one a
-  /// click selects ([Style::hit]), so a part's tooltip doesn't show there; the line is clipped
-  /// where it is short. Assistive technology reads the parts where they stand, not as the row's
-  /// description; to read one without its separators (" · 274 MB"), name it ([Ui::a11y_label]).
-  pub fn caption_parts(self, parts: &'s [(&'s str, TextStyle)]) -> Self {
-    Self { parts, ..self }
+  /// The description under the label: grey text, wrapping onto as many lines as it needs, or
+  /// what a closure builds, as SwiftUI's label of `Text`s (texts in [FormStyle::caption], a term
+  /// [TextStyle::dotted] with [Ui::help] on it, each read where it stands):
+  ///
+  /// ```ignore
+  /// FormRow::new("parakeet-ultra").caption(|ui: &mut Ui| {
+  ///   ui.help("Errors per 100 words").text("WER 4.7%", fs.caption.dotted());
+  ///   ui.text(" · 740 MB", fs.caption);
+  /// })
+  /// ```
+  pub fn caption<D: Caption<'s>>(self, caption: D) -> FormRow<'s, D> {
+    let FormRow {
+      label, badges, info, warning, tile, disabled, one_line, selected, pressed, ..
+    } = self;
+    FormRow { label, badges, info, warning, caption, tile, disabled, one_line, selected, pressed }
   }
 
   /// A tile before the label: a letter or an icon.
@@ -464,10 +511,10 @@ impl Ui<'_> {
   /// named by its label and description for assistive technology. Else the first control recorded
   /// in it with no name of its own takes them as its name and description ([Ui::a11y]), and they
   /// are not read again.
-  pub fn form_row<R>(
+  pub fn form_row<'s, R>(
     &mut self,
     fs: &FormStyle,
-    row: FormRow,
+    row: FormRow<'s, impl Caption<'s>>,
     control: impl FnOnce(&mut Self) -> R,
   ) -> Response {
     self.form_row_with(fs, row, |_| {}, control)
@@ -475,10 +522,10 @@ impl Ui<'_> {
 
   /// [Ui::form_row] with what `below` builds under the description, as wide as the label: a
   /// task's progress bar, a row's own buttons.
-  pub fn form_row_with<R>(
+  pub fn form_row_with<'s, R>(
     &mut self,
     fs: &FormStyle,
-    row: FormRow,
+    row: FormRow<'s, impl Caption<'s>>,
     below: impl FnOnce(&mut Self),
     control: impl FnOnce(&mut Self) -> R,
   ) -> Response {
@@ -504,7 +551,7 @@ impl Ui<'_> {
     };
     let style = fs.row.min_h(fs.row.min[1] + top).align(Align::Start, Align::Start);
     let style = if row.selected { style.bg(fs.selected) } else { style };
-    let text = [row.label, row.caption.unwrap_or_default()];
+    let text = [row.label, row.caption.text()];
     if fs.row.hit {
       self.a11y_row(id, text).state(State::Selected, row.selected).state(State::Disabled, off);
     }
@@ -568,20 +615,7 @@ impl Ui<'_> {
               ui.tooltip(mark, &tip);
             }
           });
-          if let Some(c) = row.caption {
-            ui.next_id = Some((id.key("caption"), false));
-            ui.text(c, dim(fs.caption));
-          }
-
-          if !row.parts.is_empty() {
-            ui.row(Style::new().w(grow()).clip(), |ui| {
-              for (i, &(text, style)) in row.parts.iter().enumerate() {
-                // Named, it takes the pointer.
-                ui.next_id = Some((id.key(("caption", i)), !fs.row.hit));
-                ui.text(text, dim(style.nowrap()));
-              }
-            });
-          }
+          row.caption.build(ui, dim(fs.caption), id.key("caption"));
 
           below(ui);
         });
@@ -613,10 +647,10 @@ impl Ui<'_> {
   /// sliding as SwiftUI's. Disabled ([FormRow::disabled], [Ui::disabled] or in a disabled scope),
   /// it dims, takes no focus and doesn't toggle. Assistive technology reads a button,
   /// [State::Expanded] while open, disabled with it. `changed` when it toggled.
-  pub fn form_disclosure<R>(
+  pub fn form_disclosure<'s, R>(
     &mut self,
     fs: &FormStyle,
-    row: FormRow,
+    row: FormRow<'s, impl Caption<'s>>,
     rows: impl FnOnce(&mut Self) -> R,
   ) -> Response {
     let (id, t) = (self.take_id(), self.theme());
@@ -633,15 +667,16 @@ impl Ui<'_> {
       false => fs.row.hit().tab_focusable().cursor(Cursor::Pointer),
     };
 
-    let ink = if off { t.tertiary } else { t.muted };
+    let (ink, label, about) =
+      (if off { t.tertiary } else { t.muted }, row.label, row.caption.text());
     let row = FormRow { disabled: off, pressed, ..row };
     let mut r = self.with_id(id).form_row(&FormStyle { row: style, ..*fs }, row, |ui| {
       // Unnamed, a click on it is the row's.
       ui.next_id = Some((id.key("chevron"), false));
       ui.canvas(Style::new().w(px(14.0)).h(px(14.0)), move |f, r| chevron(f, r, turn, ink))
     });
-    let a = self.a11y(id, Role::Button).name(row.label).state(State::Expanded, open);
-    a.description(row.caption.unwrap_or_default());
+    let a = self.a11y(id, Role::Button).name(label).state(State::Expanded, open);
+    a.description(about);
 
     if open {
       rows(self);
@@ -996,55 +1031,49 @@ mod tests {
     }
   }
 
-  /// A row with a caption of parts over one with the same caption whole, and a row a click
-  /// selects with parts; `.0` its clicks.
-  #[derive(Default)]
-  struct Parts(usize);
+  /// A row with its caption composed of texts, one with a tooltip, under one with the same
+  /// caption whole.
+  struct Composed;
 
-  impl App for Parts {
+  impl App for Composed {
     fn view(&mut self, ui: &mut Ui) {
       ui.set_theme(Theme::PLATES_LIGHT);
       let fs = FormStyle::plates(&ui.theme());
-      let parts = [("WER 4.5%", fs.caption.dotted()), (" · 274 MB", fs.caption)];
+      let caption = |ui: &mut Ui| {
+        ui.row(Style::new().w(grow()), |ui| {
+          ui.id("wer").help("Errors per 100 words").text("WER 4.5%", fs.caption.dotted());
+          ui.id("size").text(" · 274 MB", fs.caption);
+        });
+      };
       ui.col(fs.page, |ui| {
         ui.form_section(&fs, "Section", |ui| {
           ui.id("whole").form_row(&fs, FormRow::new("A").caption("WER 4.5% · 274 MB"), |_| {});
-          ui.id("parts").form_row(&fs, FormRow::new("A").caption_parts(&parts), |_| {});
-          ui.tooltip(Id::of("parts").key(("caption", 0)), "Word error rate");
-          let s = FormStyle { row: fs.row.hit(), ..fs };
-          let r = ui.id("pick").form_row(&s, FormRow::new("B").caption_parts(&parts), |_| {});
-          self.0 += r.clicked as usize;
+          ui.id("parts").form_row(&fs, FormRow::new("A").caption(caption), |_| {});
         });
       });
     }
   }
 
-  /// The parts lie on one line where the whole caption would, the row as high; a part shows
-  /// its tooltip; in a row a click selects, a click on a part selects the row.
+  /// The composed caption lies where the whole one does, the row as high; its term shows its
+  /// tooltip and reads it as its description, where it stands.
   #[test]
-  fn a_caption_of_parts_reads_as_one() {
-    let mut h = Harness::new(Parts::default(), Size::new(400.0, 300.0), 2.0);
+  fn a_caption_composed_reads_as_one() {
+    let mut h = Harness::new(Composed, Size::new(400.0, 300.0), 2.0);
     h.frame();
     let hair = FormStyle::plates(&Theme::PLATES_LIGHT).hairline;
     let (whole, parts) = (h.rect(Id::of("whole")).unwrap(), h.rect(Id::of("parts")).unwrap());
     assert_eq!(whole.h + hair, parts.h, "as high");
     let caption = h.rect(Id::of("whole").key("caption")).unwrap();
-    let part = |i: usize| h.rect(Id::of("parts").key(("caption", i))).unwrap();
-    let (a, b) = (part(0), part(1));
+    let (a, b) = (h.rect(Id::of("wer")).unwrap(), h.rect(Id::of("size")).unwrap());
     let at = (caption.x, caption.y - whole.y + hair);
     assert_eq!((a.x, a.y - parts.y), at, "where the caption is");
     assert!(a.x + a.w <= b.x && a.y == b.y, "on one line: {a:?} {b:?}");
-    assert!(h.a11y().contains(r#"static text "WER 4.5%""#), "{}", h.a11y());
+    let read = r#"static text "WER 4.5%" desc "Errors per 100 words""#;
+    assert!(h.a11y().lines().any(|l| l.trim() == read), "{}", h.a11y());
 
     h.move_to(a.x + 4.0, a.y + a.h / 2.0);
     h.wait(Duration::from_millis(400));
-    let tip = Id::of("parts").key(("caption", 0)).key("tip");
-    assert!(h.rect(tip).is_some(), "the tooltip shows");
-
-    let pick = h.rect(Id::of("pick").key(("caption", 0))).unwrap();
-    h.click(pick.x + 4.0, pick.y + pick.h / 2.0);
-    h.frame();
-    assert_eq!(h.app().0, 1, "the row selected");
+    assert_eq!(h.text(Id::of("wer").key("tip").nth(0)), Some("Errors per 100 words"));
   }
 
   /// A disclosure of two rows in a section, under a plain row, disabled by [Ui::disabled] when

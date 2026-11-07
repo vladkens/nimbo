@@ -88,7 +88,41 @@ mod tests {
   use crate::app::App;
   use crate::harness::Harness;
   use crate::scene::Size;
-  use crate::ui::{Id, Ui};
+  use crate::ui::{Id, Style, Ui, px};
+
+  /// `help` on a button, a text and a box.
+  struct Helped;
+
+  impl App for Helped {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.help("Saves it").id("save").button("Save");
+      let t = ui.theme();
+      ui.help("Errors per 100 words").id("wer").text("WER 4.5%", t.label().dotted());
+      ui.help("A box").id("box").row(Style::new().w(px(40.0)).h(px(20.0)), |_| {});
+    }
+  }
+
+  /// Each shows its tip after a rest; assistive technology reads it as the description of the
+  /// button and of the text, where they stand.
+  #[test]
+  fn help_tips_any_element_and_describes_it() {
+    let mut h = Harness::new(Helped, Size::new(300.0, 200.0), 1.0);
+    h.frame();
+    let tree = h.a11y();
+    let lines: Vec<&str> = tree.lines().map(str::trim).collect();
+    let save = lines.iter().position(|l| *l == r#"button "Save" desc "Saves it""#);
+    let wer =
+      lines.iter().position(|l| *l == r#"static text "WER 4.5%" desc "Errors per 100 words""#);
+    assert!(save.is_some() && wer.is_some() && save < wer, "{tree}");
+    for (name, tip) in [("save", "Saves it"), ("wer", "Errors per 100 words"), ("box", "A box")] {
+      let r = h.rect(Id::of(name)).unwrap();
+      h.move_to(r.x + r.w / 2.0, r.y + r.h / 2.0);
+      h.wait(Duration::from_millis(400));
+      assert_eq!(h.text(Id::of(name).key("tip").nth(0)), Some(tip), "{name}");
+      h.leave();
+      h.wait(Duration::from_millis(600));
+    }
+  }
 
   struct Tipped;
 
