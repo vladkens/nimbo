@@ -727,7 +727,6 @@ pub enum Delete {
   ToParagraphEnd,
 }
 
-/// A command from a key: AppKit's text commands (`doCommandBySelector:`), the edit menu's
 /// What a move does ([Command::Move]): moves the caret, or extends the selection from its
 /// anchor, as Shift does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -743,6 +742,7 @@ impl Extent {
   }
 }
 
+/// A command from a key: AppKit's text commands (`doCommandBySelector:`), the edit menu's
 /// (from bindings) and the app's own ([Command::Action]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {

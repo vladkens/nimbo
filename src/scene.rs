@@ -165,8 +165,6 @@ pub(crate) struct Sprite {
   pub color: Color,
 }
 
-/// A thick antialiased line from `a` to `b`.
-#[repr(C)]
 /// How a line's ends are drawn, as Core Graphics' `CGLineCap`: square at its ends, or round
 /// past them (a polyline's joints).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -187,6 +185,8 @@ impl Segment {
   }
 }
 
+/// A thick antialiased line from `a` to `b`.
+#[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Segment {
   pub a: Point,
