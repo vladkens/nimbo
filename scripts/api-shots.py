@@ -6,11 +6,13 @@
 
 The gallery prints the page (`--api`) and the blocks' slugs (`--list`); each picture is a block
 alone, as high as its variants, in the light appearance at 2x, from the harness without a window
-(`<slug> --shot docs/api/<slug>.png`). Pictures of blocks no longer in the table go.
+(`<slug> --shot docs/api/<slug>.png`). Pictures of blocks no longer in the table go. Then the
+gallery's test checks every picture byte for byte (`NIMBO_API_SHOTS_STRICT`).
 
 uv run scripts/api-shots.py
 """
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -32,6 +34,10 @@ def main() -> None:
     if old.stem not in slugs:
       old.unlink()
 
+  # The gallery's test, strict: each picture byte for byte as the gallery draws it now.
+  env = {**os.environ, "NIMBO_API_SHOTS_STRICT": "1"}
+  test = ["cargo", "test", "--test", "gallery", "the_api_doc_is_the_gallerys"]
+  subprocess.run(test, cwd=ROOT, env=env, check=True, capture_output=True)
   print(f"docs/api.md and {len(slugs)} pictures in docs/api/")
 
 

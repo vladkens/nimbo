@@ -303,12 +303,15 @@ fn the_alert_asks_and_counts_its_action() {
 }
 
 /// `docs/api.md` is what the gallery's table makes, every block's picture beside it; on macOS,
-/// where `make api-shots` draws them, each picture is what the block draws now.
+/// where `make api-shots` draws them, each picture is what the block draws now: the same size and
+/// nearly every pixel within a tolerance (another macOS draws its glyphs a touch differently),
+/// or byte for byte with `NIMBO_API_SHOTS_STRICT` set, as `make api-shots` checks.
 #[test]
 fn the_api_doc_is_the_gallerys() {
   let root = env!("CARGO_MANIFEST_DIR");
   let doc = std::fs::read_to_string(format!("{root}/docs/api.md")).unwrap();
   assert!(doc == api_md(), "docs/api.md is stale: make api-shots");
+  let strict = std::env::var_os("NIMBO_API_SHOTS_STRICT").is_some();
   let fresh = std::env::temp_dir().join(format!("nimbo-api-{}", std::process::id()));
   std::fs::create_dir_all(&fresh).unwrap();
   for (i, b) in BLOCKS.iter().enumerate() {
@@ -324,7 +327,17 @@ fn the_api_doc_is_the_gallerys() {
     h.frame();
     let now = fresh.join(format!("{}.png", b.slug()));
     h.shot(&now).unwrap();
-    assert!(std::fs::read(&now).unwrap() == kept, "{png} is stale: make api-shots");
+    let now = std::fs::read(&now).unwrap();
+    if strict {
+      assert!(now == kept, "{png} is stale: make api-shots");
+      continue;
+    }
+
+    let rgba = |file: Vec<u8>| nimbo::Png::new(Box::leak(file.into_boxed_slice())).rgba();
+    let ((w, h1, a), (w2, h2, b2)) = (rgba(kept), rgba(now));
+    assert_eq!((w, h1), (w2, h2), "{png}: another size, stale: make api-shots");
+    let off = a.iter().zip(b2).filter(|(x, y)| x.abs_diff(**y) > 48).count();
+    assert!(off * 100 <= a.len(), "{png}: {off} channels off, stale: make api-shots");
   }
 
   _ = std::fs::remove_dir_all(&fresh);
