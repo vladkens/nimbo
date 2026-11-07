@@ -90,7 +90,7 @@ mod tests {
   use crate::scene::Size;
   use crate::ui::{Id, Style, Ui, px};
 
-  /// `help` on a button, a text and a box.
+  /// `help` on a button, a text, a box with a text in it and a canvas.
   struct Helped;
 
   impl App for Helped {
@@ -98,12 +98,17 @@ mod tests {
       ui.help("Saves it").id("save").button("Save");
       let t = ui.theme();
       ui.help("Errors per 100 words").id("wer").text("WER 4.5%", t.label().dotted());
-      ui.help("A box").id("box").row(Style::new().w(px(40.0)).h(px(20.0)), |_| {});
+      let t = ui.theme();
+      ui.help("A box").id("box").row(Style::new().h(px(20.0)), |ui| ui.text("Inside", t.label()));
+      let dot =
+        |f: &mut crate::scene::Frame, r: crate::scene::Rect| f.rect(r, [0.0, 0.0, 0.0, 1.0], 2.0);
+      ui.help("A dot").id("dot").canvas(Style::new().w(px(8.0)).h(px(8.0)), dot);
     }
   }
 
   /// Each shows its tip after a rest; assistive technology reads it as the description of the
-  /// button and of the text, where they stand.
+  /// button and of the text, where they stand, and of a group for the box (its text still read
+  /// inside) and the canvas.
   #[test]
   fn help_tips_any_element_and_describes_it() {
     let mut h = Harness::new(Helped, Size::new(300.0, 200.0), 1.0);
@@ -114,7 +119,13 @@ mod tests {
     let wer =
       lines.iter().position(|l| *l == r#"static text "WER 4.5%" desc "Errors per 100 words""#);
     assert!(save.is_some() && wer.is_some() && save < wer, "{tree}");
-    for (name, tip) in [("save", "Saves it"), ("wer", "Errors per 100 words"), ("box", "A box")] {
+    let group = lines.iter().position(|l| *l == r#"group desc "A box""#);
+    let inside = lines.iter().position(|l| *l == r#"static text "Inside""#);
+    assert!(group.is_some() && group.map(|g| g + 1) == inside, "the box's child read: {tree}");
+    assert!(lines.contains(&r#"group desc "A dot""#), "the canvas: {tree}");
+    for (name, tip) in
+      [("save", "Saves it"), ("wer", "Errors per 100 words"), ("box", "A box"), ("dot", "A dot")]
+    {
       let r = h.rect(Id::of(name)).unwrap();
       h.move_to(r.x + r.w / 2.0, r.y + r.h / 2.0);
       h.wait(Duration::from_millis(400));

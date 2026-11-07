@@ -65,7 +65,7 @@ pub use containers::{
   List, ListResponse, PopUp, Row, Selection, Split, SplitBehavior, Tabs, TypeSelect,
 };
 pub use dialog::{Answer, Dialog, DialogBehavior};
-pub use form::{FormRow, FormStyle, Glass, Tile};
+pub use form::{Caption, FormRow, FormStyle, Glass, Tile};
 pub use id::Id;
 pub(crate) use input::drags_window;
 pub use input::{Click, Press, Scroll};
@@ -695,24 +695,29 @@ impl<'a> Ui<'a> {
 
   /// The next element shows `tip` under the pointer resting on it ([Ui::tooltip]) and reads it
   /// as its description to assistive technology, as SwiftUI's `.help`: any element, a text
-  /// (then read where it stands), a widget, a container. It takes the pointer, so a click on it
-  /// is its own, not its parent's.
+  /// (read where it stands), a widget, a container or a canvas (read as a group, its children
+  /// as ever). It takes the pointer, so a click on it is its own, not its parent's.
   pub fn help(&mut self, tip: &str) -> &mut Self {
     self.next_help = Some(tip.to_owned());
     self
   }
 
-  /// The tooltips the view asked for with [Ui::help], after it: each element built, a text
-  /// recorded as one for assistive technology to read the tooltip with.
+  /// The tooltips the view asked for with [Ui::help], after it: each element built. One with no
+  /// record for assistive technology gets one to carry the tip: a text as itself, any other a
+  /// group, whose children are read as ever.
   pub(crate) fn show_helps(&mut self) {
     for (i, tip) in std::mem::take(&mut self.helps) {
       let n = &self.st.tree.nodes[i as usize];
-      let id = n.id;
-      if let Kind::Text { range, .. } = n.kind
-        && self.a11y_of(id).is_none()
-      {
-        let text = self.st.tree.str(range.0, range.1).to_owned();
-        self.a11y_label(&text).a11y(id, Role::StaticText);
+      let (id, text) = match n.kind {
+        Kind::Text { range, .. } => (n.id, Some(self.st.tree.str(range.0, range.1).to_owned())),
+        _ => (n.id, None),
+      };
+
+      if self.a11y_of(id).is_none() {
+        match text {
+          Some(text) => _ = self.a11y_label(&text).a11y(id, Role::StaticText),
+          None => _ = self.a11y(id, Role::Group),
+        }
       }
 
       self.tooltip(id, &tip);

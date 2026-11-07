@@ -265,61 +265,64 @@ pub enum Tile<'s> {
   Icon(Icon),
 }
 
-/// A form row's description ([FormRow::caption]): a text, or what a closure builds, as
-/// SwiftUI's label takes a string or a view (egui's `impl Into<WidgetText>`); `()` for none.
-pub trait Caption<'s> {
-  /// The text that names the row with its label for assistive technology; none for one built,
-  /// whose texts are read where they stand.
-  fn text(&self) -> &'s str {
-    ""
-  }
-
-  /// Builds it under the label in `style` (dimmed in a disabled row), a text as `id`.
-  fn build(self, ui: &mut Ui, style: TextStyle, id: Id);
+/// A form row's description ([FormRow::caption]): none, a text, or what a closure builds with
+/// the caption's style, as SwiftUI's label takes a string or a view (egui's
+/// `impl Into<WidgetText>`); from a `&str`, a `&String` or `FnOnce(&mut Ui, TextStyle)`.
+#[derive(Default)]
+pub enum Caption<'s> {
+  #[default]
+  None,
+  Text(&'s str),
+  Built(Build<'s>),
 }
 
-impl Caption<'_> for () {
-  fn build(self, _: &mut Ui, _: TextStyle, _: Id) {}
-}
+/// What a [Caption::Built] runs: it builds the caption in its style.
+pub type Build<'s> = Box<dyn FnOnce(&mut Ui, TextStyle) + 's>;
 
-impl<'s> Caption<'s> for &'s str {
+impl<'s> Caption<'s> {
+  /// A text caption's text, which names the row with its label; none for one built, whose
+  /// elements are read where they stand.
   fn text(&self) -> &'s str {
-    self
-  }
-
-  fn build(self, ui: &mut Ui, style: TextStyle, id: Id) {
-    ui.next_id = Some((id, false));
-    ui.text(self, style);
+    if let Caption::Text(s) = self { s } else { "" }
   }
 }
 
-impl<'s> Caption<'s> for &'s String {
-  fn text(&self) -> &'s str {
-    self.as_str()
+impl<'s> From<&'s str> for Caption<'s> {
+  fn from(s: &'s str) -> Self {
+    Caption::Text(s)
   }
+}
 
-  fn build(self, ui: &mut Ui, style: TextStyle, id: Id) {
-    self.as_str().build(ui, style, id);
+impl<'s> From<&'s String> for Caption<'s> {
+  fn from(s: &'s String) -> Self {
+    Caption::Text(s)
   }
 }
 
 /// Built with the caption's style, dimmed in a disabled row as a text caption is; the widgets in
 /// it read the row's disabled scope and dim themselves.
-impl<F: FnOnce(&mut Ui, TextStyle)> Caption<'_> for F {
-  fn build(self, ui: &mut Ui, style: TextStyle, _: Id) {
-    self(ui, style);
+impl<'s, F: FnOnce(&mut Ui, TextStyle) + 's> From<F> for Caption<'s> {
+  fn from(f: F) -> Self {
+    Caption::Built(Box::new(f))
+  }
+}
+
+/// Its text, `…` for one built.
+impl std::fmt::Debug for Caption<'_> {
+  fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    f.write_str(if let Caption::Built(_) = self { "…" } else { self.text() })
   }
 }
 
 /// A row of a form section ([Ui::form_row]): its label, badges after it, an optional ⓘ tooltip or
 /// warning, description ([Caption]) and leading tile, and whether it is disabled.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct FormRow<'s, C = ()> {
+#[derive(Debug, Default)]
+pub struct FormRow<'s> {
   label: &'s str,
   badges: &'s [(&'s str, Tone)],
   info: Option<&'s str>,
   warning: Option<&'s str>,
-  caption: C,
+  caption: Caption<'s>,
   tile: Option<Tile<'s>>,
   disabled: bool,
   one_line: bool,
@@ -332,9 +335,7 @@ impl<'s> FormRow<'s> {
   pub fn new(label: &'s str) -> Self {
     Self { label, ..Self::default() }
   }
-}
 
-impl<'s, C> FormRow<'s, C> {
   /// A [Ui::badge] of each `(text, tone)` right after the label, on its line, in order: tags of
   /// what the row is ("Beta", "New"). Not SwiftUI's `.badge`, one count or word at a list row's
   /// trailing edge: these are several, they follow the label, and the controls keep the trailing
@@ -370,11 +371,8 @@ impl<'s, C> FormRow<'s, C> {
   ///   ui.text(" · 740 MB", s);
   /// })
   /// ```
-  pub fn caption<D: Caption<'s>>(self, caption: D) -> FormRow<'s, D> {
-    let FormRow {
-      label, badges, info, warning, tile, disabled, one_line, selected, pressed, ..
-    } = self;
-    FormRow { label, badges, info, warning, caption, tile, disabled, one_line, selected, pressed }
+  pub fn caption(self, caption: impl Into<Caption<'s>>) -> Self {
+    Self { caption: caption.into(), ..self }
   }
 
   /// A tile before the label: a letter or an icon.
@@ -516,10 +514,10 @@ impl Ui<'_> {
   /// named by its label and description for assistive technology. Else the first control recorded
   /// in it with no name of its own takes them as its name and description ([Ui::a11y]), and they
   /// are not read again.
-  pub fn form_row<'s, R>(
+  pub fn form_row<R>(
     &mut self,
     fs: &FormStyle,
-    row: FormRow<'s, impl Caption<'s>>,
+    row: FormRow,
     control: impl FnOnce(&mut Self) -> R,
   ) -> Response {
     self.form_row_with(fs, row, |_| {}, control)
@@ -527,10 +525,10 @@ impl Ui<'_> {
 
   /// [Ui::form_row] with what `below` builds under the description, as wide as the label: a
   /// task's progress bar, a row's own buttons.
-  pub fn form_row_with<'s, R>(
+  pub fn form_row_with<R>(
     &mut self,
     fs: &FormStyle,
-    row: FormRow<'s, impl Caption<'s>>,
+    row: FormRow,
     below: impl FnOnce(&mut Self),
     control: impl FnOnce(&mut Self) -> R,
   ) -> Response {
@@ -620,7 +618,14 @@ impl Ui<'_> {
               ui.tooltip(mark, &tip);
             }
           });
-          row.caption.build(ui, dim(fs.caption), id.key("caption"));
+          match row.caption {
+            Caption::None => {}
+            Caption::Text(c) => {
+              ui.next_id = Some((id.key("caption"), false));
+              ui.text(c, dim(fs.caption));
+            }
+            Caption::Built(f) => f(ui, dim(fs.caption)),
+          }
 
           below(ui);
         });
@@ -650,12 +655,14 @@ impl Ui<'_> {
   /// no hover. A click, or Space while it has focus, toggles it; it starts collapsed and keeps
   /// its state under its id, the chevron `id.key("chevron")`. The rows show and go at once, not
   /// sliding as SwiftUI's. Disabled ([FormRow::disabled], [Ui::disabled] or in a disabled scope),
-  /// it dims, takes no focus and doesn't toggle. Assistive technology reads a button,
-  /// [State::Expanded] while open, disabled with it. `changed` when it toggled.
-  pub fn form_disclosure<'s, R>(
+  /// it dims, takes no focus and doesn't toggle. Assistive technology reads a button named by
+  /// the label, [State::Expanded] while open, disabled with it, described by a text caption: a
+  /// built one ([Caption::Built]) would go unread inside the button, so it takes none. `changed`
+  /// when it toggled.
+  pub fn form_disclosure<R>(
     &mut self,
     fs: &FormStyle,
-    row: FormRow<'s, impl Caption<'s>>,
+    row: FormRow,
     rows: impl FnOnce(&mut Self) -> R,
   ) -> Response {
     let (id, t) = (self.take_id(), self.theme());
@@ -674,6 +681,7 @@ impl Ui<'_> {
 
     let (ink, label, about) =
       (if off { t.tertiary } else { t.muted }, row.label, row.caption.text());
+    debug_assert!(!matches!(row.caption, Caption::Built(_)), "a disclosure's caption is a text");
     let row = FormRow { disabled: off, pressed, ..row };
     let mut r = self.with_id(id).form_row(&FormStyle { row: style, ..*fs }, row, |ui| {
       // Unnamed, a click on it is the row's.
@@ -987,10 +995,10 @@ mod tests {
       let fs = FormStyle::plates(&ui.theme());
       ui.col(fs.page, |ui| {
         ui.form_section(&fs, "Section", |ui| {
-          let row = FormRow::new(self.0).one_line().caption("Under it");
-          let badged = row.badges(&[("New", Tone::Accent), ("Beta", Tone::Neutral)]);
+          let row = || FormRow::new(self.0).one_line().caption("Under it");
+          let badged = row().badges(&[("New", Tone::Accent), ("Beta", Tone::Neutral)]);
           ui.id("badged").form_row(&fs, badged, |ui| ui.id("use").button("Use"));
-          ui.id("plain").form_row(&fs, row, |ui| ui.button("Use"));
+          ui.id("plain").form_row(&fs, row(), |ui| ui.button("Use"));
         });
       });
     }
@@ -1139,9 +1147,9 @@ mod tests {
             ui.id("b").form_row(&fs, FormRow::new("B"), |_| {});
           });
           self.0 += r.changed as usize;
-          let off = FormRow::new("Off").disabled(true);
+          let off = || FormRow::new("Off").disabled(true);
           let r =
-            ui.id("off").form_disclosure(&fs, off, |ui| ui.id("c").form_row(&fs, off, |_| {}));
+            ui.id("off").form_disclosure(&fs, off(), |ui| ui.id("c").form_row(&fs, off(), |_| {}));
           self.0 += r.changed as usize;
         });
       });
