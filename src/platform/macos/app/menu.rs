@@ -16,7 +16,7 @@ use objc2_app_kit::{
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSString};
 
 use crate::keys::{Key, Shortcut, f_key};
-use crate::menu::{Item, Menu, choices};
+use crate::menu::{Item, Menu};
 use crate::scene::Point;
 
 thread_local! {
@@ -42,13 +42,18 @@ define_class!(
   }
 );
 
-/// Shows `menu` over `view` and returns the chosen item's id once it closes: `None` when
+/// Shows `menu` over `view` and returns the chosen item's action number once it closes: `None` when
 /// dismissed, and at once while another menu is open. With the secondary press that asked for
 /// it as a context menu (`popUpContextMenu:withEvent:forView:`), else at `at` in the view. The
 /// chosen item's action comes before the call returns, from its tracking loop (the plan's VM
 /// check confirms it). Only the menu's items show. A destructive item shows plain: NSMenuItem has
 /// no such style (Apple's NSMenuItem docs, 2026-10-29).
-pub fn popup(view: &NSView, press: Option<&NSEvent>, at: Point, menu: &Menu) -> Option<String> {
+pub fn popup(
+  view: &NSView,
+  press: Option<&NSEvent>,
+  at: Point,
+  menu: &Menu<usize>,
+) -> Option<usize> {
   if OPEN.replace(true) {
     return None;
   }
@@ -65,7 +70,7 @@ pub fn popup(view: &NSView, press: Option<&NSEvent>, at: Point, menu: &Menu) -> 
     ns.setAutomaticallyInsertsWritingToolsItems(false);
   }
 
-  fill(mtm, &ns, &menu.items, &target, &mut 0);
+  fill(mtm, &ns, &menu.items, &target);
   // For the window's frame view, not ours: for a view that takes text AppKit adds its own
   // items (AutoFill, Writing Tools, Services), as Electron's menus show none for a view that
   // isn't a web page's (electron/electron#45138, 2025-03-28); its user defaults
@@ -80,29 +85,22 @@ pub fn popup(view: &NSView, press: Option<&NSEvent>, at: Point, menu: &Menu) -> 
   }
 
   OPEN.set(false);
-  let tag = target.ivars().get()?;
-  choices(menu).get(tag as usize).cloned()
+  target.ivars().get().map(|tag| tag as usize)
 }
 
-/// Adds `items` to `menu`; the chosen ones send `chosen:` to `target` with their tag, counted
-/// from `tag` in the order of [choices].
-pub fn fill(
-  mtm: MainThreadMarker,
-  menu: &NSMenu,
-  items: &[Item],
-  target: &AnyObject,
-  tag: &mut isize,
-) {
+/// Adds `items` to `menu`; the chosen ones send `chosen:` to `target` with their action number
+/// as the tag.
+pub fn fill(mtm: MainThreadMarker, menu: &NSMenu, items: &[Item<usize>], target: &AnyObject) {
   for it in items {
-    if it.separator {
+    if let Item::Divider = it {
       menu.addItem(&NSMenuItem::separatorItem(mtm));
       continue;
     }
 
     // A section header on macOS 14+; below it a disabled item with the title and no action, as
     // Windows and Linux show one.
-    if it.header {
-      let title = NSString::from_str(&it.label);
+    if let Item::Section(label) = it {
+      let title = NSString::from_str(label);
       if objc2::available!(macos = 14.0) {
         menu.addItem(&NSMenuItem::sectionHeaderWithTitle(&title, mtm));
         continue;
@@ -122,34 +120,34 @@ pub fn fill(
       continue;
     }
 
-    let action = it.submenu.is_none().then_some(sel!(chosen:));
+    let action = it.action().map(|_| sel!(chosen:));
     let none = (String::new(), NSEventModifierFlags::empty());
-    let (key, mods) = it.key.as_deref().and_then(key_equivalent).unwrap_or(none);
+    let (key, mods) = it.shortcut().and_then(key_equivalent).unwrap_or(none);
     // SAFETY: the action is the target's, which outlives the menu's use.
     let item = unsafe {
       NSMenuItem::initWithTitle_action_keyEquivalent(
         NSMenuItem::alloc(mtm),
-        &NSString::from_str(&it.label),
+        &NSString::from_str(it.label()),
         action,
         &NSString::from_str(&key),
       )
     };
-    if action.is_some() {
+    if let Some(&tag) = it.action() {
       unsafe { item.setTarget(Some(target)) };
-      item.setTag(*tag);
-      *tag += 1;
+      item.setTag(tag as isize);
     }
 
     if !key.is_empty() {
       item.setKeyEquivalentModifierMask(mods);
     }
 
-    item.setEnabled(it.enabled);
-    item.setState(if it.checked { NSControlStateValueOn } else { NSControlStateValueOff });
-    if let Some(sub) = &it.submenu {
+    item.setEnabled(it.is_enabled());
+    let on = it.is_on();
+    item.setState(if on { NSControlStateValueOn } else { NSControlStateValueOff });
+    if let Item::Submenu { menu: sub, .. } = it {
       let submenu = NSMenu::new(mtm);
       submenu.setAutoenablesItems(false);
-      fill(mtm, &submenu, &sub.items, target, tag);
+      fill(mtm, &submenu, &sub.items, target);
       item.setSubmenu(Some(&submenu));
     }
 
@@ -157,10 +155,9 @@ pub fn fill(
   }
 }
 
-/// A menu item's key equivalent for a shortcut as [Shortcut::parse] spells it: the character
-/// AppKit matches (`NSF1FunctionKey` and the like for keys that type none) and the modifiers.
-fn key_equivalent(text: &str) -> Option<(String, NSEventModifierFlags)> {
-  let s = Shortcut::parse(text).ok()?;
+/// A menu item's key equivalent for a shortcut: the character AppKit matches
+/// (`NSF1FunctionKey` and the like for keys that type none) and the modifiers.
+fn key_equivalent(s: Shortcut) -> Option<(String, NSEventModifierFlags)> {
   let fkey = |n: u32| char::from_u32(n);
   let c = match s.key {
     Key::Char(c) => Some(c),
@@ -203,12 +200,11 @@ mod tests {
   #[test]
   fn key_equivalents() {
     let cmd = NSEventModifierFlags::Command;
-    assert_eq!(key_equivalent("cmd+comma"), Some((",".into(), cmd)));
-    assert_eq!(key_equivalent("cmd+q"), Some(("q".into(), cmd)));
+    let key = |s: &str| key_equivalent(Shortcut::parse(s).unwrap());
+    assert_eq!(key("cmd+comma"), Some((",".into(), cmd)));
+    assert_eq!(key("cmd+q"), Some(("q".into(), cmd)));
     let all = NSEventModifierFlags::Control | NSEventModifierFlags::Shift | cmd;
-    assert_eq!(key_equivalent("ctrl+shift+cmd+F2"), Some(("\u{F705}".into(), all)));
-    assert_eq!(key_equivalent("option+left").map(|k| k.0), Some("\u{F702}".into()));
-    assert_eq!(key_equivalent("right_option"), None, "no modifier alone");
-    assert_eq!(key_equivalent("cmd+nope"), None);
+    assert_eq!(key("ctrl+shift+cmd+F2"), Some(("\u{F705}".into(), all)));
+    assert_eq!(key("option+left").map(|k| k.0), Some("\u{F702}".into()));
   }
 }

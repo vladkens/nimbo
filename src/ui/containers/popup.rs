@@ -1,39 +1,84 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The pop-up button: one option of a few, its list a menu over the button, as macOS draws one.
+//! The picker: one value of a few, as SwiftUI's `Picker` in the menu style, drawn as macOS draws
+//! a pop-up button, its list a menu over the button.
 //!
 //! ```ignore
-//! ui.id("lang").pop_up(&mut self.lang, &["Auto", "English", "German"]);
+//! ui.id("launch").picker(&mut self.launch, &[Tag::new(Launch::Window, "Show the window"), ..]);
+//! Picker::new(&mut self.lang).option(0, "System Default").divider().options(&LANGS).show(ui);
 //! ```
 
 use crate::keys::{Command, Move};
-use crate::scene::{Point, Rect, alpha, mix};
-use crate::ui::containers::menu::TypeSelect;
+use crate::scene::{Color, Frame, Point, Rect, alpha, mix};
+use crate::ui::containers::menu::{MenuPlacement, TypeSelect};
 use crate::ui::{Align, Behavior, Id, Response, Role, State, Style, Ui, grow, px, rigid};
 
-/// A pop-up button over `cur`, an index into `options`, as macOS 26 System Settings draws one:
-/// the current option's label 13 in from the frame and a chevron capsule after it, no box.
-/// Under the pointer the frame fills with the capsule's colour, which merges into it, and
-/// stays filled, a shade darker, while its list is open. A click, Space, Enter or the arrows
-/// ([Ui::pop_up_behavior]) open its list over it, the current option checked, highlighted and
-/// over the button ([Ui::menu_popup_over]); letters typed while it has focus, open or closed,
-/// go to the first option they start ([TypeSelect]). As wide as the current label, up to
-/// [PopUp::max_width], or [PopUp::width]; the list is at least as wide as the button and
-/// [crate::Sizes::menu_w]. Its
-/// items are `id.key(("item", i))`; `changed` when one was picked that wasn't the current.
-/// Disabled, its label and chevrons turn [crate::Theme::tertiary] and the capsule fades to half,
-/// as System Settings dims one.
-pub struct PopUp<'s> {
-  cur: &'s mut usize,
-  options: &'s [&'s str],
-  width: Option<f32>,
-  max_width: Option<f32>,
-  separators: &'s [usize],
+/// An option of a picker or a segmented control, as SwiftUI's `Text(label).tag(value)`:
+/// `const`, so a list of them is a constant:
+/// `const LAUNCH: [Tag<Launch>; 2] = [Tag::new(Launch::Window, "Open a window"), ..]`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tag<'s, T> {
+  pub value: T,
+  pub label: &'s str,
+  /// A count a segment draws after its label ([Ui::segmented]); a picker shows none.
+  pub count: Option<usize>,
 }
 
-impl<'s> PopUp<'s> {
-  pub fn new(cur: &'s mut usize, options: &'s [&'s str]) -> Self {
-    Self { cur, options, width: None, max_width: None, separators: &[] }
+impl<'s, T> Tag<'s, T> {
+  pub const fn new(value: T, label: &'s str) -> Self {
+    Self { value, label, count: None }
+  }
+}
+
+impl<'s, T: Copy> Tag<'s, T> {
+  /// With `n` after the label, dimmed: a filter's matches.
+  pub const fn count(self, n: usize) -> Self {
+    Self { count: Some(n), ..self }
+  }
+}
+
+/// A picker of `cur` among its options, in their order, a line where a divider is between them,
+/// as SwiftUI's `Picker` with `Divider` among its children; as macOS 26 System Settings draws a
+/// pop-up button: the current option's label 13 in from the frame and a chevron capsule after
+/// it, no box. Under the pointer the frame fills with the capsule's colour, which merges into
+/// it, and stays filled, a shade darker, while its list is open. A click, Space, Enter or the
+/// arrows ([Ui::pop_up_behavior]) open its list over it, the current option checked,
+/// highlighted and over the button ([MenuPlacement::Over]); letters typed while it has focus,
+/// open or closed, go to the first option they start ([TypeSelect]). As wide as the current
+/// label, up to [Picker::max_width], or [Picker::width]; the list is at least as wide as the
+/// button and [crate::Sizes::menu_w]. A `cur` that is none of the options shows no label. Its
+/// items are `id.key(("item", i))`, `i` counting options only; `changed` when one was picked that
+/// wasn't the current, written back to `cur`. Disabled, its label and chevrons turn
+/// [crate::Theme::tertiary] and the capsule fades to half, as System Settings dims one.
+pub struct Picker<'s, T> {
+  cur: &'s mut T,
+  /// Its options, `None` a divider.
+  entries: Vec<Option<(T, &'s str)>>,
+  width: Option<f32>,
+  max_width: Option<f32>,
+}
+
+impl<'s, T: PartialEq + Copy> Picker<'s, T> {
+  pub fn new(cur: &'s mut T) -> Self {
+    Self { cur, entries: Vec::new(), width: None, max_width: None }
+  }
+
+  /// An option: `value`, shown as `label`.
+  pub fn option(mut self, value: T, label: &'s str) -> Self {
+    self.entries.push(Some((value, label)));
+    self
+  }
+
+  /// An option for each of `options`, as SwiftUI's `ForEach` of tagged texts.
+  pub fn options(mut self, options: &[Tag<'s, T>]) -> Self {
+    self.entries.extend(options.iter().map(|o| Some((o.value, o.label))));
+    self
+  }
+
+  /// A line between the options before and after it: "System Default", a line, the devices.
+  pub fn divider(mut self) -> Self {
+    self.entries.push(None);
+    self
   }
 
   /// A fixed width in points; a label longer than it ends in "…".
@@ -47,17 +92,22 @@ impl<'s> PopUp<'s> {
     Self { max_width: Some(w), ..self }
   }
 
-  /// A line in the list after each of these options: "System Default", a line, the devices.
-  pub fn separators(self, after: &'s [usize]) -> Self {
-    Self { separators: after, ..self }
-  }
-
   pub fn show(self, ui: &mut Ui) -> Response {
     let t = ui.theme();
     let id = ui.take_id();
-    let options = self.options;
-    let mut at = (*self.cur < options.len()).then_some(*self.cur);
-    let b = ui.pop_up_behavior(id, options.len(), |i| options[i], &mut at);
+    let options: Vec<(T, &str)> = self.entries.iter().flatten().copied().collect();
+    let labels: Vec<&str> = options.iter().map(|o| o.1).collect();
+    // A line after each option a divider follows, but the last.
+    let mut lines = Vec::new();
+    for (k, e) in self.entries.iter().enumerate() {
+      let before = self.entries[..k].iter().flatten().count();
+      if e.is_none() && before > 0 && before < options.len() {
+        lines.push(before - 1);
+      }
+    }
+
+    let mut at = options.iter().position(|o| o.0 == *self.cur);
+    let b = ui.pop_up_behavior(id, labels.len(), |i| labels[i], &mut at);
     let typed = b.changed && at.is_some();
     let open = ui.menu_open(id);
     // macOS's own hover, whatever hover_all says: the frame fills, the capsule merges into it.
@@ -80,7 +130,7 @@ impl<'s> PopUp<'s> {
     };
 
     let frame = b.style(frame);
-    let label = at.map_or("", |i| options[i]);
+    let label = at.map_or("", |i| labels[i]);
     let (text, ink) = match b.disabled {
       true => (t.label().color(t.tertiary), t.tertiary),
       false => (t.label(), t.text),
@@ -104,8 +154,9 @@ impl<'s> PopUp<'s> {
     let mut pick = None;
     // Disabled while open, it closes.
     let toggle = b.clicked || b.disabled && ui.menu_open(id);
-    ui.menu_popup_over(id, toggle, t.popup().min_w(pop_w), at, |ui| {
-      for (i, &o) in options.iter().enumerate() {
+    let place = MenuPlacement::Over { start: at };
+    ui.menu_popup(id, toggle, place, t.popup().min_w(pop_w), |ui| {
+      for (i, &o) in labels.iter().enumerate() {
         let item = id.key(("item", i));
         let ib = ui.menu_item_behavior(item, o);
         let (bg, text) = match ib.on {
@@ -137,7 +188,7 @@ impl<'s> PopUp<'s> {
         }
 
         // 11 high, from the text column to 16 from the menu's right.
-        if self.separators.contains(&i) && i + 1 < options.len() {
+        if lines.contains(&i) {
           ui.row(Style::new().w(grow()).pads([5.0, 11.0, 5.0, 25.0]), |ui| {
             ui.el(Style::new().w(grow()).h(px(1.0)).bg(t.line));
           });
@@ -145,15 +196,8 @@ impl<'s> PopUp<'s> {
       }
     });
 
-    if let Some(i) = pick
-      && Some(i) != at
-    {
-      *self.cur = i;
-      r.changed = true;
-    }
-
-    if let Some(i) = at.filter(|_| typed) {
-      *self.cur = i;
+    if let Some(i) = pick.filter(|&i| Some(i) != at).or(at.filter(|_| typed)) {
+      *self.cur = options[i].0;
       r.changed = true;
     }
 
@@ -162,7 +206,7 @@ impl<'s> PopUp<'s> {
 }
 
 /// Up and down chevrons centred in `r`, their ink 7.5 by 10.5 points, stroked 1.5.
-fn chevrons(f: &mut crate::scene::Frame, r: Rect, c: crate::scene::Color) {
+fn chevrons(f: &mut Frame, r: Rect, c: Color) {
   let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
   let p = |x: f32, y: f32| Point::new(cx + x, cy + y);
   f.polyline(&[p(-3.0, -1.75), p(0.0, -4.5), p(3.0, -1.75)], 1.5, c);
@@ -170,15 +214,16 @@ fn chevrons(f: &mut crate::scene::Frame, r: Rect, c: crate::scene::Color) {
 }
 
 /// A check mark in `r`, a 16-point box.
-pub(super) fn check(f: &mut crate::scene::Frame, r: Rect, c: crate::scene::Color) {
+pub(super) fn check(f: &mut Frame, r: Rect, c: Color) {
   let p = |x: f32, y: f32| Point::new(r.x + x * r.w / 14.0, r.y + y * r.h / 14.0);
   f.polyline(&[p(3.5, 7.3), p(6.0, 9.8), p(10.6, 4.4)], 1.6, c);
 }
 
 impl Ui<'_> {
-  /// A [PopUp] as wide as its current option.
-  pub fn pop_up(&mut self, cur: &mut usize, options: &[&str]) -> Response {
-    PopUp::new(cur, options).show(self)
+  /// A [Picker] of `options` as wide as its current option: SwiftUI's `Picker(selection:)` of
+  /// `Text`s tagged with their values.
+  pub fn picker<T: PartialEq + Copy>(&mut self, cur: &mut T, options: &[Tag<T>]) -> Response {
+    Picker::new(cur).options(options).show(self)
   }
 
   /// A pop-up button `id` over one of `n` options labelled `label(i)`, `at` the chosen one: a
@@ -237,6 +282,7 @@ mod tests {
   use crate::harness::Harness;
   use crate::keys::Key;
   use crate::scene::Size;
+  use crate::ui::{FormRow, FormStyle};
 
   /// A pop-up the app can disable.
   #[derive(Default)]
@@ -247,7 +293,8 @@ mod tests {
 
   impl App for Pick {
     fn view(&mut self, ui: &mut Ui) {
-      ui.disabled(self.off).id("pick").pop_up(&mut self.cur, &["Red", "Green", "Blue"]);
+      let options = [Tag::new(0, "Red"), Tag::new(1, "Green"), Tag::new(2, "Blue")];
+      ui.disabled(self.off).id("pick").picker(&mut self.cur, &options);
     }
   }
 
@@ -259,10 +306,10 @@ mod tests {
 
   impl App for Long {
     fn view(&mut self, ui: &mut Ui) {
-      let fs = crate::ui::FormStyle::plates(&ui.theme());
+      let fs = FormStyle::plates(&ui.theme());
       let mut cur = 0;
-      ui.id("row").form_row(&fs, crate::ui::FormRow::new("Microphone"), |ui| {
-        let pop = PopUp::new(&mut cur, std::slice::from_ref(&self.value));
+      ui.id("row").form_row(&fs, FormRow::new("Microphone"), |ui| {
+        let pop = Picker::new(&mut cur).option(0, self.value);
         let pop = match self.max {
           Some(w) => pop.max_width(w),
           None => pop,
@@ -271,6 +318,41 @@ mod tests {
         pop.show(ui.id("pick"));
       });
     }
+  }
+
+  #[derive(Clone, Copy, Debug, PartialEq)]
+  enum Lang {
+    Auto,
+    En,
+    De,
+  }
+
+  /// A picker of values with a divider after the first.
+  struct Langs(Lang);
+
+  impl App for Langs {
+    fn view(&mut self, ui: &mut Ui) {
+      let p = Picker::new(&mut self.0).option(Lang::Auto, "System Default").divider();
+      p.option(Lang::En, "English").option(Lang::De, "Deutsch").show(ui.id("lang"));
+    }
+  }
+
+  /// The value picked is written back; a divider draws a line between the options it stands
+  /// between, the items counting options only.
+  #[test]
+  fn a_picker_writes_back_values_with_a_line_at_its_divider() {
+    let mut h = Harness::new(Langs(Lang::Auto), Size::new(300.0, 240.0), 1.0);
+    let lang = Id::of("lang");
+    h.frame();
+    h.click_id(lang);
+    h.frame();
+    let (a, b) = (h.rect(lang.key(("item", 0usize))).unwrap(), h.rect(lang.key(("item", 1usize))));
+    let b = b.unwrap();
+    assert!(b.y - (a.y + a.h) >= 10.0, "a line between: {a:?} {b:?}");
+    let c = h.rect(lang.key(("item", 2usize))).unwrap();
+    assert_eq!(c.y, b.y + b.h, "none after");
+    h.click_id(lang.key(("item", 2usize)));
+    assert_eq!(h.app().0, Lang::De);
   }
 
   #[test]

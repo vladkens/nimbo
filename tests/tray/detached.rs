@@ -12,17 +12,17 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use nimbo::tray::{Item, Menu, Tray, TrayIcon};
+use nimbo::{ButtonRole, Shortcut};
 
-fn menu(n: u32) -> Menu {
-  let sizes =
-    Menu::new(vec![Item::new("small", "Small").checked(true), Item::new("large", "Large")]);
+fn menu(n: u32) -> Menu<&'static str> {
+  let sizes = Menu::new(vec![Item::toggle("small", "Small", true), Item::button("large", "Large")]);
   Menu::new(vec![
-    Item::header(&format!("Status {n}")),
-    Item::separator(),
-    Item::new("size", "Size").submenu(sizes),
-    Item::new("settings", "Settings…").key("cmd+comma"),
-    Item::new("reset", "Reset").destructive(),
-    Item::new("quit", "Quit").key("cmd+q"),
+    Item::section(&format!("Status {n}")),
+    Item::Divider,
+    Item::submenu("Size", sizes),
+    Item::button("settings", "Settings…").key(Shortcut::char(',').cmd()),
+    Item::button("reset", "Reset").role(ButtonRole::Destructive),
+    Item::button("quit", "Quit").key(Shortcut::char('q').cmd()),
   ])
 }
 
@@ -46,7 +46,7 @@ pub fn run() {
     "Reset||off|enabled".into(),
     format!("Quit|{q}|off|enabled"),
   ];
-  let items = |t: &Tray| t.describe()[1..].to_vec();
+  let items = |t: &Tray<&'static str>| t.describe()[1..].to_vec();
   assert_eq!(items(&tray), want);
   assert!(tray.describe()[0].starts_with("icon "), "{:?}", tray.describe()[0]);
 
@@ -59,7 +59,7 @@ pub fn run() {
   });
   let chosen = Rc::new(RefCell::new(Vec::new()));
   let c = chosen.clone();
-  tray.on_item(move |_, _, id| c.borrow_mut().push(id.to_owned()));
+  tray.on_item(move |_, _, id: &str| c.borrow_mut().push(id.to_owned()));
   tray.opening();
   assert_eq!((*opened.borrow(), items(&tray)[0].as_str()), (1, "Status 1||off|disabled|header"));
   tray.choose(&[3]);

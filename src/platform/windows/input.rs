@@ -25,7 +25,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use super::{Window, keyboard, with};
 use crate::app::{Event, Ime, MouseButton, Phase, WHEEL_LINE};
-use crate::keys::{KeyEvent, Os};
+use crate::keys::{KeyEvent, Os, printable};
 use crate::scene::{Point, Rect};
 use crate::ui::Cursor;
 
@@ -271,7 +271,7 @@ impl Window {
     };
 
     let s = String::from_utf16_lossy(&units);
-    if crate::keys::printable(&s) {
+    if printable(&s) {
       self.send(Event::Text(s));
     }
   }

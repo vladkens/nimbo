@@ -12,7 +12,7 @@
 // A Windows app, not a console one: no terminal opens with its window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use nimbo::{App, Config, Id, Point, Size, Style, Ui, px};
+use nimbo::{App, Config, FieldKind, Id, Point, Size, Style, Ui, px};
 
 pub const SIZE: Size = Size::new(460.0, 340.0);
 
@@ -88,10 +88,10 @@ impl App for Fields {
 
       ui.row(row.align(nimbo::Align::Start, nimbo::Align::Start), |ui| {
         ui.row(label.pads([4.0, 0.0, 0.0, 0.0]), |ui| ui.label("Notes"));
-        let style = t.field().multiline().hint("A few lines");
+        let style = t.field().kind(FieldKind::MultiLine).hint("A few lines");
         let style =
           style.frame(style.frame.h(px(84.0)).align(nimbo::Align::Start, nimbo::Align::Start));
-        if ui.a11y_label("Notes").text_field(Id::of(NOTES), &mut self.notes, &style).changed {
+        if ui.a11y_label("Notes").id(NOTES).text_field(&mut self.notes, &style).changed {
           self.changes.push(NOTES);
         }
       });
@@ -110,7 +110,7 @@ impl App for Fields {
 }
 
 fn main() {
-  nimbo::run(Config::new("fields", SIZE.w, SIZE.h), Fields::new(), |h| {
+  nimbo::run_example(Config::new("fields", SIZE.w, SIZE.h), Fields::new(), |h| {
     h.frame();
     h.click_id(Id::of(NAME));
     h.type_text("Ada Lovelace");

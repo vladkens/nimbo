@@ -9,6 +9,7 @@
 use keyboard_types::{Code, Modifiers, NamedKey};
 
 use crate::keys::{self, Key, KeyEvent};
+use crate::platform;
 
 /// GdkModifierType: Shift, Control, Mod1 (Alt), Mod4 and the virtual Super (the Super keys).
 const SHIFT: u32 = 1;
@@ -167,14 +168,14 @@ pub fn code(key: u32) -> Code {
     126 => Code::MetaRight,
     127 => Code::ContextMenu,
     183..=190 => keys::f_key((key - 170) as u8).map_or(Code::Unidentified, |f| f.0),
-    _ => crate::platform::scan_code(key.try_into().unwrap_or(0)),
+    _ => platform::scan_code(key.try_into().unwrap_or(0)),
   }
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::keys::{Command, Delete, Move};
+  use crate::keys::{Command, Delete, Extent, Move, Shortcut};
 
   const A: Code = Code::KeyA;
   const C: Code = Code::KeyC;
@@ -194,16 +195,19 @@ mod tests {
     assert_eq!((k.key, k.text, k.mods), (Key::Char('A'), Some('A'), Modifiers::SHIFT));
     let k = key(0xff51, Code::ArrowLeft, Modifiers::SHIFT);
     assert_eq!((k.key, k.text), (LEFT, None));
-    assert_eq!(keys::Os::Linux.command(&k), Some(Command::Move(Move::Left, true)));
+    assert_eq!(keys::Os::Linux.command(&k), Some(Command::Move(Move::Left, Extent::Selection)));
 
     // Ctrl is the command modifier: Ctrl-C is "cmd+c", and types nothing.
     let k = key('c' as u32, C, CTRL);
-    assert!(k.is("cmd+c") && k.text.is_none(), "{k:?}");
+    assert!(k.is(Shortcut::char('c').cmd()) && k.text.is_none(), "{k:?}");
     let k = key(0xff08, Code::Backspace, CTRL);
     assert_eq!(keys::Os::Linux.command(&k), Some(Command::Delete(Delete::WordBackward)));
     // Super is `ctrl`: no command, no text.
     let k = key('c' as u32, C, Modifiers::META);
-    assert!(k.is("ctrl+c") && !k.is("cmd+c") && k.text.is_none(), "{k:?}");
+    assert!(
+      k.is(Shortcut::char('c').ctrl()) && !k.is(Shortcut::char('c').cmd()) && k.text.is_none(),
+      "{k:?}"
+    );
   }
 
   #[test]
@@ -212,9 +216,9 @@ mod tests {
     let es = |mods, latin: Option<char>| key_event(0x6d3, Some('с'), C, mods, false, || latin);
     let k = es(Modifiers::empty(), Some('c'));
     assert_eq!((k.key, k.text), (Key::Char('с'), Some('с')));
-    assert!(es(CTRL, Some('c')).is("cmd+c"));
+    assert!(es(CTRL, Some('c')).is(Shortcut::char('c').cmd()));
     // No Latin layout: the US one's key at that place.
-    assert!(es(CTRL, None).is("cmd+c"));
+    assert!(es(CTRL, None).is(Shortcut::char('c').cmd()));
   }
 
   #[test]

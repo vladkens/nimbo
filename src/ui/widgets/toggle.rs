@@ -1,7 +1,7 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The switch: a pill knob sliding over a track, grey off and the accent on, in the rows' size
-//! or the regular one ([crate::Sizes::switch], [crate::Sizes::switch_large]).
+//! or the large one ([crate::Sizes::switch], [crate::Sizes::switch_large]).
 
 use crate::scene::mix;
 use crate::ui::theme::ControlSize;
@@ -27,17 +27,13 @@ impl Ui<'_> {
     b
   }
 
-  /// A switch with a label, toggling `on`, in the rows' size ([crate::Sizes::switch]).
+  /// A switch with a label, toggling `on`, as SwiftUI's `Toggle` in the `.switch` style: in the
+  /// rows' size ([crate::Sizes::switch]), or the large one ([crate::Sizes::switch_large]) of a
+  /// header row by a big icon at [ControlSize::Large] ([Ui::control_size]). A pill knob, as far
+  /// in from the track's end as from its top, slides over the track, grey off and the accent on;
+  /// a soft ring and a small drop shadow under it.
   pub fn toggle(&mut self, on: &mut bool, label: &str) -> Response {
-    self.toggle_sized(on, label, ControlSize::Medium)
-  }
-
-  /// [Ui::toggle] in `size`: [ControlSize::Large] is the regular switch
-  /// ([crate::Sizes::switch_large]) of a header row by a big icon. A pill knob, as far in from
-  /// the track's end as from its top, slides over the track, grey off and the accent on; a soft
-  /// ring and a small drop shadow under it.
-  pub fn toggle_sized(&mut self, on: &mut bool, label: &str, size: ControlSize) -> Response {
-    let t = self.theme();
+    let (t, size) = (self.theme(), self.take_control_size());
     let id = self.take_id();
     let b = self.toggle_behavior(id, on);
     // The check box with the switch subrole.

@@ -30,6 +30,8 @@
 
 use keyboard_types::{Code, Modifiers, NamedKey};
 
+use crate::platform;
+
 /// The command key, `cmd` in a shortcut in the app: ⌘ ([Modifiers::META]) on macOS, Ctrl
 /// ([Modifiers::CONTROL]) on Windows and Linux, as their shortcuts use them.
 pub const CMD: Modifiers = Os::CURRENT.cmd();
@@ -70,7 +72,7 @@ impl Os {
   /// The command of the first binding in `map` that matches `k`, `cmd` and `ctrl` as this
   /// platform's.
   pub fn lookup(self, map: &[Binding], k: &KeyEvent) -> Option<Command> {
-    let hit = |b: &&Binding| parse(b.keys, Some(self)).is_ok_and(|s| s.matches(k));
+    let hit = |b: &&Binding| b.keys.on(self).matches(k);
     map.iter().find(hit).map(|b| b.command)
   }
 
@@ -199,9 +201,9 @@ pub struct KeyEvent {
 }
 
 impl KeyEvent {
-  /// Whether this is the shortcut `s` in the app (`cmd+shift+z`, `escape`); see [Shortcut].
-  pub fn is(&self, s: &str) -> bool {
-    Shortcut::parse(s).is_ok_and(|k| k.matches(self))
+  /// Whether this is the shortcut `s` ([Shortcut::matches]).
+  pub fn is(&self, s: Shortcut) -> bool {
+    s.matches(self)
   }
 }
 
@@ -287,6 +289,50 @@ impl std::fmt::Display for ShortcutError {
 impl std::error::Error for ShortcutError {}
 
 impl Shortcut {
+  /// `key` alone, as SwiftUI's `KeyboardShortcut(key)`; the modifiers follow as builders:
+  /// `Shortcut::char('z').cmd().shift()`, a constant.
+  pub const fn new(key: Key) -> Self {
+    Self { key, mods: Modifiers::empty() }
+  }
+
+  /// [Shortcut::new] of the key typing `c`, lowercase for a letter.
+  pub const fn char(c: char) -> Self {
+    Self::new(Key::Char(c.to_ascii_lowercase()))
+  }
+
+  /// With the platform's command key, [CMD]: ⌘ on macOS, Ctrl elsewhere (`cmd` in its text).
+  pub const fn cmd(self) -> Self {
+    Self { mods: self.mods.union(CMD), ..self }
+  }
+
+  /// With the platform's other one, [CTRL]: Control on macOS, the Windows or Super key elsewhere.
+  pub const fn ctrl(self) -> Self {
+    Self { mods: self.mods.union(CTRL), ..self }
+  }
+
+  pub const fn shift(self) -> Self {
+    Self { mods: self.mods.union(Modifiers::SHIFT), ..self }
+  }
+
+  /// With Option, Alt elsewhere.
+  pub const fn option(self) -> Self {
+    Self { mods: self.mods.union(Modifiers::ALT), ..self }
+  }
+
+  /// As `os` writes it: this platform's command keys ([CMD], [CTRL]) as `os`'s, for its keymaps
+  /// on any host ([Os::lookup]).
+  pub(crate) fn on(self, os: Os) -> Self {
+    let swap = |m: Modifiers, from: Modifiers, to: Modifiers| match m.contains(from) {
+      true => (m - from) | to,
+      false => m,
+    };
+    let (cmd, ctrl) = (self.mods & CMD, self.mods & CTRL);
+    let rest = self.mods - CMD - CTRL;
+    let cmd = swap(cmd, CMD, os.cmd());
+    let ctrl = swap(ctrl, CTRL, os.ctrl());
+    Self { mods: rest | cmd | ctrl, ..self }
+  }
+
   /// A shortcut in the app: `cmd` is the command key [CMD]; see [Shortcut].
   pub fn parse(text: &str) -> Result<Self, ShortcutError> {
     parse(text, Some(Os::CURRENT))
@@ -604,22 +650,23 @@ impl std::fmt::Display for Hotkey {
 
 // MARK: Bindings
 
-/// A shortcut in the app ([Shortcut] syntax) and the command it runs. `const`, so a keymap is a
-/// constant: `const KEYS: &[Binding] = &[bind("cmd+z", Command::Undo)]`.
+/// A shortcut in the app and the command it runs, as SwiftUI's `.keyboardShortcut` on a command.
+/// `const`, so a keymap is a constant:
+/// `const KEYS: &[Binding] = &[bind(Shortcut::char('z').cmd(), Command::Undo)]`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Binding {
-  pub keys: &'static str,
+  pub keys: Shortcut,
   pub command: Command,
 }
 
-pub const fn bind(keys: &'static str, command: Command) -> Binding {
+pub const fn bind(keys: Shortcut, command: Command) -> Binding {
   Binding { keys, command }
 }
 
 /// The shortcut of the first binding in `map` that runs `cmd`: to show it beside the command,
 /// in a menu item or a tooltip ([Shortcut::label]).
 pub fn shortcut(map: &[Binding], cmd: Command) -> Option<Shortcut> {
-  map.iter().find(|b| b.command == cmd).and_then(|b| Shortcut::parse(b.keys).ok())
+  map.iter().find(|b| b.command == cmd).map(|b| b.keys)
 }
 
 /// The command of the first binding in `map` that matches `k`, on this platform ([Os::lookup]).
@@ -630,17 +677,19 @@ pub fn lookup(map: &[Binding], k: &KeyEvent) -> Option<Command> {
 /// The edit menu's keys, which a text field binds on itself (AppKit gets them from the
 /// menu's key equivalents, which we don't have).
 pub const EDIT_KEYS: &[Binding] = &[
-  bind("cmd+a", Command::SelectAll),
-  bind("cmd+c", Command::Copy),
-  bind("cmd+x", Command::Cut),
-  bind("cmd+v", Command::Paste),
-  bind("cmd+z", Command::Undo),
-  bind("cmd+shift+z", Command::Redo),
+  bind(Shortcut::char('a').cmd(), Command::SelectAll),
+  bind(Shortcut::char('c').cmd(), Command::Copy),
+  bind(Shortcut::char('x').cmd(), Command::Cut),
+  bind(Shortcut::char('v').cmd(), Command::Paste),
+  bind(Shortcut::char('z').cmd(), Command::Undo),
+  bind(Shortcut::char('z').cmd().shift(), Command::Redo),
 ];
 
 /// The keys of selectable text: select all and copy.
-pub const SELECT_KEYS: &[Binding] =
-  &[bind("cmd+a", Command::SelectAll), bind("cmd+c", Command::Copy)];
+pub const SELECT_KEYS: &[Binding] = &[
+  bind(Shortcut::char('a').cmd(), Command::SelectAll),
+  bind(Shortcut::char('c').cmd(), Command::Copy),
+];
 
 // MARK: Commands
 
@@ -680,12 +729,27 @@ pub enum Delete {
   ToParagraphEnd,
 }
 
+/// What a move does ([Command::Move]): moves the caret, or extends the selection from its
+/// anchor, as Shift does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Extent {
+  Caret,
+  Selection,
+}
+
+impl Extent {
+  /// [Extent::Selection] with Shift held, else Caret.
+  pub const fn by(shift: bool) -> Self {
+    if shift { Extent::Selection } else { Extent::Caret }
+  }
+}
+
 /// A command from a key: AppKit's text commands (`doCommandBySelector:`), the edit menu's
 /// (from bindings) and the app's own ([Command::Action]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Command {
-  /// Moves the caret; `true` extends the selection (the `…AndModifySelection:` selectors).
-  Move(Move, bool),
+  /// Moves the caret, or extends the selection (the `…AndModifySelection:` selectors).
+  Move(Move, Extent),
   Delete(Delete),
   InsertNewline,
   InsertTab,
@@ -703,7 +767,7 @@ pub enum Command {
   ScrollPageDown,
   ScrollToTop,
   ScrollToBottom,
-  /// The app's own command, by name: `bind("cmd+n", Command::Action("new"))`.
+  /// The app's own command, by name: `bind(Shortcut::char('n').cmd(), Command::Action("new"))`.
   Action(&'static str),
 }
 
@@ -714,8 +778,8 @@ impl Command {
   pub fn from_selector(name: &str) -> Option<Self> {
     use Move::*;
     let (base, select) = match name.strip_suffix("AndModifySelection:") {
-      Some(base) => (base, true),
-      None => (name.strip_suffix(':')?, false),
+      Some(base) => (base, Extent::Selection),
+      None => (name.strip_suffix(':')?, Extent::Caret),
     };
 
     let to = |m| Some(Self::Move(m, select));
@@ -734,7 +798,7 @@ impl Command {
       "moveToEndOfDocument" => return to(DocEnd),
       "pageUp" => return to(PageUp),
       "pageDown" => return to(PageDown),
-      _ if select => return None,
+      _ if select == Extent::Selection => return None,
       _ => {}
     }
 
@@ -777,7 +841,7 @@ pub fn standard(k: &KeyEvent) -> Option<Command> {
   use Move::*;
   use NamedKey as N;
   let (shift, ctrl, alt, cmd) = flags(k.mods, Os::Mac);
-  let to = |m| Some(Command::Move(m, shift));
+  let to = |m| Some(Command::Move(m, Extent::by(shift)));
   let del = |d| Some(Command::Delete(d));
   let Key::Named(key) = k.key else {
     // Emacs keys.
@@ -833,7 +897,7 @@ pub fn standard(k: &KeyEvent) -> Option<Command> {
 fn by_unit(key: NamedKey, shift: bool) -> Option<[Option<Command>; 3]> {
   use Move::*;
   use NamedKey as N;
-  let to = |m| Some(Command::Move(m, shift));
+  let to = |m| Some(Command::Move(m, Extent::by(shift)));
   let del = |d| Some(Command::Delete(d));
   Some(match key {
     N::ArrowLeft => [to(Left), to(WordLeft), to(LineStart)],
@@ -860,7 +924,7 @@ fn pc(k: &KeyEvent, os: Os) -> Option<Command> {
   use Move::*;
   use NamedKey as N;
   let (shift, ctrl, alt, cmd) = flags(k.mods, os);
-  let to = |m| Some(Command::Move(m, shift));
+  let to = |m| Some(Command::Move(m, Extent::by(shift)));
   if alt || ctrl {
     return None;
   }
@@ -910,7 +974,7 @@ pub fn printable(s: &str) -> bool {
 /// revoked since: only the next session tells), X11 has XTest; Windows always. An app offers its
 /// own "Allow Pasting…" only until it does (wavo-app).
 pub fn ready() -> bool {
-  crate::platform::post::ready()
+  platform::post::ready()
 }
 
 /// Sends shortcut `s` to the app in focus as key presses, as if typed: `cmd+v` pastes there. A
@@ -929,7 +993,7 @@ pub fn post(s: Shortcut) -> Result<(), String> {
     k => k,
   };
 
-  crate::platform::post::post(Shortcut { key, ..s })
+  platform::post::post(Shortcut { key, ..s })
 }
 
 /// The presses that send `key` with modifiers `want` where modifier keys are pressed (Windows,
@@ -970,8 +1034,11 @@ pub(crate) fn strokes<K: Copy>(
 
 #[cfg(test)]
 mod tests {
-  use NamedKey as N;
+  use Extent::*;
+  use NamedKey::*;
 
+  // `Delete` is the edit command's; the key is written `NamedKey::Delete`.
+  use super::Delete;
   use super::*;
 
   fn ev(key: Key, mods: Modifiers) -> KeyEvent {
@@ -1030,17 +1097,20 @@ mod tests {
     assert_eq!(Shortcut::parse("cmd++"), k(Key::Char('+'), CMD));
     assert_eq!(Shortcut::parse("ctrl + -"), k(Key::Char('-'), CTRL));
     assert_eq!(Shortcut::parse("-"), k(Key::Char('-'), Modifiers::empty()));
-    assert_eq!(Shortcut::parse("alt+left"), k(Key::Named(N::ArrowLeft), Modifiers::ALT));
-    assert_eq!(Shortcut::parse("escape"), k(Key::Named(N::Escape), Modifiers::empty()));
-    assert_eq!(Shortcut::parse("f12"), k(Key::Named(N::F12), Modifiers::empty()));
+    assert_eq!(Shortcut::parse("alt+left"), k(Key::Named(ArrowLeft), Modifiers::ALT));
+    assert_eq!(Shortcut::parse("escape"), k(Key::Named(Escape), Modifiers::empty()));
+    assert_eq!(Shortcut::parse("f12"), k(Key::Named(F12), Modifiers::empty()));
     assert_eq!(Shortcut::parse("space"), k(Key::Char(' '), Modifiers::empty()));
     assert_eq!(Shortcut::parse("cmd+?"), k(Key::Char('?'), CMD));
     assert_eq!(Shortcut::parse("shift+İ"), k(Key::Char('İ'), Modifiers::SHIFT));
     // `delete` is ⌫ in the app too, as in settings; ⌦ is `forwarddelete`.
-    let backspace = Key::Named(N::Backspace);
+    let backspace = Key::Named(Backspace);
     assert_eq!(Shortcut::parse("cmd+delete"), k(backspace, CMD));
     assert_eq!(Shortcut::parse("backspace"), k(backspace, Modifiers::empty()));
-    assert_eq!(Shortcut::parse("forwarddelete"), k(Key::Named(N::Delete), Modifiers::empty()));
+    assert_eq!(
+      Shortcut::parse("forwarddelete"),
+      k(Key::Named(NamedKey::Delete), Modifiers::empty())
+    );
     assert_eq!(hot("delete").map(|s| s.key), Ok(backspace));
     assert_eq!(Shortcut::parse("a+!"), Err(ShortcutError::TwoKeys("a".into(), "!".into())));
     for bad in ["", "cmd+", "hyper+a", "ab", "cmd+ab", "f21"] {
@@ -1058,15 +1128,18 @@ mod tests {
   #[test]
   fn matches_letters_in_either_case_and_symbols_with_shift() {
     // Cmd-Shift-Z reports 'Z'.
-    assert!(ev(Key::Char('Z'), CMD_SHIFT).is("cmd+shift+z"));
-    assert!(!ev(Key::Char('Z'), CMD_SHIFT).is("cmd+z"));
-    assert!(ev(Key::Char('z'), CMD).is("cmd+z"));
+    assert!(ev(Key::Char('Z'), CMD_SHIFT).is(Shortcut::char('z').cmd().shift()));
+    assert!(!ev(Key::Char('Z'), CMD_SHIFT).is(Shortcut::char('z').cmd()));
+    assert!(ev(Key::Char('z'), CMD).is(Shortcut::char('z').cmd()));
     // Cmd-Shift-= types '+' on a US layout.
-    assert!(ev(Key::Char('+'), CMD_SHIFT).is("cmd++"));
-    assert!(!ev(Key::Char('+'), CMD_SHIFT).is("cmd+="));
-    assert!(ev(Key::Char('='), CMD).is("cmd+="));
-    assert!(!ev(Key::Named(N::ArrowLeft), Modifiers::SHIFT).is("left"));
-    let map = [bind("cmd+z", Command::Undo), bind("cmd+shift+z", Command::Redo)];
+    assert!(ev(Key::Char('+'), CMD_SHIFT).is(Shortcut::char('+').cmd()));
+    assert!(!ev(Key::Char('+'), CMD_SHIFT).is(Shortcut::char('=').cmd()));
+    assert!(ev(Key::Char('='), CMD).is(Shortcut::char('=').cmd()));
+    assert!(!ev(Key::Named(ArrowLeft), Modifiers::SHIFT).is(Shortcut::new(Key::Named(ArrowLeft))));
+    let map = [
+      bind(Shortcut::char('z').cmd(), Command::Undo),
+      bind(Shortcut::char('z').cmd().shift(), Command::Redo),
+    ];
     assert_eq!(lookup(&map, &ev(Key::Char('Z'), CMD_SHIFT)), Some(Command::Redo));
     assert_eq!(lookup(&map, &ev(Key::Char('y'), CMD)), None);
   }
@@ -1090,7 +1163,10 @@ mod tests {
     }
 
     // In the app, the command key: ⌘ on macOS, Ctrl elsewhere.
-    let map = [bind("cmd+z", Command::Undo), bind("cmd+shift+z", Command::Redo)];
+    let map = [
+      bind(Shortcut::char('z').cmd(), Command::Undo),
+      bind(Shortcut::char('z').cmd().shift(), Command::Redo),
+    ];
     let redo = shortcut(&map, Command::Redo).map(|k| k.label());
     let want = if cfg!(target_os = "macos") { "⇧⌘Z" } else { "Ctrl+Shift+Z" };
     assert_eq!(redo.as_deref(), Some(want));
@@ -1099,17 +1175,17 @@ mod tests {
 
   #[test]
   fn named_keys_by_place() {
-    assert_eq!(Key::named(Code::ArrowLeft), Some(Key::Named(N::ArrowLeft)));
-    assert_eq!(Key::named(Code::NumpadEnter), Some(Key::Named(N::Enter)));
-    assert_eq!(Key::named(Code::F12), Some(Key::Named(N::F12)));
+    assert_eq!(Key::named(Code::ArrowLeft), Some(Key::Named(ArrowLeft)));
+    assert_eq!(Key::named(Code::NumpadEnter), Some(Key::Named(Enter)));
+    assert_eq!(Key::named(Code::F12), Some(Key::Named(F12)));
     assert_eq!(Key::named(Code::KeyA), None);
-    let some = [N::Enter, N::Tab, N::Escape, N::PageDown, N::Insert, N::ContextMenu, N::F1, N::F20];
+    let some = [Enter, Tab, Escape, PageDown, Insert, ContextMenu, F1, F20];
     for n in some {
       assert_eq!(Key::Named(n).code().and_then(Key::named), Some(Key::Named(n)));
     }
 
-    assert_eq!(Key::Named(N::Enter).code(), Some(Code::Enter));
-    assert_eq!((f_key(13), f_key(0), f_key(21)), (Some((Code::F13, N::F13)), None, None));
+    assert_eq!(Key::Named(Enter).code(), Some(Code::Enter));
+    assert_eq!((f_key(13), f_key(0), f_key(21)), (Some((Code::F13, F13)), None, None));
     assert_eq!(Key::Char('a').code(), None);
   }
 
@@ -1138,7 +1214,7 @@ mod tests {
     assert_eq!(labels(true), "↩ ⇥ ⌫ ⌦ ⎋ ↑ ↓ ← → ↖ ↘ ⇞ ⇟");
     let pc = "Enter Tab Backspace Delete Esc Up Down Left Right Home End Page Up Page Down";
     assert_eq!(labels(false), pc);
-    let other = [Key::Char(' '), Key::Char('ß'), Key::Named(N::F5), Key::Named(N::Insert)];
+    let other = [Key::Char(' '), Key::Char('ß'), Key::Named(F5), Key::Named(Insert)];
     assert_eq!(other.map(|k| key_label(k, false)), ["Space", "SS", "F5", "Insert"]);
   }
 
@@ -1210,7 +1286,7 @@ mod tests {
     let k = |key, mods| Ok(Shortcut { key, mods });
     let (ctrl, alt, meta) = (Modifiers::CONTROL, Modifiers::ALT, Modifiers::META);
     assert_eq!(hot("option+space"), k(Key::Char(' '), alt));
-    assert_eq!(hot("ctrl+option+cmd+F12"), k(Key::Named(N::F12), ctrl | alt | meta));
+    assert_eq!(hot("ctrl+option+cmd+F12"), k(Key::Named(F12), ctrl | alt | meta));
     assert_eq!(hot(" Control + Alt + Command + f12 "), hot("ctrl+option+cmd+f12"));
     assert_eq!(hot("option+shift+space"), k(Key::Char(' '), alt | Modifiers::SHIFT));
     assert_eq!(hot("cmd+K"), k(Key::Char('k'), meta));
@@ -1301,11 +1377,14 @@ mod tests {
   #[test]
   fn selectors() {
     let sel = Command::from_selector;
-    assert_eq!(sel("moveWordLeft:"), Some(Command::Move(Move::WordLeft, false)));
-    assert_eq!(sel("moveWordLeftAndModifySelection:"), Some(Command::Move(Move::WordLeft, true)));
+    assert_eq!(sel("moveWordLeft:"), Some(Command::Move(Move::WordLeft, Caret)));
+    assert_eq!(
+      sel("moveWordLeftAndModifySelection:"),
+      Some(Command::Move(Move::WordLeft, Selection))
+    );
     assert_eq!(
       sel("moveToBeginningOfParagraph:"),
-      Some(Command::Move(Move::ParagraphStart, false))
+      Some(Command::Move(Move::ParagraphStart, Caret))
     );
     assert_eq!(sel("deleteBackward:"), Some(Command::Delete(Delete::Backward)));
     assert_eq!(sel("insertNewline:"), Some(Command::InsertNewline));
@@ -1321,26 +1400,26 @@ mod tests {
     let alt_shift = Modifiers::ALT | Modifiers::SHIFT;
     // StandardKeyBinding.dict: key → selector.
     for (key, mods, selector) in [
-      (Key::Named(N::ArrowLeft), Modifiers::empty(), "moveLeft:"),
-      (Key::Named(N::ArrowLeft), alt_shift, "moveWordLeftAndModifySelection:"),
-      (Key::Named(N::ArrowRight), cmd, "moveToRightEndOfLine:"),
-      (Key::Named(N::ArrowUp), cmd, "moveToBeginningOfDocument:"),
-      (Key::Named(N::Backspace), alt, "deleteWordBackward:"),
-      (Key::Named(N::Backspace), cmd, "deleteToBeginningOfLine:"),
-      (Key::Named(N::Backspace), ctrl, "deleteBackward:"),
-      (Key::Named(N::Delete), alt, "deleteWordForward:"),
+      (Key::Named(ArrowLeft), Modifiers::empty(), "moveLeft:"),
+      (Key::Named(ArrowLeft), alt_shift, "moveWordLeftAndModifySelection:"),
+      (Key::Named(ArrowRight), cmd, "moveToRightEndOfLine:"),
+      (Key::Named(ArrowUp), cmd, "moveToBeginningOfDocument:"),
+      (Key::Named(Backspace), alt, "deleteWordBackward:"),
+      (Key::Named(Backspace), cmd, "deleteToBeginningOfLine:"),
+      (Key::Named(Backspace), ctrl, "deleteBackward:"),
+      (Key::Named(NamedKey::Delete), alt, "deleteWordForward:"),
       (Key::Char('a'), ctrl, "moveToBeginningOfParagraph:"),
       (Key::Char('k'), ctrl, "deleteToEndOfParagraph:"),
-      (Key::Named(N::Tab), Modifiers::SHIFT, "insertBacktab:"),
-      (Key::Named(N::Escape), Modifiers::empty(), "cancelOperation:"),
-      (Key::Named(N::Home), Modifiers::empty(), "scrollToBeginningOfDocument:"),
+      (Key::Named(Tab), Modifiers::SHIFT, "insertBacktab:"),
+      (Key::Named(Escape), Modifiers::empty(), "cancelOperation:"),
+      (Key::Named(Home), Modifiers::empty(), "scrollToBeginningOfDocument:"),
     ] {
       let want = Command::from_selector(selector);
       assert_eq!(Os::Mac.command(&ev(key, mods)), want, "{selector}");
     }
     assert_eq!(standard(&ev(Key::Char('c'), cmd)), None);
-    assert_eq!(standard(&ev(Key::Named(N::ArrowLeft), ctrl)), None);
-    assert_eq!(standard(&ev(Key::Named(N::Delete), cmd)), None);
+    assert_eq!(standard(&ev(Key::Named(ArrowLeft), ctrl)), None);
+    assert_eq!(standard(&ev(Key::Named(NamedKey::Delete), cmd)), None);
   }
 
   /// Windows' and GTK's text keys, Ctrl the command key there whatever the host.
@@ -1349,27 +1428,27 @@ mod tests {
     let (ctrl, shift) = (Modifiers::CONTROL, Modifiers::SHIFT);
     for os in [Os::Windows, Os::Linux] {
       for (key, mods, want) in [
-        (Key::Named(N::ArrowLeft), ctrl, Command::Move(Move::WordLeft, false)),
-        (Key::Named(N::ArrowRight), ctrl | shift, Command::Move(Move::WordRight, true)),
-        (Key::Named(N::Home), Modifiers::empty(), Command::Move(Move::LineStart, false)),
-        (Key::Named(N::End), ctrl | shift, Command::Move(Move::DocEnd, true)),
-        (Key::Named(N::Backspace), ctrl, Command::Delete(Delete::WordBackward)),
-        (Key::Named(N::Delete), ctrl, Command::Delete(Delete::WordForward)),
-        (Key::Named(N::Delete), Modifiers::empty(), Command::Delete(Delete::Forward)),
-        (Key::Named(N::ArrowUp), ctrl | shift, Command::Move(Move::ParagraphStart, true)),
-        (Key::Named(N::Tab), shift, Command::InsertBacktab),
-        (Key::Named(N::Enter), Modifiers::empty(), Command::InsertNewline),
+        (Key::Named(ArrowLeft), ctrl, Command::Move(Move::WordLeft, Caret)),
+        (Key::Named(ArrowRight), ctrl | shift, Command::Move(Move::WordRight, Selection)),
+        (Key::Named(Home), Modifiers::empty(), Command::Move(Move::LineStart, Caret)),
+        (Key::Named(End), ctrl | shift, Command::Move(Move::DocEnd, Selection)),
+        (Key::Named(Backspace), ctrl, Command::Delete(Delete::WordBackward)),
+        (Key::Named(NamedKey::Delete), ctrl, Command::Delete(Delete::WordForward)),
+        (Key::Named(NamedKey::Delete), Modifiers::empty(), Command::Delete(Delete::Forward)),
+        (Key::Named(ArrowUp), ctrl | shift, Command::Move(Move::ParagraphStart, Selection)),
+        (Key::Named(Tab), shift, Command::InsertBacktab),
+        (Key::Named(Enter), Modifiers::empty(), Command::InsertNewline),
         (Key::Char('y'), ctrl, Command::Redo),
-        (Key::Named(N::Delete), shift, Command::Cut),
-        (Key::Named(N::Insert), ctrl, Command::Copy),
-        (Key::Named(N::Insert), shift, Command::Paste),
+        (Key::Named(NamedKey::Delete), shift, Command::Cut),
+        (Key::Named(Insert), ctrl, Command::Copy),
+        (Key::Named(Insert), shift, Command::Paste),
       ] {
         assert_eq!(os.command(&ev(key, mods)), Some(want), "{os:?} {key:?} {mods:?}");
       }
 
       for (key, mods) in [
-        (Key::Named(N::ArrowLeft), Modifiers::ALT),
-        (Key::Named(N::ArrowLeft), Modifiers::META),
+        (Key::Named(ArrowLeft), Modifiers::ALT),
+        (Key::Named(ArrowLeft), Modifiers::META),
         (Key::Char('a'), ctrl),
         (Key::Char('y'), ctrl | shift),
       ] {
@@ -1377,7 +1456,7 @@ mod tests {
       }
     }
 
-    let ctrl_enter = ev(Key::Named(N::Enter), ctrl);
+    let ctrl_enter = ev(Key::Named(Enter), ctrl);
     assert_eq!(Os::Windows.command(&ctrl_enter), None);
     assert_eq!(Os::Linux.command(&ctrl_enter), Some(Command::InsertNewline));
   }
@@ -1385,7 +1464,10 @@ mod tests {
   /// `cmd` in a binding is each platform's command key, whatever the host.
   #[test]
   fn bindings_follow_the_platform() {
-    let map = [bind("cmd+v", Command::Paste), bind("ctrl+a", Command::SelectAll)];
+    let map = [
+      bind(Shortcut::char('v').cmd(), Command::Paste),
+      bind(Shortcut::char('a').ctrl(), Command::SelectAll),
+    ];
     let (ctrl, meta) = (Modifiers::CONTROL, Modifiers::META);
     for (os, cmd, other) in
       [(Os::Mac, meta, ctrl), (Os::Windows, ctrl, meta), (Os::Linux, ctrl, meta)]

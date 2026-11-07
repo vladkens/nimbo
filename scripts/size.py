@@ -43,15 +43,15 @@ BUDGETS = {
   "platform/macos": 2900,
   "platform/windows": 2200,
   "platform/linux": 3200,
-  "ui": 3900,
-  "widgets": 3600,
+  "ui": 4300,
+  "widgets": 3800,
   "text": 1200,
-  "core": 4000,
-  "app/shared": 1900,
+  "core": 4100,
+  "app/shared": 2000,
   "app/macos": 1900,
   "app/windows": 1900,
   "app/linux": 2700,
-  "a11y": 400,
+  "a11y": 500,
 }
 # Modules that count against a budget of another name ("app", src/app.rs, is the core's seams).
 # The settings form and the dialog are add-ons over the widgets, as the containers are; the

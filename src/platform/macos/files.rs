@@ -16,6 +16,7 @@ use objc2_app_kit::{
 use objc2_foundation::{NSArray, NSString, NSURL};
 
 use super::view::View;
+use crate::file_dialog::FileDialogKind;
 use crate::scene::Point;
 use crate::{Event, FileDialog};
 
@@ -27,7 +28,7 @@ pub fn show(view: &View, window: &NSWindow, d: FileDialog) {
     return;
   }
 
-  let panel = match d.save {
+  let panel = match d.kind == FileDialogKind::Save {
     true => NSSavePanel::savePanel(super::mtm()),
     false => Retained::into_super(NSOpenPanel::openPanel(super::mtm())),
   };

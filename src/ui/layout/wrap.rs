@@ -4,7 +4,9 @@
 //! or cut to fit with an ellipsis, and what of them is kept across frames per font and text
 //! ([Kept]).
 
-use super::{ELLIPSIS, EPS, Kind, Line, Measure, TextStyle, Tree};
+use super::{
+  ELLIPSIS, EPS, Elide, Kind, Line, Measure, TextLines, TextStyle, Tree, TruncationMode,
+};
 use crate::text::edit::graphemes;
 use crate::text::{Font, Memo};
 
@@ -20,7 +22,7 @@ pub(crate) struct Kept {
 /// character (grapheme), as a word that doesn't fit a line breaks between characters
 /// ([wrap_text]); measured once per line of text and kept.
 pub fn text_width(s: &str, style: TextStyle, m: &mut dyn Measure, kept: &mut Kept) -> (f32, f32) {
-  if style.ellipsis && !s.contains('\n') {
+  if matches!(style.lines, TextLines::Limit(1, _)) && !s.contains('\n') {
     let w = m.width(s, style.font);
     return (w, w.min(m.width(ELLIPSIS, style.font)));
   }
@@ -29,7 +31,7 @@ pub fn text_width(s: &str, style: TextStyle, m: &mut dyn Measure, kept: &mut Kep
   for line in s.split('\n') {
     let w = m.width(line, style.font);
     pref = pref.max(w);
-    if !style.wrap {
+    if !wraps(style) {
       least = least.max(w);
       continue;
     }
@@ -54,27 +56,52 @@ pub fn wrap(t: &mut Tree, m: &mut dyn Measure, kept: &mut Kept) {
     let (width, wide) = (n.size[0] as f32, n.content[0] as f32);
     let Kind::Text { range, style, lines, baseline, line_h } = &mut n.kind else { continue };
     let met = m.metrics(style.font);
-    *line_h = if style.line_h > 0.0 { style.line_h } else { met.line_height() };
+    *line_h = style.line_h.unwrap_or_else(|| met.line_height());
     *baseline = (*line_h - met.ascent - met.descent) / 2.0 + met.ascent;
     let start = t.lines.len() as u32;
     let s = &t.text[range.0 as usize..range.1 as usize];
     let edit = edits.next_if(|e| e.node == i as u32).filter(|e| !e.placeholder);
     // One line that fits (or doesn't wrap): its width is the one measured for the fit.
-    let fits = !style.wrap || wide <= width + EPS;
-    let cut = style.ellipsis && edit.is_none() && wide > width + EPS;
+    let fits = !wraps(*style) || wide <= width + EPS;
+    let limit = match style.lines {
+      TextLines::Limit(n, mode) if edit.is_none() => Some((n as usize, mode)),
+      _ => None,
+    };
+
+    let cut = limit.filter(|_| wide > width + EPS);
     let (start_at, end, cover) = (range.0, range.1, edit.is_some());
     match fits && !s.contains('\n') {
-      // Paint adds the ellipsis after a line that ends before its text does.
-      true if cut => {
-        let (end, w) = ellipsize(s, style.font, width, m);
-        let ink = m.line(&s[..end], style.font).1;
-        t.lines.push(Line { start: start_at, end: start_at + end as u32, width: w, ink, stop: 0 })
+      // Paint draws the ellipsis where the line says.
+      true if cut.is_some() => {
+        let mode = cut.map_or(TruncationMode::Tail, |c| c.1);
+        let l = elide(s, style.font, width, mode, m);
+        let l = Line { start: start_at + l.start, end: start_at + l.end, ..l };
+        let elide = match l.elide {
+          Elide::Middle(a, b) => Elide::Middle(start_at + a, start_at + b),
+          e => e,
+        };
+
+        t.lines.push(Line { elide, ..l })
       }
       true => {
         let ink = m.line(s, style.font).1;
-        t.lines.push(Line { start: start_at, end, width: wide, ink, stop: 0 })
+        let elide = Elide::None;
+        t.lines.push(Line { start: start_at, end, width: wide, ink, stop: 0, elide })
       }
-      false => wrap_text(&t.text, *range, *style, width, cover, m, &mut kept.lines, &mut t.lines),
+      false => {
+        wrap_text(&t.text, *range, *style, width, cover, m, &mut kept.lines, &mut t.lines);
+        // Past the limit, the lines go and the last kept one ends in "…".
+        if let Some((n, _)) = limit
+          && t.lines.len() - start as usize > n.max(1)
+        {
+          t.lines.truncate(start as usize + n.max(1));
+          let last = t.lines.last_mut().unwrap();
+          let rest = &t.text[last.start as usize..range.1 as usize];
+          let rest = rest.split('\n').next().unwrap_or_default();
+          let l = elide(rest, style.font, width, TruncationMode::Tail, m);
+          *last = Line { start: last.start, end: last.start + l.end, ..l };
+        }
+      }
     }
 
     *lines = (start, t.lines.len() as u32);
@@ -91,25 +118,50 @@ pub fn wrap(t: &mut Tree, m: &mut dyn Measure, kept: &mut Kept) {
   }
 }
 
-/// The longest prefix of `s` that fits `width` with an ellipsis after it (trailing spaces
-/// dropped), as its length in bytes and its width with the ellipsis. It ends between graphemes:
-/// an emoji sequence or a syllable stays whole.
-pub fn ellipsize(s: &str, font: Font, width: f32, m: &mut dyn Measure) -> (usize, f32) {
+/// Whether a text in `style` wraps at spaces: it does unless it is one line.
+fn wraps(style: TextStyle) -> bool {
+  !matches!(style.lines, TextLines::NoWrap | TextLines::Limit(1, _))
+}
+
+/// `s` cut to fit `width` with an ellipsis where `mode` says, as a line of it: what is kept
+/// (offsets from its start), its width with the ellipsis and its ink. Cut at the tail it keeps
+/// the longest prefix; at the head the longest suffix; in the middle a prefix and a suffix of
+/// about as many graphemes. It is cut between graphemes (an emoji sequence or a syllable stays
+/// whole), the spaces beside the ellipsis dropped.
+pub fn elide(s: &str, font: Font, width: f32, mode: TruncationMode, m: &mut dyn Measure) -> Line {
   let dots = m.width(ELLIPSIS, font);
   let bounds: Vec<usize> = std::iter::once(0).chain(graphemes(s).map(|g| g.end)).collect();
-
-  // Binary search over the graphemes: `lo` fits, `hi` doesn't.
-  let (mut lo, mut hi) = (0, bounds.len());
+  let n = bounds.len() - 1;
+  // The pieces kept with `k` graphemes, and the widest `k` that fits.
+  let keep = |k: usize| match mode {
+    TruncationMode::Tail => (bounds[k], bounds[n]),
+    TruncationMode::Head => (0, bounds[n - k]),
+    TruncationMode::Middle => (bounds[k.div_ceil(2)], bounds[n - k / 2]),
+  };
+  let shown = |k: usize| {
+    let (a, b) = keep(k);
+    (s[..a].trim_end(), s[b..].trim_start())
+  };
+  let (mut lo, mut hi) = (0, n + 1);
   while hi - lo > 1 {
     let mid = (lo + hi) / 2;
-    match m.width(&s[..bounds[mid]], font) + dots <= width + EPS {
+    let (a, b) = shown(mid);
+    match m.width(a, font) + dots + m.width(b, font) <= width + EPS {
       true => lo = mid,
       false => hi = mid,
     }
   }
 
-  let end = s[..bounds[lo]].trim_end().len();
-  (end, m.width(&s[..end], font) + dots)
+  let (a, b) = shown(lo);
+  let (pa, sb) = (a.len() as u32, (s.len() - b.len()) as u32);
+  let (w, ink) = m.line(&format!("{a}{ELLIPSIS}{b}"), font);
+  let (start, end, elide) = match mode {
+    TruncationMode::Tail => (0, pa, Elide::Tail),
+    TruncationMode::Head => (sb, s.len() as u32, Elide::Head),
+    TruncationMode::Middle => (0, s.len() as u32, Elide::Middle(pa, sb)),
+  };
+
+  Line { start, end, width: w, ink, stop: 0, elide }
 }
 
 /// The widest line of `s` in `style` wrapped at `width`, as [wrap_text] breaks it.
@@ -136,7 +188,7 @@ pub fn wrap_text(
   kept: &mut Memo<Vec<Line>>,
   out: &mut Vec<Line>,
 ) {
-  let key = u64::from(width.to_bits()) << 2 | u64::from(style.wrap) << 1 | u64::from(cover);
+  let key = u64::from(width.to_bits()) << 2 | u64::from(wraps(style)) << 1 | u64::from(cover);
   let mut at = range.0;
   for line in text[at as usize..range.1 as usize].split('\n') {
     let base = at;
@@ -150,14 +202,21 @@ pub fn wrap_text(
 fn wrap_line(s: &str, style: TextStyle, width: f32, cover: bool, m: &mut dyn Measure) -> Vec<Line> {
   let (font, mut out) = (style.font, Vec::new());
   let (w, ink) = m.line(s, font);
-  if !style.wrap || w <= width + EPS {
-    return vec![Line { start: 0, end: s.len() as u32, width: w, ink, stop: 0 }];
+  if !wraps(style) || w <= width + EPS {
+    return vec![Line {
+      start: 0,
+      end: s.len() as u32,
+      width: w,
+      ink,
+      stop: 0,
+      elide: Elide::None,
+    }];
   }
 
   let space = m.width(" ", font);
   let mut push = |m: &mut dyn Measure, a: usize, b: usize| {
     let (width, ink) = m.line(&s[a..b], font);
-    out.push(Line { start: a as u32, end: b as u32, width, ink, stop: 0 });
+    out.push(Line { start: a as u32, end: b as u32, width, ink, stop: 0, elide: Elide::None });
   };
   // The line so far: start, end and width.
   let mut cur: Option<(usize, usize, f32)> = None;

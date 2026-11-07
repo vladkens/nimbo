@@ -13,10 +13,14 @@ use std::time::{Duration, Instant};
 use keyboard_types::{Code, Modifiers};
 
 use crate::file_dialog::FileDialog;
-use crate::keys::{Binding, Command, KeyEvent, Move};
+use crate::keys::{Binding, Command, Extent, KeyEvent, Move};
 use crate::scene::{Color, Frame, Images, Point, Rect, Scene, Size};
+use crate::system::Change;
 use crate::text::TextSystem;
-use crate::ui::{Action, Click, Cursor, FrameStats, Id, Role, Sys, TextInput, Ui, UiState};
+use crate::ui::{
+  Action, Click, Cursor, FocusDirection, FrameStats, Id, Role, Sys, TextInput, Ui, UiState,
+  drags_window,
+};
 
 /// An application: owns its state, reacts to events and draws the frame from it, as an element
 /// tree (`view`), by hand (`paint`), or both. A frame is built only when something changed.
@@ -170,7 +174,7 @@ pub enum Event {
   Appearance(Appearance),
   /// A change in the system the app watches ([crate::Main::watch]), to read again
   /// ([crate::system]); redraws when the app uses it.
-  System(crate::system::Change),
+  System(Change),
   /// Files dragged over the window, the pointer at `pos`; the hover follows it, so
   /// [Cx::hovered] tells where they would go.
   DragOver {
@@ -188,11 +192,11 @@ pub enum Event {
   /// cancelled.
   FileDialog(Option<PathBuf>),
   /// The item chosen in the context menu of `on` ([Ui::context_menu]) the platform showed, by
-  /// its id; `None` when dismissed. Delivered to `on` in a view pass, then to the app when no
-  /// view took it.
+  /// its action's number ([crate::Menu]); `None` when dismissed. Delivered to `on` in a view pass,
+  /// then to the app when no view took it.
   Menu {
     on: Id,
-    item: Option<String>,
+    item: Option<usize>,
   },
   /// Assistive technology acting on the element `id` (VoiceOver's press, a slider's increment,
   /// a field's new text): the runtime takes it through the input paths, then the app hears it,
@@ -205,18 +209,55 @@ pub enum Event {
   },
 }
 
-/// The OS's look: light or dark, and the accent colour the user picked, if the OS has one
+/// Light or dark, as SwiftUI's `ColorScheme`: the OS's ([Appearance]) or a theme's.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ColorScheme {
+  #[default]
+  Light,
+  Dark,
+}
+
+impl ColorScheme {
+  /// [ColorScheme::Dark] when `dark`, else Light: from a platform's flag.
+  pub const fn of(dark: bool) -> Self {
+    if dark { ColorScheme::Dark } else { ColorScheme::Light }
+  }
+
+  /// The other one.
+  pub const fn other(self) -> Self {
+    Self::of(!self.is_dark())
+  }
+
+  pub const fn is_dark(self) -> bool {
+    matches!(self, ColorScheme::Dark)
+  }
+}
+
+/// `light` or `dark`.
+impl std::str::FromStr for ColorScheme {
+  type Err = String;
+
+  fn from_str(s: &str) -> Result<Self, String> {
+    match s {
+      "light" => Ok(ColorScheme::Light),
+      "dark" => Ok(ColorScheme::Dark),
+      _ => Err(format!("{s:?} is not light or dark")),
+    }
+  }
+}
+
+/// The OS's look: its [ColorScheme], and the accent colour the user picked, if the OS has one
 /// ([crate::platform::appearance]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Appearance {
-  pub dark: bool,
+  pub scheme: ColorScheme,
   /// sRGB; `None` where the OS has none or the user left it to apps (macOS Multicolor).
   pub accent: Option<Color>,
 }
 
 impl Appearance {
-  pub const LIGHT: Self = Self { dark: false, accent: None };
-  pub const DARK: Self = Self { dark: true, accent: None };
+  pub const LIGHT: Self = Self { scheme: ColorScheme::Light, accent: None };
+  pub const DARK: Self = Self { scheme: ColorScheme::Dark, accent: None };
 }
 
 /// What an input method does to the focused text field (macOS `NSTextInputClient`, Windows
@@ -523,7 +564,7 @@ impl<A: App> Runtime<A> {
   /// moves it (or zooms it on a double-click) instead of sending the press.
   #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
   pub fn drags_window(&self, p: Point) -> bool {
-    crate::ui::drags_window(&self.ui.last, p)
+    drags_window(&self.ui.last, p)
   }
 
   /// The height of the title bar over the content and the window's title ([Ui::titlebar]), for
@@ -547,7 +588,7 @@ impl<A: App> Runtime<A> {
   /// The context menu the view asked for, once: its element, the point in the window and the
   /// menu. The platform shows it after an event or a frame and sends the answer as
   /// [Event::Menu].
-  pub fn take_context_menu(&mut self) -> Option<(Id, Point, crate::Menu)> {
+  pub fn take_context_menu(&mut self) -> Option<(Id, Point, crate::Menu<usize>)> {
     self.ui.context_menu.take()
   }
 
@@ -648,7 +689,7 @@ impl<A: App> Runtime<A> {
       }
       Action::Increment | Action::Decrement => {
         let to = if action == Action::Increment { Move::Right } else { Move::Left };
-        self.deliver(id, Event::Command(Command::Move(to, false)));
+        self.deliver(id, Event::Command(Command::Move(to, Extent::Caret)));
       }
       Action::Focus => {
         self.ui.set_focus(Some(id));
@@ -758,8 +799,8 @@ impl<A: App> Runtime<A> {
     }
 
     match ev {
-      Event::Command(Command::InsertTab) => self.ui.focus_next(true),
-      Event::Command(Command::InsertBacktab) => self.ui.focus_next(false),
+      Event::Command(Command::InsertTab) => self.ui.focus_next(FocusDirection::Next),
+      Event::Command(Command::InsertBacktab) => self.ui.focus_next(FocusDirection::Previous),
       _ => false,
     }
   }
@@ -913,6 +954,7 @@ fn run_view<'a, A: App>(
   ui.text = Some(std::mem::replace(text, TextSystem::new(scale)));
   std::mem::swap(images, &mut ui.images);
   app.view(ui);
+  ui.show_helps();
   std::mem::swap(images, &mut ui.images);
   if let Some(t) = ui.text.take() {
     *text = t;
@@ -924,9 +966,9 @@ mod tests {
   use std::sync::mpsc;
 
   use super::*;
-  use crate::keys::{self, CMD, Key};
+  use crate::keys::{self, CMD, Key, Shortcut};
   use crate::scene::Rect;
-  use crate::ui::{Kind, Style, Theme, Transition, px};
+  use crate::ui::{Float, Kind, Style, TextStyle, Theme, Transition, grow, px};
 
   #[derive(Default)]
   struct Probe {
@@ -939,7 +981,7 @@ mod tests {
     fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
       self.events += 1;
       if let Event::KeyDown(k) = ev
-        && k.is("c")
+        && k.is(Shortcut::char('c'))
       {
         cx.clipboard().write("copied");
       }
@@ -1020,7 +1062,7 @@ mod tests {
     impl App for Meter {
       fn view(&mut self, ui: &mut Ui) {
         self.0.push(ui.last_frame().count);
-        ui.el(crate::ui::Style::new().w(crate::ui::px(10.0)).h(crate::ui::px(10.0)));
+        ui.el(Style::new().w(px(10.0)).h(px(10.0)));
       }
     }
     let clock = Clock::Virtual(Duration::ZERO);
@@ -1050,7 +1092,7 @@ mod tests {
       self.seen.push(ui.rect(crate::Id::of("pop")).is_some());
       if self.open {
         let s = Style::new().w(px(10.0)).h(px(10.0));
-        ui.id("pop").float(crate::ui::Float::window()).el(s);
+        ui.id("pop").float(Float::window()).el(s);
       }
     }
   }
@@ -1101,7 +1143,7 @@ mod tests {
   #[derive(Default)]
   struct Themed {
     pin: bool,
-    seen: Vec<(bool, crate::Color)>,
+    seen: Vec<(ColorScheme, crate::Color)>,
   }
 
   impl App for Themed {
@@ -1112,7 +1154,7 @@ mod tests {
       }
 
       let t = ui.theme();
-      self.seen.push((t.dark, t.accent));
+      self.seen.push((t.scheme, t.accent));
       ui.el(Style::new().grow().bg(t.bg));
     }
   }
@@ -1127,18 +1169,18 @@ mod tests {
     assert!(h.event(Event::Appearance(Appearance::LIGHT)));
     assert!(h.rt.needs_frame());
     assert_eq!(ground(&mut h), px(Theme::PLATES_LIGHT.bg));
-    assert_eq!(h.app().seen.last(), Some(&(false, Theme::PLATES_LIGHT.accent)));
+    assert_eq!(h.app().seen.last(), Some(&(ColorScheme::Light, Theme::PLATES_LIGHT.accent)));
     // The same again is nothing new; an accent comes with it.
     assert!(!h.event(Event::Appearance(Appearance::LIGHT)));
     let red = crate::rgb(0xff3b30);
-    h.event(Event::Appearance(Appearance { dark: true, accent: Some(red) }));
+    h.event(Event::Appearance(Appearance { scheme: ColorScheme::Dark, accent: Some(red) }));
     assert_eq!(ground(&mut h), px(Theme::PLATES_DARK.bg));
-    assert_eq!(h.app().seen.last(), Some(&(true, red)));
+    assert_eq!(h.app().seen.last(), Some(&(ColorScheme::Dark, red)));
     // The app's own theme draws, and stays over the OS's appearance.
     h.app_mut().pin = true;
     h.event(Event::Appearance(Appearance::LIGHT));
     assert_eq!(ground(&mut h), px(MINE.bg));
-    assert_eq!(h.app().seen.last(), Some(&(true, MINE.accent)));
+    assert_eq!(h.app().seen.last(), Some(&(ColorScheme::Dark, MINE.accent)));
     assert_eq!(h.rt.ui.appearance(), Appearance::LIGHT);
   }
 
@@ -1173,7 +1215,7 @@ mod tests {
     struct Over;
     impl App for Over {
       fn view(&mut self, ui: &mut Ui) {
-        ui.text("Hello", crate::ui::TextStyle::new(crate::Font::ui(20.0), [1.0; 4]));
+        ui.text("Hello", TextStyle::new(crate::Font::ui(20.0), [1.0; 4]));
       }
 
       fn paint(&mut self, f: &mut Frame) {
@@ -1244,10 +1286,10 @@ mod tests {
       fn view(&mut self, ui: &mut Ui) {
         ui.fit_window_height(200.0, 50.0, 500.0);
         ui.col(Style::new().grow(), |ui| {
-          ui.el(Style::new().w(crate::ui::grow()).h(px(40.0)));
+          ui.el(Style::new().w(grow()).h(px(40.0)));
           ui.id("list").scroll_area(Style::new().grow(), |ui| {
             for _ in 0..self.rows {
-              ui.el(Style::new().w(crate::ui::grow()).h(px(30.0)));
+              ui.el(Style::new().w(grow()).h(px(30.0)));
             }
           });
         });
@@ -1333,7 +1375,7 @@ mod tests {
       }
 
       let sq = Style::new().w(px(40.0)).h(px(40.0));
-      ui.id("count").text(self.count, crate::ui::TextStyle::new(crate::Font::ui(13.0), [1.0; 4]));
+      ui.id("count").text(self.count, TextStyle::new(crate::Font::ui(13.0), [1.0; 4]));
       if ui.id("plus").el(sq).clicked {
         self.count += 1;
       }
@@ -1351,7 +1393,7 @@ mod tests {
         self.timer = false;
       }
 
-      ui.id("line").text(&self.line, crate::ui::TextStyle::new(crate::Font::ui(13.0), [1.0; 4]));
+      ui.id("line").text(&self.line, TextStyle::new(crate::Font::ui(13.0), [1.0; 4]));
     }
   }
 
@@ -1480,13 +1522,15 @@ mod tests {
     item_takes: bool,
   }
 
-  const ITEM_KEYS: &[Binding] = &[keys::bind("cmd+z", Command::Undo)];
+  const ITEM_KEYS: &[Binding] = &[keys::bind(Shortcut::char('z').cmd(), Command::Undo)];
   const PANEL_KEYS: &[Binding] = &[
-    keys::bind("cmd+z", Command::Action("panel undo")),
-    keys::bind("cmd+p", Command::Action("panel")),
+    keys::bind(Shortcut::char('z').cmd(), Command::Action("panel undo")),
+    keys::bind(Shortcut::char('p').cmd(), Command::Action("panel")),
   ];
-  const APP_KEYS: &[Binding] =
-    &[keys::bind("cmd+p", Command::Action("app")), keys::bind("cmd+n", Command::Action("new"))];
+  const APP_KEYS: &[Binding] = &[
+    keys::bind(Shortcut::char('p').cmd(), Command::Action("app")),
+    keys::bind(Shortcut::char('n').cmd(), Command::Action("new")),
+  ];
 
   impl App for Keyed {
     fn keymap(&self) -> &[Binding] {
@@ -1628,7 +1672,7 @@ mod tests {
 
     fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
       if let Event::KeyDown(k) = ev
-        && k.is("a")
+        && k.is(Shortcut::char('a'))
       {
         cx.focus(Some(Id::of("field")));
       }
@@ -1698,7 +1742,7 @@ mod tests {
     struct Measured(f32);
     impl App for Measured {
       fn view(&mut self, ui: &mut Ui) {
-        let style = crate::ui::TextStyle::new(crate::Font::ui(20.0), [1.0; 4]);
+        let style = TextStyle::new(crate::Font::ui(20.0), [1.0; 4]);
         self.0 = ui.measure("1,234.5", style);
         ui.id("t").text("1,234.5", style.nowrap());
       }
@@ -1713,7 +1757,7 @@ mod tests {
     assert!((rt.ui.last.rect(Id::of("t")).unwrap().w - rt.app.0).abs() <= 0.5);
     // Outside a runtime there is nothing to measure with.
     let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
-    assert_eq!(ui.measure("1", crate::ui::TextStyle::new(crate::Font::ui(20.0), [1.0; 4])), 0.0);
+    assert_eq!(ui.measure("1", TextStyle::new(crate::Font::ui(20.0), [1.0; 4])), 0.0);
   }
 
   #[test]

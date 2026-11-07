@@ -44,7 +44,7 @@ fn check_fill(t: &Theme, on: bool, hot: f32) -> (Color, (f32, Color)) {
   match (on, t.flat()) {
     (true, _) => (mix(t.accent, [1.0; 4], 0.12 * hot), (0.0, [0.0; 4])),
     (false, true) => (mix(t.track, t.track_hover, hot), (0.0, [0.0; 4])),
-    (false, false) => (t.bg, (t.border, mix(t.line, t.muted, hot))),
+    (false, false) => (t.bg, (t.control_border.width(), mix(t.line, t.muted, hot))),
   }
 }
 

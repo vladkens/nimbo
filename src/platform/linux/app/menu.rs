@@ -13,20 +13,20 @@ use crate::tray::{Item, Menu};
 /// An item of the menu by its number: the root (`item` none) or an item, and its children's
 /// numbers.
 pub struct Node<'a> {
-  pub item: Option<&'a Item>,
+  pub item: Option<&'a Item<usize>>,
   pub children: Vec<usize>,
 }
 
 /// The menu's items by number, the root first.
-pub fn nodes(menu: &Menu) -> Vec<Node<'_>> {
-  fn add<'a>(items: &'a [Item], out: &mut Vec<Node<'a>>) -> Vec<usize> {
+pub fn nodes(menu: &Menu<usize>) -> Vec<Node<'_>> {
+  fn add<'a>(items: &'a [Item<usize>], out: &mut Vec<Node<'a>>) -> Vec<usize> {
     let mut ids = Vec::new();
     for it in items {
       let id = out.len();
       out.push(Node { item: Some(it), children: Vec::new() });
       ids.push(id);
-      if let Some(sub) = it.submenu.as_ref().filter(|_| !it.separator && !it.header) {
-        out[id].children = add(&sub.items, out);
+      if let Item::Submenu { menu, .. } = it {
+        out[id].children = add(&menu.items, out);
       }
     }
 
@@ -48,21 +48,21 @@ pub fn at(nodes: &[Node], path: &[usize]) -> Option<usize> {
 /// `children-display` for a submenu, `shortcut`.
 pub fn props(node: &Node) -> V {
   let Some(it) = node.item else { return V::dict(vec![("children-display", V::s("submenu"))]) };
-  if it.separator {
+  if let Item::Divider = it {
     return V::dict(vec![("type", V::s("separator"))]);
   }
 
   let mut p =
-    vec![("label", V::S(it.label.replace('_', "__"))), ("enabled", V::B(it.enabled && !it.header))];
-  if !it.header && (it.checkable || it.checked) {
-    p.extend([("toggle-type", V::s("checkmark")), ("toggle-state", V::I(it.checked as i32))]);
+    vec![("label", V::S(it.label().replace('_', "__"))), ("enabled", V::B(it.is_enabled()))];
+  if let Item::Toggle { is_on, .. } = it {
+    p.extend([("toggle-type", V::s("checkmark")), ("toggle-state", V::I(*is_on as i32))]);
   }
 
   if !node.children.is_empty() {
     p.push(("children-display", V::s("submenu")));
   }
 
-  if let Some(keys) = it.key.as_deref().and_then(shortcut) {
+  if let Some(keys) = it.shortcut().and_then(shortcut) {
     p.push(("shortcut", V::Array("as", vec![V::Array("s", keys.into_iter().map(V::S).collect())])));
   }
 
@@ -71,8 +71,7 @@ pub fn props(node: &Node) -> V {
 
 /// An item's shortcut as dbusmenu writes one: the modifiers (`Control`, `Alt`, `Shift`,
 /// `Super`), then the key's keysym name.
-fn shortcut(text: &str) -> Option<Vec<String>> {
-  let s = Shortcut::parse(text).ok()?;
+fn shortcut(s: Shortcut) -> Option<Vec<String>> {
   let mods = [
     (Modifiers::CONTROL, "Control"),
     (Modifiers::ALT, "Alt"),
@@ -107,15 +106,15 @@ pub fn describe(nodes: &[Node], id: usize, depth: usize, out: &mut Vec<String>) 
   for &c in &nodes[id].children {
     let Some(it) = nodes[c].item else { continue };
     let pad = "  ".repeat(depth);
-    if it.separator {
+    if let Item::Divider = it {
       out.push(format!("{pad}-"));
       continue;
     }
 
-    let on = if it.checked { "on" } else { "off" };
-    let enabled = if it.enabled { "enabled" } else { "disabled" };
-    let head = if it.header { "|header" } else { "" };
-    out.push(format!("{pad}{}|{}|{on}|{enabled}{head}", it.label, it.key_label()));
+    let on = if it.is_on() { "on" } else { "off" };
+    let enabled = if it.is_enabled() { "enabled" } else { "disabled" };
+    let head = if let Item::Section(_) = it { "|header" } else { "" };
+    out.push(format!("{pad}{}|{}|{on}|{enabled}{head}", it.label(), it.key_label()));
     describe(nodes, c, depth + 1, out);
   }
 }
@@ -124,14 +123,13 @@ pub fn describe(nodes: &[Node], id: usize, depth: usize, out: &mut Vec<String>) 
 mod tests {
   use super::*;
 
-  fn menu() -> Menu {
-    let sub =
-      Menu::new(vec![Item::new("a", "A_1").checked(true), Item::new("b", "B").checked(false)]);
+  fn menu() -> Menu<usize> {
+    let sub = Menu::new(vec![Item::toggle(0, "A_1", true), Item::toggle(1, "B", false)]);
     Menu::new(vec![
-      Item::header("Head"),
-      Item::separator(),
-      Item::new("sub", "Sub").submenu(sub),
-      Item::new("quit", "Quit").key("cmd+q"),
+      Item::section("Head"),
+      Item::Divider,
+      Item::submenu("Sub", sub),
+      Item::button(2, "Quit").key(Shortcut::char('q').cmd()),
     ])
   }
 
@@ -147,8 +145,7 @@ mod tests {
 
   #[test]
   fn a_header_is_disabled_and_has_no_items() {
-    let sub = Menu::new(vec![Item::new("a", "A")]);
-    let m = Menu::new(vec![Item::header("Head").enabled(true).submenu(sub)]);
+    let m = Menu::new(vec![Item::section("Head").enabled(true)]);
     let n = nodes(&m);
     assert_eq!((n.len(), n[1].children.len()), (2, 0));
     let entry = |k: &str, v: V| V::Entry(Box::new(V::s(k)), Box::new(V::Var(Box::new(v))));

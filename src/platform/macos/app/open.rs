@@ -6,6 +6,7 @@
 
 use std::path::Path;
 
+use objc2::rc::Retained;
 use objc2_app_kit::{NSWorkspace, NSWorkspaceOpenConfiguration};
 use objc2_foundation::{NSArray, NSString, NSURL};
 
@@ -30,7 +31,7 @@ pub fn file_manager() -> &'static str {
   "Finder"
 }
 
-fn file_url(path: &Path) -> objc2::rc::Retained<NSURL> {
+fn file_url(path: &Path) -> Retained<NSURL> {
   NSURL::fileURLWithPath(&NSString::from_str(&path.to_string_lossy()))
 }
 

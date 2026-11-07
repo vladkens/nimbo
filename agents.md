@@ -18,6 +18,7 @@ A small custom-drawn desktop UI toolkit in Rust: its own CPU renderer draws ever
 - Every styled widget is a headless behaviour (hover, press, click, focus, keys, the value it edits) plus drawing from the theme, so an app can draw its own look over the same behaviour.
 - Reach a window's state only through `try_borrow*` or the platform's helper over it (macOS `View`, Windows `with_window`, Linux `with`), never `borrow_mut` in a callback: the system calls back in from nested run loops (panels, permission prompts, Finder). When it is busy, defer the work, never drop it.
 - Start every `.rs` file with `// Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo`, then a `//!` doc whose first sentence says what the file does; a PR's description carries the `make size ARGS=--map` lines of the files it adds or changes.
+- Code names another module's item through a `use` (`Shortcut::char('a')`, not `crate::keys::Shortcut::char('a')`); clippy's `absolute_paths` misses generic types (`Tag`, `Frame<'_>`).
 - Keep a file within ~800 lines of code (not counting tests, docs, comments and blanks; `make size ARGS=--files` counts them) by splitting it into submodules.
 - Helper scripts go in `scripts/`: Python run with `uv run`, kebab-case names.
 
@@ -29,6 +30,15 @@ A small custom-drawn desktop UI toolkit in Rust: its own CPU renderer draws ever
 - Rows in a list keep one height in every state (idle, in progress, failed, selected).
 - Every clickable element shows the pointing hand and a hover (the toolbar's tabs only the hand, as in System Settings); transitions are animated, 120–170 ms.
 - A mark or icon is optically centred like its neighbours; check its alignment against them, not alone.
+
+## API shape
+
+- Find SwiftUI's form of a piece first (developer.apple.com) and take it: a view built from ordinary children plus general modifiers (`ui.help`, `ui.disabled`, `ui.control_size`); no modes, `_with` or `_sized` variants, or tuple lists for one caller.
+- One name per concept: a text or a closure goes through one method (`impl Into<Content>`), not a pair.
+- Behaviour goes on the element as it is built (`ui.help(tip).icon_button(..)`), never attached later by index or a derived id.
+- A choice of more than two states, or two exclusive flags, is an enum named as SwiftUI names it; no sentinel values (0 for the default) and no stringly-typed choices (a menu's actions are the app's own type).
+- Every new API goes into the gallery's table (`examples/gallery.rs`); `make api-shots` writes `docs/api.md` from it, and its pictures, made only that way, into the `assets` branch (its worktree at `.worktrees/assets`), which a person pushes after looking at them; it compresses them with `pngquant` and `oxipng` (`brew install pngquant oxipng`).
+- Bad: `FormRow::new("parakeet").caption_parts(&[("WER 4.7%", Some(TIP)), (" · 740 MB", None)])`. Good: `FormRow::new("parakeet").caption(|ui: &mut Ui, s: TextStyle| { ui.help(TIP).text("WER 4.7%", s.underline(LinePattern::Dot)); ui.text(" · 740 MB", s); })`.
 
 ## Tests
 

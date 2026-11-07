@@ -26,6 +26,7 @@ use windows_sys::core::{GUID, HRESULT, PCWSTR};
 
 use super::super::text::{Com, call, iid, out};
 use super::super::{files, wide};
+use crate::hardware;
 use crate::hardware::Transport;
 use crate::system::{Change, notice};
 
@@ -51,7 +52,7 @@ pub fn transport(id: &str) -> Transport {
     unsafe { CoUninitialize() };
   }
 
-  enumerator.map_or(Transport::Unknown, |e| crate::hardware::pnp(&e))
+  enumerator.map_or(Transport::Unknown, |e| hardware::pnp(&e))
 }
 
 /// The lid as the last power notification told it, while it is watched: `None` before, and

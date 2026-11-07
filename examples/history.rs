@@ -1,30 +1,31 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! A long form page built in view only ([nimbo::Ui::form_list]): 86,000 dictations, newest
-//! first, a plate a day under its date and count, each row its text and when it was said, a
-//! click selecting it (tinted) and Copy at its right. Only the rows on screen, and a margin,
-//! are built; the scroll area is as tall as every row.
+//! A long list built in view only ([nimbo::List] in sections, grouped on a form's plates):
+//! 86,000 dictations, newest first, a plate a day under its date and count, each row its text
+//! and when it was said, a click selecting it and Copy at its right. Only the rows on screen, and
+//! a margin, are built; the scroll area is as tall as every row.
 //!
 //! `cargo run --release --example history [-- --shot <file.png>]`
 
 // A Windows app, not a console one: no terminal opens with its window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use nimbo::{App, Button, Config, FormRow, FormStyle, Icon, Id, Style, Ui};
+use nimbo::ui::Role;
+use nimbo::{App, Config, FormStyle, Icon, Id, List, ListStyle, Selection, Style, Ui, grow};
 
 pub const ROWS: usize = 86_000;
 /// Dictations a day: the oldest day has what is left.
 pub const PER_DAY: usize = 140;
 /// A row: the text and the line under it, padded as the plates' rows are.
 pub const ROW_H: f32 = 52.0;
-pub const PAGE: &str = "page";
 pub const LIST: &str = "list";
 
 pub struct History {
   pub rows: usize,
-  /// Each day's title and its dictations.
+  /// Each day's title and its dictations, and the row each starts at.
   pub days: Vec<(String, usize)>,
-  pub selected: Option<u64>,
+  pub starts: Vec<usize>,
+  pub sel: Selection,
   pub copied: Option<u64>,
   /// A row to scroll into view: its day and its place in it.
   pub reveal: Option<(usize, usize)>,
@@ -46,7 +47,8 @@ impl History {
       d => format!("{d} days ago"),
     };
     let days = (0..n).map(|d| (day(d), PER_DAY.min(rows - d * PER_DAY))).collect();
-    Self { rows, days, selected: None, copied: None, reveal: None }
+    let starts = (0..n).map(|d| d * PER_DAY).collect();
+    Self { rows, days, starts, sel: Selection::default(), copied: None, reveal: None }
   }
 
   /// The dictation of row `i` of day `g`: its number, newest first.
@@ -58,49 +60,53 @@ impl History {
 impl App for History {
   fn view(&mut self, ui: &mut Ui) {
     let fs = FormStyle::plates(&ui.theme());
-    let reveal = self.reveal.take();
-    let groups: Vec<(&str, usize)> = self.days.iter().map(|(t, n)| (t.as_str(), *n)).collect();
-    let (selected, mut clicked, mut copied) = (self.selected, None, None);
-    let note = |ui: &mut Ui, g: usize| ui.text(format!("{} dictations", groups[g].1), fs.note);
-    let row = |ui: &mut Ui, g: usize, i: usize| {
-      let e = self.entry(g, i);
-      let s = FormStyle { row: fs.row.hit(), ..fs };
-      let text = format!("Dictation {e}: what was said, on one line");
-      let caption =
-        format!("{:02}:{:02} · {}.{} s", 23 - i / 7 % 24, 59 - i % 60, 2 + e % 9, e % 10);
-      let row = FormRow::new(&text).caption(&caption).one_line().selected(selected == Some(e));
-      let r = ui.form_row(&s, row, |ui| {
-        if Button::icon(Icon::COPY).show(ui.key("copy")).clicked {
+    if let Some((g, i)) = self.reveal.take() {
+      ui.reveal_row(Id::of(LIST), self.starts[g] + i);
+    }
+
+    let (rows, days, starts) = (self.rows, &self.days, &self.starts);
+    let key = |i: usize| (rows - i) as u64;
+    let head = |ui: &mut Ui, g: usize| {
+      ui.text(&days[g].0, fs.head);
+      ui.spacer();
+      ui.text(format!("{} dictations", days[g].1), fs.note);
+    };
+    let head_h = ui.metrics(fs.head.font).line_height() + fs.head_pad[2];
+    let mut copied = None;
+    let mut sel = std::mem::take(&mut self.sel);
+    let list = List::new(rows, ROW_H).key(&key).selection(&mut sel);
+    let list = list.list_style(ListStyle::Grouped);
+    let list = list.sections(starts, head_h, &head);
+    ui.col(Style::new().grow().bg(fs.bg), |ui| {
+      list.show(ui.id(LIST), |ui, row| {
+        let i = row.index - starts[starts.partition_point(|&s| s <= row.index) - 1];
+        let e = row.key;
+        let text = format!("Dictation {e}: what was said, on one line");
+        let caption =
+          format!("{:02}:{:02} · {}.{} s", 23 - i / 7 % 24, 59 - i % 60, 2 + e % 9, e % 10);
+        ui.col(Style::new().w(grow()).gap(2.0), |ui| {
+          ui.text(&text, fs.label.line_limit(1));
+          ui.text(&caption, fs.caption.line_limit(1));
+        });
+        if ui.key("copy").icon_button(Icon::COPY).clicked {
           copied = Some(e);
         }
-      });
-      if r.clicked {
-        clicked = Some(e);
-      }
-    };
 
-    ui.col(Style::new().grow().bg(fs.bg), |ui| {
-      ui.id(PAGE).form_scroll(&fs, Style::new().grow(), |ui| {
-        ui.col(fs.page, |ui| {
-          if let Some((g, i)) = reveal {
-            ui.reveal_form_row(Id::of(LIST), &groups, g, i);
-          }
-
-          let key = |g, i| self.entry(g, i);
-          ui.id(LIST).form_list(&fs, &groups, ROW_H, &key, note, row);
-        });
+        // Read as its text, when it was said under it.
+        ui.a11y(row.id, Role::Row).name(&text).description(&caption);
       });
     });
-    self.selected = clicked.or(self.selected);
+    self.sel = sel;
     self.copied = copied.or(self.copied);
   }
 }
 
 fn main() {
   // The shot: the page's top, the second row selected.
-  nimbo::run(Config::new("History", 560.0, 520.0), History::default(), |h| {
+  nimbo::run_example(Config::new("History", 560.0, 520.0), History::default(), |h| {
     h.frame();
-    h.app_mut().selected = Some(h.app().entry(0, 1));
+    let e = h.app().entry(0, 1);
+    h.app_mut().sel.select(e, 1);
     h.frame();
   });
 }

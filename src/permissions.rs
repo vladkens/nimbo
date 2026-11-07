@@ -8,6 +8,10 @@
 //! opens and Secure Input is never on (Windows' microphone switch in Settings › Privacy isn't read
 //! yet).
 
+use crate::open;
+#[cfg(target_os = "macos")]
+use crate::platform;
+
 /// A pane of System Settings › Privacy & Security.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Pane {
@@ -42,23 +46,28 @@ impl Pane {
   }
 }
 
-/// Whether the app has Accessibility access; with `prompt`, macOS shows its dialog pointing the
-/// user to System Settings when it has not (once per launch is enough: the answer comes later,
-/// in System Settings, and the next call sees it).
-pub fn accessibility(prompt: bool) -> bool {
+/// Whether the app has Accessibility access; always on Windows and Linux.
+pub fn accessibility() -> bool {
   #[cfg(target_os = "macos")]
-  return crate::platform::permissions::accessibility(prompt);
+  return platform::permissions::accessibility(false);
   #[cfg(not(target_os = "macos"))]
-  {
-    _ = prompt;
-    true
-  }
+  true
+}
+
+/// [accessibility], and when the app has not got it, macOS shows its dialog pointing the user
+/// to System Settings (once per launch is enough: the answer comes later, in System Settings, and
+/// the next [accessibility] sees it).
+pub fn request_accessibility() -> bool {
+  #[cfg(target_os = "macos")]
+  return platform::permissions::accessibility(true);
+  #[cfg(not(target_os = "macos"))]
+  true
 }
 
 /// Opens `pane` in System Settings, for the user to allow the app there; nothing elsewhere.
 pub fn open_pane(pane: Pane) -> Result<(), String> {
   match cfg!(target_os = "macos") {
-    true => crate::open::url(pane.url()),
+    true => open::url(pane.url()),
     false => Ok(()),
   }
 }
@@ -67,7 +76,7 @@ pub fn open_pane(pane: Pane) -> Result<(), String> {
 /// don't reach event taps, and posted ones may not arrive.
 pub fn secure_input() -> bool {
   #[cfg(target_os = "macos")]
-  return crate::platform::permissions::secure_input();
+  return platform::permissions::secure_input();
   #[cfg(not(target_os = "macos"))]
   false
 }
@@ -87,7 +96,7 @@ pub enum Access {
 /// Whether the app may record from the microphone; asks nothing.
 pub fn microphone() -> Access {
   #[cfg(target_os = "macos")]
-  return crate::platform::permissions::microphone();
+  return platform::permissions::microphone();
   #[cfg(not(target_os = "macos"))]
   Access::Granted
 }
@@ -97,7 +106,7 @@ pub fn microphone() -> Access {
 /// `done` gets true at once.
 pub fn request_microphone(done: impl FnOnce(bool) + Send + 'static) {
   #[cfg(target_os = "macos")]
-  crate::platform::permissions::request_microphone(Box::new(done));
+  platform::permissions::request_microphone(Box::new(done));
   #[cfg(not(target_os = "macos"))]
   done(true);
 }
@@ -123,7 +132,7 @@ mod tests {
   /// Reading needs no permission and never prompts.
   #[test]
   fn reading_never_prompts() {
-    let (trusted, secure, mic) = (accessibility(false), secure_input(), microphone());
+    let (trusted, secure, mic) = (accessibility(), secure_input(), microphone());
     if !cfg!(target_os = "macos") {
       assert!(trusted && !secure && mic == Access::Granted);
     }

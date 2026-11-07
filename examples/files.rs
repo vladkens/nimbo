@@ -78,7 +78,7 @@ impl App for Files {
 
 fn main() {
   // The shot: two files dragged over the zone.
-  nimbo::run(Config::new("Files", 420.0, 300.0), Files::default(), |h| {
+  nimbo::run_example(Config::new("Files", 420.0, 300.0), Files::default(), |h| {
     h.frame();
     let paths = vec![PathBuf::from("/tmp/notes.txt"), PathBuf::from("/tmp/todo.md")];
     h.event(Event::DragOver { pos: Point::new(210.0, 200.0), paths });

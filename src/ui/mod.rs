@@ -27,8 +27,8 @@
 //! }
 //! ```
 //!
-//! Widgets ([widgets]: label, button, text field, check box, switch, slider, select and the
-//! like) and containers ([containers]: scroll area, list, menu, pop-up button, tabs, split) do
+//! Widgets ([widgets]: label, button, text field, check box, switch, slider and the
+//! like) and containers ([containers]: scroll area, list, menu, picker, tabs, split) do
 //! this for an app in the look of the [Theme] set with [Ui::set_theme]:
 //! `if ui.id("plus").button("+").clicked { .. }`; so do a settings form ([form]) and a modal
 //! dialog ([dialog]).
@@ -57,27 +57,32 @@ pub mod widgets;
 use std::any::Any;
 use std::fmt::{Display, Write};
 use std::hash::Hash;
+use std::num::NonZeroU8;
 use std::time::Duration;
 
 pub use a11y::{A11yNode, A11yTree, Action, Props, Role, State, Value};
-pub use behavior::{Behavior, EditMenu, FieldBehavior};
+pub use behavior::{Behavior, EditMenu, Editing, FieldBehavior};
 pub use containers::{
-  List, ListResponse, PopUp, Row, Selection, Split, SplitBehavior, Tabs, TypeSelect,
+  List, ListResponse, ListStyle, MenuPlacement, Picker, Row, Selection, Split, SplitBehavior, Tabs,
+  Tag, TypeSelect,
 };
 pub use dialog::{Answer, Dialog, DialogBehavior};
-pub use form::{FormRow, FormStyle, Glass, Tile};
+pub use form::{Content, FormRow, FormStyle, Glass, Section, TabItem};
 pub use id::Id;
 pub(crate) use input::drags_window;
 pub use input::{Click, Press, Scroll};
-pub(crate) use layout::{Kind, Measure, Node, Sys, Tree};
+pub(crate) use layout::{Flow, Kind, Measure, Node, Sys, Tree};
 pub use store::{Ease, Transition};
 pub use style::{
-  Align, Clip, Cursor, Dim, Float, Focus, FocusRing, Shadow, Style, TextStyle, grow, pct, px, rigid,
+  Align, Axes, Axis, Clip, CoordinateSpace, Cursor, Dim, Float, Focus, FocusRing, LinePattern,
+  Shadow, Style, TextLines, TextStyle, TruncationMode, UnitPoint, grow, pct, px, rigid,
 };
 pub use textlayout::Edit;
 pub(crate) use textlayout::TextLayout;
-pub use theme::{ButtonStyle, ControlSize, Sizes, SwitchSize, Theme, Tone, Variant};
-pub use widgets::{Button, Choice, FieldStyle, Icon, Select, TextInput};
+pub use theme::{
+  ButtonLook, ButtonStyle, ControlBorder, ControlSize, Sizes, SwitchSize, Theme, Tone,
+};
+pub use widgets::{Button, ButtonRole, FieldKind, FieldStyle, Icon, IconPaint, TextInput};
 
 use self::input::{Deliver, Input, ScrollState};
 use self::store::{Anim, Store};
@@ -85,6 +90,14 @@ use crate::app::{Appearance, Clipboard, Event, MouseButton, Waker};
 use crate::keys::{Binding, Command, KeyEvent, Os};
 use crate::scene::{Frame, ImageId, Images, Point, Rect, Size};
 use crate::text::{Font, Metrics, TextSystem};
+
+/// Which way focus moves among the focusable elements ([Ui::focus_next]): Tab and Shift-Tab,
+/// as SwiftUI's `FocusDirection`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FocusDirection {
+  Next,
+  Previous,
+}
 
 /// How long [UiState::flash] shows an element pressed.
 const FLASH: Duration = Duration::from_millis(120);
@@ -133,7 +146,7 @@ pub(crate) struct UiState {
   /// The platform shows context menus ([crate::Runtime::set_native_menus]); the one asked for
   /// ([Ui::context_menu]) until it takes it; the press that opened one last.
   pub(crate) native_menus: bool,
-  pub(crate) context_menu: Option<(Id, Point, crate::Menu)>,
+  pub(crate) context_menu: Option<(Id, Point, crate::Menu<usize>)>,
   pub(crate) menu_seq: u32,
   /// The height of the title bar over the content and the window's title ([Ui::titlebar]).
   pub(crate) titlebar: Option<(f32, &'static str)>,
@@ -304,7 +317,7 @@ impl UiState {
 
   /// Moves focus to the next focusable element of the last frame in tree order, or the previous
   /// one, wrapping around; from none, to the first or the last. Returns whether there is one.
-  pub fn focus_next(&mut self, forward: bool) -> bool {
+  pub fn focus_next(&mut self, dir: FocusDirection) -> bool {
     let t = &self.last;
     let all = || t.nodes.iter().filter(|n| n.style.focus != Focus::None).map(|n| n.id);
     let n = all().count();
@@ -313,11 +326,11 @@ impl UiState {
     }
 
     let at = self.input.focus.and_then(|f| all().position(|id| id == f));
-    let next = match (at, forward) {
-      (Some(i), true) => (i + 1) % n,
-      (Some(i), false) => (i + n - 1) % n,
-      (None, true) => 0,
-      (None, false) => n - 1,
+    let next = match (at, dir) {
+      (Some(i), FocusDirection::Next) => (i + 1) % n,
+      (Some(i), FocusDirection::Previous) => (i + n - 1) % n,
+      (None, FocusDirection::Next) => 0,
+      (None, FocusDirection::Previous) => n - 1,
     };
 
     self.input.focus = all().nth(next);
@@ -335,11 +348,11 @@ impl UiState {
     let t = &self.last;
     let Some(mut i) = t.find(id) else { return };
     let mut r = t.nodes[i as usize].rect;
-    while i != 0 && !t.nodes[i as usize].float.is_some_and(|f| f.window) {
+    while i != 0 && !t.nodes[i as usize].float.is_some_and(|f| f.space == CoordinateSpace::Global) {
       let float = t.nodes[i as usize].float.is_some();
       i = t.nodes[i as usize].parent;
       let n = &t.nodes[i as usize];
-      if float || !(n.style.scroll[0] || n.style.scroll[1]) {
+      if float || n.style.scroll.is_empty() {
         continue;
       }
       // In the container's content, then its offset after showing it.
@@ -469,8 +482,18 @@ pub struct Ui<'a> {
   next_keymap: Option<&'static [Binding]>,
   /// The next widget is disabled ([Ui::disabled]).
   next_disabled: bool,
-  /// Every widget built is disabled ([Ui::disabled_scope]).
+  /// The next element's tooltip ([Ui::help]), and the elements with one built, by node.
+  next_help: Option<String>,
+  pub(crate) helps: Vec<(u32, String)>,
+  /// Every widget built is disabled ([Ui::disabled] on a container).
   scope_off: bool,
+  /// The next widget's size, or the next container's widgets' ([Ui::control_size]), and the
+  /// size of widgets built now.
+  next_size: Option<ControlSize>,
+  scope_size: ControlSize,
+  /// The containers open with a scope of their own ([Ui::disabled], [Ui::control_size]): node
+  /// and the scope around it, put back when it closes.
+  scopes: Vec<(u32, bool, ControlSize)>,
   /// The next element takes focus when it first shows ([Ui::autofocus]).
   next_autofocus: bool,
   /// The next element moves the window when pressed ([Ui::drags_window]).
@@ -511,7 +534,12 @@ impl<'a> Ui<'a> {
       next_float,
       next_keymap,
       next_disabled,
+      next_help: None,
+      helps: Vec::new(),
       scope_off: false,
+      next_size: None,
+      scope_size: ControlSize::Regular,
+      scopes: Vec::new(),
       next_autofocus,
       next_drag: false,
       text: None,
@@ -641,6 +669,12 @@ impl<'a> Ui<'a> {
     layout::wrapped_width(s, style, width, &mut m, &mut self.st.kept)
   }
 
+  /// The distance between baselines of text in `style`, as the layout lays it out: its own
+  /// ([TextStyle::line_h]) or its font's. 0 in a [Ui] the runtime didn't build.
+  pub fn line_height(&mut self, style: TextStyle) -> f32 {
+    style.line_h.unwrap_or_else(|| self.metrics(style.font).line_height())
+  }
+
   /// Vertical metrics of `font` as the layout uses them: to set a mark beside text by its
   /// baseline, cap or x-height. Zeros in a [Ui] the runtime didn't build.
   pub fn metrics(&mut self, font: Font) -> Metrics {
@@ -688,11 +722,58 @@ impl<'a> Ui<'a> {
     self
   }
 
+  /// The next element shows `tip` under the pointer resting on it, a tooltip as macOS places one
+  /// (its left edge at the pointer, 19 below it, after [Theme::tip_delay], at once within
+  /// [Theme::tip_warm] of another), and reads it as its description to assistive technology, as
+  /// SwiftUI's `.help`: any element, a text (read where it stands), a widget, a container or a
+  /// canvas (read as a group, its children as ever). It takes the pointer, so a click on it is
+  /// its own, not its parent's. The tip is `id.key("tip")` of the element's id.
+  pub fn help(&mut self, tip: &str) -> &mut Self {
+    self.next_help = Some(tip.to_owned());
+    self
+  }
+
+  /// The tooltips the view asked for with [Ui::help], after it: each element built. One with no
+  /// record for assistive technology gets one to carry the tip: a text as itself, any other a
+  /// group, whose children are read as ever.
+  pub(crate) fn show_helps(&mut self) {
+    for (i, tip) in std::mem::take(&mut self.helps) {
+      let n = &self.st.tree.nodes[i as usize];
+      let (id, text) = match n.kind {
+        Kind::Text { range, .. } => (n.id, Some(self.st.tree.str(range.0, range.1).to_owned())),
+        _ => (n.id, None),
+      };
+
+      if self.a11y_of(id).is_none() {
+        match text {
+          Some(text) => _ = self.a11y_label(&text).a11y(id, Role::StaticText),
+          None => _ = self.a11y(id, Role::Group),
+        }
+      }
+
+      self.tooltip(id, &tip);
+    }
+  }
+
   /// Disables the next widget ([widgets]) when `yes`: dimmed, not focusable, and its clicks
-  /// do nothing. Plain elements ignore it.
+  /// do nothing; on a container, every widget built in it, as SwiftUI's `.disabled` on a view.
+  /// Plain elements ignore it.
   pub fn disabled(&mut self, yes: bool) -> &mut Self {
     self.next_disabled = yes;
     self
+  }
+
+  /// Sizes the next widget, or every widget built in the next container, as SwiftUI's
+  /// `.controlSize`: a button's height and font, a switch's track, a badge's pill, a spinner's
+  /// size ([ControlSize]). Widgets are [ControlSize::Regular] outside one.
+  pub fn control_size(&mut self, size: ControlSize) -> &mut Self {
+    self.next_size = Some(size);
+    self
+  }
+
+  /// The size of the widget being built ([Ui::control_size]), for the widget to read once.
+  pub fn take_control_size(&mut self) -> ControlSize {
+    self.next_size.take().unwrap_or(self.scope_size)
   }
 
   /// Focuses the next widget, or the next element if it is focusable, when it first shows:
@@ -736,9 +817,9 @@ impl<'a> Ui<'a> {
     }
   }
 
-  /// Disables every widget `f` builds when `yes` ([Ui::disabled] for each): a form row that
-  /// doesn't apply, with its label and control dimmed.
-  pub fn disabled_scope<R>(&mut self, yes: bool, f: impl FnOnce(&mut Self) -> R) -> R {
+  /// Disables every widget `f` builds when `yes`, without a container of its own: a widget's
+  /// parts in a disabled one ([Ui::disabled] on a container for an app).
+  pub(crate) fn disabled_scope<R>(&mut self, yes: bool, f: impl FnOnce(&mut Self) -> R) -> R {
     let was = self.scope_off;
     self.scope_off |= yes;
     let r = f(self);
@@ -746,13 +827,14 @@ impl<'a> Ui<'a> {
     r
   }
 
-  /// Whether widgets built now are disabled by a [Ui::disabled_scope].
+  /// Whether widgets built now are disabled by a container's [Ui::disabled]: for a canvas that
+  /// dims itself.
   pub fn scope_disabled(&self) -> bool {
     self.scope_off
   }
 
-  /// Whether the next widget is disabled ([Ui::disabled], or inside a disabled
-  /// [Ui::disabled_scope]), for the widget to read once.
+  /// Whether the next widget is disabled ([Ui::disabled], on it or on a container around it),
+  /// for the widget to read once.
   pub fn take_disabled(&mut self) -> bool {
     std::mem::take(&mut self.next_disabled) || self.scope_off
   }
@@ -761,12 +843,12 @@ impl<'a> Ui<'a> {
 
   /// A container laying its children out left to right.
   pub fn row<R>(&mut self, style: Style, f: impl FnOnce(&mut Self) -> R) -> Response {
-    self.container(0, style, f)
+    self.container(Flow::Row, style, f)
   }
 
   /// A container laying its children out top to bottom.
   pub fn col<R>(&mut self, style: Style, f: impl FnOnce(&mut Self) -> R) -> Response {
-    self.container(1, style, f)
+    self.container(Flow::Column, style, f)
   }
 
   /// A container laying its children out in `cols` equal columns, left to right and wrapping
@@ -775,8 +857,8 @@ impl<'a> Ui<'a> {
   /// `style.align`. Rows are as high as their highest child and share the height left over
   /// when the grid is taller.
   pub fn grid<R>(&mut self, cols: u8, style: Style, f: impl FnOnce(&mut Self) -> R) -> Response {
-    let (i, r) = self.open(0, style);
-    self.st.tree.nodes[i as usize].cols = cols.max(1);
+    let cols = NonZeroU8::new(cols).unwrap_or(NonZeroU8::MIN);
+    let (i, r) = self.open(Flow::Grid(cols), style);
     f(self);
     self.close(i);
     r
@@ -784,7 +866,7 @@ impl<'a> Ui<'a> {
 
   /// A box with no children: a divider, a swatch, a fixed gap.
   pub fn el(&mut self, style: Style) -> Response {
-    self.push(Kind::Box, style, 0).1
+    self.push(Kind::Box, style, Flow::Row).1
   }
 
   /// Takes the free space along the parent's axis.
@@ -802,19 +884,19 @@ impl<'a> Ui<'a> {
     let _ = write!(text, "{s}");
     let range = (start, text.len() as u32);
     let kind = Kind::Text { range, style, lines: (0, 0), baseline: 0.0, line_h: 0.0 };
-    self.push(kind, Style::new(), 0);
+    self.push(kind, Style::new(), Flow::Row);
   }
 
   /// An image; a fit size is its pixel size over the backing scale.
   pub fn image(&mut self, image: ImageId, style: Style) -> Response {
-    self.push(Kind::Image(image), style, 0).1
+    self.push(Kind::Image(image), style, Flow::Row).1
   }
 
   /// A box whose `paint` draws into the frame within its laid-out rect (a plot). It draws in
   /// its parent's layer: start one with `f.layer()` for order across primitive kinds.
   pub fn canvas(&mut self, style: Style, paint: impl FnOnce(&mut Frame, Rect) + 'a) -> Response {
     self.canvases.push(Some(Box::new(paint)));
-    self.push(Kind::Canvas(self.canvases.len() as u32 - 1), style, 0).1
+    self.push(Kind::Canvas(self.canvases.len() as u32 - 1), style, Flow::Row).1
   }
 
   /// A canvas with children laid out left to right over what it paints: a plot's hit areas
@@ -826,7 +908,7 @@ impl<'a> Ui<'a> {
     paint: impl FnOnce(&mut Frame, Rect) + 'a,
     f: impl FnOnce(&mut Self) -> R,
   ) -> Response {
-    self.canvas_container(0, style, Box::new(paint), f)
+    self.canvas_container(Flow::Row, style, Box::new(paint), f)
   }
 
   /// [Ui::canvas_row] with the children top to bottom.
@@ -836,26 +918,27 @@ impl<'a> Ui<'a> {
     paint: impl FnOnce(&mut Frame, Rect) + 'a,
     f: impl FnOnce(&mut Self) -> R,
   ) -> Response {
-    self.canvas_container(1, style, Box::new(paint), f)
+    self.canvas_container(Flow::Column, style, Box::new(paint), f)
   }
 
   fn canvas_container<R>(
     &mut self,
-    axis: u8,
+    flow: Flow,
     style: Style,
     paint: Canvas<'a>,
     f: impl FnOnce(&mut Self) -> R,
   ) -> Response {
     self.canvases.push(Some(paint));
-    let (i, r) = self.push(Kind::Canvas(self.canvases.len() as u32 - 1), style, axis);
+    let (i, r) = self.push(Kind::Canvas(self.canvases.len() as u32 - 1), style, flow);
     self.st.stack.push((i, 0));
+    self.scope(i);
     f(self);
     self.close(i);
     r
   }
 
-  fn container<R>(&mut self, axis: u8, style: Style, f: impl FnOnce(&mut Self) -> R) -> Response {
-    let (i, r) = self.open(axis, style);
+  fn container<R>(&mut self, flow: Flow, style: Style, f: impl FnOnce(&mut Self) -> R) -> Response {
+    let (i, r) = self.open(flow, style);
     f(self);
     self.close(i);
     r
@@ -863,20 +946,38 @@ impl<'a> Ui<'a> {
 
   /// Starts a container; out of line, so each `row` / `col` call site stays small.
   #[inline(never)]
-  fn open(&mut self, axis: u8, style: Style) -> (u32, Response) {
-    let (i, r) = self.push(Kind::Box, style, axis);
+  fn open(&mut self, flow: Flow, style: Style) -> (u32, Response) {
+    let (i, r) = self.push(Kind::Box, style, flow);
     self.st.stack.push((i, 0));
+    self.scope(i);
     (i, r)
   }
 
+  /// Turns a [Ui::disabled] or [Ui::control_size] no widget took into the scope of container
+  /// `i`, until it closes.
+  fn scope(&mut self, i: u32) {
+    if !self.next_disabled && self.next_size.is_none() {
+      return;
+    }
+
+    self.scopes.push((i, self.scope_off, self.scope_size));
+    self.scope_off |= std::mem::take(&mut self.next_disabled);
+    self.scope_size = self.next_size.take().unwrap_or(self.scope_size);
+  }
+
   fn close(&mut self, i: u32) {
+    if let Some(&(_, off, size)) = self.scopes.last().filter(|s| s.0 == i) {
+      self.scopes.pop();
+      (self.scope_off, self.scope_size) = (off, size);
+    }
+
     self.st.stack.pop();
     let tree = &mut self.st.tree;
     tree.nodes[i as usize].end = tree.nodes.len() as u32;
   }
 
   #[inline(always)]
-  fn push(&mut self, kind: Kind, style: Style, axis: u8) -> (u32, Response) {
+  fn push(&mut self, kind: Kind, style: Style, flow: Flow) -> (u32, Response) {
     let (parent, count) = self.st.stack.last_mut().unwrap();
     let tree = &mut self.st.tree;
     let (id, named) = self
@@ -885,7 +986,7 @@ impl<'a> Ui<'a> {
       .unwrap_or_else(|| (tree.nodes[*parent as usize].id.nth(*count as usize), false));
     *count += 1;
     let parent = *parent;
-    let scrolls = style.scroll[0] || style.scroll[1];
+    let scrolls = !style.scroll.is_empty();
     let focus = style.focus != Focus::None;
     if self.next_autofocus {
       // Only a focusable element takes it; the flag goes with this one either way.
@@ -895,10 +996,12 @@ impl<'a> Ui<'a> {
       }
     }
 
-    let drag = std::mem::take(&mut self.next_drag);
+    let (drag, help) = (std::mem::take(&mut self.next_drag), self.next_help.take());
     let hit = style.hit || named || scrolls || focus || drag || style.cursor != Cursor::Inherit;
+    let hit = hit || help.is_some();
     let tree = &mut self.st.tree;
     let i = tree.nodes.len() as u32;
+    self.helps.extend(help.map(|tip| (i, tip)));
     tree.drags.extend(drag.then_some(i));
 
     let float = self.next_float.take();
@@ -910,7 +1013,7 @@ impl<'a> Ui<'a> {
       tree.keymaps.push((i, map));
     }
 
-    tree.nodes.push(Node::new(id, kind, style, axis, float, parent, i + 1));
+    tree.nodes.push(Node::new(id, kind, style, flow, float, parent, i + 1));
     if self.next_span != 1 {
       tree.nodes[i as usize].span = std::mem::replace(&mut self.next_span, 1);
     }
@@ -989,8 +1092,8 @@ impl<'a> Ui<'a> {
   }
 
   /// Moves focus as Tab (forward) or Shift-Tab do.
-  pub fn focus_next(&mut self, forward: bool) -> bool {
-    self.st.focus_next(forward)
+  pub fn focus_next(&mut self, dir: FocusDirection) -> bool {
+    self.st.focus_next(dir)
   }
 
   /// Whether the window is the key window, which gets the keys.
@@ -1040,8 +1143,8 @@ impl<'a> Ui<'a> {
     if used { None } else { self.key_down(id) }
   }
 
-  /// A modifier key going down (`true`) or up while `id` has focus ([Event::Modifier]): a
-  /// shortcut recorder taking one alone. Seen once; reading it uses it.
+  /// A modifier key going down or up while `id` has focus ([Event::Modifier]): a shortcut
+  /// recorder taking one alone. Seen once; reading it uses it.
   pub fn modifier_key(&self, id: Id) -> Option<(crate::Code, bool)> {
     self.st.take(id, |e| match *e {
       Event::Modifier { key, down } => Some((key, down)),

@@ -69,7 +69,7 @@ impl<'a> Ui<'a> {
   /// `key(i)`, unique and stable while it is the same thing, so what it builds keeps its ids,
   /// hover and focus as the column scrolls and items come and go before it. The column's id is
   /// the one set ([Ui::id], [Ui::key]) or its place among its siblings, not taking input. The
-  /// heights are summed each frame: for very long columns of sections, see [Ui::form_list].
+  /// heights are summed each frame: for very long columns of sections, see [crate::List].
   pub fn virtual_col<K: Hash>(
     &mut self,
     heights: impl IntoIterator<Item = f32>,
@@ -102,7 +102,7 @@ impl<'a> Ui<'a> {
     // content as of the last frame (at its top before the column is laid out).
     let t = &self.st.tree;
     let area =
-      self.st.stack.iter().rev().map(|&(i, _)| i).find(|&i| t.nodes[i as usize].style.scroll[1]);
+      self.st.stack.iter().rev().map(|&(i, _)| i).find(|&i| t.nodes[i as usize].style.scroll.at(1));
     let area_id = area.map(|i| t.nodes[i as usize].id);
     // In `f64` throughout: a column of a million rows passes `f32`'s whole numbers.
     let sc = area_id.and_then(|a| self.st.scroll_exact(a));

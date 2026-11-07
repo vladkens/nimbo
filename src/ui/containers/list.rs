@@ -35,9 +35,10 @@
 //! `starts`) and a list of 100k rows in a thousand sections costs what one without them does. A
 //! header's box has the rows' side padding, its content at the bottom.
 //!
-//! The look is a plain list, or SwiftUI's `.listStyle(.insetGrouped)` with [List::inset_grouped]:
-//! each section's rows on a rounded plate as [Ui::form_list]'s, the header over it, the list's
-//! own selection and hover filling a row's piece of the plate.
+//! The look is a plain list, or [ListStyle::Grouped] ([List::list_style]): each section's rows on
+//! a rounded plate as a grouped form's ([FormStyle::plates]), the header over it, the list's
+//! own selection filling a row's piece of the plate. No hover fill, as SwiftUI's on macOS;
+//! [Row::hover] is there for an app that draws its own.
 //!
 //! The rows to build come from the scroll offset as of the last frame and the input since,
 //! clamped to the new content; when the layout shows more than was built (the viewport grew,
@@ -45,7 +46,8 @@
 //!
 //! Selection is by row key ([List::key], the index by default), never by visible element: it
 //! stays right when rows scroll out, are inserted above or the list is re-sorted. It lives in
-//! the app ([List::selection]) or the list's own state. A press selects; with [List::multi],
+//! the app ([List::selection]) or the list's own state. A press selects, on a row's text too,
+//! but one on a control in it (a button) is the control's, as in SwiftUI; with [List::multi],
 //! Cmd-click (Ctrl-click on Windows and Linux) toggles a row and Shift-click selects from the
 //! anchor; a secondary click selects the row alone unless it is selected, for the app's context
 //! menu ([Ui::context_menu]), which one off the rows (the scrollbar, a header) doesn't open. Keys,
@@ -66,16 +68,17 @@ use std::ops::Range;
 use keyboard_types::Modifiers;
 
 use crate::app::MouseButton;
-use crate::keys::{Binding, CMD, Command, Delete, Move, Os, bind};
+use crate::keys::{Binding, CMD, Command, Delete, Extent, Move, Os, Shortcut, bind};
 use crate::scene::{Frame, Point, Quad, Rect, alpha};
 use crate::text::FxHasher;
-use crate::ui::{Align, Cursor, FormStyle, Id, Role, State, Style, Ui, grow, px};
+use crate::ui::input::ScrollState;
+use crate::ui::{Align, Cursor, Focus, FormStyle, Id, Role, State, Style, Ui, grow, px};
 
 /// Rows built past each edge of the viewport.
 const OVERSCAN: usize = 2;
 
 /// Cmd-A selects every row of a multi-select list.
-const MULTI_KEYS: &[Binding] = &[bind("cmd+a", Command::SelectAll)];
+const MULTI_KEYS: &[Binding] = &[bind(Shortcut::char('a').cmd(), Command::SelectAll)];
 
 type KeySet = HashSet<u64, BuildHasherDefault<FxHasher>>;
 
@@ -272,6 +275,20 @@ impl Spans<'_> {
   }
 }
 
+/// A [List]'s look ([List::list_style]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ListStyle {
+  /// Rows edge to edge, a selected one filled, as SwiftUI's `.plain`.
+  #[default]
+  Plain,
+  /// Each section's rows on a rounded plate, as a grouped form's ([FormStyle::plates]): the
+  /// header above it, a hairline between rows (inside the row's height, at its top; none beside
+  /// a selected row), the selection filling a row's piece of the plate. The box is padded as a
+  /// form page and the rows as a form's, unless [List::style] or [List::row_style] say otherwise.
+  /// SwiftUI's `InsetGroupedListStyle` is this on iOS only; on macOS it has none.
+  Grouped,
+}
+
 /// A list's state in the store, under its id.
 #[derive(Default)]
 struct ListState {
@@ -298,10 +315,12 @@ pub struct List<'s> {
   /// The box and the rows' as the app set them, else the look's.
   style: Option<Style>,
   row: Option<Style>,
-  /// Rows filled from the theme when selected or hovered.
+  /// Rows filled from the theme when selected.
   fill: bool,
-  /// Each section's rows on a plate ([List::inset_grouped]).
-  grouped: bool,
+  /// Plain, or each section's rows on a plate ([List::list_style]).
+  look: ListStyle,
+  /// A plain click selects its row ([List::click_selects]).
+  clicks: bool,
 }
 
 impl<'s> List<'s> {
@@ -317,7 +336,8 @@ impl<'s> List<'s> {
       style: None,
       row: None,
       fill: true,
-      grouped: false,
+      look: ListStyle::Plain,
+      clicks: true,
     }
   }
 
@@ -340,7 +360,7 @@ impl<'s> List<'s> {
   /// Rows in sections, as SwiftUI's `Section(header:)`: section `g` starts at row `starts[g]`
   /// (ascending, none empty), under a header `head_h` high built with `head(ui, g)`, which
   /// takes no selection, focus or keys (see the module's docs). Rows before the first start have
-  /// none; inset grouped, a header but one at the top has the gap between plates above it, on
+  /// none; grouped, a header but one at the top has the gap between plates above it, on
   /// top of `head_h`. One slice and one callback rather than a section per value: the app keeps the
   /// starts it has, the list finds a row's place by a binary search of them, and it builds only
   /// the headers in view, as it does the rows.
@@ -358,13 +378,16 @@ impl<'s> List<'s> {
     Self { row: Some(row), ..self }
   }
 
-  /// Each section's rows on a rounded plate, as SwiftUI's `.listStyle(.insetGrouped)` and
-  /// [Ui::form_list]'s plates ([FormStyle::plates]): the header above it, a hairline between
-  /// rows (inside the row's height, at its top; none beside a selected row), the selection and
-  /// hover filling a row's piece of the plate. The box is padded as a form page and the rows as
-  /// a form's, unless [List::style] or [List::row_style] say otherwise.
-  pub fn inset_grouped(self) -> Self {
-    Self { grouped: true, ..self }
+  /// The list's look, as SwiftUI's `.listStyle` ([ListStyle]); plain by default.
+  pub fn list_style(self, look: ListStyle) -> Self {
+    Self { look, ..self }
+  }
+
+  /// Whether a plain click selects its row (yes by default, as SwiftUI's): with `false` it only
+  /// focuses the list, and Cmd-click, Shift-click and the keys select, a deviation from SwiftUI
+  /// for rows whose clicks go to their controls (a settings list to delete from).
+  pub fn click_selects(self, yes: bool) -> Self {
+    Self { clicks: yes, ..self }
   }
 
   /// Rows with no fill: the app draws selection and hover itself from [Row], the list keeps
@@ -384,7 +407,8 @@ impl<'s> List<'s> {
       ui.focus(None);
     }
 
-    let List { n, h, fill, multi, grouped, .. } = self;
+    let List { n, h, fill, multi, look, clicks, .. } = self;
+    let grouped = look == ListStyle::Grouped;
     let fs = FormStyle::plates(&t);
     let row = Style::new().w(grow()).align(Align::Start, Align::Center);
     let (style, row) = match grouped {
@@ -416,7 +440,7 @@ impl<'s> List<'s> {
     }
 
     if !disabled {
-      ui.list_press(id, &mut st, sel, &mut out, n, multi, &key);
+      ui.list_press(id, &mut st, sel, &mut out, n, (multi, clicks), &key);
     }
 
     // Scroll a row into view, by the last frame's viewport; the first and the last with the
@@ -437,10 +461,9 @@ impl<'s> List<'s> {
 
     let sel_bg = match focused {
       true => t.selection,
-      false => alpha(t.text, if t.dark { 0.10 } else { 0.08 }),
+      false => alpha(t.text, if t.scheme.is_dark() { 0.10 } else { 0.08 }),
     };
 
-    let hover_bg = alpha(t.text, 0.05);
     st.shown.clear();
     let mut shown = 0..0;
     if multi && !disabled {
@@ -488,11 +511,7 @@ impl<'s> List<'s> {
         let rid = id.key(("row", k));
         let selected = sel.contains(k);
         let hover = ui.hot(rid, !disabled && ui.hovered(rid));
-        let bg = match (fill, selected) {
-          (true, true) => sel_bg,
-          (true, false) => alpha(hover_bg, hover_bg[3] * hover),
-          _ => [0.0; 4],
-        };
+        let bg = if fill && selected { sel_bg } else { [0.0; 4] };
 
         ui.a11y(rid, Role::Row).state(State::Selected, selected);
         let cursor = sel.cursor.is_some_and(|c| c.0 == k);
@@ -566,7 +585,7 @@ impl<'a> Ui<'a> {
 
   /// A scroll container's offset as last set, before the layout clamps it.
   fn scroll_raw(&self, id: Id) -> Point {
-    let raw = self.st.store.peek::<crate::ui::input::ScrollState>(id);
+    let raw = self.st.store.peek::<ScrollState>(id);
     let raw = raw.map(|s| Point::new(s.offset[0] as f32, s.offset[1] as f32));
     raw.or_else(|| self.scroll(id).map(|s| s.offset)).unwrap_or_default()
   }
@@ -621,12 +640,12 @@ impl<'a> Ui<'a> {
       Command::Move(Down, s) => (step(1), s),
       Command::Move(PageUp, s) => (page(-1), s),
       Command::Move(PageDown, s) => (page(1), s),
-      Command::ScrollPageUp => (page(-1), false),
-      Command::ScrollPageDown => (page(1), false),
+      Command::ScrollPageUp => (page(-1), Extent::Caret),
+      Command::ScrollPageDown => (page(1), Extent::Caret),
       Command::Move(DocStart | LineStart, s) => (0, s),
       Command::Move(DocEnd | LineEnd, s) => (n - 1, s),
-      Command::ScrollToTop => (0, false),
-      Command::ScrollToBottom => (n - 1, false),
+      Command::ScrollToTop => (0, Extent::Caret),
+      Command::ScrollToBottom => (n - 1, Extent::Caret),
       Command::InsertNewline => {
         out.activated = cur;
         return;
@@ -651,7 +670,7 @@ impl<'a> Ui<'a> {
       }
     };
 
-    match shift && multi {
+    match shift == Extent::Selection && multi {
       true => sel.extend(to, n, key),
       false => sel.select(key(to), to),
     }
@@ -671,7 +690,7 @@ impl<'a> Ui<'a> {
     sel: &mut Selection,
     out: &mut ListResponse,
     n: usize,
-    multi: bool,
+    (multi, selects): (bool, bool),
     key: &dyn Fn(usize) -> u64,
   ) {
     // The secondary button's press, on Windows its release (a Control-click is the Mac's).
@@ -693,11 +712,12 @@ impl<'a> Ui<'a> {
     st.pressed = press.map(|p| p.seq).or(click.map(|c| c.seq)).or(st.pressed);
     let Some((on, mods, clicks, button, seq)) = hit else { return };
     let right = button == MouseButton::Right;
-    // Its index as built, a hint that saves a scan unless the rows moved since; a secondary
-    // press on an element in a row is the row's, unless that element has a menu of its own.
+    // Its index as built, a hint that saves a scan unless the rows moved since; a press on an
+    // element in a row is the row's (text with a tooltip), unless that element is a control
+    // (focusable: a button) or, for a secondary one, has a menu of its own, as in SwiftUI.
     let row = |on: Id| st.shown.iter().position(|&k| id.key(("row", k)) == on);
     let (t, mut own) = (&self.st.last, false);
-    let mut up = t.find(on).filter(|_| right);
+    let mut up = t.find(on);
     let at = row(on).or_else(|| {
       loop {
         let n = &t.nodes[up? as usize];
@@ -709,7 +729,7 @@ impl<'a> Ui<'a> {
           break None;
         }
 
-        own |= t.menus.contains(&n.id);
+        own |= if right { t.menus.contains(&n.id) } else { n.style.focus != Focus::None };
         up = Some(n.parent);
       }
     });
@@ -737,6 +757,8 @@ impl<'a> Ui<'a> {
 
         sel.select(k, i);
       }
+      // A plain click that doesn't select: the press focused the list.
+      _ if !selects && !mods.contains(CMD) && !mods.shift() => return,
       (_, true) => sel.click(i, mods, n, key),
       _ => sel.select(k, i),
     }
@@ -753,6 +775,8 @@ mod tests {
   use std::time::Duration;
 
   use super::*;
+  use crate::app::Event;
+  use crate::keys::CMD;
   use crate::scene::{Point, Size};
   use crate::ui::UiState;
   use crate::ui::layout::tests::Fake;
@@ -944,17 +968,17 @@ mod tests {
     // The window losing the keys: the selection turns from the accent to grey.
     let px = |h: &mut Harness<Rows>| h.render().pixel(b.x + 150.0, b.y + 10.0);
     let active = px(&mut h);
-    h.event(crate::app::Event::Focus(false));
+    h.event(Event::Focus(false));
     let inactive = px(&mut h);
     assert_ne!(active, inactive);
-    h.event(crate::app::Event::Focus(true));
+    h.event(Event::Focus(true));
     // The same again on one row: its press selects it, then the quick Cmd-click's toggles it.
     h.press(b.x + 5.0, b.y + 5.0);
     h.frame();
     h.move_to(250.0, 250.0);
     h.release(250.0, 250.0);
     h.move_to(b.x + 5.0, b.y + 5.0);
-    h.press_with(b.x + 5.0, b.y + 5.0, 1, crate::keys::CMD);
+    h.press_with(b.x + 5.0, b.y + 5.0, 1, CMD);
     h.release(b.x + 5.0, b.y + 5.0);
     assert!(h.app().sel.is_empty());
     h.click(b.x + 5.0, b.y + 5.0);
@@ -1101,7 +1125,7 @@ mod tests {
   impl crate::App for Plates {
     fn view(&mut self, ui: &mut Ui) {
       let head = |ui: &mut Ui, _: usize| ui.label("head");
-      let list = List::new(6, 20.0).sections(&[0, 3], 20.0, &head).inset_grouped();
+      let list = List::new(6, 20.0).sections(&[0, 3], 20.0, &head).list_style(ListStyle::Grouped);
       list.selection(&mut self.sel).show(ui.id("list"), |_, _| {});
     }
   }
@@ -1160,7 +1184,7 @@ mod tests {
     use crate::harness::Harness;
     let mut h = Harness::new(Counted::default(), Size::new(200.0, 200.0), 1.0);
     h.frame();
-    h.rt.ui.store.raw::<crate::ui::input::ScrollState>(Id::of("list")).offset[1] = 1_999_000.0;
+    h.rt.ui.store.raw::<ScrollState>(Id::of("list")).offset[1] = 1_999_000.0;
     h.rt.redraw();
     h.frame();
     let row = Id::of("list").key(("row", 99_955u64 * 7));
@@ -1194,23 +1218,50 @@ mod tests {
     assert_eq!(st.scroll(id).unwrap().offset.y, 0.0);
   }
 
-  /// Rows with a button each, an odd row's with a menu of its own, under the list's row menu.
+  /// Rows with a button each, an odd row's with a menu of its own, under the list's row menu,
+  /// and a text with an id of its own (a tooltip's); the buttons' clicks.
   #[derive(Default)]
   struct Buttons {
     sel: Selection,
+    clicks: usize,
   }
 
   impl crate::App for Buttons {
     fn view(&mut self, ui: &mut Ui) {
       let list = List::new(10, 20.0).multi().selection(&mut self.sel).style(Style::new().grow());
+      let mut clicks = 0;
       let r = list.show(ui.id("list"), |ui, row| {
+        ui.id(("t", row.index)).label("Tip");
         let b = ui.id(("b", row.index)).button("B");
+        clicks += b.clicked as usize;
         if row.index % 2 == 1 {
-          ui.context_menu(b.id, || crate::Menu::new(vec![crate::Item::new("own", "Own")]));
+          ui.context_menu(b.id, || crate::Menu::new(vec![crate::Item::button("own", "Own")]));
         }
       });
-      ui.context_menu(r.id, || crate::Menu::new(vec![crate::Item::new("row", "Row")]));
+      ui.context_menu(r.id, || crate::Menu::new(vec![crate::Item::button("row", "Row")]));
+      self.clicks += clicks;
     }
+  }
+
+  /// As in SwiftUI: a click on a button in a row is the button's, the selection as it was; one
+  /// on a row's text, named for a tooltip, selects the row, Cmd-click adding it.
+  #[test]
+  fn a_click_on_a_rows_button_is_the_buttons_on_its_text_the_rows() {
+    use crate::harness::Harness;
+    let mut h = Harness::new(Buttons::default(), Size::new(200.0, 200.0), 1.0);
+    h.frame();
+    h.click_id(Id::of(("t", 1)));
+    h.frame();
+    assert_eq!((h.app().sel.cursor(), h.app().clicks), (Some(1), 0));
+    h.click_id(Id::of(("b", 3)));
+    h.frame();
+    assert_eq!((sorted(&h.app().sel), h.app().clicks), (vec![1], 1));
+    let r = h.rect(Id::of(("t", 4))).unwrap();
+    let (x, y) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
+    h.press_with(x, y, 1, crate::CMD);
+    h.release(x, y);
+    h.frame();
+    assert_eq!(sorted(&h.app().sel), [1, 4]);
   }
 
   #[test]
@@ -1223,19 +1274,68 @@ mod tests {
       let r = h.rect(Id::of(("b", i))).unwrap();
       (r.x + r.w / 2.0, r.y + r.h / 2.0)
     };
-    let asked = |h: &mut Harness<Buttons>| h.context_menu(None).map(|(_, m)| m.items[0].id.clone());
+    let asked =
+      |h: &mut Harness<Buttons>| h.context_menu(None).map(|(_, m)| m.items[0].label().to_owned());
     // A button with no menu: its row's menu, that row selected.
     let (x, y) = at(&h, 2);
     h.right_click(x, y);
     h.frame();
-    assert_eq!(asked(&mut h).as_deref(), Some("row"));
+    assert_eq!(asked(&mut h).as_deref(), Some("Row"));
     assert_eq!(h.app().sel.cursor(), Some(2));
     // One with its own: that menu, the selection as it was.
     let (x, y) = at(&h, 3);
     h.right_click(x, y);
     h.frame();
-    assert_eq!(asked(&mut h).as_deref(), Some("own"));
+    assert_eq!(asked(&mut h).as_deref(), Some("Own"));
     assert_eq!(h.app().sel.cursor(), Some(2));
+  }
+
+  /// Ten rows a plain click doesn't select; the deletes asked.
+  #[derive(Default)]
+  struct Picky {
+    sel: Selection,
+    deletes: usize,
+  }
+
+  impl crate::App for Picky {
+    fn view(&mut self, ui: &mut Ui) {
+      let list = List::new(10, 20.0).multi().click_selects(false).selection(&mut self.sel);
+      let r = list.style(Style::new().grow()).show(ui.id("list"), |ui, _| ui.label("row"));
+      self.deletes += r.delete as usize;
+    }
+  }
+
+  /// With `click_selects(false)` a plain click only focuses the list; Cmd-click, Shift-click,
+  /// the arrows, Cmd-A and Delete work as ever.
+  #[test]
+  fn a_list_a_click_doesnt_select_selects_by_cmd_shift_and_keys() {
+    use keyboard_types::NamedKey;
+
+    use crate::harness::Harness;
+    let mut h = Harness::new(Picky::default(), Size::new(200.0, 300.0), 1.0);
+    h.frame();
+    let row = |k: u64| Id::of("list").key(("row", k));
+    let click = |h: &mut Harness<Picky>, k: u64, mods: Modifiers| {
+      let r = h.rect(row(k)).unwrap();
+      let (x, y) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
+      h.press_with(x, y, 1, mods);
+      h.release(x, y);
+      h.frame();
+    };
+    click(&mut h, 2, Modifiers::empty());
+    assert!(h.app().sel.is_empty() && h.focused() == Some(Id::of("list")), "focused only");
+    click(&mut h, 2, crate::CMD);
+    click(&mut h, 4, Modifiers::SHIFT);
+    assert_eq!(sorted(&h.app().sel), [2, 3, 4]);
+    h.key(NamedKey::ArrowDown, Modifiers::empty());
+    h.frame();
+    assert_eq!(sorted(&h.app().sel), [5]);
+    h.key('a', crate::CMD);
+    h.frame();
+    assert_eq!(h.app().sel.len(), 10);
+    h.key(NamedKey::Delete, Modifiers::empty());
+    h.frame();
+    assert_eq!(h.app().deletes, 1);
   }
 
   /// Two rows in a list with no menu, inside an element with one.
@@ -1247,7 +1347,7 @@ mod tests {
         let list = List::new(2, 20.0).style(Style::new().grow());
         list.show(ui.id("list"), |ui, _| ui.label("row"));
       });
-      ui.context_menu(r.id, || crate::Menu::new(vec![crate::Item::new("outer", "Outer")]));
+      ui.context_menu(r.id, || crate::Menu::new(vec![crate::Item::button("outer", "Outer")]));
     }
   }
 
@@ -1259,7 +1359,7 @@ mod tests {
     h.frame();
     h.right_click(100.0, 150.0);
     h.frame();
-    let asked = h.context_menu(None).map(|(_, m)| m.items[0].id.clone());
-    assert_eq!(asked.as_deref(), Some("outer"));
+    let asked = h.context_menu(None).map(|(_, m)| m.items[0].label().to_owned());
+    assert_eq!(asked.as_deref(), Some("Outer"));
   }
 }

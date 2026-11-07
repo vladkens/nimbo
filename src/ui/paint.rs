@@ -5,9 +5,9 @@
 //! children, clipped when it clips. Overlays follow, each in a new layer, by z. Elements outside
 //! the window or their clip are skipped; text by where its ink reaches, not its box.
 
-use super::layout::{ELLIPSIS, Kind, Tree};
+use super::layout::{ELLIPSIS, Elide, Kind, Tree};
 use super::textlayout::{Edit, TextLayout};
-use super::{Canvas, Clip, FocusRing, Style};
+use super::{Axis, Canvas, Clip, FocusRing, Style, TextStyle};
 use crate::scene::{Color, Frame, Quad, Rect};
 use crate::text::Ink;
 
@@ -64,8 +64,10 @@ fn edge_fade(t: &Tree, p: usize, color: Color, len: f32, alpha: f32, f: &mut Fra
 
     let (solid, clear) = (fade(color, a), fade(color, 0.0));
     let q = match k {
-      0 => Quad::new(Rect::new(r.x, r.y, r.w, len), solid).gradient(clear, true),
-      _ => Quad::new(Rect::new(r.x, r.y + r.h - len, r.w, len), clear).gradient(solid, true),
+      0 => Quad::new(Rect::new(r.x, r.y, r.w, len), solid).gradient(clear, Axis::Vertical),
+      _ => {
+        Quad::new(Rect::new(r.x, r.y + r.h - len, r.w, len), clear).gradient(solid, Axis::Vertical)
+      }
     };
 
     f.quad(q);
@@ -135,7 +137,7 @@ fn node(
 
   match n.kind {
     Kind::Box => {}
-    Kind::Text { range, style, lines, baseline, line_h } => {
+    Kind::Text { style, lines, baseline, line_h, .. } => {
       let edit = t.edit(i as u32).map(|k| &t.edits[k]);
       if let Some(e) = edit {
         selection(t, i, e, alpha, f);
@@ -155,14 +157,20 @@ fn node(
       for k in first..last {
         let l = &t.lines[k as usize];
         let y = r.y + (k - lines.0) as f32 * line_h + baseline;
-        let mut w = f.text(r.x, y, t.str(l.start, l.end), style.font, color);
-        if style.ellipsis && lines.1 - lines.0 == 1 && l.end < range.1 {
-          w += f.text(r.x + w, y, ELLIPSIS, style.font, color);
+        let body = t.str(l.start, l.end);
+        let parts = match l.elide {
+          Elide::None => [body, "", ""],
+          Elide::Tail => [body, ELLIPSIS, ""],
+          Elide::Head => [ELLIPSIS, body, ""],
+          Elide::Middle(a, b) => [t.str(l.start, a), ELLIPSIS, t.str(b, l.end)],
+        };
+
+        let mut w = 0.0;
+        for s in parts.into_iter().filter(|s| !s.is_empty()) {
+          w += f.text(r.x + w, y, s, style.font, color);
         }
 
-        if style.strike && w > 0.0 {
-          strike(r.x, y, w, style.font.size, color, f);
-        }
+        rule(r.x, y, w, style, color, f);
       }
 
       if let Some(e) = edit {
@@ -265,12 +273,37 @@ fn caret(t: &Tree, i: usize, e: &Edit, text: Color, baseline: f32, alpha: f32, f
   }
 }
 
-/// A strikethrough `w` wide from `x` over a line with its baseline at `y`: at half the
-/// x-height (about 0.53 em in SF Pro), a point thick up to 14 points, on whole pixels.
-fn strike(x: f32, y: f32, w: f32, size: f32, color: Color, f: &mut Frame) {
-  let h = (size / 14.0).max(1.0);
-  let top = ((y - size * 0.27 - h / 2.0) * f.scale).round() / f.scale;
-  f.rect(Rect::new(x, top, w, h), color, 0.0);
+/// The lines of a text's line `w` wide from `x` with its baseline at `y`: its strikethrough
+/// ([TextStyle::strikethrough]) at half the x-height (about 0.53 em in SF Pro) and its underline
+/// ([TextStyle::underline]) a sixth of an em under the baseline, a point thick up to 14 points,
+/// in their patterns ([LinePattern]). Each mark on whole pixels, so dots are even at any scale
+/// and offset.
+fn rule(x: f32, y: f32, w: f32, s: TextStyle, color: Color, f: &mut Frame) {
+  let sc = f.scale;
+  let snap = move |v: f32| (v * sc).round() / sc;
+  let (size, h) = (s.font.size, snap((s.font.size / 14.0).max(1.0)));
+  for (p, dy) in [(s.strikethrough, -size * 0.27 - h / 2.0), (s.underline, size / 6.0)] {
+    let Some(p) = p.filter(|_| w > 0.0) else { continue };
+    let marks = p.marks();
+    if marks.is_empty() {
+      f.rect(Rect::new(snap(x), snap(y + dy), w, h), color, 0.0);
+      continue;
+    }
+
+    // Marks and gaps in turn, a mark at every even place of the pattern, until the line ends.
+    let (mut at, mut k) = (0.0, 0);
+    while at < w {
+      // A dash ends with the line; a dot stays whole.
+      let m = marks[k % marks.len()];
+      let len = m * h;
+      if k % 2 == 0 {
+        let cut = if m > 1.0 { len.min(w - at) } else { len };
+        f.rect(Rect::new(snap(x + at), snap(y + dy), cut, h), color, 0.0);
+      }
+
+      (at, k) = (at + len, k + 1);
+    }
+  }
 }
 
 /// Shadow, background and border.
@@ -293,9 +326,11 @@ mod tests {
   use std::time::Duration;
 
   use super::*;
-  use crate::scene::{Images, Scene, Size};
+  use crate::scene::{Images, Point, Scene, Size};
   use crate::text::{Font, TextSystem};
-  use crate::ui::{Float, Id, Sys, TextStyle, Ui, UiState, px};
+  use crate::ui::{
+    Float, Id, LinePattern, Shadow, Sys, TextStyle, Ui, UiState, UnitPoint, grow, input, px,
+  };
 
   #[test]
   fn paints_tree_then_overlays() {
@@ -306,16 +341,13 @@ mod tests {
     let mut drawn = None;
     let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
     let panel = Style::new().w(px(100.0)).h(px(50.0)).bg([0.2, 0.2, 0.2, 1.0]);
-    ui.id("panel").col(
-      panel.shadow(crate::ui::Shadow::new(2.0, 4.0, [0.0, 0.0, 0.0, 0.5])).clip(),
-      |ui| {
-        ui.text("hi", label);
-        ui.float(Float::parent().attach(1.0, 0.0)).col(panel.opacity(0.5), |ui| {
-          ui.text("tip", label);
-        });
-        ui.canvas(Style::new().w(px(10.0)).h(px(10.0)), |_, r| drawn = Some(r));
-      },
-    );
+    ui.id("panel").col(panel.shadow(Shadow::new(2.0, 4.0, [0.0, 0.0, 0.0, 0.5])).clip(), |ui| {
+      ui.text("hi", label);
+      ui.float(Float::parent().attach(UnitPoint::TOP_TRAILING)).col(panel.opacity(0.5), |ui| {
+        ui.text("tip", label);
+      });
+      ui.canvas(Style::new().w(px(10.0)).h(px(10.0)), |_, r| drawn = Some(r));
+    });
     // Outside the window: not painted.
     ui.float(Float::window().offset(500.0, 0.0)).text("away", label);
     let mut sys = Sys { text: &mut text, images: &images, scale };
@@ -394,7 +426,7 @@ mod tests {
       (Scene::default(), TextSystem::new(scale), Images::default());
     let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
     // 12 above the window, 10 high, its shadow 4 lower with no blur: 2 rows of it show.
-    let shadow = crate::ui::Shadow::new(4.0, 0.0, [0.0, 0.0, 0.0, 1.0]);
+    let shadow = Shadow::new(4.0, 0.0, [0.0, 0.0, 0.0, 1.0]);
     let s = Style::new().w(px(20.0)).h(px(10.0)).bg([1.0; 4]).shadow(shadow);
     ui.float(Float::window().offset(0.0, -12.0)).el(s);
     ui.float(Float::window().offset(0.0, -40.0)).el(s);
@@ -424,7 +456,7 @@ mod tests {
       (Scene::default(), TextSystem::new(scale), Images::default());
     let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
     let black = [0.0, 0.0, 0.0, 1.0];
-    let shadow = crate::ui::Shadow::new(4.0, 0.0, black);
+    let shadow = Shadow::new(4.0, 0.0, black);
     ui.id("box").el(Style::new().w(px(20.0)).h(px(10.0)).bg([1.0; 4]).shadow(shadow));
     let mut sys = Sys { text: &mut text, images: &images, scale };
     ui.layout(&mut sys, scale);
@@ -457,7 +489,7 @@ mod tests {
     ui.col(Style::new().w(px(60.0)), |ui| {
       ui.id("plain").text("Buy milk", plain);
       // Wraps to two lines at 60 points.
-      ui.id("done").text("Buy milk and eggs", plain.strike());
+      ui.id("done").text("Buy milk and eggs", plain.strikethrough(LinePattern::Solid));
     });
     let mut sys = Sys { text: &mut text, images: &images, scale };
     ui.layout(&mut sys, scale);
@@ -487,6 +519,121 @@ mod tests {
   }
 
   #[test]
+  fn dotted_text_gets_dots_under_its_baseline() {
+    let (size, scale) = (Size::new(200.0, 100.0), 2.0);
+    let (mut scene, mut text, mut images) =
+      (Scene::default(), TextSystem::new(scale), Images::default());
+    let plain = TextStyle::new(Font::ui(11.0), [1.0, 0.0, 0.0, 1.0]);
+    let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
+    ui.col(Style::new(), |ui| ui.id("wer").text("WER 4.5%", plain.underline(LinePattern::Dot)));
+    let mut sys = Sys { text: &mut text, images: &images, scale };
+    ui.layout(&mut sys, scale);
+    let mut f = Frame {
+      size,
+      scale,
+      mouse: None,
+      now: Duration::ZERO,
+      scene: &mut scene,
+      text: &mut text,
+      images: &mut images,
+      animate: false,
+    };
+    let st = ui.paint(&mut f);
+    let quads = &scene.layers()[0].quads;
+    let wer = st.last.get(Id::of("wer")).unwrap();
+    let Kind::Text { baseline, .. } = wer.kind else { panic!() };
+    let base = wer.rect.y + baseline;
+    // A point square every two from the text's left, under its baseline, as far as its ink.
+    assert!(quads.len() > 10, "{} dots", quads.len());
+    for (k, q) in quads.iter().enumerate() {
+      assert_eq!((q.rect.x, q.rect.w, q.rect.h), (wer.rect.x + 2.0 * k as f32, 1.0, 1.0));
+      assert!(q.rect.y > base && q.rect.y < base + 3.0, "{:?} under {base}", q.rect);
+      assert_eq!(q.color, plain.color);
+    }
+
+    assert!(quads.last().unwrap().rect.x < wer.rect.x + wer.rect.w);
+  }
+
+  /// Each pattern's marks and gaps in line thicknesses, at 1×: a dash three dots long, a gap a
+  /// dot, repeating until the line ends.
+  #[test]
+  fn line_patterns_alternate_marks_and_gaps() {
+    let size = Size::new(300.0, 60.0);
+    let marks = |p: LinePattern| {
+      let (mut scene, mut text, mut images) =
+        (Scene::default(), TextSystem::new(1.0), Images::default());
+      let s = TextStyle::new(Font::ui(13.0), [1.0, 0.0, 0.0, 1.0]).underline(p);
+      let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
+      ui.col(Style::new(), |ui| ui.text("Patterned text", s));
+      let mut sys = Sys { text: &mut text, images: &images, scale: 1.0 };
+      ui.layout(&mut sys, 1.0);
+      let mut f = Frame {
+        size,
+        scale: 1.0,
+        mouse: None,
+        now: Duration::ZERO,
+        scene: &mut scene,
+        text: &mut text,
+        images: &mut images,
+        animate: false,
+      };
+      ui.paint(&mut f);
+      let q: Vec<(f32, f32)> =
+        scene.layers()[0].quads.iter().map(|q| (q.rect.x, q.rect.w)).collect();
+      q
+    };
+    let widths = |p| marks(p).iter().take(6).map(|q| q.1).collect::<Vec<_>>();
+    assert_eq!(marks(LinePattern::Solid).len(), 1);
+    assert_eq!(widths(LinePattern::Dot), [1.0; 6]);
+    assert_eq!(widths(LinePattern::Dash), [3.0; 6]);
+    assert_eq!(widths(LinePattern::DashDot), [3.0, 1.0, 3.0, 1.0, 3.0, 1.0]);
+    assert_eq!(widths(LinePattern::DashDotDot), [3.0, 1.0, 1.0, 3.0, 1.0, 1.0]);
+    // A dot's gap after a dash.
+    let dd = marks(LinePattern::DashDot);
+    assert_eq!(dd[1].0 - dd[0].0, 4.0);
+  }
+
+  /// At 1.5× from a fractional x, struck and dotted: the line once, the dots on whole pixels,
+  /// as wide and as far apart in each.
+  #[test]
+  fn dots_keep_to_whole_pixels_with_a_strike() {
+    let (size, scale) = (Size::new(200.0, 100.0), 1.5);
+    let (mut scene, mut text, mut images) =
+      (Scene::default(), TextSystem::new(scale), Images::default());
+    let both = TextStyle::new(Font::ui(11.0), [1.0, 0.0, 0.0, 1.0])
+      .underline(LinePattern::Dot)
+      .strikethrough(LinePattern::Solid);
+    let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
+    ui.row(Style::new().pads([0.0, 0.0, 0.0, 10.3]), |ui| ui.id("t").text("WER 4.5%", both));
+    let mut sys = Sys { text: &mut text, images: &images, scale };
+    ui.layout(&mut sys, scale);
+    let mut f = Frame {
+      size,
+      scale,
+      mouse: None,
+      now: Duration::ZERO,
+      scene: &mut scene,
+      text: &mut text,
+      images: &mut images,
+      animate: false,
+    };
+    ui.paint(&mut f);
+    let quads = &scene.layers()[0].quads;
+    let (line, dots) = quads.split_first().unwrap();
+    assert!(line.rect.w > 20.0, "the strike: {:?}", line.rect);
+    let px = |v: f32| v * scale;
+    let whole = |v: f32| (px(v) - px(v).round()).abs() < 1e-3;
+    assert!(dots.len() > 10);
+    for (k, q) in dots.iter().enumerate() {
+      assert!(whole(q.rect.x) && whole(q.rect.y) && whole(q.rect.w) && whole(q.rect.h), "{q:?}");
+      assert_eq!((px(q.rect.w).round(), px(q.rect.h).round()), (2.0, 2.0));
+      if k > 0 {
+        assert_eq!(px(q.rect.x - dots[k - 1].rect.x).round(), 4.0, "dot {k}");
+      }
+    }
+  }
+
+  #[test]
   fn canvas_children_lay_out_and_paint_over_it() {
     let (size, scale) = (Size::new(200.0, 100.0), 1.0);
     let (mut scene, mut text, mut images) =
@@ -497,8 +644,8 @@ mod tests {
       f.text(r.x + 12.0, r.y + 24.0, "chart", Font::ui(13.0), [1.0; 4]);
     };
     ui.id("chart").canvas_row(Style::new().w(px(120.0)).h(px(80.0)).pad(10.0), paint, |ui| {
-      ui.id("plot").el(Style::new().w(crate::ui::grow()).h(crate::ui::grow()).bg([1.0; 4]));
-      ui.id("axis").el(Style::new().w(px(30.0)).h(crate::ui::grow()));
+      ui.id("plot").el(Style::new().w(grow()).h(grow()).bg([1.0; 4]));
+      ui.id("axis").el(Style::new().w(px(30.0)).h(grow()));
     });
     let mut sys = Sys { text: &mut text, images: &images, scale };
     ui.layout(&mut sys, scale);
@@ -528,7 +675,7 @@ mod tests {
     assert_eq!((layers[1].quads.len(), layers[1].quads[0].color), (1, [1.0; 4]));
     // Children take the pointer, innermost first.
     let mut hits = Vec::new();
-    crate::ui::input::hit(&st.last, crate::scene::Point::new(20.0, 20.0), &mut hits);
+    input::hit(&st.last, Point::new(20.0, 20.0), &mut hits);
     assert_eq!(hits, [Id::of("plot"), Id::of("chart")]);
   }
 }

@@ -14,7 +14,7 @@
 use std::f32::consts::TAU;
 
 use nimbo::{
-  App, Color, Config, Cx, Event, Frame, ImageId, Point, Quad, Rect, Size, alpha, mix, rgb,
+  App, Axis, Color, Config, Cx, Event, Frame, ImageId, Point, Quad, Rect, Size, alpha, mix, rgb,
 };
 
 pub const SIZE: Size = Size::new(480.0, 340.0);
@@ -119,7 +119,7 @@ fn disc() -> Vec<u8> {
 impl App for Shapes {
   fn event(&mut self, _cx: &mut Cx, ev: &Event) -> bool {
     match ev {
-      Event::Appearance(a) => self.light = !a.dark,
+      Event::Appearance(a) => self.light = !a.scheme.is_dark(),
       _ => return false,
     }
 
@@ -138,8 +138,8 @@ impl App for Shapes {
     let drop = Rect { y: LIFTED.y + SHADOW_DROP, ..LIFTED };
     f.shadow(drop, 12.0, SHADOW_BLUR, p.shadow);
     f.quad(Quad::new(LIFTED, p.surface).radius(12.0).borders([0.0, 0.0, 0.0, ACCENT_W], AMBER));
-    f.quad(Quad::new(DOWN, BLUE).radius(12.0).gradient(GREEN, true));
-    f.quad(Quad::new(ACROSS, RED).radius(12.0).gradient(alpha(RED, 0.0), false));
+    f.quad(Quad::new(DOWN, BLUE).radius(12.0).gradient(GREEN, Axis::Vertical));
+    f.quad(Quad::new(ACROSS, RED).radius(12.0).gradient(alpha(RED, 0.0), Axis::Horizontal));
     let image = *self.image.get_or_insert_with(|| f.images().add(IMAGE_N, IMAGE_N, &disc()));
     f.image(image, PICTURE, 1.0);
 
@@ -164,5 +164,5 @@ impl App for Shapes {
 }
 
 fn main() {
-  nimbo::run(Config::new("shapes", SIZE.w, SIZE.h), Shapes::default(), |_| {});
+  nimbo::run_example(Config::new("shapes", SIZE.w, SIZE.h), Shapes::default(), |_| {});
 }

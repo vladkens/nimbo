@@ -54,5 +54,5 @@ impl App for Pace {
 }
 
 fn main() {
-  nimbo::run(Config::new("pace", SIZE.w, SIZE.h).fixed(), Pace::default(), |_| {});
+  nimbo::run_example(Config::new("pace", SIZE.w, SIZE.h).fixed(), Pace::default(), |_| {});
 }

@@ -3,10 +3,13 @@
 //! The launcher entry ([crate::desktop]) on Windows: none to write, the executable carries
 //! the name and icon.
 
-pub fn install(_: &crate::AppInfo, _: &crate::desktop::Launcher) -> Result<bool, String> {
+use crate::AppInfo;
+use crate::desktop::Launcher;
+
+pub fn install(_: &AppInfo, _: &Launcher) -> Result<bool, String> {
   Ok(false)
 }
 
-pub fn uninstall(_: &crate::AppInfo) -> Result<(), String> {
+pub fn uninstall(_: &AppInfo) -> Result<(), String> {
   Ok(())
 }

@@ -26,7 +26,7 @@ use std::time::Duration;
 use common::{mid, px, reads};
 use nimbo::ui::Action;
 use nimbo::{
-  Appearance, Code, Event, Harness, Hotkey, Id, Key, Modifiers, NamedKey, Rect, Size, Theme,
+  Appearance, Code, Event, Harness, Hotkey, Id, Key, Modifiers, NamedKey, Rect, Size, Theme, hotkey,
 };
 use settings::*;
 
@@ -42,7 +42,7 @@ fn key(h: &mut H, k: impl Into<Key>) {
 
 /// Turns to `page` by a click on its tab, laid out and resized.
 fn turn(h: &mut H, page: Page) {
-  let i = PAGES.iter().position(|p| p.0 == page).unwrap();
+  let i = PAGES.iter().position(|p| p.value == page).unwrap();
   h.click_id(Id::of(TABS).key(i));
   h.wait(Duration::from_millis(50));
   assert_eq!(h.app().page, page);
@@ -118,7 +118,7 @@ fn general_switches_select_and_recorder() {
   h.event(Event::Modifier { key: Code::AltRight, down: true });
   h.event(Event::Modifier { key: Code::AltRight, down: false });
   // Where the platform grabs no modifier alone (Linux) it records nothing, and Escape stops it.
-  let lone = match nimbo::hotkey::modifier_alone() {
+  let lone = match hotkey::modifier_alone() {
     true => "right_option",
     false => {
       key(&mut h, NamedKey::Escape);

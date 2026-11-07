@@ -3,7 +3,7 @@
 //! The app around the windows: an event loop that runs with no window ([app]), windows opened and
 //! closed on demand ([Main::open]), each with its own runtime, where the app shows besides them
 //! ([Presence]), and the way other threads reach the main thread ([Proxy]).
-//! [crate::run] is one window on top of it, quitting when it closes.
+//! An example's window ([crate::run_example]) is one window on top of it, quitting when it closes.
 //!
 //! Everything here runs on the main thread: [Main] is its token, given to the start closure, to
 //! [Proxy]'s closures and to the callbacks, and never leaves it. Each OS implements it in
@@ -21,9 +21,11 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use crate::instance::{Command, Instance, OPEN, QUIT};
+#[cfg(any(windows, target_os = "linux"))]
+use crate::platform;
 use crate::platform::shell as imp;
 use crate::system::{self, Change};
-use crate::{App, Config, Event, Point, Size};
+use crate::{App, Config, Event, Point, Size, paste};
 
 /// The app as the OS knows it.
 #[derive(Clone, Copy, Debug)]
@@ -208,7 +210,7 @@ fn handle(main: &mut Main, cmd: &Command, quit: &dyn Fn(&mut Main)) {
   let _unused = hooks(|h| h.token.take()).filter(|t| !t.1);
   #[cfg(target_os = "linux")]
   if let Some((token, _)) = _unused {
-    crate::platform::startup_complete(&token);
+    platform::startup_complete(&token);
   }
 }
 
@@ -280,7 +282,7 @@ pub(crate) fn finish(close: impl Fn(u64)) {
     f(&mut Main::here());
   }
 
-  crate::paste::finish();
+  paste::finish();
 
   for id in windows() {
     close(id);
@@ -288,7 +290,7 @@ pub(crate) fn finish(close: impl Fn(u64)) {
 }
 
 /// One window running `app` with the loop around it, which ends when the window closes or the
-/// app quits: [crate::run] without `--shot`.
+/// app quits: [crate::run_example] without `--shot`.
 pub(crate) fn window(cfg: &Config, app: Box<dyn App>) {
   let exe = std::env::current_exe().ok();
   let stem = exe.as_ref().and_then(|p| Some(p.file_stem()?.to_str()?.to_owned()));
@@ -310,7 +312,7 @@ pub(crate) fn window(cfg: &Config, app: Box<dyn App>) {
 /// after the prompt, and closing that console would end it without its quit hook.
 pub fn attach_console() {
   #[cfg(windows)]
-  crate::platform::attach_console();
+  platform::attach_console();
 }
 
 /// The main thread while the app runs: only code on it gets one (`start`, [Proxy]'s closures,

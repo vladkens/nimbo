@@ -29,7 +29,9 @@ use nimbo::hotkey::{Edge, Hotkeys};
 use nimbo::instance::{self, Claim, Instance};
 use nimbo::paste::Paste;
 use nimbo::tray::{Item, Menu, Tray, TrayIcon};
-use nimbo::{AppInfo, Config, Main, Png, Presence, Window, autostart, desktop};
+use nimbo::{
+  AppInfo, Config, Main, Png, Presence, Shortcut, Window, autostart, desktop, focus, paste, tray,
+};
 
 pub const INFO: AppInfo =
   AppInfo { id: "com.example.nimbo-tray", name: "Nimbo Tray", presence: Presence::Accessory };
@@ -46,7 +48,17 @@ pub struct Shown {
   pub hotkey: String,
 }
 
-pub fn menu(s: &Shown) -> Menu {
+/// What the tray's menu does; its status line does nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Action {
+  None,
+  Toggle,
+  Login,
+  Paste,
+  Quit,
+}
+
+pub fn menu(s: &Shown) -> Menu<Action> {
   let (toggle, status) = match s.count {
     Some(n) => ("Close Counter", format!("Count: {n}")),
     None if s.hotkey.is_empty() => ("Open Counter", "No hotkey".into()),
@@ -54,13 +66,14 @@ pub fn menu(s: &Shown) -> Menu {
   };
 
   Menu::new(vec![
-    Item::new("status", &status).enabled(false),
-    Item::new("toggle", toggle),
-    Item::separator(),
-    Item::new("login", "Launch at Login").checked(s.login == Some(true)).enabled(s.login.is_some()),
-    Item::new("paste", "Paste a Line in 3 Seconds"),
-    Item::separator(),
-    Item::new("quit", "Quit").key("cmd+q"),
+    Item::button(Action::None, &status).enabled(false),
+    Item::button(Action::Toggle, toggle),
+    Item::Divider,
+    Item::toggle(Action::Login, "Launch at Login", s.login == Some(true))
+      .enabled(s.login.is_some()),
+    Item::button(Action::Paste, "Paste a Line in 3 Seconds"),
+    Item::Divider,
+    Item::button(Action::Quit, "Quit").key(Shortcut::char('q').cmd()),
   ])
 }
 
@@ -114,8 +127,8 @@ fn show(main: &mut Main, state: &Shared) {
 /// Pastes `text` where the user types now: the clipboard comes back after the paste, unless
 /// something else was copied meanwhile.
 fn paste(text: &str) {
-  let opts = Paste { restore: true, target: nimbo::focus::current(), deadline: None };
-  if let Err(e) = nimbo::paste::text(text, opts) {
+  let opts = Paste { restore: true, target: focus::current(), deadline: None };
+  if let Err(e) = paste::text(text, opts) {
     eprintln!("paste: {e}");
   }
 }
@@ -136,7 +149,7 @@ fn start(main: &mut Main, instance: Option<Instance>) {
 
   let state = STATE.with(Rc::clone);
   let tray = Tray::new(TrayIcon::Path { size: 18.0, d: ICON.into(), even_odd: true }, INFO.name);
-  if let Err(e) = nimbo::tray::available() {
+  if let Err(e) = tray::available() {
     eprintln!("tray: {e}");
   }
 
@@ -164,22 +177,22 @@ fn start(main: &mut Main, instance: Option<Instance>) {
   }
 
   state.borrow_mut().hotkeys = Some(hotkeys);
-  let refresh = |t: &Tray, state: &Shared| t.set_menu(&menu(&shown(state)));
+  let refresh = |t: &Tray<Action>, state: &Shared| t.set_menu(&menu(&shown(state)));
   refresh(&tray, &state);
   let s = state.clone();
   tray.on_open(move |_, t| refresh(t, &s));
-  tray.on_item(move |main, t, id| {
-    match id {
-      "toggle" => toggle(main, &state),
-      "login" => {
+  tray.on_item(move |main, t, action| {
+    match action {
+      Action::Toggle => toggle(main, &state),
+      Action::Login => {
         let on = !shown(&state).login.unwrap_or(false);
         if let Err(e) = autostart::set(&INFO, on) {
           eprintln!("launch at login: {e}");
         }
       }
-      "paste" => main.proxy().after(Duration::from_secs(3), |_| paste("Hello from nimbo")),
-      "quit" => main.quit(),
-      _ => {}
+      Action::Paste => main.proxy().after(Duration::from_secs(3), |_| paste("Hello from nimbo")),
+      Action::Quit => main.quit(),
+      Action::None => {}
     }
 
     refresh(t, &state);
@@ -200,7 +213,9 @@ fn start(main: &mut Main, instance: Option<Instance>) {
 
 fn main() {
   if std::env::args().any(|a| a == "--shot") {
-    return nimbo::run(Config::new("Counter", 360.0, 300.0), Counter::default(), |h| _ = h.frame());
+    return nimbo::run_example(Config::new("Counter", 360.0, 300.0), Counter::default(), |h| {
+      _ = h.frame()
+    });
   }
 
   // One instance: a second launch asks the first to show the counter, and ends.

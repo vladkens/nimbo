@@ -3,47 +3,47 @@
 //! The segmented control: segments side by side, one selected, over the pick behaviour
 //! ([Ui::pick_behavior]).
 
-use super::select::Choice;
 use crate::scene::alpha;
-use crate::ui::{Align, Response, Role, Style, Ui, Value, grow, px, rigid};
+use crate::ui::{Align, Response, Role, Style, Tag, Ui, Value, grow, px, rigid};
 
 impl Ui<'_> {
   /// Segments side by side, one selected (`cur`): view modes, zoom levels, filters with counts.
-  /// `options` are `(value, label)` or `(value, label, count)`, the count drawn after the
-  /// label, dimmed ([Choice]). The segments are `id.key(i)`; a click picks one, Left and Right
-  /// step a focused control. Flat ([crate::Theme::flat]), System Settings' look: one raised
-  /// capsule, the selected segment the accent over it, dividers between unselected ones; else a
-  /// bordered box holding inset segments. `changed` when `cur` changed.
-  pub fn segmented<T: PartialEq + Copy, S: Choice<T>>(
-    &mut self,
-    cur: &mut T,
-    options: &[S],
-  ) -> Response {
+  /// `options` are [Tag]s, as SwiftUI's `Picker` in the `.segmented` style, a tag's count
+  /// ([Tag::count]) drawn after its label, dimmed. The segments are `id.key(i)`; a click picks one,
+  /// Left and Right step a focused control. Flat ([crate::Theme::flat]), System Settings' look: one
+  /// raised capsule, the selected segment the accent over it, dividers between unselected ones;
+  /// else a bordered box holding inset segments. `changed` when `cur` changed.
+  pub fn segmented<T: PartialEq + Copy>(&mut self, cur: &mut T, options: &[Tag<T>]) -> Response {
     let t = self.theme();
     let id = self.take_id();
     let was = *cur;
-    let mut at = options.iter().position(|o| o.value() == *cur);
+    let mut at = options.iter().position(|o| o.value == *cur);
     let b = self.pick_behavior(id, options.len(), |i| id.key(i), &mut at);
     self.a11y(id, Role::RadioGroup);
     if b.changed
       && let Some(i) = at
     {
-      *cur = options[i].value();
+      *cur = options[i].value;
     }
 
     let (off, flat, h) = (b.disabled, t.flat(), t.sizes.control_h);
     let frame = match flat {
       true => Style::new().h(px(h)).bg(t.raised).radius(t.radius),
-      false => Style::new().h(px(h)).pad(2.0).gap(2.0).radius(t.radius).border(t.border, t.line),
+      false => Style::new()
+        .h(px(h))
+        .pad(2.0)
+        .gap(2.0)
+        .radius(t.radius)
+        .border(t.control_border.width(), t.line),
     };
 
     // Its labels' width: text beside it wraps instead.
     let frame = self.control(frame.w(rigid()), &b);
     let n = options.len();
-    let on_at = |i: usize| options.get(i).is_some_and(|o| o.value() == *cur);
+    let on_at = |i: usize| options.get(i).is_some_and(|o| o.value == *cur);
     // macOS's divider, 1 × 14: #bdbdbd on the light capsule, #6d6d6d on the dark one.
-    let ink = if t.dark { [1.0; 4] } else { [0.0, 0.0, 0.0, 1.0] };
-    let divider = alpha(ink, if t.dark { 0.26 } else { 0.18 });
+    let ink = if t.scheme.is_dark() { [1.0; 4] } else { [0.0, 0.0, 0.0, 1.0] };
+    let divider = alpha(ink, if t.scheme.is_dark() { 0.26 } else { 0.18 });
     let mut r = self.with_id(id).row(frame, |ui| {
       for (i, o) in options.iter().enumerate() {
         let seg = id.key(i);
@@ -63,8 +63,8 @@ impl Ui<'_> {
         let s = Style::new().h(grow()).pad_xy(pad, 0.0).gap(5.0).center();
         let radius = if flat { t.radius } else { t.radius - 2.0 };
         ui.with_id(seg).row(b.pointer(s.radius(radius).bg(bg)), |ui| {
-          ui.text(o.label(), text);
-          if let Some(n) = o.count() {
+          ui.text(o.label, text);
+          if let Some(n) = o.count {
             ui.text(n, text.color(alpha(text.color, 0.65)).nowrap());
           }
         });
@@ -87,13 +87,20 @@ mod tests {
   use crate::app::App;
   use crate::harness::Harness;
   use crate::scene::Size;
-  use crate::ui::{Id, Ui};
+  use crate::ui::{Id, Style, Tag, Ui, px};
 
   struct Seg(u8);
 
   impl App for Seg {
     fn view(&mut self, ui: &mut Ui) {
-      ui.id("v").segmented(&mut self.0, &[(1, "List", 12), (2, "Grid", 3), (3, "Columns", 0)]);
+      ui.id("v").segmented(
+        &mut self.0,
+        &[
+          Tag::new(1, "List").count(12),
+          Tag::new(2, "Grid").count(3),
+          Tag::new(3, "Columns").count(0),
+        ],
+      );
     }
   }
 
@@ -102,9 +109,9 @@ mod tests {
 
   impl App for Beside {
     fn view(&mut self, ui: &mut Ui) {
-      ui.row(crate::ui::Style::new().w(crate::ui::px(self.0)), |ui| {
+      ui.row(Style::new().w(px(self.0)), |ui| {
         ui.label("A note beside the control that wraps");
-        ui.id("v").segmented(&mut 1, &[(1, "List"), (2, "Grid")]);
+        ui.id("v").segmented(&mut 1, &[Tag::new(1, "List"), Tag::new(2, "Grid")]);
       });
     }
   }

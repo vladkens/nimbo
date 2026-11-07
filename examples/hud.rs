@@ -97,7 +97,7 @@ pub fn shot(h: &mut nimbo::Harness<Hud>) {
 
 fn main() {
   if std::env::args().any(|a| a == "--shot") {
-    return nimbo::run(CONFIG, Hud::default(), shot);
+    return nimbo::run_example(CONFIG, Hud::default(), shot);
   }
 
   nimbo::app(INFO, start);

@@ -7,7 +7,7 @@
 //!
 //! ```ignore
 //! ui.icon(Icon::INFO, 16.0, t.muted);
-//! ui.with_id(id).canvas(s, move |f, r| icon::draw(f, Icon::RESET, r, color, 1.5));
+//! ui.with_id(id).canvas(s, move |f, r| icon::draw(f, Icon::RESET.stroke(1.5), r, color));
 //! if ui.icon_button(Icon::TRASH).clicked { self.ask = true }
 //! ```
 //!
@@ -16,30 +16,56 @@
 //! smoothed by a hairline of its outline. Draw icons in an opaque colour: the round joints of a
 //! translucent one overlap darker. [Ui::icon] dims an icon in a disabled scope by mixing it
 //! toward the ground instead. The built-in set is drawn for nimbo, thinner than Lucide's:
-//! stroke them 1.6 units wide ([Ui::icon_stroke]).
+//! stroke them 1.6 units wide ([Icon::stroke]).
 
 use crate::scene::{Color, Frame, Point, Rect};
 use crate::svg::{flatten, spans};
 use crate::ui::{Response, Style, Ui, px};
 
 /// SVG path data in a 24 × 24 view box, drawn as a stroke or filled ([draw], [Ui::icon]).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Icon {
   /// The path data.
   pub d: &'static str,
-  /// Filled rather than stroked: a play triangle.
-  pub fill: bool,
+  /// How it is drawn: stroked, or filled (a play triangle).
+  pub paint: IconPaint,
+}
+
+/// How an [Icon] is drawn, as SF Symbols' rendering: a stroke, of the width the app gave it in
+/// view box units ([Icon::stroke]) or, with none given, of the widget's that draws it (a
+/// button's 1.6, [Ui::icon]'s Lucide's 2: [Icon::default_stroke]); or a fill.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum IconPaint {
+  Stroke(Option<f32>),
+  Fill,
 }
 
 impl Icon {
   /// A stroked icon from path data `d`.
   pub const fn new(d: &'static str) -> Self {
-    Self { d, fill: false }
+    Self { d, paint: IconPaint::Stroke(None) }
   }
 
   /// A filled one.
   pub const fn filled(d: &'static str) -> Self {
-    Self { d, fill: true }
+    Self { d, paint: IconPaint::Fill }
+  }
+
+  /// Stroked `width` view box units wide, as SwiftUI's `fontWeight` on a symbol: 1.6 for the
+  /// built-in ones beside text. A filled icon stays filled.
+  pub const fn stroke(self, width: f32) -> Self {
+    match self.paint {
+      IconPaint::Fill => self,
+      IconPaint::Stroke(_) => Self { paint: IconPaint::Stroke(Some(width)), ..self },
+    }
+  }
+
+  /// Stroked `width` wide if the app gave it no width: a widget's own width for its icons.
+  pub const fn default_stroke(self, width: f32) -> Self {
+    match self.paint {
+      IconPaint::Stroke(None) => self.stroke(width),
+      _ => self,
+    }
   }
 
   /// A gear of eight teeth.
@@ -159,7 +185,7 @@ const VIEW: f32 = 24.0;
 
 /// Draws `icon` into `r` (its view box stretched over it) in `color`, stroked `width` view box
 /// units wide (Lucide's are 2), or filled. Data that doesn't parse draws as far as it parsed.
-pub fn draw(f: &mut Frame, icon: Icon, r: Rect, color: Color, width: f32) {
+pub fn draw(f: &mut Frame, icon: Icon, r: Rect, color: Color) {
   let (kx, ky) = (r.w / VIEW, r.h / VIEW);
   let mut lines = Vec::new();
   _ = flatten(icon.d, kx.max(ky) * f.scale, &mut lines);
@@ -167,12 +193,16 @@ pub fn draw(f: &mut Frame, icon: Icon, r: Rect, color: Color, width: f32) {
     *p = Point::new(r.x + p.x * kx, r.y + p.y * ky);
   }
 
-  if icon.fill {
-    fill(f, &lines, color);
-  }
-
   // A filled icon's outline a pixel wide, over the fill's edges.
-  let stroke = if icon.fill { 1.0 / f.scale } else { width * kx.min(ky) };
+  let stroke = match icon.paint {
+    IconPaint::Fill => {
+      fill(f, &lines, color);
+      1.0 / f.scale
+    }
+    // Drawn with no width given: Lucide's.
+    IconPaint::Stroke(w) => w.unwrap_or(2.0) * kx.min(ky),
+  };
+
   for l in &lines {
     f.polyline(l, stroke, color);
   }
@@ -194,26 +224,23 @@ fn fill(f: &mut Frame, polys: &[Vec<Point>], color: Color) {
 }
 
 impl Ui<'_> {
-  /// `icon` `size` points square in `color`, stroked as Lucide draws it at 24 points (thinner
-  /// below: 1.5 points at 18). Dimmed toward the ground in a disabled scope
-  /// ([Ui::disabled_scope]).
+  /// `icon` `size` points square in `color`, as SwiftUI's `Image(systemName:)`: stroked as
+  /// its paint says ([Icon::stroke]), by default as Lucide draws it at 24 points (thinner below:
+  /// 1.5 points at 18). Disabled ([Ui::disabled], on it or a container around it), dimmed toward
+  /// the ground.
   pub fn icon(&mut self, icon: Icon, size: f32, color: Color) -> Response {
-    self.icon_stroke(icon, size, color, 2.0)
-  }
-
-  /// [Ui::icon] stroked `width` view box units wide: 1.6 for the built-in ones. Disabled
-  /// ([Ui::disabled], or in a disabled scope), dimmed toward the ground.
-  pub fn icon_stroke(&mut self, icon: Icon, size: f32, color: Color, width: f32) -> Response {
     let off = self.take_disabled();
     let color = self.dim(color, off);
     let s = Style::new().w(px(size)).h(px(size));
-    self.canvas(s, move |f, r| draw(f, icon, r, color, width))
+    self.canvas(s, move |f, r| draw(f, icon.default_stroke(2.0), r, color))
   }
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::app::App;
+  use crate::ui::grow;
 
   #[test]
   fn every_built_in_icon_parses_whole() {
@@ -230,9 +257,9 @@ mod tests {
   /// Play, filled, and the same path stroked.
   struct Icons;
 
-  impl crate::app::App for Icons {
+  impl App for Icons {
     fn view(&mut self, ui: &mut Ui) {
-      let row = Style::new().w(crate::ui::grow()).h(crate::ui::grow()).bg([1.0; 4]);
+      let row = Style::new().w(grow()).h(grow()).bg([1.0; 4]);
       ui.row(row, |ui| {
         ui.icon(Icon::PLAY, 48.0, [0.0, 0.0, 0.0, 1.0]);
         ui.icon(Icon::new(Icon::PLAY.d), 48.0, [0.0, 0.0, 0.0, 1.0]);
@@ -258,9 +285,9 @@ mod tests {
   /// touching between pixels.
   struct Nested;
 
-  impl crate::app::App for Nested {
+  impl App for Nested {
     fn view(&mut self, ui: &mut Ui) {
-      let row = Style::new().w(crate::ui::grow()).h(crate::ui::grow()).bg([1.0; 4]);
+      let row = Style::new().w(grow()).h(grow()).bg([1.0; 4]);
       let icon = Icon::filled("M2 2H22V22H2ZM6.3 6.3H17.7V17.7H6.3Z");
       let touching = Icon::filled("M2 2H8.25V22H2ZM8.25 2H22V22H8.25Z");
       ui.row(row, |ui| {

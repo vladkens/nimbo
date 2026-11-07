@@ -35,7 +35,7 @@ use std::time::{Duration, Instant};
 use crate::clipboard::{Offer, Snapshot, SystemClipboard};
 use crate::focus::{self, Focused};
 use crate::keys::{CMD, Key, Shortcut};
-use crate::{Clipboard, Main, Modifiers, permissions};
+use crate::{Clipboard, Main, Modifiers, keys, permissions, platform};
 
 /// How long after the offer's read the clipboard comes back: some apps read it more than once.
 pub const RESTORE: Duration = Duration::from_millis(500);
@@ -127,7 +127,7 @@ impl std::error::Error for NotPasted {}
 /// not where `opts` says, or it is a password field (or Secure Input is on and the app in focus
 /// can't tell).
 pub fn text(text: &str, opts: Paste) -> Result<(), NotPasted> {
-  if !crate::platform::shell::is_main() {
+  if !platform::shell::is_main() {
     return Err(NotPasted::NotMain);
   }
 
@@ -174,10 +174,10 @@ const SYSTEM: Sys = Sys {
     }
   },
   give_back: |offer, old| !SystemClipboard.holds(offer) || SystemClipboard.restore(old.clone()),
-  post: crate::keys::post,
+  post: keys::post,
   focus: focus::current,
   hidden: focus::hidden,
-  accessibility: || permissions::accessibility(false),
+  accessibility: permissions::accessibility,
   secure_input: permissions::secure_input,
   after: |delay, f| Main::here().proxy().after(delay, move |_| f()),
 };

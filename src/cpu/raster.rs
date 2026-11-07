@@ -686,7 +686,7 @@ mod tests {
   fn plain_quad_covers_its_pixels() {
     let mut px = vec![0xff00_0000u32; 16];
     let mut t = Target { px: &mut px, stride: 4, y0: 0 };
-    let q = Quad::new(crate::scene::Rect::new(1.0, 1.0, 2.0, 2.0), [1.0; 4]);
+    let q = Quad::new(Rect::new(1.0, 1.0, 2.0, 2.0), [1.0; 4]);
     quad(&mut t, &q, IRect::new(0, 0, 4, 4), 1.0);
     let lit: Vec<_> = px.iter().map(|&p| p == 0xffff_ffff).collect();
     let want = [0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0].map(|v| v == 1);

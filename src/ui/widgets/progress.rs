@@ -5,7 +5,7 @@
 use std::f32::consts::{PI, TAU};
 
 use crate::scene::{Point, Rect};
-use crate::ui::{Response, Role, State, Style, Ui, Value, grow, px};
+use crate::ui::{ControlSize, Response, Role, State, Style, Ui, Value, grow, px};
 
 impl Ui<'_> {
   /// A progress bar across its parent, 4 points high: `Some(k)` fills `k` (0 to 1) of it in the
@@ -39,10 +39,17 @@ impl Ui<'_> {
     })
   }
 
-  /// A spinning arc `size` points wide in the muted colour, for work without a known end, a
-  /// turn every 0.9 s while it shows; disabled, dimmed and still.
-  pub fn spinner(&mut self, size: f32) -> Response {
+  /// A spinning arc in the muted colour, for work without a known end, as SwiftUI's circular
+  /// `ProgressView()`: 16 points wide, 12 at [ControlSize::Small] and 24 at Large
+  /// ([Ui::control_size]); a turn every 0.9 s while it shows; disabled, dimmed and still.
+  pub fn spinner(&mut self) -> Response {
     let t = self.theme();
+    let size = match self.take_control_size() {
+      ControlSize::Small => 12.0,
+      ControlSize::Regular => 16.0,
+      ControlSize::Large => 24.0,
+    };
+
     let (id, off) = (self.take_id(), self.take_disabled());
     let color = self.dim(t.muted, off);
     let turn = if off { 0.0 } else { self.now().as_secs_f32() / 0.9 * TAU };
@@ -65,7 +72,7 @@ mod tests {
   use crate::app::App;
   use crate::harness::Harness;
   use crate::scene::Size;
-  use crate::ui::{Style, Ui, grow};
+  use crate::ui::{ControlSize, Id, Style, Ui, grow};
 
   struct Bar(Option<f32>);
 
@@ -96,11 +103,30 @@ mod tests {
 
   impl App for Still {
     fn view(&mut self, ui: &mut Ui) {
-      ui.disabled(true).spinner(16.0);
+      ui.disabled(true).spinner();
       if ui.id("b").button("B").clicked {
         self.0 += 1;
       }
     }
+  }
+
+  /// Spinners at each size: on themselves, in a container of a size, and after it.
+  struct Sized;
+
+  impl App for Sized {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.control_size(ControlSize::Small).id("small").spinner();
+      ui.control_size(ControlSize::Large).row(Style::new(), |ui| ui.id("large").spinner());
+      ui.id("regular").spinner();
+    }
+  }
+
+  #[test]
+  fn a_spinner_takes_the_control_size_of_itself_or_its_container() {
+    let mut h = Harness::new(Sized, Size::new(200.0, 100.0), 1.0);
+    h.frame();
+    let w = |n: &str| h.rect(Id::of(n)).unwrap().w;
+    assert_eq!([w("small"), w("large"), w("regular")], [12.0, 24.0, 16.0]);
   }
 
   #[test]
@@ -108,7 +134,7 @@ mod tests {
     let mut h = Harness::new(Still::default(), Size::new(200.0, 60.0), 1.0);
     h.frame();
     assert!(!h.rt.needs_frame());
-    h.click_id(crate::ui::Id::of("b"));
+    h.click_id(Id::of("b"));
     assert_eq!(h.app().0, 1);
   }
 }

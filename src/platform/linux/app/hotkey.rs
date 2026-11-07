@@ -431,6 +431,7 @@ unsafe extern "C" fn on_deactivated(_: P, _: S, _: S, _: S, _: S, args: P, data:
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::hotkey::Hotkeys;
 
   fn chord(text: &str) -> Shortcut {
     let Ok(Hotkey::Shortcut(k)) = Hotkey::parse(text) else { panic!("{text}") };
@@ -440,7 +441,7 @@ mod tests {
   /// No hotkey, so no session or X connection: the status alone says Escape is not taken.
   #[test]
   fn escape_is_reported_as_not_taken() {
-    let mut h = crate::hotkey::Hotkeys::new(|_| {});
+    let mut h = Hotkeys::new(|_| {});
     h.escape(true);
     let s = h.status();
     assert!(!s.escape);

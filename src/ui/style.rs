@@ -170,8 +170,8 @@ pub struct Style {
   pub clip: Clip,
   /// Multiplies the alpha of everything the element and its children draw, except canvases.
   pub opacity: f32,
-  /// Scrolls its children when they overflow, horizontally and vertically; implies `clip`.
-  pub scroll: [bool; 2],
+  /// The axes it scrolls its children along when they overflow; implies `clip`.
+  pub scroll: Axes,
   /// Takes pointer input (hover, press, click, wheel) and hides what is under it from the
   /// pointer. Named elements ([Ui::id]), scroll containers, focusable elements and those with
   /// a cursor always do.
@@ -204,7 +204,7 @@ impl Style {
       shadow: Shadow::NONE,
       clip: Clip::None,
       opacity: 1.0,
-      scroll: [false; 2],
+      scroll: Axes::NONE,
       hit: false,
       focus: Focus::None,
       cursor: Cursor::Inherit,
@@ -327,19 +327,10 @@ impl Style {
     Self { opacity, ..self }
   }
 
-  /// Scrolls vertically on overflow (and clips); the children keep their heights.
-  pub const fn scroll_y(self) -> Self {
-    Self { scroll: [self.scroll[0], true], clip: self.clipped(), ..self }
-  }
-
-  /// Scrolls horizontally on overflow (and clips); the children keep their widths.
-  pub const fn scroll_x(self) -> Self {
-    Self { scroll: [true, self.scroll[1]], clip: self.clipped(), ..self }
-  }
-
-  /// Scrolls both ways.
-  pub const fn scroll(self) -> Self {
-    Self { scroll: [true; 2], clip: self.clipped(), ..self }
+  /// Scrolls along `axes` on overflow (and clips), as SwiftUI's `ScrollView(axes)`: the
+  /// children keep their size along them.
+  pub const fn scroll(self, axes: Axes) -> Self {
+    Self { scroll: axes, clip: self.clipped(), ..self }
   }
 
   /// Takes pointer input without a name: a popup's background that must not let clicks
@@ -379,25 +370,131 @@ impl Style {
 pub struct TextStyle {
   pub font: Font,
   pub color: Color,
-  /// Wraps at spaces to the width the layout gives it; a word longer than that overflows.
-  pub wrap: bool,
-  /// A single line that doesn't fit its box is cut and ends in "…"; it can then shrink to
-  /// that. Implies no wrapping.
-  pub ellipsis: bool,
-  /// Distance between baselines in points; 0 takes the font's.
-  pub line_h: f32,
-  /// A line through the middle of the lowercase letters, in the text's colour (done items).
-  pub strike: bool,
+  /// How it takes lines: wrapping, one line as wide as it is, or at most some cut with "…".
+  pub lines: TextLines,
+  /// Distance between baselines in points; `None` takes the font's ([crate::Ui::line_height]).
+  pub line_h: Option<f32>,
+  /// A line under each laid-out line, in the text's colour ([TextStyle::underline]).
+  pub underline: Option<LinePattern>,
+  /// A line through the middle of the lowercase letters ([TextStyle::strikethrough]).
+  pub strikethrough: Option<LinePattern>,
+}
+
+/// A direction, as SwiftUI's `Axis`: along x or along y.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Axis {
+  Horizontal,
+  Vertical,
+}
+
+impl Axis {
+  /// Its place in a `[x, y]` pair.
+  pub(crate) const fn index(self) -> usize {
+    self as usize
+  }
+}
+
+/// A set of axes, as SwiftUI's `Axis.Set`: what a scroll area scrolls along
+/// ([Style::scroll]). `Axes::HORIZONTAL | Axes::VERTICAL` is both, [Axes::ALL].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Axes(u8);
+
+impl Axes {
+  pub const NONE: Self = Self(0);
+  pub const HORIZONTAL: Self = Self(1);
+  pub const VERTICAL: Self = Self(2);
+  pub const ALL: Self = Self(3);
+
+  pub const fn contains(self, axis: Axis) -> bool {
+    self.0 & (1 << axis as u8) != 0
+  }
+
+  pub const fn is_empty(self) -> bool {
+    self.0 == 0
+  }
+
+  /// [Axes::contains] of the axis at `[x, y]` index `ax`.
+  pub(crate) const fn at(self, ax: usize) -> bool {
+    self.0 & (1 << ax) != 0
+  }
+}
+
+impl std::ops::BitOr for Axes {
+  type Output = Self;
+
+  fn bitor(self, other: Self) -> Self {
+    Self(self.0 | other.0)
+  }
+}
+
+/// How a text takes lines, as SwiftUI's `lineLimit`, `truncationMode` and `fixedSize`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TextLines {
+  /// Wraps at spaces onto as many lines as it needs at the width the layout gives it; a word
+  /// longer than that breaks between characters.
+  #[default]
+  Wrap,
+  /// One line (a line per line break) as wide as the text, never cut: a button's label;
+  /// SwiftUI's `.fixedSize()`.
+  NoWrap,
+  /// At most this many lines, wrapping; where the text doesn't fit them it is cut with "…" in
+  /// the [TruncationMode], and it can then shrink to that, as `.lineLimit(n)` with
+  /// `.truncationMode(mode)`. Over more than one line it is cut at the end.
+  Limit(u16, TruncationMode),
+}
+
+/// Where a text cut to fit loses what doesn't, shown by "…", as SwiftUI's
+/// `Text.TruncationMode`: a path keeps its file name with [TruncationMode::Middle].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TruncationMode {
+  Head,
+  Middle,
+  #[default]
+  Tail,
+}
+
+/// How a text's line is drawn ([TextStyle::underline], [TextStyle::strikethrough]), as
+/// SwiftUI's `Text.LineStyle.Pattern`: dots and dashes as long as the line is thick, and as far
+/// apart, a dash three dots long.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinePattern {
+  Solid,
+  /// A term with more on hover ([crate::Ui::help]).
+  Dot,
+  Dash,
+  DashDot,
+  DashDotDot,
+}
+
+impl LinePattern {
+  /// The pattern's marks and gaps in line thicknesses, from its start; empty for a solid line.
+  pub(crate) const fn marks(self) -> &'static [f32] {
+    match self {
+      LinePattern::Solid => &[],
+      LinePattern::Dot => &[1.0, 1.0],
+      LinePattern::Dash => &[3.0, 1.0],
+      LinePattern::DashDot => &[3.0, 1.0, 1.0, 1.0],
+      LinePattern::DashDotDot => &[3.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    }
+  }
 }
 
 impl TextStyle {
   pub const fn new(font: Font, color: Color) -> Self {
-    Self { font, color, wrap: true, ellipsis: false, line_h: 0.0, strike: false }
+    let (underline, strikethrough, line_h) = (None, None, None);
+    Self { font, color, lines: TextLines::Wrap, line_h, underline, strikethrough }
   }
 
-  /// Struck through: a line over each laid-out line of the text.
-  pub const fn strike(self) -> Self {
-    Self { strike: true, ..self }
+  /// A line under the text in `pattern`, as SwiftUI's `Text.underline(pattern:)`: a sixth of an
+  /// em under the baseline.
+  pub const fn underline(self, pattern: LinePattern) -> Self {
+    Self { underline: Some(pattern), ..self }
+  }
+
+  /// A line through the text in `pattern` (done items), as SwiftUI's
+  /// `Text.strikethrough(pattern:)`: at half the x-height.
+  pub const fn strikethrough(self, pattern: LinePattern) -> Self {
+    Self { strikethrough: Some(pattern), ..self }
   }
 
   pub const fn color(self, color: Color) -> Self {
@@ -408,17 +505,33 @@ impl TextStyle {
     Self { font, ..self }
   }
 
+  /// One line as wide as the text ([TextLines::NoWrap]); SwiftUI's `.fixedSize()`.
   pub const fn nowrap(self) -> Self {
-    Self { wrap: false, ..self }
+    Self { lines: TextLines::NoWrap, ..self }
   }
 
-  /// One line, cut with "…" when it doesn't fit (labels, tabs, list rows).
-  pub const fn ellipsis(self) -> Self {
-    Self { wrap: false, ellipsis: true, ..self }
+  /// At most `n` lines, cut with "…" where it doesn't fit ([TextLines::Limit]), at its end
+  /// unless [TextStyle::truncation] says otherwise, as SwiftUI's `.lineLimit(n)`: one for labels,
+  /// tabs, list rows.
+  pub const fn line_limit(self, n: u16) -> Self {
+    let mode = match self.lines {
+      TextLines::Limit(_, mode) => mode,
+      _ => TruncationMode::Tail,
+    };
+
+    Self { lines: TextLines::Limit(n, mode), ..self }
   }
 
+  /// Where a text cut to fit loses what doesn't, as SwiftUI's `.truncationMode`; one line unless
+  /// [TextStyle::line_limit] said more.
+  pub const fn truncation(self, mode: TruncationMode) -> Self {
+    let n = if let TextLines::Limit(n, _) = self.lines { n } else { 1 };
+    Self { lines: TextLines::Limit(n, mode), ..self }
+  }
+
+  /// Distance between baselines in points, as SwiftUI's `.lineSpacing` sets it in effect.
   pub const fn line_h(self, line_h: f32) -> Self {
-    Self { line_h, ..self }
+    Self { line_h: Some(line_h), ..self }
   }
 }
 
@@ -427,39 +540,78 @@ impl TextStyle {
 /// percent sizes are relative to the target.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Float {
-  /// Relative to the window rather than the parent.
-  pub window: bool,
+  /// Placed in its parent's space, or the window's.
+  pub space: CoordinateSpace,
   /// Keeps its ancestors' clips (an overlay scrollbar inside a scrolled panel); overlays
   /// otherwise draw and take the pointer outside them.
   pub clip: bool,
-  /// The target's point to attach to, as fractions of its size: (0, 0) top-left, (1, 1)
-  /// bottom-right.
-  pub attach: [f32; 2],
-  /// The element's own point placed there, as fractions of its size.
-  pub anchor: [f32; 2],
+  /// The target's point to attach to.
+  pub attach: UnitPoint,
+  /// The element's own point placed there.
+  pub anchor: UnitPoint,
   pub offset: Point,
   /// Paint order among overlays, higher on top; equal ones keep tree order.
   pub z: i32,
 }
 
+/// Where an overlay is placed ([Float]), as SwiftUI's `CoordinateSpace`: in its parent, or in
+/// the window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CoordinateSpace {
+  Local,
+  Global,
+}
+
+/// A point in a box as fractions of its size, as SwiftUI's `UnitPoint`: (0, 0) the top-left
+/// corner, (1, 1) the bottom-right.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UnitPoint {
+  pub x: f32,
+  pub y: f32,
+}
+
+impl UnitPoint {
+  pub const TOP_LEADING: Self = Self::new(0.0, 0.0);
+  pub const TOP: Self = Self::new(0.5, 0.0);
+  pub const TOP_TRAILING: Self = Self::new(1.0, 0.0);
+  pub const LEADING: Self = Self::new(0.0, 0.5);
+  pub const CENTER: Self = Self::new(0.5, 0.5);
+  pub const TRAILING: Self = Self::new(1.0, 0.5);
+  pub const BOTTOM_LEADING: Self = Self::new(0.0, 1.0);
+  pub const BOTTOM: Self = Self::new(0.5, 1.0);
+  pub const BOTTOM_TRAILING: Self = Self::new(1.0, 1.0);
+
+  pub const fn new(x: f32, y: f32) -> Self {
+    Self { x, y }
+  }
+
+  /// Its fraction along the axis at `[x, y]` index `ax`.
+  pub(crate) const fn at(self, ax: usize) -> f32 {
+    if ax == 0 { self.x } else { self.y }
+  }
+}
+
 impl Float {
   /// At the parent's top-left corner.
   pub const fn parent() -> Self {
-    let offset = Point::new(0.0, 0.0);
-    Self { window: false, clip: false, attach: [0.0; 2], anchor: [0.0; 2], offset, z: 0 }
+    let (offset, at) = (Point::new(0.0, 0.0), UnitPoint::TOP_LEADING);
+    let space = CoordinateSpace::Local;
+    Self { space, clip: false, attach: at, anchor: at, offset, z: 0 }
   }
 
   /// At the window's top-left corner.
   pub const fn window() -> Self {
-    Self { window: true, ..Self::parent() }
+    Self { space: CoordinateSpace::Global, ..Self::parent() }
   }
 
-  pub const fn attach(self, x: f32, y: f32) -> Self {
-    Self { attach: [x, y], ..self }
+  /// The target's point it attaches to.
+  pub const fn attach(self, at: UnitPoint) -> Self {
+    Self { attach: at, ..self }
   }
 
-  pub const fn anchor(self, x: f32, y: f32) -> Self {
-    Self { anchor: [x, y], ..self }
+  /// Its own point placed there.
+  pub const fn anchor(self, at: UnitPoint) -> Self {
+    Self { anchor: at, ..self }
   }
 
   pub const fn offset(self, x: f32, y: f32) -> Self {

@@ -114,7 +114,7 @@ pub fn subpixel_x(k: usize, scale: f32) -> f32 {
 impl App for Text {
   fn event(&mut self, _cx: &mut Cx, ev: &Event) -> bool {
     match ev {
-      Event::Appearance(a) => self.light = !a.dark,
+      Event::Appearance(a) => self.light = !a.scheme.is_dark(),
       _ => return false,
     }
 
@@ -147,5 +147,5 @@ impl App for Text {
 }
 
 fn main() {
-  nimbo::run(Config::new("text", SIZE.w, SIZE.h), Text::default(), |_| {});
+  nimbo::run_example(Config::new("text", SIZE.w, SIZE.h), Text::default(), |_| {});
 }

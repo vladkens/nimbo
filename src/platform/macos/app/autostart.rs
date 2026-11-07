@@ -81,12 +81,13 @@ pub fn open_settings() {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::autostart;
 
   /// The test binary is no bundle.
   #[test]
   fn unavailable_unbundled() {
     let app = AppInfo { id: "com.example.app", name: "Example", presence: Default::default() };
     assert!(available().is_err());
-    assert!(crate::autostart::state(&app).is_err() && crate::autostart::set(&app, true).is_err());
+    assert!(autostart::state(&app).is_err() && autostart::set(&app, true).is_err());
   }
 }

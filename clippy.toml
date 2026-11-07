@@ -1,0 +1,4 @@
+# `absolute_paths`: `crate::keys::Shortcut::char(…)` in code goes through a `use`; std's paths
+# (`std::mem::take`) stay as they are. Clippy counts a type's path without its function, so 2.
+absolute-paths-max-segments = 2
+absolute-paths-allowed-crates = ["std", "core", "alloc"]

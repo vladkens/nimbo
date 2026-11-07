@@ -13,8 +13,8 @@
 use std::time::Duration;
 
 use nimbo::{
-  Align, App, Config, Id, Item, List, Menu, Modifiers, Selection, Split, Style, Tabs, TextStyle,
-  Ui, grow,
+  Align, App, Axis, ButtonRole, Config, Id, Item, List, Menu, Modifiers, Selection, Shortcut,
+  Split, Style, Tabs, Tag, TextStyle, Ui, grow,
 };
 
 pub const ROWS: usize = 100_000;
@@ -46,9 +46,19 @@ pub struct Lists {
   /// The rows show their sizes (the row menu's check).
   pub sizes: bool,
   /// The row menu's items chosen, each with the rows selected then.
-  pub chosen: Vec<(String, Vec<u64>)>,
+  pub chosen: Vec<(RowAction, Vec<u64>)>,
   /// The row menu was open as the view last ran: closed with nothing chosen, it says so.
   menu_open: bool,
+}
+
+/// What the row menu does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RowAction {
+  Open,
+  Sizes,
+  Rename,
+  Sort(usize),
+  Delete,
 }
 
 impl Lists {
@@ -57,38 +67,39 @@ impl Lists {
   }
 
   /// The selected rows' context menu.
-  pub fn row_menu(&self) -> Menu {
+  pub fn row_menu(&self) -> Menu<RowAction> {
     let n = self.sel.len();
     let title = match self.sel.cursor() {
       Some(k) if n == 1 => format!("Item {:06}", k + 1),
       _ => format!("{n} Items"),
     };
 
-    let sort = |(i, s): (usize, &&str)| Item::new(&format!("sort-{i}"), s).checked(i == self.sort);
+    let sort = |(i, s): (usize, &&str)| Item::toggle(RowAction::Sort(i), s, i == self.sort);
     Menu::new(vec![
-      Item::header(&title),
-      Item::new("open", "Open").key("cmd+o"),
-      Item::new("sizes", "Show Sizes").checked(self.sizes),
-      Item::new("rename", "Rename…").enabled(n == 1),
-      Item::new("sort", "Sort By").submenu(Menu::new(SORTS.iter().enumerate().map(sort).collect())),
-      Item::separator(),
-      Item::new("delete", "Delete").destructive(),
+      Item::section(&title),
+      Item::button(RowAction::Open, "Open").key(Shortcut::char('o').cmd()),
+      Item::toggle(RowAction::Sizes, "Show Sizes", self.sizes),
+      Item::button(RowAction::Rename, "Rename…").enabled(n == 1),
+      Item::submenu("Sort By", Menu::new(SORTS.iter().enumerate().map(sort).collect())),
+      Item::Divider,
+      Item::button(RowAction::Delete, "Delete").role(ButtonRole::Destructive),
     ])
   }
 
   /// Runs the row menu's item `item` on the selected rows.
-  fn choose(&mut self, item: &str) {
+  fn choose(&mut self, item: RowAction) {
     let mut rows: Vec<u64> = self.sel.keys().collect();
     rows.sort();
     match item {
-      "open" => self.opened = self.sel.cursor().map(|k| k as usize),
-      "sizes" => self.sizes = !self.sizes,
-      _ => self.sort = item.strip_prefix("sort-").and_then(|i| i.parse().ok()).unwrap_or(self.sort),
+      RowAction::Open => self.opened = self.sel.cursor().map(|k| k as usize),
+      RowAction::Sizes => self.sizes = !self.sizes,
+      RowAction::Sort(i) => self.sort = i,
+      RowAction::Rename | RowAction::Delete => {}
     }
 
     // What a check outside the harness reads.
-    eprintln!("menu: {item} {rows:?}");
-    self.chosen.push((item.to_owned(), rows));
+    eprintln!("menu: {item:?} {rows:?}");
+    self.chosen.push((item, rows));
   }
 
   fn toolbar(&mut self, ui: &mut Ui) {
@@ -109,7 +120,8 @@ impl Lists {
       }
 
       ui.text("Sort by", t.muted().nowrap());
-      ui.id(SORT).pop_up(&mut self.sort, &SORTS);
+      let sorts: Vec<Tag<usize>> = SORTS.iter().enumerate().map(|(i, s)| Tag::new(i, s)).collect();
+      ui.id(SORT).picker(&mut self.sort, &sorts);
       ui.spacer();
       let n = self.sel.len();
       ui.text(format_args!("{n} of {ROWS} selected"), t.muted().nowrap());
@@ -152,7 +164,7 @@ impl Lists {
     }
 
     match ui.context_menu(r.id, || self.row_menu()) {
-      Some(item) => self.choose(&item),
+      Some(item) => self.choose(item),
       None if self.menu_open && !ui.menu_open(r.id) => eprintln!("menu: none"),
       None => {}
     }
@@ -215,15 +227,18 @@ impl App for Lists {
 
       // The split and the tabs edit copies: their panes borrow the app.
       let (mut side, mut tab) = (self.side, self.tab);
-      Split::row().ratio(&mut side).min(200.0, 220.0).show(ui.id(SPLIT), |ui, pane| match pane {
-        0 => self.list(ui),
-        _ => {
-          _ = Tabs::new(&mut tab, &TITLES).show(ui.id(TABS), |ui, i| match i {
-            0 => self.details(ui),
-            _ => self.notes(ui),
-          })
-        }
-      });
+      Split::new(Axis::Horizontal).ratio(&mut side).min(200.0, 220.0).show(
+        ui.id(SPLIT),
+        |ui, pane| match pane {
+          0 => self.list(ui),
+          _ => {
+            _ = Tabs::new(&mut tab, &TITLES).show(ui.id(TABS), |ui, i| match i {
+              0 => self.details(ui),
+              _ => self.notes(ui),
+            })
+          }
+        },
+      );
       (self.side, self.tab) = (side, tab);
     });
   }
@@ -231,7 +246,7 @@ impl App for Lists {
 
 fn main() {
   // The shot: rows 3 to 6 selected, the list scrolled a little, the pointer on the menu.
-  nimbo::run(Config::new("lists", 760.0, 480.0), Lists::new(), |h| {
+  nimbo::run_example(Config::new("lists", 760.0, 480.0), Lists::new(), |h| {
     h.frame();
     let row = |h: &nimbo::Harness<Lists>, k: u64| h.rect(Id::of(LIST).key(("row", k))).unwrap();
     let r = row(h, 2);

@@ -29,9 +29,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use super::super::{Timer, create, run_loop, settings, show_overlay, wide, with_window};
 use super::{hardware, paste, tray};
-use crate::Config;
 use crate::app::{App, Event};
 use crate::shell::{AppInfo, Main, Presence};
+use crate::{Config, shell};
 
 type Job = Box<dyn FnOnce() + Send>;
 
@@ -94,7 +94,7 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
     run_loop(&Timer::new());
   }
 
-  crate::shell::finish(close);
+  shell::finish(close);
   tray::removed();
   // Work posted after the loop is dropped unrun: the closures are let go here.
   HOST.store(0, Ordering::Release);
@@ -237,7 +237,7 @@ unsafe extern "system" fn host_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
     WM_ENDSESSION if wp != 0 => {
       // The session ends: the process may be ended at any moment after this returns.
       shell(|s| s.terminating = true);
-      crate::shell::finish(close);
+      shell::finish(close);
       std::process::exit(0);
     }
     m if m == tray::taskbar_created() => {
@@ -262,7 +262,7 @@ pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
     s.windows.push((s.next, hwnd));
     s.next
   });
-  crate::shell::opened(id, ty);
+  shell::opened(id, ty);
   if !cfg.hidden {
     front(id);
   }
@@ -311,7 +311,7 @@ pub(in super::super) fn destroyed(hwnd: HWND) {
     let i = s.windows.iter().position(|w| w.1 == hwnd)?;
     Some(s.windows.remove(i).0)
   });
-  if let Some(f) = id.and_then(crate::shell::closed) {
+  if let Some(f) = id.and_then(shell::closed) {
     f(&mut Main::here());
   }
 }

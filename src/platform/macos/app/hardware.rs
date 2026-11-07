@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use dispatch2::{DispatchQueue, DispatchRetained};
 use objc2_core_foundation::{CFBoolean, CFRetained, CFString, CFType};
 
+use crate::hardware;
 use crate::hardware::Transport;
 use crate::system::{Change, notice, refused};
 
@@ -114,7 +115,7 @@ pub fn transport(uid: &str) -> Transport {
   let internal = kind == code(b"bltn")
     && (uid == "BuiltInMicrophoneDevice"
       || device.and_then(|d| property(d, b"ssrc", b"inpt", None)) == Some(code(b"imic")));
-  crate::hardware::core_audio(kind.to_be_bytes(), internal)
+  hardware::core_audio(kind.to_be_bytes(), internal)
 }
 
 pub fn lid_closed() -> Option<bool> {

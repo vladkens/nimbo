@@ -14,7 +14,7 @@
 use std::ops::Range;
 
 use crate::app::Clipboard;
-use crate::keys::{Command, Delete, Move};
+use crate::keys::{Command, Delete, Extent, Move};
 
 // MARK: Graphemes
 
@@ -508,10 +508,11 @@ impl Editor {
 
   /// Moves the caret, extending the selection when `select`. Without it a selection collapses:
   /// Left and Up to its start, Right and Down to its end, word and line moves go from there.
-  pub fn move_by(&mut self, m: Move, select: bool, l: &dyn Lines) {
+  pub fn move_by(&mut self, m: Move, select: Extent, l: &dyn Lines) {
     self.unmark();
     let s = &self.text;
     let r = self.sel.range();
+    let select = select == Extent::Selection;
     let collapse = !select && !self.sel.is_empty();
     let back = matches!(
       m,
@@ -1070,7 +1071,7 @@ mod tests {
   }
 
   fn mv(e: &mut Editor, m: Move, select: bool) -> usize {
-    e.move_by(m, select, &Mono::PLAIN);
+    e.move_by(m, Extent::by(select), &Mono::PLAIN);
     e.caret()
   }
 
@@ -1142,7 +1143,7 @@ mod tests {
     let l = Mono { cols: 4, page: 2 };
     let mut e = ed("abcdefghij\nkl", 1);
     let down = |e: &mut Editor| {
-      e.move_by(Move::Down, false, &l);
+      e.move_by(Move::Down, Extent::Caret, &l);
       e.caret()
     };
     assert_eq!(down(&mut e), 5);
@@ -1150,23 +1151,23 @@ mod tests {
     assert_eq!(down(&mut e), 12);
     // Line ends at a wrap stay on their line; Line Start goes to the visual start.
     e.select(Sel::caret(5));
-    e.move_by(Move::LineEnd, false, &l);
+    e.move_by(Move::LineEnd, Extent::Caret, &l);
     assert_eq!(e.caret(), 7);
-    e.move_by(Move::LineStart, false, &l);
+    e.move_by(Move::LineStart, Extent::Caret, &l);
     assert_eq!(e.caret(), 4);
     // A column past a wrapped line's end lands before the wrap.
     e.select(Sel::caret(13));
-    e.move_by(Move::Up, false, &l);
+    e.move_by(Move::Up, Extent::Caret, &l);
     assert_eq!(e.caret(), 10);
     e.select(Sel::caret(3));
-    e.move_by(Move::LineEnd, false, &l);
-    e.move_by(Move::Down, false, &l);
+    e.move_by(Move::LineEnd, Extent::Caret, &l);
+    e.move_by(Move::Down, Extent::Caret, &l);
     assert_eq!(e.caret(), 7);
     // A page is two lines.
     e.select(Sel::caret(0));
-    e.move_by(Move::PageDown, false, &l);
+    e.move_by(Move::PageDown, Extent::Caret, &l);
     assert_eq!(e.caret(), 8);
-    e.move_by(Move::PageUp, true, &l);
+    e.move_by(Move::PageUp, Extent::Selection, &l);
     assert_eq!(e.sel(), Sel::new(8, 0));
   }
 
@@ -1219,9 +1220,9 @@ mod tests {
       e.insert(c);
     }
 
-    e.move_by(Move::Left, false, &l);
+    e.move_by(Move::Left, Extent::Caret, &l);
     e.insert("!");
-    e.move_by(Move::DocEnd, false, &l);
+    e.move_by(Move::DocEnd, Extent::Caret, &l);
     for _ in 0..3 {
       e.delete(Delete::Backward, &l);
     }
@@ -1271,7 +1272,7 @@ mod tests {
     // Each paste is its own step.
     e.apply(Command::Undo, &l, &mut cb);
     assert_eq!(e.text(), "Hello");
-    e.apply(Command::Move(Move::WordLeft, true), &l, &mut cb);
+    e.apply(Command::Move(Move::WordLeft, Extent::Selection), &l, &mut cb);
     e.apply(Command::Delete(Delete::Backward), &l, &mut cb);
     assert_eq!(e.text(), "");
     // Single-line editors leave Enter and Tab to the app; multi-line ones type them.
@@ -1324,7 +1325,7 @@ mod tests {
     // Any edit or move first keeps the marked text as typed.
     e.select(Sel::caret(e.text().len()));
     e.set_marked("q", 1..1, None);
-    e.move_by(Move::DocStart, false, &Mono::PLAIN);
+    e.move_by(Move::DocStart, Extent::Caret, &Mono::PLAIN);
     assert_eq!((e.text(), e.marked(), e.caret()), ("ab日本q", None, 0));
     // A replacement range outside the marked text: commit it, then replace.
     e.select(Sel::caret(e.text().len()));

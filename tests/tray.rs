@@ -13,6 +13,7 @@ mod example;
 mod detached;
 
 use example::Shown;
+use nimbo::svg;
 
 #[cfg(not(target_os = "macos"))]
 #[test]
@@ -26,7 +27,8 @@ fn detached_tray() {
 fn the_example() {
   let labels = |s: &Shown| {
     let m = example::menu(s);
-    m.items.iter().map(|i| (i.label.clone(), i.enabled, i.checked)).collect::<Vec<_>>()
+    let items = m.items.iter().map(|i| (i.label().to_owned(), i.is_enabled(), i.is_on()));
+    items.collect::<Vec<_>>()
   };
   let idle = Shown { count: None, login: None, hotkey: "Ctrl+Alt+Space".into() };
   let l = labels(&idle);
@@ -38,7 +40,7 @@ fn the_example() {
   assert_eq!(l[3], ("Launch at Login".into(), true, true));
   assert!(nimbo::Hotkey::parse(example::HOTKEY).is_ok());
   let mut rings = Vec::new();
-  nimbo::svg::flatten(example::ICON, 1.0, &mut rings).unwrap();
+  svg::flatten(example::ICON, 1.0, &mut rings).unwrap();
   assert_eq!(rings.len(), 2, "a ring: two circles");
 }
 
