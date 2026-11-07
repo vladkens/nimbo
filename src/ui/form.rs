@@ -610,17 +610,20 @@ impl Ui<'_> {
   /// a rounded fill inset as the hairlines, as System Settings' rows that open more, which show
   /// no hover. A click, or Space while it has focus, toggles it; it starts collapsed and keeps
   /// its state under its id, the chevron `id.key("chevron")`. The rows show and go at once, not
-  /// sliding as SwiftUI's. [FormRow::disabled], it dims and doesn't toggle. Assistive technology
-  /// reads a button, [State::Expanded] while open. `changed` when it toggled.
+  /// sliding as SwiftUI's. Disabled ([FormRow::disabled], [Ui::disabled] or in a disabled scope),
+  /// it dims, takes no focus and doesn't toggle. Assistive technology reads a button,
+  /// [State::Expanded] while open, disabled with it. `changed` when it toggled.
   pub fn form_disclosure<R>(
     &mut self,
     fs: &FormStyle,
     row: FormRow,
     rows: impl FnOnce(&mut Self) -> R,
   ) -> Response {
-    let (id, t, off) = (self.take_id(), self.theme(), row.disabled || self.scope_off);
+    let (id, t) = (self.take_id(), self.theme());
+    // Disabled by the row too, before the behaviour: it reads so and lets go of the focus.
+    self.next_disabled |= row.disabled;
     let b = self.button_behavior(id);
-    let (clicked, pressed) = (b.clicked && !off, b.pressed && !off);
+    let (off, clicked, pressed) = (b.disabled, b.clicked, b.pressed);
     let open = self.state::<Disclosed>(id);
     open.0 ^= clicked;
     let open = open.0;
@@ -630,10 +633,12 @@ impl Ui<'_> {
       false => fs.row.hit().tab_focusable().cursor(Cursor::Pointer),
     };
 
-    let (ink, row) = (if off { t.tertiary } else { t.muted }, FormRow { pressed, ..row });
+    let ink = if off { t.tertiary } else { t.muted };
+    let row = FormRow { disabled: off, pressed, ..row };
     let mut r = self.with_id(id).form_row(&FormStyle { row: style, ..*fs }, row, |ui| {
-      let s = Style::new().w(px(14.0)).h(px(14.0));
-      ui.with_id(id.key("chevron")).canvas(s, move |f, r| chevron(f, r, turn, ink))
+      // Unnamed, a click on it is the row's.
+      ui.next_id = Some((id.key("chevron"), false));
+      ui.canvas(Style::new().w(px(14.0)).h(px(14.0)), move |f, r| chevron(f, r, turn, ink))
     });
     let a = self.a11y(id, Role::Button).name(row.label).state(State::Expanded, open);
     a.description(row.caption.unwrap_or_default());
@@ -895,7 +900,7 @@ impl Spans for Sections {
 mod tests {
   use std::time::Duration;
 
-  use keyboard_types::Modifiers;
+  use keyboard_types::{Modifiers, NamedKey};
 
   use super::*;
   use crate::app::App;
@@ -1042,9 +1047,10 @@ mod tests {
     assert_eq!(h.app().0, 1, "the row selected");
   }
 
-  /// A disclosure of two rows in a section, under a plain row; `.0` its toggles.
+  /// A disclosure of two rows in a section, under a plain row, disabled by [Ui::disabled] when
+  /// `.1`; `.0` the toggles.
   #[derive(Default)]
-  struct Fold(usize);
+  struct Fold(usize, bool);
 
   impl App for Fold {
     fn view(&mut self, ui: &mut Ui) {
@@ -1054,7 +1060,7 @@ mod tests {
         ui.form_section(&fs, "Section", |ui| {
           ui.form_row(&fs, FormRow::new("Shown"), |_| {});
           let row = FormRow::new("Other models").caption("2 more");
-          let r = ui.id("fold").form_disclosure(&fs, row, |ui| {
+          let r = ui.disabled(self.1).id("fold").form_disclosure(&fs, row, |ui| {
             ui.id("a").form_row(&fs, FormRow::new("A"), |_| {});
             ui.id("b").form_row(&fs, FormRow::new("B"), |_| {});
           });
@@ -1128,6 +1134,48 @@ mod tests {
     h.click_id(Id::of("off"));
     h.frame();
     assert!(h.rect(Id::of("c")).is_none() && h.app().0 == n, "disabled");
+  }
+
+  /// A click on the chevron toggles its row. Disabled, by the row or by [Ui::disabled] while it
+  /// has focus: dimmed, read disabled, out of the Tab order, the focus let go, Space ignored.
+  #[test]
+  fn a_disclosure_toggles_by_its_chevron_and_disabled_takes_nothing() {
+    let mut h = Harness::new(Fold::default(), Size::new(400.0, 300.0), 2.0);
+    h.frame();
+    let (fold, off) = (Id::of("fold"), Id::of("off"));
+    h.click_id(fold.key("chevron"));
+    h.frame();
+    assert!(h.app().0 == 1 && h.rect(Id::of("a")).is_some(), "the chevron's click");
+
+    let read = |h: &Harness<Fold>, name: &str| {
+      let tree = h.a11y();
+      tree.lines().map(str::trim).find(|l| l.contains(name)).unwrap_or_default().to_owned()
+    };
+    assert!(read(&h, "\"Off\"").contains("disabled"), "{}", read(&h, "\"Off\""));
+    assert!(!read(&h, "\"Other models\"").contains("disabled"));
+    // Its label in the tertiary colour, the other's in the text's.
+    let ink = |h: &mut Harness<Fold>, id: Id| {
+      let r = h.rect(id.key("label")).unwrap();
+      let img = h.render();
+      let px = (0..(r.w * 2.0) as i32).flat_map(|x| (0..(r.h * 2.0) as i32).map(move |y| (x, y)));
+      px.map(|(x, y)| img.pixel(r.x + x as f32 / 2.0, r.y + y as f32 / 2.0)[0]).min().unwrap()
+    };
+    let (on_ink, off_ink) = (ink(&mut h, fold), ink(&mut h, off));
+    assert!(off_ink > on_ink + 60, "dimmed: {on_ink} {off_ink}");
+    h.set_focus(Some(fold));
+    for _ in 0..3 {
+      h.key(NamedKey::Tab, Modifiers::empty());
+      assert_ne!(h.focused(), Some(off), "out of the Tab order");
+    }
+
+    h.set_focus(Some(fold));
+    h.app_mut().1 = true;
+    h.frame();
+    assert_eq!(h.focused(), None, "the focus let go");
+    assert!(read(&h, "\"Other models\"").contains("disabled"));
+    h.key(Key::Char(' '), Modifiers::empty());
+    h.frame();
+    assert_eq!(h.app().0, 1, "Space ignored");
   }
 
   /// Toolbar tabs, disabled or not, in the light theme.
