@@ -6,8 +6,8 @@
 //!
 //! An app changes the look in three steps, from the least work to the most:
 //! - a style where the widget has one: `Button::new("Save").style(ButtonStyle::BorderedProminent)`;
-//! - a style derived from the theme, changed for one widget: `t.button(ButtonStyle::Bordered, None,
-//!   ControlSize::Regular).height(36.0)` given to [super::Button::style],
+//! - a style derived from the theme, changed for one widget:
+//!   `t.button(ButtonStyle::Bordered).height(36.0)` given to [super::Button::style],
 //!   `t.field().hint("Search")` to [super::Ui::text_field];
 //! - its own theme: `const MINE: Theme = Theme { accent: rgb(0xe06c75), ..Theme::PLATES_DARK }` and
 //!   `ui.set_theme(MINE)`.
@@ -465,10 +465,15 @@ impl Theme {
     TextStyle::new(self.small.weight(Weight::Semibold), self.muted).line_limit(1)
   }
 
+  /// A button's look in `style` at the regular size, with no role ([Theme::button_for]).
+  pub const fn button(&self, style: ButtonStyle) -> ButtonLook {
+    self.button_for(style, None, ControlSize::Regular)
+  }
+
   /// A button's look in `style` at `size` ([crate::Ui::control_size]), tinted by its `role`: a
   /// destructive prominent one filled with the danger colour, any other destructive one's label
   /// in it.
-  pub const fn button(
+  pub const fn button_for(
     &self,
     style: ButtonStyle,
     role: Option<ButtonRole>,
@@ -540,7 +545,7 @@ impl Theme {
       _ => ButtonStyle::BorderedProminent,
     };
 
-    let s = self.button(style, Some(role), ControlSize::Regular);
+    let s = self.button_for(style, Some(role), ControlSize::Regular);
     let s = ButtonLook { frame: s.frame.border(0.0, [0.0; 4]), ..s };
     let s = s.height(h).radius(h / 2.0).pad_x(12.0).font(self.font);
     match style {
@@ -621,31 +626,24 @@ mod tests {
   #[test]
   fn variants_read_the_palette() {
     let t = Theme::PLATES_DARK;
-    assert_eq!(t.button(ButtonStyle::BorderedProminent, None, ControlSize::Regular).bg, t.accent);
-    assert_eq!(t.button(ButtonStyle::Borderless, None, ControlSize::Regular).bg[3], 0.0);
-    assert_eq!(
-      t.button(ButtonStyle::Bordered, None, ControlSize::Regular).frame.border_color,
-      t.line
-    );
-    assert_eq!(
-      Theme::PLATES_LIGHT.button(ButtonStyle::Bordered, None, ControlSize::Regular).frame.border,
-      [0.0; 4]
-    );
-    const TALL: ButtonLook =
-      Theme::PLATES_LIGHT.button(ButtonStyle::Bordered, None, ControlSize::Regular).height(36.0);
+    assert_eq!(t.button(ButtonStyle::BorderedProminent).bg, t.accent);
+    assert_eq!(t.button(ButtonStyle::Borderless).bg[3], 0.0);
+    assert_eq!(t.button(ButtonStyle::Bordered).frame.border_color, t.line);
+    assert_eq!(Theme::PLATES_LIGHT.button(ButtonStyle::Bordered).frame.border, [0.0; 4]);
+    const TALL: ButtonLook = Theme::PLATES_LIGHT.button(ButtonStyle::Bordered).height(36.0);
     assert_eq!(TALL.frame.size[1], px(36.0));
     // Sizes and builders, all const.
     const KEY: ButtonLook = Theme::PLATES_DARK
-      .button(ButtonStyle::Bordered, None, ControlSize::Regular)
+      .button(ButtonStyle::Bordered)
       .w(super::super::grow())
       .h(px(40.0))
       .radius(12.0);
     assert_eq!((KEY.frame.size[1], KEY.frame.radii), (px(40.0), [12.0; 4]));
-    let small = t.button(ButtonStyle::Borderless, None, ControlSize::Small);
-    let large = t.button(ButtonStyle::Borderless, None, ControlSize::Large);
+    let small = t.button_for(ButtonStyle::Borderless, None, ControlSize::Small);
+    let large = t.button_for(ButtonStyle::Borderless, None, ControlSize::Large);
     assert_eq!((small.frame.size[1], small.text.font), (px(t.sizes.small_h), t.small));
     assert_eq!((large.frame.size[1], large.text.font.size), (px(32.0), 15.0));
-    let on = t.selected(t.button(ButtonStyle::Bordered, None, ControlSize::Regular));
+    let on = t.selected(t.button(ButtonStyle::Bordered));
     assert_eq!((on.text.color, on.bg[3]), (t.accent, 0.18));
   }
 

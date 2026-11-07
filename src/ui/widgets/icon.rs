@@ -239,6 +239,8 @@ impl Ui<'_> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::app::App;
+  use crate::ui::grow;
 
   #[test]
   fn every_built_in_icon_parses_whole() {
@@ -255,9 +257,9 @@ mod tests {
   /// Play, filled, and the same path stroked.
   struct Icons;
 
-  impl crate::app::App for Icons {
+  impl App for Icons {
     fn view(&mut self, ui: &mut Ui) {
-      let row = Style::new().w(crate::ui::grow()).h(crate::ui::grow()).bg([1.0; 4]);
+      let row = Style::new().w(grow()).h(grow()).bg([1.0; 4]);
       ui.row(row, |ui| {
         ui.icon(Icon::PLAY, 48.0, [0.0, 0.0, 0.0, 1.0]);
         ui.icon(Icon::new(Icon::PLAY.d), 48.0, [0.0, 0.0, 0.0, 1.0]);
@@ -283,9 +285,9 @@ mod tests {
   /// touching between pixels.
   struct Nested;
 
-  impl crate::app::App for Nested {
+  impl App for Nested {
     fn view(&mut self, ui: &mut Ui) {
-      let row = Style::new().w(crate::ui::grow()).h(crate::ui::grow()).bg([1.0; 4]);
+      let row = Style::new().w(grow()).h(grow()).bg([1.0; 4]);
       let icon = Icon::filled("M2 2H22V22H2ZM6.3 6.3H17.7V17.7H6.3Z");
       let touching = Icon::filled("M2 2H8.25V22H2ZM8.25 2H22V22H8.25Z");
       ui.row(row, |ui| {

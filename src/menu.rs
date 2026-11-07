@@ -173,12 +173,12 @@ impl<A> Item<A> {
     }
   }
 
-  /// A toggle's state; `None` for anything else.
-  pub fn check(&self) -> Option<bool> {
-    if let Item::Toggle { is_on, .. } = self { Some(*is_on) } else { None }
+  /// Whether it is a toggle that is on, as SwiftUI's `isOn`.
+  pub fn is_on(&self) -> bool {
+    matches!(self, Item::Toggle { is_on: true, .. })
   }
 
-  pub fn destructive(&self) -> bool {
+  pub fn is_destructive(&self) -> bool {
     matches!(self, Item::Button { role: Some(ButtonRole::Destructive), .. })
   }
 
@@ -326,7 +326,7 @@ mod tests {
     assert_eq!(tags.items[4].action(), Some(&3));
     let Item::Submenu { menu: sub, .. } = &tags.items[3] else { panic!() };
     assert_eq!((sub.items[0].action(), sub.items[2].action()), (Some(&1), Some(&2)));
-    assert!(!menu.items[0].is_enabled() && menu.items[4].destructive());
+    assert!(!menu.items[0].is_enabled() && menu.items[4].is_destructive());
     let label = if cfg!(target_os = "macos") { "⌘Q" } else { "Ctrl+Q" };
     assert_eq!(menu.items[4].key_label(), label);
   }

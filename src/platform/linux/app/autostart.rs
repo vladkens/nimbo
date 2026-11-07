@@ -7,8 +7,8 @@
 
 use std::path::PathBuf;
 
-use crate::AppInfo;
 use crate::autostart::{State, desktop_entry, entry_runs};
+use crate::{AppInfo, paths, platform};
 
 pub fn available() -> Result<(), String> {
   Ok(())
@@ -24,7 +24,7 @@ pub(super) fn exe() -> Result<PathBuf, String> {
 
 /// The entry's file.
 fn entry(app: &AppInfo) -> PathBuf {
-  crate::paths::config_dir("autostart").join(format!("{}.desktop", app.id))
+  paths::config_dir("autostart").join(format!("{}.desktop", app.id))
 }
 
 pub fn state(app: &AppInfo) -> Result<State, String> {
@@ -42,7 +42,7 @@ pub fn set(app: &AppInfo, on: bool) -> Result<State, String> {
   if on {
     let on_login = [("X-GNOME-Autostart-enabled", "true")];
     let text = desktop_entry(app, &exe()?.to_string_lossy(), &on_login);
-    crate::platform::write::file(&path, text.as_bytes())?;
+    platform::write::file(&path, text.as_bytes())?;
   } else if let Err(e) = std::fs::remove_file(&path)
     && e.kind() != std::io::ErrorKind::NotFound
   {

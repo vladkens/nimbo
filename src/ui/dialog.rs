@@ -304,7 +304,7 @@ mod tests {
   use super::*;
   use crate::app::{App, Cx, Event};
   use crate::harness::Harness;
-  use crate::keys::{Binding, CMD, Command, bind};
+  use crate::keys::{Binding, CMD, Command, Shortcut, bind};
   use crate::scene::Size;
 
   /// A dialog over an app that binds Cmd-Z and hears every key and command.
@@ -316,8 +316,7 @@ mod tests {
 
   impl App for Under {
     fn keymap(&self) -> &[Binding] {
-      const KEYS: &[Binding] =
-        &[bind(crate::keys::Shortcut::char('z').cmd(), Command::Action("undo"))];
+      const KEYS: &[Binding] = &[bind(Shortcut::char('z').cmd(), Command::Action("undo"))];
       KEYS
     }
 

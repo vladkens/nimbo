@@ -45,6 +45,7 @@ pub use self::settings::appearance;
 use crate::app::{App, Clipboard, Clock, Event, Runtime};
 use crate::cpu::Renderer;
 use crate::scene::Size;
+use crate::shell::token as activation_token;
 use crate::ui::Cursor;
 use crate::{Anchor, Config};
 
@@ -506,7 +507,7 @@ fn front(id: u64) {
     overlay::place(window, size, anchor, true);
   }
 
-  let token = overlay.is_none().then(crate::shell::token).flatten();
+  let token = overlay.is_none().then(activation_token).flatten();
   let token = token.and_then(|t| CString::new(t).ok());
   // SAFETY: GTK's calls on a window of ours.
   unsafe {

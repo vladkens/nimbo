@@ -734,7 +734,7 @@ mod tests {
   use crate::scene::{Point, Size};
   use crate::text::Font;
   use crate::ui::layout::tests::Fake;
-  use crate::ui::{Float, FormRow, FormStyle, Style, TextStyle, px};
+  use crate::ui::{Axes, Float, FormRow, FormStyle, Style, Tag, TextStyle, px};
 
   /// 6 points per character, 10 per line.
   const T: TextStyle = TextStyle::new(Font::ui(10.0), [1.0; 4]);
@@ -883,15 +883,12 @@ mod tests {
     let area = Id::of("area");
     let st = frame(UiState::default(), |ui| {
       ui.scroll_to(area, Point::new(0.0, 15.0));
-      ui.with_id(area).col(
-        Style::new().w(px(100.0)).h(px(30.0)).scroll(crate::ui::Axes::VERTICAL),
-        |ui| {
-          for i in 0..5 {
-            ui.a11y(area.key(i), Role::Row);
-            ui.with_id(area.key(i)).el(Style::new().w(px(100.0)).h(px(20.0)));
-          }
-        },
-      );
+      ui.with_id(area).col(Style::new().w(px(100.0)).h(px(30.0)).scroll(Axes::VERTICAL), |ui| {
+        for i in 0..5 {
+          ui.a11y(area.key(i), Role::Row);
+          ui.with_id(area.key(i)).el(Style::new().w(px(100.0)).h(px(20.0)));
+        }
+      });
     });
     let t = st.a11y_tree();
     let rects: Vec<_> = t.nodes.iter().map(|n| (n.id, n.rect)).collect();
@@ -1006,7 +1003,7 @@ mod tests {
   fn a_disabled_containers_items_are_disabled() {
     let st = frame(UiState::default(), |ui| {
       ui.disabled_scope(true, |ui| {
-        ui.id("seg").segmented(&mut 0, &[crate::ui::Tag::new(0, "A"), crate::ui::Tag::new(1, "B")]);
+        ui.id("seg").segmented(&mut 0, &[Tag::new(0, "A"), Tag::new(1, "B")]);
         ui.list(Id::of("list"), 1, 20.0, |ui, _| ui.text("One", T));
       });
     });

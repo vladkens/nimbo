@@ -9,7 +9,7 @@
 //! ```
 
 use crate::keys::{Command, Move};
-use crate::scene::{Point, Rect, alpha, mix};
+use crate::scene::{Color, Frame, Point, Rect, alpha, mix};
 use crate::ui::containers::menu::{MenuPlacement, TypeSelect};
 use crate::ui::{Align, Behavior, Id, Response, Role, State, Style, Ui, grow, px, rigid};
 
@@ -206,7 +206,7 @@ impl<'s, T: PartialEq + Copy> Picker<'s, T> {
 }
 
 /// Up and down chevrons centred in `r`, their ink 7.5 by 10.5 points, stroked 1.5.
-fn chevrons(f: &mut crate::scene::Frame, r: Rect, c: crate::scene::Color) {
+fn chevrons(f: &mut Frame, r: Rect, c: Color) {
   let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
   let p = |x: f32, y: f32| Point::new(cx + x, cy + y);
   f.polyline(&[p(-3.0, -1.75), p(0.0, -4.5), p(3.0, -1.75)], 1.5, c);
@@ -214,7 +214,7 @@ fn chevrons(f: &mut crate::scene::Frame, r: Rect, c: crate::scene::Color) {
 }
 
 /// A check mark in `r`, a 16-point box.
-pub(super) fn check(f: &mut crate::scene::Frame, r: Rect, c: crate::scene::Color) {
+pub(super) fn check(f: &mut Frame, r: Rect, c: Color) {
   let p = |x: f32, y: f32| Point::new(r.x + x * r.w / 14.0, r.y + y * r.h / 14.0);
   f.polyline(&[p(3.5, 7.3), p(6.0, 9.8), p(10.6, 4.4)], 1.6, c);
 }
@@ -282,6 +282,7 @@ mod tests {
   use crate::harness::Harness;
   use crate::keys::Key;
   use crate::scene::Size;
+  use crate::ui::{FormRow, FormStyle};
 
   /// A pop-up the app can disable.
   #[derive(Default)]
@@ -305,9 +306,9 @@ mod tests {
 
   impl App for Long {
     fn view(&mut self, ui: &mut Ui) {
-      let fs = crate::ui::FormStyle::plates(&ui.theme());
+      let fs = FormStyle::plates(&ui.theme());
       let mut cur = 0;
-      ui.id("row").form_row(&fs, crate::ui::FormRow::new("Microphone"), |ui| {
+      ui.id("row").form_row(&fs, FormRow::new("Microphone"), |ui| {
         let pop = Picker::new(&mut cur).option(0, self.value);
         let pop = match self.max {
           Some(w) => pop.max_width(w),

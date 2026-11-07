@@ -129,7 +129,7 @@ impl Ui<'_> {
 mod tests {
   use crate::app::{App, Cx, Event, MouseButton};
   use crate::harness::Harness;
-  use crate::keys::{Binding, Command, bind};
+  use crate::keys::{Binding, Command, Key, Shortcut, bind};
   use crate::scene::{Rect, Size};
   use crate::ui::{Cursor, Id, Style, Ui, pct};
   use crate::{Modifiers, NamedKey};
@@ -156,10 +156,8 @@ mod tests {
 
   impl App for Find {
     fn keymap(&self) -> &[Binding] {
-      const KEYS: &[Binding] = &[bind(
-        crate::keys::Shortcut::new(crate::keys::Key::Named(NamedKey::Escape)),
-        Command::Cancel,
-      )];
+      const KEYS: &[Binding] =
+        &[bind(Shortcut::new(Key::Named(NamedKey::Escape)), Command::Cancel)];
       KEYS
     }
 
@@ -221,7 +219,7 @@ mod tests {
     h.right_click(r.x + 40.0, r.y + 10.0);
     h.frame();
     h.frame();
-    h.click_id(Id::of("s").key("edit").key(("item", 2usize)));
+    h.click_menu_item("Paste");
     h.frame();
     assert_eq!((h.app().text.as_str(), h.app().changes), ("moon", 1));
     assert_eq!(h.focused(), Some(Id::of("s")));

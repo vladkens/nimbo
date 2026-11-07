@@ -210,5 +210,5 @@ pub fn parse_point(s: &str) -> Option<Point> {
 }
 
 fn main() {
-  nimbo::run(Config::new("input", SIZE.w, SIZE.h), Input::default(), |_| {});
+  nimbo::run_example(Config::new("input", SIZE.w, SIZE.h), Input::default(), |_| {});
 }

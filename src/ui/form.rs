@@ -208,7 +208,7 @@ impl FormStyle {
 
     Self {
       head: TextStyle::new(t.bold, t.text).line_limit(1),
-      note: TextStyle::new(small, t.muted).fixed_size(),
+      note: TextStyle::new(small, t.muted).nowrap(),
       head_pad: [20.0, 10.0, 10.0, 10.0],
       subtitle: TextStyle::new(small, t.muted).line_h(14.0),
       subtitle_gap: 1.5,
@@ -225,7 +225,7 @@ impl FormStyle {
       tile: Style::new().w(px(h)).h(px(h)).center().radius(6.0).bg(t.raised),
       tile_x: 12.0,
       tile_text: TextStyle::new(Font { size: 11.0, ..t.font }.weight(Weight::Semibold), t.muted)
-        .fixed_size(),
+        .nowrap(),
       tile_icon: (h * 0.6).round(),
       page: Style::new().w(grow()).pads([12.0, 20.0, 20.0, 20.0]).gap(10.0),
       toolbar: Style::new()
@@ -235,10 +235,10 @@ impl FormStyle {
         .center()
         .bg(t.bg)
         .borders([0.0, 0.0, 0.5, 0.0], toolbar_line),
-      title: TextStyle::new(t.bold, t.muted).fixed_size(),
+      title: TextStyle::new(t.bold, t.muted).nowrap(),
       tab,
       tab_text: TextStyle::new(Font { size: 11.0, ..t.font }.weight(Weight::Medium), t.muted)
-        .fixed_size(),
+        .nowrap(),
       tab_icon: 26.0,
       tab_stroke: 1.4,
       tab_on,

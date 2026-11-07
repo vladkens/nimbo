@@ -9,7 +9,7 @@
 //! images and [text] through a [Frame]; the runtime drives it, fed by the window ([platform]) or
 //! by the headless [Harness], both drawing with nimbo's CPU renderer. The scene, the renderer
 //! and the laid-out tree are the crate's own, so they can change without breaking an app.
-//! Examples start with [run], which opens a window, or with `--shot <file.png>` runs the
+//! Examples start with [run_example], which opens a window, or with `--shot <file.png>` runs the
 //! harness instead (in the dark appearance unless `--appearance light`).
 //!
 //! An app with no window, or more than one, starts with [app]: windows on demand ([Main::open])
@@ -62,8 +62,8 @@ pub mod uninstall;
 use std::path::PathBuf;
 
 pub use app::{
-  App, Appearance, Clipboard, ColorScheme, Cx, Event, Ime, KeyPhase, MemClipboard, MouseButton,
-  Phase, WHEEL_LINE, Waker,
+  App, Appearance, Clipboard, ColorScheme, Cx, Event, Ime, MemClipboard, MouseButton, Phase,
+  WHEEL_LINE, Waker,
 };
 pub use clipboard::SystemClipboard;
 pub use file_dialog::{FileDialog, FileDialogKind};
@@ -250,8 +250,10 @@ fn positive(n: f32) -> bool {
   n.is_finite() && n > 0.0
 }
 
-/// The entry point of every example: [run_args] with the process's arguments.
-pub fn run<A: App + 'static>(cfg: Config, app: A, script: impl FnOnce(&mut Harness<A>)) {
+/// The entry point of every example: [run_args] with the process's whole command line, exiting
+/// with the usage on any argument it doesn't know; an app with its own arguments takes them and
+/// passes the rest to [run_args].
+pub fn run_example<A: App + 'static>(cfg: Config, app: A, script: impl FnOnce(&mut Harness<A>)) {
   let args: Vec<String> = std::env::args().skip(1).collect();
   run_args(cfg, app, script, &args);
 }
@@ -296,7 +298,7 @@ pub fn run_args<A: App + 'static>(
   println!("{}: wrote {}", cfg.title, path.display());
 }
 
-/// The harness [run] shoots in, at the size and scale of `args`; the app first hears the
+/// The harness [run_args] shoots in, at the size and scale of `args`; the app first hears the
 /// appearance, dark unless `--appearance` says otherwise, as a window tells it the OS's.
 fn harness<A: App>(cfg: &Config, app: A, args: &Args) -> Harness<A> {
   let mut h = Harness::new(app, args.size.unwrap_or(cfg.size), args.scale);

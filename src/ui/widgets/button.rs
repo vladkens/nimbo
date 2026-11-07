@@ -66,8 +66,8 @@ impl<'s> Button<'s> {
     Self { selected: on, ..self }
   }
 
-  /// Its own look instead of its style's, usually derived: `t.button(ButtonStyle::Bordered,
-  /// None, ControlSize::Regular).height(36.0)`.
+  /// Its own look instead of its style's, usually derived:
+  /// `t.button(ButtonStyle::Bordered).height(36.0)`.
   pub fn look(self, look: ButtonLook) -> Self {
     Self { look: Some(look), ..self }
   }
@@ -76,7 +76,7 @@ impl<'s> Button<'s> {
     let (t, size) = (ui.theme(), ui.take_control_size());
     let square = self.label.is_empty() && self.icon.is_some();
     let s = self.look.unwrap_or_else(|| {
-      let s = t.button(self.style, self.role, size);
+      let s = t.button_for(self.style, self.role, size);
       let h = s.frame.min[0];
       if square { ButtonLook { frame: s.frame.w(px(h)).pad(0.0), ..s } } else { s }
     });
@@ -203,7 +203,7 @@ impl Ui<'_> {
     let d = t.sizes.control_h;
     let bg = if b.pressed { t.pressed } else { mix(t.raised, t.hover, hot) };
     let s = self.control(Style::new().w(px(d)).h(px(d)).center().radius(d / 2.0).bg(bg), &b);
-    let text = TextStyle::new(t.bold, t.text).fixed_size();
+    let text = TextStyle::new(t.bold, t.text).nowrap();
     let mut r = self.with_id(id).row(s, |ui| ui.text("?", text));
     r.clicked = b.clicked;
     r
@@ -214,9 +214,9 @@ impl Ui<'_> {
 mod tests {
   use crate::app::App;
   use crate::harness::Harness;
-  use crate::scene::Size;
+  use crate::scene::{Rect, Size};
   use crate::text::Font;
-  use crate::ui::{ControlSize, Id, Response, Style, TextStyle, Ui, px};
+  use crate::ui::{ControlSize, Icon, Id, Response, Style, TextStyle, Theme, Ui, px};
 
   /// A disabled button, its last response kept.
   #[derive(Default)]
@@ -306,10 +306,10 @@ mod tests {
 
   impl App for Strokes {
     fn view(&mut self, ui: &mut Ui) {
-      ui.set_theme(crate::ui::Theme::PLATES_LIGHT);
+      ui.set_theme(Theme::PLATES_LIGHT);
       ui.col(Style::new().grow().bg(ui.theme().bg), |ui| {
-        ui.id("own").icon_button(crate::ui::Icon::GEAR);
-        ui.id("app").icon_button(crate::ui::Icon::GEAR.stroke(3.0));
+        ui.id("own").icon_button(Icon::GEAR);
+        ui.id("app").icon_button(Icon::GEAR.stroke(3.0));
       });
     }
   }
@@ -320,7 +320,7 @@ mod tests {
     let mut h = Harness::new(Strokes, Size::new(100.0, 100.0), 2.0);
     h.frame();
     let img = h.render();
-    let ink = |r: crate::scene::Rect| {
+    let ink = |r: Rect| {
       let px = (0..(r.w * 2.0) as i32).flat_map(|x| (0..(r.h * 2.0) as i32).map(move |y| (x, y)));
       px.filter(|&(x, y)| img.pixel(r.x + x as f32 / 2.0, r.y + y as f32 / 2.0)[0] < 160).count()
     };
@@ -333,9 +333,9 @@ mod tests {
 
   impl App for Reset {
     fn view(&mut self, ui: &mut Ui) {
-      ui.set_theme(crate::ui::Theme::PLATES_LIGHT);
+      ui.set_theme(Theme::PLATES_LIGHT);
       ui.col(Style::new().grow().bg(ui.theme().bg), |ui| {
-        ui.disabled(self.0).id("r").icon_button(crate::ui::Icon::RESET);
+        ui.disabled(self.0).id("r").icon_button(Icon::RESET);
       });
     }
   }

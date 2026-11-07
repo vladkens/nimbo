@@ -319,10 +319,10 @@ mod tests {
   use std::time::Duration;
 
   use super::{Edit, *};
-  use crate::keys::Move;
+  use crate::keys::{Extent, Move};
   use crate::scene::Size;
   use crate::text::Font;
-  use crate::text::edit::Editor;
+  use crate::text::edit::{Editor, Sel};
   use crate::ui::layout::tests::Fake;
   use crate::ui::{Style, TextStyle, Ui, UiState, px};
 
@@ -391,9 +391,9 @@ mod tests {
     let st = laid(s, 56.0);
     let l = TextLayout::of(&st.last, Id::of("t")).unwrap();
     let mut e = Editor::multiline(s);
-    e.select(crate::text::edit::Sel::caret(2));
+    e.select(Sel::caret(2));
     let mut mv = |m| {
-      e.move_by(m, crate::keys::Extent::Caret, &l);
+      e.move_by(m, Extent::Caret, &l);
       e.caret()
     };
     assert_eq!(mv(Move::Down), 13);

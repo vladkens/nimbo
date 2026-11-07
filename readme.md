@@ -84,11 +84,11 @@ impl App for Counter {
 }
 
 fn main() {
-  nimbo::run(Config::new("Counter", 320.0, 240.0), Counter::default(), |_| {});
+  nimbo::run_example(Config::new("Counter", 320.0, 240.0), Counter::default(), |_| {});
 }
 ```
 
-`nimbo::run` opens the window; `-- --shot counter.png` renders it to a file without one.
+`nimbo::run_example` opens the window; `-- --shot counter.png` renders it to a file without one.
 
 ### How a frame is built
 

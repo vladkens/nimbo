@@ -86,7 +86,7 @@ pub use widgets::{Button, ButtonRole, FieldKind, FieldStyle, Icon, IconPaint, Te
 
 use self::input::{Deliver, Input, ScrollState};
 use self::store::{Anim, Store};
-use crate::app::{Appearance, Clipboard, Event, KeyPhase, MouseButton, Waker};
+use crate::app::{Appearance, Clipboard, Event, MouseButton, Waker};
 use crate::keys::{Binding, Command, KeyEvent, Os};
 use crate::scene::{Frame, ImageId, Images, Point, Rect, Size};
 use crate::text::{Font, Metrics, TextSystem};
@@ -1145,9 +1145,9 @@ impl<'a> Ui<'a> {
 
   /// A modifier key going down or up while `id` has focus ([Event::Modifier]): a shortcut
   /// recorder taking one alone. Seen once; reading it uses it.
-  pub fn modifier_key(&self, id: Id) -> Option<(crate::Code, KeyPhase)> {
+  pub fn modifier_key(&self, id: Id) -> Option<(crate::Code, bool)> {
     self.st.take(id, |e| match *e {
-      Event::Modifier { key, phase } => Some((key, phase)),
+      Event::Modifier { key, down } => Some((key, down)),
       _ => None,
     })
   }

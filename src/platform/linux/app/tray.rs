@@ -35,6 +35,7 @@ use super::super::dl::fns;
 use super::super::{Fp, P, S, connect, lib, load};
 use super::menu::{self, nodes};
 use crate::tray::{Menu, State, TrayIcon};
+use crate::{desktop, paths, platform};
 
 const SNI: &str = "org.kde.StatusNotifierItem";
 const SNI_PATH: &str = "/StatusNotifierItem";
@@ -212,8 +213,7 @@ impl Tray {
   fn paint(&self, icon: &TrayIcon) {
     let gnome = std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| d.contains("GNOME"));
     let boxed = ["FLATPAK_ID", "SNAP"].iter().any(|v| std::env::var_os(v).is_some());
-    let tint =
-      if gnome || crate::platform::appearance().scheme.is_dark() { [255; 3] } else { [0; 3] };
+    let tint = if gnome || platform::appearance().scheme.is_dark() { [255; 3] } else { [0; 3] };
     let pixmap = |side: u32| {
       let rgba = icon.pixels(side, tint);
       let argb = rgba.chunks(4).flat_map(|p| [p[3], p[0], p[1], p[2]]).collect();
@@ -226,9 +226,9 @@ impl Tray {
     }
 
     static FIRST: std::sync::Once = std::sync::Once::new();
-    let (data, id, mut first) = (crate::paths::data_dir(""), super::shell::info().id, false);
+    let (data, id, mut first) = (paths::data_dir(""), super::shell::info().id, false);
     FIRST.call_once(|| first = true);
-    let name = crate::desktop::tray_icon(&data, id, &icon.svg(SIDES[1], tint), first);
+    let name = desktop::tray_icon(&data, id, &icon.svg(SIDES[1], tint), first);
     if let (Err(e), true) = (&name, first) {
       eprintln!("nimbo: the tray icon goes as pixels, its file was not written: {e}");
     }
@@ -468,8 +468,7 @@ fn follow_plasma() {
   let Some(f) = lib().and_then(|l| Files::load(&l)).filter(|_| kde()) else { return };
 
   for name in PLASMA {
-    let Ok(path) =
-      CString::new(crate::paths::config_dir(name).into_os_string().into_encoded_bytes())
+    let Ok(path) = CString::new(paths::config_dir(name).into_os_string().into_encoded_bytes())
     else {
       continue;
     };

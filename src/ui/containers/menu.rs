@@ -573,14 +573,14 @@ impl Ui<'_> {
     let b = self.a11y_label(label).disabled(off).menu_item_behavior(item, label);
     let (bg, ink) = match b.on {
       true => (t.accent, t.on_accent),
-      false => (alpha(t.accent, 0.0), if it.destructive() { t.danger } else { t.text }),
+      false => (alpha(t.accent, 0.0), if it.is_destructive() { t.danger } else { t.text }),
     };
 
     let s = row(if check { 6.0 } else { 10.0 })
       .radius((t.sizes.menu_radius - 5.0).max(t.radius))
       .bg(bg)
       .opacity(if b.disabled { t.disabled } else { 1.0 });
-    let (on, key) = (it.check() == Some(true), it.key_label());
+    let (on, key) = (it.is_on(), it.key_label());
     self.a11y(item, Role::MenuItem).state(State::Selected, on);
     self.with_id(item).row(b.pointer(s), |ui| {
       if check {
@@ -594,7 +594,7 @@ impl Ui<'_> {
       ui.text(label, t.label().color(ink));
       if !key.is_empty() {
         ui.el(Style::new().w(grow()).min_w(20.0));
-        ui.text(&key, t.label().color(if b.on { ink } else { t.muted }).fixed_size());
+        ui.text(&key, t.label().color(if b.on { ink } else { t.muted }).nowrap());
       }
     });
     if b.clicked {
@@ -641,7 +641,7 @@ mod tests {
   use keyboard_types::{Modifiers, NamedKey};
 
   use super::*;
-  use crate::app::{App, Event, Phase};
+  use crate::app::{App, Event, MouseButton, Phase};
   use crate::harness::Harness;
   use crate::scene::Size;
 
@@ -843,7 +843,7 @@ mod tests {
     let dump = h.a11y();
     assert!(dump.contains("menu item \"A\" disabled"), "{dump}");
     assert!(dump.contains("menu item \"X\"") && !dump.contains("\"X\" disabled"), "{dump}");
-    h.click_id(Id::of("el").key(("item", 1usize)));
+    h.click_menu_item("A");
     h.frame();
     assert_eq!(h.app().chosen, None);
   }
@@ -874,7 +874,7 @@ mod tests {
     h.frame();
     let r = h.rect(Id::of("b")).unwrap();
     let pos = Point::new(r.x + r.w / 2.0, r.y + r.h / 2.0);
-    let button = crate::app::MouseButton::Left;
+    let button = MouseButton::Left;
     h.move_to(pos.x, pos.y);
     for mods in [Modifiers::CONTROL, Modifiers::CONTROL | Modifiers::SHIFT] {
       h.event(Event::MouseDown { pos, button, clicks: 1, mods });

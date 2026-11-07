@@ -12,6 +12,7 @@
 //! The split keeps its ratio in the app or in its own state; dragging the divider honours both
 //! panes' minimum sizes. The behaviour is [Ui::split_behavior].
 
+use crate::scene::{Point, mix};
 use crate::ui::{
   Axis, Behavior, Cursor, Float, Flow, Id, Response, Role, Style, Ui, UnitPoint, Value, grow, pct,
   px,
@@ -95,7 +96,7 @@ impl<'s> Split<'s> {
     };
     // The line takes the accent while dragged, fading in and out.
     let hot = ui.hot(handle, held || b.handle.hovered);
-    let line = crate::scene::mix(t.line, t.accent, hot);
+    let line = mix(t.line, t.accent, hot);
     let flow = if ax == 0 { Flow::Row } else { Flow::Column };
     let mut resp = ui.with_id(id).container(flow, Style::new().grow().clip(), |ui| {
       ui.col(first.clip(), |ui| pane(ui, 0));
@@ -151,7 +152,7 @@ impl Ui<'_> {
     };
     let was = *ratio;
     let mut grab = std::mem::take(&mut self.state::<Grab>(id).0);
-    let along = |p: crate::scene::Point| if ax == 0 { p.x } else { p.y };
+    let along = |p: Point| if ax == 0 { p.x } else { p.y };
     // Held, or released since the view last ran: its last move counts.
     let held = self.press().zip(self.mouse()).filter(|_| b.held);
     match (span, held.or(self.released(handle)).filter(|_| !b.disabled)) {

@@ -11,9 +11,7 @@
 // A Windows app, not a console one: no terminal opens with its window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use nimbo::{
-  App, Button, ButtonStyle, Config, ControlSize, Font, Id, Style, TextStyle, Ui, Weight,
-};
+use nimbo::{App, Button, ButtonStyle, Config, Font, Id, Style, TextStyle, Ui, Weight};
 
 #[derive(Default)]
 pub struct Counter {
@@ -44,12 +42,8 @@ pub const RESET: &str = "reset";
 impl App for Counter {
   fn view(&mut self, ui: &mut Ui) {
     let t = ui.theme();
-    let count = TextStyle::new(Font::ui(64.0).weight(Weight::Semibold), t.text).fixed_size();
-    let big = t
-      .button(ButtonStyle::Bordered, None, ControlSize::Regular)
-      .height(36.0)
-      .min_w(64.0)
-      .font(Font::ui(22.0));
+    let count = TextStyle::new(Font::ui(64.0).weight(Weight::Semibold), t.text).nowrap();
+    let big = t.button(ButtonStyle::Bordered).height(36.0).min_w(64.0).font(Font::ui(22.0));
     ui.col(Style::new().grow().center().gap(16.0).bg(t.bg), |ui| {
       ui.text("COUNTER", t.section());
       ui.id(COUNT_ID).text(self.count, count);
@@ -72,7 +66,7 @@ impl App for Counter {
 fn main() {
   // The shot: counted to 3, the pointer resting on + after the fade.
   let cfg = Config::new("counter", 360.0, 300.0).icon(64, &ICON);
-  nimbo::run(cfg, Counter::default(), |h| {
+  nimbo::run_example(cfg, Counter::default(), |h| {
     h.frame();
     for _ in 0..3 {
       h.click_id(Id::of(PLUS));

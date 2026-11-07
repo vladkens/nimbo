@@ -119,12 +119,12 @@ impl Lists {
         self.act(ui, i);
       }
 
-      ui.text("Sort by", t.muted().fixed_size());
+      ui.text("Sort by", t.muted().nowrap());
       let sorts: Vec<Tag<usize>> = SORTS.iter().enumerate().map(|(i, s)| Tag::new(i, s)).collect();
       ui.id(SORT).picker(&mut self.sort, &sorts);
       ui.spacer();
       let n = self.sel.len();
-      ui.text(format_args!("{n} of {ROWS} selected"), t.muted().fixed_size());
+      ui.text(format_args!("{n} of {ROWS} selected"), t.muted().nowrap());
     });
   }
 
@@ -156,7 +156,7 @@ impl Lists {
         ui.text(format_args!("Item {:06}", row.index + 1), name);
         ui.spacer();
         if sizes {
-          ui.text(format_args!("{} KB", (row.index * 37) % 900 + 12), size.fixed_size());
+          ui.text(format_args!("{} KB", (row.index * 37) % 900 + 12), size.nowrap());
         }
       });
     if r.activated.is_some() {
@@ -246,7 +246,7 @@ impl App for Lists {
 
 fn main() {
   // The shot: rows 3 to 6 selected, the list scrolled a little, the pointer on the menu.
-  nimbo::run(Config::new("lists", 760.0, 480.0), Lists::new(), |h| {
+  nimbo::run_example(Config::new("lists", 760.0, 480.0), Lists::new(), |h| {
     h.frame();
     let row = |h: &nimbo::Harness<Lists>, k: u64| h.rect(Id::of(LIST).key(("row", k))).unwrap();
     let r = row(h, 2);

@@ -284,6 +284,7 @@ mod tests {
   use crate::app::App;
   use crate::harness::Harness;
   use crate::scene::{Size, rgb};
+  use crate::ui::input::ScrollState;
   use crate::ui::{Id, Style, Ui, px};
 
   /// A scroll area 200 high over 1000 points of content, fading into red.
@@ -316,7 +317,7 @@ mod tests {
     let mut h = Harness::new(Long, Size::new(200.0, 300.0), 2.0);
     let area = Id::of("area");
     h.frame();
-    h.rt.ui.store.raw::<crate::ui::input::ScrollState>(area).offset[1] = 1e12;
+    h.rt.ui.store.raw::<ScrollState>(area).offset[1] = 1e12;
     h.rt.redraw();
     for _ in 0..3 {
       h.frame();
@@ -369,7 +370,7 @@ mod tests {
     assert_eq!(img.pixel(100.0, 1.0), [0, 0, 255, 255]);
     assert!(img.pixel(100.0, 199.0)[0] > 200, "{:?}", img.pixel(100.0, 199.0));
     // Scrolled 10 down: half the fade above.
-    h.rt.ui.store.raw::<crate::ui::input::ScrollState>(area).offset[1] = 10.0;
+    h.rt.ui.store.raw::<ScrollState>(area).offset[1] = 10.0;
     h.rt.redraw();
     let top = h.render().pixel(100.0, 0.0);
     assert!(top[0] > 100 && top[0] < 150 && top[2] > 100, "{top:?}");

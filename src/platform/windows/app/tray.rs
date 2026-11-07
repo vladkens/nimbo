@@ -366,13 +366,13 @@ fn describe(menu: HMENU, depth: usize, out: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::tray::Item;
+  use crate::tray::{self, Item, TrayIcon};
 
   /// A menu dismissed (Escape, a click outside) chooses nothing and keeps the callback.
   #[test]
   fn a_dismissed_menu_keeps_the_callback() {
-    let tray = Tray::detached(crate::tray::TrayIcon::path(4.0, "M0 0H4V4Z"), "t");
-    let t = crate::tray::Tray(tray.clone(), std::marker::PhantomData);
+    let tray = Tray::detached(TrayIcon::path(4.0, "M0 0H4V4Z"), "t");
+    let t = tray::Tray(tray.clone(), std::marker::PhantomData);
     t.set_menu(&Menu::new(vec![Item::button("a", "A")]));
     let got = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let g = got.clone();

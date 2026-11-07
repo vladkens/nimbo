@@ -965,7 +965,7 @@ mod tests {
   use std::cell::Cell;
 
   use super::*;
-  use crate::text::Font;
+  use crate::text::{Font, TextSystem};
 
   thread_local! {
     /// FreeType renders on this thread.
@@ -991,7 +991,7 @@ mod tests {
 
     // An emoji's colours take no tint: its box's render is kept too (CBDT, or COLR in its
     // palette's colours).
-    let mut ts = crate::text::TextSystem::new(2.0);
+    let mut ts = TextSystem::new(2.0);
     let g = ts.layout("😀\u{fe0f}", Font::ui(13.0)).glyphs[0];
     let f = ts.faces[g.face as usize].clone();
     if !f.file.color || color_glyph(&f, g.id) == Some(true) {
@@ -1011,7 +1011,7 @@ mod tests {
   /// renders each glyph it draws once, and none for a space.
   #[test]
   fn layout_renders_no_glyph() {
-    let mut ts = crate::text::TextSystem::new(2.0);
+    let mut ts = TextSystem::new(2.0);
     RENDERS.with(|n| n.set(0));
     let line = ts.layout("Wavy jq", Font::ui(13.0));
     assert!(line.ink.up > 8.0 && line.ink.down > 2.0, "{:?}", line.ink);
@@ -1161,7 +1161,7 @@ mod tests {
   /// such a font (CBDT emoji have no layers).
   #[test]
   fn colr_glyphs_draw_by_their_layers() {
-    let mut ts = crate::text::TextSystem::new(2.0);
+    let mut ts = TextSystem::new(2.0);
     // Asked for as emoji: a colour font, where there is one.
     let g = ts.layout("😀\u{fe0f}", Font::ui(13.0)).glyphs[0];
     let f = ts.faces[g.face as usize].clone();

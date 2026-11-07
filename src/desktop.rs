@@ -20,6 +20,8 @@ use std::path::{Path, PathBuf};
 
 use crate::platform::desktop as imp;
 use crate::{AppInfo, Png};
+#[cfg(any(all(test, unix), target_os = "linux"))]
+use crate::{autostart, platform, png};
 
 /// What the launcher shows besides the app's name.
 #[derive(Clone, Copy)]
@@ -102,7 +104,7 @@ pub(crate) fn tray_icon(data: &Path, id: &str, svg: &str, clean: bool) -> Result
   let name = format!("{prefix}{:016x}-symbolic", hash.finish());
   let file = icons.join(format!("{name}.svg"));
   if !file.exists() {
-    crate::platform::write::file(&file, svg.as_bytes())?;
+    platform::write::file(&file, svg.as_bytes())?;
   }
 
   for e in std::fs::read_dir(&icons).into_iter().flatten().flatten().filter(|_| clean) {
@@ -146,7 +148,7 @@ pub(crate) fn install_in(
     ("StartupNotify", "true"),
     ("X-Nimbo-Icon", &stamp),
   ];
-  let entry_text = crate::autostart::desktop_entry(app, exe, &keys).into_bytes();
+  let entry_text = autostart::desktop_entry(app, exe, &keys).into_bytes();
   let hicolor = data.join("icons/hicolor");
   let icon_in = |d: std::fs::DirEntry| d.path().join(format!("apps/{id}.png")).exists();
   if std::fs::read(entry(data, app)).is_ok_and(|b| b == entry_text)
@@ -161,7 +163,7 @@ pub(crate) fn install_in(
   }
 
   let icon = hicolor.join(format!("{side}x{side}/apps/{id}.png"));
-  let png = crate::png::encode_rgba(side as usize, side as usize, px);
+  let png = png::encode_rgba(side as usize, side as usize, px);
   // The icon first: the entry, once there, finds it.
   let mut wrote = false;
   for (path, bytes) in [(icon, png), (entry(data, app), entry_text)] {
@@ -169,7 +171,7 @@ pub(crate) fn install_in(
       continue;
     }
 
-    crate::platform::write::file(&path, &bytes)?;
+    platform::write::file(&path, &bytes)?;
     if path.starts_with(&hicolor) {
       date(&hicolor).map_err(|e| format!("{}: {e}", hicolor.display()))?;
     }
@@ -275,7 +277,7 @@ mod tests {
     let data = std::env::temp_dir().join(format!("nimbo-desktop-{}", std::process::id()));
     _ = std::fs::remove_dir_all(&data);
     let px: Vec<u8> = (0..16 * 16 * 4).map(|i| (i * 7) as u8).collect();
-    let png = |w, h, px: &[u8]| Png::new(crate::png::encode_rgba(w, h, px).leak());
+    let png = |w, h, px: &[u8]| Png::new(png::encode_rgba(w, h, px).leak());
     let l = Launcher {
       comment: "Counts\nC:\\things",
       categories: &["Utility", "Office"],
@@ -289,7 +291,7 @@ mod tests {
     let stamp = text.strip_prefix(want).and_then(|t| t.strip_suffix('\n')).unwrap_or_default();
     assert!(stamp.len() == 16 && stamp.bytes().all(|b| b.is_ascii_hexdigit()), "{text}");
     let icon = data.join("icons/hicolor/16x16/apps/com.example.app.png");
-    assert_eq!(crate::png::decode(&std::fs::read(&icon).unwrap()), (16, 16, px.clone()));
+    assert_eq!(png::decode(&std::fs::read(&icon).unwrap()), (16, 16, px.clone()));
 
     assert_eq!(install_in(&data, &APP, &l, "/opt/Ex ample/app"), Ok(false), "the same: kept");
     std::fs::remove_file(&icon).unwrap();

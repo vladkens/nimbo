@@ -71,6 +71,7 @@ use crate::app::MouseButton;
 use crate::keys::{Binding, CMD, Command, Delete, Extent, Move, Os, Shortcut, bind};
 use crate::scene::{Frame, Point, Quad, Rect, alpha};
 use crate::text::FxHasher;
+use crate::ui::input::ScrollState;
 use crate::ui::{Align, Cursor, Focus, FormStyle, Id, Role, State, Style, Ui, grow, px};
 
 /// Rows built past each edge of the viewport.
@@ -584,7 +585,7 @@ impl<'a> Ui<'a> {
 
   /// A scroll container's offset as last set, before the layout clamps it.
   fn scroll_raw(&self, id: Id) -> Point {
-    let raw = self.st.store.peek::<crate::ui::input::ScrollState>(id);
+    let raw = self.st.store.peek::<ScrollState>(id);
     let raw = raw.map(|s| Point::new(s.offset[0] as f32, s.offset[1] as f32));
     raw.or_else(|| self.scroll(id).map(|s| s.offset)).unwrap_or_default()
   }
@@ -774,6 +775,8 @@ mod tests {
   use std::time::Duration;
 
   use super::*;
+  use crate::app::Event;
+  use crate::keys::CMD;
   use crate::scene::{Point, Size};
   use crate::ui::UiState;
   use crate::ui::layout::tests::Fake;
@@ -965,17 +968,17 @@ mod tests {
     // The window losing the keys: the selection turns from the accent to grey.
     let px = |h: &mut Harness<Rows>| h.render().pixel(b.x + 150.0, b.y + 10.0);
     let active = px(&mut h);
-    h.event(crate::app::Event::Focus(false));
+    h.event(Event::Focus(false));
     let inactive = px(&mut h);
     assert_ne!(active, inactive);
-    h.event(crate::app::Event::Focus(true));
+    h.event(Event::Focus(true));
     // The same again on one row: its press selects it, then the quick Cmd-click's toggles it.
     h.press(b.x + 5.0, b.y + 5.0);
     h.frame();
     h.move_to(250.0, 250.0);
     h.release(250.0, 250.0);
     h.move_to(b.x + 5.0, b.y + 5.0);
-    h.press_with(b.x + 5.0, b.y + 5.0, 1, crate::keys::CMD);
+    h.press_with(b.x + 5.0, b.y + 5.0, 1, CMD);
     h.release(b.x + 5.0, b.y + 5.0);
     assert!(h.app().sel.is_empty());
     h.click(b.x + 5.0, b.y + 5.0);
@@ -1181,7 +1184,7 @@ mod tests {
     use crate::harness::Harness;
     let mut h = Harness::new(Counted::default(), Size::new(200.0, 200.0), 1.0);
     h.frame();
-    h.rt.ui.store.raw::<crate::ui::input::ScrollState>(Id::of("list")).offset[1] = 1_999_000.0;
+    h.rt.ui.store.raw::<ScrollState>(Id::of("list")).offset[1] = 1_999_000.0;
     h.rt.redraw();
     h.frame();
     let row = Id::of("list").key(("row", 99_955u64 * 7));

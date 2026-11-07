@@ -59,8 +59,8 @@ use crate::app::{App, Appearance, Clipboard, Clock, Event, MouseButton, Runtime}
 use crate::cpu::Renderer;
 use crate::cpu::raster::IRect;
 use crate::platform::{Pace, points};
-use crate::scene::Size;
-use crate::ui::Cursor;
+use crate::scene::{Rect, Size};
+use crate::ui::{Cursor, Id};
 use crate::{Anchor, Config};
 
 /// Posted by the waker: something changed on another thread.
@@ -206,11 +206,11 @@ struct Window {
   high: Option<u16>,
   /// The text field the input method is on for (off without one), whether it had marked text,
   /// and whether the input method's own message is under way.
-  ime: Option<crate::ui::Id>,
+  ime: Option<Id>,
   ime_marked: bool,
   ime_call: bool,
   /// Where the composition and candidate windows were put last.
-  ime_at: Option<crate::scene::Rect>,
+  ime_at: Option<Rect>,
   /// The cursor last set.
   cursor: Cursor,
   /// The least content size in points ([Config::min]) and the window's style, for
@@ -1015,6 +1015,7 @@ mod tests {
   use windows_sys::Win32::System::DataExchange::GetClipboardOwner;
 
   use super::*;
+  use crate::app::Cx;
 
   /// The modal loop's timer messages handled after waiting `ms`: how many came.
   fn timer_ticks(hwnd: HWND, ms: u64) -> usize {
@@ -1149,7 +1150,7 @@ mod tests {
     #[derive(Default)]
     struct Seen(std::rc::Rc<std::cell::Cell<Option<Modifiers>>>);
     impl App for Seen {
-      fn event(&mut self, _: &mut crate::app::Cx, ev: &Event) -> bool {
+      fn event(&mut self, _: &mut Cx, ev: &Event) -> bool {
         if let Event::Mods(m) = ev {
           self.0.set(Some(*m));
         }
@@ -1234,7 +1235,7 @@ mod tests {
 
     struct Seen(Rc<RefCell<Vec<bool>>>);
     impl App for Seen {
-      fn event(&mut self, _: &mut crate::app::Cx, ev: &Event) -> bool {
+      fn event(&mut self, _: &mut Cx, ev: &Event) -> bool {
         if let Event::Focus(on) = ev {
           self.0.borrow_mut().push(*on);
         }
@@ -1270,7 +1271,7 @@ mod tests {
 
     struct Seen(Rc<RefCell<Vec<Appearance>>>);
     impl App for Seen {
-      fn event(&mut self, _: &mut crate::app::Cx, ev: &Event) -> bool {
+      fn event(&mut self, _: &mut Cx, ev: &Event) -> bool {
         if let Event::Appearance(a) = ev {
           self.0.borrow_mut().push(*a);
         }

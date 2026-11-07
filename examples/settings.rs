@@ -21,6 +21,7 @@
 
 use std::time::Duration;
 
+use nimbo::ui::widgets::icon;
 use nimbo::{
   Align, Answer, App, Appearance, ButtonRole, ColorScheme, Config, ControlSize, Dialog, FormRow,
   FormStyle, Hotkey, Icon, Id, Picker, Rect, Section, Style, TabItem, Tag, TextStyle, Theme, Tone,
@@ -396,7 +397,7 @@ fn app_icon(f: &mut nimbo::Frame, r: Rect, accent: nimbo::Color) {
   f.shadow(Rect::new(r.x, r.y + 1.0, r.w, r.h), 15.0, 3.0, [0.0, 0.0, 0.0, 0.2]);
   f.rect(r, accent, 15.0);
   let inner = Rect::new(r.x + 14.0, r.y + 14.0, r.w - 28.0, r.h - 28.0);
-  nimbo::ui::widgets::icon::draw(f, Icon::CHECK.stroke(2.4), inner, [1.0; 4]);
+  icon::draw(f, Icon::CHECK.stroke(2.4), inner, [1.0; 4]);
 }
 
 impl App for Settings {
@@ -422,11 +423,15 @@ impl App for Settings {
 }
 
 fn main() {
-  nimbo::run(Config::new("Settings", WIDTH, 560.0).fixed().unified(), Settings::default(), |h| {
-    h.frame();
-    h.frame();
-    let r = h.rect(Id::of(LAUNCH_ROW).key("info")).expect("the ⓘ of On launch");
-    h.move_to(r.x + r.w / 2.0, r.y + r.h / 2.0);
-    h.wait(Duration::from_millis(400));
-  });
+  nimbo::run_example(
+    Config::new("Settings", WIDTH, 560.0).fixed().unified(),
+    Settings::default(),
+    |h| {
+      h.frame();
+      h.frame();
+      let r = h.rect(Id::of(LAUNCH_ROW).key("info")).expect("the ⓘ of On launch");
+      h.move_to(r.x + r.w / 2.0, r.y + r.h / 2.0);
+      h.wait(Duration::from_millis(400));
+    },
+  );
 }

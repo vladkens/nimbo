@@ -110,7 +110,7 @@ impl App for Fields {
 }
 
 fn main() {
-  nimbo::run(Config::new("fields", SIZE.w, SIZE.h), Fields::new(), |h| {
+  nimbo::run_example(Config::new("fields", SIZE.w, SIZE.h), Fields::new(), |h| {
     h.frame();
     h.click_id(Id::of(NAME));
     h.type_text("Ada Lovelace");

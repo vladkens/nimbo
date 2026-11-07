@@ -10,7 +10,6 @@ use std::time::Duration;
 use keyboard_types::{Code, Modifiers};
 
 use crate::app::{App, Clipboard, Clock, Event, Ime, MemClipboard, MouseButton, Runtime, Waker};
-use crate::cpu;
 pub use crate::cpu::Pixels;
 use crate::file_dialog::FileDialog;
 use crate::keys::{self, Key, KeyEvent, Os};
@@ -19,6 +18,7 @@ use crate::scene::{Point, Rect, Size};
 use crate::text::TextSystem;
 use crate::text::edit::{Editor, utf16_len};
 use crate::ui::{A11yTree, Action, Cursor, Id, Kind, Role, Scroll, TextInput};
+use crate::{cpu, png};
 
 /// A display refresh at 120 Hz, the step of [Harness::wait].
 pub const TICK: Duration = Duration::from_nanos(8_333_333);
@@ -177,6 +177,13 @@ impl<A: App> Harness<A> {
     self.click(r.x + r.w / 2.0, r.y + r.h / 2.0)
   }
 
+  /// Clicks the item labelled `label` of the drawn menu open in the last frame, as
+  /// [Self::context_menu] chooses one the platform shows; panics when it isn't there.
+  pub fn click_menu_item(&mut self, label: &str) -> bool {
+    let id = self.menu_item(label).unwrap_or_else(|| panic!("no menu item {label:?}"));
+    self.click_id(id)
+  }
+
   /// Presses and releases `key` with `mods` as on a US keyboard (Shift-1 is `'!'`, Shift-A
   /// `'A'`); returns whether the press was used. Unused, it goes through text input as in a
   /// window: [Self::key_event].
@@ -259,6 +266,19 @@ impl<A: App> Harness<A> {
   /// An element's rect in the last frame built.
   pub fn rect(&self, id: Id) -> Option<Rect> {
     self.rt.ui.last.rect(id)
+  }
+
+  /// The item labelled `label` of a drawn menu in the last frame built, found by its name to
+  /// assistive technology ([Self::a11y_tree]); its rect is [Self::rect]. Panics when more than one
+  /// item has that label (a submenu's, a picker's option), so a test never takes the wrong one.
+  pub fn menu_item(&self, label: &str) -> Option<Id> {
+    let t = self.a11y_tree();
+    let items = t.nodes.iter().filter(|n| n.props.role == Role::MenuItem);
+    let mut found = items.filter(|n| t.str(n.props.name) == label).map(|n| n.id);
+    let id = found.next()?;
+    assert!(found.next().is_none(), "more than one menu item {label:?}");
+
+    Some(id)
   }
 
   /// The text of a text element in the last frame built.
@@ -449,7 +469,7 @@ impl Image {
 
   /// Writes a PNG, tagged sRGB.
   pub fn save_png(&self, path: &Path) -> Result<(), String> {
-    crate::png::write(path, &self.pixels)
+    png::write(path, &self.pixels)
   }
 }
 

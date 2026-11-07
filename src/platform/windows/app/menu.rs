@@ -74,7 +74,7 @@ fn flags(it: &Item<usize>) -> MENU_ITEM_FLAGS {
     Item::Divider => MF_SEPARATOR,
     Item::Section(_) => MF_STRING | MF_GRAYED,
     Item::Submenu { .. } => MF_STRING | MF_POPUP | on(!it.is_enabled(), MF_GRAYED),
-    _ => MF_STRING | on(it.check() == Some(true), MF_CHECKED) | on(!it.is_enabled(), MF_GRAYED),
+    _ => MF_STRING | on(it.is_on(), MF_CHECKED) | on(!it.is_enabled(), MF_GRAYED),
   }
 }
 
@@ -89,10 +89,11 @@ fn text(it: &Item<usize>) -> String {
 mod tests {
   use super::*;
   use crate::Menu;
+  use crate::keys::Shortcut;
 
   #[test]
   fn items_become_flags_and_text() {
-    let quit = Item::button(0, "Save & Quit").key(crate::keys::Shortcut::char('q').cmd());
+    let quit = Item::button(0, "Save & Quit").key(Shortcut::char('q').cmd());
     assert_eq!(text(&quit), "Save && Quit\tCtrl+Q");
     assert_eq!(flags(&quit), MF_STRING);
     assert_eq!(

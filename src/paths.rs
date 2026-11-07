@@ -17,6 +17,9 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+#[cfg(windows)]
+use crate::platform;
+
 /// The OS whose layout a path follows: [OS] in use, another in tests.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Os {
@@ -60,7 +63,7 @@ pub fn cache_dir(id: &str) -> PathBuf {
 /// where it is the home folder itself (xdg-user-dirs' way to turn a folder off).
 pub fn downloads() -> Option<PathBuf> {
   #[cfg(windows)]
-  let dir = crate::platform::downloads();
+  let dir = platform::downloads();
   #[cfg(not(windows))]
   let dir = downloads_in(OS, &|k| std::env::var_os(k), &|p| std::fs::read_to_string(p).ok());
   dir.filter(|d| d.is_dir())

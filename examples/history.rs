@@ -103,7 +103,7 @@ impl App for History {
 
 fn main() {
   // The shot: the page's top, the second row selected.
-  nimbo::run(Config::new("History", 560.0, 520.0), History::default(), |h| {
+  nimbo::run_example(Config::new("History", 560.0, 520.0), History::default(), |h| {
     h.frame();
     let e = h.app().entry(0, 1);
     h.app_mut().sel.select(e, 1);

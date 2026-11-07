@@ -434,9 +434,9 @@ pub enum TextLines {
   /// longer than that breaks between characters.
   #[default]
   Wrap,
-  /// One line (a line per line break) as wide as the text, never cut: a button's label, as
+  /// One line (a line per line break) as wide as the text, never cut: a button's label;
   /// SwiftUI's `.fixedSize()`.
-  Fixed,
+  NoWrap,
   /// At most this many lines, wrapping; where the text doesn't fit them it is cut with "…" in
   /// the [TruncationMode], and it can then shrink to that, as `.lineLimit(n)` with
   /// `.truncationMode(mode)`. Over more than one line it is cut at the end.
@@ -505,9 +505,9 @@ impl TextStyle {
     Self { font, ..self }
   }
 
-  /// One line as wide as the text ([TextLines::Fixed]), as SwiftUI's `.fixedSize()`.
-  pub const fn fixed_size(self) -> Self {
-    Self { lines: TextLines::Fixed, ..self }
+  /// One line as wide as the text ([TextLines::NoWrap]); SwiftUI's `.fixedSize()`.
+  pub const fn nowrap(self) -> Self {
+    Self { lines: TextLines::NoWrap, ..self }
   }
 
   /// At most `n` lines, cut with "…" where it doesn't fit ([TextLines::Limit]), at its end

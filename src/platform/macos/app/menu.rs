@@ -142,7 +142,7 @@ pub fn fill(mtm: MainThreadMarker, menu: &NSMenu, items: &[Item<usize>], target:
     }
 
     item.setEnabled(it.is_enabled());
-    let on = it.check() == Some(true);
+    let on = it.is_on();
     item.setState(if on { NSControlStateValueOn } else { NSControlStateValueOff });
     if let Item::Submenu { menu: sub, .. } = it {
       let submenu = NSMenu::new(mtm);

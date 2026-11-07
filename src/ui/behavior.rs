@@ -866,7 +866,7 @@ mod tests {
   use crate::app::{App, Cx, Event};
   use crate::harness::Harness;
   use crate::scene::{Color, Quad, Size};
-  use crate::ui::px;
+  use crate::ui::{Theme, px};
 
   const REST: Color = [0.2, 0.2, 0.2, 1.0];
   const OVER: Color = [0.0, 0.0, 1.0, 1.0];
@@ -1004,7 +1004,7 @@ mod tests {
   impl App for Own {
     fn view(&mut self, ui: &mut Ui) {
       let b = ui.text_field_behavior(Id::of("own"), &mut self.text, FieldKind::SingleLine);
-      let style = crate::ui::Theme::PLATES_DARK.field();
+      let style = Theme::PLATES_DARK.field();
       let frame =
         b.style(Style::new().w(px(120.0)).h(px(24.0)).bg(if b.focused { OVER } else { REST }));
       ui.with_id(b.id).row(frame, |ui| ui.field_text(&b, &style, Style::new()));

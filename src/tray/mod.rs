@@ -22,9 +22,9 @@ use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::marker::PhantomData;
 
-use crate::Main;
 pub use crate::menu::{Item, LABEL, Menu};
 use crate::platform::tray as imp;
+use crate::{Main, svg};
 
 /// The icon, a template: only its alpha counts, and the OS's colour fills it (macOS tints it
 /// for the menu bar and the highlight; Windows fills it white on a dark taskbar, black on a light
@@ -49,7 +49,7 @@ impl TrayIcon {
   /// An icon file: an SVG of `<path>`s in a square view box ([crate::svg::document] says what
   /// it reads), drawn as [TrayIcon::Path].
   pub fn from_svg(svg: &str) -> Result<Self, String> {
-    let (size, d, even_odd) = crate::svg::document(svg)?;
+    let (size, d, even_odd) = svg::document(svg)?;
     Ok(Self::Path { size, d, even_odd })
   }
 

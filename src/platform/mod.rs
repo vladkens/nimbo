@@ -34,8 +34,9 @@
 //!   - `post(delay: Duration, f: Box<dyn FnOnce() + Send>)` from any thread, run by the loop also
 //!     in modal loops (a menu open, a live resize); `is_main() -> bool`.
 //!
-//!   [crate::run] is one window whose close quits ([crate::shell] `window`). A window's app that
-//!   quits ([crate::Cx::quit]) quits the app. Each window owns a `Runtime` made with
+//!   An example's window ([crate::run_example]) is one window whose close quits ([crate::shell]
+//!   `window`). A window's app that quits ([crate::Cx::quit]) quits the app. Each window owns a
+//!   `Runtime` made with
 //!   `Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(<its clipboard>))`, and:
 //!   - window: `cfg.title`, `cfg.size` in points (content area), `cfg.resizable`, the least content
 //!     size `cfg.min()` (macOS: `contentMinSize`, Windows: `WM_GETMINMAXINFO`, Linux: the drawing
@@ -307,6 +308,8 @@ impl Pace {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::cpu::Renderer;
+  use crate::keys::us_char;
   use crate::scene::Size;
 
   /// 8 ms frames at 60 Hz: the next is due 8.7 ms after one ends, and a second holds 60 of them.
@@ -356,7 +359,7 @@ mod tests {
       Code::Unidentified,
     ];
     assert_eq!(scans.map(scan_code), want);
-    let typing = (0..89).filter(|&s| crate::keys::us_char(scan_code(s), false).is_some()).count();
+    let typing = (0..89).filter(|&s| us_char(scan_code(s), false).is_some()).count();
     assert_eq!(typing, 48);
   }
 
@@ -365,7 +368,7 @@ mod tests {
     for scale in [1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 3.0] {
       for px in 1..4000 {
         let p = points(px, scale);
-        assert_eq!(crate::cpu::Renderer::pixel_size(Size::new(p, p), scale).0, px as usize);
+        assert_eq!(Renderer::pixel_size(Size::new(p, p), scale).0, px as usize);
       }
     }
   }

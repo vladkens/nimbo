@@ -8,6 +8,8 @@
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::{Condvar, Mutex, OnceLock};
 
+use crate::platform;
+
 /// A task lent to the helpers for one [Pool::run], which doesn't return before every helper that
 /// took it is done with it.
 #[derive(Clone, Copy)]
@@ -125,7 +127,7 @@ impl Pool {
 pub fn threads() -> usize {
   // Unknown, no more than 4: past that the cores are likely efficiency ones or busy.
   let cores = || std::thread::available_parallelism().map_or(1, |n| n.get().min(4));
-  crate::platform::perf_cores().unwrap_or_else(cores)
+  platform::perf_cores().unwrap_or_else(cores)
 }
 
 #[cfg(test)]

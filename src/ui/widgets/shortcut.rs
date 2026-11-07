@@ -16,7 +16,7 @@
 use keyboard_types::{Code, Modifiers, NamedKey};
 
 use super::icon::{self, Icon};
-use crate::app::KeyPhase;
+use crate::hotkey;
 use crate::keys::{Hotkey, Key, KeyEvent, Shortcut, f_key, is_modifier, us_char};
 use crate::scene::mix;
 use crate::text::Weight;
@@ -89,13 +89,13 @@ impl Ui<'_> {
     };
 
     if rec.on {
-      if let Some((key, phase)) = self.modifier_key(id).filter(|m| is_modifier(m.0)) {
-        match phase {
-          KeyPhase::Down => {
+      if let Some((key, down)) = self.modifier_key(id).filter(|m| is_modifier(m.0)) {
+        match down {
+          true => {
             rec.lone = (rec.held == 0 && lone).then_some(key);
             rec.held += 1;
           }
-          KeyPhase::Up => {
+          false => {
             rec.held = rec.held.saturating_sub(1);
             if rec.lone.take() == Some(key) {
               set(&mut b, Some(Hotkey::Modifier(key)));
@@ -161,7 +161,7 @@ impl Ui<'_> {
     let t = self.theme();
     let id = self.take_id();
     let clear = id.key("clear");
-    let lone = crate::hotkey::modifier_alone();
+    let lone = hotkey::modifier_alone();
     let b = self.shortcut_behavior(id, value, t.shortcut_clear, lone);
     let hot = self.ctl_hot(id, b.hovered);
     let h = t.sizes.control_h;
@@ -267,7 +267,7 @@ mod tests {
     h.frame();
     h.click_id(Id::of("rec"));
     for down in [true, false] {
-      h.event(Event::Modifier { key: Code::AltRight, phase: KeyPhase::of(down) });
+      h.event(Event::Modifier { key: Code::AltRight, down });
     }
 
     assert_eq!((h.app().0, h.focused()), (None, Some(Id::of("rec"))), "still recording");

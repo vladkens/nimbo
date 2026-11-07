@@ -519,7 +519,8 @@ fn item_hash(scene: &Scene, it: &Item) -> u64 {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::scene::{Point, Quad, Segment};
+  use crate::scene::{LineCap, Point, Quad, Segment};
+  use crate::ui::Axis;
 
   /// Panels, a moving rounded card with a border and a shadow, a clip and a line.
   fn scene(t: f32) -> Scene {
@@ -532,7 +533,7 @@ mod tests {
     s.push_clip(Rect::new(20.0, 120.0, 150.0 + t, 50.0));
     let a = Point::new(10.0, 160.0);
     let b = Point::new(250.0, 125.0 + t);
-    s.segment(Segment::new(a, b, [0.9, 0.7, 0.2, 1.0], 1.5, crate::scene::LineCap::Round));
+    s.segment(Segment::new(a, b, [0.9, 0.7, 0.2, 1.0], 1.5, LineCap::Round));
     s.quad(Quad::new(Rect::new(30.0, 130.0, 40.0, 20.0), [1.0, 0.2, 0.2, 0.7]));
     s.pop_clip();
     s
@@ -613,7 +614,7 @@ mod tests {
     // The same pixel size, items and bounds, but the gradient spans twice the pixels.
     let mut s = Scene::default();
     let q = Quad::new(Rect::new(0.0, 0.0, 128.0, 128.0), [1.0, 0.0, 0.0, 1.0]);
-    s.quad(q.gradient([0.0, 0.0, 1.0, 1.0], crate::ui::Axis::Vertical));
+    s.quad(q.gradient([0.0, 0.0, 1.0, 1.0], Axis::Vertical));
     let mut r = Renderer::new();
     let mut c = Canvas::default();
     c.draw(&mut r, &s, Size::new(64.0, 64.0), 1.0, false);

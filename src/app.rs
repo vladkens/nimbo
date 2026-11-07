@@ -15,9 +15,11 @@ use keyboard_types::{Code, Modifiers};
 use crate::file_dialog::FileDialog;
 use crate::keys::{Binding, Command, Extent, KeyEvent, Move};
 use crate::scene::{Color, Frame, Images, Point, Rect, Scene, Size};
+use crate::system::Change;
 use crate::text::TextSystem;
 use crate::ui::{
   Action, Click, Cursor, FocusDirection, FrameStats, Id, Role, Sys, TextInput, Ui, UiState,
+  drags_window,
 };
 
 /// An application: owns its state, reacts to events and draws the frame from it, as an element
@@ -154,7 +156,7 @@ pub enum Event {
   /// none.
   Modifier {
     key: Code,
-    phase: KeyPhase,
+    down: bool,
   },
   /// A trackpad pinch: `delta` is the change in magnification (0.1 is 10% larger).
   Magnify {
@@ -172,7 +174,7 @@ pub enum Event {
   Appearance(Appearance),
   /// A change in the system the app watches ([crate::Main::watch]), to read again
   /// ([crate::system]); redraws when the app uses it.
-  System(crate::system::Change),
+  System(Change),
   /// Files dragged over the window, the pointer at `pos`; the hover follows it, so
   /// [Cx::hovered] tells where they would go.
   DragOver {
@@ -205,20 +207,6 @@ pub enum Event {
     role: Role,
     action: Action,
   },
-}
-
-/// Whether a key went down or up, as SwiftUI's `KeyPress.Phases`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum KeyPhase {
-  Down,
-  Up,
-}
-
-impl KeyPhase {
-  /// [KeyPhase::Down] when `down`, else Up: from a platform's flag.
-  pub const fn of(down: bool) -> Self {
-    if down { KeyPhase::Down } else { KeyPhase::Up }
-  }
 }
 
 /// Light or dark, as SwiftUI's `ColorScheme`: the OS's ([Appearance]) or a theme's.
@@ -576,7 +564,7 @@ impl<A: App> Runtime<A> {
   /// moves it (or zooms it on a double-click) instead of sending the press.
   #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
   pub fn drags_window(&self, p: Point) -> bool {
-    crate::ui::drags_window(&self.ui.last, p)
+    drags_window(&self.ui.last, p)
   }
 
   /// The height of the title bar over the content and the window's title ([Ui::titlebar]), for
@@ -978,9 +966,9 @@ mod tests {
   use std::sync::mpsc;
 
   use super::*;
-  use crate::keys::{self, CMD, Key};
+  use crate::keys::{self, CMD, Key, Shortcut};
   use crate::scene::Rect;
-  use crate::ui::{Kind, Style, Theme, Transition, px};
+  use crate::ui::{Float, Kind, Style, TextStyle, Theme, Transition, grow, px};
 
   #[derive(Default)]
   struct Probe {
@@ -993,7 +981,7 @@ mod tests {
     fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
       self.events += 1;
       if let Event::KeyDown(k) = ev
-        && k.is(crate::keys::Shortcut::char('c'))
+        && k.is(Shortcut::char('c'))
       {
         cx.clipboard().write("copied");
       }
@@ -1074,7 +1062,7 @@ mod tests {
     impl App for Meter {
       fn view(&mut self, ui: &mut Ui) {
         self.0.push(ui.last_frame().count);
-        ui.el(crate::ui::Style::new().w(crate::ui::px(10.0)).h(crate::ui::px(10.0)));
+        ui.el(Style::new().w(px(10.0)).h(px(10.0)));
       }
     }
     let clock = Clock::Virtual(Duration::ZERO);
@@ -1104,7 +1092,7 @@ mod tests {
       self.seen.push(ui.rect(crate::Id::of("pop")).is_some());
       if self.open {
         let s = Style::new().w(px(10.0)).h(px(10.0));
-        ui.id("pop").float(crate::ui::Float::window()).el(s);
+        ui.id("pop").float(Float::window()).el(s);
       }
     }
   }
@@ -1227,7 +1215,7 @@ mod tests {
     struct Over;
     impl App for Over {
       fn view(&mut self, ui: &mut Ui) {
-        ui.text("Hello", crate::ui::TextStyle::new(crate::Font::ui(20.0), [1.0; 4]));
+        ui.text("Hello", TextStyle::new(crate::Font::ui(20.0), [1.0; 4]));
       }
 
       fn paint(&mut self, f: &mut Frame) {
@@ -1298,10 +1286,10 @@ mod tests {
       fn view(&mut self, ui: &mut Ui) {
         ui.fit_window_height(200.0, 50.0, 500.0);
         ui.col(Style::new().grow(), |ui| {
-          ui.el(Style::new().w(crate::ui::grow()).h(px(40.0)));
+          ui.el(Style::new().w(grow()).h(px(40.0)));
           ui.id("list").scroll_area(Style::new().grow(), |ui| {
             for _ in 0..self.rows {
-              ui.el(Style::new().w(crate::ui::grow()).h(px(30.0)));
+              ui.el(Style::new().w(grow()).h(px(30.0)));
             }
           });
         });
@@ -1387,7 +1375,7 @@ mod tests {
       }
 
       let sq = Style::new().w(px(40.0)).h(px(40.0));
-      ui.id("count").text(self.count, crate::ui::TextStyle::new(crate::Font::ui(13.0), [1.0; 4]));
+      ui.id("count").text(self.count, TextStyle::new(crate::Font::ui(13.0), [1.0; 4]));
       if ui.id("plus").el(sq).clicked {
         self.count += 1;
       }
@@ -1405,7 +1393,7 @@ mod tests {
         self.timer = false;
       }
 
-      ui.id("line").text(&self.line, crate::ui::TextStyle::new(crate::Font::ui(13.0), [1.0; 4]));
+      ui.id("line").text(&self.line, TextStyle::new(crate::Font::ui(13.0), [1.0; 4]));
     }
   }
 
@@ -1534,15 +1522,14 @@ mod tests {
     item_takes: bool,
   }
 
-  const ITEM_KEYS: &[Binding] =
-    &[keys::bind(crate::keys::Shortcut::char('z').cmd(), Command::Undo)];
+  const ITEM_KEYS: &[Binding] = &[keys::bind(Shortcut::char('z').cmd(), Command::Undo)];
   const PANEL_KEYS: &[Binding] = &[
-    keys::bind(crate::keys::Shortcut::char('z').cmd(), Command::Action("panel undo")),
-    keys::bind(crate::keys::Shortcut::char('p').cmd(), Command::Action("panel")),
+    keys::bind(Shortcut::char('z').cmd(), Command::Action("panel undo")),
+    keys::bind(Shortcut::char('p').cmd(), Command::Action("panel")),
   ];
   const APP_KEYS: &[Binding] = &[
-    keys::bind(crate::keys::Shortcut::char('p').cmd(), Command::Action("app")),
-    keys::bind(crate::keys::Shortcut::char('n').cmd(), Command::Action("new")),
+    keys::bind(Shortcut::char('p').cmd(), Command::Action("app")),
+    keys::bind(Shortcut::char('n').cmd(), Command::Action("new")),
   ];
 
   impl App for Keyed {
@@ -1685,7 +1672,7 @@ mod tests {
 
     fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
       if let Event::KeyDown(k) = ev
-        && k.is(crate::keys::Shortcut::char('a'))
+        && k.is(Shortcut::char('a'))
       {
         cx.focus(Some(Id::of("field")));
       }
@@ -1755,9 +1742,9 @@ mod tests {
     struct Measured(f32);
     impl App for Measured {
       fn view(&mut self, ui: &mut Ui) {
-        let style = crate::ui::TextStyle::new(crate::Font::ui(20.0), [1.0; 4]);
+        let style = TextStyle::new(crate::Font::ui(20.0), [1.0; 4]);
         self.0 = ui.measure("1,234.5", style);
-        ui.id("t").text("1,234.5", style.fixed_size());
+        ui.id("t").text("1,234.5", style.nowrap());
       }
     }
     let clock = Clock::Virtual(Duration::ZERO);
@@ -1770,7 +1757,7 @@ mod tests {
     assert!((rt.ui.last.rect(Id::of("t")).unwrap().w - rt.app.0).abs() <= 0.5);
     // Outside a runtime there is nothing to measure with.
     let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
-    assert_eq!(ui.measure("1", crate::ui::TextStyle::new(crate::Font::ui(20.0), [1.0; 4])), 0.0);
+    assert_eq!(ui.measure("1", TextStyle::new(crate::Font::ui(20.0), [1.0; 4])), 0.0);
   }
 
   #[test]

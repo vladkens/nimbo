@@ -211,7 +211,7 @@ impl Gallery {
     ui.col(Style::new().w(grow()).gap(12.0), |ui| {
       let put = |ui: &mut Ui, k: &str, f: &mut dyn FnMut(&mut Ui)| {
         ui.key(k).row(line(12.0).w(grow()), |ui| {
-          ui.col(Style::new().w(px(64.0)), |ui| ui.text(k, t.muted().fixed_size()));
+          ui.col(Style::new().w(px(64.0)), |ui| ui.text(k, t.muted().nowrap()));
           ui.row(line(10.0).w(grow()), f);
         });
       };
@@ -322,7 +322,7 @@ impl Gallery {
       "Check box" => Self::variants(ui, Shown::Plain, |ui| _ = ui.checkbox(&mut self.wrap, "Wrap")),
       "Slider" => Self::variants(ui, Shown::Plain, |ui| {
         ui.a11y_label("Zoom").slider(&mut self.zoom, 0.0..=200.0);
-        ui.text(format_args!("{:.0}%", self.zoom), t.muted().fixed_size());
+        ui.text(format_args!("{:.0}%", self.zoom), t.muted().nowrap());
       }),
       "Picker" => Self::variants(ui, Shown::Plain, |ui| {
         let p = Picker::new(&mut self.size).options(&SIZES[..1]).divider();
@@ -417,7 +417,7 @@ impl Gallery {
             self.ask = true;
           }
 
-          ui.text(format_args!("Deleted {} times", self.deleted), t.muted().fixed_size());
+          ui.text(format_args!("Deleted {} times", self.deleted), t.muted().nowrap());
         });
         let d = Dialog::new("Delete the file?").message("It moves to the Trash.").icon(Icon::TRASH);
         let d = d.button("Delete", ButtonRole::Destructive);

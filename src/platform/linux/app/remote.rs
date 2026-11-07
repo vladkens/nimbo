@@ -44,6 +44,7 @@ use super::super::{Fp, P, S, gtk, keys, lib};
 use super::{paste, post};
 use crate::clipboard::Snapshot;
 use crate::keys::{Shortcut, strokes};
+use crate::{paths, platform};
 
 const REMOTE: &str = "org.freedesktop.portal.RemoteDesktop";
 const CLIPBOARD: &str = "org.freedesktop.portal.Clipboard";
@@ -171,7 +172,7 @@ fn start() -> Result<Rc<State>, String> {
   s.clipboard.set(results.get("clipboard_enabled").is_some_and(|v| v.bool()));
   // A token is good for one start: each gives the next.
   let token = results.get("restore_token").map(|v| v.str()).unwrap_or_default();
-  match crate::platform::write::file(&token_file(), token.as_bytes()) {
+  match platform::write::file(&token_file(), token.as_bytes()) {
     Ok(()) => s.restorable.set(!token.is_empty()),
     Err(e) => eprintln!("nimbo: the remote desktop's restore token: {e}"),
   }
@@ -242,7 +243,7 @@ pub(super) fn granted() -> bool {
 pub(super) const TOKEN: &str = "remote-desktop.token";
 
 fn token_file() -> PathBuf {
-  crate::paths::config_dir(super::shell::info().id).join(TOKEN)
+  paths::config_dir(super::shell::info().id).join(TOKEN)
 }
 
 // MARK: Keys

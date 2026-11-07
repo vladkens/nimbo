@@ -326,9 +326,11 @@ mod tests {
   use std::time::Duration;
 
   use super::*;
-  use crate::scene::{Images, Scene, Size};
+  use crate::scene::{Images, Point, Scene, Size};
   use crate::text::{Font, TextSystem};
-  use crate::ui::{Float, Id, LinePattern, Sys, TextStyle, Ui, UiState, px};
+  use crate::ui::{
+    Float, Id, LinePattern, Shadow, Sys, TextStyle, Ui, UiState, UnitPoint, grow, input, px,
+  };
 
   #[test]
   fn paints_tree_then_overlays() {
@@ -339,19 +341,13 @@ mod tests {
     let mut drawn = None;
     let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
     let panel = Style::new().w(px(100.0)).h(px(50.0)).bg([0.2, 0.2, 0.2, 1.0]);
-    ui.id("panel").col(
-      panel.shadow(crate::ui::Shadow::new(2.0, 4.0, [0.0, 0.0, 0.0, 0.5])).clip(),
-      |ui| {
-        ui.text("hi", label);
-        ui.float(Float::parent().attach(crate::ui::UnitPoint::TOP_TRAILING)).col(
-          panel.opacity(0.5),
-          |ui| {
-            ui.text("tip", label);
-          },
-        );
-        ui.canvas(Style::new().w(px(10.0)).h(px(10.0)), |_, r| drawn = Some(r));
-      },
-    );
+    ui.id("panel").col(panel.shadow(Shadow::new(2.0, 4.0, [0.0, 0.0, 0.0, 0.5])).clip(), |ui| {
+      ui.text("hi", label);
+      ui.float(Float::parent().attach(UnitPoint::TOP_TRAILING)).col(panel.opacity(0.5), |ui| {
+        ui.text("tip", label);
+      });
+      ui.canvas(Style::new().w(px(10.0)).h(px(10.0)), |_, r| drawn = Some(r));
+    });
     // Outside the window: not painted.
     ui.float(Float::window().offset(500.0, 0.0)).text("away", label);
     let mut sys = Sys { text: &mut text, images: &images, scale };
@@ -411,7 +407,7 @@ mod tests {
     let tall = format!("e{}", "\u{301}".repeat(24));
     let up = TextSystem::new(1.0).layout(&tall, font).ink.up;
     assert!(up > 4.0 * font.size, "the accents stack {up} pt high");
-    let style = TextStyle::new(font, [1.0; 4]).fixed_size();
+    let style = TextStyle::new(font, [1.0; 4]).nowrap();
     // The box 2 em below the window, its accents up in it.
     let below =
       glyphs(|ui| ui.float(Float::window().offset(0.0, 50.0 + 2.0 * 13.0)).text(&tall, style));
@@ -430,7 +426,7 @@ mod tests {
       (Scene::default(), TextSystem::new(scale), Images::default());
     let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
     // 12 above the window, 10 high, its shadow 4 lower with no blur: 2 rows of it show.
-    let shadow = crate::ui::Shadow::new(4.0, 0.0, [0.0, 0.0, 0.0, 1.0]);
+    let shadow = Shadow::new(4.0, 0.0, [0.0, 0.0, 0.0, 1.0]);
     let s = Style::new().w(px(20.0)).h(px(10.0)).bg([1.0; 4]).shadow(shadow);
     ui.float(Float::window().offset(0.0, -12.0)).el(s);
     ui.float(Float::window().offset(0.0, -40.0)).el(s);
@@ -460,7 +456,7 @@ mod tests {
       (Scene::default(), TextSystem::new(scale), Images::default());
     let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
     let black = [0.0, 0.0, 0.0, 1.0];
-    let shadow = crate::ui::Shadow::new(4.0, 0.0, black);
+    let shadow = Shadow::new(4.0, 0.0, black);
     ui.id("box").el(Style::new().w(px(20.0)).h(px(10.0)).bg([1.0; 4]).shadow(shadow));
     let mut sys = Sys { text: &mut text, images: &images, scale };
     ui.layout(&mut sys, scale);
@@ -648,8 +644,8 @@ mod tests {
       f.text(r.x + 12.0, r.y + 24.0, "chart", Font::ui(13.0), [1.0; 4]);
     };
     ui.id("chart").canvas_row(Style::new().w(px(120.0)).h(px(80.0)).pad(10.0), paint, |ui| {
-      ui.id("plot").el(Style::new().w(crate::ui::grow()).h(crate::ui::grow()).bg([1.0; 4]));
-      ui.id("axis").el(Style::new().w(px(30.0)).h(crate::ui::grow()));
+      ui.id("plot").el(Style::new().w(grow()).h(grow()).bg([1.0; 4]));
+      ui.id("axis").el(Style::new().w(px(30.0)).h(grow()));
     });
     let mut sys = Sys { text: &mut text, images: &images, scale };
     ui.layout(&mut sys, scale);
@@ -679,7 +675,7 @@ mod tests {
     assert_eq!((layers[1].quads.len(), layers[1].quads[0].color), (1, [1.0; 4]));
     // Children take the pointer, innermost first.
     let mut hits = Vec::new();
-    crate::ui::input::hit(&st.last, crate::scene::Point::new(20.0, 20.0), &mut hits);
+    input::hit(&st.last, Point::new(20.0, 20.0), &mut hits);
     assert_eq!(hits, [Id::of("plot"), Id::of("chart")]);
   }
 }

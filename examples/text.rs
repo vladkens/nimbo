@@ -147,5 +147,5 @@ impl App for Text {
 }
 
 fn main() {
-  nimbo::run(Config::new("text", SIZE.w, SIZE.h), Text::default(), |_| {});
+  nimbo::run_example(Config::new("text", SIZE.w, SIZE.h), Text::default(), |_| {});
 }

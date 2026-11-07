@@ -164,5 +164,5 @@ impl App for Shapes {
 }
 
 fn main() {
-  nimbo::run(Config::new("shapes", SIZE.w, SIZE.h), Shapes::default(), |_| {});
+  nimbo::run_example(Config::new("shapes", SIZE.w, SIZE.h), Shapes::default(), |_| {});
 }

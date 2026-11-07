@@ -534,7 +534,7 @@ impl UiState {
 mod tests {
   use super::*;
   use crate::ui::layout::tests::Fake;
-  use crate::ui::{Float, FocusDirection, Style, Ui, px};
+  use crate::ui::{Float, FocusDirection, Style, Ui, UnitPoint, px};
 
   /// A frame of a 200 x 100 window built by `f`.
   fn frame(st: UiState, f: impl FnOnce(&mut Ui)) -> UiState {
@@ -1055,12 +1055,9 @@ mod tests {
         ui.id("panel").col(Style::new().w(px(50.0)).h(px(100.0)).scroll(Axes::VERTICAL), |ui| {
           ui.el(Style::new().w(px(50.0)).h(px(1000.0)));
           let pop = Style::new().w(px(50.0)).h(px(20.0));
-          ui.id("pop").float(Float::parent().attach(crate::ui::UnitPoint::BOTTOM_LEADING)).col(
-            pop,
-            |ui| {
-              ui.id("item").el(Style::new().w(px(50.0)).h(px(20.0)).focusable());
-            },
-          );
+          ui.id("pop").float(Float::parent().attach(UnitPoint::BOTTOM_LEADING)).col(pop, |ui| {
+            ui.id("item").el(Style::new().w(px(50.0)).h(px(20.0)).focusable());
+          });
         });
         ui.el(Style::new().w(px(50.0)).h(px(100.0)));
       });

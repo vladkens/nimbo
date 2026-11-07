@@ -914,7 +914,7 @@ pub(crate) mod tests {
   use super::*;
   use crate::text::Memo;
   use crate::text::edit::graphemes;
-  use crate::ui::{Align, Float, Ui, UiState, grow, pct, px, rigid};
+  use crate::ui::{Align, Float, Ui, UiState, UnitPoint, grow, pct, px, rigid};
 
   /// Every character is 0.6 of the font size wide; ascent 0.8, descent 0.2.
   pub(crate) struct Fake;
@@ -1386,7 +1386,7 @@ pub(crate) mod tests {
   fn nowrap_and_line_height() {
     let t = run(400.0, 300.0, 1.0, |ui| {
       ui.col(Style::new().w(px(30.0)), |ui| {
-        ui.id("a").text("aa bb cc", T.fixed_size());
+        ui.id("a").text("aa bb cc", T.nowrap());
         ui.id("b").text("x", T.line_h(16.0));
       });
     });
@@ -1398,7 +1398,7 @@ pub(crate) mod tests {
   }
 
   /// Cut at the head the line keeps its end, in the middle both ends; a limit of two lines
-  /// wraps onto two and cuts the second's end; Fixed keeps one line its whole width.
+  /// wraps onto two and cuts the second's end; NoWrap keeps one line its whole width.
   #[test]
   fn truncation_modes_and_line_limits() {
     let t = run(400.0, 300.0, 1.0, |ui| {
@@ -1412,7 +1412,7 @@ pub(crate) mod tests {
       ui.row(Style::new().w(px(60.0)), |ui| {
         ui.id("two").text("ab cd ef gh ij kl mn op", T.line_limit(2))
       });
-      ui.row(Style::new().w(px(30.0)), |ui| ui.id("fixed").text("ab cd ef", T.fixed_size()));
+      ui.row(Style::new().w(px(30.0)), |ui| ui.id("fixed").text("ab cd ef", T.nowrap()));
     });
     let shown = |name: &str| {
       let Kind::Text { lines, .. } = t.get(Id::of(name)).unwrap().kind else { panic!() };
@@ -1554,11 +1554,8 @@ pub(crate) mod tests {
         el(ui, "x", Style::new().w(px(10.0)).h(px(10.0)));
         ui.id("p").row(Style::new().w(px(100.0)).h(px(20.0)), |ui| {
           // Under the parent, centred, 4 points below; not part of its fit size.
-          let tip = Float::parent()
-            .attach(crate::ui::UnitPoint::BOTTOM)
-            .anchor(crate::ui::UnitPoint::TOP)
-            .offset(0.0, 4.0)
-            .z(1);
+          let tip =
+            Float::parent().attach(UnitPoint::BOTTOM).anchor(UnitPoint::TOP).offset(0.0, 4.0).z(1);
           ui.id("tip").float(tip).col(Style::new().pad(5.0), |ui| {
             ui.text("tip", T);
             // An overlay of its own paints over it, though its z is lower.
@@ -1569,8 +1566,8 @@ pub(crate) mod tests {
         });
         // At the window's bottom-right corner, sized by percent of the window.
         let corner = Float::window()
-          .attach(crate::ui::UnitPoint::BOTTOM_TRAILING)
-          .anchor(crate::ui::UnitPoint::BOTTOM_TRAILING)
+          .attach(UnitPoint::BOTTOM_TRAILING)
+          .anchor(UnitPoint::BOTTOM_TRAILING)
           .z(-1);
         ui.id("win").float(corner).el(Style::new().w(pct(10.0)).h(px(500.0)).max_h(30.0));
       });

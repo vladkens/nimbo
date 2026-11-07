@@ -64,6 +64,7 @@ use crate::platform::hardware as imp;
 use crate::shell::Proxy;
 #[cfg(doc)]
 use crate::{App, Event, Main};
+use crate::{platform, shell};
 
 /// A kind of change in the system: what to read again. More kinds come (displays, power), so a
 /// `match` on it keeps a `_` arm.
@@ -205,7 +206,7 @@ fn now() -> u64 {
 /// The OS told `kind`, from any thread: atomics and, once a burst, a post to the main thread.
 pub(crate) fn notice(kind: Change) {
   if TRACE.load(Ordering::Relaxed) && WATCHER.watching(kind) {
-    let main = crate::platform::shell::is_main();
+    let main = platform::shell::is_main();
     eprintln!("nimbo: system raw {kind:?}{}", if main { " (main thread)" } else { "" });
   }
 
@@ -222,7 +223,7 @@ fn job(main: &mut crate::Main) {
   }
 
   for kind in ready {
-    crate::shell::changed(main, kind);
+    shell::changed(main, kind);
   }
 }
 

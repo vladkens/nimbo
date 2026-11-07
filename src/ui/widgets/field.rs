@@ -271,7 +271,7 @@ impl FieldStyle {
   pub const fn new(text: TextStyle) -> Self {
     Self {
       frame: Style::new().w(grow()).pad_xy(6.0, 4.0).align(Align::Start, Align::Center),
-      text: text.fixed_size(),
+      text: text.nowrap(),
       hint: "",
       placeholder: alpha(text.color, 0.4),
       selection: [0.25, 0.47, 0.95, 0.45],
@@ -287,7 +287,7 @@ impl FieldStyle {
 
   /// A field of `kind`: a multi-line one wraps its text, the others keep one line.
   pub const fn kind(self, kind: FieldKind) -> Self {
-    let lines = if let FieldKind::MultiLine = kind { TextLines::Wrap } else { TextLines::Fixed };
+    let lines = if let FieldKind::MultiLine = kind { TextLines::Wrap } else { TextLines::NoWrap };
     Self { text: TextStyle { lines, ..self.text }, kind, ..self }
   }
 
@@ -314,10 +314,11 @@ impl FieldStyle {
 
 #[cfg(test)]
 mod tests {
-  use crate::app::App;
+  use crate::app::{App, Event};
   use crate::harness::Harness;
+  use crate::keys::Command;
   use crate::scene::Size;
-  use crate::ui::{Cursor, Id, Ui};
+  use crate::ui::{Axes, Cursor, Id, Style, Ui, px};
 
   /// Disabled selectable text, then a button and a field.
   #[derive(Default)]
@@ -342,10 +343,7 @@ mod tests {
 
   impl App for Page {
     fn view(&mut self, ui: &mut Ui) {
-      let page = crate::ui::Style::new()
-        .w(crate::ui::px(200.0))
-        .h(crate::ui::px(40.0))
-        .scroll(crate::ui::Axes::VERTICAL);
+      let page = Style::new().w(px(200.0)).h(px(40.0)).scroll(Axes::VERTICAL);
       ui.id("page").col(page, |ui| _ = ui.id("t").selectable(&"line\n".repeat(20)));
     }
   }
@@ -412,7 +410,7 @@ mod tests {
     h.app_mut().off = false;
     h.frame();
     right_click(&mut h, first);
-    h.click_id(first.key("edit").key(("item", 2usize)));
+    h.click_menu_item("Paste");
     h.app_mut().off = true;
     h.frame();
     h.app_mut().off = false;
@@ -432,7 +430,7 @@ mod tests {
     h.frame();
     assert!(h.rt.ui.last.get(Id::of("page")).unwrap().scroll[1] > 0.0);
     // Page Down is not the text's: it goes on to the app.
-    let page_down = crate::app::Event::Command(crate::keys::Command::ScrollPageDown);
+    let page_down = Event::Command(Command::ScrollPageDown);
     assert!(!h.event(page_down));
   }
 

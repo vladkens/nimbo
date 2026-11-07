@@ -26,8 +26,7 @@ use std::time::Duration;
 use common::{mid, px, reads};
 use nimbo::ui::Action;
 use nimbo::{
-  Appearance, Code, Event, Harness, Hotkey, Id, Key, KeyPhase, Modifiers, NamedKey, Rect, Size,
-  Theme,
+  Appearance, Code, Event, Harness, Hotkey, Id, Key, Modifiers, NamedKey, Rect, Size, Theme, hotkey,
 };
 use settings::*;
 
@@ -116,10 +115,10 @@ fn general_switches_select_and_recorder() {
   assert_eq!(hotkey(&h).as_deref(), Some("ctrl+shift+k"));
   assert_ne!(h.focused(), Some(rec));
   h.click_id(rec);
-  h.event(Event::Modifier { key: Code::AltRight, phase: KeyPhase::Down });
-  h.event(Event::Modifier { key: Code::AltRight, phase: KeyPhase::Up });
+  h.event(Event::Modifier { key: Code::AltRight, down: true });
+  h.event(Event::Modifier { key: Code::AltRight, down: false });
   // Where the platform grabs no modifier alone (Linux) it records nothing, and Escape stops it.
-  let lone = match nimbo::hotkey::modifier_alone() {
+  let lone = match hotkey::modifier_alone() {
     true => "right_option",
     false => {
       key(&mut h, NamedKey::Escape);
@@ -132,11 +131,11 @@ fn general_switches_select_and_recorder() {
   h.click_id(rec);
   assert!(h.key('a', Modifiers::empty()));
   for (key, down) in [(Code::ShiftLeft, true), (Code::ShiftRight, true)] {
-    h.event(Event::Modifier { key, phase: KeyPhase::of(down) });
+    h.event(Event::Modifier { key, down });
   }
 
   for (key, down) in [(Code::ShiftLeft, false), (Code::ShiftRight, false)] {
-    h.event(Event::Modifier { key, phase: KeyPhase::of(down) });
+    h.event(Event::Modifier { key, down });
   }
 
   // Escape stops it unchanged, Backspace clears it.

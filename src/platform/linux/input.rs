@@ -22,7 +22,8 @@ use super::dl::fns;
 use super::{
   CURRENT, Fp, P, TRUE, Win, as_window, busy, connect, gtk, keys, lib, window_busy, with,
 };
-use crate::app::{Event, Ime, KeyPhase, MouseButton, Phase, WHEEL_LINE};
+use crate::app::{Event, Ime, MouseButton, Phase, WHEEL_LINE};
+use crate::keys::{Os, printable};
 use crate::scene::{Point, Rect};
 use crate::ui::Id;
 
@@ -735,7 +736,7 @@ impl Win {
       let syms: Vec<u32> = held.iter().map(|&(_, s)| s).collect();
       self.mods(keys::after(keys::mods(state), sym, down, &syms));
       if let Some(key) = side.filter(|_| !repeat) {
-        self.send(Event::Modifier { key, phase: KeyPhase::of(down) });
+        self.send(Event::Modifier { key, down });
       }
 
       // GDK's own events go first: an idle source runs after them.
@@ -764,7 +765,7 @@ impl Win {
     if keys::types(mods) {
       TYPED.take();
       if unsafe { (g.gtk_im_context_filter_keypress)(self.input.im, ev) } != 0 {
-        for text in TYPED.take().into_iter().filter(|t| crate::keys::printable(t)) {
+        for text in TYPED.take().into_iter().filter(|t| printable(t)) {
           self.send(Event::Text(text));
         }
 
@@ -774,7 +775,7 @@ impl Win {
       unsafe { (g.gtk_im_context_reset)(self.input.im) };
     }
 
-    if let Some(c) = crate::keys::Os::Linux.command(&k) {
+    if let Some(c) = Os::Linux.command(&k) {
       self.send(Event::Command(c));
     }
   }

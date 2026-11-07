@@ -18,6 +18,7 @@ A small custom-drawn desktop UI toolkit in Rust: its own CPU renderer draws ever
 - Every styled widget is a headless behaviour (hover, press, click, focus, keys, the value it edits) plus drawing from the theme, so an app can draw its own look over the same behaviour.
 - Reach a window's state only through `try_borrow*` or the platform's helper over it (macOS `View`, Windows `with_window`, Linux `with`), never `borrow_mut` in a callback: the system calls back in from nested run loops (panels, permission prompts, Finder). When it is busy, defer the work, never drop it.
 - Start every `.rs` file with `// Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo`, then a `//!` doc whose first sentence says what the file does; a PR's description carries the `make size ARGS=--map` lines of the files it adds or changes.
+- Code names another module's item through a `use` (`Shortcut::char('a')`, not `crate::keys::Shortcut::char('a')`); clippy's `absolute_paths` misses generic types (`Tag`, `Frame<'_>`).
 - Keep a file within ~800 lines of code (not counting tests, docs, comments and blanks; `make size ARGS=--files` counts them) by splitting it into submodules.
 - Helper scripts go in `scripts/`: Python run with `uv run`, kebab-case names.
 

@@ -19,9 +19,9 @@ use std::time::Duration;
 
 use super::super::dbus::cstr;
 use super::super::{FALSE, Fp, P, as_window, lib, load, slot};
-use crate::Config;
 use crate::app::{App, Event};
 use crate::shell::{AppInfo, Main, Presence};
+use crate::{Config, shell};
 
 thread_local! {
   /// The app running.
@@ -49,7 +49,7 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
   start(&mut Main::here());
   super::super::started();
   super::super::main_loop();
-  crate::shell::finish(|id| closed(id, false));
+  shell::finish(|id| closed(id, false));
 
   super::super::reap();
   INFO.set(None);
@@ -58,7 +58,7 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
 /// Opens a window running `app` (an app of type `ty`), in front unless `cfg.hidden`.
 pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
   let id = super::super::open(cfg, app).unwrap_or_else(|e| panic!("nimbo: the window title: {e}"));
-  crate::shell::opened(id, ty);
+  shell::opened(id, ty);
   id
 }
 
@@ -76,7 +76,7 @@ pub fn close(id: u64) {
 
 /// Window `id` goes ([super::super::close]), then its close callback runs.
 fn closed(id: u64, defer: bool) {
-  let on_close = crate::shell::closed(id);
+  let on_close = shell::closed(id);
   super::super::close(id, defer);
   if let Some(f) = on_close {
     f(&mut Main::here());

@@ -20,7 +20,7 @@ use nimbo::system::Change;
 use nimbo::tray::{Item, Menu, Tray, TrayIcon};
 use nimbo::{
   App, AppInfo, Config, Cx, Event, FormRow, FormStyle, Main, Presence, Shortcut, Style, Ui, Window,
-  grow, hardware,
+  grow, hardware, tray,
 };
 
 pub const INFO: AppInfo =
@@ -167,7 +167,7 @@ fn show(main: &mut Main) {
 
 fn start(main: &mut Main) {
   let tray = Tray::new(TrayIcon::Path { size: 18.0, d: ICON.into(), even_odd: false }, INFO.name);
-  if let Err(e) = nimbo::tray::available() {
+  if let Err(e) = tray::available() {
     eprintln!("tray: {e}");
   }
 
@@ -207,7 +207,7 @@ fn main() {
     let mut app = System::new(|| Some(true));
     app.seen.add(Change::AudioInputs, Some(false));
     app.seen.add(Change::DefaultInput, Some(false));
-    return nimbo::run(config(), app, |h| {
+    return nimbo::run_example(config(), app, |h| {
       h.event(Event::System(Change::Lid));
       h.frame();
     });

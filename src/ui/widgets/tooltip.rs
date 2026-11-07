@@ -87,8 +87,8 @@ mod tests {
 
   use crate::app::App;
   use crate::harness::Harness;
-  use crate::scene::Size;
-  use crate::ui::{Id, Style, Ui, px};
+  use crate::scene::{Frame, Rect, Size};
+  use crate::ui::{Id, LinePattern, Style, Theme, Ui, grow, px};
 
   /// `help` on a button, a text, a box with a text in it and a canvas.
   struct Helped;
@@ -97,12 +97,11 @@ mod tests {
     fn view(&mut self, ui: &mut Ui) {
       ui.help("Saves it").id("save").button("Save");
       let t = ui.theme();
-      let dotted = t.label().underline(crate::ui::LinePattern::Dot);
+      let dotted = t.label().underline(LinePattern::Dot);
       ui.help("Errors per 100 words").id("wer").text("WER 4.5%", dotted);
       let t = ui.theme();
       ui.help("A box").id("box").row(Style::new().h(px(20.0)), |ui| ui.text("Inside", t.label()));
-      let dot =
-        |f: &mut crate::scene::Frame, r: crate::scene::Rect| f.rect(r, [0.0, 0.0, 0.0, 1.0], 2.0);
+      let dot = |f: &mut Frame, r: Rect| f.rect(r, [0.0, 0.0, 0.0, 1.0], 2.0);
       ui.help("A dot").id("dot").canvas(Style::new().w(px(8.0)).h(px(8.0)), dot);
     }
   }
@@ -175,7 +174,7 @@ mod tests {
 
   impl App for Edge {
     fn view(&mut self, ui: &mut Ui) {
-      ui.row(crate::ui::Style::new().w(crate::ui::grow()), |ui| {
+      ui.row(Style::new().w(grow()), |ui| {
         ui.help("The first").id("a").button("A");
         ui.spacer();
         ui.help("A tip much wider than what is left of the window at its right")
@@ -190,7 +189,7 @@ mod tests {
 
   impl App for Long {
     fn view(&mut self, ui: &mut Ui) {
-      ui.set_theme(crate::ui::Theme::PLATES_LIGHT);
+      ui.set_theme(Theme::PLATES_LIGHT);
       let tip = "What the app shows when it starts. Restoring the last session reopens its \
                  windows where they were.";
       ui.help(tip).id("a").button("A");

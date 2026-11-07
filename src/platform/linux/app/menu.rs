@@ -54,8 +54,8 @@ pub fn props(node: &Node) -> V {
 
   let mut p =
     vec![("label", V::S(it.label().replace('_', "__"))), ("enabled", V::B(it.is_enabled()))];
-  if let Some(on) = it.check() {
-    p.extend([("toggle-type", V::s("checkmark")), ("toggle-state", V::I(on as i32))]);
+  if let Item::Toggle { is_on, .. } = it {
+    p.extend([("toggle-type", V::s("checkmark")), ("toggle-state", V::I(*is_on as i32))]);
   }
 
   if !node.children.is_empty() {
@@ -111,7 +111,7 @@ pub fn describe(nodes: &[Node], id: usize, depth: usize, out: &mut Vec<String>) 
       continue;
     }
 
-    let on = if it.check() == Some(true) { "on" } else { "off" };
+    let on = if it.is_on() { "on" } else { "off" };
     let enabled = if it.is_enabled() { "enabled" } else { "disabled" };
     let head = if let Item::Section(_) = it { "|header" } else { "" };
     out.push(format!("{pad}{}|{}|{on}|{enabled}{head}", it.label(), it.key_label()));

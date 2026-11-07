@@ -35,9 +35,9 @@ use objc2_foundation::{
 pub use super::app::{alert, is_main, post, send, set_presence};
 use super::view::View;
 use super::{Pasteboard, activate, appearance, mtm, overlay};
-use crate::Config;
 use crate::app::{App, Clock, Event, Runtime};
 use crate::shell::{Anchor, AppInfo, Main, Presence};
+use crate::{Config, shell};
 
 struct Win {
   id: u64,
@@ -103,15 +103,15 @@ define_class!(
           return;
         }
 
-        crate::shell::finish(close);
+        shell::finish(close);
         release();
         NSApplication::sharedApplication(mtm()).replyToApplicationShouldTerminate(true);
       });
       NSApplicationTerminateReply::TerminateLater
     }
 
-    /// Windows close; the app quits only through [quit] (`nimbo::run` quits when its window
-    /// closes).
+    /// Windows close; the app quits only through [quit] (`nimbo::run_example` quits when its
+    /// window closes).
     #[unsafe(method(applicationShouldTerminateAfterLastWindowClosed:))]
     fn should_terminate_after_last(&self, _app: &NSApplication) -> bool {
       false
@@ -120,7 +120,7 @@ define_class!(
     /// Opened again while it runs: LaunchServices starts no second process but tells.
     #[unsafe(method(applicationShouldHandleReopen:hasVisibleWindows:))]
     fn should_handle_reopen(&self, _app: &NSApplication, _visible: bool) -> bool {
-      defer(crate::shell::reopened);
+      defer(shell::reopened);
       false
     }
   }
@@ -216,7 +216,7 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
   }
 
   // The main queue isn't served once the loop ends: the closed windows go now.
-  crate::shell::finish(close);
+  shell::finish(close);
   release();
   // SAFETY: the observer is the delegate, added above.
   unsafe { center.removeObserver(&delegate) };
@@ -392,7 +392,7 @@ pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
   window.makeFirstResponder(Some(&view));
   let win = Win { id, window, view, _delegate: delegate, shown: false, overlay: cfg.overlay };
   shell(|s| s.windows.push(win));
-  crate::shell::opened(id, ty);
+  shell::opened(id, ty);
   if !cfg.hidden {
     front(id);
   }
@@ -454,7 +454,7 @@ fn closed(id: u64) {
   }) else {
     return;
   };
-  let on_close = crate::shell::closed(id);
+  let on_close = shell::closed(id);
   win.view.close();
   win.window.setDelegate(None);
   let Win { window, view, _delegate, .. } = win;

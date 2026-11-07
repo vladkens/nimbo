@@ -232,7 +232,7 @@ fn a_right_click_opens_the_row_menu_over_the_selection() {
     right(h, row(103), true);
     assert_eq!(selected(h), [101, 103, 104], "{os:?}: inside, kept");
     assert!(h.rect(popup).is_some() && h.focused() == Some(popup));
-    h.click_id(Id::of(LIST).key(("item", 0usize)));
+    h.click_menu_item("Open");
     h.frame();
     assert_eq!(h.app().chosen, [(RowAction::Open, vec![101, 103, 104])], "{os:?}");
     assert!(h.rect(popup).is_none());
@@ -313,7 +313,7 @@ fn the_row_menu_draws_its_model() {
     assert!(dump.contains(line), "{line}: {dump}");
   }
 
-  let (r, img) = (h.rect(Id::of(LIST).key(("item", 7usize))).unwrap(), h.render());
+  let (r, img) = (h.rect(h.menu_item("Delete").unwrap()).unwrap(), h.render());
   let red = (0..r.w as usize).map(|x| img.pixel(r.x + x as f32, r.y + r.h / 2.0));
   assert!(red.into_iter().any(|p| p[0] > p[1] + 80), "red text");
 }

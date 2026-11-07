@@ -29,7 +29,9 @@ use nimbo::hotkey::{Edge, Hotkeys};
 use nimbo::instance::{self, Claim, Instance};
 use nimbo::paste::Paste;
 use nimbo::tray::{Item, Menu, Tray, TrayIcon};
-use nimbo::{AppInfo, Config, Main, Png, Presence, Shortcut, Window, autostart, desktop};
+use nimbo::{
+  AppInfo, Config, Main, Png, Presence, Shortcut, Window, autostart, desktop, focus, paste, tray,
+};
 
 pub const INFO: AppInfo =
   AppInfo { id: "com.example.nimbo-tray", name: "Nimbo Tray", presence: Presence::Accessory };
@@ -125,8 +127,8 @@ fn show(main: &mut Main, state: &Shared) {
 /// Pastes `text` where the user types now: the clipboard comes back after the paste, unless
 /// something else was copied meanwhile.
 fn paste(text: &str) {
-  let opts = Paste { restore: true, target: nimbo::focus::current(), deadline: None };
-  if let Err(e) = nimbo::paste::text(text, opts) {
+  let opts = Paste { restore: true, target: focus::current(), deadline: None };
+  if let Err(e) = paste::text(text, opts) {
     eprintln!("paste: {e}");
   }
 }
@@ -147,7 +149,7 @@ fn start(main: &mut Main, instance: Option<Instance>) {
 
   let state = STATE.with(Rc::clone);
   let tray = Tray::new(TrayIcon::Path { size: 18.0, d: ICON.into(), even_odd: true }, INFO.name);
-  if let Err(e) = nimbo::tray::available() {
+  if let Err(e) = tray::available() {
     eprintln!("tray: {e}");
   }
 
@@ -211,7 +213,9 @@ fn start(main: &mut Main, instance: Option<Instance>) {
 
 fn main() {
   if std::env::args().any(|a| a == "--shot") {
-    return nimbo::run(Config::new("Counter", 360.0, 300.0), Counter::default(), |h| _ = h.frame());
+    return nimbo::run_example(Config::new("Counter", 360.0, 300.0), Counter::default(), |h| {
+      _ = h.frame()
+    });
   }
 
   // One instance: a second launch asks the first to show the counter, and ends.

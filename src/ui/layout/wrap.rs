@@ -120,7 +120,7 @@ pub fn wrap(t: &mut Tree, m: &mut dyn Measure, kept: &mut Kept) {
 
 /// Whether a text in `style` wraps at spaces: it does unless it is one line.
 fn wraps(style: TextStyle) -> bool {
-  !matches!(style.lines, TextLines::Fixed | TextLines::Limit(1, _))
+  !matches!(style.lines, TextLines::NoWrap | TextLines::Limit(1, _))
 }
 
 /// `s` cut to fit `width` with an ellipsis where `mode` says, as a line of it: what is kept

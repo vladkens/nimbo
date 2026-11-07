@@ -65,7 +65,7 @@ impl Ui<'_> {
         ui.with_id(seg).row(b.pointer(s.radius(radius).bg(bg)), |ui| {
           ui.text(o.label, text);
           if let Some(n) = o.count {
-            ui.text(n, text.color(alpha(text.color, 0.65)).fixed_size());
+            ui.text(n, text.color(alpha(text.color, 0.65)).nowrap());
           }
         });
         if flat && i + 1 < n {
@@ -87,7 +87,7 @@ mod tests {
   use crate::app::App;
   use crate::harness::Harness;
   use crate::scene::Size;
-  use crate::ui::{Id, Tag, Ui};
+  use crate::ui::{Id, Style, Tag, Ui, px};
 
   struct Seg(u8);
 
@@ -109,7 +109,7 @@ mod tests {
 
   impl App for Beside {
     fn view(&mut self, ui: &mut Ui) {
-      ui.row(crate::ui::Style::new().w(crate::ui::px(self.0)), |ui| {
+      ui.row(Style::new().w(px(self.0)), |ui| {
         ui.label("A note beside the control that wraps");
         ui.id("v").segmented(&mut 1, &[Tag::new(1, "List"), Tag::new(2, "Grid")]);
       });

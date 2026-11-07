@@ -46,10 +46,10 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::AppInfo;
 #[cfg(doc)]
 use crate::Main;
 use crate::platform::instance as imp;
+use crate::{AppInfo, paths};
 
 /// Shows the app: what a second launch sends. [Main::serve] runs [Main::on_reopen]'s hook for it.
 pub const OPEN: &str = "open";
@@ -139,7 +139,7 @@ impl Command {
 /// Becomes the app's one instance unless another process is: [claim_in] its data folder
 /// ([crate::paths::data_dir]), made if missing.
 pub fn claim(app: &AppInfo) -> io::Result<Claim> {
-  let dir = crate::paths::data_dir(app.id);
+  let dir = paths::data_dir(app.id);
   fs::create_dir_all(&dir)?;
   claim_in(&dir)
 }
@@ -157,7 +157,7 @@ pub fn claim_in(dir: &Path) -> io::Result<Claim> {
 
 /// Sends the command `name` to the app's instance: [send_in] its data folder.
 pub fn send(app: &AppInfo, name: &str) -> io::Result<()> {
-  send_in(&crate::paths::data_dir(app.id), name)
+  send_in(&paths::data_dir(app.id), name)
 }
 
 /// Sends the command `name` to the instance for `dir`, with this process's activation token
@@ -191,7 +191,7 @@ fn deliver(dir: &Path, cmd: &Command, deadline: Instant) -> io::Result<()> {
 /// Asks the app's instance to quit ([QUIT]) and waits up to `timeout` for its lock:
 /// [quit_and_wait_in] its data folder.
 pub fn quit_and_wait(app: &AppInfo, timeout: Duration) -> io::Result<()> {
-  quit_and_wait_in(&crate::paths::data_dir(app.id), timeout)
+  quit_and_wait_in(&paths::data_dir(app.id), timeout)
 }
 
 /// Asks the instance for `dir` to quit ([QUIT], which [Main::serve] answers with [Main::quit]) and
