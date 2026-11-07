@@ -1290,9 +1290,7 @@ mod tests {
     assert_eq!(seen.borrow().len(), 1, "unchanged: nothing sent");
 
     // As if the window last saw the other mode.
-    use crate::app::ColorScheme::{Dark, Light};
-    let scheme = if now.scheme.is_dark() { Light } else { Dark };
-    let other = Appearance { scheme, ..now };
+    let other = Appearance { scheme: now.scheme.other(), ..now };
     with(|w| {
       w.look = other;
       w.send(Event::Appearance(other));

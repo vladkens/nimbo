@@ -16,8 +16,8 @@
 use nimbo::{
   Align, Answer, App, Axes, Axis, Button, ButtonRole, ButtonStyle, Config, ControlSize, Dialog,
   Float, Font, FormRow, FormStyle, Hotkey, Icon, Item, LinePattern, List, ListStyle, Menu, Picker,
-  Section, Selection, Shortcut, Split, Style, Tabs, TextStyle, Tone, TruncationMode, Ui, UnitPoint,
-  grow, px,
+  Section, Selection, Shortcut, Split, Style, Tabs, Tag, TextStyle, Tone, TruncationMode, Ui,
+  UnitPoint, grow, px,
 };
 
 pub const SIDEBAR: &str = "sidebar";
@@ -114,8 +114,11 @@ pub enum Size {
   Large,
 }
 
-pub const SIZES: [(Size, &str); 3] =
-  [(Size::Small, "Small"), (Size::Medium, "Medium"), (Size::Large, "Large")];
+pub const SIZES: [Tag<Size>; 3] = [
+  Tag::new(Size::Small, "Small"),
+  Tag::new(Size::Medium, "Medium"),
+  Tag::new(Size::Large, "Large"),
+];
 
 /// What the context menu does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -567,8 +570,9 @@ pub fn api_md() -> String {
      at its SwiftUI counterpart's behaviour and API shape without copying it 1:1. The pictures \
      are the gallery's, in the light appearance: `make api-shots` makes them and this file again \
      from the gallery's table (`examples/gallery.rs`), so a block changes there.\n\n\
-     SwiftUI's `InsetGroupedListStyle` is iOS's only; nimbo's `ListStyle::Grouped` is named after \
-     the grouped `Form` whose plates it shares on macOS.\n",
+     On macOS SwiftUI's `List` has neither of the grouped styles (`InsetGroupedListStyle` and \
+     `GroupedListStyle` are iOS's), so there is no name to take: nimbo's `ListStyle::Grouped` is \
+     named after the grouped `Form` (`.formStyle(.grouped)`), whose plates its sections share.\n",
   );
   for g in GROUPS {
     out += &format!("\n## {g}\n");

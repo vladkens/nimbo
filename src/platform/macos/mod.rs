@@ -121,8 +121,7 @@ pub fn appearance() -> Appearance {
     look.performAsCurrentDrawingAppearance(&resolve);
   }
 
-  let scheme = if dark { ColorScheme::Dark } else { ColorScheme::Light };
-  Appearance { scheme, accent: accent.get() }
+  Appearance { scheme: ColorScheme::of(dark), accent: accent.get() }
 }
 
 /// The performance cores of an Apple Silicon Mac (`hw.perflevel0.physicalcpu`); `None` on macOS

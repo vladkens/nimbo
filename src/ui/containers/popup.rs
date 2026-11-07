@@ -4,7 +4,7 @@
 //! a pop-up button, its list a menu over the button.
 //!
 //! ```ignore
-//! ui.id("launch").picker(&mut self.launch, &[(Launch::Window, "Show the window"), ..]);
+//! ui.id("launch").picker(&mut self.launch, &[Tag::new(Launch::Window, "Show the window"), ..]);
 //! Picker::new(&mut self.lang).option(0, "System Default").divider().options(&LANGS).show(ui);
 //! ```
 
@@ -12,6 +12,20 @@ use crate::keys::{Command, Move};
 use crate::scene::{Point, Rect, alpha, mix};
 use crate::ui::containers::menu::{MenuPlacement, TypeSelect};
 use crate::ui::{Align, Behavior, Id, Response, Role, State, Style, Ui, grow, px, rigid};
+
+/// A picker's option, as SwiftUI's `Text(label).tag(value)`: `const`, so a list of them is a
+/// constant: `const LAUNCH: [Tag<Launch>; 2] = [Tag::new(Launch::Window, "Open a window"), ..]`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tag<'s, T> {
+  pub value: T,
+  pub label: &'s str,
+}
+
+impl<'s, T> Tag<'s, T> {
+  pub const fn new(value: T, label: &'s str) -> Self {
+    Self { value, label }
+  }
+}
 
 /// A picker of `cur` among its options, in their order, a line where a divider is between them,
 /// as SwiftUI's `Picker` with `Divider` among its children; as macOS 26 System Settings draws a
@@ -45,9 +59,9 @@ impl<'s, T: PartialEq + Copy> Picker<'s, T> {
     self
   }
 
-  /// An option for each `(value, label)`.
-  pub fn options(mut self, options: &[(T, &'s str)]) -> Self {
-    self.entries.extend(options.iter().map(|&o| Some(o)));
+  /// An option for each of `options`, as SwiftUI's `ForEach` of tagged texts.
+  pub fn options(mut self, options: &[Tag<'s, T>]) -> Self {
+    self.entries.extend(options.iter().map(|o| Some((o.value, o.label))));
     self
   }
 
@@ -196,9 +210,9 @@ pub(super) fn check(f: &mut crate::scene::Frame, r: Rect, c: crate::scene::Color
 }
 
 impl Ui<'_> {
-  /// A [Picker] of `options`, `(value, label)`, as wide as its current option: SwiftUI's
-  /// `Picker(selection:)` of `Text`s tagged with their values.
-  pub fn picker<T: PartialEq + Copy>(&mut self, cur: &mut T, options: &[(T, &str)]) -> Response {
+  /// A [Picker] of `options` as wide as its current option: SwiftUI's `Picker(selection:)` of
+  /// `Text`s tagged with their values.
+  pub fn picker<T: PartialEq + Copy>(&mut self, cur: &mut T, options: &[Tag<T>]) -> Response {
     Picker::new(cur).options(options).show(self)
   }
 
@@ -268,7 +282,7 @@ mod tests {
 
   impl App for Pick {
     fn view(&mut self, ui: &mut Ui) {
-      let options = [(0, "Red"), (1, "Green"), (2, "Blue")];
+      let options = [Tag::new(0, "Red"), Tag::new(1, "Green"), Tag::new(2, "Blue")];
       ui.disabled(self.off).id("pick").picker(&mut self.cur, &options);
     }
   }
@@ -308,7 +322,7 @@ mod tests {
   impl App for Langs {
     fn view(&mut self, ui: &mut Ui) {
       let p = Picker::new(&mut self.0).option(Lang::Auto, "System Default").divider();
-      p.options(&[(Lang::En, "English"), (Lang::De, "Deutsch")]).show(ui.id("lang"));
+      p.option(Lang::En, "English").option(Lang::De, "Deutsch").show(ui.id("lang"));
     }
   }
 

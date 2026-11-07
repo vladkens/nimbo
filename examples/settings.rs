@@ -23,7 +23,8 @@ use std::time::Duration;
 
 use nimbo::{
   Align, Answer, App, Appearance, ButtonRole, ColorScheme, Config, ControlSize, Dialog, FormRow,
-  FormStyle, Hotkey, Icon, Id, Picker, Rect, Section, Style, TextStyle, Theme, Tone, Ui, grow, px,
+  FormStyle, Hotkey, Icon, Id, Picker, Rect, Section, Style, TabItem, Tag, TextStyle, Theme, Tone,
+  Ui, grow, px,
 };
 
 pub const TABS: &str = "tabs";
@@ -62,11 +63,11 @@ pub enum Page {
   About,
 }
 
-pub const PAGES: [(Page, Icon, &str); 4] = [
-  (Page::General, Icon::GEAR, "General"),
-  (Page::Appearance, Icon::CONTRAST, "Appearance"),
-  (Page::Advanced, Icon::SLIDERS, "Advanced"),
-  (Page::About, Icon::INFO, "About"),
+pub const PAGES: [TabItem<Page>; 4] = [
+  TabItem::new(Page::General, Icon::GEAR, "General"),
+  TabItem::new(Page::Appearance, Icon::CONTRAST, "Appearance"),
+  TabItem::new(Page::Advanced, Icon::SLIDERS, "Advanced"),
+  TabItem::new(Page::About, Icon::INFO, "About"),
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -76,20 +77,20 @@ pub enum Launch {
   Hidden,
 }
 
-pub const LAUNCHES: [(Launch, &str); 3] = [
-  (Launch::Window, "Open a new window"),
-  (Launch::Restore, "Restore the last session"),
-  (Launch::Hidden, "Start hidden"),
+pub const LAUNCHES: [Tag<Launch>; 3] = [
+  Tag::new(Launch::Window, "Open a new window"),
+  Tag::new(Launch::Restore, "Restore the last session"),
+  Tag::new(Launch::Hidden, "Start hidden"),
 ];
 
-pub const LANGS: [(usize, &str); 7] = [
-  (0, "System Default"),
-  (1, "English"),
-  (2, "Deutsch"),
-  (3, "Español"),
-  (4, "Français"),
-  (5, "Italiano"),
-  (6, "Українська"),
+pub const LANGS: [Tag<usize>; 7] = [
+  Tag::new(0, "System Default"),
+  Tag::new(1, "English"),
+  Tag::new(2, "Deutsch"),
+  Tag::new(3, "Español"),
+  Tag::new(4, "Français"),
+  Tag::new(5, "Italiano"),
+  Tag::new(6, "Українська"),
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -109,7 +110,8 @@ pub enum Look {
 pub const LOOKS: [(Look, &str); 3] =
   [(Look::System, "Auto"), (Look::Light, "Light"), (Look::Dark, "Dark")];
 
-pub const LOGGING: [(u8, &str); 3] = [(0, "Errors only"), (1, "Warnings"), (2, "Everything")];
+pub const LOGGING: [Tag<u8>; 3] =
+  [Tag::new(0, "Errors only"), Tag::new(1, "Warnings"), Tag::new(2, "Everything")];
 
 pub const TIP_LAUNCH: &str = "What the app shows when it starts. Restoring the last session \
   reopens its windows where they were.";

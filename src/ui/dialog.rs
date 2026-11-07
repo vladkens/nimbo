@@ -134,9 +134,7 @@ impl<'s> Dialog<'s> {
       // The icon at the card's padding: the margin in its view box brings its ink in line
       // with the text, 6 further in.
       if let Some(icon) = self.icon {
-        ui.col(Style::new().pads([0.0, 0.0, 8.0, 0.0]), |ui| {
-          ui.icon(icon.stroke_or(1.3), 64.0, tone)
-        });
+        ui.col(Style::new().pads([0.0, 0.0, 8.0, 0.0]), |ui| ui.icon(icon.stroke(1.3), 64.0, tone));
       }
 
       ui.col(Style::new().w(grow()).pads([0.0, 6.0, 16.0, 6.0]), |ui| {

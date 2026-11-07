@@ -42,14 +42,9 @@ impl<'s> Button<'s> {
     Self { label, icon: None, style, role, selected, look }
   }
 
-  /// A square borderless button showing an icon, muted until the pointer is on it: reset,
-  /// delete, open elsewhere.
-  pub fn icon(icon: Icon) -> Self {
-    Self { icon: Some(icon), style: ButtonStyle::Borderless, ..Self::new("") }
-  }
-
-  /// An icon before the label.
-  pub fn with_icon(self, icon: Icon) -> Self {
+  /// An icon before the label, as SwiftUI's `Button(_:systemImage:)`; with no label, a square
+  /// button showing the icon, muted until the pointer is on it unless it has a look of its own.
+  pub fn icon(self, icon: Icon) -> Self {
     Self { icon: Some(icon), ..self }
   }
 
@@ -113,7 +108,7 @@ impl<'s> Button<'s> {
     let size = (s.text.font.size + 2.0).round();
     let mut r = ui.with_id(id).row(frame, |ui| {
       if let Some(i) = self.icon {
-        let i = i.stroke_or(1.6);
+        let i = i.stroke(1.6);
         ui.canvas(Style::new().w(px(size)).h(px(size)), move |f, r| icon::draw(f, i, r, ink));
       }
 
@@ -137,9 +132,9 @@ impl Ui<'_> {
     Button::new(label).show(self)
   }
 
-  /// A square ghost button showing an icon ([Button::icon]).
+  /// A square borderless button showing an icon ([Button::icon] with no label).
   pub fn icon_button(&mut self, icon: Icon) -> Response {
-    Button::icon(icon).show(self)
+    Button::new("").icon(icon).style(ButtonStyle::Borderless).show(self)
   }
 
   /// An ⓘ, 16 points, muted, in the label colour while held, halfway there under the pointer
@@ -178,7 +173,7 @@ impl Ui<'_> {
     let k = if b.pressed { 1.0 } else { 0.5 * hot };
     let color = self.dim(mix(ink[0], ink[1], k), b.disabled);
     let s = self.control(Style::new().w(px(size)).h(px(size)).radius(size / 2.0), &b);
-    let paint = move |f: &mut Frame, r: Rect| icon::draw(f, icon.stroke_or(1.5), r, color);
+    let paint = move |f: &mut Frame, r: Rect| icon::draw(f, icon.stroke(1.5), r, color);
     let Some(&mut MarkShift(dy)) = self.slot::<MarkShift>() else {
       let mut r = self.with_id(id).canvas(s, paint);
       r.clicked = b.clicked;

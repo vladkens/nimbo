@@ -42,8 +42,7 @@ pub fn appearance() -> Appearance {
 /// `AccentColorMenu` (0xAABBGGRR; none: no accent).
 fn read(apps_light: Option<u32>, accent: Option<u32>) -> Appearance {
   let accent = accent.map(|c| rgb((c & 0xff) << 16 | (c & 0xff00) | (c >> 16 & 0xff)));
-  let scheme = if apps_light == Some(0) { ColorScheme::Dark } else { ColorScheme::Light };
-  Appearance { scheme, accent }
+  Appearance { scheme: ColorScheme::of(apps_light == Some(0)), accent }
 }
 
 /// A DWORD value under HKCU; `None` when it or its key is missing.

@@ -2,7 +2,7 @@
 
 Each building block of nimbo beside its SwiftUI counterpart, as the gallery shows it live (`cargo run --release --example gallery`, a page per block in its variants). A block aims at its SwiftUI counterpart's behaviour and API shape without copying it 1:1. The pictures are the gallery's, in the light appearance: `make api-shots` makes them and this file again from the gallery's table (`examples/gallery.rs`), so a block changes there.
 
-SwiftUI's `InsetGroupedListStyle` is iOS's only; nimbo's `ListStyle::Grouped` is named after the grouped `Form` whose plates it shares on macOS.
+On macOS SwiftUI's `List` has neither of the grouped styles (`InsetGroupedListStyle` and `GroupedListStyle` are iOS's), so there is no name to take: nimbo's `ListStyle::Grouped` is named after the grouped `Form` (`.formStyle(.grouped)`), whose plates its sections share.
 
 ## Layout
 

@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use nimbo::{
   Align, App, Axis, ButtonRole, Config, Id, Item, List, Menu, Modifiers, Selection, Shortcut,
-  Split, Style, Tabs, TextStyle, Ui, grow,
+  Split, Style, Tabs, Tag, TextStyle, Ui, grow,
 };
 
 pub const ROWS: usize = 100_000;
@@ -120,7 +120,7 @@ impl Lists {
       }
 
       ui.text("Sort by", t.muted().fixed_size());
-      let sorts: Vec<(usize, &str)> = SORTS.iter().copied().enumerate().collect();
+      let sorts: Vec<Tag<usize>> = SORTS.iter().enumerate().map(|(i, s)| Tag::new(i, s)).collect();
       ui.id(SORT).picker(&mut self.sort, &sorts);
       ui.spacer();
       let n = self.sel.len();

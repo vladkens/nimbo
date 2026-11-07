@@ -64,10 +64,10 @@ pub use a11y::{A11yNode, A11yTree, Action, Props, Role, State, Value};
 pub use behavior::{Behavior, EditMenu, Editing, FieldBehavior};
 pub use containers::{
   List, ListResponse, ListStyle, MenuPlacement, Picker, Row, Selection, Split, SplitBehavior, Tabs,
-  TypeSelect,
+  Tag, TypeSelect,
 };
 pub use dialog::{Answer, Dialog, DialogBehavior};
-pub use form::{Content, FormRow, FormStyle, Glass, Section};
+pub use form::{Content, FormRow, FormStyle, Glass, Section, TabItem};
 pub use id::Id;
 pub(crate) use input::drags_window;
 pub use input::{Click, Press, Scroll};
@@ -352,7 +352,7 @@ impl UiState {
       let float = t.nodes[i as usize].float.is_some();
       i = t.nodes[i as usize].parent;
       let n = &t.nodes[i as usize];
-      if float || !!n.style.scroll.is_empty() {
+      if float || n.style.scroll.is_empty() {
         continue;
       }
       // In the container's content, then its offset after showing it.

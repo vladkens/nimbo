@@ -86,9 +86,9 @@ pub use ui::{
   Clip, Content, ControlBorder, ControlSize, CoordinateSpace, Cursor, Dialog, Dim, Ease, EditMenu,
   Editing, FieldBehavior, FieldKind, FieldStyle, Float, Focus, FocusDirection, FocusRing, FormRow,
   FormStyle, Icon, IconPaint, Id, LinePattern, List, ListResponse, ListStyle, MenuPlacement,
-  Picker, Press, Response, Row, Scroll, Section, Selection, Shadow, Sizes, Split, Style, Tabs,
-  TextInput, TextLines, TextStyle, Theme, Tone, Transition, TruncationMode, TypeSelect, Ui,
-  UnitPoint, grow, pct, px, rigid,
+  Picker, Press, Response, Row, Scroll, Section, Selection, Shadow, Sizes, Split, Style, TabItem,
+  Tabs, Tag, TextInput, TextLines, TextStyle, Theme, Tone, Transition, TruncationMode, TypeSelect,
+  Ui, UnitPoint, grow, pct, px, rigid,
 };
 
 /// A window's title and initial content size in points; the harness renders at this size.

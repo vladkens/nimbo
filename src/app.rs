@@ -230,6 +230,16 @@ pub enum ColorScheme {
 }
 
 impl ColorScheme {
+  /// [ColorScheme::Dark] when `dark`, else Light: from a platform's flag.
+  pub const fn of(dark: bool) -> Self {
+    if dark { ColorScheme::Dark } else { ColorScheme::Light }
+  }
+
+  /// The other one.
+  pub const fn other(self) -> Self {
+    Self::of(!self.is_dark())
+  }
+
   pub const fn is_dark(self) -> bool {
     matches!(self, ColorScheme::Dark)
   }

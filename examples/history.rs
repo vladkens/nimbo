@@ -11,9 +11,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 use nimbo::ui::Role;
-use nimbo::{
-  App, Button, Config, FormStyle, Icon, Id, List, ListStyle, Selection, Style, Ui, grow,
-};
+use nimbo::{App, Config, FormStyle, Icon, Id, List, ListStyle, Selection, Style, Ui, grow};
 
 pub const ROWS: usize = 86_000;
 /// Dictations a day: the oldest day has what is left.
@@ -90,7 +88,7 @@ impl App for History {
           ui.text(&text, fs.label.line_limit(1));
           ui.text(&caption, fs.caption.line_limit(1));
         });
-        if Button::icon(Icon::COPY).show(ui.key("copy")).clicked {
+        if ui.key("copy").icon_button(Icon::COPY).clicked {
           copied = Some(e);
         }
 

@@ -240,7 +240,7 @@ pub(super) fn reveal(t: &mut Tree, scale: f32) {
     let Some(lay) = TextLayout::at(t, e.node) else { continue };
     let c = lay.caret(e.sel.1 as usize);
     let mut p = t.nodes[e.node as usize].parent as usize;
-    while p != 0 && !!t.nodes[p].style.scroll.is_empty() {
+    while p != 0 && t.nodes[p].style.scroll.is_empty() {
       p = t.nodes[p].parent as usize;
     }
 

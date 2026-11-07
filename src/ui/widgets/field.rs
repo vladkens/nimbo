@@ -36,8 +36,8 @@ use crate::ui::{
 
 impl Ui<'_> {
   /// A text field over `text` in `style`'s look, as SwiftUI's `TextField` with a
-  /// `textFieldStyle`: one line, many ([FieldStyle::multiline]) or a password
-  /// ([FieldStyle::password]); its id from [Ui::id] or [Ui::key], else its place.
+  /// `textFieldStyle`: one line, many or a password ([FieldKind]); its id from [Ui::id] or
+  /// [Ui::key], else its place.
   /// [Ui::disabled] dims it and reads no input.
   pub fn text_field(&mut self, text: &mut String, style: &FieldStyle) -> Response {
     let id = self.take_id();

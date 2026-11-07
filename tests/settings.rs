@@ -43,7 +43,7 @@ fn key(h: &mut H, k: impl Into<Key>) {
 
 /// Turns to `page` by a click on its tab, laid out and resized.
 fn turn(h: &mut H, page: Page) {
-  let i = PAGES.iter().position(|p| p.0 == page).unwrap();
+  let i = PAGES.iter().position(|p| p.value == page).unwrap();
   h.click_id(Id::of(TABS).key(i));
   h.wait(Duration::from_millis(50));
   assert_eq!(h.app().page, page);

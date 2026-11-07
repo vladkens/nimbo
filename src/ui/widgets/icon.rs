@@ -31,18 +31,19 @@ pub struct Icon {
   pub paint: IconPaint,
 }
 
-/// How an [Icon] is drawn, as SF Symbols' rendering: a stroke of a width in view box units, or
-/// of the widget's own (Lucide's 2 for [Ui::icon]) when `None`; or a fill.
+/// How an [Icon] is drawn, as SF Symbols' rendering: a stroke of a width in view box units
+/// (Lucide's 2 by [Icon::new]), or a fill. A widget draws its icons at its own width
+/// ([Icon::stroke]): a button's at 1.6.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum IconPaint {
-  Stroke(Option<f32>),
+  Stroke(f32),
   Fill,
 }
 
 impl Icon {
   /// A stroked icon from path data `d`.
   pub const fn new(d: &'static str) -> Self {
-    Self { d, paint: IconPaint::Stroke(None) }
+    Self { d, paint: IconPaint::Stroke(2.0) }
   }
 
   /// A filled one.
@@ -55,15 +56,7 @@ impl Icon {
   pub const fn stroke(self, width: f32) -> Self {
     match self.paint {
       IconPaint::Fill => self,
-      IconPaint::Stroke(_) => Self { paint: IconPaint::Stroke(Some(width)), ..self },
-    }
-  }
-
-  /// Stroked `or` wide unless it has a width of its own.
-  pub const fn stroke_or(self, or: f32) -> Self {
-    match self.paint {
-      IconPaint::Stroke(None) => self.stroke(or),
-      _ => self,
+      IconPaint::Stroke(_) => Self { paint: IconPaint::Stroke(width), ..self },
     }
   }
 
@@ -198,7 +191,7 @@ pub fn draw(f: &mut Frame, icon: Icon, r: Rect, color: Color) {
       fill(f, &lines, color);
       1.0 / f.scale
     }
-    IconPaint::Stroke(w) => w.unwrap_or(2.0) * kx.min(ky),
+    IconPaint::Stroke(w) => w * kx.min(ky),
   };
 
   for l in &lines {
@@ -222,14 +215,15 @@ fn fill(f: &mut Frame, polys: &[Vec<Point>], color: Color) {
 }
 
 impl Ui<'_> {
-  /// `icon` `size` points square in `color`, as SwiftUI's `Image(systemName:)`: stroked
-  /// [Icon::stroke] wide, else as Lucide draws it at 24 points (thinner below: 1.5 points at
-  /// 18). Disabled ([Ui::disabled], on it or a container around it), dimmed toward the ground.
+  /// `icon` `size` points square in `color`, as SwiftUI's `Image(systemName:)`: stroked as
+  /// its paint says ([Icon::stroke]), by default as Lucide draws it at 24 points (thinner below:
+  /// 1.5 points at 18). Disabled ([Ui::disabled], on it or a container around it), dimmed toward
+  /// the ground.
   pub fn icon(&mut self, icon: Icon, size: f32, color: Color) -> Response {
     let off = self.take_disabled();
     let color = self.dim(color, off);
     let s = Style::new().w(px(size)).h(px(size));
-    self.canvas(s, move |f, r| draw(f, icon.stroke_or(2.0), r, color))
+    self.canvas(s, move |f, r| draw(f, icon, r, color))
   }
 }
 

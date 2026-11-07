@@ -21,7 +21,7 @@
 //! ```ignore
 //! let fs = FormStyle::plates(&ui.theme());
 //! ui.set_window_size(680.0, self.page.height());
-//! ui.id("tabs").toolbar_tabs(&fs, &mut self.page, &[(Page::General, Icon::GEAR, "General"), ..]);
+//! ui.id("tabs").toolbar_tabs(&fs, &mut self.page, &[TabItem::new(Page::General, Icon::GEAR, "General"), ..]);
 //! ui.form_scroll(&fs, Style::new().grow(), |ui| ui.col(fs.page, |ui| {
 //!   ui.form_section(&fs, "Startup", |ui| {
 //!     let label = |ui: &mut Ui, s: TextStyle| {
@@ -280,7 +280,7 @@ impl Content<'_> {
   }
 
   /// Builds it in `style`, a text or an icon as `id`, an icon `size` points square stroked
-  /// `stroke` wide unless it has its own.
+  /// `stroke` wide.
   fn build(self, ui: &mut Ui, style: TextStyle, id: Id, size: f32, stroke: f32) {
     match self {
       Content::None => {}
@@ -290,7 +290,7 @@ impl Content<'_> {
       }
       Content::Icon(i) => {
         ui.next_id = Some((id, false));
-        ui.icon(i.stroke_or(stroke), size, style.color);
+        ui.icon(i.stroke(stroke), size, style.color);
       }
       Content::Built(f) => f(ui, style),
     }
@@ -383,6 +383,22 @@ impl<'s> FormRow<'s> {
   /// what a closure builds.
   pub fn tile(self, tile: impl Into<Content<'s>>) -> Self {
     Self { tile: tile.into(), ..self }
+  }
+}
+
+/// A toolbar tab ([Ui::toolbar_tabs]): its value, icon and label, as SwiftUI's
+/// `.tabItem { Label(label, systemImage:) }` and `.tag(value)`; `const`, so a toolbar is a
+/// constant.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TabItem<T> {
+  pub value: T,
+  pub icon: Icon,
+  pub label: &'static str,
+}
+
+impl<T> TabItem<T> {
+  pub const fn new(value: T, icon: Icon, label: &'static str) -> Self {
+    Self { value, icon, label }
   }
 }
 
@@ -647,7 +663,8 @@ impl Ui<'_> {
     r
   }
 
-  /// A toolbar of tabs, one per `(value, icon, label)`, centred: the icon over the label, the
+  /// A toolbar of tabs, one per [TabItem], centred, as a `TabView` of `.tabItem`s in a `Settings`
+  /// scene: the icon over the label, the
   /// one equal to `cur` raised on a tile, in the accent ([FormStyle::tab_on]); no hover fill, as
   /// System Settings' toolbar, only the pointing hand. A click picks a tab; so do Left and Right
   /// while the toolbar has focus (Tab gives it, ringing the selected tab). `changed` when `cur`
@@ -657,17 +674,17 @@ impl Ui<'_> {
     &mut self,
     fs: &FormStyle,
     cur: &mut T,
-    items: &[(T, Icon, &str)],
+    items: &[TabItem<T>],
   ) -> Response {
     let fs = *fs;
     let t = self.theme();
     let id = self.take_id();
-    let mut at = items.iter().position(|o| o.0 == *cur);
+    let mut at = items.iter().position(|o| o.value == *cur);
     let b = self.pick_behavior(id, items.len(), |i| id.key(i), &mut at);
     if b.changed
       && let Some(i) = at
     {
-      *cur = items[i].0;
+      *cur = items[i].value;
     }
     let titlebar = self.titlebar();
     let mut head = Style { gap: 0.0, ..fs.toolbar };
@@ -692,7 +709,7 @@ impl Ui<'_> {
       }
 
       r = ui.with_id(id).row(bar, |ui| {
-        for (i, &(v, icon, label)) in items.iter().enumerate() {
+        for (i, &TabItem { value: v, icon, label }) in items.iter().enumerate() {
           let tab = id.key(i);
           let on = v == *cur;
           // No hover fill, as System Settings' toolbar: the pointing hand says it's a tab.
@@ -718,7 +735,7 @@ impl Ui<'_> {
           let s = b.pointer(tile);
           ui.with_id(tab).canvas_col(s, paint, |ui| {
             // Canvases draw past the bar's opacity: the icon dims itself.
-            ui.disabled(b.disabled).icon(icon.stroke_or(fs.tab_stroke), fs.tab_icon, color);
+            ui.disabled(b.disabled).icon(icon.stroke(fs.tab_stroke), fs.tab_icon, color);
             ui.text(label, fs.tab_text.color(color));
           });
         }
@@ -1117,7 +1134,7 @@ mod tests {
     fn view(&mut self, ui: &mut Ui) {
       ui.set_theme(Theme::PLATES_LIGHT);
       let fs = FormStyle::plates(&ui.theme());
-      let tabs = [(0, Icon::GEAR, "General"), (1, Icon::INFO, "About")];
+      let tabs = [TabItem::new(0, Icon::GEAR, "General"), TabItem::new(1, Icon::INFO, "About")];
       ui.col(Style::new().grow().bg(fs.bg), |ui| {
         ui.disabled(self.0).id("bar").toolbar_tabs(&fs, &mut 0, &tabs);
       });
@@ -1189,7 +1206,7 @@ mod tests {
     impl App for Unnamed {
       fn view(&mut self, ui: &mut Ui) {
         let fs = FormStyle::plates(&ui.theme());
-        ui.toolbar_tabs(&fs, &mut 0, &[(0, Icon::GEAR, "General")]);
+        ui.toolbar_tabs(&fs, &mut 0, &[TabItem::new(0, Icon::GEAR, "General")]);
       }
     }
 

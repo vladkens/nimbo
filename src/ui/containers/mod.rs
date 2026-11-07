@@ -17,6 +17,6 @@ pub mod tabs;
 
 pub use list::{List, ListResponse, ListStyle, Row, Selection};
 pub use menu::{MenuPlacement, TypeSelect};
-pub use popup::Picker;
+pub use popup::{Picker, Tag};
 pub use split::{Split, SplitBehavior};
 pub use tabs::Tabs;

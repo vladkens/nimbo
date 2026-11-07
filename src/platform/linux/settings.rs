@@ -54,12 +54,7 @@ fn api() -> Option<&'static Api> {
 pub fn appearance() -> Appearance {
   let Some(a) = api() else { return Appearance::LIGHT };
   let (dark, accent) = portal();
-  let scheme = match dark.unwrap_or_else(|| gtk_dark(a)) {
-    true => ColorScheme::Dark,
-    false => ColorScheme::Light,
-  };
-
-  Appearance { scheme, accent }
+  Appearance { scheme: ColorScheme::of(dark.unwrap_or_else(|| gtk_dark(a))), accent }
 }
 
 /// Follows the portal's and GtkSettings' changes, each sent as [Event::Appearance] (the
