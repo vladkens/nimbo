@@ -566,6 +566,9 @@ impl App for Gallery {
   }
 }
 
+/// Where `docs/api.md`'s pictures are: the repo's `assets` branch, which `make api-shots` fills.
+pub const PICTURES: &str = "https://raw.githubusercontent.com/vladkens/nimbo/assets/api";
+
 /// `docs/api.md`: per group, each block's SwiftUI line, nimbo's and its picture.
 pub fn api_md() -> String {
   let mut out = String::from(
@@ -573,8 +576,9 @@ pub fn api_md() -> String {
      Each building block of nimbo beside its SwiftUI counterpart, as the gallery shows it live \
      (`cargo run --release --example gallery`, a page per block in its variants). A block aims \
      at its SwiftUI counterpart's behaviour and API shape without copying it 1:1. The pictures \
-     are the gallery's, in the light appearance: `make api-shots` makes them and this file again \
-     from the gallery's table (`examples/gallery.rs`), so a block changes there.\n\n\
+     are the gallery's, in the light appearance, kept on the repo's `assets` branch: `make \
+     api-shots` makes them and this file again from the gallery's table (`examples/gallery.rs`), \
+     so a block changes there.\n\n\
      On macOS SwiftUI's `List` has neither of the grouped styles (`InsetGroupedListStyle` and \
      `GroupedListStyle` are iOS's), so there is no name to take: nimbo's `ListStyle::Grouped` is \
      named after the grouped `Form` (`.formStyle(.grouped)`), whose plates its sections share.\n",
@@ -584,7 +588,7 @@ pub fn api_md() -> String {
     for b in BLOCKS.iter().filter(|b| b.group == g) {
       let (name, slug) = (b.name, b.slug());
       out += &format!(
-        "\n### {name}\n\nSwiftUI: `{}`\n\nnimbo: `{}`\n\n![{name}](api/{slug}.png)\n",
+        "\n### {name}\n\nSwiftUI: `{}`\n\nnimbo: `{}`\n\n![{name}]({PICTURES}/{slug}.png)\n",
         b.swiftui, b.nimbo
       );
     }

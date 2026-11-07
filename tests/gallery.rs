@@ -7,7 +7,8 @@
 //! chooses by letters, a segment picks, a tooltip shows, a recorder records and its ⊗ clears,
 //! the alert asks in its theme, Escape closes it, its action counts), the search field draws in
 //! its theme and clears from its ⊗; assistive technology reads each widget by its role, the ⊗
-//! marks beside their controls; and `docs/api.md` and its pictures are the gallery's.
+//! marks beside their controls; and `docs/api.md` is the gallery's, and so are its pictures on the
+//! `assets` branch when its worktree is there.
 
 #[path = "../examples/gallery.rs"]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
@@ -302,36 +303,59 @@ fn the_alert_asks_and_counts_its_action() {
   assert_eq!((h.app().ask, h.app().deleted), (false, 1));
 }
 
-/// `docs/api.md` is what the gallery's table makes, every block's picture beside it; on macOS,
-/// where `make api-shots` draws them, each picture is what the block draws now: the same size and
-/// nearly every pixel within a tolerance (another macOS draws its glyphs a touch differently),
-/// or byte for byte with `NIMBO_API_SHOTS_STRICT` set, as `make api-shots` checks.
+/// The `assets` branch's pictures (`api/`), when its worktree is there: `.worktrees/assets` of the
+/// repo's main checkout.
+fn pictures() -> Option<std::path::PathBuf> {
+  let common = ["rev-parse", "--path-format=absolute", "--git-common-dir"];
+  let mut git = std::process::Command::new("git");
+  git.args(common).current_dir(env!("CARGO_MANIFEST_DIR"));
+  let out = git.output().ok().filter(|o| o.status.success())?;
+  let dir = std::path::PathBuf::from(String::from_utf8_lossy(&out.stdout).trim());
+  Some(dir.parent()?.join(".worktrees/assets/api")).filter(|d| d.is_dir())
+}
+
+/// Compresses the picture `png` in place as `make api-shots` does (`scripts/api-shots.py`).
+fn compress(png: &std::path::Path) {
+  let quant = ["--quality=80-95", "--strip", "--skip-if-larger", "--force", "--ext", ".png"];
+  for (tool, args) in [("pngquant", &quant[..]), ("oxipng", &["-o", "max", "--strip", "all"][..])] {
+    let run = std::process::Command::new(tool).args(args).arg(png).status();
+    let run = run.unwrap_or_else(|e| panic!("{tool}: {e} (brew install pngquant oxipng)"));
+    // pngquant's 98-99: the picture kept as it was, smaller so.
+    assert!(run.success() || run.code() == Some(98) || run.code() == Some(99), "{tool}: {run}");
+  }
+}
+
+/// `docs/api.md` is what the gallery's table makes. With the `assets` branch's worktree there, on
+/// macOS, where `make api-shots` draws them, each of its pictures is what the block draws now: the
+/// same size and nearly every pixel within a tolerance (another macOS draws its glyphs a touch
+/// differently, and the pictures are compressed with loss), or byte for byte, compressed the same
+/// way, with `NIMBO_API_SHOTS_STRICT` set, as `make api-shots` checks.
 #[test]
 fn the_api_doc_is_the_gallerys() {
   let root = env!("CARGO_MANIFEST_DIR");
   let doc = std::fs::read_to_string(format!("{root}/docs/api.md")).unwrap();
   assert!(doc == api_md(), "docs/api.md is stale: make api-shots");
+  let Some(dir) = pictures().filter(|_| cfg!(target_os = "macos")) else { return };
   let strict = std::env::var_os("NIMBO_API_SHOTS_STRICT").is_some();
   let fresh = std::env::temp_dir().join(format!("nimbo-api-{}", std::process::id()));
   std::fs::create_dir_all(&fresh).unwrap();
   for (i, b) in BLOCKS.iter().enumerate() {
-    let png = format!("{root}/docs/api/{}.png", b.slug());
-    let kept = std::fs::read(&png).unwrap_or_else(|_| panic!("no {png}: make api-shots"));
-    if !cfg!(target_os = "macos") {
-      continue;
-    }
-
+    let path = dir.join(format!("{}.png", b.slug()));
+    let png = path.display();
+    let kept = std::fs::read(&path).unwrap_or_else(|_| panic!("no {png}: make api-shots"));
     // As `gallery <slug> --shot` draws it.
     let mut h = Harness::new(Gallery::on(i, true), Size::new(WIDTH, 300.0), 2.0);
     h.event(Event::Appearance(Appearance::LIGHT));
     h.frame();
-    let now = fresh.join(format!("{}.png", b.slug()));
-    h.shot(&now).unwrap();
-    let now = std::fs::read(&now).unwrap();
+    let shot = fresh.join(format!("{}.png", b.slug()));
+    h.shot(&shot).unwrap();
     if strict {
-      assert!(now == kept, "{png} is stale: make api-shots");
+      compress(&shot);
+      assert!(std::fs::read(&shot).unwrap() == kept, "{png} is stale: make api-shots");
       continue;
     }
+
+    let now = std::fs::read(&shot).unwrap();
 
     let rgba = |file: Vec<u8>| nimbo::Png::new(Box::leak(file.into_boxed_slice())).rgba();
     let ((w, h1, a), (w2, h2, b2)) = (rgba(kept), rgba(now));

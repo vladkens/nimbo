@@ -36,7 +36,7 @@ A small custom-drawn desktop UI toolkit in Rust: its own CPU renderer draws ever
 - One name per concept: a text or a closure goes through one method (`impl Into<Content>`), not a pair.
 - Behaviour goes on the element as it is built (`ui.help(tip).icon_button(..)`), never attached later by index or a derived id.
 - A choice of more than two states, or two exclusive flags, is an enum named as SwiftUI names it; no sentinel values (0 for the default) and no stringly-typed choices (a menu's actions are the app's own type).
-- Every new API goes into the gallery's table (`examples/gallery.rs`); `make api-shots` writes `docs/api.md` and its pictures (`docs/api/*.png`, committed, never edited by hand) from it.
+- Every new API goes into the gallery's table (`examples/gallery.rs`); `make api-shots` writes `docs/api.md` from it, and its pictures, made only that way, into the `assets` branch (its worktree at `.worktrees/assets`), which a person pushes after looking at them; it compresses them with `pngquant` and `oxipng` (`brew install pngquant oxipng`).
 - Bad: `FormRow::new("parakeet").caption_parts(&[("WER 4.7%", Some(TIP)), (" · 740 MB", None)])`. Good: `FormRow::new("parakeet").caption(|ui: &mut Ui, s: TextStyle| { ui.help(TIP).text("WER 4.7%", s.underline(LinePattern::Dot)); ui.text(" · 740 MB", s); })`.
 
 ## Tests

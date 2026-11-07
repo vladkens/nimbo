@@ -41,5 +41,5 @@ pace: # frame pacing in a window of this session: fps while animating, wakeups w
 size: # code, docs and tests per module; ARGS="--files", "--map" (each file and what it does), "--check" (the budgets) or "--vs main"
 	uv run scripts/size.py $(ARGS)
 
-api-shots: # docs/api.md and its pictures in docs/api/, from the gallery's table, without a window
+api-shots: # docs/api.md and its pictures (into the assets branch's worktree), from the gallery's table
 	uv run scripts/api-shots.py

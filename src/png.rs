@@ -238,8 +238,8 @@ fn bucket(table: &[(usize, u32)], v: usize) -> (usize, usize, u32) {
 // MARK: Reading
 
 /// The size and straight RGBA pixels, rows top-down, of the PNG `file`: 8-bit RGB, RGBA or a
-/// palette with its tRNS, not interlaced. Panics on another kind of PNG or a broken one: the app's
-/// own file ([Png]), which its first run shows.
+/// palette of 1, 2, 4 or 8 bits with its tRNS, not interlaced. Panics on another kind of PNG or a
+/// broken one: the app's own file ([Png]), which its first run shows.
 pub fn decode(file: &[u8]) -> (usize, usize, Vec<u8>) {
   let mut at = file.strip_prefix(b"\x89PNG\r\n\x1a\n").expect("nimbo: not a PNG file");
   let (mut head, mut palette, mut trns, mut idat) = (&[][..], &[][..], &[][..], Vec::new());
@@ -258,14 +258,17 @@ pub fn decode(file: &[u8]) -> (usize, usize, Vec<u8>) {
     at = &at[n + 12..];
   }
 
-  // 8 bits a channel, RGB, palette or RGBA, deflate, the five filters, no interlace.
-  let &[w0, w1, w2, w3, h0, h1, h2, h3, 8, color @ (2 | 3 | 6), 0, 0, 0] = head else {
-    panic!("nimbo: a PNG other than 8-bit RGB, RGBA or a palette, not interlaced");
+  // 8 bits a channel, RGB, palette or RGBA, deflate, the five filters, no interlace; a palette
+  // index also of 1, 2 or 4 bits, packed from the high bits.
+  let other = "nimbo: a PNG other than 8-bit RGB, RGBA or a palette, not interlaced";
+  let &[w0, w1, w2, w3, h0, h1, h2, h3, depth, color @ (2 | 3 | 6), 0, 0, 0] = head else {
+    panic!("{other}");
   };
+  assert!(depth == 8 || color == 3 && matches!(depth, 1 | 2 | 4), "{other}");
   let w = u32::from_be_bytes([w0, w1, w2, w3]) as usize;
   let h = u32::from_be_bytes([h0, h1, h2, h3]) as usize;
-  let bpp = [3, 1, 0, 0, 4][color as usize - 2];
-  let stride = w * bpp;
+  let (bpp, depth) = ([3, 1, 0, 0, 4][color as usize - 2], depth as usize);
+  let stride = (w * bpp * depth).div_ceil(8);
   let raw = inflate(&idat);
   assert_eq!(raw.len(), (stride + 1) * h, "nimbo: a broken PNG");
   // A row of zeros above the first, dropped after.
@@ -292,7 +295,11 @@ pub fn decode(file: &[u8]) -> (usize, usize, Vec<u8>) {
       let lut: Vec<[u8; 4]> = (palette.as_chunks().0.iter().enumerate())
         .map(|(i, &[r, g, b])| [r, g, b, trns.get(i).copied().unwrap_or(255)])
         .collect();
-      rows.iter().map(|&i| lut[i as usize]).collect()
+      let pixel = |y: usize, x: usize| {
+        let byte = rows[y * stride + x * depth / 8] as usize;
+        lut[(byte >> (8 - depth - x * depth % 8)) & ((1 << depth) - 1)]
+      };
+      (0..h).flat_map(|y| (0..w).map(move |x| pixel(y, x))).collect()
     }
   };
 
@@ -647,9 +654,9 @@ mod tests {
   }
 
   /// A `w` × 1 PNG of colour type `color`, its IDAT `idat` and the `extra` chunks before it.
-  fn png(w: u8, color: u8, idat: &[u8], extra: &[(&[u8; 4], &[u8])]) -> Vec<u8> {
+  fn png(w: u8, depth: u8, color: u8, idat: &[u8], extra: &[(&[u8; 4], &[u8])]) -> Vec<u8> {
     let mut file = b"\x89PNG\r\n\x1a\n".to_vec();
-    chunk(&mut file, b"IHDR", &[0, 0, 0, w, 0, 0, 0, 1, 8, color, 0, 0, 0]);
+    chunk(&mut file, b"IHDR", &[0, 0, 0, w, 0, 0, 0, 1, depth, color, 0, 0, 0]);
     extra.iter().for_each(|&(kind, data)| chunk(&mut file, kind, data));
     chunk(&mut file, b"IDAT", idat);
     chunk(&mut file, b"IEND", &[]);
@@ -660,19 +667,22 @@ mod tests {
   fn decodes_rgb_and_palettes() {
     // Two RGB pixels through Sub, in a stored block: its length, then the length's complement.
     let stored = [0x78, 0x01, 0x01, 7, 0, !7, 0xff, 1, 10, 20, 30, 5, 5, 5];
-    assert_eq!(decode(&png(2, 2, &stored, &[])), (2, 1, vec![10, 20, 30, 255, 15, 25, 35, 255]));
+    assert_eq!(decode(&png(2, 8, 2, &stored, &[])), (2, 1, vec![10, 20, 30, 255, 15, 25, 35, 255]));
     // Three palette entries through Paeth, the first two with tRNS alphas.
     let idat = zlib(&[4, 0, 1, 1]);
     let extra: [(&[u8; 4], &[u8]); 2] =
       [(b"PLTE", &[1, 2, 3, 4, 5, 6, 7, 8, 9]), (b"tRNS", &[0, 128])];
     let want = vec![1, 2, 3, 0, 4, 5, 6, 128, 7, 8, 9, 255];
-    assert_eq!(decode(&png(3, 3, &idat, &extra)), (3, 1, want));
+    assert_eq!(decode(&png(3, 8, 3, &idat, &extra)), (3, 1, want.clone()));
+    // The same three as 4-bit indices, packed two to a byte and the last half padded, through Sub.
+    let idat = zlib(&[1, 0x01, 0x1f]);
+    assert_eq!(decode(&png(3, 4, 3, &idat, &extra)), (3, 1, want));
   }
 
   #[test]
   #[should_panic(expected = "nimbo: a PNG other than 8-bit RGB, RGBA or a palette")]
   fn panics_on_grey() {
-    decode(&png(1, 0, &zlib(&[0, 0]), &[]));
+    decode(&png(1, 8, 0, &zlib(&[0, 0]), &[]));
   }
 
   /// Real files (a palette and tRNS, as png-squash leaves them, in dynamic Huffman codes) read as
