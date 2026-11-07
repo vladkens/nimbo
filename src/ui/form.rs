@@ -274,7 +274,8 @@ pub trait Caption<'s> {
     ""
   }
 
-  /// Builds it under the label in `style` (dimmed in a disabled row), a text as `id`.
+  /// Builds it under the label in `style` (dimmed in a disabled row, as a closure's elements
+  /// are), a text as `id`.
   fn build(self, ui: &mut Ui, style: TextStyle, id: Id);
 }
 
@@ -305,7 +306,9 @@ impl<'s> Caption<'s> for &'s String {
 
 impl<F: FnOnce(&mut Ui)> Caption<'_> for F {
   fn build(self, ui: &mut Ui, _: TextStyle, _: Id) {
-    self(ui);
+    // Dimmed in a disabled row, as a text caption is.
+    let opacity = if ui.scope_disabled() { ui.theme().disabled } else { 1.0 };
+    ui.col(Style::new().w(grow()).opacity(opacity), self);
   }
 }
 
@@ -1039,23 +1042,27 @@ mod tests {
     fn view(&mut self, ui: &mut Ui) {
       ui.set_theme(Theme::PLATES_LIGHT);
       let fs = FormStyle::plates(&ui.theme());
-      let caption = |ui: &mut Ui| {
-        ui.row(Style::new().w(grow()), |ui| {
-          ui.id("wer").help("Errors per 100 words").text("WER 4.5%", fs.caption.dotted());
-          ui.id("size").text(" · 274 MB", fs.caption);
-        });
+      let caption = |wer: &'static str| {
+        move |ui: &mut Ui| {
+          ui.row(Style::new().w(grow()), |ui| {
+            ui.id(wer).help("Errors per 100 words").text("WER 4.5%", fs.caption.dotted());
+            ui.id((wer, "size")).text(" · 274 MB", fs.caption);
+          });
+        }
       };
       ui.col(fs.page, |ui| {
         ui.form_section(&fs, "Section", |ui| {
           ui.id("whole").form_row(&fs, FormRow::new("A").caption("WER 4.5% · 274 MB"), |_| {});
-          ui.id("parts").form_row(&fs, FormRow::new("A").caption(caption), |_| {});
+          ui.id("parts").form_row(&fs, FormRow::new("A").caption(caption("wer")), |_| {});
+          let off = FormRow::new("B").caption(caption("off")).disabled(true);
+          ui.form_row(&fs, off, |_| {});
         });
       });
     }
   }
 
-  /// The composed caption lies where the whole one does, the row as high; its term shows its
-  /// tooltip and reads it as its description, where it stands.
+  /// The composed caption lies where the whole one does, the row as high, dimmed in a disabled
+  /// row; its term shows its tooltip and reads it as its description, where it stands.
   #[test]
   fn a_caption_composed_reads_as_one() {
     let mut h = Harness::new(Composed, Size::new(400.0, 300.0), 2.0);
@@ -1064,12 +1071,23 @@ mod tests {
     let (whole, parts) = (h.rect(Id::of("whole")).unwrap(), h.rect(Id::of("parts")).unwrap());
     assert_eq!(whole.h + hair, parts.h, "as high");
     let caption = h.rect(Id::of("whole").key("caption")).unwrap();
-    let (a, b) = (h.rect(Id::of("wer")).unwrap(), h.rect(Id::of("size")).unwrap());
+    let (a, b) = (h.rect(Id::of("wer")).unwrap(), h.rect(Id::of(("wer", "size"))).unwrap());
     let at = (caption.x, caption.y - whole.y + hair);
     assert_eq!((a.x, a.y - parts.y), at, "where the caption is");
     assert!(a.x + a.w <= b.x && a.y == b.y, "on one line: {a:?} {b:?}");
     let read = r#"static text "WER 4.5%" desc "Errors per 100 words""#;
     assert!(h.a11y().lines().any(|l| l.trim() == read), "{}", h.a11y());
+
+    // The darkest of a text's ink: the disabled row's lighter.
+    let ink = |h: &mut Harness<Composed>, id: Id| {
+      let r = h.rect(id).unwrap();
+      let img = h.render();
+      let px = (0..(r.w * 2.0) as i32).flat_map(|x| (0..(r.h * 2.0) as i32).map(move |y| (x, y)));
+      px.map(|(x, y)| img.pixel(r.x + x as f32 / 2.0, r.y + y as f32 / 2.0)[0]).min().unwrap()
+    };
+    let (on, off) = (ink(&mut h, Id::of("wer")), ink(&mut h, Id::of("off")));
+    let whole = ink(&mut h, Id::of("whole").key("caption"));
+    assert!(off > on + 40 && on == whole, "dimmed: {on} {off}, a text caption {whole}");
 
     h.move_to(a.x + 4.0, a.y + a.h / 2.0);
     h.wait(Duration::from_millis(400));
