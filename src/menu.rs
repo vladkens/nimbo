@@ -204,7 +204,7 @@ impl<A> Item<A> {
   }
 }
 
-/// The most characters an item's label shows ([Item::new]): a menu keeps its width whatever the
+/// The most characters an item's label shows ([Item::button]): a menu keeps its width whatever the
 /// app lists (a device, a file, a warning).
 pub const LABEL: usize = 48;
 

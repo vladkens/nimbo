@@ -13,7 +13,7 @@
 //! A Linux panel shows the item only with a StatusNotifierItem host: KDE Plasma, Xfce, LXQt,
 //! Cinnamon and MATE have one, GNOME only with the AppIndicator extension (Ubuntu ships it on).
 //! [available] says whether the session has one; the tray waits for one that starts later.
-//! [Item::new] fits a long name (a device, a file) to an item.
+//! [Item::button] fits a long name (a device, a file) to an item.
 
 #[cfg(any(test, not(target_os = "macos")))]
 mod icon;

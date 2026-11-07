@@ -29,6 +29,7 @@
 mod badge;
 mod button;
 mod checkbox;
+mod divider;
 mod field;
 pub mod icon;
 mod image;

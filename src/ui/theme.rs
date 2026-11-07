@@ -5,7 +5,7 @@
 //! default one, changes what it wants and sets it, or builds its own.
 //!
 //! An app changes the look in three steps, from the least work to the most:
-//! - a variant where the widget has one: `Button::new("Save").primary()`;
+//! - a style where the widget has one: `Button::new("Save").style(ButtonStyle::BorderedProminent)`;
 //! - a style derived from the theme, changed for one widget: `t.button(ButtonStyle::Bordered, None,
 //!   ControlSize::Regular).height(36.0)` given to [super::Button::style],
 //!   `t.field().hint("Search")` to [super::Ui::text_field];

@@ -103,16 +103,18 @@ It suits settings windows, tray and HUD apps and tools with long lists. A change
 ### Examples
 
 ```sh
-cargo run --release --example gallery                          # every widget, light and dark side by side
+cargo run --release --example gallery                          # every building block beside SwiftUI's
 cargo run --release --example gallery -- --shot gallery.png    # the same, rendered without a window
 ```
 
+Each building block beside its SwiftUI counterpart, with a picture: [docs/api.md](docs/api.md), made from the gallery's table ([examples/gallery.rs](examples/gallery.rs)) by `make api-shots`.
+
 - `counter`: buttons, hover, focus
-- `gallery`: every widget, light and dark
+- `gallery`: a catalog of every building block, each page its SwiftUI line, its nimbo line and the block in its variants
 - `settings`: a macOS-style settings window
 - `files`: open and save panels, drag and drop
 - `lists`: a list of 100,000 rows, menus, tabs, a split
-- `history`: 86,000 rows a day at a time in a form, built in view only
+- `history`: 86,000 rows a day at a time in a grouped list, built in view only
 - `fields`: text fields and input methods
 - `text`: fonts, scripts, emoji
 - `shapes`: what the renderer draws

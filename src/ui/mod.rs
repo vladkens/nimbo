@@ -27,8 +27,8 @@
 //! }
 //! ```
 //!
-//! Widgets ([widgets]: label, button, text field, check box, switch, slider, select and the
-//! like) and containers ([containers]: scroll area, list, menu, pop-up button, tabs, split) do
+//! Widgets ([widgets]: label, button, text field, check box, switch, slider and the
+//! like) and containers ([containers]: scroll area, list, menu, picker, tabs, split) do
 //! this for an app in the look of the [Theme] set with [Ui::set_theme]:
 //! `if ui.id("plus").button("+").clicked { .. }`; so do a settings form ([form]) and a modal
 //! dialog ([dialog]).

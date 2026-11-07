@@ -30,6 +30,15 @@ A small custom-drawn desktop UI toolkit in Rust: its own CPU renderer draws ever
 - Every clickable element shows the pointing hand and a hover (the toolbar's tabs only the hand, as in System Settings); transitions are animated, 120–170 ms.
 - A mark or icon is optically centred like its neighbours; check its alignment against them, not alone.
 
+## API shape
+
+- Find SwiftUI's form of a piece first (developer.apple.com) and take it: a view built from ordinary children plus general modifiers (`ui.help`, `ui.disabled`, `ui.control_size`); no modes, `_with` or `_sized` variants, or tuple lists for one caller.
+- One name per concept: a text or a closure goes through one method (`impl Into<Content>`), not a pair.
+- Behaviour goes on the element as it is built (`ui.help(tip).icon_button(..)`), never attached later by index or a derived id.
+- A choice of more than two states, or two exclusive flags, is an enum named as SwiftUI names it; no sentinel values (0 for the default) and no stringly-typed choices (a menu's actions are the app's own type).
+- Every new API goes into the gallery's table (`examples/gallery.rs`); `make api-shots` writes `docs/api.md` and its pictures (`docs/api/*.png`, committed, never edited by hand) from it.
+- Bad: `FormRow::new("parakeet").caption_parts(&[("WER 4.7%", Some(TIP)), (" · 740 MB", None)])`. Good: `FormRow::new("parakeet").caption(|ui: &mut Ui, s: TextStyle| { ui.help(TIP).text("WER 4.7%", s.underline(LinePattern::Dot)); ui.text(" · 740 MB", s); })`.
+
 ## Tests
 
 - Tests are ordinary `#[test]` functions; `Cargo.toml` has no `[[test]]` sections. An example's tests are in `tests/<example>.rs`, one per thing they check: each includes the example with `#[path]`, drives it through the harness and asserts app state and pixels (helpers in `tests/common/`); pure logic gets inline unit tests. They run in parallel on libtest's threads, so the harness and what it reaches stay thread-safe. They never show a window or a status item, nor start an event tap.
