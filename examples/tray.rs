@@ -175,7 +175,7 @@ fn start(main: &mut Main, instance: Option<Instance>) {
   }
 
   state.borrow_mut().hotkeys = Some(hotkeys);
-  let refresh = |t: &Tray, state: &Shared| t.set_menu(&menu(&shown(state)));
+  let refresh = |t: &Tray<Action>, state: &Shared| t.set_menu(&menu(&shown(state)));
   refresh(&tray, &state);
   let s = state.clone();
   tray.on_open(move |_, t| refresh(t, &s));

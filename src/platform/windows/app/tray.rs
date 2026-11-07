@@ -372,7 +372,7 @@ mod tests {
   #[test]
   fn a_dismissed_menu_keeps_the_callback() {
     let tray = Tray::detached(crate::tray::TrayIcon::path(4.0, "M0 0H4V4Z"), "t");
-    let t = crate::tray::Tray(tray.clone());
+    let t = crate::tray::Tray(tray.clone(), std::marker::PhantomData);
     t.set_menu(&Menu::new(vec![Item::button("a", "A")]));
     let got = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let g = got.clone();

@@ -46,7 +46,7 @@ pub fn run() {
     "Reset||off|enabled".into(),
     format!("Quit|{q}|off|enabled"),
   ];
-  let items = |t: &Tray| t.describe()[1..].to_vec();
+  let items = |t: &Tray<&'static str>| t.describe()[1..].to_vec();
   assert_eq!(items(&tray), want);
   assert!(tray.describe()[0].starts_with("icon "), "{:?}", tray.describe()[0]);
 

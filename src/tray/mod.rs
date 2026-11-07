@@ -20,6 +20,7 @@ mod icon;
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
+use std::marker::PhantomData;
 
 use crate::Main;
 pub use crate::menu::{Item, LABEL, Menu};
@@ -81,8 +82,8 @@ impl TrayIcon {
   }
 }
 
-type OnOpen = Box<dyn FnMut(&mut Main, &Tray)>;
-type OnItem = Box<dyn FnMut(&mut Main, &Tray, usize)>;
+type OnOpen = Box<dyn FnMut(&mut Main, &imp::Tray)>;
+type OnItem = Box<dyn FnMut(&mut Main, &imp::Tray, usize)>;
 /// A menu's actions by number ([Menu::tagged]), of the app's type.
 type Actions = Option<Box<dyn Any>>;
 
@@ -103,7 +104,7 @@ impl State {
   /// The menu is about to open: the app's [Tray::on_open] runs, kept for the next time.
   pub fn opening(&self, tray: &imp::Tray) {
     if let Some(mut f) = self.on_open.take() {
-      f(&mut Main::here(), &Tray(tray.clone()));
+      f(&mut Main::here(), tray);
       self.on_open.borrow_mut().get_or_insert(f);
     }
   }
@@ -112,7 +113,7 @@ impl State {
   /// next time.
   pub fn chosen(&self, tray: &imp::Tray, n: usize) {
     if let Some(mut f) = self.on_item.take() {
-      f(&mut Main::here(), &Tray(tray.clone()), n);
+      f(&mut Main::here(), tray, n);
       self.on_item.borrow_mut().get_or_insert(f);
     }
   }
@@ -154,15 +155,20 @@ impl State {
   }
 }
 
-/// The icon and its menu, shown while any handle lives: cheap to clone, so callbacks get one
-/// and the app may keep one. Main thread only.
-#[derive(Clone)]
-pub struct Tray(pub(crate) imp::Tray);
+/// The icon and its menu of actions of the app's type `A` ([Menu]), shown while any handle
+/// lives: cheap to clone, so callbacks get one and the app may keep one. Main thread only.
+pub struct Tray<A>(pub(crate) imp::Tray, pub(crate) PhantomData<fn(A) -> A>);
 
-impl Tray {
+impl<A> Clone for Tray<A> {
+  fn clone(&self) -> Self {
+    Self(self.0.clone(), PhantomData)
+  }
+}
+
+impl<A: Clone + 'static> Tray<A> {
   /// Shows `icon` with an empty menu; `tooltip` is also what accessibility says of it.
   pub fn new(icon: TrayIcon, tooltip: &str) -> Self {
-    Self(imp::Tray::new(icon, tooltip))
+    Self(imp::Tray::new(icon, tooltip), PhantomData)
   }
 
   pub fn set_icon(&self, icon: TrayIcon) {
@@ -175,26 +181,28 @@ impl Tray {
 
   /// Replaces the menu, also while it opens ([Tray::on_open]). While it is open the new one waits
   /// until it closes (the last one set wins): rebuilt, an open menu would close its submenus.
-  pub fn set_menu<A: Clone + 'static>(&self, menu: &Menu<A>) {
+  pub fn set_menu(&self, menu: &Menu<A>) {
     let (menu, actions) = menu.tagged();
     *self.0.state().next.borrow_mut() = Some(Box::new(actions));
     self.0.set_menu(&menu);
   }
 
   /// `f` runs as the menu is about to open: the moment to refresh it with [Tray::set_menu].
-  pub fn on_open(&self, f: impl FnMut(&mut Main, &Tray) + 'static) {
-    *self.0.state().on_open.borrow_mut() = Some(Box::new(f));
+  pub fn on_open(&self, mut f: impl FnMut(&mut Main, &Tray<A>) + 'static) {
+    let run = move |main: &mut Main, tray: &imp::Tray| f(main, &Tray(tray.clone(), PhantomData));
+    *self.0.state().on_open.borrow_mut() = Some(Box::new(run));
   }
 
-  /// `f` runs with the action of the item chosen, after the menu closed: `A` the menus' set
-  /// with [Tray::set_menu].
-  pub fn on_item<A: Clone + 'static>(&self, mut f: impl FnMut(&mut Main, &Tray, A) + 'static) {
-    let run = move |main: &mut Main, tray: &Tray, n: usize| {
-      let built = tray.0.state().built.borrow();
+  /// `f` runs with the action of the item chosen as the menu closes: a menu it sets waits for
+  /// the menu to close, as one set while it is open.
+  pub fn on_item(&self, mut f: impl FnMut(&mut Main, &Tray<A>, A) + 'static) {
+    let run = move |main: &mut Main, tray: &imp::Tray, n: usize| {
+      // The actions of the menu shown, of this tray's type: set only by [Tray::set_menu].
+      let built = tray.state().built.borrow();
       let action = built.as_ref().and_then(|b| b.downcast_ref::<Vec<A>>()?.get(n).cloned());
       drop(built);
       if let Some(a) = action {
-        f(main, tray, a);
+        f(main, &Tray(tray.clone(), PhantomData), a);
       }
     };
     *self.0.state().on_item.borrow_mut() = Some(Box::new(run));
@@ -210,9 +218,9 @@ pub fn available() -> Result<(), String> {
 /// For the tray scenario (`tests/tray.rs`): a tray with nothing on screen, the menu as the OS
 /// got it, and its items chosen without opening it.
 #[doc(hidden)]
-impl Tray {
+impl<A: Clone + 'static> Tray<A> {
   pub fn detached(icon: TrayIcon, tooltip: &str) -> Self {
-    Self(imp::Tray::detached(icon, tooltip))
+    Self(imp::Tray::detached(icon, tooltip), PhantomData)
   }
 
   /// The icon as `icon <w>x<h>` and what else the OS keeps of it, then each item as
