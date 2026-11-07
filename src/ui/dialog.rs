@@ -24,12 +24,12 @@
 
 use keyboard_types::{Modifiers, NamedKey};
 
-use super::theme::Variant;
 use super::widgets::{Button, ButtonRole, Icon};
 use super::{Float, Id, Role, State, Style, TextStyle, Transition, Ui, grow, pct, px};
 use crate::keys::Key;
 use crate::scene::alpha;
 use crate::text::Weight;
+use crate::ui::UnitPoint;
 
 /// Paint order of a dialog among overlays: over menus, under tooltips.
 const MODAL_Z: i32 = 1500;
@@ -65,15 +65,16 @@ pub struct Dialog<'s> {
   icon: Option<Icon>,
   action: &'s str,
   cancel: &'s str,
-  destructive: bool,
+  /// The action's: [ButtonRole::Confirm] or [ButtonRole::Destructive].
+  role: ButtonRole,
   width: f32,
 }
 
 impl<'s> Dialog<'s> {
   /// A dialog titled `title` with Cancel and "OK", the default, as SwiftUI's `.alert(title)`.
   pub fn new(title: &'s str) -> Self {
-    let (icon, destructive) = (None, false);
-    Self { title, message: "", icon, action: "OK", cancel: "Cancel", destructive, width: 260.0 }
+    let (icon, role) = (None, ButtonRole::Confirm);
+    Self { title, message: "", icon, action: "OK", cancel: "Cancel", role, width: 260.0 }
   }
 
   /// Text under the title, wrapping.
@@ -94,8 +95,7 @@ impl<'s> Dialog<'s> {
   pub fn button(self, label: &'s str, role: ButtonRole) -> Self {
     match role {
       ButtonRole::Cancel => Self { cancel: label, ..self },
-      ButtonRole::Confirm => Self { action: label, destructive: false, ..self },
-      ButtonRole::Destructive => Self { action: label, destructive: true, ..self },
+      role => Self { action: label, role, ..self },
     }
   }
 
@@ -110,7 +110,8 @@ impl<'s> Dialog<'s> {
     let t = ui.theme();
     let id = ui.take_id();
     let (cancel, action) = (id.key("cancel"), id.key("action"));
-    let default = if self.destructive { 0 } else { 1 };
+    let destructive = self.role == ButtonRole::Destructive;
+    let default = if destructive { 0 } else { 1 };
     let b = ui.dialog_behavior(id, open, &[cancel, action], default, 0);
     if let Some(i) = b.chosen {
       return Some(if i == 1 { Answer::Action } else { Answer::Cancel });
@@ -121,10 +122,9 @@ impl<'s> Dialog<'s> {
     }
 
     let w = self.width.min(ui.size().w - 32.0).max(160.0);
-    let tone = if self.destructive { t.danger } else { t.accent };
+    let tone = if destructive { t.danger } else { t.accent };
     let card = t.dialog().w(px(w));
-    let lead = if self.destructive { Variant::Danger } else { Variant::Primary };
-    let (cs, act) = (t.dialog_button(Variant::Normal), t.dialog_button(lead));
+    let (cs, act) = (t.dialog_button(ButtonRole::Cancel), t.dialog_button(self.role));
     // Side by side while both labels fit half the row with 16 at each side, as macOS's alerts;
     // else stacked.
     let half = (w - card.pad[1] - card.pad[3] - 8.0) / 2.0;
@@ -135,7 +135,7 @@ impl<'s> Dialog<'s> {
       // with the text, 6 further in.
       if let Some(icon) = self.icon {
         ui.col(Style::new().pads([0.0, 0.0, 8.0, 0.0]), |ui| {
-          ui.icon(icon.stroke(icon.width_or(1.3)), 64.0, tone)
+          ui.icon(icon.stroke_or(1.3), 64.0, tone)
         });
       }
 
@@ -147,8 +147,8 @@ impl<'s> Dialog<'s> {
           ui.text(self.message, t.body().line_h(16.0));
         }
       });
-      let cancel_b = Button::new(self.cancel).style(cs.w(grow()));
-      let action_b = Button::new(self.action).style(act.w(grow()));
+      let cancel_b = Button::new(self.cancel).look(cs.w(grow()));
+      let action_b = Button::new(self.action).look(act.w(grow()));
       let s = Style::new().w(grow());
       match stack {
         false => {
@@ -290,7 +290,10 @@ impl Ui<'_> {
     let cover = cover.bg(alpha(scrim, scrim[3] * shown));
     self.a11y(id.key("card"), Role::Dialog).state(State::Modal, true);
     self.with_id(id.key("backdrop")).float(Float::window().z(MODAL_Z)).el(cover);
-    let at = Float::window().attach(0.5, 0.5).anchor(0.5, 0.5).offset(0.0, (1.0 - shown) * 8.0);
+    let at = Float::window()
+      .attach(UnitPoint::CENTER)
+      .anchor(UnitPoint::CENTER)
+      .offset(0.0, (1.0 - shown) * 8.0);
     self.with_id(id.key("card")).float(at.z(MODAL_Z + 1)).col(card.opacity(shown), f);
     self.scope_off = off;
   }
@@ -313,7 +316,8 @@ mod tests {
 
   impl App for Under {
     fn keymap(&self) -> &[Binding] {
-      const KEYS: &[Binding] = &[bind("cmd+z", Command::Action("undo"))];
+      const KEYS: &[Binding] =
+        &[bind(crate::keys::Shortcut::char('z').cmd(), Command::Action("undo"))];
       KEYS
     }
 

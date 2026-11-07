@@ -88,7 +88,7 @@ fn other_events_change_nothing() {
 fn the_tray_menu() {
   let mut s = Seen::new(None);
   let labels =
-    |s: &Seen| example::menu(s).items.iter().map(|i| i.label.clone()).collect::<Vec<_>>();
+    |s: &Seen| example::menu(s).items.iter().map(|i| i.label().to_owned()).collect::<Vec<_>>();
   assert_eq!(labels(&s)[..2], ["Lid: None", "Audio changes: 0"]);
   s.add(Change::AudioInputs, Some(false));
   s.add(Change::DefaultInput, Some(false));

@@ -29,7 +29,7 @@ use nimbo::hotkey::{Edge, Hotkeys};
 use nimbo::instance::{self, Claim, Instance};
 use nimbo::paste::Paste;
 use nimbo::tray::{Item, Menu, Tray, TrayIcon};
-use nimbo::{AppInfo, Config, Main, Png, Presence, Window, autostart, desktop};
+use nimbo::{AppInfo, Config, Main, Png, Presence, Shortcut, Window, autostart, desktop};
 
 pub const INFO: AppInfo =
   AppInfo { id: "com.example.nimbo-tray", name: "Nimbo Tray", presence: Presence::Accessory };
@@ -46,7 +46,17 @@ pub struct Shown {
   pub hotkey: String,
 }
 
-pub fn menu(s: &Shown) -> Menu {
+/// What the tray's menu does; its status line does nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Action {
+  None,
+  Toggle,
+  Login,
+  Paste,
+  Quit,
+}
+
+pub fn menu(s: &Shown) -> Menu<Action> {
   let (toggle, status) = match s.count {
     Some(n) => ("Close Counter", format!("Count: {n}")),
     None if s.hotkey.is_empty() => ("Open Counter", "No hotkey".into()),
@@ -54,13 +64,14 @@ pub fn menu(s: &Shown) -> Menu {
   };
 
   Menu::new(vec![
-    Item::new("status", &status).enabled(false),
-    Item::new("toggle", toggle),
-    Item::separator(),
-    Item::new("login", "Launch at Login").checked(s.login == Some(true)).enabled(s.login.is_some()),
-    Item::new("paste", "Paste a Line in 3 Seconds"),
-    Item::separator(),
-    Item::new("quit", "Quit").key("cmd+q"),
+    Item::button(Action::None, &status).enabled(false),
+    Item::button(Action::Toggle, toggle),
+    Item::Divider,
+    Item::toggle(Action::Login, "Launch at Login", s.login == Some(true))
+      .enabled(s.login.is_some()),
+    Item::button(Action::Paste, "Paste a Line in 3 Seconds"),
+    Item::Divider,
+    Item::button(Action::Quit, "Quit").key(Shortcut::char('q').cmd()),
   ])
 }
 
@@ -168,18 +179,18 @@ fn start(main: &mut Main, instance: Option<Instance>) {
   refresh(&tray, &state);
   let s = state.clone();
   tray.on_open(move |_, t| refresh(t, &s));
-  tray.on_item(move |main, t, id| {
-    match id {
-      "toggle" => toggle(main, &state),
-      "login" => {
+  tray.on_item(move |main, t, action| {
+    match action {
+      Action::Toggle => toggle(main, &state),
+      Action::Login => {
         let on = !shown(&state).login.unwrap_or(false);
         if let Err(e) = autostart::set(&INFO, on) {
           eprintln!("launch at login: {e}");
         }
       }
-      "paste" => main.proxy().after(Duration::from_secs(3), |_| paste("Hello from nimbo")),
-      "quit" => main.quit(),
-      _ => {}
+      Action::Paste => main.proxy().after(Duration::from_secs(3), |_| paste("Hello from nimbo")),
+      Action::Quit => main.quit(),
+      Action::None => {}
     }
 
     refresh(t, &state);

@@ -5,9 +5,9 @@
 //! children, clipped when it clips. Overlays follow, each in a new layer, by z. Elements outside
 //! the window or their clip are skipped; text by where its ink reaches, not its box.
 
-use super::layout::{ELLIPSIS, Kind, Tree};
+use super::layout::{ELLIPSIS, Elide, Kind, Tree};
 use super::textlayout::{Edit, TextLayout};
-use super::{Canvas, Clip, FocusRing, Style, TextStyle};
+use super::{Axis, Canvas, Clip, FocusRing, Style, TextStyle};
 use crate::scene::{Color, Frame, Quad, Rect};
 use crate::text::Ink;
 
@@ -64,8 +64,10 @@ fn edge_fade(t: &Tree, p: usize, color: Color, len: f32, alpha: f32, f: &mut Fra
 
     let (solid, clear) = (fade(color, a), fade(color, 0.0));
     let q = match k {
-      0 => Quad::new(Rect::new(r.x, r.y, r.w, len), solid).gradient(clear, true),
-      _ => Quad::new(Rect::new(r.x, r.y + r.h - len, r.w, len), clear).gradient(solid, true),
+      0 => Quad::new(Rect::new(r.x, r.y, r.w, len), solid).gradient(clear, Axis::Vertical),
+      _ => {
+        Quad::new(Rect::new(r.x, r.y + r.h - len, r.w, len), clear).gradient(solid, Axis::Vertical)
+      }
     };
 
     f.quad(q);
@@ -135,7 +137,7 @@ fn node(
 
   match n.kind {
     Kind::Box => {}
-    Kind::Text { range, style, lines, baseline, line_h } => {
+    Kind::Text { style, lines, baseline, line_h, .. } => {
       let edit = t.edit(i as u32).map(|k| &t.edits[k]);
       if let Some(e) = edit {
         selection(t, i, e, alpha, f);
@@ -155,9 +157,17 @@ fn node(
       for k in first..last {
         let l = &t.lines[k as usize];
         let y = r.y + (k - lines.0) as f32 * line_h + baseline;
-        let mut w = f.text(r.x, y, t.str(l.start, l.end), style.font, color);
-        if style.ellipsis && lines.1 - lines.0 == 1 && l.end < range.1 {
-          w += f.text(r.x + w, y, ELLIPSIS, style.font, color);
+        let body = t.str(l.start, l.end);
+        let parts = match l.elide {
+          Elide::None => [body, "", ""],
+          Elide::Tail => [body, ELLIPSIS, ""],
+          Elide::Head => [ELLIPSIS, body, ""],
+          Elide::Middle(a, b) => [t.str(l.start, a), ELLIPSIS, t.str(b, l.end)],
+        };
+
+        let mut w = 0.0;
+        for s in parts.into_iter().filter(|s| !s.is_empty()) {
+          w += f.text(r.x + w, y, s, style.font, color);
         }
 
         rule(r.x, y, w, style, color, f);
@@ -333,9 +343,12 @@ mod tests {
       panel.shadow(crate::ui::Shadow::new(2.0, 4.0, [0.0, 0.0, 0.0, 0.5])).clip(),
       |ui| {
         ui.text("hi", label);
-        ui.float(Float::parent().attach(1.0, 0.0)).col(panel.opacity(0.5), |ui| {
-          ui.text("tip", label);
-        });
+        ui.float(Float::parent().attach(crate::ui::UnitPoint::TOP_TRAILING)).col(
+          panel.opacity(0.5),
+          |ui| {
+            ui.text("tip", label);
+          },
+        );
         ui.canvas(Style::new().w(px(10.0)).h(px(10.0)), |_, r| drawn = Some(r));
       },
     );
@@ -398,7 +411,7 @@ mod tests {
     let tall = format!("e{}", "\u{301}".repeat(24));
     let up = TextSystem::new(1.0).layout(&tall, font).ink.up;
     assert!(up > 4.0 * font.size, "the accents stack {up} pt high");
-    let style = TextStyle::new(font, [1.0; 4]).nowrap();
+    let style = TextStyle::new(font, [1.0; 4]).fixed_size();
     // The box 2 em below the window, its accents up in it.
     let below =
       glyphs(|ui| ui.float(Float::window().offset(0.0, 50.0 + 2.0 * 13.0)).text(&tall, style));

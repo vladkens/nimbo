@@ -14,7 +14,7 @@
 
 use nimbo::{
   App, Binding, Color, Command, Config, Cursor, Cx, Event, Float, Frame, Key, MouseButton,
-  NamedKey, Point, Quad, Rect, Size, Style, Ui, bind, mix, px, rgb,
+  NamedKey, Point, Quad, Rect, Shortcut, Size, Style, Ui, bind, mix, px, rgb,
 };
 
 pub const SIZE: Size = Size::new(480.0, 320.0);
@@ -39,7 +39,10 @@ pub const GREEN: Color = rgb(0x30a46c);
 pub const WHITE: Color = rgb(0xffffff);
 
 /// Copy and paste, as the edit menu binds them: Cmd on macOS, Ctrl elsewhere.
-const KEYS: &[Binding] = &[bind("cmd+c", Command::Copy), bind("cmd+v", Command::Paste)];
+const KEYS: &[Binding] = &[
+  bind(Shortcut::char('c').cmd(), Command::Copy),
+  bind(Shortcut::char('v').cmd(), Command::Paste),
+];
 
 pub struct Input {
   /// The light appearance; dark by default.
@@ -111,7 +114,7 @@ impl Input {
         return was != m.shift();
       }
       Event::Focus(on) => self.focused = *on,
-      Event::Appearance(a) => self.light = !a.dark,
+      Event::Appearance(a) => self.light = !a.scheme.is_dark(),
       ev => return self.pointer(cx, ev),
     }
 

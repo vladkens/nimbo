@@ -177,7 +177,7 @@ const SYSTEM: Sys = Sys {
   post: crate::keys::post,
   focus: focus::current,
   hidden: focus::hidden,
-  accessibility: || permissions::accessibility(false),
+  accessibility: permissions::accessibility,
   secure_input: permissions::secure_input,
   after: |delay, f| Main::here().proxy().after(delay, move |_| f()),
 };

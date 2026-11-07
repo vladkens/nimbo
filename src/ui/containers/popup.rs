@@ -10,7 +10,7 @@
 
 use crate::keys::{Command, Move};
 use crate::scene::{Point, Rect, alpha, mix};
-use crate::ui::containers::menu::TypeSelect;
+use crate::ui::containers::menu::{MenuPlacement, TypeSelect};
 use crate::ui::{Align, Behavior, Id, Response, Role, State, Style, Ui, grow, px, rigid};
 
 /// A picker of `cur` among its options, in their order, a line where a divider is between them,
@@ -19,7 +19,7 @@ use crate::ui::{Align, Behavior, Id, Response, Role, State, Style, Ui, grow, px,
 /// it, no box. Under the pointer the frame fills with the capsule's colour, which merges into
 /// it, and stays filled, a shade darker, while its list is open. A click, Space, Enter or the
 /// arrows ([Ui::pop_up_behavior]) open its list over it, the current option checked,
-/// highlighted and over the button ([Ui::menu_popup_over]); letters typed while it has focus,
+/// highlighted and over the button ([MenuPlacement::Over]); letters typed while it has focus,
 /// open or closed, go to the first option they start ([TypeSelect]). As wide as the current
 /// label, up to [Picker::max_width], or [Picker::width]; the list is at least as wide as the
 /// button and [crate::Sizes::menu_w]. A `cur` that is none of the options shows no label. Its
@@ -130,7 +130,8 @@ impl<'s, T: PartialEq + Copy> Picker<'s, T> {
     let mut pick = None;
     // Disabled while open, it closes.
     let toggle = b.clicked || b.disabled && ui.menu_open(id);
-    ui.menu_popup_over(id, toggle, t.popup().min_w(pop_w), at, |ui| {
+    let place = MenuPlacement::Over { start: at };
+    ui.menu_popup(id, toggle, place, t.popup().min_w(pop_w), |ui| {
       for (i, &o) in labels.iter().enumerate() {
         let item = id.key(("item", i));
         let ib = ui.menu_item_behavior(item, o);

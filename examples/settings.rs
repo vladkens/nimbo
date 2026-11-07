@@ -22,8 +22,8 @@
 use std::time::Duration;
 
 use nimbo::{
-  Align, Answer, App, Appearance, ButtonRole, Config, ControlSize, Dialog, FormRow, FormStyle,
-  Hotkey, Icon, Id, Picker, Rect, Section, Style, TextStyle, Theme, Tone, Ui, grow, px,
+  Align, Answer, App, Appearance, ButtonRole, ColorScheme, Config, ControlSize, Dialog, FormRow,
+  FormStyle, Hotkey, Icon, Id, Picker, Rect, Section, Style, TextStyle, Theme, Tone, Ui, grow, px,
 };
 
 pub const TABS: &str = "tabs";
@@ -275,7 +275,7 @@ impl Settings {
       ui.text(&used, fs.note);
     };
     ui.form_section(fs, Section::new(storage), |ui| {
-      let folder = |ui: &mut Ui, s: TextStyle| ui.text("Data folder", s.ellipsis());
+      let folder = |ui: &mut Ui, s: TextStyle| ui.text("Data folder", s.line_limit(1));
       let row = FormRow::new(folder).caption("~/Library/Application Support/Example");
       ui.form_row(fs, row.tile(Icon::FOLDER), |ui| {
         ui.button("Change…");
@@ -394,7 +394,7 @@ fn app_icon(f: &mut nimbo::Frame, r: Rect, accent: nimbo::Color) {
   f.shadow(Rect::new(r.x, r.y + 1.0, r.w, r.h), 15.0, 3.0, [0.0, 0.0, 0.0, 0.2]);
   f.rect(r, accent, 15.0);
   let inner = Rect::new(r.x + 14.0, r.y + 14.0, r.w - 28.0, r.h - 28.0);
-  nimbo::ui::widgets::icon::draw(f, Icon::CHECK, inner, [1.0; 4], 2.4);
+  nimbo::ui::widgets::icon::draw(f, Icon::CHECK.stroke(2.4), inner, [1.0; 4]);
 }
 
 impl App for Settings {
@@ -402,8 +402,8 @@ impl App for Settings {
     let a = ui.appearance();
     match self.look {
       Look::System => ui.follow_system(),
-      Look::Light => ui.set_theme(Theme::system(Appearance { dark: false, ..a })),
-      Look::Dark => ui.set_theme(Theme::system(Appearance { dark: true, ..a })),
+      Look::Light => ui.set_theme(Theme::system(Appearance { scheme: ColorScheme::Light, ..a })),
+      Look::Dark => ui.set_theme(Theme::system(Appearance { scheme: ColorScheme::Dark, ..a })),
     }
 
     // The window as high as the page, in the OS's font.

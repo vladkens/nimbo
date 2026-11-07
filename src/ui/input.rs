@@ -19,6 +19,7 @@ use super::{Focus, Id, Ui, UiState};
 use crate::app::{Event, MouseButton, Phase};
 use crate::keys::Os;
 use crate::scene::{Point, Rect, Size};
+use crate::ui::{Axes, CoordinateSpace};
 
 /// Time constant of wheel momentum: a wheel step's distance is covered exponentially, 95% of it
 /// in three of these.
@@ -182,7 +183,7 @@ fn scroll_chain(t: &Tree, p: Point, out: &mut Vec<Id>) {
       out.push(n.id);
     }
 
-    if i == 0 || n.float.is_some_and(|f| f.window) {
+    if i == 0 || n.float.is_some_and(|f| f.space == CoordinateSpace::Global) {
       return;
     }
 
@@ -222,12 +223,12 @@ fn reaches(t: &Tree, i: u32, root: u32, p: Point) -> bool {
 }
 
 fn scrolls(n: &Node) -> bool {
-  n.style.scroll[0] || n.style.scroll[1]
+  !n.style.scroll.is_empty()
 }
 
 /// How far a scroll container can scroll on each axis.
 pub(super) fn max_scroll(n: &Node) -> [f64; 2] {
-  let m = |ax: usize, view: f32| match n.style.scroll[ax] {
+  let m = |ax: usize, view: f32| match n.style.scroll.at(ax) {
     true => (n.content[ax] - f64::from(view)).max(0.0),
     false => 0.0,
   };
@@ -421,13 +422,13 @@ impl UiState {
       let Some(n) = self.last.get(id) else { continue };
       let max = max_scroll(n);
       // A mouse wheel over a horizontal strip scrolls it sideways.
-      let sideways = !precise && n.style.scroll == [true, false] && want[0] == 0.0;
+      let sideways = !precise && n.style.scroll == Axes::HORIZONTAL && want[0] == 0.0;
       let src = if sideways { [1, 1] } else { [0, 1] };
       let s = self.store.raw::<ScrollState>(id);
       let (mut off, mut pend) = (s.offset, [s.pending.x, s.pending.y]);
       for ax in 0..2 {
         let w = want[src[ax]];
-        if !n.style.scroll[ax] || w == 0.0 {
+        if !n.style.scroll.at(ax) || w == 0.0 {
           continue;
         }
 
@@ -533,7 +534,7 @@ impl UiState {
 mod tests {
   use super::*;
   use crate::ui::layout::tests::Fake;
-  use crate::ui::{Float, Style, Ui, px};
+  use crate::ui::{Float, FocusDirection, Style, Ui, px};
 
   /// A frame of a 200 x 100 window built by `f`.
   fn frame(st: UiState, f: impl FnOnce(&mut Ui)) -> UiState {
@@ -726,7 +727,7 @@ mod tests {
     // A click on the button leaves the field focused; Tab reaches the button.
     ev(&mut st, down(5.0, 25.0));
     assert_eq!(st.focus(), Some(field));
-    st.focus_next(true);
+    st.focus_next(FocusDirection::Next);
     assert_eq!(st.focus(), Some(btn));
   }
 
@@ -750,8 +751,8 @@ mod tests {
   /// scrolling 4 rows of 25 (100 content) at its top.
   fn nested(st: UiState) -> UiState {
     frame(st, |ui| {
-      ui.id("outer").col(Style::new().w(px(100.0)).h(px(100.0)).scroll_y(), |ui| {
-        ui.id("inner").col(Style::new().w(px(100.0)).h(px(50.0)).scroll_y(), |ui| {
+      ui.id("outer").col(Style::new().w(px(100.0)).h(px(100.0)).scroll(Axes::VERTICAL), |ui| {
+        ui.id("inner").col(Style::new().w(px(100.0)).h(px(50.0)).scroll(Axes::VERTICAL), |ui| {
           for _ in 0..4 {
             ui.el(Style::new().w(px(100.0)).h(px(25.0)));
           }
@@ -837,7 +838,7 @@ mod tests {
   fn a_grid_scrolls() {
     let grid = |st| {
       frame(st, |ui| {
-        ui.id("g").grid(2, Style::new().w(px(100.0)).h(px(50.0)).scroll_y(), |ui| {
+        ui.id("g").grid(2, Style::new().w(px(100.0)).h(px(50.0)).scroll(Axes::VERTICAL), |ui| {
           for k in 0..6 {
             ui.id(("c", k)).el(Style::new().w(px(50.0)).h(px(20.0)));
           }
@@ -857,7 +858,7 @@ mod tests {
   fn a_grid_scrolls_sideways() {
     let grid = |st| {
       frame(st, |ui| {
-        ui.id("g").grid(1, Style::new().w(px(100.0)).h(px(50.0)).scroll_x(), |ui| {
+        ui.id("g").grid(1, Style::new().w(px(100.0)).h(px(50.0)).scroll(Axes::HORIZONTAL), |ui| {
           ui.id("wide").el(Style::new().w(px(300.0)).h(px(20.0)));
         });
       })
@@ -881,7 +882,7 @@ mod tests {
     let list = |n: usize| {
       move |st| {
         frame(st, |ui| {
-          ui.id("list").col(Style::new().w(px(50.0)).h(px(50.0)).scroll_y(), |ui| {
+          ui.id("list").col(Style::new().w(px(50.0)).h(px(50.0)).scroll(Axes::VERTICAL), |ui| {
             for _ in 0..n {
               ui.el(Style::new().w(px(50.0)).h(px(30.0)));
             }
@@ -904,12 +905,15 @@ mod tests {
     let rows = |n: usize| {
       move |st| {
         frame(st, |ui| {
-          ui.id("outer").col(Style::new().w(px(100.0)).h(px(100.0)).scroll_y(), |ui| {
-            ui.id("inner").col(Style::new().w(px(100.0)).h(px(50.0)).scroll_y(), |ui| {
-              for _ in 0..n {
-                ui.el(Style::new().w(px(100.0)).h(px(25.0)));
-              }
-            });
+          ui.id("outer").col(Style::new().w(px(100.0)).h(px(100.0)).scroll(Axes::VERTICAL), |ui| {
+            ui.id("inner").col(
+              Style::new().w(px(100.0)).h(px(50.0)).scroll(Axes::VERTICAL),
+              |ui| {
+                for _ in 0..n {
+                  ui.el(Style::new().w(px(100.0)).h(px(25.0)));
+                }
+              },
+            );
             ui.el(Style::new().w(px(100.0)).h(px(300.0)));
           });
         })
@@ -943,7 +947,7 @@ mod tests {
     assert!((last - 36.0).abs() < 1e-3 && st.input.moving.is_empty(), "{last}");
     // A horizontal strip scrolls sideways under a wheel.
     let mut st = frame(UiState::default(), |ui| {
-      ui.id("strip").row(Style::new().w(px(100.0)).h(px(20.0)).scroll_x(), |ui| {
+      ui.id("strip").row(Style::new().w(px(100.0)).h(px(20.0)).scroll(Axes::HORIZONTAL), |ui| {
         ui.el(Style::new().w(px(300.0)).h(px(20.0)));
       });
     });
@@ -962,7 +966,7 @@ mod tests {
 
         if show {
           ui.id("tab").col(Style::new(), |ui| {
-            ui.id("list").col(Style::new().w(px(50.0)).h(px(50.0)).scroll_y(), |ui| {
+            ui.id("list").col(Style::new().w(px(50.0)).h(px(50.0)).scroll(Axes::VERTICAL), |ui| {
               ui.el(Style::new().w(px(50.0)).h(px(500.0)));
             });
           });
@@ -999,7 +1003,7 @@ mod tests {
   #[test]
   fn tab_focus_reveals_the_focused_element() {
     let list = |ui: &mut Ui| {
-      ui.id("list").col(Style::new().w(px(50.0)).h(px(100.0)).scroll_y(), |ui| {
+      ui.id("list").col(Style::new().w(px(50.0)).h(px(100.0)).scroll(Axes::VERTICAL), |ui| {
         for i in 0..10 {
           ui.id(("item", i)).el(Style::new().w(px(50.0)).h(px(30.0)).focusable());
         }
@@ -1007,15 +1011,15 @@ mod tests {
     };
     let mut st = frame(UiState::default(), list);
     for _ in 0..5 {
-      st.focus_next(true);
+      st.focus_next(FocusDirection::Next);
     }
     // The fifth item, 120..150, shows at the bottom of the 100 high list.
     assert_eq!(st.focus(), Some(Id::of(("item", 4))));
     st = frame(st, list);
     assert_eq!(offset(&st, "list"), 50.0);
-    st.focus_next(false);
-    st.focus_next(false);
-    st.focus_next(false);
+    st.focus_next(FocusDirection::Previous);
+    st.focus_next(FocusDirection::Previous);
+    st.focus_next(FocusDirection::Previous);
     st = frame(st, list);
     assert_eq!(offset(&st, "list"), 30.0);
   }
@@ -1024,9 +1028,9 @@ mod tests {
   fn tab_focus_in_a_window_overlay_leaves_the_scroll_under_it() {
     // A popup on the window, built in a 50-high list, scrolling two items in one's height.
     let list = |ui: &mut Ui| {
-      ui.id("list").col(Style::new().w(px(50.0)).h(px(50.0)).scroll_y(), |ui| {
+      ui.id("list").col(Style::new().w(px(50.0)).h(px(50.0)).scroll(Axes::VERTICAL), |ui| {
         ui.el(Style::new().w(px(50.0)).h(px(1000.0)));
-        let pop = Style::new().w(px(50.0)).h(px(20.0)).scroll_y();
+        let pop = Style::new().w(px(50.0)).h(px(20.0)).scroll(Axes::VERTICAL);
         ui.id("pop").float(Float::window().offset(100.0, 70.0)).col(pop, |ui| {
           for i in 0..2 {
             ui.id(("item", i)).el(Style::new().w(px(50.0)).h(px(20.0)).focusable());
@@ -1035,8 +1039,8 @@ mod tests {
       });
     };
     let mut st = frame(UiState::default(), list);
-    st.focus_next(true);
-    st.focus_next(true);
+    st.focus_next(FocusDirection::Next);
+    st.focus_next(FocusDirection::Next);
     st = frame(st, list);
     assert_eq!(st.focus(), Some(Id::of(("item", 1))));
     assert_eq!((offset(&st, "list"), offset(&st, "pop")), (0.0, 20.0));
@@ -1047,19 +1051,22 @@ mod tests {
     // A popup below a 100-high scrolling panel, in a 50-high scroll: the panel's offset can't
     // move it, the outer one shows it.
     let view = |ui: &mut Ui| {
-      ui.id("outer").col(Style::new().w(px(50.0)).h(px(50.0)).scroll_y(), |ui| {
-        ui.id("panel").col(Style::new().w(px(50.0)).h(px(100.0)).scroll_y(), |ui| {
+      ui.id("outer").col(Style::new().w(px(50.0)).h(px(50.0)).scroll(Axes::VERTICAL), |ui| {
+        ui.id("panel").col(Style::new().w(px(50.0)).h(px(100.0)).scroll(Axes::VERTICAL), |ui| {
           ui.el(Style::new().w(px(50.0)).h(px(1000.0)));
           let pop = Style::new().w(px(50.0)).h(px(20.0));
-          ui.id("pop").float(Float::parent().attach(0.0, 1.0)).col(pop, |ui| {
-            ui.id("item").el(Style::new().w(px(50.0)).h(px(20.0)).focusable());
-          });
+          ui.id("pop").float(Float::parent().attach(crate::ui::UnitPoint::BOTTOM_LEADING)).col(
+            pop,
+            |ui| {
+              ui.id("item").el(Style::new().w(px(50.0)).h(px(20.0)).focusable());
+            },
+          );
         });
         ui.el(Style::new().w(px(50.0)).h(px(100.0)));
       });
     };
     let mut st = frame(UiState::default(), view);
-    st.focus_next(true);
+    st.focus_next(FocusDirection::Next);
     st = frame(st, view);
     assert_eq!(st.focus(), Some(Id::of("item")));
     assert_eq!((offset(&st, "panel"), offset(&st, "outer")), (0.0, 70.0));
@@ -1068,7 +1075,7 @@ mod tests {
   #[test]
   fn reveal_scrolls_the_least() {
     let list = |ui: &mut Ui| {
-      ui.id("list").col(Style::new().w(px(50.0)).h(px(100.0)).scroll_y(), |ui| {
+      ui.id("list").col(Style::new().w(px(50.0)).h(px(100.0)).scroll(Axes::VERTICAL), |ui| {
         ui.el(Style::new().w(px(50.0)).h(px(1000.0)));
       });
     };

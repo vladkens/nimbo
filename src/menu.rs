@@ -1,115 +1,207 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The menu model the tray ([crate::tray]) and context menus ([crate::Ui::context_menu]) share:
-//! a [Menu] of [Item]s, each chosen by its id; section headers, separators, check marks,
-//! shortcut labels, disabled and destructive items, submenus. Labels longer than [LABEL] are
-//! shortened to fit ([Item::new]).
+//! The menu model the tray ([crate::tray]) and context menus ([crate::Ui::context_menu]) share,
+//! as SwiftUI's menu content: a [Menu] of [Item]s, buttons and toggles each chosen by an action
+//! of the app's own type, submenus, section titles and dividers; shortcut labels, disabled and
+//! destructive items. Labels longer than [LABEL] are shortened to fit ([Item::button]).
 
-/// A menu's items, in the order they show.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Menu {
-  pub items: Vec<Item>,
+use crate::keys::Shortcut;
+use crate::ui::ButtonRole;
+
+/// A menu's items, in the order they show, each chosen by its action: a value of the app's own
+/// type `A` (an enum of what its menus do), as SwiftUI's menus run a button's action.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Menu<A> {
+  pub items: Vec<Item<A>>,
 }
 
-impl Menu {
-  pub fn new(items: Vec<Item>) -> Self {
+impl<A> Default for Menu<A> {
+  fn default() -> Self {
+    Self { items: Vec::new() }
+  }
+}
+
+impl<A> Menu<A> {
+  pub fn new(items: Vec<Item<A>>) -> Self {
     Self { items }
   }
-}
 
-/// A menu item: `id` is what comes back when it is chosen ([crate::tray::Tray::on_item],
-/// [crate::Event::Menu]); one with a submenu, a header or a separator is never chosen.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Item {
-  pub id: String,
-  pub label: String,
-  pub enabled: bool,
-  /// Shows a check mark when on.
-  pub checked: bool,
-  /// Can be checked ([Item::checked] sets it): Linux panels show an empty box while it is off,
-  /// and a host adds the box to an item only as it builds it.
-  pub checkable: bool,
-  pub submenu: Option<Menu>,
-  /// Its shortcut as [crate::Shortcut::parse] spells it (`cmd+comma`, `cmd+q`), shown beside it
-  /// and, on macOS, working while the menu is open.
-  pub key: Option<String>,
-  /// A line between groups; the other fields are ignored.
-  pub separator: bool,
-  /// A section's title over the items after it ([Item::header]).
-  pub header: bool,
-  /// Deletes or discards: red where the menu has the style (the drawn one), plain elsewhere.
-  pub destructive: bool,
-}
-
-impl Item {
-  /// An item labelled `label`, a longer one than [LABEL] shortened ([Item::full] keeps it whole).
-  pub fn new(id: &str, label: &str) -> Self {
-    Self::full(id, &fit(label, LABEL))
-  }
-
-  /// An item showing all of `label`, however long.
-  pub fn full(id: &str, label: &str) -> Self {
-    let (enabled, checked, checkable, submenu, key) = (true, false, false, None, None);
-    let (separator, header, destructive) = (false, false, false);
-    let (id, label) = (id.into(), label.into());
-    Self { id, label, enabled, checked, checkable, submenu, key, separator, header, destructive }
-  }
-
-  pub fn separator() -> Self {
-    Self { separator: true, ..Self::new("", "") }
-  }
-
-  /// A section title, never chosen: a section header on macOS 14+, a disabled item elsewhere.
-  pub fn header(label: &str) -> Self {
-    Self { header: true, enabled: false, ..Self::new("", label) }
-  }
-
-  pub fn enabled(self, on: bool) -> Self {
-    Self { enabled: on, ..self }
-  }
-
-  /// A check mark, shown when `on`.
-  pub fn checked(self, on: bool) -> Self {
-    Self { checked: on, checkable: true, ..self }
-  }
-
-  pub fn submenu(self, menu: Menu) -> Self {
-    Self { submenu: Some(menu), ..self }
-  }
-
-  pub fn key(self, key: &str) -> Self {
-    Self { key: Some(key.into()), ..self }
-  }
-
-  /// Marks it as one that deletes or discards.
-  pub fn destructive(self) -> Self {
-    Self { destructive: true, ..self }
-  }
-
-  /// The label of [Item::key] as the OS shows it beside the item: `⌘,` on macOS, `Ctrl+,`
-  /// elsewhere; empty when it does not parse.
-  pub fn key_label(&self) -> String {
-    let key = self.key.as_deref().and_then(|k| crate::Shortcut::parse(k).ok());
-    key.map(|k| k.label()).unwrap_or_default()
-  }
-}
-
-/// The items of `menu` that can be chosen, depth first, in the order they show: the item
-/// numbers the OS menus use (an index here is a tag, a command id or a D-Bus menu id).
-#[cfg(any(test, windows, target_os = "macos", target_os = "linux"))]
-pub(crate) fn choices(menu: &Menu) -> Vec<String> {
-  fn walk(items: &[Item], out: &mut Vec<String>) {
-    for it in items.iter().filter(|it| !it.separator && !it.header) {
-      match &it.submenu {
-        Some(sub) => walk(&sub.items, out),
-        None => out.push(it.id.clone()),
+  /// The menu with each action replaced by its number, depth first in the order they show,
+  /// and the actions by number: the tags the OS menus use (a tag, a command id or a D-Bus menu
+  /// id), the answer mapped back to the action.
+  pub(crate) fn tagged(&self) -> (Menu<usize>, Vec<A>)
+  where
+    A: Clone,
+  {
+    fn walk<A: Clone>(items: &[Item<A>], out: &mut Vec<A>) -> Vec<Item<usize>> {
+      let mut tagged = Vec::with_capacity(items.len());
+      for it in items {
+        let n = out.len();
+        tagged.push(match it {
+          Item::Button { action, label, role, enabled, key } => {
+            out.push(action.clone());
+            let (label, role, enabled, key) = (label.clone(), *role, *enabled, *key);
+            Item::Button { action: n, label, role, enabled, key }
+          }
+          Item::Toggle { action, label, is_on, enabled, key } => {
+            out.push(action.clone());
+            let (label, is_on, enabled, key) = (label.clone(), *is_on, *enabled, *key);
+            Item::Toggle { action: n, label, is_on, enabled, key }
+          }
+          Item::Submenu { label, enabled, menu } => {
+            let menu = Menu::new(walk(&menu.items, out));
+            Item::Submenu { label: label.clone(), enabled: *enabled, menu }
+          }
+          Item::Section(s) => Item::Section(s.clone()),
+          Item::Divider => Item::Divider,
+        });
       }
+
+      tagged
+    }
+
+    let mut actions = Vec::new();
+    (Menu::new(walk(&self.items, &mut actions)), actions)
+  }
+}
+
+/// A menu item, as SwiftUI's menu content: a button or a toggle chosen by its action
+/// ([crate::tray::Tray::on_item], [crate::Ui::context_menu]), a submenu, a section's title, or a
+/// divider. A label longer than [LABEL] is shortened to fit ([Item::button]).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Item<A> {
+  Button {
+    action: A,
+    label: String,
+    /// [ButtonRole::Destructive] shows red where the menu has the style (the drawn one), plain
+    /// elsewhere.
+    role: Option<ButtonRole>,
+    enabled: bool,
+    /// Shown beside it and, on macOS, working while the menu is open.
+    key: Option<Shortcut>,
+  },
+  /// A check mark when on; Linux panels show an empty box while it is off.
+  Toggle {
+    action: A,
+    label: String,
+    is_on: bool,
+    enabled: bool,
+    key: Option<Shortcut>,
+  },
+  Submenu {
+    label: String,
+    enabled: bool,
+    menu: Menu<A>,
+  },
+  /// A section's title over the items after it, never chosen: a section header on macOS 14+, a
+  /// disabled item elsewhere.
+  Section(String),
+  Divider,
+}
+
+impl<A> Item<A> {
+  /// A button running `action`, `label` shortened past [LABEL] ([Item::full] keeps it whole).
+  pub fn button(action: A, label: &str) -> Self {
+    Self::full(action, &fit(label, LABEL))
+  }
+
+  /// A button showing all of `label`, however long.
+  pub fn full(action: A, label: &str) -> Self {
+    let (label, role, enabled, key) = (label.into(), None, true, None);
+    Item::Button { action, label, role, enabled, key }
+  }
+
+  /// A toggle running `action`, a check mark when `is_on`, as SwiftUI's `Toggle` in a menu.
+  pub fn toggle(action: A, label: &str, is_on: bool) -> Self {
+    let (label, enabled, key) = (fit(label, LABEL), true, None);
+    Item::Toggle { action, label, is_on, enabled, key }
+  }
+
+  pub fn submenu(label: &str, menu: Menu<A>) -> Self {
+    Item::Submenu { label: fit(label, LABEL), enabled: true, menu }
+  }
+
+  pub fn section(label: &str) -> Self {
+    Item::Section(label.into())
+  }
+
+  pub fn enabled(mut self, on: bool) -> Self {
+    match &mut self {
+      Item::Button { enabled, .. } | Item::Toggle { enabled, .. } => *enabled = on,
+      Item::Submenu { enabled, .. } => *enabled = on,
+      Item::Section(_) | Item::Divider => {}
+    }
+
+    self
+  }
+
+  /// A button's role ([ButtonRole::Destructive]: it deletes or discards).
+  pub fn role(mut self, r: ButtonRole) -> Self {
+    if let Item::Button { role, .. } = &mut self {
+      *role = Some(r);
+    }
+
+    self
+  }
+
+  /// A button's or a toggle's shortcut, as SwiftUI's `.keyboardShortcut`.
+  pub fn key(mut self, k: Shortcut) -> Self {
+    if let Item::Button { key, .. } | Item::Toggle { key, .. } = &mut self {
+      *key = Some(k);
+    }
+
+    self
+  }
+
+  /// Its label; a divider's is empty.
+  pub fn label(&self) -> &str {
+    match self {
+      Item::Button { label, .. } | Item::Toggle { label, .. } | Item::Submenu { label, .. } => {
+        label
+      }
+      Item::Section(label) => label,
+      Item::Divider => "",
     }
   }
 
-  let mut out = Vec::new();
-  walk(&menu.items, &mut out);
-  out
+  /// Whether it can be chosen or opened; a section's title or a divider never.
+  pub fn is_enabled(&self) -> bool {
+    match self {
+      Item::Button { enabled, .. } | Item::Toggle { enabled, .. } => *enabled,
+      Item::Submenu { enabled, .. } => *enabled,
+      Item::Section(_) | Item::Divider => false,
+    }
+  }
+
+  /// A toggle's state; `None` for anything else.
+  pub fn check(&self) -> Option<bool> {
+    if let Item::Toggle { is_on, .. } = self { Some(*is_on) } else { None }
+  }
+
+  pub fn destructive(&self) -> bool {
+    matches!(self, Item::Button { role: Some(ButtonRole::Destructive), .. })
+  }
+
+  pub fn shortcut(&self) -> Option<Shortcut> {
+    match self {
+      Item::Button { key, .. } | Item::Toggle { key, .. } => *key,
+      _ => None,
+    }
+  }
+
+  /// The action a choice of it runs: a button's or a toggle's.
+  pub fn action(&self) -> Option<&A> {
+    match self {
+      Item::Button { action, .. } | Item::Toggle { action, .. } => Some(action),
+      _ => None,
+    }
+  }
+
+  /// The label of its shortcut as the OS shows it beside the item: `⌘,` on macOS, `Ctrl+,`
+  /// elsewhere; empty without one.
+  pub fn key_label(&self) -> String {
+    self.shortcut().map(|k| k.label()).unwrap_or_default()
+  }
 }
 
 /// The most characters an item's label shows ([Item::new]): a menu keeps its width whatever the
@@ -204,25 +296,38 @@ mod tests {
     let warning = "No sound from Microphone Array (Realtek(R) Audio): check the microphone";
     assert_eq!(fit(warning, LABEL), "No sound from Microphone Array: check the…");
     // Items fit by themselves, unless asked to show it all.
-    assert_eq!(Item::new("e", error).label, fit(error, LABEL));
-    assert_eq!(Item::full("e", error).label, error);
+    assert_eq!(Item::button(0, error).label(), fit(error, LABEL));
+    assert_eq!(Item::full(0, error).label(), error);
   }
 
-  /// Headers and separators are never chosen; a submenu's items are, in their place.
+  #[derive(Clone, Debug, PartialEq)]
+  enum Act {
+    Top,
+    A,
+    B,
+    Quit,
+  }
+
+  /// Sections and dividers are never chosen; a submenu's items are, in their place: numbered
+  /// depth first, each number its action.
   #[test]
-  fn choices_are_numbered_depth_first() {
-    let sub = Menu::new(vec![Item::new("a", "A"), Item::separator(), Item::new("b", "B")]);
+  fn actions_are_numbered_depth_first() {
+    let sub = Menu::new(vec![Item::button(Act::A, "A"), Item::Divider, Item::button(Act::B, "B")]);
+    let quit = Item::button(Act::Quit, "Quit").key(Shortcut::char('q').cmd());
     let menu = Menu::new(vec![
-      Item::header("Head"),
-      Item::new("top", "Top"),
-      Item::separator(),
-      Item::new("sub", "Sub").submenu(sub),
-      Item::new("quit", "Quit").key("cmd+q").destructive(),
+      Item::section("Head"),
+      Item::button(Act::Top, "Top"),
+      Item::Divider,
+      Item::submenu("Sub", sub),
+      quit.role(ButtonRole::Destructive),
     ]);
-    assert_eq!(choices(&menu), ["top", "a", "b", "quit"]);
-    assert!(menu.items[0].header && !menu.items[0].enabled && menu.items[4].destructive);
+    let (tags, actions) = menu.tagged();
+    assert_eq!(actions, [Act::Top, Act::A, Act::B, Act::Quit]);
+    assert_eq!(tags.items[4].action(), Some(&3));
+    let Item::Submenu { menu: sub, .. } = &tags.items[3] else { panic!() };
+    assert_eq!((sub.items[0].action(), sub.items[2].action()), (Some(&1), Some(&2)));
+    assert!(!menu.items[0].is_enabled() && menu.items[4].destructive());
     let label = if cfg!(target_os = "macos") { "⌘Q" } else { "Ctrl+Q" };
     assert_eq!(menu.items[4].key_label(), label);
-    assert_eq!(Item::new("x", "X").key("cmd+nope").key_label(), "");
   }
 }

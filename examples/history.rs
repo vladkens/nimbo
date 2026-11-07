@@ -1,6 +1,6 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! A long list built in view only ([nimbo::List] in sections, inset grouped as a form's plates):
+//! A long list built in view only ([nimbo::List] in sections, grouped on a form's plates):
 //! 86,000 dictations, newest first, a plate a day under its date and count, each row its text
 //! and when it was said, a click selecting it and Copy at its right. Only the rows on screen, and
 //! a margin, are built; the scroll area is as tall as every row.
@@ -11,7 +11,9 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 use nimbo::ui::Role;
-use nimbo::{App, Button, Config, FormStyle, Icon, Id, List, Selection, Style, Ui, grow};
+use nimbo::{
+  App, Button, Config, FormStyle, Icon, Id, List, ListStyle, Selection, Style, Ui, grow,
+};
 
 pub const ROWS: usize = 86_000;
 /// Dictations a day: the oldest day has what is left.
@@ -74,7 +76,8 @@ impl App for History {
     let head_h = ui.metrics(fs.head.font).line_height() + fs.head_pad[2];
     let mut copied = None;
     let mut sel = std::mem::take(&mut self.sel);
-    let list = List::new(rows, ROW_H).key(&key).selection(&mut sel).inset_grouped();
+    let list = List::new(rows, ROW_H).key(&key).selection(&mut sel);
+    let list = list.list_style(ListStyle::Grouped);
     let list = list.sections(starts, head_h, &head);
     ui.col(Style::new().grow().bg(fs.bg), |ui| {
       list.show(ui.id(LIST), |ui, row| {
@@ -84,8 +87,8 @@ impl App for History {
         let caption =
           format!("{:02}:{:02} · {}.{} s", 23 - i / 7 % 24, 59 - i % 60, 2 + e % 9, e % 10);
         ui.col(Style::new().w(grow()).gap(2.0), |ui| {
-          ui.text(&text, fs.label.ellipsis());
-          ui.text(&caption, fs.caption.ellipsis());
+          ui.text(&text, fs.label.line_limit(1));
+          ui.text(&caption, fs.caption.line_limit(1));
         });
         if Button::icon(Icon::COPY).show(ui.key("copy")).clicked {
           copied = Some(e);

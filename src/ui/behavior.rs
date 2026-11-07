@@ -67,7 +67,7 @@ use keyboard_types::Modifiers;
 
 use super::input::ScrollState;
 use super::textlayout::{Edit, TextLayout};
-use super::{Cursor, Focus, Id, Role, State, Style, Ui, UiState};
+use super::{Cursor, FieldKind, Focus, Id, Role, State, Style, Ui, UiState};
 use crate::app::{Ime, MouseButton};
 use crate::keys::{Command, Delete, Key, Move};
 use crate::menu::{Item, Menu};
@@ -75,6 +75,7 @@ use crate::scene::{Point, Rect};
 use crate::text::edit::{
   Editor, Lines, Mono, Sel, graphemes, para_range, range_from_utf16, snap, word_range,
 };
+use crate::ui::textlayout::Hit;
 
 /// The caret shows this long after it moves, then hides as long, and so on.
 const BLINK: Duration = Duration::from_millis(500);
@@ -190,16 +191,35 @@ impl Ui<'_> {
 
 // MARK: Text
 
+/// What text in a field's behaviour does ([FieldBehavior::editing]): a field of a
+/// [FieldKind] takes typing and input methods; selectable text only selects and copies.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Editing {
+  #[default]
+  Selectable,
+  Field(FieldKind),
+}
+
+impl FieldState {
+  /// Takes typing and input methods.
+  pub fn editable(&self) -> bool {
+    matches!(self.editing, Editing::Field(_))
+  }
+
+  /// A password: no input method, dots, nothing copied.
+  pub fn secure(&self) -> bool {
+    self.editing == Editing::Field(FieldKind::Secure)
+  }
+}
+
 /// A field's or selectable text's state in the store, under its id.
 #[derive(Default)]
 pub(crate) struct FieldState {
   pub ed: Editor,
   /// The text element: the field's inner one, or the selectable text itself.
   pub text_id: Id,
-  /// Takes typing and input methods (a field), or only selects and copies.
-  pub editable: bool,
-  /// A password: no input method, dots, nothing copied.
-  pub secure: bool,
+  /// A field of a kind, or text that only selects and copies.
+  pub editing: Editing,
   /// The app's text as the field last had it from the app or wrote it, and the editor's text
   /// then (line breaks made `\n`, or spaces on one line).
   app: String,
@@ -262,8 +282,8 @@ pub struct FieldBehavior {
   pub cancelled: bool,
   /// Lost focus since the view last built it.
   pub blurred: bool,
-  /// A password ([super::FieldStyle::password]).
-  pub password: bool,
+  /// A field of a kind, or selectable text.
+  pub editing: Editing,
   /// The edit menu a secondary click asked for, or that is open.
   pub menu: EditMenu,
   /// The selection, marked text, caret and reveal to draw, in offsets of the text shown;
@@ -290,14 +310,15 @@ pub struct EditMenu {
 
 impl EditMenu {
   /// The menu: Cut, Copy, Paste (Copy alone in selectable text), a line, Select All, each
-  /// enabled when it can act, their ids `cut`, `copy`, `paste` and `select_all`; no shortcut
-  /// labels, as AppKit's, Win32's and GTK's text menus show none.
-  pub fn items(&self) -> Menu {
-    let item = |id: &str, label: &str, on: bool| Item::new(id, label).enabled(on);
-    let (cut, paste) = (item("cut", "Cut", self.cut), item("paste", "Paste", self.paste));
-    let copy = item("copy", "Copy", self.copy);
+  /// enabled when it can act, running its command; no shortcut labels, as AppKit's, Win32's
+  /// and GTK's text menus show none.
+  pub fn items(&self) -> Menu<Command> {
+    let item = |cmd: Command, label: &str, on: bool| Item::button(cmd, label).enabled(on);
+    let cut = item(Command::Cut, "Cut", self.cut);
+    let paste = item(Command::Paste, "Paste", self.paste);
+    let copy = item(Command::Copy, "Copy", self.copy);
     let mut items = if self.editable { vec![cut, copy, paste] } else { vec![copy] };
-    items.extend([Item::separator(), item("select_all", "Select All", self.select_all)]);
+    items.extend([Item::Divider, item(Command::SelectAll, "Select All", self.select_all)]);
     Menu::new(items)
   }
 }
@@ -317,20 +338,21 @@ impl Ui<'_> {
     &mut self,
     id: Id,
     text: &mut String,
-    multiline: bool,
-    password: bool,
+    kind: FieldKind,
   ) -> FieldBehavior {
     // A password is a secure field, its text never exposed; one of many lines a text area.
-    let role = match (password, multiline) {
-      (true, _) => Role::SecureTextField,
-      (_, true) => Role::TextArea,
-      _ => Role::TextField,
+    let role = match kind {
+      FieldKind::Secure => Role::SecureTextField,
+      FieldKind::MultiLine => Role::TextArea,
+      FieldKind::SingleLine => Role::TextField,
     };
+
+    let password = kind == FieldKind::Secure;
 
     let disabled = self.begin(id, role).is_some();
     let mut st = std::mem::take(self.state::<FieldState>(id));
-    (st.text_id, st.editable, st.secure) = (id.key("text"), true, password);
-    st.ed.multiline = multiline && !password;
+    (st.text_id, st.editing) = (id.key("text"), Editing::Field(kind));
+    st.ed.multiline = kind == FieldKind::MultiLine;
     self.revealed(&mut st);
     // A value from the app reveals the caret too.
     let (sel, set) = (st.ed.sel(), take_value(&mut st, text));
@@ -376,7 +398,7 @@ impl Ui<'_> {
 
     let mut b = self.field_state(id, &mut st, disabled);
     (b.changed, b.submitted, b.cancelled, b.blurred) = (changed, submitted, cancelled, blurred);
-    (b.password, b.edit) = (password, shown_edit(&st));
+    (b.editing, b.edit) = (st.editing, shown_edit(&st));
     b.edit.caret = b.focused && st.ed.sel().is_empty() && self.blink(st.blink);
     b.edit.reveal = st.reveal;
     *self.state::<FieldState>(id) = st;
@@ -389,7 +411,7 @@ impl Ui<'_> {
   pub fn selectable_behavior(&mut self, id: Id, text: &str) -> FieldBehavior {
     let disabled = self.begin(id, Role::StaticText).is_some();
     let mut st = std::mem::take(self.state::<FieldState>(id));
-    (st.text_id, st.editable, st.secure, st.ed.multiline) = (id, false, false, true);
+    (st.text_id, st.editing, st.ed.multiline) = (id, Editing::Selectable, true);
     if st.app != text {
       st.ed.set_text(text);
       st.ed.select(Sel::caret(0));
@@ -457,14 +479,14 @@ impl Ui<'_> {
     });
     let mono = Mono::PLAIN;
     let lines: &dyn Lines = match &lay {
-      Some(l) if !st.secure => l,
+      Some(l) if !st.secure() => l,
       _ => &mono,
     };
 
     let multiline = st.ed.multiline;
     let (mut submitted, mut cancelled) = (false, false);
     if let Some(c) = self.command(id).or(st.queued.take()) {
-      let c = if st.secure { by_lines(c) } else { c };
+      let c = if st.secure() { by_lines(c) } else { c };
       let used = match c {
         // Enter while composing completes the composition, and only that.
         Command::InsertNewline if st.ed.marked().is_some() => {
@@ -486,7 +508,7 @@ impl Ui<'_> {
         | Command::ScrollPageDown
         | Command::ScrollToTop
         | Command::ScrollToBottom
-          if multiline && st.editable =>
+          if multiline && st.editable() =>
         {
           let line_h = lay.map_or(0.0, |l| l.line_h);
           if let Some(n) = self.st.last.get(id) {
@@ -495,11 +517,11 @@ impl Ui<'_> {
 
           true
         }
-        Command::Copy | Command::Cut if st.secure => false,
-        Command::Copy | Command::SelectAll | Command::Move(..) if !st.editable => {
+        Command::Copy | Command::Cut if st.secure() => false,
+        Command::Copy | Command::SelectAll | Command::Move(..) if !st.editable() => {
           st.ed.apply(c, lines, &mut *self.st.clipboard)
         }
-        _ if !st.editable => false,
+        _ if !st.editable() => false,
         c => st.ed.apply(c, lines, &mut *self.st.clipboard),
       };
 
@@ -508,7 +530,7 @@ impl Ui<'_> {
       }
     }
 
-    if st.editable {
+    if st.editable() {
       if let Some(t) = self.typed(id) {
         st.ed.insert(t);
       }
@@ -545,7 +567,7 @@ impl Ui<'_> {
     // A secondary click focuses it and asks for its edit menu there ([Ui::context_press]).
     if let Some(pos) = self.context_press(id) {
       self.focus(Some(id));
-      let (editable, copy) = (st.editable, !st.ed.sel().is_empty() && !st.secure);
+      let (editable, copy) = (st.editable(), !st.ed.sel().is_empty() && !st.secure());
       let (paste, select_all) =
         (editable && self.st.clipboard.has_text(), !st.ed.text().is_empty());
       st.menu =
@@ -724,8 +746,8 @@ fn apply_ime(st: &mut FieldState, ime: &Ime) {
   let s = st.ed.text();
   let replace = |r: &Option<Range<usize>>| r.clone().map(|r| range_from_utf16(s, r));
   match ime {
-    Ime::Commit { text, .. } if st.secure => st.ed.insert(text),
-    _ if st.secure => {}
+    Ime::Commit { text, .. } if st.secure() => st.ed.insert(text),
+    _ if st.secure() => {}
     // An empty preedit with nothing marked (some report one after every commit) is no edit.
     Ime::Mark { text, .. } if text.is_empty() && st.ed.marked().is_none() => {}
     Ime::Mark { text, sel, replace: r } => {
@@ -754,7 +776,7 @@ fn by_lines(c: Command) -> Command {
 
 /// Whether the last frame's layout shows the editor's text as it is now (dots for a password).
 fn shows(l: &TextLayout, st: &FieldState) -> bool {
-  match st.secure {
+  match st.secure() {
     true => l.text.len() == graphemes(st.ed.text()).count() * DOT.len(),
     false => l.text == st.ed.text(),
   }
@@ -762,7 +784,7 @@ fn shows(l: &TextLayout, st: &FieldState) -> bool {
 
 /// Offset `i` of the editor's text in the text shown: a dot per grapheme for a password.
 fn shown(st: &FieldState, i: usize) -> u32 {
-  match st.secure {
+  match st.secure() {
     true => (graphemes(&st.ed.text()[..i]).count() * DOT.len()) as u32,
     false => i as u32,
   }
@@ -770,7 +792,7 @@ fn shown(st: &FieldState, i: usize) -> u32 {
 
 /// Offset `i` of the text shown in the editor's text.
 fn real(st: &FieldState, i: usize) -> usize {
-  match st.secure {
+  match st.secure() {
     true => graphemes(st.ed.text()).nth(i / DOT.len()).map_or(st.ed.text().len(), |g| g.start),
     false => snap(st.ed.text(), i),
   }
@@ -790,11 +812,11 @@ fn shown_edit(st: &FieldState) -> Edit {
 /// A press at `p`: the caret there (Shift extends the selection to it), or the word or line
 /// there for a double or triple click (all of a password); a drag goes on from it.
 fn start_drag(st: &mut FieldState, lay: &TextLayout, p: Point, clicks: u32, shift: bool) {
-  let i = real(st, lay.hit(p, clicks >= 2));
+  let i = real(st, lay.hit(p, if clicks >= 2 { Hit::Over } else { Hit::Nearest }));
   let s = st.ed.text();
   let r = match clicks {
     0 | 1 => i..i,
-    _ if st.secure => 0..s.len(),
+    _ if st.secure() => 0..s.len(),
     2 => word_range(s, i),
     _ => para_range(s, i),
   };
@@ -818,11 +840,11 @@ fn start_drag(st: &mut FieldState, lay: &TextLayout, p: Point, clicks: u32, shif
 /// triple click.
 fn drag_to(st: &mut FieldState, lay: &TextLayout, p: Point) {
   let Some((a, clicks)) = st.drag.clone() else { return };
-  let i = real(st, lay.hit(p, clicks >= 2));
+  let i = real(st, lay.hit(p, if clicks >= 2 { Hit::Over } else { Hit::Nearest }));
   let s = st.ed.text();
   let sel = match clicks {
     0 | 1 => Sel::new(a.start, i),
-    _ if st.secure => Sel::new(0, s.len()),
+    _ if st.secure() => Sel::new(0, s.len()),
     _ => {
       let w = if clicks == 2 { word_range(s, i) } else { para_range(s, i) };
       match w.start < a.start {
@@ -981,7 +1003,7 @@ mod tests {
 
   impl App for Own {
     fn view(&mut self, ui: &mut Ui) {
-      let b = ui.text_field_behavior(Id::of("own"), &mut self.text, false, false);
+      let b = ui.text_field_behavior(Id::of("own"), &mut self.text, FieldKind::SingleLine);
       let style = crate::ui::Theme::PLATES_DARK.field();
       let frame =
         b.style(Style::new().w(px(120.0)).h(px(24.0)).bg(if b.focused { OVER } else { REST }));
@@ -999,7 +1021,7 @@ mod tests {
     h.type_text("hi");
     assert_eq!(h.app().text, "hi");
     let b = *h.app().seen.last().unwrap();
-    assert!(b.focused && b.changed && !b.password);
+    assert!(b.focused && b.changed && b.editing == Editing::Field(FieldKind::SingleLine));
     assert_eq!(h.render().pixel(100.0, 20.0), [0, 0, 255, 255]);
     assert_eq!(h.text(Id::of("own").key("text")), Some("hi"));
     // The app's own value goes in; Escape cancels and goes on.
@@ -1012,8 +1034,11 @@ mod tests {
 
   #[test]
   fn password_offsets_map_dots_to_graphemes() {
-    let st =
-      FieldState { ed: Editor::new("ae\u{301}👍🏽"), secure: true, ..FieldState::default() };
+    let st = FieldState {
+      ed: Editor::new("ae\u{301}👍🏽"),
+      editing: Editing::Field(FieldKind::Secure),
+      ..FieldState::default()
+    };
     // a, é (3 bytes), 👍🏽 (8): dots of 3 bytes each.
     assert_eq!((shown(&st, 0), shown(&st, 1), shown(&st, 4), shown(&st, 12)), (0, 3, 6, 9));
     assert_eq!((real(&st, 0), real(&st, 3), real(&st, 6), real(&st, 9)), (0, 1, 4, 12));

@@ -16,6 +16,7 @@ use super::{Id, Response, Style, TextStyle, Ui};
 use crate::app::{Event, Ime};
 use crate::scene::{Color, Point, Rect};
 use crate::text::edit::Lines;
+use crate::ui::{CoordinateSpace, Flow};
 
 /// Width of a selected line break, shown past the end of its line.
 const BREAK_W: f32 = 4.0;
@@ -63,7 +64,7 @@ impl Ui<'_> {
     text.push_str(s);
     let range = (start, text.len() as u32);
     let kind = Kind::Text { range, style, lines: (0, 0), baseline: 0.0, line_h: 0.0 };
-    let (i, r) = self.push(kind, node, 0);
+    let (i, r) = self.push(kind, node, Flow::Row);
     self.st.tree.edits.push(Edit { node: i, ..edit });
     r
   }
@@ -73,6 +74,14 @@ impl Ui<'_> {
   pub fn ime(&self, id: Id) -> Option<&Ime> {
     self.st.take(id, |e| if let Event::Ime(ime) = e { Some(ime) } else { None })
   }
+}
+
+/// Which offset a point in a text finds ([TextLayout::hit]): the stop nearest to it, or the one
+/// starting the grapheme it is over (a double click selects that one's word).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Hit {
+  Nearest,
+  Over,
 }
 
 /// An editable or selectable text element of a laid-out tree.
@@ -161,17 +170,16 @@ impl<'t> TextLayout<'t> {
     }
   }
 
-  /// The offset in line `k` nearest to `x` from the element's left edge, or with `inside` the
-  /// one starting the grapheme `x` is over (a double click selects that one's word).
-  pub fn hit_in(&self, k: usize, x: f32, inside: bool) -> usize {
+  /// The offset in line `k` by `x` from the element's left edge, as `hit` says.
+  pub fn hit_in(&self, k: usize, x: f32, hit: Hit) -> usize {
     let s = self.line_stops(k);
     let j = s.partition_point(|s| s.x <= x);
-    let at = match (j, inside) {
+    let at = match (j, hit) {
       (0, _) => 0,
       (j, _) if j == s.len() => s.len() - 1,
-      (j, true) => j - 1,
-      (j, false) if x - s[j - 1].x <= s[j].x - x => j - 1,
-      (j, false) => j,
+      (j, Hit::Over) => j - 1,
+      (j, Hit::Nearest) if x - s[j - 1].x <= s[j].x - x => j - 1,
+      (j, Hit::Nearest) => j,
     };
 
     s.get(at).map_or(0, |s| s.at as usize)
@@ -183,9 +191,9 @@ impl<'t> TextLayout<'t> {
     k.min(self.len() - 1)
   }
 
-  /// The offset nearest to `p` in the window (see [Self::hit_in] for `inside`).
-  pub fn hit(&self, p: Point, inside: bool) -> usize {
-    self.hit_in(self.line_at(p.y), p.x - self.rect.x, inside)
+  /// The offset by `p` in the window, as `hit` says ([Self::hit_in]).
+  pub fn hit(&self, p: Point, hit: Hit) -> usize {
+    self.hit_in(self.line_at(p.y), p.x - self.rect.x, hit)
   }
 
   /// The caret at offset `i` in the window: zero wide, a line high.
@@ -232,12 +240,12 @@ pub(super) fn reveal(t: &mut Tree, scale: f32) {
     let Some(lay) = TextLayout::at(t, e.node) else { continue };
     let c = lay.caret(e.sel.1 as usize);
     let mut p = t.nodes[e.node as usize].parent as usize;
-    while p != 0 && !(t.nodes[p].style.scroll[0] || t.nodes[p].style.scroll[1]) {
+    while p != 0 && !!t.nodes[p].style.scroll.is_empty() {
       p = t.nodes[p].parent as usize;
     }
 
     let n = &t.nodes[p];
-    if p == 0 && !n.style.scroll.contains(&true) {
+    if p == 0 && n.style.scroll.is_empty() {
       continue;
     }
 
@@ -250,7 +258,7 @@ pub(super) fn reveal(t: &mut Tree, scale: f32) {
     // A text field's offset is small: in `f32`, as its rects.
     let (mut d, mut scroll) = ([0.0; 2], [n.scroll[0] as f32, n.scroll[1] as f32]);
     for ax in 0..2 {
-      if !n.style.scroll[ax] {
+      if !n.style.scroll.at(ax) {
         continue;
       }
 
@@ -276,7 +284,7 @@ pub(super) fn reveal(t: &mut Tree, scale: f32) {
     let mut k = p + 1;
     while k < end {
       let c = &mut t.nodes[k];
-      if c.float.is_some_and(|f| f.window || c.parent as usize == p) {
+      if c.float.is_some_and(|f| f.space == CoordinateSpace::Global || c.parent as usize == p) {
         k = c.end as usize;
         continue;
       }
@@ -298,7 +306,7 @@ impl Lines for TextLayout<'_> {
   }
 
   fn hit(&self, _s: &str, line: Range<usize>, x: f32) -> usize {
-    self.hit_in(self.line_of(line.start), x, false)
+    self.hit_in(self.line_of(line.start), x, Hit::Nearest)
   }
 
   fn page(&self) -> usize {
@@ -349,12 +357,12 @@ mod tests {
     // An offset at the wrap belongs to the next line.
     assert_eq!((l.line_of(10), l.line_of(11), l.line_of(15), l.line_of(16)), (0, 1, 1, 2));
     // Hit tests: nearest boundary, or the grapheme under the point.
-    assert_eq!(l.hit(Point::new(10.0 + 14.0, 25.0), false), 2);
-    assert_eq!(l.hit(Point::new(10.0 + 14.0, 25.0), true), 2);
-    assert_eq!(l.hit(Point::new(10.0 + 16.0, 25.0), false), 3);
-    assert_eq!(l.hit(Point::new(10.0 + 16.0, 25.0), true), 2);
-    assert_eq!(l.hit(Point::new(500.0, 35.0), false), 15);
-    assert_eq!(l.hit(Point::new(-5.0, 999.0), false), 19);
+    assert_eq!(l.hit(Point::new(10.0 + 14.0, 25.0), Hit::Nearest), 2);
+    assert_eq!(l.hit(Point::new(10.0 + 14.0, 25.0), Hit::Over), 2);
+    assert_eq!(l.hit(Point::new(10.0 + 16.0, 25.0), Hit::Nearest), 3);
+    assert_eq!(l.hit(Point::new(10.0 + 16.0, 25.0), Hit::Over), 2);
+    assert_eq!(l.hit(Point::new(500.0, 35.0), Hit::Nearest), 15);
+    assert_eq!(l.hit(Point::new(-5.0, 999.0), Hit::Nearest), 19);
     assert_eq!(l.caret(13), Rect::new(22.0, 30.0, 0.0, 10.0));
     // A selection over three lines, its line break shown.
     let mut rects = Vec::new();
@@ -385,7 +393,7 @@ mod tests {
     let mut e = Editor::multiline(s);
     e.select(crate::text::edit::Sel::caret(2));
     let mut mv = |m| {
-      e.move_by(m, false, &l);
+      e.move_by(m, crate::keys::Extent::Caret, &l);
       e.caret()
     };
     assert_eq!(mv(Move::Down), 13);

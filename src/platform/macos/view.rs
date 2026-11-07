@@ -44,7 +44,7 @@ use super::input::*;
 use super::link::{Link, Wake, refresh};
 use super::surface::Presenter;
 use super::{a11y, keyboard, overlay};
-use crate::app::{App, Event, Ime, Runtime, WHEEL_LINE};
+use crate::app::{App, Event, Ime, KeyPhase, Runtime, WHEEL_LINE};
 use crate::keys::{self, Command, KeyEvent};
 use crate::scene::{Point, Rect, Size};
 use crate::shell::Anchor;
@@ -353,7 +353,7 @@ define_class!(
       let key = keyboard::code(event.keyCode());
       if let Some(flag) = keyboard::device_flag(key) {
         let down = event.modifierFlags().0 as u64 & flag != 0;
-        self.send(Event::Modifier { key, down });
+        self.send(Event::Modifier { key, phase: KeyPhase::of(down) });
       }
     }
 

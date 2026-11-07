@@ -531,14 +531,8 @@ mod tests {
     s.quad(Quad::new(card, [0.3, 0.5, 0.9, 1.0]).radius(8.0).border(1.0, [1.0, 1.0, 1.0, 0.6]));
     s.push_clip(Rect::new(20.0, 120.0, 150.0 + t, 50.0));
     let a = Point::new(10.0, 160.0);
-    s.segment(Segment {
-      a,
-      b: Point::new(250.0, 125.0 + t),
-      color: [0.9, 0.7, 0.2, 1.0],
-      width: 1.5,
-      round: 1.0,
-      _pad: [0.0; 2],
-    });
+    let b = Point::new(250.0, 125.0 + t);
+    s.segment(Segment::new(a, b, [0.9, 0.7, 0.2, 1.0], 1.5, crate::scene::LineCap::Round));
     s.quad(Quad::new(Rect::new(30.0, 130.0, 40.0, 20.0), [1.0, 0.2, 0.2, 0.7]));
     s.pop_clip();
     s
@@ -619,7 +613,7 @@ mod tests {
     // The same pixel size, items and bounds, but the gradient spans twice the pixels.
     let mut s = Scene::default();
     let q = Quad::new(Rect::new(0.0, 0.0, 128.0, 128.0), [1.0, 0.0, 0.0, 1.0]);
-    s.quad(q.gradient([0.0, 0.0, 1.0, 1.0], true));
+    s.quad(q.gradient([0.0, 0.0, 1.0, 1.0], crate::ui::Axis::Vertical));
     let mut r = Renderer::new();
     let mut c = Canvas::default();
     c.draw(&mut r, &s, Size::new(64.0, 64.0), 1.0, false);

@@ -23,7 +23,7 @@ use objc2_core_text::{
 };
 
 use crate::text::edit::Utf16Bytes;
-use crate::text::{Font, Glyph, GlyphBox, Ink, Line, Metrics, Raster, Weight};
+use crate::text::{Design, Font, Glyph, GlyphBox, Ink, Line, Metrics, Raster, Weight};
 
 /// A CTFont at its point size.
 #[derive(Clone)]
@@ -35,7 +35,7 @@ impl PartialEq for Face {
   }
 }
 
-/// The system font (SF Pro, or SF Mono when `font.mono`) at its size and weight.
+/// The system font (SF Pro, or SF Mono for [Design::Monospaced]) at its size and weight.
 pub fn face(font: Font) -> Face {
   let weight = unsafe {
     match font.weight {
@@ -45,9 +45,9 @@ pub fn face(font: Font) -> Face {
       Weight::Bold => NSFontWeightBold,
     }
   };
-  let ns = match font.mono {
-    true => NSFont::monospacedSystemFontOfSize_weight(font.size as f64, weight),
-    false => NSFont::systemFontOfSize_weight(font.size as f64, weight),
+  let ns = match font.design {
+    Design::Monospaced => NSFont::monospacedSystemFontOfSize_weight(font.size as f64, weight),
+    Design::Default => NSFont::systemFontOfSize_weight(font.size as f64, weight),
   };
 
   Face(ns_font(ns))

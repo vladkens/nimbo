@@ -22,7 +22,6 @@ use super::super::{FALSE, Fp, P, S, connect_id, gtk, lib, slot, window_busy, wit
 use super::hotkey::keysym;
 use crate::app::Event;
 use crate::keys::Shortcut;
-use crate::menu::choices;
 use crate::scene::Point;
 use crate::ui::Id;
 use crate::{Item, Menu};
@@ -59,15 +58,14 @@ fn menus() -> &'static Menus {
   MENUS.get_or_init(|| Menus::load(&lib()?)).as_ref().expect("GTK 3 has its menu functions")
 }
 
-/// A menu of ours, by number: its window and element, its items' ids by number ([choices]), the
-/// one chosen; the GtkMenu (our reference), the press that asked for it (a GdkEvent copy, ours;
-/// null once shown, or for none) and the rect it shows at.
+/// A menu of ours, by number: its window and element, the action number chosen; the GtkMenu (our
+/// reference), the press that asked for it (a GdkEvent copy, ours; null once shown, or for none)
+/// and the rect it shows at.
 struct Up {
   n: u64,
   win: u64,
   on: Id,
-  ids: Vec<String>,
-  chosen: Option<String>,
+  chosen: Option<usize>,
   menu: P,
   press: P,
   at: [c_int; 4],
@@ -80,20 +78,20 @@ thread_local! {
 
 /// Window `win` (its area `area`) asks for `menu` on `on` at `at`, after the secondary `press`
 /// (a copy, now ours): built now, it pops up from an idle, outside the window's borrow.
-pub fn ask(win: u64, area: P, press: P, on: Id, at: Point, menu: &Menu) {
+pub fn ask(win: u64, area: P, press: P, on: Id, at: Point, menu: &Menu<usize>) {
   let (f, n) = (menus(), NEXT.get() + 1);
   NEXT.set(n);
   // SAFETY: GTK's calls on the main thread; the menu is ours (its floating reference sunk)
   // until [on_done]. Building it runs no callback of ours.
   let m = unsafe {
     let m = (f.g_object_ref_sink)((f.gtk_menu_new)());
-    fill(m, &menu.items, n, &mut 0);
+    fill(m, &menu.items, n);
     (f.gtk_menu_attach_to_widget)(m, area, null());
     connect_id(m, c"deactivate", on_deactivate as Fp, 0, n);
     m
   };
   let at = [at.x.round() as c_int, at.y.round() as c_int, 1, 1];
-  let up = Up { n, win, on, ids: choices(menu), chosen: None, menu: m, press, at };
+  let up = Up { n, win, on, chosen: None, menu: m, press, at };
   UP.with_borrow_mut(|u| u.push(up));
   unsafe { (gtk().g_idle_add)(on_ask as Fp, n as usize as P) };
 }
@@ -131,43 +129,39 @@ unsafe extern "C" fn on_ask(data: P) -> c_int {
   FALSE
 }
 
-/// Appends `items` to `shell` (menu `n`'s, or a submenu of it), each that can be chosen
-/// numbered from `next` on, depth first, as [choices] numbers them.
-unsafe fn fill(shell: P, items: &[Item], n: u64, next: &mut u64) {
+/// Appends `items` to `shell` (menu `n`'s, or a submenu of it), each that can be chosen sending
+/// its action number.
+unsafe fn fill(shell: P, items: &[Item<usize>], n: u64) {
   let (g, f) = (gtk(), menus());
   for it in items {
-    let label = CString::new(it.label.replace('\0', "")).unwrap_or_default();
-    let plain = !it.separator && !it.header;
+    let label = CString::new(it.label().replace('\0', "")).unwrap_or_default();
     // SAFETY: new items of ours, appended to our menu, which owns them from then.
     unsafe {
-      let item = if it.separator {
-        (f.gtk_separator_menu_item_new)()
-      } else if plain && it.checkable && it.submenu.is_none() {
-        let item = (f.gtk_check_menu_item_new_with_label)(label.as_ptr());
-        // Before `activate` is connected: setting it activates the item.
-        (f.gtk_check_menu_item_set_active)(item, it.checked as c_int);
-        item
-      } else {
-        (f.gtk_menu_item_new_with_label)(label.as_ptr())
+      let item = match it {
+        Item::Divider => (f.gtk_separator_menu_item_new)(),
+        Item::Toggle { is_on, .. } => {
+          let item = (f.gtk_check_menu_item_new_with_label)(label.as_ptr());
+          // Before `activate` is connected: setting it activates the item.
+          (f.gtk_check_menu_item_set_active)(item, *is_on as c_int);
+          item
+        }
+        _ => (f.gtk_menu_item_new_with_label)(label.as_ptr()),
       };
 
-      match &it.submenu {
-        Some(sub) if plain => {
-          let menu = (f.gtk_menu_new)();
-          fill(menu, &sub.items, n, next);
-          (f.gtk_menu_item_set_submenu)(item, menu);
-        }
-        _ if plain => {
-          connect_id(item, c"activate", on_activate as Fp, 0, n << 32 | *next);
-          *next += 1;
-          if let Some((key, mods)) = it.key.as_deref().and_then(accel) {
-            (f.gtk_accel_label_set_accel)((f.gtk_bin_get_child)(item), key, mods);
-          }
-        }
-        _ => {}
+      if let Item::Submenu { menu: sub, .. } = it {
+        let menu = (f.gtk_menu_new)();
+        fill(menu, &sub.items, n);
+        (f.gtk_menu_item_set_submenu)(item, menu);
       }
 
-      (f.gtk_widget_set_sensitive)(item, (it.enabled && !it.header) as c_int);
+      if let Some(&tag) = it.action() {
+        connect_id(item, c"activate", on_activate as Fp, 0, n << 32 | tag as u64);
+        if let Some((key, mods)) = it.shortcut().and_then(accel) {
+          (f.gtk_accel_label_set_accel)((f.gtk_bin_get_child)(item), key, mods);
+        }
+      }
+
+      (f.gtk_widget_set_sensitive)(item, it.is_enabled() as c_int);
       (f.gtk_menu_shell_append)(shell, item);
       (g.gtk_widget_show_all)(item);
     }
@@ -176,8 +170,7 @@ unsafe fn fill(shell: P, items: &[Item], n: u64, next: &mut u64) {
 
 /// An item's shortcut as GTK's accel label shows it: the keyval and GdkModifierType (Shift,
 /// Control, Mod1 for Alt, Super).
-fn accel(text: &str) -> Option<(c_uint, c_uint)> {
-  let s = Shortcut::parse(text).ok()?;
+fn accel(s: Shortcut) -> Option<(c_uint, c_uint)> {
   let name = CString::new(keysym(s.key)?).ok()?;
   let key = unsafe { (menus().gdk_keyval_from_name)(name.as_ptr()) };
   let m = |on: bool, bit: u32| (on as c_uint) << bit;
@@ -188,7 +181,7 @@ fn accel(text: &str) -> Option<(c_uint, c_uint)> {
 /// An item of menu `data >> 32` was chosen, its number in the low half.
 unsafe extern "C" fn on_activate(_: P, data: P) {
   let (n, i) = (data as usize as u64 >> 32, data as usize & 0xffff_ffff);
-  let choose = |u: &mut Up| u.chosen = u.ids.get(i).cloned();
+  let choose = |u: &mut Up| u.chosen = Some(i);
   UP.with_borrow_mut(|u| u.iter_mut().filter(|u| u.n == n).for_each(choose));
 }
 

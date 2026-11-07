@@ -9,7 +9,7 @@
 //!
 //! ```ignore
 //! if ui.button("Refresh").clicked { self.refresh() }
-//! if Button::new("Save").primary().show(ui).clicked { self.save() }
+//! if Button::new("Save").style(ButtonStyle::BorderedProminent).show(ui).clicked { self.save() }
 //! ui.disabled(!self.dirty).button("Revert");
 //! ui.checkbox(&mut self.wrap, "Wrap lines");
 //! ui.id("size").segmented(&mut self.size, &[(Size::Small, "Small"), (Size::Large, "Large")]);
@@ -44,8 +44,8 @@ mod tooltip;
 
 pub(crate) use button::MarkShift;
 pub use button::{Button, ButtonRole};
-pub use field::{FieldStyle, TextInput};
-pub use icon::Icon;
+pub use field::{FieldKind, FieldStyle, TextInput};
+pub use icon::{Icon, IconPaint};
 pub use segmented::Choice;
 
 use super::{Behavior, Id, Style, Ui};

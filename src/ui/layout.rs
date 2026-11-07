@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
+use std::num::NonZeroU8;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 mod wrap;
@@ -15,11 +16,12 @@ pub(crate) use self::wrap::{Kept, wrapped_width};
 use self::wrap::{text_width, wrap};
 use super::a11y::Records;
 use super::textlayout::{Edit, Stop, reveal};
-use super::{Align, Clip, Dim, Float, Id, Style, TextStyle};
+use super::{Align, Axes, Clip, Dim, Float, Id, Style, TextLines, TextStyle, TruncationMode};
 use crate::keys::Binding;
 use crate::scene::{Color, ImageId, Images, Rect, Size};
 use crate::text::edit::next_grapheme;
 use crate::text::{Font, FxHasher, Ink, Metrics, TextSystem};
+use crate::ui::CoordinateSpace;
 
 /// Slack for float sums when comparing sizes, in points.
 const EPS: f32 = 0.01;
@@ -89,6 +91,47 @@ pub(crate) struct Line {
   pub width: f32,
   pub ink: Ink,
   pub stop: u32,
+  /// What of it is cut to fit, drawn as "…" ([super::TextLines::Limit]).
+  pub elide: Elide,
+}
+
+/// Where a line cut to fit shows "…": not cut; after or before its text; or between offsets
+/// `.0` and `.1` of it, the text between them left out.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) enum Elide {
+  #[default]
+  None,
+  Tail,
+  Head,
+  Middle(u32, u32),
+}
+
+/// How a container lays out its children: along x ([super::Ui::row]), along y
+/// ([super::Ui::col]), or in equal columns ([super::Ui::grid]), left to right and wrapping.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Flow {
+  Row,
+  Column,
+  Grid(NonZeroU8),
+}
+
+impl Flow {
+  /// The axis its children go along, as an index: a grid's rows go along x.
+  pub fn axis(self) -> usize {
+    match self {
+      Flow::Column => 1,
+      _ => 0,
+    }
+  }
+
+  /// A grid's columns; 1 for anything else.
+  pub fn cols(self) -> u32 {
+    if let Flow::Grid(n) = self { n.get().into() } else { 1 }
+  }
+
+  pub fn grid(self) -> bool {
+    matches!(self, Flow::Grid(_))
+  }
 }
 
 #[derive(Clone, Debug)]
@@ -96,15 +139,13 @@ pub(crate) struct Node {
   pub id: Id,
   pub kind: Kind,
   pub style: Style,
-  /// 0 for a row (children along x), 1 for a column.
-  pub axis: u8,
+  /// How its children are laid out: a row, a column or a grid.
+  pub flow: Flow,
   pub float: Option<Float>,
   pub parent: u32,
   /// One past the last node of the subtree. Nodes are in pre-order: the first child of `i` is
   /// `i + 1` and each next one starts at the previous one's `end`.
   pub end: u32,
-  /// Columns of a grid ([super::Ui::grid]); 0 for a row or column.
-  pub cols: u8,
   /// Columns it takes in a grid ([super::Ui::span]), at least 1.
   pub span: u8,
   /// Moves the children back by this much (scroll containers): `f64`, as content may run past
@@ -128,7 +169,7 @@ impl Node {
     id: Id,
     kind: Kind,
     style: Style,
-    axis: u8,
+    flow: Flow,
     float: Option<Float>,
     parent: u32,
     end: u32,
@@ -137,11 +178,10 @@ impl Node {
       id,
       kind,
       style,
-      axis,
+      flow,
       float,
       parent,
       end,
-      cols: 0,
       span: 1,
       scroll: [0.0; 2],
       rect: Rect::default(),
@@ -213,7 +253,7 @@ impl Tree {
     self.a11y.clear();
     self.index.clear();
     let root = Style::new().w(Dim::Px(size.w)).h(Dim::Px(size.h));
-    self.nodes.push(Node::new(Id::ROOT, Kind::Box, root, 1, None, 0, 1));
+    self.nodes.push(Node::new(Id::ROOT, Kind::Box, root, Flow::Column, None, 0, 1));
   }
 
   /// A node by id, once laid out.
@@ -404,7 +444,9 @@ fn fit(t: &mut Tree, ax: usize, m: &mut dyn Measure, kept: &mut Kept) {
         let v = f64::from(if ax == 0 { s.w } else { s.h });
         (v, v)
       }
-      Kind::Box | Kind::Canvas(_) | Kind::Fade { .. } if t.nodes[i].cols > 0 => grid_fit(t, i, ax),
+      Kind::Box | Kind::Canvas(_) | Kind::Fade { .. } if t.nodes[i].flow.grid() => {
+        grid_fit(t, i, ax)
+      }
       Kind::Box | Kind::Canvas(_) | Kind::Fade { .. } => children_fit(t, i, ax),
     };
 
@@ -424,7 +466,7 @@ fn fit(t: &mut Tree, ax: usize, m: &mut dyn Measure, kept: &mut Kept) {
 /// The content size and minimum of a box from its children in the flow.
 fn children_fit(t: &Tree, i: usize, ax: usize) -> (f64, f64) {
   let n = &t.nodes[i];
-  let along = n.axis as usize == ax;
+  let along = n.flow.axis() == ax;
   let (mut size, mut least, mut count) = (0.0f64, 0.0f64, 0);
   let mut c = i + 1;
   while c < n.end as usize {
@@ -455,11 +497,11 @@ fn grow(t: &mut Tree, ax: usize, win: Size) {
       continue;
     }
 
-    let (along, size, gap) = (n.axis as usize == ax, n.size[ax], f64::from(n.style.gap));
+    let (along, size, gap) = (n.flow.axis() == ax, n.size[ax], f64::from(n.style.gap));
     let (a, b) = pads(&n.style, ax);
     let inner = size - a - b;
-    let scrolls = n.style.scroll[ax];
-    if n.cols > 0 {
+    let scrolls = n.style.scroll.at(ax);
+    if n.flow.grid() {
       grid_grow(t, i, ax, inner, win);
       continue;
     }
@@ -467,7 +509,7 @@ fn grow(t: &mut Tree, ax: usize, win: Size) {
     let mut count = 0;
     each(t, i, |c| match c.float {
       Some(f) => {
-        let space = if f.window { win[ax] } else { size };
+        let space = if f.space == CoordinateSpace::Global { win[ax] } else { size };
         c.size[ax] = match c.style.size[ax] {
           Dim::Fit | Dim::Rigid => c.size[ax],
           _ => fill(c, ax, space),
@@ -574,7 +616,7 @@ fn distribute(t: &mut Tree, i: usize, ax: usize, avail: f64) {
   });
   let over = total - avail;
   // Along a scroll axis the content overflows instead.
-  if over <= f64::from(EPS) || t.nodes[i].style.scroll[ax] {
+  if over <= f64::from(EPS) || t.nodes[i].style.scroll.at(ax) {
     return;
   }
   // Water-fill from the top: find the cap where cutting everything above it (but not below
@@ -651,12 +693,12 @@ fn place(t: &mut Tree, win: Size, scale: f32) {
       continue;
     }
 
-    if n.cols > 0 {
+    if n.flow.grid() {
       grid_place(t, i, win);
       continue;
     }
 
-    let (ax, cr) = (n.axis as usize, 1 - n.axis as usize);
+    let (ax, cr) = (n.flow.axis(), 1 - n.flow.axis());
     let (pos, size, align, style) = (n.pos, n.size, n.style.align, n.style);
     let gap = f64::from(n.style.gap);
     let ((a, b), (ca, cb)) = (pads(&n.style, ax), pads(&n.style, cr));
@@ -702,8 +744,8 @@ fn place(t: &mut Tree, win: Size, scale: f32) {
 }
 
 /// A scroll offset within `content` seen through `size`, 0 along an axis that doesn't scroll.
-fn clamp_scroll(off: [f64; 2], scrolls: [bool; 2], content: [f64; 2], size: [f64; 2]) -> [f64; 2] {
-  let at = |k: usize| match scrolls[k] {
+fn clamp_scroll(off: [f64; 2], scrolls: Axes, content: [f64; 2], size: [f64; 2]) -> [f64; 2] {
+  let at = |k: usize| match scrolls.at(k) {
     true => off[k].clamp(0.0, (content[k] - size[k]).max(0.0)),
     false => 0.0,
   };
@@ -712,10 +754,11 @@ fn clamp_scroll(off: [f64; 2], scrolls: [bool; 2], content: [f64; 2], size: [f64
 
 /// Places overlay `c` on its target: the parent at `pos` of `size`, or the window.
 fn place_float(c: &mut Node, f: Float, pos: [f64; 2], size: [f64; 2], win: Size) {
-  let (tp, ts) = if f.window { ([0.0; 2], [win.w.into(), win.h.into()]) } else { (pos, size) };
+  let global = f.space == CoordinateSpace::Global;
+  let (tp, ts) = if global { ([0.0; 2], [win.w.into(), win.h.into()]) } else { (pos, size) };
   let off = [f.offset.x, f.offset.y];
   for k in 0..2 {
-    let (attach, anchor) = (f64::from(f.attach[k]), f64::from(f.anchor[k]));
+    let (attach, anchor) = (f64::from(f.attach.at(k)), f64::from(f.anchor.at(k)));
     c.pos[k] = tp[k] + ts[k] * attach - c.size[k] * anchor + f64::from(off[k]);
   }
 }
@@ -735,7 +778,7 @@ fn cell(col: u32, row: u32, span: u8, cols: u32) -> (u32, u32, u32) {
 /// Calls `f(child, col, row, span)` for each child of grid `i` in the flow, left to right,
 /// wrapping to the next row when a child's span doesn't fit what is left of one.
 fn each_cell(t: &mut Tree, i: usize, mut f: impl FnMut(&mut Node, u32, u32, u32)) {
-  let cols = t.nodes[i].cols as u32;
+  let cols = t.nodes[i].flow.cols();
   let (mut col, mut row) = (0, 0);
   each(t, i, |c| {
     if c.float.is_none() {
@@ -749,7 +792,7 @@ fn each_cell(t: &mut Tree, i: usize, mut f: impl FnMut(&mut Node, u32, u32, u32)
 /// A grid's content size and minimum: equal columns as wide as the widest child per column it
 /// spans, rows as high as their highest child.
 fn grid_fit(t: &mut Tree, i: usize, ax: usize) -> (f64, f64) {
-  let (cols, gap) = (t.nodes[i].cols as u32, f64::from(t.nodes[i].style.gap));
+  let (cols, gap) = (t.nodes[i].flow.cols(), f64::from(t.nodes[i].style.gap));
   let (mut size, mut least) = (0.0f64, 0.0f64);
   if ax == 0 {
     each_cell(t, i, |c, _, _, s| {
@@ -780,13 +823,13 @@ fn grid_fit(t: &mut Tree, i: usize, ax: usize) -> (f64, f64) {
 /// as their highest child plus an equal share of the height left. Overlays from their target.
 /// A child's row height and top are kept in its `pos` for [grid_place].
 fn grid_grow(t: &mut Tree, i: usize, ax: usize, inner: f64, win: [f64; 2]) {
-  let (cols, size) = (t.nodes[i].cols as u32, t.nodes[i].size[ax]);
+  let (cols, size) = (t.nodes[i].flow.cols(), t.nodes[i].size[ax]);
   let gap = f64::from(t.nodes[i].style.gap);
   each(t, i, |c| {
     if let Some(f) = c.float
       && !matches!(c.style.size[ax], Dim::Fit | Dim::Rigid)
     {
-      c.size[ax] = fill(c, ax, if f.window { win[ax] } else { size });
+      c.size[ax] = fill(c, ax, if f.space == CoordinateSpace::Global { win[ax] } else { size });
     }
   });
   if ax == 0 {
@@ -821,7 +864,7 @@ fn grid_grow(t: &mut Tree, i: usize, ax: usize, inner: f64, win: [f64; 2]) {
 /// overlays; sets its content size.
 fn grid_place(t: &mut Tree, i: usize, win: Size) {
   let n = &t.nodes[i];
-  let (pos, size, align, cols) = (n.pos, n.size, n.style.align, n.cols as u32);
+  let (pos, size, align, cols) = (n.pos, n.size, n.style.align, n.flow.cols());
   let gap = f64::from(n.style.gap);
   let ((a, b), (ca, cb)) = (pads(&n.style, 0), pads(&n.style, 1));
   let cw = (size[0] - a - b - gap * (cols - 1) as f64) / cols as f64;
@@ -867,7 +910,7 @@ fn offset(align: Align, free: f64) -> f64 {
 pub(crate) mod tests {
   use std::time::Duration;
 
-  use super::wrap::{ellipsize, wrap_text};
+  use super::wrap::{elide, wrap_text};
   use super::*;
   use crate::text::Memo;
   use crate::text::edit::graphemes;
@@ -877,10 +920,11 @@ pub(crate) mod tests {
   pub(crate) struct Fake;
 
   /// Positions and extents in `f64` took it from 320 to 360 bytes, with no time measured at a
-  /// million rows; this keeps it from growing unnoticed.
+  /// million rows, and a text's typed line limit and optional line height to 368; this keeps it
+  /// from growing unnoticed.
   #[test]
   fn node_size_is_known() {
-    assert_eq!(size_of::<Node>(), 360);
+    assert_eq!(size_of::<Node>(), 368);
   }
 
   impl Measure for Fake {
@@ -1318,8 +1362,12 @@ pub(crate) mod tests {
   #[test]
   fn an_ellipsis_keeps_graphemes_whole() {
     // "ae" and the ellipsis fit 18, but the accent belongs to the "e": only "a" stays.
-    assert_eq!(ellipsize("ae\u{301}bc", T.font, 18.0, &mut Fake), (1, 12.0));
-    assert_eq!(ellipsize("ae\u{301}bc", T.font, 24.0, &mut Fake), (4, 24.0));
+    let tail = |w: f32| {
+      let l = elide("ae\u{301}bc", T.font, w, TruncationMode::Tail, &mut Fake);
+      (l.end as usize, l.width)
+    };
+    assert_eq!(tail(18.0), (1, 12.0));
+    assert_eq!(tail(24.0), (4, 24.0));
   }
 
   #[test]
@@ -1338,7 +1386,7 @@ pub(crate) mod tests {
   fn nowrap_and_line_height() {
     let t = run(400.0, 300.0, 1.0, |ui| {
       ui.col(Style::new().w(px(30.0)), |ui| {
-        ui.id("a").text("aa bb cc", T.nowrap());
+        ui.id("a").text("aa bb cc", T.fixed_size());
         ui.id("b").text("x", T.line_h(16.0));
       });
     });
@@ -1349,14 +1397,49 @@ pub(crate) mod tests {
     assert_eq!(baseline, 3.0 + 8.0);
   }
 
+  /// Cut at the head the line keeps its end, in the middle both ends; a limit of two lines
+  /// wraps onto two and cuts the second's end; Fixed keeps one line its whole width.
+  #[test]
+  fn truncation_modes_and_line_limits() {
+    let t = run(400.0, 300.0, 1.0, |ui| {
+      let path = "/a/bcdefgh/ij";
+      ui.row(Style::new().w(px(48.0)), |ui| {
+        ui.id("head").text(path, T.truncation(TruncationMode::Head))
+      });
+      ui.row(Style::new().w(px(48.0)), |ui| {
+        ui.id("mid").text(path, T.truncation(TruncationMode::Middle))
+      });
+      ui.row(Style::new().w(px(60.0)), |ui| {
+        ui.id("two").text("ab cd ef gh ij kl mn op", T.line_limit(2))
+      });
+      ui.row(Style::new().w(px(30.0)), |ui| ui.id("fixed").text("ab cd ef", T.fixed_size()));
+    });
+    let shown = |name: &str| {
+      let Kind::Text { lines, .. } = t.get(Id::of(name)).unwrap().kind else { panic!() };
+      let ls = &t.lines[lines.0 as usize..lines.1 as usize];
+      let one = |l: &Line| match l.elide {
+        Elide::None => t.str(l.start, l.end).to_owned(),
+        Elide::Tail => format!("{}…", t.str(l.start, l.end)),
+        Elide::Head => format!("…{}", t.str(l.start, l.end)),
+        Elide::Middle(a, b) => format!("{}…{}", t.str(l.start, a), t.str(b, l.end)),
+      };
+      ls.iter().map(one).collect::<Vec<_>>()
+    };
+    // 8 characters fit 48: seven and the ellipsis; 10 fit 60.
+    assert_eq!(shown("head"), ["…efgh/ij"]);
+    assert_eq!(shown("mid"), ["/a/b…/ij"]);
+    assert_eq!(shown("two"), ["ab cd ef", "gh ij kl…"]);
+    assert_eq!((shown("fixed"), rect(&t, "fixed").2), (vec!["ab cd ef".to_owned()], 48.0));
+  }
+
   #[test]
   fn ellipsis_cuts_a_line_that_does_not_fit() {
     let t = run(400.0, 300.0, 1.0, |ui| {
-      ui.row(Style::new().w(px(40.0)), |ui| ui.id("a").text("abc defghij", T.ellipsis()));
-      ui.row(Style::new().w(px(100.0)), |ui| ui.id("b").text("abc", T.ellipsis()));
+      ui.row(Style::new().w(px(40.0)), |ui| ui.id("a").text("abc defghij", T.line_limit(1)));
+      ui.row(Style::new().w(px(100.0)), |ui| ui.id("b").text("abc", T.line_limit(1)));
       ui.row(Style::new().w(px(40.0)), |ui| {
         el(ui, "fixed", Style::new().w(px(36.0)));
-        ui.id("c").text("abc", T.ellipsis());
+        ui.id("c").text("abc", T.line_limit(1));
       });
     });
     let line = |name: &str| {
@@ -1372,7 +1455,7 @@ pub(crate) mod tests {
     assert_eq!(rect(&t, "c").2, 6.0);
     assert_eq!(line("c"), ("", 6.0));
     let t = run(400.0, 300.0, 1.0, |ui| {
-      ui.row(Style::new().w(px(32.0)), |ui| ui.id("a").text("abc defghij", T.ellipsis()));
+      ui.row(Style::new().w(px(32.0)), |ui| ui.id("a").text("abc defghij", T.line_limit(1)));
     });
     let Kind::Text { lines, .. } = t.get(Id::of("a")).unwrap().kind else { panic!() };
     let l = t.lines[lines.0 as usize];
@@ -1408,7 +1491,7 @@ pub(crate) mod tests {
         ui.id("row").row(Style::new().w(px(120.0)), |ui| {
           ui.id("label").col(Style::new().w(grow()), |ui| ui.id("t").text(caption, T));
           // 60 wide, its text could end in "…" at 6.
-          ui.id("ctl").row(Style::new().w(rigid()), |ui| ui.text("cccccccccc", T.ellipsis()));
+          ui.id("ctl").row(Style::new().w(rigid()), |ui| ui.text("cccccccccc", T.line_limit(1)));
         });
       })
     };
@@ -1471,7 +1554,11 @@ pub(crate) mod tests {
         el(ui, "x", Style::new().w(px(10.0)).h(px(10.0)));
         ui.id("p").row(Style::new().w(px(100.0)).h(px(20.0)), |ui| {
           // Under the parent, centred, 4 points below; not part of its fit size.
-          let tip = Float::parent().attach(0.5, 1.0).anchor(0.5, 0.0).offset(0.0, 4.0).z(1);
+          let tip = Float::parent()
+            .attach(crate::ui::UnitPoint::BOTTOM)
+            .anchor(crate::ui::UnitPoint::TOP)
+            .offset(0.0, 4.0)
+            .z(1);
           ui.id("tip").float(tip).col(Style::new().pad(5.0), |ui| {
             ui.text("tip", T);
             // An overlay of its own paints over it, though its z is lower.
@@ -1481,7 +1568,10 @@ pub(crate) mod tests {
           ui.id("cover").float(Float::parent()).el(Style::new().grow());
         });
         // At the window's bottom-right corner, sized by percent of the window.
-        let corner = Float::window().attach(1.0, 1.0).anchor(1.0, 1.0).z(-1);
+        let corner = Float::window()
+          .attach(crate::ui::UnitPoint::BOTTOM_TRAILING)
+          .anchor(crate::ui::UnitPoint::BOTTOM_TRAILING)
+          .z(-1);
         ui.id("win").float(corner).el(Style::new().w(pct(10.0)).h(px(500.0)).max_h(30.0));
       });
     });

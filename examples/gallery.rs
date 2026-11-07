@@ -15,8 +15,8 @@
 use std::time::Duration;
 
 use nimbo::{
-  Align, Answer, App, Appearance, Button, ButtonRole, Config, ControlSize, Dialog, Hotkey, Icon,
-  Id, Style, Theme, Tone, Ui, grow, px,
+  Align, Answer, App, Appearance, Button, ButtonRole, ButtonStyle, ColorScheme, Config,
+  ControlSize, Dialog, Hotkey, Icon, Id, Style, Theme, Tone, Ui, grow, px,
 };
 
 pub const CHECK: &str = "check";
@@ -74,7 +74,10 @@ impl Default for Gallery {
 
 /// The theme of pane `i`: light, then dark, in the system's accent.
 fn theme(ui: &Ui, i: usize) -> Theme {
-  Theme::system(Appearance { dark: i == 1, ..ui.appearance() })
+  Theme::system(Appearance {
+    scheme: [ColorScheme::Light, ColorScheme::Dark][i],
+    ..ui.appearance()
+  })
 }
 
 /// A titled line of widgets.
@@ -94,9 +97,12 @@ impl Gallery {
     ui.col(pane, |ui| {
       line(ui, "BUTTONS", |ui| {
         ui.button("Normal");
-        Button::new("Save").primary().show(ui);
-        Button::new("Delete").danger().show(ui);
-        Button::new("Ghost").ghost().show(ui);
+        Button::new("Save").style(ButtonStyle::BorderedProminent).show(ui);
+        Button::new("Delete")
+          .style(ButtonStyle::BorderedProminent)
+          .role(ButtonRole::Destructive)
+          .show(ui);
+        Button::new("Ghost").style(ButtonStyle::Borderless).show(ui);
         ui.disabled(true).button("Off");
         ui.help("Back to the default").id((RESET, i)).a11y_label("Reset").icon_button(Icon::RESET);
         ui.help("An ⓘ explains what one line can't").info_button();
@@ -115,7 +121,7 @@ impl Gallery {
           let row = Style::new().gap(10.0).align(Align::Start, Align::Center);
           ui.row(row, |ui| {
             ui.id((SLIDER, i)).a11y_label("Zoom").slider(&mut self.zoom, 0.0..=200.0);
-            ui.text(format_args!("{:.0}%", self.zoom), t.muted().nowrap());
+            ui.text(format_args!("{:.0}%", self.zoom), t.muted().fixed_size());
           });
           ui.row(row, |ui| {
             ui.id((SIZE, i)).a11y_label("Size").picker(&mut self.size, &SIZES);
@@ -162,7 +168,7 @@ impl Gallery {
         }
 
         let n = self.deleted;
-        ui.text(format_args!("Deleted {n} times"), t.muted().nowrap());
+        ui.text(format_args!("Deleted {n} times"), t.muted().fixed_size());
       });
     });
   }

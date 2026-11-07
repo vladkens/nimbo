@@ -8,6 +8,7 @@ use std::fmt::{Display, Write};
 use std::time::Duration;
 
 use crate::text::{Font, Metrics, TextSystem};
+use crate::ui::Axis;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -114,11 +115,15 @@ impl Quad {
   }
 
   /// Fills with a linear gradient from `color` at the top (or left) edge to `to` at the bottom
-  /// (or right), down the rect when `vertical`, else across it: an edge that fades. Mixed
-  /// premultiplied, so a fade to a transparent colour thins out evenly. No border: the border
-  /// colour is the gradient's end.
-  pub const fn gradient(self, to: Color, vertical: bool) -> Self {
-    let gradient = if vertical { 1.0 } else { 2.0 };
+  /// (or right), along `axis` ([Axis::Vertical] down the rect), as SwiftUI's `LinearGradient`:
+  /// an edge that fades. Mixed premultiplied, so a fade to a transparent colour thins out evenly.
+  /// No border: the border colour is the gradient's end.
+  pub const fn gradient(self, to: Color, axis: Axis) -> Self {
+    let gradient = match axis {
+      Axis::Vertical => 1.0,
+      Axis::Horizontal => 2.0,
+    };
+
     Self { border_color: to, borders: [0.0; 4], gradient, ..self }
   }
 
@@ -162,6 +167,26 @@ pub(crate) struct Sprite {
 
 /// A thick antialiased line from `a` to `b`.
 #[repr(C)]
+/// How a line's ends are drawn, as Core Graphics' `CGLineCap`: square at its ends, or round
+/// past them (a polyline's joints).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LineCap {
+  Butt,
+  Round,
+}
+
+impl Segment {
+  /// The line from `a` to `b` `width` points wide in `color`, its ends `cap`.
+  pub const fn new(a: Point, b: Point, color: Color, width: f32, cap: LineCap) -> Self {
+    let round = match cap {
+      LineCap::Butt => 0.0,
+      LineCap::Round => 1.0,
+    };
+
+    Self { a, b, color, width, round, _pad: [0.0; 2] }
+  }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Segment {
   pub a: Point,
@@ -169,7 +194,7 @@ pub(crate) struct Segment {
   pub color: Color,
   /// In points; lines under a pixel wide draw one pixel wide and fainter.
   pub width: f32,
-  /// 1 for round caps (polyline joints), 0 for butt caps.
+  /// 1 for round caps (polyline joints), 0 for butt caps ([LineCap]).
   pub round: f32,
   pub _pad: [f32; 2],
 }
@@ -437,14 +462,14 @@ impl Frame<'_> {
 
   /// A straight line with butt caps.
   pub fn line(&mut self, a: Point, b: Point, width: f32, color: Color) {
-    self.scene.segment(Segment { a, b, color, width, round: 0.0, _pad: [0.0; 2] });
+    self.scene.segment(Segment::new(a, b, color, width, LineCap::Butt));
   }
 
   /// Connected lines with round joints, one segment per pair of points. The joints overlap,
   /// so a translucent colour shows them darker.
   pub fn polyline(&mut self, points: &[Point], width: f32, color: Color) {
     for w in points.windows(2) {
-      self.scene.segment(Segment { a: w[0], b: w[1], color, width, round: 1.0, _pad: [0.0; 2] });
+      self.scene.segment(Segment::new(w[0], w[1], color, width, LineCap::Round));
     }
   }
 

@@ -873,12 +873,15 @@ mod tests {
     let area = Id::of("area");
     let st = frame(UiState::default(), |ui| {
       ui.scroll_to(area, Point::new(0.0, 15.0));
-      ui.with_id(area).col(Style::new().w(px(100.0)).h(px(30.0)).scroll_y(), |ui| {
-        for i in 0..5 {
-          ui.a11y(area.key(i), Role::Row);
-          ui.with_id(area.key(i)).el(Style::new().w(px(100.0)).h(px(20.0)));
-        }
-      });
+      ui.with_id(area).col(
+        Style::new().w(px(100.0)).h(px(30.0)).scroll(crate::ui::Axes::VERTICAL),
+        |ui| {
+          for i in 0..5 {
+            ui.a11y(area.key(i), Role::Row);
+            ui.with_id(area.key(i)).el(Style::new().w(px(100.0)).h(px(20.0)));
+          }
+        },
+      );
     });
     let t = st.a11y_tree();
     let rects: Vec<_> = t.nodes.iter().map(|n| (n.id, n.rect)).collect();

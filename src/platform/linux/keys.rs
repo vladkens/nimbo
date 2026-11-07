@@ -194,16 +194,24 @@ mod tests {
     assert_eq!((k.key, k.text, k.mods), (Key::Char('A'), Some('A'), Modifiers::SHIFT));
     let k = key(0xff51, Code::ArrowLeft, Modifiers::SHIFT);
     assert_eq!((k.key, k.text), (LEFT, None));
-    assert_eq!(keys::Os::Linux.command(&k), Some(Command::Move(Move::Left, true)));
+    assert_eq!(
+      keys::Os::Linux.command(&k),
+      Some(Command::Move(Move::Left, crate::keys::Extent::Selection))
+    );
 
     // Ctrl is the command modifier: Ctrl-C is "cmd+c", and types nothing.
     let k = key('c' as u32, C, CTRL);
-    assert!(k.is("cmd+c") && k.text.is_none(), "{k:?}");
+    assert!(k.is(crate::keys::Shortcut::char('c').cmd()) && k.text.is_none(), "{k:?}");
     let k = key(0xff08, Code::Backspace, CTRL);
     assert_eq!(keys::Os::Linux.command(&k), Some(Command::Delete(Delete::WordBackward)));
     // Super is `ctrl`: no command, no text.
     let k = key('c' as u32, C, Modifiers::META);
-    assert!(k.is("ctrl+c") && !k.is("cmd+c") && k.text.is_none(), "{k:?}");
+    assert!(
+      k.is(crate::keys::Shortcut::char('c').ctrl())
+        && !k.is(crate::keys::Shortcut::char('c').cmd())
+        && k.text.is_none(),
+      "{k:?}"
+    );
   }
 
   #[test]
@@ -212,9 +220,9 @@ mod tests {
     let es = |mods, latin: Option<char>| key_event(0x6d3, Some('с'), C, mods, false, || latin);
     let k = es(Modifiers::empty(), Some('c'));
     assert_eq!((k.key, k.text), (Key::Char('с'), Some('с')));
-    assert!(es(CTRL, Some('c')).is("cmd+c"));
+    assert!(es(CTRL, Some('c')).is(crate::keys::Shortcut::char('c').cmd()));
     // No Latin layout: the US one's key at that place.
-    assert!(es(CTRL, None).is("cmd+c"));
+    assert!(es(CTRL, None).is(crate::keys::Shortcut::char('c').cmd()));
   }
 
   #[test]

@@ -62,30 +62,33 @@ pub mod uninstall;
 use std::path::PathBuf;
 
 pub use app::{
-  App, Appearance, Clipboard, Cx, Event, Ime, MemClipboard, MouseButton, Phase, WHEEL_LINE, Waker,
+  App, Appearance, Clipboard, ColorScheme, Cx, Event, Ime, KeyPhase, MemClipboard, MouseButton,
+  Phase, WHEEL_LINE, Waker,
 };
 pub use clipboard::SystemClipboard;
-pub use file_dialog::FileDialog;
+pub use file_dialog::{FileDialog, FileDialogKind};
 pub use harness::Harness;
 /// Keys' W3C UI Events names: [Code] a key's place, [NamedKey] a key that types nothing,
 /// [Modifiers] the modifier keys held.
 pub use keyboard_types::{self, Code, Modifiers, NamedKey};
 pub use keys::{
-  Binding, CMD, Command, Delete, EDIT_KEYS, Hotkey, Key, KeyEvent, Move, Os, SELECT_KEYS, Shortcut,
-  bind, shortcut,
+  Binding, CMD, Command, Delete, EDIT_KEYS, Extent, Hotkey, Key, KeyEvent, Move, Os, SELECT_KEYS,
+  Shortcut, bind, shortcut,
 };
 pub use menu::{Item, Menu};
 pub use png::Png;
 pub use scene::{Color, Frame, ImageId, Images, Point, Quad, Rect, Size, alpha, mix, rgb};
 pub use shell::{Anchor, AppInfo, Main, Presence, Proxy, Window, WindowId, app, attach_console};
 pub use text::edit::{Editor, Lines, Mono, Sel};
-pub use text::{Font, Weight};
+pub use text::{Design, Font, Weight};
 pub use ui::{
-  Align, Answer, Behavior, Button, ButtonRole, ButtonStyle, Choice, Click, Clip, Content,
-  ControlSize, Cursor, Dialog, Dim, Ease, EditMenu, FieldBehavior, FieldStyle, Float, Focus,
-  FocusRing, FormRow, FormStyle, Icon, Id, LinePattern, List, ListResponse, Picker, Press,
-  Response, Row, Scroll, Section, Selection, Shadow, Sizes, Split, Style, Tabs, TextInput,
-  TextStyle, Theme, Tone, Transition, TypeSelect, Ui, Variant, grow, pct, px, rigid,
+  Align, Answer, Axes, Axis, Behavior, Button, ButtonLook, ButtonRole, ButtonStyle, Choice, Click,
+  Clip, Content, ControlBorder, ControlSize, CoordinateSpace, Cursor, Dialog, Dim, Ease, EditMenu,
+  Editing, FieldBehavior, FieldKind, FieldStyle, Float, Focus, FocusDirection, FocusRing, FormRow,
+  FormStyle, Icon, IconPaint, Id, LinePattern, List, ListResponse, ListStyle, MenuPlacement,
+  Picker, Press, Response, Row, Scroll, Section, Selection, Shadow, Sizes, Split, Style, Tabs,
+  TextInput, TextLines, TextStyle, Theme, Tone, Transition, TruncationMode, TypeSelect, Ui,
+  UnitPoint, grow, pct, px, rigid,
 };
 
 /// A window's title and initial content size in points; the harness renders at this size.
@@ -230,11 +233,9 @@ impl Args {
           out.size = Some(Size::new(num(w)?, num(h)?));
         }
         "--appearance" => {
-          out.appearance = Some(match it.next().map(String::as_str) {
-            Some("light") => Appearance::LIGHT,
-            Some("dark") => Appearance::DARK,
-            _ => return Err("--appearance needs light or dark".into()),
-          });
+          let scheme = it.next().ok_or("--appearance needs light or dark")?;
+          let scheme = scheme.parse().map_err(|e| format!("--appearance: {e}"))?;
+          out.appearance = Some(Appearance { scheme, accent: None });
         }
         _ => return Err(format!("unknown argument {arg}")),
       }

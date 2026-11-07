@@ -14,7 +14,7 @@ use crate::cpu;
 pub use crate::cpu::Pixels;
 use crate::file_dialog::FileDialog;
 use crate::keys::{self, Key, KeyEvent, Os};
-use crate::menu::Menu;
+use crate::menu::{Item, Menu};
 use crate::scene::{Point, Rect, Size};
 use crate::text::TextSystem;
 use crate::text::edit::{Editor, utf16_len};
@@ -113,11 +113,20 @@ impl<A: App> Harness<A> {
   }
 
   /// Answers the context menu the app asked for ([crate::Ui::context_menu]) as the person
-  /// would, choosing the item of id `answer` (`None` dismisses it), and returns where and what
+  /// would, choosing the item labelled `answer` (`None` dismisses it), and returns where and what
   /// it asked; `None` and no answer when it asked for none.
-  pub fn context_menu(&mut self, answer: Option<&str>) -> Option<(Point, Menu)> {
+  pub fn context_menu(&mut self, answer: Option<&str>) -> Option<(Point, Menu<usize>)> {
     let (on, at, menu) = self.rt.take_context_menu()?;
-    self.event(Event::Menu { on, item: answer.map(str::to_owned) });
+    fn find(items: &[Item<usize>], label: &str) -> Option<usize> {
+      items.iter().find_map(|it| match it {
+        Item::Submenu { menu, .. } => find(&menu.items, label),
+        it if it.label() == label => it.action().copied(),
+        _ => None,
+      })
+    }
+
+    let item = answer.and_then(|a| find(&menu.items, a));
+    self.event(Event::Menu { on, item });
     Some((at, menu))
   }
 

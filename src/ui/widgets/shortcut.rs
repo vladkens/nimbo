@@ -16,10 +16,11 @@
 use keyboard_types::{Code, Modifiers, NamedKey};
 
 use super::icon::{self, Icon};
+use crate::app::KeyPhase;
 use crate::keys::{Hotkey, Key, KeyEvent, Shortcut, f_key, is_modifier, us_char};
 use crate::scene::mix;
 use crate::text::Weight;
-use crate::ui::{Behavior, Cursor, Float, Id, Response, Role, Style, Ui, px};
+use crate::ui::{Behavior, Cursor, Float, Id, Response, Role, Style, Ui, UnitPoint, px};
 
 /// The recorder's width: the same recording, set or empty.
 const W: f32 = 160.0;
@@ -88,13 +89,13 @@ impl Ui<'_> {
     };
 
     if rec.on {
-      if let Some((key, down)) = self.modifier_key(id).filter(|m| is_modifier(m.0)) {
-        match down {
-          true => {
+      if let Some((key, phase)) = self.modifier_key(id).filter(|m| is_modifier(m.0)) {
+        match phase {
+          KeyPhase::Down => {
             rec.lone = (rec.held == 0 && lone).then_some(key);
             rec.held += 1;
           }
-          false => {
+          KeyPhase::Up => {
             rec.held = rec.held.saturating_sub(1);
             if rec.lone.take() == Some(key) {
               set(&mut b, Some(Hotkey::Modifier(key)));
@@ -185,12 +186,16 @@ impl Ui<'_> {
       }
 
       if value.is_some() && !b.on && !b.disabled && t.shortcut_clear {
-        let at = Float::parent().attach(1.0, 0.5).anchor(1.0, 0.5).offset(-5.0, 0.0).clip();
+        let at = Float::parent()
+          .attach(UnitPoint::TRAILING)
+          .anchor(UnitPoint::TRAILING)
+          .offset(-5.0, 0.0)
+          .clip();
         let s = Style::new().w(px(14.0)).h(px(14.0)).cursor(Cursor::Pointer);
         ui.a11y(clear, Role::Button).name("Clear");
         let hot = ui.ctl_hot(clear, ui.hovered(clear));
         let mark = mix(t.faint, t.muted, hot);
-        ui.with_id(clear).float(at).canvas(s, move |f, r| icon::draw(f, Icon::CLEAR, r, mark, 0.0));
+        ui.with_id(clear).float(at).canvas(s, move |f, r| icon::draw(f, Icon::CLEAR, r, mark));
       }
     });
     (r.clicked, r.changed) = (b.clicked, b.changed);
@@ -215,7 +220,7 @@ mod tests {
 
   impl App for Undo {
     fn keymap(&self) -> &[Binding] {
-      const KEYS: &[Binding] = &[bind("cmd+z", Command::Action("undo"))];
+      const KEYS: &[Binding] = &[bind(Shortcut::char('z').cmd(), Command::Action("undo"))];
       KEYS
     }
 
@@ -262,7 +267,7 @@ mod tests {
     h.frame();
     h.click_id(Id::of("rec"));
     for down in [true, false] {
-      h.event(Event::Modifier { key: Code::AltRight, down });
+      h.event(Event::Modifier { key: Code::AltRight, phase: KeyPhase::of(down) });
     }
 
     assert_eq!((h.app().0, h.focused()), (None, Some(Id::of("rec"))), "still recording");

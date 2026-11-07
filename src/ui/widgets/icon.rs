@@ -7,7 +7,7 @@
 //!
 //! ```ignore
 //! ui.icon(Icon::INFO, 16.0, t.muted);
-//! ui.with_id(id).canvas(s, move |f, r| icon::draw(f, Icon::RESET, r, color, 1.5));
+//! ui.with_id(id).canvas(s, move |f, r| icon::draw(f, Icon::RESET.stroke(1.5), r, color));
 //! if ui.icon_button(Icon::TRASH).clicked { self.ask = true }
 //! ```
 //!
@@ -27,32 +27,44 @@ use crate::ui::{Response, Style, Ui, px};
 pub struct Icon {
   /// The path data.
   pub d: &'static str,
-  /// Filled rather than stroked: a play triangle.
-  pub fill: bool,
-  /// The stroke's width in view box units; 0 for Lucide's 2 ([Ui::icon]) or the widget's own.
-  pub width: f32,
+  /// How it is drawn: stroked, or filled (a play triangle).
+  pub paint: IconPaint,
+}
+
+/// How an [Icon] is drawn, as SF Symbols' rendering: a stroke of a width in view box units, or
+/// of the widget's own (Lucide's 2 for [Ui::icon]) when `None`; or a fill.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum IconPaint {
+  Stroke(Option<f32>),
+  Fill,
 }
 
 impl Icon {
   /// A stroked icon from path data `d`.
   pub const fn new(d: &'static str) -> Self {
-    Self { d, fill: false, width: 0.0 }
+    Self { d, paint: IconPaint::Stroke(None) }
   }
 
   /// A filled one.
   pub const fn filled(d: &'static str) -> Self {
-    Self { d, fill: true, width: 0.0 }
+    Self { d, paint: IconPaint::Fill }
   }
 
   /// Stroked `width` view box units wide, as SwiftUI's `fontWeight` on a symbol: 1.6 for the
-  /// built-in ones beside text.
+  /// built-in ones beside text. A filled icon stays filled.
   pub const fn stroke(self, width: f32) -> Self {
-    Self { width, ..self }
+    match self.paint {
+      IconPaint::Fill => self,
+      IconPaint::Stroke(_) => Self { paint: IconPaint::Stroke(Some(width)), ..self },
+    }
   }
 
-  /// Its stroke's width, `or` when it has none of its own.
-  pub const fn width_or(self, or: f32) -> f32 {
-    if self.width > 0.0 { self.width } else { or }
+  /// Stroked `or` wide unless it has a width of its own.
+  pub const fn stroke_or(self, or: f32) -> Self {
+    match self.paint {
+      IconPaint::Stroke(None) => self.stroke(or),
+      _ => self,
+    }
   }
 
   /// A gear of eight teeth.
@@ -172,7 +184,7 @@ const VIEW: f32 = 24.0;
 
 /// Draws `icon` into `r` (its view box stretched over it) in `color`, stroked `width` view box
 /// units wide (Lucide's are 2), or filled. Data that doesn't parse draws as far as it parsed.
-pub fn draw(f: &mut Frame, icon: Icon, r: Rect, color: Color, width: f32) {
+pub fn draw(f: &mut Frame, icon: Icon, r: Rect, color: Color) {
   let (kx, ky) = (r.w / VIEW, r.h / VIEW);
   let mut lines = Vec::new();
   _ = flatten(icon.d, kx.max(ky) * f.scale, &mut lines);
@@ -180,12 +192,15 @@ pub fn draw(f: &mut Frame, icon: Icon, r: Rect, color: Color, width: f32) {
     *p = Point::new(r.x + p.x * kx, r.y + p.y * ky);
   }
 
-  if icon.fill {
-    fill(f, &lines, color);
-  }
-
   // A filled icon's outline a pixel wide, over the fill's edges.
-  let stroke = if icon.fill { 1.0 / f.scale } else { width * kx.min(ky) };
+  let stroke = match icon.paint {
+    IconPaint::Fill => {
+      fill(f, &lines, color);
+      1.0 / f.scale
+    }
+    IconPaint::Stroke(w) => w.unwrap_or(2.0) * kx.min(ky),
+  };
+
   for l in &lines {
     f.polyline(l, stroke, color);
   }
@@ -214,7 +229,7 @@ impl Ui<'_> {
     let off = self.take_disabled();
     let color = self.dim(color, off);
     let s = Style::new().w(px(size)).h(px(size));
-    self.canvas(s, move |f, r| draw(f, icon, r, color, icon.width_or(2.0)))
+    self.canvas(s, move |f, r| draw(f, icon.stroke_or(2.0), r, color))
   }
 }
 

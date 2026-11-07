@@ -81,7 +81,7 @@ pub struct FormStyle {
   pub divider: Color,
   pub hairline: f32,
   pub inset: [f32; 2],
-  /// The label; it wraps (`label.ellipsis()` keeps one line).
+  /// The label; it wraps (`label.line_limit(1)` keeps one line).
   pub label: TextStyle,
   /// The grey description under a label; it wraps.
   pub caption: TextStyle,
@@ -188,7 +188,7 @@ impl FormStyle {
       .gap(0.5)
       .radius(8.0);
     let lift = Shadow::new(1.0, 2.5, alpha(t.shadow, t.shadow[3] * 0.7));
-    let (ink, rim) = if t.dark { (WHITE, 0.12) } else { (BLACK, 0.11) };
+    let (ink, rim) = if t.scheme.is_dark() { (WHITE, 0.12) } else { (BLACK, 0.11) };
     let glass = Glass {
       ground: t.bg,
       fill: mix(t.bg, BLACK, 0.13),
@@ -196,19 +196,19 @@ impl FormStyle {
       light: alpha(WHITE, 0.6),
       glow: alpha(WHITE, 0.13),
     };
-    let (tab_on, tab_glass) = match t.glass && t.dark {
+    let (tab_on, tab_glass) = match t.glass && t.scheme.is_dark() {
       true => (tab, Some(glass)),
       false => (tab.bg(t.tab_tile()).border(0.5, alpha(ink, rim)).shadow(lift), None),
     };
 
-    let (divider, toolbar_line) = match t.dark {
+    let (divider, toolbar_line) = match t.scheme.is_dark() {
       true => (alpha(WHITE, 0.05), rgb(0x323232)),
       false => (alpha(BLACK, 0.04), rgb(0xe8e8e8)),
     };
 
     Self {
-      head: TextStyle::new(t.bold, t.text).ellipsis(),
-      note: TextStyle::new(small, t.muted).nowrap(),
+      head: TextStyle::new(t.bold, t.text).line_limit(1),
+      note: TextStyle::new(small, t.muted).fixed_size(),
       head_pad: [20.0, 10.0, 10.0, 10.0],
       subtitle: TextStyle::new(small, t.muted).line_h(14.0),
       subtitle_gap: 1.5,
@@ -225,7 +225,7 @@ impl FormStyle {
       tile: Style::new().w(px(h)).h(px(h)).center().radius(6.0).bg(t.raised),
       tile_x: 12.0,
       tile_text: TextStyle::new(Font { size: 11.0, ..t.font }.weight(Weight::Semibold), t.muted)
-        .nowrap(),
+        .fixed_size(),
       tile_icon: (h * 0.6).round(),
       page: Style::new().w(grow()).pads([12.0, 20.0, 20.0, 20.0]).gap(10.0),
       toolbar: Style::new()
@@ -235,10 +235,10 @@ impl FormStyle {
         .center()
         .bg(t.bg)
         .borders([0.0, 0.0, 0.5, 0.0], toolbar_line),
-      title: TextStyle::new(t.bold, t.muted).nowrap(),
+      title: TextStyle::new(t.bold, t.muted).fixed_size(),
       tab,
       tab_text: TextStyle::new(Font { size: 11.0, ..t.font }.weight(Weight::Medium), t.muted)
-        .nowrap(),
+        .fixed_size(),
       tab_icon: 26.0,
       tab_stroke: 1.4,
       tab_on,
@@ -259,7 +259,7 @@ impl FormStyle {
 /// `impl Into<WidgetText>`): a text, an icon, or what a closure builds in the part's text style
 /// (dimmed in a disabled row, as SwiftUI passes a foreground style down); from a `&str`, a
 /// `&String`, an [Icon] or `FnOnce(&mut Ui, TextStyle)`, whose parameters need their types
-/// written. A closure's texts take the style or one made from it (`s.ellipsis()`,
+/// written. A closure's texts take the style or one made from it (`s.line_limit(1)`,
 /// `s.underline(LinePattern::Dot)` on a term with [Ui::help]); its widgets dim themselves in a
 /// disabled row; a canvas of its own reads [Ui::scope_disabled].
 #[derive(Default)]
@@ -290,7 +290,7 @@ impl Content<'_> {
       }
       Content::Icon(i) => {
         ui.next_id = Some((id, false));
-        ui.icon(i.stroke(i.width_or(stroke)), size, style.color);
+        ui.icon(i.stroke_or(stroke), size, style.color);
       }
       Content::Built(f) => f(ui, style),
     }
@@ -355,7 +355,7 @@ impl<'s> FormRow<'s> {
   ///
   /// ```ignore
   /// FormRow::new(|ui: &mut Ui, s: TextStyle| {
-  ///   ui.text("gigaam-v3", s.ellipsis());
+  ///   ui.text("gigaam-v3", s.line_limit(1));
   ///   ui.help("Best in Russian").control_size(ControlSize::Small).badge("Recommended", Tone::Accent);
   /// })
   /// ```
@@ -466,10 +466,7 @@ impl Ui<'_> {
 
   /// A section title's line height.
   fn head_line(&mut self, fs: &FormStyle) -> f32 {
-    match fs.head.line_h > 0.0 {
-      true => fs.head.line_h,
-      false => self.metrics(fs.head.font).line_height(),
-    }
+    self.line_height(fs.head)
   }
 
   /// A row of the section being built, as SwiftUI's `LabeledContent` in a grouped form: the
@@ -514,10 +511,7 @@ impl Ui<'_> {
     };
     let style = fs.row.min_h(fs.row.min[1] + top).align(Align::Start, Align::Start);
     // The first line's height: the least the controls' slot is, with the padding around it.
-    let line_h = match fs.label.line_h > 0.0 {
-      true => fs.label.line_h,
-      false => self.metrics(fs.label.font).line_height(),
-    };
+    let line_h = self.line_height(fs.label);
 
     let (pad_x, shift) = (fs.row.pad[3], self.mark_shift(fs.label));
     let FormRow { label, caption, tile, .. } = row;
@@ -631,7 +625,7 @@ impl Ui<'_> {
       return 0.0;
     }
 
-    let line = if style.line_h > 0.0 { style.line_h } else { m.line_height() };
+    let line = style.line_h.unwrap_or(m.line_height());
     let baseline = (line - m.ascent - m.descent) / 2.0 + m.ascent;
     baseline - m.cap_height / 2.0 - line / 2.0
   }
@@ -724,11 +718,7 @@ impl Ui<'_> {
           let s = b.pointer(tile);
           ui.with_id(tab).canvas_col(s, paint, |ui| {
             // Canvases draw past the bar's opacity: the icon dims itself.
-            ui.disabled(b.disabled).icon(
-              icon.stroke(icon.width_or(fs.tab_stroke)),
-              fs.tab_icon,
-              color,
-            );
+            ui.disabled(b.disabled).icon(icon.stroke_or(fs.tab_stroke), fs.tab_icon, color);
             ui.text(label, fs.tab_text.color(color));
           });
         }
@@ -801,7 +791,7 @@ mod tests {
       let fs = FormStyle::plates(&ui.theme());
       let (name, switch) = (self.0, self.1);
       let label = |ui: &mut Ui, s: TextStyle| {
-        ui.id("name").text(name, s.ellipsis());
+        ui.id("name").text(name, s.line_limit(1));
         ui.control_size(ControlSize::Small).id("new").badge("New", Tone::Accent);
         let ui = ui.help("In testing").control_size(ControlSize::Small);
         ui.id("beta").badge("Beta", Tone::Neutral);
@@ -814,7 +804,7 @@ mod tests {
         ui.form_section(&fs, "Section", |ui| {
           let badged = FormRow::new(label).caption("Under it");
           ui.id("badged").form_row(&fs, badged, |ui| control(ui, "use"));
-          let plain = |ui: &mut Ui, s: TextStyle| ui.text(name, s.ellipsis());
+          let plain = |ui: &mut Ui, s: TextStyle| ui.text(name, s.line_limit(1));
           let plain = FormRow::new(plain).caption("Under it");
           ui.id("plain").form_row(&fs, plain, |ui| control(ui, "other"));
         });

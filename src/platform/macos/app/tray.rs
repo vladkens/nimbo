@@ -30,7 +30,6 @@ use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSSt
 
 use super::super::mtm;
 use super::menu::fill;
-use crate::menu::choices;
 use crate::svg::flatten;
 use crate::tray::{Menu, State, TrayIcon};
 
@@ -44,8 +43,6 @@ struct Inner {
   menu: Retained<NSMenu>,
   delegate: Retained<Delegate>,
   image: RefCell<Retained<NSImage>>,
-  /// The ids of the menu's items, by tag.
-  ids: RefCell<Vec<String>>,
   /// Open between `menuWillOpen:` and `menuDidClose:`.
   state: State,
 }
@@ -106,10 +103,7 @@ define_class!(
     fn chosen(&self, sender: Option<&AnyObject>) {
       let Some(item) = sender.and_then(|s| s.downcast_ref::<NSMenuItem>()) else { return };
       let Some(tray) = self.tray() else { return };
-      let id = tray.0.ids.borrow().get(item.tag() as usize).cloned();
-      if let Some(id) = id {
-        tray.0.state.chosen(&tray, &id);
-      }
+      tray.0.state.chosen(&tray, item.tag() as usize);
     }
   }
 );
@@ -161,7 +155,6 @@ impl Tray {
       menu,
       delegate,
       image: RefCell::new(image(&icon)),
-      ids: RefCell::default(),
       state: State::default(),
     };
     let tray = Self(Rc::new(inner));
@@ -192,16 +185,15 @@ impl Tray {
     }
   }
 
-  pub fn set_menu(&self, menu: &Menu) {
+  pub fn set_menu(&self, menu: &Menu<usize>) {
     if !self.0.state.hold(menu) {
       self.build(menu);
     }
   }
 
-  fn build(&self, menu: &Menu) {
+  fn build(&self, menu: &Menu<usize>) {
     self.0.menu.removeAllItems();
-    fill(self.0.mtm, &self.0.menu, &menu.items, &self.0.delegate, &mut 0);
-    *self.0.ids.borrow_mut() = choices(menu);
+    fill(self.0.mtm, &self.0.menu, &menu.items, &self.0.delegate);
   }
 
   pub fn state(&self) -> &State {

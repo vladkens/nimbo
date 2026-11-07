@@ -22,7 +22,7 @@ use super::dl::fns;
 use super::{
   CURRENT, Fp, P, TRUE, Win, as_window, busy, connect, gtk, keys, lib, window_busy, with,
 };
-use crate::app::{Event, Ime, MouseButton, Phase, WHEEL_LINE};
+use crate::app::{Event, Ime, KeyPhase, MouseButton, Phase, WHEEL_LINE};
 use crate::scene::{Point, Rect};
 use crate::ui::Id;
 
@@ -735,7 +735,7 @@ impl Win {
       let syms: Vec<u32> = held.iter().map(|&(_, s)| s).collect();
       self.mods(keys::after(keys::mods(state), sym, down, &syms));
       if let Some(key) = side.filter(|_| !repeat) {
-        self.send(Event::Modifier { key, down });
+        self.send(Event::Modifier { key, phase: KeyPhase::of(down) });
       }
 
       // GDK's own events go first: an idle source runs after them.

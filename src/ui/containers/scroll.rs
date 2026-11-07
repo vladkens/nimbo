@@ -15,7 +15,9 @@ use std::time::Duration;
 
 use crate::app::MouseButton;
 use crate::scene::{Color, Point, alpha};
-use crate::ui::{Align, Float, Id, Kind, Response, Scroll, Style, Transition, Ui, pct, px};
+use crate::ui::{
+  Align, Axes, Float, Flow, Id, Kind, Response, Scroll, Style, Transition, Ui, UnitPoint, pct, px,
+};
 
 /// How long scrollbars stay after the content last moved or the pointer came in.
 const BAR_SHOW: Duration = Duration::from_millis(1000);
@@ -104,16 +106,17 @@ impl Ui<'_> {
   }
 
   /// A container scrolling its children, with overlay scrollbars. `style` sets its size and
-  /// padding, and the axes with [Style::scroll_x] / [Style::scroll] (vertical by default). Its
+  /// padding, and the axes with [Style::scroll] (vertical by default), as SwiftUI's
+  /// `ScrollView`. Its
   /// id is the scroll container's ([Ui::scroll], [Ui::scroll_to]); the thumbs are
   /// `id.key(("thumb", axis))`, the tracks `id.key(("track", axis))`, 0 for horizontal.
   pub fn scroll_area<R>(&mut self, style: Style, f: impl FnOnce(&mut Self) -> R) -> Response {
     let t = self.theme();
     let id = self.take_id();
     let mask = self.set_slot::<EdgeFade>(None);
-    let style = match style.scroll {
-      [false, false] => style.scroll_y(),
-      _ => style.clip(),
+    let style = match style.scroll.is_empty() {
+      true => style.scroll(Axes::VERTICAL),
+      false => style.clip(),
     };
 
     let BarsState { geos, fade, shown, drag } = self.scroll_bars(id, style.scroll);
@@ -122,13 +125,13 @@ impl Ui<'_> {
       self.settle(id);
     }
 
-    self.with_id(id).container(1, style, |ui| {
+    self.with_id(id).container(Flow::Column, style, |ui| {
       f(ui);
       // The fades over the content, under the scrollbars, out of the pointer's way: the paint
       // pass draws them by the offset the layout settled on.
-      if let Some(EdgeFade(color, len)) = mask.filter(|_| style.scroll[1]) {
+      if let Some(EdgeFade(color, len)) = mask.filter(|_| style.scroll.at(1)) {
         let s = Style::new().w(pct(100.0)).h(pct(100.0));
-        ui.float(Float::parent().clip()).push(Kind::Fade { color, len }, s, 0);
+        ui.float(Float::parent().clip()).push(Kind::Fade { color, len }, s, Flow::Row);
       }
 
       for (ax, g) in geos.iter().enumerate() {
@@ -139,12 +142,18 @@ impl Ui<'_> {
         let color = alpha(t.thumb, t.thumb[3] * (1.0 + 0.6 * hot));
         let (at, s, pad) = match ax {
           0 => {
-            let at = Float::parent().attach(0.0, 1.0).anchor(0.0, 1.0).offset(BAR_INSET, 0.0);
+            let at = Float::parent()
+              .attach(UnitPoint::BOTTOM_LEADING)
+              .anchor(UnitPoint::BOTTOM_LEADING)
+              .offset(BAR_INSET, 0.0);
             let s = Style::new().w(px(g.track)).h(px(BAR)).align(Align::Start, Align::End);
             (at, s, [0.0, 0.0, 2.0, 0.0])
           }
           _ => {
-            let at = Float::parent().attach(1.0, 0.0).anchor(1.0, 0.0).offset(0.0, BAR_INSET);
+            let at = Float::parent()
+              .attach(UnitPoint::TOP_TRAILING)
+              .anchor(UnitPoint::TOP_TRAILING)
+              .offset(0.0, BAR_INSET);
             let s = Style::new().w(px(BAR)).h(px(g.track)).align(Align::End, Align::Start);
             (at, s, [0.0, 2.0, 0.0, 0.0])
           }
@@ -159,7 +168,8 @@ impl Ui<'_> {
           ui.with_id(track);
         }
 
-        ui.float(at.clip()).container(ax as u8, s.pads(pad).opacity(fade), |ui| {
+        let flow = if ax == 0 { Flow::Row } else { Flow::Column };
+        ui.float(at.clip()).container(flow, s.pads(pad).opacity(fade), |ui| {
           ui.el(gap);
           if shown {
             ui.with_id(thumb);
@@ -175,7 +185,7 @@ impl Ui<'_> {
   /// where it was pressed, a click on the track paging toward it, the bars shown while the
   /// content moves, the pointer comes in or moves in a track's strip, then fading out; they
   /// stay while a thumb is held or the pointer is on a track.
-  fn scroll_bars(&mut self, id: Id, axes: [bool; 2]) -> BarsState {
+  fn scroll_bars(&mut self, id: Id, axes: Axes) -> BarsState {
     let now = self.now();
     let mut bars = std::mem::take(self.state::<Bars>(id));
     let mut geos: [Option<Geo>; 2] = [None, None];
@@ -193,10 +203,10 @@ impl Ui<'_> {
       // layout clamps it exactly, the bars draw it in `f32`.
       let exact = self.st.scroll_exact(id).map_or([0.0; 2], |(o, _)| o);
       let (mut off, mut ex, mut moved) = (sc.offset, exact, false);
-      let scrolls = |ax: usize| axes[ax] && geo(&sc, ax, 0.0, false).is_some();
+      let scrolls = |ax: usize| axes.at(ax) && geo(&sc, ax, 0.0, false).is_some();
       let both = scrolls(0) && scrolls(1);
       for (ax, g) in geos.iter_mut().enumerate() {
-        if !axes[ax] {
+        if !axes.at(ax) {
           continue;
         }
 

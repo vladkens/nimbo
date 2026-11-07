@@ -57,35 +57,47 @@ pub mod widgets;
 use std::any::Any;
 use std::fmt::{Display, Write};
 use std::hash::Hash;
+use std::num::NonZeroU8;
 use std::time::Duration;
 
 pub use a11y::{A11yNode, A11yTree, Action, Props, Role, State, Value};
-pub use behavior::{Behavior, EditMenu, FieldBehavior};
+pub use behavior::{Behavior, EditMenu, Editing, FieldBehavior};
 pub use containers::{
-  List, ListResponse, Picker, Row, Selection, Split, SplitBehavior, Tabs, TypeSelect,
+  List, ListResponse, ListStyle, MenuPlacement, Picker, Row, Selection, Split, SplitBehavior, Tabs,
+  TypeSelect,
 };
 pub use dialog::{Answer, Dialog, DialogBehavior};
 pub use form::{Content, FormRow, FormStyle, Glass, Section};
 pub use id::Id;
 pub(crate) use input::drags_window;
 pub use input::{Click, Press, Scroll};
-pub(crate) use layout::{Kind, Measure, Node, Sys, Tree};
+pub(crate) use layout::{Flow, Kind, Measure, Node, Sys, Tree};
 pub use store::{Ease, Transition};
 pub use style::{
-  Align, Clip, Cursor, Dim, Float, Focus, FocusRing, LinePattern, Shadow, Style, TextStyle, grow,
-  pct, px, rigid,
+  Align, Axes, Axis, Clip, CoordinateSpace, Cursor, Dim, Float, Focus, FocusRing, LinePattern,
+  Shadow, Style, TextLines, TextStyle, TruncationMode, UnitPoint, grow, pct, px, rigid,
 };
 pub use textlayout::Edit;
 pub(crate) use textlayout::TextLayout;
-pub use theme::{ButtonStyle, ControlSize, Sizes, SwitchSize, Theme, Tone, Variant};
-pub use widgets::{Button, ButtonRole, Choice, FieldStyle, Icon, TextInput};
+pub use theme::{
+  ButtonLook, ButtonStyle, ControlBorder, ControlSize, Sizes, SwitchSize, Theme, Tone,
+};
+pub use widgets::{Button, ButtonRole, Choice, FieldKind, FieldStyle, Icon, IconPaint, TextInput};
 
 use self::input::{Deliver, Input, ScrollState};
 use self::store::{Anim, Store};
-use crate::app::{Appearance, Clipboard, Event, MouseButton, Waker};
+use crate::app::{Appearance, Clipboard, Event, KeyPhase, MouseButton, Waker};
 use crate::keys::{Binding, Command, KeyEvent, Os};
 use crate::scene::{Frame, ImageId, Images, Point, Rect, Size};
 use crate::text::{Font, Metrics, TextSystem};
+
+/// Which way focus moves among the focusable elements ([Ui::focus_next]): Tab and Shift-Tab,
+/// as SwiftUI's `FocusDirection`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FocusDirection {
+  Next,
+  Previous,
+}
 
 /// How long [UiState::flash] shows an element pressed.
 const FLASH: Duration = Duration::from_millis(120);
@@ -134,7 +146,7 @@ pub(crate) struct UiState {
   /// The platform shows context menus ([crate::Runtime::set_native_menus]); the one asked for
   /// ([Ui::context_menu]) until it takes it; the press that opened one last.
   pub(crate) native_menus: bool,
-  pub(crate) context_menu: Option<(Id, Point, crate::Menu)>,
+  pub(crate) context_menu: Option<(Id, Point, crate::Menu<usize>)>,
   pub(crate) menu_seq: u32,
   /// The height of the title bar over the content and the window's title ([Ui::titlebar]).
   pub(crate) titlebar: Option<(f32, &'static str)>,
@@ -305,7 +317,7 @@ impl UiState {
 
   /// Moves focus to the next focusable element of the last frame in tree order, or the previous
   /// one, wrapping around; from none, to the first or the last. Returns whether there is one.
-  pub fn focus_next(&mut self, forward: bool) -> bool {
+  pub fn focus_next(&mut self, dir: FocusDirection) -> bool {
     let t = &self.last;
     let all = || t.nodes.iter().filter(|n| n.style.focus != Focus::None).map(|n| n.id);
     let n = all().count();
@@ -314,11 +326,11 @@ impl UiState {
     }
 
     let at = self.input.focus.and_then(|f| all().position(|id| id == f));
-    let next = match (at, forward) {
-      (Some(i), true) => (i + 1) % n,
-      (Some(i), false) => (i + n - 1) % n,
-      (None, true) => 0,
-      (None, false) => n - 1,
+    let next = match (at, dir) {
+      (Some(i), FocusDirection::Next) => (i + 1) % n,
+      (Some(i), FocusDirection::Previous) => (i + n - 1) % n,
+      (None, FocusDirection::Next) => 0,
+      (None, FocusDirection::Previous) => n - 1,
     };
 
     self.input.focus = all().nth(next);
@@ -336,11 +348,11 @@ impl UiState {
     let t = &self.last;
     let Some(mut i) = t.find(id) else { return };
     let mut r = t.nodes[i as usize].rect;
-    while i != 0 && !t.nodes[i as usize].float.is_some_and(|f| f.window) {
+    while i != 0 && !t.nodes[i as usize].float.is_some_and(|f| f.space == CoordinateSpace::Global) {
       let float = t.nodes[i as usize].float.is_some();
       i = t.nodes[i as usize].parent;
       let n = &t.nodes[i as usize];
-      if float || !(n.style.scroll[0] || n.style.scroll[1]) {
+      if float || !!n.style.scroll.is_empty() {
         continue;
       }
       // In the container's content, then its offset after showing it.
@@ -657,6 +669,12 @@ impl<'a> Ui<'a> {
     layout::wrapped_width(s, style, width, &mut m, &mut self.st.kept)
   }
 
+  /// The distance between baselines of text in `style`, as the layout lays it out: its own
+  /// ([TextStyle::line_h]) or its font's. 0 in a [Ui] the runtime didn't build.
+  pub fn line_height(&mut self, style: TextStyle) -> f32 {
+    style.line_h.unwrap_or_else(|| self.metrics(style.font).line_height())
+  }
+
   /// Vertical metrics of `font` as the layout uses them: to set a mark beside text by its
   /// baseline, cap or x-height. Zeros in a [Ui] the runtime didn't build.
   pub fn metrics(&mut self, font: Font) -> Metrics {
@@ -825,12 +843,12 @@ impl<'a> Ui<'a> {
 
   /// A container laying its children out left to right.
   pub fn row<R>(&mut self, style: Style, f: impl FnOnce(&mut Self) -> R) -> Response {
-    self.container(0, style, f)
+    self.container(Flow::Row, style, f)
   }
 
   /// A container laying its children out top to bottom.
   pub fn col<R>(&mut self, style: Style, f: impl FnOnce(&mut Self) -> R) -> Response {
-    self.container(1, style, f)
+    self.container(Flow::Column, style, f)
   }
 
   /// A container laying its children out in `cols` equal columns, left to right and wrapping
@@ -839,8 +857,8 @@ impl<'a> Ui<'a> {
   /// `style.align`. Rows are as high as their highest child and share the height left over
   /// when the grid is taller.
   pub fn grid<R>(&mut self, cols: u8, style: Style, f: impl FnOnce(&mut Self) -> R) -> Response {
-    let (i, r) = self.open(0, style);
-    self.st.tree.nodes[i as usize].cols = cols.max(1);
+    let cols = NonZeroU8::new(cols).unwrap_or(NonZeroU8::MIN);
+    let (i, r) = self.open(Flow::Grid(cols), style);
     f(self);
     self.close(i);
     r
@@ -848,7 +866,7 @@ impl<'a> Ui<'a> {
 
   /// A box with no children: a divider, a swatch, a fixed gap.
   pub fn el(&mut self, style: Style) -> Response {
-    self.push(Kind::Box, style, 0).1
+    self.push(Kind::Box, style, Flow::Row).1
   }
 
   /// Takes the free space along the parent's axis.
@@ -866,19 +884,19 @@ impl<'a> Ui<'a> {
     let _ = write!(text, "{s}");
     let range = (start, text.len() as u32);
     let kind = Kind::Text { range, style, lines: (0, 0), baseline: 0.0, line_h: 0.0 };
-    self.push(kind, Style::new(), 0);
+    self.push(kind, Style::new(), Flow::Row);
   }
 
   /// An image; a fit size is its pixel size over the backing scale.
   pub fn image(&mut self, image: ImageId, style: Style) -> Response {
-    self.push(Kind::Image(image), style, 0).1
+    self.push(Kind::Image(image), style, Flow::Row).1
   }
 
   /// A box whose `paint` draws into the frame within its laid-out rect (a plot). It draws in
   /// its parent's layer: start one with `f.layer()` for order across primitive kinds.
   pub fn canvas(&mut self, style: Style, paint: impl FnOnce(&mut Frame, Rect) + 'a) -> Response {
     self.canvases.push(Some(Box::new(paint)));
-    self.push(Kind::Canvas(self.canvases.len() as u32 - 1), style, 0).1
+    self.push(Kind::Canvas(self.canvases.len() as u32 - 1), style, Flow::Row).1
   }
 
   /// A canvas with children laid out left to right over what it paints: a plot's hit areas
@@ -890,7 +908,7 @@ impl<'a> Ui<'a> {
     paint: impl FnOnce(&mut Frame, Rect) + 'a,
     f: impl FnOnce(&mut Self) -> R,
   ) -> Response {
-    self.canvas_container(0, style, Box::new(paint), f)
+    self.canvas_container(Flow::Row, style, Box::new(paint), f)
   }
 
   /// [Ui::canvas_row] with the children top to bottom.
@@ -900,18 +918,18 @@ impl<'a> Ui<'a> {
     paint: impl FnOnce(&mut Frame, Rect) + 'a,
     f: impl FnOnce(&mut Self) -> R,
   ) -> Response {
-    self.canvas_container(1, style, Box::new(paint), f)
+    self.canvas_container(Flow::Column, style, Box::new(paint), f)
   }
 
   fn canvas_container<R>(
     &mut self,
-    axis: u8,
+    flow: Flow,
     style: Style,
     paint: Canvas<'a>,
     f: impl FnOnce(&mut Self) -> R,
   ) -> Response {
     self.canvases.push(Some(paint));
-    let (i, r) = self.push(Kind::Canvas(self.canvases.len() as u32 - 1), style, axis);
+    let (i, r) = self.push(Kind::Canvas(self.canvases.len() as u32 - 1), style, flow);
     self.st.stack.push((i, 0));
     self.scope(i);
     f(self);
@@ -919,8 +937,8 @@ impl<'a> Ui<'a> {
     r
   }
 
-  fn container<R>(&mut self, axis: u8, style: Style, f: impl FnOnce(&mut Self) -> R) -> Response {
-    let (i, r) = self.open(axis, style);
+  fn container<R>(&mut self, flow: Flow, style: Style, f: impl FnOnce(&mut Self) -> R) -> Response {
+    let (i, r) = self.open(flow, style);
     f(self);
     self.close(i);
     r
@@ -928,8 +946,8 @@ impl<'a> Ui<'a> {
 
   /// Starts a container; out of line, so each `row` / `col` call site stays small.
   #[inline(never)]
-  fn open(&mut self, axis: u8, style: Style) -> (u32, Response) {
-    let (i, r) = self.push(Kind::Box, style, axis);
+  fn open(&mut self, flow: Flow, style: Style) -> (u32, Response) {
+    let (i, r) = self.push(Kind::Box, style, flow);
     self.st.stack.push((i, 0));
     self.scope(i);
     (i, r)
@@ -959,7 +977,7 @@ impl<'a> Ui<'a> {
   }
 
   #[inline(always)]
-  fn push(&mut self, kind: Kind, style: Style, axis: u8) -> (u32, Response) {
+  fn push(&mut self, kind: Kind, style: Style, flow: Flow) -> (u32, Response) {
     let (parent, count) = self.st.stack.last_mut().unwrap();
     let tree = &mut self.st.tree;
     let (id, named) = self
@@ -968,7 +986,7 @@ impl<'a> Ui<'a> {
       .unwrap_or_else(|| (tree.nodes[*parent as usize].id.nth(*count as usize), false));
     *count += 1;
     let parent = *parent;
-    let scrolls = style.scroll[0] || style.scroll[1];
+    let scrolls = !style.scroll.is_empty();
     let focus = style.focus != Focus::None;
     if self.next_autofocus {
       // Only a focusable element takes it; the flag goes with this one either way.
@@ -995,7 +1013,7 @@ impl<'a> Ui<'a> {
       tree.keymaps.push((i, map));
     }
 
-    tree.nodes.push(Node::new(id, kind, style, axis, float, parent, i + 1));
+    tree.nodes.push(Node::new(id, kind, style, flow, float, parent, i + 1));
     if self.next_span != 1 {
       tree.nodes[i as usize].span = std::mem::replace(&mut self.next_span, 1);
     }
@@ -1074,8 +1092,8 @@ impl<'a> Ui<'a> {
   }
 
   /// Moves focus as Tab (forward) or Shift-Tab do.
-  pub fn focus_next(&mut self, forward: bool) -> bool {
-    self.st.focus_next(forward)
+  pub fn focus_next(&mut self, dir: FocusDirection) -> bool {
+    self.st.focus_next(dir)
   }
 
   /// Whether the window is the key window, which gets the keys.
@@ -1125,11 +1143,11 @@ impl<'a> Ui<'a> {
     if used { None } else { self.key_down(id) }
   }
 
-  /// A modifier key going down (`true`) or up while `id` has focus ([Event::Modifier]): a
-  /// shortcut recorder taking one alone. Seen once; reading it uses it.
-  pub fn modifier_key(&self, id: Id) -> Option<(crate::Code, bool)> {
+  /// A modifier key going down or up while `id` has focus ([Event::Modifier]): a shortcut
+  /// recorder taking one alone. Seen once; reading it uses it.
+  pub fn modifier_key(&self, id: Id) -> Option<(crate::Code, KeyPhase)> {
     self.st.take(id, |e| match *e {
-      Event::Modifier { key, down } => Some((key, down)),
+      Event::Modifier { key, phase } => Some((key, phase)),
       _ => None,
     })
   }

@@ -36,22 +36,30 @@ pub enum Weight {
   Bold,
 }
 
-/// The system UI font, or its monospaced one when `mono` (SF Pro and SF Mono on macOS); `size`
-/// in points.
+/// The system font's design, as SwiftUI's `Font.Design`: SF Pro or SF Mono on macOS.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Design {
+  #[default]
+  Default,
+  Monospaced,
+}
+
+/// The system UI font in a [Design]; `size` in points.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Font {
   pub size: f32,
   pub weight: Weight,
-  pub mono: bool,
+  pub design: Design,
 }
 
 impl Font {
   pub const fn ui(size: f32) -> Self {
-    Self { size, weight: Weight::Regular, mono: false }
+    Self { size, weight: Weight::Regular, design: Design::Default }
   }
 
+  /// The monospaced system font, as SwiftUI's `.monospaced()`.
   pub const fn mono(size: f32) -> Self {
-    Self { size, weight: Weight::Regular, mono: true }
+    Self { size, weight: Weight::Regular, design: Design::Monospaced }
   }
 
   pub const fn weight(self, weight: Weight) -> Self {

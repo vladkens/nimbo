@@ -32,6 +32,6 @@ impl Ui<'_> {
     let text = s.to_string();
     self.a11y_named(id, Role::StaticText, &text);
     self.next_id = Some((id, false));
-    self.row(pill, |ui| ui.text(&text, TextStyle::new(font, t.tone(tone)).nowrap()))
+    self.row(pill, |ui| ui.text(&text, TextStyle::new(font, t.tone(tone)).fixed_size()))
   }
 }

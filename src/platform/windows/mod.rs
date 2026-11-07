@@ -409,8 +409,8 @@ impl Window {
       return;
     }
 
-    if look.dark != self.look.dark {
-      settings::title_bar(self.hwnd, look.dark);
+    if look.scheme.is_dark() != self.look.scheme.is_dark() {
+      settings::title_bar(self.hwnd, look.scheme.is_dark());
     }
 
     self.look = look;
@@ -749,7 +749,7 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
   rt.set_native_menus(true);
   // The title bar's mode before the window shows, so it never flashes light.
   let look = appearance();
-  settings::title_bar(hwnd, look.dark);
+  settings::title_bar(hwnd, look.scheme.is_dark());
   rt.event(Event::Appearance(look));
   // A wake from any thread posts a message; the window handle crosses threads as a number, held
   // while posting so the window's end waits for a post under way.
@@ -1290,7 +1290,9 @@ mod tests {
     assert_eq!(seen.borrow().len(), 1, "unchanged: nothing sent");
 
     // As if the window last saw the other mode.
-    let other = Appearance { dark: !now.dark, ..now };
+    use crate::app::ColorScheme::{Dark, Light};
+    let scheme = if now.scheme.is_dark() { Light } else { Dark };
+    let other = Appearance { scheme, ..now };
     with(|w| {
       w.look = other;
       w.send(Event::Appearance(other));

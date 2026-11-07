@@ -8,7 +8,7 @@
 //! let r = ui.id("name").field(&mut self.name, "Your name");
 //! if r.submitted { self.save() }
 //! ui.id("key").password_field(&mut self.key, "API key");
-//! ui.id("notes").text_field(&mut self.notes, &t.field().multiline().frame(NOTES));
+//! ui.id("notes").text_field(&mut self.notes, &t.field().kind(FieldKind::MultiLine).frame(NOTES));
 //! ui.id("about").selectable(ABOUT);
 //! ```
 //!
@@ -24,11 +24,15 @@
 
 use std::ops::Range;
 
-use crate::keys::{Command, EDIT_KEYS, SELECT_KEYS};
+use crate::keys::{EDIT_KEYS, SELECT_KEYS};
 use crate::scene::{Color, Point, Rect, alpha};
 use crate::text::edit::{Editor, graphemes, range_from_utf16, range_to_utf16, to_utf16, utf16_len};
 use crate::ui::behavior::{DOT, FieldState};
-use crate::ui::{Align, FieldBehavior, Response, Style, TextLayout, TextStyle, Ui, UiState, grow};
+use crate::ui::textlayout::Hit;
+use crate::ui::{
+  Align, Axes, FieldBehavior, Flow, Response, Style, TextLayout, TextLines, TextStyle, Ui, UiState,
+  grow,
+};
 
 impl Ui<'_> {
   /// A text field over `text` in `style`'s look, as SwiftUI's `TextField` with a
@@ -37,7 +41,7 @@ impl Ui<'_> {
   /// [Ui::disabled] dims it and reads no input.
   pub fn text_field(&mut self, text: &mut String, style: &FieldStyle) -> Response {
     let id = self.take_id();
-    let b = self.text_field_behavior(id, text, style.multiline, style.password);
+    let b = self.text_field_behavior(id, text, style.kind);
     self.field_box(&b, style)
   }
 
@@ -58,9 +62,9 @@ impl Ui<'_> {
       frame = frame.opacity(self.theme().disabled);
     }
 
-    let (frame, axis) = match style.multiline {
-      true => (frame.scroll_y(), 1),
-      false => (frame.scroll_x(), 0),
+    let (frame, axis) = match style.kind {
+      FieldKind::MultiLine => (frame.scroll(Axes::VERTICAL), Flow::Column),
+      _ => (frame.scroll(Axes::HORIZONTAL), Flow::Row),
     };
 
     let keys = self.keymap(EDIT_KEYS).with_id(b.id);
@@ -80,7 +84,7 @@ impl Ui<'_> {
   /// [Ui::field] for a password, as SwiftUI's `SecureField`: a dot per character, no input
   /// method, nothing copied.
   pub fn password_field(&mut self, text: &mut String, hint: &'static str) -> Response {
-    let style = self.theme().field().password().hint(hint);
+    let style = self.theme().field().kind(FieldKind::Secure).hint(hint);
     self.text_field(text, &style)
   }
 
@@ -114,15 +118,9 @@ impl Ui<'_> {
     let off = b.disabled && !self.st.native_menus && self.menu_open(id);
     let chosen = self.context_menu_at(id, m.at.or(off.then(Point::default)), || m.items());
     self.state::<FieldState>(b.id).menu_open = self.menu_open(id);
-    let cmd = match chosen.as_deref() {
-      Some("cut") => Command::Cut,
-      Some("copy") => Command::Copy,
-      Some("paste") => Command::Paste,
-      Some("select_all") => Command::SelectAll,
-      _ => return,
-    };
-
-    self.field_command(b.id, cmd);
+    if let Some(cmd) = chosen {
+      self.field_command(b.id, cmd);
+    }
   }
 
   /// The text element of a field or selectable text, as its behaviour `b` has it: the text (a
@@ -133,7 +131,7 @@ impl Ui<'_> {
     let st = std::mem::take(self.st.store.raw::<FieldState>(b.id));
     let mut e = b.edit;
     e.caret_color = style.caret;
-    e.sel_color = match (b.focused, st.editable) {
+    e.sel_color = match (b.focused, st.editable()) {
       _ if b.disabled => [0.0; 4],
       (true, _) => style.selection,
       (false, false) => alpha(style.selection, style.selection[3] * 0.5),
@@ -142,7 +140,7 @@ impl Ui<'_> {
 
     let s = st.ed.text();
     let (ts, empty) = (style.text, s.is_empty() && !style.hint.is_empty());
-    match (empty, st.secure) {
+    match (empty, st.secure()) {
       (true, _) => {
         e.placeholder = true;
         let ts = ts.color(style.placeholder);
@@ -221,7 +219,7 @@ impl TextInput<'_> {
   /// The offset nearest to `p` in the window.
   pub fn index(&self, p: Point) -> Option<usize> {
     let lay = self.lay.as_ref()?;
-    Some(to_utf16(self.ed.text(), lay.hit(p, false)))
+    Some(to_utf16(self.ed.text(), lay.hit(p, Hit::Nearest)))
   }
 }
 
@@ -230,7 +228,7 @@ impl UiState {
   /// input methods (not a password) has focus.
   pub fn text_input(&self) -> Option<TextInput<'_>> {
     let id = self.input.focus?;
-    let st = self.store.peek::<FieldState>(id).filter(|s| s.editable && !s.secure)?;
+    let st = self.store.peek::<FieldState>(id).filter(|s| s.editable() && !s.secure())?;
     let lay = TextLayout::of(&self.last, st.text_id).filter(|l| l.text == st.ed.text());
     Some(TextInput { ed: &st.ed, lay })
   }
@@ -251,10 +249,21 @@ pub struct FieldStyle {
   pub caret: Color,
   /// The border's colour while focused; transparent keeps the frame's.
   pub focus_border: Color,
-  /// Wraps lines and takes Enter as a line break.
-  pub multiline: bool,
-  /// Shows a dot per character, takes no input method, and keeps its text off the clipboard.
-  pub password: bool,
+  /// One line, many, or a password ([FieldStyle::kind]).
+  pub kind: FieldKind,
+}
+
+/// What a text field takes, as SwiftUI's `TextField`, `TextField(axis: .vertical)` and
+/// `SecureField`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FieldKind {
+  /// One line, scrolling sideways; Enter submits.
+  #[default]
+  SingleLine,
+  /// Lines wrapped at its width, Enter a line break; give the frame a height, it scrolls past it.
+  MultiLine,
+  /// One line of secret text, shown as dots: no input method, nothing copied.
+  Secure,
 }
 
 impl FieldStyle {
@@ -262,14 +271,13 @@ impl FieldStyle {
   pub const fn new(text: TextStyle) -> Self {
     Self {
       frame: Style::new().w(grow()).pad_xy(6.0, 4.0).align(Align::Start, Align::Center),
-      text: text.nowrap(),
+      text: text.fixed_size(),
       hint: "",
       placeholder: alpha(text.color, 0.4),
       selection: [0.25, 0.47, 0.95, 0.45],
       caret: text.color,
       focus_border: [0.0; 4],
-      multiline: false,
-      password: false,
+      kind: FieldKind::SingleLine,
     }
   }
 
@@ -277,16 +285,10 @@ impl FieldStyle {
     Self { frame, ..self }
   }
 
-  /// Wraps and takes line breaks; give the frame a height, it scrolls past it.
-  pub const fn multiline(self) -> Self {
-    let text = TextStyle { wrap: true, ..self.text };
-    Self { text, multiline: true, password: false, ..self }
-  }
-
-  /// One line of secret text, shown as dots.
-  pub const fn password(self) -> Self {
-    let text = TextStyle { wrap: false, ..self.text };
-    Self { text, multiline: false, password: true, ..self }
+  /// A field of `kind`: a multi-line one wraps its text, the others keep one line.
+  pub const fn kind(self, kind: FieldKind) -> Self {
+    let lines = if let FieldKind::MultiLine = kind { TextLines::Wrap } else { TextLines::Fixed };
+    Self { text: TextStyle { lines, ..self.text }, kind, ..self }
   }
 
   pub const fn hint(self, hint: &'static str) -> Self {
@@ -340,7 +342,10 @@ mod tests {
 
   impl App for Page {
     fn view(&mut self, ui: &mut Ui) {
-      let page = crate::ui::Style::new().w(crate::ui::px(200.0)).h(crate::ui::px(40.0)).scroll_y();
+      let page = crate::ui::Style::new()
+        .w(crate::ui::px(200.0))
+        .h(crate::ui::px(40.0))
+        .scroll(crate::ui::Axes::VERTICAL);
       ui.id("page").col(page, |ui| _ = ui.id("t").selectable(&"line\n".repeat(20)));
     }
   }
@@ -407,7 +412,7 @@ mod tests {
     h.app_mut().off = false;
     h.frame();
     right_click(&mut h, first);
-    h.click_id(first.key("edit").key("paste"));
+    h.click_id(first.key("edit").key(("item", 2usize)));
     h.app_mut().off = true;
     h.frame();
     h.app_mut().off = false;

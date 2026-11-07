@@ -6,7 +6,7 @@
 //!
 //! An app changes the look in three steps, from the least work to the most:
 //! - a variant where the widget has one: `Button::new("Save").primary()`;
-//! - a style derived from the theme, changed for one widget: `t.button(Variant::Normal,
+//! - a style derived from the theme, changed for one widget: `t.button(ButtonStyle::Bordered, None,
 //!   ControlSize::Regular).height(36.0)` given to [super::Button::style],
 //!   `t.field().hint("Search")` to [super::Ui::text_field];
 //! - its own theme: `const MINE: Theme = Theme { accent: rgb(0xe06c75), ..Theme::PLATES_DARK }` and
@@ -24,9 +24,9 @@
 use std::time::Duration;
 
 use super::store::Transition;
-use super::widgets::FieldStyle;
+use super::widgets::{ButtonRole, FieldStyle};
 use super::{Align, Dim, FocusRing, Shadow, Style, TextStyle, grow, px};
-use crate::app::Appearance;
+use crate::app::{Appearance, ColorScheme};
 use crate::scene::{Color, alpha, mix, rgb};
 use crate::text::{Font, Weight};
 
@@ -36,7 +36,7 @@ const BLACK: Color = [0.0, 0.0, 0.0, 1.0];
 /// A palette, sizes and fonts.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Theme {
-  pub dark: bool,
+  pub scheme: ColorScheme,
   /// The window's ground.
   pub bg: Color,
   /// Sidebars, toolbars, tab strips.
@@ -88,9 +88,9 @@ pub struct Theme {
   /// A tooltip's fill and text.
   pub tip: Color,
   pub tip_text: Color,
-  /// The border of push buttons: 0 on plates, where a grey fill is the button; a theme with
+  /// The border of push buttons: none on plates, where a grey fill is the button; a theme with
   /// one draws check boxes and segments bordered too ([Theme::flat]).
-  pub border: f32,
+  pub control_border: ControlBorder,
   /// Corners of controls.
   pub radius: f32,
   /// How big controls are.
@@ -125,17 +125,32 @@ pub struct Theme {
   pub glass: bool,
 }
 
-/// A button's look ([Theme::button]).
+/// A button's style, as SwiftUI's `.buttonStyle` ([Theme::button]); its role tints it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ButtonStyle {
+  /// A raised grey fill (with the theme's border, if it has one): `.bordered`.
+  #[default]
+  Bordered,
+  /// The accent's fill, the danger's for a destructive role: the default action,
+  /// `.borderedProminent`.
+  BorderedProminent,
+  /// No fill until hovered: toolbars, icon buttons, close buttons; `.borderless`.
+  Borderless,
+}
+
+/// Whether a theme's controls have a border ([Theme::control_border]), and how wide in points.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Variant {
-  /// A raised button with a border.
-  Normal,
-  /// The accent fill: the default action.
-  Primary,
-  /// No fill until hovered: toolbars, icon buttons, close buttons.
-  Ghost,
-  /// The danger fill: discards or deletes.
-  Danger,
+pub enum ControlBorder {
+  /// Fills alone, as System Settings' controls.
+  None,
+  Hairline(f32),
+}
+
+impl ControlBorder {
+  /// Its width, none's 0.
+  pub const fn width(self) -> f32 {
+    if let ControlBorder::Hairline(w) = self { w } else { 0.0 }
+  }
 }
 
 /// A theme's control metrics ([Theme::sizes]) in points.
@@ -226,7 +241,7 @@ pub enum Tone {
 
 /// How a button looks at rest, hovered and held, and its text. `const` builders, like [Style].
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ButtonStyle {
+pub struct ButtonLook {
   /// Size, padding, radius and border; the fill comes from below.
   pub frame: Style,
   pub bg: Color,
@@ -235,7 +250,7 @@ pub struct ButtonStyle {
   pub text: TextStyle,
 }
 
-impl ButtonStyle {
+impl ButtonLook {
   pub const fn height(self, h: f32) -> Self {
     Self { frame: self.frame.h(px(h)), ..self }
   }
@@ -281,7 +296,7 @@ impl Theme {
   /// blue, and the [Sizes::PLATES] controls. The focus ring is `keyboardFocusIndicatorColor`'s,
   /// for the blue accent.
   pub const PLATES_LIGHT: Self = Self {
-    dark: false,
+    scheme: ColorScheme::Light,
     bg: WHITE,
     panel: rgb(0xf8f8f8),
     raised: alpha(BLACK, 0.065),
@@ -311,7 +326,7 @@ impl Theme {
     dialog: WHITE,
     tip: rgb(0xf6f6f6),
     tip_text: rgb(0x545454),
-    border: 0.0,
+    control_border: ControlBorder::None,
     radius: 6.0,
     sizes: Sizes::PLATES,
     font: Font::ui(13.0),
@@ -332,7 +347,7 @@ impl Theme {
   /// [Theme::PLATES_LIGHT]'s roles on System Settings' dark greys; the focus ring is
   /// `keyboardFocusIndicatorColor`'s cyan-blue, not the accent.
   pub const PLATES_DARK: Self = Self {
-    dark: true,
+    scheme: ColorScheme::Dark,
     bg: rgb(0x1e1e1e),
     panel: rgb(0x272727),
     raised: alpha(WHITE, 0.09),
@@ -369,7 +384,7 @@ impl Theme {
 
   /// This theme with another accent, and the selection and the focus ring made from it.
   pub const fn with_accent(self, accent: Color) -> Self {
-    let (selection, focus) = if self.dark { (0.30, 0.55) } else { (0.22, 0.45) };
+    let (selection, focus) = if self.scheme.is_dark() { (0.30, 0.55) } else { (0.22, 0.45) };
     Self { accent, selection: alpha(accent, selection), focus: alpha(accent, focus), ..self }
   }
 
@@ -378,7 +393,7 @@ impl Theme {
   /// (within a level: the OS's blue), which keeps its measured focus ring. What the [super::Ui]
   /// draws with until the app sets its own ([super::Ui::set_theme]).
   pub fn system(a: Appearance) -> Self {
-    let base = if a.dark { Self::PLATES_DARK } else { Self::PLATES_LIGHT };
+    let base = if a.scheme.is_dark() { Self::PLATES_DARK } else { Self::PLATES_LIGHT };
     let Some(accent) = a.accent else { return base };
     if (0..3).all(|i| (accent[i] - base.accent[i]).abs() < 1.5 / 255.0) {
       return base;
@@ -389,13 +404,14 @@ impl Theme {
 
   /// The accent under the pointer: 12% toward black (light) or white (dark).
   pub const fn accent_hover(&self) -> Color {
-    mix(self.accent, if self.dark { WHITE } else { BLACK }, 0.12)
+    mix(self.accent, if self.scheme.is_dark() { WHITE } else { BLACK }, 0.12)
   }
 
-  /// Whether controls are fills without a border, as System Settings draws them ([Theme::border]
-  /// 0): check boxes filled with the track, a segmented control of raised segments.
+  /// Whether controls are fills without a border, as System Settings draws them
+  /// ([ControlBorder::None]): check boxes filled with the track, a segmented control of raised
+  /// segments.
   pub const fn flat(&self) -> bool {
-    self.border == 0.0
+    matches!(self.control_border, ControlBorder::None)
   }
 
   pub const fn tone(&self, tone: Tone) -> Color {
@@ -410,18 +426,18 @@ impl Theme {
 
   /// A badge's ground for `tone`: the tone at 14% (light) or 22% (dark) over the plate.
   pub const fn tint(&self, tone: Tone) -> Color {
-    mix(self.plate, self.tone(tone), if self.dark { 0.22 } else { 0.14 })
+    mix(self.plate, self.tone(tone), if self.scheme.is_dark() { 0.22 } else { 0.14 })
   }
 
   /// The selected toolbar tab's raised tile, as in macOS's preference windows: white (light) or
   /// 14% toward the text over the ground (dark, without [Theme::glass]).
   pub const fn tab_tile(&self) -> Color {
-    if self.dark { mix(self.bg, self.text, 0.14) } else { WHITE }
+    if self.scheme.is_dark() { mix(self.bg, self.text, 0.14) } else { WHITE }
   }
 
   /// One line of text, cut with "…" when it doesn't fit.
   pub const fn label(&self) -> TextStyle {
-    TextStyle::new(self.font, self.text).ellipsis()
+    TextStyle::new(self.font, self.text).line_limit(1)
   }
 
   /// Wrapping text.
@@ -431,7 +447,7 @@ impl Theme {
 
   /// Secondary text on one line: an unselected tab, a hint.
   pub const fn muted(&self) -> TextStyle {
-    TextStyle::new(self.font, self.muted).ellipsis()
+    TextStyle::new(self.font, self.muted).line_limit(1)
   }
 
   /// A menu's box: the menu fill in its corners and edge, padded 5, over a soft shadow.
@@ -446,11 +462,18 @@ impl Theme {
 
   /// A small semibold section title (write it in capitals): "LOCATIONS".
   pub const fn section(&self) -> TextStyle {
-    TextStyle::new(self.small.weight(Weight::Semibold), self.muted).ellipsis()
+    TextStyle::new(self.small.weight(Weight::Semibold), self.muted).line_limit(1)
   }
 
-  /// A button's look in variant `v` at `size` ([crate::Ui::control_size]).
-  pub const fn button(&self, v: Variant, size: ControlSize) -> ButtonStyle {
+  /// A button's look in `style` at `size` ([crate::Ui::control_size]), tinted by its `role`: a
+  /// destructive prominent one filled with the danger colour, any other destructive one's label
+  /// in it.
+  pub const fn button(
+    &self,
+    style: ButtonStyle,
+    role: Option<ButtonRole>,
+    size: ControlSize,
+  ) -> ButtonLook {
     let z = self.sizes;
     let (h, font) = match size {
       ControlSize::Small => (z.small_h, self.small),
@@ -458,45 +481,47 @@ impl Theme {
       ControlSize::Large => (z.control_h + 8.0, Font { size: self.font.size + 2.0, ..self.font }),
     };
     // Padding grows with the height: 12 at 24, 18 at 36. Its label's width, as AppKit's push
-    // buttons keep theirs: text beside it wraps instead ([ButtonStyle::w] changes it).
+    // buttons keep theirs: text beside it wraps instead ([ButtonLook::w] changes it).
     let pad = (h * 0.5).round();
     let frame = Style::new().w(Dim::Rigid).h(px(h)).min_w(h).pad_xy(pad, 0.0).gap(5.0).center();
     let frame = frame.radius(if h < z.control_h { self.radius - 1.0 } else { self.radius });
-    let text = TextStyle::new(font, self.text).ellipsis();
-    let (frame, bg, hover, pressed, text) = match v {
-      Variant::Normal => {
-        let frame = frame.border(self.border, self.line);
-        (frame, self.raised, self.hover, self.pressed, text)
+    let text = TextStyle::new(font, self.text).line_limit(1);
+    let destructive = matches!(role, Some(ButtonRole::Destructive));
+    let red = if destructive { text.color(self.danger) } else { text };
+    let (frame, bg, hover, pressed, text) = match style {
+      ButtonStyle::Bordered => {
+        let frame = frame.border(self.control_border.width(), self.line);
+        (frame, self.raised, self.hover, self.pressed, red)
       }
-      Variant::Primary => {
+      ButtonStyle::BorderedProminent if destructive => {
+        let c = self.danger;
+        let (h, p) = (mix(c, WHITE, 0.12), mix(c, BLACK, 0.15));
+        (frame, c, h, p, text.color(self.on_accent))
+      }
+      ButtonStyle::BorderedProminent => {
         let c = self.accent;
         let p = mix(c, BLACK, 0.15);
         let text = text.color(self.on_accent).font(font.weight(Weight::Medium));
         (frame, c, self.accent_hover(), p, text)
       }
-      Variant::Ghost => (frame, alpha(self.ghost, 0.0), self.ghost, self.hover, text),
-      Variant::Danger => {
-        let c = self.danger;
-        let (h, p) = (mix(c, WHITE, 0.12), mix(c, BLACK, 0.15));
-        (frame, c, h, p, text.color(self.on_accent))
-      }
+      ButtonStyle::Borderless => (frame, alpha(self.ghost, 0.0), self.ghost, self.hover, red),
     };
 
-    ButtonStyle { frame, bg, hover, pressed, text }
+    ButtonLook { frame, bg, hover, pressed, text }
   }
 
   /// `s` showing a selected or toggled-on state: tinted with the accent, the label in it.
-  pub const fn selected(&self, s: ButtonStyle) -> ButtonStyle {
+  pub const fn selected(&self, s: ButtonLook) -> ButtonLook {
     let c = self.accent;
     let s = s.colors(alpha(c, 0.18), alpha(c, 0.25), alpha(c, 0.32));
-    ButtonStyle { text: s.text.color(c), ..s }
+    ButtonLook { text: s.text.color(c), ..s }
   }
 
   /// A modal dialog's card ([super::Dialog]), a macOS 26 alert's as measured: the
   /// [Theme::dialog] fill, corners of 25, padded 20 at the top and 16 elsewhere (its text 6
   /// further in), a soft shadow; on dark grounds the menu's edge.
   pub const fn dialog(&self) -> Style {
-    let edge = if self.dark { self.menu_line } else { [0.0; 4] };
+    let edge = if self.scheme.is_dark() { self.menu_line } else { [0.0; 4] };
     Style::new()
       .pads([20.0, 16.0, 16.0, 16.0])
       .bg(self.dialog)
@@ -505,17 +530,22 @@ impl Theme {
       .shadow(Shadow::new(10.0, 36.0, self.shadow))
   }
 
-  /// A dialog's button, a macOS 26 alert's: a capsule 28 high in the body font, padded 12;
-  /// Cancel ([Variant::Normal]) a translucent grey of the text over the card, the action the
-  /// accent ([Variant::Primary]) or red ([Variant::Danger]).
-  pub const fn dialog_button(&self, v: Variant) -> ButtonStyle {
+  /// A dialog's button by its role, a macOS 26 alert's: a capsule 28 high in the body font,
+  /// padded 12; Cancel a translucent grey of the text over the card, the action the accent, or
+  /// red when destructive.
+  pub const fn dialog_button(&self, role: ButtonRole) -> ButtonLook {
     let h = 28.0;
-    let s = self.button(v, ControlSize::Regular);
-    let s = ButtonStyle { frame: s.frame.border(0.0, [0.0; 4]), ..s };
+    let style = match role {
+      ButtonRole::Cancel => ButtonStyle::Bordered,
+      _ => ButtonStyle::BorderedProminent,
+    };
+
+    let s = self.button(style, Some(role), ControlSize::Regular);
+    let s = ButtonLook { frame: s.frame.border(0.0, [0.0; 4]), ..s };
     let s = s.height(h).radius(h / 2.0).pad_x(12.0).font(self.font);
-    match v {
-      Variant::Normal | Variant::Ghost => {
-        let (k, c) = (if self.dark { 0.09 } else { 0.07 }, self.text);
+    match style {
+      ButtonStyle::Bordered | ButtonStyle::Borderless => {
+        let (k, c) = (if self.scheme.is_dark() { 0.09 } else { 0.07 }, self.text);
         s.colors(alpha(c, k), alpha(c, k + 0.04), alpha(c, k + 0.1))
       }
       _ => s,
@@ -525,7 +555,7 @@ impl Theme {
   /// The backdrop under a modal dialog ([super::Ui::modal]): black at 20% (light) or 45%
   /// (dark).
   pub const fn scrim(&self) -> Color {
-    alpha(BLACK, if self.dark { 0.45 } else { 0.2 })
+    alpha(BLACK, if self.scheme.is_dark() { 0.45 } else { 0.2 })
   }
 
   /// A tooltip's box, macOS's: the tip fill padded 6 by 3 (20 high for a line of small text),
@@ -546,7 +576,7 @@ impl Theme {
 
   /// A single-line text field: [Sizes::control_h] high at least, the field's ground and edge
   /// in the control's corners, the faint placeholder, the accent's caret and a selection of it
-  /// (`.multiline()` and a height for notes, `.password()` for secrets). Focused, the ring.
+  /// (`.kind(FieldKind::MultiLine)` and a height for notes). Focused, the ring.
   pub const fn field(&self) -> FieldStyle {
     let frame = Style::new()
       .w(grow())
@@ -556,7 +586,7 @@ impl Theme {
       .bg(self.field)
       .radius(self.radius)
       .border(1.0, self.field_line);
-    let sel = alpha(self.accent, if self.dark { 0.4 } else { 0.3 });
+    let sel = alpha(self.accent, if self.scheme.is_dark() { 0.4 } else { 0.3 });
     FieldStyle::new(TextStyle::new(self.font, self.text))
       .frame(frame)
       .placeholder(self.faint)
@@ -575,7 +605,7 @@ impl Theme {
       return f.frame(frame);
     }
 
-    let (fill, edge) = match self.dark {
+    let (fill, edge) = match self.scheme.is_dark() {
       true => (alpha(WHITE, 0.12), alpha(BLACK, 0.5)),
       false => (alpha(WHITE, 0.3), alpha(BLACK, 0.15)),
     };
@@ -591,28 +621,31 @@ mod tests {
   #[test]
   fn variants_read_the_palette() {
     let t = Theme::PLATES_DARK;
-    assert_eq!(t.button(Variant::Primary, ControlSize::Regular).bg, t.accent);
-    assert_eq!(t.button(Variant::Ghost, ControlSize::Regular).bg[3], 0.0);
-    assert_eq!(t.button(Variant::Normal, ControlSize::Regular).frame.border_color, t.line);
+    assert_eq!(t.button(ButtonStyle::BorderedProminent, None, ControlSize::Regular).bg, t.accent);
+    assert_eq!(t.button(ButtonStyle::Borderless, None, ControlSize::Regular).bg[3], 0.0);
     assert_eq!(
-      Theme::PLATES_LIGHT.button(Variant::Normal, ControlSize::Regular).frame.border,
+      t.button(ButtonStyle::Bordered, None, ControlSize::Regular).frame.border_color,
+      t.line
+    );
+    assert_eq!(
+      Theme::PLATES_LIGHT.button(ButtonStyle::Bordered, None, ControlSize::Regular).frame.border,
       [0.0; 4]
     );
-    const TALL: ButtonStyle =
-      Theme::PLATES_LIGHT.button(Variant::Normal, ControlSize::Regular).height(36.0);
+    const TALL: ButtonLook =
+      Theme::PLATES_LIGHT.button(ButtonStyle::Bordered, None, ControlSize::Regular).height(36.0);
     assert_eq!(TALL.frame.size[1], px(36.0));
     // Sizes and builders, all const.
-    const KEY: ButtonStyle = Theme::PLATES_DARK
-      .button(Variant::Normal, ControlSize::Regular)
+    const KEY: ButtonLook = Theme::PLATES_DARK
+      .button(ButtonStyle::Bordered, None, ControlSize::Regular)
       .w(super::super::grow())
       .h(px(40.0))
       .radius(12.0);
     assert_eq!((KEY.frame.size[1], KEY.frame.radii), (px(40.0), [12.0; 4]));
-    let small = t.button(Variant::Ghost, ControlSize::Small);
-    let large = t.button(Variant::Ghost, ControlSize::Large);
+    let small = t.button(ButtonStyle::Borderless, None, ControlSize::Small);
+    let large = t.button(ButtonStyle::Borderless, None, ControlSize::Large);
     assert_eq!((small.frame.size[1], small.text.font), (px(t.sizes.small_h), t.small));
     assert_eq!((large.frame.size[1], large.text.font.size), (px(32.0), 15.0));
-    let on = t.selected(t.button(Variant::Normal, ControlSize::Regular));
+    let on = t.selected(t.button(ButtonStyle::Bordered, None, ControlSize::Regular));
     assert_eq!((on.text.color, on.bg[3]), (t.accent, 0.18));
   }
 
@@ -620,13 +653,13 @@ mod tests {
   fn the_system_theme_follows_the_os_accent() {
     assert_eq!(Theme::system(Appearance::LIGHT), Theme::PLATES_LIGHT);
     assert_eq!(Theme::system(Appearance::DARK), Theme::PLATES_DARK);
-    let purple = Appearance { dark: false, accent: Some(rgb(0x953d96)) };
+    let purple = Appearance { scheme: ColorScheme::Light, accent: Some(rgb(0x953d96)) };
     let t = Theme::system(purple);
     assert_eq!((t.bg, t.accent, t.sizes), (WHITE, rgb(0x953d96), Sizes::PLATES));
     // The focus ring follows another accent.
     assert_eq!(t.focus, alpha(rgb(0x953d96), 0.45));
     // The OS's own blue is the theme's: its measured focus ring stays.
-    let blue = Appearance { dark: true, accent: Some(rgb(0x0a84ff)) };
+    let blue = Appearance { scheme: ColorScheme::Dark, accent: Some(rgb(0x0a84ff)) };
     assert_eq!(Theme::system(blue), Theme::PLATES_DARK);
     let px = |c: Color| c.map(|v| (v * 255.0).round() as u8);
     assert_eq!(px(Theme::PLATES_LIGHT.accent_hover()), [0, 107, 224, 255]);

@@ -42,17 +42,22 @@ impl Pane {
   }
 }
 
-/// Whether the app has Accessibility access; with `prompt`, macOS shows its dialog pointing the
-/// user to System Settings when it has not (once per launch is enough: the answer comes later,
-/// in System Settings, and the next call sees it).
-pub fn accessibility(prompt: bool) -> bool {
+/// Whether the app has Accessibility access; always on Windows and Linux.
+pub fn accessibility() -> bool {
   #[cfg(target_os = "macos")]
-  return crate::platform::permissions::accessibility(prompt);
+  return crate::platform::permissions::accessibility(false);
   #[cfg(not(target_os = "macos"))]
-  {
-    _ = prompt;
-    true
-  }
+  true
+}
+
+/// [accessibility], and when the app has not got it, macOS shows its dialog pointing the user
+/// to System Settings (once per launch is enough: the answer comes later, in System Settings, and
+/// the next [accessibility] sees it).
+pub fn request_accessibility() -> bool {
+  #[cfg(target_os = "macos")]
+  return crate::platform::permissions::accessibility(true);
+  #[cfg(not(target_os = "macos"))]
+  true
 }
 
 /// Opens `pane` in System Settings, for the user to allow the app there; nothing elsewhere.
@@ -123,7 +128,7 @@ mod tests {
   /// Reading needs no permission and never prompts.
   #[test]
   fn reading_never_prompts() {
-    let (trusted, secure, mic) = (accessibility(false), secure_input(), microphone());
+    let (trusted, secure, mic) = (accessibility(), secure_input(), microphone());
     if !cfg!(target_os = "macos") {
       assert!(trusted && !secure && mic == Access::Granted);
     }

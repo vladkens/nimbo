@@ -6,7 +6,7 @@
 
 use super::icon::{self, Icon};
 use crate::scene::{Color, Frame, Rect, mix};
-use crate::ui::theme::{ButtonStyle, Variant};
+use crate::ui::theme::{ButtonLook, ButtonStyle};
 use crate::ui::{Float, Response, Role, Style, TextStyle, Ui, px};
 
 /// How far below the middle of the line a mark ([Ui::info_button], [Ui::warning_button]) goes,
@@ -30,21 +30,22 @@ pub enum ButtonRole {
 pub struct Button<'s> {
   label: &'s str,
   icon: Option<Icon>,
-  variant: Variant,
+  style: ButtonStyle,
+  role: Option<ButtonRole>,
   selected: bool,
-  style: Option<ButtonStyle>,
+  look: Option<ButtonLook>,
 }
 
 impl<'s> Button<'s> {
   pub fn new(label: &'s str) -> Self {
-    let (variant, selected, style) = (Variant::Normal, false, None);
-    Self { label, icon: None, variant, selected, style }
+    let (style, role, selected, look) = (ButtonStyle::Bordered, None, false, None);
+    Self { label, icon: None, style, role, selected, look }
   }
 
-  /// A square ghost button showing an icon, muted until the pointer is on it: reset,
+  /// A square borderless button showing an icon, muted until the pointer is on it: reset,
   /// delete, open elsewhere.
   pub fn icon(icon: Icon) -> Self {
-    Self { icon: Some(icon), variant: Variant::Ghost, ..Self::new("") }
+    Self { icon: Some(icon), style: ButtonStyle::Borderless, ..Self::new("") }
   }
 
   /// An icon before the label.
@@ -52,20 +53,15 @@ impl<'s> Button<'s> {
     Self { icon: Some(icon), ..self }
   }
 
-  pub fn variant(self, variant: Variant) -> Self {
-    Self { variant, ..self }
+  /// Its style, as SwiftUI's `.buttonStyle`: [ButtonStyle::BorderedProminent] for the default
+  /// action.
+  pub fn style(self, style: ButtonStyle) -> Self {
+    Self { style, ..self }
   }
 
-  pub fn primary(self) -> Self {
-    self.variant(Variant::Primary)
-  }
-
-  pub fn ghost(self) -> Self {
-    self.variant(Variant::Ghost)
-  }
-
-  pub fn danger(self) -> Self {
-    self.variant(Variant::Danger)
+  /// What it does, as SwiftUI's `Button(role:)`: [ButtonRole::Destructive] draws it red.
+  pub fn role(self, role: ButtonRole) -> Self {
+    Self { role: Some(role), ..self }
   }
 
   /// Shows it selected or toggled on ([crate::ui::Theme::selected]) when `on`: a sidebar's toggle,
@@ -74,19 +70,19 @@ impl<'s> Button<'s> {
     Self { selected: on, ..self }
   }
 
-  /// Its own look instead of the variant's, usually derived: `t.button(Variant::Normal,
-  /// ControlSize::Regular).height(36.0)`.
-  pub fn style(self, style: ButtonStyle) -> Self {
-    Self { style: Some(style), ..self }
+  /// Its own look instead of its style's, usually derived: `t.button(ButtonStyle::Bordered,
+  /// None, ControlSize::Regular).height(36.0)`.
+  pub fn look(self, look: ButtonLook) -> Self {
+    Self { look: Some(look), ..self }
   }
 
   pub fn show(self, ui: &mut Ui) -> Response {
     let (t, size) = (ui.theme(), ui.take_control_size());
     let square = self.label.is_empty() && self.icon.is_some();
-    let s = self.style.unwrap_or_else(|| {
-      let s = t.button(self.variant, size);
+    let s = self.look.unwrap_or_else(|| {
+      let s = t.button(self.style, self.role, size);
       let h = s.frame.min[0];
-      if square { ButtonStyle { frame: s.frame.w(px(h)).pad(0.0), ..s } } else { s }
+      if square { ButtonLook { frame: s.frame.w(px(h)).pad(0.0), ..s } } else { s }
     });
     let s = if self.selected { t.selected(s) } else { s };
     let id = ui.take_id();
@@ -97,16 +93,17 @@ impl<'s> Button<'s> {
       a.name_or(n);
     }
 
-    // Ghost buttons are toolbar buttons, which macOS hovers; the others only with hover_all.
-    let hot = match self.variant {
-      Variant::Ghost => ui.hot(id, b.hovered),
+    // Borderless buttons are toolbar buttons, which macOS hovers; the others only with
+    // hover_all.
+    let hot = match self.style {
+      ButtonStyle::Borderless => ui.hot(id, b.hovered),
       _ => ui.ctl_hot(id, b.hovered),
     };
 
     let bg = if b.pressed { s.pressed } else { mix(s.bg, s.hover, hot) };
     let frame = ui.control(s.frame.bg(bg), &b);
     // An icon button's mark is muted until the pointer is on it.
-    let ink = match square && self.style.is_none() && !self.selected {
+    let ink = match square && self.look.is_none() && !self.selected {
       true => mix(t.muted, t.text, if b.pressed { 1.0 } else { hot }),
       false => s.text.color,
     };
@@ -116,8 +113,8 @@ impl<'s> Button<'s> {
     let size = (s.text.font.size + 2.0).round();
     let mut r = ui.with_id(id).row(frame, |ui| {
       if let Some(i) = self.icon {
-        let w = i.width_or(1.6);
-        ui.canvas(Style::new().w(px(size)).h(px(size)), move |f, r| icon::draw(f, i, r, ink, w));
+        let i = i.stroke_or(1.6);
+        ui.canvas(Style::new().w(px(size)).h(px(size)), move |f, r| icon::draw(f, i, r, ink));
       }
 
       if !self.label.is_empty() {
@@ -181,7 +178,7 @@ impl Ui<'_> {
     let k = if b.pressed { 1.0 } else { 0.5 * hot };
     let color = self.dim(mix(ink[0], ink[1], k), b.disabled);
     let s = self.control(Style::new().w(px(size)).h(px(size)).radius(size / 2.0), &b);
-    let paint = move |f: &mut Frame, r: Rect| icon::draw(f, icon, r, color, 1.5);
+    let paint = move |f: &mut Frame, r: Rect| icon::draw(f, icon.stroke_or(1.5), r, color);
     let Some(&mut MarkShift(dy)) = self.slot::<MarkShift>() else {
       let mut r = self.with_id(id).canvas(s, paint);
       r.clicked = b.clicked;
@@ -210,7 +207,7 @@ impl Ui<'_> {
     let d = t.sizes.control_h;
     let bg = if b.pressed { t.pressed } else { mix(t.raised, t.hover, hot) };
     let s = self.control(Style::new().w(px(d)).h(px(d)).center().radius(d / 2.0).bg(bg), &b);
-    let text = TextStyle::new(t.bold, t.text).nowrap();
+    let text = TextStyle::new(t.bold, t.text).fixed_size();
     let mut r = self.with_id(id).row(s, |ui| ui.text("?", text));
     r.clicked = b.clicked;
     r

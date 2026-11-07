@@ -23,7 +23,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 use windows_sys::core::BOOL;
 
 use super::wide;
-use crate::app::Appearance;
+use crate::app::{Appearance, ColorScheme};
 use crate::scene::rgb;
 
 const PERSONALIZE: &str = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
@@ -42,7 +42,8 @@ pub fn appearance() -> Appearance {
 /// `AccentColorMenu` (0xAABBGGRR; none: no accent).
 fn read(apps_light: Option<u32>, accent: Option<u32>) -> Appearance {
   let accent = accent.map(|c| rgb((c & 0xff) << 16 | (c & 0xff00) | (c >> 16 & 0xff)));
-  Appearance { dark: apps_light == Some(0), accent }
+  let scheme = if apps_light == Some(0) { ColorScheme::Dark } else { ColorScheme::Light };
+  Appearance { scheme, accent }
 }
 
 /// A DWORD value under HKCU; `None` when it or its key is missing.
@@ -98,16 +99,16 @@ mod tests {
 
   #[test]
   fn apps_use_light_theme_maps_to_dark() {
-    assert!(read(Some(0), None).dark, "0 is dark");
-    assert!(!read(Some(1), None).dark, "1 is light");
-    assert!(!read(None, None).dark, "missing (before 1809) is light");
+    assert!(read(Some(0), None).scheme.is_dark(), "0 is dark");
+    assert!(!read(Some(1), None).scheme.is_dark(), "1 is light");
+    assert!(!read(None, None).scheme.is_dark(), "missing (before 1809) is light");
     assert_eq!(read(Some(1), None), Appearance::LIGHT);
   }
 
   #[test]
   fn the_accent_reads_as_rgb() {
     let a = read(Some(0), Some(0xff_d4_78_00));
-    assert_eq!(a, Appearance { dark: true, accent: Some(rgb(0x0078d4)) });
+    assert_eq!(a, Appearance { scheme: ColorScheme::Dark, accent: Some(rgb(0x0078d4)) });
   }
 
   #[test]

@@ -20,7 +20,8 @@ use crate::keys::Key;
 use crate::scene::mix;
 use crate::ui::behavior::FieldState;
 use crate::ui::{
-  Align, Cursor, FieldBehavior, FieldStyle, Float, Id, Response, Role, Style, Ui, grow, px,
+  Align, Cursor, FieldBehavior, FieldKind, FieldStyle, Float, Id, Response, Role, Style, Ui, grow,
+  px,
 };
 
 /// The ⊗'s side, and how far in it is from the field's right edge.
@@ -61,7 +62,7 @@ impl Ui<'_> {
       self.state::<FieldState>(id).clear(text, now);
     }
 
-    let mut b = self.text_field_behavior(id, text, false, false);
+    let mut b = self.text_field_behavior(id, text, FieldKind::SingleLine);
     if b.focused && !text.is_empty() {
       self.grab_keys(id);
     }
@@ -101,7 +102,7 @@ impl Ui<'_> {
       let cover = cover.align(Align::Start, Align::Center);
       ui.float(Float::parent().clip()).row(cover, |ui| {
         let s = Style::new().w(px(17.0)).h(px(17.0));
-        ui.canvas(s, move |f, r| icon::draw(f, Icon::SEARCH, r, muted, 2.0));
+        ui.canvas(s, move |f, r| icon::draw(f, Icon::SEARCH, r, muted));
         if clear {
           let x = id.key("clear");
           ui.el(Style::new().w(grow()));
@@ -109,7 +110,7 @@ impl Ui<'_> {
           ui.a11y(x, Role::Button).name("Clear");
           let hot = ui.ctl_hot(x, ui.hovered(x));
           let mark = mix(t.faint, t.muted, hot);
-          ui.with_id(x).canvas(s, move |f, r| icon::draw(f, Icon::CLEAR, r, mark, 0.0));
+          ui.with_id(x).canvas(s, move |f, r| icon::draw(f, Icon::CLEAR, r, mark));
         }
       });
     });
@@ -155,7 +156,10 @@ mod tests {
 
   impl App for Find {
     fn keymap(&self) -> &[Binding] {
-      const KEYS: &[Binding] = &[bind("escape", Command::Cancel)];
+      const KEYS: &[Binding] = &[bind(
+        crate::keys::Shortcut::new(crate::keys::Key::Named(NamedKey::Escape)),
+        Command::Cancel,
+      )];
       KEYS
     }
 
@@ -217,7 +221,7 @@ mod tests {
     h.right_click(r.x + 40.0, r.y + 10.0);
     h.frame();
     h.frame();
-    h.click_id(Id::of("s").key("edit").key("paste"));
+    h.click_id(Id::of("s").key("edit").key(("item", 2usize)));
     h.frame();
     assert_eq!((h.app().text.as_str(), h.app().changes), ("moon", 1));
     assert_eq!(h.focused(), Some(Id::of("s")));

@@ -64,7 +64,7 @@ impl<V: Held> Memo<V> {
   /// time.
   pub fn get(&mut self, font: Font, text: &str, key: u64, f: impl FnOnce() -> V) -> &V {
     let mut h = FxHasher::default();
-    (font.size.to_bits(), font.weight as u8, font.mono, key, text).hash(&mut h);
+    (font.size.to_bits(), font.weight as u8, font.design, key, text).hash(&mut h);
     let same = |e: &Entry<V>| e.key == key && e.font == font && *e.text == *text;
     let e = match self.map.entry(h.finish()) {
       Slot::Occupied(o) if same(o.get()) => o.into_mut(),

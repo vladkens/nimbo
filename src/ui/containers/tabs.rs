@@ -14,7 +14,7 @@
 
 use crate::keys::{Command, Move};
 use crate::scene::{Rect, alpha, mix};
-use crate::ui::{Align, Behavior, Id, Response, Role, State, Style, Ui, grow, px};
+use crate::ui::{Align, Axes, Behavior, Id, Response, Role, State, Style, Ui, grow, px};
 
 /// A tab strip over pages, one shown (`sel`). Tabs are keyed by title (`id.key(("tab",
 /// title))`) and so are pages (`id.key(("page", title))`); a title seen before also takes its
@@ -55,7 +55,7 @@ impl<'s> Tabs<'s> {
     }
 
     let strip = Style::new().w(grow()).h(px(t.sizes.tab_h)).bg(t.panel);
-    let strip = strip.borders([0.0, 0.0, 1.0, 0.0], t.line).scroll_x();
+    let strip = strip.borders([0.0, 0.0, 1.0, 0.0], t.line).scroll(Axes::HORIZONTAL);
     let strip = if b.disabled { strip } else { strip.tab_focusable_quiet() };
     let mut r = Response::default();
     // The box of strip and page keyed apart from the strip, which has the id.

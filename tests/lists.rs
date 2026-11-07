@@ -232,9 +232,9 @@ fn a_right_click_opens_the_row_menu_over_the_selection() {
     right(h, row(103), true);
     assert_eq!(selected(h), [101, 103, 104], "{os:?}: inside, kept");
     assert!(h.rect(popup).is_some() && h.focused() == Some(popup));
-    h.click_id(Id::of(LIST).key("open"));
+    h.click_id(Id::of(LIST).key(("item", 0usize)));
     h.frame();
-    assert_eq!(h.app().chosen, [("open".to_string(), vec![101, 103, 104])], "{os:?}");
+    assert_eq!(h.app().chosen, [(RowAction::Open, vec![101, 103, 104])], "{os:?}");
     assert!(h.rect(popup).is_none());
 
     right(h, row(105), false);
@@ -251,9 +251,10 @@ fn a_right_click_opens_the_row_menu_over_the_selection() {
     right(h, row(102), false);
     right(h, row(102), true);
     assert!(h.rect(popup).is_none(), "{os:?}");
-    let (_, menu) = h.context_menu(Some("delete")).expect("a menu asked for");
-    assert_eq!((menu.items[0].label.as_str(), menu.items[0].header), ("Item 000103", true));
-    assert_eq!(h.app().chosen.last(), Some(&("delete".to_string(), vec![102])), "{os:?}");
+    let (_, menu) = h.context_menu(Some("Delete")).expect("a menu asked for");
+    let section = matches!(menu.items[0], nimbo::Item::Section(_));
+    assert_eq!((menu.items[0].label(), section), ("Item 000103", true));
+    assert_eq!(h.app().chosen.last(), Some(&(RowAction::Delete, vec![102])), "{os:?}");
   }
 }
 
@@ -312,7 +313,7 @@ fn the_row_menu_draws_its_model() {
     assert!(dump.contains(line), "{line}: {dump}");
   }
 
-  let (r, img) = (h.rect(Id::of(LIST).key("delete")).unwrap(), h.render());
+  let (r, img) = (h.rect(Id::of(LIST).key(("item", 7usize))).unwrap(), h.render());
   let red = (0..r.w as usize).map(|x| img.pixel(r.x + x as f32, r.y + r.h / 2.0));
   assert!(red.into_iter().any(|p| p[0] > p[1] + 80), "red text");
 }

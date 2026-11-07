@@ -20,7 +20,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 use super::super::{settings, wide};
 use super::menu::{build, track};
 use super::shell::{WM_TRAY, host};
-use crate::tray::{Menu, State, TrayIcon, choices};
+use crate::tray::{Menu, State, TrayIcon};
 
 /// `NIN_KEYSELECT`: the icon chosen with the keyboard.
 const NIN_KEYSELECT: u32 = NIN_SELECT | 1;
@@ -35,9 +35,8 @@ struct Inner {
   /// The icon's side in pixels.
   side: Cell<i32>,
   tip: RefCell<String>,
-  /// The menu as built, and the ids of its choices by command id less one.
+  /// The menu as built.
   hmenu: Cell<HMENU>,
-  ids: RefCell<Vec<String>>,
   /// Open while the menu shows.
   state: State,
 }
@@ -98,7 +97,6 @@ impl Tray {
       side: Cell::new(0),
       tip: RefCell::new(tooltip.into()),
       hmenu: Cell::new(null_mut()),
-      ids: RefCell::default(),
       state: State::default(),
     };
     let tray = Self(Rc::new(inner));
@@ -144,17 +142,15 @@ impl Tray {
     }
   }
 
-  pub fn set_menu(&self, menu: &Menu) {
+  pub fn set_menu(&self, menu: &Menu<usize>) {
     if !self.0.state.hold(menu) {
       self.build(menu);
     }
   }
 
-  fn build(&self, menu: &Menu) {
-    let mut next = 0;
-    let hmenu = build(&menu.items, &mut next);
+  fn build(&self, menu: &Menu<usize>) {
+    let hmenu = build(&menu.items);
     unsafe { DestroyMenu(self.0.hmenu.replace(hmenu)) };
-    *self.0.ids.borrow_mut() = choices(menu);
   }
 
   pub fn state(&self) -> &State {
@@ -175,20 +171,16 @@ impl Tray {
     }
   }
 
-  /// The id of command `cmd` in the menu built now.
-  fn id_of(&self, cmd: u32) -> Option<String> {
-    self.0.ids.borrow().get((cmd as usize).wrapping_sub(1)).cloned()
-  }
-
-  /// Runs `on_item` with the id of command `cmd`.
+  /// Runs `on_item` with the action of command `cmd`.
   fn chosen(&self, cmd: u32) {
-    self.run(self.id_of(cmd));
+    self.run((cmd as usize).checked_sub(1));
   }
 
-  /// Runs `on_item` with `id`; nothing for none (the menu dismissed), the callback kept.
-  fn run(&self, id: Option<String>) {
-    if let Some(id) = id {
-      self.0.state.chosen(self, &id);
+  /// Runs `on_item` with action number `n`; nothing for none (the menu dismissed), the callback
+  /// kept.
+  fn run(&self, n: Option<usize>) {
+    if let Some(n) = n {
+      self.0.state.chosen(self, n);
     }
   }
 
@@ -222,10 +214,10 @@ impl Tray {
       PostMessageW(host, WM_NULL, 0, 0);
       cmd
     };
-    // The item chosen in the menu shown, before a menu set meanwhile replaces it.
-    let id = self.id_of(cmd);
+    // The item chosen, run by the actions of the menu shown, before closing builds one set
+    // meanwhile (or by the app now), whose actions go with it.
+    self.run((cmd as usize).checked_sub(1));
     self.closing();
-    self.run(id);
   }
 
   pub fn describe(&self) -> Vec<String> {
@@ -376,27 +368,15 @@ mod tests {
   use super::*;
   use crate::tray::Item;
 
-  /// A separator's submenu, which [Item] says is ignored, takes no command numbers.
-  #[test]
-  fn a_separator_numbers_nothing() {
-    let sep = Item { submenu: Some(Menu::new(vec![Item::new("x", "X")])), ..Item::separator() };
-    let tray = Tray::detached(crate::tray::TrayIcon::path(4.0, "M0 0H4V4Z"), "t");
-    tray.set_menu(&Menu::new(vec![sep, Item::new("quit", "Quit")]));
-    let got = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
-    let g = got.clone();
-    crate::tray::Tray(tray.clone()).on_item(move |_, _, id| g.borrow_mut().push(id.to_owned()));
-    tray.choose(&[1]);
-    assert_eq!(*got.borrow(), ["quit"]);
-  }
-
   /// A menu dismissed (Escape, a click outside) chooses nothing and keeps the callback.
   #[test]
   fn a_dismissed_menu_keeps_the_callback() {
     let tray = Tray::detached(crate::tray::TrayIcon::path(4.0, "M0 0H4V4Z"), "t");
-    tray.set_menu(&Menu::new(vec![Item::new("a", "A")]));
+    let t = crate::tray::Tray(tray.clone());
+    t.set_menu(&Menu::new(vec![Item::button("a", "A")]));
     let got = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let g = got.clone();
-    crate::tray::Tray(tray.clone()).on_item(move |_, _, id| g.borrow_mut().push(id.to_owned()));
+    t.on_item(move |_, _, id: &str| g.borrow_mut().push(id.to_owned()));
     tray.run(None);
     tray.choose(&[0]);
     assert_eq!(*got.borrow(), ["a"]);

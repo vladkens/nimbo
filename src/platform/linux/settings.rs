@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 use super::dbus::{self, Gv, V};
 use super::dl::fns;
 use super::{Fp, P, S, connect, each, lib};
-use crate::app::{Appearance, Event};
+use crate::app::{Appearance, ColorScheme, Event};
 
 const PORTAL: &str = "org.freedesktop.portal.Desktop";
 const PATH: &str = "/org/freedesktop/portal/desktop";
@@ -54,7 +54,12 @@ fn api() -> Option<&'static Api> {
 pub fn appearance() -> Appearance {
   let Some(a) = api() else { return Appearance::LIGHT };
   let (dark, accent) = portal();
-  Appearance { dark: dark.unwrap_or_else(|| gtk_dark(a)), accent }
+  let scheme = match dark.unwrap_or_else(|| gtk_dark(a)) {
+    true => ColorScheme::Dark,
+    false => ColorScheme::Light,
+  };
+
+  Appearance { scheme, accent }
 }
 
 /// Follows the portal's and GtkSettings' changes, each sent as [Event::Appearance] (the

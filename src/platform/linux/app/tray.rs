@@ -113,7 +113,7 @@ struct Inner {
   /// `IconName`: the icon's SVG in the user's icons, empty until it is written there.
   name: RefCell<String>,
   tooltip: RefCell<String>,
-  menu: RefCell<Menu>,
+  menu: RefCell<Menu<usize>>,
   revision: Cell<u32>,
   /// What the menu's numbers ([menu::nodes]) are past the root's on the bus.
   base: Cell<i32>,
@@ -212,7 +212,8 @@ impl Tray {
   fn paint(&self, icon: &TrayIcon) {
     let gnome = std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| d.contains("GNOME"));
     let boxed = ["FLATPAK_ID", "SNAP"].iter().any(|v| std::env::var_os(v).is_some());
-    let tint = if gnome || crate::platform::appearance().dark { [255; 3] } else { [0; 3] };
+    let tint =
+      if gnome || crate::platform::appearance().scheme.is_dark() { [255; 3] } else { [0; 3] };
     let pixmap = |side: u32| {
       let rgba = icon.pixels(side, tint);
       let argb = rgba.chunks(4).flat_map(|p| [p[3], p[0], p[1], p[2]]).collect();
@@ -246,14 +247,14 @@ impl Tray {
     self.emit(SNI_PATH, SNI, "NewTitle", V::Tuple(Vec::new()));
   }
 
-  pub fn set_menu(&self, menu: &Menu) {
+  pub fn set_menu(&self, menu: &Menu<usize>) {
     if !self.0.state.hold(menu) {
       self.apply(menu.clone());
     }
   }
 
   /// Serves `menu` from now on, a new revision the host is told of.
-  fn apply(&self, menu: Menu) {
+  fn apply(&self, menu: Menu<usize>) {
     let gone = nodes(&self.0.menu.replace(menu)).len() as i32;
     self.0.base.set(self.0.base.get() + gone);
     let rev = self.0.revision.get() + 1;
@@ -284,21 +285,22 @@ impl Tray {
     self.0.revision.get() != rev
   }
 
-  /// An `Event` on item `id`: a click goes to the app by the item's id, after the menu closed.
+  /// An `Event` on item `id`: a click goes to the app by the item's action, by the actions of
+  /// the menu shown, before the menu closes and one set meanwhile (or by the app now) is served.
   fn event(&self, id: i32, kind: &str) {
     match kind {
       "clicked" => {
-        let choice: Option<String> = {
+        let choice: Option<usize> = {
           let menu = self.0.menu.borrow();
           let n = nodes(&menu);
           let it = self.index(id, n.len()).and_then(|i| n[i].item);
-          it.filter(|it| !it.separator && !it.header && it.submenu.is_none())
-            .map(|it| it.id.clone())
+          it.and_then(|it| it.action().copied())
         };
-        self.closed();
         if let Some(choice) = choice {
-          self.0.state.chosen(self, &choice);
+          self.0.state.chosen(self, choice);
         }
+
+        self.closed();
       }
       "closed" if id == 0 => self.closed(),
       _ => {}

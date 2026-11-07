@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use crate::scene::Point;
-use crate::ui::{Float, Id, TextStyle, Transition, Ui, px};
+use crate::ui::{Float, Id, TextStyle, Transition, Ui, UnitPoint, px};
 
 /// Paint order of tooltips among overlays: above menus and dialogs.
 const TIP_Z: i32 = 2000;
@@ -70,7 +70,7 @@ impl Ui<'_> {
       false => (p.y + 19.0, 0.0),
     };
 
-    let at = Float::window().anchor(0.0, ay).offset(x, y).z(TIP_Z);
+    let at = Float::window().anchor(UnitPoint::new(0.0, ay)).offset(x, y).z(TIP_Z);
     let text_style = TextStyle::new(t.small, t.tip_text).line_h((t.small.size * 1.3).round());
     // As wide as its widest line, as macOS's: the layout would keep the width before wrapping.
     let (boxed, pads) = (t.tip(), t.tip().pad[1] + t.tip().pad[3]);

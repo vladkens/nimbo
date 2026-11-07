@@ -18,11 +18,10 @@
 #[cfg(any(test, not(target_os = "macos")))]
 mod icon;
 
+use std::any::Any;
 use std::cell::{Cell, RefCell};
 
 use crate::Main;
-#[cfg(windows)]
-pub(crate) use crate::menu::choices;
 pub use crate::menu::{Item, LABEL, Menu};
 use crate::platform::tray as imp;
 
@@ -83,16 +82,21 @@ impl TrayIcon {
 }
 
 type OnOpen = Box<dyn FnMut(&mut Main, &Tray)>;
-type OnItem = Box<dyn FnMut(&mut Main, &Tray, &str)>;
+type OnItem = Box<dyn FnMut(&mut Main, &Tray, usize)>;
+/// A menu's actions by number ([Menu::tagged]), of the app's type.
+type Actions = Option<Box<dyn Any>>;
 
-/// What each platform's tray keeps alike: the app's callbacks, and while the menu is open, the
-/// last menu set meanwhile, which waits for it to close.
+/// What each platform's tray keeps alike: the app's callbacks; the actions of the menu built,
+/// by number ([Menu::tagged]), and of the one set last, which go with it once it is built; and
+/// while the menu is open, the last menu set meanwhile, which waits for it to close.
 #[derive(Default)]
 pub(crate) struct State {
   on_open: RefCell<Option<OnOpen>>,
   on_item: RefCell<Option<OnItem>>,
   open: Cell<bool>,
-  pending: RefCell<Option<Menu>>,
+  built: RefCell<Actions>,
+  next: RefCell<Actions>,
+  pending: RefCell<Option<(Menu<usize>, Actions)>>,
 }
 
 impl State {
@@ -104,10 +108,11 @@ impl State {
     }
   }
 
-  /// Item `id` was chosen: the app's [Tray::on_item] runs, kept for the next time.
-  pub fn chosen(&self, tray: &imp::Tray, id: &str) {
+  /// The item of action number `n` was chosen: the app's [Tray::on_item] runs, kept for the
+  /// next time.
+  pub fn chosen(&self, tray: &imp::Tray, n: usize) {
     if let Some(mut f) = self.on_item.take() {
-      f(&mut Main::here(), &Tray(tray.clone()), id);
+      f(&mut Main::here(), &Tray(tray.clone()), n);
       self.on_item.borrow_mut().get_or_insert(f);
     }
   }
@@ -117,26 +122,29 @@ impl State {
   }
 
   /// Whether `menu` waits, the menu being open (the last one set wins); if not, one that waited
-  /// is dropped, `menu` to be built now.
-  pub fn hold(&self, menu: &Menu) -> bool {
+  /// is dropped, `menu` to be built now, its actions taking the built one's place.
+  pub fn hold(&self, menu: &Menu<usize>) -> bool {
+    let next = self.next.take();
     if self.open.get() {
-      *self.pending.borrow_mut() = Some(menu.clone());
+      *self.pending.borrow_mut() = Some((menu.clone(), next));
       return true;
     }
 
     self.pending.take();
+    *self.built.borrow_mut() = next;
     false
   }
 
   /// The menu set while it was open, once it is closed: to be built now.
-  pub fn released(&self) -> Option<Menu> {
-    if self.open.get() { None } else { self.pending.take() }
+  pub fn released(&self) -> Option<Menu<usize>> {
+    if self.open.get() { None } else { self.take_pending() }
   }
 
   /// The menu set while it was open, open or not: a host fetching the menu builds it anew.
-  #[cfg(target_os = "linux")]
-  pub fn take_pending(&self) -> Option<Menu> {
-    self.pending.take()
+  pub fn take_pending(&self) -> Option<Menu<usize>> {
+    let (menu, actions) = self.pending.take()?;
+    *self.built.borrow_mut() = actions;
+    Some(menu)
   }
 
   /// A menu set while it was open still waits.
@@ -167,8 +175,10 @@ impl Tray {
 
   /// Replaces the menu, also while it opens ([Tray::on_open]). While it is open the new one waits
   /// until it closes (the last one set wins): rebuilt, an open menu would close its submenus.
-  pub fn set_menu(&self, menu: &Menu) {
-    self.0.set_menu(menu);
+  pub fn set_menu<A: Clone + 'static>(&self, menu: &Menu<A>) {
+    let (menu, actions) = menu.tagged();
+    *self.0.state().next.borrow_mut() = Some(Box::new(actions));
+    self.0.set_menu(&menu);
   }
 
   /// `f` runs as the menu is about to open: the moment to refresh it with [Tray::set_menu].
@@ -176,9 +186,18 @@ impl Tray {
     *self.0.state().on_open.borrow_mut() = Some(Box::new(f));
   }
 
-  /// `f` runs with the id of the item chosen, after the menu closed.
-  pub fn on_item(&self, f: impl FnMut(&mut Main, &Tray, &str) + 'static) {
-    *self.0.state().on_item.borrow_mut() = Some(Box::new(f));
+  /// `f` runs with the action of the item chosen, after the menu closed: `A` the menus' set
+  /// with [Tray::set_menu].
+  pub fn on_item<A: Clone + 'static>(&self, mut f: impl FnMut(&mut Main, &Tray, A) + 'static) {
+    let run = move |main: &mut Main, tray: &Tray, n: usize| {
+      let built = tray.0.state().built.borrow();
+      let action = built.as_ref().and_then(|b| b.downcast_ref::<Vec<A>>()?.get(n).cloned());
+      drop(built);
+      if let Some(a) = action {
+        f(main, tray, a);
+      }
+    };
+    *self.0.state().on_item.borrow_mut() = Some(Box::new(run));
   }
 }
 
@@ -239,14 +258,23 @@ mod tests {
   /// once it is closed drops what waited.
   #[test]
   fn a_menu_set_while_open_waits() {
-    let (a, b) = (Menu::new(vec![Item::new("a", "A")]), Menu::new(vec![Item::new("b", "B")]));
+    let (a, b) = (Menu::new(vec![Item::button(0, "A")]), Menu::new(vec![Item::button(0, "B")]));
     let s = State::default();
+    let actions = |s: &State| s.built.borrow().as_ref()?.downcast_ref::<Vec<&str>>().cloned();
+    let next = |s: &State, v: &'static str| *s.next.borrow_mut() = Some(Box::new(vec![v]));
+    next(&s, "a");
     assert!(!s.hold(&a));
+    assert_eq!(actions(&s), Some(vec!["a"]), "built at once");
     s.set_open(true);
-    assert!(s.hold(&a) && s.hold(&b));
+    next(&s, "a2");
+    assert!(s.hold(&a));
+    next(&s, "b");
+    assert!(s.hold(&b));
     assert_eq!(s.released(), None, "still open");
+    assert_eq!(actions(&s), Some(vec!["a"]), "the open menu's");
     s.set_open(false);
     assert_eq!(s.released(), Some(b.clone()));
+    assert_eq!(actions(&s), Some(vec!["b"]), "the one built now");
     assert_eq!(s.released(), None);
 
     s.set_open(true);

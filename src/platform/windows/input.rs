@@ -24,7 +24,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use super::{Window, keyboard, with};
-use crate::app::{Event, Ime, MouseButton, Phase, WHEEL_LINE};
+use crate::app::{Event, Ime, KeyPhase, MouseButton, Phase, WHEEL_LINE};
 use crate::keys::{KeyEvent, Os};
 use crate::scene::{Point, Rect};
 use crate::ui::Cursor;
@@ -255,7 +255,7 @@ impl Window {
     let (scan, extended, repeat) =
       (((lp >> 16) & 0xFF) as u16, lp & (1 << 24) != 0, lp & (1 << 30) != 0);
     if let Some(key) = keyboard::mod_key(vk, scan, extended).filter(|_| !(down && repeat)) {
-      self.send(Event::Modifier { key, down });
+      self.send(Event::Modifier { key, phase: KeyPhase::of(down) });
     }
   }
 

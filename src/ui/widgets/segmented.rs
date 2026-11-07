@@ -67,7 +67,12 @@ impl Ui<'_> {
     let (off, flat, h) = (b.disabled, t.flat(), t.sizes.control_h);
     let frame = match flat {
       true => Style::new().h(px(h)).bg(t.raised).radius(t.radius),
-      false => Style::new().h(px(h)).pad(2.0).gap(2.0).radius(t.radius).border(t.border, t.line),
+      false => Style::new()
+        .h(px(h))
+        .pad(2.0)
+        .gap(2.0)
+        .radius(t.radius)
+        .border(t.control_border.width(), t.line),
     };
 
     // Its labels' width: text beside it wraps instead.
@@ -75,8 +80,8 @@ impl Ui<'_> {
     let n = options.len();
     let on_at = |i: usize| options.get(i).is_some_and(|o| o.value() == *cur);
     // macOS's divider, 1 × 14: #bdbdbd on the light capsule, #6d6d6d on the dark one.
-    let ink = if t.dark { [1.0; 4] } else { [0.0, 0.0, 0.0, 1.0] };
-    let divider = alpha(ink, if t.dark { 0.26 } else { 0.18 });
+    let ink = if t.scheme.is_dark() { [1.0; 4] } else { [0.0, 0.0, 0.0, 1.0] };
+    let divider = alpha(ink, if t.scheme.is_dark() { 0.26 } else { 0.18 });
     let mut r = self.with_id(id).row(frame, |ui| {
       for (i, o) in options.iter().enumerate() {
         let seg = id.key(i);
@@ -98,7 +103,7 @@ impl Ui<'_> {
         ui.with_id(seg).row(b.pointer(s.radius(radius).bg(bg)), |ui| {
           ui.text(o.label(), text);
           if let Some(n) = o.count() {
-            ui.text(n, text.color(alpha(text.color, 0.65)).nowrap());
+            ui.text(n, text.color(alpha(text.color, 0.65)).fixed_size());
           }
         });
         if flat && i + 1 < n {

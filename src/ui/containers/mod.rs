@@ -15,8 +15,8 @@ pub mod scroll;
 pub mod split;
 pub mod tabs;
 
-pub use list::{List, ListResponse, Row, Selection};
-pub use menu::TypeSelect;
+pub use list::{List, ListResponse, ListStyle, Row, Selection};
+pub use menu::{MenuPlacement, TypeSelect};
 pub use popup::Picker;
 pub use split::{Split, SplitBehavior};
 pub use tabs::Tabs;

@@ -37,7 +37,7 @@ pub use self::app::{
   activity, autostart, desktop, focus, hardware, hotkey, open, paste, permissions, post, tray,
   uninstall,
 };
-use crate::app::{Appearance, Clipboard};
+use crate::app::{Appearance, Clipboard, ColorScheme};
 
 /// The system clipboard, plain text only.
 pub struct Pasteboard;
@@ -121,7 +121,8 @@ pub fn appearance() -> Appearance {
     look.performAsCurrentDrawingAppearance(&resolve);
   }
 
-  Appearance { dark, accent: accent.get() }
+  let scheme = if dark { ColorScheme::Dark } else { ColorScheme::Light };
+  Appearance { scheme, accent: accent.get() }
 }
 
 /// The performance cores of an Apple Silicon Mac (`hw.perflevel0.physicalcpu`); `None` on macOS

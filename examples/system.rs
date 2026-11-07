@@ -19,8 +19,8 @@ use std::rc::Rc;
 use nimbo::system::Change;
 use nimbo::tray::{Item, Menu, Tray, TrayIcon};
 use nimbo::{
-  App, AppInfo, Config, Cx, Event, FormRow, FormStyle, Main, Presence, Style, Ui, Window, grow,
-  hardware,
+  App, AppInfo, Config, Cx, Event, FormRow, FormStyle, Main, Presence, Shortcut, Style, Ui, Window,
+  grow, hardware,
 };
 
 pub const INFO: AppInfo =
@@ -74,16 +74,24 @@ pub fn kind_label(kind: Change) -> &'static str {
 }
 
 /// The tray's menu: the lid and the audio changes, then the window and Quit.
-pub fn menu(s: &Seen) -> Menu {
+pub fn menu(s: &Seen) -> Menu<Action> {
   let audio = s.counts[0] + s.counts[1];
   Menu::new(vec![
-    Item::new("lid", &format!("Lid: {}", lid_label(s.lid))).enabled(false),
-    Item::new("audio", &format!("Audio changes: {audio}")).enabled(false),
-    Item::separator(),
-    Item::new("show", "Show Window"),
-    Item::separator(),
-    Item::new("quit", "Quit").key("cmd+q"),
+    Item::button(Action::None, &format!("Lid: {}", lid_label(s.lid))).enabled(false),
+    Item::button(Action::None, &format!("Audio changes: {audio}")).enabled(false),
+    Item::Divider,
+    Item::button(Action::Show, "Show Window"),
+    Item::Divider,
+    Item::button(Action::Quit, "Quit").key(Shortcut::char('q').cmd()),
   ])
+}
+
+/// What the tray's menu does; its status lines do nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Action {
+  None,
+  Show,
+  Quit,
 }
 
 /// The window: what came, read again on each change.
@@ -183,10 +191,10 @@ fn start(main: &mut Main) {
     eprintln!("system: {e}");
   }
 
-  tray.on_item(|main, _, id| match id {
-    "show" => show(main),
-    "quit" => main.quit(),
-    _ => {}
+  tray.on_item(|main, _, action| match action {
+    Action::Show => show(main),
+    Action::Quit => main.quit(),
+    Action::None => {}
   });
   show(main);
   main.on_reopen(show);

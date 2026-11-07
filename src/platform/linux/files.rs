@@ -18,6 +18,7 @@ use std::ptr::{null, null_mut};
 
 use super::dbus::{self, Gv, V};
 use super::{FALSE, Fp, P, S, TRUE, connect_id, gtk, lib, overlay, with_data};
+use crate::file_dialog::FileDialogKind;
 use crate::scene::Point;
 use crate::{Event, FileDialog};
 
@@ -74,7 +75,17 @@ pub fn show(id: u64, window: P, d: &FileDialog) -> Result<(), String> {
   OPEN.with_borrow_mut(|o| o.push((id, format!("{PATH}/request/{sender}/{token}"))));
   let args = V::Tuple(vec![V::S(parent(window)), V::S(d.title.clone()), options(d, &token)]);
   let (chooser, method) = ("org.freedesktop.portal.FileChooser", ["OpenFile", "SaveFile"]);
-  dbus::call(bus, PORTAL, PATH, chooser, method[d.save as usize], args, MS).map(drop).map_err(|e| {
+  dbus::call(
+    bus,
+    PORTAL,
+    PATH,
+    chooser,
+    method[(d.kind == FileDialogKind::Save) as usize],
+    args,
+    MS,
+  )
+  .map(drop)
+  .map_err(|e| {
     OPEN.with_borrow_mut(|o| o.retain(|r| r.0 != id));
     format!("no FileChooser portal: {e}")
   })
@@ -98,7 +109,9 @@ fn options(d: &FileDialog, token: &str) -> V {
     o.push(("current_folder", V::Bytes([dir.as_os_str().as_bytes(), &[0]].concat())));
   }
 
-  o.extend(d.name.as_ref().filter(|_| d.save).map(|n| ("current_name", V::s(n))));
+  o.extend(
+    d.name.as_ref().filter(|_| d.kind == FileDialogKind::Save).map(|n| ("current_name", V::s(n))),
+  );
   V::dict(o)
 }
 

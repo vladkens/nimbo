@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use super::dl::{Lib, fns};
 use crate::text::edit::graphemes;
-use crate::text::{Font, Glyph, GlyphBox, Ink, Line, Metrics, Raster};
+use crate::text::{Design, Font, Glyph, GlyphBox, Ink, Line, Metrics, Raster};
 
 // MARK: FFI
 
@@ -420,7 +420,11 @@ impl Cache {
 
     let s = sys();
     let fc = &s.fc;
-    let family = if font.mono { c"monospace" } else { c"sans-serif" };
+    let family = match font.design {
+      Design::Monospaced => c"monospace",
+      Design::Default => c"sans-serif",
+    };
+
     let (matched, set) = unsafe {
       let pat = (fc.FcPatternCreate)();
       (fc.FcPatternAddString)(pat, c"family".as_ptr(), family.as_ptr());

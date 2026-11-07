@@ -26,7 +26,9 @@ fn detached_tray() {
 fn the_example() {
   let labels = |s: &Shown| {
     let m = example::menu(s);
-    m.items.iter().map(|i| (i.label.clone(), i.enabled, i.checked)).collect::<Vec<_>>()
+    let items =
+      m.items.iter().map(|i| (i.label().to_owned(), i.is_enabled(), i.check() == Some(true)));
+    items.collect::<Vec<_>>()
   };
   let idle = Shown { count: None, login: None, hotkey: "Ctrl+Alt+Space".into() };
   let l = labels(&idle);

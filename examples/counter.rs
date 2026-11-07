@@ -11,7 +11,9 @@
 // A Windows app, not a console one: no terminal opens with its window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use nimbo::{App, Button, Config, ControlSize, Font, Id, Style, TextStyle, Ui, Variant, Weight};
+use nimbo::{
+  App, Button, ButtonStyle, Config, ControlSize, Font, Id, Style, TextStyle, Ui, Weight,
+};
 
 #[derive(Default)]
 pub struct Counter {
@@ -42,18 +44,21 @@ pub const RESET: &str = "reset";
 impl App for Counter {
   fn view(&mut self, ui: &mut Ui) {
     let t = ui.theme();
-    let count = TextStyle::new(Font::ui(64.0).weight(Weight::Semibold), t.text).nowrap();
-    let big =
-      t.button(Variant::Normal, ControlSize::Regular).height(36.0).min_w(64.0).font(Font::ui(22.0));
+    let count = TextStyle::new(Font::ui(64.0).weight(Weight::Semibold), t.text).fixed_size();
+    let big = t
+      .button(ButtonStyle::Bordered, None, ControlSize::Regular)
+      .height(36.0)
+      .min_w(64.0)
+      .font(Font::ui(22.0));
     ui.col(Style::new().grow().center().gap(16.0).bg(t.bg), |ui| {
       ui.text("COUNTER", t.section());
       ui.id(COUNT_ID).text(self.count, count);
       ui.row(Style::new().gap(10.0), |ui| {
-        if Button::new("−").style(big).show(ui.id(MINUS)).clicked {
+        if Button::new("−").look(big).show(ui.id(MINUS)).clicked {
           self.count -= 1;
         }
 
-        if Button::new("+").style(big).show(ui.id(PLUS)).clicked {
+        if Button::new("+").look(big).show(ui.id(PLUS)).clicked {
           self.count += 1;
         }
       });

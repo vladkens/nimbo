@@ -20,7 +20,7 @@ use windows_sys::core::{BOOL, GUID, HRESULT};
 
 use super::wide;
 use crate::text::edit::Utf16Bytes;
-use crate::text::{Font, Glyph, GlyphBox, Ink, Line, Metrics, Raster, Weight};
+use crate::text::{Design, Font, Glyph, GlyphBox, Ink, Line, Metrics, Raster, Weight};
 
 // MARK: COM
 
@@ -391,7 +391,7 @@ pub fn face(font: Font) -> Face {
     Weight::Bold => 700,
   };
 
-  let family = match font.mono {
+  let family = match font.design == Design::Monospaced {
     true => dw.mono,
     false => dw.ui[(font.size >= 20.0) as usize],
   };

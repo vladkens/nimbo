@@ -13,10 +13,12 @@ use std::time::{Duration, Instant};
 use keyboard_types::{Code, Modifiers};
 
 use crate::file_dialog::FileDialog;
-use crate::keys::{Binding, Command, KeyEvent, Move};
+use crate::keys::{Binding, Command, Extent, KeyEvent, Move};
 use crate::scene::{Color, Frame, Images, Point, Rect, Scene, Size};
 use crate::text::TextSystem;
-use crate::ui::{Action, Click, Cursor, FrameStats, Id, Role, Sys, TextInput, Ui, UiState};
+use crate::ui::{
+  Action, Click, Cursor, FocusDirection, FrameStats, Id, Role, Sys, TextInput, Ui, UiState,
+};
 
 /// An application: owns its state, reacts to events and draws the frame from it, as an element
 /// tree (`view`), by hand (`paint`), or both. A frame is built only when something changed.
@@ -152,7 +154,7 @@ pub enum Event {
   /// none.
   Modifier {
     key: Code,
-    down: bool,
+    phase: KeyPhase,
   },
   /// A trackpad pinch: `delta` is the change in magnification (0.1 is 10% larger).
   Magnify {
@@ -188,11 +190,11 @@ pub enum Event {
   /// cancelled.
   FileDialog(Option<PathBuf>),
   /// The item chosen in the context menu of `on` ([Ui::context_menu]) the platform showed, by
-  /// its id; `None` when dismissed. Delivered to `on` in a view pass, then to the app when no
-  /// view took it.
+  /// its action's number ([crate::Menu]); `None` when dismissed. Delivered to `on` in a view pass,
+  /// then to the app when no view took it.
   Menu {
     on: Id,
-    item: Option<String>,
+    item: Option<usize>,
   },
   /// Assistive technology acting on the element `id` (VoiceOver's press, a slider's increment,
   /// a field's new text): the runtime takes it through the input paths, then the app hears it,
@@ -205,18 +207,59 @@ pub enum Event {
   },
 }
 
-/// The OS's look: light or dark, and the accent colour the user picked, if the OS has one
+/// Whether a key went down or up, as SwiftUI's `KeyPress.Phases`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum KeyPhase {
+  Down,
+  Up,
+}
+
+impl KeyPhase {
+  /// [KeyPhase::Down] when `down`, else Up: from a platform's flag.
+  pub const fn of(down: bool) -> Self {
+    if down { KeyPhase::Down } else { KeyPhase::Up }
+  }
+}
+
+/// Light or dark, as SwiftUI's `ColorScheme`: the OS's ([Appearance]) or a theme's.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ColorScheme {
+  #[default]
+  Light,
+  Dark,
+}
+
+impl ColorScheme {
+  pub const fn is_dark(self) -> bool {
+    matches!(self, ColorScheme::Dark)
+  }
+}
+
+/// `light` or `dark`.
+impl std::str::FromStr for ColorScheme {
+  type Err = String;
+
+  fn from_str(s: &str) -> Result<Self, String> {
+    match s {
+      "light" => Ok(ColorScheme::Light),
+      "dark" => Ok(ColorScheme::Dark),
+      _ => Err(format!("{s:?} is not light or dark")),
+    }
+  }
+}
+
+/// The OS's look: its [ColorScheme], and the accent colour the user picked, if the OS has one
 /// ([crate::platform::appearance]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Appearance {
-  pub dark: bool,
+  pub scheme: ColorScheme,
   /// sRGB; `None` where the OS has none or the user left it to apps (macOS Multicolor).
   pub accent: Option<Color>,
 }
 
 impl Appearance {
-  pub const LIGHT: Self = Self { dark: false, accent: None };
-  pub const DARK: Self = Self { dark: true, accent: None };
+  pub const LIGHT: Self = Self { scheme: ColorScheme::Light, accent: None };
+  pub const DARK: Self = Self { scheme: ColorScheme::Dark, accent: None };
 }
 
 /// What an input method does to the focused text field (macOS `NSTextInputClient`, Windows
@@ -547,7 +590,7 @@ impl<A: App> Runtime<A> {
   /// The context menu the view asked for, once: its element, the point in the window and the
   /// menu. The platform shows it after an event or a frame and sends the answer as
   /// [Event::Menu].
-  pub fn take_context_menu(&mut self) -> Option<(Id, Point, crate::Menu)> {
+  pub fn take_context_menu(&mut self) -> Option<(Id, Point, crate::Menu<usize>)> {
     self.ui.context_menu.take()
   }
 
@@ -648,7 +691,7 @@ impl<A: App> Runtime<A> {
       }
       Action::Increment | Action::Decrement => {
         let to = if action == Action::Increment { Move::Right } else { Move::Left };
-        self.deliver(id, Event::Command(Command::Move(to, false)));
+        self.deliver(id, Event::Command(Command::Move(to, Extent::Caret)));
       }
       Action::Focus => {
         self.ui.set_focus(Some(id));
@@ -758,8 +801,8 @@ impl<A: App> Runtime<A> {
     }
 
     match ev {
-      Event::Command(Command::InsertTab) => self.ui.focus_next(true),
-      Event::Command(Command::InsertBacktab) => self.ui.focus_next(false),
+      Event::Command(Command::InsertTab) => self.ui.focus_next(FocusDirection::Next),
+      Event::Command(Command::InsertBacktab) => self.ui.focus_next(FocusDirection::Previous),
       _ => false,
     }
   }
@@ -940,7 +983,7 @@ mod tests {
     fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
       self.events += 1;
       if let Event::KeyDown(k) = ev
-        && k.is("c")
+        && k.is(crate::keys::Shortcut::char('c'))
       {
         cx.clipboard().write("copied");
       }
@@ -1102,7 +1145,7 @@ mod tests {
   #[derive(Default)]
   struct Themed {
     pin: bool,
-    seen: Vec<(bool, crate::Color)>,
+    seen: Vec<(ColorScheme, crate::Color)>,
   }
 
   impl App for Themed {
@@ -1113,7 +1156,7 @@ mod tests {
       }
 
       let t = ui.theme();
-      self.seen.push((t.dark, t.accent));
+      self.seen.push((t.scheme, t.accent));
       ui.el(Style::new().grow().bg(t.bg));
     }
   }
@@ -1128,18 +1171,18 @@ mod tests {
     assert!(h.event(Event::Appearance(Appearance::LIGHT)));
     assert!(h.rt.needs_frame());
     assert_eq!(ground(&mut h), px(Theme::PLATES_LIGHT.bg));
-    assert_eq!(h.app().seen.last(), Some(&(false, Theme::PLATES_LIGHT.accent)));
+    assert_eq!(h.app().seen.last(), Some(&(ColorScheme::Light, Theme::PLATES_LIGHT.accent)));
     // The same again is nothing new; an accent comes with it.
     assert!(!h.event(Event::Appearance(Appearance::LIGHT)));
     let red = crate::rgb(0xff3b30);
-    h.event(Event::Appearance(Appearance { dark: true, accent: Some(red) }));
+    h.event(Event::Appearance(Appearance { scheme: ColorScheme::Dark, accent: Some(red) }));
     assert_eq!(ground(&mut h), px(Theme::PLATES_DARK.bg));
-    assert_eq!(h.app().seen.last(), Some(&(true, red)));
+    assert_eq!(h.app().seen.last(), Some(&(ColorScheme::Dark, red)));
     // The app's own theme draws, and stays over the OS's appearance.
     h.app_mut().pin = true;
     h.event(Event::Appearance(Appearance::LIGHT));
     assert_eq!(ground(&mut h), px(MINE.bg));
-    assert_eq!(h.app().seen.last(), Some(&(true, MINE.accent)));
+    assert_eq!(h.app().seen.last(), Some(&(ColorScheme::Dark, MINE.accent)));
     assert_eq!(h.rt.ui.appearance(), Appearance::LIGHT);
   }
 
@@ -1481,13 +1524,16 @@ mod tests {
     item_takes: bool,
   }
 
-  const ITEM_KEYS: &[Binding] = &[keys::bind("cmd+z", Command::Undo)];
+  const ITEM_KEYS: &[Binding] =
+    &[keys::bind(crate::keys::Shortcut::char('z').cmd(), Command::Undo)];
   const PANEL_KEYS: &[Binding] = &[
-    keys::bind("cmd+z", Command::Action("panel undo")),
-    keys::bind("cmd+p", Command::Action("panel")),
+    keys::bind(crate::keys::Shortcut::char('z').cmd(), Command::Action("panel undo")),
+    keys::bind(crate::keys::Shortcut::char('p').cmd(), Command::Action("panel")),
   ];
-  const APP_KEYS: &[Binding] =
-    &[keys::bind("cmd+p", Command::Action("app")), keys::bind("cmd+n", Command::Action("new"))];
+  const APP_KEYS: &[Binding] = &[
+    keys::bind(crate::keys::Shortcut::char('p').cmd(), Command::Action("app")),
+    keys::bind(crate::keys::Shortcut::char('n').cmd(), Command::Action("new")),
+  ];
 
   impl App for Keyed {
     fn keymap(&self) -> &[Binding] {
@@ -1629,7 +1675,7 @@ mod tests {
 
     fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
       if let Event::KeyDown(k) = ev
-        && k.is("a")
+        && k.is(crate::keys::Shortcut::char('a'))
       {
         cx.focus(Some(Id::of("field")));
       }
@@ -1701,7 +1747,7 @@ mod tests {
       fn view(&mut self, ui: &mut Ui) {
         let style = crate::ui::TextStyle::new(crate::Font::ui(20.0), [1.0; 4]);
         self.0 = ui.measure("1,234.5", style);
-        ui.id("t").text("1,234.5", style.nowrap());
+        ui.id("t").text("1,234.5", style.fixed_size());
       }
     }
     let clock = Clock::Virtual(Duration::ZERO);

@@ -25,6 +25,7 @@ use windows_sys::core::{GUID, HRESULT};
 use super::text::{Com, E_NOINTERFACE, IID_IUNKNOWN, call, iid, out};
 use super::{modal, wide, with_window};
 use crate::Event;
+use crate::file_dialog::FileDialogKind;
 
 const IID_FILE_DIALOG: u128 = 0x42f85136_db7e_439c_85f1_e4075d135fc8;
 const IID_SHELL_ITEM: u128 = 0x43826d1e_e718_42ee_bc55_a1e261c37bfe;
@@ -64,7 +65,8 @@ pub(super) fn apply(hwnd: HWND) -> bool {
 
 /// Runs `d` owned by `hwnd`: the path picked, `None` when cancelled.
 fn show(hwnd: HWND, d: &crate::FileDialog) -> Option<PathBuf> {
-  let (clsid, iid) = (if d.save { FileSaveDialog } else { FileOpenDialog }, IID_FILE_DIALOG);
+  let (clsid, iid) =
+    (if d.kind == FileDialogKind::Save { FileSaveDialog } else { FileOpenDialog }, IID_FILE_DIALOG);
   let iid = GUID::from_u128(iid);
   let dialog =
     out(|p| unsafe { CoCreateInstance(&clsid, null_mut(), CLSCTX_INPROC_SERVER, &iid, p) })?;
@@ -86,7 +88,7 @@ fn show(hwnd: HWND, d: &crate::FileDialog) -> Option<PathBuf> {
     unsafe {
       call!(dialog, SET_FILE_TYPES, (u32, *const COMDLG_FILTERSPEC) -> HRESULT; 1, &filter)
     };
-    if d.save {
+    if d.kind == FileDialogKind::Save {
       set(SET_DEFAULT_EXTENSION, ext);
     }
   }

@@ -12,12 +12,19 @@ use std::path::PathBuf;
 
 use crate::Ui;
 
+/// Which panel a [FileDialog] is, as SwiftUI's `fileImporter` and `fileExporter`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FileDialogKind {
+  #[default]
+  Open,
+  Save,
+}
+
 /// An open or a save panel, plain data: `FileDialog::open("Import").types(&["tar"])`,
 /// `FileDialog::save("Export").name("history.tar")`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FileDialog {
-  /// A save panel, else an open one.
-  pub save: bool,
+  pub kind: FileDialogKind,
   pub title: String,
   /// The extensions it takes, without the dot; any file when empty.
   pub types: Vec<String>,
@@ -33,7 +40,7 @@ impl FileDialog {
   }
 
   pub fn save(title: &str) -> Self {
-    Self { save: true, ..Self::open(title) }
+    Self { kind: FileDialogKind::Save, ..Self::open(title) }
   }
 
   pub fn types(self, types: &[&str]) -> Self {

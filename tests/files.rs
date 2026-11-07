@@ -46,7 +46,7 @@ fn save_suggests_a_name_and_a_cancel_comes_back() {
   let mut h = files();
   h.click_id(Id::of(SAVE));
   let asked = h.file_dialog(None).expect("the save panel");
-  assert!(asked.save);
+  assert_eq!(asked.kind, nimbo::FileDialogKind::Save);
   assert_eq!(asked.name.as_deref(), Some("notes.txt"));
   assert_eq!(h.app().picked, Some(None));
 }
