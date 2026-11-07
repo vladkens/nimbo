@@ -29,10 +29,10 @@ impl Ui<'_> {
   /// [crate::Theme::tip_delay], or at once within [crate::Theme::tip_warm] of another tooltip
   /// showing, until it leaves or a button goes down. As macOS places one: its left edge at the
   /// pointer, its top 19 below it, where the pointer was when it showed; moved into the window
-  /// near its edges. Call it each frame after building the target; the tip is
+  /// near its edges. Run for each element with [Ui::help] after the view built it; the tip is
   /// `target.key("tip")`, an overlay that doesn't take the pointer. `text` is the target's
   /// description for assistive technology ([Ui::a11y]), shown or not.
-  pub fn tooltip(&mut self, target: Id, text: &str) {
+  pub(crate) fn tooltip(&mut self, target: Id, text: &str) {
     if let Some(a) = self.a11y_of(target) {
       a.description(text);
     }
@@ -97,7 +97,8 @@ mod tests {
     fn view(&mut self, ui: &mut Ui) {
       ui.help("Saves it").id("save").button("Save");
       let t = ui.theme();
-      ui.help("Errors per 100 words").id("wer").text("WER 4.5%", t.label().dotted());
+      let dotted = t.label().underline(crate::ui::LinePattern::Dot);
+      ui.help("Errors per 100 words").id("wer").text("WER 4.5%", dotted);
       let t = ui.theme();
       ui.help("A box").id("box").row(Style::new().h(px(20.0)), |ui| ui.text("Inside", t.label()));
       let dot =
@@ -139,10 +140,8 @@ mod tests {
 
   impl App for Tipped {
     fn view(&mut self, ui: &mut Ui) {
-      let a = ui.id("a").button("A");
-      ui.tooltip(a.id, "The first");
-      let b = ui.id("b").button("B");
-      ui.tooltip(b.id, "The second");
+      ui.help("The first").id("a").button("A");
+      ui.help("The second").id("b").button("B");
     }
   }
 
@@ -177,11 +176,11 @@ mod tests {
   impl App for Edge {
     fn view(&mut self, ui: &mut Ui) {
       ui.row(crate::ui::Style::new().w(crate::ui::grow()), |ui| {
-        let a = ui.id("a").button("A");
-        ui.tooltip(a.id, "The first");
+        ui.help("The first").id("a").button("A");
         ui.spacer();
-        let b = ui.id("b").button("B");
-        ui.tooltip(b.id, "A tip much wider than what is left of the window at its right");
+        ui.help("A tip much wider than what is left of the window at its right")
+          .id("b")
+          .button("B");
       });
     }
   }
@@ -192,10 +191,9 @@ mod tests {
   impl App for Long {
     fn view(&mut self, ui: &mut Ui) {
       ui.set_theme(crate::ui::Theme::PLATES_LIGHT);
-      let a = ui.id("a").button("A");
       let tip = "What the app shows when it starts. Restoring the last session reopens its \
                  windows where they were.";
-      ui.tooltip(a.id, tip);
+      ui.help(tip).id("a").button("A");
     }
   }
 

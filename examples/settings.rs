@@ -3,14 +3,15 @@
 //! A demo app's settings window in macOS 26 System Settings' look ([nimbo::FormStyle::plates]):
 //! toolbar tabs (General, Appearance, Advanced, About) over pages of grey plates, in a window
 //! 680 wide whose height follows the page. General has switches (one with a warning while it is
-//! on), pop-ups (one with an ⓘ tooltip, one with a description and a separator), a shortcut
-//! recorder with its reset (a warning and an ⓘ in one tooltip while it is the default), a row
-//! disabled by another setting, with a badge after its label, whose ⓘ still shows its tooltip, and
-//! a segmented control; Appearance the look (which applies at once), a slider and a switch with a
-//! long description that wraps beside it; Advanced tiles, badges, a task's progress and buttons,
-//! two of which ask in a modal dialog first, and a footer with the "?"; About the app and its
-//! licenses. Pages fade out under the edges of their scroll area; light or dark and in the accent
-//! the system has.
+//! on), pickers (one with an ⓘ tooltip, one with a description and a divider), a shortcut
+//! recorder with its reset (a warning and an ⓘ in one tooltip while it is the default) under a
+//! section header with a grey line, a row disabled by another setting, with a badge after its
+//! name, whose ⓘ still shows its tooltip, and a segmented control; Appearance the look (which
+//! applies at once), a slider and a switch with a long description that wraps beside it;
+//! Advanced tiles, badges, a section header with a note, a task's progress under its description
+//! and buttons, two of which ask in a modal dialog first, and a footer with the "?"; About the
+//! app and its licenses. Pages fade out under the edges of their scroll area; light or dark and in
+//! the accent the system has.
 //!
 //! `cargo run --release --example settings [-- --shot <file.png>]`: the shot rests the pointer
 //! on the ⓘ of "On launch" until its tooltip shows.
@@ -21,8 +22,8 @@
 use std::time::Duration;
 
 use nimbo::{
-  Align, Answer, App, Appearance, Config, Dialog, FormRow, FormStyle, Hotkey, Icon, Id, Rect,
-  Select, Style, Theme, Tile, Tone, Ui, grow, px,
+  Align, Answer, App, Appearance, ButtonRole, Config, ControlSize, Dialog, FormRow, FormStyle,
+  Hotkey, Icon, Id, Picker, Rect, Section, Style, TextStyle, Theme, Tone, Ui, grow, px,
 };
 
 pub const TABS: &str = "tabs";
@@ -172,30 +173,56 @@ impl Default for Settings {
   }
 }
 
+/// A row's label: `name`, then the row's mark `Id::of(row).key("info")` with its tip: a warning
+/// when there is one, the ⓘ's tip under it, else the ⓘ alone.
+fn marked<'s>(
+  name: &'s str,
+  row: &'static str,
+  warning: Option<&'s str>,
+  info: Option<&'s str>,
+) -> impl FnOnce(&mut Ui, TextStyle) + 's {
+  move |ui: &mut Ui, s: TextStyle| {
+    ui.text(name, s);
+    let mark = Id::of(row).key("info");
+    match (warning, info) {
+      (Some(w), Some(i)) => _ = ui.help(&format!("{w}\n\n{i}")).with_id(mark).warning_button(),
+      (Some(w), None) => _ = ui.help(w).with_id(mark).warning_button(),
+      (None, Some(i)) => _ = ui.help(i).with_id(mark).info_button(),
+      (None, None) => {}
+    }
+  }
+}
+
 impl Settings {
   fn general(&mut self, ui: &mut Ui, fs: &FormStyle) {
     ui.form_section(fs, "Startup", |ui| {
-      let row = FormRow::new("Open at login");
-      let row = if self.login { row.warning(LOGIN_WARNING) } else { row };
+      let warning = self.login.then_some(LOGIN_WARNING);
+      let row = FormRow::new(marked("Open at login", LOGIN_ROW, warning, None));
       ui.id(LOGIN_ROW).form_row(fs, row, |ui| ui.id(LOGIN).toggle(&mut self.login, ""));
-      let row = FormRow::new("On launch").info(TIP_LAUNCH);
-      ui.id(LAUNCH_ROW).form_row(fs, row, |ui| ui.id(LAUNCH).select(&mut self.launch, &LAUNCHES));
+      let row = FormRow::new(marked("On launch", LAUNCH_ROW, None, Some(TIP_LAUNCH)));
+      ui.id(LAUNCH_ROW).form_row(fs, row, |ui| ui.id(LAUNCH).picker(&mut self.launch, &LAUNCHES));
       let row = FormRow::new("Language").caption("Applies the next time the app starts.");
       ui.form_row(fs, row, |ui| {
-        Select::new(&mut self.lang, &LANGS).separators(&[0]).show(ui.id(LANG))
+        let langs = Picker::new(&mut self.lang).options(&LANGS[..1]).divider();
+        langs.options(&LANGS[1..]).show(ui.id(LANG))
       });
     });
-    ui.form_section_sub(fs, "Shortcuts", "Work in every app, while this one runs.", |ui| {
+    let shortcuts = |ui: &mut Ui, s: TextStyle| {
+      ui.col(Style::new().w(grow()).gap(fs.subtitle_gap), |ui| {
+        ui.text("Shortcuts", s);
+        ui.text("Work in every app, while this one runs.", fs.subtitle);
+      });
+    };
+    ui.form_section(fs, Section::new(shortcuts), |ui| {
       let default = Hotkey::parse(DEFAULT_HOTKEY).ok();
-      let row = FormRow::new("Show the app").info(TIP_HOTKEY);
-      let row = if self.hotkey == default { row.warning(HOTKEY_WARNING) } else { row };
+      let warning = (self.hotkey == default).then_some(HOTKEY_WARNING);
+      let row = FormRow::new(marked("Show the app", HOTKEY_ROW, warning, Some(TIP_HOTKEY)));
       ui.id(HOTKEY_ROW).form_row(fs, row, |ui| {
         ui.id(HOTKEY).shortcut(&mut self.hotkey);
         // An icon names itself to assistive technology only by a label.
         let ui = ui.disabled(self.hotkey == default).a11y_label("Reset");
-        let r = ui.id(RESET).icon_button(Icon::RESET);
-        ui.tooltip(r.id, "Back to the default shortcut");
-        if r.clicked {
+        let ui = ui.help("Back to the default shortcut");
+        if ui.id(RESET).icon_button(Icon::RESET).clicked {
           self.hotkey = default;
         }
       });
@@ -203,9 +230,14 @@ impl Settings {
     ui.form_section(fs, "Updates", |ui| {
       let row = FormRow::new("Check for updates automatically");
       ui.form_row(fs, row, |ui| ui.id(UPDATES).toggle(&mut self.updates, ""));
-      let row = FormRow::new("Download them in the background").info(TIP_DOWNLOAD);
-      let row = row.badges(&[("Beta", Tone::Neutral)]).disabled(!self.updates);
-      ui.id(DOWNLOAD_ROW).form_row(fs, row, |ui| ui.id(DOWNLOAD).toggle(&mut self.download, ""));
+      let label = |ui: &mut Ui, s: TextStyle| {
+        ui.text("Download them in the background", s);
+        ui.control_size(ControlSize::Small).badge("Beta", Tone::Neutral);
+        ui.help(TIP_DOWNLOAD).with_id(Id::of(DOWNLOAD_ROW).key("info")).info_button();
+      };
+      ui.disabled(!self.updates)
+        .id(DOWNLOAD_ROW)
+        .form_row(fs, FormRow::new(label), |ui| ui.id(DOWNLOAD).toggle(&mut self.download, ""));
       let channels = [(Channel::Stable, "Stable"), (Channel::Beta, "Beta")];
       ui.form_row(fs, FormRow::new("Channel"), |ui| {
         ui.id(CHANNEL).segmented(&mut self.channel, &channels)
@@ -233,45 +265,37 @@ impl Settings {
 
   fn advanced(&mut self, ui: &mut Ui, fs: &FormStyle) {
     ui.form_section(fs, "Account", |ui| {
-      let row = FormRow::new("Alex Doe").caption("alex@example.com").tile(Tile::Text("AD"));
+      let row = FormRow::new("Alex Doe").caption("alex@example.com").tile("AD");
       ui.form_row(fs, row, |ui| ui.button("Sign Out…"));
     });
     let used = format!("{} MB used", self.cache + 512);
-    ui.form_section_with(
-      fs,
-      "Storage",
-      |ui| ui.text(&used, fs.note),
-      |ui| {
-        let row = FormRow::new("Data folder")
-          .caption("~/Library/Application Support/Example")
-          .tile(Tile::Icon(Icon::FOLDER))
-          .one_line();
-        ui.form_row(fs, row, |ui| {
-          ui.button("Change…");
-          ui.button("Show");
-        });
-        let caption = format!("{} MB of thumbnails and previews", self.cache);
-        let row = FormRow::new("Cache").caption(&caption).tile(Tile::Icon(Icon::TRASH));
-        ui.form_row(fs, row, |ui| {
-          if ui.disabled(self.cache == 0).id(CLEAR_CACHE).button("Clear…").clicked {
-            self.ask = Some(Ask::ClearCache);
-          }
-        });
-        let row = FormRow::new("Index")
-          .caption("Indexing 4,210 of 10,000 files")
-          .tile(Tile::Icon(Icon::DOC));
-        ui.form_row_with(
-          fs,
-          row,
-          // Clear of the description's descenders.
-          |ui| {
-            _ = ui
-              .col(Style::new().w(grow()).pads([4.0, 0.0, 0.0, 0.0]), |ui| ui.progress(Some(0.42)))
-          },
-          |ui| ui.badge("Running", Tone::Accent),
-        );
-      },
-    );
+    let storage = |ui: &mut Ui, s: TextStyle| {
+      ui.text("Storage", s);
+      ui.spacer();
+      ui.text(&used, fs.note);
+    };
+    ui.form_section(fs, Section::new(storage), |ui| {
+      let folder = |ui: &mut Ui, s: TextStyle| ui.text("Data folder", s.ellipsis());
+      let row = FormRow::new(folder).caption("~/Library/Application Support/Example");
+      ui.form_row(fs, row.tile(Icon::FOLDER), |ui| {
+        ui.button("Change…");
+        ui.button("Show");
+      });
+      let caption = format!("{} MB of thumbnails and previews", self.cache);
+      let row = FormRow::new("Cache").caption(&caption).tile(Icon::TRASH);
+      ui.form_row(fs, row, |ui| {
+        if ui.disabled(self.cache == 0).id(CLEAR_CACHE).button("Clear…").clicked {
+          self.ask = Some(Ask::ClearCache);
+        }
+      });
+      // The task's progress under its text, clear of the descenders.
+      let index = |ui: &mut Ui, s: TextStyle| {
+        ui.text("Indexing 4,210 of 10,000 files", s);
+        ui.col(Style::new().w(grow()).pads([4.0, 0.0, 0.0, 0.0]), |ui| ui.progress(Some(0.42)));
+      };
+      let row = FormRow::new("Index").caption(index).tile(Icon::DOC);
+      ui.form_row(fs, row, |ui| ui.badge("Running", Tone::Accent));
+    });
     ui.form_section(fs, "Diagnostics", |ui| {
       ui.form_row(fs, FormRow::new("Send crash reports"), |ui| {
         match self.reports {
@@ -281,14 +305,13 @@ impl Settings {
 
         ui.toggle(&mut self.reports, "")
       });
-      ui.form_row(fs, FormRow::new("Logging"), |ui| ui.select(&mut self.logging, &LOGGING));
+      ui.form_row(fs, FormRow::new("Logging"), |ui| ui.picker(&mut self.logging, &LOGGING));
     });
-    let help = ui.id(HELP).form_footer(fs, |ui| {
+    ui.help("Help on these settings").id(HELP).form_footer(fs, |ui| {
       if ui.id(RESET_ALL).button("Reset All…").clicked {
         self.ask = Some(Ask::ResetAll);
       }
     });
-    ui.tooltip(help.id, "Help on these settings");
   }
 
   /// About's head above its page: the icon, the name, the version, a line and a link.
@@ -306,7 +329,7 @@ impl Settings {
       ui.el(Style::new().h(px(8.0)));
       ui.text("A demo of nimbo's settings form, dialog and widgets.", t.label());
       ui.el(Style::new().h(px(10.0)));
-      ui.link("github.com/vladkens/nimbo", t.label().color(t.link));
+      ui.link("github.com/vladkens/nimbo");
     });
   }
 
@@ -343,10 +366,10 @@ impl Settings {
       Ask::ClearCache => Dialog::new("Clear the cache?")
         .message("Thumbnails and previews are made again as you open files.")
         .icon(Icon::TRASH)
-        .destructive("Clear"),
+        .button("Clear", ButtonRole::Destructive),
       Ask::ResetAll => Dialog::new("Reset all settings?")
         .message("Every setting goes back to how it was when the app was installed.")
-        .action("Reset"),
+        .button("Reset", ButtonRole::Confirm),
     };
 
     let mut open = true;

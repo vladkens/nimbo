@@ -36,6 +36,7 @@ use std::collections::HashMap;
 use std::fmt::{self, Display};
 use std::hash::BuildHasherDefault;
 use std::iter::successors;
+use std::ops::Range;
 
 use super::{Focus, Id, Kind, Tree, Ui, UiState};
 use crate::app::Event;
@@ -194,8 +195,8 @@ pub(crate) struct Records {
   text: String,
   /// The name for the next record ([Ui::a11y_label]).
   next: Option<Span>,
-  /// The records that took a form row's label and caption, those text elements and the names.
-  forms: Vec<(usize, [Id; 2], [Span; 2])>,
+  /// The records that took a form row's label and caption ([FormNames]).
+  forms: Vec<Form>,
   /// While the first has the focus, the second shows focused ([Ui::a11y_focus]).
   focus: Option<(Id, Id)>,
 }
@@ -270,11 +271,23 @@ impl Access<'_> {
 }
 
 /// A form row's label and caption, for the first control recorded in it with no name, which
-/// takes them from the slot ([Ui::form_names]).
+/// takes them from the slot ([Ui::form_names]): their plain texts as its name and description,
+/// those text elements, and the nodes the label and caption span.
 pub(crate) struct FormNames {
   name: Span,
   description: Span,
-  texts: [Id; 2],
+  texts: Vec<Id>,
+  parts: Range<u32>,
+}
+
+/// A record that took a form row's names ([FormNames]): its place in the list, the texts it
+/// took, the names, and the nodes of the label and caption, whose other records are read after
+/// it.
+struct Form {
+  k: usize,
+  texts: Vec<Id>,
+  names: [Span; 2],
+  parts: Range<u32>,
 }
 
 impl Ui<'_> {
@@ -293,10 +306,22 @@ impl Ui<'_> {
     if unnamed && let Some(f) = self.set_slot::<FormNames>(None) {
       let recs = &mut self.st.tree.a11y;
       (recs.list[i].1.name, recs.list[i].1.description) = (f.name, f.description);
-      recs.forms.push((i, f.texts, [f.name, f.description]));
+      let (texts, names, parts) = (f.texts, [f.name, f.description], f.parts);
+      recs.forms.push(Form { k: i, texts, names, parts });
     }
 
     Access { recs: &mut self.st.tree.a11y, i }
+  }
+
+  /// [Ui::a11y] named `name` unless [Ui::a11y_label] named it: an element that is never a form
+  /// row's control, though it may be built among them (a badge).
+  pub(crate) fn a11y_named(&mut self, id: Id, role: Role, name: &str) -> Access<'_> {
+    let recs = &mut self.st.tree.a11y;
+    if recs.next.is_none() {
+      recs.next = Some(put(&mut recs.text, name));
+    }
+
+    self.a11y(id, role)
   }
 
   /// The record of `id` this frame, to refine whatever its role: a tooltip's description, a
@@ -330,23 +355,62 @@ impl Ui<'_> {
     self.st.tree.a11y.focus = Some((held, shown));
   }
 
-  /// Records a form row a click selects (`id`) as a row named by its label and caption
-  /// (`text`), which are then not read, as [Ui::form_names] gives them.
-  pub(crate) fn a11y_row(&mut self, id: Id, text: [&str; 2]) -> Access<'_> {
-    let outer = self.form_names(id, text);
-    self.a11y(id, Role::Row);
-    self.set_slot(outer);
+  /// Records `id` as a form row a click selects, as `role`, named by the row's names in the slot
+  /// ([Ui::form_names]) whatever named it before (its behaviour's record).
+  pub(crate) fn a11y_row(&mut self, id: Id, role: Role) -> Access<'_> {
+    self.a11y(id, role);
+    if let Some(f) = self.set_slot::<FormNames>(None) {
+      let recs = &mut self.st.tree.a11y;
+      let k = recs.index[&id];
+      (recs.list[k].1.name, recs.list[k].1.description) = (f.name, f.description);
+      let (texts, names, parts) = (f.texts, [f.name, f.description], f.parts);
+      recs.forms.push(Form { k, texts, names, parts });
+    }
+
     self.a11y_of(id).unwrap()
   }
 
-  /// Gives a form row's label and caption (`text`) to the first control recorded with no name
-  /// from now on, whose text elements (`row.key("label")`, `row.key("caption")`) are then not
-  /// read; returns the names it replaces, for [Ui::set_slot] after the row's controls.
-  pub(crate) fn form_names(&mut self, row: Id, text: [&str; 2]) -> Option<FormNames> {
+  /// Gives the plain texts of a form row's label and caption, the nodes `label` and `caption`
+  /// of the tree being built, to the first record made with no name from now on, as its name
+  /// and description; those text elements are then not read. Plain: in no record and no element
+  /// with [Ui::help], so a badge or a term with a tooltip is read on its own. Returns the names
+  /// it replaces, for [Ui::set_slot] after the row's controls.
+  pub(crate) fn form_names(&mut self, label: Range<u32>, caption: Range<u32>) -> Option<FormNames> {
+    let (name, mut texts) = self.plain_text(label.clone());
+    let (description, more) = self.plain_text(caption.clone());
+    texts.extend(more);
     let recs = &mut self.st.tree.a11y;
-    let (name, description) = (put(&mut recs.text, text[0]), put(&mut recs.text, text[1]));
-    let texts = [row.key("label"), row.key("caption")];
-    self.set_slot(Some(FormNames { name, description, texts }))
+    let (name, description) = (put(&mut recs.text, &name), put(&mut recs.text, &description));
+    let parts = label.start..caption.end;
+    self.set_slot(Some(FormNames { name, description, texts, parts }))
+  }
+
+  /// The texts among nodes `r` of the tree being built in no record and no element with
+  /// [Ui::help], joined by spaces, and their ids.
+  fn plain_text(&self, r: Range<u32>) -> (String, Vec<Id>) {
+    let (t, recs) = (&self.st.tree, &self.st.tree.a11y);
+    let (mut out, mut ids, mut k) = (String::new(), Vec::new(), r.start);
+    while k < r.end {
+      let n = &t.nodes[k as usize];
+      if recs.index.contains_key(&n.id) || self.helps.iter().any(|h| h.0 == k) {
+        k = n.end;
+        continue;
+      }
+
+      if let Kind::Text { range, .. } = n.kind {
+        let s = t.str(range.0, range.1).trim();
+        if !out.is_empty() && !s.is_empty() {
+          out.push(' ');
+        }
+
+        out.push_str(s);
+        ids.push(n.id);
+      }
+
+      k += 1;
+    }
+
+    (out, ids)
   }
 }
 
@@ -455,16 +519,62 @@ impl UiState {
     // A form row's label and caption name its control and are not read, unless it has text of
     // its own (a button's label, not counting them: a row a click selects holds them): then
     // they are read, and it is named by its text, or by what named it since (`own`, the names
-    // it drops).
+    // it drops). Named by them, a control after them has the label's and caption's other records
+    // (badges, a term's tip) read after it: name, then tags (`later`, the nodes to move and where
+    // to).
     let mut own = vec![[(0, 0); 2]; recs.list.len()];
-    for &(k, texts, names) in &recs.forms {
-      let (id, p) = recs.list[k];
-      let named = |i: u32| titled(&p) && !inner_text(t, &at, i as usize, &texts).is_empty();
-      let mine = t.find(id).is_some_and(named);
-      own[k] = if mine { names } else { own[k] };
-      for i in texts.iter().filter(|_| !mine).filter_map(|&id| t.find(id)) {
+    let mut later: Vec<(u32, u32)> = Vec::new();
+    for f in &recs.forms {
+      let (id, p) = recs.list[f.k];
+      let named = |i: u32| titled(&p) && !inner_text(t, &at, i as usize, &f.texts).is_empty();
+      let node = t.find(id);
+      let mine = node.is_some_and(named);
+      own[f.k] = if mine { f.names } else { own[f.k] };
+      if mine {
+        continue;
+      }
+
+      for i in f.texts.iter().filter_map(|&id| t.find(id)) {
         if at[i as usize] == NONE {
           at[i as usize] = HIDDEN;
+        }
+      }
+
+      let Some(c) = node.filter(|&c| c >= f.parts.end) else { continue };
+      let mut k = f.parts.start;
+      while k < f.parts.end {
+        let n = &t.nodes[k as usize];
+        if at[k as usize] < HIDDEN {
+          later.push((k, t.nodes[c as usize].end));
+        }
+
+        k = if at[k as usize] < HIDDEN { n.end } else { k + 1 };
+      }
+    }
+
+    // The nodes in the order they are read: those moved, each with what is inside it, where
+    // they go.
+    later.sort_unstable();
+    let mut order: Vec<u32> = Vec::with_capacity(t.nodes.len());
+    let (mut i, mut moved) = (0u32, later.iter().peekable());
+    let n = t.nodes.len() as u32;
+    while i <= n {
+      for &(from, _) in later.iter().filter(|m| m.1 == i) {
+        order.extend(from..t.nodes[from as usize].end);
+      }
+
+      if i == n {
+        break;
+      }
+
+      match moved.peek() {
+        Some(&&(from, _)) if from == i => {
+          moved.next();
+          i = t.nodes[i as usize].end;
+        }
+        _ => {
+          order.push(i);
+          i += 1;
         }
       }
     }
@@ -482,7 +592,8 @@ impl UiState {
     // Where each node's children show, and the recorded nodes open around the one walked.
     let (mut out, mut clip) = (A11yTree::default(), vec![Rect::default(); t.nodes.len()]);
     let (mut open, mut layer): (Vec<Open>, _) = (Vec::new(), vec![0u16; t.nodes.len()]);
-    for (i, n) in t.nodes.iter().enumerate() {
+    for i in order.into_iter().map(|i| i as usize) {
+      let n = &t.nodes[i];
       while open.last().is_some_and(|o| o.0 as usize <= i) {
         open.pop();
       }

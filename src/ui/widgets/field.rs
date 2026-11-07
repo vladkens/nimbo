@@ -8,7 +8,7 @@
 //! let r = ui.id("name").field(&mut self.name, "Your name");
 //! if r.submitted { self.save() }
 //! ui.id("key").password_field(&mut self.key, "API key");
-//! ui.text_field(Id::of("notes"), &mut self.notes, &t.field().multiline().frame(NOTES));
+//! ui.id("notes").text_field(&mut self.notes, &t.field().multiline().frame(NOTES));
 //! ui.id("about").selectable(ABOUT);
 //! ```
 //!
@@ -28,14 +28,15 @@ use crate::keys::{Command, EDIT_KEYS, SELECT_KEYS};
 use crate::scene::{Color, Point, Rect, alpha};
 use crate::text::edit::{Editor, graphemes, range_from_utf16, range_to_utf16, to_utf16, utf16_len};
 use crate::ui::behavior::{DOT, FieldState};
-use crate::ui::{
-  Align, FieldBehavior, Id, Response, Style, TextLayout, TextStyle, Ui, UiState, grow,
-};
+use crate::ui::{Align, FieldBehavior, Response, Style, TextLayout, TextStyle, Ui, UiState, grow};
 
 impl Ui<'_> {
-  /// A text field over `text` in `style`'s look: one line, many ([FieldStyle::multiline]) or a
-  /// password ([FieldStyle::password]). [Ui::disabled] dims it and reads no input.
-  pub fn text_field(&mut self, id: Id, text: &mut String, style: &FieldStyle) -> Response {
+  /// A text field over `text` in `style`'s look, as SwiftUI's `TextField` with a
+  /// `textFieldStyle`: one line, many ([FieldStyle::multiline]) or a password
+  /// ([FieldStyle::password]); its id from [Ui::id] or [Ui::key], else its place.
+  /// [Ui::disabled] dims it and reads no input.
+  pub fn text_field(&mut self, text: &mut String, style: &FieldStyle) -> Response {
+    let id = self.take_id();
     let b = self.text_field_behavior(id, text, style.multiline, style.password);
     self.field_box(&b, style)
   }
@@ -69,25 +70,26 @@ impl Ui<'_> {
     Response { hovered: b.hovered, changed, submitted, cancelled, blurred, ..r }
   }
 
-  /// A single-line [Ui::text_field] in the theme's look, `hint` shown while it is empty; its id
-  /// from [Ui::id] or [Ui::key], else its place.
+  /// A single-line [Ui::text_field] in the theme's look, `hint` shown while it is empty:
+  /// SwiftUI's `TextField(hint, text:)`.
   pub fn field(&mut self, text: &mut String, hint: &'static str) -> Response {
-    let id = self.take_id();
     let style = self.theme().field().hint(hint);
-    self.text_field(id, text, &style)
+    self.text_field(text, &style)
   }
 
-  /// [Ui::field] for a password: a dot per character, no input method, nothing copied.
+  /// [Ui::field] for a password, as SwiftUI's `SecureField`: a dot per character, no input
+  /// method, nothing copied.
   pub fn password_field(&mut self, text: &mut String, hint: &'static str) -> Response {
-    let id = self.take_id();
     let style = self.theme().field().password().hint(hint);
-    self.text_field(id, text, &style)
+    self.text_field(text, &style)
   }
 
-  /// Text the user can select and copy, in `style`'s text and selection colour (its box is
-  /// not drawn): an I-beam over it, focus without a ring for the keys, its selection dimmed
-  /// when the focus goes. [Ui::disabled] makes it plain text.
-  pub fn selectable_text(&mut self, id: Id, text: &str, style: &FieldStyle) -> Response {
+  /// Text the user can select and copy, as SwiftUI's `.textSelection(.enabled)` on a `Text`, in
+  /// `style`'s text and selection colour (its box is not drawn): an I-beam over it, focus
+  /// without a ring for the keys, its selection dimmed when the focus goes; its id from
+  /// [Ui::id] or [Ui::key], else its place. [Ui::disabled] makes it plain text.
+  pub fn selectable_text(&mut self, text: &str, style: &FieldStyle) -> Response {
+    let id = self.take_id();
     let b = self.selectable_behavior(id, text);
     self.keymap(SELECT_KEYS).field_text(&b, style, b.style(Style::new()));
     self.edit_menu(&b);
@@ -95,12 +97,11 @@ impl Ui<'_> {
     Response { focused: b.focused, ..r }
   }
 
-  /// [Ui::selectable_text] in the theme's text, wrapping; its id from [Ui::id] or [Ui::key],
-  /// else its place.
+  /// [Ui::selectable_text] in the theme's text, wrapping.
   pub fn selectable(&mut self, text: &str) -> Response {
-    let (id, t) = (self.take_id(), self.theme());
+    let t = self.theme();
     let style = FieldStyle { text: TextStyle::new(t.font, t.text), ..t.field() };
-    self.selectable_text(id, text, &style)
+    self.selectable_text(text, &style)
   }
 
   /// The edit menu of a field or selectable text over its behaviour `b`, at the secondary click

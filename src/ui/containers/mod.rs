@@ -3,7 +3,7 @@
 //! Containers drawn from the theme, each its headless behaviour plus its look: the scroll area
 //! with overlay scrollbars and edge fades ([scroll]), virtualized lists ([list]) and columns
 //! ([lazy]), menus
-//! ([menu]) and the pop-up button ([popup]), tabs ([tabs]) and a resizable split ([split]).
+//! ([menu]) and the picker ([popup]), tabs ([tabs]) and a resizable split ([split]).
 //! They plug into the [super::Ui] as add-ons: a menu tells its items about itself through
 //! [super::Ui::slot].
 
@@ -17,6 +17,6 @@ pub mod tabs;
 
 pub use list::{List, ListResponse, Row, Selection};
 pub use menu::TypeSelect;
-pub use popup::PopUp;
+pub use popup::Picker;
 pub use split::{Split, SplitBehavior};
 pub use tabs::Tabs;

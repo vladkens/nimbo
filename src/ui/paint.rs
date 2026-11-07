@@ -263,20 +263,35 @@ fn caret(t: &Tree, i: usize, e: &Edit, text: Color, baseline: f32, alpha: f32, f
   }
 }
 
-/// A strikethrough `w` wide from `x` over a line with its baseline at `y` ([TextStyle::strike]):
-/// at half the x-height (about 0.53 em in SF Pro), a point thick up to 14 points; and its dots
-/// ([TextStyle::dotted]), as thick and as far apart, a sixth of an em under the baseline. Each
-/// on whole pixels, so dots are even at any scale and offset.
+/// The lines of a text's line `w` wide from `x` with its baseline at `y`: its strikethrough
+/// ([TextStyle::strikethrough]) at half the x-height (about 0.53 em in SF Pro) and its underline
+/// ([TextStyle::underline]) a sixth of an em under the baseline, a point thick up to 14 points,
+/// in their patterns ([LinePattern]). Each mark on whole pixels, so dots are even at any scale
+/// and offset.
 fn rule(x: f32, y: f32, w: f32, s: TextStyle, color: Color, f: &mut Frame) {
   let sc = f.scale;
   let snap = move |v: f32| (v * sc).round() / sc;
   let (size, h) = (s.font.size, snap((s.font.size / 14.0).max(1.0)));
-  for (on, dots, dy) in [(s.strike, false, -size * 0.27 - h / 2.0), (s.dotted, true, size / 6.0)] {
-    // Dashes every `step`, half as wide: the whole line once, or dots.
-    let step = 2.0 * if dots { h } else { w };
-    let n = if on && w > 0.0 { (w / step).ceil() as usize } else { 0 };
-    for i in 0..n {
-      f.rect(Rect::new(snap(x + i as f32 * step), snap(y + dy), step / 2.0, h), color, 0.0);
+  for (p, dy) in [(s.strikethrough, -size * 0.27 - h / 2.0), (s.underline, size / 6.0)] {
+    let Some(p) = p.filter(|_| w > 0.0) else { continue };
+    let marks = p.marks();
+    if marks.is_empty() {
+      f.rect(Rect::new(snap(x), snap(y + dy), w, h), color, 0.0);
+      continue;
+    }
+
+    // Marks and gaps in turn, a mark at every even place of the pattern, until the line ends.
+    let (mut at, mut k) = (0.0, 0);
+    while at < w {
+      // A dash ends with the line; a dot stays whole.
+      let m = marks[k % marks.len()];
+      let len = m * h;
+      if k % 2 == 0 {
+        let cut = if m > 1.0 { len.min(w - at) } else { len };
+        f.rect(Rect::new(snap(x + at), snap(y + dy), cut, h), color, 0.0);
+      }
+
+      (at, k) = (at + len, k + 1);
     }
   }
 }
@@ -303,7 +318,7 @@ mod tests {
   use super::*;
   use crate::scene::{Images, Scene, Size};
   use crate::text::{Font, TextSystem};
-  use crate::ui::{Float, Id, Sys, TextStyle, Ui, UiState, px};
+  use crate::ui::{Float, Id, LinePattern, Sys, TextStyle, Ui, UiState, px};
 
   #[test]
   fn paints_tree_then_overlays() {
@@ -465,7 +480,7 @@ mod tests {
     ui.col(Style::new().w(px(60.0)), |ui| {
       ui.id("plain").text("Buy milk", plain);
       // Wraps to two lines at 60 points.
-      ui.id("done").text("Buy milk and eggs", plain.strike());
+      ui.id("done").text("Buy milk and eggs", plain.strikethrough(LinePattern::Solid));
     });
     let mut sys = Sys { text: &mut text, images: &images, scale };
     ui.layout(&mut sys, scale);
@@ -501,7 +516,7 @@ mod tests {
       (Scene::default(), TextSystem::new(scale), Images::default());
     let plain = TextStyle::new(Font::ui(11.0), [1.0, 0.0, 0.0, 1.0]);
     let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
-    ui.col(Style::new(), |ui| ui.id("wer").text("WER 4.5%", plain.dotted()));
+    ui.col(Style::new(), |ui| ui.id("wer").text("WER 4.5%", plain.underline(LinePattern::Dot)));
     let mut sys = Sys { text: &mut text, images: &images, scale };
     ui.layout(&mut sys, scale);
     let mut f = Frame {
@@ -530,6 +545,45 @@ mod tests {
     assert!(quads.last().unwrap().rect.x < wer.rect.x + wer.rect.w);
   }
 
+  /// Each pattern's marks and gaps in line thicknesses, at 1×: a dash three dots long, a gap a
+  /// dot, repeating until the line ends.
+  #[test]
+  fn line_patterns_alternate_marks_and_gaps() {
+    let size = Size::new(300.0, 60.0);
+    let marks = |p: LinePattern| {
+      let (mut scene, mut text, mut images) =
+        (Scene::default(), TextSystem::new(1.0), Images::default());
+      let s = TextStyle::new(Font::ui(13.0), [1.0, 0.0, 0.0, 1.0]).underline(p);
+      let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
+      ui.col(Style::new(), |ui| ui.text("Patterned text", s));
+      let mut sys = Sys { text: &mut text, images: &images, scale: 1.0 };
+      ui.layout(&mut sys, 1.0);
+      let mut f = Frame {
+        size,
+        scale: 1.0,
+        mouse: None,
+        now: Duration::ZERO,
+        scene: &mut scene,
+        text: &mut text,
+        images: &mut images,
+        animate: false,
+      };
+      ui.paint(&mut f);
+      let q: Vec<(f32, f32)> =
+        scene.layers()[0].quads.iter().map(|q| (q.rect.x, q.rect.w)).collect();
+      q
+    };
+    let widths = |p| marks(p).iter().take(6).map(|q| q.1).collect::<Vec<_>>();
+    assert_eq!(marks(LinePattern::Solid).len(), 1);
+    assert_eq!(widths(LinePattern::Dot), [1.0; 6]);
+    assert_eq!(widths(LinePattern::Dash), [3.0; 6]);
+    assert_eq!(widths(LinePattern::DashDot), [3.0, 1.0, 3.0, 1.0, 3.0, 1.0]);
+    assert_eq!(widths(LinePattern::DashDotDot), [3.0, 1.0, 1.0, 3.0, 1.0, 1.0]);
+    // A dot's gap after a dash.
+    let dd = marks(LinePattern::DashDot);
+    assert_eq!(dd[1].0 - dd[0].0, 4.0);
+  }
+
   /// At 1.5× from a fractional x, struck and dotted: the line once, the dots on whole pixels,
   /// as wide and as far apart in each.
   #[test]
@@ -537,7 +591,9 @@ mod tests {
     let (size, scale) = (Size::new(200.0, 100.0), 1.5);
     let (mut scene, mut text, mut images) =
       (Scene::default(), TextSystem::new(scale), Images::default());
-    let both = TextStyle::new(Font::ui(11.0), [1.0, 0.0, 0.0, 1.0]).dotted().strike();
+    let both = TextStyle::new(Font::ui(11.0), [1.0, 0.0, 0.0, 1.0])
+      .underline(LinePattern::Dot)
+      .strikethrough(LinePattern::Solid);
     let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
     ui.row(Style::new().pads([0.0, 0.0, 0.0, 10.3]), |ui| ui.id("t").text("WER 4.5%", both));
     let mut sys = Sys { text: &mut text, images: &images, scale };

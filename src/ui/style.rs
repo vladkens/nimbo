@@ -386,26 +386,54 @@ pub struct TextStyle {
   pub ellipsis: bool,
   /// Distance between baselines in points; 0 takes the font's.
   pub line_h: f32,
-  /// A line through the middle of the lowercase letters, in the text's colour (done items).
-  pub strike: bool,
-  /// A row of dots under each line, in the text's colour: a term with more on hover, SwiftUI's
-  /// `underline(pattern: .dot)`.
-  pub dotted: bool,
+  /// A line under each laid-out line, in the text's colour ([TextStyle::underline]).
+  pub underline: Option<LinePattern>,
+  /// A line through the middle of the lowercase letters ([TextStyle::strikethrough]).
+  pub strikethrough: Option<LinePattern>,
+}
+
+/// How a text's line is drawn ([TextStyle::underline], [TextStyle::strikethrough]), as
+/// SwiftUI's `Text.LineStyle.Pattern`: dots and dashes as long as the line is thick, and as far
+/// apart, a dash three dots long.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinePattern {
+  Solid,
+  /// A term with more on hover ([crate::Ui::help]).
+  Dot,
+  Dash,
+  DashDot,
+  DashDotDot,
+}
+
+impl LinePattern {
+  /// The pattern's marks and gaps in line thicknesses, from its start; empty for a solid line.
+  pub(crate) const fn marks(self) -> &'static [f32] {
+    match self {
+      LinePattern::Solid => &[],
+      LinePattern::Dot => &[1.0, 1.0],
+      LinePattern::Dash => &[3.0, 1.0],
+      LinePattern::DashDot => &[3.0, 1.0, 1.0, 1.0],
+      LinePattern::DashDotDot => &[3.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    }
+  }
 }
 
 impl TextStyle {
   pub const fn new(font: Font, color: Color) -> Self {
-    Self { font, color, wrap: true, ellipsis: false, line_h: 0.0, strike: false, dotted: false }
+    let (underline, strikethrough) = (None, None);
+    Self { font, color, wrap: true, ellipsis: false, line_h: 0.0, underline, strikethrough }
   }
 
-  /// Struck through: a line over each laid-out line of the text.
-  pub const fn strike(self) -> Self {
-    Self { strike: true, ..self }
+  /// A line under the text in `pattern`, as SwiftUI's `Text.underline(pattern:)`: a sixth of an
+  /// em under the baseline.
+  pub const fn underline(self, pattern: LinePattern) -> Self {
+    Self { underline: Some(pattern), ..self }
   }
 
-  /// Underlined with dots ([TextStyle::dotted]).
-  pub const fn dotted(self) -> Self {
-    Self { dotted: true, ..self }
+  /// A line through the text in `pattern` (done items), as SwiftUI's
+  /// `Text.strikethrough(pattern:)`: at half the x-height.
+  pub const fn strikethrough(self, pattern: LinePattern) -> Self {
+    Self { strikethrough: Some(pattern), ..self }
   }
 
   pub const fn color(self, color: Color) -> Self {
@@ -420,7 +448,8 @@ impl TextStyle {
     Self { wrap: false, ..self }
   }
 
-  /// One line, cut with "…" when it doesn't fit (labels, tabs, list rows).
+  /// One line, cut with "…" at its end when it doesn't fit (labels, tabs, list rows), as
+  /// SwiftUI's `.lineLimit(1)` with `.truncationMode(.tail)`.
   pub const fn ellipsis(self) -> Self {
     Self { wrap: false, ellipsis: true, ..self }
   }

@@ -11,7 +11,7 @@
 // A Windows app, not a console one: no terminal opens with its window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use nimbo::{App, Button, Config, Font, Id, Style, TextStyle, Ui, Variant, Weight};
+use nimbo::{App, Button, Config, ControlSize, Font, Id, Style, TextStyle, Ui, Variant, Weight};
 
 #[derive(Default)]
 pub struct Counter {
@@ -43,7 +43,8 @@ impl App for Counter {
   fn view(&mut self, ui: &mut Ui) {
     let t = ui.theme();
     let count = TextStyle::new(Font::ui(64.0).weight(Weight::Semibold), t.text).nowrap();
-    let big = t.button(Variant::Normal).height(36.0).min_w(64.0).font(Font::ui(22.0));
+    let big =
+      t.button(Variant::Normal, ControlSize::Regular).height(36.0).min_w(64.0).font(Font::ui(22.0));
     ui.col(Style::new().grow().center().gap(16.0).bg(t.bg), |ui| {
       ui.text("COUNTER", t.section());
       ui.id(COUNT_ID).text(self.count, count);

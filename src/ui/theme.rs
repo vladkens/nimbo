@@ -6,9 +6,9 @@
 //!
 //! An app changes the look in three steps, from the least work to the most:
 //! - a variant where the widget has one: `Button::new("Save").primary()`;
-//! - a style derived from the theme, changed for one widget: `t.button(Variant::Normal)
-//!   .height(36.0)` given to [super::Button::style], `t.field().hint("Search")` to
-//!   [super::Ui::text_field];
+//! - a style derived from the theme, changed for one widget: `t.button(Variant::Normal,
+//!   ControlSize::Regular).height(36.0)` given to [super::Button::style],
+//!   `t.field().hint("Search")` to [super::Ui::text_field];
 //! - its own theme: `const MINE: Theme = Theme { accent: rgb(0xe06c75), ..Theme::PLATES_DARK }` and
 //!   `ui.set_theme(MINE)`.
 //!
@@ -156,7 +156,7 @@ pub struct Sizes {
   pub menu_edge: f32,
   /// A check box's box.
   pub check: f32,
-  /// A switch in rows ([ControlSize::Medium]) and the regular one ([ControlSize::Large]: a
+  /// A switch in rows ([ControlSize::Regular]) and the large one ([ControlSize::Large]: a
   /// header row's, by a big icon).
   pub switch: SwitchSize,
   pub switch_large: SwitchSize,
@@ -200,15 +200,15 @@ impl Sizes {
   };
 }
 
-/// How big a control is ([super::Button::small], [Theme::button_sized]): its height, font and
-/// padding.
+/// How big a control is, as SwiftUI's `ControlSize` ([crate::Ui::control_size]): a button's
+/// height, font and padding ([Theme::button]), a switch's track, a badge's pill, a spinner.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ControlSize {
   /// [Sizes::small_h] high in the small font: dense rows, inline actions.
   Small,
   /// [Sizes::control_h] high in the body font.
   #[default]
-  Medium,
+  Regular,
   /// 8 points taller, the font 2 points larger: a dialog's main actions.
   Large,
 }
@@ -449,15 +449,12 @@ impl Theme {
     TextStyle::new(self.small.weight(Weight::Semibold), self.muted).ellipsis()
   }
 
-  pub const fn button(&self, v: Variant) -> ButtonStyle {
-    self.button_sized(v, ControlSize::Medium)
-  }
-
-  pub const fn button_sized(&self, v: Variant, size: ControlSize) -> ButtonStyle {
+  /// A button's look in variant `v` at `size` ([crate::Ui::control_size]).
+  pub const fn button(&self, v: Variant, size: ControlSize) -> ButtonStyle {
     let z = self.sizes;
     let (h, font) = match size {
       ControlSize::Small => (z.small_h, self.small),
-      ControlSize::Medium => (z.control_h, self.font),
+      ControlSize::Regular => (z.control_h, self.font),
       ControlSize::Large => (z.control_h + 8.0, Font { size: self.font.size + 2.0, ..self.font }),
     };
     // Padding grows with the height: 12 at 24, 18 at 36. Its label's width, as AppKit's push
@@ -513,7 +510,7 @@ impl Theme {
   /// accent ([Variant::Primary]) or red ([Variant::Danger]).
   pub const fn dialog_button(&self, v: Variant) -> ButtonStyle {
     let h = 28.0;
-    let s = self.button(v);
+    let s = self.button(v, ControlSize::Regular);
     let s = ButtonStyle { frame: s.frame.border(0.0, [0.0; 4]), ..s };
     let s = s.height(h).radius(h / 2.0).pad_x(12.0).font(self.font);
     match v {
@@ -594,21 +591,28 @@ mod tests {
   #[test]
   fn variants_read_the_palette() {
     let t = Theme::PLATES_DARK;
-    assert_eq!(t.button(Variant::Primary).bg, t.accent);
-    assert_eq!(t.button(Variant::Ghost).bg[3], 0.0);
-    assert_eq!(t.button(Variant::Normal).frame.border_color, t.line);
-    assert_eq!(Theme::PLATES_LIGHT.button(Variant::Normal).frame.border, [0.0; 4]);
-    const TALL: ButtonStyle = Theme::PLATES_LIGHT.button(Variant::Normal).height(36.0);
+    assert_eq!(t.button(Variant::Primary, ControlSize::Regular).bg, t.accent);
+    assert_eq!(t.button(Variant::Ghost, ControlSize::Regular).bg[3], 0.0);
+    assert_eq!(t.button(Variant::Normal, ControlSize::Regular).frame.border_color, t.line);
+    assert_eq!(
+      Theme::PLATES_LIGHT.button(Variant::Normal, ControlSize::Regular).frame.border,
+      [0.0; 4]
+    );
+    const TALL: ButtonStyle =
+      Theme::PLATES_LIGHT.button(Variant::Normal, ControlSize::Regular).height(36.0);
     assert_eq!(TALL.frame.size[1], px(36.0));
     // Sizes and builders, all const.
-    const KEY: ButtonStyle =
-      Theme::PLATES_DARK.button(Variant::Normal).w(super::super::grow()).h(px(40.0)).radius(12.0);
+    const KEY: ButtonStyle = Theme::PLATES_DARK
+      .button(Variant::Normal, ControlSize::Regular)
+      .w(super::super::grow())
+      .h(px(40.0))
+      .radius(12.0);
     assert_eq!((KEY.frame.size[1], KEY.frame.radii), (px(40.0), [12.0; 4]));
-    let small = t.button_sized(Variant::Ghost, ControlSize::Small);
-    let large = t.button_sized(Variant::Ghost, ControlSize::Large);
+    let small = t.button(Variant::Ghost, ControlSize::Small);
+    let large = t.button(Variant::Ghost, ControlSize::Large);
     assert_eq!((small.frame.size[1], small.text.font), (px(t.sizes.small_h), t.small));
     assert_eq!((large.frame.size[1], large.text.font.size), (px(32.0), 15.0));
-    let on = t.selected(t.button(Variant::Normal));
+    let on = t.selected(t.button(Variant::Normal, ControlSize::Regular));
     assert_eq!((on.text.color, on.bg[3]), (t.accent, 0.18));
   }
 

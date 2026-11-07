@@ -109,7 +109,8 @@ impl Lists {
       }
 
       ui.text("Sort by", t.muted().nowrap());
-      ui.id(SORT).pop_up(&mut self.sort, &SORTS);
+      let sorts: Vec<(usize, &str)> = SORTS.iter().copied().enumerate().collect();
+      ui.id(SORT).picker(&mut self.sort, &sorts);
       ui.spacer();
       let n = self.sel.len();
       ui.text(format_args!("{n} of {ROWS} selected"), t.muted().nowrap());

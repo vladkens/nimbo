@@ -1,14 +1,16 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! Settings windows in macOS 26 System Settings' look ([FormStyle::plates], measured from
-//! its screenshots): toolbar tabs of an icon over a label ([Ui::toolbar_tabs]), and pages
-//! of sections, each a bold title (and an optional grey line under it) over a grey rounded plate
-//! of rows. A row is a label with an optional ⓘ tooltip (or a warning mark in its place) and a
-//! grey description under it at the left, the controls at the right, a leading tile (a letter or an
-//! icon) when it lists things, and a hairline above it inset from both sides of the plate. A footer
-//! row under the last plate holds the page's buttons and a round "?" that opens its help
-//! ([Ui::form_footer], [Ui::form_help]). Rows pitch 37.5 points, 53 with a one-line description,
-//! over [super::Sizes::PLATES]; draw it with [super::Theme::PLATES_LIGHT] or
+//! its screenshots), as SwiftUI's `Form` with `.formStyle(.grouped)`: toolbar tabs of an icon
+//! over a label ([Ui::toolbar_tabs]), and pages of sections ([Ui::form_section], SwiftUI's
+//! `Section { } header: { } footer: { }`), each a bold header over a grey rounded plate of rows
+//! and an optional grey footer under it. A row ([Ui::form_row], SwiftUI's `LabeledContent`) is
+//! its label and a grey description under it at the left, both a text or what a closure builds
+//! ([Content]: a name and badges, an ⓘ with [Ui::help] on it), the controls at the right, a
+//! leading tile (letters or an icon) when it lists things, and a hairline above it inset from both
+//! sides of the plate. A footer row under the last plate holds the page's buttons and a round "?"
+//! that opens its help ([Ui::form_footer]). Rows pitch 37.5 points, 53 with a one-line
+//! description, over [super::Sizes::PLATES]; draw it with [super::Theme::PLATES_LIGHT] or
 //! [super::Theme::PLATES_DARK], or the OS's of the two ([super::Theme::system], the default).
 //!
 //! The controls keep their own width ([super::Dim::Rigid]) and sit at the row's right edge
@@ -22,30 +24,29 @@
 //! ui.id("tabs").toolbar_tabs(&fs, &mut self.page, &[(Page::General, Icon::GEAR, "General"), ..]);
 //! ui.form_scroll(&fs, Style::new().grow(), |ui| ui.col(fs.page, |ui| {
 //!   ui.form_section(&fs, "Startup", |ui| {
-//!     ui.form_row(&fs, FormRow::new("On launch").info("What opens when the app starts…"), |ui| {
-//!       ui.id("launch").select(&mut self.launch, &LAUNCH);
-//!     });
+//!     let label = |ui: &mut Ui, s: TextStyle| {
+//!       ui.text("On launch", s);
+//!       ui.help("What opens when the app starts…").info_button();
+//!     };
+//!     ui.form_row(&fs, FormRow::new(label), |ui| ui.id("launch").picker(&mut self.launch, &LAUNCH));
 //!     let row = FormRow::new("Language").caption("Applies after a restart.");
-//!     ui.form_row(&fs, row, |ui| ui.select(&mut self.lang, &LANGS));
+//!     ui.form_row(&fs, row, |ui| ui.picker(&mut self.lang, &LANGS));
 //!   });
-//!   ui.form_help(&fs);
+//!   ui.form_footer(&fs, |_| {});
 //! }));
 //! ```
 //!
-//! A disabled row dims its label and disables every widget in it ([Ui::disabled_scope]) but its ⓘ
-//! or warning mark, whose tooltip reads all the same. The toolbar is a pick ([Ui::pick_behavior]):
-//! a click, or the arrows while it has focus (Tab), choose a tab.
+//! A disabled row ([Ui::disabled] on it) dims its label and disables every widget in it but its
+//! ⓘ or warning mark, whose tooltip reads all the same. The toolbar is a pick
+//! ([Ui::pick_behavior]): a click, or the arrows while it has focus (Tab), choose a tab.
 
-use std::borrow::Cow;
 use std::f32::consts::FRAC_PI_2;
-use std::ops::Range;
+use std::fmt;
 
-use super::containers::lazy::Spans;
-use super::theme::{ControlSize, Theme, Tone};
-use super::widgets::Icon;
+use super::theme::Theme;
+use super::widgets::{Icon, MarkShift};
 use super::{
-  Align, Cursor, Dim, Float, Id, Response, Role, Shadow, State, Style, TextStyle, Ui, grow, px,
-  rigid,
+  Align, Cursor, Id, Response, Role, Shadow, State, Style, TextStyle, Ui, grow, px, rigid,
 };
 use crate::scene::{Color, Frame, Point, Quad, Rect, alpha, mix, rgb};
 use crate::text::{Font, Weight};
@@ -60,9 +61,11 @@ pub struct FormStyle {
   /// Around a section's title: top, right, bottom, left; in by the row's padding, so the title
   /// lines up with the labels. The page's first section has no top.
   pub head_pad: [f32; 4],
-  /// A grey line under a section's title ([Ui::form_section_sub]), this far below it.
+  /// A grey line under a section's title in its header ([Section]), this far below it.
   pub subtitle: TextStyle,
   pub subtitle_gap: f32,
+  /// Around a section's footer ([Section::footer]): top, right, bottom, left.
+  pub foot_pad: [f32; 4],
   /// A section's plate of rows: fill and radius.
   pub group: Style,
   /// A row's box: least height (of a first row; the others add the hairline), padding at the
@@ -78,16 +81,16 @@ pub struct FormStyle {
   pub divider: Color,
   pub hairline: f32,
   pub inset: [f32; 2],
-  /// The label; it wraps unless the row is [FormRow::one_line].
+  /// The label; it wraps (`label.ellipsis()` keeps one line).
   pub label: TextStyle,
   /// The grey description under a label; it wraps.
   pub caption: TextStyle,
-  /// A row's leading tile: a letter or an icon, and their look; the tile is
-  /// centred in the row, [FormStyle::tile_x] in from the plate.
+  /// A row's leading tile ([FormRow::tile]): its box, centred in the row, [FormStyle::tile_x] in
+  /// from the plate; its text, and an icon's size (in the text's colour).
   pub tile: Style,
   pub tile_x: f32,
   pub tile_text: TextStyle,
-  pub tile_icon: Color,
+  pub tile_icon: f32,
   /// The page under the toolbar: padding and the gap between sections.
   pub page: Style,
   /// The toolbar of tabs, and a tab: its box, label, icon size and stroke, and the selected
@@ -104,14 +107,9 @@ pub struct FormStyle {
   pub tab_stroke: f32,
   pub tab_on: Style,
   pub tab_glass: Option<Glass>,
-  /// The footer under the last plate ([Ui::form_footer]): its box, right-aligned buttons and
-  /// their gap.
+  /// The page's footer under the last plate ([Ui::form_footer]): its box, right-aligned buttons
+  /// and their gap.
   pub footer: Style,
-  /// The ⓘ after a label ([FormRow::info]) or the warning mark in its place
-  /// ([FormRow::warning]): its size, as [Ui::info_button] and [Ui::warning_button] draw them.
-  pub info: f32,
-  /// A selected row's fill ([FormRow::selected]).
-  pub selected: Color,
   /// The window's ground, under the page.
   pub bg: Color,
   /// How far the page's content fades out under the edges of its scroll area
@@ -214,6 +212,7 @@ impl FormStyle {
       head_pad: [20.0, 10.0, 10.0, 10.0],
       subtitle: TextStyle::new(small, t.muted).line_h(14.0),
       subtitle_gap: 1.5,
+      foot_pad: [6.0, 10.0, 0.0, 10.0],
       group: Style::new().w(grow()).bg(t.plate).radius(12.0),
       row: Style::new().w(grow()).min_h(36.5).pad_xy(10.0, 0.0).gap(10.0),
       pad_y: 10.0,
@@ -227,7 +226,7 @@ impl FormStyle {
       tile_x: 12.0,
       tile_text: TextStyle::new(Font { size: 11.0, ..t.font }.weight(Weight::Semibold), t.muted)
         .nowrap(),
-      tile_icon: t.muted,
+      tile_icon: (h * 0.6).round(),
       page: Style::new().w(grow()).pads([12.0, 20.0, 20.0, 20.0]).gap(10.0),
       toolbar: Style::new()
         .w(grow())
@@ -249,180 +248,173 @@ impl FormStyle {
         .pads([10.0, 0.0, 0.0, 0.0])
         .gap(10.0)
         .align(Align::End, Align::Center),
-      info: (t.font.size + 3.0).round(),
-      selected: t.ghost,
       bg: t.bg,
       fade: 14.0,
     }
   }
 }
 
-/// A row's leading tile ([FormRow::tile]).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Tile<'s> {
-  /// A letter or two: an account's initials.
-  Text(&'s str),
-  Icon(Icon),
-}
-
-/// A form row's description ([FormRow::caption]): none, a text, or what a closure builds with
-/// the caption's style, as SwiftUI's label takes a string or a view (egui's
-/// `impl Into<WidgetText>`); from a `&str`, a `&String` or `FnOnce(&mut Ui, TextStyle)`.
+/// What a part of a form shows, a row's label, description or tile ([FormRow]) or a section's
+/// header or footer ([Section]), as SwiftUI's labels take a string or a view (egui's
+/// `impl Into<WidgetText>`): a text, an icon, or what a closure builds in the part's text style
+/// (dimmed in a disabled row, as SwiftUI passes a foreground style down); from a `&str`, a
+/// `&String`, an [Icon] or `FnOnce(&mut Ui, TextStyle)`, whose parameters need their types
+/// written. A closure's texts take the style or one made from it (`s.ellipsis()`,
+/// `s.underline(LinePattern::Dot)` on a term with [Ui::help]); its widgets dim themselves in a
+/// disabled row; a canvas of its own reads [Ui::scope_disabled].
 #[derive(Default)]
-pub enum Caption<'s> {
+pub enum Content<'s> {
   #[default]
   None,
   Text(&'s str),
+  Icon(Icon),
   Built(Build<'s>),
 }
 
-/// A [Ui::form_disclosure]'s row: its label, description, tile and whether it is disabled, as a
-/// [FormRow]'s, but the description only a text, which assistive technology reads as the
-/// disclosure button's (a built one would go unread inside it).
-#[derive(Debug, Default)]
-pub struct Disclosure<'s>(FormRow<'s>);
-
-impl<'s> Disclosure<'s> {
-  pub fn new(label: &'s str) -> Self {
-    Self(FormRow::new(label))
-  }
-
-  /// [FormRow::caption], a text.
-  pub fn caption(self, caption: &'s str) -> Self {
-    Self(self.0.caption(caption))
-  }
-
-  /// [FormRow::tile].
-  pub fn tile(self, tile: Tile<'s>) -> Self {
-    Self(self.0.tile(tile))
-  }
-
-  /// [FormRow::disabled].
-  pub fn disabled(self, yes: bool) -> Self {
-    Self(self.0.disabled(yes))
-  }
-}
-
-/// What a [Caption::Built] runs: it builds the caption in its style.
+/// What a [Content::Built] runs: it builds the content in its style.
 pub type Build<'s> = Box<dyn FnOnce(&mut Ui, TextStyle) + 's>;
 
-impl<'s> Caption<'s> {
-  /// A text caption's text, which names the row with its label; none for one built, whose
-  /// elements are read where they stand.
-  fn text(&self) -> &'s str {
-    if let Caption::Text(s) = self { s } else { "" }
+impl Content<'_> {
+  fn is_none(&self) -> bool {
+    matches!(self, Content::None | Content::Text(""))
+  }
+
+  /// Builds it in `style`, a text or an icon as `id`, an icon `size` points square stroked
+  /// `stroke` wide unless it has its own.
+  fn build(self, ui: &mut Ui, style: TextStyle, id: Id, size: f32, stroke: f32) {
+    match self {
+      Content::None => {}
+      Content::Text(s) => {
+        ui.next_id = Some((id, false));
+        ui.text(s, style);
+      }
+      Content::Icon(i) => {
+        ui.next_id = Some((id, false));
+        ui.icon(i.stroke(i.width_or(stroke)), size, style.color);
+      }
+      Content::Built(f) => f(ui, style),
+    }
   }
 }
 
-impl<'s> From<&'s str> for Caption<'s> {
+impl<'s> From<&'s str> for Content<'s> {
   fn from(s: &'s str) -> Self {
-    Caption::Text(s)
+    Content::Text(s)
   }
 }
 
-impl<'s> From<&'s String> for Caption<'s> {
+impl<'s> From<&'s String> for Content<'s> {
   fn from(s: &'s String) -> Self {
-    Caption::Text(s)
+    Content::Text(s)
   }
 }
 
-/// Built with the caption's style, dimmed in a disabled row as a text caption is; the widgets in
-/// it read the row's disabled scope and dim themselves.
-impl<'s, F: FnOnce(&mut Ui, TextStyle) + 's> From<F> for Caption<'s> {
+impl From<Icon> for Content<'_> {
+  fn from(i: Icon) -> Self {
+    Content::Icon(i)
+  }
+}
+
+impl<'s, F: FnOnce(&mut Ui, TextStyle) -> R + 's, R> From<F> for Content<'s> {
   fn from(f: F) -> Self {
-    Caption::Built(Box::new(f))
+    Content::Built(Box::new(move |ui, s| _ = f(ui, s)))
   }
 }
 
 /// Its text, `…` for one built.
-impl std::fmt::Debug for Caption<'_> {
-  fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-    f.write_str(if let Caption::Built(_) = self { "…" } else { self.text() })
+impl fmt::Debug for Content<'_> {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    match self {
+      Content::None => f.write_str(""),
+      Content::Text(s) => f.write_str(s),
+      Content::Icon(i) => write!(f, "{:?}", i.name()),
+      Content::Built(_) => f.write_str("…"),
+    }
   }
 }
 
-/// A row of a form section ([Ui::form_row]): its label, badges after it, an optional ⓘ tooltip or
-/// warning, description ([Caption]) and leading tile, and whether it is disabled.
+/// A row of a form section ([Ui::form_row]), as SwiftUI's `LabeledContent`: its label,
+/// description and leading tile, each [Content].
 #[derive(Debug, Default)]
 pub struct FormRow<'s> {
-  label: &'s str,
-  badges: &'s [(&'s str, Tone)],
-  info: Option<&'s str>,
-  warning: Option<&'s str>,
-  caption: Caption<'s>,
-  tile: Option<Tile<'s>>,
-  disabled: bool,
-  one_line: bool,
-  selected: bool,
+  label: Content<'s>,
+  caption: Content<'s>,
+  tile: Content<'s>,
   /// Held down: a [Ui::form_disclosure]'s.
   pressed: bool,
 }
 
 impl<'s> FormRow<'s> {
-  pub fn new(label: &'s str) -> Self {
-    Self { label, ..Self::default() }
+  /// A row labelled by a text or what a closure builds on the label's line in the label's style
+  /// ([FormStyle::label]), as SwiftUI's label of views: a name, then tags of what the row is
+  /// (a [Ui::badge] at [super::ControlSize::Small] keeps the row's height), then an ⓘ or a
+  /// warning mark with its tip ([Ui::info_button], [Ui::warning_button] with [Ui::help]), which
+  /// sits on the middle of the name's capitals. Its plain texts (those with no [Ui::help] and in
+  /// no widget) are its name: they name the row's first control with no name of its own, and are
+  /// not read again; what else it holds is read after that control, in its order.
+  ///
+  /// ```ignore
+  /// FormRow::new(|ui: &mut Ui, s: TextStyle| {
+  ///   ui.text("gigaam-v3", s.ellipsis());
+  ///   ui.help("Best in Russian").control_size(ControlSize::Small).badge("Recommended", Tone::Accent);
+  /// })
+  /// ```
+  pub fn new(label: impl Into<Content<'s>>) -> Self {
+    Self { label: label.into(), ..Self::default() }
   }
 
-  /// A [Ui::badge] of each `(text, tone)` right after the label, on its line, in order: tags of
-  /// what the row is ("Beta", "New"). Not SwiftUI's `.badge`, one count or word at a list row's
-  /// trailing edge: these are several, they follow the label, and the controls keep the trailing
-  /// edge. Small ([ControlSize::Small]), the row keeps its height; a [FormRow::one_line] label
-  /// ends in "…" before them where the line is short. Each is `id.key(("badge", i))` of the
-  /// row's id, taking the pointer for a tooltip unless the row is one a click selects.
-  pub fn badges(self, badges: &'s [(&'s str, Tone)]) -> Self {
-    Self { badges, ..self }
-  }
-
-  /// An ⓘ after the label showing `tip` on hover: only where one line can't explain.
-  pub fn info(self, tip: &'s str) -> Self {
-    Self { info: Some(tip), ..self }
-  }
-
-  /// A warning mark in the ⓘ's place ([Ui::warning_button]), showing `text` on hover, and the
-  /// [FormRow::info] tip under it when the row has one: what is wrong with the setting, as
-  /// System Settings marks one.
-  pub fn warning(self, text: &'s str) -> Self {
-    Self { warning: Some(text), ..self }
-  }
-
-  /// The description under the label: grey text, wrapping onto as many lines as it needs, or
-  /// what a closure builds, as SwiftUI's label of `Text`s, each read where it stands. The
-  /// closure gets the caption's style, [FormStyle::caption] dimmed in a disabled row, as SwiftUI
-  /// passes a foreground style down: its texts take it (a term [TextStyle::dotted] with
-  /// [Ui::help] on it); its widgets, icons included, dim themselves in the row's disabled scope;
-  /// a canvas of its own reads [Ui::scope_disabled].
+  /// The description under the label in [FormStyle::caption], wrapping onto as many lines as it
+  /// needs: a text or what a closure builds (a term with a tooltip, a task's progress under its
+  /// text). Its plain texts describe the control the label names, as its name, and are not read
+  /// again; what else it holds is read after that control.
   ///
   /// ```ignore
   /// FormRow::new("parakeet-ultra").caption(|ui: &mut Ui, s: TextStyle| {
-  ///   ui.help("Errors per 100 words").text("WER 4.7%", s.dotted());
+  ///   ui.help("Errors per 100 words").text("WER 4.7%", s.underline(LinePattern::Dot));
   ///   ui.text(" · 740 MB", s);
   /// })
   /// ```
-  pub fn caption(self, caption: impl Into<Caption<'s>>) -> Self {
+  pub fn caption(self, caption: impl Into<Content<'s>>) -> Self {
     Self { caption: caption.into(), ..self }
   }
 
-  /// A tile before the label: a letter or an icon.
-  pub fn tile(self, tile: Tile<'s>) -> Self {
-    Self { tile: Some(tile), ..self }
+  /// A tile before the label, as SwiftUI's `Label`'s icon: letters (an account's initials) in
+  /// [FormStyle::tile_text], an [Icon] [FormStyle::tile_icon] points square in its colour, or
+  /// what a closure builds.
+  pub fn tile(self, tile: impl Into<Content<'s>>) -> Self {
+    Self { tile: tile.into(), ..self }
+  }
+}
+
+/// A form section's header and footer ([Ui::form_section]), as SwiftUI's
+/// `Section { } header: { } footer: { }`: each [Content], the header in [FormStyle::head] on the
+/// title's line (a title, a note at the right after a [Ui::spacer], a grey line under it), the
+/// footer in [FormStyle::caption] under the plate. A string is a section with that title.
+#[derive(Debug, Default)]
+pub struct Section<'s> {
+  header: Content<'s>,
+  footer: Content<'s>,
+}
+
+impl<'s> Section<'s> {
+  pub fn new(header: impl Into<Content<'s>>) -> Self {
+    Self { header: header.into(), footer: Content::None }
   }
 
-  /// Dims the label and disables the row's widgets when `yes`, but its ⓘ or warning mark, whose
-  /// tooltip reads all the same. In a row a click selects ([Style::hit]) assistive technology
-  /// reads the mark disabled with its row; on screen it stays enabled.
-  pub fn disabled(self, yes: bool) -> Self {
-    Self { disabled: yes, ..self }
+  pub fn footer(self, footer: impl Into<Content<'s>>) -> Self {
+    Self { footer: footer.into(), ..self }
   }
+}
 
-  /// The label stays on one line, ending in "…" where it doesn't fit (a file's path).
-  pub fn one_line(self) -> Self {
-    Self { one_line: true, ..self }
+impl<'s> From<&'s str> for Section<'s> {
+  fn from(title: &'s str) -> Self {
+    Section::new(title)
   }
+}
 
-  /// Fills the row ([FormStyle::selected]) and reads it selected when `yes`: the current one of
-  /// rows a click selects.
-  pub fn selected(self, yes: bool) -> Self {
-    Self { selected: yes, ..self }
+impl<'s> From<&'s String> for Section<'s> {
+  fn from(title: &'s String) -> Self {
+    Section::new(title)
   }
 }
 
@@ -442,83 +434,34 @@ impl Ui<'_> {
     self.scroll_area(style, f)
   }
 
-  /// A titled plate of rows ([Ui::form_row]) built by `rows`; an empty title shows none.
-  pub fn form_section<R>(
+  /// A section: its header ([Section], or a title) over a plate of the rows `rows` builds
+  /// ([Ui::form_row]), its footer under it, as SwiftUI's `Section { } header: { } footer: { }`
+  /// in a grouped form. An empty header shows none.
+  pub fn form_section<'s, R>(
     &mut self,
     fs: &FormStyle,
-    title: &str,
+    section: impl Into<Section<'s>>,
     rows: impl FnOnce(&mut Self) -> R,
   ) -> Response {
-    self.form_section_with(fs, title, |_| {}, rows)
-  }
-
-  /// [Ui::form_section] with what `note` builds at the right of the title: a count in
-  /// [FormStyle::note], a spinner.
-  pub fn form_section_with<R>(
-    &mut self,
-    fs: &FormStyle,
-    title: &str,
-    note: impl FnOnce(&mut Self),
-    rows: impl FnOnce(&mut Self) -> R,
-  ) -> Response {
-    self.section(fs, title, "", note, rows)
-  }
-
-  /// [Ui::form_section] with a grey line under the title ([FormStyle::subtitle]): what the
-  /// section's settings do, as System Settings' Notifications explains its own.
-  pub fn form_section_sub<R>(
-    &mut self,
-    fs: &FormStyle,
-    title: &str,
-    subtitle: &str,
-    rows: impl FnOnce(&mut Self) -> R,
-  ) -> Response {
-    self.section(fs, title, subtitle, |_| {}, rows)
-  }
-
-  fn section<R>(
-    &mut self,
-    fs: &FormStyle,
-    title: &str,
-    subtitle: &str,
-    note: impl FnOnce(&mut Self),
-    rows: impl FnOnce(&mut Self) -> R,
-  ) -> Response {
-    let fs = *fs;
+    let (fs, Section { header, footer }) = (*fs, section.into());
     // The page's first section starts at the page's top; the others 30 under the plate above.
     let first = self.st.stack.last().is_none_or(|&(_, n)| n == 0);
-    self.col(Style::new().w(grow()), |ui| {
-      if !title.is_empty() {
-        ui.form_head(&fs, title, subtitle, if first { 0.0 } else { fs.head_pad[0] }, note);
+    let id = self.take_id();
+    self.with_id(id).col(Style::new().w(grow()), |ui| {
+      if !header.is_none() {
+        let [top, r, b, l] = fs.head_pad;
+        let head = Style::new().w(grow()).pads([if first { 0.0 } else { top }, r, b, l]);
+        let head = head.gap(12.0).align(Align::Start, Align::Center);
+        let line = ui.head_line(&fs);
+        ui.row(head.min_h(line), |ui| header.build(ui, fs.head, id.key("header"), line, 1.6));
       }
 
       ui.col(fs.group.clip(), rows);
+      if !footer.is_none() {
+        let pad = Style::new().w(grow()).pads(fs.foot_pad);
+        ui.col(pad, |ui| footer.build(ui, fs.caption, id.key("footer"), 12.0, 1.6));
+      }
     })
-  }
-
-  /// A section's title line: the title (and `subtitle` under it), what `note` builds at its
-  /// right, `top` over it and [FormStyle::head_pad] around the rest.
-  fn form_head(
-    &mut self,
-    fs: &FormStyle,
-    title: &str,
-    sub: &str,
-    top: f32,
-    note: impl FnOnce(&mut Self),
-  ) {
-    let line = self.head_line(fs);
-    let [_, r, b, l] = fs.head_pad;
-    let head = Style::new().w(grow()).pads([top, r, b, l]).gap(12.0);
-    self.row(head.align(Align::Start, Align::Start), |ui| {
-      ui.col(Style::new().w(grow()).gap(fs.subtitle_gap), |ui| {
-        ui.text(title, fs.head);
-        if !sub.is_empty() {
-          ui.text(sub, fs.subtitle);
-        }
-      });
-      // On the title's line.
-      ui.row(Style::new().min_h(line).align(Align::Start, Align::Center), note);
-    });
   }
 
   /// A section title's line height.
@@ -529,41 +472,31 @@ impl Ui<'_> {
     }
   }
 
-  /// A row of the section being built: the tile, the label (with its ⓘ and description) at the
-  /// left, what `control` builds at the right, 8 apart, and a hairline above it unless it is the
-  /// first. The controls keep their width and place at the right edge, centred on the row's
-  /// height; the label and description wrap in what is left, the row growing taller. A
-  /// disabled row's text is [super::Theme::tertiary]; its ⓘ or warning mark stays enabled (in a
-  /// row a click selects, assistive technology reads it disabled with its row). The
-  /// mark, the ⓘ or the warning in its place, is `id.key("info")` of the row's id, the label's text
-  /// `id.key("label")` and the description's `id.key("caption")`. The row takes no input, its
-  /// controls do, unless [FormStyle::row] is [Style::hit]: then it is a row a click selects,
-  /// named by its label and description for assistive technology. Else the first control recorded
-  /// in it with no name of its own takes them as its name and description ([Ui::a11y]), and they
-  /// are not read again.
+  /// A row of the section being built, as SwiftUI's `LabeledContent` in a grouped form: the
+  /// tile, the label and its description at the left ([FormRow]), what `control` builds at the
+  /// right, 8 apart, and a hairline above it unless it is the first. The controls keep their
+  /// width and place at the right edge, centred on the row's height; the label and description
+  /// wrap in what is left, the row growing taller. [Ui::disabled] on it dims its label and
+  /// description to [super::Theme::tertiary] and disables its widgets but an ⓘ or warning mark
+  /// (in a row a click selects, assistive technology reads it disabled with its row). A text
+  /// label is `id.key("label")` of the row's id, a text description `id.key("caption")`, a text
+  /// or icon tile `id.key("tile")`. The row takes no input, its controls do, unless
+  /// [FormStyle::row] is [Style::hit]: then it is a row a click selects, named by its label's
+  /// plain texts and described by its description's. Else the first control recorded in it with
+  /// no name of its own takes them as its name and description ([Ui::a11y]); either way they are
+  /// not read again, and the label's and description's other elements are read after the one
+  /// they name.
   pub fn form_row<R>(
     &mut self,
     fs: &FormStyle,
     row: FormRow,
     control: impl FnOnce(&mut Self) -> R,
   ) -> Response {
-    self.form_row_with(fs, row, |_| {}, control)
-  }
-
-  /// [Ui::form_row] with what `below` builds under the description, as wide as the label: a
-  /// task's progress bar, a row's own buttons.
-  pub fn form_row_with<R>(
-    &mut self,
-    fs: &FormStyle,
-    row: FormRow,
-    below: impl FnOnce(&mut Self),
-    control: impl FnOnce(&mut Self) -> R,
-  ) -> Response {
     let fs = *fs;
     let t = self.theme();
     let id = self.take_id();
+    let off = self.take_disabled();
     let first = self.st.stack.last().is_none_or(|&(_, n)| n == 0);
-    let off = row.disabled || self.scope_off;
     let dim = |s: TextStyle| if off { s.color(t.tertiary) } else { s };
     let (line, hair, [l, r]) = (fs.divider, fs.hairline, fs.inset);
     let top = if first { 0.0 } else { hair };
@@ -580,82 +513,49 @@ impl Ui<'_> {
       }
     };
     let style = fs.row.min_h(fs.row.min[1] + top).align(Align::Start, Align::Start);
-    let style = if row.selected { style.bg(fs.selected) } else { style };
-    let text = [row.label, row.caption.text()];
-    if fs.row.hit {
-      self.a11y_row(id, text).state(State::Selected, row.selected).state(State::Disabled, off);
-    }
-
     // The first line's height: the least the controls' slot is, with the padding around it.
     let line_h = match fs.label.line_h > 0.0 {
       true => fs.label.line_h,
       false => self.metrics(fs.label.font).line_height(),
     };
 
-    let pad_x = fs.row.pad[3];
-    self.disabled_scope(row.disabled, |ui| {
+    let (pad_x, shift) = (fs.row.pad[3], self.mark_shift(fs.label));
+    let FormRow { label, caption, tile, .. } = row;
+    self.disabled_scope(off, |ui| {
       ui.next_id = Some((id, false));
       ui.canvas_row(style, hairline, |ui| {
-        if let Some(tile) = row.tile {
+        if !tile.is_none() {
           let x = (fs.tile_x - pad_x).max(0.0);
           let slot =
             Style::new().h(grow()).pads([top, x, 0.0, x]).align(Align::Start, Align::Center);
-          ui.row(slot, |ui| match tile {
-            Tile::Text(s) => _ = ui.row(fs.tile, |ui| ui.text(s, fs.tile_text)),
-            Tile::Icon(i) => {
-              let h = if let Dim::Px(h) = fs.tile.size[1] { h } else { 24.0 };
-              let size = (h * 0.6).round();
-              _ = ui.row(fs.tile, |ui| ui.icon_stroke(i, size, fs.tile_icon, 1.6));
-            }
+          ui.row(slot, |ui| {
+            let k = id.key("tile");
+            ui.row(fs.tile, |ui| tile.build(ui, fs.tile_text, k, fs.tile_icon, 1.6))
           });
         }
 
-        let label = Style::new().w(grow()).gap(2.0).pads([top + fs.pad_y, 0.0, fs.pad_y, 0.0]);
-        ui.col(label, |ui| {
+        let (mut name, mut about) = (0..0, 0..0);
+        let col = Style::new().w(grow()).gap(2.0).pads([top + fs.pad_y, 0.0, fs.pad_y, 0.0]);
+        ui.col(col, |ui| {
           ui.row(Style::new().w(grow()).gap(6.0).align(Align::Start, Align::Center), |ui| {
-            let s = if row.one_line { fs.label.ellipsis() } else { fs.label };
-            ui.next_id = Some((id.key("label"), false));
-            ui.text(row.label, dim(s));
-            // Small badges in a slot as high as the line: every row keeps its height.
-            for (i, &(text, tone)) in row.badges.iter().enumerate() {
-              ui.row(Style::new().w(rigid()).h(px(line_h)).center(), |ui| {
-                // Named, it takes the pointer for a tooltip.
-                ui.next_id = Some((id.key(("badge", i)), !fs.row.hit));
-                ui.badge_sized(text, tone, ControlSize::Small)
-              });
-            }
-
-            // One tip: the warning, then the ⓘ's.
-            let tip = match (row.warning, row.info) {
-              (Some(w), Some(i)) => Some(Cow::Owned(format!("{w}\n\n{i}"))),
-              (w, i) => w.or(i).map(Cow::Borrowed),
-            };
-
-            if let Some(tip) = tip {
-              let mark = id.key("info");
-              let size = Style::new().w(px(fs.info)).h(px(fs.info));
-              let at = Float::parent().offset(0.0, ui.mark_shift(fs.label)).clip();
-              // Enabled in a disabled row: help reads all the same.
-              let off = std::mem::replace(&mut ui.scope_off, false);
-              ui.row(size, |ui| {
-                let ui = ui.with_id(mark).float(at);
-                _ = if row.warning.is_some() { ui.warning_button() } else { ui.info_button() };
-              });
-              ui.scope_off = off;
-              ui.tooltip(mark, &tip);
-            }
+            // A mark on the line sits on the capitals' middle.
+            let outer = ui.set_slot(Some(MarkShift(shift)));
+            let at = ui.st.tree.nodes.len() as u32;
+            label.build(ui, dim(fs.label), id.key("label"), line_h, 1.6);
+            name = at..ui.st.tree.nodes.len() as u32;
+            ui.set_slot(outer);
           });
-          match row.caption {
-            Caption::None => {}
-            Caption::Text(c) => {
-              ui.next_id = Some((id.key("caption"), false));
-              ui.text(c, dim(fs.caption));
-            }
-            Caption::Built(f) => f(ui, dim(fs.caption)),
-          }
-
-          below(ui);
+          let at = ui.st.tree.nodes.len() as u32;
+          caption.build(ui, dim(fs.caption), id.key("caption"), 12.0, 1.6);
+          about = at..ui.st.tree.nodes.len() as u32;
         });
+        // The names it replaces, put back once the row or its first control took them.
+        let mut outer = Some(ui.form_names(name, about));
+        if fs.row.hit {
+          ui.a11y_row(id, Role::Row).state(State::Disabled, off);
+          ui.set_slot(outer.take().flatten());
+        }
+
         // A slot as high as the row, at least the label's first line and the padding around
         // it, holding the controls centred: on the label and its description, as the tile.
         let slot = Style::new()
@@ -664,36 +564,35 @@ impl Ui<'_> {
           .min_h(top + 2.0 * fs.pad_y + line_h)
           .pads([top, 0.0, 0.0, 0.0])
           .align(Align::End, Align::Center);
-        let names = (!fs.row.hit).then(|| ui.form_names(id, text));
         ui.col(slot, |ui| {
           ui.row(Style::new().gap(fs.gap).align(Align::Start, Align::Center), control)
         });
-        if let Some(n) = names {
-          ui.set_slot(n);
+        if let Some(outer) = outer {
+          ui.set_slot(outer);
         }
       })
     })
   }
 
   /// A row that shows the rows `rows` builds under it, in its plate, while expanded, as SwiftUI's
-  /// `DisclosureGroup` in a `Form`: [Ui::form_row]'s label and description, a chevron at the
-  /// right turning from right to down ([super::Theme::fade]), the pointing hand and, held down,
-  /// a rounded fill inset as the hairlines, as System Settings' rows that open more, which show
-  /// no hover. A click, or Space while it has focus, toggles it; it starts collapsed and keeps
-  /// its state under its id, the chevron `id.key("chevron")`. The rows show and go at once, not
-  /// sliding as SwiftUI's. Disabled ([Disclosure::disabled], [Ui::disabled] or in a disabled
-  /// scope), it dims, takes no focus and doesn't toggle. Assistive technology reads a button
-  /// named by the label, described by the caption, [State::Expanded] while open, disabled with
-  /// it. `changed` when it toggled.
+  /// `DisclosureGroup` in a `Form`: [Ui::form_row]'s label, description and tile, a chevron at
+  /// the right turning from right to down ([super::Theme::fade]), the pointing hand and, held
+  /// down, a rounded fill inset as the hairlines, as System Settings' rows that open more, which
+  /// show no hover. A click, or Space while it has focus, toggles it; it starts collapsed and
+  /// keeps its state under its id, the chevron `id.key("chevron")`. The rows show and go at
+  /// once, not sliding as SwiftUI's. Disabled ([Ui::disabled] on it or a container around it),
+  /// it dims, takes no focus and doesn't toggle. Assistive technology reads a button named by the
+  /// label's plain texts, described by the description's, [State::Expanded] while open, disabled
+  /// with it; the button holds them, so their other elements (a badge) are not read.
+  /// `changed` when it toggled.
   pub fn form_disclosure<R>(
     &mut self,
     fs: &FormStyle,
-    Disclosure(row): Disclosure,
+    row: FormRow,
     rows: impl FnOnce(&mut Self) -> R,
   ) -> Response {
     let (id, t) = (self.take_id(), self.theme());
-    // Disabled by the row too, before the behaviour: it reads so and lets go of the focus.
-    self.next_disabled |= row.disabled;
+    // Disabled before the behaviour: it reads so and lets go of the focus.
     let b = self.button_behavior(id);
     let (off, clicked, pressed) = (b.disabled, b.clicked, b.pressed);
     let open = self.state::<Disclosed>(id);
@@ -705,16 +604,15 @@ impl Ui<'_> {
       false => fs.row.hit().tab_focusable().cursor(Cursor::Pointer),
     };
 
-    let (ink, label, about) =
-      (if off { t.tertiary } else { t.muted }, row.label, row.caption.text());
-    let row = FormRow { disabled: off, pressed, ..row };
-    let mut r = self.with_id(id).form_row(&FormStyle { row: style, ..*fs }, row, |ui| {
+    let ink = if off { t.tertiary } else { t.muted };
+    let row = FormRow { pressed, ..row };
+    let fs = FormStyle { row: style, ..*fs };
+    let mut r = self.disabled(off).with_id(id).form_row(&fs, row, |ui| {
       // Unnamed, a click on it is the row's.
       ui.next_id = Some((id.key("chevron"), false));
       ui.canvas(Style::new().w(px(14.0)).h(px(14.0)), move |f, r| chevron(f, r, turn, ink))
     });
-    let a = self.a11y(id, Role::Button).name(label).state(State::Expanded, open);
-    a.description(about);
+    self.a11y(id, Role::Button).state(State::Expanded, open);
 
     if open {
       rows(self);
@@ -740,22 +638,19 @@ impl Ui<'_> {
 
   /// The page's footer under its last plate ([FormStyle::footer]): what `buttons` builds,
   /// right-aligned, then the round "?" ([Ui::help_button]) at the plate's right edge, as System
-  /// Settings ends a pane. The response is the "?"'s: `clicked` opens the page's help.
+  /// Settings ends a pane, SwiftUI's `HelpLink`. The response is the "?"'s: `clicked` opens the
+  /// page's help; [Ui::help] on the footer is the "?"'s tip.
   pub fn form_footer(&mut self, fs: &FormStyle, buttons: impl FnOnce(&mut Self)) -> Response {
-    let id = self.take_id();
+    let (id, help) = (self.take_id(), self.next_help.take());
     let mut r = Response::default();
     // The row by a key of its own: the "?" has the id.
     self.next_id = Some((id.key("footer"), false));
     self.row(fs.footer, |ui| {
       buttons(ui);
+      ui.next_help = help;
       r = ui.with_id(id).help_button();
     });
     r
-  }
-
-  /// The footer with the "?" alone ([Ui::form_footer]).
-  pub fn form_help(&mut self, fs: &FormStyle) -> Response {
-    self.form_footer(fs, |_| {})
   }
 
   /// A toolbar of tabs, one per `(value, icon, label)`, centred: the icon over the label, the
@@ -829,7 +724,11 @@ impl Ui<'_> {
           let s = b.pointer(tile);
           ui.with_id(tab).canvas_col(s, paint, |ui| {
             // Canvases draw past the bar's opacity: the icon dims itself.
-            ui.disabled(b.disabled).icon_stroke(icon, fs.tab_icon, color, fs.tab_stroke);
+            ui.disabled(b.disabled).icon(
+              icon.stroke(icon.width_or(fs.tab_stroke)),
+              fs.tab_icon,
+              color,
+            );
             ui.text(label, fs.tab_text.color(color));
           });
         }
@@ -837,74 +736,6 @@ impl Ui<'_> {
     });
     (r.changed, r.clicked) = (b.changed, b.changed);
     r
-  }
-}
-
-impl<'a> Ui<'a> {
-  /// Form sections built in view only, for a long page in a [Ui::form_scroll] (a
-  /// [Ui::virtual_col]): a section for each of `groups`, its title (with what `note(ui, g)`
-  /// builds at its right) over a plate of its rows, each `row_h` high without the hairline
-  /// above it and built with `row(ui, g, i)` as [Ui::form_row]'s are. Each row is its piece of
-  /// the plate: rounded at the section's ends, the hairline above all but the first; keyed by
-  /// `key(g, i)`, so its ids, hover and focus stay as rows come and go above it. Returns the
-  /// column's items built: each section's title, then its rows.
-  pub fn form_list(
-    &mut self,
-    fs: &FormStyle,
-    groups: &[(&str, usize)],
-    row_h: f32,
-    key: &dyn Fn(usize, usize) -> u64,
-    mut note: impl FnMut(&mut Ui<'a>, usize),
-    mut row: impl FnMut(&mut Ui<'a>, usize, usize),
-  ) -> Range<usize> {
-    let fs = *fs;
-    let first = self.st.stack.last().is_none_or(|&(_, n)| n == 0);
-    // A title's top: the page's gap and the title's padding, none for the page's first.
-    let top = |g: usize| if g == 0 && first { 0.0 } else { fs.page.gap + fs.head_pad[0] };
-    let head_h = self.head_line(&fs) + fs.head_pad[2];
-    let (row_h, hair) = (row_h as f64, fs.hairline as f64);
-    let mut sec = Sections { starts: vec![0], tops: vec![0.0], heads: vec![], row_h, hair };
-    for (g, &(_, n)) in groups.iter().enumerate() {
-      let head = (top(g) + head_h) as f64;
-      sec.heads.push(head);
-      sec.starts.push(sec.starts[g] + 1 + n);
-      sec.tops.push(sec.tops[g] + head + sec.rows(n));
-    }
-
-    let (r, [l, rr], line) = (fs.group.radii[0], fs.inset, fs.divider);
-    // A title by its section, a row by the app's key.
-    let item = |k: usize| {
-      let g = sec.starts.partition_point(|&s| s <= k) - 1;
-      (g, k - sec.starts[g])
-    };
-    let keys = |k| match item(k) {
-      (g, 0) => (0u8, g as u64),
-      (g, i) => (1, key(g, i - 1)),
-    };
-    let id = self.take_id();
-    self.lazy_col(id, &sec, keys, |ui, k| {
-      let (g, i) = item(k);
-      let (title, n) = groups[g];
-      if i == 0 {
-        return ui.form_head(&fs, title, "", top(g), |ui| note(ui, g));
-      }
-
-      let (i, hair) = (i - 1, if i > 1 { fs.hairline } else { 0.0 });
-      let radii = [(i == 0) as u8 as f32 * r, (i + 1 == n) as u8 as f32 * r];
-      let piece = fs.group.h(grow()).pads([hair, 0.0, 0.0, 0.0]).clip();
-      let piece = Style { radii: [radii[0], radii[0], radii[1], radii[1]], ..piece };
-      let paint = move |f: &mut Frame, at: Rect| {
-        f.rect(Rect::new(at.x + l, at.y, (at.w - l - rr).max(0.0), hair), line, 0.0);
-      };
-      ui.canvas_col(piece, paint, |ui| row(ui, g, i));
-    })
-  }
-
-  /// Scrolls row `i` of section `g` of form list `id` into view in its next build
-  /// ([Ui::reveal_item]); `groups` as the list has them.
-  pub fn reveal_form_row(&mut self, id: Id, groups: &[(&str, usize)], g: usize, i: usize) {
-    let before: usize = groups[..g].iter().map(|&(_, n)| 1 + n).sum();
-    self.reveal_item(id, before + 1 + i);
   }
 }
 
@@ -920,55 +751,6 @@ fn chevron(f: &mut Frame, r: Rect, turn: f32, color: Color) {
   f.polyline(&[at(-1.5, -4.0), at(2.5, 0.0), at(-1.5, 4.0)], 1.5, color);
 }
 
-/// A [Ui::form_list]'s items, placed a section at a time, so a frame costs its sections, not its
-/// rows: where each section's items start, its top, and its title's height, then its rows, a
-/// row and a hairline apart (the first without one).
-struct Sections {
-  starts: Vec<usize>,
-  tops: Vec<f64>,
-  heads: Vec<f64>,
-  row_h: f64,
-  hair: f64,
-}
-
-impl Sections {
-  /// The height of a section's first `r` rows.
-  fn rows(&self, r: usize) -> f64 {
-    r as f64 * self.row_h + r.saturating_sub(1) as f64 * self.hair
-  }
-}
-
-impl Spans for Sections {
-  fn len(&self) -> usize {
-    self.starts[self.starts.len() - 1]
-  }
-
-  fn top(&self, i: usize) -> f64 {
-    let g = self.starts.partition_point(|&s| s <= i) - 1;
-    match i - self.starts[g] {
-      0 => self.tops[g],
-      j => self.tops[g] + self.heads[g] + self.rows(j - 1),
-    }
-  }
-
-  fn at(&self, y: f64) -> usize {
-    let g = self.tops.partition_point(|&t| t <= y).saturating_sub(1);
-    if g + 1 >= self.tops.len() {
-      return self.len();
-    }
-
-    // In the title, or in row `r` (past its rows, the next section's title).
-    let y = y - self.tops[g] - self.heads[g];
-    let r = match y {
-      y if y < 0.0 => return self.starts[g],
-      y if y < self.row_h => 0,
-      y => 1 + ((y - self.row_h) / (self.row_h + self.hair)) as usize,
-    };
-
-    (self.starts[g] + 1 + r).min(self.starts[g + 1])
-  }
-}
-
 #[cfg(test)]
 mod tests {
   use std::time::Duration;
@@ -976,13 +758,12 @@ mod tests {
   use keyboard_types::{Modifiers, NamedKey};
 
   use super::*;
-  use crate::Button;
   use crate::app::App;
   use crate::harness::Harness;
   use crate::keys::Key;
   use crate::scene::{Point, Size};
-  use crate::ui::Id;
   use crate::ui::layout::Kind;
+  use crate::ui::{ControlSize, Id, LinePattern, Tone};
 
   /// A section of one row and a footer with the "?" alone, nothing named.
   #[derive(Default)]
@@ -993,11 +774,10 @@ mod tests {
       let fs = FormStyle::plates(&ui.theme());
       ui.col(fs.page, |ui| {
         ui.form_section(&fs, "Section", |ui| {
-          ui.form_row(&fs, FormRow::new("Row").disabled(true), |ui| {
-            ui.id("t").toggle(&mut self.0, "")
-          });
+          ui.disabled(true)
+            .form_row(&fs, FormRow::new("Row"), |ui| ui.id("t").toggle(&mut self.0, ""));
         });
-        ui.form_help(&fs);
+        ui.form_footer(&fs, |_| {});
       });
     }
   }
@@ -1011,40 +791,54 @@ mod tests {
     assert!(!h.app().0);
   }
 
-  /// A row with badges after its label over one without, `.0` the label; each with Use.
-  struct Badged(&'static str);
+  /// A row labelled by a name and badges after it, one with a tooltip, over one with the name
+  /// alone, `.0` the name; each with Use, or a switch when `.1`.
+  struct Badged(&'static str, bool);
 
   impl App for Badged {
     fn view(&mut self, ui: &mut Ui) {
       ui.set_theme(Theme::PLATES_LIGHT);
       let fs = FormStyle::plates(&ui.theme());
+      let (name, switch) = (self.0, self.1);
+      let label = |ui: &mut Ui, s: TextStyle| {
+        ui.id("name").text(name, s.ellipsis());
+        ui.control_size(ControlSize::Small).id("new").badge("New", Tone::Accent);
+        let ui = ui.help("In testing").control_size(ControlSize::Small);
+        ui.id("beta").badge("Beta", Tone::Neutral);
+      };
+      let control = |ui: &mut Ui, id: &str| match switch {
+        true => ui.id(id).toggle(&mut false, ""),
+        false => ui.id(id).button("Use"),
+      };
       ui.col(fs.page, |ui| {
         ui.form_section(&fs, "Section", |ui| {
-          let row = || FormRow::new(self.0).one_line().caption("Under it");
-          let badged = row().badges(&[("New", Tone::Accent), ("Beta", Tone::Neutral)]);
-          ui.id("badged").form_row(&fs, badged, |ui| ui.id("use").button("Use"));
-          ui.id("plain").form_row(&fs, row(), |ui| ui.button("Use"));
+          let badged = FormRow::new(label).caption("Under it");
+          ui.id("badged").form_row(&fs, badged, |ui| control(ui, "use"));
+          let plain = |ui: &mut Ui, s: TextStyle| ui.text(name, s.ellipsis());
+          let plain = FormRow::new(plain).caption("Under it");
+          ui.id("plain").form_row(&fs, plain, |ui| control(ui, "other"));
         });
       });
     }
   }
 
-  /// The badges follow the label on its line, in order, clear of the controls, and the row keeps
-  /// the height of one without; a long label ends in "…" before them.
+  /// A label of a name and badges: the badges follow the name on its line, in order, clear of
+  /// the controls, read after it, the one with a tooltip with its tip; the row keeps the height
+  /// of one with the name alone; a long name ends in "…" before them.
   #[test]
   fn badges_follow_the_label_on_its_line() {
     // The plain row has the hairline over it.
     let hair = FormStyle::plates(&Theme::PLATES_LIGHT).hairline;
     let long = "A label long enough to run under the badges and the button at the right";
     for label in ["Row", long] {
-      let mut h = Harness::new(Badged(label), Size::new(400.0, 300.0), 2.0);
+      let mut h = Harness::new(Badged(label, false), Size::new(400.0, 300.0), 2.0);
       h.frame();
       let (badged, plain) = (h.rect(Id::of("badged")).unwrap(), h.rect(Id::of("plain")).unwrap());
       assert_eq!(badged.h + hair, plain.h, "{label}: one height");
 
       // The label's line as laid out: the text before its "…".
       let tree = &h.rt.ui.last;
-      let text = Id::of("badged").key("label");
+      let text = Id::of("name");
       let Kind::Text { lines, .. } = tree.get(text).unwrap().kind else { panic!("{label}") };
       let line = tree.lines[lines.0 as usize];
       let shown = tree.str(line.start, line.end);
@@ -1053,7 +847,7 @@ mod tests {
       // The accent pill's tint just after the label, on the line's middle, not on the plain's;
       // the second badge ends before Use.
       let text = h.rect(text).unwrap();
-      let new = h.rect(Id::of("badged").key(("badge", 0))).unwrap();
+      let new = h.rect(Id::of("new")).unwrap();
       assert_eq!(new.h, 15.0, "{label}: small");
       let (img, y) = (h.render(), text.y - badged.y + text.h / 2.0);
       let at = |r: Rect| img.pixel(text.x + text.w + 12.0, r.y + y);
@@ -1062,12 +856,32 @@ mod tests {
         tint[2] > tint[0].saturating_add(10) && ground[0] == ground[2],
         "{label}: {tint:?} {ground:?}"
       );
-      let (r, n, b) = (h.a11y().find(label), h.a11y().find("\"New\""), h.a11y().find("\"Beta\""));
-      assert!(r < n && n < b, "{label}: read in order\n{}", h.a11y());
+      let a11y = h.a11y();
+      let (r, n, b) =
+        (a11y.find(label), a11y.find("\"New\""), a11y.find(r#""Beta" desc "In testing""#));
+      assert!(r < n && n < b && r.is_some(), "{label}: read in order\n{a11y}");
       let clear = |x: f32| img.pixel(x, badged.y + y) == img.pixel(x, plain.y + y);
       let at_use = h.rect(Id::of("use")).unwrap().x;
       assert!((1..=8).all(|dx| clear(at_use - dx as f32 / 2.0)), "{label}: clear before Use");
     }
+  }
+
+  /// A switch takes the name and the description from a composed label's and caption's plain
+  /// texts, which are not read again; the badges, read on their own, come after the switch.
+  #[test]
+  fn a_composed_label_names_its_control_then_its_tags() {
+    let mut h =
+      Harness::new(Badged("Download in the background", true), Size::new(500.0, 300.0), 1.0);
+    h.frame();
+    let tree = h.a11y();
+    let lines: Vec<&str> = tree.lines().map(str::trim).collect();
+    let at = |l: &str| lines.iter().position(|x| x.starts_with(l));
+    let switch = at(r#"switch "Download in the background" off desc "Under it""#);
+    let (new, beta) = (at(r#"static text "New""#), at(r#"static text "Beta" desc "In testing""#));
+    assert!(switch.is_some() && switch < new && new < beta, "name, then tags:\n{tree}");
+    let texts = lines.iter().filter(|l| l.contains("Download in the background")).count();
+    assert_eq!(texts, 2, "the names read once a row:\n{tree}");
+    assert!(!lines.contains(&r#"static text "Under it""#), "{tree}");
   }
 
   /// A row with its caption composed of texts, one with a tooltip, under one with the same
@@ -1083,11 +897,12 @@ mod tests {
       let caption = |wer: &'static str, widgets: bool| {
         move |ui: &mut Ui, s: TextStyle| {
           ui.row(Style::new().w(grow()).gap(4.0), |ui| {
-            ui.id(wer).help("Errors per 100 words").text("WER 4.5%", s.dotted());
+            let s_dot = s.underline(LinePattern::Dot);
+            ui.id(wer).help("Errors per 100 words").text("WER 4.5%", s_dot);
             ui.id((wer, "size")).text(" · 274 MB", s);
             if widgets {
               ui.id((wer, "icon")).icon(Icon::INFO, 12.0, muted);
-              _ = Button::new("Go").small().show(ui.id((wer, "go")));
+              _ = ui.control_size(ControlSize::Small).id((wer, "go")).button("Go");
             }
           });
         }
@@ -1097,13 +912,13 @@ mod tests {
           ui.id("whole").form_row(&fs, FormRow::new("A").caption("WER 4.5% · 274 MB"), |_| {});
           ui.id("parts").form_row(&fs, FormRow::new("A").caption(caption("wer", false)), |_| {});
           ui.form_row(&fs, FormRow::new("B").caption(caption("on", true)), |_| {});
-          let off = FormRow::new("B").caption(caption("off", true)).disabled(true);
-          ui.form_row(&fs, off, |_| {});
+          let off = FormRow::new("B").caption(caption("off", true));
+          ui.disabled(true).form_row(&fs, off, |_| {});
           // A text caption and the same widgets as controls, in a disabled row.
-          let off = FormRow::new("C").caption("WER 4.5% · 274 MB").disabled(true);
-          ui.id("dim").form_row(&fs, off, |ui| {
+          let off = FormRow::new("C").caption("WER 4.5% · 274 MB");
+          ui.disabled(true).id("dim").form_row(&fs, off, |ui| {
             ui.id(("dim", "icon")).icon(Icon::INFO, 12.0, muted);
-            _ = Button::new("Go").small().show(ui.id(("dim", "go")));
+            _ = ui.control_size(ControlSize::Small).id(("dim", "go")).button("Go");
           });
         });
       });
@@ -1166,14 +981,17 @@ mod tests {
       ui.col(fs.page, |ui| {
         ui.form_section(&fs, "Section", |ui| {
           ui.form_row(&fs, FormRow::new("Shown"), |_| {});
-          let row = Disclosure::new("Other models").caption("2 more");
+          let row = FormRow::new("Other models").caption("2 more");
           let r = ui.disabled(self.1).id("fold").form_disclosure(&fs, row, |ui| {
             ui.id("a").form_row(&fs, FormRow::new("A"), |_| {});
             ui.id("b").form_row(&fs, FormRow::new("B"), |_| {});
           });
           self.0 += r.changed as usize;
-          let (off, c) = (Disclosure::new("Off").disabled(true), FormRow::new("Off"));
-          let r = ui.id("off").form_disclosure(&fs, off, |ui| ui.id("c").form_row(&fs, c, |_| {}));
+          let (off, c) = (FormRow::new("Off"), FormRow::new("Off"));
+          let r = ui
+            .disabled(true)
+            .id("off")
+            .form_disclosure(&fs, off, |ui| ui.id("c").form_row(&fs, c, |_| {}));
           self.0 += r.changed as usize;
         });
       });
@@ -1298,33 +1116,48 @@ mod tests {
     }
   }
 
-  /// Placed a section at a time, items lie where summing every height puts them, for sections
-  /// of many rows, none and one.
+  /// A section titled by a string, one with a header built of a title and a note and a footer,
+  /// and one with an empty title.
+  struct Sections;
+
+  impl App for Sections {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.set_theme(Theme::PLATES_LIGHT);
+      let fs = FormStyle::plates(&ui.theme());
+      ui.col(fs.page, |ui| {
+        ui.id("a").form_section(&fs, "Startup", |ui| ui.form_row(&fs, FormRow::new("A"), |_| {}));
+        let head = |ui: &mut Ui, s: TextStyle| {
+          ui.text("Storage", s);
+          ui.spacer();
+          ui.id("note").text("640 MB used", fs.note);
+        };
+        let section = Section::new(head).footer("Kept until you clear it.");
+        ui.id("b").form_section(&fs, section, |ui| ui.form_row(&fs, FormRow::new("B"), |_| {}));
+        ui.id("c")
+          .form_section(&fs, "", |ui| ui.id("row").form_row(&fs, FormRow::new("C"), |_| {}));
+      });
+    }
+  }
+
+  /// The header over the plate, its note at the right on the title's line; the footer under the
+  /// plate in the caption's style; an empty title shows no header.
   #[test]
-  fn sections_place_their_items_as_their_heights_do() {
-    let (counts, heads) = ([3, 0, 1, 5], [30.0, 40.5, 40.5, 40.5]);
-    let (row_h, hair) = (52.0, 1.0);
-    let mut sec = Sections { starts: vec![0], tops: vec![0.0], heads: vec![], row_h, hair };
-    let mut ends: Vec<f64> = vec![];
-    for (g, &n) in counts.iter().enumerate() {
-      sec.heads.push(heads[g]);
-      sec.starts.push(sec.starts[g] + 1 + n);
-      sec.tops.push(sec.tops[g] + heads[g] + sec.rows(n));
-      let hs =
-        std::iter::once(heads[g]).chain((0..n).map(|i| row_h + if i > 0 { hair } else { 0.0 }));
-      for h in hs {
-        ends.push(ends.last().unwrap_or(&0.0) + h);
-      }
-    }
-
-    assert_eq!(sec.len(), ends.len());
-    for i in 0..=ends.len() {
-      assert_eq!(sec.top(i), if i == 0 { 0.0 } else { ends[i - 1] }, "top of {i}");
-    }
-
-    for y in (-40..1200).map(|y| y as f64 * 0.5) {
-      assert_eq!(sec.at(y), ends.partition_point(|&e| e <= y), "at {y}");
-    }
+  fn a_section_has_a_header_and_a_footer() {
+    let mut h = Harness::new(Sections, Size::new(400.0, 400.0), 1.0);
+    h.frame();
+    let (title, note) = (h.rect(Id::of("b").key("header")), h.rect(Id::of("note")).unwrap());
+    assert!(title.is_none(), "a built header has no text of its own");
+    let b = h.rect(Id::of("b")).unwrap();
+    assert!(note.x + note.w > b.x + b.w - 20.0, "the note at the right: {note:?} in {b:?}");
+    let foot = h.rect(Id::of("b").key("footer")).unwrap();
+    assert!(foot.y + foot.h <= b.y + b.h && foot.y > note.y + 30.0, "under the plate: {foot:?}");
+    let Kind::Text { style, .. } = h.rt.ui.last.get(Id::of("b").key("footer")).unwrap().kind else {
+      panic!()
+    };
+    assert_eq!(style, FormStyle::plates(&Theme::PLATES_LIGHT).caption);
+    let (c, row) = (h.rect(Id::of("c")).unwrap(), h.rect(Id::of("row")).unwrap());
+    assert_eq!(c.y, row.y, "no header");
+    assert!(h.rect(Id::of("a").key("header")).is_some());
   }
 
   #[test]

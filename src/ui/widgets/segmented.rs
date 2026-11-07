@@ -3,9 +3,42 @@
 //! The segmented control: segments side by side, one selected, over the pick behaviour
 //! ([Ui::pick_behavior]).
 
-use super::select::Choice;
 use crate::scene::alpha;
 use crate::ui::{Align, Response, Role, Style, Ui, Value, grow, px, rigid};
+
+/// A segment of [Ui::segmented]: `(value, label)`, or `(value, label, count)` with a count
+/// drawn after its label (formatted while drawing).
+pub trait Choice<T> {
+  fn value(&self) -> T;
+  fn label(&self) -> &str;
+  fn count(&self) -> Option<usize> {
+    None
+  }
+}
+
+impl<T: Copy> Choice<T> for (T, &str) {
+  fn value(&self) -> T {
+    self.0
+  }
+
+  fn label(&self) -> &str {
+    self.1
+  }
+}
+
+impl<T: Copy> Choice<T> for (T, &str, usize) {
+  fn value(&self) -> T {
+    self.0
+  }
+
+  fn label(&self) -> &str {
+    self.1
+  }
+
+  fn count(&self) -> Option<usize> {
+    Some(self.2)
+  }
+}
 
 impl Ui<'_> {
   /// Segments side by side, one selected (`cur`): view modes, zoom levels, filters with counts.

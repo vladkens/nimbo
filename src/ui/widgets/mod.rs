@@ -1,20 +1,20 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Widgets drawn from the theme ([Ui::theme]): label, link, button (variants, sizes, an
-//! [Icon]), ⓘ and "?" buttons, text field, search field and selectable text, check box, switch,
-//! slider, select, segmented control, progress bar and spinner, badge, tooltip, the shortcut
-//! recorder, and images from pixels. Each control is its behaviour (`*_behavior`, as
-//! [super::behavior] lists) plus drawing from the theme: an app that wants its own look draws over
-//! the same behaviour.
+//! Widgets drawn from the theme ([Ui::theme]): label, link, button (variants, an [Icon]), ⓘ and
+//! "?" buttons, text field, search field and selectable text, check box, switch, slider,
+//! segmented control, progress bar and spinner, badge, tooltip, the shortcut recorder, and
+//! images from pixels; each at the control size ([Ui::control_size]). Each control is its behaviour
+//! (`*_behavior`, as [super::behavior] lists) plus drawing from the theme: an app that wants its
+//! own look draws over the same behaviour.
 //!
 //! ```ignore
 //! if ui.button("Refresh").clicked { self.refresh() }
 //! if Button::new("Save").primary().show(ui).clicked { self.save() }
 //! ui.disabled(!self.dirty).button("Revert");
 //! ui.checkbox(&mut self.wrap, "Wrap lines");
-//! ui.id("size").select(&mut self.size, &[(Size::Small, "Small"), (Size::Large, "Large")]);
-//! let r = ui.icon_button(Icon::RESET);
-//! ui.tooltip(r.id, "Back to the default");
+//! ui.id("size").segmented(&mut self.size, &[(Size::Small, "Small"), (Size::Large, "Large")]);
+//! ui.help("Back to the default").icon_button(Icon::RESET);
+//! ui.control_size(ControlSize::Small).row(Style::new(), |ui| ui.button("Small"));
 //! ```
 //!
 //! Each widget takes the id set by [Ui::id] or [Ui::key], else one by its position, and returns
@@ -37,16 +37,16 @@ mod link;
 mod progress;
 mod search;
 mod segmented;
-mod select;
 pub mod shortcut;
 mod slider;
 mod toggle;
 mod tooltip;
 
-pub use button::Button;
+pub(crate) use button::MarkShift;
+pub use button::{Button, ButtonRole};
 pub use field::{FieldStyle, TextInput};
 pub use icon::Icon;
-pub use select::{Choice, Select};
+pub use segmented::Choice;
 
 use super::{Behavior, Id, Style, Ui};
 use crate::scene::{Color, alpha, mix};

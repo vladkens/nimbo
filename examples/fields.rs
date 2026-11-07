@@ -91,7 +91,7 @@ impl App for Fields {
         let style = t.field().multiline().hint("A few lines");
         let style =
           style.frame(style.frame.h(px(84.0)).align(nimbo::Align::Start, nimbo::Align::Start));
-        if ui.a11y_label("Notes").text_field(Id::of(NOTES), &mut self.notes, &style).changed {
+        if ui.a11y_label("Notes").id(NOTES).text_field(&mut self.notes, &style).changed {
           self.changes.push(NOTES);
         }
       });

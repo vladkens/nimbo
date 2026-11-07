@@ -16,30 +16,43 @@
 //! smoothed by a hairline of its outline. Draw icons in an opaque colour: the round joints of a
 //! translucent one overlap darker. [Ui::icon] dims an icon in a disabled scope by mixing it
 //! toward the ground instead. The built-in set is drawn for nimbo, thinner than Lucide's:
-//! stroke them 1.6 units wide ([Ui::icon_stroke]).
+//! stroke them 1.6 units wide ([Icon::stroke]).
 
 use crate::scene::{Color, Frame, Point, Rect};
 use crate::svg::{flatten, spans};
 use crate::ui::{Response, Style, Ui, px};
 
 /// SVG path data in a 24 × 24 view box, drawn as a stroke or filled ([draw], [Ui::icon]).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Icon {
   /// The path data.
   pub d: &'static str,
   /// Filled rather than stroked: a play triangle.
   pub fill: bool,
+  /// The stroke's width in view box units; 0 for Lucide's 2 ([Ui::icon]) or the widget's own.
+  pub width: f32,
 }
 
 impl Icon {
   /// A stroked icon from path data `d`.
   pub const fn new(d: &'static str) -> Self {
-    Self { d, fill: false }
+    Self { d, fill: false, width: 0.0 }
   }
 
   /// A filled one.
   pub const fn filled(d: &'static str) -> Self {
-    Self { d, fill: true }
+    Self { d, fill: true, width: 0.0 }
+  }
+
+  /// Stroked `width` view box units wide, as SwiftUI's `fontWeight` on a symbol: 1.6 for the
+  /// built-in ones beside text.
+  pub const fn stroke(self, width: f32) -> Self {
+    Self { width, ..self }
+  }
+
+  /// Its stroke's width, `or` when it has none of its own.
+  pub const fn width_or(self, or: f32) -> f32 {
+    if self.width > 0.0 { self.width } else { or }
   }
 
   /// A gear of eight teeth.
@@ -194,20 +207,14 @@ fn fill(f: &mut Frame, polys: &[Vec<Point>], color: Color) {
 }
 
 impl Ui<'_> {
-  /// `icon` `size` points square in `color`, stroked as Lucide draws it at 24 points (thinner
-  /// below: 1.5 points at 18). Dimmed toward the ground in a disabled scope
-  /// ([Ui::disabled_scope]).
+  /// `icon` `size` points square in `color`, as SwiftUI's `Image(systemName:)`: stroked
+  /// [Icon::stroke] wide, else as Lucide draws it at 24 points (thinner below: 1.5 points at
+  /// 18). Disabled ([Ui::disabled], on it or a container around it), dimmed toward the ground.
   pub fn icon(&mut self, icon: Icon, size: f32, color: Color) -> Response {
-    self.icon_stroke(icon, size, color, 2.0)
-  }
-
-  /// [Ui::icon] stroked `width` view box units wide: 1.6 for the built-in ones. Disabled
-  /// ([Ui::disabled], or in a disabled scope), dimmed toward the ground.
-  pub fn icon_stroke(&mut self, icon: Icon, size: f32, color: Color, width: f32) -> Response {
     let off = self.take_disabled();
     let color = self.dim(color, off);
     let s = Style::new().w(px(size)).h(px(size));
-    self.canvas(s, move |f, r| draw(f, icon, r, color, width))
+    self.canvas(s, move |f, r| draw(f, icon, r, color, icon.width_or(2.0)))
   }
 }
 

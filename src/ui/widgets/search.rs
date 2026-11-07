@@ -70,11 +70,12 @@ impl Ui<'_> {
     b
   }
 
-  /// A search field over `text` ([Ui::search_behavior]) in `style`'s look: its box with a
-  /// magnifier at the left in the muted colour and, while there is text, a ⊗ at the right
-  /// (darker under the pointer), the text kept clear of it. [Ui::disabled] dims it, with no ⊗.
-  pub fn search_field(&mut self, id: Id, text: &mut String, style: &FieldStyle) -> Response {
-    let t = self.theme();
+  /// A search field over `text` ([Ui::search_behavior]) in `style`'s look, as SwiftUI's
+  /// `.searchable` field: its box with a magnifier at the left in the muted colour and, while
+  /// there is text, a ⊗ at the right (darker under the pointer), the text kept clear of it; its
+  /// id from [Ui::id] or [Ui::key], else its place. [Ui::disabled] dims it, with no ⊗.
+  pub fn search_field(&mut self, text: &mut String, style: &FieldStyle) -> Response {
+    let (t, id) = (self.theme(), self.take_id());
     let b = self.search_behavior(id, text);
     let clear = !text.is_empty() && !b.disabled;
     // The frame's size goes to the box the marks sit in, which the field fills, its text
@@ -116,11 +117,10 @@ impl Ui<'_> {
   }
 
   /// A [Ui::search_field] in the theme's look ([crate::ui::Theme::search]), `hint` shown while
-  /// it is empty; its id from [Ui::id] or [Ui::key], else its place.
+  /// it is empty.
   pub fn search(&mut self, text: &mut String, hint: &'static str) -> Response {
-    let id = self.take_id();
     let style = self.theme().search().hint(hint);
-    self.search_field(id, text, &style)
+    self.search_field(text, &style)
   }
 }
 
@@ -176,7 +176,7 @@ mod tests {
       let ground = if self.red { [1.0, 0.0, 0.0, 1.0] } else { t.bg };
       let left = if self.narrow { 40.0 } else { 0.0 };
       ui.row(Style::new().grow().pads([0.0, 0.0, 0.0, left]).bg(ground), |ui| {
-        let r = ui.disabled(self.off).search_field(Id::of("s"), &mut self.text, &style);
+        let r = ui.disabled(self.off).id("s").search_field(&mut self.text, &style);
         self.changes += r.changed as u32;
         self.blurs += r.blurred as u32;
       });

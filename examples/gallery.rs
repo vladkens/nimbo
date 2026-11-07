@@ -15,8 +15,8 @@
 use std::time::Duration;
 
 use nimbo::{
-  Align, Answer, App, Appearance, Button, Config, ControlSize, Dialog, Hotkey, Icon, Id, Style,
-  Theme, Tone, Ui, grow, px,
+  Align, Answer, App, Appearance, Button, ButtonRole, Config, ControlSize, Dialog, Hotkey, Icon,
+  Id, Style, Theme, Tone, Ui, grow, px,
 };
 
 pub const CHECK: &str = "check";
@@ -98,19 +98,16 @@ impl Gallery {
         Button::new("Delete").danger().show(ui);
         Button::new("Ghost").ghost().show(ui);
         ui.disabled(true).button("Off");
-        let r = ui.id((RESET, i)).a11y_label("Reset").icon_button(Icon::RESET);
-        ui.tooltip(r.id, "Back to the default");
-        let r = ui.info_button();
-        ui.tooltip(r.id, "An ⓘ explains what one line can't");
-        let r = ui.warning_button();
-        ui.tooltip(r.id, "A warning tells what is wrong");
+        ui.help("Back to the default").id((RESET, i)).a11y_label("Reset").icon_button(Icon::RESET);
+        ui.help("An ⓘ explains what one line can't").info_button();
+        ui.help("A warning tells what is wrong").warning_button();
         ui.help_button();
       });
       line(ui, "CHECK BOXES AND SWITCHES", |ui| {
         ui.id((CHECK, i)).checkbox(&mut self.wrap, "Wrap lines");
         ui.disabled(true).checkbox(&mut false, "Off");
         ui.id((TOGGLE, i)).toggle(&mut self.live, "Live");
-        ui.a11y_label("Large").toggle_sized(&mut self.big, "", ControlSize::Large);
+        ui.control_size(ControlSize::Large).a11y_label("Large").toggle(&mut self.big, "");
       });
       line(ui, "SLIDER, SELECT, SEGMENTS", |ui| {
         // Two lines under one title, as far apart as the widgets in a line.
@@ -121,8 +118,8 @@ impl Gallery {
             ui.text(format_args!("{:.0}%", self.zoom), t.muted().nowrap());
           });
           ui.row(row, |ui| {
-            ui.id((SIZE, i)).a11y_label("Size").select(&mut self.size, &SIZES);
-            ui.disabled(true).a11y_label("Size").select(&mut Size::Small, &SIZES);
+            ui.id((SIZE, i)).a11y_label("Size").picker(&mut self.size, &SIZES);
+            ui.disabled(true).a11y_label("Size").picker(&mut Size::Small, &SIZES);
             let views = [(0, "List", 128), (1, "Grid", 12), (2, "Columns", 3)];
             ui.id((VIEW, i)).segmented(&mut self.view, &views);
           });
@@ -131,10 +128,10 @@ impl Gallery {
       line(ui, "PROGRESS", |ui| {
         ui.col(Style::new().w(px(150.0)), |ui| ui.progress(Some(0.42)));
         ui.col(Style::new().w(px(150.0)), |ui| ui.disabled(true).progress(None));
-        ui.spinner(16.0);
+        ui.spinner();
       });
       line(ui, "LINK AND BADGES", |ui| {
-        ui.link("Learn more…", t.label().color(t.link));
+        ui.link("Learn more…");
         ui.badge(128, Tone::Neutral);
         ui.badge("new", Tone::Accent);
         ui.badge("+5", Tone::Success);
@@ -155,7 +152,7 @@ impl Gallery {
       line(ui, "ICONS", |ui| {
         ui.grid(11, Style::new().gap(10.0), |ui| {
           for (_, icon, _) in Icon::ALL {
-            ui.icon_stroke(icon, 20.0, t.text, 1.6);
+            ui.icon(icon.stroke(1.6), 20.0, t.text);
           }
         });
       });
@@ -187,7 +184,7 @@ impl App for Gallery {
     let d = Dialog::new("Delete the file?")
       .message("It moves to the Trash, which empties in 30 days.")
       .icon(Icon::TRASH)
-      .destructive("Delete");
+      .button("Delete", ButtonRole::Destructive);
     if d.show(ui.id(DIALOG), &mut open) == Some(Answer::Action) {
       self.deleted += 1;
     }

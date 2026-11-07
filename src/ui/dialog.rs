@@ -8,7 +8,8 @@
 //!
 //! ```ignore
 //! if ui.icon_button(Icon::TRASH).clicked { self.ask = true }
-//! let ask = Dialog::new("Delete the file?").message("It frees 740 MB.").destructive("Delete");
+//! let ask = Dialog::new("Delete the file?").message("It frees 740 MB.");
+//! let ask = ask.button("Delete", ButtonRole::Destructive);
 //! if ask.icon(Icon::TRASH).show(ui.id("delete"), &mut self.ask) == Some(Answer::Action) {
 //!   self.delete();
 //! }
@@ -24,7 +25,7 @@
 use keyboard_types::{Modifiers, NamedKey};
 
 use super::theme::Variant;
-use super::widgets::{Button, Icon};
+use super::widgets::{Button, ButtonRole, Icon};
 use super::{Float, Id, Role, State, Style, TextStyle, Transition, Ui, grow, pct, px};
 use crate::keys::Key;
 use crate::scene::alpha;
@@ -69,7 +70,7 @@ pub struct Dialog<'s> {
 }
 
 impl<'s> Dialog<'s> {
-  /// A dialog titled `title` with Cancel and "OK", the default.
+  /// A dialog titled `title` with Cancel and "OK", the default, as SwiftUI's `.alert(title)`.
   pub fn new(title: &'s str) -> Self {
     let (icon, destructive) = (None, false);
     Self { title, message: "", icon, action: "OK", cancel: "Cancel", destructive, width: 260.0 }
@@ -85,20 +86,17 @@ impl<'s> Dialog<'s> {
     Self { icon: Some(icon), ..self }
   }
 
-  /// The action, in the accent: the default button, which Return chooses.
-  pub fn action(self, label: &'s str) -> Self {
-    Self { action: label, destructive: false, ..self }
-  }
-
-  /// A destructive action, in red ("Delete"): Cancel is the default then, so Return keeps what
+  /// A button labelled `label` by its role, as SwiftUI's alert takes `Button(label, role:)`:
+  /// [ButtonRole::Cancel] the button that keeps things, Cancel by default; any other the action,
+  /// "OK" by default: [ButtonRole::Confirm] in the accent, the default button Return chooses;
+  /// [ButtonRole::Destructive] in red ("Delete"), Cancel the default then, so Return keeps what
   /// is there.
-  pub fn destructive(self, label: &'s str) -> Self {
-    Self { action: label, destructive: true, ..self }
-  }
-
-  /// Cancel's label.
-  pub fn cancel(self, label: &'s str) -> Self {
-    Self { cancel: label, ..self }
+  pub fn button(self, label: &'s str, role: ButtonRole) -> Self {
+    match role {
+      ButtonRole::Cancel => Self { cancel: label, ..self },
+      ButtonRole::Confirm => Self { action: label, destructive: false, ..self },
+      ButtonRole::Destructive => Self { action: label, destructive: true, ..self },
+    }
   }
 
   /// The card's width, 260 by default, a macOS alert's; at most the window's less 32.
@@ -106,8 +104,8 @@ impl<'s> Dialog<'s> {
     Self { width: w, ..self }
   }
 
-  /// Shows it while `open`: the answer once a button closed it (`open` is then false). Its
-  /// buttons are `id.key("cancel")` and `id.key("action")`.
+  /// Shows it while `open`, as SwiftUI's `isPresented`: the answer once a button closed it
+  /// (`open` is then false). Its buttons are `id.key("cancel")` and `id.key("action")`.
   pub fn show(self, ui: &mut Ui, open: &mut bool) -> Option<Answer> {
     let t = ui.theme();
     let id = ui.take_id();
@@ -136,7 +134,9 @@ impl<'s> Dialog<'s> {
       // The icon at the card's padding: the margin in its view box brings its ink in line
       // with the text, 6 further in.
       if let Some(icon) = self.icon {
-        ui.col(Style::new().pads([0.0, 0.0, 8.0, 0.0]), |ui| ui.icon_stroke(icon, 64.0, tone, 1.3));
+        ui.col(Style::new().pads([0.0, 0.0, 8.0, 0.0]), |ui| {
+          ui.icon(icon.stroke(icon.width_or(1.3)), 64.0, tone)
+        });
       }
 
       ui.col(Style::new().w(grow()).pads([0.0, 6.0, 16.0, 6.0]), |ui| {
@@ -356,5 +356,28 @@ mod tests {
     assert!(!h.app().open);
     h.key('z', CMD);
     assert_eq!(h.app().heard, 1);
+  }
+
+  /// Labelled by role: Cancel's own label, a destructive action, Return keeping things.
+  struct Roles(bool, Option<Answer>);
+
+  impl App for Roles {
+    fn view(&mut self, ui: &mut Ui) {
+      let d = Dialog::new("Discard?").button("Keep", ButtonRole::Cancel);
+      let d = d.button("Discard", ButtonRole::Destructive);
+      self.1 = d.show(ui.id("d"), &mut self.0).or(self.1);
+    }
+  }
+
+  #[test]
+  fn dialog_buttons_take_their_labels_by_role() {
+    let mut h = Harness::new(Roles(true, None), Size::new(400.0, 300.0), 1.0);
+    h.frame();
+    h.frame();
+    let tree = h.a11y();
+    assert!(tree.contains(r#"button "Keep""#) && tree.contains(r#"button "Discard""#), "{tree}");
+    h.key(NamedKey::Enter, Modifiers::empty());
+    h.frame();
+    assert_eq!(h.app().1, Some(Answer::Cancel), "Return keeps things");
   }
 }
