@@ -782,23 +782,32 @@ mod tests {
   }
 
   /// A row labelled by a name and badges after it, one with a tooltip, over one with the name
-  /// alone, `.0` the name; each with Use, or a switch when `.1`.
-  struct Badged(&'static str, bool);
+  /// alone, `.0` the name; each with `.1`'s control.
+  struct Badged(&'static str, Ctl);
+
+  /// The control of [Badged]'s rows: a button with a label, a switch, or a group.
+  #[derive(Clone, Copy, PartialEq)]
+  enum Ctl {
+    Use,
+    Switch,
+    Segments,
+  }
 
   impl App for Badged {
     fn view(&mut self, ui: &mut Ui) {
       ui.set_theme(Theme::PLATES_LIGHT);
       let fs = FormStyle::plates(&ui.theme());
-      let (name, switch) = (self.0, self.1);
+      let (name, ctl) = (self.0, self.1);
       let label = |ui: &mut Ui, s: TextStyle| {
         ui.id("name").text(name, s.line_limit(1));
         ui.control_size(ControlSize::Small).id("new").badge("New", Tone::Accent);
         let ui = ui.help("In testing").control_size(ControlSize::Small);
         ui.id("beta").badge("Beta", Tone::Neutral);
       };
-      let control = |ui: &mut Ui, id: &str| match switch {
-        true => ui.id(id).toggle(&mut false, ""),
-        false => ui.id(id).button("Use"),
+      let control = |ui: &mut Ui, id: &str| match ctl {
+        Ctl::Switch => ui.id(id).toggle(&mut false, ""),
+        Ctl::Segments => ui.id(id).segmented(&mut 0, &[(0, "Light"), (1, "Dark")]),
+        Ctl::Use => ui.id(id).button("Use"),
       };
       ui.col(fs.page, |ui| {
         ui.form_section(&fs, "Section", |ui| {
@@ -821,7 +830,7 @@ mod tests {
     let hair = FormStyle::plates(&Theme::PLATES_LIGHT).hairline;
     let long = "A label long enough to run under the badges and the button at the right";
     for label in ["Row", long] {
-      let mut h = Harness::new(Badged(label, false), Size::new(400.0, 300.0), 2.0);
+      let mut h = Harness::new(Badged(label, Ctl::Use), Size::new(400.0, 300.0), 2.0);
       h.frame();
       let (badged, plain) = (h.rect(Id::of("badged")).unwrap(), h.rect(Id::of("plain")).unwrap());
       assert_eq!(badged.h + hair, plain.h, "{label}: one height");
@@ -857,21 +866,30 @@ mod tests {
   }
 
   /// A switch takes the name and the description from a composed label's and caption's plain
-  /// texts, which are not read again; the badges, read on their own, come after the switch.
+  /// texts, which are not read again; the badges, read on their own, come after the switch, beside
+  /// it: a group (a segmented control) named so doesn't take them in.
   #[test]
   fn a_composed_label_names_its_control_then_its_tags() {
-    let mut h =
-      Harness::new(Badged("Download in the background", true), Size::new(500.0, 300.0), 1.0);
-    h.frame();
-    let tree = h.a11y();
-    let lines: Vec<&str> = tree.lines().map(str::trim).collect();
-    let at = |l: &str| lines.iter().position(|x| x.starts_with(l));
-    let switch = at(r#"switch "Download in the background" off desc "Under it""#);
-    let (new, beta) = (at(r#"static text "New""#), at(r#"static text "Beta" desc "In testing""#));
-    assert!(switch.is_some() && switch < new && new < beta, "name, then tags:\n{tree}");
-    let texts = lines.iter().filter(|l| l.contains("Download in the background")).count();
-    assert_eq!(texts, 2, "the names read once a row:\n{tree}");
-    assert!(!lines.contains(&r#"static text "Under it""#), "{tree}");
+    let name = "Download in the background";
+    for (ctl, read) in [(Ctl::Switch, "switch"), (Ctl::Segments, "radio group")] {
+      let mut h = Harness::new(Badged(name, ctl), Size::new(500.0, 300.0), 1.0);
+      h.frame();
+      let tree = h.a11y();
+      let lines: Vec<&str> = tree.lines().map(str::trim).collect();
+      let at = |l: &str| lines.iter().position(|x| x.starts_with(l));
+      let control = at(&format!("{read} {name:?}"));
+      let (new, beta) = (at(r#"static text "New""#), at(r#"static text "Beta" desc "In testing""#));
+      assert!(control.is_some() && control < new && new < beta, "name, then tags:\n{tree}");
+      let texts = lines.iter().filter(|l| l.contains(name)).count();
+      assert_eq!(texts, 2, "the names read once a row:\n{tree}");
+      assert!(!lines.contains(&r#"static text "Under it""#), "{tree}");
+
+      // The tags beside the control, under the same parent.
+      let t = h.a11y_tree();
+      let node = |s: &str| t.nodes.iter().find(|n| t.str(n.props.name) == s).unwrap();
+      let (control, new) = (node(name), node("New"));
+      assert_eq!(new.parent, control.parent, "{read}: beside it\n{tree}");
+    }
   }
 
   /// A row with its caption composed of texts, one with a tooltip, under one with the same

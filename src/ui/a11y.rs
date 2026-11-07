@@ -498,8 +498,8 @@ impl A11yTree {
 }
 
 /// A recorded node open around the one walked: its end in the tree, its index, whether it
-/// hides text (a leaf).
-type Open = (u32, u32, bool);
+/// hides text (a leaf), and its start in the tree.
+type Open = (u32, u32, bool, u32);
 
 /// No record at a node, or a text element not read.
 const NONE: u32 = u32::MAX;
@@ -555,12 +555,12 @@ impl UiState {
     // The nodes in the order they are read: those moved, each with what is inside it, where
     // they go.
     later.sort_unstable();
-    let mut order: Vec<u32> = Vec::with_capacity(t.nodes.len());
+    let mut order: Vec<(u32, bool)> = Vec::with_capacity(t.nodes.len());
     let (mut i, mut moved) = (0u32, later.iter().peekable());
     let n = t.nodes.len() as u32;
     while i <= n {
       for &(from, _) in later.iter().filter(|m| m.1 == i) {
-        order.extend(from..t.nodes[from as usize].end);
+        order.extend((from..t.nodes[from as usize].end).map(|k| (k, true)));
       }
 
       if i == n {
@@ -573,7 +573,7 @@ impl UiState {
           i = t.nodes[i as usize].end;
         }
         _ => {
-          order.push(i);
+          order.push((i, false));
           i += 1;
         }
       }
@@ -592,9 +592,19 @@ impl UiState {
     // Where each node's children show, and the recorded nodes open around the one walked.
     let (mut out, mut clip) = (A11yTree::default(), vec![Rect::default(); t.nodes.len()]);
     let (mut open, mut layer): (Vec<Open>, _) = (Vec::new(), vec![0u16; t.nodes.len()]);
-    for i in order.into_iter().map(|i| i as usize) {
+    // Moved nodes are read under those of their ancestors open there, the control's not among
+    // them, and the walk goes on under what was open before them.
+    let mut kept: Option<Vec<Open>> = None;
+    for (i, moved) in order.into_iter().map(|(i, m)| (i as usize, m)) {
       let n = &t.nodes[i];
-      while open.last().is_some_and(|o| o.0 as usize <= i) {
+      match (moved, kept.is_some()) {
+        (true, false) => kept = Some(open.clone()),
+        (false, true) => open = kept.take().unwrap_or_default(),
+        _ => {}
+      }
+
+      let around = |o: &Open| (o.3 as usize..o.0 as usize).contains(&i);
+      while open.last().is_some_and(|o| !around(o)) {
         open.pop();
       }
 
@@ -629,7 +639,7 @@ impl UiState {
 
         props.states |= u8::from(focus == Some(id)) << State::Focused as u8;
         out.push(id, props, rect, (n.style.focus != Focus::None, layer[i]), &open);
-        open.push((n.end, out.nodes.len() as u32 - 1, p.role.leaf()));
+        open.push((n.end, out.nodes.len() as u32 - 1, p.role.leaf(), i as u32));
       }
 
       let s = if let Kind::Text { range, .. } = n.kind { t.str(range.0, range.1) } else { "" };
