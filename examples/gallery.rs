@@ -77,7 +77,7 @@ pub const BLOCKS: &[Block] = &[
   b("Controls", "Check box", "Toggle(\"Wrap\", isOn: $wrap).toggleStyle(.checkbox)", "ui.checkbox(&mut self.wrap, \"Wrap\")"),
   b("Controls", "Slider", "Slider(value: $zoom, in: 0...200)", "ui.slider(&mut self.zoom, 0.0..=200.0)"),
   b("Controls", "Picker", "Picker(\"Size\", selection: $size) { …; Divider(); … }", "Picker::new(&mut self.size).options(&A).divider().options(&B).show(ui)"),
-  b("Controls", "Segmented picker", "Picker(…) { … }.pickerStyle(.segmented)", "ui.segmented(&mut self.view, &[(0, \"List\"), (1, \"Grid\")])"),
+  b("Controls", "Segmented picker", "Picker(…) { … }.pickerStyle(.segmented)", "ui.segmented(&mut self.view, &[Tag::new(0, \"List\").count(128), Tag::new(1, \"Grid\")])"),
   b("Controls", "Text field", "TextField(\"Name\", text: $name)", "ui.field(&mut self.name, \"Name\")"),
   b("Controls", "Secure field", "SecureField(\"Password\", text: $key)", "ui.password_field(&mut self.key, \"Password\")"),
   b("Controls", "Search field", ".searchable(text: $query)", "ui.search(&mut self.query, \"Search\")"),
@@ -329,7 +329,12 @@ impl Gallery {
         p.options(&SIZES[1..]).show(ui.a11y_label("Size"));
       }),
       "Segmented picker" => Self::variants(ui, Shown::Plain, |ui| {
-        ui.segmented(&mut self.view, &[(0, "List", 128), (1, "Grid", 12), (2, "Columns", 3)]);
+        let views = [
+          Tag::new(0, "List").count(128),
+          Tag::new(1, "Grid").count(12),
+          Tag::new(2, "Columns").count(3),
+        ];
+        ui.segmented(&mut self.view, &views);
       }),
       "Text field" => Self::variants(ui, Shown::Plain, |ui| {
         ui.col(Style::new().w(px(200.0)), |ui| _ = ui.field(&mut self.name, "Name"));

@@ -43,7 +43,8 @@ impl<'s> Button<'s> {
   }
 
   /// An icon before the label, as SwiftUI's `Button(_:systemImage:)`; with no label, a square
-  /// button showing the icon, muted until the pointer is on it unless it has a look of its own.
+  /// button showing the icon, muted until the pointer is on it unless it has a look of its own
+  /// or is selected ([Button::selected]).
   pub fn icon(self, icon: Icon) -> Self {
     Self { icon: Some(icon), ..self }
   }
@@ -108,7 +109,7 @@ impl<'s> Button<'s> {
     let size = (s.text.font.size + 2.0).round();
     let mut r = ui.with_id(id).row(frame, |ui| {
       if let Some(i) = self.icon {
-        let i = i.stroke(1.6);
+        let i = i.default_stroke(1.6);
         ui.canvas(Style::new().w(px(size)).h(px(size)), move |f, r| icon::draw(f, i, r, ink));
       }
 
@@ -173,7 +174,7 @@ impl Ui<'_> {
     let k = if b.pressed { 1.0 } else { 0.5 * hot };
     let color = self.dim(mix(ink[0], ink[1], k), b.disabled);
     let s = self.control(Style::new().w(px(size)).h(px(size)).radius(size / 2.0), &b);
-    let paint = move |f: &mut Frame, r: Rect| icon::draw(f, icon.stroke(1.5), r, color);
+    let paint = move |f: &mut Frame, r: Rect| icon::draw(f, icon.default_stroke(1.5), r, color);
     let Some(&mut MarkShift(dy)) = self.slot::<MarkShift>() else {
       let mut r = self.with_id(id).canvas(s, paint);
       r.clicked = b.clicked;
@@ -298,6 +299,33 @@ mod tests {
     h.click_id(Id::of("off"));
     h.click_id(Id::of("on"));
     assert_eq!(h.app().0, 10, "only the button after the container clicked");
+  }
+
+  /// Icon buttons of the same icon, at the button's width and at one the app gave it.
+  struct Strokes;
+
+  impl App for Strokes {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.set_theme(crate::ui::Theme::PLATES_LIGHT);
+      ui.col(Style::new().grow().bg(ui.theme().bg), |ui| {
+        ui.id("own").icon_button(crate::ui::Icon::GEAR);
+        ui.id("app").icon_button(crate::ui::Icon::GEAR.stroke(3.0));
+      });
+    }
+  }
+
+  /// A width the app gave the icon wins over the button's own.
+  #[test]
+  fn an_icons_own_stroke_stays() {
+    let mut h = Harness::new(Strokes, Size::new(100.0, 100.0), 2.0);
+    h.frame();
+    let img = h.render();
+    let ink = |r: crate::scene::Rect| {
+      let px = (0..(r.w * 2.0) as i32).flat_map(|x| (0..(r.h * 2.0) as i32).map(move |y| (x, y)));
+      px.filter(|&(x, y)| img.pixel(r.x + x as f32 / 2.0, r.y + y as f32 / 2.0)[0] < 160).count()
+    };
+    let (own, app) = (ink(h.rect(Id::of("own")).unwrap()), ink(h.rect(Id::of("app")).unwrap()));
+    assert!(app > own + own / 3, "the app's width: {app} inked, the button's {own}");
   }
 
   /// An icon button, disabled or not, in the light theme.

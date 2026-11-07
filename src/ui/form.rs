@@ -290,7 +290,7 @@ impl Content<'_> {
       }
       Content::Icon(i) => {
         ui.next_id = Some((id, false));
-        ui.icon(i.stroke(stroke), size, style.color);
+        ui.icon(i.default_stroke(stroke), size, style.color);
       }
       Content::Built(f) => f(ui, style),
     }
@@ -390,14 +390,14 @@ impl<'s> FormRow<'s> {
 /// `.tabItem { Label(label, systemImage:) }` and `.tag(value)`; `const`, so a toolbar is a
 /// constant.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct TabItem<T> {
+pub struct TabItem<'s, T> {
   pub value: T,
   pub icon: Icon,
-  pub label: &'static str,
+  pub label: &'s str,
 }
 
-impl<T> TabItem<T> {
-  pub const fn new(value: T, icon: Icon, label: &'static str) -> Self {
+impl<'s, T> TabItem<'s, T> {
+  pub const fn new(value: T, icon: Icon, label: &'s str) -> Self {
     Self { value, icon, label }
   }
 }
@@ -664,17 +664,17 @@ impl Ui<'_> {
   }
 
   /// A toolbar of tabs, one per [TabItem], centred, as a `TabView` of `.tabItem`s in a `Settings`
-  /// scene: the icon over the label, the
-  /// one equal to `cur` raised on a tile, in the accent ([FormStyle::tab_on]); no hover fill, as
-  /// System Settings' toolbar, only the pointing hand. A click picks a tab; so do Left and Right
-  /// while the toolbar has focus (Tab gives it, ringing the selected tab). `changed` when `cur`
-  /// changed. Tabs are `id.key(i)`. Under a title bar the app draws ([Ui::titlebar]) the window's
-  /// title tops it, and a press on it anywhere but a tab moves the window.
+  /// scene: the icon over the label, the one equal to `cur` raised on a tile, in the accent
+  /// ([FormStyle::tab_on]); no hover fill, as System Settings' toolbar, only the pointing hand. A
+  /// click picks a tab; so do Left and Right while the toolbar has focus (Tab gives it, ringing the
+  /// selected tab). `changed` when `cur` changed. Tabs are `id.key(i)`. Under a title bar the app
+  /// draws ([Ui::titlebar]) the window's title tops it, and a press on it anywhere but a tab moves
+  /// the window.
   pub fn toolbar_tabs<T: PartialEq + Copy>(
     &mut self,
     fs: &FormStyle,
     cur: &mut T,
-    items: &[TabItem<T>],
+    items: &[TabItem<'_, T>],
   ) -> Response {
     let fs = *fs;
     let t = self.theme();
@@ -735,7 +735,7 @@ impl Ui<'_> {
           let s = b.pointer(tile);
           ui.with_id(tab).canvas_col(s, paint, |ui| {
             // Canvases draw past the bar's opacity: the icon dims itself.
-            ui.disabled(b.disabled).icon(icon.stroke(fs.tab_stroke), fs.tab_icon, color);
+            ui.disabled(b.disabled).icon(icon.default_stroke(fs.tab_stroke), fs.tab_icon, color);
             ui.text(label, fs.tab_text.color(color));
           });
         }
@@ -770,7 +770,7 @@ mod tests {
   use crate::keys::Key;
   use crate::scene::{Point, Size};
   use crate::ui::layout::Kind;
-  use crate::ui::{ControlSize, Id, LinePattern, Tone};
+  use crate::ui::{ControlSize, Id, LinePattern, Tag, Tone};
 
   /// A section of one row and a footer with the "?" alone, nothing named.
   #[derive(Default)]
@@ -823,7 +823,7 @@ mod tests {
       };
       let control = |ui: &mut Ui, id: &str| match ctl {
         Ctl::Switch => ui.id(id).toggle(&mut false, ""),
-        Ctl::Segments => ui.id(id).segmented(&mut 0, &[(0, "Light"), (1, "Dark")]),
+        Ctl::Segments => ui.id(id).segmented(&mut 0, &[Tag::new(0, "Light"), Tag::new(1, "Dark")]),
         Ctl::Use => ui.id(id).button("Use"),
       };
       ui.col(fs.page, |ui| {

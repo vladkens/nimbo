@@ -107,8 +107,8 @@ pub enum Look {
   Dark,
 }
 
-pub const LOOKS: [(Look, &str); 3] =
-  [(Look::System, "Auto"), (Look::Light, "Light"), (Look::Dark, "Dark")];
+pub const LOOKS: [Tag<Look>; 3] =
+  [Tag::new(Look::System, "Auto"), Tag::new(Look::Light, "Light"), Tag::new(Look::Dark, "Dark")];
 
 pub const LOGGING: [Tag<u8>; 3] =
   [Tag::new(0, "Errors only"), Tag::new(1, "Warnings"), Tag::new(2, "Everything")];
@@ -240,7 +240,7 @@ impl Settings {
       ui.disabled(!self.updates)
         .id(DOWNLOAD_ROW)
         .form_row(fs, FormRow::new(label), |ui| ui.id(DOWNLOAD).toggle(&mut self.download, ""));
-      let channels = [(Channel::Stable, "Stable"), (Channel::Beta, "Beta")];
+      let channels = [Tag::new(Channel::Stable, "Stable"), Tag::new(Channel::Beta, "Beta")];
       ui.form_row(fs, FormRow::new("Channel"), |ui| {
         ui.id(CHANNEL).segmented(&mut self.channel, &channels)
       });

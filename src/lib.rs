@@ -82,8 +82,8 @@ pub use shell::{Anchor, AppInfo, Main, Presence, Proxy, Window, WindowId, app, a
 pub use text::edit::{Editor, Lines, Mono, Sel};
 pub use text::{Design, Font, Weight};
 pub use ui::{
-  Align, Answer, Axes, Axis, Behavior, Button, ButtonLook, ButtonRole, ButtonStyle, Choice, Click,
-  Clip, Content, ControlBorder, ControlSize, CoordinateSpace, Cursor, Dialog, Dim, Ease, EditMenu,
+  Align, Answer, Axes, Axis, Behavior, Button, ButtonLook, ButtonRole, ButtonStyle, Click, Clip,
+  Content, ControlBorder, ControlSize, CoordinateSpace, Cursor, Dialog, Dim, Ease, EditMenu,
   Editing, FieldBehavior, FieldKind, FieldStyle, Float, Focus, FocusDirection, FocusRing, FormRow,
   FormStyle, Icon, IconPaint, Id, LinePattern, List, ListResponse, ListStyle, MenuPlacement,
   Picker, Press, Response, Row, Scroll, Section, Selection, Shadow, Sizes, Split, Style, TabItem,

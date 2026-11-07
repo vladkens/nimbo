@@ -13,17 +13,27 @@ use crate::scene::{Point, Rect, alpha, mix};
 use crate::ui::containers::menu::{MenuPlacement, TypeSelect};
 use crate::ui::{Align, Behavior, Id, Response, Role, State, Style, Ui, grow, px, rigid};
 
-/// A picker's option, as SwiftUI's `Text(label).tag(value)`: `const`, so a list of them is a
-/// constant: `const LAUNCH: [Tag<Launch>; 2] = [Tag::new(Launch::Window, "Open a window"), ..]`.
+/// An option of a picker or a segmented control, as SwiftUI's `Text(label).tag(value)`:
+/// `const`, so a list of them is a constant:
+/// `const LAUNCH: [Tag<Launch>; 2] = [Tag::new(Launch::Window, "Open a window"), ..]`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tag<'s, T> {
   pub value: T,
   pub label: &'s str,
+  /// A count a segment draws after its label ([Ui::segmented]); a picker shows none.
+  pub count: Option<usize>,
 }
 
 impl<'s, T> Tag<'s, T> {
   pub const fn new(value: T, label: &'s str) -> Self {
-    Self { value, label }
+    Self { value, label, count: None }
+  }
+}
+
+impl<'s, T: Copy> Tag<'s, T> {
+  /// With `n` after the label, dimmed: a filter's matches.
+  pub const fn count(self, n: usize) -> Self {
+    Self { count: Some(n), ..self }
   }
 }
 

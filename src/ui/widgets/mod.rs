@@ -12,7 +12,7 @@
 //! if Button::new("Save").style(ButtonStyle::BorderedProminent).show(ui).clicked { self.save() }
 //! ui.disabled(!self.dirty).button("Revert");
 //! ui.checkbox(&mut self.wrap, "Wrap lines");
-//! ui.id("size").segmented(&mut self.size, &[(Size::Small, "Small"), (Size::Large, "Large")]);
+//! ui.id("size").segmented(&mut self.size, &[Tag::new(Size::Small, "Small"), Tag::new(Size::Large, "Large")]);
 //! ui.help("Back to the default").icon_button(Icon::RESET);
 //! ui.control_size(ControlSize::Small).row(Style::new(), |ui| ui.button("Small"));
 //! ```
@@ -47,7 +47,6 @@ pub(crate) use button::MarkShift;
 pub use button::{Button, ButtonRole};
 pub use field::{FieldKind, FieldStyle, TextInput};
 pub use icon::{Icon, IconPaint};
-pub use segmented::Choice;
 
 use super::{Behavior, Id, Style, Ui};
 use crate::scene::{Color, alpha, mix};

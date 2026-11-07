@@ -166,7 +166,7 @@ nimbo: `Picker::new(&mut self.size).options(&A).divider().options(&B).show(ui)`
 
 SwiftUI: `Picker(…) { … }.pickerStyle(.segmented)`
 
-nimbo: `ui.segmented(&mut self.view, &[(0, "List"), (1, "Grid")])`
+nimbo: `ui.segmented(&mut self.view, &[Tag::new(0, "List").count(128), Tag::new(1, "Grid")])`
 
 ![Segmented picker](api/segmented-picker.png)
 

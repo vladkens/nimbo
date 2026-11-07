@@ -31,19 +31,19 @@ pub struct Icon {
   pub paint: IconPaint,
 }
 
-/// How an [Icon] is drawn, as SF Symbols' rendering: a stroke of a width in view box units
-/// (Lucide's 2 by [Icon::new]), or a fill. A widget draws its icons at its own width
-/// ([Icon::stroke]): a button's at 1.6.
+/// How an [Icon] is drawn, as SF Symbols' rendering: a stroke, of the width the app gave it in
+/// view box units ([Icon::stroke]) or, with none given, of the widget's that draws it (a
+/// button's 1.6, [Ui::icon]'s Lucide's 2: [Icon::default_stroke]); or a fill.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum IconPaint {
-  Stroke(f32),
+  Stroke(Option<f32>),
   Fill,
 }
 
 impl Icon {
   /// A stroked icon from path data `d`.
   pub const fn new(d: &'static str) -> Self {
-    Self { d, paint: IconPaint::Stroke(2.0) }
+    Self { d, paint: IconPaint::Stroke(None) }
   }
 
   /// A filled one.
@@ -56,7 +56,15 @@ impl Icon {
   pub const fn stroke(self, width: f32) -> Self {
     match self.paint {
       IconPaint::Fill => self,
-      IconPaint::Stroke(_) => Self { paint: IconPaint::Stroke(width), ..self },
+      IconPaint::Stroke(_) => Self { paint: IconPaint::Stroke(Some(width)), ..self },
+    }
+  }
+
+  /// Stroked `width` wide if the app gave it no width: a widget's own width for its icons.
+  pub const fn default_stroke(self, width: f32) -> Self {
+    match self.paint {
+      IconPaint::Stroke(None) => self.stroke(width),
+      _ => self,
     }
   }
 
@@ -191,7 +199,8 @@ pub fn draw(f: &mut Frame, icon: Icon, r: Rect, color: Color) {
       fill(f, &lines, color);
       1.0 / f.scale
     }
-    IconPaint::Stroke(w) => w * kx.min(ky),
+    // Drawn with no width given: Lucide's.
+    IconPaint::Stroke(w) => w.unwrap_or(2.0) * kx.min(ky),
   };
 
   for l in &lines {
@@ -223,7 +232,7 @@ impl Ui<'_> {
     let off = self.take_disabled();
     let color = self.dim(color, off);
     let s = Style::new().w(px(size)).h(px(size));
-    self.canvas(s, move |f, r| draw(f, icon, r, color))
+    self.canvas(s, move |f, r| draw(f, icon.default_stroke(2.0), r, color))
   }
 }
 

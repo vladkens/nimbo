@@ -82,7 +82,7 @@ pub(crate) use textlayout::TextLayout;
 pub use theme::{
   ButtonLook, ButtonStyle, ControlBorder, ControlSize, Sizes, SwitchSize, Theme, Tone,
 };
-pub use widgets::{Button, ButtonRole, Choice, FieldKind, FieldStyle, Icon, IconPaint, TextInput};
+pub use widgets::{Button, ButtonRole, FieldKind, FieldStyle, Icon, IconPaint, TextInput};
 
 use self::input::{Deliver, Input, ScrollState};
 use self::store::{Anim, Store};
