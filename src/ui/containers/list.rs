@@ -678,7 +678,7 @@ impl<'a> Ui<'a> {
     sel: &mut Selection,
     out: &mut ListResponse,
     n: usize,
-    (multi, clicks_select): (bool, bool),
+    (multi, selects): (bool, bool),
     key: &dyn Fn(usize) -> u64,
   ) {
     // The secondary button's press, on Windows its release (a Control-click is the Mac's).
@@ -746,7 +746,7 @@ impl<'a> Ui<'a> {
         sel.select(k, i);
       }
       // A plain click that doesn't select: the press focused the list.
-      _ if !clicks_select && !mods.contains(CMD) && !mods.shift() => return,
+      _ if !selects && !mods.contains(CMD) && !mods.shift() => return,
       (_, true) => sel.click(i, mods, n, key),
       _ => sel.select(k, i),
     }

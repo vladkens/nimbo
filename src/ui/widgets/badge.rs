@@ -21,11 +21,13 @@ impl Ui<'_> {
   pub fn badge_sized(&mut self, s: impl Display, tone: Tone, size: ControlSize) -> Response {
     let t = self.theme();
     let opacity = if self.take_disabled() { t.disabled } else { 1.0 };
-    let small = size == ControlSize::Small;
-    let (dh, pad) = if small { (3.0, 5.0) } else { (0.0, 7.0) };
-    let font = Font { size: t.sizes.badge - dh / 3.0, ..t.small }.weight(Weight::Semibold);
-    let h = t.sizes.badge_h - dh;
-    let r = if small { 4.0 } else { h / 2.0 };
+    let (font, h) = (t.sizes.badge, t.sizes.badge_h);
+    let (font, h, pad, r) = match size {
+      ControlSize::Small => (font - 1.0, h - 3.0, 5.0, 4.0),
+      _ => (font, h, 7.0, h / 2.0),
+    };
+
+    let font = Font { size: font, ..t.small }.weight(Weight::Semibold);
     let pill = Style::new().h(px(h)).pad_xy(pad, 0.0).center().radius(r).bg(t.tint(tone));
     let pill = pill.w(rigid()).opacity(opacity);
     self.row(pill, |ui| ui.text(s, TextStyle::new(font, t.tone(tone)).nowrap()))

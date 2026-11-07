@@ -608,11 +608,10 @@ impl Ui<'_> {
   /// `DisclosureGroup` in a `Form`: [Ui::form_row]'s label and description, a chevron at the
   /// right turning from right to down ([super::Theme::fade]), the pointing hand and, held down,
   /// a rounded fill inset as the hairlines, as System Settings' rows that open more, which show
-  /// no hover. A click, or Space while it has focus, toggles it; it starts
-  /// collapsed and keeps its state under its id, the chevron `id.key("chevron")`. The rows show
-  /// and go at once, not sliding as SwiftUI's. [FormRow::disabled], it dims and doesn't toggle.
-  /// Assistive technology reads a button, [State::Expanded] while open. `changed` when it
-  /// toggled.
+  /// no hover. A click, or Space while it has focus, toggles it; it starts collapsed and keeps
+  /// its state under its id, the chevron `id.key("chevron")`. The rows show and go at once, not
+  /// sliding as SwiftUI's. [FormRow::disabled], it dims and doesn't toggle. Assistive technology
+  /// reads a button, [State::Expanded] while open. `changed` when it toggled.
   pub fn form_disclosure<R>(
     &mut self,
     fs: &FormStyle,
@@ -638,6 +637,7 @@ impl Ui<'_> {
     });
     let a = self.a11y(id, Role::Button).name(row.label).state(State::Expanded, open);
     a.description(row.caption.unwrap_or_default());
+
     if open {
       rows(self);
     }
