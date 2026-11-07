@@ -274,8 +274,7 @@ pub trait Caption<'s> {
     ""
   }
 
-  /// Builds it under the label in `style` (dimmed in a disabled row, as a closure's elements
-  /// are), a text as `id`.
+  /// Builds it under the label in `style` (dimmed in a disabled row), a text as `id`.
   fn build(self, ui: &mut Ui, style: TextStyle, id: Id);
 }
 
@@ -304,11 +303,11 @@ impl<'s> Caption<'s> for &'s String {
   }
 }
 
-impl<F: FnOnce(&mut Ui)> Caption<'_> for F {
-  fn build(self, ui: &mut Ui, _: TextStyle, _: Id) {
-    // Dimmed in a disabled row, as a text caption is.
-    let opacity = if ui.scope_disabled() { ui.theme().disabled } else { 1.0 };
-    ui.col(Style::new().w(grow()).opacity(opacity), self);
+/// Built with the caption's style, dimmed in a disabled row as a text caption is; the widgets in
+/// it read the row's disabled scope and dim themselves.
+impl<F: FnOnce(&mut Ui, TextStyle)> Caption<'_> for F {
+  fn build(self, ui: &mut Ui, style: TextStyle, _: Id) {
+    self(ui, style);
   }
 }
 
@@ -359,13 +358,16 @@ impl<'s, C> FormRow<'s, C> {
   }
 
   /// The description under the label: grey text, wrapping onto as many lines as it needs, or
-  /// what a closure builds, as SwiftUI's label of `Text`s (texts in [FormStyle::caption], a term
-  /// [TextStyle::dotted] with [Ui::help] on it, each read where it stands):
+  /// what a closure builds, as SwiftUI's label of `Text`s, each read where it stands. The
+  /// closure gets the caption's style, [FormStyle::caption] dimmed in a disabled row, as SwiftUI
+  /// passes a foreground style down: its texts take it (a term [TextStyle::dotted] with
+  /// [Ui::help] on it); its widgets, icons included, dim themselves in the row's disabled scope;
+  /// a canvas of its own reads [Ui::scope_disabled].
   ///
   /// ```ignore
-  /// FormRow::new("parakeet-ultra").caption(|ui: &mut Ui| {
-  ///   ui.help("Errors per 100 words").text("WER 4.7%", fs.caption.dotted());
-  ///   ui.text(" · 740 MB", fs.caption);
+  /// FormRow::new("parakeet-ultra").caption(|ui: &mut Ui, s: TextStyle| {
+  ///   ui.help("Errors per 100 words").text("WER 4.7%", s.dotted());
+  ///   ui.text(" · 740 MB", s);
   /// })
   /// ```
   pub fn caption<D: Caption<'s>>(self, caption: D) -> FormRow<'s, D> {
@@ -941,6 +943,7 @@ mod tests {
   use keyboard_types::{Modifiers, NamedKey};
 
   use super::*;
+  use crate::Button;
   use crate::app::App;
   use crate::harness::Harness;
   use crate::keys::Key;
@@ -1042,30 +1045,44 @@ mod tests {
     fn view(&mut self, ui: &mut Ui) {
       ui.set_theme(Theme::PLATES_LIGHT);
       let fs = FormStyle::plates(&ui.theme());
-      let caption = |wer: &'static str| {
-        move |ui: &mut Ui| {
-          ui.row(Style::new().w(grow()), |ui| {
-            ui.id(wer).help("Errors per 100 words").text("WER 4.5%", fs.caption.dotted());
-            ui.id((wer, "size")).text(" · 274 MB", fs.caption);
+      let muted = ui.theme().muted;
+      // With `widgets` an icon and a button after the texts.
+      let caption = |wer: &'static str, widgets: bool| {
+        move |ui: &mut Ui, s: TextStyle| {
+          ui.row(Style::new().w(grow()).gap(4.0), |ui| {
+            ui.id(wer).help("Errors per 100 words").text("WER 4.5%", s.dotted());
+            ui.id((wer, "size")).text(" · 274 MB", s);
+            if widgets {
+              ui.id((wer, "icon")).icon(Icon::INFO, 12.0, muted);
+              _ = Button::new("Go").small().show(ui.id((wer, "go")));
+            }
           });
         }
       };
       ui.col(fs.page, |ui| {
         ui.form_section(&fs, "Section", |ui| {
           ui.id("whole").form_row(&fs, FormRow::new("A").caption("WER 4.5% · 274 MB"), |_| {});
-          ui.id("parts").form_row(&fs, FormRow::new("A").caption(caption("wer")), |_| {});
-          let off = FormRow::new("B").caption(caption("off")).disabled(true);
+          ui.id("parts").form_row(&fs, FormRow::new("A").caption(caption("wer", false)), |_| {});
+          ui.form_row(&fs, FormRow::new("B").caption(caption("on", true)), |_| {});
+          let off = FormRow::new("B").caption(caption("off", true)).disabled(true);
           ui.form_row(&fs, off, |_| {});
+          // A text caption and the same widgets as controls, in a disabled row.
+          let off = FormRow::new("C").caption("WER 4.5% · 274 MB").disabled(true);
+          ui.id("dim").form_row(&fs, off, |ui| {
+            ui.id(("dim", "icon")).icon(Icon::INFO, 12.0, muted);
+            _ = Button::new("Go").small().show(ui.id(("dim", "go")));
+          });
         });
       });
     }
   }
 
-  /// The composed caption lies where the whole one does, the row as high, dimmed in a disabled
-  /// row; its term shows its tooltip and reads it as its description, where it stands.
+  /// The composed caption lies where the whole one does, the row as high; in a disabled row its
+  /// text dims as a text caption, its icon and button once, as among the controls; its term shows
+  /// its tooltip and reads it as its description, where it stands.
   #[test]
   fn a_caption_composed_reads_as_one() {
-    let mut h = Harness::new(Composed, Size::new(400.0, 300.0), 2.0);
+    let mut h = Harness::new(Composed, Size::new(400.0, 500.0), 2.0);
     h.frame();
     let hair = FormStyle::plates(&Theme::PLATES_LIGHT).hairline;
     let (whole, parts) = (h.rect(Id::of("whole")).unwrap(), h.rect(Id::of("parts")).unwrap());
@@ -1086,8 +1103,18 @@ mod tests {
       px.map(|(x, y)| img.pixel(r.x + x as f32 / 2.0, r.y + y as f32 / 2.0)[0]).min().unwrap()
     };
     let (on, off) = (ink(&mut h, Id::of("wer")), ink(&mut h, Id::of("off")));
-    let whole = ink(&mut h, Id::of("whole").key("caption"));
-    assert!(off > on + 40 && on == whole, "dimmed: {on} {off}, a text caption {whole}");
+    let (whole, dim) =
+      (ink(&mut h, Id::of("whole").key("caption")), ink(&mut h, Id::of("dim").key("caption")));
+    assert!(
+      on == whole && off == dim && off > on + 40,
+      "dimmed: {on} {off}, as text {whole} {dim}"
+    );
+    // An icon and a button in it dim once, as they do among the row's controls.
+    for part in ["icon", "go"] {
+      let (was, now) = (ink(&mut h, Id::of(("off", part))), ink(&mut h, Id::of(("dim", part))));
+      assert_eq!(was, now, "{part}: dimmed once");
+      assert!(ink(&mut h, Id::of(("on", part))) < was, "{part}: dimmed");
+    }
 
     h.move_to(a.x + 4.0, a.y + a.h / 2.0);
     h.wait(Duration::from_millis(400));
