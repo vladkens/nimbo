@@ -82,10 +82,10 @@ pub use text::edit::{Editor, Lines, Mono, Sel};
 pub use text::{Font, Weight};
 pub use ui::{
   Align, Answer, Behavior, Button, ButtonStyle, Caption, Choice, Click, Clip, ControlSize, Cursor,
-  Dialog, Dim, Ease, EditMenu, FieldBehavior, FieldStyle, Float, Focus, FocusRing, FormRow,
-  FormStyle, Icon, Id, List, ListResponse, PopUp, Press, Response, Row, Scroll, Select, Selection,
-  Shadow, Sizes, Split, Style, Tabs, TextInput, TextStyle, Theme, Tile, Tone, Transition,
-  TypeSelect, Ui, Variant, grow, pct, px, rigid,
+  Dialog, Dim, Disclosure, Ease, EditMenu, FieldBehavior, FieldStyle, Float, Focus, FocusRing,
+  FormRow, FormStyle, Icon, Id, List, ListResponse, PopUp, Press, Response, Row, Scroll, Select,
+  Selection, Shadow, Sizes, Split, Style, Tabs, TextInput, TextStyle, Theme, Tile, Tone,
+  Transition, TypeSelect, Ui, Variant, grow, pct, px, rigid,
 };
 
 /// A window's title and initial content size in points; the harness renders at this size.

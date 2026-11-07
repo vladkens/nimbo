@@ -65,7 +65,7 @@ pub use containers::{
   List, ListResponse, PopUp, Row, Selection, Split, SplitBehavior, Tabs, TypeSelect,
 };
 pub use dialog::{Answer, Dialog, DialogBehavior};
-pub use form::{Caption, FormRow, FormStyle, Glass, Tile};
+pub use form::{Caption, Disclosure, FormRow, FormStyle, Glass, Tile};
 pub use id::Id;
 pub(crate) use input::drags_window;
 pub use input::{Click, Press, Scroll};

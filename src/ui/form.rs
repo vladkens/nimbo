@@ -276,6 +276,33 @@ pub enum Caption<'s> {
   Built(Build<'s>),
 }
 
+/// A [Ui::form_disclosure]'s row: its label, description, tile and whether it is disabled, as a
+/// [FormRow]'s, but the description only a text, which assistive technology reads as the
+/// disclosure button's (a built one would go unread inside it).
+#[derive(Debug, Default)]
+pub struct Disclosure<'s>(FormRow<'s>);
+
+impl<'s> Disclosure<'s> {
+  pub fn new(label: &'s str) -> Self {
+    Self(FormRow::new(label))
+  }
+
+  /// [FormRow::caption], a text.
+  pub fn caption(self, caption: &'s str) -> Self {
+    Self(self.0.caption(caption))
+  }
+
+  /// [FormRow::tile].
+  pub fn tile(self, tile: Tile<'s>) -> Self {
+    Self(self.0.tile(tile))
+  }
+
+  /// [FormRow::disabled].
+  pub fn disabled(self, yes: bool) -> Self {
+    Self(self.0.disabled(yes))
+  }
+}
+
 /// What a [Caption::Built] runs: it builds the caption in its style.
 pub type Build<'s> = Box<dyn FnOnce(&mut Ui, TextStyle) + 's>;
 
@@ -654,15 +681,14 @@ impl Ui<'_> {
   /// a rounded fill inset as the hairlines, as System Settings' rows that open more, which show
   /// no hover. A click, or Space while it has focus, toggles it; it starts collapsed and keeps
   /// its state under its id, the chevron `id.key("chevron")`. The rows show and go at once, not
-  /// sliding as SwiftUI's. Disabled ([FormRow::disabled], [Ui::disabled] or in a disabled scope),
-  /// it dims, takes no focus and doesn't toggle. Assistive technology reads a button named by
-  /// the label, [State::Expanded] while open, disabled with it, described by a text caption: a
-  /// built one ([Caption::Built]) would go unread inside the button, so it takes none. `changed`
-  /// when it toggled.
+  /// sliding as SwiftUI's. Disabled ([Disclosure::disabled], [Ui::disabled] or in a disabled
+  /// scope), it dims, takes no focus and doesn't toggle. Assistive technology reads a button
+  /// named by the label, described by the caption, [State::Expanded] while open, disabled with
+  /// it. `changed` when it toggled.
   pub fn form_disclosure<R>(
     &mut self,
     fs: &FormStyle,
-    row: FormRow,
+    Disclosure(row): Disclosure,
     rows: impl FnOnce(&mut Self) -> R,
   ) -> Response {
     let (id, t) = (self.take_id(), self.theme());
@@ -681,7 +707,6 @@ impl Ui<'_> {
 
     let (ink, label, about) =
       (if off { t.tertiary } else { t.muted }, row.label, row.caption.text());
-    debug_assert!(!matches!(row.caption, Caption::Built(_)), "a disclosure's caption is a text");
     let row = FormRow { disabled: off, pressed, ..row };
     let mut r = self.with_id(id).form_row(&FormStyle { row: style, ..*fs }, row, |ui| {
       // Unnamed, a click on it is the row's.
@@ -1141,15 +1166,14 @@ mod tests {
       ui.col(fs.page, |ui| {
         ui.form_section(&fs, "Section", |ui| {
           ui.form_row(&fs, FormRow::new("Shown"), |_| {});
-          let row = FormRow::new("Other models").caption("2 more");
+          let row = Disclosure::new("Other models").caption("2 more");
           let r = ui.disabled(self.1).id("fold").form_disclosure(&fs, row, |ui| {
             ui.id("a").form_row(&fs, FormRow::new("A"), |_| {});
             ui.id("b").form_row(&fs, FormRow::new("B"), |_| {});
           });
           self.0 += r.changed as usize;
-          let off = || FormRow::new("Off").disabled(true);
-          let r =
-            ui.id("off").form_disclosure(&fs, off(), |ui| ui.id("c").form_row(&fs, off(), |_| {}));
+          let (off, c) = (Disclosure::new("Off").disabled(true), FormRow::new("Off"));
+          let r = ui.id("off").form_disclosure(&fs, off, |ui| ui.id("c").form_row(&fs, c, |_| {}));
           self.0 += r.changed as usize;
         });
       });
