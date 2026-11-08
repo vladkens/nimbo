@@ -189,13 +189,13 @@ impl Piece {
   }
 }
 
-/// What a section's plate tells the rows built on it ([Ui::form_section]): whether the row
-/// above is held down, and where the one held down last puts its bottom radius, the plate's
-/// once the section knows that row ended it.
+/// What a section's plate tells the rows built on it ([Ui::form_section]): the row held down
+/// last, by the node count its build ended at, and where it puts its bottom radius. A row built
+/// right after it, the count unchanged, is the one under it; the plate ends with it when the
+/// section's rows end at that count, nothing built after it.
 #[derive(Default)]
 struct Plate {
-  above: bool,
-  end: Option<Rc<Cell<f32>>>,
+  held: Option<(u32, Rc<Cell<f32>>)>,
 }
 
 const WHITE: Color = [1.0; 4];
@@ -510,8 +510,10 @@ impl Ui<'_> {
 
       let outer = ui.set_slot(Some(Plate::default()));
       ui.col(fs.group.clip(), rows);
-      // A row held down at the plate's end rounds its fill as the plate.
-      if let Some(end) = ui.set_slot(outer).and_then(|p| p.end) {
+      // A row held down that the plate ends with, nothing built after it, rounds its fill as
+      // the plate.
+      let n = ui.st.tree.nodes.len() as u32;
+      if let Some((_, end)) = ui.set_slot(outer).and_then(|p| p.held).filter(|h| h.0 == n) {
         end.set(fs.group.radii[0]);
       }
 
@@ -529,7 +531,8 @@ impl Ui<'_> {
 
   /// A row of the section being built, as SwiftUI's `LabeledContent` in a grouped form: the
   /// tile, the label and its description at the left ([FormRow]), what `control` builds at the
-  /// right, 8 apart, and a hairline above it unless it is the first. The controls keep their
+  /// right, 8 apart, and a hairline above it unless it is the first, held down (a
+  /// [Ui::form_disclosure]'s) or right under a row held down. The controls keep their
   /// width and place at the right edge, centred on the row's height; the label and description
   /// wrap in what is left, the row growing taller. [Ui::disabled] on it dims its label and
   /// description to [super::Theme::tertiary] and disables its widgets but an ⓘ or warning mark
@@ -555,15 +558,14 @@ impl Ui<'_> {
     let dim = |s: TextStyle| if off { s.color(t.tertiary) } else { s };
     let top = if first { 0.0 } else { fs.hairline };
     // Held down, a fill over its whole piece of the plate, as a grouped list's selection:
-    // rounded at the plate's top when first, at its bottom when the section ends with it (it
-    // says so once its rows are built); no hairline beside it.
+    // rounded at the plate's top when first, at its bottom when the plate ends with it (the
+    // section says so once its rows are built); no hairline beside it.
     let pressed = row.pressed;
     let end = pressed.then(|| Rc::new(Cell::new(0.0)));
-    let plate = self.slot::<Plate>();
-    let above = plate.as_ref().is_some_and(|p| p.above);
-    if let Some(p) = plate {
-      (p.above, p.end) = (pressed, end.clone());
-    }
+    let held = end.clone();
+    let at = self.st.tree.nodes.len() as u32;
+    let plate = self.slot::<Plate>().and_then(|p| p.held.as_ref());
+    let above = plate.is_some_and(|h| h.0 == at);
 
     let corner = if first { fs.group.radii[0] } else { 0.0 };
     let piece = Piece {
@@ -583,7 +585,7 @@ impl Ui<'_> {
 
     let (pad_x, shift) = (fs.row.pad[3], self.mark_shift(fs.label));
     let FormRow { label, caption, tile, .. } = row;
-    self.disabled_scope(off, |ui| {
+    let r = self.disabled_scope(off, |ui| {
       ui.next_id = Some((id, false));
       ui.canvas_row(style, hairline, |ui| {
         if !tile.is_none() {
@@ -633,7 +635,16 @@ impl Ui<'_> {
           ui.set_slot(outer);
         }
       })
-    })
+    });
+    // Held down, where its build ended, for the row under it and the section's end.
+    let n = self.st.tree.nodes.len() as u32;
+    if let Some(end) = held
+      && let Some(p) = self.slot::<Plate>()
+    {
+      p.held = Some((n, end));
+    }
+
+    r
   }
 
   /// A row that shows the rows `rows` builds under it, in its plate, while expanded, as SwiftUI's
@@ -1139,16 +1150,21 @@ mod tests {
     assert!(h.rect(Id::of("c")).is_none() && h.app().0 == n, "disabled");
   }
 
-  /// A disclosure alone in its section, on the window's ground.
-  struct Alone;
+  /// A disclosure in its section, on the window's ground, alone or with a row of the app's own
+  /// under it in the plate (`.0`).
+  struct Held(bool);
 
-  impl App for Alone {
+  impl App for Held {
     fn view(&mut self, ui: &mut Ui) {
       ui.set_theme(Theme::PLATES_LIGHT);
       let fs = FormStyle::plates(&ui.theme());
+      let after = self.0;
       ui.col(fs.page.grow().bg(fs.bg), |ui| {
         ui.form_section(&fs, "Section", |ui| {
-          ui.id("fold").form_disclosure(&fs, FormRow::new("Other models"), |_| {})
+          ui.id("fold").form_disclosure(&fs, FormRow::new("Other models"), |_| {});
+          if after {
+            ui.row(Style::new().w(grow()).min_h(40.0), |_| {});
+          }
         });
       });
     }
@@ -1158,7 +1174,7 @@ mod tests {
   /// as the plate: at the top as the first row, at the bottom as the one the section ends with.
   #[test]
   fn a_held_rows_fill_is_rounded_where_the_plate_is() {
-    let mut h = Harness::new(Alone, Size::new(400.0, 200.0), 2.0);
+    let mut h = Harness::new(Held(false), Size::new(400.0, 200.0), 2.0);
     h.frame();
     let r = h.rect(Id::of("fold")).unwrap();
     let (x, y) = (r.x + r.w - 40.0, r.y + r.h / 2.0);
@@ -1172,6 +1188,29 @@ mod tests {
     let (l, rr, t, b) = (r.x + 0.5, r.x + r.w - 0.5, r.y + 0.5, r.y + r.h - 0.5);
     for (cx, cy) in [(l, t), (rr, t), (l, b), (rr, b)] {
       assert_eq!(img.pixel(cx, cy), ground, "rounded at ({cx}, {cy})");
+    }
+  }
+
+  /// Held down with a row of the app's own under it in the plate, a row's fill keeps square
+  /// bottom corners: the plate goes on under it.
+  #[test]
+  fn a_held_row_above_more_of_the_plate_is_square_at_its_bottom() {
+    let mut h = Harness::new(Held(true), Size::new(400.0, 200.0), 2.0);
+    h.frame();
+    let r = h.rect(Id::of("fold")).unwrap();
+    let (x, y) = (r.x + r.w - 40.0, r.y + r.h / 2.0);
+    h.press(x, y);
+    h.frame();
+    let img = h.render();
+    let (fill, ground) = (img.pixel(x, y), img.pixel(r.x - 4.0, y));
+    assert_ne!(fill, ground);
+    let (l, rr, t, b) = (r.x + 0.5, r.x + r.w - 0.5, r.y + 0.5, r.y + r.h - 0.5);
+    for (cx, cy) in [(l, t), (rr, t)] {
+      assert_eq!(img.pixel(cx, cy), ground, "rounded at ({cx}, {cy})");
+    }
+
+    for (cx, cy) in [(l, b), (rr, b)] {
+      assert_eq!(img.pixel(cx, cy), fill, "square at ({cx}, {cy})");
     }
   }
 
