@@ -95,6 +95,12 @@ impl Role {
       Button | CheckBox | Switch | RadioButton | StaticText | Link | MenuItem | Tab | Row
     )
   }
+
+  /// A control a person acts on, disabled too: not a group, a text, a list or its row.
+  pub(crate) const fn control(self) -> bool {
+    use Role::*;
+    !matches!(self, Group | StaticText | List | Row | Dialog | ProgressIndicator)
+  }
 }
 
 /// A node's value.
@@ -208,6 +214,11 @@ impl Records {
     self.text.clear();
     self.forms.clear();
     (self.next, self.focus) = (None, None);
+  }
+
+  /// The role `id` was recorded as.
+  pub(crate) fn role(&self, id: Id) -> Option<Role> {
+    self.index.get(&id).map(|&i| self.list[i].1.role)
   }
 }
 

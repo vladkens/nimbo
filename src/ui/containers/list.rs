@@ -50,7 +50,9 @@
 //! but one on a control in it (a button) is the control's, as in SwiftUI; with [List::multi],
 //! Cmd-click (Ctrl-click on Windows and Linux) toggles a row and Shift-click selects from the
 //! anchor; a secondary click selects the row alone unless it is selected, for the app's context
-//! menu ([Ui::context_menu]), which one off the rows (the scrollbar, a header) doesn't open. Keys,
+//! menu ([Ui::context_menu]), which one off the rows (the scrollbar, a header) doesn't open. A
+//! plain press on the list's ground (a header, the padding, the room under the rows; not a
+//! control there nor a scrollbar) clears the selection, as a table view's on macOS. Keys,
 //! while the list has focus (a press gives it), come as the platform's commands: Up and Down (Shift
 //! extends), Page Up and Page Down, Home and End or Cmd-Up and Cmd-Down, Cmd-A, and Enter, which
 //! activates the row, as a double click does. Delete or Backspace (Cmd-Backspace too on a Mac) ask
@@ -69,8 +71,9 @@ use keyboard_types::Modifiers;
 
 use crate::app::MouseButton;
 use crate::keys::{Binding, CMD, Command, Delete, Extent, Move, Os, Shortcut, bind};
-use crate::scene::{Frame, Point, Quad, Rect, alpha};
+use crate::scene::{Frame, Point, Rect, alpha};
 use crate::text::FxHasher;
+use crate::ui::form::Piece;
 use crate::ui::input::ScrollState;
 use crate::ui::{Align, Cursor, Focus, FormStyle, Id, Role, State, Style, Ui, grow, px};
 
@@ -319,8 +322,6 @@ pub struct List<'s> {
   fill: bool,
   /// Plain, or each section's rows on a plate ([List::list_style]).
   look: ListStyle,
-  /// A plain click selects its row ([List::click_selects]).
-  clicks: bool,
 }
 
 impl<'s> List<'s> {
@@ -337,7 +338,6 @@ impl<'s> List<'s> {
       row: None,
       fill: true,
       look: ListStyle::Plain,
-      clicks: true,
     }
   }
 
@@ -383,13 +383,6 @@ impl<'s> List<'s> {
     Self { look, ..self }
   }
 
-  /// Whether a plain click selects its row (yes by default, as SwiftUI's): with `false` it only
-  /// focuses the list, and Cmd-click, Shift-click and the keys select, a deviation from SwiftUI
-  /// for rows whose clicks go to their controls (a settings list to delete from).
-  pub fn click_selects(self, yes: bool) -> Self {
-    Self { clicks: yes, ..self }
-  }
-
   /// Rows with no fill: the app draws selection and hover itself from [Row], the list keeps
   /// the behaviour (selection, keys, scrolling, virtualization).
   pub fn unstyled(self) -> Self {
@@ -407,7 +400,7 @@ impl<'s> List<'s> {
       ui.focus(None);
     }
 
-    let List { n, h, fill, multi, look, clicks, .. } = self;
+    let List { n, h, fill, multi, look, .. } = self;
     let grouped = look == ListStyle::Grouped;
     let fs = FormStyle::plates(&t);
     let row = Style::new().w(grow()).align(Align::Start, Align::Center);
@@ -440,7 +433,7 @@ impl<'s> List<'s> {
     }
 
     if !disabled {
-      ui.list_press(id, &mut st, sel, &mut out, n, (multi, clicks), &key);
+      ui.list_press(id, &mut st, sel, &mut out, n, multi, &key);
     }
 
     // Scroll a row into view, by the last frame's viewport; the first and the last with the
@@ -537,11 +530,9 @@ impl<'s> List<'s> {
         let radii = [top, top, end, end];
         let lined = (!first && !selected && !above) as u8 as f32;
         let line = alpha(fs.divider, fs.divider[3] * dim * lined);
-        let ([l, rr], hair, bg) = (fs.inset, fs.hairline, alpha(bg, bg[3] * dim));
-        let paint = move |f: &mut Frame, at: Rect| {
-          f.quad(Quad::new(at, bg).radii(radii));
-          f.rect(Rect::new(at.x + l, at.y, (at.w - l - rr).max(0.0), hair), line, 0.0);
-        };
+        let (dimmed, inset, hair) = (alpha(bg, bg[3] * dim), fs.inset, fs.hairline);
+        let piece = Piece { fill: dimmed, radii, line, inset, hair };
+        let paint = move |f: &mut Frame, at: Rect| piece.paint(f, at);
         ui.canvas_row(Style { radii, ..s.bg(fs.group.bg) }, paint, |ui| f(ui, r));
         above = selected;
       }
@@ -690,7 +681,7 @@ impl<'a> Ui<'a> {
     sel: &mut Selection,
     out: &mut ListResponse,
     n: usize,
-    (multi, selects): (bool, bool),
+    multi: bool,
     key: &dyn Fn(usize) -> u64,
   ) {
     // The secondary button's press, on Windows its release (a Control-click is the Mac's).
@@ -746,6 +737,13 @@ impl<'a> Ui<'a> {
         self.st.menu_seq = seq;
       }
 
+      // A plain press on its ground clears the selection, as a table view's on macOS.
+      let plain = !mods.contains(CMD) && !mods.shift();
+      if !right && plain && !sel.is_empty() && self.list_ground(on, id) {
+        sel.clear();
+        out.changed = true;
+      }
+
       return;
     };
     match (right, multi) {
@@ -757,8 +755,6 @@ impl<'a> Ui<'a> {
 
         sel.select(k, i);
       }
-      // A plain click that doesn't select: the press focused the list.
-      _ if !selects && !mods.contains(CMD) && !mods.shift() => return,
       (_, true) => sel.click(i, mods, n, key),
       _ => sel.select(k, i),
     }
@@ -767,6 +763,31 @@ impl<'a> Ui<'a> {
     if clicks == 2 && !right {
       out.activated = Some(i);
     }
+  }
+
+  /// Whether element `on`, off the rows, is list `id`'s ground: a header, the padding, the room
+  /// under the rows; not a control in them (a disabled one too, by its role) nor a scrollbar.
+  fn list_ground(&self, on: Id, id: Id) -> bool {
+    let t = &self.st.last;
+    if (0..2usize).any(|ax| t.within(on, id.key(("track", ax)))) {
+      return false;
+    }
+
+    let mut up = t.find(on);
+    while let Some(i) = up {
+      let n = &t.nodes[i as usize];
+      if n.id == id {
+        return true;
+      }
+
+      if i == 0 || t.a11y.role(n.id).is_some_and(Role::control) {
+        return false;
+      }
+
+      up = Some(n.parent);
+    }
+
+    false
   }
 }
 
@@ -1290,52 +1311,78 @@ mod tests {
     assert_eq!(h.app().sel.cursor(), Some(2));
   }
 
-  /// Ten rows a plain click doesn't select; the deletes asked.
+  /// Six rows 20 high in two sections under headers 30 high, each with a text, a button and a
+  /// disabled one; a box after the list. Scrolls in its 100 high.
   #[derive(Default)]
-  struct Picky {
+  struct Ground {
     sel: Selection,
-    deletes: usize,
+    clicks: usize,
   }
 
-  impl crate::App for Picky {
+  impl crate::App for Ground {
     fn view(&mut self, ui: &mut Ui) {
-      let list = List::new(10, 20.0).multi().click_selects(false).selection(&mut self.sel);
-      let r = list.style(Style::new().grow()).show(ui.id("list"), |ui, _| ui.label("row"));
-      self.deletes += r.delete as usize;
+      let clicks = std::cell::Cell::new(0);
+      let head = |ui: &mut Ui, g: usize| {
+        ui.id(("t", g)).label("head");
+        ui.spacer();
+        clicks.set(clicks.get() + ui.id(("b", g)).button("B").clicked as usize);
+        ui.disabled(true).id(("off", g)).button("Off");
+      };
+      ui.col(Style::new().w(px(200.0)).h(px(100.0)), |ui| {
+        let list = List::new(6, 20.0).sections(&[0, 3], 30.0, &head).multi();
+        let list = list.selection(&mut self.sel).style(Style::new().grow());
+        list.show(ui.id("list"), |ui, _| ui.label("row"));
+      });
+      ui.id("after").el(Style::new().w(px(200.0)).h(px(50.0)));
+      self.clicks += clicks.get();
     }
   }
 
-  /// With `click_selects(false)` a plain click only focuses the list; Cmd-click, Shift-click,
-  /// the arrows, Cmd-A and Delete work as ever.
+  /// As a table view on macOS: a plain press on a header, its text or the room beside it,
+  /// clears the selection; one with Cmd or Shift, on a header's button, enabled or not, on the
+  /// scrollbar or off the list keeps it.
   #[test]
-  fn a_list_a_click_doesnt_select_selects_by_cmd_shift_and_keys() {
-    use keyboard_types::NamedKey;
-
+  fn a_press_on_the_lists_ground_clears_the_selection() {
     use crate::harness::Harness;
-    let mut h = Harness::new(Picky::default(), Size::new(200.0, 300.0), 1.0);
+    let mut h = Harness::new(Ground::default(), Size::new(300.0, 300.0), 1.0);
+    let id = Id::of("list");
+    let row = |k: u64| id.key(("row", k));
     h.frame();
-    let row = |k: u64| Id::of("list").key(("row", k));
-    let click = |h: &mut Harness<Picky>, k: u64, mods: Modifiers| {
-      let r = h.rect(row(k)).unwrap();
-      let (x, y) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
+    let pick = |h: &mut Harness<Ground>| {
+      h.click_id(row(1));
+      h.frame();
+      assert_eq!(sorted(&h.app().sel), [1]);
+    };
+    pick(&mut h);
+    let (t, b) = (h.rect(Id::of(("t", 0))).unwrap(), h.rect(Id::of(("b", 0))).unwrap());
+    let (x, y) = ((t.x + t.w + b.x) / 2.0, t.y + t.h / 2.0);
+    for mods in [CMD, Modifiers::SHIFT] {
       h.press_with(x, y, 1, mods);
       h.release(x, y);
       h.frame();
-    };
-    click(&mut h, 2, Modifiers::empty());
-    assert!(h.app().sel.is_empty() && h.focused() == Some(Id::of("list")), "focused only");
-    click(&mut h, 2, crate::CMD);
-    click(&mut h, 4, Modifiers::SHIFT);
-    assert_eq!(sorted(&h.app().sel), [2, 3, 4]);
-    h.key(NamedKey::ArrowDown, Modifiers::empty());
+    }
+
+    h.click_id(Id::of(("b", 0)));
+    h.click_id(Id::of(("off", 0)));
+    h.click_id(Id::of("after"));
     h.frame();
-    assert_eq!(sorted(&h.app().sel), [5]);
-    h.key('a', crate::CMD);
+    assert_eq!((sorted(&h.app().sel), h.app().clicks), (vec![1], 1));
+    // The scrollbar, shown with the pointer in its strip: its thumb keeps the selection.
+    let v = h.rect(id).unwrap();
+    h.move_to(v.x + v.w - 3.0, v.y + 20.0);
     h.frame();
-    assert_eq!(h.app().sel.len(), 10);
-    h.key(NamedKey::Delete, Modifiers::empty());
+    let thumb = h.rect(id.key(("thumb", 1usize))).expect("a thumb");
+    h.click(thumb.x + thumb.w / 2.0, thumb.y + thumb.h / 2.0);
     h.frame();
-    assert_eq!(h.app().deletes, 1);
+    assert_eq!(sorted(&h.app().sel), [1]);
+    // The room beside the header's text clears it; its text too.
+    h.click(x, y);
+    h.frame();
+    assert!(h.app().sel.is_empty());
+    pick(&mut h);
+    h.click_id(Id::of(("t", 0)));
+    h.frame();
+    assert!(h.app().sel.is_empty());
   }
 
   /// Two rows in a list with no menu, inside an element with one.
