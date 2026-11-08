@@ -50,7 +50,9 @@
 //! but one on a control in it (a button) is the control's, as in SwiftUI; with [List::multi],
 //! Cmd-click (Ctrl-click on Windows and Linux) toggles a row and Shift-click selects from the
 //! anchor; a secondary click selects the row alone unless it is selected, for the app's context
-//! menu ([Ui::context_menu]), which one off the rows (the scrollbar, a header) doesn't open. Keys,
+//! menu ([Ui::context_menu]), which one off the rows (the scrollbar, a header) doesn't open. A
+//! plain press on the list's ground (a header, the padding, the room under the rows; not a
+//! control there nor a scrollbar) clears the selection, as a table view's on macOS. Keys,
 //! while the list has focus (a press gives it), come as the platform's commands: Up and Down (Shift
 //! extends), Page Up and Page Down, Home and End or Cmd-Up and Cmd-Down, Cmd-A, and Enter, which
 //! activates the row, as a double click does. Delete or Backspace (Cmd-Backspace too on a Mac) ask
@@ -735,6 +737,13 @@ impl<'a> Ui<'a> {
         self.st.menu_seq = seq;
       }
 
+      // A plain press on its ground clears the selection, as a table view's on macOS.
+      let plain = !mods.contains(CMD) && !mods.shift();
+      if !right && plain && !sel.is_empty() && self.list_ground(on, id) {
+        sel.clear();
+        out.changed = true;
+      }
+
       return;
     };
     match (right, multi) {
@@ -754,6 +763,31 @@ impl<'a> Ui<'a> {
     if clicks == 2 && !right {
       out.activated = Some(i);
     }
+  }
+
+  /// Whether element `on`, off the rows, is list `id`'s ground: a header, the padding, the room
+  /// under the rows; not a control in them (a disabled one too, by its role) nor a scrollbar.
+  fn list_ground(&self, on: Id, id: Id) -> bool {
+    let t = &self.st.last;
+    if (0..2usize).any(|ax| t.within(on, id.key(("track", ax)))) {
+      return false;
+    }
+
+    let mut up = t.find(on);
+    while let Some(i) = up {
+      let n = &t.nodes[i as usize];
+      if n.id == id {
+        return true;
+      }
+
+      if i == 0 || t.a11y.role(n.id).is_some_and(Role::control) {
+        return false;
+      }
+
+      up = Some(n.parent);
+    }
+
+    false
   }
 }
 
@@ -1275,6 +1309,80 @@ mod tests {
     h.frame();
     assert_eq!(asked(&mut h).as_deref(), Some("Own"));
     assert_eq!(h.app().sel.cursor(), Some(2));
+  }
+
+  /// Six rows 20 high in two sections under headers 30 high, each with a text, a button and a
+  /// disabled one; a box after the list. Scrolls in its 100 high.
+  #[derive(Default)]
+  struct Ground {
+    sel: Selection,
+    clicks: usize,
+  }
+
+  impl crate::App for Ground {
+    fn view(&mut self, ui: &mut Ui) {
+      let clicks = std::cell::Cell::new(0);
+      let head = |ui: &mut Ui, g: usize| {
+        ui.id(("t", g)).label("head");
+        ui.spacer();
+        clicks.set(clicks.get() + ui.id(("b", g)).button("B").clicked as usize);
+        ui.disabled(true).id(("off", g)).button("Off");
+      };
+      ui.col(Style::new().w(px(200.0)).h(px(100.0)), |ui| {
+        let list = List::new(6, 20.0).sections(&[0, 3], 30.0, &head).multi();
+        let list = list.selection(&mut self.sel).style(Style::new().grow());
+        list.show(ui.id("list"), |ui, _| ui.label("row"));
+      });
+      ui.id("after").el(Style::new().w(px(200.0)).h(px(50.0)));
+      self.clicks += clicks.get();
+    }
+  }
+
+  /// As a table view on macOS: a plain press on a header, its text or the room beside it,
+  /// clears the selection; one with Cmd or Shift, on a header's button, enabled or not, on the
+  /// scrollbar or off the list keeps it.
+  #[test]
+  fn a_press_on_the_lists_ground_clears_the_selection() {
+    use crate::harness::Harness;
+    let mut h = Harness::new(Ground::default(), Size::new(300.0, 300.0), 1.0);
+    let id = Id::of("list");
+    let row = |k: u64| id.key(("row", k));
+    h.frame();
+    let pick = |h: &mut Harness<Ground>| {
+      h.click_id(row(1));
+      h.frame();
+      assert_eq!(sorted(&h.app().sel), [1]);
+    };
+    pick(&mut h);
+    let (t, b) = (h.rect(Id::of(("t", 0))).unwrap(), h.rect(Id::of(("b", 0))).unwrap());
+    let (x, y) = ((t.x + t.w + b.x) / 2.0, t.y + t.h / 2.0);
+    for mods in [CMD, Modifiers::SHIFT] {
+      h.press_with(x, y, 1, mods);
+      h.release(x, y);
+      h.frame();
+    }
+
+    h.click_id(Id::of(("b", 0)));
+    h.click_id(Id::of(("off", 0)));
+    h.click_id(Id::of("after"));
+    h.frame();
+    assert_eq!((sorted(&h.app().sel), h.app().clicks), (vec![1], 1));
+    // The scrollbar, shown with the pointer in its strip: its thumb keeps the selection.
+    let v = h.rect(id).unwrap();
+    h.move_to(v.x + v.w - 3.0, v.y + 20.0);
+    h.frame();
+    let thumb = h.rect(id.key(("thumb", 1usize))).expect("a thumb");
+    h.click(thumb.x + thumb.w / 2.0, thumb.y + thumb.h / 2.0);
+    h.frame();
+    assert_eq!(sorted(&h.app().sel), [1]);
+    // The room beside the header's text clears it; its text too.
+    h.click(x, y);
+    h.frame();
+    assert!(h.app().sel.is_empty());
+    pick(&mut h);
+    h.click_id(Id::of(("t", 0)));
+    h.frame();
+    assert!(h.app().sel.is_empty());
   }
 
   /// Two rows in a list with no menu, inside an element with one.
