@@ -69,8 +69,9 @@ use keyboard_types::Modifiers;
 
 use crate::app::MouseButton;
 use crate::keys::{Binding, CMD, Command, Delete, Extent, Move, Os, Shortcut, bind};
-use crate::scene::{Frame, Point, Quad, Rect, alpha};
+use crate::scene::{Frame, Point, Rect, alpha};
 use crate::text::FxHasher;
+use crate::ui::form::Piece;
 use crate::ui::input::ScrollState;
 use crate::ui::{Align, Cursor, Focus, FormStyle, Id, Role, State, Style, Ui, grow, px};
 
@@ -319,8 +320,6 @@ pub struct List<'s> {
   fill: bool,
   /// Plain, or each section's rows on a plate ([List::list_style]).
   look: ListStyle,
-  /// A plain click selects its row ([List::click_selects]).
-  clicks: bool,
 }
 
 impl<'s> List<'s> {
@@ -337,7 +336,6 @@ impl<'s> List<'s> {
       row: None,
       fill: true,
       look: ListStyle::Plain,
-      clicks: true,
     }
   }
 
@@ -383,13 +381,6 @@ impl<'s> List<'s> {
     Self { look, ..self }
   }
 
-  /// Whether a plain click selects its row (yes by default, as SwiftUI's): with `false` it only
-  /// focuses the list, and Cmd-click, Shift-click and the keys select, a deviation from SwiftUI
-  /// for rows whose clicks go to their controls (a settings list to delete from).
-  pub fn click_selects(self, yes: bool) -> Self {
-    Self { clicks: yes, ..self }
-  }
-
   /// Rows with no fill: the app draws selection and hover itself from [Row], the list keeps
   /// the behaviour (selection, keys, scrolling, virtualization).
   pub fn unstyled(self) -> Self {
@@ -407,7 +398,7 @@ impl<'s> List<'s> {
       ui.focus(None);
     }
 
-    let List { n, h, fill, multi, look, clicks, .. } = self;
+    let List { n, h, fill, multi, look, .. } = self;
     let grouped = look == ListStyle::Grouped;
     let fs = FormStyle::plates(&t);
     let row = Style::new().w(grow()).align(Align::Start, Align::Center);
@@ -440,7 +431,7 @@ impl<'s> List<'s> {
     }
 
     if !disabled {
-      ui.list_press(id, &mut st, sel, &mut out, n, (multi, clicks), &key);
+      ui.list_press(id, &mut st, sel, &mut out, n, multi, &key);
     }
 
     // Scroll a row into view, by the last frame's viewport; the first and the last with the
@@ -537,11 +528,9 @@ impl<'s> List<'s> {
         let radii = [top, top, end, end];
         let lined = (!first && !selected && !above) as u8 as f32;
         let line = alpha(fs.divider, fs.divider[3] * dim * lined);
-        let ([l, rr], hair, bg) = (fs.inset, fs.hairline, alpha(bg, bg[3] * dim));
-        let paint = move |f: &mut Frame, at: Rect| {
-          f.quad(Quad::new(at, bg).radii(radii));
-          f.rect(Rect::new(at.x + l, at.y, (at.w - l - rr).max(0.0), hair), line, 0.0);
-        };
+        let (dimmed, inset, hair) = (alpha(bg, bg[3] * dim), fs.inset, fs.hairline);
+        let piece = Piece { fill: dimmed, radii, line, inset, hair };
+        let paint = move |f: &mut Frame, at: Rect| piece.paint(f, at);
         ui.canvas_row(Style { radii, ..s.bg(fs.group.bg) }, paint, |ui| f(ui, r));
         above = selected;
       }
@@ -690,7 +679,7 @@ impl<'a> Ui<'a> {
     sel: &mut Selection,
     out: &mut ListResponse,
     n: usize,
-    (multi, selects): (bool, bool),
+    multi: bool,
     key: &dyn Fn(usize) -> u64,
   ) {
     // The secondary button's press, on Windows its release (a Control-click is the Mac's).
@@ -757,8 +746,6 @@ impl<'a> Ui<'a> {
 
         sel.select(k, i);
       }
-      // A plain click that doesn't select: the press focused the list.
-      _ if !selects && !mods.contains(CMD) && !mods.shift() => return,
       (_, true) => sel.click(i, mods, n, key),
       _ => sel.select(k, i),
     }
@@ -1288,54 +1275,6 @@ mod tests {
     h.frame();
     assert_eq!(asked(&mut h).as_deref(), Some("Own"));
     assert_eq!(h.app().sel.cursor(), Some(2));
-  }
-
-  /// Ten rows a plain click doesn't select; the deletes asked.
-  #[derive(Default)]
-  struct Picky {
-    sel: Selection,
-    deletes: usize,
-  }
-
-  impl crate::App for Picky {
-    fn view(&mut self, ui: &mut Ui) {
-      let list = List::new(10, 20.0).multi().click_selects(false).selection(&mut self.sel);
-      let r = list.style(Style::new().grow()).show(ui.id("list"), |ui, _| ui.label("row"));
-      self.deletes += r.delete as usize;
-    }
-  }
-
-  /// With `click_selects(false)` a plain click only focuses the list; Cmd-click, Shift-click,
-  /// the arrows, Cmd-A and Delete work as ever.
-  #[test]
-  fn a_list_a_click_doesnt_select_selects_by_cmd_shift_and_keys() {
-    use keyboard_types::NamedKey;
-
-    use crate::harness::Harness;
-    let mut h = Harness::new(Picky::default(), Size::new(200.0, 300.0), 1.0);
-    h.frame();
-    let row = |k: u64| Id::of("list").key(("row", k));
-    let click = |h: &mut Harness<Picky>, k: u64, mods: Modifiers| {
-      let r = h.rect(row(k)).unwrap();
-      let (x, y) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
-      h.press_with(x, y, 1, mods);
-      h.release(x, y);
-      h.frame();
-    };
-    click(&mut h, 2, Modifiers::empty());
-    assert!(h.app().sel.is_empty() && h.focused() == Some(Id::of("list")), "focused only");
-    click(&mut h, 2, crate::CMD);
-    click(&mut h, 4, Modifiers::SHIFT);
-    assert_eq!(sorted(&h.app().sel), [2, 3, 4]);
-    h.key(NamedKey::ArrowDown, Modifiers::empty());
-    h.frame();
-    assert_eq!(sorted(&h.app().sel), [5]);
-    h.key('a', crate::CMD);
-    h.frame();
-    assert_eq!(h.app().sel.len(), 10);
-    h.key(NamedKey::Delete, Modifiers::empty());
-    h.frame();
-    assert_eq!(h.app().deletes, 1);
   }
 
   /// Two rows in a list with no menu, inside an element with one.

@@ -40,8 +40,10 @@
 //! ⓘ or warning mark, whose tooltip reads all the same. The toolbar is a pick
 //! ([Ui::pick_behavior]): a click, or the arrows while it has focus (Tab), choose a tab.
 
+use std::cell::Cell;
 use std::f32::consts::FRAC_PI_2;
 use std::fmt;
+use std::rc::Rc;
 
 use super::theme::Theme;
 use super::widgets::{Icon, MarkShift};
@@ -160,6 +162,40 @@ impl Glass {
     f.quad(Quad::new(ring, [0.0; 4]).radius(radius + m).border(m, self.ground));
     f.pop_clip();
   }
+}
+
+/// A row's piece of a section's plate, as a grouped form's row and a grouped list's
+/// ([super::ListStyle::Grouped]) draw it: a fill over the whole piece, rounded where the plate
+/// is (`radii`), and the hairline at its top, [FormStyle::inset] in from the plate's sides.
+#[derive(Clone, Copy)]
+pub(crate) struct Piece {
+  pub fill: Color,
+  pub radii: [f32; 4],
+  pub line: Color,
+  pub inset: [f32; 2],
+  pub hair: f32,
+}
+
+impl Piece {
+  pub fn paint(&self, f: &mut Frame, at: Rect) {
+    if self.fill[3] > 0.0 {
+      f.quad(Quad::new(at, self.fill).radii(self.radii));
+    }
+
+    if self.line[3] > 0.0 {
+      let [l, r] = self.inset;
+      f.rect(Rect::new(at.x + l, at.y, (at.w - l - r).max(0.0), self.hair), self.line, 0.0);
+    }
+  }
+}
+
+/// What a section's plate tells the rows built on it ([Ui::form_section]): whether the row
+/// above is held down, and where the one held down last puts its bottom radius, the plate's
+/// once the section knows that row ended it.
+#[derive(Default)]
+struct Plate {
+  above: bool,
+  end: Option<Rc<Cell<f32>>>,
 }
 
 const WHITE: Color = [1.0; 4];
@@ -472,7 +508,13 @@ impl Ui<'_> {
         ui.row(head.min_h(line), |ui| header.build(ui, fs.head, id.key("header"), line, 1.6));
       }
 
+      let outer = ui.set_slot(Some(Plate::default()));
       ui.col(fs.group.clip(), rows);
+      // A row held down at the plate's end rounds its fill as the plate.
+      if let Some(end) = ui.set_slot(outer).and_then(|p| p.end) {
+        end.set(fs.group.radii[0]);
+      }
+
       if !footer.is_none() {
         let pad = Style::new().w(grow()).pads(fs.foot_pad);
         ui.col(pad, |ui| footer.build(ui, fs.caption, id.key("footer"), 12.0, 1.6));
@@ -511,19 +553,29 @@ impl Ui<'_> {
     let off = self.take_disabled();
     let first = self.st.stack.last().is_none_or(|&(_, n)| n == 0);
     let dim = |s: TextStyle| if off { s.color(t.tertiary) } else { s };
-    let (line, hair, [l, r]) = (fs.divider, fs.hairline, fs.inset);
-    let top = if first { 0.0 } else { hair };
-    // Pressed, a rounded fill inset as the hairlines are.
-    let (pressed, fill) = (row.pressed, t.pressed);
-    let hairline = move |f: &mut Frame, rect: Rect| {
-      if pressed {
-        let (w, h) = (rect.w - l - r, rect.h - top - 4.0);
-        f.rect(Rect::new(rect.x + l, rect.y + top + 2.0, w, h), fill, 6.0);
-      }
+    let top = if first { 0.0 } else { fs.hairline };
+    // Held down, a fill over its whole piece of the plate, as a grouped list's selection:
+    // rounded at the plate's top when first, at its bottom when the section ends with it (it
+    // says so once its rows are built); no hairline beside it.
+    let pressed = row.pressed;
+    let end = pressed.then(|| Rc::new(Cell::new(0.0)));
+    let plate = self.slot::<Plate>();
+    let above = plate.as_ref().is_some_and(|p| p.above);
+    if let Some(p) = plate {
+      (p.above, p.end) = (pressed, end.clone());
+    }
 
-      if !first {
-        f.rect(Rect::new(rect.x + l, rect.y, (rect.w - l - r).max(0.0), hair), line, 0.0);
-      }
+    let corner = if first { fs.group.radii[0] } else { 0.0 };
+    let piece = Piece {
+      fill: if pressed { t.pressed } else { [0.0; 4] },
+      radii: [corner; 4],
+      line: if first || pressed || above { [0.0; 4] } else { fs.divider },
+      inset: fs.inset,
+      hair: fs.hairline,
+    };
+    let hairline = move |f: &mut Frame, at: Rect| {
+      let end = end.as_ref().map_or(0.0, |e| e.get());
+      Piece { radii: [corner, corner, end, end], ..piece }.paint(f, at)
     };
     let style = fs.row.min_h(fs.row.min[1] + top).align(Align::Start, Align::Start);
     // The first line's height: the least the controls' slot is, with the padding around it.
@@ -587,14 +639,14 @@ impl Ui<'_> {
   /// A row that shows the rows `rows` builds under it, in its plate, while expanded, as SwiftUI's
   /// `DisclosureGroup` in a `Form`: [Ui::form_row]'s label, description and tile, a chevron at
   /// the right turning from right to down ([super::Theme::fade]), the pointing hand and, held
-  /// down, a rounded fill inset as the hairlines, as System Settings' rows that open more, which
-  /// show no hover. A click, or Space while it has focus, toggles it; it starts collapsed and
-  /// keeps its state under its id, the chevron `id.key("chevron")`. The rows show and go at
-  /// once, not sliding as SwiftUI's. Disabled ([Ui::disabled] on it or a container around it),
-  /// it dims, takes no focus and doesn't toggle. Assistive technology reads a button named by the
-  /// label's plain texts, described by the description's, [State::Expanded] while open, disabled
-  /// with it; the button holds them, so their other elements (a badge) are not read.
-  /// `changed` when it toggled.
+  /// down, a fill over its piece of the plate as a grouped list's selection, as System
+  /// Settings' rows that open more, which show no hover. A click, or Space while it has focus,
+  /// toggles it; it starts collapsed and keeps its state under its id, the chevron
+  /// `id.key("chevron")`. The rows show and go at once, not sliding as SwiftUI's. Disabled
+  /// ([Ui::disabled] on it or a container around it), it dims, takes no focus and doesn't toggle.
+  /// Assistive technology reads a button named by the label's plain texts, described by the
+  /// description's, [State::Expanded] while open, disabled with it; the button holds them, so their
+  /// other elements (a badge) are not read. `changed` when it toggled.
   pub fn form_disclosure<R>(
     &mut self,
     fs: &FormStyle,
@@ -1062,10 +1114,12 @@ mod tests {
     assert_eq!(h.app().0, 2);
     assert!(h.rect(Id::of("a")).is_none(), "closed by Space");
 
-    // No hover fill; held down, an inset one, the edge of the plate as it was.
+    // No hover fill; held down, one over its piece of the plate, to the plate's edge and its
+    // corners, square in the plate's middle.
     let at = |h: &mut Harness<Fold>| {
       let img = h.render();
-      [img.pixel(r.x + r.w - 40.0, r.y + r.h / 2.0), img.pixel(r.x + 4.0, r.y + r.h / 2.0)]
+      let y = r.y + r.h / 2.0;
+      [img.pixel(r.x + r.w - 40.0, y), img.pixel(r.x + 0.5, y), img.pixel(r.x + 0.5, r.y + 0.5)]
     };
     h.leave();
     h.wait(Duration::from_millis(400));
@@ -1076,13 +1130,49 @@ mod tests {
     h.press(r.x + r.w - 40.0, r.y + r.h / 2.0);
     h.frame();
     let held = at(&mut h);
-    assert!(held[0] != rest[0] && held[1] == rest[1], "pressed, inset: {held:?} {rest:?}");
+    assert!(held[0] != rest[0] && held == [held[0]; 3], "pressed, full: {held:?} {rest:?}");
     h.release(r.x + r.w - 40.0, r.y + r.h / 2.0);
     h.frame();
     let n = h.app().0;
     h.click_id(Id::of("off"));
     h.frame();
     assert!(h.rect(Id::of("c")).is_none() && h.app().0 == n, "disabled");
+  }
+
+  /// A disclosure alone in its section, on the window's ground.
+  struct Alone;
+
+  impl App for Alone {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.set_theme(Theme::PLATES_LIGHT);
+      let fs = FormStyle::plates(&ui.theme());
+      ui.col(fs.page.grow().bg(fs.bg), |ui| {
+        ui.form_section(&fs, "Section", |ui| {
+          ui.id("fold").form_disclosure(&fs, FormRow::new("Other models"), |_| {})
+        });
+      });
+    }
+  }
+
+  /// Held down, the plate's only row is filled to its edges and rounded at all four corners
+  /// as the plate: at the top as the first row, at the bottom as the one the section ends with.
+  #[test]
+  fn a_held_rows_fill_is_rounded_where_the_plate_is() {
+    let mut h = Harness::new(Alone, Size::new(400.0, 200.0), 2.0);
+    h.frame();
+    let r = h.rect(Id::of("fold")).unwrap();
+    let (x, y) = (r.x + r.w - 40.0, r.y + r.h / 2.0);
+    h.press(x, y);
+    h.frame();
+    let img = h.render();
+    let (fill, ground) = (img.pixel(x, y), img.pixel(r.x - 4.0, y));
+    assert_ne!(fill, ground);
+    assert_eq!((img.pixel(r.x + 0.5, y), img.pixel(r.x + r.w - 0.5, y)), (fill, fill));
+    // A point in from each corner of the row's box: the ground, the corner cut off.
+    let (l, rr, t, b) = (r.x + 0.5, r.x + r.w - 0.5, r.y + 0.5, r.y + r.h - 0.5);
+    for (cx, cy) in [(l, t), (rr, t), (l, b), (rr, b)] {
+      assert_eq!(img.pixel(cx, cy), ground, "rounded at ({cx}, {cy})");
+    }
   }
 
   /// A click on the chevron toggles its row. Disabled, by the row or by [Ui::disabled] while it
