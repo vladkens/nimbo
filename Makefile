@@ -38,7 +38,7 @@ pace: # frame pacing in a window of this session: fps while animating, wakeups w
 	cargo build --release --example pace
 	uv run scripts/pace.py
 
-size: # code, docs and tests per module; ARGS="--files", "--map" (each file and what it does), "--check" (the budgets) or "--vs main"
+size: # code, docs and tests per module; ARGS="--files", "--map" (each file and what it does), "--check" (at most 600 lines of library code added since main) or "--vs main"
 	uv run scripts/size.py $(ARGS)
 
 api-shots: # docs/api.md and its pictures (into the assets branch's worktree), from the gallery's table

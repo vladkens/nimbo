@@ -10,15 +10,14 @@ accessibility model ui/a11y.rs) or a top-level file; examples/ and tests/ are on
 is every line that is not blank, a comment, a doc comment or inside a `#[cfg(test)]` item. With
 a git ref, a column shows how code moved since it.
 `--map` lists the files with the first sentence of each one's module doc (`//!`): what it does.
-`--check` sums the code per part against its budget (BUDGETS) and fails when one is over, or
-when a budget is not a whole number of hundreds; with `SIZE_WARN` set (CI on `main`, where two
-PRs that each fit can merge into one over) it only warns, so a release still publishes.
+`--check` fails when the working tree adds more than LIMIT lines of library code (src/, net of
+removed lines) over its merge base with main, the most one PR should add at once; examples and
+tests don't count.
 
 uv run scripts/size.py [--files | --map | --check] [--vs <ref>]
 """
 
 import argparse
-import os
 import re
 import subprocess
 from collections import defaultdict
@@ -28,42 +27,11 @@ ROOT = Path(__file__).resolve().parent.parent
 DIRS = ("src", "examples", "tests")
 EXTS = (".rs",)
 KINDS = ("code", "docs", "comments", "tests", "blank")
-# The code lines each part may have: a platform, the UI core (ui/: the tree, layout, input,
-# paint, theme), its widgets and containers (ui/widgets, ui/containers: add-ons over it), the
-# text system (text/: shaping, the glyph atlas, the editing model), the app platform (its
-# portable part: the shell, tray and its menu model, hotkeys, paths, launch at login, the
-# launcher entry, opening, permissions, the system clipboard, the focus of other apps, the one
-# instance, the uninstall, the paste, the hardware and the system's changes; and each OS's
-# platform/<os>/app), the accessibility model (ui/a11y.rs: roles, records, assembly) and the core
-# (the rest of src/). A budget is whole hundreds (STEP): a change that doesn't fit is written
-# tighter, or the budget goes up by a hundred, a decision recorded in its PR; never by the few
-# lines one change needs.
-STEP = 100
-BUDGETS = {
-  "platform/macos": 2900,
-  "platform/windows": 2200,
-  "platform/linux": 3200,
-  "ui": 4300,
-  "widgets": 3800,
-  "text": 1200,
-  "core": 4100,
-  "app/shared": 2000,
-  "app/macos": 1900,
-  "app/windows": 1900,
-  "app/linux": 2700,
-  "a11y": 500,
-}
-# Modules that count against a budget of another name ("app", src/app.rs, is the core's seams).
-# The settings form and the dialog are add-ons over the widgets, as the containers are; the
-# accessibility model has its own.
-PARTS = {
-  "ui/widgets": "widgets",
-  "ui/containers": "widgets",
-  "ui/form": "widgets",
-  "ui/dialog": "widgets",
-  "ui/a11y": "a11y",
-  **{m: "app/shared" for m in ("shell", "tray", "menu", "hotkey", "paths", "autostart", "desktop", "open", "permissions", "clipboard", "focus", "instance", "uninstall", "paste", "hardware", "system")},
-}
+# The library code one PR may add, net of what it removes.
+LIMIT = 600
+# Files under ui/ shown as modules of their own: the widgets and containers, the add-ons over
+# them and the accessibility model.
+SPLIT = ("ui/widgets", "ui/containers", "ui/form", "ui/dialog", "ui/a11y")
 
 
 def module(path: str, files: bool) -> str:
@@ -89,47 +57,10 @@ def module(path: str, files: bool) -> str:
 
   if parts[1] in ("platform", "ui") and len(parts) > 2:
     sub = f"{parts[1]}/{parts[2].removesuffix('.rs')}"
-    if parts[1] == "platform" and len(parts) > 3 or sub in PARTS:
+    if parts[1] == "platform" and len(parts) > 3 or sub in SPLIT:
       return sub
 
   return parts[1]
-
-
-def part(module: str) -> str | None:
-  """The budget a module's code counts against; examples and tests have none.
-
-  >>> [part(m) for m in ("platform/linux", "ui", "ui/containers", "text", "cpu", "tests")]
-  ['platform/linux', 'ui', 'widgets', 'text', 'core', None]
-  >>> [part(m) for m in ("app", "tray", "app/linux", "ui/a11y")]
-  ['core', 'app/shared', 'app/linux', 'a11y']
-  """
-  if module in BUDGETS:
-    return module
-
-  if module in PARTS:
-    return PARTS[module]
-
-  return None if module in ("examples", "tests") else "core"
-
-
-def check(rows: dict[str, dict[str, int]]) -> bool:
-  """Prints each part's code against its budget; whether all are within."""
-  used = defaultdict(int)
-  for m, r in rows.items():
-    if (p := part(m)) is not None:
-      used[p] += r["code"]
-
-  odd = [p for p, limit in BUDGETS.items() if limit % STEP]
-  for p in odd:
-    print(f"{p}: budget {BUDGETS[p]} is not whole hundreds: raise it by {STEP}, not by a few lines")
-
-  ok = not odd
-  for p, limit in BUDGETS.items():
-    over = used[p] > limit
-    print(f"{p:<18} {used[p]:>6} / {limit:<6} {'over' if over else 'ok'}")
-    ok &= not over
-
-  return ok
 
 
 def braces(line: str) -> int:
@@ -201,6 +132,25 @@ def files_at(ref: str) -> dict[str, str]:
   return out
 
 
+def merge_base() -> str:
+  """The commit this branch forked from main: origin/main's, or the local main's."""
+  for ref in ("origin/main", "main"):
+    run = subprocess.run(["git", "-C", str(ROOT), "merge-base", "HEAD", ref], capture_output=True, text=True)
+    if run.returncode == 0:
+      return run.stdout.strip()
+
+  raise SystemExit("no merge base with origin/main or main")
+
+
+def library(files: dict[str, str]) -> int:
+  """The code lines of the library (src/).
+
+  >>> library({"src/a.rs": "fn a() {}", "src/b.rs": "// a note", "tests/c.rs": "fn c() {}"})
+  1
+  """
+  return sum(count(text)["code"] for path, text in files.items() if path.startswith("src/"))
+
+
 def table(files: dict[str, str], by_file: bool) -> dict[str, dict[str, int]]:
   rows = defaultdict(lambda: dict.fromkeys(KINDS, 0))
   for path, text in files.items():
@@ -216,16 +166,19 @@ def main():
   ap.add_argument("--files", action="store_true", help="one row per file")
   ap.add_argument("--map", action="store_true", help="one row per file with what it does")
   ap.add_argument("--vs", metavar="REF", help="show the code change since this git ref")
-  ap.add_argument("--check", action="store_true", help="fail when a part is over its budget")
+  ap.add_argument("--check", action="store_true", help=f"fail when the library grew by more than {LIMIT} lines since main")
   args = ap.parse_args()
 
   files = files_now()
   if args.check:
-    ok = check(table(files, False))
-    if not ok and os.environ.get("SIZE_WARN"):
-      print("::warning::a part is over its code budget; raise it or trim in the next PR")
+    base = merge_base()
+    added = library(files) - library(files_at(base))
+    print(f"library code since {base[:9]}: {added:+} lines (limit {LIMIT})")
+    if added > LIMIT:
+      print(f"over by {added - LIMIT}: split the work into several PRs")
+      raise SystemExit(1)
 
-    raise SystemExit(0 if ok or os.environ.get("SIZE_WARN") else 1)
+    return
 
   if args.map:
     for path in sorted(files, key=lambda p: (p.count("/"), p)):
