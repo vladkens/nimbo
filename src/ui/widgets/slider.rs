@@ -159,6 +159,8 @@ impl Ui<'_> {
     inset: f32,
   ) -> Behavior {
     let (lo, hi) = (*range.start(), *range.end());
+    // A step as [Slider::step] takes it: none unless finite and positive.
+    let step = step.filter(|s| s.is_finite() && *s > 0.0);
     let b = match self.begin(id, Role::Slider) {
       Some(b) => b,
       None => self.slide(id, v, (lo, hi), step, inset),
