@@ -86,11 +86,13 @@ impl Ui<'_> {
   /// `id.key(2).key(0)`, in the room between them (`id.key(2)`): centred in the bar where there is
   /// room, else beside the others and cut short, never over them.
   pub fn toolbar(&mut self, mut content: impl FnMut(&mut Self)) -> Response {
-    self.st.toolbar = true;
     let (id, h) = (self.take_id(), self.toolbar_height());
     // Where the band was; in a navigation split's sidebar its items trail. Only a band at the
-    // window's top is beside its buttons; lower down it is the content's header row.
+    // window's top is beside its buttons and gives the title bar a toolbar's height; lower down
+    // it is the content's header row. Not laid out yet, it is taken as at the top: the view
+    // runs again on where it is ([Ui::settle]) before the frame shows.
     let at = self.rect(id).unwrap_or(Rect::new(0.0, 0.0, self.size().w, h));
+    self.st.toolbar |= at.y <= 0.0;
     let buttons = self.titlebar().and_then(|b| b.buttons).filter(|_| at.y <= 0.0);
     let column = self.slot::<Sidebar>().is_some();
     // Laid out elsewhere (a column sliding), the view runs again on where it is now.
@@ -642,6 +644,9 @@ mod tests {
     let mut h = Harness::new(Lower, Size::new(640.0, 400.0), 2.0);
     h.set_titlebar(Some(mac_titlebar("", false)));
     h.frame();
+    // The title bar keeps its own height: the platform is asked for no toolbar.
+    assert!(!h.rt.toolbar());
+    assert_eq!(h.rt.titlebar().unwrap().height, 32.0);
     h.frame();
     let back = h.rect(Id::of("back")).unwrap();
     assert_eq!((back.x, mid(back).y), (LEAD, 100.0 + TOOLBAR_HEIGHT / 2.0));
