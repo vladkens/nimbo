@@ -794,10 +794,12 @@ impl<'a> Ui<'a> {
     self
   }
 
-  /// Makes the next element move the window when pressed where no interactive element inside it
-  /// is: the header of a window that draws its own title bar ([crate::Config::unified]). A
-  /// double-click zooms or minimizes the window as the OS's setting says; the app never sees
-  /// the press. The element takes pointer input.
+  /// Makes the next element move the window when pressed: the header of a window that draws
+  /// its own title bar ([crate::Config::unified]). It is a layer over the content, as AppKit's
+  /// title bar is: where it shows, the pointer reaches only what is built inside it and the
+  /// overlays over it (an open menu); the content under it gets no hover, cursor or press there,
+  /// and a press moves the window. A double-click zooms or minimizes the window as the OS's
+  /// setting says; the app never sees the press. The wheel scrolls the content under it.
   pub fn drags_window(&mut self) -> &mut Self {
     self.next_drag = true;
     self
@@ -1002,7 +1004,7 @@ impl<'a> Ui<'a> {
     }
 
     let (drag, help) = (std::mem::take(&mut self.next_drag), self.next_help.take());
-    let hit = style.hit || named || scrolls || focus || drag || style.cursor != Cursor::Inherit;
+    let hit = style.hit || named || scrolls || focus || style.cursor != Cursor::Inherit;
     let hit = hit || help.is_some();
     let tree = &mut self.st.tree;
     let i = tree.nodes.len() as u32;

@@ -344,11 +344,19 @@ nimbo: `Split::new(Axis::Horizontal).ratio(&mut self.side).show(ui, |ui, pane| {
 
 ![Split](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/split.png)
 
+### Navigation split
+
+SwiftUI: `NavigationSplitView { … } detail: { … }`
+
+nimbo: `Split::navigation().ratio(&mut self.side).show(ui, |ui, pane| { … })`
+
+![Navigation split](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/navigation-split.png)
+
 ### Toolbar
 
-SwiftUI: `.toolbar { ToolbarItem(placement: .navigation) { … } }`
+SwiftUI: `Detail().toolbar { ToolbarItem(placement: .principal) { … }; ToolbarItem(placement: .primaryAction) { … } } in a NavigationSplitView`
 
-nimbo: `ui.toolbar(|ui| ui.toolbar_item(ToolbarItemPlacement::Navigation, |ui| _ = ui.icon_button(Icon::SIDEBAR)))`
+nimbo: `ui.toolbar(|ui| ui.toolbar_item(ToolbarItemPlacement::PrimaryAction, |ui| _ = ui.icon_button(Icon::DOC))) in a column`
 
 ![Toolbar](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/toolbar.png)
 

@@ -1,12 +1,13 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! A window with a sidebar it shows and hides from its title bar, as Notes': a unified window
-//! ([nimbo::Config::unified]) whose toolbar ([nimbo::Ui::toolbar]) has the sidebar toggle right of
-//! the traffic lights and a new-note button at the trailing end, the empty part of the bar moving
-//! the window; the sidebar (the notes on the panel's ground, up to the window's top) beside the
-//! note in a split ([nimbo::Split]), the note alone while the sidebar is hidden; it slides in and
-//! out in 150 ms. On Windows and
-//! Linux the window keeps its title bar and the toolbar is the content's top row.
+//! A window with a sidebar it shows and hides from its title bar, as Notes' on macOS 26: a unified
+//! window ([nimbo::Config::unified]) whose columns have toolbars ([nimbo::Ui::toolbar]) in the
+//! title bar, the sidebar's toggle at its trailing edge by the divider (right of the traffic
+//! lights while the sidebar is hidden) and the note's new-note button at the window's end, the
+//! empty part of the bar moving the window; the sidebar (the notes on the panel's ground, up to
+//! the window's top) beside the note in a split ([nimbo::Split]), the note alone while the
+//! sidebar is hidden; it slides in and out in 150 ms, the toggle with it. On Windows and Linux the
+//! window keeps its title bar and the toolbars are the columns' top rows.
 //!
 //! `cargo run --release --example notes [-- --no-sidebar] [--shot <file.png>]`
 
@@ -14,15 +15,14 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 use nimbo::{
-  App, Axis, Config, Icon, Id, List, Selection, Split, Style, TextStyle, ToolbarItemPlacement,
-  Transition, Ui, px,
+  App, Config, Icon, Id, List, Selection, Split, Style, TextStyle, ToolbarItemPlacement,
+  Transition, Ui, grow, px,
 };
 
 pub const TOGGLE: &str = "toggle";
 pub const NEW: &str = "new";
 pub const SPLIT: &str = "split";
 pub const LIST: &str = "notes";
-pub const NOTE: &str = "note";
 /// The sidebar's slide, 150 ms from in to out.
 pub const SLIDE: Transition = Transition::smooth(1000.0 / 150.0);
 
@@ -54,10 +54,24 @@ impl Notes {
     self.sel.cursor_index(self.notes.len(), &|i| i as u64).unwrap_or(0)
   }
 
-  /// The sidebar: the notes on the panel's ground, under the toolbar's band.
+  /// The sidebar column's toolbar: the toggle at its trailing edge, by the divider, as on macOS
+  /// 26; in a column too narrow for it, or hidden, right of the traffic lights.
+  fn toggle(&mut self, ui: &mut Ui) {
+    ui.toolbar(|ui| {
+      ui.toolbar_item(ToolbarItemPlacement::Navigation, |ui| {
+        let tip = if self.sidebar { "Hide Sidebar" } else { "Show Sidebar" };
+        if ui.help(tip).id(TOGGLE).icon_button(Icon::SIDEBAR).clicked {
+          self.sidebar ^= true;
+        }
+      });
+    });
+  }
+
+  /// The sidebar: the notes on the panel's ground, under its toolbar.
   fn sidebar(&mut self, ui: &mut Ui, bar: f32) {
     let t = ui.theme();
     ui.col(Style::new().grow().bg(t.panel), |ui| {
+      self.toggle(ui);
       ui.el(Style::new().h(px(bar)));
       let notes = &self.notes;
       let list = List::new(notes.len(), 28.0).selection(&mut self.sel);
@@ -66,14 +80,23 @@ impl Notes {
     });
   }
 
-  /// The note open, under the toolbar's band.
-  fn note(&self, ui: &mut Ui, bar: f32) {
+  /// The note open under the note column's toolbar, a new-note button at its end.
+  fn note(&mut self, ui: &mut Ui, bar: f32) {
     let t = ui.theme();
-    let (title, body) = &self.notes[self.open()];
     let page = Style::new().grow().pads([bar, 24.0, 24.0, 24.0]).gap(10.0);
-    ui.id(NOTE).col(page, |ui| {
+    ui.col(page, |ui| {
+      let (title, body) = &self.notes[self.open()];
       ui.text(title, TextStyle::new(t.bold, t.text));
       ui.text(body, t.label());
+      ui.toolbar(|ui| {
+        ui.toolbar_item(ToolbarItemPlacement::PrimaryAction, |ui| {
+          if ui.help("New Note").id(NEW).icon_button(Icon::DOC).clicked {
+            self.notes.push(("New Note".to_owned(), ""));
+            let i = self.notes.len() - 1;
+            self.sel.select(i as u64, i);
+          }
+        });
+      });
     });
   }
 }
@@ -85,35 +108,25 @@ impl App for Notes {
     // How far the sidebar is out: it slides in and out in 150 ms.
     let out = ui.animate(Id::of(SPLIT).key("out"), self.sidebar as u8 as f32, SLIDE);
     ui.col(Style::new().grow().bg(t.bg), |ui| {
+      // Hidden, the sidebar's column is no wider than nothing, its toolbar there all the same.
       if out == 0.0 {
-        return self.note(ui, bar);
+        return ui.row(Style::new().grow(), |ui| {
+          ui.col(Style::new().w(px(0.0)).h(grow()), |ui| self.toggle(ui));
+          self.note(ui, bar);
+        });
       }
 
       // Sliding, the sidebar takes that part of its share, the share kept for when it is out.
       let mut side = std::mem::take(&mut self.side);
       let mut sliding = side * out;
       let ratio = if out < 1.0 { &mut sliding } else { &mut side };
-      let split = Split::new(Axis::Horizontal).ratio(ratio).min(180.0 * out, 280.0);
-      split.show(ui.id(SPLIT), |ui, pane| match pane {
+      let split = Split::navigation().ratio(ratio).min(180.0 * out, 280.0);
+      let r = split.show(ui.id(SPLIT), |ui, pane| match pane {
         0 => self.sidebar(ui, bar),
         _ => self.note(ui, bar),
       });
       self.side = side;
-    });
-    ui.toolbar(|ui| {
-      ui.toolbar_item(ToolbarItemPlacement::Navigation, |ui| {
-        let tip = if self.sidebar { "Hide Sidebar" } else { "Show Sidebar" };
-        if ui.help(tip).id(TOGGLE).icon_button(Icon::SIDEBAR).clicked {
-          self.sidebar ^= true;
-        }
-      });
-      ui.toolbar_item(ToolbarItemPlacement::PrimaryAction, |ui| {
-        if ui.help("New Note").id(NEW).icon_button(Icon::DOC).clicked {
-          self.notes.push(("New Note".to_owned(), ""));
-          let i = self.notes.len() - 1;
-          self.sel.select(i as u64, i);
-        }
-      });
+      r
     });
   }
 }

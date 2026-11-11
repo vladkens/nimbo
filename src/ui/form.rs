@@ -802,6 +802,7 @@ impl Ui<'_> {
       if let Some(bar) = titlebar {
         let line = Style::new().w(grow()).h(px(bar.height)).center().clip();
         ui.row(line, |ui| ui.text(bar.title, fs.title));
+        // Beside the tabs the bar of them moves the window too.
         ui.drags_window();
       }
 

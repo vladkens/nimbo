@@ -99,7 +99,8 @@ pub const BLOCKS: &[Block] = &[
   b("List", "List sections", "Section(header:) in a List; .listStyle(…)", "List::new(n, 32.0).sections(&starts, 24.0, &head).list_style(ListStyle::Grouped)"),
   b("Containers", "Tabs", "TabView { … }", "Tabs::new(&mut self.tab, &[\"One\", \"Two\"]).show(ui, |ui, i| { … })"),
   b("Containers", "Split", "HSplitView { … }", "Split::new(Axis::Horizontal).ratio(&mut self.side).show(ui, |ui, pane| { … })"),
-  b("Containers", "Toolbar", ".toolbar { ToolbarItem(placement: .navigation) { … } }", "ui.toolbar(|ui| ui.toolbar_item(ToolbarItemPlacement::Navigation, |ui| _ = ui.icon_button(Icon::SIDEBAR)))"),
+  b("Containers", "Navigation split", "NavigationSplitView { … } detail: { … }", "Split::navigation().ratio(&mut self.side).show(ui, |ui, pane| { … })"),
+  b("Containers", "Toolbar", "Detail().toolbar { ToolbarItem(placement: .principal) { … }; ToolbarItem(placement: .primaryAction) { … } } in a NavigationSplitView", "ui.toolbar(|ui| ui.toolbar_item(ToolbarItemPlacement::PrimaryAction, |ui| _ = ui.icon_button(Icon::DOC))) in a column"),
   b("Containers", "Menu", "Menu(\"Actions\") { Button(…) }", "ui.menu(\"Actions\", |ui| { ui.menu_item(\"Copy\"); })"),
   b("Containers", "Lazy column", "LazyVStack { ForEach(…) }", "ui.virtual_col(heights, |i| i, |ui, i| { … })"),
   b("Presentation", "Alert", ".alert(\"Delete?\", isPresented: $ask) { Button(\"Delete\", role: .destructive) }", "Dialog::new(\"Delete?\").button(\"Delete\", ButtonRole::Destructive).show(ui, &mut self.ask)"),
@@ -149,6 +150,8 @@ pub struct Gallery {
   pub hotkey: Option<Hotkey>,
   pub tab: usize,
   pub side: f32,
+  /// The toolbar's sidebar share.
+  pub bar_side: f32,
   pub rows: Selection,
   pub ask: bool,
   pub deleted: usize,
@@ -179,6 +182,7 @@ impl Default for Gallery {
       hotkey: Hotkey::parse("ctrl+option+space").ok(),
       tab: 0,
       side: 0.4,
+      bar_side: 0.4,
       rows: Selection::default(),
       ask: false,
       deleted: 0,
@@ -428,16 +432,39 @@ impl Gallery {
           });
         });
       }),
-      // In a window's title bar on macOS ([nimbo::Config::unified]: `examples/notes.rs`); here in
-      // a bar of its own.
-      "Toolbar" => Self::variants(ui, Shown::Plain, |ui| {
-        ui.col(Style::new().w(px(360.0)).h(px(52.0)).radius(8.0).bg(t.panel), |ui| {
-          ui.toolbar(|ui| {
-            ui.toolbar_item(ToolbarItemPlacement::Navigation, |ui| {
-              _ = ui.help("Hide Sidebar").icon_button(Icon::SIDEBAR)
+      "Navigation split" => Self::variants(ui, Shown::Plain, |ui| {
+        ui.row(Style::new().w(px(260.0)).h(px(60.0)), |ui| {
+          Split::navigation().ratio(&mut self.side).show(ui, |ui, pane| {
+            let ground = if pane == 0 { t.panel } else { t.bg };
+            ui.col(Style::new().grow().pad(8.0).bg(ground), |ui| {
+              ui.text(["Sidebar", "Detail"][pane], t.label())
             });
-            ui.toolbar_item(ToolbarItemPlacement::PrimaryAction, |ui| {
-              _ = ui.help("New Note").icon_button(Icon::DOC)
+          });
+        });
+      }),
+      // In a window's title bar on macOS ([nimbo::Config::unified]: `examples/notes.rs`); here in
+      // a bar of its own, a sidebar's column with its toggle beside the detail's with its action.
+      "Toolbar" => Self::variants(ui, Shown::Plain, |ui| {
+        let bar = Style::new().w(px(360.0)).h(px(52.0)).radius(8.0).pad(1.0).clip().bg(t.bg);
+        ui.row(bar.border(1.0, t.line), |ui| {
+          Split::navigation().ratio(&mut self.bar_side).show(ui, |ui, pane| {
+            let ground = if pane == 0 { t.panel } else { t.bg };
+            ui.col(Style::new().grow().bg(ground), |ui| {
+              // The sidebar's toggle at its trailing edge; the detail's title in its centre and
+              // its action at its end.
+              ui.toolbar(|ui| match pane {
+                0 => ui.toolbar_item(ToolbarItemPlacement::Navigation, |ui| {
+                  _ = ui.help("Hide Sidebar").icon_button(Icon::SIDEBAR)
+                }),
+                _ => {
+                  ui.toolbar_item(ToolbarItemPlacement::Principal, |ui| {
+                    ui.text("Notes", t.label())
+                  });
+                  ui.toolbar_item(ToolbarItemPlacement::PrimaryAction, |ui| {
+                    _ = ui.help("New Note").icon_button(Icon::DOC)
+                  });
+                }
+              });
             });
           });
         });

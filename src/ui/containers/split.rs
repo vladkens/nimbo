@@ -1,6 +1,7 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The split: two panes with a divider to drag between them.
+//! The split: two panes with a divider to drag between them, or a sidebar and its detail
+//! ([Split::navigation]).
 //!
 //! ```ignore
 //! Split::new(Axis::Horizontal).ratio(&mut self.side).min(160.0, 320.0).show(ui.id("split"), |ui, pane| match pane {
@@ -12,6 +13,7 @@
 //! The split keeps its ratio in the app or in its own state; dragging the divider honours both
 //! panes' minimum sizes. The behaviour is [Ui::split_behavior].
 
+use super::toolbar::Sidebar;
 use crate::scene::{Point, mix};
 use crate::ui::{
   Axis, Behavior, Cursor, Float, Flow, Id, Response, Role, Style, Ui, UnitPoint, Value, grow, pct,
@@ -28,19 +30,30 @@ pub struct SplitBehavior {
 }
 
 /// Two panes side by side or stacked ([Split::new]) with a divider to drag
-/// (`id.key("handle")`), as SwiftUI's `HSplitView` and `VSplitView`.
+/// (`id.key("handle")`), as SwiftUI's `HSplitView` and `VSplitView`; or a sidebar beside its
+/// detail ([Split::navigation]), as `NavigationSplitView`.
 pub struct Split<'s> {
   axis: Axis,
   ratio: Option<&'s mut f32>,
   init: f32,
   min: [f32; 2],
+  /// The first pane is a sidebar column ([Split::navigation]).
+  sidebar: bool,
 }
 
 impl<'s> Split<'s> {
   /// Panes along `axis`: [Axis::Horizontal] left and right of a vertical divider, Vertical
   /// above and below a horizontal one.
   pub fn new(axis: Axis) -> Self {
-    Self { axis, ratio: None, init: 0.5, min: [0.0; 2] }
+    Self { axis, ratio: None, init: 0.5, min: [0.0; 2], sidebar: false }
+  }
+
+  /// A sidebar column left of its detail, as SwiftUI's `NavigationSplitView`: a toolbar built
+  /// in the sidebar ([Ui::toolbar]) is its part of the window's title bar, its items at its
+  /// trailing edge by the divider (the sidebar toggle, as macOS 26 puts it); one in the detail is
+  /// the rest of the bar.
+  pub fn navigation() -> Self {
+    Self { sidebar: true, ..Self::new(Axis::Horizontal) }
   }
 
   /// The first pane's share of the split, kept by the app; without it the split keeps its
@@ -98,13 +111,23 @@ impl<'s> Split<'s> {
     let hot = ui.hot(handle, held || b.handle.hovered);
     let line = mix(t.line, t.accent, hot);
     let flow = if ax == 0 { Flow::Row } else { Flow::Column };
+    let sidebar = self.sidebar;
     let mut resp = ui.with_id(id).container(flow, Style::new().grow().clip(), |ui| {
-      ui.col(first.clip(), |ui| pane(ui, 0));
+      // A navigation split's leading pane is the sidebar column, the other the detail: a
+      // toolbar in each is that column's ([Ui::toolbar]).
+      let mut column = |ui: &mut Ui<'a>, i: usize, style: Style| {
+        let was = sidebar.then(|| ui.set_slot((i == 0).then_some(Sidebar)));
+        ui.col(style.clip(), |ui| pane(ui, i));
+        if let Some(was) = was {
+          ui.set_slot(was);
+        }
+      };
+      column(ui, 0, first);
       ui.row(divider.bg(line), |ui| {
         let at = Float::parent().attach(UnitPoint::CENTER).anchor(UnitPoint::CENTER).clip();
         ui.with_id(handle).float(at).el(grip);
       });
-      ui.col(second.clip(), |ui| pane(ui, 1));
+      column(ui, 1, second);
     });
     resp.changed = b.handle.changed;
     resp
