@@ -1345,6 +1345,41 @@ mod tests {
     assert_eq!((h.rt.images.size(images[0]), h.rt.ui.pictures.len()), (None, 0));
   }
 
+  /// A decoded picture shows as one image for it and its clones, kept while built, then dropped;
+  /// another decode of the same file is another image.
+  #[test]
+  fn bitmaps_live_while_built() {
+    struct Photos(Vec<crate::Bitmap>);
+    impl App for Photos {
+      fn view(&mut self, ui: &mut Ui) {
+        for b in &self.0 {
+          ui.image(b, Style::new().w(px(32.0)).h(px(24.0)));
+        }
+      }
+    }
+    let file = include_bytes!("../tests/images/quadrants.jpg");
+    let one = crate::Bitmap::decode(file, 32).unwrap();
+    let photos = vec![one.clone(), one, crate::Bitmap::decode(file, 32).unwrap()];
+    let mut h = crate::Harness::new(Photos(photos), Size::new(96.0, 24.0), 1.0);
+    h.frame();
+    let images: Vec<_> = h.rt.ui.pictures.iter().map(|p| p.1).collect();
+    assert_eq!(images.len(), 2, "a clone is the same picture");
+    assert_eq!(h.rt.images.size(images[0]), Some((32, 24)));
+    let red = h.render().pixel(4.0, 4.0);
+    assert!(red[0] > 200 && red[1] < 60 && red[2] < 60, "{red:?}");
+    // Shown, the pixels are the bitmap's own allocation, not a copy.
+    let kept = h.cpu.image_pixels(images[0]).unwrap();
+    assert!(std::sync::Arc::ptr_eq(kept, &h.app().0[0].px));
+
+    h.rt.redraw();
+    h.frame();
+    assert_eq!(h.rt.ui.pictures.len(), 2);
+    h.app_mut().0.clear();
+    h.rt.redraw();
+    h.frame();
+    assert_eq!((h.rt.images.size(images[0]), h.rt.ui.pictures.len()), (None, 0));
+  }
+
   #[test]
   fn virtual_clock() {
     let mut rt = runtime();

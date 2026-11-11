@@ -12,6 +12,7 @@ mod view;
 mod a11y;
 mod app;
 mod files;
+pub mod image;
 mod input;
 mod keyboard;
 mod link;

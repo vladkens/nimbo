@@ -453,7 +453,7 @@ impl Reader<'_> {
 /// An image the app ships as a PNG file, `Png::new(include_bytes!("logo.png"))`: decoded the
 /// first time its pixels are asked for ([Png::rgba]), then kept for the app's life. For the
 /// windows' icon ([crate::Config::png_icon]), the launcher's ([crate::desktop::Launcher::icon]),
-/// a view's image ([crate::Ui::png_image]); [Png::tile] and [Png::side] shape it first.
+/// a view's image ([crate::Ui::image]); [Png::tile] and [Png::side] shape it first.
 #[derive(Clone, Copy, Hash)]
 pub struct Png {
   file: &'static [u8],

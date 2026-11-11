@@ -104,6 +104,14 @@ nimbo: `ui.icon(Icon::GEAR, 20.0, t.text)`
 
 ![Image](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/image.png)
 
+### Photo
+
+SwiftUI: `Image(nsImage: NSImage(data: file)!).resizable().aspectRatio(contentMode: .fill).frame(width: 80, height: 80).clipped()`
+
+nimbo: `let photo = Bitmap::decode(&file, 240)?; ui.aspect_ratio(ContentMode::Fill).image(&photo, Style::new().w(px(80.0)).h(px(80.0)))`
+
+![Photo](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/photo.png)
+
 ## Controls
 
 ### Button

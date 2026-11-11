@@ -7,6 +7,7 @@
 
 use super::layout::{ELLIPSIS, Elide, Kind, Tree};
 use super::textlayout::{Edit, TextLayout};
+use super::widgets::placed;
 use super::{Axis, Canvas, Clip, FocusRing, Style, TextStyle};
 use crate::scene::{Color, Frame, Quad, Rect};
 use crate::text::Ink;
@@ -177,7 +178,12 @@ fn node(
         caret(t, i, e, style.color, baseline, alpha, f);
       }
     }
-    Kind::Image(id) => f.image(id, r, alpha),
+    Kind::Image(id, mode) => {
+      if let Some((w, h)) = f.images().size(id) {
+        let (rect, uv) = placed(mode, r, w as f32, h as f32);
+        f.image_part(id, rect, uv, alpha);
+      }
+    }
     Kind::Fade { color, len } => edge_fade(t, n.parent as usize, color, len, alpha, f),
     Kind::Canvas(k) => {
       if let Some(paint) = canvases[k as usize].take() {

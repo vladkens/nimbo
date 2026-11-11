@@ -82,7 +82,10 @@ pub(crate) use textlayout::TextLayout;
 pub use theme::{
   ButtonLook, ButtonStyle, ControlBorder, ControlSize, Sizes, SwitchSize, Theme, Tone,
 };
-pub use widgets::{Button, ButtonRole, FieldKind, FieldStyle, Icon, IconPaint, Slider, TextInput};
+pub use widgets::{
+  Button, ButtonRole, ContentMode, FieldKind, FieldStyle, Icon, IconPaint, ImageSource, Slider,
+  TextInput,
+};
 
 use self::input::{Deliver, Input, ScrollState};
 use self::store::{Anim, Store};
@@ -150,8 +153,8 @@ pub(crate) struct UiState {
   pub(crate) menu_seq: u32,
   /// The height of the title bar over the content and the window's title ([Ui::titlebar]).
   pub(crate) titlebar: Option<(f32, &'static str)>,
-  /// The images [Ui::rgba_image] added: their pixels' hash, the image, and whether a view built
-  /// it since the last frame.
+  /// The images [Ui::image] and [Ui::rgba_image] added: their pixels' hash or a bitmap's
+  /// identity, the image, and whether a view built it since the last frame.
   pub(crate) pictures: Vec<(u64, ImageId, bool)>,
   /// The element that takes key presses before any binding ([Ui::grab_keys]), as the view
   /// built last asked.
@@ -885,11 +888,6 @@ impl<'a> Ui<'a> {
     let range = (start, text.len() as u32);
     let kind = Kind::Text { range, style, lines: (0, 0), baseline: 0.0, line_h: 0.0 };
     self.push(kind, Style::new(), Flow::Row);
-  }
-
-  /// An image; a fit size is its pixel size over the backing scale.
-  pub fn image(&mut self, image: ImageId, style: Style) -> Response {
-    self.push(Kind::Image(image), style, Flow::Row).1
   }
 
   /// A box whose `paint` draws into the frame within its laid-out rect (a plot). It draws in

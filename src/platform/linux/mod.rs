@@ -23,6 +23,7 @@ mod app;
 mod dbus;
 mod dl;
 mod files;
+pub mod image;
 mod input;
 mod keys;
 mod overlay;

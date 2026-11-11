@@ -22,9 +22,10 @@
 //! other apps: links and files opened or shown ([open]), the OS's permissions ([permissions]),
 //! where the user types ([focus]), keys posted to the app in focus ([keys::post]), the clipboard,
 //! also taken and put back around a paste of the app's own ([SystemClipboard]), and that paste
-//! itself, which gives the clipboard back ([paste]); and the hardware: how a microphone is
-//! attached and the laptop's lid ([hardware]), and the system's changes, such as a microphone
-//! plugged or the lid closed, as they come ([system], [Main::watch]).
+//! itself, which gives the clipboard back ([paste]); photos decoded by the OS at the size they show
+//! ([Bitmap]); and the hardware: how a microphone is attached and the laptop's lid ([hardware]),
+//! and the system's changes, such as a microphone plugged or the lid closed, as they come
+//! ([system], [Main::watch]).
 //!
 //! macOS 11 is the least it runs on, rustc's default deployment target, so an app sets none;
 //! newer APIs are used where the system has them (the activation, the display link and menu
@@ -33,6 +34,7 @@
 pub mod activity;
 pub mod app;
 pub mod autostart;
+mod bitmap;
 pub mod clipboard;
 pub(crate) mod cpu;
 pub mod desktop;
@@ -65,6 +67,7 @@ pub use app::{
   App, Appearance, Clipboard, ColorScheme, Cx, Event, Ime, MemClipboard, MouseButton, Phase,
   WHEEL_LINE, Waker,
 };
+pub use bitmap::Bitmap;
 pub use clipboard::SystemClipboard;
 pub use file_dialog::{FileDialog, FileDialogKind};
 pub use harness::Harness;
@@ -83,12 +86,12 @@ pub use text::edit::{Editor, Lines, Mono, Sel};
 pub use text::{Design, Font, Weight};
 pub use ui::{
   Align, Answer, Axes, Axis, Behavior, Button, ButtonLook, ButtonRole, ButtonStyle, Click, Clip,
-  Content, ControlBorder, ControlSize, CoordinateSpace, Cursor, Dialog, Dim, Ease, EditMenu,
-  Editing, FieldBehavior, FieldKind, FieldStyle, Float, Focus, FocusDirection, FocusRing, FormRow,
-  FormStyle, Icon, IconPaint, Id, LinePattern, List, ListResponse, ListStyle, MenuPlacement,
-  Picker, Press, Response, Row, Scroll, Section, Selection, Shadow, Sizes, Slider, Split, Style,
-  TabItem, Tabs, Tag, TextInput, TextLines, TextStyle, Theme, Tone, Transition, TruncationMode,
-  TypeSelect, Ui, UnitPoint, grow, pct, px, rigid,
+  Content, ContentMode, ControlBorder, ControlSize, CoordinateSpace, Cursor, Dialog, Dim, Ease,
+  EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, Float, Focus, FocusDirection, FocusRing,
+  FormRow, FormStyle, Icon, IconPaint, Id, ImageSource, LinePattern, List, ListResponse, ListStyle,
+  MenuPlacement, Picker, Press, Response, Row, Scroll, Section, Selection, Shadow, Sizes, Slider,
+  Split, Style, TabItem, Tabs, Tag, TextInput, TextLines, TextStyle, Theme, Tone, Transition,
+  TruncationMode, TypeSelect, Ui, UnitPoint, grow, pct, px, rigid,
 };
 
 /// A window's title and initial content size in points; the harness renders at this size.

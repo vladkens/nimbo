@@ -548,7 +548,9 @@ fn fetch(tex: Tex, x: usize, y: usize) -> [f32; 4] {
   [p[2], p[1], p[0], p[3]].map(|v| v as f32 * (1.0 / 255.0))
 }
 
-/// Bilinear filtering in pixel coordinates, clamped to the edge, as the `linear` sampler.
+/// Bilinear filtering in pixel coordinates, clamped to the edge, as the `linear` sampler. In
+/// every image loop that calls it: called per pixel, it is the loop.
+#[inline(always)]
 fn sample(tex: Tex, u: f32, v: f32) -> [f32; 4] {
   let (u, v) = (u - 0.5, v - 0.5);
   let (fu, fv) = (u.floor(), v.floor());

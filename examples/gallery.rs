@@ -14,10 +14,10 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 use nimbo::{
-  Align, Answer, App, Axes, Axis, Button, ButtonRole, ButtonStyle, Config, ControlSize, Dialog,
-  Float, Font, FormRow, FormStyle, Hotkey, Icon, Item, LinePattern, List, ListStyle, Menu, Picker,
-  Section, Selection, Shortcut, Slider, Split, Style, Tabs, Tag, TextStyle, Tone, TruncationMode,
-  Ui, UnitPoint, grow, px,
+  Align, Answer, App, Axes, Axis, Bitmap, Button, ButtonRole, ButtonStyle, Config, ContentMode,
+  ControlSize, Dialog, Float, Font, FormRow, FormStyle, Hotkey, Icon, Item, LinePattern, List,
+  ListStyle, Menu, Picker, Section, Selection, Shortcut, Slider, Split, Style, Tabs, Tag,
+  TextStyle, Tone, TruncationMode, Ui, UnitPoint, grow, px,
 };
 
 pub const SIDEBAR: &str = "sidebar";
@@ -70,6 +70,7 @@ pub const BLOCKS: &[Block] = &[
   b("Text", "Selectable text", "Text(log).textSelection(.enabled)", "ui.selectable(&log)"),
   b("Text", "Link", "Link(\"Learn more\", destination: url)", "if ui.link(\"Learn more…\").clicked { nimbo::open::url(URL)? }"),
   b("Text", "Image", "Image(systemName: \"gear\")", "ui.icon(Icon::GEAR, 20.0, t.text)"),
+  b("Text", "Photo", "Image(nsImage: NSImage(data: file)!).resizable().aspectRatio(contentMode: .fill).frame(width: 80, height: 80).clipped()", "let photo = Bitmap::decode(&file, 240)?; ui.aspect_ratio(ContentMode::Fill).image(&photo, Style::new().w(px(80.0)).h(px(80.0)))"),
   b("Controls", "Button", "Button(\"Save\") { … }.buttonStyle(.borderedProminent)", "Button::new(\"Save\").style(ButtonStyle::BorderedProminent).show(ui)"),
   b("Controls", "Button role", "Button(\"Delete\", role: .destructive) { … }", "Button::new(\"Delete\").role(ButtonRole::Destructive).show(ui)"),
   b("Controls", "Icon button", "Button { Image(systemName: \"trash\") }.buttonStyle(.borderless)", "ui.icon_button(Icon::TRASH)"),
@@ -152,7 +153,12 @@ pub struct Gallery {
   pub deleted: usize,
   pub copied: usize,
   pub on: bool,
+  /// The photo block's, decoded by the OS at twice its size in points.
+  pub photo: Option<Bitmap>,
 }
+
+/// A sunset drawn for the photo block, 240 × 160.
+pub const SUNSET: &[u8] = include_bytes!("../tests/images/sunset.jpg");
 
 impl Default for Gallery {
   fn default() -> Self {
@@ -177,6 +183,7 @@ impl Default for Gallery {
       deleted: 0,
       copied: 0,
       on: true,
+      photo: Bitmap::decode(SUNSET, 240).ok(),
     }
   }
 }
@@ -306,6 +313,15 @@ impl Gallery {
       "Image" => Self::variants(ui, Shown::Alone, |ui| {
         for icon in [Icon::GEAR, Icon::FOLDER, Icon::TRASH, Icon::INFO] {
           ui.icon(icon.stroke(1.6), 20.0, t.text);
+        }
+      }),
+      "Photo" => Self::variants(ui, Shown::Alone, |ui| {
+        // Stretched to its box, then in its aspect: filling a square, fitting it.
+        if let Some(photo) = &self.photo {
+          ui.image(photo, Style::new().w(px(120.0)).h(px(80.0)));
+          let square = Style::new().w(px(80.0)).h(px(80.0)).bg(t.panel);
+          ui.aspect_ratio(ContentMode::Fill).image(photo, square);
+          ui.aspect_ratio(ContentMode::Fit).image(photo, square);
         }
       }),
       "Button" => Self::variants(ui, Shown::Sized, |ui| {
