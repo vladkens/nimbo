@@ -11,7 +11,7 @@
 
 </div>
 
-`nimbo` is a desktop UI toolkit for Rust that draws every widget itself, on the CPU, over a thin native layer for the window, the input and the text: AppKit and CoreText on macOS, Win32 and DirectWrite on Windows, GTK 3 with FreeType and HarfBuzz on Linux. The look follows macOS System Settings, measured from its screenshots, in light and dark. A settings window, a tray app or a HUD takes a few hundred lines and 13 crates, and the whole toolkit builds from scratch in about 10 seconds.
+`nimbo` is a desktop UI toolkit for Rust that draws every widget itself, on the CPU, over a thin native layer for the window, the input and the text: AppKit and CoreText on macOS, Win32 and DirectWrite on Windows, GTK 3 with FreeType and HarfBuzz on Linux. The look follows macOS System Settings, measured from its screenshots, in light and dark. A settings window, a tray app or a HUD takes a few hundred lines and 14 crates, and the whole toolkit builds from scratch in about 10 seconds.
 
 ## 🌟 Features
 
@@ -22,7 +22,7 @@
 - 🛎️ **Tray and HUD apps**: a tray menu, global hotkeys, launch at login, overlays that never take the focus, the system's permissions
 - 📂 **Files and photos**: the system's open and save panels, files dragged onto a window, photos (JPEG, PNG, GIF; HEIC and WebP where the system has their decoders) decoded by the system at the size they show
 - 🧪 **A headless harness**: every example renders to a PNG without a window; tests click, type and check pixels and what a screen reader reads, in parallel
-- 📦 **13 crates on macOS, 4 on Windows, 2 on Linux**: GTK is loaded at run time, nothing to link
+- 📦 **14 crates on macOS, 4 on Windows, 2 on Linux**: GTK is loaded at run time, nothing to link
 
 <div align="center">
   <img src="docs/settings.png" alt="the settings example on macOS" width="700" />
@@ -128,7 +128,7 @@ Measured on an Apple M2, rustc 1.99, 2026-10-25, without a compiler cache:
 
 - **10.1 s** a clean release build of the `counter` example (8.3 s debug)
 - **1.1 MB** its release binary (0.87 MB stripped)
-- **13 / 4 / 2** crates in the build on macOS / Windows / Linux, nimbo excluded
+- **14 / 4 / 2** crates in the build on macOS / Windows / Linux, nimbo excluded
 
 ## 🤝 Contributing
 

@@ -2,57 +2,38 @@
 
 //! Images decoded by ImageIO ([crate::Bitmap]): the thumbnail of the first image at the size
 //! (`CGImageSourceCreateThumbnailAtIndex`, which a JPEG decodes at a fraction of its full size),
-//! turned upright by its orientation, drawn into premultiplied sRGB RGBA. ImageIO is declared by
-//! hand (three functions and three keys, macOS 10.4) rather than through `objc2-image-io`, a
-//! crate more for them. ImageIO and CoreGraphics' bitmap contexts are thread-safe: any thread.
+//! turned upright by its orientation, drawn into premultiplied sRGB RGBA. ImageIO and
+//! CoreGraphics' bitmap contexts are thread-safe: any thread.
 
 use std::ffi::c_void;
-use std::ptr::NonNull;
 
 use objc2_core_foundation::{
-  CFBoolean, CFData, CFDictionary, CFNumber, CFRetained, CFString, CFType, CGPoint, CGRect, CGSize,
+  CFBoolean, CFData, CFDictionary, CFNumber, CFString, CFType, CGPoint, CGRect, CGSize,
   kCFAllocatorNull,
 };
 use objc2_core_graphics::{
   CGBitmapContextCreate, CGColorSpace, CGContext, CGImage, CGImageAlphaInfo, kCGColorSpaceSRGB,
 };
+use objc2_image_io::{
+  CGImageSource, kCGImagePropertyPixelHeight, kCGImagePropertyPixelWidth,
+  kCGImageSourceCreateThumbnailFromImageAlways, kCGImageSourceCreateThumbnailWithTransform,
+  kCGImageSourceThumbnailMaxPixelSize,
+};
 
 use crate::bitmap::{size, zeroed};
-
-#[link(name = "ImageIO", kind = "framework")]
-unsafe extern "C" {
-  fn CGImageSourceCreateWithData(data: &CFData, options: Option<&CFDictionary>) -> *mut CFType;
-  fn CGImageSourceCreateThumbnailAtIndex(
-    src: &CFType,
-    index: usize,
-    options: &CFDictionary,
-  ) -> *mut CGImage;
-  fn CGImageSourceCopyPropertiesAtIndex(
-    src: &CFType,
-    index: usize,
-    options: Option<&CFDictionary>,
-  ) -> *mut CFDictionary;
-  static kCGImagePropertyPixelWidth: &'static CFString;
-  static kCGImagePropertyPixelHeight: &'static CFString;
-  static kCGImageSourceCreateThumbnailFromImageAlways: &'static CFString;
-  static kCGImageSourceCreateThumbnailWithTransform: &'static CFString;
-  static kCGImageSourceThumbnailMaxPixelSize: &'static CFString;
-}
 
 /// The first image in `file` with its longer side at most `side`: its size and premultiplied
 /// RGBA pixels.
 pub fn decode(file: &[u8], side: u32) -> Result<(u32, u32, Vec<u8>), String> {
   // SAFETY: the data borrows `file`, which outlives it, the source and the thumbnail (drawn
-  // here); each Create result is owned.
+  // here); the options are CFString keys.
   let image = unsafe {
     let data =
       CFData::with_bytes_no_copy(None, file.as_ptr(), file.len() as isize, kCFAllocatorNull)
         .ok_or("can't read the image")?;
-    let src = NonNull::new(CGImageSourceCreateWithData(&data, None)).ok_or("not an image")?;
-    let src = CFRetained::from_raw(src);
+    let src = CGImageSource::with_data(&data, None).ok_or("not an image")?;
     // Its size from the header, checked before anything is decoded.
-    let props = CGImageSourceCopyPropertiesAtIndex(&src, 0, None);
-    let props = CFRetained::from_raw(NonNull::new(props).ok_or("not an image the system reads")?);
+    let props = src.properties_at_index(0, None).ok_or("not an image the system reads")?;
     let props = props.cast_unchecked::<CFString, CFNumber>();
     let dim = |k| props.get(k).and_then(|n| n.as_i64()).and_then(|v| u32::try_from(v).ok());
     let (w, h) = (dim(kCGImagePropertyPixelWidth), dim(kCGImagePropertyPixelHeight));
@@ -66,8 +47,7 @@ pub fn decode(file: &[u8], side: u32) -> Result<(u32, u32, Vec<u8>), String> {
     ];
     let values: [&CFType; 3] = [yes, yes, &max];
     let opts = CFDictionary::<CFString, CFType>::from_slices(&keys, &values);
-    let thumb = CGImageSourceCreateThumbnailAtIndex(&src, 0, opts.as_opaque());
-    CFRetained::from_raw(NonNull::new(thumb).ok_or("not an image the system reads")?)
+    src.thumbnail_at_index(0, Some(opts.as_opaque())).ok_or("not an image the system reads")?
   };
 
   let (w, h) = (CGImage::width(Some(&image)), CGImage::height(Some(&image)));
