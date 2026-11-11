@@ -272,6 +272,26 @@ fn every_widget_has_its_role() {
   reads(&h.a11y(), &["text field \"Search\" value \"Switches\"", "button \"Clear\""]);
 }
 
+/// A segmented control goes to the next segment on Right and Down, back on Left and Up, and no
+/// further than its ends: the arrows read as a list's, not a slider's.
+#[test]
+fn segments_step_down_and_up() {
+  let mut h = gallery(page("Segmented picker"), false);
+  let t = h.a11y_tree();
+  let group = t.nodes.iter().find(|n| n.props.role == Role::RadioGroup).expect("a radio group");
+  h.set_focus(Some(group.id));
+  let key = |h: &mut H, k: NamedKey| {
+    h.key(k, Modifiers::empty());
+    h.frame();
+    h.app().view
+  };
+  assert_eq!(key(&mut h, NamedKey::ArrowDown), 1, "down: the next");
+  assert_eq!(key(&mut h, NamedKey::ArrowRight), 2);
+  assert_eq!(key(&mut h, NamedKey::ArrowDown), 2, "not past the last");
+  assert_eq!(key(&mut h, NamedKey::ArrowUp), 1, "up: the one before");
+  assert_eq!(key(&mut h, NamedKey::ArrowLeft), 0);
+}
+
 /// The stepped slider's page ("Slider steps") at 2x in `look`: the enabled slider's id and rect.
 fn steps(look: Appearance) -> (H, Id, Rect) {
   let size = Size::new(WIDTH + 200.0, 600.0);
@@ -330,6 +350,11 @@ fn a_stepped_slider_moves_a_step() {
   assert!(h.act(id, Action::Increment));
   h.frame();
   reads(&h.a11y(), &["slider \"Level\" 20 in 10..90 focused"]);
+  key(&mut h, NamedKey::ArrowUp);
+  assert_eq!(h.app().level, 30.0, "up raises it, as AppKit's slider");
+  key(&mut h, NamedKey::ArrowDown);
+  key(&mut h, NamedKey::ArrowDown);
+  assert_eq!(h.app().level, 10.0, "down lowers it");
   (0..10).for_each(|_| key(&mut h, NamedKey::ArrowRight));
   assert_eq!(h.app().level, 90.0, "not past the end");
 }

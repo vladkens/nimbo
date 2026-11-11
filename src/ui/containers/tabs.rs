@@ -101,17 +101,20 @@ impl<'s> Tabs<'s> {
 }
 
 impl Ui<'_> {
-  /// A step from the arrows while `id` has focus, as the platform's commands: -1 for Left or
-  /// Up, 1 for Right or Down; other commands go on unused.
-  pub(crate) fn arrows(&mut self, id: Id) -> i32 {
+  /// A step from the arrows while `id` has focus, as the platform's commands, along x and y on
+  /// the screen: `[-1, 0]` for Left, `[1, 0]` Right, `[0, -1]` Up, `[0, 1]` Down; each caller
+  /// says which way is forward (a tab list's Down, a slider's Up). Other commands go on unused.
+  pub(crate) fn arrows(&mut self, id: Id) -> [i32; 2] {
     match self.command(id) {
-      Some(Command::Move(Move::Left | Move::Up, _)) => -1,
-      Some(Command::Move(Move::Right | Move::Down, _)) => 1,
+      Some(Command::Move(Move::Left, _)) => [-1, 0],
+      Some(Command::Move(Move::Right, _)) => [1, 0],
+      Some(Command::Move(Move::Up, _)) => [0, -1],
+      Some(Command::Move(Move::Down, _)) => [0, 1],
       Some(_) => {
         self.pass(id);
-        0
+        [0, 0]
       }
-      None => 0,
+      None => [0, 0],
     }
   }
 
@@ -128,7 +131,9 @@ impl Ui<'_> {
   ) -> Behavior {
     let (off, was) = (self.begin(id, Role::TabList), *at);
     if off.is_none() {
-      let step = self.arrows(id);
+      // Right and Down to the next item.
+      let [x, y] = self.arrows(id);
+      let step = x + y;
       if step != 0 && n > 0 {
         let i = at.map_or(0, |i| (i as i32 + step).clamp(0, n as i32 - 1));
         *at = Some(i as usize);

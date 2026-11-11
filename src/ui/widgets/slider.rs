@@ -135,9 +135,9 @@ impl<'s> Slider<'s> {
 
 impl Ui<'_> {
   /// A horizontal slider over `range` on the element `id`, its track `inset` points in from
-  /// either end (half a knob): a press, a click or a drag sets `v` from the pointer, Left and Right
-  /// (and Up and Down) move it while focused; with a `step` ([Slider::step]) onto the step nearest
-  /// from the range's start and by one step, else anywhere and by a twentieth of the range.
+  /// either end (half a knob): a press, a click or a drag sets `v` from the pointer, Right and Up
+  /// raise it while focused, Left and Down lower it; with a `step` ([Slider::step]) onto the step
+  /// nearest from the range's start and by one step, else anywhere and by a twentieth of the range.
   /// `changed` when `v` moved.
   pub fn slider_behavior(
     &mut self,
@@ -177,9 +177,10 @@ impl Ui<'_> {
       *v = snap(lo + (hi - lo) * k);
     }
 
-    let arrows = self.arrows(id);
-    if arrows != 0 {
-      *v = snap(snap(*v) + step.unwrap_or((hi - lo) / 20.0) * arrows as f32);
+    // Right and Up raise it, as AppKit's slider.
+    let [x, y] = self.arrows(id);
+    if x - y != 0 {
+      *v = snap(snap(*v) + step.unwrap_or((hi - lo) / 20.0) * (x - y) as f32);
     }
 
     Behavior { changed: *v != was, ..self.pointer_state(id) }
