@@ -19,7 +19,8 @@
 //! middle, wherever the platform reports them ([crate::TitleBar::buttons]), and the band's empty
 //! part moves the window. In full screen, where the lights come down with the menu bar, and in a
 //! window with the OS's own title bar (Windows, Linux) the band is the content's top row under
-//! it, as an app's header row: the items [LEAD] from its leading end, nothing moved by it.
+//! it, as an app's header row: the items [LEAD] from its leading end, nothing moved by it. So
+//! is a band lower in the window, built in a container under other content.
 //!
 //! The band floats over its parent's top (the window's, built at the top level) and draws no
 //! ground: the content runs under it, so a sidebar's ground goes up to the window's top as in
@@ -87,9 +88,10 @@ impl Ui<'_> {
   pub fn toolbar(&mut self, mut content: impl FnMut(&mut Self)) -> Response {
     self.st.toolbar = true;
     let (id, h) = (self.take_id(), self.toolbar_height());
-    let buttons = self.titlebar().and_then(|b| b.buttons);
-    // Where the band was; in a navigation split's sidebar its items trail.
+    // Where the band was; in a navigation split's sidebar its items trail. Only a band at the
+    // window's top is beside its buttons; lower down it is the content's header row.
     let at = self.rect(id).unwrap_or(Rect::new(0.0, 0.0, self.size().w, h));
+    let buttons = self.titlebar().and_then(|b| b.buttons).filter(|_| at.y <= 0.0);
     let column = self.slot::<Sidebar>().is_some();
     // Laid out elsewhere (a column sliding), the view runs again on where it is now.
     self.settle(id);
@@ -183,7 +185,7 @@ mod tests {
   use crate::harness::{Harness, mac_titlebar};
   use crate::scene::{Point, Rect, Size};
   use crate::ui::{Axis, Cursor, Float, Id, List, Split, Style, grow, px};
-  use crate::{Icon, TitleBar};
+  use crate::{Event, Icon, Modifiers, Phase, TitleBar};
 
   /// A toolbar of a toggle at the leading end and a button at the trailing one, built in the
   /// other order, and a count of the toggle's clicks.
@@ -586,6 +588,64 @@ mod tests {
       let back = mid(h.rect(Id::of("back")).unwrap());
       assert!(!h.drags_window(back.x, back.y));
     }
+  }
+
+  /// A list filling the window below a 52-point inset, no scroll set, its rows under the bar.
+  struct Wheel;
+
+  impl App for Wheel {
+    fn view(&mut self, ui: &mut Ui) {
+      let list = List::new(100, 24.0).style(Style::new().grow().pads([52.0, 0.0, 0.0, 0.0]));
+      list.show(ui.id("list"), |ui, row| {
+        ui.text(format_args!("Row {}", row.index), ui.theme().label())
+      });
+      ui.toolbar(|ui| {
+        ui.toolbar_item(ToolbarItemPlacement::Navigation, |ui| {
+          _ = ui.id("back").icon_button(Icon::RESET)
+        })
+      });
+    }
+  }
+
+  #[test]
+  fn the_wheel_over_the_bars_items_scrolls_the_content_under_them() {
+    let mut h = Harness::new(Wheel, Size::new(640.0, 400.0), 2.0);
+    h.set_titlebar(Some(mac_titlebar("", false)));
+    h.frame();
+    h.frame();
+    let back = mid(h.rect(Id::of("back")).unwrap());
+    let (delta, mods) = (Point::new(0.0, -40.0), Modifiers::empty());
+    let (phase, momentum) = (Phase::Changed, Phase::None);
+    h.event(Event::Scroll { pos: back, delta, precise: true, phase, momentum, mods });
+    h.frame();
+    assert!(h.scroll(Id::of("list")).unwrap().offset.y > 0.0);
+  }
+
+  /// A 100-point header, then a column with a toolbar in it, lower in the window.
+  struct Lower;
+
+  impl App for Lower {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.el(Style::new().w(grow()).h(px(100.0)));
+      ui.col(Style::new().grow(), |ui| {
+        ui.toolbar(|ui| {
+          ui.toolbar_item(ToolbarItemPlacement::Navigation, |ui| {
+            _ = ui.id("back").icon_button(Icon::RESET)
+          })
+        });
+      });
+    }
+  }
+
+  #[test]
+  fn a_toolbar_lower_in_the_window_is_a_header_row() {
+    let mut h = Harness::new(Lower, Size::new(640.0, 400.0), 2.0);
+    h.set_titlebar(Some(mac_titlebar("", false)));
+    h.frame();
+    h.frame();
+    let back = h.rect(Id::of("back")).unwrap();
+    assert_eq!((back.x, mid(back).y), (LEAD, 100.0 + TOOLBAR_HEIGHT / 2.0));
+    assert!(!h.drags_window(320.0, 126.0) && !h.drags_window(320.0, 110.0));
   }
 
   /// A split of two panes, `nav` a navigation split, a vertical split in its leading pane with a

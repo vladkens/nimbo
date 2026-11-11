@@ -219,7 +219,7 @@ fn shown_at(t: &Tree, i: u32, p: Point) -> bool {
 /// it (its toolbar's items) and the overlays over it (an open menu's backdrop) are reached; the
 /// content under it is not, and a press there moves the window.
 fn top(t: &Tree, p: Point) -> Option<u32> {
-  let i = under(t, p)?;
+  let i = under(t, p, false)?;
   let Some(bar) = bar_layer(t, p) else { return Some(i) };
   let inside = t.drags.iter().any(|&d| holds(t, d, i));
   (inside || layer(t, i) > bar).then_some(i)
@@ -227,18 +227,26 @@ fn top(t: &Tree, p: Point) -> Option<u32> {
 
 /// The topmost interactive node under `p`, the bars aside: overlays from the top by z, then the
 /// tree; none outside the window (a release after a drag out of it), where nothing shows. The
-/// wheel scrolls what is under it, under a title bar too.
-fn under(t: &Tree, p: Point) -> Option<u32> {
+/// wheel scrolls what is under it, under a title bar too: `through_bars` passes over the title
+/// bar and its items to the content under them.
+fn under(t: &Tree, p: Point, through_bars: bool) -> Option<u32> {
   if t.nodes.len() <= 1 || !t.nodes[0].rect.contains(p) {
     return None;
   }
 
+  let keep = |i: u32| !through_bars || !in_bar(t, i);
   t.floats
     .iter()
     .rev()
     .filter(|&&f| t.float_clip(f).is_none_or(|c| c.contains(p)))
-    .find_map(|&f| top_in(t, f, p))
-    .or_else(|| top_in(t, 0, p))
+    .find_map(|&f| top_in(t, f, p, keep))
+    .or_else(|| top_in(t, 0, p, keep))
+}
+
+/// Whether node `i` is part of an element that moves the window (a title bar, its items), in its
+/// layer: an overlay opened from an item (a menu) is not.
+fn in_bar(t: &Tree, i: u32) -> bool {
+  t.drags.iter().any(|&d| holds(t, d, i) && layer(t, d) == layer(t, i))
 }
 
 /// The scroll containers a wheel at `p` moves, innermost first: those around the topmost
@@ -246,7 +254,7 @@ fn under(t: &Tree, p: Point) -> Option<u32> {
 /// under it.
 fn scroll_chain(t: &Tree, p: Point, out: &mut Vec<Id>) {
   out.clear();
-  let Some(mut i) = under(t, p) else { return };
+  let Some(mut i) = under(t, p, true) else { return };
   loop {
     let n = &t.nodes[i as usize];
     if scrolls(n) {
@@ -261,16 +269,16 @@ fn scroll_chain(t: &Tree, p: Point, out: &mut Vec<Id>) {
   }
 }
 
-/// The last interactive node in paint order under `p` in the subtree at `root`, leaving out
-/// overlays nested in it.
-fn top_in(t: &Tree, root: u32, p: Point) -> Option<u32> {
+/// The last interactive node in paint order under `p` in the subtree at `root` that `keep` keeps,
+/// leaving out overlays nested in it.
+fn top_in(t: &Tree, root: u32, p: Point, keep: impl Fn(u32) -> bool) -> Option<u32> {
   let end = t.nodes[root as usize].end;
   let (a, b) = (t.hits.partition_point(|&i| i < root), t.hits.partition_point(|&i| i < end));
   t.hits[a..b]
     .iter()
     .rev()
     .copied()
-    .find(|&i| t.nodes[i as usize].rect.contains(p) && reaches(t, i, root, p))
+    .find(|&i| t.nodes[i as usize].rect.contains(p) && reaches(t, i, root, p) && keep(i))
 }
 
 /// Whether `p` on node `i` gets through every clip up to `root`, with no overlay between.
