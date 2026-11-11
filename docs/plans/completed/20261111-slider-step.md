@@ -8,7 +8,7 @@ Done: 2026-11-11
 - [x] A press, a click and a drag land on the nearest step, never past the last one (a range the step doesn't divide ends there); the arrows and assistive technology's increment move one, Up raising it as AppKit's slider does
 - [x] Steps made only when their dots are drawn (a few dozen at most), a step that isn't finite or positive ignored
 - [x] Dots under the track at every step (none closer than 4 points), labels under the steps the closure names, centred on their dots within the slider's width, one that would run into the last left out
-- [x] With labels, as much room over the track as under it; a form row centres its label on a control higher than a line, which keeps a button's room over and under it: the track in line with the row's title
+- [x] With labels, as much room over the track as under it; in a form, such a slider goes in its row's footer (a form row lays its line out as before, so an app's rows don't move)
 - [x] The gallery's table, `docs/api.md` and its picture (`make api-shots`)
 - [x] Harness tests: snapping on a drag and a click, the arrows' and increment's steps, the dots and labels in both appearances, the value read
 

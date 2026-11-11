@@ -595,14 +595,15 @@ impl Ui<'_> {
       let end = end.as_ref().map_or(0.0, |e| e.get());
       Piece { radii: [corner, corner, end, end], ..piece }.paint(f, at)
     };
-    let style = fs.row.min_h(fs.row.min[1] + top).align(Align::Start, Align::Center);
+    let style = fs.row.min_h(fs.row.min[1] + top).align(Align::Start, Align::Start);
     // The first line's height: the least the controls' slot is, with the padding around it.
     let line_h = self.line_height(fs.label);
 
     let (pad_x, shift) = (fs.row.pad[3], self.mark_shift(fs.label));
     let FormRow { label, caption, tile, footer, .. } = row;
-    // The line of the tile, the label and the controls, the footer under it.
-    let line = Style::new().w(grow()).gap(style.gap).align(Align::Start, Align::Center);
+    // The line of the tile, the label and the controls, as high as the row's least height; the
+    // footer under it.
+    let line = Style::new().w(grow()).min_h(style.min[1]).gap(style.gap);
     let r = self.disabled_scope(off, |ui| {
       ui.next_id = Some((id, false));
       ui.canvas_col(style.gap(0.0), hairline, |ui| {
@@ -618,10 +619,7 @@ impl Ui<'_> {
           }
 
           let (mut name, mut about) = (0..0, 0..0);
-          // As high as the row's least height: the label where it was in a row of one line,
-          // centred on the control in a higher one (a slider with tick labels).
-          let col = Style::new().w(grow()).min_h(style.min[1]).gap(2.0);
-          let col = col.pads([top + fs.pad_y, 0.0, fs.pad_y, 0.0]);
+          let col = Style::new().w(grow()).gap(2.0).pads([top + fs.pad_y, 0.0, fs.pad_y, 0.0]);
           ui.col(col, |ui| {
             ui.row(Style::new().w(grow()).gap(6.0).align(Align::Start, Align::Center), |ui| {
               // A mark on the line sits on the capitals' middle.
@@ -643,14 +641,12 @@ impl Ui<'_> {
           }
 
           // A slot as high as the row, at least the label's first line and the padding around
-          // it, holding the controls centred: on the label and its description, as the tile. A
-          // control higher than a button keeps the room a button has over and under it.
-          let room = ((2.0 * fs.pad_y + line_h - t.sizes.control_h) / 2.0).max(0.0);
+          // it, holding the controls centred: on the label and its description, as the tile.
           let slot = Style::new()
             .w(rigid())
             .h(grow())
             .min_h(top + 2.0 * fs.pad_y + line_h)
-            .pads([top + room, 0.0, room, 0.0])
+            .pads([top, 0.0, 0.0, 0.0])
             .align(Align::End, Align::Center);
           ui.col(slot, |ui| {
             ui.row(Style::new().gap(fs.gap).align(Align::Start, Align::Center), control)
@@ -934,6 +930,37 @@ mod tests {
   /// A label of a name and badges: the badges follow the name on its line, in order, clear of
   /// the controls, read after it, the one with a tooltip with its tip; the row keeps the height
   /// of one with the name alone; a long name ends in "…" before them.
+  /// Two rows with a description: one with a switch, one with a control as high as the row, as
+  /// an app centres a link's ↗ in its whole row.
+  struct Tall;
+
+  impl App for Tall {
+    fn view(&mut self, ui: &mut Ui) {
+      let fs = FormStyle::plates(&ui.theme());
+      let row_h = 2.0 * fs.pad_y + ui.line_height(fs.label) + 2.0 + ui.line_height(fs.caption);
+      ui.col(fs.page, |ui| {
+        ui.form_section(&fs, Section::default(), |ui| {
+          let row = FormRow::new("Switch").caption("What it does");
+          ui.id("switch").form_row(&fs, row, |ui| ui.toggle(&mut false, ""));
+          let row = FormRow::new("Link").caption("Where it goes");
+          ui.id("tall").form_row(&fs, row, |ui| {
+            let slot = Style::new().h(px(row_h)).align(Align::Center, Align::Center);
+            ui.col(slot, |ui| ui.control_size(ControlSize::Large).icon_button(Icon::EXTERNAL))
+          });
+        });
+      });
+    }
+  }
+
+  #[test]
+  fn a_control_as_high_as_the_row_keeps_its_height() {
+    let hair = FormStyle::plates(&Theme::PLATES_LIGHT).hairline;
+    let mut h = Harness::new(Tall, Size::new(400.0, 300.0), 2.0);
+    h.frame();
+    let (switch, tall) = (h.rect(Id::of("switch")).unwrap(), h.rect(Id::of("tall")).unwrap());
+    assert_eq!(switch.h + hair, tall.h);
+  }
+
   #[test]
   fn badges_follow_the_label_on_its_line() {
     // The plain row has the hairline over it.
