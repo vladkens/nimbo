@@ -276,6 +276,14 @@ nimbo: `FormRow::new("Data").tile(Icon::FOLDER)`
 
 ![Row tile](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/row-tile.png)
 
+### Row footer
+
+SwiftUI: `Section { VStack { Toggle(…); Slider(…) } }`
+
+nimbo: `FormRow::new("Turn off below 30%").footer(|ui: &mut Ui, _: TextStyle| _ = ui.slider(&mut level, 10.0..=90.0))`
+
+![Row footer](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/row-footer.png)
+
 ### Disclosure
 
 SwiftUI: `DisclosureGroup("Other models") { … }`

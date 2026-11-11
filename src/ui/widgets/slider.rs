@@ -6,7 +6,7 @@
 use std::ops::RangeInclusive;
 
 use crate::scene::{Frame, Quad, Rect, alpha, mix};
-use crate::ui::{Behavior, Id, Response, Role, Style, TextStyle, Ui, Value, px};
+use crate::ui::{Behavior, Id, Response, Role, Style, TextStyle, Ui, Value, grow, px};
 
 /// Steps closer than this, in points, get no dots: they would run into a line.
 const DENSE: f32 = 4.0;
@@ -17,10 +17,12 @@ const LABEL_GAP: f32 = 4.0;
 /// What [Slider::tick_label] takes.
 type TickLabel<'s> = Box<dyn Fn(f32) -> Option<String> + 's>;
 
-/// A horizontal slider over a range, 160 points wide, as SwiftUI's `Slider(value:in:step:)`: a
-/// knob ([crate::Sizes::knob], a capsule when wider than high) on a track [crate::Sizes::rail]
-/// thick, filled in the accent up to it, the knob's shadow deeper under the pointer where the
-/// theme hovers controls. [Ui::slider] is one with no step.
+/// A horizontal slider over a range, as SwiftUI's `Slider(value:in:step:)`: a knob
+/// ([crate::Sizes::knob], a capsule when wider than high) on a track [crate::Sizes::rail] thick,
+/// filled in the accent up to it, the knob's shadow deeper under the pointer where the theme
+/// hovers controls. It fills the width it is offered, as SwiftUI's, and is at least 160 points
+/// wide: that much among a form row's controls, which keep their width, the row's whole width in
+/// its footer ([crate::FormRow::footer]). [Ui::slider] is one with no step.
 pub struct Slider<'s> {
   value: &'s mut f32,
   range: RangeInclusive<f32>,
@@ -47,13 +49,14 @@ impl<'s> Slider<'s> {
   /// text. Centred on the step's dot and kept within the slider's width; one that would run into
   /// the label before it, or is wider than the slider, is left out, and all of them where the
   /// steps have no dots. A text, not [crate::Content]: it is placed by its width, measured
-  /// before the layout.
+  /// before the layout, along the slider's width in the last frame (the view runs again when the
+  /// layout changes it).
   pub fn tick_label(self, label: impl Fn(f32) -> Option<String> + 's) -> Self {
     Self { label: Some(Box::new(label)), ..self }
   }
 
   pub fn show(self, ui: &mut Ui) -> Response {
-    const W: f32 = 160.0;
+    const MIN_W: f32 = 160.0;
     let t = ui.theme();
     let ([kw, kh], rh) = (t.sizes.knob, t.sizes.rail);
     let id = ui.take_id();
@@ -61,6 +64,13 @@ impl<'s> Slider<'s> {
     let v = self.value;
     let b = ui.slider_behavior(id, v, self.range, self.step, kw / 2.0);
     let hot = ui.ctl_hot(id, b.hovered || b.held);
+    // Its width from the last frame, for the dots and the labels: the view runs again when the
+    // layout gives it another.
+    if self.step.is_some() {
+      ui.settle(id);
+    }
+
+    let w = ui.rect(id).map_or(MIN_W, |r| r.w.max(MIN_W));
     let k = if hi != lo { ((*v - lo) / (hi - lo)).clamp(0.0, 1.0) } else { 0.0 };
     let a = if b.disabled { t.disabled } else { 1.0 };
     let rail = alpha(mix(t.track, t.track_hover, hot), t.track[3] * a);
@@ -69,7 +79,7 @@ impl<'s> Slider<'s> {
     // Each step's value and its place along the track, 0 to 1, when their dots are apart enough
     // to draw: a few dozen at most.
     let marked =
-      self.step.filter(|s| last_step(lo, hi, *s) >= 1.0 && (W - kw) * s / (hi - lo) >= DENSE);
+      self.step.filter(|s| last_step(lo, hi, *s) >= 1.0 && (w - kw) * s / (hi - lo) >= DENSE);
     let steps: Vec<(f32, f32)> = match marked {
       Some(s) => (0..=last_step(lo, hi, s) as usize)
         .map(|i| (lo + s * i as f32, s * i as f32 / (hi - lo)))
@@ -78,7 +88,8 @@ impl<'s> Slider<'s> {
     };
 
     let dots: Vec<f32> = steps.iter().map(|&(_, k)| k).collect();
-    let s = b.style(Style::new().w(px(W)).h(px(kh + 4.0)));
+    let width = Style::new().w(grow()).min_w(MIN_W);
+    let s = b.style(width.h(px(kh + 4.0)));
     let paint = move |f: &mut Frame, r: Rect| {
       let (x0, w, cy) = (r.x + kw / 2.0, r.w - kw, r.y + r.h / 2.0);
       f.rect(Rect::new(x0 - rh / 2.0, cy - rh / 2.0, w + rh, rh), rail, rh / 2.0);
@@ -107,15 +118,15 @@ impl<'s> Slider<'s> {
       // in line with a row's title or the controls beside it.
       let lh = ui.line_height(style);
       ui.next_id = Some((id.key("ticks"), false));
-      ui.col(Style::new().w(px(W)).pads([lh, 0.0, 0.0, 0.0]), |ui| {
+      ui.col(width.pads([lh, 0.0, 0.0, 0.0]), |ui| {
         r = ui.with_id(id).canvas(s, paint);
-        ui.row(Style::new().w(px(W)), |ui| {
+        ui.row(Style::new().w(grow()), |ui| {
           // Left to right: where the last one ends, and where the next may start.
           let (mut end, mut free) = (0.0, 0.0);
           for (k, label) in &labels {
             let lw = ui.measure(label, style);
-            let at = (kw / 2.0 + (W - kw) * k - lw / 2.0).min(W - lw).max(0.0);
-            if at < free || at + lw > W {
+            let at = (kw / 2.0 + (w - kw) * k - lw / 2.0).min(w - lw).max(0.0);
+            if at < free || at + lw > w {
               continue;
             }
 

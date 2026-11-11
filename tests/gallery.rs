@@ -7,9 +7,9 @@
 //! chooses by letters, a segment picks, a tooltip shows, a recorder records and its ⊗ clears,
 //! the alert asks in its theme, Escape closes it, its action counts), the search field draws in
 //! its theme and clears from its ⊗; a stepped slider lands on its steps from the pointer and the
-//! keys and marks them with dots and labels; assistive technology reads each widget by its role,
-//! the ⊗ marks beside their controls; and `docs/api.md` is the gallery's, and so are its pictures
-//! on the `assets` branch when its worktree is there.
+//! keys and marks them with dots and labels; a row's footer spans its row; assistive technology
+//! reads each widget by its role, the ⊗ marks beside their controls; and `docs/api.md` is the
+//! gallery's, and so are its pictures on the `assets` branch when its worktree is there.
 
 #[path = "../examples/gallery.rs"]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
@@ -393,6 +393,36 @@ fn a_stepped_slider_marks_its_steps() {
     assert!((mid(mid50).0 - level_x(r, 50.0)).abs() < 0.5, "{mid50:?} under 50 of {r:?}");
     assert!(first.x >= r.x && last.x + last.w <= r.x + r.w + 0.01, "{first:?} {last:?} in {r:?}");
     assert!(first.y >= r.y + r.h && mid50.y == first.y, "below the track: {first:?} {r:?}");
+  }
+}
+
+/// A row's footer is in the row under its line, across its width: a slider there runs from the
+/// plate's padding at the left to the switch's right edge, over the plate's fill with no
+/// hairline above it, and takes its disabled look from the switch.
+#[test]
+fn a_row_footer_spans_its_row() {
+  for (look, t) in LOOKS {
+    let mut h = on("Row footer", look);
+    let (_, slider) = node(&h, Role::Slider, "Level");
+    let (switch, toggle) = node(&h, Role::Switch, "Turn off below 30%");
+    let ends = (slider.x + slider.w - toggle.x - toggle.w).abs();
+    assert!(ends < 0.5 && slider.y >= toggle.y + toggle.h, "{look:?}: {slider:?}, {toggle:?}");
+    let (img, plate) = (h.render(), px(t.plate));
+    let on_plate = |x: f32, y: f32| diff(img.pixel(x, y), plate) <= 2;
+    let y = slider.y + slider.h - 2.0;
+    let pad = (1..40).find(|&d| !on_plate(slider.x - d as f32 + 0.5, y));
+    assert_eq!(pad, Some(11), "{look:?}: 10 points of the plate left of {slider:?}");
+    let x = slider.x + slider.w / 2.0 + 30.0;
+    for y in (toggle.y + toggle.h) as i32..slider.y as i32 + 6 {
+      assert!(on_plate(x, y as f32 + 0.5), "{look:?}: no plate at {x}, {y}");
+    }
+
+    let enabled =
+      |h: &H| h.a11y().lines().filter(|l| l.trim() == "slider \"Level\" 30 in 10..90").count();
+    assert_eq!(enabled(&h), 1, "{look:?}: on with the switch");
+    h.click_id(switch);
+    h.frame();
+    assert_eq!(enabled(&h), 0, "{look:?}: off with the switch\n{}", h.a11y());
   }
 }
 

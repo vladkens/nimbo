@@ -370,12 +370,13 @@ impl fmt::Debug for Content<'_> {
 }
 
 /// A row of a form section ([Ui::form_row]), as SwiftUI's `LabeledContent`: its label,
-/// description and leading tile, each [Content].
+/// description, leading tile and footer, each [Content].
 #[derive(Debug, Default)]
 pub struct FormRow<'s> {
   label: Content<'s>,
   caption: Content<'s>,
   tile: Content<'s>,
+  footer: Content<'s>,
   /// Held down: a [Ui::form_disclosure]'s.
   pressed: bool,
 }
@@ -419,6 +420,21 @@ impl<'s> FormRow<'s> {
   /// what a closure builds.
   pub fn tile(self, tile: impl Into<Content<'s>>) -> Self {
     Self { tile: tile.into(), ..self }
+  }
+
+  /// What goes under the label and the controls, in the row across its whole width with no
+  /// hairline between, as a `VStack` of a control and a view under it is one row of SwiftUI's
+  /// grouped form: a text in [FormStyle::caption], or what a closure builds (a slider over the
+  /// row's width setting what the row's switch turns on).
+  ///
+  /// ```ignore
+  /// let row = FormRow::new("Turn off below 50%").footer(|ui: &mut Ui, _: TextStyle| {
+  ///   ui.disabled(!on).slider(&mut level, 10.0..=90.0);
+  /// });
+  /// ui.form_row(&fs, row, |ui| ui.toggle(&mut on, ""));
+  /// ```
+  pub fn footer(self, footer: impl Into<Content<'s>>) -> Self {
+    Self { footer: footer.into(), ..self }
   }
 }
 
@@ -531,19 +547,19 @@ impl Ui<'_> {
 
   /// A row of the section being built, as SwiftUI's `LabeledContent` in a grouped form: the
   /// tile, the label and its description at the left ([FormRow]), what `control` builds at the
-  /// right, 8 apart, and a hairline above it unless it is the first, held down (a
-  /// [Ui::form_disclosure]'s) or right under a row held down. The controls keep their
-  /// width and place at the right edge, centred on the row's height; the label and description
-  /// wrap in what is left, the row growing taller. [Ui::disabled] on it dims its label and
-  /// description to [super::Theme::tertiary] and disables its widgets but an ⓘ or warning mark
-  /// (in a row a click selects, assistive technology reads it disabled with its row). A text
+  /// right, 8 apart, the row's footer under them across its width, and a hairline above it unless
+  /// it is the first, held down (a [Ui::form_disclosure]'s) or right under a row held down. The
+  /// controls keep their width and place at the right edge, centred on the row's height; the label
+  /// and description wrap in what is left, the row growing taller. [Ui::disabled] on it dims its
+  /// label and description to [super::Theme::tertiary] and disables its widgets but an ⓘ or warning
+  /// mark (in a row a click selects, assistive technology reads it disabled with its row). A text
   /// label is `id.key("label")` of the row's id, a text description `id.key("caption")`, a text
-  /// or icon tile `id.key("tile")`. The row takes no input, its controls do, unless
-  /// [FormStyle::row] is [Style::hit]: then it is a row a click selects, named by its label's
-  /// plain texts and described by its description's. Else the first control recorded in it with
-  /// no name of its own takes them as its name and description ([Ui::a11y]); either way they are
-  /// not read again, and the label's and description's other elements are read after the one
-  /// they name.
+  /// or icon tile `id.key("tile")`, a text footer `id.key("footer")`. The row takes no input, its
+  /// controls do, unless [FormStyle::row] is [Style::hit]: then it is a row a click selects, named
+  /// by its label's plain texts and described by its description's. Else the first control recorded
+  /// in it with no name of its own takes them as its name and description ([Ui::a11y]); either way
+  /// they are not read again, and the label's and description's other elements are read after the
+  /// one they name.
   pub fn form_row<R>(
     &mut self,
     fs: &FormStyle,
@@ -584,60 +600,69 @@ impl Ui<'_> {
     let line_h = self.line_height(fs.label);
 
     let (pad_x, shift) = (fs.row.pad[3], self.mark_shift(fs.label));
-    let FormRow { label, caption, tile, .. } = row;
+    let FormRow { label, caption, tile, footer, .. } = row;
+    // The line of the tile, the label and the controls, the footer under it.
+    let line = Style::new().w(grow()).gap(style.gap).align(Align::Start, Align::Center);
     let r = self.disabled_scope(off, |ui| {
       ui.next_id = Some((id, false));
-      ui.canvas_row(style, hairline, |ui| {
-        if !tile.is_none() {
-          let x = (fs.tile_x - pad_x).max(0.0);
-          let slot =
-            Style::new().h(grow()).pads([top, x, 0.0, x]).align(Align::Start, Align::Center);
-          ui.row(slot, |ui| {
-            let k = id.key("tile");
-            ui.row(fs.tile, |ui| tile.build(ui, fs.tile_text, k, fs.tile_icon, 1.6))
-          });
-        }
+      ui.canvas_col(style.gap(0.0), hairline, |ui| {
+        ui.row(line, |ui| {
+          if !tile.is_none() {
+            let x = (fs.tile_x - pad_x).max(0.0);
+            let slot =
+              Style::new().h(grow()).pads([top, x, 0.0, x]).align(Align::Start, Align::Center);
+            ui.row(slot, |ui| {
+              let k = id.key("tile");
+              ui.row(fs.tile, |ui| tile.build(ui, fs.tile_text, k, fs.tile_icon, 1.6))
+            });
+          }
 
-        let (mut name, mut about) = (0..0, 0..0);
-        // As high as the row's least height: the label where it was in a row of one line,
-        // centred on the control in a higher one (a slider with tick labels).
-        let col = Style::new().w(grow()).min_h(style.min[1]).gap(2.0);
-        let col = col.pads([top + fs.pad_y, 0.0, fs.pad_y, 0.0]);
-        ui.col(col, |ui| {
-          ui.row(Style::new().w(grow()).gap(6.0).align(Align::Start, Align::Center), |ui| {
-            // A mark on the line sits on the capitals' middle.
-            let outer = ui.set_slot(Some(MarkShift(shift)));
+          let (mut name, mut about) = (0..0, 0..0);
+          // As high as the row's least height: the label where it was in a row of one line,
+          // centred on the control in a higher one (a slider with tick labels).
+          let col = Style::new().w(grow()).min_h(style.min[1]).gap(2.0);
+          let col = col.pads([top + fs.pad_y, 0.0, fs.pad_y, 0.0]);
+          ui.col(col, |ui| {
+            ui.row(Style::new().w(grow()).gap(6.0).align(Align::Start, Align::Center), |ui| {
+              // A mark on the line sits on the capitals' middle.
+              let outer = ui.set_slot(Some(MarkShift(shift)));
+              let at = ui.st.tree.nodes.len() as u32;
+              label.build(ui, dim(fs.label), id.key("label"), line_h, 1.6);
+              name = at..ui.st.tree.nodes.len() as u32;
+              ui.set_slot(outer);
+            });
             let at = ui.st.tree.nodes.len() as u32;
-            label.build(ui, dim(fs.label), id.key("label"), line_h, 1.6);
-            name = at..ui.st.tree.nodes.len() as u32;
-            ui.set_slot(outer);
+            caption.build(ui, dim(fs.caption), id.key("caption"), 12.0, 1.6);
+            about = at..ui.st.tree.nodes.len() as u32;
           });
-          let at = ui.st.tree.nodes.len() as u32;
-          caption.build(ui, dim(fs.caption), id.key("caption"), 12.0, 1.6);
-          about = at..ui.st.tree.nodes.len() as u32;
-        });
-        // The names it replaces, put back once the row or its first control took them.
-        let mut outer = Some(ui.form_names(name, about));
-        if fs.row.hit {
-          ui.a11y_row(id, Role::Row).state(State::Disabled, off);
-          ui.set_slot(outer.take().flatten());
-        }
+          // The names it replaces, put back once the row or its first control took them.
+          let mut outer = Some(ui.form_names(name, about));
+          if fs.row.hit {
+            ui.a11y_row(id, Role::Row).state(State::Disabled, off);
+            ui.set_slot(outer.take().flatten());
+          }
 
-        // A slot as high as the row, at least the label's first line and the padding around
-        // it, holding the controls centred: on the label and its description, as the tile. A
-        // control higher than a button keeps the room a button has over and under it.
-        let room = ((2.0 * fs.pad_y + line_h - t.sizes.control_h) / 2.0).max(0.0);
-        let slot = Style::new()
-          .w(rigid())
-          .h(grow())
-          .min_h(top + 2.0 * fs.pad_y + line_h)
-          .pads([top + room, 0.0, room, 0.0])
-          .align(Align::End, Align::Center);
-        ui.col(slot, |ui| {
-          ui.row(Style::new().gap(fs.gap).align(Align::Start, Align::Center), control)
+          // A slot as high as the row, at least the label's first line and the padding around
+          // it, holding the controls centred: on the label and its description, as the tile. A
+          // control higher than a button keeps the room a button has over and under it.
+          let room = ((2.0 * fs.pad_y + line_h - t.sizes.control_h) / 2.0).max(0.0);
+          let slot = Style::new()
+            .w(rigid())
+            .h(grow())
+            .min_h(top + 2.0 * fs.pad_y + line_h)
+            .pads([top + room, 0.0, room, 0.0])
+            .align(Align::End, Align::Center);
+          ui.col(slot, |ui| {
+            ui.row(Style::new().gap(fs.gap).align(Align::Start, Align::Center), control)
+          });
+          if let Some(outer) = outer {
+            ui.set_slot(outer);
+          }
         });
-        if let Some(outer) = outer {
-          ui.set_slot(outer);
+        if !footer.is_none() {
+          // Right under the description, 2 apart as it is from the label: over the line's padding.
+          let pad = Style::new().w(grow()).pads([2.0 - fs.pad_y, 0.0, fs.pad_y, 0.0]);
+          ui.col(pad, |ui| footer.build(ui, dim(fs.caption), id.key("footer"), 12.0, 1.6));
         }
       })
     });
