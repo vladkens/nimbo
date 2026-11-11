@@ -85,7 +85,7 @@ fn next_key() -> u64 {
 /// The most pixels a file may declare, and a decoded picture have: a crafted file of a few bytes
 /// can declare 60000 × 60000.
 const MAX_SOURCE: u64 = 1 << 30;
-const MAX_PIXELS: u64 = 1 << 27;
+pub(crate) const MAX_PIXELS: u64 = 1 << 27;
 
 /// The size a `w` × `h` picture decodes to at `side` ([fit]): an error over the limits, read
 /// from the file's header before decoding.

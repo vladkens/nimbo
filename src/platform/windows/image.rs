@@ -1,10 +1,10 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! Images decoded by WIC ([crate::Bitmap]): the first frame from memory, shrunk by WIC's Fant
-//! scaler as it is read, converted to premultiplied RGBA, then turned by its
-//! `System.Photo.Orientation` ([orient]). The COM interfaces are called by vtable slot as in
-//! [super::text], the order of `wincodec.h`. WIC's factory is free-threaded: any thread, which
-//! joins COM's multithreaded apartment for the call when it is in none.
+//! scaler as it is read, converted to premultiplied RGBA, then turned by its EXIF orientation
+//! ([orient]). The COM interfaces are called by vtable slot as in [super::text], the order of
+//! `wincodec.h`. WIC's factory is free-threaded: any thread, which joins COM's multithreaded
+//! apartment for the call when it is in none.
 
 use std::ffi::c_void;
 use std::ptr::{null, null_mut};
@@ -129,15 +129,23 @@ fn orientation(frame: &Com) -> u16 {
     return 1;
   };
 
-  let name = wide("System.Photo.Orientation");
-  // SAFETY: an empty PROPVARIANT is all zeros; GetMetadataByName fills it, PropVariantClear frees
-  // it.
-  let mut v: PROPVARIANT = unsafe { std::mem::zeroed() };
-  let got = unsafe {
-    call!(reader, BY_NAME, (*const u16, *mut PROPVARIANT) -> HRESULT; name.as_ptr(), &mut v)
-  };
-  let s = unsafe { v.Anonymous.Anonymous };
-  let o = if got >= 0 && s.vt == VT_UI2 { unsafe { s.Anonymous.uiVal } } else { 1 };
-  unsafe { PropVariantClear(&mut v) };
-  o
+  // The EXIF tag's query path (not its property name): in a JPEG's APP1, or at the root of a
+  // TIFF-like container; a path the container hasn't fails.
+  for path in ["/app1/ifd/{ushort=274}", "/ifd/{ushort=274}"] {
+    let path = wide(path);
+    // SAFETY: an empty PROPVARIANT is all zeros; GetMetadataByName fills it, PropVariantClear
+    // frees it.
+    let mut v: PROPVARIANT = unsafe { std::mem::zeroed() };
+    let got = unsafe {
+      call!(reader, BY_NAME, (*const u16, *mut PROPVARIANT) -> HRESULT; path.as_ptr(), &mut v)
+    };
+    let s = unsafe { v.Anonymous.Anonymous };
+    let o = if got >= 0 && s.vt == VT_UI2 { Some(unsafe { s.Anonymous.uiVal }) } else { None };
+    unsafe { PropVariantClear(&mut v) };
+    if let Some(o) = o {
+      return o;
+    }
+  }
+
+  1
 }

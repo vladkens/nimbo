@@ -1,19 +1,19 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! Images decoded by gdk-pixbuf ([crate::Bitmap]), loaded at run time as GTK is: a
-//! `GdkPixbufLoader` fed the file, which its `size-prepared` signal shrinks as it reads (a JPEG
-//! decodes at a fraction of its full size), its first frame turned upright by
-//! `gdk_pixbuf_apply_embedded_orientation`, then premultiplied. The formats are the loaders the
-//! system has (WebP and HEIC from the distribution's `webp-pixbuf-loader` and `libheif`). The
-//! loader is used by one thread at a time and gdk-pixbuf locks the loaders that aren't
-//! thread-safe: any thread.
+//! `GdkPixbufLoader` fed the file, which its `size-prepared` signal shrinks (a JPEG decodes at a
+//! fraction of its full size, other formats in full and shrunk after), its first frame turned
+//! upright by `gdk_pixbuf_apply_embedded_orientation`, then premultiplied. The formats are the
+//! loaders the system has (WebP and HEIC from the distribution's `webp-pixbuf-loader` and
+//! `libheif`). The loader is used by one thread at a time and gdk-pixbuf locks the loaders that
+//! aren't thread-safe: any thread.
 
 use std::ffi::{CStr, c_char, c_int, c_void};
 use std::ptr::null_mut;
 use std::sync::OnceLock;
 
 use super::dl::{Lib, fns};
-use crate::bitmap::{premultiply, size, zeroed};
+use crate::bitmap::{MAX_PIXELS, premultiply, size, zeroed};
 
 type P = *mut c_void;
 
@@ -50,7 +50,8 @@ fn pixbuf() -> Option<&'static Pixbuf> {
 
 pub fn decode(file: &[u8], side: u32) -> Result<(u32, u32, Vec<u8>), String> {
   let f = pixbuf().ok_or("gdk-pixbuf is not installed")?;
-  let mut ask = Ask { side, refused: None };
+  let jpeg = file.starts_with(&[0xff, 0xd8, 0xff]);
+  let mut ask = Ask { side, jpeg, refused: None };
   // SAFETY: GLib's calls with the loader alive until its unref; `ask` outlives the signal, which
   // comes during the writes; the pixbuf is the loader's (borrowed) or an owned turned copy.
   unsafe {
@@ -99,18 +100,34 @@ pub fn decode(file: &[u8], side: u32) -> Result<(u32, u32, Vec<u8>), String> {
   }
 }
 
-/// What the loader's `size-prepared` is asked: the side, and why the image was refused.
+/// What the loader's `size-prepared` is asked: the side, whether the file is a JPEG, and why the
+/// image was refused.
 struct Ask {
   side: u32,
+  jpeg: bool,
   refused: Option<String>,
 }
 
 /// `size-prepared`: the image is `w` × `h` (its header read, nothing decoded); shrinks it to the
-/// side asked, or refuses it over the limits with a size of 0, which stops the loader.
+/// side asked, or refuses it over the limits with a size of 0, which stops the loader. Only the
+/// JPEG loader decodes smaller (by 1/2, 1/4 or 1/8, `scale_denom` in gdk-pixbuf's `io-jpeg.c`);
+/// the others decode the full picture and the loader shrinks it after, so its full size is held
+/// to [MAX_PIXELS] too.
 unsafe extern "C" fn prepared(loader: P, w: c_int, h: c_int, data: P) {
   let ask = unsafe { &mut *data.cast::<Ask>() };
   let (w, h) = (w.max(0) as u32, h.max(0) as u32);
-  let (fw, fh) = size(w, h, ask.side).unwrap_or_else(|e| {
+  let fits = size(w, h, ask.side).and_then(|(fw, fh)| {
+    let mut d = 1;
+    while ask.jpeg && d < 8 && w.div_ceil(d * 2) >= fw && h.div_ceil(d * 2) >= fh {
+      d *= 2;
+    }
+
+    match w.div_ceil(d) as u64 * h.div_ceil(d) as u64 {
+      n if n > MAX_PIXELS => Err(format!("a {w} × {h} picture is too large")),
+      _ => Ok((fw, fh)),
+    }
+  });
+  let (fw, fh) = fits.unwrap_or_else(|e| {
     ask.refused = Some(e);
     (0, 0)
   });
