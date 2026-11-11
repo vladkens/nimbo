@@ -5,8 +5,10 @@
 //! nothing.
 
 use std::fmt::{Display, Write};
+use std::sync::Arc;
 use std::time::Duration;
 
+use crate::bitmap::premultiply;
 use crate::text::{Font, Metrics, TextSystem};
 use crate::ui::Axis;
 
@@ -350,7 +352,7 @@ pub(crate) struct ImageUpload {
   pub id: ImageId,
   pub w: usize,
   pub h: usize,
-  pub data: Vec<u8>,
+  pub data: Arc<Vec<u8>>,
 }
 
 /// RGBA images by id. Adding one queues its pixels for the renderer, which keeps a texture
@@ -369,6 +371,14 @@ impl Images {
   /// first.
   pub fn add(&mut self, w: usize, h: usize, rgba: &[u8]) -> ImageId {
     assert_eq!(rgba.len(), w * h * 4, "image pixels");
+    let mut data = rgba.to_vec();
+    premultiply(&mut data);
+    self.add_premultiplied(w, h, Arc::new(data))
+  }
+
+  /// [Images::add] of premultiplied pixels ([crate::Bitmap]'s), shared as they are: the renderer
+  /// keeps the same allocation.
+  pub(crate) fn add_premultiplied(&mut self, w: usize, h: usize, data: Arc<Vec<u8>>) -> ImageId {
     let id = match self.free.pop() {
       Some(i) => {
         self.sizes[i as usize] = Some((w, h));
@@ -380,11 +390,6 @@ impl Images {
       }
     };
 
-    let premultiply = |p: &[u8; 4]| {
-      let a = p[3] as u32;
-      [0, 1, 2].map(|i| ((p[i] as u32 * a + 127) / 255) as u8).into_iter().chain([p[3]])
-    };
-    let data = rgba.as_chunks::<4>().0.iter().flat_map(premultiply).collect();
     self.added.push(ImageUpload { id, w, h, data });
     id
   }
@@ -476,7 +481,11 @@ impl Frame<'_> {
   /// Draws an image into `rect`, scaled with linear filtering; `opacity` 0..1.
   pub fn image(&mut self, id: ImageId, rect: Rect, opacity: f32) {
     let Some((w, h)) = self.images.size(id) else { return };
-    let uv = Rect::new(0.0, 0.0, w as f32, h as f32);
+    self.image_part(id, rect, Rect::new(0.0, 0.0, w as f32, h as f32), opacity);
+  }
+
+  /// [Frame::image] of its part `uv`, in pixels.
+  pub(crate) fn image_part(&mut self, id: ImageId, rect: Rect, uv: Rect, opacity: f32) {
     self.scene.image(id, Sprite { rect, uv, color: [1.0, 1.0, 1.0, opacity] });
   }
 
@@ -769,7 +778,7 @@ mod tests {
   fn images_premultiply_and_reuse_ids() {
     let mut im = Images::default();
     let a = im.add(1, 1, &[255, 128, 0, 128]);
-    assert_eq!(im.added[0].data, [128, 64, 0, 128]);
+    assert_eq!(*im.added[0].data, [128, 64, 0, 128]);
     let b = im.add(2, 1, &[0; 8]);
     assert_eq!(im.size(b), Some((2, 1)));
     im.remove(a);

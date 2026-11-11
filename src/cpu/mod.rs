@@ -10,10 +10,12 @@
 pub mod pool;
 pub mod raster;
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use self::pool::Pool;
 use self::raster::{IRect, Target, Tex};
+#[cfg(test)]
+use crate::scene::ImageId;
 use crate::scene::{Images, Rect, Scene, Size};
 use crate::text::{ATLAS_SIZE, COLOR_ATLAS_SIZE, TextSystem, Upload};
 
@@ -60,7 +62,7 @@ pub struct Pixels {
 struct Image {
   w: usize,
   h: usize,
-  data: Vec<u8>,
+  data: Arc<Vec<u8>>,
 }
 
 pub struct Renderer {
@@ -166,6 +168,12 @@ impl Renderer {
 
       self.images[i] = Some(Image { w: u.w, h: u.h, data: u.data.clone() });
     }
+  }
+
+  /// The pixels kept for image `id`, for tests that it shares its bitmap's.
+  #[cfg(test)]
+  pub(crate) fn image_pixels(&self, id: ImageId) -> Option<&Arc<Vec<u8>>> {
+    self.images.get(id.0 as usize)?.as_ref().map(|i| &i.data)
   }
 
   /// The frame size in pixels for a view of `size` points.

@@ -16,7 +16,9 @@ pub(crate) use self::wrap::{Kept, wrapped_width};
 use self::wrap::{text_width, wrap};
 use super::a11y::Records;
 use super::textlayout::{Edit, Stop, reveal};
-use super::{Align, Axes, Clip, Dim, Float, Id, Style, TextLines, TextStyle, TruncationMode};
+use super::{
+  Align, Axes, Clip, ContentMode, Dim, Float, Id, Style, TextLines, TextStyle, TruncationMode,
+};
 use crate::keys::Binding;
 use crate::scene::{Color, ImageId, Images, Rect, Size};
 use crate::text::edit::next_grapheme;
@@ -70,7 +72,8 @@ pub(crate) enum Kind {
     baseline: f32,
     line_h: f32,
   },
-  Image(ImageId),
+  /// An image and how it fills its box ([super::Ui::aspect_ratio]; stretched without one).
+  Image(ImageId, Option<ContentMode>),
   /// The index of its paint callback.
   Canvas(u32),
   /// Over a scroll container ([super::Ui::fade_edges]): its content fading into `color` under
@@ -439,9 +442,16 @@ fn fit(t: &mut Tree, ax: usize, m: &mut dyn Measure, kept: &mut Kept) {
         let h = (lines.1 - lines.0) as f64 * f64::from(line_h);
         (h, h)
       }
-      Kind::Image(id) => {
-        let s = m.image(id);
-        let v = f64::from(if ax == 0 { s.w } else { s.h });
+      Kind::Image(id, mode) => {
+        let (s, n) = (m.image(id), &t.nodes[i]);
+        // In its aspect ([super::Ui::aspect_ratio]): the width from a height set, the height from
+        // the width laid out (heights fit after widths); with both set they win.
+        let v = match (mode, ax, n.style.size[1]) {
+          (Some(_), 0, Dim::Px(h)) if s.h > 0.0 => f64::from(h * s.w / s.h),
+          (Some(_), 1, _) if s.w > 0.0 => n.size[0] * f64::from(s.h / s.w),
+          _ => f64::from(if ax == 0 { s.w } else { s.h }),
+        };
+
         (v, v)
       }
       Kind::Box | Kind::Canvas(_) | Kind::Fade { .. } if t.nodes[i].flow.grid() => {

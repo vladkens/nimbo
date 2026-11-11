@@ -20,7 +20,7 @@
 - 🖥️ **A CPU renderer**: draws the whole window, the glyphs from that atlas too, and hands the frame to the system's 2D path (an IOSurface, a GDI bitmap, a cairo surface); no GPU API, shaders or drivers; frames paced to the display, an idle window asleep
 - 🧩 **Widgets as headless behaviours** plus a theme: buttons, switches, fields, selects, tabs, splits, dialogs, lists and form pages of 500k rows built in view only; or your own look over the same behaviour, read by VoiceOver either way
 - 🛎️ **Tray and HUD apps**: a tray menu, global hotkeys, launch at login, overlays that never take the focus, the system's permissions
-- 📂 **Files**: the system's open and save panels, files dragged onto a window
+- 📂 **Files and photos**: the system's open and save panels, files dragged onto a window, photos (JPEG, PNG, GIF; HEIC and WebP where the system has their decoders) decoded by the system at the size they show
 - 🧪 **A headless harness**: every example renders to a PNG without a window; tests click, type and check pixels and what a screen reader reads, in parallel
 - 📦 **13 crates on macOS, 4 on Windows, 2 on Linux**: GTK is loaded at run time, nothing to link
 

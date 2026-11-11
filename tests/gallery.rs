@@ -119,6 +119,27 @@ fn a_block_alone_is_as_high_as_its_variants() {
   }
 }
 
+/// The photo block shows the sunset the OS decoded, stretched to its box (blue sky at the top,
+/// the dark ground at the bottom), filling a square and fitting one, kept across frames.
+#[test]
+fn the_photo_block_shows_the_decoded_photo() {
+  let mut h = gallery(page("Photo"), true);
+  assert_eq!(h.app().photo.as_ref().map(|p| (p.width(), p.height())), Some((240, 160)));
+  for _ in 0..2 {
+    // The photo, 120 × 80, inside the block's 20 points of padding.
+    let b = h.rect(Id::of(BLOCK)).unwrap();
+    let (x, y, img) = (b.x + 20.0, b.y + 20.0, h.render());
+    let (sky, ground) = (img.pixel(x + 60.0, y + 2.0), img.pixel(x + 60.0, y + 78.0));
+    assert!(diff(sky, [62, 72, 160, 255]) < 24, "sky {sky:?}");
+    assert!(diff(ground, [22, 28, 44, 255]) < 24, "ground {ground:?}");
+    // Filling a square: sky to its top; fitting it: letterboxed, no sky at its top.
+    let (fill, fit) = (img.pixel(x + 170.0, y + 2.0), img.pixel(x + 260.0, y + 2.0));
+    assert!(diff(fill, sky) < 24 && diff(fit, sky) > 48, "fill {fill:?}, fit {fit:?}");
+    h.redraw();
+    h.frame();
+  }
+}
+
 /// In each appearance: a check box checked in its theme's accent, a switch that slides, the
 /// slider dragged, a picker choosing by letters, a segment picked, a tooltip after a rest, a
 /// recorder recording a chord and its ⊗ clearing it, the alert in its theme.

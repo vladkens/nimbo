@@ -160,6 +160,12 @@
 //!
 //!   `activity`, `hardware`, `open`, `post`, `paste`, `focus`, `permissions` and `uninstall` live
 //!   in `app/` on each OS too.
+//! - `pub mod image` ([crate::Bitmap]), from any thread: `decode(file: &[u8], side: u32) ->
+//!   Result<(u32, u32, Vec<u8>), String>`, the first image in `file` turned upright by its EXIF
+//!   orientation, its longer side shrunk to at most `side` as it is decoded (never grown): its size
+//!   and premultiplied RGBA pixels, rows top-down (macOS ImageIO's thumbnail, Windows WIC, Linux
+//!   gdk-pixbuf's loader); an error over `crate::bitmap::size`'s limits, checked on the size its
+//!   header declares before decoding, and from `crate::bitmap::zeroed`, which allocates the pixels.
 //! - `pub fn appearance() -> Appearance` ([crate::Appearance]): `dark`, and `accent` in sRGB or
 //!   `None` when the OS has none or the user left it to apps (macOS: `effectiveAppearance` matched
 //!   against Aqua / DarkAqua, `controlAccentColor` unless Multicolor; on the main thread only,
@@ -233,8 +239,8 @@ pub(crate) use imp::permissions;
 #[cfg(target_os = "linux")]
 pub(crate) use imp::startup_complete;
 pub(crate) use imp::{
-  activity, autostart, clipboard, desktop, focus, hardware, hotkey, open, paste, perf_cores, post,
-  shell, text, tray, uninstall,
+  activity, autostart, clipboard, desktop, focus, hardware, hotkey, image, open, paste, perf_cores,
+  post, shell, text, tray, uninstall,
 };
 #[cfg(target_os = "windows")]
 pub(crate) use imp::{attach_console, downloads};
