@@ -22,7 +22,7 @@
 //! let fs = FormStyle::plates(&ui.theme());
 //! ui.set_window_size(680.0, self.page.height());
 //! ui.id("tabs").toolbar_tabs(&fs, &mut self.page, &[TabItem::new(Page::General, Icon::GEAR, "General"), ..]);
-//! ui.form_scroll(&fs, Style::new().grow(), |ui| ui.col(fs.page, |ui| {
+//! ui.id(("page", self.page as u8)).form_scroll(&fs, Style::new().grow(), |ui| ui.col(fs.page, |ui| {
 //!   ui.form_section(&fs, "Startup", |ui| {
 //!     let label = |ui: &mut Ui, s: TextStyle| {
 //!       ui.text("On launch", s);
@@ -758,7 +758,8 @@ impl Ui<'_> {
   /// click picks a tab; so do Left and Right while the toolbar has focus (Tab gives it, ringing the
   /// selected tab). `changed` when `cur` changed. Tabs are `id.key(i)`. Under a title bar the app
   /// draws ([Ui::titlebar]) the window's title tops it, and a press on it anywhere but a tab moves
-  /// the window.
+  /// the window. The page under it is the app's: keyed by its tab (`ui.id(("page", tab))`), each
+  /// tab's widgets keep their own state, so a switch doesn't slide from another tab's on a change.
   pub fn toolbar_tabs<T: PartialEq + Copy>(
     &mut self,
     fs: &FormStyle,
