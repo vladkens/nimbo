@@ -138,6 +138,11 @@ impl Icon {
   pub const MIC: Self = Self::new(
     "M12 3.5a3 3 0 0 1 3 3V11a3 3 0 0 1-6 0V6.5a3 3 0 0 1 3-3zM6 11a6 6 0 0 0 12 0M12 17v3.5",
   );
+  /// A window with a sidebar at its left: shows and hides the sidebar, as SF Symbols'
+  /// `sidebar.left`.
+  pub const SIDEBAR: Self = Self::new(
+    "M5.5 5h13a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zM9.5 5v14",
+  );
   /// A cross: cancel, close.
   pub const X: Self = Self::new("M7 7l10 10M17 7 7 17");
   /// A person in a circle: accessibility.
@@ -149,7 +154,7 @@ impl Icon {
 
   /// Every built-in icon, for a gallery and the tests, with what a button showing it alone does
   /// ([Icon::name]).
-  pub const ALL: [(&'static str, Self, &'static str); 21] = [
+  pub const ALL: [(&'static str, Self, &'static str); 22] = [
     ("gear", Self::GEAR, "Settings"),
     ("contrast", Self::CONTRAST, "Appearance"),
     ("sliders", Self::SLIDERS, "Options"),
@@ -169,6 +174,7 @@ impl Icon {
     ("history", Self::HISTORY, "History"),
     ("stop", Self::STOP, "Stop"),
     ("mic", Self::MIC, "Dictate"),
+    ("sidebar", Self::SIDEBAR, "Sidebar"),
     ("x", Self::X, "Close"),
     ("accessibility", Self::ACCESSIBILITY, "Accessibility"),
   ];

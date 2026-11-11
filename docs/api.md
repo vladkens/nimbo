@@ -344,6 +344,14 @@ nimbo: `Split::new(Axis::Horizontal).ratio(&mut self.side).show(ui, |ui, pane| {
 
 ![Split](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/split.png)
 
+### Toolbar
+
+SwiftUI: `.toolbar { ToolbarItem(placement: .navigation) { … } }`
+
+nimbo: `ui.toolbar(|ui| ui.toolbar_item(ToolbarItemPlacement::Navigation, |ui| _ = ui.icon_button(Icon::SIDEBAR)))`
+
+![Toolbar](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/toolbar.png)
+
 ### Menu
 
 SwiftUI: `Menu("Actions") { Button(…) }`

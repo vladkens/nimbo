@@ -48,6 +48,7 @@ mod id;
 pub mod input;
 mod layout;
 mod paint;
+mod query;
 pub mod store;
 mod style;
 mod textlayout;
@@ -64,7 +65,7 @@ pub use a11y::{A11yNode, A11yTree, Action, Props, Role, State, Value};
 pub use behavior::{Behavior, EditMenu, Editing, FieldBehavior};
 pub use containers::{
   List, ListResponse, ListStyle, MenuPlacement, Picker, Row, Selection, Split, SplitBehavior, Tabs,
-  Tag, TypeSelect,
+  Tag, ToolbarItemPlacement, TypeSelect,
 };
 pub use dialog::{Answer, Dialog, DialogBehavior};
 pub use form::{Content, FormRow, FormStyle, Glass, Section, TabItem};
@@ -89,8 +90,9 @@ pub use widgets::{
 
 use self::input::{Deliver, Input, ScrollState};
 use self::store::{Anim, Store};
+use crate::TitleBar;
 use crate::app::{Appearance, Clipboard, Event, MouseButton, Waker};
-use crate::keys::{Binding, Command, KeyEvent, Os};
+use crate::keys::{Binding, Os};
 use crate::scene::{Frame, ImageId, Images, Point, Rect, Size};
 use crate::text::{Font, Metrics, TextSystem};
 
@@ -151,8 +153,11 @@ pub(crate) struct UiState {
   pub(crate) native_menus: bool,
   pub(crate) context_menu: Option<(Id, Point, crate::Menu<usize>)>,
   pub(crate) menu_seq: u32,
-  /// The height of the title bar over the content and the window's title ([Ui::titlebar]).
-  pub(crate) titlebar: Option<(f32, &'static str)>,
+  /// The title bar over the content ([Ui::titlebar]).
+  pub(crate) titlebar: Option<TitleBar>,
+  /// The view built a toolbar ([Ui::toolbar]): the platform gives the title bar a toolbar's
+  /// height.
+  pub(crate) toolbar: bool,
   /// The images [Ui::image] and [Ui::rgba_image] added: their pixels' hash or a bitmap's
   /// identity, the image, and whether a view built it since the last frame.
   pub(crate) pictures: Vec<(u64, ImageId, bool)>,
@@ -216,6 +221,7 @@ impl Default for UiState {
       context_menu: None,
       menu_seq: 0,
       titlebar: None,
+      toolbar: false,
       pictures: Vec::new(),
       grab: None,
       ring_on: None,
@@ -525,7 +531,7 @@ impl<'a> Ui<'a> {
     st.stack.push((0, 0));
     st.animating = false;
     st.input.moves = false;
-    (st.grab, st.ring_on) = (None, None);
+    (st.grab, st.ring_on, st.toolbar) = (None, None, false);
     st.input.now = now;
     let (next_id, next_float, next_keymap) = (None, None, None);
     let canvases = Vec::new();
@@ -616,9 +622,10 @@ impl<'a> Ui<'a> {
     self.st.ask_size(Size::new(w, h), self.size);
   }
 
-  /// The height of the title bar the content runs under and the window's title, for a window
-  /// that draws its own title bar ([crate::Config::unified]); `None` for any other.
-  pub fn titlebar(&self) -> Option<(f32, &'static str)> {
+  /// The title bar the content runs under, for a window that draws its own
+  /// ([crate::Config::unified]): its height, the window's title and where the window's buttons
+  /// are; `None` for any other.
+  pub fn titlebar(&self) -> Option<TitleBar> {
     self.st.titlebar
   }
 
@@ -1035,132 +1042,6 @@ impl<'a> Ui<'a> {
     }
 
     self.st.response(id)
-  }
-
-  // MARK: Input
-
-  /// Whether the pointer is over `id` or an element inside it, as of the last frame.
-  pub fn hovered(&self, id: Id) -> bool {
-    self.st.hovered(id)
-  }
-
-  /// Whether a button is held on `id` with the pointer over it.
-  pub fn pressed(&self, id: Id) -> bool {
-    self.st.pressed(id)
-  }
-
-  /// Whether a button went down on `id` and is held, wherever the pointer is (drags).
-  pub fn held(&self, id: Id) -> bool {
-    self.st.held(id)
-  }
-
-  /// The button held down, where and on what it went down.
-  pub fn press(&self) -> Option<Press> {
-    self.st.press()
-  }
-
-  /// A click on `id` (any button), seen once.
-  pub fn click(&self, id: Id) -> Option<Click> {
-    self.st.click(id)
-  }
-
-  /// Whether `id` was clicked with the left button; seen once.
-  pub fn clicked(&self, id: Id) -> bool {
-    self.st.clicked(id)
-  }
-
-  /// Shows `id` pressed for a moment, as a click would: a key on a keypad typed on the keyboard,
-  /// a button activated by Space.
-  pub fn flash(&mut self, id: Id) {
-    self.st.flash(id, self.now);
-  }
-
-  pub fn focused(&self, id: Id) -> bool {
-    self.st.focused(id)
-  }
-
-  /// The focused element.
-  pub fn focus_id(&self) -> Option<Id> {
-    self.st.focus()
-  }
-
-  /// Moves focus to `id`, or clears it. Focus clears by itself when its element is gone.
-  pub fn focus(&mut self, id: Option<Id>) {
-    self.st.set_focus(id);
-  }
-
-  /// Moves focus as Tab (forward) or Shift-Tab do.
-  pub fn focus_next(&mut self, dir: FocusDirection) -> bool {
-    self.st.focus_next(dir)
-  }
-
-  /// Whether the window is the key window, which gets the keys.
-  pub fn window_focused(&self) -> bool {
-    self.st.window_focused()
-  }
-
-  /// The pointer's cursor, as of the last frame and the input since.
-  pub fn cursor(&self) -> Cursor {
-    self.st.cursor()
-  }
-
-  /// Whether `id` is focused in the key window: when to draw a focus ring or a caret.
-  pub fn focus_visible(&self, id: Id) -> bool {
-    self.focused(id) && self.window_focused()
-  }
-
-  /// Rings the focused box ([Style::focusable]) while the window is key; `None` leaves
-  /// focus for the widgets to show. Kept until changed.
-  pub fn set_focus_ring(&mut self, ring: Option<FocusRing>) {
-    self.st.ring = ring;
-  }
-
-  // MARK: Keys
-
-  /// A command for `id`, seen once: from its bindings ([Ui::keymap]), or a key it did not use
-  /// turned into one by text input while it has focus. Reading it uses it; [Ui::pass] gives it
-  /// back.
-  pub fn command(&self, id: Id) -> Option<Command> {
-    self.st.take(id, |e| if let &Event::Command(c) = e { Some(c) } else { None })
-  }
-
-  /// Text typed while `id` has focus, seen once. Reading it uses it.
-  pub fn typed(&self, id: Id) -> Option<&str> {
-    self.st.take(id, |e| if let Event::Text(s) = e { Some(s.as_str()) } else { None })
-  }
-
-  /// A key pressed while `id` has focus, before bindings of the app and text input, seen once.
-  /// Reading it uses it: what it would type or do is then not typed or done.
-  pub fn key_down(&self, id: Id) -> Option<KeyEvent> {
-    self.st.take(id, |e| if let &Event::KeyDown(k) = e { Some(k) } else { None })
-  }
-
-  /// [Ui::key_down] unless something built before (a tree over its list) used it already.
-  pub fn key_unused(&self, id: Id) -> Option<KeyEvent> {
-    let used = self.st.input.deliver.as_ref().is_some_and(|d| d.target == id && d.used.get());
-    if used { None } else { self.key_down(id) }
-  }
-
-  /// A modifier key going down or up while `id` has focus ([Event::Modifier]): a shortcut
-  /// recorder taking one alone. Seen once; reading it uses it.
-  pub fn modifier_key(&self, id: Id) -> Option<(crate::Code, bool)> {
-    self.st.take(id, |e| match *e {
-      Event::Modifier { key, down } => Some((key, down)),
-      _ => None,
-    })
-  }
-
-  /// Gives back the key, text or command `id` read: it goes on as if unused (a single-line
-  /// field passing Enter on to the app).
-  pub fn pass(&self, id: Id) {
-    if let Some(d) = self.st.input.deliver.as_ref().filter(|d| d.target == id) {
-      d.used.set(false);
-    }
-  }
-
-  /// The clipboard: the system's in a window, an in-memory one in the harness.
-  pub fn clipboard(&mut self) -> &mut dyn Clipboard {
-    &mut *self.st.clipboard
   }
 
   // MARK: State

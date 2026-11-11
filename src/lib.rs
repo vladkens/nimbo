@@ -90,9 +90,31 @@ pub use ui::{
   EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, Float, Focus, FocusDirection, FocusRing,
   FormRow, FormStyle, Icon, IconPaint, Id, ImageSource, LinePattern, List, ListResponse, ListStyle,
   MenuPlacement, Picker, Press, Response, Row, Scroll, Section, Selection, Shadow, Sizes, Slider,
-  Split, Style, TabItem, Tabs, Tag, TextInput, TextLines, TextStyle, Theme, Tone, Transition,
-  TruncationMode, TypeSelect, Ui, UnitPoint, grow, pct, px, rigid,
+  Split, Style, TabItem, Tabs, Tag, TextInput, TextLines, TextStyle, Theme, Tone,
+  ToolbarItemPlacement, Transition, TruncationMode, TypeSelect, Ui, UnitPoint, grow, pct, px,
+  rigid,
 };
+
+/// The title bar a unified window's content runs under ([Config::unified]), as the platform
+/// reports it ([Ui::titlebar]), in points from the content's top-left corner.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct TitleBar {
+  pub height: f32,
+  /// The window's title ([Config::title]).
+  pub title: &'static str,
+  /// The window's own buttons over the content, macOS's traffic lights, all three; `None` while
+  /// they don't show over it (in full screen they come down with the menu bar).
+  pub buttons: Option<Rect>,
+}
+
+impl TitleBar {
+  /// A title bar `height` high over a window titled `title`, the window's buttons at `buttons`:
+  /// one a platform reports, or a test plays ([harness::mac_titlebar] plays macOS's).
+  pub const fn new(height: f32, title: &'static str, buttons: Option<Rect>) -> Self {
+    Self { height, title, buttons }
+  }
+}
 
 /// A window's title and initial content size in points; the harness renders at this size.
 pub struct Config {
@@ -170,11 +192,14 @@ impl Config {
   /// The title bar is part of the content, as in a macOS preferences window: the content runs
   /// under it and its size is the window's, the app draws the title in the band at the top
   /// ([Ui::titlebar]) and moves the window from its empty parts
-  /// ([Ui::drags_window]); [Ui::toolbar_tabs] does both.
+  /// ([Ui::drags_window]); [Ui::toolbar_tabs] does both. A [Ui::toolbar] gives the title bar a
+  /// toolbar's height, its items beside the window's buttons.
   ///
   /// Per OS: macOS a full-size content view under a transparent title bar, its title hidden (the
-  /// Window menu and Mission Control still show it), the traffic lights over the content.
-  /// Windows and Linux keep their title bar: [Ui::titlebar] is `None` there.
+  /// Window menu and Mission Control still show it), the traffic lights over the content; with a
+  /// toolbar, an empty unified `NSToolbar` that makes the bar 52 high with the lights centred in
+  /// it, as Finder's and Notes', hidden in full screen. Windows and Linux keep their title bar:
+  /// [Ui::titlebar] is `None` there.
   pub const fn unified(self) -> Self {
     Self { unified: true, ..self }
   }
@@ -306,8 +331,8 @@ pub fn run_args<A: App + 'static>(
 fn harness<A: App>(cfg: &Config, app: A, args: &Args) -> Harness<A> {
   let mut h = Harness::new(app, args.size.unwrap_or(cfg.size), args.scale);
   h.set_transparent(cfg.overlay.is_some());
-  // A unified window's title bar as high as macOS 26's.
-  h.set_titlebar(cfg.unified.then_some((32.0, cfg.title)));
+  // A unified window's title bar as macOS's.
+  h.set_titlebar(cfg.unified.then(|| harness::mac_titlebar(cfg.title, false)));
   h.event(Event::Appearance(args.appearance.unwrap_or(Appearance::DARK)));
   h
 }
