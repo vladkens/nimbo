@@ -205,20 +205,22 @@ impl Ui<'_> {
 
 /// `v` within `lo..=hi`, onto the nearest of its steps from `lo` with a `step`.
 fn snap(v: f32, lo: f32, hi: f32, step: Option<f32>) -> f32 {
-  match step {
+  let v = match step {
     Some(s) => lo + ((v - lo) / s).round().clamp(0.0, last_step(lo, hi, s)) * s,
-    None => v.clamp(lo.min(hi), hi.max(lo)),
-  }
+    None => v,
+  };
+  // Against f32 drift on the last step.
+  v.clamp(lo.min(hi), hi.max(lo))
 }
 
 /// The index of the last step of `s` from `lo` within `lo..=hi`: 0 when the range is shorter.
 fn last_step(lo: f32, hi: f32, s: f32) -> f32 {
-  ((hi - lo) / s + 1e-3).floor().max(0.0)
+  ((hi - lo) / s + 1e-4).floor().max(0.0)
 }
 
 #[cfg(test)]
 mod tests {
-  use super::snap;
+  use super::{last_step, snap};
 
   /// A step that doesn't divide the range ends it at its last step, from the pointer and from
   /// the keys alike; one longer than the range keeps its start; with none, anywhere in it.
@@ -235,6 +237,11 @@ mod tests {
       [snap(30.0, 10.0, 90.0, Some(10.0)), snap(34.9, 10.0, 90.0, Some(10.0))],
       [30.0, 30.0]
     );
+    assert_eq!(
+      [snap(30.0, 0.0, 29.99, Some(10.0)), snap(25.0, 0.0, 29.99, Some(10.0))],
+      [20.0, 20.0]
+    );
+    assert_eq!([last_step(0.0, 1.0, 0.1), snap(1.0, 0.0, 1.0, Some(0.1))], [10.0, 1.0]);
     assert_eq!([snap(4.2, 0.0, 10.0, None), snap(11.0, 0.0, 10.0, None)], [4.2, 10.0]);
   }
 }

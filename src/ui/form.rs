@@ -602,16 +602,22 @@ impl Ui<'_> {
     let (pad_x, shift) = (fs.row.pad[3], self.mark_shift(fs.label));
     let FormRow { label, caption, tile, footer, .. } = row;
     // The line of the tile, the label and the controls, as high as the row's least height; the
-    // footer under it.
-    let line = Style::new().w(grow()).min_h(style.min[1]).gap(style.gap);
+    // footer under it. With a footer the line ends at the description, its padding under the
+    // footer, and the tile and controls keep their centre on the label and description.
+    let below = if footer.is_none() { fs.pad_y } else { 0.0 };
+    let over = top + fs.pad_y - below;
+    let line = Style::new().w(grow()).min_h(style.min[1] - fs.pad_y + below).gap(style.gap);
     let r = self.disabled_scope(off, |ui| {
       ui.next_id = Some((id, false));
       ui.canvas_col(style.gap(0.0), hairline, |ui| {
+        // The names the row's label and description replace, put back once the row or its first
+        // control, in the line or the footer, took them.
+        let mut outer = None;
         ui.row(line, |ui| {
           if !tile.is_none() {
             let x = (fs.tile_x - pad_x).max(0.0);
             let slot =
-              Style::new().h(grow()).pads([top, x, 0.0, x]).align(Align::Start, Align::Center);
+              Style::new().h(grow()).pads([over, x, 0.0, x]).align(Align::Start, Align::Center);
             ui.row(slot, |ui| {
               let k = id.key("tile");
               ui.row(fs.tile, |ui| tile.build(ui, fs.tile_text, k, fs.tile_icon, 1.6))
@@ -619,7 +625,7 @@ impl Ui<'_> {
           }
 
           let (mut name, mut about) = (0..0, 0..0);
-          let col = Style::new().w(grow()).gap(2.0).pads([top + fs.pad_y, 0.0, fs.pad_y, 0.0]);
+          let col = Style::new().w(grow()).gap(2.0).pads([top + fs.pad_y, 0.0, below, 0.0]);
           ui.col(col, |ui| {
             ui.row(Style::new().w(grow()).gap(6.0).align(Align::Start, Align::Center), |ui| {
               // A mark on the line sits on the capitals' middle.
@@ -633,8 +639,7 @@ impl Ui<'_> {
             caption.build(ui, dim(fs.caption), id.key("caption"), 12.0, 1.6);
             about = at..ui.st.tree.nodes.len() as u32;
           });
-          // The names it replaces, put back once the row or its first control took them.
-          let mut outer = Some(ui.form_names(name, about));
+          outer = Some(ui.form_names(name, about));
           if fs.row.hit {
             ui.a11y_row(id, Role::Row).state(State::Disabled, off);
             ui.set_slot(outer.take().flatten());
@@ -645,20 +650,21 @@ impl Ui<'_> {
           let slot = Style::new()
             .w(rigid())
             .h(grow())
-            .min_h(top + 2.0 * fs.pad_y + line_h)
-            .pads([top, 0.0, 0.0, 0.0])
+            .min_h(top + fs.pad_y + below + line_h)
+            .pads([over, 0.0, 0.0, 0.0])
             .align(Align::End, Align::Center);
           ui.col(slot, |ui| {
             ui.row(Style::new().gap(fs.gap).align(Align::Start, Align::Center), control)
           });
-          if let Some(outer) = outer {
-            ui.set_slot(outer);
-          }
         });
         if !footer.is_none() {
-          // Right under the description, 2 apart as it is from the label: over the line's padding.
-          let pad = Style::new().w(grow()).pads([2.0 - fs.pad_y, 0.0, fs.pad_y, 0.0]);
+          // Right under the description, 2 apart as it is from the label, and under the controls.
+          let pad = Style::new().w(grow()).pads([2.0, 0.0, fs.pad_y, 0.0]);
           ui.col(pad, |ui| footer.build(ui, dim(fs.caption), id.key("footer"), 12.0, 1.6));
+        }
+
+        if let Some(outer) = outer {
+          ui.set_slot(outer);
         }
       })
     });
@@ -928,11 +934,9 @@ mod tests {
     }
   }
 
-  /// A label of a name and badges: the badges follow the name on its line, in order, clear of
-  /// the controls, read after it, the one with a tooltip with its tip; the row keeps the height
-  /// of one with the name alone; a long name ends in "…" before them.
-  /// Two rows with a description: one with a switch, one with a control as high as the row, as
-  /// an app centres a link's ↗ in its whole row.
+  /// Rows with a description: one with a switch, one with a control as high as the row, as an
+  /// app centres a link's ↗ in its whole row, then that one with a slider in its footer, and a
+  /// row with no controls and a slider in its footer.
   struct Tall;
 
   impl App for Tall {
@@ -943,11 +947,22 @@ mod tests {
         ui.form_section(&fs, Section::default(), |ui| {
           let row = FormRow::new("Switch").caption("What it does");
           ui.id("switch").form_row(&fs, row, |ui| ui.toggle(&mut false, ""));
-          let row = FormRow::new("Link").caption("Where it goes");
-          ui.id("tall").form_row(&fs, row, |ui| {
+          let tall = |ui: &mut Ui, id: &str| {
             let slot = Style::new().h(px(row_h)).align(Align::Center, Align::Center);
-            ui.col(slot, |ui| ui.control_size(ControlSize::Large).icon_button(Icon::EXTERNAL))
-          });
+            ui.id(id)
+              .col(slot, |ui| ui.control_size(ControlSize::Large).icon_button(Icon::EXTERNAL))
+          };
+          let row = FormRow::new("Link").caption("Where it goes");
+          ui.id("tall").form_row(&fs, row, |ui| tall(ui, "link"));
+          let slider = |id: &'static str| {
+            move |ui: &mut Ui, _: TextStyle| {
+              ui.id(id).slider(&mut 0.5, 0.0..=1.0);
+            }
+          };
+          let row = FormRow::new("Link").caption("Where it goes").footer(slider("under"));
+          ui.id("footed").form_row(&fs, row, |ui| tall(ui, "over"));
+          let row = FormRow::new("Volume").caption("How loud").footer(slider("volume"));
+          ui.form_row(&fs, row, |_| {});
         });
       });
     }
@@ -962,6 +977,21 @@ mod tests {
     assert_eq!(switch.h + hair, tall.h);
   }
 
+  /// A footer starts under a control taller than the label and description; a slider in the
+  /// footer of a row with no controls takes the row's name and description.
+  #[test]
+  fn a_footer_follows_the_controls_and_takes_the_name() {
+    let mut h = Harness::new(Tall, Size::new(400.0, 500.0), 2.0);
+    h.frame();
+    let (over, under) = (h.rect(Id::of("over")).unwrap(), h.rect(Id::of("under")).unwrap());
+    assert!(under.y >= over.y + over.h, "{over:?} {under:?}");
+    let read = r#"slider "Volume" 0.5 in 0..1 desc "How loud""#;
+    assert!(h.a11y().lines().any(|l| l.trim() == read), "{}", h.a11y());
+  }
+
+  /// A label of a name and badges: the badges follow the name on its line, in order, clear of
+  /// the controls, read after it, the one with a tooltip with its tip; the row keeps the height
+  /// of one with the name alone; a long name ends in "…" before them.
   #[test]
   fn badges_follow_the_label_on_its_line() {
     // The plain row has the hairline over it.
