@@ -23,7 +23,8 @@
 //!
 //! - [Ui::button_behavior]: click, Space while focused (flashes it pressed);
 //! - [Ui::toggle_behavior] (check box, switch): a button that flips a `bool`;
-//! - [Ui::slider_behavior]: a drag along the element, the arrows step a twentieth;
+//! - [Ui::slider_behavior]: a drag along the element onto the nearest step if it has one, the
+//!   arrows move a step or a twentieth;
 //! - [Ui::pick_behavior] (tabs, segmented control, toolbar tabs): one of `n` items by a click, the
 //!   arrows step;
 //! - [Ui::shortcut_behavior]: a shortcut recorder over a global hotkey ([crate::Hotkey]);

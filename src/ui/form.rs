@@ -22,7 +22,7 @@
 //! let fs = FormStyle::plates(&ui.theme());
 //! ui.set_window_size(680.0, self.page.height());
 //! ui.id("tabs").toolbar_tabs(&fs, &mut self.page, &[TabItem::new(Page::General, Icon::GEAR, "General"), ..]);
-//! ui.form_scroll(&fs, Style::new().grow(), |ui| ui.col(fs.page, |ui| {
+//! ui.id(("page", self.page as u8)).form_scroll(&fs, Style::new().grow(), |ui| ui.col(fs.page, |ui| {
 //!   ui.form_section(&fs, "Startup", |ui| {
 //!     let label = |ui: &mut Ui, s: TextStyle| {
 //!       ui.text("On launch", s);
@@ -370,12 +370,13 @@ impl fmt::Debug for Content<'_> {
 }
 
 /// A row of a form section ([Ui::form_row]), as SwiftUI's `LabeledContent`: its label,
-/// description and leading tile, each [Content].
+/// description, leading tile and footer, each [Content].
 #[derive(Debug, Default)]
 pub struct FormRow<'s> {
   label: Content<'s>,
   caption: Content<'s>,
   tile: Content<'s>,
+  footer: Content<'s>,
   /// Held down: a [Ui::form_disclosure]'s.
   pressed: bool,
 }
@@ -419,6 +420,21 @@ impl<'s> FormRow<'s> {
   /// what a closure builds.
   pub fn tile(self, tile: impl Into<Content<'s>>) -> Self {
     Self { tile: tile.into(), ..self }
+  }
+
+  /// What goes under the label and the controls, in the row across its whole width with no
+  /// hairline between, as a `VStack` of a control and a view under it is one row of SwiftUI's
+  /// grouped form: a text in [FormStyle::caption], or what a closure builds (a slider over the
+  /// row's width setting what the row's switch turns on).
+  ///
+  /// ```ignore
+  /// let row = FormRow::new("Turn off below 50%").footer(|ui: &mut Ui, _: TextStyle| {
+  ///   ui.disabled(!on).slider(&mut level, 10.0..=90.0);
+  /// });
+  /// ui.form_row(&fs, row, |ui| ui.toggle(&mut on, ""));
+  /// ```
+  pub fn footer(self, footer: impl Into<Content<'s>>) -> Self {
+    Self { footer: footer.into(), ..self }
   }
 }
 
@@ -531,19 +547,19 @@ impl Ui<'_> {
 
   /// A row of the section being built, as SwiftUI's `LabeledContent` in a grouped form: the
   /// tile, the label and its description at the left ([FormRow]), what `control` builds at the
-  /// right, 8 apart, and a hairline above it unless it is the first, held down (a
-  /// [Ui::form_disclosure]'s) or right under a row held down. The controls keep their
-  /// width and place at the right edge, centred on the row's height; the label and description
-  /// wrap in what is left, the row growing taller. [Ui::disabled] on it dims its label and
-  /// description to [super::Theme::tertiary] and disables its widgets but an ⓘ or warning mark
-  /// (in a row a click selects, assistive technology reads it disabled with its row). A text
+  /// right, 8 apart, the row's footer under them across its width, and a hairline above it unless
+  /// it is the first, held down (a [Ui::form_disclosure]'s) or right under a row held down. The
+  /// controls keep their width and place at the right edge, centred on the row's height; the label
+  /// and description wrap in what is left, the row growing taller. [Ui::disabled] on it dims its
+  /// label and description to [super::Theme::tertiary] and disables its widgets but an ⓘ or warning
+  /// mark (in a row a click selects, assistive technology reads it disabled with its row). A text
   /// label is `id.key("label")` of the row's id, a text description `id.key("caption")`, a text
-  /// or icon tile `id.key("tile")`. The row takes no input, its controls do, unless
-  /// [FormStyle::row] is [Style::hit]: then it is a row a click selects, named by its label's
-  /// plain texts and described by its description's. Else the first control recorded in it with
-  /// no name of its own takes them as its name and description ([Ui::a11y]); either way they are
-  /// not read again, and the label's and description's other elements are read after the one
-  /// they name.
+  /// or icon tile `id.key("tile")`, a text footer `id.key("footer")`. The row takes no input, its
+  /// controls do, unless [FormStyle::row] is [Style::hit]: then it is a row a click selects, named
+  /// by its label's plain texts and described by its description's. Else the first control recorded
+  /// in it with no name of its own takes them as its name and description ([Ui::a11y]); either way
+  /// they are not read again, and the label's and description's other elements are read after the
+  /// one they name.
   pub fn form_row<R>(
     &mut self,
     fs: &FormStyle,
@@ -584,53 +600,69 @@ impl Ui<'_> {
     let line_h = self.line_height(fs.label);
 
     let (pad_x, shift) = (fs.row.pad[3], self.mark_shift(fs.label));
-    let FormRow { label, caption, tile, .. } = row;
+    let FormRow { label, caption, tile, footer, .. } = row;
+    // The line of the tile, the label and the controls, as high as the row's least height; the
+    // footer under it. With a footer the line ends at the description, its padding under the
+    // footer, and the tile and controls keep their centre on the label and description.
+    let below = if footer.is_none() { fs.pad_y } else { 0.0 };
+    let over = top + fs.pad_y - below;
+    let line = Style::new().w(grow()).min_h(style.min[1] - fs.pad_y + below).gap(style.gap);
     let r = self.disabled_scope(off, |ui| {
       ui.next_id = Some((id, false));
-      ui.canvas_row(style, hairline, |ui| {
-        if !tile.is_none() {
-          let x = (fs.tile_x - pad_x).max(0.0);
-          let slot =
-            Style::new().h(grow()).pads([top, x, 0.0, x]).align(Align::Start, Align::Center);
-          ui.row(slot, |ui| {
-            let k = id.key("tile");
-            ui.row(fs.tile, |ui| tile.build(ui, fs.tile_text, k, fs.tile_icon, 1.6))
-          });
-        }
+      ui.canvas_col(style.gap(0.0), hairline, |ui| {
+        // The names the row's label and description replace, put back once the row or its first
+        // control, in the line or the footer, took them.
+        let mut outer = None;
+        ui.row(line, |ui| {
+          if !tile.is_none() {
+            let x = (fs.tile_x - pad_x).max(0.0);
+            let slot =
+              Style::new().h(grow()).pads([over, x, 0.0, x]).align(Align::Start, Align::Center);
+            ui.row(slot, |ui| {
+              let k = id.key("tile");
+              ui.row(fs.tile, |ui| tile.build(ui, fs.tile_text, k, fs.tile_icon, 1.6))
+            });
+          }
 
-        let (mut name, mut about) = (0..0, 0..0);
-        let col = Style::new().w(grow()).gap(2.0).pads([top + fs.pad_y, 0.0, fs.pad_y, 0.0]);
-        ui.col(col, |ui| {
-          ui.row(Style::new().w(grow()).gap(6.0).align(Align::Start, Align::Center), |ui| {
-            // A mark on the line sits on the capitals' middle.
-            let outer = ui.set_slot(Some(MarkShift(shift)));
+          let (mut name, mut about) = (0..0, 0..0);
+          let col = Style::new().w(grow()).gap(2.0).pads([top + fs.pad_y, 0.0, below, 0.0]);
+          ui.col(col, |ui| {
+            ui.row(Style::new().w(grow()).gap(6.0).align(Align::Start, Align::Center), |ui| {
+              // A mark on the line sits on the capitals' middle.
+              let outer = ui.set_slot(Some(MarkShift(shift)));
+              let at = ui.st.tree.nodes.len() as u32;
+              label.build(ui, dim(fs.label), id.key("label"), line_h, 1.6);
+              name = at..ui.st.tree.nodes.len() as u32;
+              ui.set_slot(outer);
+            });
             let at = ui.st.tree.nodes.len() as u32;
-            label.build(ui, dim(fs.label), id.key("label"), line_h, 1.6);
-            name = at..ui.st.tree.nodes.len() as u32;
-            ui.set_slot(outer);
+            caption.build(ui, dim(fs.caption), id.key("caption"), 12.0, 1.6);
+            about = at..ui.st.tree.nodes.len() as u32;
           });
-          let at = ui.st.tree.nodes.len() as u32;
-          caption.build(ui, dim(fs.caption), id.key("caption"), 12.0, 1.6);
-          about = at..ui.st.tree.nodes.len() as u32;
+          outer = Some(ui.form_names(name, about));
+          if fs.row.hit {
+            ui.a11y_row(id, Role::Row).state(State::Disabled, off);
+            ui.set_slot(outer.take().flatten());
+          }
+
+          // A slot as high as the row, at least the label's first line and the padding around
+          // it, holding the controls centred: on the label and its description, as the tile.
+          let slot = Style::new()
+            .w(rigid())
+            .h(grow())
+            .min_h(top + fs.pad_y + below + line_h)
+            .pads([over, 0.0, 0.0, 0.0])
+            .align(Align::End, Align::Center);
+          ui.col(slot, |ui| {
+            ui.row(Style::new().gap(fs.gap).align(Align::Start, Align::Center), control)
+          });
         });
-        // The names it replaces, put back once the row or its first control took them.
-        let mut outer = Some(ui.form_names(name, about));
-        if fs.row.hit {
-          ui.a11y_row(id, Role::Row).state(State::Disabled, off);
-          ui.set_slot(outer.take().flatten());
+        if !footer.is_none() {
+          // Right under the description, 2 apart as it is from the label, and under the controls.
+          let pad = Style::new().w(grow()).pads([2.0, 0.0, fs.pad_y, 0.0]);
+          ui.col(pad, |ui| footer.build(ui, dim(fs.caption), id.key("footer"), 12.0, 1.6));
         }
 
-        // A slot as high as the row, at least the label's first line and the padding around
-        // it, holding the controls centred: on the label and its description, as the tile.
-        let slot = Style::new()
-          .w(rigid())
-          .h(grow())
-          .min_h(top + 2.0 * fs.pad_y + line_h)
-          .pads([top, 0.0, 0.0, 0.0])
-          .align(Align::End, Align::Center);
-        ui.col(slot, |ui| {
-          ui.row(Style::new().gap(fs.gap).align(Align::Start, Align::Center), control)
-        });
         if let Some(outer) = outer {
           ui.set_slot(outer);
         }
@@ -732,7 +764,8 @@ impl Ui<'_> {
   /// click picks a tab; so do Left and Right while the toolbar has focus (Tab gives it, ringing the
   /// selected tab). `changed` when `cur` changed. Tabs are `id.key(i)`. Under a title bar the app
   /// draws ([Ui::titlebar]) the window's title tops it, and a press on it anywhere but a tab moves
-  /// the window.
+  /// the window. The page under it is the app's: keyed by its tab (`ui.id(("page", tab))`), each
+  /// tab's widgets keep their own state, so a switch doesn't slide from another tab's on a change.
   pub fn toolbar_tabs<T: PartialEq + Copy>(
     &mut self,
     fs: &FormStyle,
@@ -899,6 +932,61 @@ mod tests {
         });
       });
     }
+  }
+
+  /// Rows with a description: one with a switch, one with a control as high as the row, as an
+  /// app centres a link's ↗ in its whole row, then that one with a slider in its footer, and a
+  /// row with no controls and a slider in its footer.
+  struct Tall;
+
+  impl App for Tall {
+    fn view(&mut self, ui: &mut Ui) {
+      let fs = FormStyle::plates(&ui.theme());
+      let row_h = 2.0 * fs.pad_y + ui.line_height(fs.label) + 2.0 + ui.line_height(fs.caption);
+      ui.col(fs.page, |ui| {
+        ui.form_section(&fs, Section::default(), |ui| {
+          let row = FormRow::new("Switch").caption("What it does");
+          ui.id("switch").form_row(&fs, row, |ui| ui.toggle(&mut false, ""));
+          let tall = |ui: &mut Ui, id: &str| {
+            let slot = Style::new().h(px(row_h)).align(Align::Center, Align::Center);
+            ui.id(id)
+              .col(slot, |ui| ui.control_size(ControlSize::Large).icon_button(Icon::EXTERNAL))
+          };
+          let row = FormRow::new("Link").caption("Where it goes");
+          ui.id("tall").form_row(&fs, row, |ui| tall(ui, "link"));
+          let slider = |id: &'static str| {
+            move |ui: &mut Ui, _: TextStyle| {
+              ui.id(id).slider(&mut 0.5, 0.0..=1.0);
+            }
+          };
+          let row = FormRow::new("Link").caption("Where it goes").footer(slider("under"));
+          ui.id("footed").form_row(&fs, row, |ui| tall(ui, "over"));
+          let row = FormRow::new("Volume").caption("How loud").footer(slider("volume"));
+          ui.form_row(&fs, row, |_| {});
+        });
+      });
+    }
+  }
+
+  #[test]
+  fn a_control_as_high_as_the_row_keeps_its_height() {
+    let hair = FormStyle::plates(&Theme::PLATES_LIGHT).hairline;
+    let mut h = Harness::new(Tall, Size::new(400.0, 300.0), 2.0);
+    h.frame();
+    let (switch, tall) = (h.rect(Id::of("switch")).unwrap(), h.rect(Id::of("tall")).unwrap());
+    assert_eq!(switch.h + hair, tall.h);
+  }
+
+  /// A footer starts under a control taller than the label and description; a slider in the
+  /// footer of a row with no controls takes the row's name and description.
+  #[test]
+  fn a_footer_follows_the_controls_and_takes_the_name() {
+    let mut h = Harness::new(Tall, Size::new(400.0, 500.0), 2.0);
+    h.frame();
+    let (over, under) = (h.rect(Id::of("over")).unwrap(), h.rect(Id::of("under")).unwrap());
+    assert!(under.y >= over.y + over.h, "{over:?} {under:?}");
+    let read = r#"slider "Volume" 0.5 in 0..1 desc "How loud""#;
+    assert!(h.a11y().lines().any(|l| l.trim() == read), "{}", h.a11y());
   }
 
   /// A label of a name and badges: the badges follow the name on its line, in order, clear of

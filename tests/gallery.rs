@@ -6,9 +6,10 @@
 //! in its theme (a check box checks in its accent, a switch slides, the slider drags, a picker
 //! chooses by letters, a segment picks, a tooltip shows, a recorder records and its ⊗ clears,
 //! the alert asks in its theme, Escape closes it, its action counts), the search field draws in
-//! its theme and clears from its ⊗; assistive technology reads each widget by its role, the ⊗
-//! marks beside their controls; and `docs/api.md` is the gallery's, and so are its pictures on the
-//! `assets` branch when its worktree is there.
+//! its theme and clears from its ⊗; a stepped slider lands on its steps from the pointer and the
+//! keys and marks them with dots and labels; a row's footer spans its row; assistive technology
+//! reads each widget by its role, the ⊗ marks beside their controls; and `docs/api.md` is the
+//! gallery's, and so are its pictures on the `assets` branch when its worktree is there.
 
 #[path = "../examples/gallery.rs"]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
@@ -232,7 +233,7 @@ fn the_search_field_in_both_themes() {
 /// Each kind of widget is what it is to assistive technology: its role, name, value and states.
 #[test]
 fn every_widget_has_its_role() {
-  let pages: [(&str, &[&str]); 10] = [
+  let pages: [(&str, &[&str]); 11] = [
     ("Button", &["button \"Bordered\"", "button \"Prominent\" disabled"]),
     (
       "Help marks",
@@ -245,6 +246,7 @@ fn every_widget_has_its_role() {
     ("Check box", &["check box \"Wrap\" off", "check box \"Wrap\" off disabled"]),
     ("Switch", &["switch \"Live\" on"]),
     ("Slider", &["slider \"Zoom\" 60 in 0..200"]),
+    ("Slider steps", &["slider \"Level\" 30 in 10..90", "static text \"50%\""]),
     (
       "Picker",
       &[
@@ -268,6 +270,160 @@ fn every_widget_has_its_role() {
   reads(&h.a11y(), &["static text \"New\""]);
   let h = gallery(page("Search field"), false);
   reads(&h.a11y(), &["text field \"Search\" value \"Switches\"", "button \"Clear\""]);
+}
+
+/// A segmented control goes to the next segment on Right and Down, back on Left and Up, and no
+/// further than its ends: the arrows read as a list's, not a slider's.
+#[test]
+fn segments_step_down_and_up() {
+  let mut h = gallery(page("Segmented picker"), false);
+  let t = h.a11y_tree();
+  let group = t.nodes.iter().find(|n| n.props.role == Role::RadioGroup).expect("a radio group");
+  h.set_focus(Some(group.id));
+  let key = |h: &mut H, k: NamedKey| {
+    h.key(k, Modifiers::empty());
+    h.frame();
+    h.app().view
+  };
+  assert_eq!(key(&mut h, NamedKey::ArrowDown), 1, "down: the next");
+  assert_eq!(key(&mut h, NamedKey::ArrowRight), 2);
+  assert_eq!(key(&mut h, NamedKey::ArrowDown), 2, "not past the last");
+  assert_eq!(key(&mut h, NamedKey::ArrowUp), 1, "up: the one before");
+  assert_eq!(key(&mut h, NamedKey::ArrowLeft), 0);
+}
+
+/// The stepped slider's page ("Slider steps") at 2x in `look`: the enabled slider's id and rect.
+fn steps(look: Appearance) -> (H, Id, Rect) {
+  let size = Size::new(WIDTH + 200.0, 600.0);
+  let mut h = Harness::new(Gallery::on(page("Slider steps"), false), size, 2.0);
+  h.event(Event::Appearance(look));
+  h.frame();
+  let (id, r) = node(&h, Role::Slider, "Level");
+  (h, id, r)
+}
+
+/// Where `v` of the stepped slider's 10..=90 sits along it, its track half a knob in from either
+/// end.
+fn level_x(r: Rect, v: f32) -> f32 {
+  let inset = Theme::PLATES_LIGHT.sizes.knob[0] / 2.0;
+  r.x + inset + (r.w - 2.0 * inset) * (v - 10.0) / 80.0
+}
+
+/// A press, a drag and a click land on the nearest step, the knob drawn there.
+#[test]
+fn a_stepped_slider_snaps_drags_and_clicks() {
+  let (mut h, _, r) = steps(Appearance::LIGHT);
+  let y = r.y + r.h / 2.0;
+  h.press(level_x(r, 33.0), y);
+  h.frame();
+  assert_eq!(h.app().level, 30.0);
+  h.move_to(level_x(r, 47.0), y);
+  h.frame();
+  assert_eq!(h.app().level, 50.0);
+  let knob = px(Theme::PLATES_LIGHT.knob);
+  assert_eq!(h.render().pixel(level_x(r, 50.0), y), knob, "the knob jumped to the step");
+  h.release(level_x(r, 47.0), y);
+  h.frame();
+  assert_eq!(h.app().level, 50.0);
+  h.click(level_x(r, 74.0), y);
+  assert_eq!(h.app().level, 70.0);
+}
+
+/// The arrows and assistive technology's increment and decrement move a step, to the range's
+/// ends and no further; the value reads as it is.
+#[test]
+fn a_stepped_slider_moves_a_step() {
+  let (mut h, id, _) = steps(Appearance::LIGHT);
+  h.set_focus(Some(id));
+  let key = |h: &mut H, k: NamedKey| {
+    h.key(k, Modifiers::empty());
+    h.frame();
+  };
+  key(&mut h, NamedKey::ArrowRight);
+  assert_eq!(h.app().level, 40.0);
+  key(&mut h, NamedKey::ArrowLeft);
+  key(&mut h, NamedKey::ArrowLeft);
+  assert_eq!(h.app().level, 20.0);
+  assert!(h.act(id, Action::Decrement));
+  assert!(h.act(id, Action::Decrement));
+  assert_eq!(h.app().level, 10.0, "not below the start");
+  assert!(h.act(id, Action::Increment));
+  h.frame();
+  reads(&h.a11y(), &["slider \"Level\" 20 in 10..90 focused"]);
+  key(&mut h, NamedKey::ArrowUp);
+  assert_eq!(h.app().level, 30.0, "up raises it, as AppKit's slider");
+  key(&mut h, NamedKey::ArrowDown);
+  key(&mut h, NamedKey::ArrowDown);
+  assert_eq!(h.app().level, 10.0, "down lowers it");
+  (0..10).for_each(|_| key(&mut h, NamedKey::ArrowRight));
+  assert_eq!(h.app().level, 90.0, "not past the end");
+}
+
+/// In each appearance a dot in the tertiary colour under the track at every step but the one
+/// under the knob, nothing between them; the labels under their steps, within the slider.
+#[test]
+fn a_stepped_slider_marks_its_steps() {
+  for (look, t) in LOOKS {
+    let (mut h, _, r) = steps(look);
+    // A quarter point above and left of a dot's middle: inside it, off its rim.
+    let y = r.y + r.h / 2.0 + t.sizes.knob[1] / 2.0 - 1.25;
+    let dot = px(t.tertiary);
+    let img = h.render();
+    for v in [10.0, 20.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0] {
+      let got = img.pixel(level_x(r, v) - 0.25, y);
+      assert!(diff(got, dot) <= 8, "{look:?}: a dot at {v}: {got:?}, not {dot:?}");
+    }
+
+    for (x, what) in
+      [(level_x(r, 55.0), "between dots"), (level_x(r, 30.0) - 0.25, "under the knob")]
+    {
+      let got = img.pixel(x, y);
+      assert!(diff(got, dot) > 40, "{look:?}: no dot {what}: {got:?}");
+    }
+
+    let tree = h.a11y_tree();
+    let label = |name: &str| {
+      let n = tree
+        .nodes
+        .iter()
+        .find(|n| n.props.role == Role::StaticText && tree.str(n.props.name) == name);
+      n.unwrap_or_else(|| panic!("no {name:?} in\n{}", h.a11y())).rect
+    };
+    let (first, mid50, last) = (label("10%"), label("50%"), label("90%"));
+    assert!((mid(mid50).0 - level_x(r, 50.0)).abs() < 0.5, "{mid50:?} under 50 of {r:?}");
+    assert!(first.x >= r.x && last.x + last.w <= r.x + r.w + 0.01, "{first:?} {last:?} in {r:?}");
+    assert!(first.y >= r.y + r.h && mid50.y == first.y, "below the track: {first:?} {r:?}");
+  }
+}
+
+/// A row's footer is in the row under its line, across its width: a slider there runs from the
+/// plate's padding at the left to the switch's right edge, over the plate's fill with no
+/// hairline above it, and takes its disabled look from the switch.
+#[test]
+fn a_row_footer_spans_its_row() {
+  for (look, t) in LOOKS {
+    let mut h = on("Row footer", look);
+    let (_, slider) = node(&h, Role::Slider, "Level");
+    let (switch, toggle) = node(&h, Role::Switch, "Turn off below 30%");
+    let ends = (slider.x + slider.w - toggle.x - toggle.w).abs();
+    assert!(ends < 0.5 && slider.y >= toggle.y + toggle.h, "{look:?}: {slider:?}, {toggle:?}");
+    let (img, plate) = (h.render(), px(t.plate));
+    let on_plate = |x: f32, y: f32| diff(img.pixel(x, y), plate) <= 2;
+    let y = slider.y + slider.h - 2.0;
+    let pad = (1..40).find(|&d| !on_plate(slider.x - d as f32 + 0.5, y));
+    assert_eq!(pad, Some(11), "{look:?}: 10 points of the plate left of {slider:?}");
+    let x = slider.x + slider.w / 2.0 + 30.0;
+    for y in (toggle.y + toggle.h) as i32..slider.y as i32 + 6 {
+      assert!(on_plate(x, y as f32 + 0.5), "{look:?}: no plate at {x}, {y}");
+    }
+
+    let enabled =
+      |h: &H| h.a11y().lines().filter(|l| l.trim() == "slider \"Level\" 30 in 10..90").count();
+    assert_eq!(enabled(&h), 1, "{look:?}: on with the switch");
+    h.click_id(switch);
+    h.frame();
+    assert_eq!(enabled(&h), 0, "{look:?}: off with the switch\n{}", h.a11y());
+  }
 }
 
 /// The ⊗ of a recorder and of a search field are beside them, not inside the leaves, where a

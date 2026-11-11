@@ -154,6 +154,14 @@ nimbo: `ui.slider(&mut self.zoom, 0.0..=200.0)`
 
 ![Slider](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/slider.png)
 
+### Slider steps
+
+SwiftUI: `Slider(value: $level, in: 10...90, step: 10) { … } tick: { v in SliderTick(v) { … } }`
+
+nimbo: `Slider::new(&mut self.level, 10.0..=90.0).step(10.0).tick_label(|v| (v == 50.0).then(|| "50%".into())).show(ui)`
+
+![Slider steps](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/slider-steps.png)
+
 ### Picker
 
 SwiftUI: `Picker("Size", selection: $size) { …; Divider(); … }`
@@ -267,6 +275,14 @@ SwiftUI: `Label { Text(title) } icon: { Image(systemName: "folder") }`
 nimbo: `FormRow::new("Data").tile(Icon::FOLDER)`
 
 ![Row tile](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/row-tile.png)
+
+### Row footer
+
+SwiftUI: `Section { VStack { Toggle(…); Slider(…) } }`
+
+nimbo: `FormRow::new("Turn off below 30%").footer(|ui: &mut Ui, _: TextStyle| _ = ui.slider(&mut level, 10.0..=90.0))`
+
+![Row footer](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/row-footer.png)
 
 ### Disclosure
 
