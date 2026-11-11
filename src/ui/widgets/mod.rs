@@ -12,6 +12,7 @@
 //! if Button::new("Save").style(ButtonStyle::BorderedProminent).show(ui).clicked { self.save() }
 //! ui.disabled(!self.dirty).button("Revert");
 //! ui.checkbox(&mut self.wrap, "Wrap lines");
+//! Slider::new(&mut self.level, 10.0..=90.0).step(10.0).show(ui);
 //! ui.id("size").segmented(&mut self.size, &[Tag::new(Size::Small, "Small"), Tag::new(Size::Large, "Large")]);
 //! ui.help("Back to the default").icon_button(Icon::RESET);
 //! ui.control_size(ControlSize::Small).row(Style::new(), |ui| ui.button("Small"));
@@ -24,7 +25,7 @@
 //! ([super::Theme::hover_all]), and every control shows the pointing hand; [Ui::disabled] dims a
 //! widget and ignores its input (no hover, no hand). Controls take focus by Tab only, as
 //! AppKit's do; a focused one is ringed ([super::Theme::focus_ring]), Space activates it, and
-//! the arrows step a segmented control or a slider.
+//! the arrows step a segmented control or a slider (by its step, else a twentieth).
 
 mod badge;
 mod button;
@@ -47,6 +48,7 @@ pub(crate) use button::MarkShift;
 pub use button::{Button, ButtonRole};
 pub use field::{FieldKind, FieldStyle, TextInput};
 pub use icon::{Icon, IconPaint};
+pub use slider::Slider;
 
 use super::{Behavior, Id, Style, Ui};
 use crate::scene::{Color, alpha, mix};

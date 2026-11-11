@@ -579,7 +579,7 @@ impl Ui<'_> {
       let end = end.as_ref().map_or(0.0, |e| e.get());
       Piece { radii: [corner, corner, end, end], ..piece }.paint(f, at)
     };
-    let style = fs.row.min_h(fs.row.min[1] + top).align(Align::Start, Align::Start);
+    let style = fs.row.min_h(fs.row.min[1] + top).align(Align::Start, Align::Center);
     // The first line's height: the least the controls' slot is, with the padding around it.
     let line_h = self.line_height(fs.label);
 
@@ -599,7 +599,10 @@ impl Ui<'_> {
         }
 
         let (mut name, mut about) = (0..0, 0..0);
-        let col = Style::new().w(grow()).gap(2.0).pads([top + fs.pad_y, 0.0, fs.pad_y, 0.0]);
+        // As high as the row's least height: the label where it was in a row of one line,
+        // centred on the control in a higher one (a slider with tick labels).
+        let col = Style::new().w(grow()).min_h(style.min[1]).gap(2.0);
+        let col = col.pads([top + fs.pad_y, 0.0, fs.pad_y, 0.0]);
         ui.col(col, |ui| {
           ui.row(Style::new().w(grow()).gap(6.0).align(Align::Start, Align::Center), |ui| {
             // A mark on the line sits on the capitals' middle.
@@ -621,12 +624,14 @@ impl Ui<'_> {
         }
 
         // A slot as high as the row, at least the label's first line and the padding around
-        // it, holding the controls centred: on the label and its description, as the tile.
+        // it, holding the controls centred: on the label and its description, as the tile. A
+        // control higher than a button keeps the room a button has over and under it.
+        let room = ((2.0 * fs.pad_y + line_h - t.sizes.control_h) / 2.0).max(0.0);
         let slot = Style::new()
           .w(rigid())
           .h(grow())
           .min_h(top + 2.0 * fs.pad_y + line_h)
-          .pads([top, 0.0, 0.0, 0.0])
+          .pads([top + room, 0.0, room, 0.0])
           .align(Align::End, Align::Center);
         ui.col(slot, |ui| {
           ui.row(Style::new().gap(fs.gap).align(Align::Start, Align::Center), control)

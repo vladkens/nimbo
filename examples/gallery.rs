@@ -16,8 +16,8 @@
 use nimbo::{
   Align, Answer, App, Axes, Axis, Button, ButtonRole, ButtonStyle, Config, ControlSize, Dialog,
   Float, Font, FormRow, FormStyle, Hotkey, Icon, Item, LinePattern, List, ListStyle, Menu, Picker,
-  Section, Selection, Shortcut, Split, Style, Tabs, Tag, TextStyle, Tone, TruncationMode, Ui,
-  UnitPoint, grow, px,
+  Section, Selection, Shortcut, Slider, Split, Style, Tabs, Tag, TextStyle, Tone, TruncationMode,
+  Ui, UnitPoint, grow, px,
 };
 
 pub const SIDEBAR: &str = "sidebar";
@@ -76,6 +76,7 @@ pub const BLOCKS: &[Block] = &[
   b("Controls", "Switch", "Toggle(\"Live\", isOn: $live)", "ui.toggle(&mut self.live, \"Live\")"),
   b("Controls", "Check box", "Toggle(\"Wrap\", isOn: $wrap).toggleStyle(.checkbox)", "ui.checkbox(&mut self.wrap, \"Wrap\")"),
   b("Controls", "Slider", "Slider(value: $zoom, in: 0...200)", "ui.slider(&mut self.zoom, 0.0..=200.0)"),
+  b("Controls", "Slider steps", "Slider(value: $level, in: 10...90, step: 10) { … } tick: { v in SliderTick(v) { … } }", "Slider::new(&mut self.level, 10.0..=90.0).step(10.0).tick_label(|v| (v == 50.0).then(|| \"50%\".into())).show(ui)"),
   b("Controls", "Picker", "Picker(\"Size\", selection: $size) { …; Divider(); … }", "Picker::new(&mut self.size).options(&A).divider().options(&B).show(ui)"),
   b("Controls", "Segmented picker", "Picker(…) { … }.pickerStyle(.segmented)", "ui.segmented(&mut self.view, &[Tag::new(0, \"List\").count(128), Tag::new(1, \"Grid\")])"),
   b("Controls", "Text field", "TextField(\"Name\", text: $name)", "ui.field(&mut self.name, \"Name\")"),
@@ -136,6 +137,7 @@ pub struct Gallery {
   pub live: bool,
   pub wrap: bool,
   pub zoom: f32,
+  pub level: f32,
   pub size: Size,
   pub view: u8,
   pub name: String,
@@ -160,6 +162,7 @@ impl Default for Gallery {
       live: true,
       wrap: false,
       zoom: 60.0,
+      level: 30.0,
       size: Size::Medium,
       view: 0,
       name: "Alex".into(),
@@ -323,6 +326,12 @@ impl Gallery {
       "Slider" => Self::variants(ui, Shown::Plain, |ui| {
         ui.a11y_label("Zoom").slider(&mut self.zoom, 0.0..=200.0);
         ui.text(format_args!("{:.0}%", self.zoom), t.muted().nowrap());
+      }),
+      "Slider steps" => Self::variants(ui, Shown::Plain, |ui| {
+        let label = |v: f32| [10.0, 50.0, 90.0].contains(&v).then(|| format!("{v}%"));
+        let s = Slider::new(&mut self.level, 10.0..=90.0).step(10.0).tick_label(label);
+        s.show(ui.a11y_label("Level"));
+        ui.text(format_args!("{:.0}%", self.level), t.muted().nowrap());
       }),
       "Picker" => Self::variants(ui, Shown::Plain, |ui| {
         let p = Picker::new(&mut self.size).options(&SIZES[..1]).divider();
