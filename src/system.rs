@@ -50,11 +50,11 @@
 //! });
 //! ```
 //!
-//! | | audio inputs, default input | lid |
-//! |---|---|---|
-//! | macOS | CoreAudio's property listeners on the system object | IOPMrootDomain's clamshell message |
-//! | Windows | `IMMNotificationClient` | `GUID_LIDSWITCH_STATE_CHANGE` |
-//! | Linux | PulseAudio's subscription (PipeWire through `pipewire-pulse`) | UPower's `LidIsClosed` |
+//! | | audio inputs, default input | lid | input source |
+//! |---|---|---|---|
+//! | macOS | CoreAudio's property listeners on the system object | IOPMrootDomain's clamshell message | TIS's distributed notifications |
+//! | Windows | `IMMNotificationClient` | `GUID_LIDSWITCH_STATE_CHANGE` | a poll of the layout |
+//! | Linux | PulseAudio's subscription (PipeWire through `pipewire-pulse`) | UPower's `LidIsClosed` | GNOME's GSettings, Plasma's D-Bus |
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -78,12 +78,16 @@ pub enum Change {
   DefaultInput,
   /// The laptop's lid opened or closed ([crate::hardware::lid_closed]).
   Lid,
+  /// The keyboard input source in use changed, or the ones the user can switch to
+  /// ([crate::input_source]).
+  InputSource,
 }
 
-const KINDS: usize = 3;
+const KINDS: usize = 4;
 
 impl Change {
-  const ALL: [Change; KINDS] = [Change::AudioInputs, Change::DefaultInput, Change::Lid];
+  const ALL: [Change; KINDS] =
+    [Change::AudioInputs, Change::DefaultInput, Change::Lid, Change::InputSource];
 
   fn bit(self) -> u32 {
     1 << self as u32

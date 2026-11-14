@@ -278,7 +278,7 @@ mod tests {
   use keyboard_types::{Modifiers, NamedKey};
 
   use super::*;
-  use crate::app::App;
+  use crate::app::{App, Event};
   use crate::harness::Harness;
   use crate::keys::Key;
   use crate::scene::Size;
@@ -375,6 +375,24 @@ mod tests {
     assert!(h.rect(pick.key("menu")).is_none());
     h.key(NamedKey::Enter, Modifiers::empty());
     assert_eq!(h.app().cur, 2);
+  }
+
+  /// The window losing the focus closes an open list, nothing picked, as macOS closes its menus.
+  #[test]
+  fn a_pop_up_closes_when_the_window_loses_the_focus() {
+    let mut h = Harness::new(Pick::default(), Size::new(300.0, 200.0), 1.0);
+    let pick = Id::of("pick");
+    h.frame();
+    h.rt.ui.set_focus(Some(pick));
+    h.key(NamedKey::ArrowDown, Modifiers::empty());
+    h.frame();
+    h.frame();
+    assert!(h.rect(pick.key("menu")).is_some());
+    h.event(Event::Focus(false));
+    h.frame();
+    h.frame();
+    assert!(h.rect(pick.key("menu")).is_none());
+    assert_eq!(h.app().cur, 0);
   }
 
   /// At most 220 wide, a long value ends in "…" there: the row's label keeps its line.

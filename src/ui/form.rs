@@ -607,6 +607,9 @@ impl Ui<'_> {
     let below = if footer.is_none() { fs.pad_y } else { 0.0 };
     let over = top + fs.pad_y - below;
     let line = Style::new().w(grow()).min_h(style.min[1] - fs.pad_y + below).gap(style.gap);
+    // Over a footer, a control taller than the label's line would leave the label above its
+    // middle: the two centre on each other.
+    let line = if footer.is_none() { line } else { line.align(Align::Start, Align::Center) };
     let r = self.disabled_scope(off, |ui| {
       ui.next_id = Some((id, false));
       ui.canvas_col(style.gap(0.0), hairline, |ui| {

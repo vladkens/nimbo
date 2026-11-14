@@ -38,7 +38,8 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub use self::app::{
-  activity, autostart, desktop, focus, hardware, hotkey, open, paste, post, shell, tray, uninstall,
+  activity, autostart, desktop, focus, hardware, hotkey, input_source, open, paste, post, shell,
+  tray, uninstall,
 };
 use self::dl::{Lib, fns};
 use self::input::Input;

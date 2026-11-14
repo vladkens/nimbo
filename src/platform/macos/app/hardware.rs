@@ -3,9 +3,10 @@
 //! Hardware on macOS ([crate::hardware]): an audio device's transport by its UID (CoreAudio's
 //! properties) and the lid (IOPMrootDomain's `AppleClamshellState`, absent on a desktop), and
 //! their changes ([crate::system]): CoreAudio's property listeners on the system object and
-//! IOPMrootDomain's clamshell message. Declared by hand: the objc2 crates for them would add
-//! crates for a few calls, and AppKit loads both frameworks anyway. Constants from MacOSX.sdk 27.0
-//! (`AudioHardware.h`, `IOKitLib.h`, `pwr_mgt/IOPM.h`), read 2026-10-30.
+//! IOPMrootDomain's clamshell message; the input source's in [input_source]. Declared by hand: the
+//! objc2 crates for them would add crates for a few calls, and AppKit loads both frameworks anyway.
+//! Constants from MacOSX.sdk 27.0 (`AudioHardware.h`, `IOKitLib.h`, `pwr_mgt/IOPM.h`), read
+//! 2026-10-30.
 
 use std::cell::Cell;
 use std::ffi::{c_char, c_void};
@@ -16,6 +17,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use dispatch2::{DispatchQueue, DispatchRetained};
 use objc2_core_foundation::{CFBoolean, CFRetained, CFString, CFType};
 
+use super::input_source;
 use crate::hardware;
 use crate::hardware::Transport;
 use crate::system::{Change, notice, refused};
@@ -183,8 +185,10 @@ fn told(selector: u32) -> Option<Change> {
 /// queue, then one change told, as what the app read before it listened may be old (a rare
 /// failure can't come back as `Err`: [crate::system::refused]); or the clamshell.
 pub fn watch(kind: Change) -> Result<(), String> {
-  if kind == Change::Lid {
-    return watch_lid();
+  match kind {
+    Change::Lid => return watch_lid(),
+    Change::InputSource => return input_source::watch(),
+    _ => {}
   }
 
   let Some((i, at)) = address(kind) else { return Err("not on macOS".into()) };
@@ -225,6 +229,8 @@ fn watch_lid() -> Result<(), String> {
 
 /// Stops every listener and the clamshell's notification.
 pub fn unwatch() {
+  input_source::unwatch();
+
   // Nothing was added without the queue: none made for the loop's end.
   let Some(audio) = QUEUE.get() else { return unwatch_lid() };
   audio.exec_async(|| {

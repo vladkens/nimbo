@@ -289,7 +289,8 @@ impl Ui<'_> {
     let on_item = |c: Id| cx.items.iter().any(|&(i, on)| on && i == c);
     let clicked = self.st.input.click.is_some_and(|c| c.id == away || on_item(c.id));
     (st.items, st.labels) = (cx.items, cx.labels);
-    if clicked || cx.ran {
+    // The window losing the focus closes it too, as AppKit's menus close with the app's.
+    if clicked || cx.ran || !self.window_focused() {
       if self.focus_id().is_none_or(|f| f == menu) {
         self.focus(st.prev);
       }

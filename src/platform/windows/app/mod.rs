@@ -15,6 +15,7 @@ pub mod desktop;
 pub mod focus;
 pub mod hardware;
 pub mod hotkey;
+pub mod input_source;
 pub mod menu;
 pub mod open;
 pub mod paste;
