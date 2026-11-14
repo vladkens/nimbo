@@ -4,9 +4,10 @@
 //! GNOME's GSettings `org.gnome.desktop.input-sources` (`sources`, the one in use first in
 //! `mru-sources`, its `changed` signal) and Plasma's `org.kde.keyboard` on the session bus
 //! (`getLayoutsList`, `getLayout`, `layoutChanged`, `layoutListChanged`). A layout's language
-//! and name come from XKB's registry (`evdev.xml`: `shortDescription`, `description`), a
-//! variant's own where GNOME names it (`us+dvorak`); Plasma names only the layout, its variant in
-//! the name it gives. Other desktops (another X11 window manager, Sway, Hyprland) tell none.
+//! and name come from XKB's registry (`evdev.xml`: `languageList`, `description`), a variant's
+//! own where the desktop names it: GNOME in the source (`us+dvorak`), Plasma in its settings
+//! (`kxkbrc`'s `VariantList`). Other desktops (another X11 window manager, Sway, Hyprland) tell
+//! none.
 //!
 //! What they miss: with GNOME's per-window sources (off by default) a source a window brings back
 //! isn't in `mru-sources`, so the last one picked is told; Plasma 5 offers `org.kde.keyboard`
@@ -14,7 +15,7 @@
 
 use std::cell::Cell;
 use std::collections::HashMap;
-use std::ffi::{CStr, c_int};
+use std::ffi::{CStr, c_int, c_ulong};
 use std::ptr::{null, null_mut};
 use std::sync::OnceLock;
 
@@ -22,6 +23,7 @@ use super::super::dbus::{self, Gv, V};
 use super::super::dl::fns;
 use super::super::{Fp, P, S, connect, lib};
 use crate::input_source::{InputSource, primary};
+use crate::paths;
 use crate::system::{Change, notice};
 
 const SCHEMA: &CStr = c"org.gnome.desktop.input-sources";
@@ -37,11 +39,12 @@ fns!(Gio {
   fn g_settings_schema_unref(schema: P);
   fn g_settings_new(id: S) -> P;
   fn g_settings_get_value(settings: P, key: S) -> P;
+  fn g_signal_handler_disconnect(obj: P, id: c_ulong);
 });
 
 thread_local! {
-  /// GNOME's settings while watched, and Plasma's two subscriptions.
-  static WATCH: Cell<Option<(P, u32, u32)>> = const { Cell::new(None) };
+  /// GNOME's `changed` handler while watched, and Plasma's two subscriptions.
+  static WATCH: Cell<Option<(c_ulong, u32, u32)>> = const { Cell::new(None) };
 }
 
 /// Who switches the layouts here.
@@ -68,9 +71,11 @@ pub fn available() -> bool {
 pub fn current() -> Option<InputSource> {
   match desktop()? {
     Desktop::Gnome => {
+      // GNOME saves the recent ones as the user switches: one removed since can lead.
       let (g, settings) = gnome()?;
+      let all = sources(g, settings, c"sources");
       let mru = sources(g, settings, c"mru-sources");
-      mru.into_iter().next().or_else(|| sources(g, settings, c"sources").into_iter().next())
+      mru.into_iter().find(|m| all.iter().any(|s| s.id == m.id)).or_else(|| all.into_iter().next())
     }
     Desktop::Plasma => {
       let bus = dbus::session().ok()?;
@@ -97,19 +102,19 @@ pub fn watch() -> Result<(), String> {
   let watched = match desktop().ok_or("no desktop that tells its keyboard layouts")? {
     Desktop::Gnome => {
       let (g, settings) = gnome().ok_or("no GSettings")?;
-      // SAFETY: the settings live while watched; the callback has `changed`'s signature.
-      unsafe { connect(settings, c"changed", changed as Fp, 0) };
+      // SAFETY: the settings live for good; the callback has `changed`'s signature.
+      let id = unsafe { connect(settings, c"changed", changed as Fp, 0) };
       // GSettings tells a key's change only once the key was read with a handler connected.
       sources(g, settings, c"sources");
       sources(g, settings, c"mru-sources");
-      (settings, 0, 0)
+      (id, 0, 0)
     }
     Desktop::Plasma => {
       let bus = dbus::session()?;
       let sub = |m| {
         dbus::subscribe(bus, KDE, KDE_IFACE, m, Some(KDE_PATH), told as Fp, (null_mut(), null()))
       };
-      (null_mut(), sub("layoutChanged"), sub("layoutListChanged"))
+      (0, sub("layoutChanged"), sub("layoutListChanged"))
     }
   };
 
@@ -118,7 +123,14 @@ pub fn watch() -> Result<(), String> {
 }
 
 pub fn unwatch() {
-  let Some((_, a, b)) = WATCH.take() else { return };
+  let Some((id, a, b)) = WATCH.take() else { return };
+  if id != 0
+    && let Some((g, settings)) = gnome()
+  {
+    // SAFETY: the handler connected by [watch].
+    unsafe { (g.g_signal_handler_disconnect)(settings, id) };
+  }
+
   if let Ok(bus) = dbus::session() {
     for id in [a, b].into_iter().filter(|&id| id != 0) {
       dbus::unsubscribe(bus, id);
@@ -177,17 +189,39 @@ fn sources(g: &Gio, settings: P, key: &CStr) -> Vec<InputSource> {
 }
 
 /// Plasma's layouts: `(short name, display name, long name)`, the short name the layout's alone
-/// (`us` for US Dvorak too), so the long name tells them apart in the id.
+/// (`us` for US Dvorak too), so the long name tells them apart in the id; their variants from
+/// Plasma's settings, in the same order.
 fn plasma(bus: P) -> Vec<InputSource> {
   let Some(reply) = call(bus, "getLayoutsList") else { return Vec::new() };
   let list = reply.child(0);
+  let set = kxkbrc();
   (0..list.len())
-    .map(|i| list.child(i))
-    .map(|l| (l.child(0).str(), l.child(2).str()))
-    .map(|(short, long)| InputSource {
-      id: format!("xkb:{short}:{long}"),
-      ..xkb(&short, Some(long))
+    .map(|i| (i, list.child(i)))
+    .map(|(i, l)| (i, l.child(0).str(), l.child(2).str()))
+    .map(|(i, short, long)| {
+      let var = set.get(i).filter(|(l, v)| *l == short && !v.is_empty());
+      let full = var.map_or_else(|| short.clone(), |(_, v)| format!("{short}({v})"));
+      InputSource { id: format!("xkb:{short}:{long}"), ..xkb(&full, Some(long)) }
     })
+    .collect()
+}
+
+/// Plasma's layouts and their variants as set (`[Layout]`'s `LayoutList=us,ru`,
+/// `VariantList=,phonetic`), the layout empty past the list.
+fn kxkbrc() -> Vec<(String, String)> {
+  layout_lists(&std::fs::read_to_string(paths::config_dir("kxkbrc")).unwrap_or_default())
+}
+
+fn layout_lists(ini: &str) -> Vec<(String, String)> {
+  let list = |key: &str| {
+    let line = ini.lines().find_map(|l| l.trim().strip_prefix(key)?.strip_prefix('='));
+    line.map_or_else(Vec::new, |l| l.split(',').map(|x| x.trim().to_owned()).collect())
+  };
+  let (layouts, variants) = (list("LayoutList"), list("VariantList"));
+  layouts
+    .into_iter()
+    .enumerate()
+    .map(|(i, l)| (l, variants.get(i).cloned().unwrap_or_default()))
     .collect()
 }
 
@@ -205,7 +239,7 @@ fn xkb(name: &str, given: Option<String>) -> InputSource {
 
   let layout = name.split(['+', '(']).next().unwrap_or(name);
   let entry = registry().get(&full).or_else(|| registry().get(layout));
-  let language = entry.and_then(|(short, _)| primary(short));
+  let language = entry.and_then(|e| e.0.clone());
   let named = given.filter(|g| !g.is_empty()).or_else(|| entry.map(|e| e.1.clone()));
   InputSource {
     id: format!("xkb:{name}"),
@@ -214,10 +248,13 @@ fn xkb(name: &str, given: Option<String>) -> InputSource {
   }
 }
 
-/// XKB's layouts and variants by name (`us`, `us(dvorak)`): their short description, the language
-/// they type (`en`, `uk` for `ua`), and their description (`English (Dvorak)`).
-fn registry() -> &'static HashMap<String, (String, String)> {
-  static REGISTRY: OnceLock<HashMap<String, (String, String)>> = OnceLock::new();
+/// A layout's language and description.
+type Entry = (Option<String>, String);
+
+/// XKB's layouts and variants by name (`us`, `us(dvorak)`): the language they type (`en`, `uk` for
+/// `ua`) and their description (`English (Dvorak)`).
+fn registry() -> &'static HashMap<String, Entry> {
+  static REGISTRY: OnceLock<HashMap<String, Entry>> = OnceLock::new();
   REGISTRY.get_or_init(|| {
     let files = ["/usr/share/X11/xkb/rules/evdev.xml", "/usr/share/X11/xkb/rules/base.xml"];
     files
@@ -228,8 +265,9 @@ fn registry() -> &'static HashMap<String, (String, String)> {
 }
 
 /// Each `<layout>`'s own `configItem`, and each of its variants', whose language is the layout's
-/// unless it gives its own.
-fn layouts(xml: &str) -> HashMap<String, (String, String)> {
+/// unless it gives its own: the first of its `languageList`, an ISO 639-3 code (`shortDescription`
+/// is only a label: `be` for Belgian).
+fn layouts(xml: &str) -> HashMap<String, Entry> {
   let tag = |s: &str, t: &str| {
     let (open, close) = (format!("<{t}>"), format!("</{t}>"));
     let at = s.find(&open)? + open.len();
@@ -239,18 +277,45 @@ fn layouts(xml: &str) -> HashMap<String, (String, String)> {
   for block in xml.split("<layout>").skip(1) {
     let (own, variants) = block.split_once("<variantList>").unwrap_or((block, ""));
     let (Some(name), Some(desc)) = (tag(own, "name"), tag(own, "description")) else { continue };
-    let short = tag(own, "shortDescription").unwrap_or_default();
+    let lang = tag(own, "iso639Id").and_then(|c| language(&c));
     for v in variants.split("<variant>").skip(1) {
       let (Some(var), Some(var_desc)) = (tag(v, "name"), tag(v, "description")) else { continue };
-      let var_short = tag(v, "shortDescription").unwrap_or_else(|| short.clone());
-      out.insert(format!("{name}({var})"), (var_short, var_desc));
+      let var_lang = tag(v, "iso639Id").map_or_else(|| lang.clone(), |c| language(&c));
+      out.insert(format!("{name}({var})"), (var_lang, var_desc));
     }
 
-    out.insert(name, (short, desc));
+    out.insert(name, (lang, desc));
   }
 
   out
 }
+
+/// ISO 639-3 code `code` as a language tag's: its two letters where ISO 639-1 has them (`deu`,
+/// `de`), else itself (`prs`); none for `und`.
+fn language(code: &str) -> Option<String> {
+  let two = ISO639_1.as_bytes().chunks(5).find(|c| &c[..3] == code.as_bytes());
+  match two {
+    Some(c) => Some(String::from_utf8_lossy(&c[3..]).into_owned()),
+    None if code == "und" => None,
+    None => primary(code),
+  }
+}
+
+/// Each ISO 639-3 code with ISO 639-1's two letters, as five letters (`deude`), from the
+/// [ISO 639-3 tables](https://iso639-3.sil.org/code_tables/download_tables).
+const ISO639_1: &str = "\
+  aaraaabkabafrafakaakamhamaraararganasmasavaavaveaeaymayazeazbakbabambmbelbebenbn\
+  bisbibodbobosbsbrebrbulbgcatcacescschachchecechucuchvcvcorkwcoscocrecrcymcydanda\
+  deudedivdvdzodzellelengenepoeoesteteuseueweeefaofofasfafijfjfinfifrafrfryfyfulff\
+  glagdglegaglgglglvgvgrngngujguhaththauhahbsshhebheherhzhinhihmohohrvhrhunhuhyehy\
+  iboigidoioiiiiiikuiuileieinaiaindidipkikislisitaitjavjvjpnjakalklkanknkaskskatka\
+  kaukrkazkkkhmkmkikkikinrwkirkykomkvkonkgkorkokuakjkurkulaololatlalavlvlimlilinln\
+  litltltzlblubluluglgmahmhmalmlmarmrmkdmkmlgmgmltmtmonmnmrimimsamsmyamynaunanavnv\
+  nblnrndendndongnepnenldnlnnonnnobnbnornonyanyociocojiojoriorormomossospanpaplipi\
+  polplporptpuspsquequrohrmronrorunrnrusrusagsgsansasinsislkskslvslsmesesmosmsnasn\
+  sndsdsomsosotstspaessqisqsrdscsrpsrsswsssunsuswaswswesvtahtytamtatatttteltetgktg\
+  tgltlthathtirtitontotsntntsotstuktkturtrtwitwuigugukrukurduruzbuzvenvevievivolvo\
+  wlnwawolwoxhoxhyidyiyoryozhazazhozhzulzu";
 
 #[cfg(test)]
 mod tests {
@@ -258,15 +323,39 @@ mod tests {
 
   #[test]
   fn the_registry_gives_a_layouts_language_and_name() {
-    let xml = "<layoutList><layout><configItem><name>ua</name><shortDescription>uk</shortDescription>\
-      <description>Ukrainian</description></configItem><variantList><variant><configItem>\
-      <name>phonetic</name><description>Ukrainian (phonetic)</description></configItem></variant>\
-      </variantList></layout><layout><configItem><name>us</name><shortDescription>en</shortDescription>\
-      <description>English (US)</description></configItem></layout></layoutList>";
+    let xml = "<layoutList><layout><configItem><name>be</name><shortDescription>be</shortDescription>\
+      <description>Belgian</description><languageList><iso639Id>deu</iso639Id><iso639Id>nld\
+      </iso639Id></languageList></configItem><variantList><variant><configItem><name>oss</name>\
+      <description>Belgian (alt.)</description></configItem></variant></variantList></layout>\
+      <layout><configItem><name>us</name><shortDescription>en</shortDescription><description>\
+      English (US)</description><languageList><iso639Id>eng</iso639Id></languageList>\
+      </configItem><variantList><variant><configItem><name>rus</name><description>Russian (US, \
+      phonetic)</description><languageList><iso639Id>rus</iso639Id></languageList></configItem>\
+      </variant></variantList></layout><layout><configItem><name>brai</name><description>Braille\
+      </description></configItem></layout></layoutList>";
     let got = layouts(xml);
-    assert_eq!(got["ua"], ("uk".into(), "Ukrainian".into()));
-    assert_eq!(got["ua(phonetic)"], ("uk".into(), "Ukrainian (phonetic)".into()));
-    assert_eq!(got["us"], ("en".into(), "English (US)".into()));
-    assert_eq!(got.len(), 3);
+    let lang = |s: &str| Some(s.to_owned());
+    assert_eq!(got["be"], (lang("de"), "Belgian".into()));
+    assert_eq!(got["be(oss)"], (lang("de"), "Belgian (alt.)".into()));
+    assert_eq!(got["us"], (lang("en"), "English (US)".into()));
+    assert_eq!(got["us(rus)"], (lang("ru"), "Russian (US, phonetic)".into()));
+    assert_eq!(got["brai"], (None, "Braille".into()));
+    assert_eq!(got.len(), 5);
+  }
+
+  #[test]
+  fn an_iso_639_3_code_is_a_tags_language() {
+    let cases = [("deu", Some("de")), ("zho", Some("zh")), ("prs", Some("prs")), ("und", None)];
+    for (code, want) in cases {
+      assert_eq!(language(code).as_deref(), want, "{code}");
+    }
+  }
+
+  #[test]
+  fn plasmas_settings_give_each_layouts_variant() {
+    let ini = "[Layout]\nDisplayNames=,\nLayoutList=us,ru\nUse=true\nVariantList=,phonetic\n";
+    let want = [("us".into(), String::new()), ("ru".into(), "phonetic".into())];
+    assert_eq!(layout_lists(ini), want);
+    assert!(layout_lists("").is_empty());
   }
 }

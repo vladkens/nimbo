@@ -7,7 +7,7 @@
 //! Windows tells no other app of a switch, so a thread of its own looks every [POLL] while they are
 //! watched ([crate::system]).
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -26,7 +26,9 @@ use crate::system::{Change, notice};
 /// How often a watch looks: a switch reaches the app within this and the system's settle.
 const POLL: Duration = Duration::from_millis(200);
 
-static WATCHED: AtomicBool = AtomicBool::new(false);
+/// The watch going on, odd while watched: a poll stops once it moves on, so a watch started again
+/// before the last poll woke runs alone.
+static WATCH: AtomicU32 = AtomicU32::new(0);
 
 pub fn available() -> bool {
   true
@@ -48,17 +50,20 @@ pub fn enabled() -> Vec<InputSource> {
   out
 }
 
-/// Starts the poll (on the main thread): a change of the layout in use or of the list.
+/// Starts the poll (on the main thread): a change of the layout in use or of the list, from what
+/// they are as it starts.
 pub fn watch() -> Result<(), String> {
-  if WATCHED.swap(true, Ordering::AcqRel) {
+  let at = WATCH.load(Ordering::Acquire);
+  if at % 2 == 1 {
     return Ok(());
   }
 
-  let spawn = thread::Builder::new().name("nimbo-input-source".into()).spawn(|| {
-    let mut last = (layout(), layouts());
-    while WATCHED.load(Ordering::Acquire) {
+  WATCH.store(at + 1, Ordering::Release);
+  let mut last = state();
+  let spawn = thread::Builder::new().name("nimbo-input-source".into()).spawn(move || {
+    while WATCH.load(Ordering::Acquire) == at + 1 {
       thread::sleep(POLL);
-      let now = (layout(), layouts());
+      let now = state();
       if now != last {
         last = now;
         notice(Change::InputSource);
@@ -66,7 +71,7 @@ pub fn watch() -> Result<(), String> {
     }
   });
   if let Err(e) = spawn {
-    WATCHED.store(false, Ordering::Release);
+    WATCH.store(at + 2, Ordering::Release);
     return Err(e.to_string());
   }
 
@@ -74,7 +79,15 @@ pub fn watch() -> Result<(), String> {
 }
 
 pub fn unwatch() {
-  WATCHED.store(false, Ordering::Release);
+  let at = WATCH.load(Ordering::Acquire);
+  if at % 2 == 1 {
+    WATCH.store(at + 1, Ordering::Release);
+  }
+}
+
+/// The layout in use, then the list, as numbers: a thread of its own keeps them.
+fn state() -> Vec<usize> {
+  std::iter::once(layout()).chain(layouts()).map(|h| h as usize).collect()
 }
 
 /// The foreground window's thread's layout, else this thread's.

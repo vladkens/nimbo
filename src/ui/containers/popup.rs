@@ -390,7 +390,6 @@ mod tests {
     assert!(h.rect(pick.key("menu")).is_some());
     h.event(Event::Focus(false));
     h.frame();
-    h.frame();
     assert!(h.rect(pick.key("menu")).is_none());
     assert_eq!(h.app().cur, 0);
   }

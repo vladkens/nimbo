@@ -174,15 +174,16 @@ fn gtk() -> &'static Gtk {
   load().expect("GTK is loaded before its callbacks run")
 }
 
-/// Connects `cb` to `obj`'s `signal`, with no data: [with] finds the window the event is for.
-unsafe fn connect(obj: P, signal: &CStr, cb: Fp, flags: c_int) {
-  unsafe { connect_id(obj, signal, cb, flags, 0) };
+/// Connects `cb` to `obj`'s `signal`, with no data: [with] finds the window the event is for. The
+/// handler's id.
+unsafe fn connect(obj: P, signal: &CStr, cb: Fp, flags: c_int) -> c_ulong {
+  unsafe { connect_id(obj, signal, cb, flags, 0) }
 }
 
 /// Connects `cb` to `obj`'s `signal` with window `id` as its data ([as_window]).
-unsafe fn connect_id(obj: P, signal: &CStr, cb: Fp, flags: c_int, id: u64) {
+unsafe fn connect_id(obj: P, signal: &CStr, cb: Fp, flags: c_int, id: u64) -> c_ulong {
   let data = id as usize as P;
-  unsafe { (gtk().g_signal_connect_data)(obj, signal.as_ptr(), cb, data, null(), flags) };
+  unsafe { (gtk().g_signal_connect_data)(obj, signal.as_ptr(), cb, data, null(), flags) }
 }
 
 /// The performance cores: Intel hybrid CPUs list theirs in `/sys/devices/cpu_core/cpus`
