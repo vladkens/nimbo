@@ -17,6 +17,7 @@ mod grab;
 pub(super) mod gtk_menu;
 pub mod hardware;
 pub mod hotkey;
+pub mod input_source;
 mod menu;
 pub mod open;
 pub mod paste;

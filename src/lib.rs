@@ -20,12 +20,12 @@
 //! ([desktop]), alerts ([Main::alert]), its command line's console on Windows
 //! ([attach_console]) and an uninstall that undoes what nimbo set up ([uninstall]); and to reach
 //! other apps: links and files opened or shown ([open]), the OS's permissions ([permissions]),
-//! where the user types ([focus]), keys posted to the app in focus ([keys::post]), the clipboard,
-//! also taken and put back around a paste of the app's own ([SystemClipboard]), and that paste
-//! itself, which gives the clipboard back ([paste]); photos decoded by the OS at the size they show
-//! ([Bitmap]); and the hardware: how a microphone is attached and the laptop's lid ([hardware]),
-//! and the system's changes, such as a microphone plugged or the lid closed, as they come
-//! ([system], [Main::watch]).
+//! where the user types ([focus]) and with which keyboard layout ([input_source]), keys posted to
+//! the app in focus ([keys::post]), the clipboard, also taken and put back around a paste of the
+//! app's own ([SystemClipboard]), and that paste itself, which gives the clipboard back ([paste]);
+//! photos decoded by the OS at the size they show ([Bitmap]); and the hardware: how a microphone is
+//! attached and the laptop's lid ([hardware]), and the system's changes, such as a microphone
+//! plugged or the lid closed, as they come ([system], [Main::watch]).
 //!
 //! macOS 11 is the least it runs on, rustc's default deployment target, so an app sets none;
 //! newer APIs are used where the system has them (the activation, the display link and menu
@@ -43,6 +43,7 @@ pub mod focus;
 pub mod hardware;
 pub mod harness;
 pub mod hotkey;
+pub mod input_source;
 pub mod instance;
 pub mod keys;
 mod menu;

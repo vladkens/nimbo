@@ -26,6 +26,7 @@ use windows_sys::core::{GUID, HRESULT, PCWSTR};
 
 use super::super::text::{Com, call, iid, out};
 use super::super::{files, wide};
+use super::input_source;
 use crate::hardware;
 use crate::hardware::Transport;
 use crate::system::{Change, notice};
@@ -202,6 +203,7 @@ pub fn watch(kind: Change) -> Result<(), String> {
   match kind {
     Change::AudioInputs | Change::DefaultInput => watch_audio(),
     Change::Lid => watch_lid(),
+    Change::InputSource => input_source::watch(),
   }
 }
 
@@ -257,6 +259,7 @@ pub fn unwatch() {
   }
 
   LID.store(UNKNOWN, Ordering::Release);
+  input_source::unwatch();
 }
 
 /// `WM_POWERBROADCAST`'s `PBT_POWERSETTINGCHANGE` to the shell's window: the lid's state kept,

@@ -17,6 +17,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use super::super::dbus::{self, Gv};
 use super::super::dl::{Lib, fns};
 use super::super::{Fp, P, S};
+use super::input_source;
 use crate::hardware::Transport;
 use crate::system::{Change, notice, refused};
 
@@ -43,6 +44,7 @@ pub fn watch(kind: Change) -> Result<(), String> {
   match kind {
     Change::AudioInputs | Change::DefaultInput => watch_audio(),
     Change::Lid => watch_lid(),
+    Change::InputSource => input_source::watch(),
   }
 }
 
@@ -55,6 +57,7 @@ pub fn unwatch() {
   }
 
   unwatch_audio();
+  input_source::unwatch();
 }
 
 // MARK: Lid

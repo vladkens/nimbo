@@ -214,6 +214,8 @@ impl Ui<'_> {
       self.grab_keys(menu);
     }
 
+    // The window losing the focus closes it too, as AppKit's menus close with the app's.
+    close |= !self.window_focused();
     if !st.open || close {
       if st.open && self.focus_id().is_none_or(|f| f == menu) {
         self.focus(st.prev);

@@ -50,11 +50,11 @@
 //! });
 //! ```
 //!
-//! | | audio inputs, default input | lid |
-//! |---|---|---|
-//! | macOS | CoreAudio's property listeners on the system object | IOPMrootDomain's clamshell message |
-//! | Windows | `IMMNotificationClient` | `GUID_LIDSWITCH_STATE_CHANGE` |
-//! | Linux | PulseAudio's subscription (PipeWire through `pipewire-pulse`) | UPower's `LidIsClosed` |
+//! | | audio inputs, default input | lid | input source |
+//! |---|---|---|---|
+//! | macOS | CoreAudio's property listeners on the system object | IOPMrootDomain's clamshell message | TIS's distributed notifications |
+//! | Windows | `IMMNotificationClient` | `GUID_LIDSWITCH_STATE_CHANGE` | a poll of the layout |
+//! | Linux | PulseAudio's subscription (PipeWire through `pipewire-pulse`) | UPower's `LidIsClosed` | GNOME's GSettings, Plasma's D-Bus |
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -78,12 +78,17 @@ pub enum Change {
   DefaultInput,
   /// The laptop's lid opened or closed ([crate::hardware::lid_closed]).
   Lid,
+  /// The keyboard input source in use changed, or the ones the user can switch to
+  /// ([crate::input_source]).
+  InputSource,
 }
 
-const KINDS: usize = 3;
+const KINDS: usize = Change::ALL.len();
 
 impl Change {
-  const ALL: [Change; KINDS] = [Change::AudioInputs, Change::DefaultInput, Change::Lid];
+  /// Every kind, in the enum's order: a new kind goes here too.
+  const ALL: &[Change] =
+    &[Change::AudioInputs, Change::DefaultInput, Change::Lid, Change::InputSource];
 
   fn bit(self) -> u32 {
     1 << self as u32
@@ -158,7 +163,7 @@ impl Watcher {
     self.scheduled.swap(false, Ordering::AcqRel);
     let pending = self.pending.load(Ordering::Acquire);
     let (mut ready, mut wait) = (Vec::new(), None::<Duration>);
-    for kind in Change::ALL.into_iter().filter(|k| pending & k.bit() != 0) {
+    for kind in Change::ALL.iter().copied().filter(|k| pending & k.bit() != 0) {
       let i = kind as usize;
       let (first, last) =
         (self.first[i].load(Ordering::Acquire), self.last[i].load(Ordering::Acquire));
@@ -256,7 +261,7 @@ pub(crate) fn watch(kinds: &[Change]) -> Result<(), String> {
 /// Stops watching everything: the loop ends.
 pub(crate) fn unwatch() {
   imp::unwatch();
-  for kind in Change::ALL {
+  for &kind in Change::ALL {
     WATCHER.unwatch(kind);
   }
 
@@ -277,6 +282,14 @@ mod tests {
   use super::*;
 
   const MS: u64 = 1_000_000;
+
+  /// [Change::ALL] in the enum's order: a kind's index is its bit and its slot.
+  #[test]
+  fn every_kind_is_at_its_index() {
+    for (i, &kind) in Change::ALL.iter().enumerate() {
+      assert_eq!(kind as usize, i, "{kind:?}");
+    }
+  }
 
   fn watcher(kinds: &[Change]) -> Watcher {
     let w = Watcher::new();

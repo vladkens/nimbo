@@ -148,6 +148,9 @@
 //! - macOS only, `pub mod permissions` ([crate::permissions]): `accessibility(prompt: bool) ->
 //!   bool`, `secure_input() -> bool`, `microphone() -> Access`, `request_microphone(Box<dyn
 //!   FnOnce(bool) + Send>)`.
+//! - `pub mod input_source` ([crate::input_source]), on the main thread: `available() -> bool`,
+//!   `current() -> Option<InputSource>`, `enabled() -> Vec<InputSource>`, and `watch() ->
+//!   Result<(), String>` / `unwatch()` for `hardware`'s [crate::system::Change::InputSource].
 //!
 //! - `pub mod hardware` ([crate::hardware]), from any thread: `transport(id: &str) -> Transport`,
 //!   an audio device's by the id cpal gives (macOS the CoreAudio UID, its transport type to
@@ -242,8 +245,8 @@ pub(crate) use imp::permissions;
 #[cfg(target_os = "linux")]
 pub(crate) use imp::startup_complete;
 pub(crate) use imp::{
-  activity, autostart, clipboard, desktop, focus, hardware, hotkey, image, open, paste, perf_cores,
-  post, shell, text, tray, uninstall,
+  activity, autostart, clipboard, desktop, focus, hardware, hotkey, image, input_source, open,
+  paste, perf_cores, post, shell, text, tray, uninstall,
 };
 #[cfg(target_os = "windows")]
 pub(crate) use imp::{attach_console, downloads};

@@ -7,8 +7,9 @@
 //! maps keys anew under Cmd ("Dvorak – QWERTY ⌘" types QWERTY's letters then) gives that
 //! mapping, which `charactersIgnoringModifiers` drops.
 //!
-//! Text Input Sources (HIToolbox) and `UCKeyTranslate` (CarbonCore), declared here: the objc2
-//! crates don't cover them.
+//! Text Input Sources (HIToolbox) and `UCKeyTranslate` (CarbonCore), declared here, for
+//! [super::app::input_source] too: the objc2 crates don't cover them. Names from MacOSX.sdk 27.0
+//! (`TextInputSources.h`).
 
 use std::ffi::c_void;
 
@@ -16,14 +17,24 @@ use keyboard_types::Code;
 
 use crate::keys;
 
-type CFTypeRef = *const c_void;
+pub(super) type CFTypeRef = *const c_void;
 
 #[link(name = "Carbon", kind = "framework")]
 unsafe extern "C" {
   static kTISPropertyUnicodeKeyLayoutData: CFTypeRef;
+  pub(super) static kTISPropertyInputSourceID: CFTypeRef;
+  pub(super) static kTISPropertyLocalizedName: CFTypeRef;
+  pub(super) static kTISPropertyInputSourceLanguages: CFTypeRef;
+  pub(super) static kTISPropertyInputSourceCategory: CFTypeRef;
+  pub(super) static kTISPropertyInputSourceIsSelectCapable: CFTypeRef;
+  pub(super) static kTISCategoryKeyboardInputSource: CFTypeRef;
+  pub(super) static kTISNotifySelectedKeyboardInputSourceChanged: CFTypeRef;
+  pub(super) static kTISNotifyEnabledKeyboardInputSourcesChanged: CFTypeRef;
   fn TISCopyCurrentASCIICapableKeyboardLayoutInputSource() -> CFTypeRef;
   fn TISCopyCurrentKeyboardLayoutInputSource() -> CFTypeRef;
-  fn TISGetInputSourceProperty(src: CFTypeRef, key: CFTypeRef) -> CFTypeRef;
+  pub(super) fn TISCopyCurrentKeyboardInputSource() -> CFTypeRef;
+  pub(super) fn TISCreateInputSourceList(filter: CFTypeRef, all_installed: u8) -> CFTypeRef;
+  pub(super) fn TISGetInputSourceProperty(src: CFTypeRef, key: CFTypeRef) -> CFTypeRef;
   fn LMGetKbdType() -> u8;
   fn UCKeyTranslate(
     layout: *const c_void,
@@ -209,12 +220,6 @@ mod tests {
   use objc2_core_foundation::{CFDictionary, CFRetained, CFString};
 
   use super::*;
-
-  #[link(name = "Carbon", kind = "framework")]
-  unsafe extern "C" {
-    static kTISPropertyInputSourceID: CFTypeRef;
-    fn TISCreateInputSourceList(filter: CFTypeRef, all_installed: u8) -> CFTypeRef;
-  }
 
   #[link(name = "CoreFoundation", kind = "framework")]
   unsafe extern "C" {
