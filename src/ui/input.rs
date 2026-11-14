@@ -150,25 +150,103 @@ pub(crate) fn hit(t: &Tree, p: Point, out: &mut Vec<Id>) {
   }
 }
 
-/// Whether a press at `p` moves the window: the topmost interactive node there drags it
-/// ([super::Ui::drags_window]).
+/// Whether a press at `p` moves the window ([super::Ui::drags_window]): it is on an element that
+/// drags it, shown there, and the pointer reaches nothing else there ([top]): neither an overlay
+/// over it nor anything built inside it that doesn't drag the window itself.
 pub(crate) fn drags_window(t: &Tree, p: Point) -> bool {
-  top(t, p).is_some_and(|i| t.drags.binary_search(&i).is_ok())
+  let own = |i: u32| t.drags.binary_search(&i).is_ok();
+  bar_layer(t, p).is_some() && top(t, p).is_none_or(own)
 }
 
-/// The topmost interactive node under `p`: overlays from the top by z, then the tree; none
-/// outside the window (a release after a drag out of it), where nothing shows.
+/// The highest paint layer of the elements that drag the window shown at `p` ([layer]); `None`
+/// where there is none. A bar reaches a point past its sides, so two columns' bars are one over
+/// the divider between them.
+fn bar_layer(t: &Tree, p: Point) -> Option<Option<usize>> {
+  let reach = |r: Rect| Rect::new(r.x - 1.0, r.y, r.w + 2.0, r.h).contains(p);
+  let bars = t.drags.iter().filter(|&&d| reach(t.nodes[d as usize].rect) && shown_at(t, d, p));
+  bars.map(|&d| layer(t, d)).max()
+}
+
+/// The overlay node `i` is in, by its place in the paint order; `None` for the tree under them.
+fn layer(t: &Tree, i: u32) -> Option<usize> {
+  let mut k = i;
+  while k != 0 && t.nodes[k as usize].float.is_none() {
+    k = t.nodes[k as usize].parent;
+  }
+
+  t.floats.iter().position(|&f| f == k)
+}
+
+/// Whether node `a` is `i` or one of its ancestors.
+fn holds(t: &Tree, a: u32, i: u32) -> bool {
+  let mut k = i;
+  loop {
+    if k == a {
+      return true;
+    }
+
+    if k == 0 {
+      return false;
+    }
+
+    k = t.nodes[k as usize].parent;
+  }
+}
+
+/// Whether node `i` shows at `p`, a point of its rect: inside every clip around it, up to an
+/// overlay that draws outside its ancestors' clips.
+fn shown_at(t: &Tree, i: u32, p: Point) -> bool {
+  let mut k = i;
+  while k != 0 {
+    let n = &t.nodes[k as usize];
+    if n.float.is_some_and(|f| !f.clip) {
+      return true;
+    }
+
+    k = n.parent;
+    let a = &t.nodes[k as usize];
+    if a.style.clip_rect(a.rect).is_some_and(|c| !c.contains(p)) {
+      return false;
+    }
+  }
+
+  true
+}
+
+/// The topmost interactive node the pointer reaches at `p`, for its hover, cursor and presses. An
+/// element that moves the window ([super::Ui::drags_window]: a unified window's title bar) is a
+/// layer over the content, as AppKit's title bar is: where it shows, only what is built inside
+/// it (its toolbar's items) and the overlays over it (an open menu's backdrop) are reached; the
+/// content under it is not, and a press there moves the window.
 fn top(t: &Tree, p: Point) -> Option<u32> {
+  let i = under(t, p, false)?;
+  let Some(bar) = bar_layer(t, p) else { return Some(i) };
+  let inside = t.drags.iter().any(|&d| holds(t, d, i));
+  (inside || layer(t, i) > bar).then_some(i)
+}
+
+/// The topmost interactive node under `p`, the bars aside: overlays from the top by z, then the
+/// tree; none outside the window (a release after a drag out of it), where nothing shows. The
+/// wheel scrolls what is under it, under a title bar too: `through_bars` passes over the title
+/// bar and its items to the content under them.
+fn under(t: &Tree, p: Point, through_bars: bool) -> Option<u32> {
   if t.nodes.len() <= 1 || !t.nodes[0].rect.contains(p) {
     return None;
   }
 
+  let keep = |i: u32| !through_bars || !in_bar(t, i);
   t.floats
     .iter()
     .rev()
     .filter(|&&f| t.float_clip(f).is_none_or(|c| c.contains(p)))
-    .find_map(|&f| top_in(t, f, p))
-    .or_else(|| top_in(t, 0, p))
+    .find_map(|&f| top_in(t, f, p, keep))
+    .or_else(|| top_in(t, 0, p, keep))
+}
+
+/// Whether node `i` is part of an element that moves the window (a title bar, its items), in its
+/// layer: an overlay opened from an item (a menu) is not.
+fn in_bar(t: &Tree, i: u32) -> bool {
+  t.drags.iter().any(|&d| holds(t, d, i) && layer(t, d) == layer(t, i))
 }
 
 /// The scroll containers a wheel at `p` moves, innermost first: those around the topmost
@@ -176,7 +254,7 @@ fn top(t: &Tree, p: Point) -> Option<u32> {
 /// under it.
 fn scroll_chain(t: &Tree, p: Point, out: &mut Vec<Id>) {
   out.clear();
-  let Some(mut i) = top(t, p) else { return };
+  let Some(mut i) = under(t, p, true) else { return };
   loop {
     let n = &t.nodes[i as usize];
     if scrolls(n) {
@@ -191,16 +269,16 @@ fn scroll_chain(t: &Tree, p: Point, out: &mut Vec<Id>) {
   }
 }
 
-/// The last interactive node in paint order under `p` in the subtree at `root`, leaving out
-/// overlays nested in it.
-fn top_in(t: &Tree, root: u32, p: Point) -> Option<u32> {
+/// The last interactive node in paint order under `p` in the subtree at `root` that `keep` keeps,
+/// leaving out overlays nested in it.
+fn top_in(t: &Tree, root: u32, p: Point, keep: impl Fn(u32) -> bool) -> Option<u32> {
   let end = t.nodes[root as usize].end;
   let (a, b) = (t.hits.partition_point(|&i| i < root), t.hits.partition_point(|&i| i < end));
   t.hits[a..b]
     .iter()
     .rev()
     .copied()
-    .find(|&i| t.nodes[i as usize].rect.contains(p) && reaches(t, i, root, p))
+    .find(|&i| t.nodes[i as usize].rect.contains(p) && reaches(t, i, root, p) && keep(i))
 }
 
 /// Whether `p` on node `i` gets through every clip up to `root`, with no overlay between.

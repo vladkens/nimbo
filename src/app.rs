@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use keyboard_types::{Code, Modifiers};
 
+use crate::TitleBar;
 use crate::file_dialog::FileDialog;
 use crate::keys::{Binding, Command, Extent, KeyEvent, Move};
 use crate::scene::{Color, Frame, Images, Point, Rect, Scene, Size};
@@ -562,15 +563,26 @@ impl<A: App> Runtime<A> {
 
   /// Whether a press at `p` moves the window ([crate::Ui::drags_window]): the platform then
   /// moves it (or zooms it on a double-click) instead of sending the press.
-  #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
   pub fn drags_window(&self, p: Point) -> bool {
     drags_window(&self.ui.last, p)
   }
 
-  /// The height of the title bar over the content and the window's title ([Ui::titlebar]), for
-  /// a unified window ([crate::Config::unified]); the platform's.
-  pub fn set_titlebar(&mut self, bar: Option<(f32, &'static str)>) {
+  /// The title bar over the content ([Ui::titlebar]), for a unified window
+  /// ([crate::Config::unified]), as the platform has it now; a change asks for a frame.
+  pub fn set_titlebar(&mut self, bar: Option<TitleBar>) {
+    let changed = self.ui.titlebar != bar;
     self.ui.titlebar = bar;
+    self.ask(changed);
+  }
+
+  pub fn titlebar(&self) -> Option<TitleBar> {
+    self.ui.titlebar
+  }
+
+  /// Whether the last frame built a toolbar ([Ui::toolbar]): under a title bar, the platform
+  /// gives the bar a toolbar's height (macOS an empty `NSToolbar`).
+  pub fn toolbar(&self) -> bool {
+    self.ui.toolbar
   }
 
   /// The file panel the app asked for ([Ui::file_dialog]), once: the platform shows it over the

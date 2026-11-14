@@ -20,6 +20,7 @@ mod overlay;
 pub mod shell;
 mod surface;
 pub mod text;
+mod titlebar;
 
 use std::cell::Cell;
 use std::sync::mpsc;

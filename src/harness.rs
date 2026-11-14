@@ -18,10 +18,18 @@ use crate::scene::{Point, Rect, Size};
 use crate::text::TextSystem;
 use crate::text::edit::{Editor, utf16_len};
 use crate::ui::{A11yTree, Action, Cursor, Id, Kind, Role, Scroll, TextInput};
-use crate::{cpu, png};
+use crate::{TitleBar, cpu, png};
 
 /// A display refresh at 120 Hz, the step of [Harness::wait].
 pub const TICK: Duration = Duration::from_nanos(8_333_333);
+
+/// macOS's title bar over a unified window's content, measured on macOS 27: 32 high with the
+/// traffic lights (three of 14, 9 apart) 9 from the top-left corner; with a toolbar
+/// ([crate::Ui::toolbar]) 52 high, the lights 19 in, centred on it.
+pub fn mac_titlebar(title: &'static str, toolbar: bool) -> TitleBar {
+  let (height, at) = if toolbar { (52.0, 19.0) } else { (32.0, 9.0) };
+  TitleBar { height, title, buttons: Some(Rect::new(at, at, 60.0, 14.0)) }
+}
 
 /// Runs an app headless: scripted input in, app state, the last frame's elements and rendered
 /// pixels out, all from the public API, so the frame's internals can change under the tests.
@@ -57,11 +65,18 @@ impl<A: App> Harness<A> {
     self.rt.ui.os = os;
   }
 
-  /// Plays the window's title bar over the content ([crate::Config::unified]): its height and
-  /// the window's title, which [crate::Ui::titlebar] reports; the next frame shows it.
-  pub fn set_titlebar(&mut self, bar: Option<(f32, &'static str)>) {
+  /// Plays the window's title bar over the content ([crate::Config::unified]), which
+  /// [crate::Ui::titlebar] reports; the next frame shows it. One played as macOS's
+  /// ([mac_titlebar]) gets a toolbar's height as the view builds one, as a window does.
+  pub fn set_titlebar(&mut self, bar: Option<TitleBar>) {
     self.rt.set_titlebar(bar);
     self.rt.redraw();
+  }
+
+  /// Whether a press at `x`, `y` moves the window instead of reaching the app, as a window asks
+  /// before it sends one ([crate::Ui::drags_window]).
+  pub fn drags_window(&self, x: f32, y: f32) -> bool {
+    self.rt.drags_window(Point::new(x, y))
   }
 
   /// Renders transparent where the app draws nothing, as an overlay's window does
@@ -391,7 +406,7 @@ impl<A: App> Harness<A> {
   fn build(&mut self) -> bool {
     let mut again = self.rt.frame();
     self.cpu.sync(&mut self.rt.text, &mut self.rt.images);
-    if self.apply_resize() {
+    if self.apply_resize() | self.apply_toolbar() {
       again = self.rt.frame();
       self.cpu.sync(&mut self.rt.text, &mut self.rt.images);
     }
@@ -404,6 +419,20 @@ impl<A: App> Harness<A> {
     let Some(size) = self.rt.take_resize() else { return false };
     let scale = self.rt.scale;
     self.rt.resize(size, scale);
+    true
+  }
+
+  /// Gives a title bar played as macOS's a toolbar's height when the view built a toolbar, and
+  /// back without one, as a window does; returns whether it changed.
+  fn apply_toolbar(&mut self) -> bool {
+    let Some(bar) = self.rt.titlebar() else { return false };
+    let mac = mac_titlebar(bar.title, self.rt.toolbar());
+    let played = [false, true].map(|t| mac_titlebar(bar.title, t)).contains(&bar);
+    if !played || bar == mac {
+      return false;
+    }
+
+    self.rt.set_titlebar(Some(mac));
     true
   }
 

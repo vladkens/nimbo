@@ -799,8 +799,10 @@ impl Ui<'_> {
     let mut r = Response::default();
     self.next_id = Some((id.key("head"), false));
     self.col(head, |ui| {
-      if let Some((h, title)) = titlebar {
-        ui.row(Style::new().w(grow()).h(px(h)).center().clip(), |ui| ui.text(title, fs.title));
+      if let Some(bar) = titlebar {
+        let line = Style::new().w(grow()).h(px(bar.height)).center().clip();
+        ui.row(line, |ui| ui.text(bar.title, fs.title));
+        // Beside the tabs the bar of them moves the window too.
         ui.drags_window();
       }
 
@@ -862,7 +864,7 @@ mod tests {
 
   use super::*;
   use crate::app::App;
-  use crate::harness::Harness;
+  use crate::harness::{Harness, mac_titlebar};
   use crate::keys::Key;
   use crate::scene::{Point, Size};
   use crate::ui::layout::Kind;
@@ -1428,7 +1430,7 @@ mod tests {
     }
 
     let mut h = Harness::new(Unnamed, Size::new(200.0, 120.0), 1.0);
-    h.rt.set_titlebar(Some((32.0, "Preferences")));
+    h.rt.set_titlebar(Some(mac_titlebar("Preferences", false)));
     h.frame();
     assert!(h.rt.drags_window(Point::new(5.0, 16.0)));
   }
@@ -1449,7 +1451,7 @@ mod tests {
   #[test]
   fn under_its_own_title_bar_the_toolbar_has_the_title_and_drags_the_window() {
     let mut h = Harness::new(Bar(false), Size::new(300.0, 120.0), 2.0);
-    h.rt.set_titlebar(Some((32.0, "Preferences")));
+    h.rt.set_titlebar(Some(mac_titlebar("Preferences", false)));
     h.frame();
     let tab = h.rect(Id::of("bar").key(1)).unwrap();
     assert_eq!(tab.y, 32.0, "the tabs right under the title bar");

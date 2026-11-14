@@ -34,7 +34,7 @@ use objc2_foundation::{
 
 pub use super::app::{alert, is_main, post, send, set_presence};
 use super::view::View;
-use super::{Pasteboard, activate, appearance, mtm, overlay};
+use super::{Pasteboard, activate, appearance, mtm, overlay, titlebar};
 use crate::app::{App, Clock, Event, Runtime};
 use crate::shell::{Anchor, AppInfo, Main, Presence};
 use crate::{Config, shell};
@@ -316,9 +316,37 @@ define_class!(
       }
     }
 
+    /// A toolbar hides before full screen, where AppKit would show it over the content
+    /// ([titlebar]); after, or when full screen failed, the next frame shows it again.
+    #[unsafe(method(windowWillEnterFullScreen:))]
+    fn will_enter_full_screen(&self, _note: &NSNotification) {
+      if let Some(window) = window(self.ivars().id.get()) {
+        titlebar::sync(&window, false);
+      }
+    }
+
+    #[unsafe(method(windowDidExitFullScreen:))]
+    fn did_exit_full_screen(&self, _note: &NSNotification) {
+      self.wake();
+    }
+
+    #[unsafe(method(windowDidFailToEnterFullScreen:))]
+    fn did_fail_to_enter_full_screen(&self, _note: &NSNotification) {
+      self.wake();
+    }
+
     #[unsafe(method(windowWillClose:))]
     fn will_close(&self, _note: &NSNotification) {
       closed(self.ivars().id.get());
+    }
+  }
+
+  impl WindowDelegate {
+    /// AppKit moved the traffic lights ([titlebar::watch]), maybe after the last frame: the
+    /// next one reads them.
+    #[unsafe(method(buttonsMoved:))]
+    fn buttons_moved(&self, _note: &NSNotification) {
+      self.wake();
     }
   }
 );
@@ -328,10 +356,22 @@ impl WindowDelegate {
     let this = Self::alloc(mtm).set_ivars(WindowIvars { id: Cell::new(id) });
     unsafe { msg_send![super(this), init] }
   }
+
+  /// A frame for the window: its title bar is read again and the toolbar shown or hidden
+  /// ([titlebar]).
+  fn wake(&self) {
+    if let Some(view) = view(self.ivars().id.get()) {
+      view.wake();
+    }
+  }
 }
 
 pub(super) fn view(id: u64) -> Option<Retained<View>> {
   shell(|s| s.windows.iter().find(|w| w.id == id).map(|w| w.view.clone()))
+}
+
+fn window(id: u64) -> Option<Retained<NSWindow>> {
+  shell(|s| s.windows.iter().find(|w| w.id == id).map(|w| w.window.clone()))
 }
 
 fn views() -> Vec<Retained<View>> {
@@ -376,17 +416,24 @@ pub fn open(cfg: &Config, app: Box<dyn App>, ty: TypeId) -> u64 {
   let mut rt = Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(Pasteboard));
   rt.event(Event::Appearance(appearance()));
   rt.set_native_menus(true);
-  // The title bar over the content: the frame's height over the layout rect's.
-  let bar = (window.frame().size.height - window.contentLayoutRect().size.height) as f32;
-  rt.set_titlebar(cfg.unified.then_some((bar, cfg.title)));
   let view = View::new(mtm, frame, rt, cfg.overlay);
   window.setContentView(Some(&view));
+  // The title bar over the content, read again before each frame.
+  if cfg.unified {
+    let bar = titlebar::read(&view, &window, cfg.title);
+    view.try_runtime(|rt| rt.set_titlebar(Some(bar)));
+  }
+
   let id = shell(|s| {
     s.next += 1;
     s.next
   });
   let delegate = WindowDelegate::new(mtm, id);
   window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+  if cfg.unified {
+    titlebar::watch(&window, &delegate, sel!(buttonsMoved:));
+  }
+
   view.prepare();
   window.center();
   window.makeFirstResponder(Some(&view));
@@ -457,6 +504,8 @@ fn closed(id: u64) {
   let on_close = shell::closed(id);
   win.view.close();
   win.window.setDelegate(None);
+  // SAFETY: the delegate is the observer `titlebar::watch` added, if any.
+  unsafe { NSNotificationCenter::defaultCenter().removeObserver(&win._delegate) };
   let Win { window, view, _delegate, .. } = win;
   shell(|s| s.gone.push(Gone { window, _view: view, _delegate }));
   defer(release);
