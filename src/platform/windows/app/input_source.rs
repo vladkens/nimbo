@@ -3,8 +3,9 @@
 //! The keyboard layouts on Windows ([crate::input_source]): the foreground window's thread's
 //! (`GetKeyboardLayout`, from any process: the one the user types with, by default the same for
 //! every window), those the user can switch to (`GetKeyboardLayoutList`), each named by its
-//! language's locale. Windows tells no other app of a switch, so a thread of its own looks every
-//! [POLL] while they are watched ([crate::system]).
+//! language's locale, as the language bar lists them (two layouts of a language share the name).
+//! Windows tells no other app of a switch, so a thread of its own looks every [POLL] while they are
+//! watched ([crate::system]).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -63,7 +64,12 @@ pub fn watch() -> Result<(), String> {
       }
     }
   });
-  spawn.map(|_| ()).map_err(|e| e.to_string())
+  if let Err(e) = spawn {
+    WATCHED.store(false, Ordering::Release);
+    return Err(e.to_string());
+  }
+
+  Ok(())
 }
 
 pub fn unwatch() {
