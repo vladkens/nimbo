@@ -19,6 +19,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
 
+use super::super::wide;
 use crate::input_source::{InputSource, primary};
 use crate::system::{Change, notice};
 
@@ -109,14 +110,10 @@ fn source(hkl: HKL) -> InputSource {
   let len = name.len() as i32;
   // SAFETY: the tag ends in a nul; the buffer and its length.
   let m = unsafe {
-    GetLocaleInfoEx(tag_w(&tag).as_ptr(), LOCALE_SLOCALIZEDDISPLAYNAME, name.as_mut_ptr(), len)
+    GetLocaleInfoEx(wide(&tag).as_ptr(), LOCALE_SLOCALIZEDDISPLAYNAME, name.as_mut_ptr(), len)
   };
   let name = String::from_utf16_lossy(&name[..(m.max(1) - 1) as usize]);
 
   let id = format!("{:08x}", hkl as usize as u32);
   InputSource { name: if name.is_empty() { id.clone() } else { name }, id, language: primary(&tag) }
-}
-
-fn tag_w(tag: &str) -> Vec<u16> {
-  tag.encode_utf16().chain([0]).collect()
 }

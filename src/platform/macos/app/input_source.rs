@@ -1,167 +1,126 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The keyboard input sources on macOS ([crate::input_source]): Text Input Sources (HIToolbox),
-//! asked on the main thread, and their changes from the distributed notifications TIS posts when
-//! the selected source or the enabled ones change ([crate::system]). Declared by hand: the objc2
-//! crates don't cover HIToolbox. Names from MacOSX.sdk 27.0 (`TextInputSources.h`,
-//! `CFNotificationCenter.h`), read 2026-11-14.
+//! The keyboard input sources on macOS ([crate::input_source]): Text Input Sources (HIToolbox,
+//! declared in [super::super::keyboard]), asked on the main thread, and their changes from the
+//! distributed notifications TIS posts when the selected source or the enabled ones change
+//! ([crate::system]).
 
-use std::ffi::c_void;
-use std::ptr::null;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::cell::RefCell;
+use std::ptr::NonNull;
 
-use objc2_core_foundation::{CFDictionary, CFRetained, CFString};
+use objc2::rc::Retained;
+use objc2::runtime::NSObject;
+use objc2::{AnyThread, define_class, msg_send, sel};
+use objc2_core_foundation::{CFArray, CFBoolean, CFDictionary, CFRetained, CFString, CFType, Type};
+use objc2_foundation::{
+  NSDistributedNotificationCenter, NSNotification, NSNotificationSuspensionBehavior, NSString,
+};
 
+use super::super::keyboard::{
+  CFTypeRef, TISCopyCurrentKeyboardInputSource, TISCreateInputSourceList,
+  TISGetInputSourceProperty, kTISCategoryKeyboardInputSource,
+  kTISNotifyEnabledKeyboardInputSourcesChanged, kTISNotifySelectedKeyboardInputSourceChanged,
+  kTISPropertyInputSourceCategory, kTISPropertyInputSourceID,
+  kTISPropertyInputSourceIsSelectCapable, kTISPropertyInputSourceLanguages,
+  kTISPropertyLocalizedName,
+};
 use crate::input_source::{InputSource, primary};
 use crate::system::{Change, notice};
 
-type CFTypeRef = *const c_void;
-type Callback = unsafe extern "C" fn(CFTypeRef, *mut c_void, CFTypeRef, *const c_void, CFTypeRef);
+define_class!(
+  // SAFETY: NSObject has no subclassing requirements, and `Observer` does not implement `Drop`.
+  #[unsafe(super = NSObject)]
+  #[name = "NimboInputSourceObserver"]
+  struct Observer;
 
-#[link(name = "Carbon", kind = "framework")]
-unsafe extern "C" {
-  static kTISPropertyInputSourceID: CFTypeRef;
-  static kTISPropertyLocalizedName: CFTypeRef;
-  static kTISPropertyInputSourceLanguages: CFTypeRef;
-  static kTISPropertyInputSourceCategory: CFTypeRef;
-  static kTISPropertyInputSourceIsSelectCapable: CFTypeRef;
-  static kTISCategoryKeyboardInputSource: CFTypeRef;
-  static kTISNotifySelectedKeyboardInputSourceChanged: CFTypeRef;
-  static kTISNotifyEnabledKeyboardInputSourcesChanged: CFTypeRef;
-  fn TISCopyCurrentKeyboardInputSource() -> CFTypeRef;
-  fn TISCreateInputSourceList(filter: CFTypeRef, all_installed: u8) -> CFTypeRef;
-  fn TISGetInputSourceProperty(src: CFTypeRef, key: CFTypeRef) -> CFTypeRef;
+  impl Observer {
+    /// The selected source or the enabled ones changed.
+    #[unsafe(method(changed:))]
+    fn changed(&self, _: &NSNotification) {
+      notice(Change::InputSource);
+    }
+  }
+);
+
+thread_local! {
+  /// The observer while watched (on the main thread, where the center calls it back).
+  static OBSERVER: RefCell<Option<Retained<Observer>>> = const { RefCell::new(None) };
 }
-
-#[link(name = "CoreFoundation", kind = "framework")]
-unsafe extern "C" {
-  fn CFArrayGetCount(a: CFTypeRef) -> isize;
-  fn CFArrayGetValueAtIndex(a: CFTypeRef, i: isize) -> CFTypeRef;
-  fn CFBooleanGetValue(b: CFTypeRef) -> u8;
-  fn CFRelease(cf: CFTypeRef);
-  fn CFNotificationCenterGetDistributedCenter() -> CFTypeRef;
-  fn CFNotificationCenterAddObserver(
-    center: CFTypeRef,
-    observer: *const c_void,
-    callback: Callback,
-    name: CFTypeRef,
-    object: CFTypeRef,
-    behavior: isize,
-  );
-  fn CFNotificationCenterRemoveObserver(
-    center: CFTypeRef,
-    observer: *const c_void,
-    name: CFTypeRef,
-    object: CFTypeRef,
-  );
-}
-
-/// `CFNotificationSuspensionBehaviorDeliverImmediately`: told while the app is in the background
-/// too, where a menu-bar app always is.
-const DELIVER_IMMEDIATELY: isize = 4;
-
-/// Watched, and the observer's identity for the center.
-static WATCHED: AtomicBool = AtomicBool::new(false);
 
 pub fn available() -> bool {
   true
 }
 
 pub fn current() -> Option<InputSource> {
-  // SAFETY: a Copy function returns a retained source or null, released once it is read.
-  unsafe {
-    let src = TISCopyCurrentKeyboardInputSource();
-    if src.is_null() {
-      return None;
-    }
-
-    let source = source(src);
-    CFRelease(src);
-    source
-  }
+  // SAFETY: a Copy function returns a retained source or null.
+  let src: CFRetained<CFType> = unsafe { owned(TISCopyCurrentKeyboardInputSource())? };
+  // SAFETY: the source lives while it is read.
+  unsafe { source((&raw const *src).cast()) }
 }
 
 pub fn enabled() -> Vec<InputSource> {
-  // SAFETY: the keys are CFString constants; the list is retained (Create rule) and released
-  // once its sources, owned by it, are read.
+  // SAFETY: the keys are CFString constants; the list is retained (Create rule), its sources
+  // owned by it.
   unsafe {
     let key = &*kTISPropertyInputSourceCategory.cast::<CFString>();
     let keyboard = &*kTISCategoryKeyboardInputSource.cast::<CFString>();
-    let filter: CFRetained<CFDictionary<CFString, CFString>> =
-      CFDictionary::from_slices(&[key], &[keyboard]);
+    let filter = CFDictionary::<CFString, CFString>::from_slices(&[key], &[keyboard]);
     let list = TISCreateInputSourceList((&raw const *filter).cast(), 0);
-    if list.is_null() {
-      return Vec::new();
-    }
-
-    let sources = (0..CFArrayGetCount(list))
-      .map(|i| CFArrayGetValueAtIndex(list, i))
+    let Some(list) = owned::<CFArray>(list) else { return Vec::new() };
+    (0..list.count())
+      .map(|i| list.value_at_index(i))
       .filter(|&src| flag(src, kTISPropertyInputSourceIsSelectCapable))
       .filter_map(|src| source(src))
-      .collect();
-    CFRelease(list);
-    sources
+      .collect()
   }
 }
 
-/// Starts telling [Change::InputSource] (on the main thread, as the center calls back there).
+/// Starts telling [Change::InputSource]; delivered at once, as a menu-bar app is always in the
+/// background, where the center holds back notifications by default.
 pub fn watch() -> Result<(), String> {
-  if WATCHED.swap(true, Ordering::AcqRel) {
+  if OBSERVER.with_borrow(Option::is_some) {
     return Ok(());
   }
 
-  // SAFETY: the distributed center lives as long as the process; the names are CFString
-  // constants and the callback a plain function.
-  unsafe {
-    let center = CFNotificationCenterGetDistributedCenter();
-    for name in names() {
-      CFNotificationCenterAddObserver(
-        center,
-        observer(),
-        changed,
-        name,
-        null(),
-        DELIVER_IMMEDIATELY,
+  // SAFETY: NSObject's `init`.
+  let observer: Retained<Observer> = unsafe { msg_send![Observer::alloc(), init] };
+  let center = NSDistributedNotificationCenter::defaultCenter();
+  let now = NSNotificationSuspensionBehavior::DeliverImmediately;
+  for name in names() {
+    // SAFETY: the observer has `changed:`, taking a notification; `unwatch` removes it.
+    unsafe {
+      center.addObserver_selector_name_object_suspensionBehavior(
+        &observer,
+        sel!(changed:),
+        Some(name),
+        None,
+        now,
       );
     }
   }
 
+  OBSERVER.set(Some(observer));
   Ok(())
 }
 
 pub fn unwatch() {
-  if !WATCHED.swap(false, Ordering::AcqRel) {
-    return;
-  }
-
-  // SAFETY: the observer added by `watch`, with the same names.
-  unsafe {
-    let center = CFNotificationCenterGetDistributedCenter();
-    for name in names() {
-      CFNotificationCenterRemoveObserver(center, observer(), name, null());
-    }
-  }
+  let Some(observer) = OBSERVER.take() else { return };
+  // SAFETY: the observer `watch` added, for every name.
+  unsafe { NSDistributedNotificationCenter::defaultCenter().removeObserver(&observer) };
 }
 
-fn names() -> [CFTypeRef; 2] {
-  // SAFETY: reading two CFString constants.
+fn names() -> [&'static NSString; 2] {
+  // SAFETY: two CFString constants, toll-free bridged to NSString.
   unsafe {
     [kTISNotifySelectedKeyboardInputSourceChanged, kTISNotifyEnabledKeyboardInputSourcesChanged]
+      .map(|n| &*n.cast::<NSString>())
   }
 }
 
-fn observer() -> *const c_void {
-  (&raw const WATCHED).cast()
-}
-
-unsafe extern "C" fn changed(
-  _: CFTypeRef,
-  _: *mut c_void,
-  _: CFTypeRef,
-  _: *const c_void,
-  _: CFTypeRef,
-) {
-  notice(Change::InputSource);
+/// A Copy or Create function's result, released when dropped; `None` for null.
+unsafe fn owned<T: Type>(cf: CFTypeRef) -> Option<CFRetained<T>> {
+  // SAFETY: the caller passes a retained `T` or null.
+  NonNull::new(cf.cast_mut().cast::<T>()).map(|p| unsafe { CFRetained::from_raw(p) })
 }
 
 /// What `src`, a live `TISInputSourceRef`, is; `None` without an id.
@@ -172,9 +131,8 @@ unsafe fn source(src: CFTypeRef) -> Option<InputSource> {
     let id = string(TISGetInputSourceProperty(src, kTISPropertyInputSourceID))?;
     let name = string(TISGetInputSourceProperty(src, kTISPropertyLocalizedName));
     let langs = TISGetInputSourceProperty(src, kTISPropertyInputSourceLanguages);
-    let first = (!langs.is_null() && CFArrayGetCount(langs) > 0)
-      .then(|| string(CFArrayGetValueAtIndex(langs, 0)))
-      .flatten();
+    let langs = langs.cast::<CFArray>().as_ref().filter(|l| l.count() > 0);
+    let first = langs.and_then(|l| string(l.value_at_index(0)));
     let language = first.as_deref().and_then(primary);
     Some(InputSource { name: name.unwrap_or_else(|| id.clone()), id, language })
   }
@@ -183,14 +141,12 @@ unsafe fn source(src: CFTypeRef) -> Option<InputSource> {
 /// A CFString's text; `None` for null.
 unsafe fn string(cf: CFTypeRef) -> Option<String> {
   // SAFETY: the caller passes a CFString or null.
-  (!cf.is_null()).then(|| unsafe { &*cf.cast::<CFString>() }.to_string())
+  unsafe { cf.cast::<CFString>().as_ref() }.map(|s| s.to_string())
 }
 
 /// A CFBoolean property of `src`; false when it has none.
 unsafe fn flag(src: CFTypeRef, key: CFTypeRef) -> bool {
   // SAFETY: the property is a CFBoolean owned by the source, or null.
-  unsafe {
-    let value = TISGetInputSourceProperty(src, key);
-    !value.is_null() && CFBooleanGetValue(value) != 0
-  }
+  unsafe { TISGetInputSourceProperty(src, key).cast::<CFBoolean>().as_ref() }
+    .is_some_and(|b| b.as_bool())
 }
