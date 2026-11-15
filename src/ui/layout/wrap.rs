@@ -7,6 +7,7 @@
 use super::{
   ELLIPSIS, EPS, Elide, Kind, Line, Measure, TextLines, TextStyle, Tree, TruncationMode,
 };
+use crate::scene::Size;
 use crate::text::edit::graphemes;
 use crate::text::{Font, Memo};
 
@@ -164,11 +165,18 @@ pub fn elide(s: &str, font: Font, width: f32, mode: TruncationMode, m: &mut dyn 
   Line { start, end, width: w, ink, stop: 0, elide }
 }
 
-/// The widest line of `s` in `style` wrapped at `width`, as [wrap_text] breaks it.
-pub fn wrapped_width(s: &str, style: TextStyle, w: f32, m: &mut dyn Measure, k: &mut Kept) -> f32 {
+/// The size of `s` in `style` wrapped at `w`, as [wrap_text] breaks it: its widest line, and
+/// its lines (at most its limit) at its line height.
+pub fn wrapped_size(s: &str, style: TextStyle, w: f32, m: &mut dyn Measure, k: &mut Kept) -> Size {
   let mut lines = Vec::new();
   wrap_text(s, (0, s.len() as u32), style, w, false, m, &mut k.lines, &mut lines);
-  lines.iter().fold(0.0, |w, l| w.max(l.width))
+  let n = match style.lines {
+    TextLines::Limit(n, _) => lines.len().min(usize::from(n.max(1))),
+    _ => lines.len(),
+  };
+
+  let line_h = style.line_h.unwrap_or_else(|| m.metrics(style.font).line_height());
+  Size::new(lines.iter().fold(0.0, |w, l| w.max(l.width)), n as f32 * line_h)
 }
 
 /// Breaks the text at `range` into lines no wider than `width`: at newlines, and greedily at
