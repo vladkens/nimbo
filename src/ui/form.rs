@@ -487,6 +487,12 @@ impl<'s> From<&'s str> for Section<'s> {
   }
 }
 
+impl From<Localized> for Section<'_> {
+  fn from(title: Localized) -> Self {
+    Section::new(title)
+  }
+}
+
 impl<'s> From<&'s String> for Section<'s> {
   fn from(title: &'s String) -> Self {
     Section::new(title)

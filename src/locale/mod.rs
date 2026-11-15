@@ -78,8 +78,15 @@ impl Locale {
 }
 
 /// A string to translate where it shows, made by [t!](crate::t): its English text is the key.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Localized(&'static str);
+
+/// As the text it shows, so a tree of labels reads the same whether a label was marked.
+impl fmt::Debug for Localized {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fmt::Debug::fmt(self.as_str(), f)
+  }
+}
 
 impl Localized {
   pub const fn new(key: &'static str) -> Self {
@@ -423,6 +430,7 @@ msgstr[2] "{n} диктовок"
     assert_eq!(t!("Not in the catalog").to_string(), "Not in the catalog");
     let s: &str = &KEEP;
     assert_eq!((s, KEEP.as_str()), ("Хранить историю", "Хранить историю"));
+    assert_eq!(format!("{KEEP:?}"), "\"Хранить историю\"");
   }
 
   /// nimbo's own strings, in the language the app's catalogs give.
