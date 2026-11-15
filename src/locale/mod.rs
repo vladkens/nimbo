@@ -146,7 +146,7 @@ struct State {
 /// A language as it translates: the app's catalog and nimbo's own of the same language, or
 /// the pseudo language's strings made so far, or none (English). Made the first time a string
 /// asks after a language is chosen, and kept as long as the program, so that its strings are
-/// `&'static str`: a catalog's text each time the app changes its language.
+/// `&'static str`: a catalog's text per language the app chooses.
 #[derive(Default)]
 struct Lang {
   app: Option<Catalog>,
@@ -182,7 +182,7 @@ pub(crate) fn set(locale: Locale) {
 /// The catalogs of a window's config: the app's from now on, unless it has none.
 pub(crate) fn provide(catalogs: Localizations) {
   let mut s = global();
-  if !catalogs.is_empty() && !std::ptr::eq(s.catalogs, catalogs) {
+  if !catalogs.is_empty() && !same(s.catalogs, catalogs) {
     *s = State::new(s.locale, catalogs);
   }
 }
@@ -197,11 +197,29 @@ impl State {
     Self { locale, catalogs, lang: None }
   }
 
-  /// The language in use, its catalogs read the first time.
+  /// The language in use, its catalogs read the first time this language is chosen with
+  /// these catalogs: the languages made are kept, so that tests and a language picker read
+  /// each one once.
   fn lang(&mut self) -> &'static Lang {
+    static MADE: Mutex<Vec<(Locale, Localizations, &'static Lang)>> = Mutex::new(Vec::new());
     let (locale, catalogs) = (self.locale, self.catalogs);
-    self.lang.get_or_insert_with(|| Box::leak(Box::new(Lang::find(locale, catalogs))))
+    self.lang.get_or_insert_with(|| {
+      let mut made = MADE.lock().unwrap_or_else(PoisonError::into_inner);
+      if let Some(m) = made.iter().find(|m| m.0 == locale && same(m.1, catalogs)) {
+        return m.2;
+      }
+
+      let lang: &'static Lang = Box::leak(Box::new(Lang::find(locale, catalogs)));
+      made.push((locale, catalogs, lang));
+      lang
+    })
   }
+}
+
+/// The same catalogs: the same tags and `.po` texts, wherever the lists are.
+fn same(a: Localizations, b: Localizations) -> bool {
+  let eq = |(x, y): (&(&str, &str), &(&str, &str))| x.0 == y.0 && std::ptr::eq(x.1, y.1);
+  a.len() == b.len() && a.iter().zip(b).all(eq)
 }
 
 impl Lang {

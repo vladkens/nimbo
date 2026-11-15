@@ -193,7 +193,6 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
   let ns_app = NSApplication::sharedApplication(mtm);
   let delegate = Delegate::new(mtm);
   ns_app.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
-  ns_app.setMainMenu(Some(&main_menu(mtm, info.name, &delegate)));
   let center = NSNotificationCenter::defaultCenter();
   // SAFETY: the delegate lives until the app ends and has the selector, taking a notification.
   unsafe {
@@ -211,6 +210,8 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
   }
 
   start(&mut Main::here());
+  // After `start`: in the language it chose, from the catalogs its windows gave.
+  ns_app.setMainMenu(Some(&main_menu(mtm, info.name, &delegate)));
   if !shell(|s| s.quitting) {
     ns_app.run();
   }
