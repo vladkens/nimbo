@@ -64,6 +64,14 @@ nimbo: `ui.text("Title", TextStyle::new(t.bold, t.muted))`
 
 ![Text](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/text.png)
 
+### Localized text
+
+SwiftUI: `Text("Keep the history"); String(localized: "\(name) is not on disk")`
+
+nimbo: `ui.text(t!("Keep the history"), s); t!("{name} is not on disk", name); tn!("{n} file", "{n} files", count)`
+
+![Localized text](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/localized-text.png)
+
 ### Line limit
 
 SwiftUI: `Text(path).lineLimit(1).truncationMode(.middle)`

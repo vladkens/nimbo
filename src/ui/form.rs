@@ -50,6 +50,7 @@ use super::widgets::{Icon, MarkShift};
 use super::{
   Align, Cursor, Id, Response, Role, Shadow, State, Style, TextStyle, Ui, grow, px, rigid,
 };
+use crate::locale::Localized;
 use crate::scene::{Color, Frame, Point, Quad, Rect, alpha, mix, rgb};
 use crate::text::{Font, Weight};
 
@@ -294,15 +295,17 @@ impl FormStyle {
 /// header or footer ([Section]), as SwiftUI's labels take a string or a view (egui's
 /// `impl Into<WidgetText>`): a text, an icon, or what a closure builds in the part's text style
 /// (dimmed in a disabled row, as SwiftUI passes a foreground style down); from a `&str`, a
-/// `&String`, an [Icon] or `FnOnce(&mut Ui, TextStyle)`, whose parameters need their types
-/// written. A closure's texts take the style or one made from it (`s.line_limit(1)`,
-/// `s.underline(LinePattern::Dot)` on a term with [Ui::help]); its widgets dim themselves in a
-/// disabled row; a canvas of its own reads [Ui::scope_disabled].
+/// `&String`, a [Localized] (`t!("…")`), an [Icon] or `FnOnce(&mut Ui, TextStyle)`, whose
+/// parameters need their types written. A closure's texts take the style or one made from it
+/// (`s.line_limit(1)`, `s.underline(LinePattern::Dot)` on a term with [Ui::help]); its widgets dim
+/// themselves in a disabled row; a canvas of its own reads [Ui::scope_disabled].
 #[derive(Default)]
 pub enum Content<'s> {
   #[default]
   None,
   Text(&'s str),
+  /// A text translated as it is built ([crate::t]).
+  Localized(Localized),
   Icon(Icon),
   Built(Build<'s>),
 }
@@ -321,6 +324,10 @@ impl Content<'_> {
     match self {
       Content::None => {}
       Content::Text(s) => {
+        ui.next_id = Some((id, false));
+        ui.text(s, style);
+      }
+      Content::Localized(s) => {
         ui.next_id = Some((id, false));
         ui.text(s, style);
       }
@@ -345,6 +352,12 @@ impl<'s> From<&'s String> for Content<'s> {
   }
 }
 
+impl From<Localized> for Content<'_> {
+  fn from(s: Localized) -> Self {
+    Content::Localized(s)
+  }
+}
+
 impl From<Icon> for Content<'_> {
   fn from(i: Icon) -> Self {
     Content::Icon(i)
@@ -363,6 +376,7 @@ impl fmt::Debug for Content<'_> {
     match self {
       Content::None => f.write_str(""),
       Content::Text(s) => f.write_str(s),
+      Content::Localized(s) => write!(f, "{s}"),
       Content::Icon(i) => write!(f, "{:?}", i.name()),
       Content::Built(_) => f.write_str("…"),
     }

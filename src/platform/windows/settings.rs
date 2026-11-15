@@ -10,11 +10,12 @@
 //! gets a light one otherwise:
 //! [Support Dark and Light themes in Win32 apps](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/ui/apply-windows-themes),
 //! [DWMWINDOWATTRIBUTE](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute)
-//! (as of 2026-10).
+//! (as of 2026-10). The user's languages come from `GetUserPreferredUILanguages`.
 
 use std::ptr::null_mut;
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM};
+use windows_sys::Win32::Globalization::{GetUserPreferredUILanguages, MUI_LANGUAGE_NAME};
 use windows_sys::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
 use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -36,6 +37,26 @@ const DARK_MODE_BEFORE_20H1: u32 = 19;
 /// The OS's light or dark app mode and its accent colour now.
 pub fn appearance() -> Appearance {
   read(dword(PERSONALIZE, "AppsUseLightTheme"), dword(ACCENT, "AccentColorMenu"))
+}
+
+/// The user's preferred display languages, the most preferred first, as tags (`ru-RU`):
+/// `GetUserPreferredUILanguages`, a list of names each ended by a null, then a null.
+pub fn languages() -> Vec<String> {
+  // The units the list takes, written into `buf` when it has room; an empty one asks for them.
+  let list = |buf: &mut [u16]| {
+    let (mut count, mut len) = (0, buf.len() as u32);
+    let p = if buf.is_empty() { null_mut() } else { buf.as_mut_ptr() };
+    // SAFETY: `p` is null with a length of 0, or `buf`, `len` units long.
+    let ok = unsafe { GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &mut count, p, &mut len) };
+    (ok != 0).then_some(len as usize)
+  };
+  let Some(len) = list(&mut []) else { return Vec::new() };
+  let mut buf = vec![0; len];
+  if list(&mut buf).is_none() {
+    return Vec::new();
+  }
+
+  buf.split(|&c| c == 0).filter(|s| !s.is_empty()).map(String::from_utf16_lossy).collect()
 }
 
 /// The appearance from `AppsUseLightTheme` (0 dark, else light; none, as before 1809, light) and

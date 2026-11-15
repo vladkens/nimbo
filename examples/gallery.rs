@@ -17,7 +17,7 @@ use nimbo::{
   Align, Answer, App, Axes, Axis, Bitmap, Button, ButtonRole, ButtonStyle, Config, ContentMode,
   ControlSize, Dialog, Float, Font, FormRow, FormStyle, Hotkey, Icon, Item, LinePattern, List,
   ListStyle, Menu, Picker, Section, Selection, Shortcut, Slider, Split, Style, Tabs, Tag,
-  TextStyle, Tone, ToolbarItemPlacement, TruncationMode, Ui, UnitPoint, grow, px,
+  TextStyle, Tone, ToolbarItemPlacement, TruncationMode, Ui, UnitPoint, grow, px, t, tn,
 };
 
 pub const SIDEBAR: &str = "sidebar";
@@ -65,6 +65,7 @@ pub const BLOCKS: &[Block] = &[
   b("Layout", "Scroll view", "ScrollView(.vertical) { … }", "ui.scroll_area(Style::new().h(px(80.0)).scroll(Axes::VERTICAL), |ui| { … })"),
   b("Layout", "Overlay", ".overlay(alignment: .topTrailing) { … }", "ui.float(Float::parent().attach(UnitPoint::TOP_TRAILING).anchor(UnitPoint::TOP_TRAILING)).el(style)"),
   b("Text", "Text", "Text(\"Title\").font(.headline).foregroundStyle(.secondary)", "ui.text(\"Title\", TextStyle::new(t.bold, t.muted))"),
+  b("Text", "Localized text", "Text(\"Keep the history\"); String(localized: \"\\(name) is not on disk\")", "ui.text(t!(\"Keep the history\"), s); t!(\"{name} is not on disk\", name); tn!(\"{n} file\", \"{n} files\", count)"),
   b("Text", "Line limit", "Text(path).lineLimit(1).truncationMode(.middle)", "ui.text(path, t.body().line_limit(1).truncation(TruncationMode::Middle))"),
   b("Text", "Underline", "Text(\"WER\").underline(pattern: .dot)", "ui.text(\"WER\", s.underline(LinePattern::Dot)); s.strikethrough(LinePattern::Solid)"),
   b("Text", "Selectable text", "Text(log).textSelection(.enabled)", "ui.selectable(&log)"),
@@ -160,6 +161,24 @@ pub struct Gallery {
   /// The photo block's, decoded by the OS at twice its size in points.
   pub photo: Option<Bitmap>,
 }
+
+/// The localized text block's Russian (`--locale ru`).
+pub const RU: &str = r#"
+msgid ""
+msgstr "Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+msgid "Keep the history"
+msgstr "Хранить историю"
+
+msgid "{name} is not on disk"
+msgstr "{name} нет на диске"
+
+msgid "{n} file"
+msgid_plural "{n} files"
+msgstr[0] "{n} файл"
+msgstr[1] "{n} файла"
+msgstr[2] "{n} файлов"
+"#;
 
 /// A sunset drawn for the photo block, 240 × 160.
 pub const SUNSET: &[u8] = include_bytes!("../tests/images/sunset.jpg");
@@ -288,6 +307,14 @@ impl Gallery {
         ui.text("Title", TextStyle::new(t.bold, t.text));
         ui.text("Body", t.label());
         ui.text("Secondary", t.muted());
+      }),
+      "Localized text" => Self::variants(ui, Shown::Alone, |ui| {
+        let name = "parakeet";
+        ui.col(Style::new().gap(4.0), |ui| {
+          ui.text(t!("Keep the history"), t.label());
+          ui.text(t!("{name} is not on disk", name), t.label());
+          ui.text(tn!("{n} file", "{n} files", 3), t.muted());
+        });
       }),
       "Line limit" => Self::variants(ui, Shown::Alone, |ui| {
         let path = "/Users/alex/Library/Application Support/Example/cache.db";
@@ -690,5 +717,6 @@ fn main() {
   let rest = &args[page.is_some() as usize..];
   let app = Gallery::on(page.unwrap_or(0), page.is_some());
   let (w, h) = if page.is_some() { (WIDTH, 300.0) } else { (WIDTH + 200.0, 600.0) };
-  nimbo::run_args(Config::new("Gallery", w, h), app, |h| _ = h.frame(), rest);
+  let cfg = Config::new("Gallery", w, h).localizations(&[("ru", RU)]);
+  nimbo::run_args(cfg, app, |h| _ = h.frame(), rest);
 }
