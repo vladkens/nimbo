@@ -166,8 +166,10 @@ pub fn elide(s: &str, font: Font, width: f32, mode: TruncationMode, m: &mut dyn 
 }
 
 /// The size of `s` in `style` wrapped at `w`, as [wrap_text] breaks it: its widest line, and
-/// its lines (at most its limit) at its line height.
+/// its lines (at most its limit) at its line height. Never narrower than its least width, as
+/// the layout gives it.
 pub fn wrapped_size(s: &str, style: TextStyle, w: f32, m: &mut dyn Measure, k: &mut Kept) -> Size {
+  let w = w.max(text_width(s, style, m, k).1);
   let mut lines = Vec::new();
   wrap_text(s, (0, s.len() as u32), style, w, false, m, &mut k.lines, &mut lines);
   let n = match style.lines {

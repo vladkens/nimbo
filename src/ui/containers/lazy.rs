@@ -249,8 +249,13 @@ mod tests {
   }
 
   /// Paragraphs in a column 120 wide, of 1 to 8 sentences, the last two lines at most:
-  /// a column of them at the heights [Ui::measure_wrapped] gives.
-  struct Paragraphs;
+  /// a column of them at the heights [Ui::measure_wrapped] gives; and a text in a box narrower
+  /// than its widest character, with the height measured for it.
+  struct Paragraphs {
+    narrow: f32,
+  }
+
+  const NARROW: &str = "iiiiiiii W";
 
   const SENTENCE: &str = "The quick brown fox jumps over the lazy dog. ";
 
@@ -270,6 +275,9 @@ mod tests {
           ui.measure_wrapped(&text, style, 120.0).h
         })
         .collect();
+      let style = paragraph(0).1;
+      self.narrow = ui.measure_wrapped(NARROW, style, 5.0).h;
+      ui.col(Style::new().w(px(5.0)), |ui| ui.id("narrow").text(NARROW, style));
       ui.id("area").scroll_area(Style::new().w(px(120.0)).h(px(2000.0)), |ui| {
         ui.id("col").virtual_col(
           heights,
@@ -284,10 +292,11 @@ mod tests {
   }
 
   /// Measured wrapped, a paragraph is as high as the layout lays it out: it fills its item, no
-  /// line clipped, and a limited one counts only the lines it shows.
+  /// line clipped, and a limited one counts only the lines it shows. Narrower than a character,
+  /// it is as wide as that, as laid out.
   #[test]
   fn wrapped_paragraphs_fill_items_of_their_measured_heights() {
-    let mut h = Harness::new(Paragraphs, Size::new(200.0, 2000.0), 2.0);
+    let mut h = Harness::new(Paragraphs { narrow: 0.0 }, Size::new(200.0, 2000.0), 2.0);
     settle(&mut h);
     let line_h = h.text_system().metrics(paragraph(7).1.font).line_height();
     let text = |i: usize| h.rect(Id::of(("text", i))).unwrap();
@@ -298,5 +307,7 @@ mod tests {
 
     assert!(text(6).h > text(0).h * 5.0, "it wraps: {:?}", text(6));
     assert_eq!(text(7).h, 2.0 * line_h, "two lines");
+    let narrow = h.rect(Id::of("narrow")).unwrap();
+    assert_eq!(narrow.h, h.app().narrow, "{narrow:?}");
   }
 }
