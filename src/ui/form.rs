@@ -304,8 +304,6 @@ pub enum Content<'s> {
   #[default]
   None,
   Text(&'s str),
-  /// A text translated as it is built ([crate::t]).
-  Localized(Localized),
   Icon(Icon),
   Built(Build<'s>),
 }
@@ -324,10 +322,6 @@ impl Content<'_> {
     match self {
       Content::None => {}
       Content::Text(s) => {
-        ui.next_id = Some((id, false));
-        ui.text(s, style);
-      }
-      Content::Localized(s) => {
         ui.next_id = Some((id, false));
         ui.text(s, style);
       }
@@ -354,7 +348,7 @@ impl<'s> From<&'s String> for Content<'s> {
 
 impl From<Localized> for Content<'_> {
   fn from(s: Localized) -> Self {
-    Content::Localized(s)
+    Content::Text(s.as_str())
   }
 }
 
@@ -376,7 +370,6 @@ impl fmt::Debug for Content<'_> {
     match self {
       Content::None => f.write_str(""),
       Content::Text(s) => f.write_str(s),
-      Content::Localized(s) => write!(f, "{s}"),
       Content::Icon(i) => write!(f, "{:?}", i.name()),
       Content::Built(_) => f.write_str("…"),
     }

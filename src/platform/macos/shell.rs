@@ -37,7 +37,7 @@ use super::view::View;
 use super::{Pasteboard, activate, appearance, mtm, overlay, titlebar};
 use crate::app::{App, Clock, Event, Runtime};
 use crate::shell::{Anchor, AppInfo, Main, Presence};
-use crate::{Config, shell};
+use crate::{Config, shell, t};
 
 struct Win {
   id: u64,
@@ -163,8 +163,8 @@ fn main_menu(mtm: MainThreadMarker, name: &str, delegate: &Delegate) -> Retained
   let app_item = NSMenuItem::new(mtm);
   let app_menu = NSMenu::new(mtm);
   // To the key window through the responder chain.
-  app_menu.addItem(&item("Close Window", sel!(performClose:), "w"));
-  let quit = item(&format!("Quit {name}"), sel!(quit:), "q");
+  app_menu.addItem(&item(&t!("Close Window"), sel!(performClose:), "w"));
+  let quit = item(&t!("Quit {name}", name), sel!(quit:), "q");
   // SAFETY: the delegate has `quit:` and lives as long as the app.
   unsafe { quit.setTarget(Some(delegate)) };
   app_menu.addItem(&quit);

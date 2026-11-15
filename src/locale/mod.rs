@@ -5,8 +5,9 @@
 //! `Text("…")` and gettext key them.
 //!
 //! - `t!("Keep the history")` is a [Localized], `const` and `Copy`, translated where it shows: a
-//!   text ([crate::Ui::text]), a [crate::Content], `format!("{KEEP}")`. A string not marked never
-//!   is (SwiftUI's `Text(verbatim:)`): names, paths, what the user typed.
+//!   text ([crate::Ui::text]), a [crate::Content], `format!("{KEEP}")`, a label as `&t!("Cancel")`
+//!   (a `&str`). A string not marked never is (SwiftUI's `Text(verbatim:)`): names, paths, what the
+//!   user typed.
 //! - `t!("{chosen} is not on disk", chosen, size = f.size)` is a `String` translated now, its
 //!   `{name}`s filled (`{{` and `}}` for braces), in the order the translation puts them.
 //! - `tn!("{n} file", "{n} files", count)` is a `String` in the form the catalog's `Plural-Forms`
@@ -17,6 +18,8 @@
 //! ([Config::localizations](crate::Config::localizations)); only the one in use is read. The
 //! language is the system's ([Locale::System]) or the app's choice ([crate::Main::set_locale]),
 //! found as the tag (`pt-BR`), then its language (`pt`); with no catalog, the English text.
+//! nimbo's own strings (OK and Cancel, the text menu, an icon button's name) come in its own
+//! catalogs (`locales/`, `make i18n`), in the language the app's give.
 //! `pseudo` is a pseudo language (`--locale pseudo` in an example): every marked string accented
 //! and a third longer, so unmarked and cut strings show. GNU gettext (0.24 or later, for Rust)
 //! keeps the catalogs; a comment `// Translators: …` before a string goes to its translator:
@@ -34,11 +37,12 @@
 
 mod po;
 
-use std::borrow::Cow;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt::{self, Display, Write};
 use std::iter;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::ops::Deref;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use po::Catalog;
 
@@ -47,6 +51,10 @@ use crate::platform;
 /// The catalogs an app ships: a language tag (`ru`, `pt-BR`) and its `.po` file's text, as
 /// `("ru", include_str!("../locales/ru.po"))`.
 pub type Localizations = &'static [(&'static str, &'static str)];
+
+/// nimbo's own catalogs, for its strings (OK, Cancel, Copy, an icon button's name), each used
+/// with the app's of the same language (`make i18n` updates them from the code).
+const OWN: Localizations = &[("ru", include_str!("../../locales/ru.po"))];
 
 /// The language the app's strings show in.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -82,19 +90,34 @@ impl Localized {
   pub const fn key(self) -> &'static str {
     self.0
   }
+
+  /// The translation in the language chosen now, the English text without one, kept as long
+  /// as the program: where a `&'static str` is wanted (a field's hint); `&t!("…")` is a `&str`
+  /// for the statement, as a label takes it.
+  pub fn as_str(self) -> &'static str {
+    lang().text(self.0)
+  }
 }
 
-/// The translation in the language chosen now, the English text without one.
+/// [Localized::as_str], so `&t!("Cancel")` passes as a `&str`.
+impl Deref for Localized {
+  type Target = str;
+
+  fn deref(&self) -> &str {
+    self.as_str()
+  }
+}
+
 impl Display for Localized {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-    f.write_str(&lang().text(self.0))
+    f.write_str(self.as_str())
   }
 }
 
 /// [t!](crate::t) with arguments: `key` translated, its `{name}`s filled from `args`.
 #[doc(hidden)]
-pub fn format(key: &str, args: &[(&str, &dyn Display)]) -> String {
-  fill(&lang().text(key), args)
+pub fn format(key: &'static str, args: &[(&str, &dyn Display)]) -> String {
+  fill(lang().text(key), args)
 }
 
 /// [tn!](crate::tn): the form of `one` / `other` for `n`, its `{name}`s filled from `args`.
@@ -102,13 +125,13 @@ pub fn format(key: &str, args: &[(&str, &dyn Display)]) -> String {
 pub fn plural(one: &str, other: &str, n: u64, args: &[(&str, &dyn Display)]) -> String {
   let lang = lang();
   let english = if n == 1 { one } else { other };
-  let form = match (&lang.catalog, lang.pseudo) {
-    (_, true) => Cow::Owned(pseudo(english)),
-    (Some(c), _) => Cow::Borrowed(c.plural(one, n).unwrap_or(english)),
-    (None, _) => Cow::Borrowed(english),
-  };
+  if lang.pseudo.is_some() {
+    return fill(&pseudo(english), args);
+  }
 
-  fill(&form, args)
+  let form = lang.app.as_ref().and_then(|c| c.plural(one, n));
+  let form = form.or_else(|| lang.own.as_ref()?.plural(one, n));
+  fill(form.unwrap_or(english), args)
 }
 
 // MARK: State
@@ -117,14 +140,18 @@ pub fn plural(one: &str, other: &str, n: u64, args: &[(&str, &dyn Display)]) -> 
 struct State {
   locale: Locale,
   catalogs: Localizations,
-  lang: Option<Arc<Lang>>,
+  lang: Option<&'static Lang>,
 }
 
-/// A language as it translates: its catalog, or the pseudo language, or neither (English).
+/// A language as it translates: the app's catalog and nimbo's own of the same language, or
+/// the pseudo language's strings made so far, or none (English). Made the first time a string
+/// asks after a language is chosen, and kept as long as the program, so that its strings are
+/// `&'static str`: a catalog's text each time the app changes its language.
 #[derive(Default)]
 struct Lang {
-  catalog: Option<Catalog>,
-  pseudo: bool,
+  app: Option<Catalog>,
+  own: Option<Catalog>,
+  pseudo: Option<Mutex<HashMap<&'static str, &'static str>>>,
 }
 
 static STATE: Mutex<State> = Mutex::new(State::new(Locale::System, &[]));
@@ -139,7 +166,7 @@ fn global() -> MutexGuard<'static, State> {
 }
 
 /// The language in use on this thread.
-fn lang() -> Arc<Lang> {
+fn lang() -> &'static Lang {
   let local = THREAD.with_borrow_mut(|s| s.as_mut().map(State::lang));
   local.unwrap_or_else(|| global().lang())
 }
@@ -170,16 +197,16 @@ impl State {
     Self { locale, catalogs, lang: None }
   }
 
-  /// The language in use, its catalog read the first time.
-  fn lang(&mut self) -> Arc<Lang> {
+  /// The language in use, its catalogs read the first time.
+  fn lang(&mut self) -> &'static Lang {
     let (locale, catalogs) = (self.locale, self.catalogs);
-    self.lang.get_or_insert_with(|| Arc::new(Lang::find(locale, catalogs))).clone()
+    self.lang.get_or_insert_with(|| Box::leak(Box::new(Lang::find(locale, catalogs))))
   }
 }
 
 impl Lang {
-  /// The first of the languages `locale` wants that `catalogs` has, by its tag and then shorter
-  /// ones (`zh-Hant-TW`, `zh-Hant`, `zh`); English, the keys' language, ends the search.
+  /// The first of the languages `locale` wants that `catalogs` has, with nimbo's own catalog of
+  /// it; English, the keys' language, ends the search.
   fn find(locale: Locale, catalogs: Localizations) -> Self {
     let wanted = match locale {
       Locale::System => platform::languages(),
@@ -187,21 +214,16 @@ impl Lang {
     };
 
     for want in &wanted {
-      let mut tag = want.as_str();
-      if tag == "pseudo" {
-        return Self { catalog: None, pseudo: true };
+      if want == "pseudo" {
+        return Self { pseudo: Some(Mutex::default()), ..Self::default() };
       }
 
-      loop {
-        if let Some((_, po)) = catalogs.iter().find(|c| c.0.eq_ignore_ascii_case(tag)) {
-          return Self { catalog: Some(Catalog::parse(po)), pseudo: false };
-        }
-
-        let Some((head, _)) = tag.rsplit_once('-') else { break };
-        tag = head;
+      if let Some(po) = po_of(catalogs, want) {
+        let own = po_of(OWN, want).map(Catalog::parse);
+        return Self { app: Some(Catalog::parse(po)), own, pseudo: None };
       }
 
-      if tag.eq_ignore_ascii_case("en") {
+      if want.split('-').next().is_some_and(|l| l.eq_ignore_ascii_case("en")) {
         break;
       }
     }
@@ -209,13 +231,28 @@ impl Lang {
     Self::default()
   }
 
-  /// `key` in this language.
-  fn text<'a>(&'a self, key: &'a str) -> Cow<'a, str> {
-    if self.pseudo {
-      return Cow::Owned(pseudo(key));
+  /// `key` in this language: the app's, else nimbo's translation, else the key.
+  fn text(&'static self, key: &'static str) -> &'static str {
+    if let Some(made) = &self.pseudo {
+      let mut made = made.lock().unwrap_or_else(PoisonError::into_inner);
+      return made.entry(key).or_insert_with(|| pseudo(key).leak());
     }
 
-    Cow::Borrowed(self.catalog.as_ref().and_then(|c| c.get(key)).unwrap_or(key))
+    let found = self.app.as_ref().and_then(|c| c.get(key));
+    found.or_else(|| self.own.as_ref()?.get(key)).unwrap_or(key)
+  }
+}
+
+/// The `.po` text of `catalogs` for `tag`, else for a shorter one (`zh-Hant-TW`, `zh-Hant`,
+/// `zh`).
+fn po_of(catalogs: Localizations, tag: &str) -> Option<&'static str> {
+  let mut tag = tag;
+  loop {
+    if let Some((_, po)) = catalogs.iter().find(|c| c.0.eq_ignore_ascii_case(tag)) {
+      return Some(po);
+    }
+
+    tag = tag.rsplit_once('-')?.0;
   }
 }
 
@@ -366,6 +403,21 @@ msgstr[2] "{n} диктовок"
       ["1 диктовка", "2 диктовки", "5 диктовок", "11 диктовок", "21 диктовка", "111 диктовок"];
     assert_eq!(forms, want);
     assert_eq!(t!("Not in the catalog").to_string(), "Not in the catalog");
+    let s: &str = &KEEP;
+    assert_eq!((s, KEEP.as_str()), ("Хранить историю", "Хранить историю"));
+  }
+
+  /// nimbo's own strings, in the language the app's catalogs give.
+  #[test]
+  fn own_strings_follow_the_app() {
+    set_thread(Locale::Tag("ru-RU"), CATALOGS);
+    assert_eq!([t!("Cancel"), t!("Copy")].map(Localized::as_str), ["Отменить", "Скопировать"]);
+    set_thread(Locale::Tag("ru"), &[("de", "")]);
+    assert_eq!(t!("Cancel").as_str(), "Cancel");
+    for (tag, po) in OWN {
+      let entries = po.matches("\nmsgid ").count() - 1;
+      assert_eq!(Catalog::parse(po).len(), entries, "{tag}: each translated");
+    }
   }
 
   /// The tag, then shorter ones, then the English key.

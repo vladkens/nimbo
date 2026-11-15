@@ -26,7 +26,7 @@ update:
 clean:
 	cargo clean
 
-.PHONY: check-targets size pace api-shots
+.PHONY: check-targets size pace api-shots i18n
 
 # The library, its examples and tests build for these too; needs `rustup target add` of each.
 TARGETS := x86_64-pc-windows-msvc x86_64-unknown-linux-gnu
@@ -43,3 +43,12 @@ size: # code, docs and tests per module; ARGS="--files", "--map" (each file and 
 
 api-shots: # docs/api.md and its pictures (into the assets branch's worktree), from the gallery's table
 	uv run scripts/api-shots.py
+
+# GNU gettext 0.24 or later (`brew install gettext`), the first to read Rust; the locale module's
+# own strings are its tests'.
+i18n: # nimbo's own strings: locales/nimbo.pot from the code, merged into each language's .po
+	xgettext --language=Rust --keyword='t!:1' --keyword='tn!:1,2' --add-comments=Translators \
+	  --from-code=UTF-8 --package-name=nimbo -o locales/nimbo.pot \
+	  $$(find src -name '*.rs' -not -path 'src/locale/*' | sort)
+	for po in locales/*.po; do msgmerge -q --update --backup=none $$po locales/nimbo.pot; done
+	for po in locales/*.po; do msgfmt -c --statistics -o /dev/null $$po || exit 1; done

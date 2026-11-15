@@ -6,6 +6,7 @@
 
 use super::icon::{self, Icon};
 use crate::scene::{Color, Frame, Rect, mix};
+use crate::t;
 use crate::ui::theme::{ButtonLook, ButtonStyle};
 use crate::ui::{Float, Response, Role, Style, TextStyle, Ui, px};
 
@@ -198,7 +199,7 @@ impl Ui<'_> {
     let t = self.theme();
     let id = self.take_id();
     let b = self.button_behavior(id);
-    self.a11y(id, Role::Button).name_or("Help");
+    self.a11y(id, Role::Button).name_or(&t!("Help"));
     let hot = self.ctl_hot(id, b.hovered);
     let d = t.sizes.control_h;
     let bg = if b.pressed { t.pressed } else { mix(t.raised, t.hover, hot) };

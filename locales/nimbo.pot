@@ -1,0 +1,139 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the nimbo package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: nimbo\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-11-15 04:28+0200\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=CHARSET\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: src/platform/macos/shell.rs:166
+msgid "Close Window"
+msgstr ""
+
+#: src/platform/macos/shell.rs:167
+#, rust-format
+msgid "Quit {name}"
+msgstr ""
+
+#: src/ui/behavior.rs:319
+msgid "Cut"
+msgstr ""
+
+#: src/ui/behavior.rs:320
+msgid "Paste"
+msgstr ""
+
+#: src/ui/behavior.rs:321 src/ui/widgets/icon.rs:174
+msgid "Copy"
+msgstr ""
+
+#: src/ui/behavior.rs:323
+msgid "Select All"
+msgstr ""
+
+#: src/ui/dialog.rs:78
+msgid "OK"
+msgstr ""
+
+#: src/ui/dialog.rs:78
+msgid "Cancel"
+msgstr ""
+
+#: src/ui/widgets/button.rs:202
+msgid "Help"
+msgstr ""
+
+#: src/ui/widgets/icon.rs:160
+msgid "Settings"
+msgstr ""
+
+#: src/ui/widgets/icon.rs:161
+msgid "Appearance"
+msgstr ""
+
+#: src/ui/widgets/icon.rs:162
+msgid "Options"
+msgstr ""
+
+#: src/ui/widgets/icon.rs:163
+msgid "Info"
+msgstr ""
+
+#: src/ui/widgets/icon.rs:164
+msgid "Warning"
+msgstr ""
+
+#: src/ui/widgets/icon.rs:165
+msgid "Reset"
+msgstr ""
+
+#: src/ui/widgets/icon.rs:166
+msgid "Delete"
+msgstr ""
+
+#: src/ui/widgets/icon.rs:167
+msgid "Folder"
+msgstr ""
+
+#: src/ui/widgets/icon.rs:168
+msgid "Document"
+msgstr ""
+
+#: src/ui/widgets/icon.rs:169
+msgid "Open"
+msgstr ""
+
+#: src/ui/widgets/icon.rs:170
+msgid "Done"
+msgstr ""
+
+#: src/ui/widgets/icon.rs:171
+msgid "Search"
+msgstr ""
+
+#: src/ui/widgets/icon.rs:172
+msgid "Play"
+msgstr ""
+
+#: src/ui/widgets/icon.rs:173
+msgid "Clear"
+msgstr ""
+
+#: src/ui/widgets/icon.rs:175
+msgid "Download"
+msgstr ""
+
+#: src/ui/widgets/icon.rs:176
+msgid "History"
+msgstr ""
+
+#: src/ui/widgets/icon.rs:177
+msgid "Stop"
+msgstr ""
+
+#: src/ui/widgets/icon.rs:178
+msgid "Dictate"
+msgstr ""
+
+#: src/ui/widgets/icon.rs:179
+msgid "Sidebar"
+msgstr ""
+
+#: src/ui/widgets/icon.rs:180
+msgid "Close"
+msgstr ""
+
+#: src/ui/widgets/icon.rs:181
+msgid "Accessibility"
+msgstr ""

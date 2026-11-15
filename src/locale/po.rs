@@ -117,6 +117,12 @@ impl Catalog {
     self.msgs.insert(e.id, e.strs);
   }
 
+  /// The messages translated.
+  #[cfg(test)]
+  pub fn len(&self) -> usize {
+    self.msgs.len()
+  }
+
   /// The translation of `id`; `None` when there is none.
   pub fn get(&self, id: &str) -> Option<&str> {
     self.msgs.get(id)?.first().map(String::as_str)

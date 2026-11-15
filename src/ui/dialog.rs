@@ -28,6 +28,7 @@ use super::widgets::{Button, ButtonRole, Icon};
 use super::{Float, Id, Role, State, Style, TextStyle, Transition, Ui, grow, pct, px};
 use crate::keys::Key;
 use crate::scene::alpha;
+use crate::t;
 use crate::text::Weight;
 use crate::ui::UnitPoint;
 
@@ -74,7 +75,15 @@ impl<'s> Dialog<'s> {
   /// A dialog titled `title` with Cancel and "OK", the default, as SwiftUI's `.alert(title)`.
   pub fn new(title: &'s str) -> Self {
     let (icon, role) = (None, ButtonRole::Confirm);
-    Self { title, message: "", icon, action: "OK", cancel: "Cancel", role, width: 260.0 }
+    Self {
+      title,
+      message: "",
+      icon,
+      action: t!("OK").as_str(),
+      cancel: t!("Cancel").as_str(),
+      role,
+      width: 260.0,
+    }
   }
 
   /// Text under the title, wrapping.

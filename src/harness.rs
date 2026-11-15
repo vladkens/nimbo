@@ -40,7 +40,10 @@ pub struct Harness<A> {
 }
 
 impl<A: App> Harness<A> {
+  /// The app at `size` and `scale`, its strings in English ([Harness::set_locale]) whatever the
+  /// machine's language.
   pub fn new(app: A, size: Size, scale: f32) -> Self {
+    locale::set_thread(Locale::Tag("en"), &[]);
     let clock = Clock::Virtual(Duration::ZERO);
     let rt = Runtime::new(app, size, scale, clock, Box::new(MemClipboard::default()));
     Self { rt, cpu: cpu::Renderer::new() }

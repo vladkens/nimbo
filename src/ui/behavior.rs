@@ -73,6 +73,7 @@ use crate::app::{Ime, MouseButton};
 use crate::keys::{Command, Delete, Key, Move};
 use crate::menu::{Item, Menu};
 use crate::scene::{Point, Rect};
+use crate::t;
 use crate::text::edit::{
   Editor, Lines, Mono, Sel, graphemes, para_range, range_from_utf16, snap, word_range,
 };
@@ -315,11 +316,11 @@ impl EditMenu {
   /// and GTK's text menus show none.
   pub fn items(&self) -> Menu<Command> {
     let item = |cmd: Command, label: &str, on: bool| Item::button(cmd, label).enabled(on);
-    let cut = item(Command::Cut, "Cut", self.cut);
-    let paste = item(Command::Paste, "Paste", self.paste);
-    let copy = item(Command::Copy, "Copy", self.copy);
+    let cut = item(Command::Cut, &t!("Cut"), self.cut);
+    let paste = item(Command::Paste, &t!("Paste"), self.paste);
+    let copy = item(Command::Copy, &t!("Copy"), self.copy);
     let mut items = if self.editable { vec![cut, copy, paste] } else { vec![copy] };
-    items.extend([Item::Divider, item(Command::SelectAll, "Select All", self.select_all)]);
+    items.extend([Item::Divider, item(Command::SelectAll, &t!("Select All"), self.select_all)]);
     Menu::new(items)
   }
 }
