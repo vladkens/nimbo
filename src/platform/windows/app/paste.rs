@@ -81,6 +81,10 @@ pub fn holds(id: u64) -> bool {
   OFFER.with_borrow(|o| o.as_ref().is_some_and(|o| o.id == id))
 }
 
+pub fn reaches(_: u64) -> bool {
+  true
+}
+
 pub fn readable() -> bool {
   true
 }

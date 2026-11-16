@@ -98,6 +98,10 @@ pub fn holds(count: u64) -> bool {
   change_count() == Some(count)
 }
 
+pub fn reaches(_: u64) -> bool {
+  true
+}
+
 pub fn readable() -> bool {
   may_read(&general())
 }

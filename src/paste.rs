@@ -151,8 +151,8 @@ struct Sys {
   write: fn(&str) -> bool,
   /// Puts the snapshot back if the clipboard still holds the offer; `false` when it couldn't.
   give_back: fn(Offer, &Snapshot) -> bool,
-  /// Puts the snapshot back whatever the clipboard holds.
-  restore: fn(Snapshot),
+  /// Other apps can paste the offer.
+  reaches: fn(Offer) -> bool,
   post: fn(Shortcut) -> Result<(), String>,
   focus: fn() -> Option<Focused>,
   hidden: fn() -> bool,
@@ -176,7 +176,7 @@ const SYSTEM: Sys = Sys {
     }
   },
   give_back: |offer, old| !SystemClipboard.holds(offer) || SystemClipboard.restore(old.clone()),
-  restore: |old| _ = SystemClipboard.restore(old),
+  reaches: |offer| SystemClipboard.reaches(offer),
   post: keys::post,
   focus: focus::current,
   hidden: focus::hidden,
@@ -243,13 +243,14 @@ fn paste_now(sys: Sys, text: &str, opts: Paste) -> Result<(), NotPasted> {
   let after = move |delay| (sys.after)(delay, Box::new(move || settle(sys, Some(id))));
   match snapshot {
     Some(snapshot) => {
-      let Some(offer) = (sys.offer)(text, Some(Box::new(move || after(RESTORE)))) else {
-        // One that failed may have taken the clipboard all the same (Linux: XWayland's, which the
-        // compositor took too late).
-        (sys.restore)(snapshot);
-        return Err(NotPasted::NoClipboard);
-      };
+      let offer = (sys.offer)(text, Some(Box::new(move || after(RESTORE))));
+      let offer = offer.ok_or(NotPasted::NoClipboard)?;
       PENDING.set(Some((id, offer, snapshot)));
+      if !(sys.reaches)(offer) {
+        settle(sys, Some(id));
+        return Err(NotPasted::NoClipboard);
+      }
+
       after(CAP);
     }
     // On Wayland only the paste's own way (the portal's clipboard) reaches the clipboard of an app
@@ -258,7 +259,10 @@ fn paste_now(sys: Sys, text: &str, opts: Paste) -> Result<(), NotPasted> {
       (sys.write)(text).then_some(()).ok_or(NotPasted::NoClipboard)?
     }
     // Nothing to restore: the text stays, marked for clipboard managers to skip.
-    None => _ = (sys.offer)(text, None).ok_or(NotPasted::NoClipboard)?,
+    None => {
+      let offer = (sys.offer)(text, None).ok_or(NotPasted::NoClipboard)?;
+      (sys.reaches)(offer).then_some(()).ok_or(NotPasted::NoClipboard)?
+    }
   }
 
   // Wayland's first offer may wait for the portal's dialog.
@@ -336,8 +340,8 @@ mod tests {
     holder: Option<u64>,
     offers: u64,
     on_read: Option<Box<dyn FnMut()>>,
-    /// The offer takes the clipboard, but fails.
-    offer_fails: bool,
+    /// Other apps can't paste the offers.
+    unreached: bool,
     restored: usize,
     posted: Vec<Shortcut>,
     post_error: Option<String>,
@@ -375,7 +379,7 @@ mod tests {
       world(|w| {
         w.offers += 1;
         (w.clip, w.holder, w.on_read) = (text.into(), Some(w.offers), on_read);
-        (!w.offer_fails).then_some(Offer(w.offers))
+        Some(Offer(w.offers))
       })
     },
     write: |text| {
@@ -398,10 +402,7 @@ mod tests {
 
       true
     },
-    restore: |snapshot| {
-      write(&String::from_utf8(snapshot.items[0][0].1.clone()).unwrap());
-      world(|w| w.restored += 1);
-    },
+    reaches: |_| world(|w| !w.unreached),
     post: |key| {
       world(|w| match w.post_error.clone() {
         Some(e) => Err(e),
@@ -463,9 +464,9 @@ mod tests {
   }
 
   #[test]
-  fn restores_after_a_failed_offer() {
+  fn restores_an_offer_out_of_reach() {
     let opts = setup("TextEdit");
-    world(|w| w.offer_fails = true);
+    world(|w| w.unreached = true);
     assert_eq!(paste(FAKE, "hello", opts), Err(NotPasted::NoClipboard));
     assert_eq!(clip(), ("mine".into(), 1));
     assert!(world(|w| w.posted.is_empty()));

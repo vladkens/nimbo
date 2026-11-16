@@ -93,6 +93,8 @@ thread_local! {
   /// XWayland's CLIPBOARD atom while [taken] waits, and whether an X client asked for it since.
   static WANTED: Cell<c_ulong> = const { Cell::new(0) };
   static ASKED: Cell<bool> = const { Cell::new(false) };
+  /// The last offer the Wayland apps didn't get.
+  static UNREACHED: Cell<u64> = const { Cell::new(0) };
 }
 
 /// The functions and the CLIPBOARD selection, while the app runs: XWayland's on Wayland, where
@@ -115,6 +117,10 @@ pub fn change_count() -> Option<u64> {
 
 pub fn holds(id: u64) -> bool {
   SERVED.with_borrow(|s| s.as_ref().is_some_and(|s| s.id == id))
+}
+
+pub fn reaches(id: u64) -> bool {
+  UNREACHED.get() != id
 }
 
 pub fn readable() -> bool {
@@ -217,9 +223,12 @@ pub fn offer(text: &str, on_read: Option<OnRead>) -> Option<u64> {
   types.push((MARKER.0.into(), MARKER.1.to_vec()));
   let id = serve(types, on_read)?;
   // Not the Wayland apps' (KWin takes XWayland's selection only from an X window in focus), or
-  // taken too late: the paste gives the snapshot back.
-  let reached = !overlay::wayland() || remote::clipboard().is_some() || taken();
-  reached.then_some(id)
+  // another owner's since.
+  if overlay::wayland() && remote::clipboard().is_none() && !(taken() && holds(id)) {
+    UNREACHED.set(id);
+  }
+
+  Some(id)
 }
 
 /// The compositor asked for XWayland's selection (its targets, as GNOME does at once), and had

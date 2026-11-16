@@ -118,6 +118,12 @@ impl SystemClipboard {
   pub fn holds(&self, offer: Offer) -> bool {
     imp::holds(offer.0)
   }
+
+  /// Other apps can paste `offer`: on Wayland without the portal's clipboard, once the compositor
+  /// took XWayland's selection, which [offer](Self::offer) waits for; always elsewhere.
+  pub fn reaches(&self, offer: Offer) -> bool {
+    imp::reaches(offer.0)
+  }
 }
 
 #[cfg(test)]
