@@ -174,8 +174,9 @@ impl Ui<'_> {
   /// binding (the menu grabs the keys, [Ui::grab_keys]); closed, focus goes back where it was. A
   /// trigger disabled while its menu is open closes it with `toggle`.
   ///
-  /// It stays in the window: under the trigger, or above it when it doesn't fit there and
-  /// there is more room above; as high as the room at most, its items then scroll
+  /// It stays in the window, under the window's own buttons (macOS's traffic lights, which the
+  /// OS draws over the content, [Ui::titlebar]): under the trigger, or above it when it doesn't
+  /// fit there and there is more room above; as high as the room at most, its items then scroll
   /// (`id.key("menu").key("list")`, a [Ui::scroll_area]), keeping the highlighted one in view.
   /// Its first frame lays it out out of sight, to place it. Opening it stops what was
   /// scrolling under it; wheel events around it scroll nothing.
@@ -369,7 +370,7 @@ impl Ui<'_> {
   /// for its height. Under the trigger, or above it when it doesn't fit below and there is
   /// more room above; from its left edge, or its right edge near the window's. Over the
   /// trigger (`over`), the item it opened on over it, by where the last frame laid it out, the
-  /// list scrolled to bring it the rest of the way.
+  /// list scrolled to bring it the rest of the way. Its top stays under the window's buttons.
   fn menu_place(
     &mut self,
     id: Id,
@@ -379,6 +380,8 @@ impl Ui<'_> {
   ) -> (f32, f32, f32, f32) {
     let (menu, list) = (id.key("menu"), id.key("menu").key("list"));
     let size = self.size();
+    // Its least top: under the window's own buttons, which the OS draws over everything.
+    let least = self.titlebar().and_then(|t| t.buttons).map_or(EDGE, |b| b.y + b.h + EDGE);
     // At a point, the menu goes 3 below it as under a trigger, or 3 above it flipped: the
     // trigger's gap taken back.
     let at = st.point.map(|p| Rect::new(p.x, p.y + 3.0, 0.0, -6.0));
@@ -387,25 +390,25 @@ impl Ui<'_> {
     let frame = style.pad[0] + style.pad[2] + style.border[0] + style.border[2];
     let natural = self.scroll(list).map_or(0.0, |sc| sc.content.h + frame);
     let below = b.y + b.h + 3.0;
-    let (down, up) = ((size.h - EDGE - below).max(0.0), (b.y - 3.0 - EDGE).max(0.0));
+    let (down, up) = ((size.h - EDGE - below).max(0.0), (b.y - 3.0 - least).max(0.0));
     let flip = natural > down && up > down;
     let (mut y, mut ay, mut room) = if flip { (b.y - 3.0, 1.0, up) } else { (below, 0.0, down) };
     let mut x = if b.x + menu_w > size.w - EDGE { b.x + b.w - menu_w } else { b.x };
     if over && let Some(p) = st.at {
       // Where it went, inside the window still when the window shrank.
-      room = size.h - 2.0 * EDGE;
-      (x, y, ay) = (p.x, p.y.min(size.h - EDGE - natural.min(room)).max(EDGE), 0.0);
+      room = size.h - EDGE - least;
+      (x, y, ay) = (p.x, p.y.min(size.h - EDGE - natural.min(room)).max(least), 0.0);
     } else if over {
-      room = size.h - 2.0 * EDGE;
+      room = size.h - EDGE - least;
       let h = natural.min(room);
       let start = st.start.or(Some(0)).and_then(|i| st.items.get(i));
       let item = start.and_then(|&(i, _)| self.rect(i));
       let top = style.pad[0];
-      (y, ay) = ((b.y - top).min(size.h - EDGE - h).max(EDGE), 0.0);
+      (y, ay) = ((b.y - top).min(size.h - EDGE - h).max(least), 0.0);
       if let (Some(r), Some(sc)) = (item, self.scroll(list)) {
         let at = r.y - sc.viewport.y + sc.offset.y;
         let target = b.y + (b.h - r.h) / 2.0;
-        y = (target - top - at).min(size.h - EDGE - h).max(EDGE);
+        y = (target - top - at).min(size.h - EDGE - h).max(least);
         let max = (natural - h).max(0.0);
         self.scroll_to(list, Point::new(0.0, (y + top + at - target).clamp(0.0, max)));
         st.reveal = false;
@@ -644,7 +647,7 @@ mod tests {
 
   use super::*;
   use crate::app::{App, Event, MouseButton, Phase};
-  use crate::harness::Harness;
+  use crate::harness::{Harness, mac_titlebar};
   use crate::scene::Size;
 
   /// A menu inside a scroll area over tall content; its items count their runs.
@@ -804,6 +807,41 @@ mod tests {
           "A label far longer than this narrow window is wide, which ends in an ellipsis",
         );
       });
+    }
+  }
+
+  /// A button at the window's bottom and its menu of 30 items, over it or under it.
+  struct Low(MenuPlacement);
+
+  impl App for Low {
+    fn view(&mut self, ui: &mut Ui) {
+      let (id, t) = (Id::of("open"), ui.theme());
+      ui.el(Style::new().w(px(10.0)).h(px(200.0)));
+      let toggle = ui.with_id(id).button("Open").clicked;
+      ui.menu_popup(id, toggle, self.0, t.popup(), |ui| {
+        for i in 0..30 {
+          ui.key(i).menu_item("Item");
+        }
+      });
+    }
+  }
+
+  /// However tall, a menu stays under the window's own buttons, which the OS draws over it.
+  #[test]
+  fn a_menu_stays_under_the_window_buttons() {
+    let bar = mac_titlebar("", false);
+    let lights = bar.buttons.unwrap();
+    for place in [MenuPlacement::Below, MenuPlacement::Over { start: Some(0) }] {
+      let mut h = Harness::new(Low(place), Size::new(300.0, 240.0), 1.0);
+      h.rt.set_titlebar(Some(bar));
+      h.frame();
+      h.click_id(Id::of("open"));
+      for _ in 0..3 {
+        h.frame();
+      }
+
+      let m = h.rect(Id::of("open").key("menu")).unwrap();
+      assert!(m.y >= lights.y + lights.h + EDGE && m.y + m.h <= 240.0 - EDGE, "{place:?}: {m:?}");
     }
   }
 
