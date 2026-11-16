@@ -3,10 +3,10 @@
 //! The tray's menu as each OS gets it, with nothing on screen (a detached tray: no status item,
 //! notify icon or D-Bus item): built from a [Menu] (a header, labels, shortcuts, check marks,
 //! disabled and destructive items, separators, a submenu), rebuilt as it opens, kept while open
-//! (a new one waits for it to close), and items chosen through the OS's own path, reaching the
-//! app by id; icons from RGBA and from path data, and the title beside them where the OS has one. A
-//! plain test on Windows and Linux (`tests/tray.rs`); on macOS the NSMenu and NSImage are main
-//! thread only, which the test harness isn't.
+//! (a new one waits for it to close, the app told as it closes), and items chosen through the OS's
+//! own path, reaching the app by id; icons from RGBA and from path data, and the title beside them
+//! where the OS has one. A plain test on Windows and Linux (`tests/tray.rs`); on macOS the NSMenu
+//! and NSImage are main thread only, which the test harness isn't.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -60,6 +60,9 @@ pub fn run() {
   let chosen = Rc::new(RefCell::new(Vec::new()));
   let c = chosen.clone();
   tray.on_item(move |_, _, id: &str| c.borrow_mut().push(id.to_owned()));
+  let closed = Rc::new(RefCell::new(0));
+  let c = closed.clone();
+  tray.on_close(move |_, _| *c.borrow_mut() += 1);
   tray.opening();
   assert_eq!((*opened.borrow(), items(&tray)[0].as_str()), (1, "Status 1||off|disabled|header"));
   tray.choose(&[3]);
@@ -80,6 +83,10 @@ pub fn run() {
   assert_eq!(items(&tray)[0], "Status 2||off|disabled|header");
   tray.closing();
   assert_eq!(items(&tray)[0], "Status 8||off|disabled|header");
+  // Once for each time it was open, whether it closed on a click (Linux) or not.
+  assert_eq!(*closed.borrow(), 2);
+  tray.closing();
+  assert_eq!(*closed.borrow(), 2, "closed already");
   tray.set_menu(&menu(9));
   assert_eq!(items(&tray)[0], "Status 9||off|disabled|header", "closed: at once");
 

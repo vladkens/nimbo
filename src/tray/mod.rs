@@ -1,8 +1,8 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The app's icon in the menu bar or the tray, with a menu the app describes ([Menu]) and
-//! rebuilds when it changes or as it opens ([Tray::on_open]). A click on an item comes to
-//! [Tray::on_item] by the item's id. Main thread only, while [crate::app] runs.
+//! rebuilds when it changes or as it opens ([Tray::on_open]) and closes ([Tray::on_close]). A click
+//! on an item comes to [Tray::on_item] by the item's id. Main thread only, while [crate::app] runs.
 //!
 //! | | macOS | Windows | Linux |
 //! |---|---|---|---|
@@ -83,31 +83,63 @@ impl TrayIcon {
   }
 }
 
-type OnOpen = Box<dyn FnMut(&mut Main, &imp::Tray)>;
+type OnMenu = Box<dyn FnMut(&mut Main, &imp::Tray)>;
 type OnItem = Box<dyn FnMut(&mut Main, &imp::Tray, usize)>;
 /// A menu's actions by number ([Menu::tagged]), of the app's type.
 type Actions = Option<Box<dyn Any>>;
 
-/// What each platform's tray keeps alike: the app's callbacks; the actions of the menu built,
-/// by number ([Menu::tagged]), and of the one set last, which go with it once it is built; and
-/// while the menu is open, the last menu set meanwhile, which waits for it to close.
+/// What becomes of a menu set ([State::set_menu]).
+pub(crate) enum Set {
+  Build,
+  /// The open menu takes its labels, checks and enabled states.
+  Update,
+  Wait,
+}
+
+/// What each platform's tray keeps alike: the app's callbacks; the menu shown and the actions
+/// of the menu built, by number ([Menu::tagged]), and of the one set last, which go with it once
+/// it is built; and while the menu is open, the last menu set meanwhile, which waits for it to
+/// close.
 #[derive(Default)]
 pub(crate) struct State {
-  on_open: RefCell<Option<OnOpen>>,
+  on_open: RefCell<Option<OnMenu>>,
+  on_close: RefCell<Option<OnMenu>>,
   on_item: RefCell<Option<OnItem>>,
   open: Cell<bool>,
+  shown: RefCell<Option<Menu<usize>>>,
   built: RefCell<Actions>,
   next: RefCell<Actions>,
-  pending: RefCell<Option<(Menu<usize>, Actions)>>,
+  /// The next actions are the built ones: an open menu of the same items keeps their numbers.
+  same_actions: Cell<bool>,
+  /// The menu shown has the items and actions of the one before it: their ids may stay.
+  kept: Cell<bool>,
+  pending: RefCell<Option<(Menu<usize>, Actions, bool)>>,
+}
+
+/// Runs the app's callback in `slot`, kept for the next time unless it set another.
+fn call(slot: &RefCell<Option<OnMenu>>, tray: &imp::Tray) {
+  if let Some(mut f) = slot.take() {
+    f(&mut Main::here(), tray);
+    slot.borrow_mut().get_or_insert(f);
+  }
 }
 
 impl State {
-  /// The menu is about to open: the app's [Tray::on_open] runs, kept for the next time.
+  /// The menu is about to open: the app's [Tray::on_open] runs.
   pub fn opening(&self, tray: &imp::Tray) {
-    if let Some(mut f) = self.on_open.take() {
-      f(&mut Main::here(), tray);
-      self.on_open.borrow_mut().get_or_insert(f);
+    call(&self.on_open, tray);
+  }
+
+  /// The menu closed, if it was open: the app's [Tray::on_close] runs, a menu it sets going with
+  /// the one set while it was open, which is to be built now.
+  pub fn closed(&self, tray: &imp::Tray) -> Option<Menu<usize>> {
+    if !self.open.get() {
+      return None;
     }
+
+    call(&self.on_close, tray);
+    self.open.set(false);
+    self.take_pending()
   }
 
   /// The item of action number `n` was chosen: the app's [Tray::on_item] runs, kept for the
@@ -123,36 +155,47 @@ impl State {
     self.open.set(open);
   }
 
-  /// Whether `menu` waits, the menu being open (the last one set wins); if not, one that waited
-  /// is dropped, `menu` to be built now, its actions taking the built one's place.
-  pub fn hold(&self, menu: &Menu<usize>) -> bool {
+  /// What becomes of `menu`: while the menu is open it waits (the last one set wins), unless the
+  /// platform changes an open menu's items (`in_place`) and it has the same items and actions as
+  /// the one shown ([Menu::same_items]); then, or when the menu is closed, one that waited is
+  /// dropped, `menu`'s actions taking the built one's place.
+  pub fn set_menu(&self, menu: &Menu<usize>, in_place: bool) -> Set {
     let next = self.next.take();
-    if self.open.get() {
-      *self.pending.borrow_mut() = Some((menu.clone(), next));
-      return true;
+    let open = self.open.get();
+    let same =
+      self.same_actions.get() && self.shown.borrow().as_ref().is_some_and(|m| m.same_items(menu));
+    if open && !(in_place && same) {
+      *self.pending.borrow_mut() = Some((menu.clone(), next, same));
+      return Set::Wait;
     }
 
     self.pending.take();
-    *self.built.borrow_mut() = next;
-    false
-  }
-
-  /// The menu set while it was open, once it is closed: to be built now.
-  pub fn released(&self) -> Option<Menu<usize>> {
-    if self.open.get() { None } else { self.take_pending() }
+    self.show(menu.clone(), next, same);
+    if open { Set::Update } else { Set::Build }
   }
 
   /// The menu set while it was open, open or not: a host fetching the menu builds it anew.
   pub fn take_pending(&self) -> Option<Menu<usize>> {
-    let (menu, actions) = self.pending.take()?;
-    *self.built.borrow_mut() = actions;
+    let (menu, actions, same) = self.pending.take()?;
+    self.show(menu.clone(), actions, same);
     Some(menu)
   }
 
-  /// A menu set while it was open still waits.
+  fn show(&self, menu: Menu<usize>, actions: Actions, same: bool) {
+    *self.shown.borrow_mut() = Some(menu);
+    *self.built.borrow_mut() = actions;
+    self.kept.set(same);
+  }
+
+  /// The menu shown has the items and actions of the one before it ([Menu::same_items]).
+  #[cfg(target_os = "linux")]
+  pub fn kept(&self) -> bool {
+    self.kept.get()
+  }
+
   #[cfg(target_os = "macos")]
-  pub fn waiting(&self) -> bool {
-    self.pending.borrow().is_some()
+  pub fn is_open(&self) -> bool {
+    self.open.get()
   }
 }
 
@@ -166,7 +209,7 @@ impl<A> Clone for Tray<A> {
   }
 }
 
-impl<A: Clone + 'static> Tray<A> {
+impl<A: Clone + PartialEq + 'static> Tray<A> {
   /// Shows `icon` with an empty menu; `tooltip` is also what accessibility says of it.
   pub fn new(icon: TrayIcon, tooltip: &str) -> Self {
     Self(imp::Tray::new(icon, tooltip), PhantomData)
@@ -188,11 +231,19 @@ impl<A: Clone + 'static> Tray<A> {
     self.0.set_title(title);
   }
 
-  /// Replaces the menu, also while it opens ([Tray::on_open]). While it is open the new one waits
-  /// until it closes (the last one set wins): rebuilt, an open menu would close its submenus.
+  /// Replaces the menu, also while it opens ([Tray::on_open]). While it is open, one of the same
+  /// items but for labels, checks and enabled states ([Item]) changes it in place on macOS, its
+  /// submenus staying open (a countdown in it); any other waits until it closes (the last one set
+  /// wins): rebuilt, an open menu would close its submenus.
   pub fn set_menu(&self, menu: &Menu<A>) {
     let (menu, actions) = menu.tagged();
-    *self.0.state().next.borrow_mut() = Some(Box::new(actions));
+    let state = self.0.state();
+    let built = state.built.borrow();
+    let same =
+      built.as_ref().and_then(|b| b.downcast_ref::<Vec<A>>()).is_some_and(|b| *b == actions);
+    drop(built);
+    state.same_actions.set(same);
+    *state.next.borrow_mut() = Some(Box::new(actions));
     self.0.set_menu(&menu);
   }
 
@@ -200,6 +251,15 @@ impl<A: Clone + 'static> Tray<A> {
   pub fn on_open(&self, mut f: impl FnMut(&mut Main, &Tray<A>) + 'static) {
     let run = move |main: &mut Main, tray: &imp::Tray| f(main, &Tray(tray.clone(), PhantomData));
     *self.0.state().on_open.borrow_mut() = Some(Box::new(run));
+  }
+
+  /// `f` runs as the menu closes, after the chosen item's action (KDE says the menu closed before
+  /// the click): the moment to stop what only an open menu needs (a countdown in it). A menu it
+  /// sets takes the place of one set while the menu was open. Linux panels that don't say the
+  /// menu closed run it on a click or as the menu opens next.
+  pub fn on_close(&self, mut f: impl FnMut(&mut Main, &Tray<A>) + 'static) {
+    let run = move |main: &mut Main, tray: &imp::Tray| f(main, &Tray(tray.clone(), PhantomData));
+    *self.0.state().on_close.borrow_mut() = Some(Box::new(run));
   }
 
   /// `f` runs with the action of the item chosen as the menu closes: a menu it sets waits for
@@ -227,7 +287,7 @@ pub fn available() -> Result<(), String> {
 /// For the tray scenario (`tests/tray.rs`): a tray with nothing on screen, the menu as the OS
 /// got it, and its items chosen without opening it.
 #[doc(hidden)]
-impl<A: Clone + 'static> Tray<A> {
+impl<A: Clone + PartialEq + 'static> Tray<A> {
   pub fn detached(icon: TrayIcon, tooltip: &str) -> Self {
     Self(imp::Tray::detached(icon, tooltip), PhantomData)
   }
@@ -271,34 +331,41 @@ mod tests {
     assert!(TrayIcon::from_svg("<svg/>").is_err());
   }
 
-  /// A menu set while it is open waits for it to close, the last one set winning; one set
+  /// A menu set while it is open waits for it to close, the last one set winning, or with the
+  /// same items and actions changes it in place where the platform can, their ids kept; one set
   /// once it is closed drops what waited.
   #[test]
   fn a_menu_set_while_open_waits() {
-    let (a, b) = (Menu::new(vec![Item::button(0, "A")]), Menu::new(vec![Item::button(0, "B")]));
+    let menu = |label| Menu::new(vec![Item::button(0, label)]);
+    let (a, b) = (menu("A"), Menu::new(vec![Item::toggle(0, "B", true)]));
     let s = State::default();
     let actions = |s: &State| s.built.borrow().as_ref()?.downcast_ref::<Vec<&str>>().cloned();
-    let next = |s: &State, v: &'static str| *s.next.borrow_mut() = Some(Box::new(vec![v]));
-    next(&s, "a");
-    assert!(!s.hold(&a));
+    let set = |s: &State, m: &Menu<usize>, v: &'static str, in_place| {
+      s.same_actions.set(actions(s) == Some(vec![v]));
+      *s.next.borrow_mut() = Some(Box::new(vec![v]));
+      s.set_menu(m, in_place)
+    };
+    assert!(matches!(set(&s, &a, "a", true), Set::Build));
     assert_eq!(actions(&s), Some(vec!["a"]), "built at once");
     s.set_open(true);
-    next(&s, "a2");
-    assert!(s.hold(&a));
-    next(&s, "b");
-    assert!(s.hold(&b));
-    assert_eq!(s.released(), None, "still open");
+    assert!(matches!(set(&s, &menu("A 2"), "a2", false), Set::Wait), "not in place");
+    assert!(matches!(set(&s, &b, "b", true), Set::Wait), "other items");
     assert_eq!(actions(&s), Some(vec!["a"]), "the open menu's");
-    s.set_open(false);
-    assert_eq!(s.released(), Some(b.clone()));
+    assert_eq!(s.take_pending(), Some(b.clone()), "the last one set");
     assert_eq!(actions(&s), Some(vec!["b"]), "the one built now");
-    assert_eq!(s.released(), None);
+    assert_eq!(s.take_pending(), None);
 
-    s.set_open(true);
-    s.hold(&a);
+    assert!(matches!(set(&s, &a, "a", true), Set::Wait));
+    assert!(matches!(set(&s, &b, "c", true), Set::Wait), "another action");
+    let b2 = Menu::new(vec![Item::toggle(0, "B 2", false)]);
+    assert!(matches!(set(&s, &b2, "b", true), Set::Update), "the same items as shown");
+    assert!(s.kept.get(), "their ids stay");
+    assert_eq!(s.take_pending(), None, "what waited is dropped");
+    set(&s, &b, "b", false);
     s.set_open(false);
-    assert!(!s.hold(&b));
-    assert_eq!(s.released(), None);
+    assert!(matches!(set(&s, &a, "a", false), Set::Build));
+    assert_eq!(s.take_pending(), None);
+    assert!(!s.kept.get(), "other items");
   }
 
   /// Path data goes in an icon's SVG as it is, an image as runs of its alpha.

@@ -34,7 +34,7 @@ use super::super::dbus::{self, Gv, V, VTable};
 use super::super::dl::fns;
 use super::super::{Fp, P, S, connect, lib, load};
 use super::menu::{self, nodes};
-use crate::tray::{Menu, State, TrayIcon};
+use crate::tray::{Menu, Set, State, TrayIcon};
 use crate::{desktop, paths, platform};
 
 const SNI: &str = "org.kde.StatusNotifierItem";
@@ -261,24 +261,39 @@ impl Tray {
   }
 
   pub fn set_menu(&self, menu: &Menu<usize>) {
-    if !self.0.state.hold(menu) {
+    if let Set::Build = self.0.state.set_menu(menu, false) {
       self.apply(menu.clone());
     }
   }
 
-  /// Serves `menu` from now on, a new revision the host is told of.
+  /// Serves `menu` from now on, a new revision the host is told of. The same items keep their
+  /// ids: KDE sends the click after saying the menu closed, which builds the menu set meanwhile;
+  /// it keeps the submenus it fetched by id, so each kept one is updated too.
   fn apply(&self, menu: Menu<usize>) {
     let gone = nodes(&self.0.menu.replace(menu)).len() as i32;
-    self.0.base.set(self.0.base.get() + gone);
+    let kept = self.0.state.kept();
+    if !kept {
+      self.0.base.set(self.0.base.get() + gone);
+    }
+
     let rev = self.0.revision.get() + 1;
     self.0.revision.set(rev);
-    self.emit(MENU_PATH, MENU, "LayoutUpdated", V::Tuple(vec![V::U(rev), V::I(0)]));
+    let mut updated = vec![0];
+    if kept {
+      let menu = self.0.menu.borrow();
+      let n = nodes(&menu);
+      let subs = n.iter().enumerate().skip(1).filter(|(_, n)| !n.children.is_empty());
+      updated.extend(subs.map(|(id, _)| self.0.base.get() + id as i32));
+    }
+
+    for id in updated {
+      self.emit(MENU_PATH, MENU, "LayoutUpdated", V::Tuple(vec![V::U(rev), V::I(id)]));
+    }
   }
 
-  /// The menu closed: the one set meanwhile, if any, is served.
+  /// The menu closed: the app's `on_close` runs and the one set meanwhile, if any, is served.
   fn closed(&self) {
-    self.0.state.set_open(false);
-    if let Some(menu) = self.0.state.released() {
+    if let Some(menu) = self.0.state.closed(self) {
       self.apply(menu);
     }
   }
