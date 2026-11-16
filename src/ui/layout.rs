@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 mod wrap;
 
-pub(crate) use self::wrap::{Kept, wrapped_width};
+pub(crate) use self::wrap::{Kept, wrapped_size};
 use self::wrap::{text_width, wrap};
 use super::a11y::Records;
 use super::textlayout::{Edit, Stop, reveal};
