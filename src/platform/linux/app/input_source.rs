@@ -107,10 +107,10 @@ pub fn current() -> Option<InputSource> {
     }
     Desktop::Xkb => {
       let c = query()?;
-      // XkbStateRec, its first byte the effective group.
-      let mut state = [0u8; 32];
-      let ok = unsafe { (c.x.XkbGetState)(c.d(), CORE_KBD, state.as_mut_ptr()) } == 0;
-      groups(c).into_iter().nth(usize::from(state[0])).filter(|_| ok)
+      // XkbStateRec (its shorts aligned), its first byte the effective group.
+      let mut state = [0u64; 4];
+      let ok = unsafe { (c.x.XkbGetState)(c.d(), CORE_KBD, state.as_mut_ptr().cast()) } == 0;
+      groups(c).into_iter().nth(usize::from(state[0].to_ne_bytes()[0])).filter(|_| ok)
     }
   }
 }
@@ -251,8 +251,8 @@ impl Conn {
   }
 }
 
-/// The connection the layouts are read on, opened at the first; it asks for no events, so none
-/// waits in it.
+/// The connection the layouts are read on, opened at the first; it asks for no events, and
+/// [groups] drops those X sends anyway (`MappingNotify`).
 fn query() -> Option<Conn> {
   static QUERY: OnceLock<Option<Conn>> = OnceLock::new();
   *QUERY.get_or_init(Conn::open)
@@ -262,8 +262,9 @@ fn query() -> Option<Conn> {
 fn groups(c: Conn) -> Vec<InputSource> {
   let (x, d) = (c.x, c.d());
   let (mut kind, mut format, mut items, mut after, mut data) = (0, 0, 0, 0, null_mut());
-  // SAFETY: Xlib's call with out-pointers to locals; the data is Xlib's, freed after the copy.
+  // SAFETY: Xlib's calls with out-pointers to locals; the data is Xlib's, freed after the copy.
   let text = unsafe {
+    (x.XSync)(d, 1);
     let root = (x.XDefaultRootWindow)(d);
     (x.XGetWindowProperty)(
       d,
