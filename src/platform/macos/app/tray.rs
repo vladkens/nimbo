@@ -3,10 +3,10 @@
 //! The tray on macOS: an NSStatusItem with an NSMenu built from [Menu], its delegate asking the
 //! app as it opens (`menuNeedsUpdate:`) and taking the chosen item (`chosen:`, by tag); the icon
 //! a template NSImage, from RGBA through CoreGraphics, or path data filled whenever AppKit draws
-//! it. A menu set while the menu is open (`menuWillOpen:` to `menuDidClose:`) waits for it to
-//! close: rebuilding an open NSMenu closes its open submenus. It is built from the main queue
-//! after `menuDidClose:`, where AppKit forbids changing the menu, and after the chosen item's
-//! action, which still finds its id.
+//! it; the title beside it in the menu bar's font, its digits of one width. A menu set while the
+//! menu is open (`menuWillOpen:` to `menuDidClose:`) waits for it to close: rebuilding an open
+//! NSMenu closes its open submenus. It is built from the main queue after `menuDidClose:`, where
+//! AppKit forbids changing the menu, and after the chosen item's action, which still finds its id.
 
 use std::cell::RefCell;
 use std::ptr::null_mut;
@@ -18,8 +18,9 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool, ProtocolObject};
 use objc2::{AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{
-  NSBezierPath, NSColor, NSControlStateValueOn, NSEventModifierFlags, NSImage, NSMenu,
-  NSMenuDelegate, NSMenuItem, NSStatusBar, NSStatusItem, NSVariableStatusItemLength, NSWindingRule,
+  NSBezierPath, NSCellImagePosition, NSColor, NSControlStateValueOn, NSEventModifierFlags, NSFont,
+  NSFontWeightRegular, NSImage, NSMenu, NSMenuDelegate, NSMenuItem, NSStatusBar, NSStatusItem,
+  NSVariableStatusItemLength, NSWindingRule,
 };
 use objc2_core_foundation::CFRunLoop;
 use objc2_core_graphics::{
@@ -43,6 +44,8 @@ struct Inner {
   menu: Retained<NSMenu>,
   delegate: Retained<Delegate>,
   image: RefCell<Retained<NSImage>>,
+  /// Beside the icon; empty for none.
+  title: RefCell<String>,
   /// Open between `menuWillOpen:` and `menuDidClose:`.
   state: State,
 }
@@ -155,6 +158,7 @@ impl Tray {
       menu,
       delegate,
       image: RefCell::new(image(&icon)),
+      title: RefCell::default(),
       state: State::default(),
     };
     let tray = Self(Rc::new(inner));
@@ -183,6 +187,25 @@ impl Tray {
     if let Some(button) = self.0.item.as_ref().and_then(|i| i.button(self.0.mtm)) {
       button.setToolTip(Some(&s));
     }
+  }
+
+  pub fn set_title(&self, title: &str) {
+    *self.0.title.borrow_mut() = title.into();
+    let Some(button) = self.0.item.as_ref().and_then(|i| i.button(self.0.mtm)) else { return };
+    // Digits of one width: a countdown doesn't move the items to its left each second.
+    let size = NSFont::menuBarFontOfSize(0.0).pointSize();
+    // SAFETY: a static of the AppKit framework.
+    let font = NSFont::monospacedDigitSystemFontOfSize_weight(size, unsafe { NSFontWeightRegular });
+    button.setFont(Some(&font));
+    button.setTitle(&NSString::from_str(title));
+    // `ImageLeading` is macOS 13's; the menu bar runs left to right.
+    let at = if title.is_empty() {
+      NSCellImagePosition::ImageOnly
+    } else {
+      NSCellImagePosition::ImageLeft
+    };
+
+    button.setImagePosition(at);
   }
 
   pub fn set_menu(&self, menu: &Menu<usize>) {
@@ -242,6 +265,11 @@ impl Tray {
     let image = self.0.image.borrow();
     let (size, template) = (image.size(), image.isTemplate());
     let mut out = vec![format!("icon {}x{} template={template}", size.width, size.height)];
+    let title = self.0.title.borrow();
+    if !title.is_empty() {
+      out[0] += &format!(" title={title}");
+    }
+
     walk(&self.0.menu, 0, &mut out);
     out
   }

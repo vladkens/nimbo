@@ -3,7 +3,8 @@
 //! A tray app with no window of its own: an icon in the menu bar (macOS) or the tray (Windows,
 //! Linux) whose menu opens a counter window and shows its count, a global hotkey that opens or
 //! closes that window from any app, launch at login as a check mark, and an item that pastes a
-//! line where the user types three seconds later, as a dictation app does ([nimbo::paste]). On
+//! line where the user types three seconds later, as a dictation app does ([nimbo::paste]),
+//! counting them down beside the icon ([Tray::set_title]). On
 //! Linux it writes its launcher entry at start ([desktop]), so the dock shows its icon for the
 //! window. It runs once: a second launch has the first show its counter ([instance]), and ends.
 //!
@@ -81,6 +82,10 @@ pub fn menu(s: &Shown) -> Menu<Action> {
 pub struct State {
   window: Option<Window<Counter>>,
   hotkeys: Option<Hotkeys>,
+  /// For the paste's countdown, from the main queue.
+  tray: Option<Tray<Action>>,
+  /// A paste counts down: another waits for its end.
+  pasting: bool,
 }
 
 pub type Shared = Rc<RefCell<State>>;
@@ -133,6 +138,24 @@ fn paste(text: &str) {
   }
 }
 
+/// The seconds left to the paste beside the icon, each second, then the paste.
+fn paste_in(main: &mut Main, secs: u64) {
+  let tray = STATE.with(|s| {
+    let mut s = s.borrow_mut();
+    s.pasting = secs > 0;
+    s.tray.clone()
+  });
+  let title = if secs == 0 { String::new() } else { secs.to_string() };
+  if let Some(tray) = tray {
+    tray.set_title(&title);
+  }
+
+  match secs {
+    0 => paste("Hello from nimbo"),
+    _ => main.proxy().after(Duration::from_secs(1), move |main| paste_in(main, secs - 1)),
+  }
+}
+
 thread_local! {
   /// The app's state, on the main thread, where the hotkey's work is posted.
   static STATE: Shared = Shared::default();
@@ -177,6 +200,7 @@ fn start(main: &mut Main, instance: Option<Instance>) {
   }
 
   state.borrow_mut().hotkeys = Some(hotkeys);
+  state.borrow_mut().tray = Some(tray.clone());
   let refresh = |t: &Tray<Action>, state: &Shared| t.set_menu(&menu(&shown(state)));
   refresh(&tray, &state);
   let s = state.clone();
@@ -190,7 +214,8 @@ fn start(main: &mut Main, instance: Option<Instance>) {
           eprintln!("launch at login: {e}");
         }
       }
-      Action::Paste => main.proxy().after(Duration::from_secs(3), |_| paste("Hello from nimbo")),
+      Action::Paste if !state.borrow().pasting => paste_in(main, 3),
+      Action::Paste => {}
       Action::Quit => main.quit(),
       Action::None => {}
     }
@@ -208,7 +233,10 @@ fn start(main: &mut Main, instance: Option<Instance>) {
   }
 
   // The tray lives as long as the app; the hotkeys are in its state.
-  main.on_quit(move |_| drop(tray));
+  main.on_quit(move |_| {
+    drop(tray);
+    STATE.with(|s| s.borrow_mut().tray = None);
+  });
 }
 
 fn main() {

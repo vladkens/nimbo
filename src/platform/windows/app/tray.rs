@@ -142,6 +142,9 @@ impl Tray {
     }
   }
 
+  /// The notification area has no text beside an icon.
+  pub fn set_title(&self, _title: &str) {}
+
   pub fn set_menu(&self, menu: &Menu<usize>) {
     if !self.0.state.hold(menu) {
       self.build(menu);

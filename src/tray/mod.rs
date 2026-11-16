@@ -7,6 +7,7 @@
 //! | | macOS | Windows | Linux |
 //! |---|---|---|---|
 //! | icon | NSStatusItem, a template NSImage | `Shell_NotifyIconW`, tinted for the taskbar | StatusNotifierItem over D-Bus (GIO), an SVG the panel colours |
+//! | title | the NSStatusItem's | none | `XAyatanaLabel`, where the panel shows it |
 //! | menu | NSMenu | `TrackPopupMenu` | `com.canonical.dbusmenu` |
 //! | opens on | a click | a left or right click | as the panel shows menus (KDE: a click) |
 //!
@@ -177,6 +178,14 @@ impl<A: Clone + 'static> Tray<A> {
 
   pub fn set_tooltip(&self, tooltip: &str) {
     self.0.set_tooltip(tooltip);
+  }
+
+  /// Text beside the icon (a timer's time left), empty for none, as an NSStatusItem's title: in
+  /// the menu bar's font, its digits of one width so that a countdown keeps its place. Linux shows
+  /// it on panels that show an AppIndicator's label (GNOME's), Windows nowhere: the tooltip is
+  /// the place for what must be read everywhere.
+  pub fn set_title(&self, title: &str) {
+    self.0.set_title(title);
   }
 
   /// Replaces the menu, also while it opens ([Tray::on_open]). While it is open the new one waits
