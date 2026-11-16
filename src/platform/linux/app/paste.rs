@@ -12,7 +12,7 @@
 //! X11 and Wayland keep no change count. On the main thread while the app runs.
 
 use std::cell::{Cell, RefCell};
-use std::ffi::{CStr, CString, c_char, c_int, c_uint};
+use std::ffi::{CStr, CString, c_char, c_int, c_uint, c_ulong};
 use std::ptr::{null, null_mut};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
@@ -61,6 +61,18 @@ const ASK: Duration = Duration::from_millis(500);
 const SETTLE: Duration = Duration::from_millis(50);
 /// `SelectionRequest`, an X event's type.
 const REQUEST: c_int = 30;
+
+/// `XSelectionRequestEvent`, up to the selection.
+#[repr(C)]
+struct Request {
+  kind: c_int,
+  serial: c_ulong,
+  send_event: c_int,
+  display: P,
+  owner: c_ulong,
+  requestor: c_ulong,
+  selection: c_ulong,
+}
 /// Targets about the selection, not data in it.
 pub(super) const META: [&str; 5] = ["TARGETS", "TIMESTAMP", "MULTIPLE", "SAVE_TARGETS", "DELETE"];
 
@@ -78,7 +90,8 @@ thread_local! {
   static NEXT: Cell<u64> = const { Cell::new(1) };
   /// A snapshot reads: the app's own reads of its offer are not the paste's.
   static SNAPSHOT: Cell<bool> = const { Cell::new(false) };
-  /// An X client asked for what the app serves since [taken] began to wait.
+  /// XWayland's CLIPBOARD atom while [taken] waits, and whether an X client asked for it since.
+  static WANTED: Cell<c_ulong> = const { Cell::new(0) };
   static ASKED: Cell<bool> = const { Cell::new(false) };
 }
 
@@ -173,12 +186,15 @@ fn contents(s: &Selection, c: P, target: P) -> Option<Vec<u8>> {
 /// Served by the app until another owner takes the selection, and kept after it quits where a
 /// clipboard manager stores it.
 pub fn restore(snapshot: Snapshot) -> bool {
-  let (types, remote): (Vec<_>, _) =
-    (snapshot.items.into_iter().flatten().collect(), remote::clipboard());
-  if types.is_empty() && remote.is_some() {
+  let types: Vec<_> = snapshot.items.into_iter().flatten().collect();
+  if remote::clipboard().is_some() {
     // The portal can't empty the clipboard: what it asks for of the app's own is not there.
-    SERVED.set(None);
-    return false;
+    if types.is_empty() {
+      SERVED.set(None);
+      return false;
+    }
+
+    return serve(types, None).is_some();
   }
 
   let Some((s, _, c)) = clip() else { return false };
@@ -189,7 +205,7 @@ pub fn restore(snapshot: Snapshot) -> bool {
   }
 
   let served = serve(types, None).is_some();
-  if served && remote.is_none() {
+  if served {
     unsafe { (s.gtk_clipboard_set_can_store)(c, null(), 0) };
   }
 
@@ -200,21 +216,21 @@ pub fn offer(text: &str, on_read: Option<OnRead>) -> Option<u64> {
   let mut types: Vec<_> = TEXT.iter().map(|t| (t.to_string(), text.as_bytes().to_vec())).collect();
   types.push((MARKER.0.into(), MARKER.1.to_vec()));
   let id = serve(types, on_read)?;
-  if !overlay::wayland() || remote::clipboard().is_some() || taken() {
-    return Some(id);
-  }
-
-  // Not the Wayland apps' (KWin takes XWayland's selection only from an X window in focus).
-  let (s, _, c) = clip()?;
-  unsafe { (s.gtk_clipboard_clear)(c) };
-  None
+  // Not the Wayland apps' (KWin takes XWayland's selection only from an X window in focus), or
+  // taken too late: the paste gives the snapshot back.
+  let reached = !overlay::wayland() || remote::clipboard().is_some() || taken();
+  reached.then_some(id)
 }
 
 /// The compositor asked for XWayland's selection (its targets, as GNOME does at once), and had
 /// [SETTLE] more to give it to the Wayland app in focus: a paste before it gets the clipboard
 /// before the offer. The main loop turns meanwhile, which serves the request.
 fn taken() -> bool {
+  type Atom = unsafe extern "C" fn(P, *const c_char) -> c_ulong;
   let Some((s, g, _)) = clip() else { return false };
+  let get = lib().and_then(|l| unsafe { l.sym::<Atom>("gdk_x11_get_xatom_by_name_for_display\0") });
+  let (Some(get), Some(x)) = (get, overlay::xdisplay()) else { return false };
+  WANTED.set(unsafe { get(x, c"CLIPBOARD".as_ptr()) });
   ASKED.set(false);
   unsafe { (s.gdk_window_add_filter)(null_mut(), on_x as Fp, null_mut()) };
   let (start, mut asked) = (Instant::now(), None);
@@ -235,10 +251,12 @@ fn taken() -> bool {
   asked.is_some()
 }
 
-/// `GdkFilterFunc` of every X event: notes a `SelectionRequest`, and lets GTK handle it.
+/// `GdkFilterFunc` of every X event: notes a `SelectionRequest` of CLIPBOARD, and lets GTK
+/// handle it.
 unsafe extern "C" fn on_x(event: P, _: P, _: P) -> c_int {
-  // SAFETY: an `XEvent`, its type the first int.
-  if unsafe { *event.cast::<c_int>() } == REQUEST {
+  // SAFETY: an `XEvent`, its type the first int, and of this type an `XSelectionRequestEvent`.
+  let e = event.cast::<Request>();
+  if unsafe { (*e).kind == REQUEST && (*e).selection == WANTED.get() } {
     ASKED.set(true);
   }
 

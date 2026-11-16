@@ -151,6 +151,8 @@ struct Sys {
   write: fn(&str) -> bool,
   /// Puts the snapshot back if the clipboard still holds the offer; `false` when it couldn't.
   give_back: fn(Offer, &Snapshot) -> bool,
+  /// Puts the snapshot back whatever the clipboard holds.
+  restore: fn(Snapshot),
   post: fn(Shortcut) -> Result<(), String>,
   focus: fn() -> Option<Focused>,
   hidden: fn() -> bool,
@@ -174,6 +176,7 @@ const SYSTEM: Sys = Sys {
     }
   },
   give_back: |offer, old| !SystemClipboard.holds(offer) || SystemClipboard.restore(old.clone()),
+  restore: |old| _ = SystemClipboard.restore(old),
   post: keys::post,
   focus: focus::current,
   hidden: focus::hidden,
@@ -240,8 +243,12 @@ fn paste_now(sys: Sys, text: &str, opts: Paste) -> Result<(), NotPasted> {
   let after = move |delay| (sys.after)(delay, Box::new(move || settle(sys, Some(id))));
   match snapshot {
     Some(snapshot) => {
-      let offer = (sys.offer)(text, Some(Box::new(move || after(RESTORE))));
-      let offer = offer.ok_or(NotPasted::NoClipboard)?;
+      let Some(offer) = (sys.offer)(text, Some(Box::new(move || after(RESTORE)))) else {
+        // One that failed may have taken the clipboard all the same (Linux: XWayland's, which the
+        // compositor took too late).
+        (sys.restore)(snapshot);
+        return Err(NotPasted::NoClipboard);
+      };
       PENDING.set(Some((id, offer, snapshot)));
       after(CAP);
     }
@@ -329,6 +336,8 @@ mod tests {
     holder: Option<u64>,
     offers: u64,
     on_read: Option<Box<dyn FnMut()>>,
+    /// The offer takes the clipboard, but fails.
+    offer_fails: bool,
     restored: usize,
     posted: Vec<Shortcut>,
     post_error: Option<String>,
@@ -366,7 +375,7 @@ mod tests {
       world(|w| {
         w.offers += 1;
         (w.clip, w.holder, w.on_read) = (text.into(), Some(w.offers), on_read);
-        Some(Offer(w.offers))
+        (!w.offer_fails).then_some(Offer(w.offers))
       })
     },
     write: |text| {
@@ -388,6 +397,10 @@ mod tests {
       }
 
       true
+    },
+    restore: |snapshot| {
+      write(&String::from_utf8(snapshot.items[0][0].1.clone()).unwrap());
+      world(|w| w.restored += 1);
     },
     post: |key| {
       world(|w| match w.post_error.clone() {
@@ -447,6 +460,15 @@ mod tests {
     );
     let mods = if cfg!(target_os = "macos") { Modifiers::META } else { Modifiers::CONTROL };
     assert_eq!(PASTE, Shortcut { key: Key::Char('v'), mods });
+  }
+
+  #[test]
+  fn restores_after_a_failed_offer() {
+    let opts = setup("TextEdit");
+    world(|w| w.offer_fails = true);
+    assert_eq!(paste(FAKE, "hello", opts), Err(NotPasted::NoClipboard));
+    assert_eq!(clip(), ("mine".into(), 1));
+    assert!(world(|w| w.posted.is_empty()));
   }
 
   #[test]
