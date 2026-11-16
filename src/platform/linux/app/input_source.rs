@@ -150,10 +150,12 @@ pub fn watch() -> Result<(), String> {
     Desktop::Xkb => {
       let c = Conn::open().ok_or("no X display")?;
       let (x, d) = (c.x, c.d());
-      let (mut base, mut no) = (0, 0);
-      // SAFETY: Xlib's calls on our connection; GLib reads it on the main thread.
+      // The opcode, event and error bases, and XKB 1.0 asked (the version the server has back).
+      let (mut op, mut base, mut err, mut major, mut minor) = (0, 0, 0, 1, 0);
+      // SAFETY: Xlib's calls on our connection, out-pointers to locals; GLib reads it on the main
+      // thread.
       let source = unsafe {
-        (x.XkbQueryExtension)(d, &mut no, &mut base, &mut no, &mut no, &mut no);
+        (x.XkbQueryExtension)(d, &mut op, &mut base, &mut err, &mut major, &mut minor);
         (x.XkbSelectEventDetails)(d, CORE_KBD, STATE_NOTIFY, GROUP_STATE, GROUP_STATE);
         (x.XSelectInput)(d, (x.XDefaultRootWindow)(d), PROPERTY_CHANGE);
         (x.XFlush)(d);
