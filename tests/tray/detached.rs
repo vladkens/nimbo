@@ -4,9 +4,9 @@
 //! notify icon or D-Bus item): built from a [Menu] (a header, labels, shortcuts, check marks,
 //! disabled and destructive items, separators, a submenu), rebuilt as it opens, kept while open
 //! (a new one waits for it to close), and items chosen through the OS's own path, reaching the
-//! app by id; icons from RGBA and from path data. A plain test on Windows and Linux
-//! (`tests/tray.rs`); on macOS the NSMenu and NSImage are main thread only, which the test
-//! harness isn't.
+//! app by id; icons from RGBA and from path data, and the title beside them where the OS has one. A
+//! plain test on Windows and Linux (`tests/tray.rs`); on macOS the NSMenu and NSImage are main
+//! thread only, which the test harness isn't.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -85,4 +85,11 @@ pub fn run() {
 
   tray.set_icon(TrayIcon::path(24.0, "M2 2H22V22Z"));
   assert!(tray.describe()[0].starts_with("icon "));
+
+  // Windows has no title; an empty one takes it away.
+  tray.set_title("4:59");
+  let head = tray.describe()[0].clone();
+  assert_eq!(head.ends_with(" title=4:59"), !cfg!(windows), "{head:?}");
+  tray.set_title("");
+  assert!(!tray.describe()[0].contains("title="));
 }
