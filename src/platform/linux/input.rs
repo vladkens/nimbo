@@ -590,7 +590,8 @@ impl Win {
     let time = unsafe { (g.gdk_event_get_time)(ev) };
     let gap = time.wrapping_sub(std::mem::replace(&mut self.input.scrolled, time));
     let phase = phase(&mut self.input.scrolling, precise, stop, gap);
-    let unit = if precise { PRECISE } else { WHEEL_LINE };
+    // A touchpad's distance is GTK's units, a point each at the zoom; a wheel's is lines.
+    let unit = if precise { PRECISE / self.zoom } else { WHEEL_LINE };
     let delta = Point::new(-dx as f32 * unit, -dy as f32 * unit);
     self.send(Event::Scroll { pos, delta, precise, phase, momentum: Phase::None, mods });
   }
