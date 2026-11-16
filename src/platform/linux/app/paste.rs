@@ -6,22 +6,26 @@
 //! and tells when another owner takes the selection (its clear callback), which ends what the app
 //! served. On Wayland, where only the app with the keyboard focus can set the clipboard, the
 //! RemoteDesktop session's clipboard does all of it ([super::remote]) once the desktop gave it,
-//! its targets the MIME types; GTK's otherwise. X11 and Wayland keep no change count. On the main
-//! thread while the app runs.
+//! its targets the MIME types; else XWayland's CLIPBOARD, which the compositor shares with the
+//! Wayland apps (GNOME 42 has no Clipboard portal, and takes XWayland's selection without the
+//! focus) once it read the targets: an offer waits for that ([taken]). None without XWayland.
+//! X11 and Wayland keep no change count. On the main thread while the app runs.
 
 use std::cell::{Cell, RefCell};
 use std::ffi::{CStr, CString, c_char, c_int, c_uint};
 use std::ptr::{null, null_mut};
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 use super::super::dl::fns;
-use super::super::{CLIPBOARD, Fp, Gtk, P, lib, load};
+use super::super::{CLIPBOARD, Fp, Gtk, P, lib, load, overlay};
 use super::remote;
 use super::shell::running;
 use crate::clipboard::Snapshot;
 
 // What the plain-text clipboard ([super::super::clipboard]) doesn't need.
 fns!(Selection {
+  fn gtk_clipboard_get_for_display(display: P, selection: usize) -> P;
   fn gtk_clipboard_wait_for_targets(c: P, targets: *mut *mut P, n: *mut c_int) -> c_int;
   fn gtk_clipboard_wait_for_contents(c: P, target: P) -> P;
   fn gtk_clipboard_set_with_data(c: P, t: *const Target, n: c_uint, get: Fp, clear: Fp, data: P)
@@ -35,6 +39,8 @@ fns!(Selection {
   fn gtk_selection_data_set(d: P, kind: P, format: c_int, data: *const u8, len: c_int);
   fn gtk_selection_data_free(d: P);
   fn gdk_atom_name(atom: P) -> *mut c_char;
+  fn gdk_window_add_filter(w: P, f: Fp, data: P);
+  fn gdk_window_remove_filter(w: P, f: Fp, data: P);
 });
 
 /// `GtkTargetEntry`.
@@ -49,6 +55,12 @@ struct Target {
 /// skip.
 const TEXT: [&str; 3] = ["UTF8_STRING", "text/plain;charset=utf-8", "text/plain"];
 const MARKER: (&str, &[u8]) = ("x-kde-passwordManagerHint", b"secret");
+/// How long the compositor may take to ask for XWayland's selection, and how long after it asked
+/// the Wayland app in focus may take to get it.
+const ASK: Duration = Duration::from_millis(500);
+const SETTLE: Duration = Duration::from_millis(50);
+/// `SelectionRequest`, an X event's type.
+const REQUEST: c_int = 30;
 /// Targets about the selection, not data in it.
 pub(super) const META: [&str; 5] = ["TARGETS", "TIMESTAMP", "MULTIPLE", "SAVE_TARGETS", "DELETE"];
 
@@ -66,14 +78,22 @@ thread_local! {
   static NEXT: Cell<u64> = const { Cell::new(1) };
   /// A snapshot reads: the app's own reads of its offer are not the paste's.
   static SNAPSHOT: Cell<bool> = const { Cell::new(false) };
+  /// An X client asked for what the app serves since [taken] began to wait.
+  static ASKED: Cell<bool> = const { Cell::new(false) };
 }
 
-/// The functions and the CLIPBOARD selection, while the app runs.
+/// The functions and the CLIPBOARD selection, while the app runs: XWayland's on Wayland, where
+/// GTK's own reaches no other app without the focus.
 fn clip() -> Option<(&'static Selection, &'static Gtk, P)> {
   static SELECTION: OnceLock<Option<Selection>> = OnceLock::new();
   let s = SELECTION.get_or_init(|| Selection::load(&lib()?)).as_ref().filter(|_| running())?;
   let g = load()?;
-  Some((s, g, unsafe { (g.gtk_clipboard_get)(CLIPBOARD) }))
+  let display = match overlay::wayland() {
+    true => overlay::xdisplay()?,
+    false => unsafe { (g.gdk_display_get_default)() },
+  };
+
+  Some((s, g, unsafe { (s.gtk_clipboard_get_for_display)(display, CLIPBOARD) }))
 }
 
 pub fn change_count() -> Option<u64> {
@@ -179,7 +199,50 @@ pub fn restore(snapshot: Snapshot) -> bool {
 pub fn offer(text: &str, on_read: Option<OnRead>) -> Option<u64> {
   let mut types: Vec<_> = TEXT.iter().map(|t| (t.to_string(), text.as_bytes().to_vec())).collect();
   types.push((MARKER.0.into(), MARKER.1.to_vec()));
-  serve(types, on_read)
+  let id = serve(types, on_read)?;
+  if !overlay::wayland() || remote::clipboard().is_some() || taken() {
+    return Some(id);
+  }
+
+  // Not the Wayland apps' (KWin takes XWayland's selection only from an X window in focus).
+  let (s, _, c) = clip()?;
+  unsafe { (s.gtk_clipboard_clear)(c) };
+  None
+}
+
+/// The compositor asked for XWayland's selection (its targets, as GNOME does at once), and had
+/// [SETTLE] more to give it to the Wayland app in focus: a paste before it gets the clipboard
+/// before the offer. The main loop turns meanwhile, which serves the request.
+fn taken() -> bool {
+  let Some((s, g, _)) = clip() else { return false };
+  ASKED.set(false);
+  unsafe { (s.gdk_window_add_filter)(null_mut(), on_x as Fp, null_mut()) };
+  let (start, mut asked) = (Instant::now(), None);
+  loop {
+    asked = asked.or_else(|| ASKED.get().then(Instant::now));
+    match asked {
+      Some(at) if at.elapsed() >= SETTLE => break,
+      None if start.elapsed() >= ASK => break,
+      _ => {}
+    }
+
+    if unsafe { (g.g_main_context_iteration)(null_mut(), 0) } == 0 {
+      std::thread::sleep(Duration::from_millis(2));
+    }
+  }
+
+  unsafe { (s.gdk_window_remove_filter)(null_mut(), on_x as Fp, null_mut()) };
+  asked.is_some()
+}
+
+/// `GdkFilterFunc` of every X event: notes a `SelectionRequest`, and lets GTK handle it.
+unsafe extern "C" fn on_x(event: P, _: P, _: P) -> c_int {
+  // SAFETY: an `XEvent`, its type the first int.
+  if unsafe { *event.cast::<c_int>() } == REQUEST {
+    ASKED.set(true);
+  }
+
+  0
 }
 
 /// Takes the selection, serving `types`.

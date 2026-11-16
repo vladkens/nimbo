@@ -95,8 +95,9 @@ fn is_wayland(display: P) -> bool {
   get.is_some_and(|f| unsafe { (gdk().g_type_check_instance_is_a)(display, f()) } != 0)
 }
 
-/// XWayland's display, for an overlay on Wayland without the layer shell; opened at the first.
-fn xwayland() -> Option<P> {
+/// XWayland's display (`DISPLAY`), opened at the first call: an overlay's on Wayland without the
+/// layer shell, and the clipboard's ([super::app::paste]).
+pub(super) fn xdisplay() -> Option<P> {
   static X: OnceLock<usize> = OnceLock::new();
   let at = X.get_or_init(|| {
     let name = std::env::var_os("DISPLAY").and_then(|d| CString::new(d.into_vec()).ok());
@@ -104,7 +105,12 @@ fn xwayland() -> Option<P> {
     let d = name.map_or(std::ptr::null_mut(), |n| unsafe { (gdk().gdk_display_open)(n.as_ptr()) });
     if d.is_null() || is_wayland(d) { 0 } else { d as usize }
   });
-  (wayland() && layer_shell().is_none() && *at != 0).then_some(*at as P)
+  (*at != 0).then_some(*at as P)
+}
+
+/// XWayland's display, for an overlay on Wayland without the layer shell.
+fn xwayland() -> Option<P> {
+  xdisplay().filter(|_| wayland() && layer_shell().is_none())
 }
 
 /// The layer shell, where the compositor has it (Wayland only).
