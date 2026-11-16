@@ -18,7 +18,7 @@ use std::ptr::{null, null_mut};
 use std::sync::OnceLock;
 
 use super::super::dl::fns;
-use super::super::{FALSE, Fp, P, S, connect_id, gtk, lib, slot, window_busy, with_data};
+use super::super::{FALSE, Fp, P, S, connect_id, gtk, lib, settings, slot, window_busy, with_data};
 use super::hotkey::keysym;
 use crate::app::Event;
 use crate::keys::Shortcut;
@@ -90,7 +90,8 @@ pub fn ask(win: u64, area: P, press: P, on: Id, at: Point, menu: &Menu<usize>) {
     connect_id(m, c"deactivate", on_deactivate as Fp, 0, n);
     m
   };
-  let at = [at.x.round() as c_int, at.y.round() as c_int, 1, 1];
+  let z = settings::zoom();
+  let at = [(at.x * z).round() as c_int, (at.y * z).round() as c_int, 1, 1];
   let up = Up { n, win, on, chosen: None, menu: m, press, at };
   UP.with_borrow_mut(|u| u.push(up));
   unsafe { (gtk().g_idle_add)(on_ask as Fp, n as usize as P) };

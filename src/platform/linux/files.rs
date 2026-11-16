@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::ptr::{null, null_mut};
 
 use super::dbus::{self, Gv, V};
-use super::{FALSE, Fp, P, S, TRUE, connect_id, gtk, lib, overlay, with_data};
+use super::{FALSE, Fp, P, S, TRUE, connect_id, gtk, lib, overlay, point, with_data};
 use crate::file_dialog::FileDialogKind;
 use crate::scene::Point;
 use crate::{Event, FileDialog};
@@ -173,7 +173,7 @@ fn status(ctx: P, time: u32, data: P) {
 /// `drag-motion`: a new drag asks for its files, the answer waiting for them ([on_data]); a
 /// known one answers with the files it has.
 unsafe extern "C" fn on_motion(area: P, ctx: P, x: i32, y: i32, time: u32, data: P) -> c_int {
-  let pos = Point::new(x as f32, y as f32);
+  let pos = point(x.into(), y.into());
   let new = DRAG.with_borrow_mut(|d| {
     let new = d.ctx != ctx;
     *d = Drag { ctx, pos, paths: if new { Vec::new() } else { std::mem::take(&mut d.paths) } };
@@ -207,7 +207,7 @@ unsafe extern "C" fn on_drop(_: P, ctx: P, x: i32, y: i32, time: u32, data: P) -
   let paths = end_drag(ctx).map(|d| d.paths).unwrap_or_default();
   unsafe { (gtk().gtk_drag_finish)(ctx, !paths.is_empty() as c_int, FALSE, time) };
   if !paths.is_empty() {
-    with_data(data, false, |w| w.send(Event::Drop { pos: Point::new(x as f32, y as f32), paths }));
+    with_data(data, false, |w| w.send(Event::Drop { pos: point(x.into(), y.into()), paths }));
   }
 
   TRUE

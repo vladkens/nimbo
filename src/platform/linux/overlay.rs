@@ -22,7 +22,7 @@ use std::os::unix::ffi::OsStringExt;
 use std::sync::OnceLock;
 
 use super::dl::{Lib, fns};
-use super::{FALSE, P, S, TRUE, lib};
+use super::{FALSE, P, S, TRUE, lib, settings};
 use crate::scene::Size;
 use crate::shell::Anchor;
 
@@ -214,7 +214,8 @@ pub fn place(window: P, size: Size, anchor: Anchor, pointer: bool) {
     (g.gdk_monitor_get_workarea)(monitor, &mut area);
   }
 
-  let [x, y, w, h] = area;
-  let at = anchor.offset(Size::new(w as f32, h as f32), size);
-  unsafe { (g.gtk_window_move)(window, x + at.x as c_int, y + at.y as c_int) };
+  // The work area in points at the zoom ([settings::zoom]), the offset back in GTK's units.
+  let ([x, y, w, h], z) = (area, settings::zoom());
+  let at = anchor.offset(Size::new(w as f32 / z, h as f32 / z), size);
+  unsafe { (g.gtk_window_move)(window, x + (at.x * z) as c_int, y + (at.y * z) as c_int) };
 }

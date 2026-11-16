@@ -13,7 +13,8 @@
 //! timeouts, a wake from another thread an idle source. Input is in [input] (keys in [keys]),
 //! light or dark and the languages in [settings], the text stack in [text] (fontconfig, FreeType,
 //! HarfBuzz), overlays in [overlay], file panels and drops in [files], context menus in
-//! [app::gtk_menu]. GTK 3 scales by whole numbers only.
+//! [app::gtk_menu]. GTK 3 scales by whole numbers only; the desktop's text scale zooms all we
+//! draw on top of that, fractionally ([settings::zoom]): points are GTK's units over it.
 //!
 //! Windows open and close on demand while GTK's main loop runs ([app] has the loop, the tray,
 //! the hotkeys and launch at login): each callback carries its window's id, set as the current
@@ -44,9 +45,10 @@ pub use self::app::{
 use self::dl::{Lib, fns};
 use self::input::Input;
 pub use self::settings::{appearance, languages};
+use super::points;
 use crate::app::{App, Clipboard, Clock, Event, Runtime};
 use crate::cpu::Renderer;
-use crate::scene::Size;
+use crate::scene::{Point, Size};
 use crate::shell::token as activation_token;
 use crate::ui::Cursor;
 use crate::{Anchor, Config};
@@ -403,8 +405,7 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Result<u64, std::ffi::NulError> {
   NEXT.set(id);
   let title = CString::new(cfg.title)?;
   let size = Size::new(cfg.size.w.round().max(1.0), cfg.size.h.round().max(1.0));
-  let (w, h) = (size.w as c_int, size.h as c_int);
-  let min = cfg.min();
+  let (min, [w, h]) = (cfg.min(), gtk_px(size));
   // SAFETY: GTK's calls, on the thread that runs its loop; each callback has its signal's
   // signature.
   let (window, area) = unsafe {
@@ -427,7 +428,8 @@ fn open(cfg: &Config, app: Box<dyn App>) -> Result<u64, std::ffi::NulError> {
     match cfg.resizable {
       true => {
         (g.gtk_window_set_default_size)(window, w, h);
-        (g.gtk_widget_set_size_request)(area, min.w.ceil() as c_int, min.h.ceil() as c_int);
+        let [mw, mh] = gtk_px(min);
+        (g.gtk_widget_set_size_request)(area, mw, mh);
       }
       false => {
         (g.gtk_window_set_resizable)(window, FALSE);
@@ -598,16 +600,24 @@ fn close(id: u64, defer: bool) -> bool {
 }
 
 impl Win {
-  /// The area's size in points, and the scale.
+  /// The area's size in points, and their scale: GDK's zoomed ([settings::zoom]).
   fn size(&self) -> (Size, f32) {
     let g = gtk();
-    let (w, h, scale) = unsafe {
+    let (w, h) = unsafe {
       let w = (g.gtk_widget_get_allocated_width)(self.area);
       let h = (g.gtk_widget_get_allocated_height)(self.area);
-      (w, h, (g.gtk_widget_get_scale_factor)(self.area).max(1))
+      (w.max(1), h.max(1))
     };
 
-    (Size::new(w.max(1) as f32, h.max(1) as f32), scale as f32)
+    let dev = self.device_scale();
+    let scale = dev as f32 * settings::zoom();
+    let pt = |px: c_int| points((px * dev) as u32, scale);
+    (Size::new(pt(w), pt(h)), scale)
+  }
+
+  /// GDK's scale, a whole one: the surface's pixels in each of GTK's units.
+  fn device_scale(&self) -> c_int {
+    unsafe { (gtk().gtk_widget_get_scale_factor)(self.area) }.max(1)
   }
 
   /// The surface shown is not of the area's size and scale, or there is none.
@@ -693,6 +703,7 @@ impl Win {
   fn render(&mut self, queue: bool) {
     let g = gtk();
     let (size, scale) = self.size();
+    let dev = self.device_scale() as f32;
     self.rt.resize(size, scale);
     self.rt.frame();
     let r = &mut self.renderer;
@@ -701,7 +712,7 @@ impl Win {
     let (w, h) = r.size();
     if ((w, h), scale) != (self.shown, self.shown_scale) || self.surface.get().is_null() {
       // Out of memory: the frame waits for the next.
-      if !new_surface(&self.surface, w, h, scale, r.transparent) {
+      if !new_surface(&self.surface, w, h, dev, r.transparent) {
         return;
       }
 
@@ -727,9 +738,9 @@ impl Win {
 
     if queue {
       for rc in &rects {
-        let (x, y) = ((rc.x0 as f32 / scale) as c_int, (rc.y0 as f32 / scale) as c_int);
-        let x1 = (rc.x1 as f32 / scale).ceil() as c_int;
-        let y1 = (rc.y1 as f32 / scale).ceil() as c_int;
+        let (x, y) = ((rc.x0 as f32 / dev) as c_int, (rc.y0 as f32 / dev) as c_int);
+        let x1 = (rc.x1 as f32 / dev).ceil() as c_int;
+        let y1 = (rc.y1 as f32 / dev).ceil() as c_int;
         unsafe { (g.gtk_widget_queue_draw_area)(self.area, x, y, x1 - x, y1 - y) };
       }
     }
@@ -742,21 +753,33 @@ impl Win {
   /// fixed one gets it as the area's size, which GTK fits the window to.
   fn apply_resize(&mut self) {
     let Some(size) = self.rt.take_resize() else { return };
-    let g = gtk();
-    let (w, h) = (size.w.round().max(1.0) as c_int, size.h.round().max(1.0) as c_int);
-    unsafe {
-      match self.resizable {
-        true => {
-          if self.min.w > size.w || self.min.h > size.h {
-            self.min = Size::new(self.min.w.min(size.w), self.min.h.min(size.h));
-            let (mw, mh) = (self.min.w.ceil() as c_int, self.min.h.ceil() as c_int);
-            (g.gtk_widget_set_size_request)(self.area, mw, mh);
-          }
+    if self.resizable && (self.min.w > size.w || self.min.h > size.h) {
+      self.min = Size::new(self.min.w.min(size.w), self.min.h.min(size.h));
+      let [w, h] = gtk_px(self.min);
+      unsafe { (gtk().gtk_widget_set_size_request)(self.area, w, h) };
+    }
 
-          (g.gtk_window_resize)(self.window, w, h);
-        }
-        false => (g.gtk_widget_set_size_request)(self.area, w, h),
-      }
+    self.set_size(size);
+  }
+
+  /// The zoom changed ([settings::zoom]): the window keeps its size in points, and its least
+  /// size.
+  fn fit(&mut self) {
+    if self.resizable {
+      let [w, h] = gtk_px(self.min);
+      unsafe { (gtk().gtk_widget_set_size_request)(self.area, w, h) };
+    }
+
+    self.set_size(self.rt.size);
+  }
+
+  /// Sizes the window, or a fixed one's area, to `size` points.
+  fn set_size(&mut self, size: Size) {
+    let g = gtk();
+    let [w, h] = gtk_px(size);
+    match self.resizable {
+      true => unsafe { (g.gtk_window_resize)(self.window, w, h) },
+      false => unsafe { (g.gtk_widget_set_size_request)(self.area, w, h) },
     }
 
     if let Some(anchor) = self.overlay {
@@ -788,6 +811,18 @@ impl Win {
 
     unsafe { (g.gdk_window_set_cursor)(win, cursor) };
   }
+}
+
+/// `size` points in GTK's units at the zoom now ([settings::zoom]), at least 1.
+fn gtk_px(size: Size) -> [c_int; 2] {
+  let z = settings::zoom();
+  [size.w, size.h].map(|v| (v * z).round().max(1.0) as c_int)
+}
+
+/// The point at GTK's `x`, `y` at the zoom now.
+fn point(x: f64, y: f64) -> Point {
+  let z = f64::from(settings::zoom());
+  Point::new((x / z) as f32, (y / z) as f32)
 }
 
 /// A cursor's CSS name, as GDK finds it in the theme.
