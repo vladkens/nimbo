@@ -71,6 +71,11 @@ fns!(X11 {
   fn XNextEvent(d: P, event: *mut [c_long; 24]) -> c_int;
   fn XConnectionNumber(d: P) -> c_int;
   fn XkbSetDetectableAutoRepeat(d: P, on: c_int, supported: *mut c_int) -> c_int;
+  fn XkbQueryExtension(d: P, opcode: *mut c_int, event: *mut c_int, error: *mut c_int,
+    major: *mut c_int, minor: *mut c_int) -> c_int;
+  fn XkbSelectEventDetails(d: P, device: c_uint, kind: c_uint, affect: c_ulong, details: c_ulong)
+    -> c_int;
+  fn XSelectInput(d: P, w: c_ulong, mask: c_long) -> c_int;
 });
 
 /// `libX11`, loaded at the first use.
