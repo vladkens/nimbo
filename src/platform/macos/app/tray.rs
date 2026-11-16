@@ -4,9 +4,11 @@
 //! app as it opens (`menuNeedsUpdate:`) and taking the chosen item (`chosen:`, by tag); the icon
 //! a template NSImage, from RGBA through CoreGraphics, or path data filled whenever AppKit draws
 //! it; the title beside it in the menu bar's font, its digits of one width. A menu set while the
-//! menu is open (`menuWillOpen:` to `menuDidClose:`) waits for it to close: rebuilding an open
-//! NSMenu closes its open submenus. It is built from the main queue after `menuDidClose:`, where
-//! AppKit forbids changing the menu, and after the chosen item's action, which still finds its id.
+//! menu is open (`menuWillOpen:` to `menuDidClose:`) changes its items in place when they are the
+//! same ([super::menu::update]), or waits for it to close: rebuilding an open NSMenu closes its
+//! open submenus. The menu closes from the main queue after `menuDidClose:`, where AppKit forbids
+//! changing the menu, and after the chosen item's action, which still finds its id: the app's
+//! `on_close` runs and the menu that waited is built.
 
 use std::cell::RefCell;
 use std::ptr::null_mut;
@@ -30,9 +32,9 @@ use objc2_core_graphics::{
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
 
 use super::super::mtm;
-use super::menu::fill;
+use super::menu::{fill, update};
 use crate::svg::flatten;
-use crate::tray::{Menu, State, TrayIcon};
+use crate::tray::{Menu, Set, State, TrayIcon};
 
 /// The menu bar's icon box, in points.
 const SIZE: NSSize = NSSize::new(18.0, 18.0);
@@ -46,7 +48,7 @@ struct Inner {
   image: RefCell<Retained<NSImage>>,
   /// Beside the icon; empty for none.
   title: RefCell<String>,
-  /// Open between `menuWillOpen:` and `menuDidClose:`.
+  /// Open from `menuWillOpen:` to the main queue's work `menuDidClose:` leaves.
   state: State,
 }
 
@@ -89,12 +91,11 @@ define_class!(
     #[unsafe(method(menuDidClose:))]
     fn menu_did_close(&self, _menu: &NSMenu) {
       let Some(tray) = self.tray() else { return };
-      tray.0.state.set_open(false);
       let weak = MainThreadBound::new(Rc::downgrade(&tray.0), tray.0.mtm);
       DispatchQueue::main().exec_async(move || {
         let mtm = MainThreadMarker::new().unwrap();
         let Some(tray) = weak.into_inner(mtm).upgrade().map(Tray) else { return };
-        if let Some(menu) = tray.0.state.released() {
+        if let Some(menu) = tray.0.state.closed(&tray) {
           tray.build(&menu);
         }
       });
@@ -209,8 +210,10 @@ impl Tray {
   }
 
   pub fn set_menu(&self, menu: &Menu<usize>) {
-    if !self.0.state.hold(menu) {
-      self.build(menu);
+    match self.0.state.set_menu(menu, true) {
+      Set::Build => self.build(menu),
+      Set::Update => update(&self.0.menu, &menu.items),
+      Set::Wait => {}
     }
   }
 
@@ -280,13 +283,13 @@ impl Tray {
     let _: () = unsafe { msg_send![delegate, menuWillOpen: menu] };
   }
 
-  /// `menuDidClose:`, then the main queue's work it left (the menu set meanwhile).
+  /// `menuDidClose:`, then the main queue's work it left (`on_close`, the menu set meanwhile).
   pub fn closing(&self) {
     let _: () = unsafe { msg_send![&*self.0.delegate, menuDidClose: &*self.0.menu] };
     // SAFETY: a static of the CoreFoundation framework.
     let mode = unsafe { objc2_core_foundation::kCFRunLoopDefaultMode };
     for _ in 0..50 {
-      if !self.0.state.waiting() {
+      if !self.0.state.is_open() {
         break;
       }
 
