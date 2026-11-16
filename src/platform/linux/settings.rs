@@ -136,7 +136,8 @@ unsafe extern "C" fn on_dpi(_: P, _: P, _: P) {
   }
 }
 
-/// Fits every window to the zoom now ([super::Win::fit]); while one is busy, again in a moment.
+/// Fits every window to the zoom now ([super::Win::fit]); while one is busy, again in a moment
+/// (till then it keeps its own).
 unsafe extern "C" fn refit(_: P) -> c_int {
   if each(|w| w.fit()) {
     let f = &api().expect("loaded before its callbacks").f;
@@ -246,15 +247,18 @@ fn xft_zoom(a: &Api) -> f32 {
   let mut dpi: c_int = -1;
   // SAFETY: an int property, then the null that ends the list.
   unsafe { (a.g_object_get)(settings, c"gtk-xft-dpi".as_ptr(), &mut dpi, null::<c_char>()) };
-  dpi_zoom(dpi)
+  let scale = std::env::var("GDK_DPI_SCALE").ok().and_then(|s| s.trim().parse().ok());
+  dpi_zoom(dpi, scale.unwrap_or(1.0))
 }
 
-/// `gtk-xft-dpi` (1024 × the DPI, GDK's whole scale left out; -1 unset) over 96 DPI, to the
-/// hundredth within GNOME's 0.5–3 (Xft rounds 1.2 × 96 down to 115.199).
-fn dpi_zoom(dpi: c_int) -> f32 {
+/// `gtk-xft-dpi` (1024 × the DPI, GDK's whole scale left out; -1 unset) times `GDK_DPI_SCALE`,
+/// as GTK takes its fonts' resolution (`settings_update_resolution`, gtk-3-24), over 96 DPI; to
+/// the hundredth within GNOME's 0.5–3 (Xft rounds 1.2 × 96 down to 115.199).
+fn dpi_zoom(dpi: c_int, scale: f32) -> f32 {
+  let scale = if scale > 0.0 { scale } else { 1.0 };
   match dpi {
     ..=0 => 1.0,
-    _ => ((dpi as f32 / (96.0 * 1024.0)).clamp(0.5, 3.0) * 100.0).round() / 100.0,
+    _ => ((dpi as f32 * scale / (96.0 * 1024.0)).clamp(0.5, 3.0) * 100.0).round() / 100.0,
   }
 }
 
@@ -294,10 +298,12 @@ mod tests {
 
   #[test]
   fn the_text_scale_zooms() {
-    assert_eq!(dpi_zoom(-1), 1.0, "unset");
-    assert_eq!(dpi_zoom(96 * 1024), 1.0);
-    assert_eq!(dpi_zoom(144 * 1024), 1.5);
-    assert_eq!(dpi_zoom(117964), 1.2, "Cinnamon's 1.2");
-    assert_eq!(dpi_zoom(1000 * 1024), 3.0);
+    assert_eq!(dpi_zoom(-1, 1.0), 1.0, "unset");
+    assert_eq!(dpi_zoom(96 * 1024, 1.0), 1.0);
+    assert_eq!(dpi_zoom(144 * 1024, 1.0), 1.5);
+    assert_eq!(dpi_zoom(117964, 1.0), 1.2, "Cinnamon's 1.2");
+    assert_eq!(dpi_zoom(1000 * 1024, 1.0), 3.0);
+    assert_eq!(dpi_zoom(192 * 1024, 0.5), 1.0, "GDK_DPI_SCALE");
+    assert_eq!(dpi_zoom(96 * 1024, 0.0), 1.0, "GTK ignores 0");
   }
 }

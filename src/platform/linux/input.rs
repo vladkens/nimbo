@@ -20,8 +20,7 @@ use keyboard_types::Modifiers;
 
 use super::dl::fns;
 use super::{
-  CURRENT, Fp, P, TRUE, Win, as_window, busy, connect, gtk, keys, lib, point, settings,
-  window_busy, with,
+  CURRENT, Fp, P, TRUE, Win, as_window, busy, connect, gtk, keys, lib, point, window_busy, with,
 };
 use crate::app::{Event, Ime, MouseButton, Phase, WHEEL_LINE};
 use crate::keys::{Os, printable};
@@ -480,7 +479,7 @@ impl Win {
       (g.gdk_event_get_state)(ev, &mut state);
       (g.gdk_event_get_event_type)(ev)
     };
-    let (pos, mods) = (point(x, y), keys::mods(state));
+    let (pos, mods) = (point(x, y, self.zoom), keys::mods(state));
     match kind {
       MOTION | ENTER => {
         self.input.mouse = pos;
@@ -597,7 +596,7 @@ impl Win {
   }
 
   fn pinch(&mut self, p: &Pinch, mods: Modifiers) {
-    let pos = point(p.x, p.y);
+    let pos = point(p.x, p.y, self.zoom);
     // GdkTouchpadGesturePhase: begin, update, end, cancel. The scale is the gesture's since it
     // began; the delta is the change since the last update, as a fraction of it (×1.5 then ×2
     // is +50%, then +33%).
@@ -686,7 +685,7 @@ impl Win {
 
     let ime = self.input.ime;
     let Some(r) = on.and_then(|_| self.rt.text_input()?.caret_rect()) else { return };
-    let r = gdk_rect(r);
+    let r = gdk_rect(r, self.zoom);
     if self.input.caret != Some(r) {
       self.input.caret = Some(r);
       unsafe { (g.gtk_im_context_set_cursor_location)(ime, &r) };
@@ -782,9 +781,8 @@ impl Win {
   }
 }
 
-/// A rect in points as GDK's at the zoom now ([settings::zoom]), whole units around it.
-fn gdk_rect(r: Rect) -> GdkRect {
-  let z = settings::zoom();
+/// A rect in points as GDK's at zoom `z`, whole units around it.
+fn gdk_rect(r: Rect, z: f32) -> GdkRect {
   let (x, y) = ((r.x * z).floor() as c_int, (r.y * z).floor() as c_int);
   let (w, h) = (((r.x + r.w) * z).ceil() as c_int - x, ((r.y + r.h) * z).ceil() as c_int - y);
   GdkRect { x, y, w: w.max(1), h: h.max(1) }

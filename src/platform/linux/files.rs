@@ -35,7 +35,8 @@ const DROP_START: c_int = 26;
 #[repr(C)]
 struct Target(S, c_uint, c_uint);
 
-/// The drag over a window: its context, the pointer, and its files once GTK gave them.
+/// The drag over a window: its context, the pointer (in GTK's units), and its files once GTK
+/// gave them.
 struct Drag {
   ctx: P,
   pos: Point,
@@ -166,14 +167,16 @@ fn status(ctx: P, time: u32, data: P) {
   let (pos, paths) = DRAG.with_borrow(|d| (d.pos, d.paths.clone()));
   unsafe { (gtk().gdk_drag_status)(ctx, if paths.is_empty() { 0 } else { COPY }, time) };
   if !paths.is_empty() {
-    with_data(data, false, |w| w.send(Event::DragOver { pos, paths }));
+    with_data(data, false, |w| {
+      w.send(Event::DragOver { pos: point(pos.x.into(), pos.y.into(), w.zoom), paths })
+    });
   }
 }
 
 /// `drag-motion`: a new drag asks for its files, the answer waiting for them ([on_data]); a
 /// known one answers with the files it has.
 unsafe extern "C" fn on_motion(area: P, ctx: P, x: i32, y: i32, time: u32, data: P) -> c_int {
-  let pos = point(x.into(), y.into());
+  let pos = Point::new(x as f32, y as f32);
   let new = DRAG.with_borrow_mut(|d| {
     let new = d.ctx != ctx;
     *d = Drag { ctx, pos, paths: if new { Vec::new() } else { std::mem::take(&mut d.paths) } };
@@ -207,7 +210,9 @@ unsafe extern "C" fn on_drop(_: P, ctx: P, x: i32, y: i32, time: u32, data: P) -
   let paths = end_drag(ctx).map(|d| d.paths).unwrap_or_default();
   unsafe { (gtk().gtk_drag_finish)(ctx, !paths.is_empty() as c_int, FALSE, time) };
   if !paths.is_empty() {
-    with_data(data, false, |w| w.send(Event::Drop { pos: point(x.into(), y.into()), paths }));
+    with_data(data, false, |w| {
+      w.send(Event::Drop { pos: point(x.into(), y.into(), w.zoom), paths })
+    });
   }
 
   TRUE
