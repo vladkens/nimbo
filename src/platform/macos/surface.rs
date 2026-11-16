@@ -233,9 +233,9 @@ mod tests {
     assert!(!p.starved && p.front == Some(0));
     let want = p.renderer.snapshot(&scene(40.0), size, scale).data;
     assert!(shown(&mut p) == want);
-    for i in 0..3 {
-      while p.surfaces[i].in_use() {
-        unsafe { IOSurfaceDecrementUseCount(&p.surfaces[i].obj) };
+    for s in &p.surfaces {
+      while s.in_use() {
+        unsafe { IOSurfaceDecrementUseCount(&s.obj) };
       }
     }
   }
