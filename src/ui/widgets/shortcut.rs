@@ -286,6 +286,7 @@ mod tests {
     assert_eq!(hk(' ', Modifiers::ALT).as_deref(), Some("option+space"));
     assert_eq!(hk(NamedKey::F12, all).as_deref(), Some("ctrl+option+shift+cmd+f12"));
     assert_eq!(hk('K', Modifiers::META).as_deref(), Some("shift+cmd+k"));
+
     // The physical key: Shift-1 is 1, Shift-/ is slash.
     let ctrl_shift = Modifiers::CONTROL | Modifiers::SHIFT;
     assert_eq!(hk('!', ctrl_shift).as_deref(), Some("ctrl+shift+1"));
@@ -295,6 +296,7 @@ mod tests {
     // No modifier, or Shift alone: no hotkey.
     assert_eq!(hk('a', Modifiers::empty()), None);
     assert_eq!(hk('a', Modifiers::SHIFT), None);
+
     // What it writes parses back to the same hotkey.
     for (k, m) in [(Key::Char(' '), Modifiers::CONTROL | Modifiers::ALT), ('/'.into(), all)] {
       let h = hotkey_of(&us_key(k, m)).unwrap();

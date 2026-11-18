@@ -36,16 +36,19 @@ impl Ui<'_> {
     let (t, size) = (self.controls_theme(), self.take_control_size());
     let id = self.take_id();
     let b = self.toggle_behavior(id, on);
+
     // The check box with the switch subrole.
     self.a11y(id, Role::Switch);
     let k = self.animate(id.key("knob"), *on as u8 as f32, SLIDE);
     let hot = self.ctl_hot(id, b.hovered);
     let rest = mix(t.track, t.track_hover, hot);
+
     let sw = if size == ControlSize::Large { t.sizes.switch_large } else { t.sizes.switch };
     let ([w, h], [kw, kh]) = (sw.track, sw.knob);
     let inset = (h - kh) / 2.0;
     let row = Style::new().w(rigid()).gap((h / 3.0).round()).align(Align::Start, Align::Center);
     let row = self.control(row.radius(h / 2.0), &b);
+
     let mut r = self.with_id(id).row(row, |ui| {
       let track = Style::new().w(px(w)).h(px(h)).pad(inset).radius(h / 2.0);
       ui.row(track.bg(mix(rest, mix(t.accent, t.accent_hover(), hot), k)), |ui| {

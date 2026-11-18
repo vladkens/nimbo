@@ -6,10 +6,12 @@
 //! `app_mut` redraws. Assistive technology reads the buttons by their text.
 
 #[path = "../examples/counter.rs"]
+#[expect(dead_code, reason = "its main and what this file doesn't use")]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
-#[allow(dead_code, unused_attributes)]
+#[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
 mod counter;
 
+#[expect(dead_code, reason = "this file uses a part of the helpers")]
 mod common;
 
 use std::time::Duration;
@@ -68,10 +70,12 @@ fn hover_fades_in_on_virtual_time_then_idles() {
   let mut h = counter();
   let (x, y) = inside_minus(&mut h);
   let off = h.render().pixel(x, y);
+
   assert!(h.move_to(x, y));
   assert!(h.frame());
   let start = h.render().pixel(x, y);
   assert_eq!(start, off, "the fade starts at the resting fill");
+
   h.wait(Duration::from_millis(80));
   let mid = h.render().pixel(x, y);
   let frames = h.wait(Duration::from_millis(500));

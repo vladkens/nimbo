@@ -78,6 +78,7 @@ fn read(file: &[u8], side: u32) -> Result<(u32, u32, Vec<u8>, u16), String> {
   let factory = factory.ok_or("no WIC")?;
   let new =
     |slot| out(|p| unsafe { call!(factory, slot, (*mut *mut c_void) -> HRESULT; p) }).ok_or(UNREAD);
+
   // SAFETY: each call is its interface's method at that slot; the stream reads `file`, which
   // outlives it and everything decoded from it.
   unsafe {
@@ -90,6 +91,7 @@ fn read(file: &[u8], side: u32) -> Result<(u32, u32, Vec<u8>, u16), String> {
     let decoder = decoder.ok_or(UNREAD)?;
     let frame = out(|p| call!(decoder, GET_FRAME, (u32, *mut *mut c_void) -> HRESULT; 0, p));
     let frame = frame.ok_or(UNREAD)?;
+
     // Open: WIC's HEIF decoder may turn the picture by its `irot` and `imir` and still report
     // the orientation, turning it twice; it needs a run on Windows.
     let orientation = orientation(&frame);

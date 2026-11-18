@@ -146,6 +146,7 @@ impl Presenter {
     s.with_pixels(|px, stride| r.draw(scene, px, stride, &rects));
     s.tiles.clear();
     s.tiles.extend_from_slice(r.tiles());
+
     CATransaction::begin();
     CATransaction::setDisableActions(true);
     let obj: &AnyObject = s.obj.as_ref();

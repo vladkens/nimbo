@@ -620,6 +620,7 @@ mod tests {
       animate: false,
     };
     let font = Font::ui(13.0);
+
     // A line scrolled far left: its hidden start takes no slots, its visible end does.
     let s = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 OK";
     let w = f.measure(s, font);
@@ -628,6 +629,7 @@ mod tests {
     let drawn = f.scene.layers()[0].glyphs.len();
     assert!((1..=12).contains(&drawn), "{drawn} of {} glyphs", s.len());
     assert_eq!(f.text.uploads().count(), drawn);
+
     // Below the frame, and outside a clip: none.
     f.text(0.0, 200.0, s, font, [1.0; 4]);
     f.push_clip(Rect::new(0.0, 0.0, 10.0, 10.0));
@@ -756,10 +758,12 @@ mod tests {
     s.pop_clip();
     s.quad(Quad::default());
     s.pop_clip();
+
     // An empty layer is reused rather than stacked.
     s.push_clip(Rect::new(1.0, 1.0, 1.0, 1.0));
     s.pop_clip();
     s.quad(Quad::default());
+
     let clips: Vec<_> = s.layers().iter().map(|l| l.clip).collect();
     let (outer, inner) = (Rect::new(0.0, 0.0, 100.0, 100.0), Rect::new(50.0, 60.0, 50.0, 40.0));
     assert_eq!(clips, [None, Some(outer), Some(inner), Some(outer), None]);

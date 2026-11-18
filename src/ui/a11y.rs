@@ -630,6 +630,7 @@ impl UiState {
       clip[i] = n.style.clip_rect(n.rect).map_or(outer, |c| c.intersect(outer));
       let rect = n.rect.intersect(outer);
       let shown = rect.w > 0.0 && rect.h > 0.0 && inside(i);
+
       // The overlay it shows in, by z ([A11yNode::layer]).
       let z = n.float.and_then(|_| t.floats.iter().zip(1..).find(|f| *f.0 as usize == i));
       layer[i] = z.map_or(if i > 0 { layer[n.parent as usize] } else { 0 }, |f| f.1);
@@ -916,6 +917,7 @@ mod tests {
       ui.a11y(Id::of("a"), Role::CheckBox).value(Value::On);
       control(ui, "b", Role::Tab, "B");
     };
+
     let mut ui = Ui::new(UiState::default(), Size::new(200.0, 100.0), None, Duration::ZERO);
     view(&mut ui);
     ui.a11y_label("Stale");
@@ -965,6 +967,7 @@ mod tests {
       ui.a11y(Id::of("r1"), Role::Row);
       ui.id("r1").el(row);
     });
+
     let t = st.a11y_tree();
     let at = |x, y| t.at(Point::new(x, y)).map(|i| t.nodes[i as usize].id);
     assert_eq!(at(2.0, 25.0), Some(Id::of("go")));

@@ -321,6 +321,7 @@ pub fn quad(t: &mut Target, q: &Quad, clip: IRect, scale: f32) {
   let (cx, cy) = (q.rect.x + half.0, q.rect.y + half.1);
   let radii = q.radii.map(|v| v.min(half.0.min(half.1)));
   let border_w = q.borders.iter().fold(0.0f32, |a, &v| a.max(v));
+
   // Deeper than this inside, a pixel gets the fill (full coverage, inside the inner edge, past
   // the blur); farther than this outside, nothing.
   let inside = border_w + q.blur + 0.5 * px + px / 64.0;
@@ -445,6 +446,7 @@ pub fn line(t: &mut Target, s: &Segment, clip: IRect, scale: f32) {
   let ext = s.width.max(1.0 / scale) * 0.5 + 1.0 / scale;
   let (mx, my) = ((s.a.x + s.b.x) * 0.5, (s.a.y + s.b.y) * 0.5);
   let hl = len * 0.5 + ext;
+
   for y in r.y0..r.y1 {
     let dy = centre(y, scale) - my;
     let u = band(dir.0, dy * dir.1, hl);
@@ -453,6 +455,7 @@ pub fn line(t: &mut Target, s: &Segment, clip: IRect, scale: f32) {
     if lo > hi {
       continue;
     }
+
     // Outside the quad the coverage is zero, so a pixel more on each side changes nothing.
     let x0 = (((mx + lo) * scale - 0.5).floor() as i32 - 1).max(r.x0);
     let x1 = (((mx + hi) * scale - 0.5).ceil() as i32 + 2).min(r.x1);

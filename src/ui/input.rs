@@ -341,6 +341,7 @@ impl Ui<'_> {
     let down = input.press.filter(|p| p.button == right && self.st.os != Os::Windows);
     let down = down.map(|p| (p.id, p.pos, p.seq));
     let (on, at, seq) = down.or(up).filter(|p| p.2 != self.st.menu_seq)?;
+
     let t = &self.st.last;
     let mut i = t.find(on)?;
     while t.nodes[i as usize].id != id {
@@ -499,6 +500,7 @@ impl UiState {
     for &id in &self.input.latch {
       let Some(n) = self.last.get(id) else { continue };
       let max = max_scroll(n);
+
       // A mouse wheel over a horizontal strip scrolls it sideways.
       let sideways = !precise && n.style.scroll == Axes::HORIZONTAL && want[0] == 0.0;
       let src = if sideways { [1, 1] } else { [0, 1] };
@@ -656,6 +658,7 @@ mod tests {
     let (a, b) = (Id::of("a"), Id::of("b"));
     let st = frame(UiState::default(), |ui| _ = ui.id("a").autofocus().el(field));
     assert_eq!(st.focus(), Some(a));
+
     // Built again it doesn't take focus back; a new one does, and the view sees it at once.
     let mut st = frame(st, |ui| _ = ui.id("a").autofocus().el(field));
     st.set_focus(None);
@@ -667,12 +670,14 @@ mod tests {
       ui.with_id(b).el(field);
     });
     assert_eq!((st.focus(), seen), (Some(b), true));
+
     // The flag goes with the element after it, not further.
     let st = frame(UiState::default(), |ui| {
       ui.autofocus().el(Style::new());
       ui.id("a").el(field);
     });
     assert_eq!(st.focus(), None);
+
     // A disabled widget doesn't take it, named before its behaviour as a button is, or given
     // its id: the focus stays where it was.
     let mut st = frame(UiState::default(), |ui| _ = ui.id("a").el(field));
@@ -684,6 +689,7 @@ mod tests {
       ui.with_id(id).el(off.style(field));
     });
     assert_eq!(st.focus(), Some(a));
+
     let st = frame(st, |ui| {
       ui.id("a").el(field);
       let off = ui.disabled(true).autofocus().button_behavior(Id::of("c"));
@@ -720,6 +726,7 @@ mod tests {
       // An overlay with a hit area, over `a`.
       ui.id("pop").float(Float::window().offset(40.0, 0.0)).el(box_(10.0, 10.0));
     });
+
     let (panel, a, b, pop) = (Id::of("panel"), Id::of("a"), Id::of("b"), Id::of("pop"));
     assert_eq!(at(&st, 15.0, 15.0), [a, panel]);
     assert_eq!(at(&st, 70.0, 5.0), [b, panel]);
@@ -764,6 +771,7 @@ mod tests {
     assert!(st.pressed(btn) && !st.pressed(row));
     // The button is focused through its focusable row.
     assert_eq!(st.input.focus, Some(row));
+
     // Released elsewhere: no click; on it: one, to the innermost.
     ev(&mut st, up(50.0, 5.0));
     assert_eq!(st.input.click, None);
@@ -772,6 +780,7 @@ mod tests {
     assert!(st.held(btn) && !st.pressed(btn));
     ev(&mut st, up(6.0, 6.0));
     assert_eq!(st.input.click.map(|c| (c.id, c.pos)), Some((btn, Point::new(6.0, 6.0))));
+
     // Outside: hover clears, focus goes.
     ev(&mut st, down(150.0, 80.0));
     assert_eq!((st.input.hover.len(), st.input.focus), (0, None));
@@ -864,6 +873,7 @@ mod tests {
     let st2 = nested(std::mem::take(&mut st));
     assert_eq!(st2.last.rect(Id::of("inner")).unwrap().y, -30.0);
     st = st2;
+
     // Past the end: clamped, and at the limit nothing changes; then back to the top.
     ev(&mut st, wheel(10.0, 60.0, 0.0, -1000.0, true, Phase::None));
     assert_eq!(offset(&st, "outer"), 190.0);
@@ -944,6 +954,7 @@ mod tests {
     let mut st = grid(UiState::default());
     let g = st.scroll(Id::of("g")).unwrap();
     assert_eq!((g.content.w, g.max().x), (300.0, 200.0));
+
     // A wheel moves it, and the layout applies it; past the end clamped.
     ev(&mut st, wheel(10.0, 10.0, -50.0, 0.0, true, Phase::None));
     st = grid(st);
@@ -968,6 +979,7 @@ mod tests {
         })
       }
     };
+
     let mut st = list(10)(UiState::default());
     ev(&mut st, wheel(10.0, 10.0, 0.0, -150.0, true, Phase::None));
     st = list(10)(st);
@@ -997,6 +1009,7 @@ mod tests {
         })
       }
     };
+
     // The inner column at 10 with 40 of the wheel to run, then its end moves from 50 to 25.
     let mut st = rows(4)(UiState::default());
     ev(&mut st, wheel(10.0, 10.0, 0.0, -10.0, true, Phase::None));
@@ -1053,6 +1066,7 @@ mod tests {
     };
     let mut st = frame(UiState::default(), tab(true, false));
     ev(&mut st, wheel(10.0, 10.0, 0.0, -70.0, true, Phase::None));
+
     // Hidden two frames but retained: the offset is there when it shows again.
     st = frame(st, tab(false, true));
     st = frame(st, tab(false, true));
@@ -1095,6 +1109,7 @@ mod tests {
     assert_eq!(st.focus(), Some(Id::of(("item", 4))));
     st = frame(st, list);
     assert_eq!(offset(&st, "list"), 50.0);
+
     st.focus_next(FocusDirection::Previous);
     st.focus_next(FocusDirection::Previous);
     st.focus_next(FocusDirection::Previous);
@@ -1116,6 +1131,7 @@ mod tests {
         });
       });
     };
+
     let mut st = frame(UiState::default(), list);
     st.focus_next(FocusDirection::Next);
     st.focus_next(FocusDirection::Next);
@@ -1140,6 +1156,7 @@ mod tests {
         ui.el(Style::new().w(px(50.0)).h(px(100.0)));
       });
     };
+
     let mut st = frame(UiState::default(), view);
     st.focus_next(FocusDirection::Next);
     st = frame(st, view);

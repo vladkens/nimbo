@@ -210,6 +210,7 @@ impl Settings {
         langs.options(&LANGS[1..]).show(ui.id(LANG))
       });
     });
+
     let shortcuts = |ui: &mut Ui, s: TextStyle| {
       ui.col(Style::new().w(grow()).gap(fs.subtitle_gap), |ui| {
         ui.text("Shortcuts", s);
@@ -222,6 +223,7 @@ impl Settings {
       let row = FormRow::new(marked("Show the app", HOTKEY_ROW, warning, Some(TIP_HOTKEY)));
       ui.id(HOTKEY_ROW).form_row(fs, row, |ui| {
         ui.id(HOTKEY).shortcut(&mut self.hotkey);
+
         // An icon names itself to assistive technology only by a label.
         let ui = ui.disabled(self.hotkey == default).a11y_label("Reset");
         let ui = ui.help("Back to the default shortcut");
@@ -230,6 +232,7 @@ impl Settings {
         }
       });
     });
+
     ui.form_section(fs, "Updates", |ui| {
       let row = FormRow::new("Check for updates automatically");
       ui.form_row(fs, row, |ui| ui.id(UPDATES).toggle(&mut self.updates, ""));
@@ -271,6 +274,7 @@ impl Settings {
       let row = FormRow::new("Alex Doe").caption("alex@example.com").tile("AD");
       ui.form_row(fs, row, |ui| ui.button("Sign Out…"));
     });
+
     let used = format!("{} MB used", self.cache + 512);
     let storage = |ui: &mut Ui, s: TextStyle| {
       ui.text("Storage", s);
@@ -284,6 +288,7 @@ impl Settings {
         ui.button("Change…");
         ui.button("Show");
       });
+
       let caption = format!("{} MB of thumbnails and previews", self.cache);
       let row = FormRow::new("Cache").caption(&caption).tile(Icon::TRASH);
       ui.form_row(fs, row, |ui| {
@@ -291,6 +296,7 @@ impl Settings {
           self.ask = Some(Ask::ClearCache);
         }
       });
+
       // The task's progress under its text, clear of the descenders.
       let index = |ui: &mut Ui, s: TextStyle| {
         ui.text("Indexing 4,210 of 10,000 files", s);
@@ -299,6 +305,7 @@ impl Settings {
       let row = FormRow::new("Index").caption(index).tile(Icon::DOC);
       ui.form_row(fs, row, |ui| ui.badge("Running", Tone::Accent));
     });
+
     ui.form_section(fs, "Diagnostics", |ui| {
       ui.form_row(fs, FormRow::new("Send crash reports"), |ui| {
         match self.reports {
@@ -310,6 +317,7 @@ impl Settings {
       });
       ui.form_row(fs, FormRow::new("Logging"), |ui| ui.picker(&mut self.logging, &LOGGING));
     });
+
     ui.help("Help on these settings").id(HELP).form_footer(fs, |ui| {
       if ui.id(RESET_ALL).button("Reset All…").clicked {
         self.ask = Some(Ask::ResetAll);
@@ -322,6 +330,7 @@ impl Settings {
     let t = ui.theme();
     let head =
       Style::new().w(grow()).pads([22.0, 20.0, 0.0, 20.0]).align(Align::Center, Align::Start);
+
     ui.col(head, |ui| {
       let accent = t.accent;
       ui.canvas(Style::new().w(px(64.0)).h(px(64.0)), move |f, r| app_icon(f, r, accent));

@@ -243,18 +243,21 @@ impl Tree {
     self.nodes.clear();
     self.text.clear();
     self.lines.clear();
+
     self.floats.clear();
     self.hits.clear();
     self.scrolls.clear();
     self.drags.clear();
     self.keymaps.clear();
     self.menus.clear();
+
     self.partial.clear();
     self.settle.clear();
     self.edits.clear();
     self.stops.clear();
     self.a11y.clear();
     self.index.clear();
+
     let root = Style::new().w(Dim::Px(size.w)).h(Dim::Px(size.h));
     self.nodes.push(Node::new(Id::ROOT, Kind::Box, root, Flow::Column, None, 0, 1));
   }
@@ -625,10 +628,12 @@ fn distribute(t: &mut Tree, i: usize, ax: usize, avail: f64) {
     }
   });
   let over = total - avail;
+
   // Along a scroll axis the content overflows instead.
   if over <= f64::from(EPS) || t.nodes[i].style.scroll.at(ax) {
     return;
   }
+
   // Water-fill from the top: find the cap where cutting everything above it (but not below
   // each one's minimum) frees `over`.
   let shrinks = |c: &Node| c.float.is_none() && matches!(c.style.size[ax], Dim::Fit | Dim::Grow(_));
@@ -725,6 +730,7 @@ fn place(t: &mut Tree, win: Size, scale: f32) {
     if count > 1 {
       used += gap * (count - 1) as f64;
     }
+
     // The content at its final size; a scroll container's offset is clamped to it.
     let n = &mut t.nodes[i];
     (n.content[ax], n.content[cr]) = (used + a + b, across + ca + cb);
@@ -884,6 +890,7 @@ fn grid_place(t: &mut Tree, i: usize, win: Size) {
       place_float(c, f, pos, size, win);
     }
   });
+
   // Each cell holds its row's height and top until placed. The columns fit the width, but a
   // child wider than its cell (a fixed one) goes past it.
   let x = |c: &Node, col: u32, s: u32| {
@@ -895,6 +902,7 @@ fn grid_place(t: &mut Tree, i: usize, win: Size) {
     bottom = bottom.max(c.pos[1] + c.pos[0]);
     right = right.max(x(c, col, s) + c.size[0]);
   });
+
   // The offset is clamped to the content.
   let n = &mut t.nodes[i];
   n.content = [right + a + b, bottom + ca + cb];
@@ -984,11 +992,14 @@ pub(crate) mod tests {
 
         ui.id("wide").span(2).el(key);
         el(ui, "k5", key);
+
         // Fixed: centred in its cell.
         el(ui, "small", Style::new().w(px(20.0)).h(px(10.0)));
+
         // No room left on the row: the next one.
         ui.id("next").span(3).el(key.min_h(0.0));
       });
+
       // A fit grid: columns as wide as the widest cell, rows as high as their highest.
       ui.id("fit").grid(2, Style::new().gap(4.0), |ui| {
         el(ui, "a", Style::new().w(px(30.0)).h(px(10.0)));
@@ -996,6 +1007,7 @@ pub(crate) mod tests {
         ui.id("c").span(2).el(Style::new().w(px(80.0)).h(px(5.0)));
       });
     });
+
     // Columns (330 - 3 × 10) / 4 = 75; rows 20, 20 and 0 high, and 150 - 40 - 20 of gaps
     // leaves 90: 30 more each.
     assert_eq!(rect(&t, "k0"), (0.0, 0.0, 75.0, 50.0));
@@ -1006,6 +1018,7 @@ pub(crate) mod tests {
     assert_eq!(rect(&t, "next"), (0.0, 120.0, 245.0, 30.0));
     let g = t.get(Id::of("grid")).unwrap();
     assert_eq!(g.content, [330.0, 150.0]);
+
     // 80 over two columns and a gap: 38 each; rows 15 and 5.
     assert_eq!(rect(&t, "fit"), (0.0, 150.0, 80.0, 24.0));
     assert_eq!(rect(&t, "b"), (42.0, 150.0, 10.0, 15.0));
@@ -1071,6 +1084,7 @@ pub(crate) mod tests {
         el(ui, "g", Style::new().w(grow()).max_w(100.0));
       });
     });
+
     assert_eq!(rect(&t, "a").2, 50.0);
     assert_eq!(rect(&t, "b"), (50.0, 0.0, 250.0, 0.0));
     assert_eq!((rect(&t, "c").2, rect(&t, "d").2, rect(&t, "e").2), (200.0, 50.0, 50.0));
@@ -1127,6 +1141,7 @@ pub(crate) mod tests {
         });
       });
     });
+
     assert_eq!(rect(&t, "app"), (0.0, 0.0, 400.0, 300.0));
     assert_eq!(rect(&t, "l"), (5.0, 5.0, 30.0, 30.0));
     assert_eq!(rect(&t, "r"), (365.0, 5.0, 30.0, 30.0));
@@ -1150,21 +1165,25 @@ pub(crate) mod tests {
         });
       })
     };
+
     // 15 characters, 90 points: fits in 100 - 4 padding.
     let t = build(100.0);
     assert_eq!(lines(&t, "t"), ["aaaa bbbb  cccc", "dd"]);
     assert_eq!(rect(&t, "t"), (2.0, 2.0, 90.0, 20.0));
     assert_eq!(rect(&t, "col").3, 24.0);
+
     // 60 - 4 = 56 wide: "aaaa bbbb" is 54, then two spaces and "cccc" go to the next line.
     let t = build(60.0);
     assert_eq!(lines(&t, "t"), ["aaaa bbbb", "cccc", "dd"]);
     assert_eq!(rect(&t, "t"), (2.0, 2.0, 56.0, 30.0));
     assert_eq!(rect(&t, "col").3, 34.0);
     assert_eq!(t.lines[0].width, 54.0);
+
     // Narrower than a word: each word starts a line and breaks between characters.
     let t = build(20.0);
     assert_eq!(lines(&t, "t"), ["aa", "aa", "bb", "bb", "cc", "cc", "dd"]);
     assert_eq!(rect(&t, "t").2, 16.0);
+
     // Narrower than a character: one a line, overflowing.
     let t = build(7.0);
     assert_eq!(lines(&t, "t")[..3], ["a", "a", "a"]);
@@ -1285,6 +1304,7 @@ pub(crate) mod tests {
       wrap_text(s, (0, s.len() as u32), T, w, cover, m, kept, &mut out);
       out
     };
+
     // One memo through every width and back, against a fresh one each time.
     let kept = &mut Memo::default();
     for round in 0..2 {
@@ -1360,11 +1380,13 @@ pub(crate) mod tests {
       let Kind::Text { lines: (a, b), .. } = n.kind else { panic!() };
       (st.last.lines[a as usize..b as usize].to_vec(), n.rect, m.0, st)
     };
+
     let (lines, rect, first, next) = frame(st);
     st = next;
     let (again, at, steady, _) = frame(st);
     assert_eq!((again, at), (lines, rect));
     assert!(first > 3 * steady, "{first} characters measured first, {steady} then");
+
     // The preferred width's: the text's lines, once.
     assert_eq!(steady, text.len() - 1);
   }
@@ -1435,6 +1457,7 @@ pub(crate) mod tests {
       };
       ls.iter().map(one).collect::<Vec<_>>()
     };
+
     // 8 characters fit 48: seven and the ellipsis; 10 fit 60.
     assert_eq!(shown("head"), ["…efgh/ij"]);
     assert_eq!(shown("mid"), ["/a/b…/ij"]);
@@ -1457,10 +1480,12 @@ pub(crate) mod tests {
       let l = t.lines[lines.0 as usize];
       (t.str(l.start, l.end), l.width)
     };
+
     // 66 wide in 40: "abc d" with "…" is 36; the space before a cut goes.
     assert_eq!(rect(&t, "a").2, 40.0);
     assert_eq!(line("a"), ("abc d", 36.0));
     assert_eq!(line("b"), ("abc", 18.0));
+
     // Shrinks down to the ellipsis alone, then overflows.
     assert_eq!(rect(&t, "c").2, 6.0);
     assert_eq!(line("c"), ("", 6.0));
@@ -1505,6 +1530,7 @@ pub(crate) mod tests {
         });
       })
     };
+
     // 120 - 60 = 60 for the label: its 10 words wrap two to a line, the row grows, the control
     // stays.
     let t = build("aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj");
@@ -1512,6 +1538,7 @@ pub(crate) mod tests {
     assert_eq!(rect(&t, "label"), (0.0, 0.0, 60.0, 50.0));
     assert_eq!(rect(&t, "row").3, 50.0);
     assert_eq!(rect(&build("a"), "ctl"), (60.0, 0.0, 60.0, 10.0));
+
     // A word longer than the label's 60 (a path without spaces) breaks inside: the label keeps
     // its 60, the control its place in the row.
     let t = build("~/Library/Application/com.example.app/logs b");
@@ -1568,12 +1595,15 @@ pub(crate) mod tests {
             Float::parent().attach(UnitPoint::BOTTOM).anchor(UnitPoint::TOP).offset(0.0, 4.0).z(1);
           ui.id("tip").float(tip).col(Style::new().pad(5.0), |ui| {
             ui.text("tip", T);
+
             // An overlay of its own paints over it, though its z is lower.
             ui.id("inner").float(Float::parent()).el(Style::new().w(px(4.0)).h(px(4.0)));
           });
+
           // Covers the parent.
           ui.id("cover").float(Float::parent()).el(Style::new().grow());
         });
+
         // At the window's bottom-right corner, sized by percent of the window.
         let corner = Float::window()
           .attach(UnitPoint::BOTTOM_TRAILING)
@@ -1586,8 +1616,10 @@ pub(crate) mod tests {
     assert_eq!(rect(&t, "tip"), (66.0, 34.0, 28.0, 20.0));
     assert_eq!(rect(&t, "cover"), (30.0, 10.0, 100.0, 20.0));
     assert_eq!(rect(&t, "win"), (360.0, 270.0, 40.0, 30.0));
+
     // The row fits only its flow children.
     assert_eq!(t.nodes[1].rect, Rect::new(0.0, 0.0, 140.0, 40.0));
+
     // Paint order: by z, raised to the outer overlay's, then tree order.
     let order: Vec<_> = t.floats.iter().map(|&i| t.nodes[i as usize].id).collect();
     assert_eq!(order, [Id::of("win"), Id::of("cover"), Id::of("tip"), Id::of("inner")]);
@@ -1645,5 +1677,20 @@ pub(crate) mod tests {
     assert_eq!((a.0, a.2), (0.0, 33.5));
     assert_eq!((b.0, b.2), (33.5, 33.0));
     assert_eq!((c.0, c.2), (66.5, 33.5));
+  }
+  /// A float attached at its parent's leading edge by its trailing one: beside the parent,
+  /// centred on it.
+  #[test]
+  fn a_float_beside_its_parent() {
+    let t = run(200.0, 100.0, 1.0, |ui| {
+      ui.col(Style::new().pad(50.0), |ui| {
+        ui.id("p").row(Style::new().w(px(40.0)).h(px(20.0)), |ui| {
+          let beside = Float::parent().attach(UnitPoint::LEADING).anchor(UnitPoint::TRAILING);
+          ui.id("f").float(beside).el(Style::new().w(px(10.0)).h(px(10.0)));
+        });
+      });
+    });
+    assert_eq!(rect(&t, "p"), (50.0, 50.0, 40.0, 20.0));
+    assert_eq!(rect(&t, "f"), (40.0, 55.0, 10.0, 10.0));
   }
 }

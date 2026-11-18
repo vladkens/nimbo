@@ -140,7 +140,10 @@ pub(crate) fn fit(w: u32, h: u32, side: u32) -> (u32, u32) {
 
 /// `px`, `w` × `h` pixels as stored, turned upright as EXIF `orientation` (1–8) says: its size
 /// and pixels. Windows' decoder gives them as stored.
-#[cfg_attr(not(any(test, target_os = "windows")), allow(dead_code))]
+#[cfg_attr(
+  not(any(test, target_os = "windows")),
+  expect(dead_code, reason = "only Windows' decoder gives the pixels as stored")
+)]
 pub(crate) fn orient(w: u32, h: u32, px: Vec<u8>, o: u16) -> Result<(u32, u32, Vec<u8>), String> {
   let (w, h) = (w as usize, h as usize);
   // The stored pixel shown at `x`, `y`: mirrored (2, 4), turned half (3), across a diagonal (5,

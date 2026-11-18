@@ -116,12 +116,14 @@ fn main() {
     h.type_text("Ada Lovelace");
     h.click_id(Id::of(PASSWORD));
     h.type_text("secret");
+
     // A word of the paragraph, double-clicked: it stays selected, dimmed, as the notes take
     // the focus and an input method composes there.
     let r = h.rect(Id::of(ABOUT)).unwrap();
     let p = Point::new(r.x + 30.0, r.y + 8.0);
     h.press_with(p.x, p.y, 2, nimbo::Modifiers::empty());
     h.release(p.x, p.y);
+
     h.click_id(Id::of(NOTES));
     h.type_text("Notes over lines: ");
     h.ime_mark("にほん");

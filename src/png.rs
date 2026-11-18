@@ -123,6 +123,7 @@ fn zlib(data: &[u8]) -> Vec<u8> {
     let k = u32::from_le_bytes(data[i..i + 4].try_into().unwrap());
     (k.wrapping_mul(0x9e37_79b1) >> (32 - HASH_BITS)) as usize
   };
+
   let mut i = 0;
   while i < data.len() {
     let (mut len, mut dist) = (0, 0);
@@ -269,6 +270,7 @@ pub fn decode(file: &[u8]) -> (usize, usize, Vec<u8>) {
   let h = u32::from_be_bytes([h0, h1, h2, h3]) as usize;
   let (bpp, depth) = ([3, 1, 0, 0, 4][color as usize - 2], depth as usize);
   let stride = (w * bpp * depth).div_ceil(8);
+
   let raw = inflate(&idat);
   assert_eq!(raw.len(), (stride + 1) * h, "nimbo: a broken PNG");
   // A row of zeros above the first, dropped after.
@@ -321,13 +323,7 @@ fn inflate(z: &[u8]) -> Vec<u8> {
         out.extend((0..len).map(|_| r.take(8) as u8));
         continue;
       }
-      1 => {
-        let mut lens = [8u8; 288 + 32];
-        lens[144..256].fill(9);
-        lens[256..280].fill(7);
-        lens[288..].fill(5);
-        (Huffman::new(&lens[..288]), Huffman::new(&lens[288..]))
-      }
+      1 => fixed(),
       2 => dynamic(&mut r),
       _ => panic!("nimbo: a broken PNG"),
     };
@@ -355,6 +351,15 @@ fn inflate(z: &[u8]) -> Vec<u8> {
   }
 
   out
+}
+
+/// A fixed block's codes (RFC 1951, 3.2.6): the literal/length one and the distance one.
+fn fixed() -> (Huffman, Huffman) {
+  let mut lens = [8u8; 288 + 32];
+  lens[144..256].fill(9);
+  lens[256..280].fill(7);
+  lens[288..].fill(5);
+  (Huffman::new(&lens[..288]), Huffman::new(&lens[288..]))
 }
 
 /// A dynamic block's codes (RFC 1951, 3.2.7): the literal/length one and the distance one.

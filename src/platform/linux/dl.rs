@@ -37,10 +37,10 @@ impl Lib {
 }
 
 /// Declares a struct of a library's functions and a `load(&Lib) -> Option<Self>` that finds
-/// them all by name.
+/// them all by name; attributes before the name go on the struct.
 macro_rules! fns {
-  ($name:ident { $(fn $f:ident($($a:ident: $t:ty),* $(,)?) $(-> $r:ty)?;)* }) => {
-    #[allow(non_snake_case)]
+  ($(#[$m:meta])* $name:ident { $(fn $f:ident($($a:ident: $t:ty),* $(,)?) $(-> $r:ty)?;)* }) => {
+    $(#[$m])*
     struct $name {
       $($f: unsafe extern "C" fn($($t),*) $(-> $r)?,)*
     }

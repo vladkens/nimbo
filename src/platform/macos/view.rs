@@ -517,6 +517,7 @@ impl View {
         }
       });
     }));
+
     let weak = view.weak();
     let wake = Wake::new(DispatchQueue::main(), move || {
       let mtm = MainThreadMarker::new().unwrap();

@@ -170,6 +170,7 @@ impl Ui<'_> {
     let b = self.button_behavior(id);
     self.scope_off = scope;
     self.a11y(id, Role::Button).name_or(icon.name().unwrap_or_default());
+
     let hot = self.ctl_hot(id, b.hovered);
     let size = (t.font.size + 3.0).round();
     let k = if b.pressed { 1.0 } else { 0.5 * hot };

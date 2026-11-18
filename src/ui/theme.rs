@@ -494,6 +494,7 @@ impl Theme {
       ControlSize::Regular => (z.control_h, self.font),
       ControlSize::Large => (z.control_h + 8.0, Font { size: self.font.size + 2.0, ..self.font }),
     };
+
     // Padding grows with the height: 12 at 24, 18 at 36. Its label's width, as AppKit's push
     // buttons keep theirs: text beside it wraps instead ([ButtonLook::w] changes it).
     let pad = (h * 0.5).round();
@@ -502,6 +503,7 @@ impl Theme {
     let text = TextStyle::new(font, self.text).line_limit(1);
     let destructive = matches!(role, Some(ButtonRole::Destructive));
     let red = if destructive { text.color(self.danger) } else { text };
+
     let (frame, bg, hover, pressed, text) = match style {
       ButtonStyle::Bordered => {
         let frame = frame.border(self.control_border.width(), self.line);
@@ -641,6 +643,7 @@ mod tests {
     assert_eq!(Theme::PLATES_LIGHT.button(ButtonStyle::Bordered).frame.border, [0.0; 4]);
     const TALL: ButtonLook = Theme::PLATES_LIGHT.button(ButtonStyle::Bordered).height(36.0);
     assert_eq!(TALL.frame.size[1], px(36.0));
+
     // Sizes and builders, all const.
     const KEY: ButtonLook = Theme::PLATES_DARK
       .button(ButtonStyle::Bordered)
@@ -663,6 +666,7 @@ mod tests {
     let purple = Appearance { scheme: ColorScheme::Light, accent: Some(rgb(0x953d96)) };
     let t = Theme::system(purple);
     assert_eq!((t.bg, t.accent, t.sizes), (WHITE, rgb(0x953d96), Sizes::PLATES));
+
     // The focus ring follows another accent.
     assert_eq!(t.focus, alpha(rgb(0x953d96), 0.45));
     // The OS's own blue is the theme's: its measured focus ring stays.

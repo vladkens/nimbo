@@ -163,6 +163,7 @@ impl<'s, T: PartialEq + Copy> Picker<'s, T> {
           true => (t.accent, t.label().color(t.on_accent)),
           false => (alpha(t.accent, 0.0), t.label()),
         };
+
         // The highlight 5 in from the menu's sides (its padding), its corners concentric.
         let row = Style::new()
           .w(grow())
@@ -183,6 +184,7 @@ impl<'s, T: PartialEq + Copy> Picker<'s, T> {
           });
           ui.text(o, text);
         });
+
         if ib.clicked {
           pick = Some(i);
         }
@@ -363,11 +365,13 @@ mod tests {
     h.rt.ui.set_focus(Some(pick));
     h.key(Key::Char('b'), Modifiers::empty());
     assert_eq!(h.app().cur, 2);
+
     // Down opens it on the current option, checked.
     h.key(NamedKey::ArrowDown, Modifiers::empty());
     h.frame();
     h.frame();
     assert!(h.rect(pick.key("menu")).is_some() && h.rect(pick.key(("item", 2usize))).is_some());
+
     // Disabled while open: it closes and its options can't be picked.
     h.app_mut().off = true;
     h.frame();

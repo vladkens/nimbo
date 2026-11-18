@@ -33,35 +33,8 @@ impl<A> Menu<A> {
   where
     A: Clone,
   {
-    fn walk<A: Clone>(items: &[Item<A>], out: &mut Vec<A>) -> Vec<Item<usize>> {
-      let mut tagged = Vec::with_capacity(items.len());
-      for it in items {
-        let n = out.len();
-        tagged.push(match it {
-          Item::Button { action, label, role, enabled, key } => {
-            out.push(action.clone());
-            let (label, role, enabled, key) = (label.clone(), *role, *enabled, *key);
-            Item::Button { action: n, label, role, enabled, key }
-          }
-          Item::Toggle { action, label, is_on, enabled, key } => {
-            out.push(action.clone());
-            let (label, is_on, enabled, key) = (label.clone(), *is_on, *enabled, *key);
-            Item::Toggle { action: n, label, is_on, enabled, key }
-          }
-          Item::Submenu { label, enabled, menu } => {
-            let menu = Menu::new(walk(&menu.items, out));
-            Item::Submenu { label: label.clone(), enabled: *enabled, menu }
-          }
-          Item::Section(s) => Item::Section(s.clone()),
-          Item::Divider => Item::Divider,
-        });
-      }
-
-      tagged
-    }
-
     let mut actions = Vec::new();
-    (Menu::new(walk(&self.items, &mut actions)), actions)
+    (Menu::new(tag(&self.items, &mut actions)), actions)
   }
 
   /// Whether `other` has the same items but for their labels, checks and enabled states: what an
@@ -226,6 +199,35 @@ impl<A> Item<A> {
   }
 }
 
+/// `items` with each action replaced by its number, depth first ([Menu::tagged]); the actions
+/// go to `out` in that order.
+fn tag<A: Clone>(items: &[Item<A>], out: &mut Vec<A>) -> Vec<Item<usize>> {
+  let mut tagged = Vec::with_capacity(items.len());
+  for it in items {
+    let n = out.len();
+    tagged.push(match it {
+      Item::Button { action, label, role, enabled, key } => {
+        out.push(action.clone());
+        let (label, role, enabled, key) = (label.clone(), *role, *enabled, *key);
+        Item::Button { action: n, label, role, enabled, key }
+      }
+      Item::Toggle { action, label, is_on, enabled, key } => {
+        out.push(action.clone());
+        let (label, is_on, enabled, key) = (label.clone(), *is_on, *enabled, *key);
+        Item::Toggle { action: n, label, is_on, enabled, key }
+      }
+      Item::Submenu { label, enabled, menu } => {
+        let menu = Menu::new(tag(&menu.items, out));
+        Item::Submenu { label: label.clone(), enabled: *enabled, menu }
+      }
+      Item::Section(s) => Item::Section(s.clone()),
+      Item::Divider => Item::Divider,
+    });
+  }
+
+  tagged
+}
+
 /// The most characters an item's label shows ([Item::button]): a menu keeps its width whatever the
 /// app lists (a device, a file, a warning).
 pub const LABEL: usize = 48;
@@ -306,6 +308,7 @@ mod tests {
     assert_eq!(fit("A Rather Long Device Name (USB)", 24), "A Rather Long Device…");
     assert_eq!(fit("Ünïcödé wörds ärë cöüntëd äs chärs", 20), "Ünïcödé wörds ärë…");
     assert_eq!(fit("anything", 0), "…");
+
     // Brackets in the middle: shortened, or left out when too little of them would show.
     let warning = "No sound from Line In (High Definition Audio Device): check the microphone";
     assert_eq!(fit(warning, LABEL), "No sound from Line In: check the microphone");
@@ -313,10 +316,12 @@ mod tests {
     assert_eq!(fit(warning, 60), "No sound from USB Mic (Elgato Wave:3…): check the microphone");
     let error = "The last dictation failed: the engine did not answer in time and was restarted";
     assert!(fit(error, LABEL).ends_with('…') && fit(error, LABEL).chars().count() <= LABEL);
+
     // Brackets inside the brackets: the outer ones close at their own.
     assert_eq!(fit("Microphone Array (Realtek(R) Audio)", 32), "Microphone Array (Realtek(R)…)");
     let warning = "No sound from Microphone Array (Realtek(R) Audio): check the microphone";
     assert_eq!(fit(warning, LABEL), "No sound from Microphone Array: check the…");
+
     // Items fit by themselves, unless asked to show it all.
     assert_eq!(Item::button(0, error).label(), fit(error, LABEL));
     assert_eq!(Item::full(0, error).label(), error);

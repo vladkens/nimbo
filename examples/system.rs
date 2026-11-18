@@ -174,6 +174,7 @@ fn start(main: &mut Main) {
   let seen = Seen::new(hardware::lid_closed());
   tray.set_menu(&menu(&seen));
   STATE.with(|s| s.borrow_mut().seen = Some(seen));
+
   // The hook: what lives outside the windows, before they hear it.
   let t = tray.clone();
   let watched = main.watch(&KINDS, move |_, change| {

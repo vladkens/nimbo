@@ -112,7 +112,7 @@
 //!   and `uninstall(&AppInfo) -> Result<(), String>`; nothing but on Linux.
 //!
 //!   The tray, hotkeys and autostart live in `app/` on each OS (on Windows and Linux with the
-//!   shell), sized apart from the window layer (`scripts/size.py`).
+//!   shell), sized apart from the window layer (`make size`).
 //! - `pub mod open` ([crate::open]): `url(&str)`, `path(&Path)` and `reveal(&Path)` (an absolute
 //!   path), each `-> Result<(), String>` without waiting for the app it starts; `file_manager() ->
 //!   &'static str`.

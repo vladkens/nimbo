@@ -68,6 +68,7 @@ impl Ui<'_> {
             ui.text(n, text.color(alpha(text.color, 0.65)).nowrap());
           }
         });
+
         if flat && i + 1 < n {
           let shown = !on && !on_at(i + 1);
           let line = Style::new().w(px(1.0)).h(px(14.0)).bg(if shown { divider } else { [0.0; 4] });

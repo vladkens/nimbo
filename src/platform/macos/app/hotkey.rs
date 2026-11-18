@@ -208,6 +208,7 @@ impl Hotkeys {
     self.shared.chord_down.store(false, Ordering::Release);
     self.carbon.unregister();
     self.carbon_error = None;
+
     let Some(hotkey) = hotkey else { return Ok(()) };
     match hotkey {
       Hotkey::Shortcut(s) => {
@@ -266,12 +267,14 @@ impl Hotkeys {
     out.fallback = self.carbon.registered();
     out.fallback_error = self.carbon_error.clone();
     out.secure_input = super::permissions::secure_input();
+
     out.counts.listener = n(&s.tap_events);
     out.counts.fallback = n(&s.carbon_events);
     out.counts.fallback_repeats = n(&s.carbon_repeats);
     out.counts.duplicates = n(&s.duplicates);
     out.counts.reenabled = n(&s.tap_reenabled);
     out.counts.overflow = n(&s.overflow);
+
     // Secure Input leaves the tap deaf, never Carbon.
     let tap = out.listener == Listener::Active && !out.secure_input;
     if s.escape.load(Ordering::Relaxed) && !tap && !self.carbon.escape_registered() {
@@ -351,6 +354,7 @@ fn run_tap(shared: Arc<Shared>, events: Sender<Raw>) {
     *shared.tap_error.lock().unwrap() = Some(why.into());
     shared.tap.store(TAP_FAILED, Ordering::Release);
   };
+
   let mask = (1u64 << CGEventType::KeyDown.0)
     | (1u64 << CGEventType::KeyUp.0)
     | (1u64 << CGEventType::FlagsChanged.0);
@@ -376,6 +380,7 @@ fn run_tap(shared: Arc<Shared>, events: Sender<Raw>) {
     drop(unsafe { Box::from_raw(state) });
     return failed("no run loop source for the event tap");
   };
+
   // SAFETY: from here on the tap may call back with `state` for the rest of the process.
   let state: &'static TapState = unsafe { &*state };
   state.port.store(CFRetained::as_ptr(&port).as_ptr(), Ordering::Release);
@@ -645,14 +650,17 @@ mod tests {
     assert!(!d.accept(Source::Carbon, down, ms(3)), "Carbon right after the tap");
     assert!(d.accept(Source::Tap, Hit::Up, ms(400)));
     assert!(!d.accept(Source::Carbon, Hit::Up, ms(450)), "the window is inclusive");
+
     // Carbon first (the tap was late), then the tap's copy.
     assert!(d.accept(Source::Carbon, down, ms(1_000)));
     assert!(!d.accept(Source::Tap, down, ms(1_010)));
+
     // Out of the window both count; one source never dedupes itself (autorepeat, quick taps).
     assert!(d.accept(Source::Carbon, Hit::Up, ms(1_200)));
     assert!(d.accept(Source::Tap, Hit::Up, ms(1_251)));
     assert!(d.accept(Source::Tap, down, ms(1_260)));
     assert!(d.accept(Source::Tap, Hit::Down { repeat: true }, ms(1_270)));
+
     // Kinds do not mix; Escape from both is one.
     assert!(d.accept(Source::Carbon, Hit::Abort, ms(1_275)));
     assert!(d.accept(Source::Tap, Hit::Escape, ms(1_280)));
@@ -753,15 +761,18 @@ mod tests {
     let tell = Verdict::Tell;
     assert_eq!(flags(&s, Code::AltRight, RIGHT_ALT), tell(Hit::Down { repeat: false }));
     assert_eq!(flags(&s, Code::AltRight, 0), tell(Hit::Up));
+
     // The left one is another key; with ⌘ held it is a chord of the user's.
     assert_eq!(flags(&s, Code::AltLeft, LEFT_ALT), Verdict::Pass);
     assert_eq!(flags(&s, Code::AltLeft, 0), Verdict::Pass);
     let cmd = CGEventFlags::MaskCommand.0 | 0x08;
     assert_eq!(flags(&s, Code::AltRight, RIGHT_ALT | cmd), Verdict::Pass);
     assert_eq!(flags(&s, Code::AltRight, cmd), Verdict::Pass, "no release owed");
+
     // Left Option held, then Right Option: a chord of the user's too.
     assert_eq!(flags(&s, Code::AltRight, RIGHT_ALT | LEFT_ALT), Verdict::Pass);
     assert_eq!(flags(&s, Code::AltRight, LEFT_ALT), Verdict::Pass, "no release owed");
+
     // Keys and their releases are the apps' while it is not held.
     assert_eq!(key(&s, true, E, NONE, false), Verdict::Pass);
     assert_eq!(key(&s, false, E, NONE, false), Verdict::Pass);
@@ -799,6 +810,7 @@ mod tests {
     let s = lone_shared(Code::Fn);
     let fn_flag = CGEventFlags::MaskSecondaryFn.0;
     let with_fn = CGEventFlags(fn_flag);
+
     // A long hold while typing: nothing aborts, the release stops.
     assert_eq!(flags_at(&s, 0, Code::Fn, fn_flag), Verdict::Tell(Hit::Down { repeat: false }));
     assert_eq!(key_at(&s, 400, true, E, with_fn, false), Verdict::Pass);
@@ -806,6 +818,7 @@ mod tests {
     let shift = CGEventFlags::MaskShift.0 | 0x02;
     assert_eq!(flags_at(&s, 500, Code::ShiftLeft, fn_flag | shift), Verdict::Pass);
     assert_eq!(flags_at(&s, 3_000, Code::Fn, 0), Verdict::Tell(Hit::Up));
+
     // A tap: typing after it is the app's.
     flags_at(&s, 5_000, Code::Fn, fn_flag);
     assert_eq!(flags_at(&s, 5_100, Code::Fn, 0), Verdict::Tell(Hit::Up));
@@ -869,17 +882,20 @@ mod tests {
     assert_eq!(key(&s, true, ESC, NONE, true), Verdict::Swallow(None), "its repeats");
     s.escape.store(false, Ordering::Release); // turned off meanwhile
     assert_eq!(key(&s, false, ESC, NONE, false), Verdict::Swallow(None), "its release");
+
     // Held since before it was on: the app's.
     assert_eq!(key(&s, true, ESC, NONE, false), Verdict::Pass);
     s.escape.store(true, Ordering::Release);
     assert_eq!(key(&s, true, ESC, NONE, true), Verdict::Pass);
     assert_eq!(key(&s, false, ESC, NONE, false), Verdict::Pass);
+
     // ⌘⎋, ⌃⎋, ⌥⎋ are not Escape; ⇧⎋ is.
     for flags in [CGEventFlags::MaskCommand, CGEventFlags::MaskControl, OPT] {
       assert_eq!(key(&s, true, ESC, flags, false), Verdict::Pass, "{flags:?}");
     }
 
     assert_eq!(key(&s, true, ESC, CGEventFlags::MaskShift, false), taken);
+
     // The chord still works meanwhile.
     assert!(matches!(key(&s, true, SPACE, OPT, false), Verdict::Swallow(Some(Hit::Down { .. }))));
   }
@@ -889,22 +905,26 @@ mod tests {
     let s = lone_shared(Code::AltRight);
     s.escape.store(true, Ordering::Release);
     let opt = CGEventFlags(RIGHT_ALT);
+
     // Right after the press: the user's ⌥⎋, which aborts the press and is the app's.
     flags_at(&s, 0, Code::AltRight, RIGHT_ALT);
     assert_eq!(key_at(&s, 100, true, ESC, opt, false), Verdict::Tell(Hit::Abort));
     assert_eq!(key_at(&s, 150, false, ESC, opt, false), Verdict::Pass);
     flags_at(&s, 200, Code::AltRight, 0);
+
     // Held past the chord window: Escape is taken, the hotkey's own ⌥ notwithstanding.
     flags_at(&s, 1_000, Code::AltRight, RIGHT_ALT);
     let taken = Verdict::Swallow(Some(Hit::Escape));
     assert_eq!(key_at(&s, 2_000, true, ESC, opt, false), taken);
     assert_eq!(key_at(&s, 2_050, false, ESC, opt, false), Verdict::Swallow(None));
+
     // Shift too: still taken. With the left ⌥ held too: the user's ⌥⎋.
     let shift = CGEventFlags(RIGHT_ALT | CGEventFlags::MaskShift.0 | 0x02);
     assert_eq!(key_at(&s, 2_080, true, ESC, shift, false), taken);
     assert_eq!(key_at(&s, 2_090, false, ESC, shift, false), Verdict::Swallow(None));
     let both = CGEventFlags(RIGHT_ALT | LEFT_ALT);
     assert_eq!(key_at(&s, 2_100, true, ESC, both, false), Verdict::Pass);
+
     // ⌥⎋ with another hotkey, or with this one not held, is still the app's.
     let s = lone_shared(Code::MetaRight);
     s.escape.store(true, Ordering::Release);

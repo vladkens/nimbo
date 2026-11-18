@@ -349,13 +349,16 @@ mod tests {
     let l = TextLayout::of(&st.last, Id::of("t")).unwrap();
     let lines: Vec<_> = (0..l.len()).map(|k| l.range(k)).collect();
     assert_eq!(lines, [0..11, 11..15, 16..18, 19..19]);
+
     // Stops every character, from the line's start.
     assert_eq!(
       (l.x_in(0, 4), l.x_in(0, 11), l.x_in(1, 11), l.x_in(1, 13)),
       (24.0, 66.0, 0.0, 12.0)
     );
+
     // An offset at the wrap belongs to the next line.
     assert_eq!((l.line_of(10), l.line_of(11), l.line_of(15), l.line_of(16)), (0, 1, 1, 2));
+
     // Hit tests: nearest boundary, or the grapheme under the point.
     assert_eq!(l.hit(Point::new(10.0 + 14.0, 25.0), Hit::Nearest), 2);
     assert_eq!(l.hit(Point::new(10.0 + 14.0, 25.0), Hit::Over), 2);
@@ -364,6 +367,7 @@ mod tests {
     assert_eq!(l.hit(Point::new(500.0, 35.0), Hit::Nearest), 15);
     assert_eq!(l.hit(Point::new(-5.0, 999.0), Hit::Nearest), 19);
     assert_eq!(l.caret(13), Rect::new(22.0, 30.0, 0.0, 10.0));
+
     // A selection over three lines, its line break shown.
     let mut rects = Vec::new();
     l.rects(2..17, |r| rects.push(r));
@@ -373,11 +377,13 @@ mod tests {
       Rect::new(10.0, 40.0, 6.0, 10.0),
     ];
     assert_eq!(rects, want);
+
     // Leading spaces count toward the first line's width.
     let st = laid("      ab cd", 56.0);
     let l = TextLayout::of(&st.last, Id::of("t")).unwrap();
     let lines: Vec<_> = (0..l.len()).map(|k| l.range(k)).collect();
     assert_eq!(lines, [0..9, 9..11]);
+
     // A word wider than a line breaks between characters, the lines still covering the text.
     let st = laid("ab cdefghijklmnop q", 56.0);
     let l = TextLayout::of(&st.last, Id::of("t")).unwrap();
@@ -400,6 +406,7 @@ mod tests {
     assert_eq!(mv(Move::Down), 18);
     assert_eq!(mv(Move::Up), 13);
     assert_eq!(mv(Move::LineStart), 11);
+
     // The end of a wrapped line: before the space it broke at.
     assert_eq!(mv(Move::Up), 0);
     assert_eq!(mv(Move::LineEnd), 10);

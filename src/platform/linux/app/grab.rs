@@ -246,11 +246,13 @@ mod tests {
     keys.chord.set(Some((65, 4 | 8)));
     keys.escape.set(Some(9));
     let edge = |kind, code, state| keys.edge(kind, code, state, at);
+
     assert_eq!(edge(PRESS, 65, 4), None, "Ctrl alone");
     assert_eq!(edge(PRESS, 65, 4 | 8 | 2 | 16), Some(Edge::Down { at, repeat: false }));
     assert_eq!(edge(PRESS, 65, 4 | 8), Some(Edge::Down { at, repeat: true }));
     assert_eq!(edge(RELEASE, 65, 0), Some(Edge::Up { at }));
     assert_eq!(edge(RELEASE, 65, 0), None);
+
     assert_eq!(edge(PRESS, 9, 1), Some(Edge::Escape));
     assert_eq!(edge(PRESS, 9, 1), None, "held");
     assert_eq!(edge(RELEASE, 9, 0), None);

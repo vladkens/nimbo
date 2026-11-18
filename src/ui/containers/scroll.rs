@@ -140,6 +140,7 @@ impl Ui<'_> {
         let hot = ui.hot(track, ui.hovered(track) || drag[ax]);
         let thick = 6.0 + 2.0 * hot;
         let color = alpha(t.thumb, t.thumb[3] * (1.0 + 0.6 * hot));
+
         let (at, s, pad) = match ax {
           0 => {
             let at = Float::parent()
@@ -347,6 +348,7 @@ mod tests {
     h.frame();
     h.move_to(195.0, 150.0);
     h.wait(Duration::from_millis(300));
+
     let thumb = h.rect(area.key(("thumb", 1usize))).expect("a thumb");
     let (x, y) = (thumb.x + thumb.w / 2.0, thumb.y + thumb.h / 2.0);
     h.press(x, y);
@@ -365,15 +367,18 @@ mod tests {
   fn edges_fade_as_the_content_scrolls_away_and_the_thumb_drags() {
     let mut h = Harness::new(Tall(1000.0), Size::new(200.0, 200.0), 1.0);
     let area = Id::of("area");
+
     // At the top: no fade above, the full one below.
     let img = h.render();
     assert_eq!(img.pixel(100.0, 1.0), [0, 0, 255, 255]);
     assert!(img.pixel(100.0, 199.0)[0] > 200, "{:?}", img.pixel(100.0, 199.0));
+
     // Scrolled 10 down: half the fade above.
     h.rt.ui.store.raw::<ScrollState>(area).offset[1] = 10.0;
     h.rt.redraw();
     let top = h.render().pixel(100.0, 0.0);
     assert!(top[0] > 100 && top[0] < 150 && top[2] > 100, "{top:?}");
+
     // The pointer in the bar's strip shows the bars; the thumb drags the content 4 points per
     // point (800 over a track of 196 less the thumb of 40).
     h.move_to(195.0, 100.0);
@@ -386,6 +391,7 @@ mod tests {
     let off = h.rt.ui.scroll(area).unwrap().offset.y;
     assert!((off - (10.0 + 10.0 * 800.0 / 156.0)).abs() < 0.5, "{off}");
     h.release(x, y + 10.0);
+
     // A drag no frame saw held: its last move counts.
     h.frame();
     let thumb = h.rect(area.key(("thumb", 1usize))).unwrap();
@@ -397,20 +403,24 @@ mod tests {
     let now = h.rt.ui.scroll(area).unwrap().offset.y;
     assert!((now - off - 10.0 * 800.0 / 156.0).abs() < 0.5, "{off} → {now}");
     let off = now;
+
     // A click on the track below the thumb pages down.
     h.click(195.0, 190.0);
     h.frame();
     assert!(h.rt.ui.scroll(area).unwrap().offset.y > off + 150.0);
+
     // The pointer resting on the track keeps the bars, with no frames.
     h.move_to(195.0, 100.0);
     h.wait(Duration::from_millis(300));
     assert!(h.wait(Duration::from_millis(3000)) == 0 && h.rt.due_in().is_none());
     assert!(h.rect(area.key(("thumb", 1usize))).is_some());
+
     // The content twice as tall: the thumb fits it in the frame that shows it.
     h.app_mut().0 = 2000.0;
     h.frame();
     let thumb = h.rect(area.key(("thumb", 1usize))).unwrap();
     assert!((thumb.h - 24.0).abs() < 0.5, "{thumb:?}");
+
     // Left alone, the bars fade out and the frames stop.
     h.leave();
     h.wait(Duration::from_millis(2000));

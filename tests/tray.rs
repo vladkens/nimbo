@@ -4,8 +4,9 @@
 //! (`tests/tray/detached.rs`) where it needs no main thread: everywhere but macOS.
 
 #[path = "../examples/tray.rs"]
+#[expect(dead_code, reason = "its main and what this file doesn't use")]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
-#[allow(dead_code, unused_attributes)]
+#[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
 mod example;
 
 #[cfg(not(target_os = "macos"))]
@@ -30,14 +31,17 @@ fn the_example() {
     let items = m.items.iter().map(|i| (i.label().to_owned(), i.is_enabled(), i.is_on()));
     items.collect::<Vec<_>>()
   };
+
   let idle = Shown { count: None, login: None, hotkey: "Ctrl+Alt+Space".into() };
   let l = labels(&idle);
   assert_eq!(l[0], ("Ctrl+Alt+Space opens the counter".into(), false, false));
   assert_eq!((l[1].0.as_str(), l[3].1), ("Open Counter", false), "no launch at login");
+
   let open = Shown { count: Some(3), login: Some(true), ..idle };
   let l = labels(&open);
   assert_eq!((l[0].0.as_str(), l[1].0.as_str()), ("Count: 3", "Close Counter"));
   assert_eq!(l[3], ("Launch at Login".into(), true, true));
+
   assert!(nimbo::Hotkey::parse(example::HOTKEY).is_ok());
   let mut rings = Vec::new();
   svg::flatten(example::ICON, 1.0, &mut rings).unwrap();

@@ -96,6 +96,7 @@ pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {
     let attrs = unsafe { run.attributes() };
     let attrs = unsafe { attrs.cast_unchecked::<CFString, CTFont>() };
     let face = index(Face(attrs.get(key).unwrap()));
+
     let n = unsafe { run.glyph_count() } as usize;
     let mut ids = vec![0u16; n];
     let mut pos = vec![CGPoint::new(0.0, 0.0); n];
@@ -106,6 +107,7 @@ pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {
       run.positions(all, NonNull::new(pos.as_mut_ptr()).unwrap());
       run.string_indices(all, NonNull::new(idx.as_mut_ptr()).unwrap());
     }
+
     let at = |&u: &CFIndex| bytes.at(u as usize);
     glyphs.extend(ids.iter().zip(&pos).map(|(&id, p)| Glyph {
       face,
@@ -210,12 +212,14 @@ fn draw_coverage(
   let space = CGColorSpace::with_name(Some(unsafe { kCGColorSpaceSRGB }));
   let info = CGImageAlphaInfo::NoneSkipLast.0;
   let ctx = unsafe { CGBitmapContextCreate(ptr, w, h, 8, w * 4, space.as_deref(), info) }?;
+
   let (bg, fg) = if raster.dark { (1.0, 0.0) } else { (0.0, 1.0) };
   CGContext::set_rgb_fill_color(Some(&ctx), bg, bg, bg, 1.0);
   CGContext::fill_rect(Some(&ctx), CGRect::new(CGPoint::ZERO, CGSize::new(w as _, h as _)));
   CGContext::set_rgb_fill_color(Some(&ctx), fg, fg, fg, 1.0);
   context_setup(&ctx, scale, true);
   unsafe { font.draw_glyphs(glyph, origin_ptr, 1, &ctx) };
+
   drop(ctx);
   let flip = if raster.dark { 255 } else { 0 };
   Some(rgba.as_chunks::<4>().0.iter().map(|p| p[1] ^ flip).collect())

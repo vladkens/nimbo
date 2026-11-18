@@ -148,6 +148,7 @@ impl Ui<'_> {
       let centre = band.x + band.w / 2.0 - s.x - w / 2.0;
       centre.min(s.w - w).max(GAP)
     });
+
     // Laid out elsewhere (the window resized), the view runs again on where it is now.
     self.settle(slot);
     self.settle(slot.key(0));
@@ -158,6 +159,7 @@ impl Ui<'_> {
       ui.key(0).row(group, content);
       ui.set_slot(was);
     });
+
     // With principal items, the room ends a gap before the items after it.
     if w > 0.0 {
       self.el(Style::new().w(px(GAP)));
@@ -315,6 +317,7 @@ mod tests {
             self.pressed += 1;
           }
         });
+
         let across = Float::parent().offset(300.0, 40.0);
         _ = ui.id("across").float(across).el(Style::new().w(px(60.0)).h(px(24.0)).hit());
         ui.toolbar(|ui| {
@@ -496,6 +499,7 @@ mod tests {
       h.set_titlebar(Some(mac_titlebar("", false)));
       h.frame();
       h.frame();
+
       // The title as it shows: cut by the room it is in, its group's parent.
       let t = &h.rt.ui.last;
       let title = t.find(Id::of("title")).unwrap();
@@ -506,6 +510,7 @@ mod tests {
         shown.x + shown.w <= find.x - GAP + 0.5,
         "{w}: the title to {shown:?}, the field at {find:?}"
       );
+
       let grip = h.rect(Id::of("split").key("handle")).unwrap();
       assert!(shown.w == 0.0 || shown.x >= mid(grip).x, "{w}: {shown:?}");
       // With room, in the centre of the detail's bar.
@@ -513,6 +518,7 @@ mod tests {
         let title = t.nodes[title as usize].rect;
         assert!((mid(title).x - (mid(grip).x + w) / 2.0).abs() < 1.0, "{title:?}");
       }
+
       // The field's whole width takes its own presses.
       let end = Point::new(find.x + 3.0, mid(find).y);
       assert!(!h.drags_window(end.x, end.y));
@@ -529,6 +535,7 @@ mod tests {
     h.click(t.x, t.y);
     h.frame();
     assert_eq!(h.app().toggled, 1);
+
     // A search field in the toolbar: no drag, a click focuses it, the text cursor over it.
     let f = mid(h.rect(Id::of("find")).unwrap());
     assert!(!h.drags_window(f.x, f.y));
@@ -538,6 +545,7 @@ mod tests {
     h.move_to(f.x, f.y);
     h.frame();
     assert_eq!(h.cursor(), Cursor::Text);
+
     // The principal item, between the detail's other items, on the lights' middle.
     let title = h.rect(Id::of("title")).unwrap();
     assert_eq!(mid(title).y, 26.0);
@@ -580,6 +588,7 @@ mod tests {
       h.frame();
       h.frame();
       assert!(h.drags_window(300.0, 26.0) && h.drags_window(300.0, 6.0), "list {list}");
+
       // The list's rows are there, under the bar, and reach no pointer there; below it they do.
       h.move_to(300.0, 26.0);
       h.frame();

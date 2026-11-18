@@ -356,6 +356,7 @@ mod tests {
     });
     // Outside the window: not painted.
     ui.float(Float::window().offset(500.0, 0.0)).text("away", label);
+
     let mut sys = Sys { text: &mut text, images: &images, scale };
     ui.layout(&mut sys, scale);
     let mut f = Frame {
@@ -464,6 +465,7 @@ mod tests {
     let black = [0.0, 0.0, 0.0, 1.0];
     let shadow = Shadow::new(4.0, 0.0, black);
     ui.id("box").el(Style::new().w(px(20.0)).h(px(10.0)).bg([1.0; 4]).shadow(shadow));
+
     let mut sys = Sys { text: &mut text, images: &images, scale };
     ui.layout(&mut sys, scale);
     let mut f = Frame {
@@ -476,6 +478,7 @@ mod tests {
       images: &mut images,
       animate: false,
     };
+
     let i = ui.st.tree.find(Id::of("box")).unwrap() as usize;
     let ring = FocusRing::new([1.0, 0.0, 0.0, 1.0]);
     paint(&ui.st.tree, &mut ui.canvases, Some((i, ring)), &mut f);
@@ -497,6 +500,7 @@ mod tests {
       // Wraps to two lines at 60 points.
       ui.id("done").text("Buy milk and eggs", plain.strikethrough(LinePattern::Solid));
     });
+
     let mut sys = Sys { text: &mut text, images: &images, scale };
     ui.layout(&mut sys, scale);
     let mut f = Frame {
@@ -510,6 +514,7 @@ mod tests {
       animate: false,
     };
     let st = ui.paint(&mut f);
+
     let quads = &scene.layers()[0].quads;
     assert_eq!(quads.len(), 2);
     let done = st.last.get(Id::of("done")).unwrap();
@@ -532,6 +537,7 @@ mod tests {
     let plain = TextStyle::new(Font::ui(11.0), [1.0, 0.0, 0.0, 1.0]);
     let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
     ui.col(Style::new(), |ui| ui.id("wer").text("WER 4.5%", plain.underline(LinePattern::Dot)));
+
     let mut sys = Sys { text: &mut text, images: &images, scale };
     ui.layout(&mut sys, scale);
     let mut f = Frame {
@@ -545,6 +551,7 @@ mod tests {
       animate: false,
     };
     let st = ui.paint(&mut f);
+
     let quads = &scene.layers()[0].quads;
     let wer = st.last.get(Id::of("wer")).unwrap();
     let Kind::Text { baseline, .. } = wer.kind else { panic!() };
@@ -588,6 +595,7 @@ mod tests {
         scene.layers()[0].quads.iter().map(|q| (q.rect.x, q.rect.w)).collect();
       q
     };
+
     let widths = |p| marks(p).iter().take(6).map(|q| q.1).collect::<Vec<_>>();
     assert_eq!(marks(LinePattern::Solid).len(), 1);
     assert_eq!(widths(LinePattern::Dot), [1.0; 6]);
@@ -611,6 +619,7 @@ mod tests {
       .strikethrough(LinePattern::Solid);
     let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
     ui.row(Style::new().pads([0.0, 0.0, 0.0, 10.3]), |ui| ui.id("t").text("WER 4.5%", both));
+
     let mut sys = Sys { text: &mut text, images: &images, scale };
     ui.layout(&mut sys, scale);
     let mut f = Frame {
@@ -624,9 +633,11 @@ mod tests {
       animate: false,
     };
     ui.paint(&mut f);
+
     let quads = &scene.layers()[0].quads;
     let (line, dots) = quads.split_first().unwrap();
     assert!(line.rect.w > 20.0, "the strike: {:?}", line.rect);
+
     let px = |v: f32| v * scale;
     let whole = |v: f32| (px(v) - px(v).round()).abs() < 1e-3;
     assert!(dots.len() > 10);
@@ -653,6 +664,7 @@ mod tests {
       ui.id("plot").el(Style::new().w(grow()).h(grow()).bg([1.0; 4]));
       ui.id("axis").el(Style::new().w(px(30.0)).h(grow()));
     });
+
     let mut sys = Sys { text: &mut text, images: &images, scale };
     ui.layout(&mut sys, scale);
     let mut f = Frame {
@@ -668,6 +680,7 @@ mod tests {
     let st = ui.paint(&mut f);
     assert_eq!(st.last.rect(Id::of("plot")), Some(Rect::new(10.0, 10.0, 70.0, 60.0)));
     assert_eq!(st.last.rect(Id::of("axis")), Some(Rect::new(80.0, 10.0, 30.0, 60.0)));
+
     // The canvas first, over its whole box, its text with it; then the children in a layer over
     // it, so the plot's ground covers the canvas's text too.
     let layers = scene.layers();
@@ -679,9 +692,35 @@ mod tests {
       (Rect::new(0.0, 0.0, 120.0, 80.0), [0.0, 0.0, 1.0, 1.0])
     );
     assert_eq!((layers[1].quads.len(), layers[1].quads[0].color), (1, [1.0; 4]));
+
     // Children take the pointer, innermost first.
     let mut hits = Vec::new();
     input::hit(&st.last, Point::new(20.0, 20.0), &mut hits);
     assert_eq!(hits, [Id::of("plot"), Id::of("chart")]);
+  }
+
+  struct Ringed(Option<FocusRing>);
+
+  impl crate::App for Ringed {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.set_focus_ring(self.0);
+      ui.col(Style::new().pad(10.0), |ui| {
+        ui.id("box").el(Style::new().w(px(20.0)).h(px(10.0)).focusable());
+      });
+    }
+  }
+
+  /// The ring [Ui::set_focus_ring] sets goes round the focused box; `None`, none does.
+  #[test]
+  fn the_focus_ring_set_is_painted() {
+    let red = [1.0, 0.0, 0.0, 1.0];
+    let mut h = crate::Harness::new(Ringed(Some(FocusRing::new(red))), Size::new(50.0, 40.0), 1.0);
+    h.set_focus(Some(Id::of("box")));
+    h.frame();
+    let ring = h.render().pixel(8.5, 15.0);
+    h.app_mut().0 = None;
+    h.frame();
+    assert_eq!(ring, [255, 0, 0, 255]);
+    assert_ne!(h.render().pixel(8.5, 15.0), ring);
   }
 }

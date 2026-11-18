@@ -311,6 +311,7 @@ unsafe extern "C" fn on_state(c: P, _: P) {
       notice(Change::AudioInputs);
       notice(Change::DefaultInput);
     }
+
     FAILED | TERMINATED if CONTEXT.load(Ordering::Acquire) == c => {
       let api = API.load(Ordering::Acquire);
       if READIED.swap(false, Ordering::AcqRel) {

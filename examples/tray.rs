@@ -16,8 +16,9 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 #[path = "counter.rs"]
+#[expect(dead_code, reason = "its main and what this file doesn't use")]
 // The counter sets the Windows subsystem, an attribute of its own crate, not of this module.
-#[allow(dead_code, unused_attributes)]
+#[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
 mod counter;
 
 use std::cell::RefCell;

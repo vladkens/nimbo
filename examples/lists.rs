@@ -185,6 +185,7 @@ impl Lists {
           None => ui.text("Nothing selected", t.muted()),
         }
       });
+
       ui.col(pair, |ui| {
         ui.text("OPENED", t.section());
         match self.opened {
@@ -192,6 +193,7 @@ impl Lists {
           None => ui.text("Press Enter or double-click a row", t.muted()),
         }
       });
+
       ui.col(pair, |ui| {
         ui.text("SORTED BY", t.section());
         ui.text(SORTS[self.sort], text);

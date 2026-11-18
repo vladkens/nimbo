@@ -137,9 +137,9 @@ pub struct Config {
   pub unified: bool,
   /// The window's icon off macOS ([Config::icon]): its side and straight RGBA pixels, `side`²
   /// of them, as only the builder checks; or a PNG's ([Config::png_icon]).
-  #[cfg_attr(target_os = "macos", allow(dead_code))]
+  #[cfg_attr(target_os = "macos", expect(dead_code, reason = "a macOS window has no icon"))]
   pub(crate) icon: Option<(u32, &'static [u8])>,
-  #[cfg_attr(target_os = "macos", allow(dead_code))]
+  #[cfg_attr(target_os = "macos", expect(dead_code, reason = "a macOS window has no icon"))]
   pub(crate) png_icon: Option<Png>,
   /// The app's catalogs ([Config::localizations]).
   pub localizations: Localizations,
@@ -206,7 +206,7 @@ impl Config {
   }
 
   /// The window's icon: its side and pixels, a PNG's decoded now.
-  #[cfg_attr(target_os = "macos", allow(dead_code))]
+  #[cfg_attr(target_os = "macos", expect(dead_code, reason = "a macOS window has no icon"))]
   pub(crate) fn window_icon(&self) -> Option<(u32, &'static [u8])> {
     self.icon.or_else(|| self.png_icon.map(|png| png.square()))
   }
@@ -279,6 +279,7 @@ impl Args {
             return Err(format!("--scale: {v} is not a positive number"));
           }
         }
+
         "--size" => {
           let v = it.next().ok_or("--size needs <w>x<h>")?;
           let (w, h) = v.split_once('x').ok_or("--size needs <w>x<h>")?;
@@ -289,6 +290,7 @@ impl Args {
           };
           out.size = Some(Size::new(num(w)?, num(h)?));
         }
+
         "--appearance" => {
           let scheme = it.next().ok_or("--appearance needs light or dark")?;
           let scheme = scheme.parse().map_err(|e| format!("--appearance: {e}"))?;
@@ -436,6 +438,7 @@ mod tests {
     let a = parse("--shot a.png --scale 1").unwrap();
     assert_eq!(a, Args { shot: Some("a.png".into()), scale: 1.0, ..Args::default() });
     assert_eq!(parse("").unwrap(), Args { scale: 2.0, ..Args::default() });
+
     assert_eq!(parse("--size 1280x800").unwrap().size, Some(Size::new(1280.0, 800.0)));
     assert_eq!(parse("--appearance light").unwrap().appearance, Some(Appearance::LIGHT));
     assert!(parse("--appearance blue").is_err());

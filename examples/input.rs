@@ -150,6 +150,7 @@ impl Input {
         let side = (self.side + delta.y).clamp(SIDES.0, SIDES.1);
         let grow = side - self.side;
         self.side = side;
+
         // Grown or shrunk about its centre.
         let corner = Point::new(self.pos.x - grow / 2.0, self.pos.y - grow / 2.0);
         self.move_to(corner, cx.size);

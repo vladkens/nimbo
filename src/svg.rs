@@ -100,6 +100,7 @@ pub fn flatten(d: &str, px: f32, out: &mut Vec<Vec<Point>>) -> Result<(), String
 
     cur.clear();
   };
+
   loop {
     let rel = cmd.is_ascii_lowercase();
     let base = if rel { at } else { Point::new(0.0, 0.0) };
@@ -112,6 +113,7 @@ pub fn flatten(d: &str, px: f32, out: &mut Vec<Vec<Point>>) -> Result<(), String
       true => Point::new(2.0 * at.x - ctrl.x, 2.0 * at.y - ctrl.y),
       false => at,
     };
+
     match cmd.to_ascii_uppercase() {
       b'M' => {
         finish(&mut cur, out);
@@ -124,20 +126,24 @@ pub fn flatten(d: &str, px: f32, out: &mut Vec<Vec<Point>>) -> Result<(), String
           continue;
         }
       }
+
       b'L' => {
         at = pt(&mut c)?;
         cur.push(at);
       }
+
       b'H' => {
         let x = c.num()?;
         at = Point::new(if rel { at.x + x } else { x }, at.y);
         cur.push(at);
       }
+
       b'V' => {
         let y = c.num()?;
         at = Point::new(at.x, if rel { at.y + y } else { y });
         cur.push(at);
       }
+
       u @ (b'C' | b'S') => {
         let c1 = if u == b'C' { pt(&mut c)? } else { mirror(*b"CS") };
         let c2 = pt(&mut c)?;
@@ -145,6 +151,7 @@ pub fn flatten(d: &str, px: f32, out: &mut Vec<Vec<Point>>) -> Result<(), String
         cubic(&mut cur, [at, c1, c2, end], px);
         (ctrl, at) = (c2, end);
       }
+
       u @ (b'Q' | b'T') => {
         let q = if u == b'Q' { pt(&mut c)? } else { mirror(*b"QT") };
         let end = pt(&mut c)?;
@@ -154,6 +161,7 @@ pub fn flatten(d: &str, px: f32, out: &mut Vec<Vec<Point>>) -> Result<(), String
         cubic(&mut cur, [at, c1, c2, end], px);
         (ctrl, at) = (q, end);
       }
+
       b'A' => {
         let (rx, ry, rot) = (c.num()?, c.num()?, c.num()?);
         let (large, sweep) = (c.flag()?, c.flag()?);
@@ -161,6 +169,7 @@ pub fn flatten(d: &str, px: f32, out: &mut Vec<Vec<Point>>) -> Result<(), String
         arc(&mut cur, at, [rx, ry, rot], [large, sweep], end, px);
         at = end;
       }
+
       b'Z' => {
         if cur.last() != Some(&start) && !cur.is_empty() {
           cur.push(start);
@@ -170,6 +179,7 @@ pub fn flatten(d: &str, px: f32, out: &mut Vec<Vec<Point>>) -> Result<(), String
         at = start;
         cur.push(at);
       }
+
       _ => return Err(format!("unknown command {:?}", cmd as char)),
     }
 
@@ -529,11 +539,13 @@ mod tests {
       assert!((r - 10.0).abs() < 1e-3, "{p:?}");
       assert!(p.y >= 12.0 - 1e-3, "below the centre: {p:?}");
     }
+
     // A cubic ends at its end; S mirrors the last control point.
     let l = lines("M0 0C0 10 10 10 10 0S20-10 20 0");
     assert!(near(*l[0].last().unwrap(), 20.0, 0.0));
     let mid = l[0][l[0].len() * 3 / 4];
     assert!(mid.y < 0.0, "the mirrored half bows up: {mid:?}");
+
     // A chord longer than the radii allow: they grow to a half circle.
     let l = lines("M0 0A1 1 0 0 1 10 0");
     assert!(l[0].iter().any(|p| (p.y + 5.0).abs() < 0.1), "{:?}", l[0]);

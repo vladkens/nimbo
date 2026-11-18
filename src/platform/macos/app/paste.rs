@@ -298,6 +298,7 @@ mod tests {
     assert_eq!(pb.0.stringForType(string).map(|s| s.to_string()).as_deref(), Some("текст"));
     let types = pb.0.types().unwrap().iter().map(|t| t.to_string()).collect::<Vec<_>>();
     assert!(MARKERS.iter().all(|m| types.iter().any(|t| t == m)), "{types:?}");
+
     assert!(put(&pb.0, &Snapshot::default()));
     assert_eq!(pb.0.stringForType(string), None);
     assert!(owner.ivars().on_read.borrow().is_none(), "the promise went with the restore");

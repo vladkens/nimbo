@@ -1,17 +1,19 @@
 .PHONY: prepare check test build update clean
 
+LINT := uv run --script https://raw.githubusercontent.com/vladkens/lint/main/rust.py
+
 prepare:
 	cargo +nightly fmt
-	uv run scripts/blank-lines.py --fix
+	$(LINT) fix
 	cargo clippy --all-targets --fix --allow-dirty --allow-staged
 
 check: check-targets
 	cargo +nightly fmt --check
-	uv run scripts/blank-lines.py
-	uv run --no-project python -m doctest scripts/pace.py scripts/size.py scripts/macos-min.py
-	uv run scripts/size.py --check
+	uv run --no-project python -m doctest scripts/pace.py scripts/macos-min.py
+	$(LINT) size --check
 	uv run scripts/macos-min.py
 	cargo clippy --all-targets -- -D warnings
+	$(LINT)
 
 test:
 	cargo test
@@ -39,7 +41,7 @@ pace: # frame pacing in a window of this session: fps while animating, wakeups w
 	uv run scripts/pace.py
 
 size: # code, docs and tests per module; ARGS="--files", "--map" (each file and what it does), "--check" (at most 600 lines of library code added since main) or "--vs main"
-	uv run scripts/size.py $(ARGS)
+	$(LINT) size $(ARGS)
 
 api-shots: # docs/api.md and its pictures (into the assets branch's worktree), from the gallery's table
 	uv run scripts/api-shots.py

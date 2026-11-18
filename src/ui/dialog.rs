@@ -156,6 +156,7 @@ impl<'s> Dialog<'s> {
           ui.text(self.message, t.body().line_h(16.0));
         }
       });
+
       let cancel_b = Button::new(self.cancel).look(cs.w(grow()));
       let action_b = Button::new(self.action).look(act.w(grow()));
       let s = Style::new().w(grow());
@@ -345,11 +346,13 @@ mod tests {
     let mut h = Harness::new(Under { open: true, heard: 0 }, Size::new(400.0, 300.0), 1.0);
     h.frame();
     let d = Id::of("d");
+
     // The app's binding, a command from elsewhere, a letter: none reaches the app.
     h.key('z', CMD);
     h.event(Event::Command(Command::Action("undo")));
     h.key('a', Modifiers::empty());
     assert_eq!(h.app().heard, 0);
+
     // Tab and Shift-Tab cycle the buttons, one step each, from a button too.
     let tab = |h: &mut Harness<Under>, mods| h.key(NamedKey::Tab, mods);
     tab(&mut h, Modifiers::empty());
@@ -362,6 +365,7 @@ mod tests {
     assert_eq!(h.focused(), Some(d.key("action")));
     h.key('a', Modifiers::empty());
     assert_eq!(h.app().heard, 0);
+
     // Closed, the app has its keys back.
     h.key(NamedKey::Escape, Modifiers::empty());
     h.frame();

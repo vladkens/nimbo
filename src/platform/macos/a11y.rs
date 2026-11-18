@@ -861,6 +861,7 @@ mod tests {
       }),
       6..6,
     );
+
     let want = [
       Note::Selected(LIST),
       Note::Title(ROW1),
@@ -900,6 +901,7 @@ mod tests {
       t.nodes[4].actions = Action::SetValue(String::new()).bit() | Action::Focus.bit();
     });
     let (switch, field, row) = (&t.nodes[3], &t.nodes[4], &t.nodes[1]);
+
     assert_eq!(allowed(switch, "accessibilityPerformPress"), Some(true));
     assert_eq!(allowed(field, "accessibilityPerformPress"), Some(false));
     assert_eq!(allowed(switch, "accessibilityPerformIncrement"), Some(false));
@@ -908,6 +910,7 @@ mod tests {
     assert_eq!(allowed(field, "accessibilitySelectedTextRange"), Some(true));
     assert_eq!(allowed(switch, "accessibilityStringForRange:"), Some(false));
     assert_eq!(allowed(switch, "accessibilityMinValue"), Some(false));
+
     assert_eq!(allowed(row, "isAccessibilitySelected"), Some(true));
     assert_eq!(allowed(&t.nodes[0], "accessibilitySelectedChildren"), Some(true));
     assert_eq!(allowed(row, "accessibilityRole"), None);

@@ -554,7 +554,6 @@ unsafe fn parts<'a, T>(p: *const T, n: usize) -> &'a [T] {
   }
 }
 
-#[allow(clippy::too_many_arguments)]
 unsafe extern "system" fn collector_glyph_run(
   this: This,
   _: Ctx,
@@ -627,6 +626,7 @@ pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {
       text.as_ptr(), text.len() as u32, format.ptr(), 1e6, 1e6, p)
   });
   let Some(layout) = layout else { return empty };
+
   let mut c = Collector {
     vtbl: &RENDERER,
     runs: Vec::new(),
@@ -714,6 +714,7 @@ fn color_layers(face: &Face, id: u16, em: f32) -> Option<Vec<(u16, Option<[f32; 
     {
       break;
     }
+
     // SAFETY: the current run stays valid until the next MoveNext.
     let cr = unsafe { &*cur };
     let color = (cr.palette != PALETTE_TEXT).then_some(cr.color);

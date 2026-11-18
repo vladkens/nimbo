@@ -62,6 +62,7 @@ pub fn wrap(t: &mut Tree, m: &mut dyn Measure, kept: &mut Kept) {
     let start = t.lines.len() as u32;
     let s = &t.text[range.0 as usize..range.1 as usize];
     let edit = edits.next_if(|e| e.node == i as u32).filter(|e| !e.placeholder);
+
     // One line that fits (or doesn't wrap): its width is the one measured for the fit.
     let fits = !wraps(*style) || wide <= width + EPS;
     let limit = match style.lines {
@@ -187,7 +188,7 @@ pub fn wrapped_size(s: &str, style: TextStyle, w: f32, m: &mut dyn Measure, k: &
 /// (an editable text) the same breaks give lines that cover the text: each up to where the next
 /// starts, with the spaces it broke at, the first from the line break before it. Each line of
 /// text is broken once per width and kept.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "the text, how to break it, its cache and output")]
 pub fn wrap_text(
   text: &str,
   range: (u32, u32),

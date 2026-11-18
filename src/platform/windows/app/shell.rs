@@ -204,6 +204,7 @@ unsafe extern "system" fn host_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
       job();
       0
     }
+
     WM_TIMER => {
       unsafe { KillTimer(hwnd, wp) };
       let job = shell(|s| {
@@ -216,23 +217,28 @@ unsafe extern "system" fn host_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
 
       0
     }
+
     WM_TRAY => {
       tray::notify(wp, lp);
       0
     }
+
     WM_POWERBROADCAST if wp == PBT_POWERSETTINGCHANGE as WPARAM => {
       // SAFETY: the message's setting, a header and its data.
       hardware::power(unsafe { &*(lp as *const POWERBROADCAST_SETTING) });
       1
     }
+
     WM_RENDERFORMAT | WM_RENDERALLFORMATS => {
       paste::render(hwnd, msg == WM_RENDERALLFORMATS);
       0
     }
+
     WM_DESTROYCLIPBOARD => {
       paste::destroyed();
       0
     }
+
     WM_QUERYENDSESSION => 1,
     WM_ENDSESSION if wp != 0 => {
       // The session ends: the process may be ended at any moment after this returns.
@@ -240,14 +246,17 @@ unsafe extern "system" fn host_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
       shell::finish(close);
       std::process::exit(0);
     }
+
     m if m == tray::taskbar_created() => {
       tray::added_again();
       0
     }
+
     m if settings::changed(m, lp) => {
       tray::retint();
       unsafe { DefWindowProcW(hwnd, msg, wp, lp) }
     }
+
     _ => unsafe { DefWindowProcW(hwnd, msg, wp, lp) },
   }
 }

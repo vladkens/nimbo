@@ -189,6 +189,7 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
     NSDictionary::<NSString, AnyObject>::from_slices(&keys, &[no.as_ref(), no.as_ref()]);
   // SAFETY: strings to numbers, property list values as the registration domain takes them.
   unsafe { NSUserDefaults::standardUserDefaults().registerDefaults(&defaults) };
+
   let mtm = mtm();
   let ns_app = NSApplication::sharedApplication(mtm);
   let delegate = Delegate::new(mtm);
@@ -502,6 +503,7 @@ fn closed(id: u64) {
   }) else {
     return;
   };
+
   let on_close = shell::closed(id);
   win.view.close();
   win.window.setDelegate(None);

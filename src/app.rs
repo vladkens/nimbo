@@ -549,7 +549,10 @@ impl<A: App> Runtime<A> {
   /// The OS took the pointer while a button was held (another window captured it): the press
   /// ends without a click. The platform then sends the button's [Event::MouseUp] as usual, which
   /// ends the app's drags.
-  #[cfg_attr(target_os = "macos", allow(dead_code))]
+  #[cfg_attr(
+    all(target_os = "macos", not(test)),
+    expect(dead_code, reason = "AppKit has no capture to lose")
+  )]
   pub fn cancel_press(&mut self) {
     let cancelled = self.ui.cancel_press();
     self.ask(cancelled);
@@ -906,6 +909,7 @@ impl<A: App> Runtime<A> {
       let t1 = Instant::now();
       ui.layout(&mut Sys { text: &mut self.text, images: &self.images, scale }, scale);
       let moved = ui.rehover();
+
       // Content built in part shows what it didn't build: again, on this layout's viewports.
       let short = ui.partial_short();
       (view, layout) = (view + (t1 - t0), layout + t1.elapsed());
@@ -934,11 +938,13 @@ impl<A: App> Runtime<A> {
     self.ui_passes = passes;
     let count = self.ui.stats.count + 1;
     self.ui.stats = FrameStats { view, layout, paint: self.ui_times[2], passes, count };
+
     // In a layer of its own, so the app's paint covers the view's text too (a layer draws its
     // glyphs over its quads).
     f.layer();
     self.app.paint(&mut f);
     self.animating = f.animate || self.ui.animating || !self.ui.input.moving.is_empty();
+
     // Glyphs dropped, the hover moved again, or an overlay opened or closed or the window
     // resized, so what the view read from the last frame is behind: draw once more, but not
     // over and over.
@@ -1116,6 +1122,7 @@ mod tests {
     let mut rt = Runtime::new(Pop::default(), size, 1.0, clock, Box::new(MemClipboard::default()));
     rt.frame();
     assert!(!rt.needs_frame());
+
     // Opened, then closed: the frame after each sees the last one's overlay, so one more
     // follows, which sees it as it is; then nothing.
     for open in [true, false] {
@@ -1177,17 +1184,20 @@ mod tests {
     let ground = |h: &mut crate::Harness<Themed>| h.render().pixel(20.0, 20.0);
     let px = |c: crate::Color| c.map(|v| (v * 255.0).round() as u8);
     assert_eq!(ground(&mut h), px(Theme::PLATES_DARK.bg));
+
     // The OS turns light: the next frame is light, from the view up.
     assert!(h.event(Event::Appearance(Appearance::LIGHT)));
     assert!(h.rt.needs_frame());
     assert_eq!(ground(&mut h), px(Theme::PLATES_LIGHT.bg));
     assert_eq!(h.app().seen.last(), Some(&(ColorScheme::Light, Theme::PLATES_LIGHT.accent)));
+
     // The same again is nothing new; an accent comes with it.
     assert!(!h.event(Event::Appearance(Appearance::LIGHT)));
     let red = crate::rgb(0xff3b30);
     h.event(Event::Appearance(Appearance { scheme: ColorScheme::Dark, accent: Some(red) }));
     assert_eq!(ground(&mut h), px(Theme::PLATES_DARK.bg));
     assert_eq!(h.app().seen.last(), Some(&(ColorScheme::Dark, red)));
+
     // The app's own theme draws, and stays over the OS's appearance.
     h.app_mut().pin = true;
     h.event(Event::Appearance(Appearance::LIGHT));
@@ -1258,16 +1268,19 @@ mod tests {
     let mut h = crate::Harness::new(Tall(100.0), Size::new(100.0, 100.0), 1.0);
     h.frame();
     assert_eq!((h.rt.size, h.rt.take_resize()), (Size::new(100.0, 100.0), None));
+
     // Another page: the frame is built at the new size.
     h.app_mut().0 = 60.0;
     h.rt.redraw();
     h.frame();
     assert_eq!(h.rt.size, Size::new(100.0, 60.0));
     assert_eq!(h.rt.ui.last.nodes[1].rect.h, 60.0);
+
     // Asked every frame, the same size is nothing new: a size the user set stays.
     h.rt.resize(Size::new(200.0, 80.0), 1.0);
     h.frame();
     assert_eq!((h.rt.size, h.rt.take_resize()), (Size::new(200.0, 80.0), None));
+
     // From an event handler too.
     let cx_size = |rt: &mut Runtime<Tall>| {
       let mut quit = false;
@@ -1369,6 +1382,7 @@ mod tests {
         }
       }
     }
+
     let file = include_bytes!("../tests/images/quadrants.jpg");
     let one = crate::Bitmap::decode(file, 32).unwrap();
     let photos = vec![one.clone(), one, crate::Bitmap::decode(file, 32).unwrap()];
@@ -1379,6 +1393,7 @@ mod tests {
     assert_eq!(h.rt.images.size(images[0]), Some((32, 24)));
     let red = h.render().pixel(4.0, 4.0);
     assert!(red[0] > 200 && red[1] < 60 && red[2] < 60, "{red:?}");
+
     // Shown, the pixels are the bitmap's own allocation, not a copy.
     let kept = h.cpu.image_pixels(images[0]).unwrap();
     assert!(std::sync::Arc::ptr_eq(kept, &h.app().0[0].px));
@@ -1500,17 +1515,20 @@ mod tests {
     let mut rt = ui_runtime();
     rt.frame();
     let b = rt.ui.last.rect(Id::of("box")).unwrap();
+
     // Just under the box: nothing hovered.
     rt.event(Event::MouseMove {
       pos: Point::new(b.x + 5.0, b.y + b.h + 5.0),
       mods: Modifiers::empty(),
     });
     assert!(!rt.needs_frame());
+
     // The box moves under the pointer: the view runs again and sees the hover.
     rt.app.shift = true;
     rt.redraw();
     rt.frame();
     assert_eq!((rt.app.saw_hover, rt.ui_passes), (true, 2));
+
     // The fade starts at 0 and runs frames until it gets to 1 in 250 ms.
     assert_eq!(rt.app.fade, 0.0);
     assert!(rt.needs_frame());
@@ -1535,6 +1553,7 @@ mod tests {
         ui.with_id(b).el(Style::new().w(px(40.0)).h(px(40.0)));
       }
     }
+
     let clock = Clock::Virtual(Duration::ZERO);
     let mut rt =
       Runtime::new(Dodge, Size::new(200.0, 200.0), 1.0, clock, Box::new(MemClipboard::default()));
@@ -1625,10 +1644,12 @@ mod tests {
         KeyEvent { key: Key::Char(c), text: None, code: Code::KeyA, mods: CMD, repeat: false };
       rt.event(Event::KeyDown(k))
     };
+
     // No focus: only the app's bindings; a key nobody binds is unused.
     assert!(!key(&mut rt, 'z'));
     assert!(key(&mut rt, 'n'));
     assert!(rt.event(Event::Text("a".into())));
+
     // Focused: the item's binding, else (passed) the panel's, which also beats the app's.
     rt.ui.set_focus(Some(Id::of("item")));
     rt.app.item_takes = true;
@@ -1646,6 +1667,7 @@ mod tests {
       "app Action(\"new\")",
     ];
     assert_eq!(rt.app.log, log);
+
     // Tab with nothing taking it moves focus; with one element it stays there.
     rt.ui.set_focus(None);
     assert!(rt.event(Event::Command(Command::InsertTab)));
@@ -1794,6 +1816,7 @@ mod tests {
         ui.id("t").text("1,234.5", style.nowrap());
       }
     }
+
     let clock = Clock::Virtual(Duration::ZERO);
     let size = Size::new(200.0, 100.0);
     let mut rt =
@@ -1802,6 +1825,7 @@ mod tests {
     assert!(rt.app.0 > 40.0, "{}", rt.app.0);
     // The layout's width, snapped to pixels.
     assert!((rt.ui.last.rect(Id::of("t")).unwrap().w - rt.app.0).abs() <= 0.5);
+
     // Outside a runtime there is nothing to measure with.
     let mut ui = Ui::new(UiState::default(), size, None, Duration::ZERO);
     assert_eq!(ui.measure("1", TextStyle::new(crate::Font::ui(20.0), [1.0; 4])), 0.0);
@@ -1814,6 +1838,7 @@ mod tests {
     rt.app.rx = Some(rx);
     rt.frame();
     assert!(!rt.needs_frame());
+
     let waker = rt.waker().clone();
     std::thread::spawn(move || {
       tx.send("loaded 42 rows".to_owned()).unwrap();

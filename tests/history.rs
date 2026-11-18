@@ -7,10 +7,12 @@
 //! numbers, scroll to their end and their middle a row apart; rows read as rows and press.
 
 #[path = "../examples/history.rs"]
+#[expect(dead_code, reason = "its main and what this file doesn't use")]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
-#[allow(dead_code, unused_attributes)]
+#[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
 mod history;
 
+#[expect(dead_code, reason = "this file uses a part of the helpers")]
 mod common;
 
 use common::{mid, reads};

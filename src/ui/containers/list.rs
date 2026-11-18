@@ -486,6 +486,7 @@ impl<'s> List<'s> {
       ui.el(Style::new().h(px(sp.top(shown.start))));
       st.shown.extend(shown.clone().map(key));
       st.from = shown.start;
+
       // A header: the rows' side padding, its content at the bottom, by its first row.
       let [_, pad_r, _, pad_l] = row.pad;
       let below = if grouped { fs.head_pad[2] } else { 4.0 };
@@ -673,7 +674,7 @@ impl<'a> Ui<'a> {
   /// modifiers ask; a double click activates it. A secondary one, as a context menu opens
   /// ([Ui::context_press]), focuses the list and selects the row alone unless it is selected
   /// (Finder's rule): the app's [Ui::context_menu] after it reads that selection.
-  #[allow(clippy::too_many_arguments)]
+  #[expect(clippy::too_many_arguments, reason = "the list's state, its response and the rows")]
   fn list_press(
     &mut self,
     id: Id,
@@ -809,28 +810,33 @@ mod tests {
     let key = rows(&[10, 11, 12, 13, 14]);
     s.select(12, 2);
     assert_eq!((s.cursor(), s.cursor_index(5, &key)), (Some(12), Some(2)));
+
     // Shift extends from the anchor, both ways, replacing the range.
     s.extend(4, 5, &key);
     assert_eq!(sorted(&s), [12, 13, 14]);
     s.extend(0, 5, &key);
     assert_eq!(sorted(&s), [10, 11, 12]);
+
     // Cmd toggles and moves the anchor.
     s.toggle(11, 1);
     assert_eq!(sorted(&s), [10, 12]);
     s.extend(3, 5, &key);
     assert_eq!(sorted(&s), [11, 12, 13]);
+
     // Rows inserted above: found again by key.
     let moved = rows(&[1, 2, 10, 11, 12, 13, 14]);
     assert_eq!(s.cursor_index(7, &moved), Some(5));
     assert!(s.contains(13) && !s.contains(1));
     s.select_all(7, &moved);
     assert_eq!(s.len(), 7);
+
     // Rows gone: their keys go, the cursor with its row; the rest stays.
     s.retain(|k| k != 13 && k != 2);
     assert_eq!((s.len(), s.cursor()), (5, None));
     s.select(12, 4);
     s.retain(|k| k != 2);
     assert_eq!((sorted(&s), s.cursor()), (vec![12], Some(12)));
+
     // Each key is asked once: a predicate that drops 12 and would keep it when asked again
     // leaves no cursor on it.
     s.select_all(7, &moved);
@@ -842,6 +848,7 @@ mod tests {
     asked.sort_unstable();
     assert_eq!(asked, [1, 2, 10, 11, 12, 13, 14]);
     assert!(!s.contains(12) && s.cursor().is_none());
+
     // A row Cmd-click took out keeps the cursor and the anchor while `f` keeps it, asked once.
     s.select_all(7, &moved);
     s.toggle(13, 5);
@@ -853,6 +860,7 @@ mod tests {
     asked.sort_unstable();
     assert_eq!(asked, [1, 2, 10, 11, 12, 13, 14]);
     assert_eq!((s.contains(13), s.cursor()), (false, Some(13)));
+
     s.extend(6, 7, &moved);
     assert_eq!(sorted(&s), [13, 14]);
     s.toggle(13, 5);
@@ -892,18 +900,22 @@ mod tests {
     let key = |i: usize| [10, 11, 12, 13, 14][i];
     let (none, shift) = (Modifiers::empty(), Modifiers::SHIFT);
     let mut s = Selection::default();
+
     // Shift with no anchor yet starts at the row.
     s.click(2, shift, 5, &key);
     assert_eq!(sorted(&s), [12]);
+
     // A plain click selects the row alone.
     s.select_all(5, &key);
     s.click(2, none, 5, &key);
     assert_eq!((sorted(&s), s.cursor()), (vec![12], Some(12)));
+
     // Shift extends from the anchor, both ways, replacing the range.
     s.click(4, shift, 5, &key);
     assert_eq!(sorted(&s), [12, 13, 14]);
     s.click(0, shift, 5, &key);
     assert_eq!((sorted(&s), s.cursor()), (vec![10, 11, 12], Some(10)));
+
     // Cmd toggles, out and back in, and wins over Shift.
     s.click(1, CMD, 5, &key);
     assert_eq!(sorted(&s), [10, 12]);
@@ -911,6 +923,7 @@ mod tests {
     assert_eq!(sorted(&s), [10, 12, 14]);
     s.click(4, CMD, 5, &key);
     assert_eq!(sorted(&s), [10, 12]);
+
     // Shift after Cmd extends from the row Cmd clicked last.
     s.click(2, shift, 5, &key);
     assert_eq!(sorted(&s), [12, 13, 14]);
@@ -973,10 +986,12 @@ mod tests {
     use crate::harness::Harness;
     let mut h = Harness::new(Rows::default(), Size::new(300.0, 300.0), 1.0);
     let row = |k: u64| Id::of("list").key(("row", k));
+
     // Asked before the list had a viewport: shown once it has one.
     h.frame();
     h.frame();
     assert!(h.rect(row(500)).is_some(), "row 500 revealed");
+
     // A press seen by a frame, released off the list (no click), then a quick click on another
     // row before the next frame: that click selects.
     let (a, b) = (h.rect(row(500)).unwrap(), h.rect(row(497)).unwrap());
@@ -986,6 +1001,7 @@ mod tests {
     h.release(250.0, 250.0);
     h.click(b.x + 5.0, b.y + 5.0);
     assert_eq!(h.app().sel.cursor(), Some(497));
+
     // The window losing the keys: the selection turns from the accent to grey.
     let px = |h: &mut Harness<Rows>| h.render().pixel(b.x + 150.0, b.y + 10.0);
     let active = px(&mut h);
@@ -993,6 +1009,7 @@ mod tests {
     let inactive = px(&mut h);
     assert_ne!(active, inactive);
     h.event(Event::Focus(true));
+
     // The same again on one row: its press selects it, then the quick Cmd-click's toggles it.
     h.press(b.x + 5.0, b.y + 5.0);
     h.frame();
@@ -1003,6 +1020,7 @@ mod tests {
     h.release(b.x + 5.0, b.y + 5.0);
     assert!(h.app().sel.is_empty());
     h.click(b.x + 5.0, b.y + 5.0);
+
     // Disabled: no selection by click, no focus, and the button after it still works.
     h.frame();
     h.app_mut().off = true;
@@ -1043,12 +1061,15 @@ mod tests {
     let id = Id::of("list");
     let (row, head) = (|k: u64| id.key(("row", k)), |k: u64| id.key(("head", k)));
     h.frame();
+
     // Each section's first row under its header.
     let (top, r0) = (h.rect(id).unwrap().y, h.rect(row(0)).unwrap());
     assert_eq!((h.rect(head(0)).unwrap().h, r0.y - top), (30.0, 30.0));
+
     // A click on a header selects nothing.
     h.click_id(head(0));
     assert!(h.app().sel.is_empty());
+
     // Down from a section's last row goes to the next one's first, Up back over its header;
     // Shift extends over the rows only, Cmd-A selects the 30 rows.
     h.click_id(row(7));
@@ -1065,6 +1086,7 @@ mod tests {
     assert_eq!(sorted(&h.app().sel), [8, 9, 10]);
     h.key(crate::Key::Char('a'), CMD);
     assert_eq!(h.app().sel.len(), 30);
+
     // End: the last row in view, under its section's header, the first rows no longer built.
     h.key(K::End, Modifiers::empty());
     h.frame();
@@ -1099,6 +1121,7 @@ mod tests {
     let row = |k: u64| id.key(("row", k));
     h.frame();
     h.click_id(row(0));
+
     // Rows 0 to 6 span the 200 of the viewport over three headers: a page down goes to row 6,
     // not the nine rows the height alone would give, and back up the same way; in view after.
     let none = Modifiers::empty();
@@ -1125,11 +1148,13 @@ mod tests {
     h.set_os(Os::Mac);
     h.frame();
     h.click_id(Id::of("list").key(("row", 2u64)));
+
     // Backspace, Delete and Cmd-Backspace ask to delete the selection, which stays.
     h.key(K::Backspace, none);
     h.key(K::Delete, none);
     h.key(K::Backspace, Os::Mac.cmd());
     assert_eq!((h.app().deletes, h.app().sel.len()), (3, 1));
+
     // Escape clears it; with nothing selected, neither key is the list's.
     h.key(K::Escape, none);
     assert!(h.app().sel.is_empty());
@@ -1158,6 +1183,7 @@ mod tests {
     let id = Id::of("list");
     let (row, head) = (|k: u64| id.key(("row", k)), |k: u64| id.key(("head", k)));
     h.frame();
+
     // Inset as a form page; the second header the gap between plates under the first plate.
     let list = h.rect(id).unwrap();
     let r: Vec<Rect> = (0..6).map(|k| h.rect(row(k)).unwrap()).collect();
@@ -1165,6 +1191,7 @@ mod tests {
     let (h0, h3) = (h.rect(head(0)).unwrap(), h.rect(head(3)).unwrap());
     assert_eq!((h0.y - list.y, r[0].y, h3.y, h3.h), (12.0, h0.y + 20.0, r[2].y + 20.0, 50.0));
     assert_eq!(r[3].y, h3.y + h3.h);
+
     // The plate under each section's rows, the ground between; rounded at a section's ends.
     let img = h.render();
     let at = |r: Rect, dy: f32| img.pixel(r.x + r.w - 30.0, r.y + dy);
@@ -1173,6 +1200,7 @@ mod tests {
     assert_eq!((at(r[4], 10.0), at(r[2], 19.0)), (plate, plate));
     assert_eq!(img.pixel(r[0].x + 0.5, r[0].y + 0.5), ground);
     assert_eq!(img.pixel(r[1].x + 0.5, r[1].y + 0.5), plate);
+
     // A hairline at the top of every row but a section's first, none beside a selected row.
     assert_ne!(at(r[1], 0.5), plate);
     assert_eq!((at(r[0], 0.5), at(r[3], 0.5)), (plate, plate));
@@ -1210,6 +1238,7 @@ mod tests {
     h.frame();
     let row = Id::of("list").key(("row", 99_955u64 * 7));
     let r = h.rect(row).expect("row 99955 built");
+
     h.app().calls.set(0);
     h.click(r.x + 5.0, r.y + 5.0);
     let calls = h.app().calls.get();
@@ -1221,10 +1250,12 @@ mod tests {
   fn builds_only_the_rows_in_view() {
     let id = Id::of("list");
     let (st, shown, short) = frame(UiState::default(), 100_000, -1.0);
+
     // The window's height before the list has a viewport: 11 rows and the overscan.
     assert_eq!((shown, short), (13, false));
     let sc = st.scroll(id).unwrap();
     assert_eq!((sc.content.h, sc.viewport.h), (1_000_000.0, 100.0));
+
     // Scrolled to the end: the last rows, nothing past them.
     let (st, shown, short) = frame(st, 100_000, 2_000_000.0);
     assert_eq!((shown, short), (12, false));
@@ -1232,6 +1263,7 @@ mod tests {
     assert!(st.last.rect(id.key(("row", 99_999u64))).is_some());
     assert!(st.last.rect(id.key(("row", 99_988u64))).is_some());
     assert!(st.last.rect(id.key(("row", 99_987u64))).is_none());
+
     // The count drops under the offset: clamped in the view too, rows shown from the top; the
     // scrollbar, showing since the offset moved, drew from the old content: the view runs again.
     let (st, shown, short) = frame(st, 5, -1.0);
@@ -1274,9 +1306,11 @@ mod tests {
     h.click_id(Id::of(("t", 1)));
     h.frame();
     assert_eq!((h.app().sel.cursor(), h.app().clicks), (Some(1), 0));
+
     h.click_id(Id::of(("b", 3)));
     h.frame();
     assert_eq!((sorted(&h.app().sel), h.app().clicks), (vec![1], 1));
+
     let r = h.rect(Id::of(("t", 4))).unwrap();
     let (x, y) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
     h.press_with(x, y, 1, crate::CMD);
@@ -1297,12 +1331,14 @@ mod tests {
     };
     let asked =
       |h: &mut Harness<Buttons>| h.context_menu(None).map(|(_, m)| m.items[0].label().to_owned());
+
     // A button with no menu: its row's menu, that row selected.
     let (x, y) = at(&h, 2);
     h.right_click(x, y);
     h.frame();
     assert_eq!(asked(&mut h).as_deref(), Some("Row"));
     assert_eq!(h.app().sel.cursor(), Some(2));
+
     // One with its own: that menu, the selection as it was.
     let (x, y) = at(&h, 3);
     h.right_click(x, y);
@@ -1353,6 +1389,7 @@ mod tests {
       h.frame();
       assert_eq!(sorted(&h.app().sel), [1]);
     };
+
     pick(&mut h);
     let (t, b) = (h.rect(Id::of(("t", 0))).unwrap(), h.rect(Id::of(("b", 0))).unwrap());
     let (x, y) = ((t.x + t.w + b.x) / 2.0, t.y + t.h / 2.0);
@@ -1367,6 +1404,7 @@ mod tests {
     h.click_id(Id::of("after"));
     h.frame();
     assert_eq!((sorted(&h.app().sel), h.app().clicks), (vec![1], 1));
+
     // The scrollbar, shown with the pointer in its strip: its thumb keeps the selection.
     let v = h.rect(id).unwrap();
     h.move_to(v.x + v.w - 3.0, v.y + 20.0);
@@ -1375,6 +1413,7 @@ mod tests {
     h.click(thumb.x + thumb.w / 2.0, thumb.y + thumb.h / 2.0);
     h.frame();
     assert_eq!(sorted(&h.app().sel), [1]);
+
     // The room beside the header's text clears it; its text too.
     h.click(x, y);
     h.frame();
@@ -1408,5 +1447,55 @@ mod tests {
     h.frame();
     let asked = h.context_menu(None).map(|(_, m)| m.items[0].label().to_owned());
     assert_eq!(asked.as_deref(), Some("Outer"));
+  }
+  #[derive(Default)]
+  struct Bare {
+    sel: Selection,
+    bare: bool,
+  }
+
+  impl crate::App for Bare {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.col(Style::new().w(px(200.0)).h(px(100.0)), |ui| {
+        let list = List::new(3, 20.0).selection(&mut self.sel).style(Style::new().grow());
+        let list = list.row_style(Style::new().w(grow()).pad(8.0));
+        let list = if self.bare { list.unstyled() } else { list };
+        let inner = Style::new().w(px(10.0)).h(px(4.0));
+        list.show(ui.id("list"), |ui, row| _ = ui.id(("in", row.index)).el(inner));
+      });
+    }
+  }
+
+  /// A row style's padding moves the row's content in.
+  #[test]
+  fn a_row_styles_padding_moves_the_content_in() {
+    use crate::harness::Harness;
+    let mut h = Harness::new(Bare::default(), Size::new(300.0, 300.0), 1.0);
+    h.frame();
+    let row = h.rect(Id::of("list").key(("row", 1u64))).unwrap();
+    let inner = h.rect(Id::of(("in", 1))).unwrap();
+    assert_eq!((inner.x - row.x, inner.y - row.y), (8.0, 8.0));
+  }
+
+  /// Unstyled, a selected row keeps the list's ground for the app to paint.
+  #[test]
+  fn unstyled_rows_leave_the_selection_to_the_app() {
+    use crate::harness::Harness;
+    let mut h = Harness::new(Bare::default(), Size::new(300.0, 300.0), 1.0);
+    h.frame();
+    let row = h.rect(Id::of("list").key(("row", 1u64))).unwrap();
+    // Styled, the selection fills the row; unstyled, the row shows the ground as a row below.
+    h.click_id(Id::of("list").key(("row", 1u64)));
+    h.frame();
+    let filled = h.render().pixel(row.x + 150.0, row.y + 10.0);
+
+    h.app_mut().bare = true;
+    h.frame();
+    let img = h.render();
+    let (bare, other) =
+      (img.pixel(row.x + 150.0, row.y + 10.0), img.pixel(row.x + 150.0, row.y + 30.0));
+    assert_eq!(h.app().sel.cursor(), Some(1));
+    assert_ne!(bare, filled);
+    assert_eq!(bare, other);
   }
 }

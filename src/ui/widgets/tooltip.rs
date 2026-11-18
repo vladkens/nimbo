@@ -123,6 +123,7 @@ mod tests {
     let inside = lines.iter().position(|l| *l == r#"static text "Inside""#);
     assert!(group.is_some() && group.map(|g| g + 1) == inside, "the box's child read: {tree}");
     assert!(lines.contains(&r#"group desc "A dot""#), "the canvas: {tree}");
+
     for (name, tip) in
       [("save", "Saves it"), ("wer", "Errors per 100 words"), ("box", "A box"), ("dot", "A dot")]
     {
@@ -159,6 +160,7 @@ mod tests {
     h.wait(Duration::from_millis(200));
     let tip = h.rect(Id::of("a").key("tip")).unwrap();
     assert!((tip.x - x).abs() <= 0.5 && (tip.y - y - 19.0).abs() <= 0.5, "{tip:?}");
+
     // Onto the next one: warm, it shows at once; a press hides it.
     let (x, y) = mid(&h, "b");
     h.move_to(x, y);
@@ -205,6 +207,7 @@ mod tests {
     h.wait(Duration::from_millis(400));
     let tip = h.rect(Id::of("a").key("tip")).unwrap();
     assert!(tip.h > 30.0, "it wraps: {tip:?}");
+
     // The text's rightmost pixel, clear of the rounded corners: the padding (6) and a bearing
     // in from the edge, not the 16 of a box as wide as its text before wrapping.
     let img = h.render();
