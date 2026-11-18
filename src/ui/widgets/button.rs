@@ -5,6 +5,7 @@
 //! that tells what is wrong with it, and the round "?" that opens a page's help.
 
 use super::icon::{self, Icon};
+pub use crate::menu::ButtonRole;
 use crate::scene::{Color, Frame, Rect, mix};
 use crate::t;
 use crate::ui::theme::{ButtonLook, ButtonStyle};
@@ -13,18 +14,6 @@ use crate::ui::{Float, Response, Role, Style, TextStyle, Ui, px};
 /// How far below the middle of the line a mark ([Ui::info_button], [Ui::warning_button]) goes,
 /// while a form row builds its label ([crate::FormRow::new]): onto its capitals' middle.
 pub(crate) struct MarkShift(pub f32);
-
-/// What a button does, as SwiftUI's `ButtonRole`: a [crate::Dialog]'s buttons are told apart by
-/// it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ButtonRole {
-  /// The action that goes ahead, the default one.
-  Confirm,
-  /// Keeps things as they are.
-  Cancel,
-  /// Deletes or loses something: drawn red.
-  Destructive,
-}
 
 /// A button with a label, an [Icon], or both, at the control size ([Ui::control_size]).
 #[derive(Clone, Copy, Debug)]

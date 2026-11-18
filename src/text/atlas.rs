@@ -9,8 +9,8 @@ use std::collections::HashMap;
 use std::hash::BuildHasherDefault;
 
 use super::{FxHasher, Raster};
+use crate::geom::Rect;
 use crate::platform::text::{self as sys, Face};
-use crate::scene::Rect;
 
 /// Width and height of the coverage atlas in pixels (R8: 4 MB).
 pub const ATLAS_SIZE: usize = 2048;

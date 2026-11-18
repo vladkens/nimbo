@@ -4,7 +4,8 @@
 //! focus, cursor), a text element's [TextStyle], and [Float] for overlays. All `const`, so a
 //! look is a set of constants.
 
-use crate::scene::{Color, Point, Rect};
+pub use crate::geom::Axis;
+use crate::geom::{Color, Point, Rect};
 use crate::text::Font;
 
 /// How an element is sized along one axis.
@@ -380,20 +381,6 @@ pub struct TextStyle {
   pub strikethrough: Option<LinePattern>,
 }
 
-/// A direction, as SwiftUI's `Axis`: along x or along y.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Axis {
-  Horizontal,
-  Vertical,
-}
-
-impl Axis {
-  /// Its place in a `[x, y]` pair.
-  pub(crate) const fn index(self) -> usize {
-    self as usize
-  }
-}
-
 /// A set of axes, as SwiftUI's `Axis.Set`: what a scroll area scrolls along
 /// ([Style::scroll]). `Axes::HORIZONTAL | Axes::VERTICAL` is both, [Axes::ALL].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -626,4 +613,17 @@ impl Float {
   pub const fn clip(self) -> Self {
     Self { clip: true, ..self }
   }
+}
+
+/// How big a control is, as SwiftUI's `ControlSize` ([super::Ui::control_size]): a button's
+/// height, font and padding ([super::Theme::button]), a switch's track, a badge's pill, a spinner.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ControlSize {
+  /// [super::Sizes::small_h] high in the small font: dense rows, inline actions.
+  Small,
+  /// [super::Sizes::control_h] high in the body font.
+  #[default]
+  Regular,
+  /// 8 points taller, the font 2 points larger: a dialog's main actions.
+  Large,
 }

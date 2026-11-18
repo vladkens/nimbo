@@ -25,7 +25,7 @@ use std::time::Duration;
 
 use super::store::Transition;
 use super::widgets::{ButtonRole, FieldStyle};
-use super::{Align, Dim, FocusRing, Shadow, Style, TextStyle, grow, px};
+use super::{Align, ControlSize, Dim, FocusRing, Shadow, Style, TextStyle, grow, px};
 use crate::app::{Appearance, ColorScheme};
 use crate::scene::{Color, alpha, mix, rgb};
 use crate::text::{Font, Weight};
@@ -213,19 +213,6 @@ impl Sizes {
     badge: 11.0,
     badge_h: 18.0,
   };
-}
-
-/// How big a control is, as SwiftUI's `ControlSize` ([crate::Ui::control_size]): a button's
-/// height, font and padding ([Theme::button]), a switch's track, a badge's pill, a spinner.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ControlSize {
-  /// [Sizes::small_h] high in the small font: dense rows, inline actions.
-  Small,
-  /// [Sizes::control_h] high in the body font.
-  #[default]
-  Regular,
-  /// 8 points taller, the font 2 points larger: a dialog's main actions.
-  Large,
 }
 
 /// A colour role for badges ([Theme::tone]).

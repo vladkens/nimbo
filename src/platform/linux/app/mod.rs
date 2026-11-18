@@ -27,6 +27,7 @@ pub mod shell;
 pub mod tray;
 pub mod uninstall;
 
+use std::cell::Cell;
 use std::ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void};
 use std::ptr::null_mut;
 use std::sync::atomic::{AtomicPtr, AtomicU8, Ordering};
@@ -34,6 +35,7 @@ use std::sync::{Mutex, OnceLock};
 
 use super::dl::{Lib, fns};
 use super::{Fp, P};
+use crate::info::{AppInfo, Presence};
 
 // Xlib, for posted keys, the hotkey's grab and the active window on X11.
 fns!(#[expect(non_snake_case, reason = "Xlib's names")] X11 {
@@ -82,6 +84,22 @@ fns!(#[expect(non_snake_case, reason = "Xlib's names")] X11 {
 fn x11() -> Option<&'static X11> {
   static X11: OnceLock<Option<X11>> = OnceLock::new();
   X11.get_or_init(|| X11::load(&Lib::open(&[c"libX11.so.6"])?)).as_ref()
+}
+
+thread_local! {
+  /// The app running, which [shell::run] sets.
+  static INFO: Cell<Option<AppInfo>> = const { Cell::new(None) };
+}
+
+/// The app running ([crate::app]'s info); outside it, one named after the executable.
+fn info() -> AppInfo {
+  INFO.get().unwrap_or(AppInfo { id: "nimbo", name: "nimbo", presence: Presence::Regular })
+}
+
+/// The app runs and this is its thread, GTK's ([shell::run], from before `start` to after its
+/// loop).
+pub(super) fn running() -> bool {
+  INFO.get().is_some()
 }
 
 /// The desktop session is Wayland's (`XDG_SESSION_TYPE`, which the login manager sets): the

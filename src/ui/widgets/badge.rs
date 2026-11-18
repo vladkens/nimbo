@@ -5,8 +5,8 @@
 use std::fmt::Display;
 
 use crate::text::{Font, Weight};
-use crate::ui::theme::{ControlSize, Tone};
-use crate::ui::{Response, Role, Style, TextStyle, Ui, px, rigid};
+use crate::ui::theme::Tone;
+use crate::ui::{ControlSize, Response, Role, Style, TextStyle, Ui, px, rigid};
 
 impl Ui<'_> {
   /// A pill: counts, `-4 +5`, statuses ("Allowed", "Not allowed"), as SwiftUI's `.badge`, but

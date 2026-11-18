@@ -16,9 +16,7 @@ pub(crate) use self::wrap::{Kept, wrapped_size};
 use self::wrap::{text_width, wrap};
 use super::a11y::Records;
 use super::textlayout::{Edit, Stop, reveal};
-use super::{
-  Align, Axes, Clip, ContentMode, Dim, Float, Id, Style, TextLines, TextStyle, TruncationMode,
-};
+use super::{Align, Axes, Clip, Dim, Float, Id, Style, TextLines, TextStyle, TruncationMode};
 use crate::keys::Binding;
 use crate::scene::{Color, ImageId, Images, Rect, Size};
 use crate::text::edit::next_grapheme;
@@ -922,6 +920,16 @@ fn offset(align: Align, free: f64) -> f64 {
     Align::Center => free / 2.0,
     Align::End => free,
   }
+}
+
+/// How an image fills the box it is given ([super::Ui::aspect_ratio]), as SwiftUI's `ContentMode`;
+/// without one it is stretched to the box.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContentMode {
+  /// Whole and in its own aspect, centred: letterboxed where the box has another (`scaledToFit`).
+  Fit,
+  /// Covering the box in its own aspect, centred, the overflow cut off (`scaledToFill`).
+  Fill,
 }
 
 #[cfg(test)]

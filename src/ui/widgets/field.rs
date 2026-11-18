@@ -27,7 +27,7 @@ use std::ops::Range;
 use crate::keys::{EDIT_KEYS, SELECT_KEYS};
 use crate::scene::{Color, Point, Rect, alpha};
 use crate::text::edit::{Editor, graphemes, range_from_utf16, range_to_utf16, to_utf16, utf16_len};
-use crate::ui::behavior::{DOT, FieldState};
+use crate::ui::behavior::{DOT, FieldKind, FieldState};
 use crate::ui::textlayout::Hit;
 use crate::ui::{
   Align, Axes, FieldBehavior, Flow, Response, Style, TextLayout, TextLines, TextStyle, Ui, UiState,
@@ -251,19 +251,6 @@ pub struct FieldStyle {
   pub focus_border: Color,
   /// One line, many, or a password ([FieldStyle::kind]).
   pub kind: FieldKind,
-}
-
-/// What a text field takes, as SwiftUI's `TextField`, `TextField(axis: .vertical)` and
-/// `SecureField`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum FieldKind {
-  /// One line, scrolling sideways; Enter submits.
-  #[default]
-  SingleLine,
-  /// Lines wrapped at its width, Enter a line break; give the frame a height, it scrolls past it.
-  MultiLine,
-  /// One line of secret text, shown as dots: no input method, nothing copied.
-  Secure,
 }
 
 impl FieldStyle {

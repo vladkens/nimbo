@@ -23,8 +23,39 @@
 //! desktop gave it, its session started by the first call on Wayland (the desktop asks the user
 //! once).
 
-use crate::app::Clipboard;
 use crate::platform::{clipboard, paste as imp};
+
+pub trait Clipboard {
+  fn read(&self) -> Option<String>;
+  fn write(&mut self, s: &str);
+
+  /// Whether it holds text, without reading it (macOS asks the user before an app reads what
+  /// another one copied): an edit menu's Paste.
+  fn has_text(&self) -> bool {
+    self.read().is_some_and(|s| !s.is_empty())
+  }
+}
+
+/// An in-memory clipboard: the harness uses it so tests never touch the real pasteboard.
+#[derive(Default)]
+pub struct MemClipboard(pub Option<String>);
+
+impl Clipboard for MemClipboard {
+  fn read(&self) -> Option<String> {
+    self.0.clone()
+  }
+
+  fn write(&mut self, s: &str) {
+    self.0 = Some(s.to_owned());
+  }
+}
+
+/// An in-memory one, until the runtime puts its own in.
+impl Default for Box<dyn Clipboard> {
+  fn default() -> Self {
+    Box::new(MemClipboard::default())
+  }
+}
 
 /// The system clipboard, plain text, as each window's runtime has it: for code outside a window
 /// (a tray menu's Copy, a paste of the app's own). On the main thread, while the app runs

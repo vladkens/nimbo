@@ -6,7 +6,7 @@
 //! relative, implicit repeats); curves and arcs in pieces of about 2 pixels. [document] reads an
 //! icon file's `<path>`s into one path.
 
-use crate::scene::Point;
+use crate::geom::Point;
 
 /// Reads path data: commands, numbers and arc flags.
 struct Cur<'a> {

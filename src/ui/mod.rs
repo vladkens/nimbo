@@ -62,7 +62,7 @@ use std::num::NonZeroU8;
 use std::time::Duration;
 
 pub use a11y::{A11yNode, A11yTree, Action, Props, Role, State, Value};
-pub use behavior::{Behavior, EditMenu, Editing, FieldBehavior};
+pub use behavior::{Behavior, EditMenu, Editing, FieldBehavior, FieldKind};
 pub use containers::{
   List, ListResponse, ListStyle, MenuPlacement, Picker, Row, Selection, Split, SplitBehavior, Tabs,
   Tag, ToolbarItemPlacement, TypeSelect,
@@ -72,20 +72,19 @@ pub use form::{Content, FormRow, FormStyle, Glass, Section, TabItem};
 pub use id::Id;
 pub(crate) use input::drags_window;
 pub use input::{Click, Press, Scroll};
+pub use layout::ContentMode;
 pub(crate) use layout::{Flow, Kind, Measure, Node, Sys, Tree};
 pub use store::{Ease, Transition};
 pub use style::{
-  Align, Axes, Axis, Clip, CoordinateSpace, Cursor, Dim, Float, Focus, FocusRing, LinePattern,
-  Shadow, Style, TextLines, TextStyle, TruncationMode, UnitPoint, grow, pct, px, rigid,
+  Align, Axes, Axis, Clip, ControlSize, CoordinateSpace, Cursor, Dim, Float, Focus, FocusRing,
+  LinePattern, Shadow, Style, TextLines, TextStyle, TruncationMode, UnitPoint, grow, pct, px,
+  rigid,
 };
 pub use textlayout::Edit;
 pub(crate) use textlayout::TextLayout;
-pub use theme::{
-  ButtonLook, ButtonStyle, ControlBorder, ControlSize, Sizes, SwitchSize, Theme, Tone,
-};
+pub use theme::{ButtonLook, ButtonStyle, ControlBorder, Sizes, SwitchSize, Theme, Tone};
 pub use widgets::{
-  Button, ButtonRole, ContentMode, FieldKind, FieldStyle, Icon, IconPaint, ImageSource, Slider,
-  TextInput,
+  Button, ButtonRole, FieldStyle, Icon, IconPaint, ImageSource, Slider, TextInput,
 };
 
 use self::input::{Deliver, Input, ScrollState};
@@ -1082,6 +1081,14 @@ impl<'a> Ui<'a> {
   /// Asks for a frame `dt` from now (a timer); the app checks [Ui::now] when it comes.
   pub fn request_frame_in(&mut self, dt: Duration) {
     self.st.request_frame_at(self.now + dt);
+  }
+
+  /// Shows the system's file panel over the window once this frame is built: from the person's
+  /// click, never by itself. The answer comes as [crate::Event::FileDialog]. Asked while one is
+  /// open, it is answered `None` at once on macOS and Windows and replaces it on Linux, where a
+  /// portal that went away never answers.
+  pub fn file_dialog(&mut self, dialog: crate::FileDialog) {
+    self.st.file_dialog = Some(dialog);
   }
 
   // MARK: Scrolling

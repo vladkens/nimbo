@@ -4,9 +4,8 @@
 //! or the large one ([crate::Sizes::switch], [crate::Sizes::switch_large]).
 
 use crate::scene::mix;
-use crate::ui::theme::ControlSize;
 use crate::ui::{
-  Align, Behavior, Id, Response, Role, Shadow, Style, Transition, Ui, Value, px, rigid,
+  Align, Behavior, ControlSize, Id, Response, Role, Shadow, Style, Transition, Ui, Value, px, rigid,
 };
 
 /// How fast the knob slides: across in 140 ms, eased.

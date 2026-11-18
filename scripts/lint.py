@@ -34,18 +34,21 @@ checks its last commit.
 
 The layer rules look at the whole crate on every run (errors):
 
-  layer         a file uses an item of a higher layer (LAYERS: OS vocabulary at the bottom, then
-                text, render, OS services, the ui core, headless behaviour, the styled design
-                system, the shell, the harness, the crate root); a `pub use` counts only when its file
-                uses the name too
-  private       a file of the styled layer reaches into the ui core's state (`.st.`) or calls a
-                `pub(crate)` / `pub(super)` function of a lower layer, which a design system
-                outside the crate couldn't
+  layer         a file uses an item of a higher layer (LAYERS: the base vocabulary at the bottom,
+                then text, render, OS services, the ui core, headless behaviour, the styled
+                design system, the shell, the harness, the crate root; PLACES puts each file in
+                one); a `pub use` counts only when its file uses the name too; the platform
+                facades (FACADES) are the platform's front and may be used from any layer
+  private       a file of the styled layer reaches into the ui core's state (`.st`), implements
+                a core type, or calls a `pub(crate)` / `pub(super)` function of a lower layer,
+                which a design system outside the crate couldn't
   os            OS crates or `cfg(target_os)`-style gates outside src/platform/
+  unplaced      a file of the crate no PLACES entry covers, or an entry no file matches
 
-What breaks a layer rule today is listed in BASELINE, one `rule from -> to` per line with the
-reason after `#`. A finding that is listed passes; a listed one that is gone fails until its line
-is deleted, so the list only shrinks.
+What breaks a layer rule today is listed in BASELINE by key, the reason in `#` comments: an item
+(`layer src/ui/mod.rs -> ui/theme.rs::Theme`, any number of uses), and for `os` how many gates
+a file may have (`os src/keys.rs target_os 5`). A listed finding passes; a line that allows more
+than is found fails until it is lowered or deleted, so the list only shrinks.
 
 size counts the non-blank lines of code, docs, comments and tests (every line of a test item)
 per module: a folder under src/, a file right in src/, the tests, examples and benches each as
@@ -64,6 +67,7 @@ Ported from vladkens/lint rust.py (MIT), the checks every Rust repository of its
 import argparse
 import bisect
 import collections
+import functools
 import hashlib
 import itertools
 import json
@@ -109,10 +113,12 @@ DOC = re.compile(r"^\s*//[/!]\s?(.*)")
 # Items other languages call, which no Rust code names.
 EXPORTED = re.compile(r"no_mangle|export_name|wasm_bindgen|\bextern\b|pyfunction|napi|uniffi")
 IDENT = re.compile(r"\b[A-Za-z_]\w*\b")
+# A name used on its own, not as a path's later segment (`Flow::Row` doesn't use `Row`).
+USED = re.compile(r"(?<!::)\b[A-Za-z_]\w*\b")
 USE = re.compile(r"\buse\s+([^;]+);")
 PATH = re.compile(r"(?<![\w$])\$?(crate|super|self)((?:\s*::\s*\w+)+)")
 MOD_DECL = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(\w+)\s*;")
-PATH_ATTR = re.compile(r'#\[path\s*=\s*"([^"]+)"\]')
+PATH_ATTR = re.compile(r'#\[(?:cfg_attr\(.*?,\s*)?path\s*=\s*"([^"]+)"\)?\]')
 ROOT = re.compile(r"(?:^|/)src/(?:lib|main|bin/[^/]+|bin/[^/]+/main)\.rs$")
 LINKS = re.compile(r"\b(?:crate|super|self)\s*::|\bmod\s|\buse\s")
 
@@ -520,22 +526,28 @@ def modules(scans: "Scans") -> dict[str, tuple[str, tuple[str, ...]]]:
                 if not (m := MOD_DECL.match(code)):
                     continue
 
+                # A path per OS (`cfg_attr(unix, path = …)`) makes each file the module.
                 attr = [a[1] for x in sc.raws[max(0, i - 3) : i] if (a := PATH_ATTR.search(x))]
                 d = posixpath.join(here, *sc.mods[i])
-                cands = [posixpath.join(parent, attr[0])] if attr else []
-                cands += [posixpath.join(d, m[1] + ".rs"), posixpath.join(d, m[1], "mod.rs")]
-                child = next(
-                    (posixpath.normpath(x) for x in cands if posixpath.normpath(x) in scans.names),
-                    None,
-                )
-                if child:
-                    todo.append((child, mod + sc.mods[i] + (m[1],)))
+                found = [posixpath.normpath(posixpath.join(parent, x)) for x in attr]
+                found = [x for x in found if x in scans.names]
+                if not attr:
+                    cands = [posixpath.join(d, m[1] + ".rs"), posixpath.join(d, m[1], "mod.rs")]
+                    cands = [posixpath.normpath(x) for x in cands]
+                    found = [x for x in cands if x in scans.names][:1]
+
+                todo += [(x, mod + sc.mods[i] + (m[1],)) for x in found]
 
     return out
 
 
 def expand(tree: str) -> list[list[str]]:
     """The paths a use tree names: `a::{b, c::d as e}` gives a::b and a::c::d."""
+    return [segs for segs, _ in named(tree)]
+
+
+def named(tree: str) -> list[tuple[list[str], str]]:
+    """The paths a use tree names, each with the name it brings in: its alias or its last part."""
     out = []
 
     def go(prefix: list[str], s: str):
@@ -551,7 +563,9 @@ def expand(tree: str) -> list[list[str]]:
                     part += c
 
         elif s:
-            out.append(prefix + [x for x in s.split(" as ")[0].split("::") if x])
+            path, _, alias = s.partition(" as ")
+            segs = prefix + [x for x in path.split("::") if x]
+            out.append((segs, alias.strip() or (segs[-1] if segs else "")))
 
     go([], re.sub(r"\s*(::|[{},])\s*", r"\1", " ".join(tree.split())))
     return out
@@ -725,53 +739,56 @@ def tangles(top: Path, since: str | None, scope: dict | None, scans: "Scans") ->
 # MARK: Layers
 
 # Each file's layer, by the longest matching path under src/; a lower layer never uses a higher
-# one. A platform file takes the layer of what it backs; the window host is the shell's.
-LAYERS = ("os", "text", "render", "service", "ui", "headless", "styled", "shell", "harness", "root")
+# one. A platform file takes the layer of what it backs; the window host is the shell's. Every
+# key names a file or folder that exists, and every file has a layer.
+LAYERS = ("base", "text", "render", "service", "ui", "headless", "styled", "shell", "harness")
+LAYERS += ("root",)
 SERVICES = (
-    *("activity", "autostart", "clipboard", "desktop", "file_dialog", "focus", "hardware"),
-    *("hotkey", "input_source", "instance", "open", "paths", "permissions", "system", "uninstall"),
+    *("activity", "autostart", "desktop", "file_dialog", "focus", "hardware", "hotkey"),
+    *("input_source", "instance", "open", "paste", "paths", "permissions", "runloop", "system"),
+    "uninstall",
 )
 PLACES = {
-    "keys.rs": "os",
-    "menu.rs": "os",
-    "locale": "os",
+    **{x: "base" for x in ("clipboard.rs", "geom.rs", "info.rs", "keys.rs", "locale", "menu.rs")},
     "text": "text",
-    "scene.rs": "render",
-    "cpu": "render",
-    "png.rs": "render",
-    "svg.rs": "render",
-    "bitmap.rs": "render",
+    **{x: "render" for x in ("bitmap.rs", "cpu", "png.rs", "scene.rs", "svg.rs")},
     **{f"{x}.rs": "service" for x in SERVICES},
+    "event.rs": "ui",
     "ui": "ui",
     "ui/behavior.rs": "headless",
-    **{f"ui/{x}": "styled" for x in ("theme.rs", "form.rs", "dialog.rs", "widgets", "containers")},
-    "app.rs": "shell",
-    "shell.rs": "shell",
-    "paste.rs": "shell",
-    "tray": "shell",
-    "lib.rs": "root",
+    **{f"ui/{x}": "styled" for x in ("containers", "dialog.rs", "form.rs", "theme.rs", "widgets")},
+    **{x: "shell" for x in ("app.rs", "shell.rs", "tray", "platform")},
     "harness.rs": "harness",
-    "platform": "shell",
+    "lib.rs": "root",
+    # The platform's files below the shell, by what they back.
     **{
-        f"platform/{os}/{x}": "os"
-        for os in ("macos", "windows", "linux")
-        for x in ("keys.rs", "keyboard.rs", "link.rs", "dl.rs", "dbus.rs")
+        f"platform/{x}": "base"
+        for x in ("linux/dbus.rs", "linux/display.rs", "linux/dl.rs", "linux/keys.rs")
     },
-    **{f"platform/{os}/text.rs": "text" for os in ("macos", "windows", "linux")},
-    **{f"platform/{os}/image.rs": "render" for os in ("macos", "windows", "linux")},
+    **{f"platform/{x}": "base" for x in ("macos/keyboard.rs", "windows/keyboard.rs")},
+    **{f"platform/{x}/text.rs": "text" for x in ("linux", "macos", "windows")},
+    **{f"platform/{x}/image.rs": "render" for x in ("linux", "macos", "windows")},
     **{
         f"platform/{os}/app/{x}": "service"
-        for os in ("macos", "windows", "linux")
-        for x in (
-            *(f"{s}.rs" for s in SERVICES),
-            "hotkey",
-            "paste.rs",
-            "post.rs",
-            "remote.rs",
-            "write.rs",
-            "grab.rs",
+        for os, names in (
+            (
+                "linux",
+                "activity autostart desktop focus grab hardware hotkey input_source instance",
+            ),
+            ("linux", "open paste post remote uninstall write"),
+            ("macos", "activity autostart desktop focus hardware hotkey hotkey/carbon"),
+            ("macos", "input_source open paste permissions post uninstall"),
+            ("windows", "activity autostart desktop focus hardware hotkey input_source instance"),
+            ("windows", "open paste post uninstall"),
         )
+        for x in (f"{n}.rs" for n in names.split())
     },
+}
+# The platform's facades: every layer reaches the OS through them.
+FACADES = {"src/platform/mod.rs"} | {
+    f"src/platform/{os}/{x}"
+    for os in ("linux", "macos", "windows")
+    for x in ("mod.rs", "app/mod.rs")
 }
 BASELINE = "scripts/lint-baseline.txt"
 PUB_USE = re.compile(r"^\s*pub(?:\([^)]*\))?\s+use\b")
@@ -780,22 +797,40 @@ PRIVATE_FN = re.compile(
 )
 PUBLIC_FN = re.compile(r"\bpub\s+(?:const\s+)?(?:unsafe\s+)?fn\s+(\w+)")
 CALL = re.compile(r"(?:\.|::)\s*(\w+)\s*(?:::<[^>]*>)?\s*\(")
-STATE = re.compile(r"\.\s*st\s*\.\s*(\w+)")
+STATE = re.compile(r"\.\s*st\b(?!\s*\()")
 # Methods of std types that a private function of the crate may share a name with.
 STD_NAMES = {"take", "get", "insert", "remove", "push", "pop", "len", "contains", "clear", "iter"}
-STD_NAMES |= {"map", "set", "replace", "new"}
+STD_NAMES |= {"map", "set", "replace", "new", "hash", "finish", "read", "write", "fmt", "cmp", "eq"}
 OS_CRATE = re.compile(r"\b(objc2\w*|block2|dispatch2|windows_sys)\s*::")
-OS_GATE = re.compile(r"\bcfg(?:_attr)?\s*\(.*?\b(target_os|target_family|windows|unix)\b")
+OS_GATE = re.compile(
+    r"\bcfg(?:_attr)?\s*!?\s*\([^\];{}]*?\b(target_os|target_family|windows|unix)\b"
+)
+# The core's state, which only the core adds methods to.
+CORE_IMPL = re.compile(r"^[ \t]*impl\b[^{\n]*\b(UiState|Tree|Store|Input)\b[^{\n]*\{", re.M)
 
 
+@functools.cache
 def layer(path: str) -> str | None:
-    """The layer of a file under src/; None for tests, examples and benches."""
+    """The layer of a file under src/; None for tests, examples, benches and a file PLACES misses."""
     if not path.startswith("src/"):
         return None
 
     rest = path[4:]
     best = max((k for k in PLACES if rest == k or rest.startswith(k + "/")), key=len, default=None)
     return PLACES[best] if best else None
+
+
+def unplaced(scans: "Scans") -> list[Hit]:
+    """A file of the crate with no layer, and a PLACES key that names nothing."""
+    names = [x for x in scans.names if x.startswith("src/")]
+    out = [
+        Hit(x, 1, "layer", f"{x[4:]} has no layer: add it to PLACES in scripts/lint.py")
+        for x in names
+        if layer(x) is None
+    ]
+    stale = [k for k in PLACES if not any(x[4:] == k or x[4:].startswith(k + "/") for x in names)]
+    out += [Hit("scripts/lint.py", 1, "layer", f"PLACES names `{k}`, which is gone") for k in stale]
+    return out
 
 
 def absolute(cur: tuple[str, ...], segs: list[str], files: dict) -> tuple[str, ...] | None:
@@ -821,13 +856,10 @@ def exports(scans: "Scans", tree: dict) -> dict[tuple[str, ...], tuple[str, ...]
             if not PUB_USE.match(sc.codes[line]) or sc.test[line]:
                 continue
 
-            for segs in expand(m[1]):
+            for segs, name in named(m[1]):
                 to = absolute(mod + sc.mods[line], segs, files)
-                if to is None:
-                    continue
-
-                alias = re.search(r"\bas\s+(\w+)\s*$", m[1]) if len(expand(m[1])) == 1 else None
-                out[mod + sc.mods[line] + ((alias[1],) if alias else to[-1:])] = to
+                if to is not None:
+                    out[mod + sc.mods[line] + (name,)] = to
 
     return out
 
@@ -863,25 +895,26 @@ def edges(scans: "Scans") -> list[tuple[str, int, str, str]]:
         sc = scans[path]
         text = "\n".join(sc.codes)
         starts = list(itertools.accumulate((len(x) + 1 for x in sc.codes[:-1]), initial=0))
-        uses = [(m.start(), m.end(), expand(m[1])) for m in USE.finditer(text)]
-        refs = [(a, x) for a, _, xs in uses for x in xs]
+        uses = [(m.start(), m.end(), named(m[1])) for m in USE.finditer(text)]
+        refs = [(a, segs, name) for a, _, xs in uses for segs, name in xs]
         refs += [
-            (m.start(), [m[1], *re.split(r"\s*::\s*", m[2].strip())[1:]])
+            (m.start(), segs, segs[-1])
             for m in PATH.finditer(text)
             if not any(a <= m.start() < b for a, b, _ in uses)
+            for segs in [[m[1], *re.split(r"\s*::\s*", m[2].strip())[1:]]]
         ]
         bare = text
         for a, b, _ in uses:
             bare = bare[:a] + " " * (b - a) + bare[b:]
 
-        used = set(IDENT.findall(bare))
-        for pos, segs in refs:
+        used = set(USED.findall(bare))
+        for pos, segs, name in refs:
             i = bisect.bisect_right(starts, pos) - 1
             if sc.test[i] or "cfg(doc)" in sc.raws[max(0, i - 1)]:
                 continue
 
             # A re-export alone isn't a use; the file using the name it brings in is.
-            if PUB_USE.match(sc.codes[i]) and segs[-1] not in used:
+            if PUB_USE.match(sc.codes[i]) and name not in used:
                 continue
 
             to = absolute(mod + sc.mods[i], segs, files)
@@ -893,13 +926,16 @@ def edges(scans: "Scans") -> list[tuple[str, int, str, str]]:
 
 
 def private_fns(scans: "Scans") -> set[str]:
-    """Names of the functions the lower layers keep to the crate, not named `pub` anywhere."""
+    """Names of the functions the lower layers keep to the crate: not named `pub` anywhere, nor
+    defined in the styled layer."""
     low = LAYERS[: LAYERS.index("headless") + 1]
     private, public = set(), set()
     for path in scans.names:
         text = "\n".join(scans[path].codes)
         public.update(PUBLIC_FN.findall(text))
-        if layer(path) in low:
+        if layer(path) == "styled":
+            public.update(FN.findall(text))
+        elif layer(path) in low and not path.startswith("src/platform/"):
             private.update(PRIVATE_FN.findall(text))
 
     return private - public - STD_NAMES
@@ -907,65 +943,102 @@ def private_fns(scans: "Scans") -> set[str]:
 
 def layering(scans: "Scans") -> list[Hit]:
     """The layer rules on the whole crate."""
-    out = []
+    out = unplaced(scans)
     for path, line, item, file in edges(scans):
         a, b = layer(path), layer(file)
-        if file.startswith("src/platform/"):
-            continue  # every layer reaches the OS through platform; its own files are its business
+        if file in FACADES or not (a and b) or LAYERS.index(b) <= LAYERS.index(a):
+            continue
 
-        if a and b and LAYERS.index(b) > LAYERS.index(a):
-            msg = f"{path[4:]} ({a}) -> {item} ({b}): a lower layer may not use a higher one"
-            out.append(Hit(path, line, "layer", msg, key=f"layer {path} -> {item}"))
+        name = item.split("::")[-1]
+        msg = (
+            f"{path[4:]} ({a}) -> {item} ({b}): a lower layer may not use a higher one; move the "
+            "item down, or hand it in from above (a hook or a parameter)"
+        )
+        key = f"layer {path} -> {file[4:]}::{name}"
+        out.append(Hit(path, line, "layer", msg, key=key))
 
     hidden = private_fns(scans)
     for path in scans.names:
         sc, at = scans[path], layer(path)
-        if at is None:
-            continue
-
-        own = set(PRIVATE_FN.findall("\n".join(sc.codes))) if at == "styled" else set()
-        for i, code in enumerate(sc.codes):
-            if sc.test[i]:
-                continue
-
-            if at == "styled":
-                for name in STATE.findall(code):
-                    msg = f"`st.{name}`: the styled layer builds on the public ui only"
-                    out.append(Hit(path, i + 1, "private", msg, key=f"private {path} st.{name}"))
-
-                for name in CALL.findall(code):
-                    if name in hidden and name not in own:
-                        msg = f"`{name}` is pub(crate): a design system outside the crate can't call it"
-                        out.append(Hit(path, i + 1, "private", msg, key=f"private {path} {name}"))
-
-            if not path.startswith("src/platform/"):
-                for m in [*OS_CRATE.finditer(code), *OS_GATE.finditer(code)]:
-                    msg = f"`{m[1]}` outside src/platform/: OS code lives in platform/<os>/"
-                    out.append(Hit(path, i + 1, "os", msg, key=f"os {path} {m[1]}"))
+        if at is not None:
+            out += styled(path, sc, hidden) if at == "styled" else []
+            out += os_code(path, sc) if not path.startswith("src/platform/") else []
 
     return baselined(out, scans.top)
 
 
+def matches(sc: Scan, pattern: re.Pattern) -> list[tuple[int, re.Match]]:
+    """Each match of a pattern over the file's code, which may span lines, outside tests: the line
+    it starts on and the match."""
+    if not hasattr(sc, "text"):
+        sc.text = "\n".join(sc.codes)
+        sc.starts = list(itertools.accumulate((len(x) + 1 for x in sc.codes[:-1]), initial=0))
+
+    found = ((bisect.bisect_right(sc.starts, m.start()) - 1, m) for m in pattern.finditer(sc.text))
+    return [(i, m) for i, m in found if not sc.test[i]]
+
+
+def styled(path: str, sc: Scan, hidden: set[str]) -> list[Hit]:
+    """What the styled layer takes from the core that a design system outside the crate
+    couldn't."""
+    out = []
+    for i, m in matches(sc, STATE):
+        msg = "`st`, the core's state: the styled layer builds on the public ui only"
+        out.append(Hit(path, i + 1, "private", msg, key=f"private {path} st"))
+
+    for i, m in matches(sc, CALL):
+        if m[1] in hidden:
+            msg = f"`{m[1]}` is the crate's own: a design system outside it couldn't call it"
+            out.append(Hit(path, i + 1, "private", msg, key=f"private {path} {m[1]}"))
+
+    for i, m in matches(sc, CORE_IMPL):
+        msg = f"`impl {m[1]}`: the styled layer adds no methods to the core's state"
+        out.append(Hit(path, i + 1, "private", msg, key=f"private {path} impl {m[1]}"))
+
+    return out
+
+
+def os_code(path: str, sc: Scan) -> list[Hit]:
+    """OS crates and OS gates outside src/platform/."""
+    out = []
+    for i, m in sorted(matches(sc, OS_CRATE) + matches(sc, OS_GATE), key=lambda x: x[0]):
+        msg = f"`{m[1]}` outside src/platform/: OS code lives in platform/<os>/"
+        out.append(Hit(path, i + 1, "os", msg, key=f"os {path} {m[1]}"))
+
+    return out
+
+
 def baselined(found: list[Hit], top: Path) -> list[Hit]:
-    """The findings not in the baseline, and the baseline lines nothing matches any more."""
+    """The findings the baseline doesn't allow, and its lines that allow more than is found. A line
+    is a finding's key (an item, which may be used many times), and for `os` also how many gates
+    the file may have: `os src/keys.rs target_os 7`."""
     file = top / BASELINE
     listed = {}
     for n, raw in enumerate(read(file).splitlines() if file.is_file() else [], 1):
         key = raw.split("#")[0].strip()
-        if key:
-            listed[key] = n
+        head, _, num = key.rpartition(" ")
+        if key.startswith("os ") and num.isdigit():
+            listed[head] = (n, int(num))
+        elif key:
+            listed[key] = (n, None)
 
-    seen, out = set(), []
+    counts = collections.Counter(h.key for h in found)
+    out = []
     for h in found:
-        if h.key in listed:
-            seen.add(h.key)
-        elif (h.path, h.key) not in {(x.path, x.key) for x in out}:
+        if h.key not in listed:
+            out.append(h)
+        elif (allowed := listed[h.key][1]) is not None and counts[h.key] > allowed:
+            h.msg += f" ({counts[h.key]} in the file, the baseline allows {allowed})"
             out.append(h)
 
-    msg = "is no longer found: delete the line, the baseline only shrinks"
-    out += [
-        Hit(BASELINE, n, "baseline", f"`{k}` {msg}") for k, n in listed.items() if k not in seen
-    ]
+    for key, (n, allowed) in listed.items():
+        if not counts[key]:
+            msg = f"`{key}` is no longer found: delete the line, the baseline only shrinks"
+            out.append(Hit(BASELINE, n, "baseline", msg))
+        elif allowed is not None and counts[key] < allowed:
+            msg = f"`{key}` is found {counts[key]} times, not {allowed}: lower it, it only shrinks"
+            out.append(Hit(BASELINE, n, "baseline", msg))
+
     return out
 
 
