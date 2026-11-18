@@ -45,6 +45,7 @@ fns!(Gdk {
   fn gtk_window_set_type_hint(w: P, hint: c_int);
   fn gtk_window_move(w: P, x: c_int, y: c_int);
   fn gtk_widget_get_window(w: P) -> P;
+  fn gdk_window_move(w: P, x: c_int, y: c_int);
   fn gdk_window_raise(w: P);
   fn gdk_display_get_default() -> P;
   fn gdk_display_open(name: S) -> P;
@@ -237,5 +238,15 @@ pub fn place(window: P, size: Size, anchor: Anchor, pointer: bool, zoom: f32) {
   // The work area in points at the zoom, the offset back in GTK's units.
   let ([x, y, w, h], z) = (area, zoom);
   let at = anchor.offset(Size::new(w as f32 / z, h as f32 / z), size);
-  unsafe { (g.gtk_window_move)(window, x + (at.x * z) as c_int, y + (at.y * z) as c_int) };
+  let (x, y) = (x + (at.x * z) as c_int, y + (at.y * z) as c_int);
+  // SAFETY: GTK's and GDK's calls on a window of ours.
+  unsafe {
+    (g.gtk_window_move)(window, x, y);
+    // GTK moves a shown window without noting it (`info->last`, gtkwindow.c, gtk-3-24): hidden,
+    // asked its last noted place again, it moves nothing as it shows. Its GDK window goes now.
+    let w = (g.gtk_widget_get_window)(window);
+    if !w.is_null() {
+      (g.gdk_window_move)(w, x, y);
+    }
+  }
 }
