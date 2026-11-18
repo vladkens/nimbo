@@ -18,7 +18,8 @@
 //! ([Config::localizations](crate::Config::localizations)), or before any window, for a tray
 //! menu, from [crate::Main::set_localizations]; only the one in use is read. The
 //! language is the system's ([Locale::System]) or the app's choice ([crate::Main::set_locale]),
-//! found as the tag (`pt-BR`), then its language (`pt`); with no catalog, the English text.
+//! found as the tag (`pt-BR`), then its language (`pt`), then the language's first longer tag
+//! (`pt` finds `pt-BR`, as Apple's bundles); with no catalog, the English text.
 //! nimbo's own strings (OK and Cancel, the text menu, an icon button's name) come in its own
 //! catalogs (`locales/`, `make i18n`), in the language the app's give.
 //! `pseudo` is a pseudo language (`--locale pseudo` in an example): every marked string accented
@@ -290,7 +291,8 @@ impl Lang {
 }
 
 /// The `.po` text of `catalogs` for `tag`, else for a shorter one (`zh-Hant-TW`, `zh-Hant`,
-/// `zh`).
+/// `zh`), else the first longer one of its language, as Apple's bundles match `zh` to `zh-Hans`
+/// and `pt` to `pt-BR`.
 fn po_of(catalogs: Localizations, tag: &str) -> Option<&'static str> {
   let mut tag = tag;
   loop {
@@ -298,8 +300,15 @@ fn po_of(catalogs: Localizations, tag: &str) -> Option<&'static str> {
       return Some(po);
     }
 
-    tag = tag.rsplit_once('-')?.0;
+    match tag.rsplit_once('-') {
+      Some((shorter, _)) => tag = shorter,
+      None => break,
+    }
   }
+
+  let longer =
+    |c: &&(&str, &str)| c.0.split_once('-').is_some_and(|(lang, _)| lang.eq_ignore_ascii_case(tag));
+  catalogs.iter().find(longer).map(|c| c.1)
 }
 
 // MARK: Text
@@ -465,6 +474,11 @@ msgstr[2] "{n} диктовок"
     assert_eq!(t!("Cancel").as_str(), "Abbrechen");
     set_thread(Locale::Tag("zh-Hans-CN"), &[("zh-Hans", "")]);
     assert_eq!(t!("Copy").as_str(), "拷贝");
+    // A language alone takes its first longer catalog, as Apple's: `zh` `zh-Hans`, `pt` `pt-BR`.
+    set_thread(Locale::Tag("zh"), &[("zh-Hans", "")]);
+    assert_eq!(t!("Copy").as_str(), "拷贝");
+    set_thread(Locale::Tag("PT"), &[("pt-BR", "")]);
+    assert_eq!(t!("Cancel").as_str(), "Cancelar");
     for (tag, po) in OWN {
       let entries = po.matches("\nmsgid ").count() - 1;
       assert_eq!(Catalog::parse(po).len(), entries, "{tag}: each translated");
