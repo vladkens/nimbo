@@ -1,6 +1,7 @@
 .PHONY: prepare check test build update clean
 
-LINT := uv run --script https://raw.githubusercontent.com/vladkens/lint/main/rust.py
+# A commit of the linter, not its main: a push there changes no check here until this moves.
+LINT := uv run --script https://raw.githubusercontent.com/vladkens/lint/2ce8ca6de7456fcb395bdb57a3e828e373e4b728/rust.py
 
 prepare:
 	cargo +nightly fmt

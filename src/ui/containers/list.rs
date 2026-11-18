@@ -1466,20 +1466,29 @@ mod tests {
     }
   }
 
-  /// A row style's padding moves the row's content in; unstyled, a selected row keeps the
-  /// list's ground for the app to paint.
+  /// A row style's padding moves the row's content in.
   #[test]
-  fn a_row_style_and_unstyled_rows() {
+  fn a_row_styles_padding_moves_the_content_in() {
     use crate::harness::Harness;
     let mut h = Harness::new(Bare::default(), Size::new(300.0, 300.0), 1.0);
     h.frame();
     let row = h.rect(Id::of("list").key(("row", 1u64))).unwrap();
     let inner = h.rect(Id::of(("in", 1))).unwrap();
     assert_eq!((inner.x - row.x, inner.y - row.y), (8.0, 8.0));
+  }
 
+  /// Unstyled, a selected row keeps the list's ground for the app to paint.
+  #[test]
+  fn unstyled_rows_leave_the_selection_to_the_app() {
+    use crate::harness::Harness;
+    let mut h = Harness::new(Bare::default(), Size::new(300.0, 300.0), 1.0);
+    h.frame();
+    let row = h.rect(Id::of("list").key(("row", 1u64))).unwrap();
+    // Styled, the selection fills the row; unstyled, the row shows the ground as a row below.
     h.click_id(Id::of("list").key(("row", 1u64)));
     h.frame();
     let filled = h.render().pixel(row.x + 150.0, row.y + 10.0);
+
     h.app_mut().bare = true;
     h.frame();
     let img = h.render();

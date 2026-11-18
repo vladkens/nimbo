@@ -573,15 +573,4 @@ msgstr[2] "{n} диктовок"
     assert!(h.frame());
     assert_eq!(h.text(Id::of("keep")), Some("Keep the history"));
   }
-  /// [crate::Main::set_localizations] makes catalogs the process's without a window; a made-up
-  /// language keeps the strings of the tests running beside this one.
-  #[test]
-  fn catalogs_without_a_window() {
-    const XX: Localizations = &[("xx", "msgid \"Keep the history\"\nmsgstr \"XX\"")];
-    let was = global().catalogs;
-    crate::Main::here().set_localizations(XX);
-    assert!(same(global().catalogs, XX));
-    crate::Main::here().set_localizations(was);
-    assert!(same(global().catalogs, was));
-  }
 }

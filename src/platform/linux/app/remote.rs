@@ -44,6 +44,7 @@ use super::super::{Fp, P, S, gtk, keys, lib};
 use super::{paste, post};
 use crate::clipboard::Snapshot;
 use crate::keys::{Shortcut, strokes};
+use crate::paste::PORTAL_WAIT;
 use crate::{paths, platform};
 
 const REMOTE: &str = "org.freedesktop.portal.RemoteDesktop";
@@ -55,6 +56,8 @@ const MS: c_int = 2000;
 /// session that failed is tried again, how long the owner may take to give a type, and how long
 /// a session that serves nothing stays after its last use (a paste's steps come within it).
 const WAIT: Duration = Duration::from_secs(60);
+// A caller off the main thread waits out the desktop's question ([PORTAL_WAIT]).
+const _: () = assert!(WAIT.as_secs() < PORTAL_WAIT.as_secs());
 const RETRY: Duration = Duration::from_secs(2);
 const READ: Duration = Duration::from_millis(500);
 const LINGER: Duration = Duration::from_secs(1);

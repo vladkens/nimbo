@@ -96,7 +96,7 @@ fn activate(mtm: MainThreadMarker) {
   if objc2::available!(macos = 14.0) {
     app.activate();
   } else {
-    #[expect(deprecated, reason = "before macOS 14")]
+    #[expect(deprecated, reason = "its replacement, activate, is macOS 14+")]
     app.activateIgnoringOtherApps(true);
   }
 }

@@ -138,11 +138,10 @@ mod tests {
     }
   }
   /// Elsewhere nothing asks: the request is granted and no pane opens.
+  #[cfg(not(target_os = "macos"))]
   #[test]
   fn elsewhere_nothing_asks() {
-    if !cfg!(target_os = "macos") {
-      assert!(request_accessibility());
-      assert_eq!(open_pane(Pane::Accessibility), Ok(()));
-    }
+    assert!(request_accessibility());
+    assert_eq!(open_pane(Pane::Accessibility), Ok(()));
   }
 }
