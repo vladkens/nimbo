@@ -928,7 +928,7 @@ def edges(scans: "Scans") -> list[tuple[str, int, str, str]]:
         ]
         bare = text
         for a, b, _ in uses:
-            bare = bare[:a] + " " * (b - a) + bare[b:]
+            bare = bare[:a] + re.sub(r"[^\n]", " ", bare[a:b]) + bare[b:]
 
         # Tests don't count: a name used only there doesn't make its re-export a use.
         used = set(USED.findall("\n".join(x for x, t in zip(bare.split("\n"), sc.test) if not t)))
