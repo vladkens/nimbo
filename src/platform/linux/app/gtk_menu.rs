@@ -76,8 +76,9 @@ thread_local! {
   static NEXT: Cell<u64> = const { Cell::new(0) };
 }
 
-/// Window `win` (its area `area`) asks for `menu` on `on` at `at`, after the secondary `press`
-/// (a copy, now ours): built now, it pops up from an idle, outside the window's borrow.
+/// Window `win` (its area `area`) asks for `menu` on `on` at `at` (in GTK's units), after the
+/// secondary `press` (a copy, now ours): built now, it pops up from an idle, outside the
+/// window's borrow.
 pub fn ask(win: u64, area: P, press: P, on: Id, at: Point, menu: &Menu<usize>) {
   let (f, n) = (menus(), NEXT.get() + 1);
   NEXT.set(n);

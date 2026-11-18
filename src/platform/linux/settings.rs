@@ -8,7 +8,10 @@
 //! sets it with its dark colours, its theme staying `Breeze`) or a dark theme's name
 //! (`Adwaita-dark`, `Breeze-Dark`, from XSETTINGS or GSettings), followed as they change. The
 //! user's languages are gettext's variables.
+//!
+//! The text scale ([zoom]) is GtkSettings' too, followed the same way.
 
+use std::cell::Cell;
 use std::ffi::{CStr, c_char, c_int, c_uint, c_void};
 use std::ptr::{null, null_mut};
 use std::sync::OnceLock;
@@ -17,6 +20,11 @@ use super::dbus::{self, Gv, V};
 use super::dl::fns;
 use super::{Fp, P, S, connect, each, lib};
 use crate::app::{Appearance, ColorScheme, Event};
+
+thread_local! {
+  /// [zoom], read when GTK opened its display and as it changes.
+  static ZOOM: Cell<f32> = const { Cell::new(1.0) };
+}
 
 const PORTAL: &str = "org.freedesktop.portal.Desktop";
 const PATH: &str = "/org/freedesktop/portal/desktop";
@@ -99,12 +107,14 @@ fn tag(name: &str) -> String {
 /// runtime drops repeats).
 pub fn watch() {
   let Some(a) = api() else { return };
+  ZOOM.set(xft_zoom(a));
   // SAFETY: GTK's calls; the callbacks have the signals' signatures.
   unsafe {
     let settings = (a.f.gtk_settings_get_default)();
     if !settings.is_null() {
       connect(settings, c"notify::gtk-theme-name", on_changed as Fp, 0);
       connect(settings, c"notify::gtk-application-prefer-dark-theme", on_changed as Fp, 0);
+      connect(settings, c"notify::gtk-xft-dpi", on_dpi as Fp, 0);
     }
   }
 
@@ -117,6 +127,24 @@ pub fn watch() {
 unsafe extern "C" fn on_changed(_: P, _: P, _: P) {
   super::app::tray::repaint();
   unsafe { deliver(null_mut()) };
+}
+
+unsafe extern "C" fn on_dpi(_: P, _: P, _: P) {
+  let z = api().map_or(1.0, xft_zoom);
+  if ZOOM.replace(z) != z {
+    unsafe { refit(null_mut()) };
+  }
+}
+
+/// Fits every window to the zoom now ([super::Win::fit]); while one is busy, again in a moment
+/// (till then it keeps its own).
+unsafe extern "C" fn refit(_: P) -> c_int {
+  if each(|w| w.fit()) {
+    let f = &api().expect("loaded before its callbacks").f;
+    unsafe { (f.g_timeout_add)(100, refit as Fp, null_mut()) };
+  }
+
+  0
 }
 
 /// `SettingChanged(namespace, key, value)`: one in the appearance namespace.
@@ -202,6 +230,38 @@ fn dark_theme(name: &str) -> bool {
   name.to_lowercase().contains("dark")
 }
 
+/// How much bigger than its points everything is drawn: the desktop's text scale (GNOME's and
+/// Cinnamon's text scaling factor, the DPI Xfce and Plasma on X11 set), as Chromium and Firefox
+/// take it, over GDK's whole scale. 1 when the desktop sets none.
+pub fn zoom() -> f32 {
+  ZOOM.get()
+}
+
+/// GtkSettings' `gtk-xft-dpi` as a zoom ([dpi_zoom]).
+fn xft_zoom(a: &Api) -> f32 {
+  let settings = unsafe { (a.f.gtk_settings_get_default)() };
+  if settings.is_null() {
+    return 1.0;
+  }
+
+  let mut dpi: c_int = -1;
+  // SAFETY: an int property, then the null that ends the list.
+  unsafe { (a.g_object_get)(settings, c"gtk-xft-dpi".as_ptr(), &mut dpi, null::<c_char>()) };
+  let scale = std::env::var("GDK_DPI_SCALE").ok().and_then(|s| s.trim().parse().ok());
+  dpi_zoom(dpi, scale.unwrap_or(1.0))
+}
+
+/// `gtk-xft-dpi` (1024 × the DPI, GDK's whole scale left out; -1 unset) times `GDK_DPI_SCALE`,
+/// as GTK takes its fonts' resolution (`settings_update_resolution`, gtk-3-24), over 96 DPI; to
+/// the hundredth within GNOME's 0.5–3 (Xft rounds 1.2 × 96 down to 115.199).
+fn dpi_zoom(dpi: c_int, scale: f32) -> f32 {
+  let scale = if scale > 0.0 { scale } else { 1.0 };
+  match dpi {
+    ..=0 => 1.0,
+    _ => ((dpi as f32 * scale / (96.0 * 1024.0)).clamp(0.5, 3.0) * 100.0).round() / 100.0,
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -234,5 +294,16 @@ mod tests {
     assert_eq!(accent_rgb([0.2, 0.4, 1.0]), Some([0.2, 0.4, 1.0, 1.0]));
     assert_eq!(accent_rgb([-1.0, -1.0, -1.0]), None, "unset");
     assert_eq!(accent_rgb([0.5, 2.0, 0.0]), None);
+  }
+
+  #[test]
+  fn the_text_scale_zooms() {
+    assert_eq!(dpi_zoom(-1, 1.0), 1.0, "unset");
+    assert_eq!(dpi_zoom(96 * 1024, 1.0), 1.0);
+    assert_eq!(dpi_zoom(144 * 1024, 1.0), 1.5);
+    assert_eq!(dpi_zoom(117964, 1.0), 1.2, "Cinnamon's 1.2");
+    assert_eq!(dpi_zoom(1000 * 1024, 1.0), 3.0);
+    assert_eq!(dpi_zoom(192 * 1024, 0.5), 1.0, "GDK_DPI_SCALE");
+    assert_eq!(dpi_zoom(96 * 1024, 0.0), 1.0, "GTK ignores 0");
   }
 }

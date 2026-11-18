@@ -261,7 +261,7 @@ use keyboard_types::Code;
 /// The points of `px` pixels at `scale`: the least that the renderer's pixels (`points × scale`,
 /// cut down: [crate::cpu::Renderer::pixel_size]) give back whole at a fractional scale, where
 /// `px / scale` alone can lose the last row (454 px at 1.75).
-#[cfg(any(test, target_os = "windows"))]
+#[cfg(any(test, target_os = "windows", target_os = "linux"))]
 pub(crate) fn points(px: u32, scale: f32) -> f32 {
   let mut p = px as f32 / scale;
   while ((p * scale) as u32) < px {

@@ -130,8 +130,9 @@ pub fn kind() -> c_int {
   if wayland() && xwayland().is_none() { super::WINDOW_TOPLEVEL } else { POPUP }
 }
 
-/// Sets overlay `window` up before it shows: see the module docs.
-pub fn setup(window: P, anchor: Anchor) {
+/// Sets overlay `window` up before it shows, at `zoom` ([super::settings::zoom]): see the module
+/// docs.
+pub fn setup(window: P, anchor: Anchor, zoom: f32) {
   let g = gdk();
   // SAFETY: GTK's calls on a window of ours not shown yet.
   unsafe {
@@ -166,16 +167,28 @@ pub fn setup(window: P, anchor: Anchor) {
     (ls.gtk_layer_set_namespace)(window, c"overlay".as_ptr());
     (ls.gtk_layer_set_layer)(window, OVERLAY);
     (ls.gtk_layer_set_keyboard_interactivity)(window, FALSE);
-    let edge = match anchor {
-      Anchor::Top(m) => Some((TOP, m)),
-      Anchor::Center => None,
-      Anchor::Bottom(m) => Some((BOTTOM, m)),
-    };
-
-    if let Some((edge, margin)) = edge {
+    if let Some((edge, _)) = edge(anchor) {
       (ls.gtk_layer_set_anchor)(window, edge, TRUE);
-      (ls.gtk_layer_set_margin)(window, edge, margin.round() as c_int);
     }
+  }
+
+  margin(window, anchor, zoom);
+}
+
+/// Sets a layer surface's margin from its edge to `anchor`'s at `zoom`; nothing for the others.
+pub fn margin(window: P, anchor: Anchor, zoom: f32) {
+  let Some(ls) = wayland().then(layer_shell).flatten() else { return };
+  if let Some((edge, m)) = edge(anchor) {
+    unsafe { (ls.gtk_layer_set_margin)(window, edge, (m * zoom).round() as c_int) };
+  }
+}
+
+/// The layer shell's edge of `anchor`, and its margin in points.
+fn edge(anchor: Anchor) -> Option<(c_int, f32)> {
+  match anchor {
+    Anchor::Top(m) => Some((TOP, m)),
+    Anchor::Center => None,
+    Anchor::Bottom(m) => Some((BOTTOM, m)),
   }
 }
 
@@ -189,8 +202,9 @@ pub fn raise(window: P) {
 }
 
 /// Moves overlay `window` of `size` to `anchor` in the work area of the monitor with the
-/// pointer, or of its own unless `pointer`; nothing on Wayland, where the compositor places it.
-pub fn place(window: P, size: Size, anchor: Anchor, pointer: bool) {
+/// pointer, or of its own unless `pointer`, at `zoom`; nothing on Wayland, where the compositor
+/// places it.
+pub fn place(window: P, size: Size, anchor: Anchor, pointer: bool, zoom: f32) {
   let g = gdk();
   let display = unsafe { (g.gtk_widget_get_display)(window) };
   if is_wayland(display) {
@@ -220,7 +234,8 @@ pub fn place(window: P, size: Size, anchor: Anchor, pointer: bool) {
     (g.gdk_monitor_get_workarea)(monitor, &mut area);
   }
 
-  let [x, y, w, h] = area;
-  let at = anchor.offset(Size::new(w as f32, h as f32), size);
-  unsafe { (g.gtk_window_move)(window, x + at.x as c_int, y + at.y as c_int) };
+  // The work area in points at the zoom, the offset back in GTK's units.
+  let ([x, y, w, h], z) = (area, zoom);
+  let at = anchor.offset(Size::new(w as f32 / z, h as f32 / z), size);
+  unsafe { (g.gtk_window_move)(window, x + (at.x * z) as c_int, y + (at.y * z) as c_int) };
 }
