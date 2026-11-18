@@ -15,7 +15,8 @@
 //!   follow as in `t!`.
 //!
 //! The catalogs, one `.po` file per language, come with the window's [crate::Config]
-//! ([Config::localizations](crate::Config::localizations)); only the one in use is read. The
+//! ([Config::localizations](crate::Config::localizations)), or before any window, for a tray
+//! menu, from [crate::Main::set_localizations]; only the one in use is read. The
 //! language is the system's ([Locale::System]) or the app's choice ([crate::Main::set_locale]),
 //! found as the tag (`pt-BR`), then its language (`pt`); with no catalog, the English text.
 //! nimbo's own strings (OK and Cancel, the text menu, an icon button's name) come in its own
@@ -201,8 +202,15 @@ pub(crate) fn set(locale: Locale) {
 
 /// The catalogs of a window's config: the app's from now on, unless it has none.
 pub(crate) fn provide(catalogs: Localizations) {
+  if !catalogs.is_empty() {
+    replace(catalogs);
+  }
+}
+
+/// The app's catalogs from now on, none too ([crate::Main::set_localizations]).
+pub(crate) fn replace(catalogs: Localizations) {
   let mut s = global();
-  if !catalogs.is_empty() && !same(s.catalogs, catalogs) {
+  if !same(s.catalogs, catalogs) {
     *s = State::new(s.locale, catalogs);
   }
 }

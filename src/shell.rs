@@ -21,7 +21,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use crate::instance::{Command, Instance, OPEN, QUIT};
-use crate::locale::{self, Locale};
+use crate::locale::{self, Locale, Localizations};
 #[cfg(any(windows, target_os = "linux"))]
 use crate::platform;
 use crate::platform::shell as imp;
@@ -364,6 +364,14 @@ impl Main {
   /// keep the language the app started in.
   pub fn set_locale(&mut self, locale: Locale) {
     locale::set(locale);
+    redraw(windows());
+  }
+
+  /// The app's catalogs ([crate::locale]) from now on, as a window's [Config::localizations]
+  /// gives them: for strings shown before any window opens, a menu-bar app's tray menu. Empty,
+  /// the English texts again.
+  pub fn set_localizations(&mut self, catalogs: Localizations) {
+    locale::replace(catalogs);
     redraw(windows());
   }
 

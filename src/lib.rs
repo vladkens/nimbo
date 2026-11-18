@@ -169,7 +169,8 @@ impl Config {
 
   /// The app's translations ([locale]), a gettext `.po` file's text per language tag:
   /// `&[("ru", include_str!("../locales/ru.po"))]`. Only the language in use is read, as a
-  /// string first shows. Every window shares them: the last window opened with any gives them.
+  /// string first shows. Every window shares them: the last window opened with any gives them, or
+  /// [Main::set_localizations], which needs no window.
   pub const fn localizations(self, catalogs: Localizations) -> Self {
     Self { localizations: catalogs, ..self }
   }
