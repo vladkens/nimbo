@@ -45,10 +45,10 @@ The layer rules look at the whole crate on every run (errors):
   os            OS crates or `cfg(target_os)`-style gates outside src/platform/
   unplaced      a file of the crate no PLACES entry covers, or an entry no file matches
 
-What breaks a layer rule today is listed in BASELINE by key, the reason in `#` comments: an item
-(`layer src/ui/mod.rs -> ui/theme.rs::Theme`, any number of uses), and for `os` how many gates
-a file may have (`os src/keys.rs target_os 5`). A listed finding passes; a line that allows more
-than is found fails until it is lowered or deleted, so the list only shrinks.
+What breaks a layer rule today is listed in BASELINE, the reason in `#` comments: a finding's
+key and how many there are (`layer src/ui/mod.rs -> ui/theme.rs::Theme 3`, `os src/keys.rs
+target_os 5`). Findings up to the count pass; a line that allows more than is found, or more
+than the base branch's baseline did, fails, so the list only shrinks.
 
 size counts the non-blank lines of code, docs, comments and tests (every line of a test item)
 per module: a folder under src/, a file right in src/, the tests, examples and benches each as
@@ -749,7 +749,8 @@ SERVICES = (
     "uninstall",
 )
 PLACES = {
-    **{x: "base" for x in ("clipboard.rs", "geom.rs", "info.rs", "keys.rs", "locale", "menu.rs")},
+    **{x: "base" for x in ("clipboard", "geom.rs", "info.rs", "keys.rs", "locale", "menu.rs")},
+    "clipboard/system.rs": "service",
     "text": "text",
     **{x: "render" for x in ("bitmap.rs", "cpu", "png.rs", "scene.rs", "svg.rs")},
     **{f"{x}.rs": "service" for x in SERVICES},
@@ -803,7 +804,7 @@ STD_NAMES = {"take", "get", "insert", "remove", "push", "pop", "len", "contains"
 STD_NAMES |= {"map", "set", "replace", "new", "hash", "finish", "read", "write", "fmt", "cmp", "eq"}
 OS_CRATE = re.compile(r"\b(objc2\w*|block2|dispatch2|windows_sys)\s*::")
 OS_GATE = re.compile(
-    r"\bcfg(?:_attr)?\s*!?\s*\([^\];{}]*?\b(target_os|target_family|windows|unix)\b"
+    r"\bcfg(?:_attr)?\s*!?\s*\((?:[^\];{}()]|\()*?\b(target_os|target_family|target_vendor|windows|unix)\b"
 )
 # The core's state, which only the core adds methods to.
 CORE_IMPL = re.compile(r"^[ \t]*impl\b[^{\n]*\b(UiState|Tree|Store|Input)\b[^{\n]*\{", re.M)
@@ -844,22 +845,33 @@ def absolute(cur: tuple[str, ...], segs: list[str], files: dict) -> tuple[str, .
 
 
 def exports(scans: "Scans", tree: dict) -> dict[tuple[str, ...], tuple[str, ...]]:
-    """What a `pub use` names: the path through the re-export to the path it re-exports."""
+    """What a `pub use` names: the path through the re-export to the path it re-exports; and a
+    module's private alias (`use macos as imp;`), which its re-exports go through."""
     files = {mod: path for path, (_, mod) in tree.items()}
-    out = {}
+    found = []
     for path, (_, mod) in tree.items():
         sc = scans[path]
         text = "\n".join(sc.codes)
         starts = list(itertools.accumulate((len(x) + 1 for x in sc.codes[:-1]), initial=0))
         for m in USE.finditer(text):
             line = bisect.bisect_right(starts, m.start()) - 1
-            if not PUB_USE.match(sc.codes[line]) or sc.test[line]:
-                continue
+            if not sc.test[line]:
+                cur = mod + sc.mods[line]
+                found += [
+                    (cur, segs, name, PUB_USE.match(sc.codes[line])) for segs, name in named(m[1])
+                ]
 
-            for segs, name in named(m[1]):
-                to = absolute(mod + sc.mods[line], segs, files)
-                if to is not None:
-                    out[mod + sc.mods[line] + (name,)] = to
+    out = {}
+    for cur, segs, name, public in found:
+        to = absolute(cur, segs, files)
+        if not public and to in files:
+            out[cur + (name,)] = to
+
+    known = files | out
+    for cur, segs, name, public in found:
+        to = absolute(cur, segs, known)
+        if public and to is not None:
+            out[cur + (name,)] = to
 
     return out
 
@@ -910,7 +922,7 @@ def edges(scans: "Scans") -> list[tuple[str, int, str, str]]:
         used = set(USED.findall(bare))
         for pos, segs, name in refs:
             i = bisect.bisect_right(starts, pos) - 1
-            if sc.test[i] or "cfg(doc)" in sc.raws[max(0, i - 1)]:
+            if sc.test[i] or "#[cfg(doc)]" in sc.raws[max(0, i - 1)]:
                 continue
 
             # A re-export alone isn't a use; the file using the name it brings in is.
@@ -941,8 +953,8 @@ def private_fns(scans: "Scans") -> set[str]:
     return private - public - STD_NAMES
 
 
-def layering(scans: "Scans") -> list[Hit]:
-    """The layer rules on the whole crate."""
+def layering(scans: "Scans", since: str | None = None) -> list[Hit]:
+    """The layer rules on the whole crate; the baseline compared with its own at `since`."""
     out = unplaced(scans)
     for path, line, item, file in edges(scans):
         a, b = layer(path), layer(file)
@@ -964,7 +976,7 @@ def layering(scans: "Scans") -> list[Hit]:
             out += styled(path, sc, hidden) if at == "styled" else []
             out += os_code(path, sc) if not path.startswith("src/platform/") else []
 
-    return baselined(out, scans.top)
+    return baselined(out, scans.top, since)
 
 
 def matches(sc: Scan, pattern: re.Pattern) -> list[tuple[int, re.Match]]:
@@ -1008,36 +1020,49 @@ def os_code(path: str, sc: Scan) -> list[Hit]:
     return out
 
 
-def baselined(found: list[Hit], top: Path) -> list[Hit]:
-    """The findings the baseline doesn't allow, and its lines that allow more than is found. A line
-    is a finding's key (an item, which may be used many times), and for `os` also how many gates
-    the file may have: `os src/keys.rs target_os 7`."""
-    file = top / BASELINE
-    listed = {}
-    for n, raw in enumerate(read(file).splitlines() if file.is_file() else [], 1):
+def allowed(text: str) -> dict[str, tuple[int, int | None]]:
+    """A baseline's lines: each key with its line number and how many findings it allows (None
+    for a line without a count)."""
+    out = {}
+    for n, raw in enumerate(text.splitlines(), 1):
         key = raw.split("#")[0].strip()
         head, _, num = key.rpartition(" ")
-        if key.startswith("os ") and num.isdigit():
-            listed[head] = (n, int(num))
-        elif key:
-            listed[key] = (n, None)
+        if key:
+            out[head if num.isdigit() else key] = (n, int(num) if num.isdigit() else None)
 
+    return out
+
+
+def baselined(found: list[Hit], top: Path, since: str | None) -> list[Hit]:
+    """The findings the baseline doesn't allow, and its lines that allow more than is found or
+    than the base allowed. A line is a finding's key and how many there are:
+    `layer src/ui/mod.rs -> ui/theme.rs::Theme 3`, `os src/keys.rs target_os 5`."""
+    file = top / BASELINE
+    listed = allowed(read(file)) if file.is_file() else {}
+    before = since and git(top, "show", f"{since}:{BASELINE}")
+    before = allowed(before) if before else None
     counts = collections.Counter(h.key for h in found)
     out = []
     for h in found:
-        if h.key not in listed:
-            out.append(h)
-        elif (allowed := listed[h.key][1]) is not None and counts[h.key] > allowed:
-            h.msg += f" ({counts[h.key]} in the file, the baseline allows {allowed})"
+        n = listed.get(h.key, (0, 0))[1]
+        if n is not None and counts[h.key] > n:
+            h.msg += f" ({counts[h.key]} found, the baseline allows {n})" if n else ""
             out.append(h)
 
-    for key, (n, allowed) in listed.items():
-        if not counts[key]:
-            msg = f"`{key}` is no longer found: delete the line, the baseline only shrinks"
-            out.append(Hit(BASELINE, n, "baseline", msg))
-        elif allowed is not None and counts[key] < allowed:
-            msg = f"`{key}` is found {counts[key]} times, not {allowed}: lower it, it only shrinks"
-            out.append(Hit(BASELINE, n, "baseline", msg))
+    for key, (line, n) in listed.items():
+        was = before.get(key, (0, 0))[1] if before is not None else None
+        if n is None:
+            msg = f"`{key}` has no count: end the line with how many are found ({counts[key]})"
+        elif was is not None and n > was:
+            msg = (
+                f"`{key}` allows {n}, more than the base's {was}: fix the finding, it only shrinks"
+            )
+        elif counts[key] < n:
+            msg = f"`{key}` is found {counts[key]} times, not {n}: lower or delete the line"
+        else:
+            continue
+
+        out.append(Hit(BASELINE, line, "baseline", msg))
 
     return out
 
@@ -1161,7 +1186,7 @@ def findings(top: Path, scope: dict | None, since: str | None, bins: bool = Fals
             out += hits(x, scans[x], None if scope is None else scope[x])
 
     out += unused_pubs(scans, scope, bins) + tangles(top, since, scope, scans)
-    return out + layering(scans)
+    return out + layering(scans, since)
 
 
 def unseen(top: Path, warns: list[Hit]) -> list[Hit]:
