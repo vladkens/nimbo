@@ -54,7 +54,20 @@ pub type Localizations = &'static [(&'static str, &'static str)];
 
 /// nimbo's own catalogs, for its strings (OK, Cancel, Copy, an icon button's name), each used
 /// with the app's of the same language (`make i18n` updates them from the code).
-const OWN: Localizations = &[("ru", include_str!("../../locales/ru.po"))];
+const OWN: Localizations = &[
+  ("de", include_str!("../../locales/de.po")),
+  ("es", include_str!("../../locales/es.po")),
+  ("fr", include_str!("../../locales/fr.po")),
+  ("it", include_str!("../../locales/it.po")),
+  ("ja", include_str!("../../locales/ja.po")),
+  ("ko", include_str!("../../locales/ko.po")),
+  ("pl", include_str!("../../locales/pl.po")),
+  ("pt-BR", include_str!("../../locales/pt-BR.po")),
+  ("ru", include_str!("../../locales/ru.po")),
+  ("tr", include_str!("../../locales/tr.po")),
+  ("uk", include_str!("../../locales/uk.po")),
+  ("zh-Hans", include_str!("../../locales/zh-Hans.po")),
+];
 
 /// The language the app's strings show in.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -440,6 +453,10 @@ msgstr[2] "{n} диктовок"
     assert_eq!([t!("Cancel"), t!("Copy")].map(Localized::as_str), ["Отменить", "Скопировать"]);
     set_thread(Locale::Tag("ru"), &[("de", "")]);
     assert_eq!(t!("Cancel").as_str(), "Cancel");
+    set_thread(Locale::Tag("de-AT"), &[("de", "")]);
+    assert_eq!(t!("Cancel").as_str(), "Abbrechen");
+    set_thread(Locale::Tag("zh-Hans-CN"), &[("zh-Hans", "")]);
+    assert_eq!(t!("Copy").as_str(), "拷贝");
     for (tag, po) in OWN {
       let entries = po.matches("\nmsgid ").count() - 1;
       assert_eq!(Catalog::parse(po).len(), entries, "{tag}: each translated");

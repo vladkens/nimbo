@@ -1,0 +1,136 @@
+# nimbo's own strings in Chinese (Simplified), as macOS names them (`make i18n` merges the code's changes).
+# MIT License, as nimbo.
+msgid ""
+msgstr ""
+"Project-Id-Version: nimbo\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-11-15 04:28+0200\n"
+"PO-Revision-Date: 2026-11-18 06:00+0200\n"
+"Last-Translator: \n"
+"Language-Team: none\n"
+"Language: zh-Hans\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+#: src/platform/macos/shell.rs:166
+msgid "Close Window"
+msgstr "关闭窗口"
+
+#: src/platform/macos/shell.rs:167
+#, rust-format
+msgid "Quit {name}"
+msgstr "退出 {name}"
+
+#: src/ui/behavior.rs:319
+msgid "Cut"
+msgstr "剪切"
+
+#: src/ui/behavior.rs:320
+msgid "Paste"
+msgstr "粘贴"
+
+#: src/ui/behavior.rs:321 src/ui/widgets/icon.rs:174
+msgid "Copy"
+msgstr "拷贝"
+
+#: src/ui/behavior.rs:323
+msgid "Select All"
+msgstr "全选"
+
+#: src/ui/dialog.rs:78
+msgid "OK"
+msgstr "好"
+
+#: src/ui/dialog.rs:78
+msgid "Cancel"
+msgstr "取消"
+
+#: src/ui/widgets/button.rs:202
+msgid "Help"
+msgstr "帮助"
+
+#: src/ui/widgets/icon.rs:160
+msgid "Settings"
+msgstr "设置"
+
+#: src/ui/widgets/icon.rs:161
+msgid "Appearance"
+msgstr "外观"
+
+#: src/ui/widgets/icon.rs:162
+msgid "Options"
+msgstr "选项"
+
+#: src/ui/widgets/icon.rs:163
+msgid "Info"
+msgstr "信息"
+
+#: src/ui/widgets/icon.rs:164
+msgid "Warning"
+msgstr "警告"
+
+#: src/ui/widgets/icon.rs:165
+msgid "Reset"
+msgstr "重置"
+
+#: src/ui/widgets/icon.rs:166
+msgid "Delete"
+msgstr "删除"
+
+#: src/ui/widgets/icon.rs:167
+msgid "Folder"
+msgstr "文件夹"
+
+#: src/ui/widgets/icon.rs:168
+msgid "Document"
+msgstr "文稿"
+
+#: src/ui/widgets/icon.rs:169
+msgid "Open"
+msgstr "打开"
+
+#: src/ui/widgets/icon.rs:170
+msgid "Done"
+msgstr "完成"
+
+#: src/ui/widgets/icon.rs:171
+msgid "Search"
+msgstr "搜索"
+
+#: src/ui/widgets/icon.rs:172
+msgid "Play"
+msgstr "播放"
+
+#: src/ui/widgets/icon.rs:173
+msgid "Clear"
+msgstr "清除"
+
+#: src/ui/widgets/icon.rs:175
+msgid "Download"
+msgstr "下载"
+
+#: src/ui/widgets/icon.rs:176
+msgid "History"
+msgstr "历史记录"
+
+#: src/ui/widgets/icon.rs:177
+msgid "Stop"
+msgstr "停止"
+
+#: src/ui/widgets/icon.rs:178
+msgid "Dictate"
+msgstr "听写"
+
+#: src/ui/widgets/icon.rs:179
+msgid "Sidebar"
+msgstr "边栏"
+
+#: src/ui/widgets/icon.rs:180
+msgid "Close"
+msgstr "关闭"
+
+#: src/ui/widgets/icon.rs:181
+msgid "Accessibility"
+msgstr "辅助功能"

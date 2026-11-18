@@ -1,0 +1,136 @@
+# nimbo's own strings in French, as macOS names them (`make i18n` merges the code's changes).
+# MIT License, as nimbo.
+msgid ""
+msgstr ""
+"Project-Id-Version: nimbo\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-11-15 04:28+0200\n"
+"PO-Revision-Date: 2026-11-18 06:00+0200\n"
+"Last-Translator: \n"
+"Language-Team: none\n"
+"Language: fr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+#: src/platform/macos/shell.rs:166
+msgid "Close Window"
+msgstr "Fermer la fenêtre"
+
+#: src/platform/macos/shell.rs:167
+#, rust-format
+msgid "Quit {name}"
+msgstr "Quitter {name}"
+
+#: src/ui/behavior.rs:319
+msgid "Cut"
+msgstr "Couper"
+
+#: src/ui/behavior.rs:320
+msgid "Paste"
+msgstr "Coller"
+
+#: src/ui/behavior.rs:321 src/ui/widgets/icon.rs:174
+msgid "Copy"
+msgstr "Copier"
+
+#: src/ui/behavior.rs:323
+msgid "Select All"
+msgstr "Tout sélectionner"
+
+#: src/ui/dialog.rs:78
+msgid "OK"
+msgstr "OK"
+
+#: src/ui/dialog.rs:78
+msgid "Cancel"
+msgstr "Annuler"
+
+#: src/ui/widgets/button.rs:202
+msgid "Help"
+msgstr "Aide"
+
+#: src/ui/widgets/icon.rs:160
+msgid "Settings"
+msgstr "Réglages"
+
+#: src/ui/widgets/icon.rs:161
+msgid "Appearance"
+msgstr "Apparence"
+
+#: src/ui/widgets/icon.rs:162
+msgid "Options"
+msgstr "Options"
+
+#: src/ui/widgets/icon.rs:163
+msgid "Info"
+msgstr "Infos"
+
+#: src/ui/widgets/icon.rs:164
+msgid "Warning"
+msgstr "Avertissement"
+
+#: src/ui/widgets/icon.rs:165
+msgid "Reset"
+msgstr "Réinitialiser"
+
+#: src/ui/widgets/icon.rs:166
+msgid "Delete"
+msgstr "Supprimer"
+
+#: src/ui/widgets/icon.rs:167
+msgid "Folder"
+msgstr "Dossier"
+
+#: src/ui/widgets/icon.rs:168
+msgid "Document"
+msgstr "Document"
+
+#: src/ui/widgets/icon.rs:169
+msgid "Open"
+msgstr "Ouvrir"
+
+#: src/ui/widgets/icon.rs:170
+msgid "Done"
+msgstr "Terminé"
+
+#: src/ui/widgets/icon.rs:171
+msgid "Search"
+msgstr "Rechercher"
+
+#: src/ui/widgets/icon.rs:172
+msgid "Play"
+msgstr "Lire"
+
+#: src/ui/widgets/icon.rs:173
+msgid "Clear"
+msgstr "Effacer"
+
+#: src/ui/widgets/icon.rs:175
+msgid "Download"
+msgstr "Télécharger"
+
+#: src/ui/widgets/icon.rs:176
+msgid "History"
+msgstr "Historique"
+
+#: src/ui/widgets/icon.rs:177
+msgid "Stop"
+msgstr "Arrêter"
+
+#: src/ui/widgets/icon.rs:178
+msgid "Dictate"
+msgstr "Dicter"
+
+#: src/ui/widgets/icon.rs:179
+msgid "Sidebar"
+msgstr "Barre latérale"
+
+#: src/ui/widgets/icon.rs:180
+msgid "Close"
+msgstr "Fermer"
+
+#: src/ui/widgets/icon.rs:181
+msgid "Accessibility"
+msgstr "Accessibilité"
