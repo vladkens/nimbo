@@ -10,7 +10,7 @@ impl Ui<'_> {
   /// and no border where controls are flat ([Theme::flat]), else a bordered box; on, the
   /// accent with a white check.
   pub fn checkbox(&mut self, on: &mut bool, label: &str) -> Response {
-    let t = self.theme();
+    let t = self.controls_theme();
     let id = self.take_id();
     let b = self.toggle_behavior(id, on);
     let hot = self.ctl_hot(id, b.hovered);

@@ -12,7 +12,7 @@ impl Ui<'_> {
   /// accent; `None` slides a third of it along every 1.4 s while frames follow (indeterminate).
   /// Disabled, both dim toward the ground and stop.
   pub fn progress(&mut self, k: Option<f32>) -> Response {
-    let t = self.theme();
+    let t = self.controls_theme();
     let (id, off) = (self.take_id(), self.take_disabled());
     let (rail, fill) = (self.dim(t.track, off), self.dim(t.accent, off));
     let now = self.now().as_secs_f32();
