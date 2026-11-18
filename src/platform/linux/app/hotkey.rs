@@ -243,7 +243,7 @@ fn grabbed(s: &State, needs: bool, f: impl FnOnce(&Grab) -> Done) -> Done {
 /// A connection to the portal ([dbus::portal]), the signals followed; `Err` without a portal that
 /// has global shortcuts.
 fn connect(s: &Rc<State>) -> Result<P, String> {
-  let bus = portal(super::shell::info().id)?;
+  let bus = portal(super::info().id)?;
   let args = V::Tuple(vec![V::s(SHORTCUTS), V::s("version")]);
   if let Err(e) = dbus::call(bus, PORTAL, PATH, "org.freedesktop.DBus.Properties", "Get", args, MS)
   {
@@ -301,7 +301,7 @@ fn close_session(s: &State) {
 /// Binds the hotkey in the session made.
 fn bind(s: &Rc<State>) {
   let (Some(session), Some(k)) = (s.session.borrow().clone(), s.hotkey.get()) else { return };
-  let app = super::shell::info();
+  let app = super::info();
   let mut opts = vec![("description", V::s(app.name))];
   if let Some(t) = trigger(&k) {
     opts.push(("preferred_trigger", V::S(t)));

@@ -46,14 +46,14 @@ mod tooltip;
 
 pub(crate) use button::MarkShift;
 pub use button::{Button, ButtonRole};
-pub use field::{FieldKind, FieldStyle, TextInput};
+pub use field::{FieldStyle, TextInput};
 pub use icon::{Icon, IconPaint};
-pub(crate) use image::placed;
-pub use image::{ContentMode, ImageSource};
+pub use image::ImageSource;
 pub use slider::Slider;
 
 use super::{Behavior, Id, Style, Ui};
 use crate::scene::{Color, alpha, mix};
+pub use crate::ui::{ContentMode, FieldKind};
 
 impl Ui<'_> {
   /// A hover fade for `id`, 0 to 1, on the theme's transition: `on` while hovered. Its state

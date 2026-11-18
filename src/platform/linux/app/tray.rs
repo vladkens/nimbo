@@ -233,7 +233,7 @@ impl Tray {
     }
 
     static FIRST: std::sync::Once = std::sync::Once::new();
-    let (data, id, mut first) = (paths::data_dir(""), super::shell::info().id, false);
+    let (data, id, mut first) = (paths::data_dir(""), super::info().id, false);
     FIRST.call_once(|| first = true);
     let name = desktop::tray_icon(&data, id, &icon.svg(SIDES[1], tint), first);
     if let (Err(e), true) = (&name, first) {
@@ -371,7 +371,7 @@ impl Tray {
   // MARK: D-Bus
 
   fn property(&self, iface: &str, name: &str) -> Option<V> {
-    let info = super::shell::info();
+    let info = super::info();
     let s = |s: &str| Some(V::s(s));
     let no_pixmaps = || Some(V::Array("(iiay)", Vec::new()));
     match (iface, name) {

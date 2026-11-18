@@ -61,10 +61,9 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::platform::hardware as imp;
-use crate::shell::Proxy;
 #[cfg(doc)]
 use crate::{App, Event, Main};
-use crate::{platform, shell};
+use crate::{platform, runloop};
 
 /// A kind of change in the system: what to read again. More kinds come (displays, power), so a
 /// `match` on it keeps a `_` arm.
@@ -198,6 +197,8 @@ impl Watcher {
 }
 
 static WATCHER: Watcher = Watcher::new();
+/// Where a change goes on the main thread: the shell's delivery to its hook and windows.
+static DELIVER: OnceLock<fn(Change)> = OnceLock::new();
 static EPOCH: OnceLock<Instant> = OnceLock::new();
 /// Each notice to stderr (`NIMBO_TRACE`), and whether it came on the main thread: for checks,
 /// not for apps (it takes stderr's lock, which the OS's callbacks shouldn't).
@@ -216,25 +217,27 @@ pub(crate) fn notice(kind: Change) {
   }
 
   if WATCHER.notice(kind, now()) {
-    Proxy(()).after(SETTLE, job);
+    runloop::after(SETTLE, job);
   }
 }
 
 /// Delivers the kinds due, then posts itself again for the rest.
-fn job(main: &mut crate::Main) {
+fn job() {
   let (ready, wait) = WATCHER.take(now());
   if let Some(wait) = wait {
-    Proxy(()).after(wait, job);
+    runloop::after(wait, job);
   }
 
+  let Some(deliver) = DELIVER.get() else { return };
   for kind in ready {
-    shell::changed(main, kind);
+    deliver(kind);
   }
 }
 
 /// Watches each of `kinds` not watched yet, on the main thread; `Err` names those the OS
 /// refused, the rest watched.
-pub(crate) fn watch(kinds: &[Change]) -> Result<(), String> {
+pub(crate) fn watch(kinds: &[Change], deliver: fn(Change)) -> Result<(), String> {
+  DELIVER.get_or_init(|| deliver);
   EPOCH.get_or_init(Instant::now);
   TRACE.store(std::env::var_os("NIMBO_TRACE").is_some(), Ordering::Relaxed);
   let mut errors = Vec::new();

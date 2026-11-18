@@ -7,8 +7,8 @@
 
 use crate::bitmap::Bitmap;
 use crate::png::Png;
-use crate::scene::{ImageId, Images, Rect};
-use crate::ui::{Flow, Id, Kind, Response, Style, Ui, UiState};
+use crate::scene::{ImageId, Images};
+use crate::ui::{ContentMode, Flow, Id, Kind, Response, Style, Ui, UiState};
 
 /// What [Ui::image] shows, as SwiftUI's `Image` is made from a name or an `NSImage`: from an
 /// [ImageId], a [Png] or a `&`[Bitmap].
@@ -20,16 +20,6 @@ pub enum ImageSource<'a> {
   Png(Png),
   /// A picture the OS decoded ([Bitmap::decode]).
   Bitmap(&'a Bitmap),
-}
-
-/// How an image fills the box it is given ([Ui::aspect_ratio]), as SwiftUI's `ContentMode`;
-/// without one it is stretched to the box.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ContentMode {
-  /// Whole and in its own aspect, centred: letterboxed where the box has another (`scaledToFit`).
-  Fit,
-  /// Covering the box in its own aspect, centred, the overflow cut off (`scaledToFill`).
-  Fill,
 }
 
 impl From<ImageId> for ImageSource<'_> {
@@ -102,24 +92,6 @@ impl Ui<'_> {
     let id = add(&mut self.images);
     self.st.pictures.push((key, id, true));
     id
-  }
-}
-
-/// Where an image of `w` × `h` pixels draws in its box `r` as `mode` says, and the part of it
-/// shown there (in pixels).
-pub(crate) fn placed(mode: Option<ContentMode>, r: Rect, w: f32, h: f32) -> (Rect, Rect) {
-  let all = Rect::new(0.0, 0.0, w, h);
-  let (sx, sy) = (r.w / w, r.h / h);
-  match mode {
-    None => (r, all),
-    Some(ContentMode::Fit) => {
-      let (dw, dh) = (w * sx.min(sy), h * sx.min(sy));
-      (Rect::new(r.x + (r.w - dw) / 2.0, r.y + (r.h - dh) / 2.0, dw, dh), all)
-    }
-    Some(ContentMode::Fill) => {
-      let (uw, uh) = (r.w / sx.max(sy), r.h / sx.max(sy));
-      (r, Rect::new((w - uw) / 2.0, (h - uh) / 2.0, uw, uh))
-    }
   }
 }
 

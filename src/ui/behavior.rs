@@ -68,7 +68,7 @@ use keyboard_types::Modifiers;
 
 use super::input::ScrollState;
 use super::textlayout::{Edit, TextLayout};
-use super::{Cursor, FieldKind, Focus, Id, Role, State, Style, Ui, UiState};
+use super::{Cursor, Focus, Id, Role, State, Style, Ui, UiState};
 use crate::app::{Ime, MouseButton};
 use crate::keys::{Command, Delete, Key, Move};
 use crate::menu::{Item, Menu};
@@ -192,6 +192,19 @@ impl Ui<'_> {
 }
 
 // MARK: Text
+
+/// What a text field takes, as SwiftUI's `TextField`, `TextField(axis: .vertical)` and
+/// `SecureField`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FieldKind {
+  /// One line, scrolling sideways; Enter submits.
+  #[default]
+  SingleLine,
+  /// Lines wrapped at its width, Enter a line break; give the frame a height, it scrolls past it.
+  MultiLine,
+  /// One line of secret text, shown as dots: no input method, nothing copied.
+  Secure,
+}
 
 /// What text in a field's behaviour does ([FieldBehavior::editing]): a field of a
 /// [FieldKind] takes typing and input methods; selectable text only selects and copies.

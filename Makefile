@@ -1,6 +1,6 @@
 .PHONY: prepare check test build update clean
 
-LINT := uv run --script https://raw.githubusercontent.com/vladkens/lint/main/rust.py
+LINT := uv run scripts/lint.py
 
 prepare:
 	cargo +nightly fmt

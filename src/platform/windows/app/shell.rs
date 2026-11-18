@@ -15,7 +15,7 @@
 use std::any::TypeId;
 use std::cell::RefCell;
 use std::ptr::{null, null_mut};
-use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
@@ -28,7 +28,7 @@ use windows_sys::Win32::UI::HiDpi::{
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use super::super::{Timer, create, run_loop, settings, show_overlay, wide, with_window};
-use super::{hardware, paste, tray};
+use super::{hardware, host, paste, tray};
 use crate::app::{App, Event};
 use crate::shell::{AppInfo, Main, Presence};
 use crate::{Config, shell};
@@ -64,18 +64,6 @@ fn shell<R>(f: impl FnOnce(&mut Shell) -> R) -> R {
 
 /// The thread `run` runs on.
 static MAIN: AtomicU32 = AtomicU32::new(0);
-/// The shell's window, as a number for other threads; 0 when there is none. An atomic, not a
-/// lock: [post] runs in callbacks that must never wait (Windows' audio notifications). A post
-/// that read the handle just before the loop ended sends to the window being destroyed: the
-/// message fails and the work is dropped, or goes with the window and its closure leaks, once,
-/// as the app ends; work posted after the loop is dropped anyway.
-static HOST: AtomicIsize = AtomicIsize::new(0);
-
-/// The shell's window: null while no app runs.
-pub(in super::super) fn host() -> HWND {
-  HOST.load(Ordering::Acquire) as HWND
-}
-
 pub fn is_main() -> bool {
   MAIN.load(Ordering::Relaxed) == unsafe { GetCurrentThreadId() }
 }
@@ -86,7 +74,7 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
   unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
   shell(|s| *s = Shell::default());
   let hwnd = make_host(info.name);
-  HOST.store(hwnd as isize, Ordering::Release);
+  super::HOST.store(hwnd as isize, Ordering::Release);
 
   start(&mut Main::here());
   if !shell(|s| s.quitting) {
@@ -97,7 +85,7 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
   shell::finish(close);
   tray::removed();
   // Work posted after the loop is dropped unrun: the closures are let go here.
-  HOST.store(0, Ordering::Release);
+  super::HOST.store(0, Ordering::Release);
 
   let mut msg: MSG = unsafe { std::mem::zeroed() };
   while unsafe { PeekMessageW(&mut msg, hwnd, WM_POST, WM_POST, PM_REMOVE) } != 0 {

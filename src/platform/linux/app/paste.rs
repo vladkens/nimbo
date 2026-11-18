@@ -18,9 +18,8 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use super::super::dl::fns;
-use super::super::{CLIPBOARD, Fp, Gtk, P, lib, load, overlay};
-use super::remote;
-use super::shell::running;
+use super::super::{CLIPBOARD, Fp, Gtk, P, display, lib, load};
+use super::{remote, running};
 use crate::clipboard::Snapshot;
 
 // What the plain-text clipboard ([super::super::clipboard]) doesn't need.
@@ -103,8 +102,8 @@ fn clip() -> Option<(&'static Selection, &'static Gtk, P)> {
   static SELECTION: OnceLock<Option<Selection>> = OnceLock::new();
   let s = SELECTION.get_or_init(|| Selection::load(&lib()?)).as_ref().filter(|_| running())?;
   let g = load()?;
-  let display = match overlay::wayland() {
-    true => overlay::xdisplay()?,
+  let display = match display::wayland() {
+    true => display::xdisplay()?,
     false => unsafe { (g.gdk_display_get_default)() },
   };
 
@@ -224,7 +223,7 @@ pub fn offer(text: &str, on_read: Option<OnRead>) -> Option<u64> {
   let id = serve(types, on_read)?;
   // Not the Wayland apps' (KWin takes XWayland's selection only from an X window in focus), or
   // another owner's since.
-  if overlay::wayland() && remote::clipboard().is_none() && !(taken() && holds(id)) {
+  if display::wayland() && remote::clipboard().is_none() && !(taken() && holds(id)) {
     UNREACHED.set(id);
   }
 
@@ -238,7 +237,7 @@ fn taken() -> bool {
   type Atom = unsafe extern "C" fn(P, *const c_char) -> c_ulong;
   let Some((s, g, _)) = clip() else { return false };
   let get = lib().and_then(|l| unsafe { l.sym::<Atom>("gdk_x11_get_xatom_by_name_for_display\0") });
-  let (Some(get), Some(x)) = (get, overlay::xdisplay()) else { return false };
+  let (Some(get), Some(x)) = (get, display::xdisplay()) else { return false };
   WANTED.set(unsafe { get(x, c"CLIPBOARD".as_ptr()) });
   ASKED.set(false);
   unsafe { (s.gdk_window_add_filter)(null_mut(), on_x as Fp, null_mut()) };

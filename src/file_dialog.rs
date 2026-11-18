@@ -1,6 +1,6 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The system's file panel, asked for by a window ([Ui::file_dialog]): an
+//! The system's file panel, asked for by a window ([crate::Ui::file_dialog]): an
 //! open or a save panel over it, the window drawing on, its answer coming back to the window as
 //! [crate::Event::FileDialog]. The harness answers it as a test says
 //! ([crate::Harness::file_dialog]).
@@ -9,8 +9,6 @@
 //! `IFileSaveDialog` owned by the window; Linux the XDG desktop portal's `FileChooser`.
 
 use std::path::PathBuf;
-
-use crate::Ui;
 
 /// Which panel a [FileDialog] is, as SwiftUI's `fileImporter` and `fileExporter`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -49,15 +47,5 @@ impl FileDialog {
 
   pub fn name(self, name: &str) -> Self {
     Self { name: Some(name.into()), ..self }
-  }
-}
-
-impl Ui<'_> {
-  /// Shows the system's file panel over the window once this frame is built: from the person's
-  /// click, never by itself. The answer comes as [crate::Event::FileDialog]. Asked while one is
-  /// open, it is answered `None` at once on macOS and Windows and replaces it on Linux, where a
-  /// portal that went away never answers.
-  pub fn file_dialog(&mut self, dialog: FileDialog) {
-    self.st.file_dialog = Some(dialog);
   }
 }

@@ -6,7 +6,18 @@
 //! destructive items. Labels longer than [LABEL] are shortened to fit ([Item::button]).
 
 use crate::keys::Shortcut;
-use crate::ui::ButtonRole;
+
+/// What a button or a menu item does, as SwiftUI's `ButtonRole`: a [crate::Dialog]'s buttons are
+/// told apart by it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ButtonRole {
+  /// The action that goes ahead, the default one.
+  Confirm,
+  /// Keeps things as they are.
+  Cancel,
+  /// Deletes or loses something: drawn red.
+  Destructive,
+}
 
 /// A menu's items, in the order they show, each chosen by its action: a value of the app's own
 /// type `A` (an enum of what its menus do), as SwiftUI's menus run a button's action.

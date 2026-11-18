@@ -974,7 +974,7 @@ impl Clipboard for WinClipboard {
 /// The system clipboard outside a window, through the app's hidden window; `None` while no app
 /// runs: a clipboard opened for no window can't be written.
 pub fn clipboard() -> Option<impl Clipboard> {
-  let host = app::shell::host();
+  let host = app::host();
   (!host.is_null()).then(|| WinClipboard::new(host))
 }
 

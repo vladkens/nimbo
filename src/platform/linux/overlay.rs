@@ -17,17 +17,16 @@
 //! output). With no XWayland, a borderless toplevel that the compositor places, focuses and
 //! stacks. It is shown, never presented (`gtk_window_present` asks for activation).
 
-use std::ffi::{CString, c_int};
-use std::os::unix::ffi::OsStringExt;
+use std::ffi::c_int;
 use std::sync::OnceLock;
 
+use super::display::{is_wayland, wayland, xdisplay};
 use super::dl::{Lib, fns};
 use super::{FALSE, P, S, TRUE, lib};
 use crate::scene::Size;
 use crate::shell::Anchor;
 
 fns!(Gdk {
-  fn g_type_check_instance_is_a(instance: P, ty: usize) -> c_int;
   fn gtk_widget_get_screen(w: P) -> P;
   fn gdk_screen_get_rgba_visual(screen: P) -> P;
   fn gtk_widget_set_visual(w: P, visual: P);
@@ -47,8 +46,6 @@ fns!(Gdk {
   fn gtk_widget_get_window(w: P) -> P;
   fn gdk_window_move(w: P, x: c_int, y: c_int);
   fn gdk_window_raise(w: P);
-  fn gdk_display_get_default() -> P;
-  fn gdk_display_open(name: S) -> P;
   fn gdk_display_get_default_screen(display: P) -> P;
   fn gtk_window_set_screen(w: P, screen: P);
   fn gtk_widget_get_display(w: P) -> P;
@@ -82,31 +79,6 @@ const BOTTOM: c_int = 3;
 fn gdk() -> &'static Gdk {
   static GDK: OnceLock<Option<Gdk>> = OnceLock::new();
   GDK.get_or_init(|| Gdk::load(&lib()?)).as_ref().expect("GTK is loaded before a window opens")
-}
-
-/// The display is Wayland's: GDK's Wayland backend is built in and opened it.
-pub fn wayland() -> bool {
-  is_wayland(unsafe { (gdk().gdk_display_get_default)() })
-}
-
-fn is_wayland(display: P) -> bool {
-  let Some(lib) = lib() else { return false };
-  // SAFETY: GObject's type getter of GDK's Wayland display, a `GType` (a `gsize`).
-  let get = unsafe { lib.sym::<unsafe extern "C" fn() -> usize>("gdk_wayland_display_get_type\0") };
-  get.is_some_and(|f| unsafe { (gdk().g_type_check_instance_is_a)(display, f()) } != 0)
-}
-
-/// XWayland's display (`DISPLAY`), opened at the first call: an overlay's on Wayland without the
-/// layer shell, and the clipboard's ([super::app::paste]).
-pub(super) fn xdisplay() -> Option<P> {
-  static X: OnceLock<usize> = OnceLock::new();
-  let at = X.get_or_init(|| {
-    let name = std::env::var_os("DISPLAY").and_then(|d| CString::new(d.into_vec()).ok());
-    // SAFETY: GDK's call on the main thread; GDK's Wayland backend refuses an X display's name.
-    let d = name.map_or(std::ptr::null_mut(), |n| unsafe { (gdk().gdk_display_open)(n.as_ptr()) });
-    if d.is_null() || is_wayland(d) { 0 } else { d as usize }
-  });
-  (*at != 0).then_some(*at as P)
 }
 
 /// XWayland's display, for an overlay on Wayland without the layer shell.

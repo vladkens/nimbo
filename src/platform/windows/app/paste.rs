@@ -25,7 +25,7 @@ use windows_sys::Win32::System::Memory::{
 };
 
 use super::super::{CF_TEXT_UTF16, wide};
-use super::shell::host;
+use super::host;
 use crate::clipboard::Snapshot;
 
 /// `CF_BITMAP`, `CF_METAFILEPICT`, `CF_PALETTE`, `CF_ENHMETAFILE` and their display forms: GDI
