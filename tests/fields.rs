@@ -12,10 +12,12 @@
 //! right-click, its items enabled as they can act, and what it runs.
 
 #[path = "../examples/fields.rs"]
+#[expect(dead_code, reason = "its main and what this file doesn't use")]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
-#[allow(dead_code, unused_attributes)]
+#[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
 mod fields;
 
+#[expect(dead_code, reason = "this file uses a part of the helpers")]
 mod common;
 
 use std::time::Duration;

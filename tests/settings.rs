@@ -16,10 +16,12 @@
 //! the slider, choose in a select, move the focus, and reach only the dialog while it is open.
 
 #[path = "../examples/settings.rs"]
+#[expect(dead_code, reason = "its main and what this file doesn't use")]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
-#[allow(dead_code, unused_attributes)]
+#[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
 mod settings;
 
+#[expect(dead_code, reason = "this file uses a part of the helpers")]
 mod common;
 
 use std::time::Duration;

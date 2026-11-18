@@ -115,9 +115,9 @@ pub fn ns_cursor(c: Cursor) -> Retained<NSCursor> {
     Cursor::Text => NSCursor::IBeamCursor(),
     Cursor::Pointer => NSCursor::pointingHandCursor(),
     // `columnResizeCursor` and `rowResizeCursor` replace these from macOS 15 only.
-    #[allow(deprecated)]
+    #[expect(deprecated, reason = "its replacement is macOS 15+")]
     Cursor::ResizeX => NSCursor::resizeLeftRightCursor(),
-    #[allow(deprecated)]
+    #[expect(deprecated, reason = "its replacement is macOS 15+")]
     Cursor::ResizeY => NSCursor::resizeUpDownCursor(),
     Cursor::Crosshair => NSCursor::crosshairCursor(),
     Cursor::Grab => NSCursor::openHandCursor(),

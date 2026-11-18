@@ -137,9 +137,9 @@ pub struct Config {
   pub unified: bool,
   /// The window's icon off macOS ([Config::icon]): its side and straight RGBA pixels, `side`²
   /// of them, as only the builder checks; or a PNG's ([Config::png_icon]).
-  #[cfg_attr(target_os = "macos", allow(dead_code))]
+  #[cfg_attr(target_os = "macos", expect(dead_code, reason = "a macOS window has no icon"))]
   pub(crate) icon: Option<(u32, &'static [u8])>,
-  #[cfg_attr(target_os = "macos", allow(dead_code))]
+  #[cfg_attr(target_os = "macos", expect(dead_code, reason = "a macOS window has no icon"))]
   pub(crate) png_icon: Option<Png>,
   /// The app's catalogs ([Config::localizations]).
   pub localizations: Localizations,
@@ -206,7 +206,7 @@ impl Config {
   }
 
   /// The window's icon: its side and pixels, a PNG's decoded now.
-  #[cfg_attr(target_os = "macos", allow(dead_code))]
+  #[cfg_attr(target_os = "macos", expect(dead_code, reason = "a macOS window has no icon"))]
   pub(crate) fn window_icon(&self) -> Option<(u32, &'static [u8])> {
     self.icon.or_else(|| self.png_icon.map(|png| png.square()))
   }

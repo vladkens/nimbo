@@ -277,7 +277,10 @@ fn redraw(ids: Vec<u64>) {
 
 /// The activation token of the command being handled, for a window that shows or comes to the
 /// front meanwhile: used by it.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[cfg_attr(
+  not(any(test, target_os = "linux")),
+  expect(dead_code, reason = "only Linux hands a window the token")
+)]
 pub(crate) fn token() -> Option<String> {
   hooks(|h| {
     let (token, used) = h.token.as_mut()?;

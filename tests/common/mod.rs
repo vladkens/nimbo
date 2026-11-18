@@ -3,7 +3,6 @@
 //! Pixel helpers shared by the tests: a colour as the frame stores it, the difference of two
 //! pixels, a rect's middle; and the lines assistive technology reads. Each test crate uses its
 //! own subset of them.
-#![allow(dead_code)]
 
 use nimbo::{Color, Rect};
 

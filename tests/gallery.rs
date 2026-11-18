@@ -12,8 +12,9 @@
 //! gallery's, and so are its pictures on the `assets` branch when its worktree is there.
 
 #[path = "../examples/gallery.rs"]
+#[expect(dead_code, reason = "its main and what this file doesn't use")]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
-#[allow(dead_code, unused_attributes)]
+#[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
 mod gallery;
 
 mod common;

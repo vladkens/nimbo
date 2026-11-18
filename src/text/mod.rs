@@ -99,7 +99,10 @@ pub(crate) struct GlyphBox {
 /// How glyphs are rasterized; each backend reads what it uses (macOS no `text`, Linux no `smooth`
 /// or `dark`).
 #[derive(Clone, Copy, Debug)]
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#[cfg_attr(
+  not(target_os = "windows"),
+  expect(dead_code, reason = "Windows alone reads every field")
+)]
 pub(crate) struct Raster {
   pub scale: f32,
   /// Font smoothing (CoreGraphics' stem darkening on current macOS).

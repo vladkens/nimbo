@@ -673,7 +673,7 @@ impl<'a> Ui<'a> {
   /// modifiers ask; a double click activates it. A secondary one, as a context menu opens
   /// ([Ui::context_press]), focuses the list and selects the row alone unless it is selected
   /// (Finder's rule): the app's [Ui::context_menu] after it reads that selection.
-  #[allow(clippy::too_many_arguments)]
+  #[expect(clippy::too_many_arguments, reason = "the list's state, its response and the rows")]
   fn list_press(
     &mut self,
     id: Id,

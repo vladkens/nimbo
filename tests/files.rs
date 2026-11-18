@@ -5,10 +5,12 @@
 //! light it, dragged away or dropped outside it leave it as it was, dropped on it list there.
 
 #[path = "../examples/files.rs"]
+#[expect(dead_code, reason = "its main and what this file doesn't use")]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
-#[allow(dead_code, unused_attributes)]
+#[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
 mod files;
 
+#[expect(dead_code, reason = "this file uses a part of the helpers")]
 mod common;
 
 use std::path::{Path, PathBuf};

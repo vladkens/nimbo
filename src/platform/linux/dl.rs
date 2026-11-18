@@ -40,7 +40,7 @@ impl Lib {
 /// them all by name.
 macro_rules! fns {
   ($name:ident { $(fn $f:ident($($a:ident: $t:ty),* $(,)?) $(-> $r:ty)?;)* }) => {
-    #[allow(non_snake_case)]
+    #[expect(non_snake_case, reason = "the C functions' names")]
     struct $name {
       $($f: unsafe extern "C" fn($($t),*) $(-> $r)?,)*
     }

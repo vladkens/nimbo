@@ -549,7 +549,10 @@ impl<A: App> Runtime<A> {
   /// The OS took the pointer while a button was held (another window captured it): the press
   /// ends without a click. The platform then sends the button's [Event::MouseUp] as usual, which
   /// ends the app's drags.
-  #[cfg_attr(target_os = "macos", allow(dead_code))]
+  #[cfg_attr(
+    all(target_os = "macos", not(test)),
+    expect(dead_code, reason = "AppKit has no capture to lose")
+  )]
   pub fn cancel_press(&mut self) {
     let cancelled = self.ui.cancel_press();
     self.ask(cancelled);

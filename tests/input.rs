@@ -6,10 +6,12 @@
 //! and frames built only when the input changed something.
 
 #[path = "../examples/input.rs"]
+#[expect(dead_code, reason = "its main and what this file doesn't use")]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
-#[allow(dead_code, unused_attributes)]
+#[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
 mod input;
 
+#[expect(dead_code, reason = "this file uses a part of the helpers")]
 mod common;
 
 use common::{mid, px};

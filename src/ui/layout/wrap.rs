@@ -187,7 +187,7 @@ pub fn wrapped_size(s: &str, style: TextStyle, w: f32, m: &mut dyn Measure, k: &
 /// (an editable text) the same breaks give lines that cover the text: each up to where the next
 /// starts, with the spaces it broke at, the first from the line break before it. Each line of
 /// text is broken once per width and kept.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments, reason = "the text, how to break it, its cache and output")]
 pub fn wrap_text(
   text: &str,
   range: (u32, u32),
