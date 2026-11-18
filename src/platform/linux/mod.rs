@@ -145,6 +145,7 @@ fns!(Gtk {
   fn gtk_widget_get_allocated_height(w: P) -> c_int;
   fn gtk_widget_get_scale_factor(w: P) -> c_int;
   fn gtk_widget_get_window(w: P) -> P;
+  fn gtk_widget_get_mapped(w: P) -> c_int;
   fn gtk_widget_get_frame_clock(w: P) -> P;
   fn gtk_clipboard_get(selection: usize) -> P;
   fn gtk_clipboard_set_text(c: P, text: S, len: c_int);
@@ -605,19 +606,30 @@ fn close(id: u64, defer: bool) -> bool {
 }
 
 impl Win {
-  /// The area's size in points, and their scale: GDK's zoomed ([Win::zoom]).
+  /// The area's size in points, and their scale: GDK's zoomed ([Win::zoom]). Not mapped, the
+  /// runtime's: GTK allocates the area as it shows (1×1 before), so an event to a hidden window
+  /// would size its app, and an overlay's place, from that.
   fn size(&self) -> (Size, f32) {
     let g = gtk();
+    let dev = self.device_scale();
+    let scale = dev as f32 * self.zoom;
+    if !self.mapped() {
+      return (self.rt.size, scale);
+    }
+
     let (w, h) = unsafe {
       let w = (g.gtk_widget_get_allocated_width)(self.area);
       let h = (g.gtk_widget_get_allocated_height)(self.area);
       (w.max(1), h.max(1))
     };
 
-    let dev = self.device_scale();
-    let scale = dev as f32 * self.zoom;
     let pt = |px: c_int| points((px * dev) as u32, scale);
     (Size::new(pt(w), pt(h)), scale)
+  }
+
+  /// The area is mapped: shown, with GTK's allocation.
+  fn mapped(&self) -> bool {
+    unsafe { (gtk().gtk_widget_get_mapped)(self.area) != 0 }
   }
 
   /// GDK's scale, a whole one: the surface's pixels in each of GTK's units.
@@ -788,13 +800,19 @@ impl Win {
     self.set_size(self.rt.size);
   }
 
-  /// Sizes the window, or a fixed one's area, to `size` points.
+  /// Sizes the window, or a fixed one's area, to `size` points; a hidden one's runtime takes
+  /// them at once ([Win::size]).
   fn set_size(&mut self, size: Size) {
     let g = gtk();
     let [w, h] = gtk_px(size, self.zoom);
     match self.resizable {
       true => unsafe { (g.gtk_window_resize)(self.window, w, h) },
       false => unsafe { (g.gtk_widget_set_size_request)(self.area, w, h) },
+    }
+
+    if !self.mapped() {
+      let scale = self.device_scale() as f32 * self.zoom;
+      self.rt.resize(size, scale);
     }
 
     if let Some(anchor) = self.overlay {
