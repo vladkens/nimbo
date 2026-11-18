@@ -23,9 +23,10 @@
 
 use std::time::Duration;
 
+pub use super::ControlSize;
 use super::store::Transition;
 use super::widgets::{ButtonRole, FieldStyle};
-use super::{Align, ControlSize, Dim, FocusRing, Shadow, Style, TextStyle, grow, px};
+use super::{Align, Dim, FocusRing, Shadow, Style, TextStyle, grow, px};
 use crate::app::{Appearance, ColorScheme};
 use crate::scene::{Color, alpha, mix, rgb};
 use crate::text::{Font, Weight};

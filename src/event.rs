@@ -81,8 +81,8 @@ pub enum Event {
   Mods(Modifiers),
   /// A modifier key went down or up, by its place ([Code::AltRight], [Code::Fn]): what a
   /// shortcut recorder needs to take one alone (`right_option`). After the [Event::Mods] it
-  /// changed; to the focused element first ([Ui::modifier_key]), then the app. Autorepeats send
-  /// none.
+  /// changed; to the focused element first ([crate::Ui::modifier_key]), then the app. Autorepeats
+  /// send none.
   Modifier {
     key: Code,
     down: bool,
@@ -99,13 +99,13 @@ pub enum Event {
   /// An input method composing or committing text, for the focused text field.
   Ime(Ime),
   /// The OS's light or dark setting or accent colour changed, or is first known (before the
-  /// first frame): the theme follows it unless the app set one ([Ui::set_theme]).
+  /// first frame): the theme follows it unless the app set one ([crate::Ui::set_theme]).
   Appearance(Appearance),
   /// A change in the system the app watches ([crate::Main::watch]), to read again
   /// ([crate::system]); redraws when the app uses it.
   System(Change),
   /// Files dragged over the window, the pointer at `pos`; the hover follows it, so
-  /// [Cx::hovered] tells where they would go.
+  /// [crate::Cx::hovered] tells where they would go.
   DragOver {
     pos: Point,
     paths: Vec<PathBuf>,
@@ -117,20 +117,20 @@ pub enum Event {
     pos: Point,
     paths: Vec<PathBuf>,
   },
-  /// The file picked in the panel the window asked for ([Ui::file_dialog]); `None` when
+  /// The file picked in the panel the window asked for ([crate::Ui::file_dialog]); `None` when
   /// cancelled.
   FileDialog(Option<PathBuf>),
-  /// The item chosen in the context menu of `on` ([Ui::context_menu]) the platform showed, by
-  /// its action's number ([crate::Menu]); `None` when dismissed. Delivered to `on` in a view pass,
-  /// then to the app when no view took it.
+  /// The item chosen in the context menu of `on` ([crate::Ui::context_menu]) the platform showed,
+  /// by its action's number ([crate::Menu]); `None` when dismissed. Delivered to `on` in a view
+  /// pass, then to the app when no view took it.
   Menu {
     on: Id,
     item: Option<usize>,
   },
   /// Assistive technology acting on the element `id` (VoiceOver's press, a slider's increment,
   /// a field's new text): the runtime takes it through the input paths, then the app hears it,
-  /// the press as a click ([Cx::clicked]). `role` is the node's, as the client saw it: a node
-  /// of `id` with another role refuses it.
+  /// the press as a click ([crate::Cx::clicked]). `role` is the node's, as the client saw it: a
+  /// node of `id` with another role refuses it.
   A11y {
     id: Id,
     role: Role,

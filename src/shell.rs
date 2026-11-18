@@ -67,7 +67,7 @@ pub fn app(info: AppInfo, start: impl FnOnce(&mut Main)) {
 
 /// Runs the loop ([runloop]): [Proxy]'s work runs only in the loop it was posted to.
 fn running(run: impl FnOnce()) {
-  runloop::running(|| {
+  runloop::running(imp::post, || {
     HOOKS.take();
     run();
     system::unwatch();

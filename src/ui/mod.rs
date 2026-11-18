@@ -89,11 +89,11 @@ pub use widgets::{
 
 use self::input::{Deliver, Input, ScrollState};
 use self::store::{Anim, Store};
-use crate::TitleBar;
 use crate::app::{Appearance, Clipboard, Event, MouseButton, Waker};
 use crate::keys::{Binding, Os};
 use crate::scene::{Frame, ImageId, Images, Point, Rect, Size};
 use crate::text::{Font, Metrics, TextSystem};
+use crate::{FileDialog, TitleBar};
 
 /// Which way focus moves among the focusable elements ([Ui::focus_next]): Tab and Shift-Tab,
 /// as SwiftUI's `FocusDirection`.
@@ -1087,7 +1087,7 @@ impl<'a> Ui<'a> {
   /// click, never by itself. The answer comes as [crate::Event::FileDialog]. Asked while one is
   /// open, it is answered `None` at once on macOS and Windows and replaces it on Linux, where a
   /// portal that went away never answers.
-  pub fn file_dialog(&mut self, dialog: crate::FileDialog) {
+  pub fn file_dialog(&mut self, dialog: FileDialog) {
     self.st.file_dialog = Some(dialog);
   }
 
