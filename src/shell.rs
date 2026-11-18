@@ -26,31 +26,8 @@ use crate::locale::{self, Locale, Localizations};
 use crate::platform;
 use crate::platform::shell as imp;
 use crate::system::{self, Change};
-use crate::{App, Config, Event, Point, Size, paste, runloop};
-
-/// Where an overlay ([crate::Config::overlay]) shows: centred across the work area (the screen
-/// less the menu bar, the Dock or the taskbar) of the screen with the pointer, a margin in points
-/// from its top or bottom edge, or in its middle.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Anchor {
-  Top(f32),
-  Center,
-  Bottom(f32),
-}
-
-impl Anchor {
-  /// The top-left corner of a window of `size` in a work area of `area`, from the area's top
-  /// left (y down), in whole points.
-  pub fn offset(self, area: Size, size: Size) -> Point {
-    let y = match self {
-      Self::Top(margin) => margin,
-      Self::Center => (area.h - size.h) / 2.0,
-      Self::Bottom(margin) => area.h - size.h - margin,
-    };
-
-    Point::new(((area.w - size.w) / 2.0).round(), y.round())
-  }
-}
+pub use crate::window::Anchor;
+use crate::{App, Config, Event, paste, runloop};
 
 /// Runs the event loop with no window: `start` opens what the app needs (windows, a
 /// [crate::tray::Tray], [crate::hotkey::Hotkeys]), then the loop runs until [Main::quit].
@@ -557,15 +534,6 @@ mod tests {
   use std::rc::Rc;
 
   use super::*;
-
-  /// A HUD 200x40 in a 1000x600 work area: centred across, 20 points off the edge.
-  #[test]
-  fn anchors_place_in_the_work_area() {
-    let (area, size) = (Size::new(1000.0, 600.0), Size::new(200.0, 40.5));
-    assert_eq!(Anchor::Top(20.0).offset(area, size), Point::new(400.0, 20.0));
-    assert_eq!(Anchor::Bottom(20.0).offset(area, size), Point::new(400.0, 540.0));
-    assert_eq!(Anchor::Center.offset(area, size), Point::new(400.0, 280.0));
-  }
 
   /// The windows by id: a close callback set on one is given back once, as it closes; the quit
   /// hook runs once.

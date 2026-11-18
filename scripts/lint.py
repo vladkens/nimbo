@@ -755,6 +755,7 @@ PLACES = {
     **{x: "render" for x in ("bitmap.rs", "cpu", "png.rs", "scene.rs", "svg.rs")},
     **{f"{x}.rs": "service" for x in SERVICES},
     "event.rs": "ui",
+    "window.rs": "ui",
     "ui": "ui",
     "ui/behavior.rs": "headless",
     **{f"ui/{x}": "styled" for x in ("containers", "dialog.rs", "form.rs", "theme.rs", "widgets")},
@@ -793,6 +794,7 @@ FACADES = {"src/platform/mod.rs"} | {
 }
 BASELINE = "scripts/lint-baseline.txt"
 PUB_USE = re.compile(r"^\s*pub(?:\([^)]*\))?\s+use\b")
+MACRO = re.compile(r"#\[macro_export\]\s*macro_rules!\s*(\w+)")
 PRIVATE_FN = re.compile(
     r"\bpub\((?:crate|super|in [^)]*)\)\s+(?:const\s+)?(?:unsafe\s+)?fn\s+(\w+)"
 )
@@ -870,8 +872,14 @@ def exports(scans: "Scans", tree: dict) -> dict[tuple[str, ...], tuple[str, ...]
     known = files | out
     for cur, segs, name, public in found:
         to = absolute(cur, segs, known)
-        if public and to is not None:
-            out[cur + (name,)] = to
+        if public:
+            # Another crate's item: no file of ours.
+            out[cur + (name,)] = to if to is not None else ("<extern>",)
+
+    # An exported macro is the crate root's, defined where its `macro_rules!` is.
+    for path, (_, mod) in tree.items():
+        for name in MACRO.findall("\n".join(scans[path].codes)):
+            out[(name,)] = mod + (name,)
 
     return out
 
@@ -893,7 +901,10 @@ def target(segs: tuple[str, ...], files: dict, reexp: dict) -> str | None:
 
         segs = reexp[segs[:k]] + segs[k:]
 
-    return next((files[segs[:i]] for i in range(len(segs), 0, -1) if segs[:i] in files), None)
+    if segs[:1] == ("<extern>",):
+        return None
+
+    return next((files[segs[:i]] for i in range(len(segs), -1, -1) if segs[:i] in files), None)
 
 
 def edges(scans: "Scans") -> list[tuple[str, int, str, str]]:
@@ -919,7 +930,8 @@ def edges(scans: "Scans") -> list[tuple[str, int, str, str]]:
         for a, b, _ in uses:
             bare = bare[:a] + " " * (b - a) + bare[b:]
 
-        used = set(USED.findall(bare))
+        # Tests don't count: a name used only there doesn't make its re-export a use.
+        used = set(USED.findall("\n".join(x for x, t in zip(bare.split("\n"), sc.test) if not t)))
         for pos, segs, name in refs:
             i = bisect.bisect_right(starts, pos) - 1
             if sc.test[i] or "#[cfg(doc)]" in sc.raws[max(0, i - 1)]:
