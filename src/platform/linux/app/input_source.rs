@@ -6,8 +6,10 @@
 //! (`getLayoutsList`, `getLayout`, `layoutChanged`, `layoutListChanged`). A layout's language
 //! and name come from XKB's registry (`evdev.xml`: `languageList`, `description`), a variant's
 //! own where the desktop names it: GNOME in the source (`us+dvorak`), Plasma in its settings
-//! (`kxkbrc`'s `VariantList`). Other desktops (another X11 window manager, Sway, Hyprland) tell
-//! none.
+//! (`kxkbrc`'s `VariantList`). On X11 the others (Cinnamon, MATE, Xfce, a window manager)
+//! switch XKB's groups: the layouts are in the root window's `_XKB_RULES_NAMES` (`us,ru` and
+//! their variants, as `setxkbmap` sets them), the one in use is the group in XKB's state, their
+//! changes XKB's `StateNotify` and the property's. Wayland's others (Sway, Hyprland) tell none.
 //!
 //! What they miss: with GNOME's per-window sources (off by default) a source a window brings back
 //! isn't in `mru-sources`, so the last one picked is told; Plasma 5 offers `org.kde.keyboard`
@@ -15,13 +17,14 @@
 
 use std::cell::Cell;
 use std::collections::HashMap;
-use std::ffi::{CStr, c_int, c_ulong};
+use std::ffi::{CStr, c_int, c_long, c_uint, c_ulong};
 use std::ptr::{null, null_mut};
 use std::sync::OnceLock;
 
 use super::super::dbus::{self, Gv, V};
 use super::super::dl::fns;
-use super::super::{Fp, P, S, connect, lib};
+use super::super::{Fp, P, S, connect, gtk, lib};
+use super::{X11, x11};
 use crate::input_source::{InputSource, primary};
 use crate::paths;
 use crate::system::{Change, notice};
@@ -32,6 +35,14 @@ const KDE_PATH: &str = "/Layouts";
 const KDE_IFACE: &str = "org.kde.KeyboardLayouts";
 /// How long a call to Plasma waits.
 const TIMEOUT_MS: c_int = 250;
+/// `XkbUseCoreKbd`, `XkbStateNotify`, `XkbGroupStateMask` (XKBstr.h, XKB.h).
+const CORE_KBD: c_uint = 0x100;
+const STATE_NOTIFY: c_uint = 2;
+const GROUP_STATE: c_ulong = 1 << 4;
+/// `PropertyNotify`, `PropertyChangeMask`, `XA_STRING` (X.h, Xatom.h).
+const PROPERTY_NOTIFY: c_int = 28;
+const PROPERTY_CHANGE: c_long = 1 << 22;
+const STRING: c_ulong = 31;
 
 fns!(Gio {
   fn g_settings_schema_source_get_default() -> P;
@@ -43,8 +54,18 @@ fns!(Gio {
 });
 
 thread_local! {
-  /// GNOME's `changed` handler while watched, and Plasma's two subscriptions.
-  static WATCH: Cell<Option<(c_ulong, u32, u32)>> = const { Cell::new(None) };
+  /// What tells the changes while watched.
+  static WATCH: Cell<Option<Watch>> = const { Cell::new(None) };
+}
+
+#[derive(Clone, Copy)]
+enum Watch {
+  /// GNOME's `changed` handler.
+  Gnome(c_ulong),
+  /// Plasma's two subscriptions.
+  Plasma(u32, u32),
+  /// A connection to X of its own, its XKB event base, and GLib's watch of it.
+  Xkb(Conn, c_int, c_uint),
 }
 
 /// Who switches the layouts here.
@@ -52,6 +73,7 @@ thread_local! {
 enum Desktop {
   Gnome,
   Plasma,
+  Xkb,
 }
 
 fn desktop() -> Option<Desktop> {
@@ -60,6 +82,7 @@ fn desktop() -> Option<Desktop> {
   match () {
     _ if has("KDE") => Some(Desktop::Plasma),
     _ if (has("GNOME") || has("Unity")) && gnome().is_some() => Some(Desktop::Gnome),
+    _ if !super::wayland() && query().is_some() => Some(Desktop::Xkb),
     _ => None,
   }
 }
@@ -82,6 +105,13 @@ pub fn current() -> Option<InputSource> {
       let i = call(bus, "getLayout")?.child(0).u32() as usize;
       plasma(bus).into_iter().nth(i)
     }
+    Desktop::Xkb => {
+      let c = query()?;
+      // XkbStateRec (its shorts aligned), its first byte the effective group.
+      let mut state = [0u64; 4];
+      let ok = unsafe { (c.x.XkbGetState)(c.d(), CORE_KBD, state.as_mut_ptr().cast()) } == 0;
+      groups(c).into_iter().nth(usize::from(state[0].to_ne_bytes()[0])).filter(|_| ok)
+    }
   }
 }
 
@@ -89,6 +119,7 @@ pub fn enabled() -> Vec<InputSource> {
   match desktop() {
     Some(Desktop::Gnome) => gnome().map_or_else(Vec::new, |(g, s)| sources(g, s, c"sources")),
     Some(Desktop::Plasma) => dbus::session().map_or_else(|_| Vec::new(), plasma),
+    Some(Desktop::Xkb) => query().map_or_else(Vec::new, groups),
     None => Vec::new(),
   }
 }
@@ -107,14 +138,32 @@ pub fn watch() -> Result<(), String> {
       // GSettings tells a key's change only once the key was read with a handler connected.
       sources(g, settings, c"sources");
       sources(g, settings, c"mru-sources");
-      (id, 0, 0)
+      Watch::Gnome(id)
     }
     Desktop::Plasma => {
       let bus = dbus::session()?;
       let sub = |m| {
         dbus::subscribe(bus, KDE, KDE_IFACE, m, Some(KDE_PATH), told as Fp, (null_mut(), null()))
       };
-      (0, sub("layoutChanged"), sub("layoutListChanged"))
+      Watch::Plasma(sub("layoutChanged"), sub("layoutListChanged"))
+    }
+    Desktop::Xkb => {
+      let c = Conn::open().ok_or("no X display")?;
+      let (x, d) = (c.x, c.d());
+      // The opcode, event and error bases, and XKB 1.0 asked (the version the server has back).
+      let (mut op, mut base, mut err, mut major, mut minor) = (0, 0, 0, 1, 0);
+      // SAFETY: Xlib's calls on our connection, out-pointers to locals; GLib reads it on the main
+      // thread.
+      let source = unsafe {
+        (x.XkbQueryExtension)(d, &mut op, &mut base, &mut err, &mut major, &mut minor);
+        (x.XkbSelectEventDetails)(d, CORE_KBD, STATE_NOTIFY, GROUP_STATE, GROUP_STATE);
+        (x.XSelectInput)(d, (x.XDefaultRootWindow)(d), PROPERTY_CHANGE);
+        (x.XFlush)(d);
+        // `G_IO_IN`: the socket has data.
+        let fd = (x.XConnectionNumber)(d);
+        (gtk().g_unix_fd_add_full)(0, fd, 1, on_x as Fp, null_mut(), null())
+      };
+      Watch::Xkb(c, base, source)
     }
   };
 
@@ -123,18 +172,28 @@ pub fn watch() -> Result<(), String> {
 }
 
 pub fn unwatch() {
-  let Some((id, a, b)) = WATCH.take() else { return };
-  if id != 0
-    && let Some((g, settings)) = gnome()
-  {
-    // SAFETY: the handler connected by [watch].
-    unsafe { (g.g_signal_handler_disconnect)(settings, id) };
-  }
-
-  if let Ok(bus) = dbus::session() {
-    for id in [a, b].into_iter().filter(|&id| id != 0) {
-      dbus::unsubscribe(bus, id);
+  match WATCH.take() {
+    Some(Watch::Gnome(id)) => {
+      if let Some((g, settings)) = gnome() {
+        // SAFETY: the handler connected by [watch].
+        unsafe { (g.g_signal_handler_disconnect)(settings, id) };
+      }
     }
+    Some(Watch::Plasma(a, b)) => {
+      if let Ok(bus) = dbus::session() {
+        for id in [a, b].into_iter().filter(|&id| id != 0) {
+          dbus::unsubscribe(bus, id);
+        }
+      }
+    }
+    Some(Watch::Xkb(c, _, source)) => {
+      // SAFETY: GLib's watch from [watch], then the connection it read.
+      unsafe {
+        (gtk().g_source_remove)(source);
+        (c.x.XCloseDisplay)(c.d());
+      }
+    }
+    None => {}
   }
 }
 
@@ -144,6 +203,114 @@ unsafe extern "C" fn changed(_: P, _: S, _: P) {
 
 unsafe extern "C" fn told(_: P, _: S, _: S, _: S, _: S, _: P, _: P) {
   notice(Change::InputSource);
+}
+
+/// `GUnixFDSourceFunc`: X sent events; told once for a new group or list among them.
+unsafe extern "C" fn on_x(_: c_int, _: c_uint, _: P) -> c_int {
+  let Some(Watch::Xkb(c, base, _)) = WATCH.get() else { return 0 };
+  let (x, d) = (c.x, c.d());
+  let names = c.atom();
+  let mut changed = false;
+  let mut event = [0 as c_long; 24];
+  while unsafe { (x.XPending)(d) } > 0 {
+    unsafe { (x.XNextEvent)(d, &mut event) };
+    // LP64: the type is the first int; an XKB event's own type the 11th (after the time), a
+    // property's atom the 6th long.
+    let ints = unsafe { &*event.as_ptr().cast::<[c_int; 48]>() };
+    changed |= (ints[0] == base && ints[10] == STATE_NOTIFY as c_int)
+      || (ints[0] == PROPERTY_NOTIFY && event[5] as c_ulong == names);
+  }
+
+  if changed {
+    notice(Change::InputSource);
+  }
+
+  1
+}
+
+/// A connection to X: Xlib, and the display as an address (it lives for good, or until
+/// [unwatch] closes the watch's).
+#[derive(Clone, Copy)]
+struct Conn {
+  x: &'static X11,
+  d: usize,
+}
+
+impl Conn {
+  fn open() -> Option<Self> {
+    let x = x11()?;
+    let d = unsafe { (x.XOpenDisplay)(null()) };
+    (!d.is_null()).then_some(Self { x, d: d as usize })
+  }
+
+  fn d(self) -> P {
+    self.d as P
+  }
+
+  /// `_XKB_RULES_NAMES`.
+  fn atom(self) -> c_ulong {
+    unsafe { (self.x.XInternAtom)(self.d(), c"_XKB_RULES_NAMES".as_ptr(), 0) }
+  }
+}
+
+/// The connection the layouts are read on, opened at the first; it asks for no events, and
+/// [groups] drops those X sends anyway (`MappingNotify`).
+fn query() -> Option<Conn> {
+  static QUERY: OnceLock<Option<Conn>> = OnceLock::new();
+  *QUERY.get_or_init(Conn::open)
+}
+
+/// XKB's groups, as the root window's `_XKB_RULES_NAMES` names them ([rules_layouts]).
+fn groups(c: Conn) -> Vec<InputSource> {
+  let (x, d) = (c.x, c.d());
+  let (mut kind, mut format, mut items, mut after, mut data) = (0, 0, 0, 0, null_mut());
+  // SAFETY: Xlib's calls with out-pointers to locals; the data is Xlib's, freed after the copy.
+  let text = unsafe {
+    (x.XSync)(d, 1);
+    let root = (x.XDefaultRootWindow)(d);
+    (x.XGetWindowProperty)(
+      d,
+      root,
+      c.atom(),
+      0,
+      1024,
+      0,
+      STRING,
+      &mut kind,
+      &mut format,
+      &mut items,
+      &mut after,
+      &mut data,
+    );
+    if data.is_null() {
+      return Vec::new();
+    }
+
+    let bytes = std::slice::from_raw_parts(data, if format == 8 { items as usize } else { 0 });
+    let text = String::from_utf8_lossy(bytes).into_owned();
+    (x.XFree)(data.cast());
+    text
+  };
+
+  rules_layouts(&text).iter().map(|l| xkb(l, None)).collect()
+}
+
+/// `_XKB_RULES_NAMES`' rules, model, layouts, variants and options, each ended by a NUL
+/// (`evdev\0pc105\0us,ru\0,phonetic\0grp:alt_shift_toggle\0`): the layouts with their
+/// variants as GNOME writes them (`ru+phonetic`), in the groups' order.
+fn rules_layouts(names: &str) -> Vec<String> {
+  let mut parts = names.split('\0').skip(2);
+  let (layouts, variants) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+  let variants: Vec<_> = variants.split(',').collect();
+  layouts
+    .split(',')
+    .filter(|l| !l.is_empty())
+    .enumerate()
+    .map(|(i, l)| match variants.get(i).copied().unwrap_or("") {
+      "" => l.to_owned(),
+      v => format!("{l}+{v}"),
+    })
+    .collect()
 }
 
 /// GIO and GNOME's input sources settings, made once; `None` without the schema (`g_settings_new`
@@ -349,6 +516,14 @@ mod tests {
     for (code, want) in cases {
       assert_eq!(language(code).as_deref(), want, "{code}");
     }
+  }
+
+  #[test]
+  fn xkbs_rules_names_give_the_groups() {
+    let names = "evdev\0pc105\0us,ru\0,phonetic\0grp:alt_shift_toggle\0";
+    assert_eq!(rules_layouts(names), ["us", "ru+phonetic"]);
+    assert_eq!(rules_layouts("evdev\0pc105\0de\0\0\0"), ["de"]);
+    assert!(rules_layouts("").is_empty());
   }
 
   #[test]

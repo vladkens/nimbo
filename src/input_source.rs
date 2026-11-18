@@ -11,7 +11,8 @@
 //! | Windows | the foreground window's layout (`GetKeyboardLayout`), `GetKeyboardLayoutList` | none: polled while watched |
 //! | Linux GNOME | GSettings `org.gnome.desktop.input-sources` | its `changed` signal |
 //! | Linux Plasma | `org.kde.keyboard` on the session bus | its `layoutChanged`, `layoutListChanged` |
-//! | other Linux desktops | none: [available] is false | refused |
+//! | other Linux desktops on X11 (Cinnamon, MATE, Xfce) | XKB's groups, the root window's `_XKB_RULES_NAMES` | XKB's `StateNotify`, the property's change |
+//! | other Linux desktops on Wayland | none: [available] is false | refused |
 //!
 //! Call them on the main thread.
 
@@ -31,7 +32,7 @@ pub struct InputSource {
   pub language: Option<String>,
 }
 
-/// The platform tells the input sources: macOS, Windows, and GNOME and Plasma on Linux.
+/// The platform tells the input sources: macOS, Windows, and on Linux GNOME, Plasma and X11.
 pub fn available() -> bool {
   imp::available()
 }
