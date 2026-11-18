@@ -72,6 +72,7 @@ impl App for History {
       ui.text(format!("{} dictations", days[g].1), fs.note);
     };
     let head_h = ui.metrics(fs.head.font).line_height() + fs.head_pad[2];
+
     let mut copied = None;
     let mut sel = std::mem::take(&mut self.sel);
     let list = List::new(rows, ROW_H).key(&key).selection(&mut sel);
@@ -84,6 +85,7 @@ impl App for History {
         let text = format!("Dictation {e}: what was said, on one line");
         let caption =
           format!("{:02}:{:02} · {}.{} s", 23 - i / 7 % 24, 59 - i % 60, 2 + e % 9, e % 10);
+
         ui.col(Style::new().w(grow()).gap(2.0), |ui| {
           ui.text(&text, fs.label.line_limit(1));
           ui.text(&caption, fs.caption.line_limit(1));

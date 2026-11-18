@@ -63,6 +63,7 @@ pub fn run() {
   let closed = Rc::new(RefCell::new(0));
   let c = closed.clone();
   tray.on_close(move |_, _| *c.borrow_mut() += 1);
+
   tray.opening();
   assert_eq!((*opened.borrow(), items(&tray)[0].as_str()), (1, "Status 1||off|disabled|header"));
   tray.choose(&[3]);
@@ -83,6 +84,7 @@ pub fn run() {
   assert_eq!(items(&tray)[0], "Status 2||off|disabled|header");
   tray.closing();
   assert_eq!(items(&tray)[0], "Status 8||off|disabled|header");
+
   // Once for each time it was open, whether it closed on a click (Linux) or not.
   assert_eq!(*closed.borrow(), 2);
   tray.closing();

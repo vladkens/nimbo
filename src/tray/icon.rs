@@ -15,6 +15,7 @@ pub fn fill(d: &str, size: f32, side: u32, even_odd: bool) -> Vec<u8> {
   let k = side as f32 / size.max(f32::EPSILON);
   let mut polys = Vec::new();
   _ = flatten(d, k * SUB as f32, &mut polys);
+
   let n = side as usize;
   let mut hits = vec![0u16; n * n];
   let mut xs = Vec::new();

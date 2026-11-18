@@ -282,6 +282,7 @@ impl TextSystem {
       self.lines.clear();
       self.atlas.reset();
       self.color_atlas.reset();
+
       // Drawn again once, not over and over when every frame asks for this many.
       let again = !self.refilled;
       self.refilled = again;
@@ -707,6 +708,7 @@ mod tests {
     assert!(ts.faces.len() > FACE_CAP);
     assert!(ts.end_frame());
     assert!(ts.faces.is_empty() && ts.fonts.is_empty() && ts.lines.is_empty());
+
     // The frame drawn again asks for as many: it starts over without a third draw.
     fill(&mut ts);
     assert!(!ts.end_frame());

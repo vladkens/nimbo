@@ -279,6 +279,7 @@ impl Args {
             return Err(format!("--scale: {v} is not a positive number"));
           }
         }
+
         "--size" => {
           let v = it.next().ok_or("--size needs <w>x<h>")?;
           let (w, h) = v.split_once('x').ok_or("--size needs <w>x<h>")?;
@@ -289,6 +290,7 @@ impl Args {
           };
           out.size = Some(Size::new(num(w)?, num(h)?));
         }
+
         "--appearance" => {
           let scheme = it.next().ok_or("--appearance needs light or dark")?;
           let scheme = scheme.parse().map_err(|e| format!("--appearance: {e}"))?;
@@ -436,6 +438,7 @@ mod tests {
     let a = parse("--shot a.png --scale 1").unwrap();
     assert_eq!(a, Args { shot: Some("a.png".into()), scale: 1.0, ..Args::default() });
     assert_eq!(parse("").unwrap(), Args { scale: 2.0, ..Args::default() });
+
     assert_eq!(parse("--size 1280x800").unwrap().size, Some(Size::new(1280.0, 800.0)));
     assert_eq!(parse("--appearance light").unwrap().appearance, Some(Appearance::LIGHT));
     assert!(parse("--appearance blue").is_err());

@@ -474,6 +474,7 @@ pub(super) fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> Option<LRE
         w.send(Event::MouseExit);
       })
     }
+
     WM_LBUTTONDOWN | WM_LBUTTONUP => {
       _ = with(|w| button(MouseButton::Left)(w, msg == WM_LBUTTONDOWN))
     }
@@ -489,15 +490,18 @@ pub(super) fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> Option<LRE
       _ = with(|w| button(b)(w, msg == WM_XBUTTONDOWN));
       return Some(1);
     }
+
     WM_MOUSEWHEEL | WM_MOUSEHWHEEL => _ = with(|w| w.wheel(wp, lp, msg == WM_MOUSEHWHEEL)),
     WM_CAPTURECHANGED => _ = with(|w| w.capture_lost(lp as HWND)),
     WM_SETCURSOR if (lp & 0xFFFF) as u32 == HTCLIENT => {
       return with(|w| w.sync_cursor(true)).map(|_| 1);
     }
+
     WM_CHAR => _ = with(|w| w.char(wp as u16)),
     // Alt with a key: no menu to open, no beep; Alt-Space still opens the window menu.
     WM_SYSCHAR if wp != ' ' as usize => {}
     WM_SYSCOMMAND if wp & 0xFFF0 == SC_KEYMENU as usize && lp == 0 => {}
+
     WM_IME_SETCONTEXT => {
       // The composition shows in the field, not in the input method's window.
       let lp = lp & !(ISC_SHOWUICOMPOSITIONWINDOW as LPARAM);

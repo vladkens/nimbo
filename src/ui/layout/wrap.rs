@@ -62,6 +62,7 @@ pub fn wrap(t: &mut Tree, m: &mut dyn Measure, kept: &mut Kept) {
     let start = t.lines.len() as u32;
     let s = &t.text[range.0 as usize..range.1 as usize];
     let edit = edits.next_if(|e| e.node == i as u32).filter(|e| !e.placeholder);
+
     // One line that fits (or doesn't wrap): its width is the one measured for the fit.
     let fits = !wraps(*style) || wide <= width + EPS;
     let limit = match style.lines {

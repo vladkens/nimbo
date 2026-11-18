@@ -46,6 +46,7 @@ impl View {
     // The window lives while its menu is open, even if the app closes it meanwhile.
     let _window = self.window();
     let item = popup(self, press.as_deref(), at, &menu);
+
     // Any button the menu took the release of: the right one, the left of a Control-click.
     let held = self.ivars().held.get();
     let gone = held & !(NSEvent::pressedMouseButtons() as u64);

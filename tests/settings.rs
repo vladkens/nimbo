@@ -99,6 +99,7 @@ fn general_switches_select_and_recorder() {
   h.set_focus(Some(launch));
   key(&mut h, 'o');
   assert_eq!(h.app().launch, Launch::Window);
+
   h.click_id(launch);
   h.frame();
   h.frame();
@@ -148,6 +149,7 @@ fn general_switches_select_and_recorder() {
   h.click_id(rec);
   key(&mut h, NamedKey::Backspace);
   assert_eq!(h.app().hotkey, None);
+
   // A click elsewhere stops it; the reset puts the default back.
   h.click_id(rec);
   h.click_id(Id::of(LOGIN));
@@ -169,11 +171,13 @@ fn appearance_row_width_slider_and_look() {
   assert_eq!(sw.w, Theme::PLATES_LIGHT.sizes.switch.track[0]);
   assert!((row.x + row.w - 10.0 - (sw.x + sw.w)).abs() < 0.5, "{sw:?} in {row:?}");
   assert!(caption.h >= 28.0 && caption.x + caption.w < sw.x, "{caption:?}");
+
   // The slider takes a click between frames, drags to its ends and steps by a twentieth.
   let s = rect(&h, TEXT_SIZE);
   h.click(s.x + s.w / 2.0, s.y + s.h / 2.0);
   assert_eq!(h.app().text_size, 15.0);
   h.frame();
+
   h.press(s.x + 2.0, s.y + s.h / 2.0);
   h.frame();
   assert_eq!(h.app().text_size, 10.0);
@@ -181,9 +185,11 @@ fn appearance_row_width_slider_and_look() {
   h.frame();
   h.release(s.x + s.w + 20.0, s.y + s.h / 2.0);
   assert_eq!(h.app().text_size, 20.0);
+
   h.set_focus(Some(Id::of(TEXT_SIZE)));
   key(&mut h, NamedKey::ArrowLeft);
   assert_eq!(h.app().text_size, 19.5);
+
   // The look applies at once.
   h.click_id(Id::of(LOOK).key(2));
   h.wait(Duration::from_millis(50));
@@ -215,6 +221,7 @@ fn advanced_asks_in_a_dialog() {
   let mut h = start();
   h.app_mut().login = false;
   h.redraw();
+
   // Advanced: the dialog asks before clearing the cache, over a dimmed page.
   turn(&mut h, Page::Advanced);
   let confirm = Id::of(CONFIRM);
@@ -225,6 +232,7 @@ fn advanced_asks_in_a_dialog() {
   assert!(h.rect(confirm.key("card")).is_some());
   let dimmed = h.render().pixel(4.0, h.size().h - 4.0);
   assert!(dimmed[0] < ground[0], "{dimmed:?} over {ground:?}");
+
   // A click on the page under it does nothing; Return chooses Cancel (the action is
   // destructive) and closes it.
   h.click(clear.x + 2.0, clear.y + 2.0);
@@ -233,6 +241,7 @@ fn advanced_asks_in_a_dialog() {
   h.frame();
   assert_eq!((h.app().ask, h.app().cache), (None, 128));
   assert!(h.rect(confirm.key("card")).is_none());
+
   // Tab focuses the action, then Cancel, then the action again; Alt-Space goes on to the
   // window menu; Space chooses.
   h.click_id(Id::of(CLEAR_CACHE));
@@ -243,11 +252,13 @@ fn advanced_asks_in_a_dialog() {
   assert_eq!(h.focused(), Some(confirm.key("cancel")));
   key(&mut h, NamedKey::Tab);
   assert_eq!(h.focused(), Some(confirm.key("action")));
+
   h.key(' ', Modifiers::ALT);
   assert_eq!(h.app().ask, Some(Ask::ClearCache));
   key(&mut h, ' ');
   h.frame();
   assert_eq!((h.app().ask, h.app().cache), (None, 0));
+
   // Reset All: Escape cancels, Return resets (the action is the default), keeping the page.
   h.click_id(Id::of(RESET_ALL));
   h.frame();
@@ -345,6 +356,7 @@ fn the_dialog_takes_the_focus_and_gives_it_back() {
   assert_eq!(h.app().ask, Some(Ask::ClearCache));
   assert_eq!(h.focused(), Some(confirm.key("backdrop")));
   reads(&h.a11y(), &["button \"Cancel\" focused"]);
+
   key(&mut h, NamedKey::Escape);
   h.frame();
   assert_eq!((h.app().ask, h.focused()), (None, Some(clear)));
@@ -442,6 +454,7 @@ fn a_warning_marks_its_row_in_the_warning_colour() {
     h.event(Event::Appearance(look));
     h.wait(Duration::from_millis(50));
     let (r, img) = (mark(&h, LOGIN_ROW), h.render());
+
     // In its 24-unit view box: the fill either side of the "!"'s dot, and the ground through
     // the middle of its stem.
     let at = |x: f32, y: f32| img.pixel(r.x + x / 24.0 * r.w, r.y + y / 24.0 * r.h);
@@ -449,6 +462,7 @@ fn a_warning_marks_its_row_in_the_warning_colour() {
     assert_eq!(at(17.0, 17.0), px(t.warning));
     let ground = (-2..=2).any(|i| at(12.0 + i as f32 * 0.2, 11.0) == px(t.plate));
     assert!(ground, "the plate through the \"!\": {:?}", at(12.0, 11.0));
+
     let info = mark(&h, LAUNCH_ROW);
     assert_eq!((r.w, r.h), (info.w, info.h), "as big as the ⓘ");
   }

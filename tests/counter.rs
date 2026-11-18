@@ -70,10 +70,12 @@ fn hover_fades_in_on_virtual_time_then_idles() {
   let mut h = counter();
   let (x, y) = inside_minus(&mut h);
   let off = h.render().pixel(x, y);
+
   assert!(h.move_to(x, y));
   assert!(h.frame());
   let start = h.render().pixel(x, y);
   assert_eq!(start, off, "the fade starts at the resting fill");
+
   h.wait(Duration::from_millis(80));
   let mid = h.render().pixel(x, y);
   let frames = h.wait(Duration::from_millis(500));

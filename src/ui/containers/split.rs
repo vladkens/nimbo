@@ -107,6 +107,7 @@ impl<'s> Split<'s> {
         Style::new().h(px(7.0)).w(grow()).cursor(Cursor::ResizeY),
       ),
     };
+
     // The line takes the accent while dragged, fading in and out.
     let hot = ui.hot(handle, held || b.handle.hovered);
     let line = mix(t.line, t.accent, hot);
@@ -122,6 +123,7 @@ impl<'s> Split<'s> {
           ui.set_slot(was);
         }
       };
+
       column(ui, 0, first);
       ui.row(divider.bg(line), |ui| {
         let at = Float::parent().attach(UnitPoint::CENTER).anchor(UnitPoint::CENTER).clip();
@@ -249,6 +251,7 @@ mod tests {
     let handle = h.rect(Id::of("split").key("handle")).unwrap();
     let (x, y) = (handle.x + handle.w / 2.0, handle.y + 20.0);
     assert!((x - 200.5).abs() < 1.0, "{handle:?}");
+
     // 10 points right moves it 10 points: no dead zone from the ratio asked.
     h.move_to(x, y);
     h.press(x, y);
@@ -256,6 +259,7 @@ mod tests {
     h.frame();
     h.release(x + 10.0, y);
     assert!((h.app().0 - 0.42).abs() < 0.005, "{}", h.app().0);
+
     // A drag no frame saw held: pressed, moved and released between frames.
     h.frame();
     let x = x + 10.0;

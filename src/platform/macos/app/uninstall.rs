@@ -76,6 +76,7 @@ mod tests {
         _ => Ok(()),
       }
     };
+
     let steps = steps_with("com.example.a", Some(&home), &mut run);
     let shown: Vec<String> = steps.iter().map(Step::to_string).collect();
     assert_eq!(shown, ["permissions reset", "defaults removed"]);

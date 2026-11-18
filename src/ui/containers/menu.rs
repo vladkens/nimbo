@@ -380,8 +380,10 @@ impl Ui<'_> {
   ) -> (f32, f32, f32, f32) {
     let (menu, list) = (id.key("menu"), id.key("menu").key("list"));
     let size = self.size();
+
     // Its least top: under the window's own buttons, which the OS draws over everything.
     let least = self.titlebar().and_then(|t| t.buttons).map_or(EDGE, |b| b.y + b.h + EDGE);
+
     // At a point, the menu goes 3 below it as under a trigger, or 3 above it flipped: the
     // trigger's gap taken back.
     let at = st.point.map(|p| Rect::new(p.x, p.y + 3.0, 0.0, -6.0));
@@ -389,11 +391,13 @@ impl Ui<'_> {
     let menu_w = self.rect(menu).map_or(160.0, |m| m.w);
     let frame = style.pad[0] + style.pad[2] + style.border[0] + style.border[2];
     let natural = self.scroll(list).map_or(0.0, |sc| sc.content.h + frame);
+
     let below = b.y + b.h + 3.0;
     let (down, up) = ((size.h - EDGE - below).max(0.0), (b.y - 3.0 - least).max(0.0));
     let flip = natural > down && up > down;
     let (mut y, mut ay, mut room) = if flip { (b.y - 3.0, 1.0, up) } else { (below, 0.0, down) };
     let mut x = if b.x + menu_w > size.w - EDGE { b.x + b.w - menu_w } else { b.x };
+
     if over && let Some(p) = st.at {
       // Where it went, inside the window still when the window shrank.
       room = size.h - EDGE - least;
@@ -405,6 +409,7 @@ impl Ui<'_> {
       let item = start.and_then(|&(i, _)| self.rect(i));
       let top = style.pad[0];
       (y, ay) = ((b.y - top).min(size.h - EDGE - h).max(least), 0.0);
+
       if let (Some(r), Some(sc)) = (item, self.scroll(list)) {
         let at = r.y - sc.viewport.y + sc.offset.y;
         let target = b.y + (b.h - r.h) / 2.0;
@@ -690,6 +695,7 @@ mod tests {
       });
       h.wait(Duration::from_millis(500));
     };
+
     // A wheel's momentum still running as it opens stops.
     wheel(&mut h, 350.0, 250.0);
     let at = h.rt.ui.scroll(area).unwrap().offset.y;
@@ -698,11 +704,13 @@ mod tests {
     h.frame();
     h.frame();
     assert_eq!(h.focused(), Some(menu.key("menu")));
+
     // Over the open menu, or the cover around it: nothing under them scrolls.
     let r = h.rect(Id::of("one")).unwrap();
     wheel(&mut h, r.x + 5.0, r.y + 5.0);
     wheel(&mut h, 350.0, 250.0);
     assert_eq!(h.rt.ui.scroll(area).unwrap().offset.y, at);
+
     // The pointer highlights an item; Down skips the disabled one; Enter runs it.
     h.move_to(r.x + 5.0, r.y + 5.0);
     h.frame();
@@ -711,6 +719,7 @@ mod tests {
     h.frame();
     assert_eq!(h.app().runs, [0, 0, 1]);
     assert!(h.rect(menu.key("menu")).is_none() && h.focused().is_none());
+
     // Its button disabled while it is open, it closes.
     h.click_id(menu);
     h.frame();
@@ -757,14 +766,17 @@ mod tests {
     h.frame();
     let m = h.rect(menu).unwrap();
     assert!(m.y + m.h <= 240.0 && h.app().open, "{m:?}");
+
     // A click on its scrollbar's track pages the items and leaves it open.
     let track = h.rect(list.key(("track", 1usize))).expect("a scrollbar");
     h.click(track.x + track.w / 2.0, track.y + track.h - 4.0);
     h.frame();
     assert!(h.rect(menu).is_some() && h.rt.ui.scroll(list).unwrap().offset.y > 0.0);
+
     // Tab leaves focus in it.
     h.key(NamedKey::Tab, Modifiers::empty());
     assert_eq!(h.focused(), Some(menu));
+
     // The pointer on an item, Down past it, then the pointer moving within it: it takes the
     // highlight back, and Enter runs it.
     // Items are keyed in the menu's list.
@@ -780,6 +792,7 @@ mod tests {
     h.key(NamedKey::Enter, Modifiers::empty());
     assert_eq!(h.app().ran, Some(k));
     h.frame();
+
     // A click on an item: the call that sees it says closed.
     h.click_id(open);
     h.frame();
@@ -787,6 +800,7 @@ mod tests {
     let rr = h.rect(list.key(k)).unwrap();
     h.click(rr.x + 10.0, rr.y + 5.0);
     assert!(!h.app().open && h.rect(menu).is_some(), "closed in the pass that ran it");
+
     // Disabled while open, it closes.
     h.click_id(open);
     h.frame();
@@ -912,6 +926,7 @@ mod tests {
     h.set_os(Os::Mac);
     h.native_menus();
     h.frame();
+
     let r = h.rect(Id::of("b")).unwrap();
     let pos = Point::new(r.x + r.w / 2.0, r.y + r.h / 2.0);
     let button = MouseButton::Left;
@@ -957,6 +972,7 @@ mod tests {
     h.right_click(50.0, 20.0);
     h.frame();
     assert!(h.rt.ui.menu_open(Id::of("el")));
+
     let (on, ..) = h.rt.take_context_menu().unwrap();
     h.app_mut().shown = false;
     h.frame();

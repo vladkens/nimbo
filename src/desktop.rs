@@ -283,6 +283,7 @@ mod tests {
       categories: &["Utility", "Office"],
       icon: png(16, 16, &px),
     };
+
     assert_eq!(install_in(&data, &APP, &l, "/opt/Ex ample/app"), Ok(true));
     let text = std::fs::read_to_string(data.join("applications/com.example.app.desktop")).unwrap();
     let want = "[Desktop Entry]\nType=Application\nName=Example\nExec=\"/opt/Ex ample/app\"\n\

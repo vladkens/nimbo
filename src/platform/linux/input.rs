@@ -394,6 +394,7 @@ fn new_ime(window: P, id: u64) -> (P, usize) {
   let n = IME_GEN.get() + 1;
   IME_GEN.set(n);
   LIVE.with_borrow_mut(|l| l.push((n, id)));
+
   // Each handler gets its context's number: one kept alive by a reply under way stays mute.
   let connect = |signal: &CStr, cb: Fp| unsafe {
     let free = std::ptr::null();
@@ -480,6 +481,7 @@ impl Win {
       (g.gdk_event_get_event_type)(ev)
     };
     let (pos, mods) = (point(x, y, self.zoom), keys::mods(state));
+
     match kind {
       MOTION | ENTER => {
         self.input.mouse = pos;

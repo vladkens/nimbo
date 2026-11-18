@@ -96,6 +96,7 @@ impl Ui<'_> {
     self.next_id = Some((id.key("wrap"), false));
     self.row(wrap, |ui| {
       r = ui.field_box(&b, &style);
+
       // Over the field, clipped to it: System Settings' magnifier (its ink 13 wide, 10 in from
       // the edge) and the ⊗.
       let cover = Style::new().grow().pads([0.0, INSET, 0.0, INSET]).clip();
@@ -103,6 +104,7 @@ impl Ui<'_> {
       ui.float(Float::parent().clip()).row(cover, |ui| {
         let s = Style::new().w(px(17.0)).h(px(17.0));
         ui.canvas(s, move |f, r| icon::draw(f, Icon::SEARCH, r, muted));
+
         if clear {
           let x = id.key("clear");
           ui.el(Style::new().w(grow()));
@@ -299,6 +301,7 @@ mod tests {
     h.type_text("moon");
     h.ime_mark("ni");
     h.frame();
+
     // Escape is the input method's while it composes.
     h.key(NamedKey::Escape, NONE);
     assert_eq!(h.app().text, "moon");
@@ -319,6 +322,7 @@ mod tests {
     // The field's ground, above the text.
     let ground = h.render().pixel(field.x + field.w / 2.0, field.y + 3.0);
     let y = field.y + field.h / 2.0;
+
     // Scrolled to the end, then back to the start: nothing of it over the magnifier's side or
     // the ⊗'s.
     let len = h.app().text.len();
@@ -370,6 +374,7 @@ mod tests {
     let field = h.rect(Id::of("s")).unwrap();
     assert_eq!((field.x, field.w), (40.0, 18.0));
     let (x, y) = (field.x + field.w - 1.0, field.y + field.h / 2.0);
+
     // Either side of it, the row's ground, and a click there clears nothing.
     let img = h.render();
     for x in [field.x - 2.0, field.x + field.w + 4.0, field.x + field.w + 12.0] {
@@ -397,6 +402,7 @@ mod tests {
     h.click_id(Id::of("s").key("clear"));
     h.frame();
     assert_eq!(h.app().text, "");
+
     h.key('z', MAC_CMD);
     h.frame();
     assert_eq!(h.app().text, "moon");

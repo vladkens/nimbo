@@ -544,6 +544,7 @@ mod tests {
     h.render();
     h.rt.redraw();
     h.render();
+
     h.app_mut().0 = hello();
     h.rt.redraw();
     let img = h.render();

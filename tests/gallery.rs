@@ -214,9 +214,11 @@ fn every_widget_in_both_themes() {
     let card = h.rect(dialog.key("card")).expect("the dialog");
     let fill = h.render().pixel(card.x + card.w / 2.0, card.y + 8.0);
     assert_eq!(fill, px(t.dialog), "{look:?}");
+
     h.key(NamedKey::Escape, Modifiers::empty());
     h.frame();
     assert!(!h.app().ask && h.rect(dialog.key("card")).is_none());
+
     h.click_id(find(&h, Role::Button, "Delete…"));
     h.frame();
     h.click_id(dialog.key("action"));
@@ -237,6 +239,7 @@ fn the_search_field_in_both_themes() {
     let want = px(mix(t.bg, alpha(fill, 1.0), fill[3]));
     let got = h.render().pixel(r.x + r.w / 2.0, r.y + 4.0);
     assert!(diff(got, want) <= 1, "{look:?}: {got:?}, not {want:?}");
+
     if look == Appearance::LIGHT {
       h.click_id(field.key("clear"));
       h.frame();
@@ -339,14 +342,17 @@ fn a_stepped_slider_snaps_drags_and_clicks() {
   h.press(level_x(r, 33.0), y);
   h.frame();
   assert_eq!(h.app().level, 30.0);
+
   h.move_to(level_x(r, 47.0), y);
   h.frame();
   assert_eq!(h.app().level, 50.0);
   let knob = px(Theme::PLATES_LIGHT.knob);
   assert_eq!(h.render().pixel(level_x(r, 50.0), y), knob, "the knob jumped to the step");
+
   h.release(level_x(r, 47.0), y);
   h.frame();
   assert_eq!(h.app().level, 50.0);
+
   h.click(level_x(r, 74.0), y);
   assert_eq!(h.app().level, 70.0);
 }
@@ -361,17 +367,20 @@ fn a_stepped_slider_moves_a_step() {
     h.key(k, Modifiers::empty());
     h.frame();
   };
+
   key(&mut h, NamedKey::ArrowRight);
   assert_eq!(h.app().level, 40.0);
   key(&mut h, NamedKey::ArrowLeft);
   key(&mut h, NamedKey::ArrowLeft);
   assert_eq!(h.app().level, 20.0);
+
   assert!(h.act(id, Action::Decrement));
   assert!(h.act(id, Action::Decrement));
   assert_eq!(h.app().level, 10.0, "not below the start");
   assert!(h.act(id, Action::Increment));
   h.frame();
   reads(&h.a11y(), &["slider \"Level\" 20 in 10..90 focused"]);
+
   key(&mut h, NamedKey::ArrowUp);
   assert_eq!(h.app().level, 30.0, "up raises it, as AppKit's slider");
   key(&mut h, NamedKey::ArrowDown);
@@ -429,11 +438,13 @@ fn a_row_footer_spans_its_row() {
     let (switch, toggle) = node(&h, Role::Switch, "Turn off below 30%");
     let ends = (slider.x + slider.w - toggle.x - toggle.w).abs();
     assert!(ends < 0.5 && slider.y >= toggle.y + toggle.h, "{look:?}: {slider:?}, {toggle:?}");
+
     let (img, plate) = (h.render(), px(t.plate));
     let on_plate = |x: f32, y: f32| diff(img.pixel(x, y), plate) <= 2;
     let y = slider.y + slider.h - 2.0;
     let pad = (1..40).find(|&d| !on_plate(slider.x - d as f32 + 0.5, y));
     assert_eq!(pad, Some(11), "{look:?}: 10 points of the plate left of {slider:?}");
+
     let x = slider.x + slider.w / 2.0 + 30.0;
     for y in (toggle.y + toggle.h) as i32..slider.y as i32 + 6 {
       assert!(on_plate(x, y as f32 + 0.5), "{look:?}: no plate at {x}, {y}");
@@ -513,6 +524,7 @@ fn the_api_doc_is_the_gallerys() {
   let root = env!("CARGO_MANIFEST_DIR");
   let doc = std::fs::read_to_string(format!("{root}/docs/api.md")).unwrap();
   assert!(doc == api_md(), "docs/api.md is stale: make api-shots");
+
   let Some(dir) = pictures().filter(|_| cfg!(target_os = "macos")) else { return };
   let strict = std::env::var_os("NIMBO_API_SHOTS_STRICT").is_some();
   let fresh = std::env::temp_dir().join(format!("nimbo-api-{}", std::process::id()));
@@ -521,6 +533,7 @@ fn the_api_doc_is_the_gallerys() {
     let path = dir.join(format!("{}.png", b.slug()));
     let png = path.display();
     let kept = std::fs::read(&path).unwrap_or_else(|_| panic!("no {png}: make api-shots"));
+
     // As `gallery <slug> --shot` draws it.
     let mut h = Harness::new(Gallery::on(i, true), Size::new(WIDTH, 300.0), 2.0);
     h.event(Event::Appearance(Appearance::LIGHT));

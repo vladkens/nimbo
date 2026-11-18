@@ -147,6 +147,7 @@ fn check(h: &mut Harness<Text>, p: &Palette) {
   let line = h.text_system().layout(SCRIPTS[2].text, SCRIPTS[2].font);
   let at = line.clusters.iter().position(|&c| c as usize == EMOJI_AT.len()).unwrap();
   let (g, next) = (line.glyphs[at], line.glyphs[at + 1]);
+
   // About an em wide, in any font: a colour one, or the missing glyph's box.
   let em = SCRIPTS[2].font.size;
   assert!((0.5 * em..2.0 * em).contains(&(next.x - g.x)), "{g:?} {next:?}");
@@ -173,13 +174,16 @@ fn measures_hold_for_any_font() {
   assert!(t.measure("Hello, world", ui) > t.measure("Hello", ui));
   assert!(t.measure("Hello", ui.weight(Weight::Bold)) > t.measure("Hello", ui));
   assert!(t.measure("Hello", Font::ui(26.0)) > t.measure("Hello", ui) * 1.8);
+
   let mono = Font::mono(13.0);
   assert!((t.measure("iiii", mono) - t.measure("MMMM", mono)).abs() < 0.01);
   assert!(t.measure("iiii", ui) < t.measure("MMMM", ui));
+
   // A combining accent takes no room: e and U+0301 as wide as é.
   let (decomposed, composed) = (t.measure("cafe\u{301}", ui), t.measure("café", ui));
   assert!((decomposed - composed).abs() < 0.5, "{decomposed} vs {composed}");
   assert!(decomposed > t.measure("caf", ui));
+
   // Its glyphs start at the clusters of the text: the accent's cluster is the e's or its own.
   let line = t.layout("cafe\u{301}", ui);
   assert!(line.clusters.iter().all(|&c| "cafe\u{301}".is_char_boundary(c as usize)));
@@ -187,6 +191,7 @@ fn measures_hold_for_any_font() {
   let q = t.layout("Q\u{302}", ui);
   assert_eq!(q.glyphs[0].y, 0.0);
   assert!(q.glyphs.len() == 1 || q.glyphs[1].y > 1.0, "{:?}", q.glyphs);
+
   let m = t.metrics(ui);
   assert!(m.ascent > 0.0 && m.descent > 0.0 && m.line_height() >= m.ascent + m.descent);
   assert!(m.cap_height > m.x_height && m.x_height > 0.0, "{m:?}");

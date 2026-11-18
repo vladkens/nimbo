@@ -32,6 +32,7 @@ pub fn decode(file: &[u8], side: u32) -> Result<(u32, u32, Vec<u8>), String> {
       CFData::with_bytes_no_copy(None, file.as_ptr(), file.len() as isize, kCFAllocatorNull)
         .ok_or("can't read the image")?;
     let src = CGImageSource::with_data(&data, None).ok_or("not an image")?;
+
     // Its size from the header, checked before anything is decoded.
     let props = src.properties_at_index(0, None).ok_or("not an image the system reads")?;
     let props = props.cast_unchecked::<CFString, CFNumber>();

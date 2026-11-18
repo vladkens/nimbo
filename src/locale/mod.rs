@@ -458,6 +458,7 @@ msgstr[2] "{n} диктовок"
     assert_eq!(Locale::current(), Locale::Tag("ru"));
     assert_eq!(KEEP.to_string(), "Хранить историю");
     assert_eq!(format!("{KEEP}!"), "Хранить историю!");
+
     let (chosen, model) = ("parakeet", ("whisper",));
     let s =
       t!("{chosen} is not on disk: {fallback} transcribes instead.", chosen, fallback = model.0);
@@ -466,6 +467,7 @@ msgstr[2] "{n} диктовок"
     let want =
       ["1 диктовка", "2 диктовки", "5 диктовок", "11 диктовок", "21 диктовка", "111 диктовок"];
     assert_eq!(forms, want);
+
     assert_eq!(t!("Not in the catalog").to_string(), "Not in the catalog");
     let s: &str = &KEEP;
     assert_eq!((s, KEEP.as_str()), ("Хранить историю", "Хранить историю"));

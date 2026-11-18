@@ -693,6 +693,7 @@ impl Editor {
       (None, Some(r)) => r,
       (None, None) => self.sel.range(),
     };
+
     // Char boundaries only: marked text may start or end inside a cluster (a combining mark or
     // ZWJ after it), and snapping back would leave part of it in place, duplicated.
     let (t, end) = (&self.text, r.end.max(r.start));
@@ -703,6 +704,7 @@ impl Editor {
       before: self.sel,
     });
     m.range.end = m.range.end + s.len() - r.len();
+
     // `sel` is within `s`, which lands at the start of what it replaces.
     let start = r.start;
     self.text.replace_range(r, &s);
@@ -820,6 +822,7 @@ impl Editor {
     self.sel = after;
     self.goal = None;
     self.redo.clear();
+
     if let Some(last) = self.undo.last_mut()
       && run.is_some()
       && run == self.run
@@ -846,6 +849,7 @@ impl Editor {
         return;
       }
     }
+
     self.undo.push(Step { at: r.start, removed, inserted: s.to_owned(), before, after });
     self.run = run;
   }
@@ -1085,6 +1089,7 @@ mod tests {
     assert_eq!(mv(&mut e, Move::Right, false), 11); // over the line break
     assert_eq!(mv(&mut e, Move::WordRight, false), 17);
     assert_eq!(mv(&mut e, Move::WordRight, false), 21);
+
     assert_eq!(mv(&mut e, Move::ParagraphStart, false), 11);
     assert_eq!(mv(&mut e, Move::Left, false), 10);
     assert_eq!(mv(&mut e, Move::DocEnd, false), 21);
@@ -1101,10 +1106,12 @@ mod tests {
     mv(&mut e, Move::Left, true);
     mv(&mut e, Move::Left, true);
     assert_eq!(e.selected(), "wor");
+
     // Past the anchor the selection flips.
     mv(&mut e, Move::WordLeft, true);
     mv(&mut e, Move::WordLeft, true);
     assert_eq!((e.sel(), e.selected()), (Sel::new(6, 0), "hello "));
+
     // Without Shift: Left goes to the start, Right to the end.
     let mut c = e.clone();
     assert_eq!((mv(&mut c, Move::Left, false), c.sel().is_empty()), (0, true));
@@ -1122,15 +1129,18 @@ mod tests {
     assert_eq!(mv(&mut e, Move::Down, false), 20); // column 7 again
     assert_eq!(mv(&mut e, Move::Up, false), 12);
     assert_eq!(mv(&mut e, Move::Up, false), 7);
+
     // Past the first line: the start; past the last: the end.
     assert_eq!(mv(&mut e, Move::Up, false), 0);
     assert_eq!(mv(&mut e, Move::DocEnd, false), 24);
     assert_eq!(mv(&mut e, Move::Down, false), 24);
+
     // Another move forgets the goal.
     e.select(Sel::caret(1));
     mv(&mut e, Move::Down, false);
     mv(&mut e, Move::Right, false);
     assert_eq!(mv(&mut e, Move::Down, false), 15);
+
     // Up with a selection starts from its start; Shift-Down extends.
     e.select(Sel::new(16, 12));
     assert_eq!(mv(&mut e, Move::Up, false), 2);
@@ -1149,12 +1159,14 @@ mod tests {
     assert_eq!(down(&mut e), 5);
     assert_eq!(down(&mut e), 9);
     assert_eq!(down(&mut e), 12);
+
     // Line ends at a wrap stay on their line; Line Start goes to the visual start.
     e.select(Sel::caret(5));
     e.move_by(Move::LineEnd, Extent::Caret, &l);
     assert_eq!(e.caret(), 7);
     e.move_by(Move::LineStart, Extent::Caret, &l);
     assert_eq!(e.caret(), 4);
+
     // A column past a wrapped line's end lands before the wrap.
     e.select(Sel::caret(13));
     e.move_by(Move::Up, Extent::Caret, &l);
@@ -1163,6 +1175,7 @@ mod tests {
     e.move_by(Move::LineEnd, Extent::Caret, &l);
     e.move_by(Move::Down, Extent::Caret, &l);
     assert_eq!(e.caret(), 7);
+
     // A page is two lines.
     e.select(Sel::caret(0));
     e.move_by(Move::PageDown, Extent::Caret, &l);
@@ -1193,6 +1206,7 @@ mod tests {
     let mut e = ed("one two👍🏽\nthree", 15);
     assert!(e.delete(Delete::Backward, &l));
     assert_eq!(e.text(), "one two\nthree");
+
     e.select(Sel::caret(7));
     e.delete(Delete::WordBackward, &l);
     assert_eq!((e.text(), e.caret()), ("one \nthree", 4));
@@ -1203,6 +1217,7 @@ mod tests {
     e.delete(Delete::ToLineStart, &l);
     assert_eq!((e.text(), e.caret()), ("", 0));
     assert!(!e.delete(Delete::Backward, &l) && !e.delete(Delete::Forward, &l));
+
     // A selection goes as a whole, whatever the delete.
     let mut e = ed("abcdef", 0);
     e.select(Sel::new(1, 3));
@@ -1228,6 +1243,7 @@ mod tests {
     }
 
     assert_eq!(e.text(), "hel");
+
     // The three backspaces, the "!", then the whole "hello".
     assert!(e.undo());
     assert_eq!((e.text(), e.caret()), ("hell!o", 6));
@@ -1238,9 +1254,11 @@ mod tests {
     assert!(!e.undo());
     assert!(e.redo() && e.redo());
     assert_eq!((e.text(), e.caret()), ("hell!o", 5));
+
     // A new edit drops what could be redone.
     e.insert("x");
     assert!(!e.can_redo());
+
     // Typing over a selection: undo brings it back, selected.
     let mut e = Editor::new("one two");
     e.select(Sel::new(4, 7));
@@ -1248,6 +1266,7 @@ mod tests {
     e.insert("en");
     assert!(e.undo());
     assert_eq!((e.text(), e.sel()), ("one two", Sel::new(4, 7)));
+
     // Forward deletes group too.
     let mut e = ed("abcd", 0);
     e.delete(Delete::Forward, &l);
@@ -1269,12 +1288,14 @@ mod tests {
     e.apply(Command::Paste, &l, &mut cb);
     e.apply(Command::Paste, &l, &mut cb);
     assert_eq!(e.text(), "HelloHello");
+
     // Each paste is its own step.
     e.apply(Command::Undo, &l, &mut cb);
     assert_eq!(e.text(), "Hello");
     e.apply(Command::Move(Move::WordLeft, Extent::Selection), &l, &mut cb);
     e.apply(Command::Delete(Delete::Backward), &l, &mut cb);
     assert_eq!(e.text(), "");
+
     // Single-line editors leave Enter and Tab to the app; multi-line ones type them.
     assert!(!e.apply(Command::InsertNewline, &l, &mut cb));
     assert!(!e.apply(Command::Cancel, &l, &mut cb));
@@ -1301,6 +1322,7 @@ mod tests {
   #[test]
   fn marked_text_commits_as_one_undo_step() {
     let mut e = Editor::new("ab");
+
     // Composing: each mark replaces the last; the selection is inside it.
     e.set_marked("n", 1..1, None);
     e.set_marked("ni", 2..2, None);
@@ -1309,11 +1331,13 @@ mod tests {
     assert_eq!((e.text(), e.marked(), e.sel()), ("abにほ", Some(2..8), Sel::new(2, 8)));
     e.commit("日本", None);
     assert_eq!((e.text(), e.marked(), e.caret()), ("ab日本", None, 8));
+
     // One step back to before marking.
     assert!(e.undo());
     assert_eq!((e.text(), e.sel()), ("ab", Sel::caret(2)));
     assert!(e.redo());
     assert_eq!(e.text(), "ab日本");
+
     // Marking over a selection replaces it; an empty mark cancels, the selection gone.
     e.select(Sel::new(0, 2));
     e.set_marked("x", 1..1, None);
@@ -1322,11 +1346,13 @@ mod tests {
     assert_eq!((e.text(), e.marked()), ("日本", None));
     e.undo();
     assert_eq!(e.text(), "ab日本");
+
     // Any edit or move first keeps the marked text as typed.
     e.select(Sel::caret(e.text().len()));
     e.set_marked("q", 1..1, None);
     e.move_by(Move::DocStart, Extent::Caret, &Mono::PLAIN);
     assert_eq!((e.text(), e.marked(), e.caret()), ("ab日本q", None, 0));
+
     // A replacement range outside the marked text: commit it, then replace.
     e.select(Sel::caret(e.text().len()));
     e.set_marked("z", 1..1, None);
@@ -1355,12 +1381,14 @@ mod tests {
     assert_eq!(e.caret(), 11);
     assert!(e.delete(Delete::Backward, &Mono::PLAIN));
     assert_eq!(e.text(), "");
+
     // So does a commit.
     let mut e = Editor::new("👩👩");
     e.select(Sel::caret(4));
     e.set_marked("\u{200d}", 3..3, None);
     e.commit("\u{200d}", None);
     assert_eq!(e.caret(), 11);
+
     // A delete that makes a flag of two indicators.
     let mut e = Editor::new("🇺x🇸");
     e.select(Sel::caret(5));
@@ -1420,6 +1448,7 @@ mod tests {
     assert_eq!((e.text(), e.marked()), ("e\u{301}\u{302}", Some(1..5)));
     e.commit("\u{302}", None);
     assert_eq!((e.text(), e.caret()), ("e\u{302}", 3));
+
     // Marked text ending in ZWJ joins the emoji after it.
     let mut e = Editor::new("👩");
     e.select(Sel::caret(0));

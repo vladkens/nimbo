@@ -411,6 +411,7 @@ impl Tray {
         return dbus::fail(inv, "org.freedesktop.DBus.Error.NotSupported", "the menu opens");
       }
       (SNI, _) => V::Tuple(Vec::new()),
+
       (MENU, "GetLayout") => {
         let (parent, depth) = (args.child(0).i32(), args.child(1).i32());
         // Fetched whole, the menu is built anew: the one that waited goes in.
@@ -428,6 +429,7 @@ impl Tray {
         let layout = menu::layout(&n, id, depth, self.0.base.get());
         V::Tuple(vec![V::U(self.0.revision.get()), layout])
       }
+
       (MENU, "GetGroupProperties") => {
         let menu = self.0.menu.borrow();
         let n = nodes(&menu);
@@ -437,6 +439,7 @@ impl Tray {
         });
         V::Tuple(vec![V::Array("(ia{sv})", found.collect())])
       }
+
       (MENU, "GetProperty") => {
         let (id, name) = (args.child(0).i32(), args.child(1).str());
         let menu = self.0.menu.borrow();
@@ -455,10 +458,12 @@ impl Tray {
         };
         V::Tuple(vec![value])
       }
+
       (MENU, "Event") => {
         dbus::reply(inv, V::Tuple(Vec::new()));
         return self.event(args.child(0).i32(), &args.child(1).str());
       }
+
       (MENU, "EventGroup") => {
         let all = args.child(0);
         let events: Vec<_> = (0..all.len())
@@ -471,9 +476,11 @@ impl Tray {
 
         return;
       }
+
       (MENU, "AboutToShow") => {
         V::Tuple(vec![V::B(args.child(0).i32() == 0 && self.about_to_show())])
       }
+
       (MENU, "AboutToShowGroup") => {
         let changed = ints(args.child(0)).contains(&0) && self.about_to_show();
         let updated = if changed { vec![V::I(0)] } else { Vec::new() };

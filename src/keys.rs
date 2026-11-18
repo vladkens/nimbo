@@ -1092,17 +1092,20 @@ mod tests {
     assert_eq!(Shortcut::parse("cmd+z"), k(Key::Char('z'), CMD));
     assert_eq!(Shortcut::parse("cmd+shift+z"), k(Key::Char('z'), CMD_SHIFT));
     assert_eq!(Shortcut::parse("cmd-shift-Z"), k(Key::Char('z'), CMD_SHIFT), "dashes");
+
     assert_eq!(Shortcut::parse("cmd+-"), k(Key::Char('-'), CMD));
     assert_eq!(Shortcut::parse("cmd--"), k(Key::Char('-'), CMD));
     assert_eq!(Shortcut::parse("cmd++"), k(Key::Char('+'), CMD));
     assert_eq!(Shortcut::parse("ctrl + -"), k(Key::Char('-'), CTRL));
     assert_eq!(Shortcut::parse("-"), k(Key::Char('-'), Modifiers::empty()));
+
     assert_eq!(Shortcut::parse("alt+left"), k(Key::Named(ArrowLeft), Modifiers::ALT));
     assert_eq!(Shortcut::parse("escape"), k(Key::Named(Escape), Modifiers::empty()));
     assert_eq!(Shortcut::parse("f12"), k(Key::Named(F12), Modifiers::empty()));
     assert_eq!(Shortcut::parse("space"), k(Key::Char(' '), Modifiers::empty()));
     assert_eq!(Shortcut::parse("cmd+?"), k(Key::Char('?'), CMD));
     assert_eq!(Shortcut::parse("shift+İ"), k(Key::Char('İ'), Modifiers::SHIFT));
+
     // `delete` is ⌫ in the app too, as in settings; ⌦ is `forwarddelete`.
     let backspace = Key::Named(Backspace);
     assert_eq!(Shortcut::parse("cmd+delete"), k(backspace, CMD));
@@ -1243,6 +1246,7 @@ mod tests {
           format!("ctrl+shift+{name} ⌃⇧{symbol} Ctrl+Shift+{names}")
         }),
     );
+
     assert_eq!(want.len(), 26 + 10 + 20 + 25);
     for row in want {
       let name = row.split(' ').next().unwrap();
@@ -1292,6 +1296,7 @@ mod tests {
     assert_eq!(hot("cmd+K"), k(Key::Char('k'), meta));
     assert_eq!(hot("ctrl+/"), k(Key::Char('/'), ctrl));
     assert_eq!(hot("escape"), hot("esc"));
+
     for (text, canonical, symbols, names) in [
       ("ctrl+option+cmd+F12", "ctrl+option+cmd+f12", "⌃⌥⌘F12", "Ctrl+Alt+Super+F12"),
       ("Alt+Space", "option+space", "⌥Space", "Alt+Space"),

@@ -505,6 +505,7 @@ impl Ui<'_> {
           cancelled = true;
           false
         }
+
         Command::InsertTab | Command::InsertBacktab => false,
         Command::ScrollPageUp
         | Command::ScrollPageDown
@@ -903,6 +904,7 @@ mod tests {
     let mut h = Harness::new(Round::default(), Size::new(100.0, 100.0), 1.0);
     let px = |h: &mut Harness<Round>| h.render().pixel(20.0, 20.0);
     assert_eq!(px(&mut h), [51, 51, 51, 255]);
+
     // Hovered, held, clicked: the app's colours, one play.
     h.move_to(20.0, 20.0);
     assert_eq!(px(&mut h), [0, 0, 255, 255]);
@@ -910,6 +912,7 @@ mod tests {
     assert_eq!(px(&mut h), [255, 0, 0, 255]);
     h.release(20.0, 20.0);
     assert_eq!(h.app().plays, 1);
+
     // Tab focuses it, Space plays and flashes it pressed.
     h.leave();
     h.key(NamedKey::Tab, Modifiers::empty());
@@ -917,6 +920,7 @@ mod tests {
     h.key(Key::Char(' '), Modifiers::empty());
     assert_eq!(h.app().plays, 2);
     assert_eq!(px(&mut h), [255, 0, 0, 255]);
+
     // Space again before the flash ends: pressed until the second one ends, then at rest.
     h.wait(Duration::from_millis(80));
     h.key(Key::Char(' '), Modifiers::empty());
@@ -924,9 +928,11 @@ mod tests {
     assert_eq!(px(&mut h), [255, 0, 0, 255]);
     h.wait(Duration::from_millis(100));
     assert_eq!((px(&mut h), h.app().plays), ([51, 51, 51, 255], 3));
+
     // Alt-Space is the window menu's on Windows: it goes on unused.
     assert!(!h.key(Key::Char(' '), Modifiers::ALT));
     assert_eq!(h.app().plays, 3);
+
     // Disabled while focused: focus goes, no input, and Tab passes it by.
     h.app_mut().off = true;
     h.rt.redraw();
@@ -1026,6 +1032,7 @@ mod tests {
     assert!(b.focused && b.changed && b.editing == Editing::Field(FieldKind::SingleLine));
     assert_eq!(h.render().pixel(100.0, 20.0), [0, 0, 255, 255]);
     assert_eq!(h.text(Id::of("own").key("text")), Some("hi"));
+
     // The app's own value goes in; Escape cancels and goes on.
     h.app_mut().text = "set".into();
     h.frame();
@@ -1068,15 +1075,18 @@ mod tests {
     let mut text = "ab".to_owned();
     take_value(&mut st, &text);
     st.ed.set_marked("x", 1..1, None);
+
     // The app sets a value: held, the composition stays, nothing written back.
     text = "app".into();
     take_value(&mut st, &text);
     assert!(!write_back(&mut st, &mut text));
     assert_eq!((st.ed.text(), text.as_str()), ("abx", "app"));
+
     // Cancelled: the app's value applies, not as a change.
     st.ed.set_marked("", 0..0, None);
     assert!(!write_back(&mut st, &mut text));
     assert_eq!((st.ed.text(), st.held.as_deref()), ("app", None));
+
     // Set, then set back: nothing waits.
     st.ed.set_marked("z", 1..1, None);
     text = "other".into();
@@ -1086,6 +1096,7 @@ mod tests {
     st.ed.set_marked("", 0..0, None);
     assert!(!write_back(&mut st, &mut text));
     assert_eq!((st.ed.text(), text.as_str()), ("app", "app"));
+
     // Held again, then committed: the commit wins.
     st.ed.set_marked("y", 1..1, None);
     text = "other".into();

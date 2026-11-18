@@ -145,14 +145,17 @@ fn keys_go_to_the_ends_and_select_all() {
   h.set_os(Os::Mac);
   let list = Id::of(LIST);
   h.click_id(row(101));
+
   h.key(NamedKey::End, NONE);
   h.frame();
   assert_eq!(selected(&h), [ROWS as u64 - 1]);
   let (v, last) = (h.scroll(list).unwrap().viewport, h.rect(row(ROWS as u64 - 1)).unwrap());
   assert!(last.y >= v.y && last.y + last.h <= v.y + v.h + 0.5, "{last:?} in {v:?}");
+
   h.key(NamedKey::ArrowUp, Os::Mac.cmd());
   h.frame();
   assert_eq!((selected(&h), offset(&h, list)), (vec![0], 0.0));
+
   h.key(Key::Char('a'), Os::Mac.cmd());
   assert_eq!(h.app().sel.len(), ROWS);
 }
@@ -167,6 +170,7 @@ fn the_menu_runs_the_highlighted_item() {
   h.key(Key::Char('a'), CMD);
   open(&mut h, menu);
   assert_eq!(h.focused(), Some(popup));
+
   h.key(NamedKey::ArrowDown, NONE);
   h.key(NamedKey::ArrowDown, NONE);
   h.key(NamedKey::ArrowDown, NONE);
@@ -228,12 +232,14 @@ fn a_right_click_opens_the_row_menu_over_the_selection() {
     select_some(h);
     h.set_os(os);
     let popup = Id::of(LIST).key("menu");
+
     right(h, row(103), false);
     // macOS opens it as the button goes down, Windows as it is let go.
     assert_eq!(h.rect(popup).is_some(), os == Os::Mac, "{os:?}");
     right(h, row(103), true);
     assert_eq!(selected(h), [101, 103, 104], "{os:?}: inside, kept");
     assert!(h.rect(popup).is_some() && h.focused() == Some(popup));
+
     h.click_menu_item("Open");
     h.frame();
     assert_eq!(h.app().chosen, [(RowAction::Open, vec![101, 103, 104])], "{os:?}");
@@ -358,9 +364,11 @@ fn the_pop_up_button_opens_over_itself() {
   h.frame();
   h.frame();
   assert_eq!(h.focused(), Some(sort.key("menu")));
+
   // The button sits by the window's top.
   let (b, m) = (h.rect(sort).unwrap(), h.rect(sort.key("menu")).unwrap());
   assert!(m.x < b.x && m.y < b.y + b.h && m.y >= 6.0, "{m:?} over {b:?}");
+
   h.key(Key::Char('d'), NONE);
   h.key(NamedKey::Enter, NONE);
   h.frame();
@@ -376,14 +384,17 @@ fn tabs_switch_and_keep_the_hidden_page_scroll() {
   h.click_id(tabs.key(("tab", "Notes")));
   h.frame();
   assert_eq!(h.app().tab, 1);
+
   let notes = Id::of(NOTES);
   let at = mid(h.rect(notes).unwrap());
   swipe(&mut h, at, -60.0);
   h.frame();
   assert_eq!(offset(&h, notes), 60.0);
+
   h.click_id(tabs.key(("tab", "Details")));
   h.frame();
   assert!(h.rect(notes).is_none());
+
   h.set_focus(Some(tabs));
   h.key(NamedKey::ArrowRight, NONE);
   h.frame();
@@ -398,6 +409,7 @@ fn the_split_divider_drags() {
   let handle = Id::of(SPLIT).key("handle");
   let w = h.rect(list).unwrap().w;
   let (x, y) = mid(h.rect(handle).unwrap());
+
   h.move_to(x, y);
   h.press(x, y);
   h.move_to(x + 80.0, y);
@@ -407,6 +419,7 @@ fn the_split_divider_drags() {
   let grown = h.rect(list).unwrap().w;
   assert!((grown - (w + 80.0)).abs() <= 1.0, "{w} → {grown}");
   assert!(h.app().side > 0.45);
+
   h.leave();
   h.wait(Duration::from_millis(2000));
   assert!(!h.frame(), "idle");

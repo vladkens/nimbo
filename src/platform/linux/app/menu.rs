@@ -163,15 +163,18 @@ mod tests {
     let V::Array(_, a) = props(&n[4]) else { panic!() };
     assert!(a.contains(&entry("label", V::s("A__1"))));
     assert!(a.contains(&entry("toggle-state", V::I(1))));
+
     // Checkable but off: the box shows empty, and turns on in place when it changes.
     let V::Array(_, b) = props(&n[5]) else { panic!() };
     assert!(b.contains(&entry("toggle-type", V::s("checkmark"))));
     assert!(b.contains(&entry("toggle-state", V::I(0))));
     let V::Array(_, head) = props(&n[1]) else { panic!() };
     assert!(!head.iter().any(|e| matches!(e, V::Entry(k, _) if **k == V::s("toggle-type"))));
+
     let V::Array(_, quit) = props(&n[6]) else { panic!() };
     let keys = V::Array("as", vec![V::Array("s", vec![V::s("Control"), V::s("q")])]);
     assert!(quit.contains(&entry("shortcut", keys)));
+
     assert_eq!(layout(&n, 0, -1, 0).ty(), "(ia{sv}av)");
     let V::Tuple(root) = layout(&n, 0, 1, 100) else { panic!() };
     assert_eq!(root[0], V::I(0), "the root keeps 0");

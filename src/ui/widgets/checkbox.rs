@@ -16,6 +16,7 @@ impl Ui<'_> {
     let hot = self.ctl_hot(id, b.hovered);
     let (fill, edge) = check_fill(&t, *on, hot);
     let mark = alpha(t.on_accent, if b.disabled { t.disabled } else { 1.0 });
+
     let c = t.sizes.check;
     let row = Style::new().w(rigid()).gap((c * 0.4).round()).align(Align::Start, Align::Center);
     let row = row.radius(3.0);
@@ -85,6 +86,7 @@ mod tests {
     h.wait(std::time::Duration::from_millis(300));
     let accent = h.rt.ui.theme.accent.map(|c| (c * 255.0).round() as u8);
     assert_eq!(h.render().pixel(x, y), accent);
+
     h.app_mut().off = true;
     h.rt.redraw();
     h.click_id(Id::of("c"));

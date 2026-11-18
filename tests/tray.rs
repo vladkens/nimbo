@@ -31,14 +31,17 @@ fn the_example() {
     let items = m.items.iter().map(|i| (i.label().to_owned(), i.is_enabled(), i.is_on()));
     items.collect::<Vec<_>>()
   };
+
   let idle = Shown { count: None, login: None, hotkey: "Ctrl+Alt+Space".into() };
   let l = labels(&idle);
   assert_eq!(l[0], ("Ctrl+Alt+Space opens the counter".into(), false, false));
   assert_eq!((l[1].0.as_str(), l[3].1), ("Open Counter", false), "no launch at login");
+
   let open = Shown { count: Some(3), login: Some(true), ..idle };
   let l = labels(&open);
   assert_eq!((l[0].0.as_str(), l[1].0.as_str()), ("Count: 3", "Close Counter"));
   assert_eq!(l[3], ("Launch at Login".into(), true, true));
+
   assert!(nimbo::Hotkey::parse(example::HOTKEY).is_ok());
   let mut rings = Vec::new();
   svg::flatten(example::ICON, 1.0, &mut rings).unwrap();

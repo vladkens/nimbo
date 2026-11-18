@@ -53,6 +53,7 @@ fn the_toggle_trails_the_sidebar_and_follows_it_to_the_traffic_lights() {
   let mut h = notes(true);
   let lights = mac_titlebar("Notes", true).buttons.unwrap();
   let after = lights.x + lights.w + AFTER_BUTTONS;
+
   // Shown: at the sidebar's trailing edge, by the divider, on the lights' middle.
   let at = toggle(&h);
   assert_eq!((at.x + at.w, mid(at).y), (column_end(&h) - 8.0, mid(lights).y));
@@ -60,15 +61,18 @@ fn the_toggle_trails_the_sidebar_and_follows_it_to_the_traffic_lights() {
   h.click(mid(at).x, mid(at).y);
   h.frame();
   assert!(!h.app().sidebar);
+
   // It slides out in 150 ms, not at once, the toggle with it.
   h.wait(Duration::from_millis(60));
   let (half, t) = (h.rect(Id::of(LIST)).map_or(0.0, |r| r.w), toggle(&h).x);
   assert!(half > 0.0 && half < side, "{half} of {side}");
   assert!(t > after && t < at.x, "the toggle at {t}, between {after} and {}", at.x);
+
   // Hidden: right of the lights.
   h.wait(Duration::from_millis(120));
   assert!(h.rect(Id::of(LIST)).is_none());
   assert_eq!((toggle(&h).x, mid(toggle(&h)).y), (after, mid(lights).y));
+
   let t = toggle(&h);
   h.click(mid(t).x, mid(t).y);
   h.wait(Duration::from_millis(200));

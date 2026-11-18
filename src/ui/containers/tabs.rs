@@ -233,6 +233,7 @@ mod tests {
     h.rt.ui.store.raw::<ScrollState>(page).offset[1] = 50.0;
     h.rt.redraw();
     h.frame();
+
     // The second "Same" is its own tab; the first page's offset outlives it hidden.
     h.click_id(Id::of("tabs").key(("tab", "Same", 1usize)));
     h.frame();

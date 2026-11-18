@@ -345,6 +345,7 @@ mod tests {
       *s.next.borrow_mut() = Some(Box::new(vec![v]));
       s.set_menu(m, in_place)
     };
+
     assert!(matches!(set(&s, &a, "a", true), Set::Build));
     assert_eq!(actions(&s), Some(vec!["a"]), "built at once");
     s.set_open(true);

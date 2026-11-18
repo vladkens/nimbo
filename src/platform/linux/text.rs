@@ -695,11 +695,13 @@ pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {
       (hb.hb_buffer_add_utf8)(buf, s.as_ptr().cast(), s.len() as c_int, off, len);
       (hb.hb_buffer_guess_segment_properties)(buf);
       (hb.hb_shape)(font, buf, std::ptr::null(), 0);
+
       let mut n = 0;
       let infos = (hb.hb_buffer_get_glyph_infos)(buf, &mut n);
       let infos = std::slice::from_raw_parts(infos, n as usize);
       let pos = (hb.hb_buffer_get_glyph_positions)(buf, &mut n);
       let pos = std::slice::from_raw_parts(pos, n as usize);
+
       let mut space = 0;
       (hb.hb_font_get_nominal_glyph)(font, ' ' as u32, &mut space);
       for (g, p) in infos.iter().zip(pos) {
@@ -1055,6 +1057,7 @@ mod tests {
       (s.fc.FcPatternAddInteger)(pat, c"weight".as_ptr(), FC_WEIGHTS[0]);
       (s.fc.FcConfigSubstitute)(s.config, pat, FC_MATCH_PATTERN);
       (s.fc.FcDefaultSubstitute)(pat);
+
       let mut res = 0;
       let set = (s.fc.FcFontSort)(s.config, pat, 0, std::ptr::null_mut(), &mut res);
       (s.fc.FcPatternDestroy)(pat);

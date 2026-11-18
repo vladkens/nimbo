@@ -111,6 +111,7 @@ pub fn appearance() -> Appearance {
   let (aqua, dark) = unsafe { (NSAppearanceNameAqua, NSAppearanceNameDarkAqua) };
   let best = look.bestMatchFromAppearancesWithNames(&NSArray::from_slice(&[aqua, dark]));
   let dark = best.is_some_and(|n| &*n == dark);
+
   let picked = NSUserDefaults::standardUserDefaults().objectForKey(ns_string!("AppleAccentColor"));
   let accent = Cell::new(None);
   if picked.is_some() {

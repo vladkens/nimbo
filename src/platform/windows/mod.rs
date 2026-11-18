@@ -705,6 +705,7 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
   let (ww, wh) = (rc.right - rc.left, rc.bottom - rc.top);
   let (sw, sh) = unsafe { (GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN)) };
   let (x, y) = (((sw - ww) / 2).max(0), ((sh - wh) / 2).max(0));
+
   let title = wide(cfg.title);
   let hwnd = unsafe {
     CreateWindowExW(
@@ -723,6 +724,7 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
     )
   };
   assert!(!hwnd.is_null(), "nimbo: CreateWindowExW failed");
+
   if let Some((side, px)) = cfg.window_icon() {
     // Big and small alike, the system scales it. One per image (`'static`), the windows share it
     // for the app's life.
@@ -748,10 +750,12 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
   let scale = unsafe { GetDpiForWindow(hwnd) } as f32 / 96.0;
   let mut rt = Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(WinClipboard::new(hwnd)));
   rt.set_native_menus(true);
+
   // The title bar's mode before the window shows, so it never flashes light.
   let look = appearance();
   settings::title_bar(hwnd, look.scheme.is_dark());
   rt.event(Event::Appearance(look));
+
   // A wake from any thread posts a message; the window handle crosses threads as a number, held
   // while posting so the window's end waits for a post under way.
   let target = Arc::new(Mutex::new(hwnd as isize));
@@ -808,6 +812,7 @@ fn apply_resize(hwnd: HWND) -> bool {
     Some((size, w.style))
   });
   let Some((size, style)) = want.flatten() else { return false };
+
   let dpi = unsafe { GetDpiForWindow(hwnd) };
   let k = dpi as f32 / 96.0;
   let (w, h) = ((size.w * k).round() as i32, (size.h * k).round() as i32);

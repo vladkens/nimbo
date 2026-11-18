@@ -119,11 +119,13 @@ fn a_smaller_window_brings_the_square_back_inside() {
   h.render();
   h.move_to(SIZE.w - SIDE / 2.0, SIZE.h - SIDE / 2.0);
   assert!(h.app().hover);
+
   h.resize(Size::new(320.0, 240.0), 2.0);
   let img = h.render();
   assert_eq!(h.app().pos, Point::new(320.0 - SIDE, 240.0 - SIDE));
   assert_eq!(img.pixel(320.0 - SIDE / 2.0, 240.0 - SIDE / 2.0), px(BLUE));
   assert!(!h.app().hover);
+
   h.resize(SIZE, 2.0);
   h.leave();
   assert_eq!(h.mouse(), None);
@@ -170,14 +172,17 @@ fn the_hover_follows_the_square_under_a_still_pointer() {
   h.move_to(edge.0, edge.1);
   h.frame();
   assert!(h.app().hover && h.cursor() == Cursor::Grab);
+
   assert!(h.key(NamedKey::ArrowLeft, NONE));
   assert!(!h.app().hover, "moved away by an arrow");
   let img = h.render();
   assert_eq!(h.cursor(), Cursor::Arrow);
   assert_eq!(img.pixel(h.app().pos.x + 0.5, edge.1), px(BLUE), "no hover border");
+
   assert!(h.key(NamedKey::ArrowRight, NONE));
   h.frame();
   assert!(h.app().hover && h.cursor() == Cursor::Grab, "back under the pointer");
+
   h.clipboard().write("300,200");
   assert!(h.key(Key::Char('v'), CMD));
   h.frame();
@@ -185,6 +190,7 @@ fn the_hover_follows_the_square_under_a_still_pointer() {
   h.clipboard().write(&format!("{},{}", START.x, START.y));
   assert!(h.key(Key::Char('v'), CMD));
   assert!(h.app().hover);
+
   assert!(wheel(&mut h, edge, -20.0));
   h.frame();
   assert!(!h.app().hover && h.cursor() == Cursor::Arrow, "shrunk away by the wheel");
@@ -212,13 +218,16 @@ fn cmd_c_and_cmd_v_copy_and_paste_the_position() {
   assert!(h.key(Key::Char('c'), CMD));
   let copied = h.clipboard().read();
   assert_eq!(copied, Some(format!("{},{}", START.x, START.y)));
+
   h.clipboard().write(" 200, 120 ");
   assert!(h.key(Key::Char('v'), CMD));
   assert_eq!(h.app().pos, Point::new(200.0, 120.0));
   check_square(&h.render(), h.app(), BLUE);
+
   h.clipboard().write("hello");
   assert!(!h.key(Key::Char('v'), CMD));
   assert_eq!(h.app().pos, Point::new(200.0, 120.0));
+
   // A binding's command reaches the app as a command, not as the key.
   let k = KeyEvent { key: Key::Char('v'), text: None, code: Code::KeyV, mods: CMD, repeat: false };
   h.clipboard().write("10,50");

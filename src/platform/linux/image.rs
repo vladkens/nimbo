@@ -52,6 +52,7 @@ pub fn decode(file: &[u8], side: u32) -> Result<(u32, u32, Vec<u8>), String> {
   let f = pixbuf().ok_or("gdk-pixbuf is not installed")?;
   let jpeg = file.starts_with(&[0xff, 0xd8, 0xff]);
   let mut ask = Ask { side, jpeg, refused: None };
+
   // SAFETY: GLib's calls with the loader alive until its unref; `ask` outlives the signal, which
   // comes during the writes; the pixbuf is the loader's (borrowed) or an owned turned copy.
   unsafe {
@@ -65,6 +66,7 @@ pub fn decode(file: &[u8], side: u32) -> Result<(u32, u32, Vec<u8>), String> {
       null_mut(),
       0,
     );
+
     let mut err = null_mut();
     let read = (f.gdk_pixbuf_loader_write)(loader, file.as_ptr(), file.len(), &mut err) != 0;
     // Closed in any case, its error kept only when the write had none.

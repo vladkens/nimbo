@@ -209,6 +209,7 @@ fn run(edges: &Sender<Edge>, shared: Arc<Shared>, cmds: &Receiver<Cmd>, ready: &
   HOOK.with_borrow_mut(|h| (h.thread, h.shared) = (thread, Some(shared.clone())));
   _ = ready.send(thread);
   let mut chord = Chord { registered: false, held: None, timer: 0, hook: null_mut() };
+
   while unsafe { GetMessageW(&mut msg, null_mut(), 0, 0) } > 0 {
     let now = Instant::now();
     match msg.message {
@@ -225,6 +226,7 @@ fn run(edges: &Sender<Edge>, shared: Arc<Shared>, cmds: &Receiver<Cmd>, ready: &
 
         on(Edge::Down { at: now, repeat });
       }
+
       WM_TIMER if msg.wParam == chord.timer && chord.timer != 0 => {
         let up =
           chord.held.is_none_or(|vk| unsafe { GetAsyncKeyState(vk as i32) } as u16 & 0x8000 == 0);
@@ -234,12 +236,14 @@ fn run(edges: &Sender<Edge>, shared: Arc<Shared>, cmds: &Receiver<Cmd>, ready: &
           on(Edge::Up { at: now });
         }
       }
+
       WM_EDGE => {
         for edge in HOOK.with_borrow_mut(|h| std::mem::take(&mut h.queue)) {
           shared.listener_events.fetch_add(1, Ordering::Relaxed);
           on(edge);
         }
       }
+
       WM_CMD => {
         while let Ok(cmd) = cmds.try_recv() {
           match cmd {
@@ -256,6 +260,7 @@ fn run(edges: &Sender<Edge>, shared: Arc<Shared>, cmds: &Receiver<Cmd>, ready: &
           }
         }
       }
+
       _ => unsafe {
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
@@ -586,15 +591,18 @@ mod tests {
     assert_eq!(l.key(ralt, true, ms(0)), Some(Hit::Down));
     assert_eq!(l.key(ralt, true, ms(30)), None, "its autorepeat");
     assert_eq!(l.key(ralt, false, ms(100)), Some(Hit::Up));
+
     // Another modifier held first: the user's chord.
     assert_eq!(l.key(lalt, true, ms(200)), None);
     assert_eq!(l.key(ralt, true, ms(210)), None);
     assert_eq!(l.key(ralt, false, ms(220)), None, "no release owed");
     assert_eq!(l.key(lalt, false, ms(230)), None);
+
     // A key soon after the press aborts it; its release is no edge.
     assert_eq!(l.key(ralt, true, ms(300)), Some(Hit::Down));
     assert_eq!(l.key(e, true, ms(350)), Some(Hit::Aborted));
     assert_eq!(l.key(ralt, false, ms(400)), None);
+
     // Later keys are typing while it is held: they never cancel.
     assert_eq!(l.key(ralt, true, ms(1000)), Some(Hit::Down));
     assert_eq!(l.key(shift, true, ms(1500)), None);
@@ -614,11 +622,13 @@ mod tests {
     assert_eq!(l.escape(true, esc, true), taken);
     assert_eq!(l.escape(true, esc, true), Some(None), "its autorepeat");
     assert_eq!(l.escape(false, esc, false), Some(None), "its release, once off");
+
     // Held since before it was on: the app's, repeats and release too.
     assert_eq!(l.escape(false, esc, true), None);
     assert_eq!(l.escape(true, esc, true), None);
     assert_eq!(l.escape(true, esc, false), None);
     assert_eq!(l.escape(true, a, true), None, "other keys pass");
+
     // Ctrl+Esc (Start), Win+Esc are not Escape; Shift+Esc is.
     for m in [ctrl, win] {
       l.key(m, true, t0);
@@ -630,6 +640,7 @@ mod tests {
     l.key(shift, true, t0);
     assert_eq!(l.escape(true, esc, true), taken);
     assert_eq!(l.escape(true, esc, false), Some(None));
+
     // Another hotkey meanwhile: a taken press stays taken, repeats and release.
     assert_eq!(l.escape(true, esc, true), taken);
     l.watch(VK_RMENU as u32);
@@ -644,18 +655,21 @@ mod tests {
     let (ralt, lalt, esc) = (VK_RMENU as u32, VK_LMENU as u32, VK_ESCAPE as u32);
     let mut l = Lone { key: ralt, ..Lone::default() };
     let mut judge = |vk, down, at| l.judge(true, vk, down, ms(at));
+
     // Right after the press: the user's Alt+Esc, which aborts the press and passes.
     assert_eq!(judge(ralt, true, 0), (Some(Hit::Down), false));
     assert_eq!(judge(esc, true, 100), (Some(Hit::Aborted), false));
     assert_eq!(judge(esc, true, 130), (None, false), "its autorepeat is the app's too");
     assert_eq!(judge(esc, false, 150), (None, false));
     assert_eq!(judge(ralt, false, 200), (None, false), "no release owed");
+
     // Held past the chord window: Escape is taken, the hotkey's own Alt notwithstanding.
     assert_eq!(judge(ralt, true, 1000), (Some(Hit::Down), false));
     assert_eq!(judge(esc, true, 2000), (Some(Hit::Escape), true));
     assert_eq!(judge(esc, true, 2030), (None, true));
     assert_eq!(judge(esc, false, 2050), (None, true));
     assert_eq!(judge(ralt, false, 2100), (Some(Hit::Up), false));
+
     // Left Alt is another key: Alt+Esc stays the app's.
     assert_eq!(judge(lalt, true, 3000), (None, false));
     assert_eq!(judge(esc, true, 4000), (None, false));

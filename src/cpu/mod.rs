@@ -229,6 +229,7 @@ impl Renderer {
     self.bins.resize_with(bands, Vec::new);
     self.bins.truncate(bands);
     self.bins.iter_mut().for_each(Vec::clear);
+
     let (tw, th) = (w.div_ceil(TILE as usize), h.div_ceil(TILE as usize));
     self.tiles_w = tw;
     self.tiles.clear();
@@ -320,6 +321,7 @@ impl Renderer {
     let (items, images, scale) = (&self.items, &self.images, self.scale);
     let clear = if self.transparent { 0 } else { CLEAR };
     let job = Job { scene, items, images, atlas, color, scale, clear };
+
     let rows = BAND as usize * stride;
     let px = &mut px[..stride * (h - 1) + w];
     let bands: Vec<(usize, &mut [u32])> = px.chunks_mut(rows).enumerate().collect();
@@ -328,6 +330,7 @@ impl Renderer {
       rects.iter().any(|r| r.overlaps(band))
     };
     let bands: Vec<_> = bands.into_iter().filter(|(b, _)| todo(*b)).collect();
+
     let run = |(b, px): (usize, &mut [u32])| {
       let y0 = b as i32 * BAND;
       let band = IRect::new(0, y0, w as i32, (y0 + BAND).min(h as i32));
@@ -500,6 +503,7 @@ fn item_hash(scene: &Scene, it: &Item) -> u64 {
   let i = it.idx as usize;
   let r = it.rect;
   let h = Hash(it.kind as u64).add(r.x0 as u64).add(r.y0 as u64).add(r.x1 as u64).add(r.y1 as u64);
+
   let rect = |r: Rect| [r.x, r.y, r.w, r.h];
   let h = match it.kind {
     Kind::Quad => {
@@ -556,6 +560,7 @@ mod tests {
     let mut r = Renderer::new();
     let size = Size::new(20.0, 10.0);
     let opaque = r.snapshot(&s, size, 1.0);
+
     let mut c = Canvas::default();
     c.draw(&mut r, &s, size, 1.0, false);
     r.transparent = true;
@@ -563,6 +568,7 @@ mod tests {
     // A canvas drawn opaque is drawn again, all of it.
     assert_eq!(c.draw(&mut r, &s, size, 1.0, true), 20 * 10);
     assert_eq!(c.pixels().data, px.data);
+
     let at = |p: &Pixels, x: usize| p.data[x * 4..x * 4 + 4].to_vec();
     assert_eq!(at(&opaque, 15), [0, 0, 0, 255]);
     assert_eq!(at(&px, 15), [0, 0, 0, 0]);

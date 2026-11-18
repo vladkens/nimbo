@@ -586,6 +586,7 @@ impl Ui<'_> {
     let first = self.st.stack.last().is_none_or(|&(_, n)| n == 0);
     let dim = |s: TextStyle| if off { s.color(t.tertiary) } else { s };
     let top = if first { 0.0 } else { fs.hairline };
+
     // Held down, a fill over its whole piece of the plate, as a grouped list's selection:
     // rounded at the plate's top when first, at its bottom when the plate ends with it (the
     // section says so once its rows are built); no hairline beside it.
@@ -614,6 +615,7 @@ impl Ui<'_> {
 
     let (pad_x, shift) = (fs.row.pad[3], self.mark_shift(fs.label));
     let FormRow { label, caption, tile, footer, .. } = row;
+
     // The line of the tile, the label and the controls, as high as the row's least height; the
     // footer under it. With a footer the line ends at the description, its padding under the
     // footer, and the tile and controls keep their centre on the label and description.
@@ -623,6 +625,7 @@ impl Ui<'_> {
     // Over a footer, a control taller than the label's line would leave the label above its
     // middle: the two centre on each other.
     let line = if footer.is_none() { line } else { line.align(Align::Start, Align::Center) };
+
     let r = self.disabled_scope(off, |ui| {
       ui.next_id = Some((id, false));
       ui.canvas_col(style.gap(0.0), hairline, |ui| {
@@ -651,10 +654,12 @@ impl Ui<'_> {
               name = at..ui.st.tree.nodes.len() as u32;
               ui.set_slot(outer);
             });
+
             let at = ui.st.tree.nodes.len() as u32;
             caption.build(ui, dim(fs.caption), id.key("caption"), 12.0, 1.6);
             about = at..ui.st.tree.nodes.len() as u32;
           });
+
           outer = Some(ui.form_names(name, about));
           if fs.row.hit {
             ui.a11y_row(id, Role::Row).state(State::Disabled, off);
@@ -941,6 +946,7 @@ mod tests {
         Ctl::Segments => ui.id(id).segmented(&mut 0, &[Tag::new(0, "Light"), Tag::new(1, "Dark")]),
         Ctl::Use => ui.id(id).button("Use"),
       };
+
       ui.col(fs.page, |ui| {
         ui.form_section(&fs, "Section", |ui| {
           let badged = FormRow::new(label).caption("Under it");
@@ -966,6 +972,7 @@ mod tests {
         ui.form_section(&fs, Section::default(), |ui| {
           let row = FormRow::new("Switch").caption("What it does");
           ui.id("switch").form_row(&fs, row, |ui| ui.toggle(&mut false, ""));
+
           let tall = |ui: &mut Ui, id: &str| {
             let slot = Style::new().h(px(row_h)).align(Align::Center, Align::Center);
             ui.id(id)
@@ -973,6 +980,7 @@ mod tests {
           };
           let row = FormRow::new("Link").caption("Where it goes");
           ui.id("tall").form_row(&fs, row, |ui| tall(ui, "link"));
+
           let slider = |id: &'static str| {
             move |ui: &mut Ui, _: TextStyle| {
               ui.id(id).slider(&mut 0.5, 0.0..=1.0);
@@ -1042,6 +1050,7 @@ mod tests {
         tint[2] > tint[0].saturating_add(10) && ground[0] == ground[2],
         "{label}: {tint:?} {ground:?}"
       );
+
       let a11y = h.a11y();
       let (r, n, b) =
         (a11y.find(label), a11y.find("\"New\""), a11y.find(r#""Beta" desc "In testing""#));
@@ -1061,6 +1070,7 @@ mod tests {
     for (ctl, read) in [(Ctl::Switch, "switch"), (Ctl::Segments, "radio group")] {
       let mut h = Harness::new(Badged(name, ctl), Size::new(500.0, 300.0), 1.0);
       h.frame();
+
       let tree = h.a11y();
       let lines: Vec<&str> = tree.lines().map(str::trim).collect();
       let at = |l: &str| lines.iter().position(|x| x.starts_with(l));
@@ -1088,6 +1098,7 @@ mod tests {
       ui.set_theme(Theme::PLATES_LIGHT);
       let fs = FormStyle::plates(&ui.theme());
       let muted = ui.theme().muted;
+
       // With `widgets` an icon and a button after the texts.
       let caption = |wer: &'static str, widgets: bool| {
         move |ui: &mut Ui, s: TextStyle| {
@@ -1102,6 +1113,7 @@ mod tests {
           });
         }
       };
+
       ui.col(fs.page, |ui| {
         ui.form_section(&fs, "Section", |ui| {
           ui.id("whole").form_row(&fs, FormRow::new("A").caption("WER 4.5% · 274 MB"), |_| {});
@@ -1109,6 +1121,7 @@ mod tests {
           ui.form_row(&fs, FormRow::new("B").caption(caption("on", true)), |_| {});
           let off = FormRow::new("B").caption(caption("off", true));
           ui.disabled(true).form_row(&fs, off, |_| {});
+
           // A text caption and the same widgets as controls, in a disabled row.
           let off = FormRow::new("C").caption("WER 4.5% · 274 MB");
           ui.disabled(true).id("dim").form_row(&fs, off, |ui| {
@@ -1182,6 +1195,7 @@ mod tests {
             ui.id("b").form_row(&fs, FormRow::new("B"), |_| {});
           });
           self.0 += r.changed as usize;
+
           let (off, c) = (FormRow::new("Off"), FormRow::new("Off"));
           let r = ui
             .disabled(true)
@@ -1239,18 +1253,21 @@ mod tests {
       let y = r.y + r.h / 2.0;
       [img.pixel(r.x + r.w - 40.0, y), img.pixel(r.x + 0.5, y), img.pixel(r.x + 0.5, r.y + 0.5)]
     };
+
     h.leave();
     h.wait(Duration::from_millis(400));
     let rest = at(&mut h);
     h.move_to(r.x + r.w - 40.0, r.y + r.h / 2.0);
     h.wait(Duration::from_millis(400));
     assert_eq!(at(&mut h), rest, "no hover fill");
+
     h.press(r.x + r.w - 40.0, r.y + r.h / 2.0);
     h.frame();
     let held = at(&mut h);
     assert!(held[0] != rest[0] && held == [held[0]; 3], "pressed, full: {held:?} {rest:?}");
     h.release(r.x + r.w - 40.0, r.y + r.h / 2.0);
     h.frame();
+
     let n = h.app().0;
     h.click_id(Id::of("off"));
     h.frame();
@@ -1291,6 +1308,7 @@ mod tests {
     let (fill, ground) = (img.pixel(x, y), img.pixel(r.x - 4.0, y));
     assert_ne!(fill, ground);
     assert_eq!((img.pixel(r.x + 0.5, y), img.pixel(r.x + r.w - 0.5, y)), (fill, fill));
+
     // A point in from each corner of the row's box: the ground, the corner cut off.
     let (l, rr, t, b) = (r.x + 0.5, r.x + r.w - 0.5, r.y + 0.5, r.y + r.h - 0.5);
     for (cx, cy) in [(l, t), (rr, t), (l, b), (rr, b)] {
@@ -1338,6 +1356,7 @@ mod tests {
     };
     assert!(read(&h, "\"Off\"").contains("disabled"), "{}", read(&h, "\"Off\""));
     assert!(!read(&h, "\"Other models\"").contains("disabled"));
+
     // Its label in the tertiary colour, the other's in the text's.
     let ink = |h: &mut Harness<Fold>, id: Id| {
       let r = h.rect(id.key("label")).unwrap();
@@ -1347,6 +1366,7 @@ mod tests {
     };
     let (on_ink, off_ink) = (ink(&mut h, fold), ink(&mut h, off));
     assert!(off_ink > on_ink + 60, "dimmed: {on_ink} {off_ink}");
+
     h.set_focus(Some(fold));
     for _ in 0..3 {
       h.key(NamedKey::Tab, Modifiers::empty());
@@ -1410,12 +1430,14 @@ mod tests {
     assert!(title.is_none(), "a built header has no text of its own");
     let b = h.rect(Id::of("b")).unwrap();
     assert!(note.x + note.w > b.x + b.w - 20.0, "the note at the right: {note:?} in {b:?}");
+
     let foot = h.rect(Id::of("b").key("footer")).unwrap();
     assert!(foot.y + foot.h <= b.y + b.h && foot.y > note.y + 30.0, "under the plate: {foot:?}");
     let Kind::Text { style, .. } = h.rt.ui.last.get(Id::of("b").key("footer")).unwrap().kind else {
       panic!()
     };
     assert_eq!(style, FormStyle::plates(&Theme::PLATES_LIGHT).caption);
+
     let (c, row) = (h.rect(Id::of("c")).unwrap(), h.rect(Id::of("row")).unwrap());
     assert_eq!(c.y, row.y, "no header");
     assert!(h.rect(Id::of("a").key("header")).is_some());

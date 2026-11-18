@@ -649,6 +649,7 @@ mod tests {
     hooks(|h| h.command = Some(Box::new(f)));
     let s = seen.clone();
     let quit = move |_: &mut Main| s.borrow_mut().push("quits".into());
+
     command(&mut Main::here(), cmd("open", Some("t1")), &quit);
     command(&mut Main::here(), cmd("quit", None), &quit);
     command(&mut Main::here(), cmd("open now", Some("t2")), &quit);
