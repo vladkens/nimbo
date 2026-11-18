@@ -18,8 +18,8 @@
 //! ([Config::localizations](crate::Config::localizations)), or before any window, for a tray
 //! menu, from [crate::Main::set_localizations]; only the one in use is read. The
 //! language is the system's ([Locale::System]) or the app's choice ([crate::Main::set_locale]),
-//! found as the tag (`pt-BR`), then its language (`pt`), then the language's first longer tag
-//! (`pt` finds `pt-BR`, as Apple's bundles); with no catalog, the English text.
+//! found as the tag (`pt-BR`), then its language (`pt`); a language alone also finds its first
+//! longer tag (`pt` finds `pt-BR`, as Apple's bundles); with no catalog, the English text.
 //! nimbo's own strings (OK and Cancel, the text menu, an icon button's name) come in its own
 //! catalogs (`locales/`, `make i18n`), in the language the app's give.
 //! `pseudo` is a pseudo language (`--locale pseudo` in an example): every marked string accented
@@ -260,7 +260,12 @@ impl Lang {
       Locale::Tag(tag) => vec![tag.to_owned()],
     };
 
-    for want in &wanted {
+    Self::first(wanted.iter().map(String::as_str), catalogs)
+  }
+
+  /// The first of `wanted` that `catalogs` has ([Lang::find]).
+  fn first<'a>(wanted: impl IntoIterator<Item = &'a str>, catalogs: Localizations) -> Self {
+    for want in wanted {
       if want == "pseudo" {
         return Self { pseudo: Some(Mutex::default()), ..Self::default() };
       }
@@ -290,20 +295,24 @@ impl Lang {
   }
 }
 
-/// The `.po` text of `catalogs` for `tag`, else for a shorter one (`zh-Hant-TW`, `zh-Hant`,
-/// `zh`), else the first longer one of its language, as Apple's bundles match `zh` to `zh-Hans`
-/// and `pt` to `pt-BR`.
-fn po_of(catalogs: Localizations, tag: &str) -> Option<&'static str> {
-  let mut tag = tag;
+/// The `.po` text of `catalogs` for `want`, else for a shorter tag (`zh-Hant-TW`, `zh-Hant`,
+/// `zh`); a language alone also takes the first longer one of it, as Apple's bundles match `zh`
+/// to `zh-Hans` and `pt` to `pt-BR`.
+fn po_of(catalogs: Localizations, want: &str) -> Option<&'static str> {
+  let mut tag = want;
   loop {
     if let Some((_, po)) = catalogs.iter().find(|c| c.0.eq_ignore_ascii_case(tag)) {
       return Some(po);
     }
 
-    match tag.rsplit_once('-') {
-      Some((shorter, _)) => tag = shorter,
-      None => break,
-    }
+    let Some((shorter, _)) = tag.rsplit_once('-') else { break };
+    tag = shorter;
+  }
+
+  // A script or a region never takes another's: `zh-Hant-TW` leaves `zh-Hans` for the next
+  // language the user wants, as macOS does.
+  if want.contains('-') {
+    return None;
   }
 
   let longer =
@@ -474,14 +483,27 @@ msgstr[2] "{n} диктовок"
     assert_eq!(t!("Cancel").as_str(), "Abbrechen");
     set_thread(Locale::Tag("zh-Hans-CN"), &[("zh-Hans", "")]);
     assert_eq!(t!("Copy").as_str(), "拷贝");
-    // A language alone takes its first longer catalog, as Apple's: `zh` `zh-Hans`, `pt` `pt-BR`.
-    set_thread(Locale::Tag("zh"), &[("zh-Hans", "")]);
-    assert_eq!(t!("Copy").as_str(), "拷贝");
-    set_thread(Locale::Tag("PT"), &[("pt-BR", "")]);
-    assert_eq!(t!("Cancel").as_str(), "Cancelar");
     for (tag, po) in OWN {
       let entries = po.matches("\nmsgid ").count() - 1;
       assert_eq!(Catalog::parse(po).len(), entries, "{tag}: each translated");
+    }
+  }
+
+  /// A language alone takes its first longer catalog, as Apple's (`zh` `zh-Hans`, `PT` `pt-BR`);
+  /// a tag with a script or a region doesn't take another's: `zh-Hant-TW` passes `zh-Hans` by
+  /// for the next language the user wants.
+  #[test]
+  fn a_language_alone_takes_a_longer_catalog() {
+    let catalogs: Localizations = &[("zh-Hans", ""), ("ja", ""), ("pt-BR", "")];
+    let cases: [(&[&str], &str); 4] = [
+      (&["zh-Hant-TW", "ja"], "キャンセル"),
+      (&["zh"], "取消"),
+      (&["PT"], "Cancelar"),
+      (&["pt-PT", "zh-Hans-CN"], "取消"),
+    ];
+    for (wanted, cancel) in cases {
+      let lang: &'static Lang = Box::leak(Box::new(Lang::first(wanted.iter().copied(), catalogs)));
+      assert_eq!(lang.text("Cancel"), cancel, "{wanted:?}");
     }
   }
 
