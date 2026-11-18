@@ -670,13 +670,14 @@ impl<'a> Ui<'a> {
     self.text.as_mut().map_or(0.0, |t| t.measure(s, style.font))
   }
 
-  /// The widest line of `s` in `style` wrapped at `width`, as the layout breaks it: to fit a box
-  /// to its wrapped text (a tooltip), as the layout sizes one by the text's width before it
-  /// wraps. 0 in a [Ui] the runtime didn't build.
-  pub fn measure_wrapped(&mut self, s: &str, style: TextStyle, width: f32) -> f32 {
-    let Some(text) = self.text.as_mut() else { return 0.0 };
+  /// The size of `s` in `style` wrapped at `width`, as the layout breaks and lays it out: its
+  /// widest line, to fit a box to its wrapped text (a tooltip), as the layout sizes one by the
+  /// text's width before it wraps; and its lines' height, for items of known heights
+  /// ([Ui::virtual_col]) that are paragraphs. Zero in a [Ui] the runtime didn't build.
+  pub fn measure_wrapped(&mut self, s: &str, style: TextStyle, width: f32) -> Size {
+    let Some(text) = self.text.as_mut() else { return Size::default() };
     let mut m = Sys { text, images: &self.images, scale: 1.0 };
-    layout::wrapped_width(s, style, width, &mut m, &mut self.st.kept)
+    layout::wrapped_size(s, style, width, &mut m, &mut self.st.kept)
   }
 
   /// The distance between baselines of text in `style`, as the layout lays it out: its own

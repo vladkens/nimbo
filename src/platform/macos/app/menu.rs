@@ -1,7 +1,8 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Menus on macOS: an NSMenu built from [Menu] ([fill], the tray's too), a context menu popped
-//! up over a view ([popup]) outside the window's borrow, and the key equivalents of shortcuts.
+//! Menus on macOS: an NSMenu built from [Menu] ([fill], the tray's too) and changed in place
+//! ([update]), a context menu popped up over a view ([popup]) outside the window's borrow, and
+//! the key equivalents of shortcuts.
 
 use std::cell::Cell;
 
@@ -152,6 +153,29 @@ pub fn fill(mtm: MainThreadMarker, menu: &NSMenu, items: &[Item<usize>], target:
     }
 
     menu.addItem(&item);
+  }
+}
+
+/// Gives the items of `menu`, built by [fill] from items the same but for these, `items`' labels,
+/// checks and enabled states: an open menu keeps its submenus open.
+pub fn update(menu: &NSMenu, items: &[Item<usize>]) {
+  for (i, it) in items.iter().enumerate() {
+    let Some(item) = menu.itemAtIndex(i as isize) else { return };
+    if let Item::Divider = it {
+      continue;
+    }
+
+    item.setTitle(&NSString::from_str(it.label()));
+    if let Item::Section(_) = it {
+      continue;
+    }
+
+    item.setEnabled(it.is_enabled());
+    let on = it.is_on();
+    item.setState(if on { NSControlStateValueOn } else { NSControlStateValueOff });
+    if let (Item::Submenu { menu: sub, .. }, Some(submenu)) = (it, item.submenu()) {
+      update(&submenu, &sub.items);
+    }
   }
 }
 

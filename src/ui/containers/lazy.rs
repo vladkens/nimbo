@@ -190,7 +190,7 @@ mod tests {
   use crate::app::App;
   use crate::harness::Harness;
   use crate::scene::Size;
-  use crate::ui::{Id, Style, Ui, grow, px};
+  use crate::ui::{Id, Style, TextStyle, Theme, Ui, grow, px};
 
   /// A scroll area 300 high over a prefix `pre` high and a column of 50 items `h` high each, the
   /// item `reveal` asked for in the next view.
@@ -218,7 +218,7 @@ mod tests {
     Some((r.y - vp.y, r.y + r.h - vp.y))
   }
 
-  fn settle(h: &mut Harness<Col>) {
+  fn settle<A: App>(h: &mut Harness<A>) {
     for _ in 0..6 {
       h.frame();
     }
@@ -246,5 +246,68 @@ mod tests {
     settle(&mut h);
     let (top, end) = shown(&h, 2).expect("built");
     assert!(top >= 0.0 && end <= 300.0, "{top}..{end}");
+  }
+
+  /// Paragraphs in a column 120 wide, of 1 to 8 sentences, the last two lines at most:
+  /// a column of them at the heights [Ui::measure_wrapped] gives; and a text in a box narrower
+  /// than its widest character, with the height measured for it.
+  struct Paragraphs {
+    narrow: f32,
+  }
+
+  const NARROW: &str = "iiiiiiii W";
+
+  const SENTENCE: &str = "The quick brown fox jumps over the lazy dog. ";
+
+  fn paragraph(i: usize) -> (String, TextStyle, Theme) {
+    let t = Theme::PLATES_LIGHT;
+    let style = TextStyle::new(t.font, t.text);
+    let style = if i == 7 { style.line_limit(2) } else { style };
+    (SENTENCE.repeat(i + 1).trim_end().to_owned(), style, t)
+  }
+
+  impl App for Paragraphs {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.set_theme(paragraph(0).2);
+      let heights: Vec<f32> = (0..8)
+        .map(|i| {
+          let (text, style, _) = paragraph(i);
+          ui.measure_wrapped(&text, style, 120.0).h
+        })
+        .collect();
+      let style = paragraph(0).1;
+      self.narrow = ui.measure_wrapped(NARROW, style, 5.0).h;
+      ui.col(Style::new().w(px(5.0)), |ui| ui.id("narrow").text(NARROW, style));
+      ui.id("area").scroll_area(Style::new().w(px(120.0)).h(px(2000.0)), |ui| {
+        ui.id("col").virtual_col(
+          heights,
+          |i| i,
+          |ui, i| {
+            let (text, style, _) = paragraph(i);
+            ui.id(("text", i)).text(&text, style);
+          },
+        );
+      });
+    }
+  }
+
+  /// Measured wrapped, a paragraph is as high as the layout lays it out: it fills its item, no
+  /// line clipped, and a limited one counts only the lines it shows. Narrower than a character,
+  /// it is as wide as that, as laid out.
+  #[test]
+  fn wrapped_paragraphs_fill_items_of_their_measured_heights() {
+    let mut h = Harness::new(Paragraphs { narrow: 0.0 }, Size::new(200.0, 2000.0), 2.0);
+    settle(&mut h);
+    let line_h = h.text_system().metrics(paragraph(7).1.font).line_height();
+    let text = |i: usize| h.rect(Id::of(("text", i))).unwrap();
+    for i in 0..8 {
+      let item = h.rect(Id::of("col").key(i)).unwrap();
+      assert_eq!((text(i).y, text(i).h), (item.y, item.h), "paragraph {i}");
+    }
+
+    assert!(text(6).h > text(0).h * 5.0, "it wraps: {:?}", text(6));
+    assert_eq!(text(7).h, 2.0 * line_h, "two lines");
+    let narrow = h.rect(Id::of("narrow")).unwrap();
+    assert_eq!(narrow.h, h.app().narrow, "{narrow:?}");
   }
 }

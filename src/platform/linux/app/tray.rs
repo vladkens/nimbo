@@ -34,7 +34,7 @@ use super::super::dbus::{self, Gv, V, VTable};
 use super::super::dl::fns;
 use super::super::{Fp, P, S, connect, lib, load};
 use super::menu::{self, nodes};
-use crate::tray::{Menu, State, TrayIcon};
+use crate::tray::{Menu, Set, State, TrayIcon};
 use crate::{desktop, paths, platform};
 
 const SNI: &str = "org.kde.StatusNotifierItem";
@@ -66,6 +66,8 @@ const SNI_XML: &std::ffi::CStr = cr#"<node><interface name="org.kde.StatusNotifi
 <property name="ToolTip" type="(sa(iiay)ss)" access="read"/>
 <property name="ItemIsMenu" type="b" access="read"/><property name="Menu" type="o" access="read"/>
 <property name="IconThemePath" type="s" access="read"/>
+<property name="XAyatanaLabel" type="s" access="read"/>
+<property name="XAyatanaLabelGuide" type="s" access="read"/>
 <method name="ContextMenu"><arg type="i" direction="in"/><arg type="i" direction="in"/></method>
 <method name="Activate"><arg type="i" direction="in"/><arg type="i" direction="in"/></method>
 <method name="SecondaryActivate"><arg type="i" direction="in"/><arg type="i" direction="in"/></method>
@@ -73,6 +75,7 @@ const SNI_XML: &std::ffi::CStr = cr#"<node><interface name="org.kde.StatusNotifi
 <signal name="NewTitle"/><signal name="NewIcon"/><signal name="NewAttentionIcon"/>
 <signal name="NewOverlayIcon"/><signal name="NewToolTip"/>
 <signal name="NewStatus"><arg type="s"/></signal>
+<signal name="XAyatanaNewLabel"><arg type="s"/><arg type="s"/></signal>
 </interface></node>"#;
 
 const MENU_XML: &std::ffi::CStr = cr#"<node><interface name="com.canonical.dbusmenu">
@@ -114,6 +117,9 @@ struct Inner {
   /// `IconName`: the icon's SVG in the user's icons, empty until it is written there.
   name: RefCell<String>,
   tooltip: RefCell<String>,
+  /// `XAyatanaLabel`: beside the icon on panels that show it (GNOME's AppIndicator), empty for
+  /// none.
+  title: RefCell<String>,
   menu: RefCell<Menu<usize>>,
   revision: Cell<u32>,
   /// What the menu's numbers ([menu::nodes]) are past the root's on the bus.
@@ -161,6 +167,7 @@ impl Tray {
       icon: RefCell::new(icon.clone()),
       name: RefCell::default(),
       tooltip: RefCell::new(tooltip.into()),
+      title: RefCell::default(),
       menu: RefCell::default(),
       revision: Cell::new(1),
       base: Cell::new(0),
@@ -247,25 +254,46 @@ impl Tray {
     self.emit(SNI_PATH, SNI, "NewTitle", V::Tuple(Vec::new()));
   }
 
+  pub fn set_title(&self, title: &str) {
+    *self.0.title.borrow_mut() = title.into();
+    let args = V::Tuple(vec![V::s(title), V::s("")]);
+    self.emit(SNI_PATH, SNI, "XAyatanaNewLabel", args);
+  }
+
   pub fn set_menu(&self, menu: &Menu<usize>) {
-    if !self.0.state.hold(menu) {
+    if let Set::Build = self.0.state.set_menu(menu, false) {
       self.apply(menu.clone());
     }
   }
 
-  /// Serves `menu` from now on, a new revision the host is told of.
+  /// Serves `menu` from now on, a new revision the host is told of. The same items keep their
+  /// ids: KDE sends the click after saying the menu closed, which builds the menu set meanwhile;
+  /// it keeps the submenus it fetched by id, so each kept one is updated too.
   fn apply(&self, menu: Menu<usize>) {
     let gone = nodes(&self.0.menu.replace(menu)).len() as i32;
-    self.0.base.set(self.0.base.get() + gone);
+    let kept = self.0.state.kept();
+    if !kept {
+      self.0.base.set(self.0.base.get() + gone);
+    }
+
     let rev = self.0.revision.get() + 1;
     self.0.revision.set(rev);
-    self.emit(MENU_PATH, MENU, "LayoutUpdated", V::Tuple(vec![V::U(rev), V::I(0)]));
+    let mut updated = vec![0];
+    if kept {
+      let menu = self.0.menu.borrow();
+      let n = nodes(&menu);
+      let subs = n.iter().enumerate().skip(1).filter(|(_, n)| !n.children.is_empty());
+      updated.extend(subs.map(|(id, _)| self.0.base.get() + id as i32));
+    }
+
+    for id in updated {
+      self.emit(MENU_PATH, MENU, "LayoutUpdated", V::Tuple(vec![V::U(rev), V::I(id)]));
+    }
   }
 
-  /// The menu closed: the one set meanwhile, if any, is served.
+  /// The menu closed: the app's `on_close` runs and the one set meanwhile, if any, is served.
   fn closed(&self) {
-    self.0.state.set_open(false);
-    if let Some(menu) = self.0.state.released() {
+    if let Some(menu) = self.0.state.closed(self) {
       self.apply(menu);
     }
   }
@@ -309,6 +337,11 @@ impl Tray {
 
   pub fn describe(&self) -> Vec<String> {
     let mut out = vec![format!("icon {0}x{0}", SIDES[0])];
+    let title = self.0.title.borrow();
+    if !title.is_empty() {
+      out[0] += &format!(" title={title}");
+    }
+
     menu::describe(&nodes(&self.0.menu.borrow()), 0, 0, &mut out);
     out
   }
@@ -350,6 +383,9 @@ impl Tray {
       (SNI, "IconName") => s(&self.0.name.borrow()),
       (SNI, "OverlayIconName" | "AttentionIconName" | "AttentionMovieName") => s(""),
       (SNI, "IconThemePath") => s(""),
+      (SNI, "XAyatanaLabel") => s(&self.0.title.borrow()),
+      // No guide (the widest text it will hold): the label is as wide as its text.
+      (SNI, "XAyatanaLabelGuide") => s(""),
       (SNI, "IconPixmap") => Some(self.0.pixmaps.borrow().clone()),
       (SNI, "OverlayIconPixmap" | "AttentionIconPixmap") => no_pixmaps(),
       (SNI, "ToolTip") => {

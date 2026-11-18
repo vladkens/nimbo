@@ -63,6 +63,28 @@ impl<A> Menu<A> {
     let mut actions = Vec::new();
     (Menu::new(walk(&self.items, &mut actions)), actions)
   }
+
+  /// Whether `other` has the same items but for their labels, checks and enabled states: what an
+  /// open menu changes in place ([crate::tray::Tray::set_menu]).
+  pub(crate) fn same_items(&self, other: &Menu<A>) -> bool
+  where
+    A: PartialEq,
+  {
+    let same = |a: &Item<A>, b: &Item<A>| match (a, b) {
+      (Item::Button { action, role, key, .. }, Item::Button { action: a, role: r, key: k, .. }) => {
+        (action, role, key) == (a, r, k)
+      }
+      (Item::Toggle { action, key, .. }, Item::Toggle { action: a, key: k, .. }) => {
+        (action, key) == (a, k)
+      }
+      (Item::Submenu { menu, .. }, Item::Submenu { menu: m, .. }) => menu.same_items(m),
+      (Item::Section(_), Item::Section(_)) | (Item::Divider, Item::Divider) => true,
+      _ => false,
+    };
+
+    self.items.len() == other.items.len()
+      && self.items.iter().zip(&other.items).all(|(a, b)| same(a, b))
+  }
 }
 
 /// A menu item, as SwiftUI's menu content: a button or a toggle chosen by its action
@@ -329,5 +351,35 @@ mod tests {
     assert!(!menu.items[0].is_enabled() && menu.items[4].is_destructive());
     let label = if cfg!(target_os = "macos") { "⌘Q" } else { "Ctrl+Q" };
     assert_eq!(menu.items[4].key_label(), label);
+  }
+
+  /// A menu of the same items but for labels, checks and enabled states changes in place; one
+  /// with an item more, another kind, action or shortcut, or a submenu that differs is built anew.
+  #[test]
+  fn same_items_but_labels_and_checks() {
+    let menu = |label: &str, on: bool, sub: Vec<Item<Act>>| {
+      Menu::new(vec![
+        Item::full(Act::Top, label).enabled(false),
+        Item::Divider,
+        Item::submenu("Sub", Menu::new(sub)),
+        Item::section(label),
+        Item::toggle(Act::A, "A", on).key(Shortcut::char('a').cmd()),
+      ])
+    };
+    let a = || vec![Item::toggle(Act::B, "B", false)];
+    let shown = menu("Awake: 14:59 left", false, a());
+    assert!(shown.same_items(&menu(
+      "Awake: 14:58 left",
+      true,
+      vec![Item::toggle(Act::B, "C", true)]
+    )));
+    assert!(!shown.same_items(&menu("Off", false, vec![Item::button(Act::B, "B")])));
+    assert!(!shown.same_items(&menu("Off", false, [a(), a()].concat())));
+    let mut quit = menu("Off", false, a());
+    quit.items.push(Item::button(Act::Quit, "Quit"));
+    assert!(!shown.same_items(&quit));
+    quit.items.truncate(4);
+    quit.items.push(Item::toggle(Act::A, "A", false));
+    assert!(!shown.same_items(&quit), "no shortcut");
   }
 }

@@ -20,7 +20,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 use super::super::{settings, wide};
 use super::menu::{build, track};
 use super::shell::{WM_TRAY, host};
-use crate::tray::{Menu, State, TrayIcon};
+use crate::tray::{Menu, Set, State, TrayIcon};
 
 /// `NIN_KEYSELECT`: the icon chosen with the keyboard.
 const NIN_KEYSELECT: u32 = NIN_SELECT | 1;
@@ -142,8 +142,11 @@ impl Tray {
     }
   }
 
+  /// The notification area has no text beside an icon.
+  pub fn set_title(&self, _title: &str) {}
+
   pub fn set_menu(&self, menu: &Menu<usize>) {
-    if !self.0.state.hold(menu) {
+    if let Set::Build = self.0.state.set_menu(menu, false) {
       self.build(menu);
     }
   }
@@ -163,10 +166,9 @@ impl Tray {
     self.0.state.set_open(true);
   }
 
-  /// The menu closed: the one set while it was open is built.
+  /// The menu closed: the app's `on_close` runs and the one set while it was open is built.
   pub fn closing(&self) {
-    self.0.state.set_open(false);
-    if let Some(menu) = self.0.state.released() {
+    if let Some(menu) = self.0.state.closed(self) {
       self.build(&menu);
     }
   }
