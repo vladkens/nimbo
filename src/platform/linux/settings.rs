@@ -6,7 +6,8 @@
 //! ([Settings portal](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Settings.html),
 //! as of 2026-10). Without a portal or a preference, GtkSettings: its dark preference (Plasma
 //! sets it with its dark colours, its theme staying `Breeze`) or a dark theme's name
-//! (`Adwaita-dark`, `Breeze-Dark`, from XSETTINGS or GSettings), followed as they change.
+//! (`Adwaita-dark`, `Breeze-Dark`, from XSETTINGS or GSettings), followed as they change. The
+//! user's languages are gettext's variables.
 
 use std::ffi::{CStr, c_char, c_int, c_uint, c_void};
 use std::ptr::{null, null_mut};
@@ -55,6 +56,43 @@ pub fn appearance() -> Appearance {
   let Some(a) = api() else { return Appearance::LIGHT };
   let (dark, accent) = portal();
   Appearance { scheme: ColorScheme::of(dark.unwrap_or_else(|| gtk_dark(a))), accent }
+}
+
+/// The user's preferred languages, the most preferred first, as tags, as gettext picks them:
+/// `LANGUAGE` (a list by `:`), else the first of `LC_ALL`, `LC_MESSAGES` and `LANG` that is set;
+/// none in the `C` locale, which turns translations off, `LANGUAGE` too.
+pub fn languages() -> Vec<String> {
+  let var = |k| std::env::var(k).ok().filter(|v: &String| !v.is_empty());
+  let locale = ["LC_ALL", "LC_MESSAGES", "LANG"].into_iter().find_map(var);
+  tags(&var("LANGUAGE").unwrap_or_default(), locale.as_deref())
+}
+
+/// The tags of a `LANGUAGE` list, or of the locale's name without one; none when the locale is
+/// `C` or `POSIX`, or unset. `C` in the list is English, the untranslated text.
+fn tags(list: &str, locale: Option<&str>) -> Vec<String> {
+  let Some(locale) = locale.map(tag).filter(|l| !matches!(l.as_str(), "" | "C" | "POSIX")) else {
+    return Vec::new();
+  };
+
+  let english = |t: String| if matches!(t.as_str(), "C" | "POSIX") { "en".into() } else { t };
+  let list: Vec<_> = list.split(':').map(tag).filter(|t| !t.is_empty()).map(english).collect();
+  if list.is_empty() { vec![locale] } else { list }
+}
+
+/// A locale name's tag: `ru_RU.UTF-8` is `ru-RU`, `sr_RS@latin` `sr-Latn-RS` (gettext's script
+/// modifiers); other modifiers (`@euro`) are dropped.
+fn tag(name: &str) -> String {
+  let (name, modifier) = name.split_once('@').unwrap_or((name, ""));
+  let name = name.split('.').next().unwrap_or_default();
+  let script = match modifier {
+    "latin" => "Latn",
+    "cyrillic" => "Cyrl",
+    _ => "",
+  };
+
+  let (lang, region) = name.split_once('_').unwrap_or((name, ""));
+  let parts = [lang, script, region].into_iter().filter(|p| !p.is_empty());
+  parts.collect::<Vec<_>>().join("-")
 }
 
 /// Follows the portal's and GtkSettings' changes, each sent as [Event::Appearance] (the
@@ -167,6 +205,20 @@ fn dark_theme(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn languages_from_the_variables() {
+    let tags = |list, locale| tags(list, locale).join(" ");
+    assert_eq!(tags("ru_RU:de", Some("en_US.UTF-8")), "ru-RU de");
+    assert_eq!(tags("C.UTF-8:ru", Some("ru_RU.UTF-8")), "en ru");
+    assert_eq!(tags("", Some("sr_RS@latin")), "sr-Latn-RS");
+    assert_eq!(tags("sr@latin", Some("de_DE@euro")), "sr-Latn");
+    assert_eq!(tags("", Some("uz_UZ.UTF-8@cyrillic")), "uz-Cyrl-UZ");
+    assert_eq!(tags("", Some("C.UTF-8")), "");
+    assert_eq!(tags("POSIX", None), "");
+    assert_eq!(tags("ru", Some("C")), "");
+    assert_eq!(tags("ru", None), "");
+  }
 
   #[test]
   fn the_portal_and_themes_say_dark() {

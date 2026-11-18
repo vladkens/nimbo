@@ -13,6 +13,7 @@ use crate::app::{App, Clipboard, Clock, Event, Ime, MemClipboard, MouseButton, R
 pub use crate::cpu::Pixels;
 use crate::file_dialog::FileDialog;
 use crate::keys::{self, Key, KeyEvent, Os};
+use crate::locale::{self, Locale, Localizations};
 use crate::menu::{Item, Menu};
 use crate::scene::{Point, Rect, Size};
 use crate::text::TextSystem;
@@ -39,7 +40,10 @@ pub struct Harness<A> {
 }
 
 impl<A: App> Harness<A> {
+  /// The app at `size` and `scale`, its strings in English ([Harness::set_locale]) whatever the
+  /// machine's language.
   pub fn new(app: A, size: Size, scale: f32) -> Self {
+    locale::set_thread(Locale::Tag("en"), &[]);
     let clock = Clock::Virtual(Duration::ZERO);
     let rt = Runtime::new(app, size, scale, clock, Box::new(MemClipboard::default()));
     Self { rt, cpu: cpu::Renderer::new() }
@@ -77,6 +81,14 @@ impl<A: App> Harness<A> {
   /// before it sends one ([crate::Ui::drags_window]).
   pub fn drags_window(&self, x: f32, y: f32) -> bool {
     self.rt.drags_window(Point::new(x, y))
+  }
+
+  /// Shows the app's strings ([crate::locale]) in `locale` from `catalogs` (an app's
+  /// [crate::Config::localizations]) on this thread from now on, over the app's language, so
+  /// tests side by side each have their own; the next frame shows it.
+  pub fn set_locale(&mut self, locale: Locale, catalogs: Localizations) {
+    locale::set_thread(locale, catalogs);
+    self.rt.redraw();
   }
 
   /// Renders transparent where the app draws nothing, as an overlay's window does

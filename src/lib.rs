@@ -9,8 +9,10 @@
 //! images and [text] through a [Frame]; the runtime drives it, fed by the window ([platform]) or
 //! by the headless [Harness], both drawing with nimbo's CPU renderer. The scene, the renderer
 //! and the laid-out tree are the crate's own, so they can change without breaking an app.
+//! Its strings show in the user's language from the app's gettext catalogs ([locale], [t!]).
 //! Examples start with [run_example], which opens a window, or with `--shot <file.png>` runs the
-//! harness instead (in the dark appearance unless `--appearance light`).
+//! harness instead (in the dark appearance unless `--appearance light`, in English unless
+//! `--locale <tag>`).
 //!
 //! An app with no window, or more than one, starts with [app]: windows on demand ([Main::open])
 //! and overlays, HUDs over every app ([Config::overlay]), work from other threads ([Proxy]), and
@@ -46,6 +48,7 @@ pub mod hotkey;
 pub mod input_source;
 pub mod instance;
 pub mod keys;
+pub mod locale;
 mod menu;
 pub mod open;
 pub mod paste;
@@ -79,6 +82,7 @@ pub use keys::{
   Binding, CMD, Command, Delete, EDIT_KEYS, Extent, Hotkey, Key, KeyEvent, Move, Os, SELECT_KEYS,
   Shortcut, bind, shortcut,
 };
+pub use locale::{Locale, Localizations, Localized};
 pub use menu::{Item, Menu};
 pub use png::Png;
 pub use scene::{Color, Frame, ImageId, Images, Point, Quad, Rect, Size, alpha, mix, rgb};
@@ -137,6 +141,8 @@ pub struct Config {
   pub(crate) icon: Option<(u32, &'static [u8])>,
   #[cfg_attr(target_os = "macos", allow(dead_code))]
   pub(crate) png_icon: Option<Png>,
+  /// The app's catalogs ([Config::localizations]).
+  pub localizations: Localizations,
 }
 
 impl Config {
@@ -146,7 +152,26 @@ impl Config {
   pub const fn new(title: &'static str, w: f32, h: f32) -> Self {
     let (size, min_size) = (Size::new(w, h), Self::MIN_SIZE);
     let (resizable, hidden, overlay, unified, icon) = (true, false, None, false, None);
-    Self { title, size, min_size, resizable, hidden, overlay, unified, icon, png_icon: None }
+    let (png_icon, localizations) = (None, &[] as Localizations);
+    Self {
+      title,
+      size,
+      min_size,
+      resizable,
+      hidden,
+      overlay,
+      unified,
+      icon,
+      png_icon,
+      localizations,
+    }
+  }
+
+  /// The app's translations ([locale]), a gettext `.po` file's text per language tag:
+  /// `&[("ru", include_str!("../locales/ru.po"))]`. Only the language in use is read, as a
+  /// string first shows. Every window shares them: the last window opened with any gives them.
+  pub const fn localizations(self, catalogs: Localizations) -> Self {
+    Self { localizations: catalogs, ..self }
   }
 
   /// The least content size the user can resize the window to, [Config::MIN_SIZE] unless set.
@@ -225,7 +250,7 @@ impl Config {
 }
 
 const USAGE: &str = "usage: [--shot <file.png>] [--scale <n>] [--size <w>x<h>] \
-  [--appearance light|dark]";
+  [--appearance light|dark] [--locale <tag>|pseudo]";
 
 #[derive(Debug, Default, PartialEq)]
 struct Args {
@@ -235,6 +260,8 @@ struct Args {
   size: Option<Size>,
   /// The OS appearance the harness reports; dark by default.
   appearance: Option<Appearance>,
+  /// The language ([Locale]): the system's in a window, English in a shot unless given.
+  locale: Option<Locale>,
 }
 
 impl Args {
@@ -265,6 +292,11 @@ impl Args {
           let scheme = it.next().ok_or("--appearance needs light or dark")?;
           let scheme = scheme.parse().map_err(|e| format!("--appearance: {e}"))?;
           out.appearance = Some(Appearance { scheme, accent: None });
+        }
+        "--locale" => {
+          let tag = it.next().ok_or("--locale needs a language tag")?;
+          // Read once per process: it lives as long as it.
+          out.locale = Some(Locale::Tag(Box::leak(tag.clone().into_boxed_str())));
         }
         _ => return Err(format!("unknown argument {arg}")),
       }
@@ -315,7 +347,13 @@ pub fn run_args<A: App + 'static>(
     eprintln!("{e}\n{USAGE}");
     std::process::exit(2);
   });
-  let Some(path) = &args.shot else { return shell::window(&cfg, Box::new(app)) };
+  let Some(path) = &args.shot else {
+    if let Some(l) = args.locale {
+      locale::set(l);
+    }
+
+    return shell::window(&cfg, Box::new(app));
+  };
 
   let mut h = harness(&cfg, app, &args);
   script(&mut h);
@@ -327,10 +365,12 @@ pub fn run_args<A: App + 'static>(
   println!("{}: wrote {}", cfg.title, path.display());
 }
 
-/// The harness [run_args] shoots in, at the size and scale of `args`; the app first hears the
-/// appearance, dark unless `--appearance` says otherwise, as a window tells it the OS's.
+/// The harness [run_args] shoots in, at the size and scale of `args`, in its language (English
+/// unless `--locale` says otherwise); the app first hears the appearance, dark unless
+/// `--appearance` says otherwise, as a window tells it the OS's.
 fn harness<A: App>(cfg: &Config, app: A, args: &Args) -> Harness<A> {
   let mut h = Harness::new(app, args.size.unwrap_or(cfg.size), args.scale);
+  h.set_locale(args.locale.unwrap_or(Locale::Tag("en")), cfg.localizations);
   h.set_transparent(cfg.overlay.is_some());
   // A unified window's title bar as macOS's.
   h.set_titlebar(cfg.unified.then(|| harness::mac_titlebar(cfg.title, false)));
@@ -398,6 +438,8 @@ mod tests {
     assert_eq!(parse("--size 1280x800").unwrap().size, Some(Size::new(1280.0, 800.0)));
     assert_eq!(parse("--appearance light").unwrap().appearance, Some(Appearance::LIGHT));
     assert!(parse("--appearance blue").is_err());
+    assert_eq!(parse("--locale ru").unwrap().locale, Some(Locale::Tag("ru")));
+    assert!(parse("--locale").is_err());
     assert!(parse("--size 10").is_err());
     for bad in ["0", "-1", "inf", "NaN"] {
       assert!(parse(&format!("--scale {bad}")).is_err(), "--scale {bad}");

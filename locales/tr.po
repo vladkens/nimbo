@@ -1,0 +1,136 @@
+# nimbo's own strings in Turkish, as macOS names them (`make i18n` merges the code's changes).
+# MIT License, as nimbo.
+msgid ""
+msgstr ""
+"Project-Id-Version: nimbo\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-11-15 04:28+0200\n"
+"PO-Revision-Date: 2026-11-18 06:00+0200\n"
+"Last-Translator: \n"
+"Language-Team: none\n"
+"Language: tr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: src/platform/macos/shell.rs:166
+msgid "Close Window"
+msgstr "Pencereyi Kapat"
+
+#: src/platform/macos/shell.rs:167
+#, rust-format
+msgid "Quit {name}"
+msgstr "{name} Uygulamasından Çık"
+
+#: src/ui/behavior.rs:319
+msgid "Cut"
+msgstr "Kes"
+
+#: src/ui/behavior.rs:320
+msgid "Paste"
+msgstr "Yapıştır"
+
+#: src/ui/behavior.rs:321 src/ui/widgets/icon.rs:174
+msgid "Copy"
+msgstr "Kopyala"
+
+#: src/ui/behavior.rs:323
+msgid "Select All"
+msgstr "Tümünü Seç"
+
+#: src/ui/dialog.rs:78
+msgid "OK"
+msgstr "Tamam"
+
+#: src/ui/dialog.rs:78
+msgid "Cancel"
+msgstr "Vazgeç"
+
+#: src/ui/widgets/button.rs:202
+msgid "Help"
+msgstr "Yardım"
+
+#: src/ui/widgets/icon.rs:160
+msgid "Settings"
+msgstr "Ayarlar"
+
+#: src/ui/widgets/icon.rs:161
+msgid "Appearance"
+msgstr "Görünüm"
+
+#: src/ui/widgets/icon.rs:162
+msgid "Options"
+msgstr "Seçenekler"
+
+#: src/ui/widgets/icon.rs:163
+msgid "Info"
+msgstr "Bilgi"
+
+#: src/ui/widgets/icon.rs:164
+msgid "Warning"
+msgstr "Uyarı"
+
+#: src/ui/widgets/icon.rs:165
+msgid "Reset"
+msgstr "Sıfırla"
+
+#: src/ui/widgets/icon.rs:166
+msgid "Delete"
+msgstr "Sil"
+
+#: src/ui/widgets/icon.rs:167
+msgid "Folder"
+msgstr "Klasör"
+
+#: src/ui/widgets/icon.rs:168
+msgid "Document"
+msgstr "Belge"
+
+#: src/ui/widgets/icon.rs:169
+msgid "Open"
+msgstr "Aç"
+
+#: src/ui/widgets/icon.rs:170
+msgid "Done"
+msgstr "Bitti"
+
+#: src/ui/widgets/icon.rs:171
+msgid "Search"
+msgstr "Ara"
+
+#: src/ui/widgets/icon.rs:172
+msgid "Play"
+msgstr "Oynat"
+
+#: src/ui/widgets/icon.rs:173
+msgid "Clear"
+msgstr "Temizle"
+
+#: src/ui/widgets/icon.rs:175
+msgid "Download"
+msgstr "İndir"
+
+#: src/ui/widgets/icon.rs:176
+msgid "History"
+msgstr "Geçmiş"
+
+#: src/ui/widgets/icon.rs:177
+msgid "Stop"
+msgstr "Durdur"
+
+#: src/ui/widgets/icon.rs:178
+msgid "Dictate"
+msgstr "Dikte Et"
+
+#: src/ui/widgets/icon.rs:179
+msgid "Sidebar"
+msgstr "Kenar Çubuğu"
+
+#: src/ui/widgets/icon.rs:180
+msgid "Close"
+msgstr "Kapat"
+
+#: src/ui/widgets/icon.rs:181
+msgid "Accessibility"
+msgstr "Erişilebilirlik"

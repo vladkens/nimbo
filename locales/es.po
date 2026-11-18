@@ -1,0 +1,136 @@
+# nimbo's own strings in Spanish, as macOS names them (`make i18n` merges the code's changes).
+# MIT License, as nimbo.
+msgid ""
+msgstr ""
+"Project-Id-Version: nimbo\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-11-15 04:28+0200\n"
+"PO-Revision-Date: 2026-11-18 06:00+0200\n"
+"Last-Translator: \n"
+"Language-Team: none\n"
+"Language: es\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: src/platform/macos/shell.rs:166
+msgid "Close Window"
+msgstr "Cerrar ventana"
+
+#: src/platform/macos/shell.rs:167
+#, rust-format
+msgid "Quit {name}"
+msgstr "Salir de {name}"
+
+#: src/ui/behavior.rs:319
+msgid "Cut"
+msgstr "Cortar"
+
+#: src/ui/behavior.rs:320
+msgid "Paste"
+msgstr "Pegar"
+
+#: src/ui/behavior.rs:321 src/ui/widgets/icon.rs:174
+msgid "Copy"
+msgstr "Copiar"
+
+#: src/ui/behavior.rs:323
+msgid "Select All"
+msgstr "Seleccionar todo"
+
+#: src/ui/dialog.rs:78
+msgid "OK"
+msgstr "Aceptar"
+
+#: src/ui/dialog.rs:78
+msgid "Cancel"
+msgstr "Cancelar"
+
+#: src/ui/widgets/button.rs:202
+msgid "Help"
+msgstr "Ayuda"
+
+#: src/ui/widgets/icon.rs:160
+msgid "Settings"
+msgstr "Ajustes"
+
+#: src/ui/widgets/icon.rs:161
+msgid "Appearance"
+msgstr "Apariencia"
+
+#: src/ui/widgets/icon.rs:162
+msgid "Options"
+msgstr "Opciones"
+
+#: src/ui/widgets/icon.rs:163
+msgid "Info"
+msgstr "Información"
+
+#: src/ui/widgets/icon.rs:164
+msgid "Warning"
+msgstr "Advertencia"
+
+#: src/ui/widgets/icon.rs:165
+msgid "Reset"
+msgstr "Restablecer"
+
+#: src/ui/widgets/icon.rs:166
+msgid "Delete"
+msgstr "Eliminar"
+
+#: src/ui/widgets/icon.rs:167
+msgid "Folder"
+msgstr "Carpeta"
+
+#: src/ui/widgets/icon.rs:168
+msgid "Document"
+msgstr "Documento"
+
+#: src/ui/widgets/icon.rs:169
+msgid "Open"
+msgstr "Abrir"
+
+#: src/ui/widgets/icon.rs:170
+msgid "Done"
+msgstr "OK"
+
+#: src/ui/widgets/icon.rs:171
+msgid "Search"
+msgstr "Buscar"
+
+#: src/ui/widgets/icon.rs:172
+msgid "Play"
+msgstr "Reproducir"
+
+#: src/ui/widgets/icon.rs:173
+msgid "Clear"
+msgstr "Borrar"
+
+#: src/ui/widgets/icon.rs:175
+msgid "Download"
+msgstr "Descargar"
+
+#: src/ui/widgets/icon.rs:176
+msgid "History"
+msgstr "Historial"
+
+#: src/ui/widgets/icon.rs:177
+msgid "Stop"
+msgstr "Detener"
+
+#: src/ui/widgets/icon.rs:178
+msgid "Dictate"
+msgstr "Dictar"
+
+#: src/ui/widgets/icon.rs:179
+msgid "Sidebar"
+msgstr "Barra lateral"
+
+#: src/ui/widgets/icon.rs:180
+msgid "Close"
+msgstr "Cerrar"
+
+#: src/ui/widgets/icon.rs:181
+msgid "Accessibility"
+msgstr "Accesibilidad"

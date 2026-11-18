@@ -4,8 +4,8 @@
 //! ([view]: input, cursors, timers, occlusion, present through [surface]; its display link in
 //! [link]) and its nodes for assistive clients ([a11y]), the keyboard layout ([keyboard]), overlay
 //! panels ([overlay]), the clipboard on NSPasteboard, the CoreText text backend ([text]) and the
-//! performance cores; the tray, global hotkeys and launch at login in [app]. macOS 11 or later,
-//! with the newer APIs behind run-time checks.
+//! performance cores and the preferred languages; the tray, global hotkeys and launch at login in
+//! [app]. macOS 11 or later, with the newer APIs behind run-time checks.
 
 mod view;
 
@@ -33,7 +33,7 @@ use objc2_app_kit::{
   NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSApplication, NSColor, NSColorSpace,
   NSPasteboard, NSPasteboardTypeString,
 };
-use objc2_foundation::{NSArray, NSString, NSUserDefaults, ns_string};
+use objc2_foundation::{NSArray, NSLocale, NSString, NSUserDefaults, ns_string};
 
 pub use self::app::{
   activity, autostart, desktop, focus, hardware, hotkey, input_source, open, paste, permissions,
@@ -124,6 +124,13 @@ pub fn appearance() -> Appearance {
   }
 
   Appearance { scheme: ColorScheme::of(dark), accent: accent.get() }
+}
+
+/// The user's preferred languages, the most preferred first, as tags (`ru-RU`):
+/// `NSLocale.preferredLanguages`, the app's own language from System Settings (its
+/// `AppleLanguages` default) first.
+pub fn languages() -> Vec<String> {
+  NSLocale::preferredLanguages().iter().map(|s| s.to_string()).collect()
 }
 
 /// The performance cores of an Apple Silicon Mac (`hw.perflevel0.physicalcpu`); `None` on macOS

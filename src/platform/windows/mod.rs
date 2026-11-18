@@ -8,9 +8,9 @@
 //! is on, followed as it moves to another or the mode changes. No frames while a window is
 //! minimized; one when it shows again. The windows are kept by handle; a message's handler finds
 //! its own through [CURRENT] ([with]). Input and cursors are in [input], keys in [keyboard],
-//! light or dark and the accent in [settings], the app shell, tray, hotkeys and launch at login
-//! in [app], file dialogs and drops in [files]; then the clipboard, the performance cores, and
-//! the DirectWrite text backend ([text]).
+//! light or dark, the accent and the languages in [settings], the app shell, tray, hotkeys and
+//! launch at login in [app], file dialogs and drops in [files]; then the clipboard, the performance
+//! cores, and the DirectWrite text backend ([text]).
 
 mod app;
 mod files;
@@ -33,7 +33,7 @@ pub use app::{
   open, paste, post, shell, tray, uninstall,
 };
 use keyboard_types::Modifiers;
-pub use settings::appearance;
+pub use settings::{appearance, languages};
 use windows_sys::Win32::Foundation::{
   CloseHandle, FILETIME, HANDLE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
 };

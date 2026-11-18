@@ -1,0 +1,137 @@
+# nimbo's own strings in Russian, as macOS names them (`make i18n` merges the code's changes).
+# MIT License, as nimbo.
+msgid ""
+msgstr ""
+"Project-Id-Version: nimbo\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-11-15 04:28+0200\n"
+"PO-Revision-Date: 2026-11-15 04:28+0200\n"
+"Last-Translator: \n"
+"Language-Team: none\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && "
+"n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+#: src/platform/macos/shell.rs:166
+msgid "Close Window"
+msgstr "Закрыть окно"
+
+#: src/platform/macos/shell.rs:167
+#, rust-format
+msgid "Quit {name}"
+msgstr "Завершить {name}"
+
+#: src/ui/behavior.rs:319
+msgid "Cut"
+msgstr "Вырезать"
+
+#: src/ui/behavior.rs:320
+msgid "Paste"
+msgstr "Вставить"
+
+#: src/ui/behavior.rs:321 src/ui/widgets/icon.rs:174
+msgid "Copy"
+msgstr "Скопировать"
+
+#: src/ui/behavior.rs:323
+msgid "Select All"
+msgstr "Выбрать все"
+
+#: src/ui/dialog.rs:78
+msgid "OK"
+msgstr "ОК"
+
+#: src/ui/dialog.rs:78
+msgid "Cancel"
+msgstr "Отменить"
+
+#: src/ui/widgets/button.rs:202
+msgid "Help"
+msgstr "Справка"
+
+#: src/ui/widgets/icon.rs:160
+msgid "Settings"
+msgstr "Настройки"
+
+#: src/ui/widgets/icon.rs:161
+msgid "Appearance"
+msgstr "Оформление"
+
+#: src/ui/widgets/icon.rs:162
+msgid "Options"
+msgstr "Параметры"
+
+#: src/ui/widgets/icon.rs:163
+msgid "Info"
+msgstr "Информация"
+
+#: src/ui/widgets/icon.rs:164
+msgid "Warning"
+msgstr "Предупреждение"
+
+#: src/ui/widgets/icon.rs:165
+msgid "Reset"
+msgstr "Сбросить"
+
+#: src/ui/widgets/icon.rs:166
+msgid "Delete"
+msgstr "Удалить"
+
+#: src/ui/widgets/icon.rs:167
+msgid "Folder"
+msgstr "Папка"
+
+#: src/ui/widgets/icon.rs:168
+msgid "Document"
+msgstr "Документ"
+
+#: src/ui/widgets/icon.rs:169
+msgid "Open"
+msgstr "Открыть"
+
+#: src/ui/widgets/icon.rs:170
+msgid "Done"
+msgstr "Готово"
+
+#: src/ui/widgets/icon.rs:171
+msgid "Search"
+msgstr "Поиск"
+
+#: src/ui/widgets/icon.rs:172
+msgid "Play"
+msgstr "Воспроизвести"
+
+#: src/ui/widgets/icon.rs:173
+msgid "Clear"
+msgstr "Очистить"
+
+#: src/ui/widgets/icon.rs:175
+msgid "Download"
+msgstr "Загрузить"
+
+#: src/ui/widgets/icon.rs:176
+msgid "History"
+msgstr "История"
+
+#: src/ui/widgets/icon.rs:177
+msgid "Stop"
+msgstr "Остановить"
+
+#: src/ui/widgets/icon.rs:178
+msgid "Dictate"
+msgstr "Диктовать"
+
+#: src/ui/widgets/icon.rs:179
+msgid "Sidebar"
+msgstr "Боковая панель"
+
+#: src/ui/widgets/icon.rs:180
+msgid "Close"
+msgstr "Закрыть"
+
+#: src/ui/widgets/icon.rs:181
+msgid "Accessibility"
+msgstr "Универсальный доступ"

@@ -50,6 +50,7 @@ use super::widgets::{Icon, MarkShift};
 use super::{
   Align, Cursor, Id, Response, Role, Shadow, State, Style, TextStyle, Ui, grow, px, rigid,
 };
+use crate::locale::Localized;
 use crate::scene::{Color, Frame, Point, Quad, Rect, alpha, mix, rgb};
 use crate::text::{Font, Weight};
 
@@ -294,10 +295,10 @@ impl FormStyle {
 /// header or footer ([Section]), as SwiftUI's labels take a string or a view (egui's
 /// `impl Into<WidgetText>`): a text, an icon, or what a closure builds in the part's text style
 /// (dimmed in a disabled row, as SwiftUI passes a foreground style down); from a `&str`, a
-/// `&String`, an [Icon] or `FnOnce(&mut Ui, TextStyle)`, whose parameters need their types
-/// written. A closure's texts take the style or one made from it (`s.line_limit(1)`,
-/// `s.underline(LinePattern::Dot)` on a term with [Ui::help]); its widgets dim themselves in a
-/// disabled row; a canvas of its own reads [Ui::scope_disabled].
+/// `&String`, a [Localized] (`t!("…")`), an [Icon] or `FnOnce(&mut Ui, TextStyle)`, whose
+/// parameters need their types written. A closure's texts take the style or one made from it
+/// (`s.line_limit(1)`, `s.underline(LinePattern::Dot)` on a term with [Ui::help]); its widgets dim
+/// themselves in a disabled row; a canvas of its own reads [Ui::scope_disabled].
 #[derive(Default)]
 pub enum Content<'s> {
   #[default]
@@ -342,6 +343,12 @@ impl<'s> From<&'s str> for Content<'s> {
 impl<'s> From<&'s String> for Content<'s> {
   fn from(s: &'s String) -> Self {
     Content::Text(s)
+  }
+}
+
+impl From<Localized> for Content<'_> {
+  fn from(s: Localized) -> Self {
+    Content::Text(s.as_str())
   }
 }
 
@@ -476,6 +483,12 @@ impl<'s> Section<'s> {
 
 impl<'s> From<&'s str> for Section<'s> {
   fn from(title: &'s str) -> Self {
+    Section::new(title)
+  }
+}
+
+impl From<Localized> for Section<'_> {
+  fn from(title: Localized) -> Self {
     Section::new(title)
   }
 }

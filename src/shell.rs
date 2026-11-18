@@ -21,6 +21,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use crate::instance::{Command, Instance, OPEN, QUIT};
+use crate::locale::{self, Locale};
 #[cfg(any(windows, target_os = "linux"))]
 use crate::platform;
 use crate::platform::shell as imp;
@@ -264,6 +265,16 @@ fn retry(ids: Vec<u64>, change: Change, send: SendFn, post: PostFn) {
   }
 }
 
+/// Redraws the windows `ids` still open; those busy are tried again after [system::RETRY].
+fn redraw(ids: Vec<u64>) {
+  let open = windows();
+  let ids = ids.into_iter().filter(|id| open.contains(id));
+  let busy: Vec<_> = ids.filter(|&id| !imp::with_app(id, &mut |_| {})).collect();
+  if !busy.is_empty() {
+    post(system::RETRY, Box::new(move || redraw(busy)));
+  }
+}
+
 /// The activation token of the command being handled, for a window that shows or comes to the
 /// front meanwhile: used by it.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -297,6 +308,7 @@ pub(crate) fn window(cfg: &Config, app: Box<dyn App>) {
   // The loop runs once per process: the strings live as long as it.
   let id: &'static str = Box::leak(stem.unwrap_or_else(|| "nimbo".into()).into_boxed_str());
   let info = AppInfo { id, name: cfg.title, presence: Presence::Regular };
+  locale::provide(cfg.localizations);
   running(|| {
     imp::run(&info, |_| {
       let id = imp::open(cfg, app, TypeId::of::<()>());
@@ -330,6 +342,7 @@ impl Main {
   /// Opens a window running `app` with its own runtime, in front unless `cfg` is
   /// [hidden](Config::hidden).
   pub fn open<A: App + 'static>(&mut self, cfg: &Config, app: A) -> Window<A> {
+    locale::provide(cfg.localizations);
     let id = imp::open(cfg, Box::new(app), TypeId::of::<A>());
     Window::new(WindowId(id))
   }
@@ -343,6 +356,15 @@ impl Main {
   /// Where the app shows besides its windows ([Presence]).
   pub fn set_presence(&mut self, p: Presence) {
     imp::set_presence(p);
+  }
+
+  /// The language of the app's strings from now on ([crate::locale]), as SwiftUI's
+  /// `.environment(\.locale, …)` on every window: each redraws in it, one busy up the stack (the
+  /// caller's own) a moment later. [Locale::System] by default. Menus and dialogs the OS draws
+  /// keep the language the app started in.
+  pub fn set_locale(&mut self, locale: Locale) {
+    locale::set(locale);
+    redraw(windows());
   }
 
   /// `f` runs when the app is opened again while it runs (macOS: the Dock icon, Finder,

@@ -18,8 +18,10 @@
 //! toward the ground instead. The built-in set is drawn for nimbo, thinner than Lucide's:
 //! stroke them 1.6 units wide ([Icon::stroke]).
 
+use crate::locale::Localized;
 use crate::scene::{Color, Frame, Point, Rect};
 use crate::svg::{flatten, spans};
+use crate::t;
 use crate::ui::{Response, Style, Ui, px};
 
 /// SVG path data in a 24 × 24 view box, drawn as a stroke or filled ([draw], [Ui::icon]).
@@ -154,35 +156,35 @@ impl Icon {
 
   /// Every built-in icon, for a gallery and the tests, with what a button showing it alone does
   /// ([Icon::name]).
-  pub const ALL: [(&'static str, Self, &'static str); 22] = [
-    ("gear", Self::GEAR, "Settings"),
-    ("contrast", Self::CONTRAST, "Appearance"),
-    ("sliders", Self::SLIDERS, "Options"),
-    ("info", Self::INFO, "Info"),
-    ("warning", Self::WARNING, "Warning"),
-    ("reset", Self::RESET, "Reset"),
-    ("trash", Self::TRASH, "Delete"),
-    ("folder", Self::FOLDER, "Folder"),
-    ("doc", Self::DOC, "Document"),
-    ("external", Self::EXTERNAL, "Open"),
-    ("check", Self::CHECK, "Done"),
-    ("search", Self::SEARCH, "Search"),
-    ("play", Self::PLAY, "Play"),
-    ("clear", Self::CLEAR, "Clear"),
-    ("copy", Self::COPY, "Copy"),
-    ("download", Self::DOWNLOAD, "Download"),
-    ("history", Self::HISTORY, "History"),
-    ("stop", Self::STOP, "Stop"),
-    ("mic", Self::MIC, "Dictate"),
-    ("sidebar", Self::SIDEBAR, "Sidebar"),
-    ("x", Self::X, "Close"),
-    ("accessibility", Self::ACCESSIBILITY, "Accessibility"),
+  pub const ALL: [(&'static str, Self, Localized); 22] = [
+    ("gear", Self::GEAR, t!("Settings")),
+    ("contrast", Self::CONTRAST, t!("Appearance")),
+    ("sliders", Self::SLIDERS, t!("Options")),
+    ("info", Self::INFO, t!("Info")),
+    ("warning", Self::WARNING, t!("Warning")),
+    ("reset", Self::RESET, t!("Reset")),
+    ("trash", Self::TRASH, t!("Delete")),
+    ("folder", Self::FOLDER, t!("Folder")),
+    ("doc", Self::DOC, t!("Document")),
+    ("external", Self::EXTERNAL, t!("Open")),
+    ("check", Self::CHECK, t!("Done")),
+    ("search", Self::SEARCH, t!("Search")),
+    ("play", Self::PLAY, t!("Play")),
+    ("clear", Self::CLEAR, t!("Clear")),
+    ("copy", Self::COPY, t!("Copy")),
+    ("download", Self::DOWNLOAD, t!("Download")),
+    ("history", Self::HISTORY, t!("History")),
+    ("stop", Self::STOP, t!("Stop")),
+    ("mic", Self::MIC, t!("Dictate")),
+    ("sidebar", Self::SIDEBAR, t!("Sidebar")),
+    ("x", Self::X, t!("Close")),
+    ("accessibility", Self::ACCESSIBILITY, t!("Accessibility")),
   ];
 
   /// What a button showing a built-in icon alone does, read when nothing names it: "Copy" for
   /// [Icon::COPY]; `None` for an app's own.
   pub fn name(self) -> Option<&'static str> {
-    Self::ALL.iter().find(|a| a.1 == self).map(|a| a.2)
+    Self::ALL.iter().find(|a| a.1 == self).map(|a| a.2.as_str())
   }
 }
 

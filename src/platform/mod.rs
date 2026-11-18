@@ -182,6 +182,10 @@
 //!   `DWMWA_USE_IMMERSIVE_DARK_MODE`. Linux: the XDG portal's `org.freedesktop.appearance`
 //!   `color-scheme` and `accent-color`, changes by its `SettingChanged` signal; else GtkSettings'
 //!   dark preference or theme name.
+//! - `pub fn languages() -> Vec<String>` ([crate::Locale::System]), from any thread: the user's
+//!   preferred languages, the most preferred first, as BCP 47 tags (`ru-RU`; macOS
+//!   `NSLocale.preferredLanguages`, with the app's own language first; Windows
+//!   `GetUserPreferredUILanguages`; Linux gettext's `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, `LANG`).
 //! - `pub fn perf_cores() -> Option<usize>`: the performance cores, to size the CPU renderer's
 //!   threads (`cpu::pool`); `None` falls back to `available_parallelism` capped at 4.
 //! - `pub mod text`, the text backend under [crate::text] (its atlas and line cache are portable):
@@ -246,8 +250,8 @@ pub(crate) use imp::permissions;
 #[cfg(target_os = "linux")]
 pub(crate) use imp::startup_complete;
 pub(crate) use imp::{
-  activity, autostart, clipboard, desktop, focus, hardware, hotkey, image, input_source, open,
-  paste, perf_cores, post, shell, text, tray, uninstall,
+  activity, autostart, clipboard, desktop, focus, hardware, hotkey, image, input_source, languages,
+  open, paste, perf_cores, post, shell, text, tray, uninstall,
 };
 #[cfg(target_os = "windows")]
 pub(crate) use imp::{attach_console, downloads};

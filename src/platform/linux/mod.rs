@@ -11,9 +11,9 @@
 //! layout phase, and the frame is built after GTK's layout, at the size it just gave the area,
 //! so a live resize never stretches. Nothing runs while idle or minimized: timers are GLib
 //! timeouts, a wake from another thread an idle source. Input is in [input] (keys in [keys]),
-//! light or dark in [settings], the text stack in [text] (fontconfig, FreeType, HarfBuzz),
-//! overlays in [overlay], file panels and drops in [files], context menus in [app::gtk_menu].
-//! GTK 3 scales by whole numbers only.
+//! light or dark and the languages in [settings], the text stack in [text] (fontconfig, FreeType,
+//! HarfBuzz), overlays in [overlay], file panels and drops in [files], context menus in
+//! [app::gtk_menu]. GTK 3 scales by whole numbers only.
 //!
 //! Windows open and close on demand while GTK's main loop runs ([app] has the loop, the tray,
 //! the hotkeys and launch at login): each callback carries its window's id, set as the current
@@ -43,7 +43,7 @@ pub use self::app::{
 };
 use self::dl::{Lib, fns};
 use self::input::Input;
-pub use self::settings::appearance;
+pub use self::settings::{appearance, languages};
 use crate::app::{App, Clipboard, Clock, Event, Runtime};
 use crate::cpu::Renderer;
 use crate::scene::Size;
