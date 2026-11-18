@@ -567,6 +567,12 @@ impl<'a> Ui<'a> {
     self.st.theme
   }
 
+  /// The theme of controls filled with the accent: [Theme::inactive] while the window isn't key,
+  /// as AppKit's switches, check boxes, sliders, segments and progress bars turn grey there.
+  pub(crate) fn controls_theme(&self) -> Theme {
+    if self.window_focused() { self.st.theme } else { self.st.theme.inactive() }
+  }
+
   /// Sets the theme, kept until changed, over the OS's appearance, and its focus ring
   /// ([Ui::set_focus_ring] after this overrides the ring).
   pub fn set_theme(&mut self, theme: Theme) {

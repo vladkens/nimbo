@@ -57,7 +57,7 @@ impl<'s> Slider<'s> {
 
   pub fn show(self, ui: &mut Ui) -> Response {
     const MIN_W: f32 = 160.0;
-    let t = ui.theme();
+    let t = ui.controls_theme();
     let ([kw, kh], rh) = (t.sizes.knob, t.sizes.rail);
     let id = ui.take_id();
     let (lo, hi) = (*self.range.start(), *self.range.end());

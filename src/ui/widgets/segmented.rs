@@ -14,7 +14,7 @@ impl Ui<'_> {
   /// raised capsule, the selected segment the accent over it, dividers between unselected ones;
   /// else a bordered box holding inset segments. `changed` when `cur` changed.
   pub fn segmented<T: PartialEq + Copy>(&mut self, cur: &mut T, options: &[Tag<T>]) -> Response {
-    let t = self.theme();
+    let t = self.controls_theme();
     let id = self.take_id();
     let was = *cur;
     let mut at = options.iter().position(|o| o.value == *cur);

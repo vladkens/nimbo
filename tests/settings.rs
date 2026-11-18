@@ -4,7 +4,8 @@
 //! their height; switches flip, a row disabled by another setting ignores clicks; a select opens
 //! over its button and chooses by letters typed, closed and open; the shortcut recorder records
 //! a chord and a modifier key alone, Escape and a click elsewhere stop it, Backspace clears it,
-//! the reset puts the default back; the slider drags and steps; the dialog asks before clearing
+//! the reset puts the default back; the slider drags and steps, greys with the selected
+//! segment while the window isn't key; the dialog asks before clearing
 //! the cache and resetting all: Return chooses its default, Escape cancels, Tab and Space the
 //! action, its backdrop dims the page and takes the pointer; a row's switch keeps its width and
 //! place beside a long description that wraps. A row's warning takes its ⓘ's place, in the
@@ -185,6 +186,26 @@ fn appearance_row_width_slider_and_look() {
   h.click_id(Id::of(LOOK).key(2));
   h.wait(Duration::from_millis(50));
   assert!(h.render().pixel(4.0, h.size().h - 4.0)[0] < 64);
+}
+
+#[test]
+fn an_inactive_window_greys_the_accent() {
+  let mut h = start();
+  turn(&mut h, Page::Appearance);
+  // The slider's fill and the selected segment: the accent while the window is key, a grey
+  // when another window is, as AppKit's controls.
+  let (s, auto) = (rect(&h, TEXT_SIZE), h.rect(Id::of(LOOK).key(0)).unwrap());
+  let spots = [(s.x + 12.0, s.y + s.h / 2.0), (auto.x + 4.0, auto.y + 4.0)];
+  let at = |h: &mut H| spots.map(|(x, y)| h.render().pixel(x, y));
+  let accent = px(Theme::PLATES_LIGHT.accent);
+  assert_eq!(at(&mut h), [accent; 2]);
+  h.event(Event::Focus(false));
+  for [r, g, b, _] in at(&mut h) {
+    assert!(r == g && g == b && r < 0xe0, "{r} {g} {b}");
+  }
+
+  h.event(Event::Focus(true));
+  assert_eq!(at(&mut h), [accent; 2]);
 }
 
 #[test]

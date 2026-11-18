@@ -789,7 +789,7 @@ impl Ui<'_> {
     items: &[TabItem<'_, T>],
   ) -> Response {
     let fs = *fs;
-    let t = self.theme();
+    let (t, key) = (self.theme(), self.window_focused());
     let id = self.take_id();
     let mut at = items.iter().position(|o| o.value == *cur);
     let b = self.pick_behavior(id, items.len(), |i| id.key(i), &mut at);
@@ -828,7 +828,8 @@ impl Ui<'_> {
           let on = v == *cur;
           // No hover fill, as System Settings' toolbar: the pointing hand says it's a tab.
           let (tile, color) = match on {
-            true => (fs.tab_on, t.accent),
+            true if key => (fs.tab_on, t.accent),
+            true => (fs.tab_on, fs.tab_text.color),
             false => (fs.tab, fs.tab_text.color),
           };
 

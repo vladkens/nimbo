@@ -402,6 +402,15 @@ impl Theme {
     base.with_accent(accent)
   }
 
+  /// This theme in a window that isn't key, as AppKit draws its controls there: the accent a
+  /// grey, the ground 20% toward black (light) or white (dark), as a switch's track, a check
+  /// box, a slider's fill and a selected segment are there (14–23%), the marks on it in the
+  /// text's colour.
+  pub(crate) const fn inactive(self) -> Self {
+    let grey = mix(self.bg, if self.scheme.is_dark() { WHITE } else { BLACK }, 0.2);
+    Self { accent: grey, on_accent: self.text, ..self }
+  }
+
   /// The accent under the pointer: 12% toward black (light) or white (dark).
   pub const fn accent_hover(&self) -> Color {
     mix(self.accent, if self.scheme.is_dark() { WHITE } else { BLACK }, 0.12)
