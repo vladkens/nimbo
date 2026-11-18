@@ -554,7 +554,6 @@ unsafe fn parts<'a, T>(p: *const T, n: usize) -> &'a [T] {
   }
 }
 
-#[expect(clippy::too_many_arguments, reason = "IDWriteTextRenderer::DrawGlyphRun's signature")]
 unsafe extern "system" fn collector_glyph_run(
   this: This,
   _: Ctx,

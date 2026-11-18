@@ -24,7 +24,7 @@ use crate::text::{Design, Font, Glyph, GlyphBox, Ink, Line, Metrics, Raster};
 
 type P = *mut c_void;
 
-fns!(Fc {
+fns!(#[expect(non_snake_case, reason = "Fontconfig's names")] Fc {
   fn FcInitLoadConfigAndFonts() -> P;
   fn FcPatternCreate() -> P;
   fn FcPatternDestroy(p: P);
@@ -53,7 +53,7 @@ const FC_RESULT_MATCH: c_int = 0;
 /// `FC_WEIGHT_REGULAR`, `_MEDIUM`, `_DEMIBOLD`, `_BOLD`, by [crate::text::Weight].
 const FC_WEIGHTS: [c_int; 4] = [80, 100, 180, 200];
 
-fns!(Ft {
+fns!(#[expect(non_snake_case, reason = "FreeType's names")] Ft {
   fn FT_Init_FreeType(lib: *mut P) -> c_int;
   fn FT_New_Face(lib: P, path: *const c_char, index: c_long, face: *mut *mut FtFaceRec) -> c_int;
   fn FT_Set_Char_Size(f: *mut FtFaceRec, w: c_long, h: c_long, x: c_uint, y: c_uint) -> c_int;

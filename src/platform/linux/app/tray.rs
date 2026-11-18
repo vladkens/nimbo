@@ -579,7 +579,6 @@ unsafe fn tray(data: P) -> Option<Tray> {
   unsafe { dbus::upgrade(data) }.map(Tray)
 }
 
-#[expect(clippy::too_many_arguments, reason = "GDBus' method call handler")]
 unsafe extern "C" fn on_call(_: P, _: S, _: S, iface: S, method: S, args: P, inv: P, data: P) {
   let Some(t) = (unsafe { tray(data) }) else {
     return dbus::fail(inv, "org.freedesktop.DBus.Error.UnknownObject", "the tray is gone");

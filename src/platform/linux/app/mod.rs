@@ -36,7 +36,7 @@ use super::dl::{Lib, fns};
 use super::{Fp, P};
 
 // Xlib, for posted keys, the hotkey's grab and the active window on X11.
-fns!(X11 {
+fns!(#[expect(non_snake_case, reason = "Xlib's names")] X11 {
   fn XOpenDisplay(name: *const c_char) -> P;
   fn XCloseDisplay(d: P) -> c_int;
   fn XQueryKeymap(d: P, keys: *mut u8) -> c_int;
