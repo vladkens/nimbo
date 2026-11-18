@@ -124,7 +124,7 @@ LINKS = re.compile(r"\b(?:crate|super|self)\s*::|\bmod\s|\buse\s")
 
 TOKEN = re.compile(r"""//|/\*|(?<!\w)[bc]?r#*"|"|'""")
 BLOCK = re.compile(r"/\*|\*/")
-STRING_END = re.compile(r'(?:[^"\\]|\\.)*"', re.S)
+STRING_END = re.compile(r'(?:[^"\\]|\\.)*"', re.DOTALL)
 CHAR = re.compile(r"'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]{1,6}\}|.)|[^\\'\n])'")
 HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 
@@ -807,7 +807,7 @@ OS_GATE = re.compile(
     r"\bcfg(?:_attr)?\s*!?\s*\((?:[^\];{}()]|\()*?\b(target_os|target_family|target_vendor|windows|unix)\b"
 )
 # The core's state, which only the core adds methods to.
-CORE_IMPL = re.compile(r"^[ \t]*impl\b[^{\n]*\b(UiState|Tree|Store|Input)\b[^{\n]*\{", re.M)
+CORE_IMPL = re.compile(r"^[ \t]*impl\b[^{\n]*\b(UiState|Tree|Store|Input)\b[^{\n]*\{", re.MULTILINE)
 
 
 @functools.cache
