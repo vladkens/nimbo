@@ -151,6 +151,8 @@ struct Sys {
   write: fn(&str) -> bool,
   /// Puts the snapshot back if the clipboard still holds the offer; `false` when it couldn't.
   give_back: fn(Offer, &Snapshot) -> bool,
+  /// Other apps can paste the offer.
+  reaches: fn(Offer) -> bool,
   post: fn(Shortcut) -> Result<(), String>,
   focus: fn() -> Option<Focused>,
   hidden: fn() -> bool,
@@ -174,6 +176,7 @@ const SYSTEM: Sys = Sys {
     }
   },
   give_back: |offer, old| !SystemClipboard.holds(offer) || SystemClipboard.restore(old.clone()),
+  reaches: |offer| SystemClipboard.reaches(offer),
   post: keys::post,
   focus: focus::current,
   hidden: focus::hidden,
@@ -243,6 +246,11 @@ fn paste_now(sys: Sys, text: &str, opts: Paste) -> Result<(), NotPasted> {
       let offer = (sys.offer)(text, Some(Box::new(move || after(RESTORE))));
       let offer = offer.ok_or(NotPasted::NoClipboard)?;
       PENDING.set(Some((id, offer, snapshot)));
+      if !(sys.reaches)(offer) {
+        settle(sys, Some(id));
+        return Err(NotPasted::NoClipboard);
+      }
+
       after(CAP);
     }
     // On Wayland only the paste's own way (the portal's clipboard) reaches the clipboard of an app
@@ -251,7 +259,10 @@ fn paste_now(sys: Sys, text: &str, opts: Paste) -> Result<(), NotPasted> {
       (sys.write)(text).then_some(()).ok_or(NotPasted::NoClipboard)?
     }
     // Nothing to restore: the text stays, marked for clipboard managers to skip.
-    None => _ = (sys.offer)(text, None).ok_or(NotPasted::NoClipboard)?,
+    None => {
+      let offer = (sys.offer)(text, None).ok_or(NotPasted::NoClipboard)?;
+      (sys.reaches)(offer).then_some(()).ok_or(NotPasted::NoClipboard)?
+    }
   }
 
   // Wayland's first offer may wait for the portal's dialog.
@@ -329,6 +340,8 @@ mod tests {
     holder: Option<u64>,
     offers: u64,
     on_read: Option<Box<dyn FnMut()>>,
+    /// Other apps can't paste the offers.
+    unreached: bool,
     restored: usize,
     posted: Vec<Shortcut>,
     post_error: Option<String>,
@@ -389,6 +402,7 @@ mod tests {
 
       true
     },
+    reaches: |_| world(|w| !w.unreached),
     post: |key| {
       world(|w| match w.post_error.clone() {
         Some(e) => Err(e),
@@ -447,6 +461,15 @@ mod tests {
     );
     let mods = if cfg!(target_os = "macos") { Modifiers::META } else { Modifiers::CONTROL };
     assert_eq!(PASTE, Shortcut { key: Key::Char('v'), mods });
+  }
+
+  #[test]
+  fn restores_an_offer_out_of_reach() {
+    let opts = setup("TextEdit");
+    world(|w| w.unreached = true);
+    assert_eq!(paste(FAKE, "hello", opts), Err(NotPasted::NoClipboard));
+    assert_eq!(clip(), ("mine".into(), 1));
+    assert!(world(|w| w.posted.is_empty()));
   }
 
   #[test]

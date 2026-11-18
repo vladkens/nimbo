@@ -58,6 +58,10 @@ const WAIT: Duration = Duration::from_secs(60);
 const RETRY: Duration = Duration::from_secs(2);
 const READ: Duration = Duration::from_millis(500);
 const LINGER: Duration = Duration::from_secs(1);
+/// The pause after each key's press or release: GNOME 42 passes a key through the input method
+/// (IBus) after it applied the modifiers' changes, so a shortcut posted at once reaches the app as
+/// its key without the modifiers.
+const STROKE: Duration = Duration::from_millis(50);
 
 fns!(Keymap {
   fn gdk_keymap_get_for_display(display: P) -> P;
@@ -258,6 +262,7 @@ pub(super) fn post(k: Shortcut) -> Result<(), String> {
   for (code, down) in strokes(mods, key, evdev, |_| false, None).ok_or("no modifier key")? {
     let args = vec![path(&s), V::dict(vec![]), V::I(code as i32), V::U(down.into())];
     call(&s, REMOTE, "NotifyKeyboardKeycode", args)?;
+    std::thread::sleep(STROKE);
   }
 
   Ok(())
