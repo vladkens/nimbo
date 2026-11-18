@@ -1,0 +1,145 @@
+# What breaks a layer rule of scripts/lint.py today, one finding per line.
+# A listed finding passes; a line nothing matches any more fails until it is deleted.
+
+# The vocabulary in app.rs (Event, Clipboard, Appearance, MouseButton, Ime…) sits under the shell: it moves down to modules of its own.
+layer src/clipboard.rs -> app::Clipboard
+layer src/text/edit.rs -> app::Clipboard
+layer src/ui/a11y.rs -> app::Event
+layer src/ui/behavior.rs -> app::Ime
+layer src/ui/behavior.rs -> app::MouseButton
+layer src/ui/containers/list.rs -> app::MouseButton
+layer src/ui/containers/menu.rs -> app::Event
+layer src/ui/containers/scroll.rs -> app::MouseButton
+layer src/ui/input.rs -> app::Event
+layer src/ui/input.rs -> app::MouseButton
+layer src/ui/input.rs -> app::Phase
+layer src/ui/mod.rs -> app::Appearance
+layer src/ui/mod.rs -> app::Clipboard
+layer src/ui/mod.rs -> app::Event
+layer src/ui/mod.rs -> app::MouseButton
+layer src/ui/mod.rs -> app::Waker
+layer src/ui/query.rs -> app::Clipboard
+layer src/ui/query.rs -> app::Event
+layer src/ui/textlayout.rs -> app::Event
+layer src/ui/textlayout.rs -> app::Ime
+layer src/ui/theme.rs -> app::Appearance
+layer src/ui/theme.rs -> app::ColorScheme
+layer src/ui/widgets/search.rs -> app::MouseButton
+
+# AppInfo, the app's identity, lives in the shell, while the services need it: it moves down.
+layer src/autostart.rs -> AppInfo
+layer src/desktop.rs -> AppInfo
+layer src/instance.rs -> AppInfo
+layer src/platform/linux/app/autostart.rs -> AppInfo
+layer src/platform/linux/app/desktop.rs -> AppInfo
+layer src/platform/linux/app/uninstall.rs -> AppInfo
+layer src/platform/macos/app/autostart.rs -> AppInfo
+layer src/platform/macos/app/desktop.rs -> AppInfo
+layer src/platform/macos/app/uninstall.rs -> AppInfo
+layer src/platform/windows/app/autostart.rs -> AppInfo
+layer src/platform/windows/app/desktop.rs -> AppInfo
+layer src/platform/windows/app/uninstall.rs -> AppInfo
+layer src/uninstall.rs -> AppInfo
+
+# Geometry and colour live in scene and Axis in ui: a geometry module under text and scene ends the cycle.
+layer src/scene.rs -> ui::Axis
+layer src/text/atlas.rs -> scene::Rect
+layer src/text/mod.rs -> scene::Color
+
+# Lower modules that reach up: ButtonRole moves into menu, Ui::file_dialog into ui, the system watcher and the portal wait go behind hooks.
+layer src/file_dialog.rs -> Ui
+layer src/menu.rs -> ui::ButtonRole
+layer src/platform/linux/app/remote.rs -> paste::PORTAL_WAIT
+layer src/system.rs -> Main
+layer src/system.rs -> shell
+layer src/system.rs -> shell::Proxy
+
+# The ui core holds the styled layer's Theme, ControlSize, list rows, field kind and image placing: they move into a scoped environment or down.
+layer src/ui/behavior.rs -> ui::FieldKind
+layer src/ui/layout.rs -> ui::ContentMode
+layer src/ui/mod.rs -> ui::containers::Row
+layer src/ui/mod.rs -> ui::theme::ControlSize
+layer src/ui/mod.rs -> ui::theme::Theme
+layer src/ui/paint.rs -> ui::widgets::placed
+
+# The styled layer reaches into the ui core's state and pub(crate) functions: public building blocks replace them.
+private src/ui/containers/lazy.rs reveal_exact
+private src/ui/containers/lazy.rs scroll_exact
+private src/ui/containers/lazy.rs st.animating
+private src/ui/containers/lazy.rs st.last
+private src/ui/containers/lazy.rs st.scroll_exact
+private src/ui/containers/lazy.rs st.stack
+private src/ui/containers/lazy.rs st.tree
+private src/ui/containers/list.rs st.animating
+private src/ui/containers/list.rs st.input
+private src/ui/containers/list.rs st.last
+private src/ui/containers/list.rs st.menu_seq
+private src/ui/containers/list.rs st.os
+private src/ui/containers/list.rs st.stack
+private src/ui/containers/list.rs st.store
+private src/ui/containers/list.rs st.tree
+private src/ui/containers/menu.rs halt_scrolling
+private src/ui/containers/menu.rs pointer_state
+private src/ui/containers/menu.rs st.animating
+private src/ui/containers/menu.rs st.context_menu
+private src/ui/containers/menu.rs st.halt_scrolling
+private src/ui/containers/menu.rs st.input
+private src/ui/containers/menu.rs st.menu_open
+private src/ui/containers/menu.rs st.native_menus
+private src/ui/containers/menu.rs st.stack
+private src/ui/containers/menu.rs st.take
+private src/ui/containers/menu.rs tagged
+private src/ui/containers/scroll.rs scroll_exact
+private src/ui/containers/scroll.rs st.scroll_exact
+private src/ui/containers/split.rs pointer_state
+private src/ui/containers/tabs.rs pointer_state
+private src/ui/containers/toolbar.rs st.toolbar
+private src/ui/dialog.rs halt_scrolling
+private src/ui/dialog.rs st.halt_scrolling
+private src/ui/form.rs a11y_row
+private src/ui/form.rs disabled_scope
+private src/ui/form.rs form_names
+private src/ui/form.rs st.stack
+private src/ui/form.rs st.tree
+private src/ui/widgets/badge.rs a11y_named
+private src/ui/widgets/button.rs control
+private src/ui/widgets/checkbox.rs control
+private src/ui/widgets/checkbox.rs controls_theme
+private src/ui/widgets/divider.rs st.stack
+private src/ui/widgets/divider.rs st.tree
+private src/ui/widgets/field.rs st.native_menus
+private src/ui/widgets/field.rs st.response
+private src/ui/widgets/field.rs st.store
+private src/ui/widgets/field.rs text_id
+private src/ui/widgets/image.rs add_premultiplied
+private src/ui/widgets/image.rs st.pictures
+private src/ui/widgets/link.rs control
+private src/ui/widgets/progress.rs controls_theme
+private src/ui/widgets/progress.rs st.animating
+private src/ui/widgets/segmented.rs control
+private src/ui/widgets/segmented.rs controls_theme
+private src/ui/widgets/shortcut.rs activated
+private src/ui/widgets/shortcut.rs control
+private src/ui/widgets/shortcut.rs pointer_state
+private src/ui/widgets/shortcut.rs st.input
+private src/ui/widgets/slider.rs controls_theme
+private src/ui/widgets/slider.rs pointer_state
+private src/ui/widgets/toggle.rs control
+private src/ui/widgets/toggle.rs controls_theme
+
+# Public API gated per OS, not OS code: the item exists on some systems only.
+os src/autostart.rs target_os
+os src/desktop.rs unix
+os src/hardware.rs target_os
+os src/instance.rs windows
+os src/keys.rs target_os
+os src/lib.rs target_os
+os src/open.rs unix
+os src/paths.rs windows
+os src/permissions.rs target_os
+os src/shell.rs target_os
+os src/shell.rs windows
+os src/system.rs windows
+os src/tray/icon.rs target_os
+os src/tray/mod.rs target_os
+os src/uninstall.rs windows
