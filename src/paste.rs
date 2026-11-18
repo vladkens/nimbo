@@ -705,4 +705,9 @@ mod tests {
     let got = std::thread::spawn(move || text("hello", opts)).join().unwrap();
     assert_eq!(got, Err(NotPasted::NotMain));
   }
+  /// A caller off the main thread outwaits the desktop's dialog, which nimbo gives 60 s.
+  #[test]
+  fn the_portal_wait_outlasts_the_dialog() {
+    assert!(PORTAL_WAIT > Duration::from_secs(60));
+  }
 }

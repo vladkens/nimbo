@@ -1678,4 +1678,19 @@ pub(crate) mod tests {
     assert_eq!((b.0, b.2), (33.5, 33.0));
     assert_eq!((c.0, c.2), (66.5, 33.5));
   }
+  /// A float attached at its parent's leading edge by its trailing one: beside the parent,
+  /// centred on it.
+  #[test]
+  fn a_float_beside_its_parent() {
+    let t = run(200.0, 100.0, 1.0, |ui| {
+      ui.col(Style::new().pad(50.0), |ui| {
+        ui.id("p").row(Style::new().w(px(40.0)).h(px(20.0)), |ui| {
+          let beside = Float::parent().attach(UnitPoint::LEADING).anchor(UnitPoint::TRAILING);
+          ui.id("f").float(beside).el(Style::new().w(px(10.0)).h(px(10.0)));
+        });
+      });
+    });
+    assert_eq!(rect(&t, "p"), (50.0, 50.0, 40.0, 20.0));
+    assert_eq!(rect(&t, "f"), (40.0, 55.0, 10.0, 10.0));
+  }
 }

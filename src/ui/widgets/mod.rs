@@ -95,7 +95,7 @@ impl Ui<'_> {
 #[cfg(test)]
 mod tests {
   use crate::scene::{Color, Size};
-  use crate::ui::{Theme, Ui, UiState};
+  use crate::ui::{Style, Theme, Ui, UiState};
 
   #[test]
   fn dimmed_colours_fade_toward_the_ground() {
@@ -111,5 +111,13 @@ mod tests {
 
       assert_eq!(ui.dim(t.track, false), t.track);
     }
+  }
+
+  /// A container's [Ui::disabled] reaches what is built in it, not what comes after.
+  #[test]
+  fn a_disabled_container_scopes_its_widgets() {
+    let mut ui = Ui::new(UiState::default(), Size::new(10.0, 10.0), None, Default::default());
+    ui.disabled(true).col(Style::new(), |ui| assert!(ui.scope_disabled()));
+    assert!(!ui.scope_disabled());
   }
 }

@@ -1448,4 +1448,45 @@ mod tests {
     let asked = h.context_menu(None).map(|(_, m)| m.items[0].label().to_owned());
     assert_eq!(asked.as_deref(), Some("Outer"));
   }
+  #[derive(Default)]
+  struct Bare {
+    sel: Selection,
+    bare: bool,
+  }
+
+  impl crate::App for Bare {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.col(Style::new().w(px(200.0)).h(px(100.0)), |ui| {
+        let list = List::new(3, 20.0).selection(&mut self.sel).style(Style::new().grow());
+        let list = list.row_style(Style::new().w(grow()).pad(8.0));
+        let list = if self.bare { list.unstyled() } else { list };
+        let inner = Style::new().w(px(10.0)).h(px(4.0));
+        list.show(ui.id("list"), |ui, row| _ = ui.id(("in", row.index)).el(inner));
+      });
+    }
+  }
+
+  /// A row style's padding moves the row's content in; unstyled, a selected row keeps the
+  /// list's ground for the app to paint.
+  #[test]
+  fn a_row_style_and_unstyled_rows() {
+    use crate::harness::Harness;
+    let mut h = Harness::new(Bare::default(), Size::new(300.0, 300.0), 1.0);
+    h.frame();
+    let row = h.rect(Id::of("list").key(("row", 1u64))).unwrap();
+    let inner = h.rect(Id::of(("in", 1))).unwrap();
+    assert_eq!((inner.x - row.x, inner.y - row.y), (8.0, 8.0));
+
+    h.click_id(Id::of("list").key(("row", 1u64)));
+    h.frame();
+    let filled = h.render().pixel(row.x + 150.0, row.y + 10.0);
+    h.app_mut().bare = true;
+    h.frame();
+    let img = h.render();
+    let (bare, other) =
+      (img.pixel(row.x + 150.0, row.y + 10.0), img.pixel(row.x + 150.0, row.y + 30.0));
+    assert_eq!(h.app().sel.cursor(), Some(1));
+    assert_ne!(bare, filled);
+    assert_eq!(bare, other);
+  }
 }

@@ -698,4 +698,29 @@ mod tests {
     input::hit(&st.last, Point::new(20.0, 20.0), &mut hits);
     assert_eq!(hits, [Id::of("plot"), Id::of("chart")]);
   }
+
+  struct Ringed(Option<FocusRing>);
+
+  impl crate::App for Ringed {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.set_focus_ring(self.0);
+      ui.col(Style::new().pad(10.0), |ui| {
+        ui.id("box").el(Style::new().w(px(20.0)).h(px(10.0)).focusable());
+      });
+    }
+  }
+
+  /// The ring [Ui::set_focus_ring] sets goes round the focused box; `None`, none does.
+  #[test]
+  fn the_focus_ring_set_is_painted() {
+    let red = [1.0, 0.0, 0.0, 1.0];
+    let mut h = crate::Harness::new(Ringed(Some(FocusRing::new(red))), Size::new(50.0, 40.0), 1.0);
+    h.set_focus(Some(Id::of("box")));
+    h.frame();
+    let ring = h.render().pixel(8.5, 15.0);
+    h.app_mut().0 = None;
+    h.frame();
+    assert_eq!(ring, [255, 0, 0, 255]);
+    assert_ne!(h.render().pixel(8.5, 15.0), ring);
+  }
 }
