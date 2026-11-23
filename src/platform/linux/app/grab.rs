@@ -48,6 +48,9 @@ struct Keys {
   /// (paused while a recorder records).
   down: [Cell<Option<u8>>; MAX],
   escape_down: Cell<bool>,
+  /// The key whose press began X's grab of the keyboard (every key event comes through a grab):
+  /// its release ends it, those of the keys held with it going to the focused window instead.
+  grab: Cell<Option<u8>>,
 }
 
 impl Keys {
@@ -75,6 +78,24 @@ impl Keys {
       }
       _ => None,
     }
+  }
+
+  /// The edges of a key event ([Keys::edge]); at the release that ends X's grab, the release of
+  /// every key held with it too, which won't come.
+  fn edges(&self, kind: c_uint, code: u8, state: c_uint, at: Instant) -> Vec<Edge> {
+    let mut edges: Vec<Edge> = self.edge(kind, code, state, at).into_iter().collect();
+    match kind {
+      PRESS if self.grab.get().is_none() => self.grab.set(Some(code)),
+      RELEASE if self.grab.get() == Some(code) => {
+        self.grab.set(None);
+        self.escape_down.set(false);
+        let held = self.down.iter().enumerate().filter(|(_, d)| d.take().is_some());
+        edges.extend(held.map(|(which, _)| Edge::Up { which, at }));
+      }
+      _ => {}
+    }
+
+    edges
   }
 }
 
@@ -213,7 +234,7 @@ impl Inner {
       unsafe { (self.x.XNextEvent)(self.d, &mut event) };
       // An `XKeyEvent` (LP64): its type the first int, `state` and `keycode` at bytes 80 and 84.
       let e = unsafe { &*event.as_ptr().cast::<[c_uint; 48]>() };
-      if let Some(edge) = self.keys.edge(e[0], e[21] as u8, e[20], Instant::now()) {
+      for edge in self.keys.edges(e[0], e[21] as u8, e[20], Instant::now()) {
         self.events.set(self.events.get() + 1);
         let _ = self.tx.send(edge);
       }
@@ -285,6 +306,28 @@ mod tests {
     assert_eq!(edge(PRESS, 65, 4 | 1), Some(Edge::Down { which: 1, at, repeat: true }));
     assert_eq!(edge(RELEASE, 65, 4 | 1), Some(Edge::Up { which: 1, at }));
     assert_eq!(edge(PRESS, 65, 4 | 1), Some(Edge::Down { which: 2, at, repeat: false }));
+  }
+
+  /// F5 (71) and F6 (72) held together: F6 let go first is its own release; F5 let go first ends
+  /// X's grab, which its press began, and lets go of F6 and Escape too: their next press is one.
+  #[test]
+  fn the_grabs_end_lets_go_of_the_keys_held_with_it() {
+    let (keys, at) = (Keys::default(), Instant::now());
+    keys.chords[0].set(Some((71, 0)));
+    keys.chords[1].set(Some((72, 0)));
+    keys.escape.set(Some(9));
+    let edges = |kind, code| keys.edges(kind, code, 0, at);
+    let down = |which| vec![Edge::Down { which, at, repeat: false }];
+    let up = |which| Edge::Up { which, at };
+
+    assert_eq!((edges(PRESS, 71), edges(PRESS, 72)), (down(0), down(1)));
+    assert_eq!((edges(RELEASE, 72), edges(RELEASE, 71)), (vec![up(1)], vec![up(0)]));
+
+    assert_eq!((edges(PRESS, 71), edges(PRESS, 72)), (down(0), down(1)));
+    assert_eq!(edges(PRESS, 9), [Edge::Escape]);
+    assert_eq!(edges(RELEASE, 71), [up(0), up(1)]);
+    assert_eq!((edges(PRESS, 72), edges(PRESS, 9)), (down(1), vec![Edge::Escape]));
+    assert_eq!(edges(RELEASE, 72), [up(1)]);
   }
 
   /// The grab's keys by their place (X's keycodes on a PC keyboard) and its masks: each chord's

@@ -167,6 +167,12 @@ impl Hotkeys {
   pub fn set(&mut self, hotkeys: &[Option<Hotkey>]) -> Result<(), String> {
     let changed = changed(&self.places, hotkeys);
     self.places.resize_with(hotkeys.len().max(self.places.len()), Place::default);
+    // Each place changed lets its hotkey go before any takes its new one: two places swapping
+    // theirs would find each other's taken.
+    for &which in changed.iter().filter(|&&which| which < MAX) {
+      _ = self.imp.set(which, None);
+    }
+
     for which in changed {
       let hotkey = hotkeys.get(which).copied().flatten();
       self.places[which] = Place { hotkey, error: refused(hotkeys, which) };
@@ -240,19 +246,20 @@ impl Hotkeys {
 }
 
 /// The places [Hotkeys::set] of `hotkeys` hands the platform again: those whose hotkey changed or
-/// went, and those refused, tried again.
+/// went, those refused, tried again, and those refused now (an earlier place took their hotkey).
 fn changed(places: &[Place], hotkeys: &[Option<Hotkey>]) -> Vec<usize> {
   let same = |which: usize| {
     let p = places.get(which).cloned().unwrap_or_default();
-    p.error.is_none() && p.hotkey == hotkeys.get(which).copied().flatten()
+    let hotkey = hotkeys.get(which).copied().flatten();
+    p.error.is_none() && p.hotkey == hotkey && refused(hotkeys, which).is_none()
   };
   (0..hotkeys.len().max(places.len())).filter(|&which| !same(which)).collect()
 }
 
 /// Why place `which` of `hotkeys` is refused before the OS is asked: past [MAX], or an earlier
-/// place has its hotkey.
+/// place has its hotkey. None past the list: the place went.
 fn refused(hotkeys: &[Option<Hotkey>], which: usize) -> Option<String> {
-  let hotkey = hotkeys[which]?;
+  let hotkey = hotkeys.get(which).copied().flatten()?;
   if which >= MAX {
     return Some(format!("more than {MAX} hotkeys"));
   }
@@ -286,6 +293,10 @@ mod tests {
     assert_eq!(changed(&was, &keys(&["option+space", "f6", "right_option"])), [1]);
     assert_eq!(changed(&was, &keys(&["option+space", "", "right_option"])), [1]);
     assert_eq!(changed(&was, &keys(&["option+space"])), [1, 2]);
+    assert_eq!(refused(&keys(&["option+space"]), 2), None, "gone");
+    assert_eq!(changed(&was, &keys(&["f5", "option+space", "right_option"])), [0, 1], "swapped");
+    let taken = keys(&["f5", "f5", "right_option"]);
+    assert_eq!(changed(&was, &taken), [0, 1], "the second refused now, its hotkey the first's");
     assert_eq!(changed(&was, &keys(&["option+space", "f5", "right_option", "f7"])), [3]);
     assert_eq!(changed(&[], &keys(&["", "f5"])), [1]);
 

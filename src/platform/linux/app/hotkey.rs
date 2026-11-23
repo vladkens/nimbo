@@ -408,9 +408,12 @@ pub fn keysym(key: Key) -> Option<String> {
 /// `GSourceFunc`: the places set since the idle was added bind together.
 unsafe extern "C" fn on_rebind(data: P) -> c_int {
   let weak = unsafe { Box::from_raw(data as *mut Weak<State>) };
+  // Not once XWayland's grab stands in for a portal missing: its places are grabbed already.
   if let Some(s) = weak.upgrade() {
     s.rebinding.set(false);
-    rebind(&s);
+    if !x11(&s) {
+      rebind(&s);
+    }
   }
 
   0
