@@ -30,9 +30,10 @@ use objc2::{
   sel,
 };
 use objc2_app_kit::{
-  NSDragOperation, NSDraggingInfo, NSEvent, NSEventModifierFlags, NSMenuItem,
-  NSPasteboardTypeFileURL, NSResponder, NSTextInputClient, NSTextInputContext, NSTrackingArea,
-  NSTrackingAreaOptions, NSView, NSWindow, NSWindowOcclusionState, NSWindowStyleMask,
+  NSApplication, NSDragOperation, NSDraggingInfo, NSEvent, NSEventModifierFlags, NSEventType,
+  NSMenuItem, NSPasteboardTypeFileURL, NSResponder, NSTextInputClient, NSTextInputContext,
+  NSTrackingArea, NSTrackingAreaOptions, NSView, NSWindow, NSWindowOcclusionState,
+  NSWindowStyleMask,
 };
 use objc2_foundation::{
   NSArray, NSAttributedString, NSAttributedStringKey, NSNotFound, NSObject, NSObjectProtocol,
@@ -73,6 +74,8 @@ pub struct Ivars {
   /// Timestamp of the last key event offered through `performKeyEquivalent:`, which AppKit
   /// sends again as `keyDown:` when neither we nor the menu used it.
   key_equivalent: Cell<f64>,
+  /// Timestamp of the last of them that waits for the busy runtime ([View::send]).
+  key_waits: Cell<f64>,
   /// When the scheduled timer wake fires, on the runtime's clock.
   timer: Cell<Option<Duration>>,
   /// When the last frame started, on the runtime's clock: a timer frame comes a refresh later at
@@ -785,14 +788,22 @@ impl View {
     }
 
     self.ivars().key_equivalent.set(event.timestamp());
+    if self.busy() {
+      self.ivars().key_waits.set(event.timestamp());
+    }
+
     self.send(Event::KeyDown(key_event(event)))
   }
 
-  /// A command from the menu bar, as its key would run it. A key equivalent offered first
-  /// ([View::key_equivalent]) reaches the menu only when nobody used it, so the item runs anew: the
-  /// same command finds nobody again, and a key bound to another one still runs the item's.
+  /// A command from the menu bar, as its key would run it. The view is offered a key equivalent
+  /// first ([View::key_equivalent]): the menu sees one nobody used, or one that waits for the busy
+  /// runtime and runs then, not here as well.
   fn menu_command(&self, cmd: Command) {
-    self.send(Event::Command(cmd));
+    let event = NSApplication::sharedApplication(MainThreadMarker::from(self)).currentEvent();
+    let key = event.filter(|e| e.r#type() == NSEventType::KeyDown);
+    if key.is_none_or(|e| e.timestamp() != self.ivars().key_waits.get()) {
+      self.send(Event::Command(cmd));
+    }
   }
 
   /// Whether `cmd` has someone to run it ([Runtime::can]); busy up the stack, yes.

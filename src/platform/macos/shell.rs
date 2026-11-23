@@ -18,6 +18,7 @@
 use std::any::TypeId;
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
+use std::mem::replace;
 
 use dispatch2::{DispatchQueue, MainThreadBound};
 use objc2::rc::Retained;
@@ -70,11 +71,13 @@ struct Shell {
   /// once the app has finished.
   terminating: bool,
   /// The app's name and delegate, the menu bar's target; the app's answer to an item of its own
-  /// chosen there, once it set the bar ([set_commands]), and the items chosen it has yet to see.
+  /// chosen there, once it set the bar ([set_commands]), the items chosen it has yet to see and
+  /// whether it runs.
   name: &'static str,
   delegate: Option<Retained<Delegate>>,
   chosen: Option<OnChosen>,
   picked: VecDeque<usize>,
+  choosing: bool,
   commands: bool,
 }
 
@@ -155,19 +158,20 @@ define_class!(
     fn chosen(&self, sender: Option<&AnyObject>) {
       let Some(item) = sender.and_then(|s| s.downcast_ref::<NSMenuItem>()) else { return };
       shell(|s| s.picked.push_back(item.tag() as usize));
-      // One at a time: an item chosen in a nested loop of another's answer runs after it.
-      while let Some(mut f) = shell(|s| s.chosen.take()) {
-        let n = shell(|s| s.picked.pop_front());
-        if let Some(n) = n {
-          f(&mut Main::here(), n);
-        }
+      // One at a time: an item chosen in a nested loop of the answer runs after it, by the bar
+      // set then.
+      if shell(|s| replace(&mut s.choosing, true)) {
+        return;
+      }
 
+      while let Some(n) = shell(|s| s.picked.pop_front()) {
+        let Some(mut f) = shell(|s| s.chosen.take()) else { break };
+        f(&mut Main::here(), n);
         // Kept unless it set another.
         shell(|s| _ = s.chosen.get_or_insert(f));
-        if n.is_none() {
-          return;
-        }
       }
+
+      shell(|s| s.choosing = false);
     }
   }
 );
