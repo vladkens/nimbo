@@ -52,10 +52,10 @@ fn find(at: (u64, usize), n: usize, key: &dyn Fn(usize) -> u64) -> Option<usize>
 }
 
 impl Selection {
-  /// Several rows at a time in a list over it: Cmd-click toggles, Shift-click and Shift-arrows
-  /// extend, Cmd-A selects all.
-  pub fn multiple(self) -> Self {
-    Self { multiple: true, ..self }
+  /// Several rows at a time in a list over it when `yes`: Cmd-click toggles, Shift-click and
+  /// Shift-arrows extend, Cmd-A selects all; else one at a time, as by default.
+  pub fn multiple(self, yes: bool) -> Self {
+    Self { multiple: yes, ..self }
   }
 
   /// Whether a list over it selects several rows at a time ([Self::multiple]).

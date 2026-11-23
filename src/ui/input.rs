@@ -785,6 +785,21 @@ mod tests {
     assert!(st.input.click.is_none());
   }
 
+  /// A container that takes no pointer input, though its style asks for it, is not among a
+  /// hovered child's interactive ancestors.
+  #[test]
+  fn no_hit_testing_leaves_a_container_out_of_hover() {
+    let box_ = |w: f32, h: f32| Style::new().w(px(w)).h(px(h));
+    let st = frame(UiState::default(), |ui| {
+      ui.id("panel").row(box_(100.0, 50.0), |ui| {
+        ui.id("box").allows_hit_testing(false).row(box_(60.0, 50.0).hit(), |ui| {
+          ui.id("child").el(box_(60.0, 50.0));
+        });
+      });
+    });
+    assert_eq!(at(&st, 10.0, 10.0), [Id::of("child"), Id::of("panel")]);
+  }
+
   #[test]
   fn hit_respects_order_clips_and_opt_in() {
     let box_ = |w: f32, h: f32| Style::new().w(px(w)).h(px(h));

@@ -155,8 +155,20 @@ impl Ui<'_> {
   /// where it was pressed, a click on the track paging toward it, the bars shown while the
   /// content moves, the pointer comes in or moves in a track's strip, then fading out; they
   /// stay while a thumb is held or the pointer is on a track. Read before the area is built, as
-  /// of the last frame's content and viewport.
+  /// of the last frame's content and viewport; the view runs again when the layout changes them
+  /// while the bars show, or lays the area out first ([Ui::settle]). A design that draws its bars
+  /// while they are hidden settles the area itself to follow its content.
   pub fn scroll_behavior(&mut self, id: Id, axes: Axes) -> ScrollBehavior {
+    if self.scroll(id).is_none() {
+      self.settle(id);
+    }
+
+    self.scroll_bars(id, axes)
+  }
+
+  /// [Ui::scroll_behavior] with no run of its own for an area not laid out yet: a bar hidden
+  /// until something moves has nothing to show on its first frame.
+  fn scroll_bars(&mut self, id: Id, axes: Axes) -> ScrollBehavior {
     let now = self.now();
     let mut bars = std::mem::take(self.state::<Bars>(id));
     let mut geos: [Option<ScrollBar>; 2] = [None, None];
@@ -244,6 +256,12 @@ impl Ui<'_> {
 
     let opacity =
       self.animate(id.key("bars"), until.is_some() as u8 as f32, Transition::linear(5.0));
+    // The bars are of the last frame's content and viewport: the view runs again if the layout
+    // changes them while they show.
+    if opacity > 0.0 || until.is_some() {
+      self.settle(id);
+    }
+
     let drag = bars.drag.map(|d| d.is_some());
     *self.state::<Bars>(id) = bars;
     ScrollBehavior { opacity, shown: until.is_some(), id, bars: geos, drag }
@@ -277,13 +295,8 @@ impl Ui<'_> {
       false => style.clip(),
     };
 
-    let b = self.scroll_behavior(id, style.scroll);
+    let b = self.scroll_bars(id, style.scroll);
     let (opacity, shown) = (b.opacity, b.shown);
-    // Drawn from the last frame's content and viewport: again if the layout changes them.
-    if opacity > 0.0 || shown {
-      self.settle(id);
-    }
-
     self.with_id(id).container(Flow::Column, style, |ui| {
       f(ui);
       // The fades over the content, under the scrollbars, out of the pointer's way: the paint
@@ -353,7 +366,7 @@ mod tests {
   use crate::harness::Harness;
   use crate::scene::{Size, rgb};
   use crate::ui::input::ScrollState;
-  use crate::ui::{Id, ScrollerKnob, Style, Ui, px};
+  use crate::ui::{Axes, Axis, Float, Id, ScrollerKnob, Style, Ui, px};
 
   /// A scroll area 200 high over 1000 points of content, fading into red.
   struct Tall(f32);
@@ -365,6 +378,31 @@ mod tests {
         ui.el(Style::new().w(px(200.0)).h(px(self.0)).bg(rgb(0x0000ff)));
       });
     }
+  }
+
+  /// A design's own bar on [Ui::scroll_behavior], always shown: it is there on the first frame,
+  /// with no input to run the view again.
+  #[test]
+  fn a_custom_bar_shows_on_the_first_frame() {
+    struct Custom;
+    impl App for Custom {
+      fn view(&mut self, ui: &mut Ui) {
+        let id = Id::of("area");
+        let b = ui.scroll_behavior(id, Axes::VERTICAL);
+        let s = Style::new().w(px(200.0)).h(px(200.0)).scroll(Axes::VERTICAL);
+        ui.with_id(id).col(s, |ui| {
+          ui.el(Style::new().h(px(1000.0)));
+          if let Some(g) = b.bar(Axis::Vertical) {
+            let bar = Style::new().w(px(6.0)).h(px(g.thumb));
+            ui.with_id(b.thumb(Axis::Vertical)).float(Float::parent()).el(bar);
+          }
+        });
+      }
+    }
+
+    let mut h = Harness::new(Custom, Size::new(200.0, 200.0), 1.0);
+    h.frame();
+    assert!(h.rect(Id::of("area").key(("thumb", 1usize))).is_some());
   }
 
   /// 53 million points of content under a 2-point prefix, past `f32`'s whole numbers: at the

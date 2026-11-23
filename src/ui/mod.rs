@@ -1002,7 +1002,7 @@ impl<'a> Ui<'a> {
   }
 
   #[inline(always)]
-  fn push(&mut self, kind: Kind, style: Style, flow: Flow) -> (u32, Response) {
+  fn push(&mut self, kind: Kind, mut style: Style, flow: Flow) -> (u32, Response) {
     let (parent, count) = self.st.stack.last_mut().unwrap();
     let tree = &mut self.st.tree;
     let (id, named) = self
@@ -1027,6 +1027,8 @@ impl<'a> Ui<'a> {
     let off = std::mem::take(&mut self.next_no_hit);
     let hit = style.hit || named || style.cursor != Cursor::Inherit;
     let hit = (hit && !off) || scrolls || focus || help.is_some();
+    // Its style's `hit` turned off too: no hover as an interactive child's ancestor.
+    style.hit = hit;
     let tree = &mut self.st.tree;
     let i = tree.nodes.len() as u32;
     self.helps.extend(help.map(|tip| (i, tip)));
@@ -1052,11 +1054,10 @@ impl<'a> Ui<'a> {
     }
   }
 
-  /// Marks a node interactive, indexes it for hit testing (and a scroll container for the
-  /// layout) and reads its input; out of line, so plain elements build fast.
+  /// Indexes an interactive node for hit testing (and a scroll container for the layout) and
+  /// reads its input; out of line, so plain elements build fast.
   #[inline(never)]
   fn interactive(&mut self, i: u32, id: Id, scrolls: bool) -> Response {
-    self.st.tree.nodes[i as usize].style.hit = true;
     self.st.tree.hits.push(i);
     if scrolls {
       self.st.tree.scrolls.push(i);

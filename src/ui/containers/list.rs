@@ -169,7 +169,8 @@ impl<'s> List<'s> {
   }
 
   /// Several rows at a time: Cmd-click toggles, Shift-click and Shift-arrows extend, Cmd-A
-  /// selects all. Makes its selection [Selection::multiple], as one already so does.
+  /// selects all. The list sets its selection's mode ([Selection::multiple]) as each build says:
+  /// one built without it selects one row at a time.
   pub fn multi(self) -> Self {
     Self { multi: true, ..self }
   }
@@ -238,8 +239,9 @@ impl<'s> List<'s> {
       None => own.insert(std::mem::take(&mut ui.state::<Own>(id).0)),
     };
 
-    if multi && !sel.is_multiple() {
-      *sel = std::mem::take(sel).multiple();
+    // The mode is this build's, whatever the selection had.
+    if sel.is_multiple() != multi {
+      *sel = std::mem::take(sel).multiple(multi);
     }
 
     let b = ui.list_behavior(id, rows, sel, &key);
@@ -507,6 +509,45 @@ mod tests {
     let (v, last) = (h.rect(id).unwrap(), h.rect(row(29)).unwrap());
     assert!(last.y + last.h <= v.y + v.h + 0.5, "{last:?} in {v:?}");
     assert!(h.rect(head(20)).is_some() && h.rect(row(0)).is_none());
+  }
+
+  /// Two lists of 5 rows, multi-select or not as `.0` says: the app holds the first's
+  /// selection, the second keeps its own.
+  #[derive(Default)]
+  struct Modes(bool, Selection);
+
+  impl crate::App for Modes {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.row(Style::new().w(px(300.0)).h(px(100.0)), |ui| {
+        for name in ["held", "own"] {
+          let list = List::new(5, 20.0).style(Style::new().w(px(100.0)).h(px(100.0)));
+          let list = if self.0 { list.multi() } else { list };
+          let list = if name == "held" { list.selection(&mut self.1) } else { list };
+          list.show(ui.id(name), |ui, _| ui.label("row"));
+        }
+      });
+    }
+  }
+
+  /// The mode is the build's: a list built again without `.multi()` selects one row at a time.
+  #[test]
+  fn a_list_selects_one_row_again_without_multi() {
+    use crate::NamedKey as K;
+    use crate::harness::Harness;
+    let mut h = Harness::new(Modes(true, Selection::default()), Size::new(300.0, 100.0), 1.0);
+    h.frame();
+    h.app_mut().0 = false;
+    h.frame();
+    for name in ["held", "own"] {
+      h.click_id(Id::of(name).key(("row", 0u64)));
+      h.key(K::ArrowDown, Modifiers::SHIFT);
+      h.key(K::ArrowDown, Modifiers::SHIFT);
+      h.frame();
+    }
+
+    assert_eq!(sorted(&h.app().1), [2]);
+    let tree = h.a11y();
+    assert_eq!(tree.matches("selected").count(), 2, "{tree}");
   }
 
   /// 30 rows 20 high in sections of three under headers 30 high, the app holding the selection.
