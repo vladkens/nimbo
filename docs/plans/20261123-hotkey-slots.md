@@ -23,7 +23,7 @@ Not in this work: keys taken while a hotkey is held and fn as a chord modifier (
 - [x] 2. macOS: the tap's places and two-edge verdicts, Carbon per place, the hotkey thread. `judge` tests: two chords, a chord and a modifier alone with its modifier (two edges), two modifiers alone, Escape with places; `route`'s dedupe per place.
 - [x] 3. Windows: places, one timer, [Lone] over several keys. Tests of [Lone].
 - [x] 4. Linux: X11 grabs per place (the `Keys` tests), the portal's shortcuts per place (the id of each, unit-tested).
-- [ ] 5. Checks: `make check`, `make test`; wavo-app built against this branch; the VMs (below). 2026-11-23: `make check` (with Windows' and Linux' clippy) passes; `make test` too but `the_api_doc_is_the_gallerys` (photo.png, as on main here); the Windows and Linux tests are built, not run (the hosts were off; CI runs Linux').
+- [ ] 5. Checks: `make check`, `make test`; wavo-app built against this branch; the VMs (below). 2026-11-23: `make check` (with Windows' and Linux' clippy) passes; `make test` too but `the_api_doc_is_the_gallerys` (photo.png, as on main here); the Windows tests are built, not run (the hosts were off); the Linux ones pass in a Debian container. The review's fixes: places changed let go before any takes its new hotkey (a swap), a shorter list, a place refused once an earlier one takes its hotkey; X11's grab ended by the key that began it lets go of the keys held with it; the portal takes no press of a place changed since it bound it, and a session closed lets go of the places held. The VMs not run: the test Macs were off.
 
 ## Checks
 
