@@ -45,8 +45,11 @@ pub mod containers;
 pub mod dialog;
 pub mod form;
 mod id;
+mod image;
 pub mod input;
 mod layout;
+mod lazy;
+mod menus;
 mod paint;
 mod query;
 pub mod store;
@@ -70,6 +73,7 @@ pub use containers::{
 pub use dialog::{Answer, Dialog, DialogBehavior};
 pub use form::{Content, FormRow, FormStyle, Glass, Section, TabItem};
 pub use id::Id;
+pub use image::ImageSource;
 pub(crate) use input::drags_window;
 pub use input::{Click, Press, Scroll};
 pub use layout::ContentMode;
@@ -83,9 +87,7 @@ pub use style::{
 pub use textlayout::Edit;
 pub(crate) use textlayout::TextLayout;
 pub use theme::{ButtonLook, ButtonStyle, ControlBorder, Sizes, SwitchSize, Theme, Tone};
-pub use widgets::{
-  Button, ButtonRole, FieldStyle, Icon, IconPaint, ImageSource, Slider, TextInput,
-};
+pub use widgets::{Button, ButtonRole, FieldStyle, Icon, IconPaint, Slider, TextInput};
 
 use self::input::{Deliver, Input, ScrollState};
 use self::store::{Anim, Store};

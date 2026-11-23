@@ -40,7 +40,7 @@ impl<A> Menu<A> {
   /// The menu with each action replaced by its number, depth first in the order they show,
   /// and the actions by number: the tags the OS menus use (a tag, a command id or a D-Bus menu
   /// id), the answer mapped back to the action.
-  pub(crate) fn tagged(&self) -> (Menu<usize>, Vec<A>)
+  pub fn tagged(&self) -> (Menu<usize>, Vec<A>)
   where
     A: Clone,
   {

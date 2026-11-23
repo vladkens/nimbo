@@ -8,7 +8,6 @@
 //! They plug into the [super::Ui] as add-ons: a menu tells its items about itself through
 //! [super::Ui::slot].
 
-pub mod lazy;
 pub mod list;
 pub mod menu;
 pub mod popup;

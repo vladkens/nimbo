@@ -21,15 +21,13 @@ use std::time::Duration;
 
 use keyboard_types::NamedKey;
 
-use crate::app::Event;
 use crate::keys::{Command, Key, Move};
 use crate::menu::{Item, Menu};
 use crate::scene::{Point, Rect, alpha};
 use crate::ui::containers::popup::check as check_mark;
 use crate::ui::containers::scroll::{Bars, MIN_THUMB};
 use crate::ui::{
-  Align, Behavior, Button, Float, Id, Response, Role, State, Style, Ui, UiState, UnitPoint, grow,
-  pct, px,
+  Align, Behavior, Button, Float, Id, Response, Role, State, Style, Ui, UnitPoint, grow, pct, px,
 };
 
 /// Paint order of menus among overlays.
@@ -85,11 +83,10 @@ impl TypeSelect {
   }
 }
 
-/// A menu between frames: open, the highlighted item, and the items (id, enabled) as the
-/// last build made them.
+/// An open menu between frames ([Ui::menu_open]): the highlighted item, and the items (id,
+/// enabled) as the last build made them.
 #[derive(Default)]
 struct Open {
-  open: bool,
   cur: Option<usize>,
   items: Vec<(Id, bool)>,
   /// The item under the pointer last frame: moving onto another one highlights it.
@@ -156,14 +153,6 @@ impl Ui<'_> {
     r
   }
 
-  /// Whether the menu of the control `id` ([Ui::menu_popup]) is open now: as the input since
-  /// the last frame left it, not as that frame laid it out, so a trigger drawn before its menu
-  /// shows it closed in the very frame it closes. A native context menu ([Ui::context_menu]) is
-  /// open until its answer comes.
-  pub fn menu_open(&self, id: Id) -> bool {
-    self.st.menu_open(id)
-  }
-
   /// The menu of the control `id` (its trigger, built before), opened and closed by `toggle`
   /// (the trigger's click) and placed by `place` ([MenuPlacement]): while open, `items`
   /// ([Ui::menu_item], [Ui::menu_item_behavior]) in a `style` box, as an overlay; returns whether
@@ -196,32 +185,33 @@ impl Ui<'_> {
 
     let (menu, list) = (id.key("menu"), id.key("menu").key("list"));
     let mut st = std::mem::take(self.state::<Open>(id));
-    let mut close = false;
+    let (mut open, mut close) = (self.menu_open(id), false);
     if toggle {
-      match st.open {
+      match open {
         true => close = true,
         false => {
           let prev = self.focus_id();
-          st = Open { open: true, cur: start, prev, reveal: true, start, point, ..Open::default() };
-          // What scrolls under it stops: a trackpad's gesture, a wheel's momentum.
-          self.st.halt_scrolling();
+          st = Open { cur: start, prev, reveal: true, start, point, ..Open::default() };
+          self.set_menu_open(id, true);
+          open = true;
         }
       }
     }
 
     let mut run = None;
-    if st.open && !close {
+    if open && !close {
       (close, run) = self.menu_keys(menu, &mut st);
       self.grab_keys(menu);
     }
 
     // The window losing the focus closes it too, as AppKit's menus close with the app's.
     close |= !self.window_focused();
-    if !st.open || close {
-      if st.open && self.focus_id().is_none_or(|f| f == menu) {
+    if !open || close {
+      if open && self.focus_id().is_none_or(|f| f == menu) {
         self.focus(st.prev);
       }
 
+      self.set_menu_open(id, false);
       *self.state::<Open>(id) = Open::default();
       return false;
     }
@@ -297,10 +287,10 @@ impl Ui<'_> {
         self.focus(st.prev);
       }
 
-      st = Open::default();
+      (st, open) = (Open::default(), false);
     }
 
-    let open = st.open;
+    self.set_menu_open(id, open);
     *self.state::<Open>(id) = st;
     open
   }
@@ -504,30 +494,8 @@ impl Ui<'_> {
     at: Option<Point>,
     menu: impl FnOnce() -> Menu<A>,
   ) -> Option<A> {
-    let answer = self.st.take(id, |e| match e {
-      Event::Menu { item, .. } => Some(*item),
-      _ => None,
-    });
-    if let Some(item) = answer {
-      self.state::<Open>(id).open = false;
-      let actions = std::mem::take(&mut self.state::<Actions<A>>(id).0);
-      return item.and_then(|i| actions.get(i).cloned());
-    }
-
-    // Asked for, it stays open until the answer comes, its actions kept till then.
-    if self.st.native_menus {
-      if at.is_some() || self.menu_open(id) {
-        self.state::<Open>(id).open = true;
-        self.retain(id);
-      }
-
-      if let Some(at) = at {
-        let (menu, actions) = menu().tagged();
-        self.state::<Actions<A>>(id).0 = actions;
-        self.st.context_menu = Some((id, at, menu));
-      }
-
-      return None;
+    if self.native_menus() {
+      return self.native_menu(id, at, menu);
     }
 
     let t = self.theme();
@@ -613,20 +581,6 @@ impl Ui<'_> {
   }
 }
 
-impl UiState {
-  /// [Ui::menu_open] as the last frame and the input since left it.
-  pub fn menu_open(&self, id: Id) -> bool {
-    self.store.peek::<Open>(id).is_some_and(|o| o.open)
-  }
-
-  /// Closes `id`'s menu: the platform's answered it.
-  pub(crate) fn close_menu(&mut self, id: Id) {
-    if let Some(o) = self.store.peek_mut::<Open>(id) {
-      o.open = false;
-    }
-  }
-}
-
 /// Whether any of `items` has a check mark to show, in a submenu too: the menu has a column
 /// for them then.
 fn checks(items: &[Item<usize>]) -> bool {
@@ -635,15 +589,6 @@ fn checks(items: &[Item<usize>]) -> bool {
     Item::Submenu { menu, .. } => checks(&menu.items),
     _ => false,
   })
-}
-
-/// The actions of a native context menu waiting for its answer, by number ([Menu::tagged]).
-struct Actions<A>(Vec<A>);
-
-impl<A> Default for Actions<A> {
-  fn default() -> Self {
-    Self(Vec::new())
-  }
 }
 
 #[cfg(test)]

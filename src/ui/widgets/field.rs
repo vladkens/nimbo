@@ -115,7 +115,7 @@ impl Ui<'_> {
   pub fn edit_menu(&mut self, b: &FieldBehavior) {
     let (id, m) = (b.id.key("edit"), b.menu);
     // Disabled while open, a drawn one closes.
-    let off = b.disabled && !self.st.native_menus && self.menu_open(id);
+    let off = b.disabled && !self.native_menus() && self.menu_open(id);
     let chosen = self.context_menu_at(id, m.at.or(off.then(Point::default)), || m.items());
     self.state::<FieldState>(b.id).menu_open = self.menu_open(id);
     if let Some(cmd) = chosen {

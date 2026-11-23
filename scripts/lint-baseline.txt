@@ -8,15 +8,9 @@ layer src/ui/mod.rs -> ui/theme.rs::Theme 1
 
 # The styled controls build on the core's internals (`ui.st`, crate-private calls): public
 # building blocks replace them (docs/plans/20261118-layers.md, 3).
-private src/ui/containers/lazy.rs reveal_exact 1
-private src/ui/containers/lazy.rs scroll_exact 1
-private src/ui/containers/lazy.rs st 8
 private src/ui/containers/list.rs st 11
-private src/ui/containers/menu.rs halt_scrolling 1
-private src/ui/containers/menu.rs impl UiState 1
 private src/ui/containers/menu.rs pointer_state 1
-private src/ui/containers/menu.rs st 9
-private src/ui/containers/menu.rs tagged 2
+private src/ui/containers/menu.rs st 4
 private src/ui/containers/scroll.rs scroll_exact 2
 private src/ui/containers/scroll.rs st 1
 private src/ui/containers/split.rs pointer_state 1
@@ -32,11 +26,8 @@ private src/ui/widgets/badge.rs a11y_named 1
 private src/ui/widgets/checkbox.rs controls_theme 1
 private src/ui/widgets/divider.rs st 2
 private src/ui/widgets/field.rs impl UiState 1
-private src/ui/widgets/field.rs st 4
+private src/ui/widgets/field.rs st 3
 private src/ui/widgets/field.rs text_id 3
-private src/ui/widgets/image.rs add_premultiplied 1
-private src/ui/widgets/image.rs impl UiState 1
-private src/ui/widgets/image.rs st 2
 private src/ui/widgets/progress.rs controls_theme 1
 private src/ui/widgets/progress.rs st 2
 private src/ui/widgets/segmented.rs controls_theme 1

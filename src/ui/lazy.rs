@@ -19,7 +19,7 @@
 use std::hash::Hash;
 use std::ops::Range;
 
-use super::super::{Id, Style, Ui, grow, px};
+use super::{Id, Style, Ui, grow, px};
 
 /// How far past the viewport items are built, in points: a wheel step and more.
 const MARGIN: f64 = 200.0;
