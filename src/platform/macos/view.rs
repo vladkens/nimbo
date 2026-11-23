@@ -30,10 +30,9 @@ use objc2::{
   sel,
 };
 use objc2_app_kit::{
-  NSApplication, NSDragOperation, NSDraggingInfo, NSEvent, NSEventModifierFlags, NSEventType,
-  NSMenuItem, NSPasteboardTypeFileURL, NSResponder, NSTextInputClient, NSTextInputContext,
-  NSTrackingArea, NSTrackingAreaOptions, NSView, NSWindow, NSWindowOcclusionState,
-  NSWindowStyleMask,
+  NSDragOperation, NSDraggingInfo, NSEvent, NSEventModifierFlags, NSMenuItem,
+  NSPasteboardTypeFileURL, NSResponder, NSTextInputClient, NSTextInputContext, NSTrackingArea,
+  NSTrackingAreaOptions, NSView, NSWindow, NSWindowOcclusionState, NSWindowStyleMask,
 };
 use objc2_foundation::{
   NSArray, NSAttributedString, NSAttributedStringKey, NSNotFound, NSObject, NSObjectProtocol,
@@ -789,14 +788,11 @@ impl View {
     self.send(Event::KeyDown(key_event(event)))
   }
 
-  /// A command from the menu bar, as its key would run it; not for the key equivalent offered
-  /// already ([View::key_equivalent]), which nobody used.
+  /// A command from the menu bar, as its key would run it. A key equivalent offered first
+  /// ([View::key_equivalent]) reaches the menu only when nobody used it, so the item runs anew: the
+  /// same command finds nobody again, and a key bound to another one still runs the item's.
   fn menu_command(&self, cmd: Command) {
-    let event = NSApplication::sharedApplication(MainThreadMarker::from(self)).currentEvent();
-    let key = event.filter(|e| e.r#type() == NSEventType::KeyDown);
-    if key.is_none_or(|e| e.timestamp() != self.ivars().key_equivalent.get()) {
-      self.send(Event::Command(cmd));
-    }
+    self.send(Event::Command(cmd));
   }
 
   /// Whether `cmd` has someone to run it ([Runtime::can]); busy up the stack, yes.

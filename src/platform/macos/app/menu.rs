@@ -149,7 +149,8 @@ pub fn fill(
     }
 
     if let Item::Submenu { menu: sub, .. } = it {
-      let submenu = NSMenu::new(mtm);
+      // The bar shows a submenu's title, not its item's.
+      let submenu = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(it.label()));
       submenu.setAutoenablesItems(false);
       fill(mtm, &submenu, &sub.items, act);
       item.setSubmenu(Some(&submenu));
@@ -159,8 +160,8 @@ pub fn fill(
   }
 }
 
-/// What [fill] gives a context menu's or the tray's item: `chosen:` sent to `target` with the
-/// action's number as the tag.
+/// What [fill] gives an app's item in a context menu, the tray or the bar: `chosen:` sent to
+/// `target` with the action's number as the tag.
 pub fn chooses(target: &AnyObject) -> impl Fn(&NSMenuItem, usize) {
   move |item, n| {
     // SAFETY: the target has `chosen:` and outlives the menu's use.
@@ -190,6 +191,7 @@ pub fn update(menu: &NSMenu, items: &[Item<usize>]) {
     let on = it.is_on();
     item.setState(if on { NSControlStateValueOn } else { NSControlStateValueOff });
     if let (Item::Submenu { menu: sub, .. }, Some(submenu)) = (it, item.submenu()) {
+      submenu.setTitle(&NSString::from_str(it.label()));
       update(&submenu, &sub.items);
     }
   }

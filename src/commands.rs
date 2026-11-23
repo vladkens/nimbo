@@ -199,19 +199,20 @@ impl<A: Clone> Commands<A> {
     ((menu, standard), app.collect())
   }
 
-  /// Group `p`'s items: the standard ones, with the app's before, after or in place of them.
+  /// Group `p`'s items: the standard ones or the app's last replacement, with the app's before and
+  /// after them in the order given.
   fn items(&self, p: CommandGroupPlacement, name: &str) -> Vec<Item<Action<A>>> {
-    let mut items = standard(p, name);
+    let (mut before, mut base, mut after) = (Vec::new(), standard(p, name), Vec::new());
     for (_, at, theirs) in self.groups.iter().filter(|g| g.0 == p) {
       let theirs = map(theirs, &mut |a: &A| Action::App(a.clone()));
-      items = match at {
-        At::Before => [theirs, items].concat(),
-        At::After => [items, theirs].concat(),
-        At::Replacing => theirs,
-      };
+      match at {
+        At::Before => before.extend(theirs),
+        At::After => after.extend(theirs),
+        At::Replacing => base = theirs,
+      }
     }
 
-    items
+    [before, base, after].concat()
   }
 }
 
@@ -322,8 +323,8 @@ mod tests {
     locale::set_thread(Locale::Tag("en"), &[]);
     let play = Menu::new(vec![Item::button(Act::Play, "Play")]);
     let commands = Commands::new()
+      .after(P::AppSettings, vec![Item::button(Act::Updates, "Check for Updates…")])
       .settings(Act::Settings)
-      .after(P::AppInfo, vec![Item::button(Act::Updates, "Check for Updates…")])
       .replacing(P::NewItem, vec![Item::button(Act::New, "New Recording")])
       .before(P::NewItem, vec![Item::Divider])
       .replacing(P::SaveItem, vec![])
@@ -334,14 +335,14 @@ mod tests {
     let menus = describe(&bar);
     let settings = Shortcut::parse("cmd+comma").unwrap().label();
     assert!(menus[0].starts_with(&format!(
-      "Wavo: About Wavo, Check for Updates…, -, Settings…+{settings}, -, Services"
+      "Wavo: About Wavo, -, Settings…+{settings}, Check for Updates…, -, Services"
     )));
 
     assert_eq!(menus[1], "File: -, New Recording");
     assert_eq!(menus[3], "Track: Play", "no View: empty");
     assert_eq!(menus[4..].iter().map(|m| &m[..4]).collect::<Vec<_>>(), ["Wind", "Help"]);
     let acts: Vec<_> = app.into_iter().flatten().collect();
-    assert_eq!(acts, [Act::Updates, Act::Settings, Act::New, Act::Play]);
+    assert_eq!(acts, [Act::Settings, Act::Updates, Act::New, Act::Play]);
     assert_eq!(bar.1.len(), bar.1.iter().filter(|s| s.is_some()).count() + 4);
   }
 }

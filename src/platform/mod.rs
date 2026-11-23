@@ -31,9 +31,8 @@
 //!     the menu bar where the OS has one (macOS), `bar` called with the app's name, an item of the
 //!     app's chosen running `chosen` with its action's number; before any, after `start`, the
 //!     standard bar (`Commands::new().bar(name)`); Edit's items run the command their key would in
-//!     the key window (`Event::Command`, enabled while `Runtime::can`), and a key the window was
-//!     offered and nobody used isn't run again by the menu. Windows and Linux have no menu bar:
-//!     nothing;
+//!     the key window (`Event::Command`, enabled while `Runtime::can`); the window is offered a key
+//!     first, so the menu runs only what nobody used. Windows and Linux have no menu bar: nothing;
 //!   - `set_presence(Presence)`, `terminating() -> bool`, `quit()`; a second launch, where the OS
 //!     tells (macOS), runs `crate::shell::reopened`; a window shown or brought to the front comes
 //!     with `crate::shell::token()`, the activation token of the command being served, where the OS

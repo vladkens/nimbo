@@ -17,6 +17,7 @@
 
 use std::any::TypeId;
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 
 use dispatch2::{DispatchQueue, MainThreadBound};
 use objc2::rc::Retained;
@@ -69,10 +70,11 @@ struct Shell {
   /// once the app has finished.
   terminating: bool,
   /// The app's name and delegate, the menu bar's target; the app's answer to an item of its own
-  /// chosen there, once it set the bar ([set_commands]).
+  /// chosen there, once it set the bar ([set_commands]), and the items chosen it has yet to see.
   name: &'static str,
   delegate: Option<Retained<Delegate>>,
   chosen: Option<OnChosen>,
+  picked: VecDeque<usize>,
   commands: bool,
 }
 
@@ -152,10 +154,20 @@ define_class!(
     #[unsafe(method(chosen:))]
     fn chosen(&self, sender: Option<&AnyObject>) {
       let Some(item) = sender.and_then(|s| s.downcast_ref::<NSMenuItem>()) else { return };
-      let Some(mut f) = shell(|s| s.chosen.take()) else { return };
-      f(&mut Main::here(), item.tag() as usize);
-      // Kept unless it set another.
-      shell(|s| _ = s.chosen.get_or_insert(f));
+      shell(|s| s.picked.push_back(item.tag() as usize));
+      // One at a time: an item chosen in a nested loop of another's answer runs after it.
+      while let Some(mut f) = shell(|s| s.chosen.take()) {
+        let n = shell(|s| s.picked.pop_front());
+        if let Some(n) = n {
+          f(&mut Main::here(), n);
+        }
+
+        // Kept unless it set another.
+        shell(|s| _ = s.chosen.get_or_insert(f));
+        if n.is_none() {
+          return;
+        }
+      }
     }
   }
 );
@@ -171,7 +183,9 @@ impl Delegate {
 /// which replace the standard bar set after `start`, and the answer to its items.
 pub fn set_commands(bar: &dyn Fn(&str) -> Bar, chosen: OnChosen) {
   let set = shell(|s| {
+    // Items chosen in the old bar have numbers of their own.
     (s.chosen, s.commands) = (Some(chosen), true);
+    s.picked.clear();
     Some((s.name, s.delegate.clone()?))
   });
   if let Some((name, delegate)) = set {
