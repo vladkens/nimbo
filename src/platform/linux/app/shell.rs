@@ -10,7 +10,6 @@
 //! [quit] only.
 
 use std::any::TypeId;
-use std::cell::Cell;
 use std::ffi::{c_char, c_int};
 use std::ptr::null_mut;
 use std::sync::OnceLock;
@@ -19,22 +18,13 @@ use std::time::Duration;
 
 use super::super::dbus::cstr;
 use super::super::{FALSE, Fp, P, as_window, lib, load, slot};
+use super::running;
 use crate::app::{App, Event};
 use crate::shell::{AppInfo, Main, Presence};
 use crate::{Config, shell};
 
-thread_local! {
-  /// The app running.
-  static INFO: Cell<Option<AppInfo>> = const { Cell::new(None) };
-}
-
 /// The thread GTK runs on.
 static MAIN: OnceLock<ThreadId> = OnceLock::new();
-
-/// The app running ([crate::app]'s info); outside it, one named after the executable.
-pub(super) fn info() -> AppInfo {
-  INFO.get().unwrap_or(AppInfo { id: "nimbo", name: "nimbo", presence: Presence::Regular })
-}
 
 /// Opens the display, runs `start`, then GTK's loop until [quit]; the quit hook, then the
 /// windows close.
@@ -45,14 +35,14 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
     std::process::exit(1);
   }
 
-  INFO.set(Some(*info));
+  super::INFO.set(Some(*info));
   start(&mut Main::here());
   super::super::started();
   super::super::main_loop();
   shell::finish(|id| closed(id, false));
 
   super::super::reap();
-  INFO.set(None);
+  super::INFO.set(None);
 }
 
 /// Opens a window running `app` (an app of type `ty`), in front unless `cfg.hidden`.
@@ -138,11 +128,6 @@ pub fn overlay_takes_focus() -> bool {
 
 pub fn quit() {
   super::super::quit();
-}
-
-/// The app runs and this is its thread, GTK's ([run], from before `start` to after its loop).
-pub(in super::super) fn running() -> bool {
-  INFO.get().is_some()
 }
 
 pub fn is_main() -> bool {

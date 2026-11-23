@@ -35,7 +35,7 @@ use std::time::{Duration, Instant};
 use crate::clipboard::{Offer, Snapshot, SystemClipboard};
 use crate::focus::{self, Focused};
 use crate::keys::{CMD, Key, Shortcut};
-use crate::{Clipboard, Main, Modifiers, keys, permissions, platform};
+use crate::{Clipboard, Modifiers, keys, permissions, platform, runloop};
 
 /// How long after the offer's read the clipboard comes back: some apps read it more than once.
 pub const RESTORE: Duration = Duration::from_millis(500);
@@ -182,7 +182,7 @@ const SYSTEM: Sys = Sys {
   hidden: focus::hidden,
   accessibility: permissions::accessibility,
   secure_input: permissions::secure_input,
-  after: |delay, f| Main::here().proxy().after(delay, move |_| f()),
+  after: |delay, f| runloop::after(delay, f),
 };
 
 thread_local! {

@@ -25,7 +25,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::DEVICE_NOTIFY_WINDOW_HANDLE;
 use windows_sys::core::{GUID, HRESULT, PCWSTR};
 
 use super::super::text::{Com, call, iid, out};
-use super::super::{files, wide};
+use super::super::wide;
 use super::input_source;
 use crate::hardware;
 use crate::hardware::Transport;
@@ -221,7 +221,7 @@ fn watch_audio() -> Result<(), String> {
 
   // OLE's apartment, which the windows' drops need: a COM start of our own in the MTA here
   // would make OLE's fail when a tray app's first window opens after this.
-  files::ole();
+  super::ole();
   let devices = devices().ok_or("no MMDeviceEnumerator")?;
   let hr = unsafe { call!(devices, REGISTER, (*mut c_void) -> HRESULT; client()) };
   if hr < 0 {
@@ -240,7 +240,7 @@ fn watch_lid() -> Result<(), String> {
   }
 
   let guid = GUID::from_u128(LID_SWITCH);
-  let host = super::shell::host();
+  let host = super::host();
   let h = unsafe { RegisterPowerSettingNotification(host, &guid, DEVICE_NOTIFY_WINDOW_HANDLE) };
   if h == 0 {
     return Err("RegisterPowerSettingNotification failed".into());

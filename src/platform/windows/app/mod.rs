@@ -24,14 +24,39 @@ pub mod shell;
 pub mod tray;
 pub mod uninstall;
 
+use std::cell::Cell;
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStringExt;
 use std::path::PathBuf;
-use std::ptr::null_mut;
+use std::ptr::{null, null_mut};
+use std::sync::atomic::{AtomicIsize, Ordering};
 
+use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
+use windows_sys::Win32::System::Ole::OleInitialize;
 use windows_sys::Win32::UI::Shell::{FOLDERID_Downloads, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
+
+/// The shell's window ([shell::run]'s), as a number for other threads; 0 when there is none. An
+/// atomic, not a lock: [shell::post] runs in callbacks that must never wait (Windows' audio
+/// notifications). A post that read the handle just before the loop ended sends to the window
+/// being destroyed: the message fails and the work is dropped, or goes with the window and its
+/// closure leaks, once, as the app ends; work posted after the loop is dropped anyway.
+static HOST: AtomicIsize = AtomicIsize::new(0);
+
+/// The shell's window: null while no app runs.
+pub(super) fn host() -> HWND {
+  HOST.load(Ordering::Acquire) as HWND
+}
+
+/// Starts OLE on this thread, once (it lasts as long as the app): the apartment drops need
+/// ([super::files]), so it comes before any other COM start here ([hardware]).
+pub(super) fn ole() {
+  thread_local!(static OLE: Cell<bool> = const { Cell::new(false) });
+  if !OLE.replace(true) {
+    unsafe { OleInitialize(null()) };
+  }
+}
 
 /// The user's Downloads, the Known Folder (wherever the user moved it): [crate::paths::downloads].
 pub fn downloads() -> Option<PathBuf> {

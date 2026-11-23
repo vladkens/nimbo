@@ -7,8 +7,7 @@
 
 use super::layout::{ELLIPSIS, Elide, Kind, Tree};
 use super::textlayout::{Edit, TextLayout};
-use super::widgets::placed;
-use super::{Axis, Canvas, Clip, FocusRing, Style, TextStyle};
+use super::{Axis, Canvas, Clip, ContentMode, FocusRing, Style, TextStyle};
 use crate::scene::{Color, Frame, Quad, Rect};
 use crate::text::Ink;
 
@@ -324,6 +323,24 @@ fn decorate(s: &Style, r: Rect, alpha: f32, f: &mut Frame) {
   if s.bg[3] > 0.0 || border {
     let q = Quad::new(r, fade(s.bg, alpha)).radii(s.radii);
     f.quad(if border { q.borders(s.border, fade(s.border_color, alpha)) } else { q });
+  }
+}
+
+/// Where an image of `w` × `h` pixels draws in its box `r` as `mode` says, and the part of it
+/// shown there (in pixels).
+pub(crate) fn placed(mode: Option<ContentMode>, r: Rect, w: f32, h: f32) -> (Rect, Rect) {
+  let all = Rect::new(0.0, 0.0, w, h);
+  let (sx, sy) = (r.w / w, r.h / h);
+  match mode {
+    None => (r, all),
+    Some(ContentMode::Fit) => {
+      let (dw, dh) = (w * sx.min(sy), h * sx.min(sy));
+      (Rect::new(r.x + (r.w - dw) / 2.0, r.y + (r.h - dh) / 2.0, dw, dh), all)
+    }
+    Some(ContentMode::Fill) => {
+      let (uw, uh) = (r.w / sx.max(sy), r.h / sx.max(sy));
+      (r, Rect::new((w - uw) / 2.0, (h - uh) / 2.0, uw, uh))
+    }
   }
 }
 

@@ -17,8 +17,8 @@ pub(crate) use atlas::{ATLAS_SIZE, AtlasGlyph, COLOR_ATLAS_SIZE, Upload};
 
 use self::atlas::Atlas;
 pub(crate) use self::memo::Memo;
+use crate::geom::Color;
 use crate::platform::text::{self as sys, Face};
-use crate::scene::Color;
 
 /// Shaped lines kept before eviction starts dropping those not drawn in the last frame.
 const LINE_CAP: usize = 4096;

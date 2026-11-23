@@ -18,8 +18,9 @@ use windows_sys::Win32::UI::Shell::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use super::super::{settings, wide};
+use super::host;
 use super::menu::{build, track};
-use super::shell::{WM_TRAY, host};
+use super::shell::WM_TRAY;
 use crate::tray::{Menu, Set, State, TrayIcon};
 
 /// `NIN_KEYSELECT`: the icon chosen with the keyboard.

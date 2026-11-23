@@ -134,15 +134,14 @@ fn close_unused() {
 
 /// The session when it has the clipboard (Wayland only).
 pub(super) fn clipboard() -> Option<Rc<State>> {
-  let on = super::wayland() && super::shell::running();
+  let on = super::wayland() && super::running();
   on.then(session).and_then(Result::ok).filter(|s| s.clipboard.get())
 }
 
 /// A session on a connection of its own, its signals followed from the start.
 fn start() -> Result<Rc<State>, String> {
   let (session, clipboard, restorable) = (RefCell::default(), Cell::default(), Cell::default());
-  let (signals, owner, bus) =
-    (RefCell::default(), RefCell::default(), portal(super::shell::info().id)?);
+  let (signals, owner, bus) = (RefCell::default(), RefCell::default(), portal(super::info().id)?);
   let s = Rc::new(State { bus, session, clipboard, restorable, signals, owner });
   let follow = [
     (CLIPBOARD, "SelectionOwnerChanged", on_owner as Fp),
@@ -250,7 +249,7 @@ pub(super) fn granted() -> bool {
 pub(super) const TOKEN: &str = "remote-desktop.token";
 
 fn token_file() -> PathBuf {
-  paths::config_dir(super::shell::info().id).join(TOKEN)
+  paths::config_dir(super::info().id).join(TOKEN)
 }
 
 // MARK: Keys

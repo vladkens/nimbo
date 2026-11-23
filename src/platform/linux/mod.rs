@@ -22,6 +22,7 @@
 
 mod app;
 mod dbus;
+mod display;
 mod dl;
 mod files;
 pub mod image;
@@ -560,7 +561,7 @@ fn started() {
 /// ([crate::shell]): the launcher stops its busy cursor for that launch.
 pub(crate) fn startup_complete(token: &str) {
   let Ok(token) = CString::new(token) else { return };
-  if app::shell::running() {
+  if app::running() {
     // SAFETY: GDK's call on the main thread while the app runs, with a NUL-terminated string.
     unsafe { (gtk().gdk_notify_startup_complete_with_id)(token.as_ptr()) };
   }
@@ -1082,7 +1083,7 @@ impl Clipboard for Clip {
 /// The system clipboard outside a window, GTK's CLIPBOARD selection: on the main thread while
 /// the app runs (GTK initialized), `None` elsewhere.
 pub fn clipboard() -> Option<impl Clipboard> {
-  if !app::shell::running() {
+  if !app::running() {
     return None;
   }
 

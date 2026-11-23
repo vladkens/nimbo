@@ -16,64 +16,18 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::io;
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
 
+pub use crate::info::{AppInfo, Presence};
 use crate::instance::{Command, Instance, OPEN, QUIT};
 use crate::locale::{self, Locale, Localizations};
 #[cfg(any(windows, target_os = "linux"))]
 use crate::platform;
 use crate::platform::shell as imp;
 use crate::system::{self, Change};
-use crate::{App, Config, Event, Point, Size, paste};
-
-/// The app as the OS knows it.
-#[derive(Clone, Copy, Debug)]
-pub struct AppInfo {
-  /// Reverse DNS, such as `com.example.app`: its files ([crate::paths]), its launch at login
-  /// ([crate::autostart]), its tray item on Linux.
-  pub id: &'static str,
-  /// What the user reads: the app menu's "Quit {name}", the login item.
-  pub name: &'static str,
-  pub presence: Presence,
-}
-
-/// Where the app shows besides its windows.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Presence {
-  /// In the Dock and in ⌘Tab, as most apps.
-  #[default]
-  Regular,
-  /// A menu-bar or tray app: no Dock icon, except while one of its windows is shown (macOS: the
-  /// accessory activation policy, regular while a window is open). Windows and Linux have no
-  /// Dock: the taskbar shows the windows only, so both are the same there.
-  Accessory,
-}
-
-/// Where an overlay ([crate::Config::overlay]) shows: centred across the work area (the screen
-/// less the menu bar, the Dock or the taskbar) of the screen with the pointer, a margin in points
-/// from its top or bottom edge, or in its middle.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Anchor {
-  Top(f32),
-  Center,
-  Bottom(f32),
-}
-
-impl Anchor {
-  /// The top-left corner of a window of `size` in a work area of `area`, from the area's top
-  /// left (y down), in whole points.
-  pub fn offset(self, area: Size, size: Size) -> Point {
-    let y = match self {
-      Self::Top(margin) => margin,
-      Self::Center => (area.h - size.h) / 2.0,
-      Self::Bottom(margin) => area.h - size.h - margin,
-    };
-
-    Point::new(((area.w - size.w) / 2.0).round(), y.round())
-  }
-}
+pub use crate::window::Anchor;
+use crate::{App, Config, Event, paste, runloop};
 
 /// Runs the event loop with no window: `start` opens what the app needs (windows, a
 /// [crate::tray::Tray], [crate::hotkey::Hotkeys]), then the loop runs until [Main::quit].
@@ -88,18 +42,14 @@ pub fn app(info: AppInfo, start: impl FnOnce(&mut Main)) {
   running(|| imp::run(&info, start));
 }
 
-/// The loop running now, by number (0: none): [Proxy]'s work runs only in the loop it was
-/// posted to, so work posted after it ended is dropped, and never runs in a later one.
-static LOOP: AtomicU64 = AtomicU64::new(0);
-static LOOPS: AtomicU64 = AtomicU64::new(0);
-
+/// Runs the loop ([runloop]): [Proxy]'s work runs only in the loop it was posted to.
 fn running(run: impl FnOnce()) {
-  LOOP.store(LOOPS.fetch_add(1, Ordering::Relaxed) + 1, Ordering::Release);
-  HOOKS.take();
-  run();
-  system::unwatch();
-  HOOKS.take();
-  LOOP.store(0, Ordering::Release);
+  runloop::running(imp::post, || {
+    HOOKS.take();
+    run();
+    system::unwatch();
+    HOOKS.take();
+  });
 }
 
 pub(crate) type OnMain = Box<dyn FnOnce(&mut Main)>;
@@ -451,7 +401,7 @@ impl Main {
     f: impl FnMut(&mut Main, Change) + 'static,
   ) -> Result<(), String> {
     hooks(|h| h.change = Some(Box::new(f)));
-    system::watch(kinds)
+    system::watch(kinds, |change| changed(&mut Main::here(), change))
   }
 
   pub fn proxy(&self) -> Proxy {
@@ -555,19 +505,7 @@ impl Proxy {
 
   /// Runs `f` on the main thread after `delay`.
   pub fn after(&self, delay: Duration, f: impl FnOnce(&mut Main) + Send + 'static) {
-    let n = LOOP.load(Ordering::Acquire);
-    if n == 0 {
-      return;
-    }
-
-    imp::post(
-      delay,
-      Box::new(move || {
-        if LOOP.load(Ordering::Acquire) == n {
-          f(&mut Main::here());
-        }
-      }),
-    );
+    runloop::after(delay, move || f(&mut Main::here()));
   }
 
   /// Runs `f` on the main thread and returns what it returns: at once on the main thread;
@@ -596,15 +534,6 @@ mod tests {
   use std::rc::Rc;
 
   use super::*;
-
-  /// A HUD 200x40 in a 1000x600 work area: centred across, 20 points off the edge.
-  #[test]
-  fn anchors_place_in_the_work_area() {
-    let (area, size) = (Size::new(1000.0, 600.0), Size::new(200.0, 40.5));
-    assert_eq!(Anchor::Top(20.0).offset(area, size), Point::new(400.0, 20.0));
-    assert_eq!(Anchor::Bottom(20.0).offset(area, size), Point::new(400.0, 540.0));
-    assert_eq!(Anchor::Center.offset(area, size), Point::new(400.0, 280.0));
-  }
 
   /// The windows by id: a close callback set on one is given back once, as it closes; the quit
   /// hook runs once.

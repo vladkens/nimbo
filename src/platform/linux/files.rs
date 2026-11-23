@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::ptr::{null, null_mut};
 
 use super::dbus::{self, Gv, V};
-use super::{FALSE, Fp, P, S, TRUE, connect_id, gtk, lib, overlay, point, with_data};
+use super::{FALSE, Fp, P, S, TRUE, connect_id, display, gtk, lib, point, with_data};
 use crate::file_dialog::FileDialogKind;
 use crate::scene::Point;
 use crate::{Event, FileDialog};
@@ -123,7 +123,7 @@ fn parent(window: P) -> String {
   let xid = lib().and_then(|l| unsafe { l.sym::<Xid>("gdk_x11_window_get_xid\0") });
   let gdk = unsafe { (gtk().gtk_widget_get_window)(window) };
   match xid {
-    Some(f) if !gdk.is_null() && !overlay::wayland() => format!("x11:{:x}", unsafe { f(gdk) }),
+    Some(f) if !gdk.is_null() && !display::wayland() => format!("x11:{:x}", unsafe { f(gdk) }),
     _ => String::new(),
   }
 }
