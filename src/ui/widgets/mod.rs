@@ -50,7 +50,6 @@ pub use slider::Slider;
 
 use super::{Behavior, Id, Style, Ui};
 use crate::scene::{Color, alpha, mix};
-pub use crate::ui::{ContentMode, FieldKind, FieldStyle, ImageSource, TextInput};
 
 impl Ui<'_> {
   /// A hover fade for `id`, 0 to 1, on the theme's transition: `on` while hovered. Its state

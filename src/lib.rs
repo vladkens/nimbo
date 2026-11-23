@@ -96,13 +96,14 @@ pub use text::edit::{Editor, Lines, Mono, Sel};
 pub use text::{Design, Font, Weight};
 pub use ui::{
   Align, Answer, Axes, Axis, Behavior, Button, ButtonLook, ButtonRole, ButtonStyle, Click, Clip,
-  Content, ContentMode, ControlBorder, ControlSize, CoordinateSpace, Cursor, Dialog, Dim, Ease,
-  EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, Float, Focus, FocusDirection, FocusRing,
-  FormRow, FormStyle, Icon, IconPaint, Id, ImageSource, LinePattern, List, ListResponse, ListStyle,
-  MenuPlacement, NativeMenu, Picker, Press, Response, Row, Scroll, ScrollerKnob, Section,
-  Selection, Shadow, Sizes, Slider, Split, Style, TabItem, Tabs, Tag, TextInput, TextLines,
-  TextStyle, Theme, Tone, ToolbarItemPlacement, Transition, TruncationMode, TypeSelect, Ui,
-  UnitPoint, grow, pct, px, rigid,
+  Content, ContentMode, ControlBorder, ControlSize, CoordinateSpace, Cursor, Dialog,
+  DialogBehavior, Dim, Ease, EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, Float, Focus,
+  FocusDirection, FocusRing, FormRow, FormStyle, Icon, IconPaint, Id, ImageSource, LinePattern,
+  List, ListBehavior, ListResponse, ListRows, ListStyle, MenuPlacement, NativeMenu, Picker, Press,
+  Response, Row, Scroll, ScrollBar, ScrollBehavior, ScrollerKnob, Section, SectionHeader,
+  Selection, Shadow, Sizes, Slider, Split, SplitBehavior, Style, TabItem, Tabs, Tag, TextInput,
+  TextLines, TextStyle, Theme, Tone, ToolbarItemPlacement, Transition, TruncationMode, TypeSelect,
+  Ui, UnitPoint, grow, pct, px, rigid,
 };
 pub use window::{Config, TitleBar, WindowToolbarStyle};
 

@@ -67,7 +67,6 @@ use keyboard_types::Modifiers;
 pub use list::{ListBehavior, ListRows, SectionHeader, Selection};
 pub use menu::{MenuPlacement, TYPE_SELECT, TypeSelect};
 pub use scroll::{ScrollBar, ScrollBehavior, ScrollerKnob};
-pub use shortcut::hotkey_of;
 pub use split::SplitBehavior;
 
 use super::{Cursor, Focus, Id, Role, State, Style, Ui};

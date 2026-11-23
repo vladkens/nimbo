@@ -13,13 +13,13 @@
 // A Windows app, not a console one: no terminal opens with its window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use nimbo::ui::{LabeledPairRole, ListRows, ScrollBar};
+use nimbo::ui::LabeledPairRole;
 use nimbo::{
   Align, Answer, App, Axes, Axis, Bitmap, Button, ButtonRole, ButtonStyle, Color, Config,
   ContentMode, ControlSize, Dialog, Float, Font, FormRow, FormStyle, Hotkey, Icon, Id, Item,
-  LinePattern, List, ListStyle, Menu, Picker, ScrollerKnob, Section, Selection, Shortcut, Slider,
-  Split, Style, Tabs, Tag, TextStyle, Tone, ToolbarItemPlacement, TruncationMode, Ui, UnitPoint,
-  WindowToolbarStyle, alpha, grow, px, t, tn,
+  LinePattern, List, ListRows, ListStyle, Menu, Picker, ScrollBar, ScrollerKnob, Section,
+  Selection, Shortcut, Slider, Split, Style, Tabs, Tag, TextStyle, Tone, ToolbarItemPlacement,
+  TruncationMode, Ui, UnitPoint, WindowToolbarStyle, alpha, grow, px, t, tn,
 };
 
 pub const SIDEBAR: &str = "sidebar";

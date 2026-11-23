@@ -67,7 +67,7 @@
 use std::ops::Range;
 
 use crate::scene::{Frame, Rect, alpha};
-pub use crate::ui::behavior::Selection;
+use crate::ui::behavior::Selection;
 use crate::ui::form::Piece;
 use crate::ui::{Align, Cursor, FormStyle, Id, ListRows, Style, Ui, grow, px};
 

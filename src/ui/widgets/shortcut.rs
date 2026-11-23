@@ -18,7 +18,6 @@ use crate::hotkey;
 use crate::keys::Hotkey;
 use crate::scene::mix;
 use crate::text::Weight;
-pub use crate::ui::behavior::hotkey_of;
 use crate::ui::{Cursor, Float, Response, Role, Style, Ui, UnitPoint, px};
 
 /// The recorder's width: the same recording, set or empty.

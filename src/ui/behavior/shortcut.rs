@@ -1,12 +1,12 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! A shortcut recorder's behaviour ([Ui::shortcut_behavior]): recording a global hotkey, a
-//! chord ([hotkey_of]) or a modifier key alone, with every key taken while it records;
+//! chord ([Hotkey::from_key_event]) or a modifier key alone, with every key taken while it records;
 //! [Ui::shortcut] draws it.
 
-use keyboard_types::{Code, Modifiers, NamedKey};
+use keyboard_types::{Code, NamedKey};
 
-use crate::keys::{Hotkey, Key, KeyEvent, Shortcut, f_key, is_modifier, us_char};
+use crate::keys::{Hotkey, Key, is_modifier};
 use crate::ui::{Behavior, Id, Role, Ui};
 
 /// A recorder between frames: recording, the focus to give back after, the modifier keys
@@ -19,27 +19,10 @@ struct Rec {
   lone: Option<Code>,
 }
 
-/// The global hotkey a key press makes, or `None` when it makes none: a key with Ctrl, Alt
-/// (Option) or Meta (⌘, Windows), or an F-key with any. The key is the physical one, as a US
-/// keyboard has it (Shift-1 is `shift+1`).
-pub fn hotkey_of(k: &KeyEvent) -> Option<Hotkey> {
-  let f = (1..=20).any(|n| f_key(n).is_some_and(|(c, _)| c == k.code));
-  if !(f || k.mods.intersects(Modifiers::CONTROL | Modifiers::ALT | Modifiers::META)) {
-    return None;
-  }
-
-  let key = match us_char(k.code, false) {
-    Some(c) => Key::Char(c),
-    None => Key::named(k.code).filter(|k| *k != Key::Named(NamedKey::Unidentified))?,
-  };
-
-  Some(Hotkey::Shortcut(Shortcut { key, mods: k.mods }))
-}
-
 impl Ui<'_> {
   /// A shortcut recorder over `value`: a click, or Space while focused, starts recording (`on`)
-  /// and focuses it; the next chord typed ([hotkey_of]), or with `lone` a modifier key pressed
-  /// and released with nothing else between ([crate::Event::Modifier]: left or right, fn),
+  /// and focuses it; the next chord typed ([Hotkey::from_key_event]), or with `lone` a modifier key
+  /// pressed and released with nothing else between ([crate::Event::Modifier]: left or right, fn),
   /// becomes the value and stops it, `changed`. Escape stops it unchanged, Backspace or Delete
   /// clear the value; a click again or elsewhere, or focus moving away, stop it unchanged. With
   /// `clear`, a click on `id.key("clear")` (a ⊗ the look draws) clears the value too. Every key
@@ -98,7 +81,7 @@ impl Ui<'_> {
             stop = true;
           }
           _ => {
-            if let Some(h) = hotkey_of(&k) {
+            if let Some(h) = Hotkey::from_key_event(&k) {
               set(&mut b, Some(h));
               stop = true;
             }
@@ -137,9 +120,12 @@ impl Ui<'_> {
 
 #[cfg(test)]
 mod tests {
+  use keyboard_types::Modifiers;
+
   use super::*;
   use crate::app::{App, Event};
   use crate::harness::{Harness, us_key};
+  use crate::keys::Shortcut;
   use crate::scene::Size;
   use crate::ui::{Style, px};
 
@@ -170,7 +156,7 @@ mod tests {
   }
 
   fn hk(key: impl Into<Key>, mods: Modifiers) -> Option<String> {
-    hotkey_of(&us_key(key.into(), mods)).map(|h| h.to_string())
+    Hotkey::from_key_event(&us_key(key.into(), mods)).map(|h| h.to_string())
   }
 
   #[test]
@@ -192,7 +178,7 @@ mod tests {
 
     // What it writes parses back to the same hotkey.
     for (k, m) in [(Key::Char(' '), Modifiers::CONTROL | Modifiers::ALT), ('/'.into(), all)] {
-      let h = hotkey_of(&us_key(k, m)).unwrap();
+      let h = Hotkey::from_key_event(&us_key(k, m)).unwrap();
       assert_eq!(Hotkey::parse(&h.to_string()), Ok(h));
     }
   }

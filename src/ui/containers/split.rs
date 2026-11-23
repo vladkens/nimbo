@@ -15,7 +15,6 @@
 
 use super::toolbar::Sidebar;
 use crate::scene::mix;
-pub use crate::ui::behavior::SplitBehavior;
 use crate::ui::{Axis, Cursor, Float, Response, Style, Ui, UnitPoint, grow, pct, px};
 
 /// Two panes side by side or stacked ([Split::new]) with a divider to drag

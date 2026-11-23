@@ -22,7 +22,6 @@
 //! It fades in, rising 8 points, over 120 ms of the runtime's clock. [Ui::modal] is the
 //! backdrop and the card alone, for a dialog of the app's own over the same behaviour.
 
-pub use super::behavior::DialogBehavior;
 use super::widgets::{Button, ButtonRole, Icon};
 use super::{Float, Id, Role, State, Style, TextStyle, Ui, grow, pct, px};
 use crate::scene::alpha;

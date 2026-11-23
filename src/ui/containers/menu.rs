@@ -18,7 +18,7 @@
 
 use crate::menu::{Item, Menu};
 use crate::scene::{Point, alpha};
-pub use crate::ui::behavior::{MenuPlacement, TYPE_SELECT, TypeSelect};
+use crate::ui::behavior::MenuPlacement;
 use crate::ui::containers::popup::check as check_mark;
 use crate::ui::{Align, Button, Id, NativeMenu, Response, Role, State, Style, Ui, grow, px};
 
