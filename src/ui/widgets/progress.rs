@@ -5,7 +5,7 @@
 use std::f32::consts::{PI, TAU};
 
 use crate::scene::{Point, Rect};
-use crate::ui::{ControlSize, Response, Role, State, Style, Ui, Value, grow, px};
+use crate::ui::{ControlSize, Enabled, Response, Role, State, Style, Ui, Value, grow, px};
 
 impl Ui<'_> {
   /// A progress bar across its parent, 4 points high: `Some(k)` fills `k` (0 to 1) of it in the
@@ -13,7 +13,7 @@ impl Ui<'_> {
   /// Disabled, both dim toward the ground and stop.
   pub fn progress(&mut self, k: Option<f32>) -> Response {
     let t = self.controls_theme();
-    let (id, off) = (self.take_id(), self.take_disabled());
+    let (id, off) = (self.take_id(), !self.environment_value::<Enabled>().0);
     let (rail, fill) = (self.dim(t.track, off), self.dim(t.accent, off));
     let now = self.now().as_secs_f32();
     if k.is_none() && !off {
@@ -44,13 +44,13 @@ impl Ui<'_> {
   /// ([Ui::control_size]); a turn every 0.9 s while it shows; disabled, dimmed and still.
   pub fn spinner(&mut self) -> Response {
     let t = self.theme();
-    let size = match self.take_control_size() {
+    let size = match self.environment_value::<ControlSize>() {
       ControlSize::Small => 12.0,
       ControlSize::Regular => 16.0,
       ControlSize::Large => 24.0,
     };
 
-    let (id, off) = (self.take_id(), self.take_disabled());
+    let (id, off) = (self.take_id(), !self.environment_value::<Enabled>().0);
     let color = self.dim(t.muted, off);
     let turn = if off { 0.0 } else { self.now().as_secs_f32() / 0.9 * TAU };
     if !off {

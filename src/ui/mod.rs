@@ -33,6 +33,9 @@
 //! the app sets (`Ui::set_theme`):
 //! `if ui.id("plus").button("+").clicked { .. }`; so do a settings form ([form]) and a modal
 //! dialog ([dialog]).
+//! What they read of where they are built, the theme, their size, whether they are enabled, is
+//! the environment: values by type a container puts for what is built in it
+//! ([Ui::environment]: `ui.disabled(true).col(..)`), the window for all ([Ui::set_environment]).
 //!
 //! The rule for every widget: a headless behaviour ([behavior]: `ui.button_behavior(id)` and
 //! the like, hover, press, click, focus, keys and the value edited) plus drawing from the
@@ -44,6 +47,7 @@ pub mod a11y;
 pub mod behavior;
 pub mod containers;
 pub mod dialog;
+mod environment;
 pub mod form;
 mod id;
 mod image;
@@ -75,6 +79,7 @@ pub use containers::{
   List, ListResponse, ListStyle, Picker, Row, Split, Tabs, Tag, ToolbarItemPlacement,
 };
 pub use dialog::{Answer, Dialog};
+pub use environment::{Enabled, EnvironmentValue};
 pub use form::{Content, FormRow, FormStyle, Glass, Section, TabItem};
 pub use id::Id;
 pub use image::ImageSource;
@@ -139,8 +144,10 @@ pub(crate) struct UiState {
   pub(crate) animating: bool,
   pub(crate) waker: Waker,
   pub(crate) clipboard: Box<dyn Clipboard>,
-  /// Values the whole window shares, one per type ([Ui::environment]).
+  /// Values the whole window shares, one per type ([Ui::set_environment]).
   env: Vec<Box<dyn Any>>,
+  /// Values scoped to the elements being built ([Ui::environment]).
+  scoped: environment::Scoped,
   /// The focus ring the view set this frame ([Ui::set_focus_ring]), over the default, which the
   /// shell puts after each view ([Ui::set_default_focus_ring]).
   own_ring: Option<Option<FocusRing>>,
@@ -217,6 +224,7 @@ impl Default for UiState {
       waker: Waker::default(),
       clipboard: Box::default(),
       env: Vec::new(),
+      scoped: environment::Scoped::default(),
       own_ring: None,
       ring: None,
       appearance: Appearance::DARK,
@@ -447,20 +455,9 @@ pub struct Ui<'a> {
   next_id: Option<(Id, bool)>,
   next_float: Option<Float>,
   next_keymap: Option<&'static [Binding]>,
-  /// The next widget is disabled ([Ui::disabled]).
-  next_disabled: bool,
   /// The next element's tooltip ([Ui::help]), and the elements with one built, by node.
   next_help: Option<String>,
   pub(crate) helps: Vec<(u32, String)>,
-  /// Every widget built is disabled ([Ui::disabled] on a container).
-  scope_off: bool,
-  /// The next widget's size, or the next container's widgets' ([Ui::control_size]), and the
-  /// size of widgets built now.
-  next_size: Option<ControlSize>,
-  scope_size: ControlSize,
-  /// The containers open with a scope of their own ([Ui::disabled], [Ui::control_size]): node
-  /// and the scope around it, put back when it closes.
-  scopes: Vec<(u32, bool, ControlSize)>,
   /// The next element takes focus when it first shows ([Ui::autofocus]).
   next_autofocus: bool,
   /// The next element moves the window when pressed ([Ui::drags_window]).
@@ -493,23 +490,18 @@ impl<'a> Ui<'a> {
     st.input.moves = false;
     (st.grab, st.ring_on, st.toolbar, st.own_ring) = (None, None, false, None);
     st.input.now = now;
+    st.scoped.clear();
     let (next_id, next_float, next_keymap) = (None, None, None);
     let canvases = Vec::new();
-    let (next_disabled, next_autofocus) = (false, false);
     Self {
       st,
       canvases,
       next_id,
       next_float,
       next_keymap,
-      next_disabled,
       next_help: None,
       helps: Vec::new(),
-      scope_off: false,
-      next_size: None,
-      scope_size: ControlSize::Regular,
-      scopes: Vec::new(),
-      next_autofocus,
+      next_autofocus: false,
       next_drag: false,
       next_no_hit: false,
       text: None,
@@ -531,7 +523,7 @@ impl<'a> Ui<'a> {
   /// Light or dark as the content is drawn, as SwiftUI's `colorScheme`: the environment's (a
   /// theme the app set puts its own), else the OS's.
   pub fn color_scheme(&self) -> ColorScheme {
-    self.environment::<ColorScheme>().copied().unwrap_or(self.st.appearance.scheme)
+    self.environment_value()
   }
 
   /// What the last frame cost: view, layout and paint times and the frames built so far.
@@ -559,30 +551,6 @@ impl<'a> Ui<'a> {
     }
 
     old.and_then(|s| s.downcast().ok()).map(|s| *s)
-  }
-
-  /// The value of type `T` the window shares, put with [Ui::set_environment]: what the whole
-  /// view reads, as SwiftUI's `@Environment` (the theme the app set, `Ui::theme`). Kept across
-  /// frames until changed.
-  pub fn environment<T: 'static>(&self) -> Option<&T> {
-    self.st.env.iter().find_map(|v| v.downcast_ref())
-  }
-
-  /// Puts `v` as the window's value of type `T` ([Ui::environment]), or clears it with `None`;
-  /// returns the one it replaces. Kept across frames, so a view may put it every frame: one
-  /// already there is replaced in place.
-  pub fn set_environment<T: 'static>(&mut self, v: Option<T>) -> Option<T> {
-    let env = &mut self.st.env;
-    let i = env.iter().position(|e| e.is::<T>());
-    match (i, v) {
-      (Some(i), Some(v)) => env[i].downcast_mut().map(|old| std::mem::replace(old, v)),
-      (Some(i), None) => env.swap_remove(i).downcast().ok().map(|old| *old),
-      (None, Some(v)) => {
-        env.push(Box::new(v));
-        None
-      }
-      (None, None) => None,
-    }
   }
 
   /// Asks the window for a content size of `w` × `h` points: a preferences window whose height
@@ -772,24 +740,21 @@ impl<'a> Ui<'a> {
   }
 
   /// Disables the next widget ([widgets]) when `yes`: dimmed, not focusable, and its clicks
-  /// do nothing; on a container, every widget built in it, as SwiftUI's `.disabled` on a view.
-  /// Plain elements ignore it.
+  /// do nothing; on a container, every widget built in it, as SwiftUI's `.disabled`. Puts
+  /// [Enabled] `false`, so it only disables: `ui.environment(Enabled(true))` enables a part.
   pub fn disabled(&mut self, yes: bool) -> &mut Self {
-    self.next_disabled = yes;
+    if yes {
+      self.environment(Enabled(false));
+    }
+
     self
   }
 
   /// Sizes the next widget, or every widget built in the next container, as SwiftUI's
   /// `.controlSize`: a button's height and font, a switch's track, a badge's pill, a spinner's
-  /// size ([ControlSize]). Widgets are [ControlSize::Regular] outside one.
+  /// size; the environment's [ControlSize], [ControlSize::Regular] outside one.
   pub fn control_size(&mut self, size: ControlSize) -> &mut Self {
-    self.next_size = Some(size);
-    self
-  }
-
-  /// The size of the widget being built ([Ui::control_size]), for the widget to read once.
-  pub fn take_control_size(&mut self) -> ControlSize {
-    self.next_size.take().unwrap_or(self.scope_size)
+    self.environment(size)
   }
 
   /// Focuses the next widget, or the next element if it is focusable, when it first shows:
@@ -827,28 +792,12 @@ impl<'a> Ui<'a> {
   }
 
   /// Applies [Ui::autofocus] to `id`, for widgets given their id: focuses it when the last
-  /// frame did not have it, unless it is disabled ([Ui::disabled], read without taking it).
+  /// frame did not have it, unless it is disabled ([Ui::disabled]).
   pub fn take_autofocus(&mut self, id: Id) {
-    let off = self.next_disabled || self.scope_off;
+    let off = !self.environment_value::<Enabled>().0;
     if std::mem::take(&mut self.next_autofocus) && !off && self.st.last.find(id).is_none() {
       self.st.input.focus = Some(id);
     }
-  }
-
-  /// Builds `f` with every widget in it disabled when `yes`, enabled when not, whatever the
-  /// containers around say, as SwiftUI's `.environment(\.isEnabled, !yes)`: a widget's parts as
-  /// it is, a part enabled in a disabled container (a modal dialog, an ⓘ in a disabled row).
-  pub fn disabled_scope<R>(&mut self, yes: bool, f: impl FnOnce(&mut Self) -> R) -> R {
-    let was = std::mem::replace(&mut self.scope_off, yes);
-    let r = f(self);
-    self.scope_off = was;
-    r
-  }
-
-  /// Whether the next widget is disabled ([Ui::disabled], on it or on a container around it),
-  /// for the widget to read once.
-  pub fn take_disabled(&mut self) -> bool {
-    std::mem::take(&mut self.next_disabled) || self.scope_off
   }
 
   // MARK: Elements
@@ -954,9 +903,9 @@ impl<'a> Ui<'a> {
     f: impl FnOnce(&mut Self) -> R,
   ) -> Response {
     self.canvases.push(Some(paint));
-    let (i, r) = self.push(Kind::Canvas(self.canvases.len() as u32 - 1), style, flow);
+    let (i, r) = self.node(Kind::Canvas(self.canvases.len() as u32 - 1), style, flow);
     self.st.stack.push((i, 0));
-    self.scope(i);
+    self.st.scoped.open(i);
     f(self);
     self.close(i);
     r
@@ -972,37 +921,29 @@ impl<'a> Ui<'a> {
   /// Starts a container; out of line, so each `row` / `col` call site stays small.
   #[inline(never)]
   fn open(&mut self, flow: Flow, style: Style) -> (u32, Response) {
-    let (i, r) = self.push(Kind::Box, style, flow);
+    let (i, r) = self.node(Kind::Box, style, flow);
     self.st.stack.push((i, 0));
-    self.scope(i);
+    self.st.scoped.open(i);
     (i, r)
   }
 
-  /// Turns a [Ui::disabled] or [Ui::control_size] no widget took into the scope of container
-  /// `i`, until it closes.
-  fn scope(&mut self, i: u32) {
-    if !self.next_disabled && self.next_size.is_none() {
-      return;
-    }
-
-    self.scopes.push((i, self.scope_off, self.scope_size));
-    self.scope_off |= std::mem::take(&mut self.next_disabled);
-    self.scope_size = self.next_size.take().unwrap_or(self.scope_size);
-  }
-
   fn close(&mut self, i: u32) {
-    if let Some(&(_, off, size)) = self.scopes.last().filter(|s| s.0 == i) {
-      self.scopes.pop();
-      (self.scope_off, self.scope_size) = (off, size);
-    }
-
+    self.st.scoped.close(i);
     self.st.stack.pop();
     let tree = &mut self.st.tree;
     tree.nodes[i as usize].end = tree.nodes.len() as u32;
   }
 
+  /// Adds an element with no children: the values put for it ([Ui::environment]) go with it.
   #[inline(always)]
-  fn push(&mut self, kind: Kind, mut style: Style, flow: Flow) -> (u32, Response) {
+  fn push(&mut self, kind: Kind, style: Style, flow: Flow) -> (u32, Response) {
+    let (i, r) = self.node(kind, style, flow);
+    self.st.scoped.close(i);
+    (i, r)
+  }
+
+  #[inline(always)]
+  fn node(&mut self, kind: Kind, mut style: Style, flow: Flow) -> (u32, Response) {
     let (parent, count) = self.st.stack.last_mut().unwrap();
     let tree = &mut self.st.tree;
     let (id, named) = self
@@ -1273,34 +1214,6 @@ mod tests {
     let hit = |ui: &Ui, i: usize| ui.st.tree.nodes[i].style.hit;
     let n = ui.st.tree.nodes.len();
     assert!(!hit(&ui, n - 2) && hit(&ui, n - 1));
-  }
-
-  /// A part enabled in a disabled container, which is disabled again after it.
-  #[test]
-  fn a_disabled_scope_enables_too() {
-    let mut ui = Ui::new(UiState::default(), Size::new(10.0, 10.0), None, Duration::ZERO);
-    ui.disabled(true).col(Style::new(), |ui| {
-      ui.disabled_scope(false, |ui| assert!(!ui.take_disabled()));
-      assert!(ui.take_disabled());
-    });
-  }
-
-  /// What the window shares: one value per type, kept across frames, replaced in place.
-  #[test]
-  fn the_environment_is_kept_across_frames() {
-    struct Tint(u32);
-
-    let mut ui = Ui::new(UiState::default(), Size::new(10.0, 10.0), None, Duration::ZERO);
-    assert!(ui.environment::<Tint>().is_none());
-    assert!(ui.set_environment(Some(Tint(1))).is_none());
-    assert!(ui.set_environment(Some(1u8)).is_none());
-
-    let mut ui = Ui::new(ui.finish(), Size::new(10.0, 10.0), None, Duration::ZERO);
-    assert_eq!(ui.environment::<Tint>().map(|t| t.0), Some(1));
-    assert_eq!(ui.set_environment(Some(Tint(2))).map(|t| t.0), Some(1));
-    assert_eq!(ui.set_environment::<Tint>(None).map(|t| t.0), Some(2));
-    assert!(ui.environment::<Tint>().is_none());
-    assert_eq!(ui.environment::<u8>(), Some(&1));
   }
 
   /// A delivered event is read as its own kind only: asked as another, it stays unused and

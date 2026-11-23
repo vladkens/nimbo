@@ -26,7 +26,9 @@ use std::time::Duration;
 pub use super::ControlSize;
 use super::store::Transition;
 use super::widgets::ButtonRole;
-use super::{Align, Dim, FieldStyle, FocusRing, Shadow, Style, TextStyle, Ui, grow, px};
+use super::{
+  Align, Dim, EnvironmentValue, FieldStyle, FocusRing, Shadow, Style, TextStyle, Ui, grow, px,
+};
 use crate::app::{Appearance, ColorScheme};
 use crate::scene::{Color, alpha, mix, rgb};
 use crate::text::{Font, Weight};
@@ -614,14 +616,20 @@ impl Theme {
   }
 }
 
+/// The OS's for the window's appearance ([Theme::system]) where neither the app nor an element
+/// put one.
+impl EnvironmentValue for Theme {
+  fn default_value(ui: &Ui) -> Self {
+    Theme::system(ui.appearance())
+  }
+}
+
 impl Ui<'_> {
-  /// The theme widgets draw with, a copy: the one the app set ([Ui::set_theme]), kept in the
-  /// environment ([Ui::environment]), else the OS's ([Theme::system]).
+  /// The theme widgets draw with, a copy: the environment's ([Ui::environment_value]), the one
+  /// the app set ([Ui::set_theme]) unless an element around puts its own, else the OS's
+  /// ([Theme::system]).
   pub fn theme(&self) -> Theme {
-    match self.environment::<Theme>() {
-      Some(&t) => t,
-      None => Theme::system(self.appearance()),
-    }
+    self.environment_value()
   }
 
   /// The theme of controls filled with the accent: [Ui::theme], its accent a grey while the

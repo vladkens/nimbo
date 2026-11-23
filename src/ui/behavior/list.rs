@@ -17,7 +17,7 @@ use crate::keys::{Binding, CMD, Command, Delete, Extent, Move, Os, Shortcut, bin
 use crate::scene::{Point, Rect};
 use crate::text::FxHasher;
 use crate::ui::input::ScrollState;
-use crate::ui::{Focus, Id, Role, State, Style, Ui, px};
+use crate::ui::{Enabled, Focus, Id, Role, State, Style, Ui, px};
 
 /// Rows built past each edge of the viewport.
 const OVERSCAN: usize = 2;
@@ -318,7 +318,7 @@ impl<'a> Ui<'a> {
     sel: &'s mut Selection,
     key: &'s dyn Fn(usize) -> u64,
   ) -> ListBehavior<'s> {
-    let disabled = self.take_disabled();
+    let disabled = !self.environment_value::<Enabled>().0;
     if disabled && self.focused(id) {
       self.focus(None);
     }

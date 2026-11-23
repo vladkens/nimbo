@@ -1107,7 +1107,7 @@ mod tests {
   #[test]
   fn a_disabled_containers_items_are_disabled() {
     let st = frame(UiState::default(), |ui| {
-      ui.disabled_scope(true, |ui| {
+      ui.disabled(true).col(Style::new(), |ui| {
         ui.id("seg").segmented(&mut 0, &[Tag::new(0, "A"), Tag::new(1, "B")]);
         ui.list(Id::of("list"), 1, 20.0, |ui, _| ui.text("One", T));
       });

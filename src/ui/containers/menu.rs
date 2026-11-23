@@ -20,7 +20,9 @@ use crate::menu::{Item, Menu};
 use crate::scene::{Point, alpha};
 use crate::ui::behavior::MenuPlacement;
 use crate::ui::containers::popup::check as check_mark;
-use crate::ui::{Align, Button, Id, NativeMenu, Response, Role, State, Style, Ui, grow, px};
+use crate::ui::{
+  Align, Button, Enabled, Id, NativeMenu, Response, Role, State, Style, Ui, grow, px,
+};
 
 impl Ui<'_> {
   /// A button that opens a menu of `items` ([Ui::menu_item]) under it: [Ui::menu_popup] in
@@ -28,8 +30,8 @@ impl Ui<'_> {
   pub fn menu<R>(&mut self, label: &str, items: impl FnOnce(&mut Self) -> R) -> Response {
     let t = self.theme();
     let id = self.take_id();
-    let off = self.take_disabled();
-    let r = Button::new(label).show(self.disabled(off).with_id(id));
+    let off = !self.environment_value::<Enabled>().0;
+    let r = Button::new(label).show(self.with_id(id));
     // Disabled while open, it closes.
     let toggle = r.clicked || off && self.menu_open(id);
     self.menu_popup(id, toggle, MenuPlacement::Below, t.popup().min_w(160.0), items);

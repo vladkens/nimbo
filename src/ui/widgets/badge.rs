@@ -6,7 +6,7 @@ use std::fmt::Display;
 
 use crate::text::{Font, Weight};
 use crate::ui::theme::Tone;
-use crate::ui::{ControlSize, Response, Role, Style, TextStyle, Ui, px, rigid};
+use crate::ui::{ControlSize, Enabled, Response, Role, Style, TextStyle, Ui, px, rigid};
 
 impl Ui<'_> {
   /// A pill: counts, `-4 +5`, statuses ("Allowed", "Not allowed"), as SwiftUI's `.badge`, but
@@ -18,8 +18,8 @@ impl Ui<'_> {
   /// it as a text, where it stands.
   pub fn badge(&mut self, s: impl Display, tone: Tone) -> Response {
     let t = self.theme();
-    let (id, size) = (self.take_id(), self.take_control_size());
-    let opacity = if self.take_disabled() { t.disabled } else { 1.0 };
+    let (id, size) = (self.take_id(), self.environment_value::<ControlSize>());
+    let opacity = if self.environment_value::<Enabled>().0 { 1.0 } else { t.disabled };
     let (font, h) = (t.sizes.badge, t.sizes.badge_h);
     let (font, h, pad, r) = match size {
       ControlSize::Small => (font - 1.0, h - 3.0, 5.0, 4.0),

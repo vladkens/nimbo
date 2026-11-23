@@ -23,7 +23,7 @@
 //! backdrop and the card alone, for a dialog of the app's own over the same behaviour.
 
 use super::widgets::{Button, ButtonRole, Icon};
-use super::{Float, Id, Role, State, Style, TextStyle, Ui, grow, pct, px};
+use super::{Enabled, Float, Id, Role, State, Style, TextStyle, Ui, grow, pct, px};
 use crate::scene::alpha;
 use crate::t;
 use crate::text::Weight;
@@ -168,17 +168,16 @@ impl Ui<'_> {
   /// around it.
   pub fn modal<R>(&mut self, id: Id, shown: f32, card: Style, f: impl FnOnce(&mut Self) -> R) {
     let scrim = self.theme().scrim();
-    self.disabled_scope(false, |ui| {
-      let cover = Style::new().w(pct(100.0)).h(pct(100.0)).tab_focusable_quiet();
-      let cover = cover.bg(alpha(scrim, scrim[3] * shown));
-      ui.a11y(id.key("card"), Role::Dialog).state(State::Modal, true);
-      ui.with_id(id.key("backdrop")).float(Float::window().z(MODAL_Z)).el(cover);
-      let at = Float::window()
-        .attach(UnitPoint::CENTER)
-        .anchor(UnitPoint::CENTER)
-        .offset(0.0, (1.0 - shown) * 8.0);
-      ui.with_id(id.key("card")).float(at.z(MODAL_Z + 1)).col(card.opacity(shown), f);
-    });
+    let cover = Style::new().w(pct(100.0)).h(pct(100.0)).tab_focusable_quiet();
+    let cover = cover.bg(alpha(scrim, scrim[3] * shown));
+    self.a11y(id.key("card"), Role::Dialog).state(State::Modal, true);
+    self.with_id(id.key("backdrop")).float(Float::window().z(MODAL_Z)).el(cover);
+    let at = Float::window()
+      .attach(UnitPoint::CENTER)
+      .anchor(UnitPoint::CENTER)
+      .offset(0.0, (1.0 - shown) * 8.0);
+    let card = card.opacity(shown);
+    self.with_id(id.key("card")).float(at.z(MODAL_Z + 1)).environment(Enabled(true)).col(card, f);
   }
 }
 

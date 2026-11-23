@@ -16,10 +16,10 @@
 use nimbo::ui::LabeledPairRole;
 use nimbo::{
   Align, Answer, App, Axes, Axis, Bitmap, Button, ButtonRole, ButtonStyle, Color, Config,
-  ContentMode, ControlSize, Dialog, Float, Font, FormRow, FormStyle, Hotkey, Icon, Id, Item,
-  LinePattern, List, ListRows, ListStyle, Menu, Picker, ScrollBar, ScrollerKnob, Section,
-  Selection, Shortcut, Slider, Split, Style, Tabs, Tag, TextStyle, Tone, ToolbarItemPlacement,
-  TruncationMode, Ui, UnitPoint, WindowToolbarStyle, alpha, grow, px, t, tn,
+  ContentMode, ControlSize, Dialog, Enabled, EnvironmentValue, Float, Font, FormRow, FormStyle,
+  Hotkey, Icon, Id, Item, LinePattern, List, ListRows, ListStyle, Menu, Picker, ScrollBar,
+  ScrollerKnob, Section, Selection, Shortcut, Slider, Split, Style, Tabs, Tag, TextStyle, Tone,
+  ToolbarItemPlacement, TruncationMode, Ui, UnitPoint, WindowToolbarStyle, alpha, grow, px, t, tn,
 };
 
 pub const SIDEBAR: &str = "sidebar";
@@ -119,9 +119,9 @@ pub const BLOCKS: &[Block] = &[
   b("Modifiers", "Control size", ".controlSize(.small)", "ui.control_size(ControlSize::Small).row(Style::new(), |ui| { … })"),
   b("Modifiers", "Accessibility label", ".accessibilityLabel(\"Reset\")", "ui.a11y_label(\"Reset\").icon_button(Icon::RESET)"),
   b("Modifiers", "Keyboard shortcut", ".keyboardShortcut(\"z\", modifiers: .command)", "ui.keymap(&[bind(Shortcut::char('z').cmd(), Command::Undo)]).col(…)"),
-  b("Modifiers", "Environment", ".environment(\\.tint, .green); @Environment(\\.tint) var tint", "ui.set_environment(Some(Tint(t.success))); let tint = ui.environment::<Tint>()"),
+  b("Modifiers", "Environment", ".environment(\\.tint, .green) { … }; @Environment(\\.tint) var tint", "ui.environment(Tint(t.success)).row(style, |ui| { … }); ui.set_environment(Some(Tint(t.success))) for the window; let tint = ui.environment_value::<Tint>()"),
   b("Modifiers", "Identity", "Box().id(item.id); .allowsHitTesting(false)", "ui.key(item.id).row(style, |ui| { … }); ui.with_id(id.key(\"box\")).allows_hit_testing(false).col(style, |ui| { … })"),
-  b("Modifiers", "Widget parts", ".environment(\\.isEnabled, true); .help(tip) on a part", "let tip = ui.take_help(); ui.disabled_scope(false, |ui| { if let Some(tip) = &tip { ui.help(tip); } ui.button(\"Undo\") })"),
+  b("Modifiers", "Widget parts", ".environment(\\.isEnabled, true); .help(tip) on a part", "let tip = ui.take_help(); if let Some(tip) = &tip { ui.help(tip); } ui.environment(Enabled(true)).button(\"Undo\")"),
   b("Modifiers", "Frame request", "TimelineView(.animation) { context in … }", "ui.request_frame(); let k = ui.now().as_secs_f32() % 1.0"),
   b("Modifiers", "Accessibility pair", ".accessibilityLabeledPair(role: .label, id: \"volume\", in: ns)", "ui.a11y_labeled_pair(LabeledPairRole::Label, id, |ui| ui.text(\"Volume\", s)); ui.a11y_labeled_pair(LabeledPairRole::Content, id, |ui| ui.slider(&mut v, 0.0..=1.0))"),
   b("Modifiers", "Controls theme", "@Environment(\\.controlActiveState) var state", "let t = ui.controls_theme(); ui.el(Style::new().bg(t.accent)); let grey = ui.theme().inactive().accent"),
@@ -141,8 +141,16 @@ pub const SIZES: [Tag<Size>; 3] = [
   Tag::new(Size::Large, "Large"),
 ];
 
-/// The environment block's value: the tint of the swatches built while it is there.
+/// The environment block's value: the tint of the swatches built while it is there, the
+/// theme's raised colour by default.
+#[derive(Clone, Copy)]
 pub struct Tint(pub Color);
+
+impl EnvironmentValue for Tint {
+  fn default_value(ui: &Ui) -> Self {
+    Self(ui.theme().raised)
+  }
+}
 
 /// The menu bar the "Menu bar" block's line makes.
 const MENU_BAR: &str = "File, Edit, View, Track, Window and Help in the menu bar (macOS)";
@@ -650,17 +658,11 @@ impl Gallery {
         Self::variants(ui, Shown::Plain, |ui| _ = ui.a11y_label("Reset").icon_button(Icon::RESET))
       }
 
-      // Swatches that take their colour from the environment, put for the last two (and put
-      // back after them for the gallery's other blocks).
+      // Swatches that take their colour from the environment, put for the row of the last two.
       "Environment" => Self::variants(ui, Shown::Alone, |ui| {
-        let tile = |ui: &mut Ui| {
-          let c = ui.environment::<Tint>().map_or(t.raised, |c| c.0);
-          ui.el(swatch(c));
-        };
+        let tile = |ui: &mut Ui| _ = ui.el(swatch(ui.environment_value::<Tint>().0));
         tile(ui);
-        let old = ui.set_environment(Some(Tint(t.success)));
-        (0..2).for_each(|_| tile(ui));
-        ui.set_environment(old);
+        ui.environment(Tint(t.success)).row(line(10.0), |ui| (0..2).for_each(|_| tile(ui)));
       }),
 
       // Keyed boxes: a key of its own each, the last a ready id.
@@ -673,13 +675,11 @@ impl Gallery {
       "Widget parts" => Self::variants(ui, Shown::Plain, |ui| {
         ui.button("Save");
         let tip = ui.help("Always enabled").take_help();
-        ui.disabled_scope(false, |ui| {
-          if let Some(tip) = &tip {
-            ui.help(tip);
-          }
+        if let Some(tip) = &tip {
+          ui.help(tip);
+        }
 
-          ui.button("Undo")
-        });
+        ui.environment(Enabled(true)).button("Undo");
       }),
 
       // A bar that moves every frame.

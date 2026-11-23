@@ -18,8 +18,8 @@ use std::time::Duration;
 use crate::app::MouseButton;
 use crate::scene::{Color, Point, alpha};
 use crate::ui::{
-  Align, Axes, Axis, Float, Flow, Id, Kind, Response, Scroll, Style, Transition, Ui, UnitPoint,
-  pct, px,
+  Align, Axes, Axis, EnvironmentValue, Float, Flow, Id, Kind, Response, Scroll, Style, Transition,
+  Ui, UnitPoint, pct, px,
 };
 
 /// How long scrollbars stay after the content last moved or the pointer came in.
@@ -27,10 +27,9 @@ const BAR_SHOW: Duration = Duration::from_millis(1000);
 /// A thumb's least length.
 pub(super) const MIN_THUMB: f32 = 24.0;
 
-/// How [Ui::scroll_area] draws its scrollers' knobs (the thumbs), an environment value
-/// ([Ui::set_environment]), as AppKit's `NSScroller.knobStyle`: their colour, and how they
-/// thicken and darken while the pointer is on a track. Without one, [Self::DARK] in the light
-/// appearance, [Self::LIGHT] in the dark one.
+/// How [Ui::scroll_area] draws its knobs (the thumbs), an environment value, as AppKit's
+/// `NSScroller.knobStyle`: their colour, and how they thicken and darken while the pointer is on
+/// a track. [Self::DARK] in the light color scheme ([Ui::color_scheme]), [Self::LIGHT] in the dark.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScrollerKnob {
   pub color: Color,
@@ -42,6 +41,12 @@ impl ScrollerKnob {
   pub const DARK: Self = Self { color: alpha([0.0, 0.0, 0.0, 1.0], 0.24), hover: HOVER };
   /// AppKit's `.light`: a light knob, for dark content (the dark appearance's).
   pub const LIGHT: Self = Self { color: alpha([1.0; 4], 0.26), hover: HOVER };
+}
+
+impl EnvironmentValue for ScrollerKnob {
+  fn default_value(ui: &Ui) -> Self {
+    if ui.color_scheme().is_dark() { Self::LIGHT } else { Self::DARK }
+  }
 }
 
 /// The knobs' change on a track's hover, as the theme's hover fades (`Theme::fade`).
@@ -282,12 +287,7 @@ impl Ui<'_> {
   /// container's ([Ui::scroll], [Ui::scroll_to]); the thumbs and tracks are its behaviour's
   /// ([ScrollBehavior::thumb], [ScrollBehavior::track]).
   pub fn scroll_area<R>(&mut self, style: Style, f: impl FnOnce(&mut Self) -> R) -> Response {
-    let knob = match self.environment::<ScrollerKnob>() {
-      Some(&s) => s,
-      None if self.color_scheme().is_dark() => ScrollerKnob::LIGHT,
-      None => ScrollerKnob::DARK,
-    };
-
+    let knob = self.environment_value::<ScrollerKnob>();
     let id = self.take_id();
     let mask = self.set_slot::<EdgeFade>(None);
     let style = match style.scroll.is_empty() {

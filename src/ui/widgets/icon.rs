@@ -22,7 +22,7 @@ use crate::locale::Localized;
 use crate::scene::{Color, Frame, Point, Rect};
 use crate::svg::{flatten, spans};
 use crate::t;
-use crate::ui::{Response, Style, Ui, px};
+use crate::ui::{Enabled, Response, Style, Ui, px};
 
 /// SVG path data in a 24 × 24 view box, drawn as a stroke or filled ([draw], [Ui::icon]).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -237,7 +237,7 @@ impl Ui<'_> {
   /// 1.5 points at 18). Disabled ([Ui::disabled], on it or a container around it), dimmed toward
   /// the ground.
   pub fn icon(&mut self, icon: Icon, size: f32, color: Color) -> Response {
-    let off = self.take_disabled();
+    let off = !self.environment_value::<Enabled>().0;
     let color = self.dim(color, off);
     let s = Style::new().w(px(size)).h(px(size));
     self.canvas(s, move |f, r| draw(f, icon.default_stroke(2.0), r, color))

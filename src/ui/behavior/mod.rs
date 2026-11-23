@@ -68,7 +68,7 @@ pub use menu::{MenuPlacement, TYPE_SELECT, TypeSelect};
 pub use scroll::{ScrollBar, ScrollBehavior, ScrollerKnob};
 pub use split::SplitBehavior;
 
-use super::{Cursor, Focus, Id, Role, State, Style, Ui};
+use super::{Cursor, Enabled, Focus, Id, Role, State, Style, Ui};
 use crate::keys::{Command, Key, Move};
 
 /// What a control got this frame, read before it is built; see the module's docs.
@@ -133,7 +133,7 @@ impl Ui<'_> {
   fn begin(&mut self, id: Id, role: Role) -> Option<Behavior> {
     // Autofocus reads the disabled flag, so before it is taken.
     self.take_autofocus(id);
-    let off = self.take_disabled();
+    let off = !self.environment_value::<Enabled>().0;
     self.a11y(id, role).state(State::Disabled, off);
     if off && self.focused(id) {
       self.focus(None);

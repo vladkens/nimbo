@@ -4,14 +4,14 @@
 
 use std::fmt::Display;
 
-use crate::ui::Ui;
+use crate::ui::{Enabled, Ui};
 
 impl Ui<'_> {
   /// One line of text in the theme's colour, cut with "…" when it doesn't fit; dimmed when
-  /// disabled ([Ui::disabled], [Ui::disabled_scope]).
+  /// disabled ([Ui::disabled], [Enabled]).
   pub fn label(&mut self, s: impl Display) {
     let mut style = self.theme().label();
-    if self.take_disabled() {
+    if !self.environment_value::<Enabled>().0 {
       style.color[3] *= self.theme().disabled;
     }
 
