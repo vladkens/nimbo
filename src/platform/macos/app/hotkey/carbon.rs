@@ -1,7 +1,8 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The hotkeys' fallback: Carbon's `RegisterEventHotKey` (HIToolbox, declared by hand), which
-//! works without Accessibility access and under Secure Input, chords only, and takes Escape
+//! works without Accessibility access and under Secure Input, chords only, one per place (its id
+//! `1 + which`), and takes Escape
 //! alone while that is on: a key registered here never reaches the app in front. Not ⇧⎋: the
 //! tap passes it while a Shift hotkey is held within its chord window, which Carbon can't tell. Its
 //! handler runs on the main thread and sends the edge, timed when the key moved, to the hotkey
@@ -17,6 +18,7 @@ use std::time::{Duration, Instant};
 use keyboard_types::Modifiers;
 
 use super::{DEDUPE, Hit, KEY_ESCAPE, Raw, Shared, Source};
+use crate::hotkey::MAX;
 
 type OSStatus = i32;
 type EventRef = *mut c_void;
@@ -89,8 +91,8 @@ unsafe extern "C" {
 }
 
 const SIGNATURE: u32 = u32::from_be_bytes(*b"nmbo");
-const CHORD_ID: u32 = 1;
-const ESCAPE_ID: u32 = 2;
+/// Past the places' ids, `1 + which`.
+const ESCAPE_ID: u32 = 0x100;
 
 /// What the handler works with; leaked: the handler stays installed for the process.
 struct State {
@@ -103,7 +105,7 @@ struct State {
 /// This app's Carbon hotkeys; main thread only.
 pub struct Carbon {
   installed: bool,
-  chord: Option<EventHotKeyRef>,
+  chords: [Option<EventHotKeyRef>; MAX],
   escape: Option<EventHotKeyRef>,
   state: &'static State,
 }
@@ -127,13 +129,14 @@ impl Carbon {
         &mut handler,
       )
     };
-    Self { installed: status == 0, chord: None, escape: None, state }
+    Self { installed: status == 0, chords: Default::default(), escape: None, state }
   }
 
-  /// Registers virtual key `code` with Carbon's `modifiers`, in place of the one before.
-  pub fn register(&mut self, code: u16, modifiers: u32) -> Result<(), String> {
-    self.unregister();
-    self.chord = Some(self.hot_key(code, modifiers, CHORD_ID)?);
+  /// Registers virtual key `code` with Carbon's `modifiers` as place `which`'s, in place of the one
+  /// before.
+  pub fn register(&mut self, which: usize, code: u16, modifiers: u32) -> Result<(), String> {
+    self.unregister(which);
+    self.chords[which] = Some(self.hot_key(code, modifiers, 1 + which as u32)?);
     Ok(())
   }
 
@@ -155,12 +158,12 @@ impl Carbon {
     }
   }
 
-  pub fn unregister(&mut self) {
-    release(self.chord.take());
+  pub fn unregister(&mut self, which: usize) {
+    release(self.chords[which].take());
   }
 
-  pub fn registered(&self) -> bool {
-    self.chord.is_some()
+  pub fn registered(&self, which: usize) -> bool {
+    self.chords[which].is_some()
   }
 
   /// Escape alone registered while `on`; the error is why it is not.
@@ -216,15 +219,17 @@ extern "C" fn handler_fn(
   let (kind, happened, now) =
     unsafe { (GetEventKind(event), GetEventTime(event), GetCurrentEventTime()) };
   let escape = &state.escape_down;
+  let which = id.id.wrapping_sub(1) as usize;
   let edge = match (id.id, kind) {
-    (CHORD_ID, K_EVENT_HOT_KEY_PRESSED) => Hit::Down { repeat: false },
-    (CHORD_ID, K_EVENT_HOT_KEY_RELEASED) => Hit::Up,
     // Carbon repeats the press while Escape is held: told once.
     (ESCAPE_ID, K_EVENT_HOT_KEY_PRESSED) if !escape.swap(true, Ordering::Relaxed) => Hit::Escape,
     (ESCAPE_ID, K_EVENT_HOT_KEY_RELEASED) => {
       escape.store(false, Ordering::Relaxed);
       return 0;
     }
+    (ESCAPE_ID, _) => return 0,
+    (_, K_EVENT_HOT_KEY_PRESSED) if which < MAX => Hit::Down { which, repeat: false },
+    (_, K_EVENT_HOT_KEY_RELEASED) if which < MAX => Hit::Up { which },
     _ => return 0,
   };
   // When the key moved, not when the main thread got to the event: it may have been busy, and the

@@ -51,6 +51,7 @@ A small custom-drawn desktop UI toolkit in Rust: its own CPU renderer draws ever
 
 ## Workflow
 
+- Before reviewing or changing an API or a platform's input code, read `docs/review.md`: the bugs reviews missed here, as patterns with their cases. Add a pattern when a bug of a new kind turns up.
 - For multi-step work keep a checklist in `docs/plans/yyyymmdd-<name>.md` and tick it during the work; when done add `Done: yyyy-mm-dd` and a short `## Result`, and move it to `docs/plans/completed/`.
 - `make check` (it needs nightly rustfmt, `rustup target add x86_64-pc-windows-msvc x86_64-unknown-linux-gnu` and, on a Mac, Xcode's clang for `scripts/macos-min.py`) and `make test` pass before a commit; `make prepare` formats the code, adds the blank lines `make check` asks for and applies clippy's fixes.
 - A commit is one short lowercase line, `<area>: <what changed>`, with no body; docs go in the same commit.

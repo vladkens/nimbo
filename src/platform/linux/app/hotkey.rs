@@ -1,14 +1,16 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The hotkey on Linux: X11's grab ([super::grab]) where the session is not Wayland's, else the
+//! The hotkeys on Linux: X11's grab ([super::grab]) where the session is not Wayland's, else the
 //! XDG desktop portal's `org.freedesktop.portal.GlobalShortcuts`
 //! (<https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.GlobalShortcuts.html>,
-//! as of 2026-10): a session ([Hotkeys::start]: `CreateSession`) binds the hotkey
-//! (`BindShortcuts`, with the chord as its `preferred_trigger` in the XDG shortcuts spec's form,
-//! `CTRL+ALT+space`), the desktop asks the user, who may pick another; its `Activated` and
-//! `Deactivated` signals are the press and the release, handed to the "hotkey" thread.
+//! as of 2026-10): a session ([Hotkeys::start]: `CreateSession`) binds every place's hotkey
+//! (`BindShortcuts`, each with the chord as its `preferred_trigger` in the XDG shortcuts spec's
+//! form, `CTRL+ALT+space`, and its place's [id]), the desktop asks the user, who may pick others;
+//! the `Activated` and `Deactivated` signals of an id are its press and release, handed to the
+//! "hotkey" thread.
 //!
-//! A session binds once, so another hotkey closes it and makes a new one. On a connection of
+//! A session binds once, so a changed place closes it and makes a new one, once the main loop is
+//! idle: places set one after another bind together. On a connection of
 //! its own, the app first registers its id with `org.freedesktop.host.portal.Registry`
 //! (xdg-desktop-portal 1.19+), which the backend keeps the shortcut under. KDE Plasma 6 and GNOME
 //! 48+ have the portal; without it (older GNOME on Wayland) [Hotkeys::start] falls back to X11's
@@ -18,23 +20,23 @@
 //! that is reported, not done; the grab takes it.
 
 use std::cell::{Cell, RefCell};
-use std::ffi::c_uint;
+use std::ffi::{c_int, c_uint};
 use std::ptr::null_mut;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::mpsc::{Sender, channel};
 use std::time::Instant;
 
 use keyboard_types::NamedKey;
 
 use super::super::dbus::{self, Gv, PORTAL, PORTAL_PATH as PATH, V, portal, request};
-use super::super::{Fp, P, S};
+use super::super::{Fp, P, S, gtk};
 use super::grab::Grab;
 use crate::Modifiers;
-use crate::hotkey::{Edge, Listener, OnEdge, Status};
+use crate::hotkey::{Edge, Listener, MAX, OnEdge, Status};
 use crate::keys::{Hotkey, Key, Shortcut};
 
 const SHORTCUTS: &str = "org.freedesktop.portal.GlobalShortcuts";
-/// The one shortcut the session binds.
+/// The first place's shortcut id, the others' after a dash ([id]).
 const ID: &str = "hotkey";
 const MS: i32 = 2000;
 
@@ -44,7 +46,15 @@ struct State {
   tx: Sender<Edge>,
   /// The portal's connection, once [Hotkeys::start] made it.
   bus: Cell<P>,
-  hotkey: Cell<Option<Shortcut>>,
+  /// Each place's chord.
+  hotkeys: Cell<[Option<Shortcut>; MAX]>,
+  /// Each place's chord as the session bound it: a place changed since takes no press until the
+  /// rebind binds it anew.
+  bound: Cell<[Option<Shortcut>; MAX]>,
+  /// The places pressed whose release has not come.
+  held: Cell<[bool; MAX]>,
+  /// The session is made anew once the main loop is idle.
+  rebinding: Cell<bool>,
   started: Cell<bool>,
   listener: Cell<Listener>,
   error: RefCell<Option<String>>,
@@ -90,7 +100,10 @@ impl Hotkeys {
     Self(Rc::new(State {
       tx,
       bus: Cell::new(null_mut()),
-      hotkey: Cell::new(None),
+      hotkeys: Cell::new([None; MAX]),
+      bound: Cell::new([None; MAX]),
+      held: Cell::new([false; MAX]),
+      rebinding: Cell::new(false),
       started: Cell::new(false),
       listener: Cell::new(Listener::Off),
       error: RefCell::new(None),
@@ -105,7 +118,7 @@ impl Hotkeys {
     }))
   }
 
-  pub fn set(&mut self, hotkey: Option<Hotkey>) -> Result<(), String> {
+  pub fn set(&mut self, which: usize, hotkey: Option<Hotkey>) -> Result<(), String> {
     let s = &self.0;
     let (shortcut, error) = match hotkey {
       None => (None, None),
@@ -116,27 +129,20 @@ impl Hotkeys {
       Some(Hotkey::Shortcut(k)) => (Some(k), None),
     };
 
+    let mut hotkeys = s.hotkeys.get();
+    let was = std::mem::replace(&mut hotkeys[which], shortcut);
+    s.hotkeys.set(hotkeys);
     if x11(s) {
-      s.hotkey.set(shortcut);
-      let taken = grabbed(s, shortcut.is_some(), |g| g.set(shortcut));
+      let taken = grabbed(s, shortcut.is_some(), |g| g.set(which, shortcut));
       return error.map_or(taken, Err);
     }
 
-    if s.hotkey.get() != shortcut {
-      self.rebind(shortcut);
+    if was != shortcut && !s.rebinding.replace(true) {
+      let data = Box::into_raw(Box::new(Rc::downgrade(s))) as P;
+      unsafe { (gtk().g_idle_add)(on_rebind as Fp, data) };
     }
 
     error.map_or(Ok(()), Err)
-  }
-
-  /// Takes `hotkey`: the session that bound another closes, and once started a new one binds it.
-  fn rebind(&self, hotkey: Option<Shortcut>) {
-    let s = &self.0;
-    s.hotkey.set(hotkey);
-    close_session(s);
-    if s.started.get() && !s.bus.get().is_null() && hotkey.is_some() {
-      create_session(s);
-    }
   }
 
   pub fn start(&mut self) -> Result<(), String> {
@@ -162,7 +168,8 @@ impl Hotkeys {
           // XWayland's grab, where there is an X server: it hears the chord only while an X11
           // app has the keyboard.
           s.fallback.set(true);
-          let taken = self.set(s.hotkey.get().map(Hotkey::Shortcut));
+          let hotkeys = s.hotkeys.get().map(|k| k.map(Hotkey::Shortcut));
+          let taken = (0..MAX).map(|which| self.set(which, hotkeys[which])).fold(Ok(()), Done::and);
           let taken = taken.and_then(|_| grabbed(s, true, |_| Ok(())));
           s.fallback.set(s.grab.borrow().is_some());
           let only = "X11's grab hears the hotkey only while an X11 app has the keyboard";
@@ -176,7 +183,8 @@ impl Hotkeys {
       }
     }
 
-    if s.hotkey.get().is_some() {
+    // A rebind under way makes the session.
+    if !s.rebinding.get() && s.hotkeys.get().iter().any(Option::is_some) {
       create_session(s);
     }
 
@@ -293,22 +301,64 @@ fn close_session(s: &State) {
     let _ = dbus::call(s.bus.get(), PORTAL, &session, iface, "Close", V::Tuple(Vec::new()), MS);
   }
 
+  // Its releases won't come: the places held are let go now.
+  let at = Instant::now();
+  for which in (0..MAX).filter(|&which| s.held.get()[which]) {
+    let _ = s.tx.send(Edge::Up { which, at });
+  }
+
+  s.held.set([false; MAX]);
+  s.bound.set([None; MAX]);
+
   if s.listener.get() != Listener::Failed {
     s.listener.set(Listener::Off);
   }
 }
 
-/// Binds the hotkey in the session made.
-fn bind(s: &Rc<State>) {
-  let (Some(session), Some(k)) = (s.session.borrow().clone(), s.hotkey.get()) else { return };
-  let app = super::info();
-  let mut opts = vec![("description", V::s(app.name))];
-  if let Some(t) = trigger(&k) {
-    opts.push(("preferred_trigger", V::S(t)));
+/// The places' hotkeys as they are now: the session that bound others closes, and once started a
+/// new one binds them.
+fn rebind(s: &Rc<State>) {
+  close_session(s);
+  if s.started.get() && !s.bus.get().is_null() && s.hotkeys.get().iter().any(Option::is_some) {
+    create_session(s);
   }
+}
 
-  let shortcuts = V::Array("(sa{sv})", vec![V::Tuple(vec![V::s(ID), V::dict(opts)])]);
-  ask(s, "BindShortcuts", vec![V::O(session), shortcuts, V::s("")], on_bound as Fp);
+/// Binds every place's hotkey in the session made, each described as the app with its place
+/// after the first's (`Wavo`, `Wavo 2`).
+fn bind(s: &Rc<State>) {
+  let Some(session) = s.session.borrow().clone() else { return };
+  s.bound.set(s.hotkeys.get());
+  let app = super::info();
+  let shortcut = |(which, k): (usize, Option<Shortcut>)| {
+    let name =
+      if which == 0 { app.name.to_string() } else { format!("{} {}", app.name, which + 1) };
+    let mut opts = vec![("description", V::S(name))];
+    if let Some(t) = trigger(&k?) {
+      opts.push(("preferred_trigger", V::S(t)));
+    }
+
+    Some(V::Tuple(vec![V::S(id(which)), V::dict(opts)]))
+  };
+  let shortcuts: Vec<_> = s.hotkeys.get().into_iter().enumerate().filter_map(shortcut).collect();
+  if !shortcuts.is_empty() {
+    let shortcuts = V::Array("(sa{sv})", shortcuts);
+    ask(s, "BindShortcuts", vec![V::O(session), shortcuts, V::s("")], on_bound as Fp);
+  }
+}
+
+/// The portal's id of place `which`'s shortcut: [ID] for the first (as when there was one), then
+/// `hotkey-2`, `hotkey-3`.
+fn id(which: usize) -> String {
+  match which {
+    0 => ID.into(),
+    which => format!("{ID}-{}", which + 1),
+  }
+}
+
+/// The place of the shortcut with id `name`.
+fn place(name: &str) -> Option<usize> {
+  (0..MAX).find(|&which| id(which) == name)
 }
 
 /// The chord in the XDG shortcuts spec's form: `CTRL`, `ALT`, `SHIFT`, `LOGO`, then the key's
@@ -372,6 +422,20 @@ pub fn keysym(key: Key) -> Option<String> {
 
 // MARK: Callbacks
 
+/// `GSourceFunc`: the places set since the idle was added bind together.
+unsafe extern "C" fn on_rebind(data: P) -> c_int {
+  let weak = unsafe { Box::from_raw(data as *mut Weak<State>) };
+  // Not once XWayland's grab stands in for a portal missing: its places are grabbed already.
+  if let Some(s) = weak.upgrade() {
+    s.rebinding.set(false);
+    if !x11(&s) {
+      rebind(&s);
+    }
+  }
+
+  0
+}
+
 /// A request's `Response(u code, a{sv} results)`: the state and both, the request over.
 unsafe fn response(args: P, data: P) -> Option<(Rc<State>, u32, Gv)> {
   let s = unsafe { dbus::upgrade::<State>(data) }?;
@@ -405,19 +469,36 @@ unsafe extern "C" fn on_bound(_: P, _: S, _: S, _: S, _: S, args: P, data: P) {
   }
 }
 
-/// `Activated` or `Deactivated(o session, s id, t timestamp, a{sv})` of our session's hotkey.
+/// `Activated` or `Deactivated(o session, s id, t timestamp, a{sv})` of our session's hotkeys.
 unsafe fn edge(args: P, data: P, down: bool) {
   let Some(s) = (unsafe { dbus::upgrade::<State>(data) }) else { return };
   let args = Gv::borrowed(args);
-  let ours =
-    s.session.borrow().as_deref() == Some(&args.child(0).str()) && args.child(1).str() == ID;
-  if !ours {
-    return;
+  let ours = s.session.borrow().as_deref() == Some(&args.child(0).str());
+  let Some(which) = place(&args.child(1).str()).filter(|_| ours) else { return };
+  if let Some(edge) = shortcut_edge(&s, which, down) {
+    s.events.set(s.events.get() + 1);
+    let _ = s.tx.send(edge);
+  }
+}
+
+/// The edge of place `which`'s `Activated` (`down`) or `Deactivated`: a press while its hotkey is
+/// the one the session bound, a release of a press that came.
+fn shortcut_edge(s: &State, which: usize, down: bool) -> Option<Edge> {
+  let mut held = s.held.get();
+  let hotkey = s.hotkeys.get()[which];
+  match down {
+    true if hotkey.is_none() || hotkey != s.bound.get()[which] => return None,
+    false if !held[which] => return None,
+    _ => {}
   }
 
-  s.events.set(s.events.get() + 1);
+  held[which] = down;
+  s.held.set(held);
   let at = Instant::now();
-  let _ = s.tx.send(if down { Edge::Down { at, repeat: false } } else { Edge::Up { at } });
+  Some(match down {
+    true => Edge::Down { which, at, repeat: false },
+    false => Edge::Up { which, at },
+  })
 }
 
 unsafe extern "C" fn on_activated(_: P, _: S, _: S, _: S, _: S, args: P, data: P) {
@@ -448,6 +529,39 @@ mod tests {
     assert!(s.escape_error.is_some_and(|e| e.contains("Escape")));
     h.escape(false);
     assert_eq!((h.status().escape, h.status().escape_error), (false, None));
+  }
+
+  /// A place pressed whose hotkey changed since the session bound it takes no press; a release
+  /// comes after a press only, and a session closed lets go of the places held.
+  #[test]
+  fn the_portals_edges_of_the_hotkeys_bound() {
+    let (tx, rx) = channel();
+    let h = super::Hotkeys::new(Box::new(move |e| _ = tx.send(e)));
+    let s = &h.0;
+    let mut hotkeys = [None; MAX];
+    hotkeys[..2].copy_from_slice(&[Some(chord("ctrl+option+space")), Some(chord("ctrl+F5"))]);
+    s.hotkeys.set(hotkeys);
+    s.bound.set(hotkeys);
+    let edge = |which, down| shortcut_edge(s, which, down);
+
+    assert!(matches!(edge(0, true), Some(Edge::Down { which: 0, .. })));
+    assert_eq!((edge(1, false), edge(2, true)), (None, None), "not pressed, not bound");
+    hotkeys[1] = Some(chord("ctrl+F6"));
+    s.hotkeys.set(hotkeys);
+    assert_eq!(edge(1, true), None, "changed since bound");
+
+    close_session(s);
+    let up = rx.recv_timeout(std::time::Duration::from_secs(1));
+    assert!(matches!(up, Ok(Edge::Up { which: 0, .. })), "{up:?}");
+    assert_eq!(edge(0, false), None, "let go already");
+  }
+
+  /// Each place's id, the first as when there was one, and back.
+  #[test]
+  fn shortcut_ids_by_place() {
+    assert_eq!([0, 1, 7].map(id), ["hotkey", "hotkey-2", "hotkey-8"]);
+    assert_eq!(["hotkey", "hotkey-2", "hotkey-8"].map(place), [Some(0), Some(1), Some(7)]);
+    assert_eq!(["hotkey-1", "hotkey-9", "other"].map(place), [None; 3]);
   }
 
   #[test]

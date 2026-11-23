@@ -1,9 +1,9 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The hotkey on X11: a passive grab of its chord on the root window (`XGrabKey`) on an X
-//! connection of its own (`libX11` loaded at run time), ported from lalo's `src/linux/hotkey.rs`
-//! (same author, MIT; on x11rb there). The chord's key is its place, as on the other platforms
-//! (X's keycode, evdev's past 8). X matches a grab's modifiers exactly, so the chord is
+//! The hotkeys on X11: a passive grab of each place's chord on the root window (`XGrabKey`) on an
+//! X connection of its own (`libX11` loaded at run time), ported from lalo's `src/linux/hotkey.rs`
+//! (same author, MIT; on x11rb there). A chord's key is its place, as on the other platforms
+//! (X's keycode, evdev's past 8). X matches a grab's modifiers exactly, so a chord is
 //! grabbed four times, with and without Caps Lock (`LockMask`) and Num Lock (`Mod2Mask`); another
 //! client's grab of it is a BadAccess, caught ([super::trap]) and returned by [Grab::set], the
 //! grabs made undone. XKB's detectable autorepeat has a held key repeat as presses with no
@@ -24,7 +24,7 @@ use keyboard_types::Code;
 use super::super::{Fp, P, dbus, gtk};
 use super::{X11, remote, trap, x11};
 use crate::Modifiers;
-use crate::hotkey::Edge;
+use crate::hotkey::{Edge, MAX};
 use crate::keys::Shortcut;
 
 /// The lock modifiers each grab is made with and without: `LockMask` and `Mod2Mask`.
@@ -40,37 +40,62 @@ const RELEASE: c_uint = 3;
 /// The keys grabbed and those held, which key events match into edges.
 #[derive(Default)]
 struct Keys {
-  /// The chord's keycode and modifier mask.
-  chord: Cell<Option<(u8, c_uint)>>,
+  /// Each place's chord: its keycode and modifier mask.
+  chords: [Cell<Option<(u8, c_uint)>>; MAX],
   /// Escape's keycode, while it is grabbed.
   escape: Cell<Option<u8>>,
-  /// The chord's key while it is down: its release counts though the chord changed meanwhile
+  /// Each place's key while it is down: its release counts though the chord changed meanwhile
   /// (paused while a recorder records).
-  down: Cell<Option<u8>>,
+  down: [Cell<Option<u8>>; MAX],
   escape_down: Cell<bool>,
+  /// The key whose press began X's grab of the keyboard (every key event comes through a grab):
+  /// its release ends it, those of the keys held with it going to the focused window instead.
+  grab: Cell<Option<u8>>,
 }
 
 impl Keys {
-  /// The edge of key event `kind` of `code` with modifier `state`: the chord's press (a repeat
-  /// while it is held) and its release, or Escape's press, once while it is held.
+  /// The edge of key event `kind` of `code` with modifier `state`: a chord's press (a repeat while
+  /// it is held, its modifiers changed or not: the press was its place's) and its release, or
+  /// Escape's press, once while it is held.
   fn edge(&self, kind: c_uint, code: u8, state: c_uint, at: Instant) -> Option<Edge> {
-    let chord = self.chord.get().is_some_and(|(c, m)| c == code && state & HELD == m);
+    let held = self.down.iter().position(|d| d.get() == Some(code));
+    let chord = |k: Option<(u8, c_uint)>| k.is_some_and(|(c, m)| c == code && state & HELD == m);
+    let place = held.or_else(|| self.chords.iter().position(|k| chord(k.get())));
     let escape = self.escape.get() == Some(code);
-    match kind {
-      PRESS if chord => {
-        Some(Edge::Down { at, repeat: self.down.replace(Some(code)) == Some(code) })
+    match (kind, place) {
+      (PRESS, Some(which)) => {
+        let repeat = self.down[which].replace(Some(code)) == Some(code);
+        Some(Edge::Down { which, at, repeat })
       }
-      PRESS if escape => (!self.escape_down.replace(true)).then_some(Edge::Escape),
-      RELEASE if self.down.get() == Some(code) => {
-        self.down.set(None);
-        Some(Edge::Up { at })
+      (PRESS, None) if escape => (!self.escape_down.replace(true)).then_some(Edge::Escape),
+      (RELEASE, Some(which)) if held.is_some() => {
+        self.down[which].set(None);
+        Some(Edge::Up { which, at })
       }
-      RELEASE if escape => {
+      (RELEASE, _) if escape => {
         self.escape_down.set(false);
         None
       }
       _ => None,
     }
+  }
+
+  /// The edges of a key event ([Keys::edge]); at the release that ends X's grab, the release of
+  /// every key held with it too, which won't come.
+  fn edges(&self, kind: c_uint, code: u8, state: c_uint, at: Instant) -> Vec<Edge> {
+    let mut edges: Vec<Edge> = self.edge(kind, code, state, at).into_iter().collect();
+    match kind {
+      PRESS if self.grab.get().is_none() => self.grab.set(Some(code)),
+      RELEASE if self.grab.get() == Some(code) => {
+        self.grab.set(None);
+        self.escape_down.set(false);
+        let held = self.down.iter().enumerate().filter(|(_, d)| d.take().is_some());
+        edges.extend(held.map(|(which, _)| Edge::Up { which, at }));
+      }
+      _ => {}
+    }
+
+    edges
   }
 }
 
@@ -113,12 +138,13 @@ impl Grab {
     self.0.events.get()
   }
 
-  /// Grabs `chord` in place of the one before, by the key's place ([Shortcut::code]) as the
-  /// other platforms do; `Err` (none grabbed) when it has none or another app grabbed it.
-  pub fn set(&self, chord: Option<Shortcut>) -> Result<(), String> {
+  /// Grabs `chord` as place `which` in place of the one before, by the key's place
+  /// ([Shortcut::code]) as the other platforms do; `Err` (none grabbed) when it has none or
+  /// another app grabbed it.
+  pub fn set(&self, which: usize, chord: Option<Shortcut>) -> Result<(), String> {
     let s = &self.0;
     let done = (|| {
-      if let Some((code, mods)) = s.keys.chord.take() {
+      if let Some((code, mods)) = s.keys.chords[which].take() {
         s.grab(code, &[mods], false)?;
       }
 
@@ -126,7 +152,7 @@ impl Grab {
       let code = keycode(k.code()).ok_or_else(|| format!("{k} has no key on this keyboard"))?;
       let mods = mask(k.mods);
       s.grab(code, &[mods], true)?;
-      s.keys.chord.set(Some((code, mods)));
+      s.keys.chords[which].set(Some((code, mods)));
       Ok(())
     })();
     // Read after the keys are known: a press the grab's sync queued is the chord's.
@@ -158,7 +184,8 @@ impl Grab {
 
 impl Drop for Grab {
   fn drop(&mut self) {
-    let _ = (self.set(None), self.escape(false));
+    (0..MAX).for_each(|which| _ = self.set(which, None));
+    let _ = self.escape(false);
     let s = &self.0;
     unsafe {
       (gtk().g_source_remove)(s.source.get());
@@ -172,10 +199,11 @@ impl Inner {
   /// refused are undone.
   fn grab(&self, code: u8, mods: &[c_uint], on: bool) -> Result<(), String> {
     let (x, d, root, kc) = (self.x, self.d, self.root, c_int::from(code));
-    // X keeps one grab of a key and mask for the app: what the chord or Escape (Shift's mask 1
-    // or none) still holds stays.
-    let (chord, escape) = (self.keys.chord.get(), self.keys.escape.get());
-    let held = |m: c_uint| chord == Some((code, m)) || escape == Some(code) && m <= 1;
+    // X keeps one grab of a key and mask for the app: what a chord or Escape (Shift's mask 1 or
+    // none) still holds stays.
+    let (chords, escape) = (&self.keys.chords, self.keys.escape.get());
+    let chord = |m: c_uint| chords.iter().any(|c| c.get() == Some((code, m)));
+    let held = |m: c_uint| chord(m) || escape == Some(code) && m <= 1;
     let mods: Vec<_> = mods.iter().copied().filter(|&m| on || !held(m)).collect();
     let ((), error) = trap(x, d, || {
       for m in mods.iter().flat_map(|m| LOCKS.map(|lock| m | lock)) {
@@ -206,7 +234,7 @@ impl Inner {
       unsafe { (self.x.XNextEvent)(self.d, &mut event) };
       // An `XKeyEvent` (LP64): its type the first int, `state` and `keycode` at bytes 80 and 84.
       let e = unsafe { &*event.as_ptr().cast::<[c_uint; 48]>() };
-      if let Some(edge) = self.keys.edge(e[0], e[21] as u8, e[20], Instant::now()) {
+      for edge in self.keys.edges(e[0], e[21] as u8, e[20], Instant::now()) {
         self.events.set(self.events.get() + 1);
         let _ = self.tx.send(edge);
       }
@@ -243,22 +271,63 @@ mod tests {
   #[test]
   fn key_events_into_edges() {
     let (keys, at) = (Keys::default(), Instant::now());
-    keys.chord.set(Some((65, 4 | 8)));
+    keys.chords[0].set(Some((65, 4 | 8)));
     keys.escape.set(Some(9));
     let edge = |kind, code, state| keys.edge(kind, code, state, at);
+    let down = |repeat| Some(Edge::Down { which: 0, at, repeat });
+    let up = Some(Edge::Up { which: 0, at });
 
     assert_eq!(edge(PRESS, 65, 4), None, "Ctrl alone");
-    assert_eq!(edge(PRESS, 65, 4 | 8 | 2 | 16), Some(Edge::Down { at, repeat: false }));
-    assert_eq!(edge(PRESS, 65, 4 | 8), Some(Edge::Down { at, repeat: true }));
-    assert_eq!(edge(RELEASE, 65, 0), Some(Edge::Up { at }));
+    assert_eq!(edge(PRESS, 65, 4 | 8 | 2 | 16), down(false));
+    assert_eq!(edge(PRESS, 65, 4 | 8), down(true));
+    assert_eq!(edge(RELEASE, 65, 0), up);
     assert_eq!(edge(RELEASE, 65, 0), None);
 
     assert_eq!(edge(PRESS, 9, 1), Some(Edge::Escape));
     assert_eq!(edge(PRESS, 9, 1), None, "held");
     assert_eq!(edge(RELEASE, 9, 0), None);
-    assert_eq!(edge(PRESS, 65, 4 | 8), Some(Edge::Down { at, repeat: false }));
+    assert_eq!(edge(PRESS, 65, 4 | 8), down(false));
     assert_eq!(edge(PRESS, 9, 2), Some(Edge::Escape), "with Caps Lock");
-    assert_eq!(edge(RELEASE, 65, 4 | 8), Some(Edge::Up { at }));
+    assert_eq!(edge(RELEASE, 65, 4 | 8), up);
+  }
+
+  /// Ctrl+Space and Ctrl+Shift+Space (65) in places 1 and 2: each press its place's; Shift
+  /// pressed while Ctrl+Space is held repeats place 1, whose release it stays.
+  #[test]
+  fn chords_on_one_key_each_their_place() {
+    let (keys, at) = (Keys::default(), Instant::now());
+    keys.chords[1].set(Some((65, 4)));
+    keys.chords[2].set(Some((65, 4 | 1)));
+    let edge = |kind, code, state| keys.edge(kind, code, state, at);
+
+    assert_eq!(edge(PRESS, 65, 4 | 1), Some(Edge::Down { which: 2, at, repeat: false }));
+    assert_eq!(edge(RELEASE, 65, 4 | 1), Some(Edge::Up { which: 2, at }));
+    assert_eq!(edge(PRESS, 65, 4), Some(Edge::Down { which: 1, at, repeat: false }));
+    assert_eq!(edge(PRESS, 65, 4 | 1), Some(Edge::Down { which: 1, at, repeat: true }));
+    assert_eq!(edge(RELEASE, 65, 4 | 1), Some(Edge::Up { which: 1, at }));
+    assert_eq!(edge(PRESS, 65, 4 | 1), Some(Edge::Down { which: 2, at, repeat: false }));
+  }
+
+  /// F5 (71) and F6 (72) held together: F6 let go first is its own release; F5 let go first ends
+  /// X's grab, which its press began, and lets go of F6 and Escape too: their next press is one.
+  #[test]
+  fn the_grabs_end_lets_go_of_the_keys_held_with_it() {
+    let (keys, at) = (Keys::default(), Instant::now());
+    keys.chords[0].set(Some((71, 0)));
+    keys.chords[1].set(Some((72, 0)));
+    keys.escape.set(Some(9));
+    let edges = |kind, code| keys.edges(kind, code, 0, at);
+    let down = |which| vec![Edge::Down { which, at, repeat: false }];
+    let up = |which| Edge::Up { which, at };
+
+    assert_eq!((edges(PRESS, 71), edges(PRESS, 72)), (down(0), down(1)));
+    assert_eq!((edges(RELEASE, 72), edges(RELEASE, 71)), (vec![up(1)], vec![up(0)]));
+
+    assert_eq!((edges(PRESS, 71), edges(PRESS, 72)), (down(0), down(1)));
+    assert_eq!(edges(PRESS, 9), [Edge::Escape]);
+    assert_eq!(edges(RELEASE, 71), [up(0), up(1)]);
+    assert_eq!((edges(PRESS, 72), edges(PRESS, 9)), (down(1), vec![Edge::Escape]));
+    assert_eq!(edges(RELEASE, 72), [up(1)]);
   }
 
   /// The grab's keys by their place (X's keycodes on a PC keyboard) and its masks: each chord's
