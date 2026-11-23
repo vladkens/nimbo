@@ -76,7 +76,11 @@ impl Ui<'_> {
     let (boxed, pads) = (t.tip(), t.tip().pad[1] + t.tip().pad[3]);
     let widest = self.measure_wrapped(text, text_style, boxed.max[0] - pads).w;
     let boxed = if widest > 0.0 { boxed.w(px(widest.ceil() + pads)) } else { boxed };
-    self.with_key(tip).float(at).row(boxed.opacity(fade), |ui| ui.text(text, text_style));
+    self
+      .with_id(tip)
+      .allows_hit_testing(false)
+      .float(at)
+      .row(boxed.opacity(fade), |ui| ui.text(text, text_style));
   }
 }
 

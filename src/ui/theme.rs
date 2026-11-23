@@ -636,13 +636,11 @@ impl Ui<'_> {
     if self.window_focused() { t } else { t.inactive() }
   }
 
-  /// Sets the theme, kept until changed, over the OS's appearance, with its focus ring
-  /// ([Ui::set_focus_ring] after this overrides the ring) and its scrollbars
-  /// ([ScrollIndicatorStyle]).
+  /// Sets the theme, kept until changed, over the OS's appearance; its focus ring is the one the
+  /// shell puts after each view, unless the view sets its own ([Ui::set_focus_ring]).
   pub fn set_theme(&mut self, theme: Theme) {
     self.set_environment(Some(theme));
     self.set_environment(Some(ScrollIndicatorStyle { thumb: theme.thumb, fade: theme.fade }));
-    self.set_focus_ring(Some(theme.focus_ring()));
   }
 
   /// Follows the OS's appearance again ([Theme::system]), the default: light or dark with
@@ -752,7 +750,8 @@ mod tests {
   }
 
   /// The theme's focus ring rings the focused box and follows the OS's appearance; one the app
-  /// sets after [Ui::set_theme] overrides it, and the theme set again puts its own back.
+  /// sets in a frame overrides it there, whatever the theme, and the theme's comes back when the
+  /// app stops setting it.
   #[test]
   fn the_focus_ring_is_the_themes_unless_the_app_sets_one() {
     let mut h = Harness::new(Ringed::default(), Size::new(40.0, 40.0), 1.0);

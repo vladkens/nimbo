@@ -298,7 +298,7 @@ impl FormStyle {
 /// `&String`, a [Localized] (`t!("…")`), an [Icon] or `FnOnce(&mut Ui, TextStyle)`, whose
 /// parameters need their types written. A closure's texts take the style or one made from it
 /// (`s.line_limit(1)`, `s.underline(LinePattern::Dot)` on a term with [Ui::help]); its widgets dim
-/// themselves in a disabled row; a canvas of its own reads [Ui::scope_disabled].
+/// themselves in a disabled row; a canvas of its own reads [Ui::take_disabled].
 #[derive(Default)]
 pub enum Content<'s> {
   #[default]
@@ -322,10 +322,10 @@ impl Content<'_> {
     match self {
       Content::None => {}
       Content::Text(s) => {
-        ui.with_key(id).text(s, style);
+        ui.with_id(id).allows_hit_testing(false).text(s, style);
       }
       Content::Icon(i) => {
-        ui.with_key(id).icon(i.default_stroke(stroke), size, style.color);
+        ui.with_id(id).allows_hit_testing(false).icon(i.default_stroke(stroke), size, style.color);
       }
       Content::Built(f) => f(ui, style),
     }
@@ -524,7 +524,7 @@ impl Ui<'_> {
   ) -> Response {
     let (fs, Section { header, footer }) = (*fs, section.into());
     // The page's first section starts at the page's top; the others 30 under the plate above.
-    let first = self.stack_len() == 0;
+    let first = self.child_count() == 0;
     let id = self.take_id();
     self.with_id(id).col(Style::new().w(grow()), |ui| {
       if !header.is_none() {
@@ -581,7 +581,7 @@ impl Ui<'_> {
     let t = self.theme();
     let id = self.take_id();
     let off = self.take_disabled();
-    let first = self.stack_len() == 0;
+    let first = self.child_count() == 0;
     let dim = |s: TextStyle| if off { s.color(t.tertiary) } else { s };
     let top = if first { 0.0 } else { fs.hairline };
 
@@ -625,7 +625,7 @@ impl Ui<'_> {
     let line = if footer.is_none() { line } else { line.align(Align::Start, Align::Center) };
 
     let r = self.disabled_scope(off, |ui| {
-      ui.with_key(id).canvas_col(style.gap(0.0), hairline, |ui| {
+      ui.with_id(id).allows_hit_testing(style.hit).canvas_col(style.gap(0.0), hairline, |ui| {
         // The names the row's label and description replace, put back once the row or its first
         // control, in the line or the footer, took them.
         let mut outer = None;
@@ -732,7 +732,8 @@ impl Ui<'_> {
     let fs = FormStyle { row: style, ..*fs };
     let mut r = self.disabled(off).with_id(id).form_row(&fs, row, |ui| {
       // Unnamed, a click on it is the row's.
-      ui.with_key(id.key("chevron"))
+      ui.with_id(id.key("chevron"))
+        .allows_hit_testing(false)
         .canvas(Style::new().w(px(14.0)).h(px(14.0)), move |f, r| chevron(f, r, turn, ink))
     });
     self.a11y(id, Role::Button).state(State::Expanded, open);
@@ -767,7 +768,7 @@ impl Ui<'_> {
     let (id, help) = (self.take_id(), self.take_help());
     let mut r = Response::default();
     // The row by a key of its own: the "?" has the id.
-    self.with_key(id.key("footer")).row(fs.footer, |ui| {
+    self.with_id(id.key("footer")).allows_hit_testing(fs.footer.hit).row(fs.footer, |ui| {
       buttons(ui);
       if let Some(tip) = &help {
         ui.help(tip);
@@ -817,7 +818,7 @@ impl Ui<'_> {
 
     let ring = b.focused.then_some((t.focus_ring().color, t.focus_ring().width));
     let mut r = Response::default();
-    self.with_key(id.key("head")).col(head, |ui| {
+    self.with_id(id.key("head")).allows_hit_testing(head.hit).col(head, |ui| {
       if let Some(bar) = titlebar {
         let line = Style::new().w(grow()).h(px(bar.height)).center().clip();
         ui.row(line, |ui| ui.text(bar.title, fs.title));

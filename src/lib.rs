@@ -104,7 +104,7 @@ pub use ui::{
   TextStyle, Theme, Tone, ToolbarItemPlacement, Transition, TruncationMode, TypeSelect, Ui,
   UnitPoint, grow, pct, px, rigid,
 };
-pub use window::{Config, TitleBar};
+pub use window::{Config, TitleBar, WindowToolbarStyle};
 
 const USAGE: &str = "usage: [--shot <file.png>] [--scale <n>] [--size <w>x<h>] \
   [--appearance light|dark] [--locale <tag>|pseudo]";

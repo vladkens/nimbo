@@ -19,7 +19,7 @@ use nimbo::{
   ContentMode, ControlSize, Dialog, Float, Font, FormRow, FormStyle, Hotkey, Icon, Id, Item,
   LinePattern, List, ListStyle, Menu, Picker, ScrollIndicatorStyle, Section, Selection, Shortcut,
   Slider, Split, Style, Tabs, Tag, TextStyle, Tone, ToolbarItemPlacement, TruncationMode, Ui,
-  UnitPoint, alpha, grow, px, t, tn,
+  UnitPoint, WindowToolbarStyle, alpha, grow, px, t, tn,
 };
 
 pub const SIDEBAR: &str = "sidebar";
@@ -105,21 +105,21 @@ pub const BLOCKS: &[Block] = &[
   b("Containers", "Split", "HSplitView { … }", "Split::new(Axis::Horizontal).ratio(&mut self.side).show(ui, |ui, pane| { … })"),
   b("Containers", "Navigation split", "NavigationSplitView { … } detail: { … }", "Split::navigation().ratio(&mut self.side).show(ui, |ui, pane| { … })"),
   b("Containers", "Toolbar", "Detail().toolbar { ToolbarItem(placement: .principal) { … }; ToolbarItem(placement: .primaryAction) { … } } in a NavigationSplitView", "ui.toolbar(|ui| ui.toolbar_item(ToolbarItemPlacement::PrimaryAction, |ui| _ = ui.icon_button(Icon::DOC))) in a column"),
-  b("Containers", "Unified toolbar", ".windowToolbarStyle(.unified)", "ui.unified_toolbar(); ui.row(band, |ui| { … }) at the window's top"),
+  b("Containers", "Unified toolbar", ".windowToolbarStyle(.unified)", "ui.window_toolbar_style(WindowToolbarStyle::Unified); ui.row(band, |ui| { … }) at the window's top"),
   b("Containers", "Menu", "Menu(\"Actions\") { Button(…) }", "ui.menu(\"Actions\", |ui| { ui.menu_item(\"Copy\"); })"),
   b("Containers", "Lazy column", "LazyVStack { ForEach(…) }", "ui.virtual_col(heights, |i| i, |ui, i| { … })"),
   b("Containers", "Scroll behavior", "ScrollView { … }.scrollIndicators(.hidden).onScrollGeometryChange(…) { … }", "let b = ui.scroll_behavior(id, Axes::VERTICAL); ui.with_id(id).col(style.scroll(Axes::VERTICAL), |ui| { …; if let Some(bar) = b.bars[1] { … } })"),
   b("Containers", "Scroll indicators", "NSScroller.knobStyle = .light (AppKit; SwiftUI has none)", "let old = ui.set_environment(Some(ScrollIndicatorStyle { thumb: red, ..ScrollIndicatorStyle::LIGHT })); ui.scroll_area(style, |ui| { … }); ui.set_environment(old)"),
-  b("Containers", "Stack queries", "Divider() follows its stack's axis (SwiftUI has no API for it)", "let line = match ui.stack_axis() { Axis::Horizontal => v, Axis::Vertical => h }; ui.stack_len() == 0; ui.element_count()"),
+  b("Containers", "Stack queries", "Divider() follows its stack's axis (SwiftUI has no API for it)", "let line = match ui.parent_axis() { Some(Axis::Horizontal) => v, _ => h }; ui.child_count() == 0"),
   b("Presentation", "Alert", ".alert(\"Delete?\", isPresented: $ask) { Button(\"Delete\", role: .destructive) }", "Dialog::new(\"Delete?\").button(\"Delete\", ButtonRole::Destructive).show(ui, &mut self.ask)"),
   b("Presentation", "Context menu", ".contextMenu { Button(\"Copy\") { … } }", "ui.context_menu(r.id, || Menu::new(vec![Item::button(Action::Copy, \"Copy\")])); match ui.native_menu(id, at, menu) { NativeMenu::Unavailable => /* draw it */, NativeMenu::Unanswered => {}, NativeMenu::Answered(a) => … }"),
-  b("Presentation", "Tooltip", ".help(\"Saves it\")", "ui.help(\"Saves it\").button(\"Save\")"),
+  b("Presentation", "Tooltip", ".help(\"Saves it\")", "ui.help(\"Saves it\").button(\"Save\"); for (id, tip) in ui.take_tooltips() { /* a look of its own */ }"),
   b("Modifiers", "Disabled", ".disabled(true)", "ui.disabled(true).col(Style::new(), |ui| { … })"),
   b("Modifiers", "Control size", ".controlSize(.small)", "ui.control_size(ControlSize::Small).row(Style::new(), |ui| { … })"),
   b("Modifiers", "Accessibility label", ".accessibilityLabel(\"Reset\")", "ui.a11y_label(\"Reset\").icon_button(Icon::RESET)"),
   b("Modifiers", "Keyboard shortcut", ".keyboardShortcut(\"z\", modifiers: .command)", "ui.keymap(&[bind(Shortcut::char('z').cmd(), Command::Undo)]).col(…)"),
   b("Modifiers", "Environment", ".environment(\\.tint, .green); @Environment(\\.tint) var tint", "let old = ui.set_environment(Some(Tint(t.success))); ui.environment::<Tint>(); ui.set_environment(old)"),
-  b("Modifiers", "Identity", "Box().id(item.id)", "ui.key(item.id).row(style, |ui| { … }); ui.with_key(id.key(\"box\")).col(style, |ui| { … })"),
+  b("Modifiers", "Identity", "Box().id(item.id); .allowsHitTesting(false)", "ui.key(item.id).row(style, |ui| { … }); ui.with_id(id.key(\"box\")).allows_hit_testing(false).col(style, |ui| { … })"),
   b("Modifiers", "Widget parts", ".environment(\\.isEnabled, true); .help(tip) on a part", "let tip = ui.take_help(); ui.disabled_scope(false, |ui| { if let Some(tip) = &tip { ui.help(tip); } ui.button(\"Undo\") })"),
   b("Modifiers", "Frame request", "TimelineView(.animation) { context in … }", "ui.request_frame(); let k = ui.now().as_secs_f32() % 1.0"),
   b("Modifiers", "Accessibility pair", ".accessibilityLabeledPair(role: .label, id: \"volume\", in: ns); Text(\"New\")", "let at = ui.element_count(); ui.text(\"Volume\", s); let old = ui.form_names(at..ui.element_count(), 0..0); ui.slider(&mut v, 0.0..=1.0); ui.set_slot(old); ui.a11y_row(row, Role::Row); ui.a11y_named(id, Role::StaticText, \"New\")"),
@@ -547,7 +547,7 @@ impl Gallery {
       // A band of the app's own: at a window's top it would ask for a toolbar's title bar.
       "Unified toolbar" => Self::variants(ui, Shown::Alone, |ui| {
         let band = Style::new().w(px(360.0)).h(px(52.0)).radius(8.0).pad_xy(12.0, 0.0).bg(t.panel);
-        ui.unified_toolbar();
+        ui.window_toolbar_style(WindowToolbarStyle::Unified);
         ui.row(band.align(Align::Start, Align::Center).gap(8.0), |ui| {
           ui.text("Notes", t.label());
           ui.spacer();
@@ -558,8 +558,10 @@ impl Gallery {
       // Each stack's axis and children so far, read where the text goes.
       "Stack queries" => Self::variants(ui, Shown::Alone, |ui| {
         let read = |ui: &mut Ui| {
-          let (axis, n) = (ui.stack_axis(), ui.stack_len());
-          ui.text(format_args!("{axis:?}, {n} before"), t.label());
+          let (axis, n) = (ui.parent_axis(), ui.child_count());
+          if let Some(axis) = axis {
+            ui.text(format_args!("{axis:?}, {n} before"), t.label());
+          }
         };
         ui.row(line(8.0), |ui| (0..2).for_each(|_| read(ui)));
         ui.col(Style::new().gap(4.0), |ui| (0..2).for_each(|_| read(ui)));
@@ -658,7 +660,7 @@ impl Gallery {
       // Keyed boxes: a key of its own each, the last a ready id.
       "Identity" => Self::variants(ui, Shown::Alone, |ui| {
         (0..3).for_each(|k| _ = ui.key(k).el(swatch(t.raised)));
-        ui.with_key(Id::of("identity").key("box")).el(swatch(t.accent));
+        ui.with_id(Id::of("identity").key("box")).allows_hit_testing(false).el(swatch(t.accent));
       }),
 
       // A part enabled in a disabled container, with the tip the widget was given.

@@ -119,24 +119,27 @@ impl<'s> Slider<'s> {
       // As much room over the track as the labels take under it: the track stays in the middle,
       // in line with a row's title or the controls beside it.
       let lh = ui.line_height(style);
-      ui.with_key(id.key("ticks")).col(width.pads([lh, 0.0, 0.0, 0.0]), |ui| {
-        r = ui.with_id(id).canvas(s, paint);
-        ui.row(Style::new().w(grow()), |ui| {
-          // Left to right: where the last one ends, and where the next may start.
-          let (mut end, mut free) = (0.0, 0.0);
-          for (k, label) in &labels {
-            let lw = ui.measure(label, style);
-            let at = (kw / 2.0 + (w - kw) * k - lw / 2.0).min(w - lw).max(0.0);
-            if at < free || at + lw > w {
-              continue;
-            }
+      ui.with_id(id.key("ticks")).allows_hit_testing(false).col(
+        width.pads([lh, 0.0, 0.0, 0.0]),
+        |ui| {
+          r = ui.with_id(id).canvas(s, paint);
+          ui.row(Style::new().w(grow()), |ui| {
+            // Left to right: where the last one ends, and where the next may start.
+            let (mut end, mut free) = (0.0, 0.0);
+            for (k, label) in &labels {
+              let lw = ui.measure(label, style);
+              let at = (kw / 2.0 + (w - kw) * k - lw / 2.0).min(w - lw).max(0.0);
+              if at < free || at + lw > w {
+                continue;
+              }
 
-            ui.el(Style::new().w(px(at - end)));
-            ui.text(label, style);
-            (end, free) = (at + lw, at + lw + LABEL_GAP);
-          }
-        });
-      });
+              ui.el(Style::new().w(px(at - end)));
+              ui.text(label, style);
+              (end, free) = (at + lw, at + lw + LABEL_GAP);
+            }
+          });
+        },
+      );
       r
     };
 

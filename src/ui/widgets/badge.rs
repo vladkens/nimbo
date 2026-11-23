@@ -31,6 +31,9 @@ impl Ui<'_> {
     let pill = pill.w(rigid()).opacity(opacity);
     let text = s.to_string();
     self.a11y_named(id, Role::StaticText, &text);
-    self.with_key(id).row(pill, |ui| ui.text(&text, TextStyle::new(font, t.tone(tone)).nowrap()))
+    self
+      .with_id(id)
+      .allows_hit_testing(false)
+      .row(pill, |ui| ui.text(&text, TextStyle::new(font, t.tone(tone)).nowrap()))
   }
 }

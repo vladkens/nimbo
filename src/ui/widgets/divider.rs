@@ -9,9 +9,9 @@ impl Ui<'_> {
   /// `Divider`: down a row, along a column (or a grid). It takes no input.
   pub fn divider(&mut self) -> Response {
     let t = self.theme();
-    let line = match self.stack_axis() {
-      Axis::Horizontal => Style::new().w(px(1.0)).h(grow()),
-      Axis::Vertical => Style::new().w(grow()).h(px(1.0)),
+    let line = match self.parent_axis() {
+      Some(Axis::Horizontal) => Style::new().w(px(1.0)).h(grow()),
+      Some(Axis::Vertical) | None => Style::new().w(grow()).h(px(1.0)),
     };
 
     self.el(line.bg(t.line))

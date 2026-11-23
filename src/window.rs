@@ -55,6 +55,21 @@ impl TitleBar {
   }
 }
 
+/// How the title bar of a window whose content runs under it ([Config::unified]) shows a
+/// toolbar, as SwiftUI's `.windowToolbarStyle` ([Ui::window_toolbar_style]); in any other window
+/// it changes nothing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum WindowToolbarStyle {
+  /// The window's own: a toolbar's height while the view builds a toolbar at the window's top
+  /// (nimbo's `ui.toolbar`), the title bar's alone otherwise.
+  #[default]
+  Automatic,
+  /// A toolbar's height, the window's buttons centred in it, as AppKit's unified toolbar (macOS
+  /// an empty `NSToolbar`): for a band of the view's own drawn at the window's top.
+  Unified,
+}
+
 /// A window's title and initial content size in points; the harness renders at this size.
 pub struct Config {
   pub title: &'static str,
@@ -154,7 +169,9 @@ impl Config {
   /// under it and its size is the window's, the app draws the title in the band at the top
   /// ([Ui::titlebar]) and moves the window from its empty parts
   /// ([Ui::drags_window]); [Ui::toolbar_tabs] does both. A [Ui::toolbar] gives the title bar a
-  /// toolbar's height, its items beside the window's buttons.
+  /// toolbar's height, its items beside the window's buttons, as
+  /// [WindowToolbarStyle::Unified] ([Ui::window_toolbar_style]) does for a band of the view's own:
+  /// this window's content under its title bar is what that style shapes.
   ///
   /// Per OS: macOS a full-size content view under a transparent title bar, its title hidden (the
   /// Window menu and Mission Control still show it), the traffic lights over the content; with a

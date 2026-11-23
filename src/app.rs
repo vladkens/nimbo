@@ -711,7 +711,7 @@ fn run_view<'a, A: App>(
   ui.text = Some(std::mem::replace(text, TextSystem::new(scale)));
   std::mem::swap(images, &mut ui.images);
   app.view(ui);
-  for (id, tip) in ui.take_helps() {
+  for (id, tip) in ui.take_tooltips() {
     ui.tooltip(id, &tip);
   }
 

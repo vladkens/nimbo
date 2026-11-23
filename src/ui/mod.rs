@@ -99,7 +99,7 @@ use crate::app::{Appearance, Clipboard, Event, MouseButton, Waker};
 use crate::keys::{Binding, Os};
 use crate::scene::{Frame, ImageId, Images, Point, Rect, Size};
 use crate::text::{Font, Metrics, TextSystem};
-use crate::{FileDialog, TitleBar};
+use crate::{FileDialog, TitleBar, WindowToolbarStyle};
 
 /// Which way focus moves among the focusable elements ([Ui::focus_next]): Tab and Shift-Tab,
 /// as SwiftUI's `FocusDirection`.
@@ -140,8 +140,8 @@ pub(crate) struct UiState {
   pub(crate) clipboard: Box<dyn Clipboard>,
   /// Values the whole window shares, one per type ([Ui::environment]).
   env: Vec<Box<dyn Any>>,
-  /// The focus ring the app set ([Ui::set_focus_ring]), over the theme's, which the shell puts
-  /// each frame ([Ui::set_default_focus_ring]).
+  /// The focus ring the view set this frame ([Ui::set_focus_ring]), over the default, which the
+  /// shell puts after each view ([Ui::set_default_focus_ring]).
   own_ring: Option<Option<FocusRing>>,
   ring: Option<FocusRing>,
   /// The OS's look ([Ui::appearance]).
@@ -162,8 +162,8 @@ pub(crate) struct UiState {
   pub(crate) menu_seq: u32,
   /// The title bar over the content ([Ui::titlebar]).
   pub(crate) titlebar: Option<TitleBar>,
-  /// The view asked for a toolbar's title bar ([Ui::unified_toolbar]): the platform gives the
-  /// title bar a toolbar's height.
+  /// The view asked for a toolbar's title bar ([Ui::window_toolbar_style]): the platform gives
+  /// the title bar a toolbar's height.
   pub(crate) toolbar: bool,
   /// The images [Ui::image] and [Ui::rgba_image] added: their pixels' hash or a bitmap's
   /// identity, the image, and whether a view built it since the last frame.
@@ -464,6 +464,8 @@ pub struct Ui<'a> {
   next_autofocus: bool,
   /// The next element moves the window when pressed ([Ui::drags_window]).
   next_drag: bool,
+  /// The next element takes no pointer input of its own ([Ui::allows_hit_testing]).
+  next_no_hit: bool,
   /// The runtime's text system, lent while the view runs ([Ui::measure]).
   pub(crate) text: Option<TextSystem>,
   /// The runtime's images, lent while the view runs ([Ui::rgba_image]).
@@ -488,7 +490,7 @@ impl<'a> Ui<'a> {
     st.stack.push((0, 0));
     st.animating = false;
     st.input.moves = false;
-    (st.grab, st.ring_on, st.toolbar) = (None, None, false);
+    (st.grab, st.ring_on, st.toolbar, st.own_ring) = (None, None, false, None);
     st.input.now = now;
     let (next_id, next_float, next_keymap) = (None, None, None);
     let canvases = Vec::new();
@@ -508,6 +510,7 @@ impl<'a> Ui<'a> {
       scopes: Vec::new(),
       next_autofocus,
       next_drag: false,
+      next_no_hit: false,
       text: None,
       images: Images::default(),
       next_span: 1,
@@ -590,11 +593,13 @@ impl<'a> Ui<'a> {
     self.st.titlebar
   }
 
-  /// Gives the title bar a toolbar's height this frame, as AppKit's unified toolbar (macOS an
-  /// empty `NSToolbar`), for a toolbar the view draws at the window's top ([Ui::toolbar] asks it
-  /// itself). Ask it each frame.
-  pub fn unified_toolbar(&mut self) {
-    self.st.toolbar = true;
+  /// How the title bar shows a toolbar this frame ([WindowToolbarStyle]), as SwiftUI's
+  /// `.windowToolbarStyle`: [WindowToolbarStyle::Unified] gives it a toolbar's height for a band
+  /// the view draws at the window's top (nimbo's `ui.toolbar` asks it itself). Only a window whose
+  /// content runs under its title bar ([crate::Config::unified]) has one to change. Ask it each
+  /// frame; [WindowToolbarStyle::Automatic] takes back nothing asked in the frame.
+  pub fn window_toolbar_style(&mut self, style: WindowToolbarStyle) {
+    self.st.toolbar |= style == WindowToolbarStyle::Unified;
   }
 
   /// Asks the window for `w` points wide and as high as its content, between `min_h` and
@@ -682,10 +687,15 @@ impl<'a> Ui<'a> {
     self
   }
 
-  /// Keys the next element with a ready id, as [Ui::key] does: identity only, no pointer input.
-  /// A widget's part keyed off the widget's id (`id.key("box")`).
-  pub fn with_key(&mut self, id: Id) -> &mut Self {
-    self.next_id = Some((id, false));
+  /// Whether the next element takes pointer input of its own, as SwiftUI's `.allowsHitTesting`:
+  /// `false` leaves it to what is under it, named or not, so a part a widget names off its own
+  /// id (`ui.with_id(id.key("box")).allows_hit_testing(false)`) has an identity, a rect and a
+  /// record for assistive technology but no hover, press or click, and a click on it is its
+  /// parent's. Unlike SwiftUI's, the elements inside it keep theirs. Not for a scroll container,
+  /// a focusable element or one with [Ui::help], which take the pointer to work. `true`, the
+  /// default, changes nothing.
+  pub fn allows_hit_testing(&mut self, yes: bool) -> &mut Self {
+    self.next_no_hit = !yes;
     self
   }
 
@@ -725,10 +735,12 @@ impl<'a> Ui<'a> {
     self.next_help.take()
   }
 
-  /// The tooltips the view asked for with [Ui::help], after it: each element built and its tip,
-  /// for the shell to show. One with no record for assistive technology gets one to carry the
-  /// tip: a text as itself, any other a group, whose children are read as ever.
-  pub(crate) fn take_helps(&mut self) -> Vec<(Id, String)> {
+  /// The tooltips this frame asked for with [Ui::help] so far: each element built with one and
+  /// its tip, to show the one the pointer rests on in a design system's own look, at the end of
+  /// the view. Taken: the shell shows those left after the view (nimbo's styled tooltip), so
+  /// a view that takes them draws them all. One with no record for assistive technology gets one
+  /// to carry the tip: a text as itself, any other a group, whose children are read as ever.
+  pub fn take_tooltips(&mut self) -> Vec<(Id, String)> {
     let mut out = Vec::with_capacity(self.helps.len());
     for (i, tip) in std::mem::take(&mut self.helps) {
       let n = &self.st.tree.nodes[i as usize];
@@ -824,12 +836,6 @@ impl<'a> Ui<'a> {
     r
   }
 
-  /// Whether widgets built now are disabled by a container's [Ui::disabled]: for a canvas that
-  /// dims itself.
-  pub fn scope_disabled(&self) -> bool {
-    self.scope_off
-  }
-
   /// Whether the next widget is disabled ([Ui::disabled], on it or on a container around it),
   /// for the widget to read once.
   pub fn take_disabled(&mut self) -> bool {
@@ -871,19 +877,21 @@ impl<'a> Ui<'a> {
     self.el(Style::new().grow())
   }
 
-  /// The axis the container being built lays its children along: horizontal in a row, vertical
-  /// in a column or a grid, as SwiftUI's `Divider` follows its stack.
-  pub fn stack_axis(&self) -> Axis {
+  /// The axis the container being built, the next element's parent, lays its children along:
+  /// horizontal in a row, vertical in a column (the window's root is one), as SwiftUI's
+  /// `Divider` follows its stack; `None` in a grid, which lays them along both.
+  pub fn parent_axis(&self) -> Option<Axis> {
     let parent = self.st.stack.last().map_or(0, |s| s.0);
     match self.st.tree.nodes[parent as usize].flow {
-      Flow::Row => Axis::Horizontal,
-      _ => Axis::Vertical,
+      Flow::Row => Some(Axis::Horizontal),
+      Flow::Column => Some(Axis::Vertical),
+      Flow::Grid(_) => None,
     }
   }
 
-  /// How many children the container being built has so far: 0 before its first (a section's
-  /// first row, with no line above it).
-  pub fn stack_len(&self) -> usize {
+  /// How many children the container being built has so far, the next element's place among
+  /// them: 0 before its first (a section's first row, with no line above it).
+  pub fn child_count(&self) -> usize {
     self.st.stack.last().map_or(0, |s| s.1 as usize)
   }
 
@@ -1012,7 +1020,7 @@ impl<'a> Ui<'a> {
 
     let (drag, help) = (std::mem::take(&mut self.next_drag), self.next_help.take());
     let hit = style.hit || named || scrolls || focus || style.cursor != Cursor::Inherit;
-    let hit = hit || help.is_some();
+    let hit = (hit || help.is_some()) && !std::mem::take(&mut self.next_no_hit);
     let tree = &mut self.st.tree;
     let i = tree.nodes.len() as u32;
     self.helps.extend(help.map(|tip| (i, tip)));
@@ -1239,12 +1247,13 @@ mod tests {
     let mut ui = Ui::new(UiState::default(), Size::new(10.0, 10.0), None, Duration::ZERO);
     let at = ui.element_count();
     ui.row(Style::new(), |ui| {
-      assert_eq!((ui.stack_axis(), ui.stack_len()), (Axis::Horizontal, 0));
+      assert_eq!((ui.parent_axis(), ui.child_count()), (Some(Axis::Horizontal), 0));
       ui.el(Style::new());
-      assert_eq!(ui.stack_len(), 1);
-      ui.col(Style::new(), |ui| assert_eq!(ui.stack_axis(), Axis::Vertical));
+      assert_eq!(ui.child_count(), 1);
+      ui.col(Style::new(), |ui| assert_eq!(ui.parent_axis(), Some(Axis::Vertical)));
+      ui.grid(2, Style::new(), |ui| assert_eq!(ui.parent_axis(), None));
     });
-    assert_eq!(ui.element_count() - at, 3);
+    assert_eq!(ui.element_count() - at, 4);
   }
 
   /// A part enabled in a disabled container, which is disabled again after it.

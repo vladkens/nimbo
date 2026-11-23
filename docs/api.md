@@ -380,7 +380,7 @@ nimbo: `ui.toolbar(|ui| ui.toolbar_item(ToolbarItemPlacement::PrimaryAction, |ui
 
 SwiftUI: `.windowToolbarStyle(.unified)`
 
-nimbo: `ui.unified_toolbar(); ui.row(band, |ui| { … }) at the window's top`
+nimbo: `ui.window_toolbar_style(WindowToolbarStyle::Unified); ui.row(band, |ui| { … }) at the window's top`
 
 ![Unified toolbar](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/unified-toolbar.png)
 
@@ -420,7 +420,7 @@ nimbo: `let old = ui.set_environment(Some(ScrollIndicatorStyle { thumb: red, ..S
 
 SwiftUI: `Divider() follows its stack's axis (SwiftUI has no API for it)`
 
-nimbo: `let line = match ui.stack_axis() { Axis::Horizontal => v, Axis::Vertical => h }; ui.stack_len() == 0; ui.element_count()`
+nimbo: `let line = match ui.parent_axis() { Some(Axis::Horizontal) => v, _ => h }; ui.child_count() == 0`
 
 ![Stack queries](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/stack-queries.png)
 
@@ -446,7 +446,7 @@ nimbo: `ui.context_menu(r.id, || Menu::new(vec![Item::button(Action::Copy, "Copy
 
 SwiftUI: `.help("Saves it")`
 
-nimbo: `ui.help("Saves it").button("Save")`
+nimbo: `ui.help("Saves it").button("Save"); for (id, tip) in ui.take_tooltips() { /* a look of its own */ }`
 
 ![Tooltip](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/tooltip.png)
 
@@ -494,9 +494,9 @@ nimbo: `let old = ui.set_environment(Some(Tint(t.success))); ui.environment::<Ti
 
 ### Identity
 
-SwiftUI: `Box().id(item.id)`
+SwiftUI: `Box().id(item.id); .allowsHitTesting(false)`
 
-nimbo: `ui.key(item.id).row(style, |ui| { … }); ui.with_key(id.key("box")).col(style, |ui| { … })`
+nimbo: `ui.key(item.id).row(style, |ui| { … }); ui.with_id(id.key("box")).allows_hit_testing(false).col(style, |ui| { … })`
 
 ![Identity](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/identity.png)
 
