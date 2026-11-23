@@ -39,12 +39,12 @@ The layer rules look at the whole crate on every run (errors):
                 design system, the shell, the harness, the crate root; PLACES puts each file in
                 one); a `pub use` counts only when its file uses the name too; the platform
                 facades (FACADES) are the platform's front and may be used from any layer; or
-                calls a method of `Ui` / `UiState` that only a higher layer defines, by its name
-  private       a file of the styled layer uses what a lower layer keeps to the crate, which a
-                design system outside the crate couldn't: a field (`ui.st`, `self.next_id`), a
-                type, a method or a function (a path to it or a name its `use` brings in) that
-                is not `pub` there, by its name, unless a lower layer has a `pub` one of the
-                name, the styled layer one of its own or std's types a method
+                calls on a `Ui` / `UiState` (`ui`, `self`, `u: &mut Ui`) a method only a higher
+                layer defines
+  private       a styled file reaches what a lower layer keeps to the crate, which a design
+                system outside it couldn't: a `pub(crate)`, `pub(super)` or `pub(in ..)` item,
+                or a private one of a module above the file, that a `use`, a glob or a path
+                brings in; or such a field or method of a `Ui` / `UiState` (`ui.st`)
   os            OS crates or `cfg(target_os)`-style gates outside src/platform/
   unplaced      a file of the crate no PLACES entry covers, or an entry no file matches
 
@@ -605,18 +605,15 @@ def links(scans: "Scans") -> dict[tuple[str, str, str], list[tuple[str, int]]]:
             continue
 
         sc = scans[path]
-        text = "\n".join(sc.codes)
-        starts = list(itertools.accumulate((len(x) + 1 for x in sc.codes[:-1]), initial=0))
-        uses = [(m.start(), m.end(), expand(m[1])) for m in USE.finditer(text)]
-        refs = [(a, x) for a, _, xs in uses for x in xs]
+        uses = [(i, m.span(), expand(m[1])) for i, m in matches(sc, USE)]
+        refs = [(i, x) for i, _, xs in uses for x in xs]
         refs += [
-            (m.start(), [m[1], *re.split(r"\s*::\s*", m[2].strip())[1:]])
-            for m in PATH.finditer(text)
-            if not any(a <= m.start() < b for a, b, _ in uses)
+            (i, [m[1], *re.split(r"\s*::\s*", m[2].strip())[1:]])
+            for i, m in matches(sc, PATH)
+            if not any(a <= m.start() < b for _, (a, b), _ in uses)
         ]
-        for pos, segs in refs:
-            i = bisect.bisect_right(starts, pos) - 1
-            to = None if sc.test[i] else resolve(mod + sc.mods[i], segs)
+        for i, segs in refs:
+            to = resolve(mod + sc.mods[i], segs)
             if to and to[0] in tops[root] and to[0] != mod[0]:
                 at = out[(root, mod[0], to[0])]
                 if (path, i + 1) not in at:
@@ -799,13 +796,11 @@ BASELINE = "scripts/lint-baseline.txt"
 PUB_USE = re.compile(r"^\s*pub(?:\([^)]*\))?\s+use\b")
 MACRO = re.compile(r"#\[macro_export\]\s*macro_rules!\s*(\w+)")
 VIS = r"(?:(pub(?:\([^)]*\))?)\s+)?"
-TYPE_DEF = re.compile(rf"^[ \t]*{VIS}(?:struct|enum|union|trait|type)\s+(\w+)", re.MULTILINE)
-FN_DEF = re.compile(
-    rf"^[ \t]*{VIS}(?:(?:const|async|unsafe|extern\s*\"\")\s+)*fn\s+(\w+)[^(]*"
-    r"\(\s*(?:&\s*(?:'\w+\s+)?)?(?:mut\s+)?(self\b)?",
+ITEM = re.compile(
+    rf"^[ \t]*{VIS}(?:(?:const|async|unsafe|extern\s*\"\")\s+)*"
+    r"(struct|enum|union|trait|type|fn|const|static|mod)\s+(?:mut\s+)?(\w+)",
     re.MULTILINE,
 )
-STRUCT = re.compile(rf"^[ \t]*{VIS}struct\s+(\w+)[^;{{(]*\{{", re.MULTILINE)
 FIELD = re.compile(r"^\s*(?:#\[[^\]]*\]\s*)*(pub(?:\([^)]*\))?\s+)?(\w+)\s*:")
 # An impl or trait block, the trait it implements and its type.
 IMPL = re.compile(
@@ -813,15 +808,13 @@ IMPL = re.compile(
     r"\s*([^{\n]*?\bfor\s+)?(?:\w+::)*(\w+)[^{\n]*\{",
     re.MULTILINE,
 )
-METHOD = re.compile(r"\.\s*(\w+)\s*(?:::<[^>]*>)?\s*\(")
-# A function called by a path, or by its bare name: `::` when the path names it.
-CALL = re.compile(r"(?:(::)\s*|(?<![\w.:])(?<!fn ))(\w+)\s*(?:::<[^>]*>)?\s*\(")
-FIELD_USE = re.compile(r"\b(?:self|ui)\s*\.\s*(\w+)\b(?!\s*(?:\(|::))")
-TYPE_USE = re.compile(r"(?<![\w.])[A-Z]\w*")
-# Methods of std types that a function of the crate may share a name with.
-STD_NAMES = {"take", "get", "insert", "remove", "push", "pop", "len", "contains", "clear", "iter"}
-STD_NAMES |= {"map", "set", "replace", "new", "hash", "finish", "read", "write", "fmt", "cmp", "eq"}
-STD_NAMES |= {"open", "retain"}
+# The ui core's types: the styled layer reaches only their `pub` fields and methods.
+CORE = ("Ui", "UiState")
+# A binding of a Ui or UiState: `u: &mut Ui`.
+TYPED = re.compile(r"\b(\w+)\s*:\s*&\s*(?:'\w+\s+)?(?:mut\s+)?(?:Ui|UiState)\b")
+# A field `.name`, or a method `.name(`, of what comes before.
+MEMBER = re.compile(r"\s*\.\s*(\w+)\s*(?:::<[^>]*>\s*)?(\()?")
+PATHS = re.compile(r"(?<![\w:$])\w+(?:\s*::\s*\w+)+")
 OS_CRATE = re.compile(r"\b(objc2\w*|block2|dispatch2|windows_sys)\s*::")
 OS_GATE = re.compile(
     r"\bcfg(?:_attr)?\s*!?\s*\((?:[^\];{}()]|\()*?\b(target_os|target_family|target_vendor|windows|unix)\b"
@@ -869,15 +862,9 @@ def exports(scans: "Scans", tree: dict) -> dict[tuple[str, ...], tuple[str, ...]
     found = []
     for path, (_, mod) in tree.items():
         sc = scans[path]
-        text = "\n".join(sc.codes)
-        starts = list(itertools.accumulate((len(x) + 1 for x in sc.codes[:-1]), initial=0))
-        for m in USE.finditer(text):
-            line = bisect.bisect_right(starts, m.start()) - 1
-            if not sc.test[line]:
-                cur = mod + sc.mods[line]
-                found += [
-                    (cur, segs, name, PUB_USE.match(sc.codes[line])) for segs, name in named(m[1])
-                ]
+        for i, m in matches(sc, USE):
+            public = PUB_USE.match(sc.codes[i])
+            found += [(mod + sc.mods[i], segs, name, public) for segs, name in named(m[1])]
 
     out = {}
     for cur, segs, name, public in found:
@@ -923,34 +910,28 @@ def target(segs: tuple[str, ...], files: dict, reexp: dict) -> str | None:
     return next((files[segs[:i]] for i in range(len(segs), -1, -1) if segs[:i] in files), None)
 
 
-def edges(scans: "Scans") -> list[tuple[str, int, str, str]]:
+def edges(scans: "Scans", tree: dict, files: dict) -> list[tuple[str, int, tuple, str]]:
     """The uses of one file's items by another, outside tests, `#[cfg(doc)]` and re-exports: the
-    file, line, the path as written and the file it names."""
-    tree = {x: v for x, v in modules(scans).items() if v[0] == "src/lib.rs"}
-    files = {mod: path for path, (_, mod) in tree.items()}
-    reexp = exports(scans, tree)
-    out = []
+    file, line, the crate path it names and the file that defines it."""
+    reexp, out = exports(scans, tree), []
     for path, (_, mod) in sorted(tree.items()):
         sc = scans[path]
-        text = "\n".join(sc.codes)
-        starts = list(itertools.accumulate((len(x) + 1 for x in sc.codes[:-1]), initial=0))
-        uses = [(m.start(), m.end(), named(m[1])) for m in USE.finditer(text)]
-        refs = [(a, segs, name) for a, _, xs in uses for segs, name in xs]
+        uses = [(i, m.span(), named(m[1])) for i, m in matches(sc, USE)]
+        refs = [(i, segs, name) for i, _, xs in uses for segs, name in xs]
         refs += [
-            (m.start(), segs, segs[-1])
-            for m in PATH.finditer(text)
-            if not any(a <= m.start() < b for a, b, _ in uses)
+            (i, segs, segs[-1])
+            for i, m in matches(sc, PATH)
+            if not any(a <= m.start() < b for _, (a, b), _ in uses)
             for segs in [[m[1], *re.split(r"\s*::\s*", m[2].strip())[1:]]]
         ]
-        bare = text
-        for a, b, _ in uses:
+        bare = sc.text
+        for _, (a, b), _ in uses:
             bare = bare[:a] + re.sub(r"[^\n]", " ", bare[a:b]) + bare[b:]
 
         # Tests don't count: a name used only there doesn't make its re-export a use.
         used = set(USED.findall("\n".join(x for x, t in zip(bare.split("\n"), sc.test) if not t)))
-        for pos, segs, name in refs:
-            i = bisect.bisect_right(starts, pos) - 1
-            if sc.test[i] or "#[cfg(doc)]" in sc.raws[max(0, i - 1)]:
+        for i, segs, name in refs:
+            if "#[cfg(doc)]" in sc.raws[max(0, i - 1)]:
                 continue
 
             # A re-export alone isn't a use; the file using the name it brings in is.
@@ -960,87 +941,104 @@ def edges(scans: "Scans") -> list[tuple[str, int, str, str]]:
             to = absolute(mod + sc.mods[i], segs, files)
             file = to and target(to, files, reexp)
             if file and file != path:
-                out.append((path, i + 1, "::".join(x for x in to if x != "*"), file))
+                out.append((path, i + 1, to, file))
 
     return out
 
 
-@dataclass
-class Def:
-    kind: str  # fn, method (a fn that takes self), field or type
-    name: str
-    public: bool  # `pub`, or a trait's
-    owner: str | None  # the type a fn is implemented on, or a field's struct
+def block(sc: Scan, pos: int) -> re.Match | None:
+    """The innermost impl or trait block around pos outside function bodies, as IMPL matched it."""
+    if not hasattr(sc, "impls"):
+        found = [m for i, m in matches(sc, IMPL) if not sc.body[i]]
+        sc.impls = [(m.start(), closing(sc.text, m.end() - 1), m) for m in found]
+
+    return next((m for a, z, m in reversed(sc.impls) if a < pos < z), None)
 
 
-def defs(sc: Scan) -> list[Def]:
-    """The items a file defines outside tests: its types, its structs' fields and its functions,
-    those of an impl block with its type."""
+def defs(sc: Scan) -> list[tuple[int, str, str, str | None, str | None]]:
+    """The items a file defines outside tests and function bodies, and Ui's and UiState's fields:
+    the line, kind, name, visibility (None if private) and the type whose impl block has it ("" a
+    trait's, as public as the trait)."""
     if hasattr(sc, "defs"):
         return sc.defs
 
-    # What a function body defines is its own.
-    found = {p: [m for i, m in matches(sc, p) if not sc.body[i]] for p in (IMPL, TYPE_DEF, STRUCT)}
-    text, fns = sc.text, [m for i, m in matches(sc, FN_DEF) if not sc.body[i]]
-    blocks = [(m.start(), closing(text, m.end() - 1), m) for m in found[IMPL]]
-    out = [Def("type", m[2], m[1] == "pub", None) for m in found[TYPE_DEF]]
-    for m in found[STRUCT]:
-        body = text[m.end() : closing(text, m.end() - 1) - 1]
-        fields = (FIELD.match(x) for x in items(body))
-        out += [Def("field", f[2], (f[1] or "").strip() == "pub", m[2]) for f in fields if f]
+    sc.defs = []
+    for i, m in (x for x in matches(sc, ITEM) if not sc.body[x[0]]):
+        b = block(sc, m.start())
+        sc.defs.append((i, m[2], m[3], m[1], b and ("" if b[1] == "trait" or b[2] else b[3])))
+        if m[2] == "struct" and m[3] in CORE and (start := sc.text.find("{", m.end())) >= 0:
+            fields = (FIELD.match(x) for x in items(sc.text[start + 1 : closing(sc.text, start)]))
+            sc.defs += [(i, "field", f[2], f[1] and f[1].strip(), m[3]) for f in fields if f]
 
-    for m in fns:
-        imp = next((b for a, z, b in reversed(blocks) if a < m.start() < z), None)
-        # A trait's functions are as public as the trait.
-        public = m[1] == "pub" or bool(imp and (imp[1] == "trait" or imp[2]))
-        out.append(Def("method" if m[3] else "fn", m[2], public, imp and imp[3]))
+    return sc.defs
 
-    sc.defs = out
+
+def hidden(scans: "Scans", tree: dict) -> tuple[dict, set[tuple[str, str]]]:
+    """What the lower layers keep to the crate that rustc lets a styled file reach, `pub(crate)`,
+    `pub(super)`, `pub(in ..)` or private in a module above it: per module the names of such items
+    and re-exports (not modules: their items count); Ui's and UiState's fields and methods."""
+    low = (*LAYERS[: LAYERS.index("headless") + 1], "root")
+    above = {m[:k] for x, (_, m) in tree.items() if layer(x) == "styled" for k in range(len(m))}
+    kept, members, public = collections.defaultdict(set), set(), set()
+    for path, (_, mod) in tree.items():
+        sc = scans[path]
+        for i, kind, name, vis, of in defs(sc) if layer(path) in low else []:
+            hide = vis != "pub" and (vis or mod + sc.mods[i] in above)
+            if of in CORE:
+                key = ("field" if kind == "field" else "fn", name)
+                (members if hide else public if vis == "pub" else set()).add(key)
+            elif of is None and hide and kind != "mod":
+                kept[mod + sc.mods[i]].add(name)
+
+        for i, m in matches(sc, USE) if layer(path) in low else []:
+            if (v := re.match(rf"\s*{VIS}use\b", sc.codes[i])) and v[1] not in (None, "pub"):
+                kept[mod + sc.mods[i]] |= {x for _, x in named(m[1])} - {"*", "self"}
+
+    return kept, members - public
+
+
+def members(sc: Scan) -> list[tuple[int, str, str]]:
+    """The fields and methods used on a Ui or UiState outside tests: on `ui`, a binding typed as
+    one or the `self` of an impl of one, its `.st`, and down the chain of calls; the line, "field"
+    or "fn", and the name."""
+    names = {"self", "ui", *(m[1] for _, m in matches(sc, TYPED))}
+    out = []
+    for _, m in matches(sc, re.compile(rf"\b(?:{'|'.join(names)})\b")):
+        b, pos = block(sc, m.start()), m.end()
+        if m[0] == "self" and not (b and b[1] == "impl" and b[3] in CORE):
+            continue
+
+        while c := MEMBER.match(sc.text, pos):
+            line = bisect.bisect_right(sc.starts, c.start(1)) - 1
+            out.append((line, "fn" if c[2] else "field", c[1]))
+            if not c[2] and c[1] != "st":
+                break
+
+            pos = closing(sc.text, c.end() - 1) if c[2] else c.end()
+
     return out
 
 
-def hidden(scans: "Scans") -> dict[str, set[str]]:
-    """Per kind, the names of what the lower layers keep to the crate: not public in them, nor
-    defined in the styled layer, nor a method std's types share."""
-    low = LAYERS[: LAYERS.index("headless") + 1]
-    private, public = collections.defaultdict(set), collections.defaultdict(set)
-    # The platform's own files are behind its facades, their `pub` the platform's only.
-    for path in (x for x in scans.names if not x.startswith("src/platform/") or x in FACADES):
-        at = layer(path)
-        for d in defs(scans[path]) if at in low or at == "styled" else []:
-            # A styled file's `self` and `ui` are a Ui or its own type: another's field is no
-            # name it could reach.
-            if at == "styled" or d.public and d.kind != "field":
-                public[d.kind].add(d.name)
-            else:
-                private[d.kind].add(d.name)
-
-    return {k: private[k] - public[k] - STD_NAMES for k in ("fn", "method", "field", "type")}
-
-
 def upward(scans: "Scans") -> list[Hit]:
-    """Calls of a method of Ui or UiState that only a higher layer defines, by its name."""
-    ui, lowest = {}, collections.defaultdict(lambda: len(LAYERS))
+    """Calls on a Ui or UiState ([members]) of a method of one that only a higher layer defines."""
+    lowest = {}
     for path in scans.names:
-        if (at := layer(path)) is None:
-            continue
-
-        for d in (d for d in defs(scans[path]) if d.kind == "method"):
-            lowest[d.name] = min(lowest[d.name], LAYERS.index(at))
-            if d.owner in ("Ui", "UiState"):
-                ui.setdefault(d.name, path)
+        at = layer(path)
+        for _, kind, name, _, of in defs(scans[path]) if at else []:
+            if kind == "fn" and of in CORE and LAYERS.index(at) < lowest.get(name, (99,))[0]:
+                lowest[name] = (LAYERS.index(at), path)
 
     out = []
     for path in scans.names:
         at = layer(path)
-        for i, m in matches(scans[path], METHOD) if at else []:
-            file = ui.get(m[1])
-            if file and lowest[m[1]] > LAYERS.index(at) and m[1] not in STD_NAMES:
+        for i, kind, name in members(scans[path]) if at else []:
+            n, file = lowest.get(name, (0, ""))
+            if kind == "fn" and n > LAYERS.index(at):
                 msg = (
-                    f"{path[4:]} ({at}) -> .{m[1]}() of {file[4:]} ({layer(file)}): a lower layer "
+                    f"{path[4:]} ({at}) -> .{name}() of {file[4:]} ({layer(file)}): a lower layer "
                     "may not call a method a higher one adds; move it down, or hand it in"
                 )
-                key = f"layer {path} -> {file[4:]}::{m[1]}"
+                key = f"layer {path} -> {file[4:]}::{name}"
                 out.append(Hit(path, i + 1, "layer", msg, key=key))
 
     return out
@@ -1049,25 +1047,29 @@ def upward(scans: "Scans") -> list[Hit]:
 def layering(scans: "Scans", since: str | None = None) -> list[Hit]:
     """The layer rules on the whole crate; the baseline compared with its own at `since`."""
     out = unplaced(scans)
-    for path, line, item, file in edges(scans):
+    tree = {x: v for x, v in modules(scans).items() if v[0] == "src/lib.rs"}
+    files = {mod: path for path, (_, mod) in tree.items()}
+    refs = collections.defaultdict(list)
+    for path, line, to, file in edges(scans, tree, files):
         a, b = layer(path), layer(file)
+        refs[path].append((line - 1, to))
         if file in FACADES or not (a and b) or LAYERS.index(b) <= LAYERS.index(a):
             continue
 
-        name = item.split("::")[-1]
+        item = "::".join(x for x in to if x != "*")
         msg = (
             f"{path[4:]} ({a}) -> {item} ({b}): a lower layer may not use a higher one; move the "
             "item down, or hand it in from above (a hook or a parameter)"
         )
-        key = f"layer {path} -> {file[4:]}::{name}"
+        key = f"layer {path} -> {file[4:]}::{item.split('::')[-1]}"
         out.append(Hit(path, line, "layer", msg, key=key))
 
     out += upward(scans)
-    kept = hidden(scans)
+    kept = hidden(scans, tree)
     for path in scans.names:
         sc, at = scans[path], layer(path)
         if at is not None:
-            out += styled(path, sc, kept) if at == "styled" else []
+            out += styled(path, sc, refs[path], *kept) if at == "styled" else []
             out += os_code(path, sc) if not path.startswith("src/platform/") else []
 
     return baselined(out, scans.top, since)
@@ -1084,21 +1086,19 @@ def matches(sc: Scan, pattern: re.Pattern) -> list[tuple[int, re.Match]]:
     return [(i, m) for i, m in found if not sc.test[i]]
 
 
-def styled(path: str, sc: Scan, kept: dict[str, set[str]]) -> list[Hit]:
-    """What the styled layer takes from the lower ones that a design system outside the crate
-    couldn't: a field, type, method or function they keep to the crate ([hidden])."""
-    out = []
-    found = [(i, "field", m[1]) for i, m in matches(sc, FIELD_USE)]
-    found += [(i, "type", m[0]) for i, m in matches(sc, TYPE_USE)]
-    found += [(i, "method", m[1]) for i, m in matches(sc, METHOD)]
-    # A function the file brings in by a `use`, or names by a path.
-    brought = {name for _, m in matches(sc, USE) for _, name in named(m[1])}
-    found += [(i, "fn", m[2]) for i, m in matches(sc, CALL) if m[1] or m[2] in brought]
+def styled(path: str, sc: Scan, refs: list, kept: dict, hid: set) -> list[Hit]:
+    """What a styled file reaches that the lower layers keep to the crate ([hidden]): a field or
+    method of Ui or UiState ([members]); an item a `use` or a path names or goes through (`Tree` in
+    `crate::ui::Tree::new`); a name a glob brings in."""
+    found = [(i, name) for i, kind, name in members(sc) if (kind, name) in hid]
+    found += [(i, x) for i, to in refs for k, x in enumerate(to) if x in kept[to[:k]]]
+    globbed = {x for _, to in refs if to[-1] == "*" for x in kept[to[:-1]]}
+    bare = re.compile(rf"(?<![\w.:])(?:{'|'.join(sorted(globbed)) or '(?!)'})\b")
+    found += [(i, m[0]) for i, m in matches(sc, bare)]
     msg = "`{}` is the crate's own: a design system outside it couldn't use it"
     return [
         Hit(path, i + 1, "private", msg.format(name), key=f"private {path} {name}")
-        for i, kind, name in sorted(found)
-        if name in kept[kind]
+        for i, name in sorted(found)
     ]
 
 
