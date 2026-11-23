@@ -35,9 +35,12 @@ impl Ui<'_> {
   /// [Ui::key], else its place.
   /// [Ui::disabled] dims it and reads no input.
   pub fn text_field(&mut self, text: &mut String, style: &FieldStyle) -> Response {
-    let id = self.take_id();
-    let b = self.text_field_behavior(id, text, style.kind);
-    self.field_box(&b, style)
+    // The values put for it reach its edit menu too.
+    self.group(|ui| {
+      let id = ui.take_id();
+      let b = ui.text_field_behavior(id, text, style.kind);
+      ui.field_box(&b, style)
+    })
   }
 
   /// A text field's box and text in `style`'s look over its behaviour `b`.
@@ -88,12 +91,14 @@ impl Ui<'_> {
   /// without a ring for the keys, its selection dimmed when the focus goes; its id from
   /// [Ui::id] or [Ui::key], else its place. [Ui::disabled] makes it plain text.
   pub fn selectable_text(&mut self, text: &str, style: &FieldStyle) -> Response {
-    let id = self.take_id();
-    let b = self.selectable_behavior(id, text);
-    self.keymap(SELECT_KEYS).field_text(&b, style, b.style(Style::new()));
-    self.edit_menu(&b);
-    let (hovered, pressed, clicked) = (self.hovered(id), self.pressed(id), self.clicked(id));
-    Response { id, hovered, pressed, focused: b.focused, clicked, ..Response::default() }
+    self.group(|ui| {
+      let id = ui.take_id();
+      let b = ui.selectable_behavior(id, text);
+      ui.keymap(SELECT_KEYS).field_text(&b, style, b.style(Style::new()));
+      ui.edit_menu(&b);
+      let (hovered, pressed, clicked) = (ui.hovered(id), ui.pressed(id), ui.clicked(id));
+      Response { id, hovered, pressed, focused: b.focused, clicked, ..Response::default() }
+    })
   }
 
   /// The edit menu of a field or selectable text over its behaviour `b`, at the secondary click

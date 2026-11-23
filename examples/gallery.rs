@@ -120,6 +120,7 @@ pub const BLOCKS: &[Block] = &[
   b("Modifiers", "Accessibility label", ".accessibilityLabel(\"Reset\")", "ui.a11y_label(\"Reset\").icon_button(Icon::RESET)"),
   b("Modifiers", "Keyboard shortcut", ".keyboardShortcut(\"z\", modifiers: .command)", "ui.keymap(&[bind(Shortcut::char('z').cmd(), Command::Undo)]).col(…)"),
   b("Modifiers", "Environment", ".environment(\\.tint, .green) { … }; @Environment(\\.tint) var tint", "ui.environment(Tint(t.success)).row(style, |ui| { … }); ui.set_environment(Some(Tint(t.success))) for the window; let tint = ui.environment_value::<Tint>()"),
+  b("Modifiers", "Group", "Group { Button(\"Save\"); Toggle(…) }.disabled(true)", "ui.disabled(true).group(|ui| { ui.button(\"Save\"); ui.toggle(&mut on, \"\"); }); ui.button(\"Open\")"),
   b("Modifiers", "Identity", "Box().id(item.id); .allowsHitTesting(false)", "ui.key(item.id).row(style, |ui| { … }); ui.with_id(id.key(\"box\")).allows_hit_testing(false).col(style, |ui| { … })"),
   b("Modifiers", "Widget parts", ".environment(\\.isEnabled, true); .help(tip) on a part", "let tip = ui.take_help(); if let Some(tip) = &tip { ui.help(tip); } ui.environment(Enabled(true)).button(\"Undo\")"),
   b("Modifiers", "Frame request", "TimelineView(.animation) { context in … }", "ui.request_frame(); let k = ui.now().as_secs_f32() % 1.0"),
@@ -663,6 +664,15 @@ impl Gallery {
         let tile = |ui: &mut Ui| _ = ui.el(swatch(ui.environment_value::<Tint>().0));
         tile(ui);
         ui.environment(Tint(t.success)).row(line(10.0), |ui| (0..2).for_each(|_| tile(ui)));
+      }),
+
+      // Two widgets side by side disabled as one, the button after them enabled.
+      "Group" => Self::variants(ui, Shown::Alone, |ui| {
+        ui.disabled(true).group(|ui| {
+          ui.button("Save");
+          ui.toggle(&mut self.on, "");
+        });
+        ui.button("Open");
       }),
 
       // Keyed boxes: a key of its own each, the last a ready id.

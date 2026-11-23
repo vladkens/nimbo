@@ -148,6 +148,18 @@ impl Ui<'_> {
     style: Style,
     items: impl FnOnce(&mut Self) -> R,
   ) -> bool {
+    // The values put for it reach its items past the cover, and end with it when it is closed.
+    self.group(|ui| ui.menu_popup_in(id, toggle, place, style, items))
+  }
+
+  fn menu_popup_in<R>(
+    &mut self,
+    id: Id,
+    toggle: bool,
+    place: MenuPlacement,
+    style: Style,
+    items: impl FnOnce(&mut Self) -> R,
+  ) -> bool {
     let (point, start, over) = match place {
       MenuPlacement::Below => (None, None, false),
       MenuPlacement::At(p) => (Some(p), None, false),

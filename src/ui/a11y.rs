@@ -403,13 +403,13 @@ impl Ui<'_> {
     let c = self.st.tree.a11y.pair(id);
     if part == LabeledPairRole::Content {
       let outer = self.st.tree.a11y.content.replace(c);
-      let r = build(self);
+      let r = self.group(build);
       self.st.tree.a11y.content = outer;
       return r;
     }
 
     let at = self.st.tree.nodes.len() as u32;
-    let r = build(self);
+    let r = self.group(build);
     let nodes = at..self.st.tree.nodes.len() as u32;
     let (text, ids) = self.plain_text(nodes.clone());
     let recs = &mut self.st.tree.a11y;

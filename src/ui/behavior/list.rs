@@ -376,6 +376,15 @@ impl<'a> Ui<'a> {
   pub fn list_rows(
     &mut self,
     b: &ListBehavior,
+    row: impl FnMut(&mut Ui<'a>, usize, u64),
+  ) -> Range<usize> {
+    // The values put for them reach every row past the spacer above.
+    self.group(|ui| ui.rows_in_view(b, row))
+  }
+
+  fn rows_in_view(
+    &mut self,
+    b: &ListBehavior,
     mut row: impl FnMut(&mut Ui<'a>, usize, u64),
   ) -> Range<usize> {
     let (id, rows, sel, key) = (b.id, b.rows, b.sel, b.key.0);

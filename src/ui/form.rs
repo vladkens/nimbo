@@ -713,6 +713,16 @@ impl Ui<'_> {
     row: FormRow,
     rows: impl FnOnce(&mut Self) -> R,
   ) -> Response {
+    // The values put for it reach the rows under it too.
+    self.group(|ui| ui.disclosure(fs, row, rows))
+  }
+
+  fn disclosure<R>(
+    &mut self,
+    fs: &FormStyle,
+    row: FormRow,
+    rows: impl FnOnce(&mut Self) -> R,
+  ) -> Response {
     let (id, t) = (self.take_id(), self.theme());
     // Disabled before the behaviour: it reads so and lets go of the focus.
     let b = self.button_behavior(id);
@@ -729,7 +739,7 @@ impl Ui<'_> {
     let ink = if off { t.tertiary } else { t.muted };
     let row = FormRow { pressed, ..row };
     let fs = FormStyle { row: style, ..*fs };
-    let mut r = self.disabled(off).with_id(id).form_row(&fs, row, |ui| {
+    let mut r = self.with_id(id).form_row(&fs, row, |ui| {
       // Unnamed, a click on it is the row's.
       ui.with_id(id.key("chevron"))
         .allows_hit_testing(false)

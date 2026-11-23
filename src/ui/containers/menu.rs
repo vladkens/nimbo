@@ -28,14 +28,17 @@ impl Ui<'_> {
   /// A button that opens a menu of `items` ([Ui::menu_item]) under it: [Ui::menu_popup] in
   /// the theme's popup.
   pub fn menu<R>(&mut self, label: &str, items: impl FnOnce(&mut Self) -> R) -> Response {
-    let t = self.theme();
-    let id = self.take_id();
-    let off = !self.environment_value::<Enabled>().0;
-    let r = Button::new(label).show(self.with_id(id));
-    // Disabled while open, it closes.
-    let toggle = r.clicked || off && self.menu_open(id);
-    self.menu_popup(id, toggle, MenuPlacement::Below, t.popup().min_w(160.0), items);
-    r
+    // The values put for it reach its items too.
+    self.group(|ui| {
+      let t = ui.theme();
+      let id = ui.take_id();
+      let off = !ui.environment_value::<Enabled>().0;
+      let r = Button::new(label).show(ui.with_id(id));
+      // Disabled while open, it closes.
+      let toggle = r.clicked || off && ui.menu_open(id);
+      ui.menu_popup(id, toggle, MenuPlacement::Below, t.popup().min_w(160.0), items);
+      r
+    })
   }
 
   /// An item of a menu: highlighted in the accent under the pointer or by the menu's keys,
@@ -92,11 +95,11 @@ impl Ui<'_> {
     // Run once, by the platform's menu or the drawn one.
     let mut menu = Some(menu);
     let mut build = || menu.take().map_or_else(Menu::default, |m| m());
-    match self.native_menu(id, at, &mut build) {
-      NativeMenu::Unavailable => self.drawn_context_menu(id, at, build),
+    self.group(|ui| match ui.native_menu(id, at, &mut build) {
+      NativeMenu::Unavailable => ui.drawn_context_menu(id, at, build),
       NativeMenu::Unanswered => None,
       NativeMenu::Answered(a) => a,
-    }
+    })
   }
 
   /// [Ui::context_menu_at] drawn: where the platform shows none ([NativeMenu::Unavailable]).
@@ -209,6 +212,7 @@ mod tests {
   use crate::app::{App, Event, MouseButton, Phase};
   use crate::harness::Harness;
   use crate::scene::Size;
+  use crate::ui::ControlSize;
 
   /// A menu inside a scroll area over tall content; its items count their runs.
   #[derive(Default)]
@@ -420,5 +424,36 @@ mod tests {
     h.app_mut().shown = true;
     h.frame();
     assert!(!h.rt.ui.menu_open(Id::of("el")));
+  }
+
+  /// A menu enabled in a disabled container, sized: what it was given reaches its items.
+  #[derive(Default)]
+  struct Given {
+    seen: Option<(Enabled, ControlSize)>,
+    runs: usize,
+  }
+
+  impl App for Given {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.disabled(true).col(Style::new(), |ui| {
+        let ui = ui.environment(Enabled(true)).control_size(ControlSize::Small);
+        ui.id("menu").menu("Menu", |ui| {
+          self.seen = Some((ui.environment_value(), ui.environment_value()));
+          self.runs += ui.id("one").menu_item("One").clicked as usize;
+        });
+      });
+    }
+  }
+
+  #[test]
+  fn a_menus_values_reach_its_items() {
+    let mut h = Harness::new(Given::default(), Size::new(300.0, 300.0), 1.0);
+    h.frame();
+    assert!(h.click_id(Id::of("menu")));
+    h.frame();
+    h.frame();
+    assert_eq!(h.app().seen, Some((Enabled(true), ControlSize::Small)));
+    assert!(h.click_id(Id::of("one")));
+    assert_eq!(h.app().runs, 1);
   }
 }

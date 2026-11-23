@@ -500,6 +500,14 @@ nimbo: `ui.environment(Tint(t.success)).row(style, |ui| { … }); ui.set_environ
 
 ![Environment](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/environment.png)
 
+### Group
+
+SwiftUI: `Group { Button("Save"); Toggle(…) }.disabled(true)`
+
+nimbo: `ui.disabled(true).group(|ui| { ui.button("Save"); ui.toggle(&mut on, ""); }); ui.button("Open")`
+
+![Group](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/group.png)
+
 ### Identity
 
 SwiftUI: `Box().id(item.id); .allowsHitTesting(false)`

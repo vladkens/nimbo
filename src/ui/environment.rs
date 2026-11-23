@@ -66,6 +66,8 @@ impl<T: 'static> Values for Vec<T> {
 
 /// A scope's owner while it waits for the next element.
 const PENDING: u32 = u32::MAX;
+/// The owners of groups' scopes ([Ui::group]), past every node's index: this and the depth.
+const GROUP: u32 = 1 << 31;
 
 /// The values scoped to elements being built ([Ui::environment]): a stack per type, and every
 /// value put with its stack and the container it is scoped to, in the order put. Kept across
@@ -74,12 +76,15 @@ const PENDING: u32 = u32::MAX;
 pub(crate) struct Scoped {
   stacks: Vec<(TypeId, Box<dyn Values>)>,
   put: Vec<(u32, usize)>,
+  /// Groups open ([Ui::group]).
+  groups: u32,
 }
 
 impl Scoped {
   pub(crate) fn clear(&mut self) {
     self.stacks.iter_mut().for_each(|s| s.1.drop_all());
     self.put.clear();
+    self.groups = 0;
   }
 
   fn get<T: 'static>(&self) -> Option<&T> {
@@ -123,6 +128,20 @@ impl Scoped {
 }
 
 impl Ui<'_> {
+  /// Builds `f` as one element for the values put for the next element ([Ui::environment],
+  /// [Ui::disabled], [Ui::control_size]): they reach all it builds and end with it, as SwiftUI's
+  /// `Group`. It adds no element: a widget of several elements side by side builds in one.
+  pub fn group<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> R {
+    let sc = &mut self.st.scoped;
+    sc.groups += 1;
+    let owner = GROUP + sc.groups;
+    sc.open(owner);
+    let r = f(self);
+    self.st.scoped.close(owner);
+    self.st.scoped.groups -= 1;
+    r
+  }
+
   /// Puts `v` for the next element: what a container builds reads it until it closes, an element
   /// with no children drops it, and the widget being built reads it at once
   /// (`ui.environment(ControlSize::Small).button("Save")`).
@@ -236,6 +255,24 @@ mod tests {
       assert_eq!(ui.environment_value::<ControlSize>(), ControlSize::Regular);
       assert_eq!(ui.environment_value::<Enabled>(), Enabled(true));
     }
+  }
+
+  /// A group's values reach all it builds, nested groups their own, and end with it.
+  #[test]
+  fn a_group_spans_its_elements() {
+    let mut ui = ui(UiState::default());
+    let tint = |ui: &Ui| ui.environment_value::<Tint>();
+    ui.environment(Tint(1)).group(|ui| {
+      ui.el(Style::new());
+      assert_eq!(tint(ui), Tint(1));
+      ui.environment(Tint(2)).group(|ui| {
+        ui.el(Style::new());
+        ui.row(Style::new(), |ui| assert_eq!(tint(ui), Tint(2)));
+      });
+      assert_eq!(tint(ui), Tint(1));
+      ui.environment(Tint(3));
+    });
+    assert_eq!(tint(&ui), Tint(0));
   }
 
   /// `disabled(false)` leaves a disabled container disabled; `Enabled(true)` enables a part of it.
