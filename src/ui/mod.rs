@@ -67,8 +67,8 @@ use std::time::Duration;
 pub use a11y::{A11yNode, A11yTree, Action, LabeledPairRole, Props, Role, State, Value};
 pub use behavior::{
   Behavior, DialogBehavior, EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, ListBehavior,
-  ListRows, MenuPlacement, ScrollBar, ScrollBehavior, ScrollerKnob, Selection, SplitBehavior,
-  TextInput, TypeSelect,
+  ListRows, MenuPlacement, ScrollBar, ScrollBehavior, ScrollerKnob, SectionHeader, Selection,
+  SplitBehavior, TextInput, TypeSelect,
 };
 pub use containers::{
   List, ListResponse, ListStyle, Picker, Row, Split, Tabs, Tag, ToolbarItemPlacement,

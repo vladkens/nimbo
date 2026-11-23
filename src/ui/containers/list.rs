@@ -169,7 +169,7 @@ impl<'s> List<'s> {
   }
 
   /// Several rows at a time: Cmd-click toggles, Shift-click and Shift-arrows extend, Cmd-A
-  /// selects all.
+  /// selects all. Makes its selection [Selection::multiple], as one already so does.
   pub fn multi(self) -> Self {
     Self { multi: true, ..self }
   }
@@ -228,7 +228,8 @@ impl<'s> List<'s> {
     let (starts, head_h, head) = self.sections.unwrap_or((&[], 0.0, &|_, _| {}));
     // Grouped, the space between plates above each header but one at the top.
     let gap = if grouped { fs.page.gap + fs.head_pad[0] } else { 0.0 };
-    let rows = ListRows { n, h, starts, head_h, gap, pad: [style.pad[0], style.pad[2]] };
+    let rows = ListRows::new(n, h).sections(starts, head_h).section_spacing(gap);
+    let rows = rows.padding(style.pad[0], style.pad[2]);
     let keyf = self.key;
     let key = move |i: usize| keyf.map_or(i as u64, |k| k(i));
     let mut own = None;
@@ -237,7 +238,11 @@ impl<'s> List<'s> {
       None => own.insert(std::mem::take(&mut ui.state::<Own>(id).0)),
     };
 
-    let b = ui.list_behavior(id, rows, multi, sel, &key);
+    if multi && !sel.is_multiple() {
+      *sel = std::mem::take(sel).multiple();
+    }
+
+    let b = ui.list_behavior(id, rows, sel, &key);
     let (disabled, focused) = (b.disabled, b.focused);
     // Its selection in the accent while it has focus in the key window.
     let sel_bg = match focused {
@@ -248,7 +253,7 @@ impl<'s> List<'s> {
     // Disabled, it dims.
     let style = b.style(style.gap(0.0));
     let style = if disabled { style.opacity(t.disabled) } else { style };
-    let sel: &Selection = sel;
+    let sel = b.selection();
     let mut shown = 0..0;
     ui.with_id(id).scroll_area(style, |ui| {
       // A header: the rows' side padding, its content at the bottom, by its first row.
@@ -259,10 +264,10 @@ impl<'s> List<'s> {
       let dim = if disabled { t.disabled } else { 1.0 };
       let mut above = false;
 
-      shown = ui.list_rows(id, rows, sel, &key, |ui, i, k| {
+      shown = ui.list_rows(&b, |ui, i, k| {
         let header = rows.header(i);
-        if let Some((g, head_h)) = header {
-          ui.key(("head", k)).row(hs.h(px(head_h)), |ui| head(ui, g));
+        if let Some(head_at) = header {
+          ui.key(("head", k)).row(hs.h(px(head_at.height)), |ui| head(ui, head_at.section));
         }
 
         let rid = id.key(("row", k));
@@ -301,11 +306,11 @@ impl<'s> List<'s> {
       });
     });
 
+    let (changed, pressed, activated, delete) = (b.changed, b.pressed, b.activated, b.delete);
     if let Some(own) = own {
       ui.state::<Own>(id).0 = own;
     }
 
-    let (changed, pressed, activated, delete) = (b.changed, b.pressed, b.activated, b.delete);
     ListResponse { id, changed, pressed, activated, delete, shown, focused }
   }
 }

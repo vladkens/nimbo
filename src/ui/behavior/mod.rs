@@ -64,7 +64,7 @@ mod toggle;
 pub use dialog::DialogBehavior;
 pub use field::{EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, TextInput};
 use keyboard_types::Modifiers;
-pub use list::{ListBehavior, ListRows, Selection};
+pub use list::{ListBehavior, ListRows, SectionHeader, Selection};
 pub use menu::{MenuPlacement, TYPE_SELECT, TypeSelect};
 pub use scroll::{ScrollBar, ScrollBehavior, ScrollerKnob};
 pub use shortcut::hotkey_of;

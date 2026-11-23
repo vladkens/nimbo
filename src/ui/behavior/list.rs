@@ -6,6 +6,7 @@
 //! what each key and press does.
 
 use std::collections::HashSet;
+use std::fmt;
 use std::hash::BuildHasherDefault;
 use std::ops::Range;
 
@@ -28,14 +29,17 @@ type KeySet = HashSet<u64, BuildHasherDefault<FxHasher>>;
 
 // MARK: Selection
 
-/// The selected rows of a list, by row key. The cursor is the row keys move from (the last one
-/// pressed or moved to), the anchor where Shift extends from. Each keeps the index it was last
-/// seen at as a hint, so finding it again is one lookup unless rows moved, then a scan.
+/// The selected rows of a list, by row key: one at a time, or several ([Self::multiple]), as
+/// SwiftUI's `List(selection:)` takes an optional value or a set. The cursor is the row keys
+/// move from (the last one pressed or moved to), the anchor where Shift extends from. Each keeps
+/// the index it was last seen at as a hint, so finding it again is one lookup unless rows moved,
+/// then a scan.
 #[derive(Clone, Debug, Default)]
 pub struct Selection {
   keys: KeySet,
   cursor: Option<(u64, usize)>,
   anchor: Option<(u64, usize)>,
+  multiple: bool,
 }
 
 /// Row `at`'s index among `n` rows keyed by `key`: its hint, else a scan.
@@ -48,6 +52,17 @@ fn find(at: (u64, usize), n: usize, key: &dyn Fn(usize) -> u64) -> Option<usize>
 }
 
 impl Selection {
+  /// Several rows at a time in a list over it: Cmd-click toggles, Shift-click and Shift-arrows
+  /// extend, Cmd-A selects all.
+  pub fn multiple(self) -> Self {
+    Self { multiple: true, ..self }
+  }
+
+  /// Whether a list over it selects several rows at a time ([Self::multiple]).
+  pub fn is_multiple(&self) -> bool {
+    self.multiple
+  }
+
   pub fn contains(&self, key: u64) -> bool {
     self.keys.contains(&key)
   }
@@ -139,26 +154,54 @@ impl Selection {
   }
 }
 
-/// Where a list's rows lie ([Ui::list_behavior], [Ui::list_rows]): `n` rows `h` high from the
-/// top of its content, under its padding `pad` (above and below them), and a header `head_h`
-/// high above the first row of each section (`starts`, ascending, none empty), `gap` above it
-/// unless it is at the top.
+/// Where a list's rows lie ([Ui::list_behavior]): rows of one height from the top of its
+/// content, under its padding, in sections with a header above each.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ListRows<'s> {
-  pub n: usize,
-  pub h: f32,
-  pub starts: &'s [usize],
-  pub head_h: f32,
-  pub gap: f32,
-  pub pad: [f32; 2],
+  n: usize,
+  h: f32,
+  starts: &'s [usize],
+  head_h: f32,
+  gap: f32,
+  pad: [f32; 2],
 }
 
-impl ListRows<'_> {
-  /// The section row `i` starts and its header's height, the gap above it included; `None` for
-  /// a row inside a section.
-  pub fn header(&self, i: usize) -> Option<(usize, f32)> {
+/// The header above a row that starts a section ([ListRows::header]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SectionHeader {
+  /// The section's place among the list's.
+  pub section: usize,
+  /// Its height, the spacing above it included.
+  pub height: f32,
+}
+
+impl<'s> ListRows<'s> {
+  /// `count` rows `row_height` high, in no sections, with no padding.
+  pub fn new(count: usize, row_height: f32) -> Self {
+    Self { n: count, h: row_height, ..Self::default() }
+  }
+
+  /// Rows in sections: section `g` starts at row `starts[g]` (ascending, none empty), under a
+  /// header `header_height` high; rows before the first start have none.
+  pub fn sections(self, starts: &'s [usize], header_height: f32) -> Self {
+    Self { starts, head_h: header_height, ..self }
+  }
+
+  /// The space above each header but one at the top of the content (between grouped plates).
+  pub fn section_spacing(self, spacing: f32) -> Self {
+    Self { gap: spacing, ..self }
+  }
+
+  /// The content's padding above the first row and below the last.
+  pub fn padding(self, top: f32, bottom: f32) -> Self {
+    Self { pad: [top, bottom], ..self }
+  }
+
+  /// The header above row `i` when it starts a section; `None` for a row inside one.
+  pub fn header(&self, i: usize) -> Option<SectionHeader> {
     let g = self.heads(i);
-    (self.starts.get(g) == Some(&i)).then(|| (g, self.above(g + 1) - self.above(g)))
+    let height = || self.above(g + 1) - self.above(g);
+    (self.starts.get(g) == Some(&i)).then(|| SectionHeader { section: g, height: height() })
   }
 
   /// The headers above row `i`'s own: those of the sections that start before it.
@@ -204,9 +247,10 @@ struct ListState {
 
 // MARK: Behaviour
 
-/// What a list got this frame ([Ui::list_behavior]), read before its rows are built.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ListBehavior {
+/// What a list got this frame ([Ui::list_behavior]), read before its rows are built, which it
+/// builds ([Ui::list_rows]).
+#[derive(Clone, Copy)]
+pub struct ListBehavior<'s> {
   pub id: Id,
   /// Disabled by [Ui::disabled]: no input was read, and it gave its focus up.
   pub disabled: bool,
@@ -220,9 +264,42 @@ pub struct ListBehavior {
   pub activated: Option<usize>,
   /// Delete or Backspace with rows selected: the app asks to delete them.
   pub delete: bool,
+  rows: ListRows<'s>,
+  sel: &'s Selection,
+  key: &'s dyn Fn(usize) -> u64,
 }
 
-impl ListBehavior {
+impl fmt::Debug for ListBehavior<'_> {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.debug_struct("ListBehavior")
+      .field("id", &self.id)
+      .field("disabled", &self.disabled)
+      .field("focused", &self.focused)
+      .field("changed", &self.changed)
+      .field("pressed", &self.pressed)
+      .field("activated", &self.activated)
+      .field("delete", &self.delete)
+      .field("rows", &self.rows)
+      .field("selection", self.sel)
+      .finish_non_exhaustive()
+  }
+}
+
+/// What the input did to a list ([ListBehavior]'s events).
+#[derive(Default)]
+struct Events {
+  changed: bool,
+  pressed: Option<usize>,
+  activated: Option<usize>,
+  delete: bool,
+}
+
+impl<'s> ListBehavior<'s> {
+  /// The selection after the input, as the rows are to show it.
+  pub fn selection(&self) -> &'s Selection {
+    self.sel
+  }
+
   /// The list's box: takes focus by a press, with no ring of its own (its selection shows it);
   /// disabled, none.
   pub const fn style(&self, s: Style) -> Style {
@@ -234,19 +311,19 @@ impl<'a> Ui<'a> {
   /// The input of list `id`, its rows lying as `rows` says, keyed by `key` (unique and stable
   /// while the row is the same thing), before it is built: a press selects a row into `sel` and
   /// focuses the list, the keys move and extend the selection, Enter and a double click activate
-  /// a row, Delete asks to delete the selection; with `multi`, several rows at a time
-  /// ([crate::List] has the whole of it). A row asked for by the keys or [Ui::reveal_row] scrolls
-  /// into view. A list with its rows selected to assistive technology, the cursor's row the active
-  /// one. Build the list right after as a scroll area under `id` with [ListBehavior::style], its
-  /// rows with [Ui::list_rows]; [Ui::disabled] before the call disables it.
-  pub fn list_behavior(
+  /// a row, Delete asks to delete the selection; several rows at a time in a
+  /// [Selection::multiple] ([crate::List] has the whole of it). A row asked for by the keys or
+  /// [Ui::reveal_row] scrolls into view. A list with its rows selected to assistive technology, the
+  /// cursor's row the active one. Build the list right after as a scroll area under `id` with
+  /// [ListBehavior::style], its rows with [Ui::list_rows]; [Ui::disabled] before the call disables
+  /// it.
+  pub fn list_behavior<'s>(
     &mut self,
     id: Id,
-    rows: ListRows,
-    multi: bool,
-    sel: &mut Selection,
-    key: &dyn Fn(usize) -> u64,
-  ) -> ListBehavior {
+    rows: ListRows<'s>,
+    sel: &'s mut Selection,
+    key: &'s dyn Fn(usize) -> u64,
+  ) -> ListBehavior<'s> {
     let disabled = self.take_disabled();
     if disabled && self.focused(id) {
       self.focus(None);
@@ -254,7 +331,7 @@ impl<'a> Ui<'a> {
 
     let mut st = std::mem::take(self.state::<ListState>(id));
     let focused = self.focus_visible(id);
-    let mut out = ListBehavior { id, disabled, focused, ..ListBehavior::default() };
+    let (mut out, multi) = (Events::default(), sel.multiple);
     let sc = self.scroll(id);
     let view_h = sc.map_or(self.size().h, |s| s.viewport.h);
     if rows.n > 0 && !disabled {
@@ -290,23 +367,23 @@ impl<'a> Ui<'a> {
     let active = sel.cursor.map(|c| id.key(("row", c.0)));
     self.a11y(id, Role::List).state(State::Disabled, disabled).active(active);
     *self.state::<ListState>(id) = st;
-    out
+    let Events { changed, pressed, activated, delete } = out;
+    ListBehavior { id, disabled, focused, changed, pressed, activated, delete, rows, sel, key }
   }
 
-  /// The rows of list `id` in view and a few around them ([Ui::list_behavior] took its input),
-  /// built inside its scroll area: a spacer for the rows above, `row(ui, index, key)` for each
-  /// (its element `id.key(("row", key))`, a row selected in `sel` to assistive technology), a
-  /// spacer for the rows below; returns the rows built. They come from the scroll offset as of
-  /// the last frame and the input since, clamped to the content as it is now; when the layout
-  /// shows more than was built, the view runs again at once, so a frame never shows a gap.
+  /// The rows in view and a few around them of the list whose input `b` took
+  /// ([Ui::list_behavior]), built inside its scroll area: a spacer for the rows above,
+  /// `row(ui, index, key)` for each (its element `b.id.key(("row", key))`, a row selected in the
+  /// selection to assistive technology), a spacer for the rows below; returns the rows built. They
+  /// come from the scroll offset as of the last frame and the input since, clamped to the content
+  /// as it is now; when the layout shows more than was built, the view runs again at once, so a
+  /// frame never shows a gap.
   pub fn list_rows(
     &mut self,
-    id: Id,
-    rows: ListRows,
-    sel: &Selection,
-    key: &dyn Fn(usize) -> u64,
+    b: &ListBehavior,
     mut row: impl FnMut(&mut Ui<'a>, usize, u64),
   ) -> Range<usize> {
+    let (id, rows, sel, key) = (b.id, b.rows, b.sel, b.key);
     let mut st = std::mem::take(self.state::<ListState>(id));
     let view_h = self.scroll(id).map_or(self.size().h, |s| s.viewport.h);
     // The offset after the input and the scroll area's own (a thumb drag), clamped to the
@@ -361,7 +438,7 @@ impl<'a> Ui<'a> {
     id: Id,
     st: &mut ListState,
     sel: &mut Selection,
-    out: &mut ListBehavior,
+    out: &mut Events,
     geo: (ListRows, f32, bool),
     key: &dyn Fn(usize) -> u64,
   ) {
@@ -457,7 +534,7 @@ impl<'a> Ui<'a> {
     id: Id,
     st: &mut ListState,
     sel: &mut Selection,
-    out: &mut ListBehavior,
+    out: &mut Events,
     n: usize,
     multi: bool,
     key: &dyn Fn(usize) -> u64,

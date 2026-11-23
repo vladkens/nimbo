@@ -338,7 +338,7 @@ nimbo: `List::new(n, 32.0).sections(&starts, 24.0, &head).list_style(ListStyle::
 
 SwiftUI: `List(rows, selection: $sel) { … }.listRowBackground(…)`
 
-nimbo: `let rows = ListRows { n, h: 22.0, ..ListRows::default() }; let b = ui.list_behavior(id, rows, false, &mut sel, &key); ui.with_id(id).scroll_area(b.style(style), |ui| ui.list_rows(id, rows, &sel, &key, |ui, i, k| { … }))`
+nimbo: `let b = ui.list_behavior(id, ListRows::new(n, 22.0), &mut sel, &key); ui.with_id(id).scroll_area(b.style(style), |ui| ui.list_rows(&b, |ui, i, k| { … }))`
 
 ![List behavior](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/list-behavior.png)
 

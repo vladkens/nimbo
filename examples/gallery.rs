@@ -100,7 +100,7 @@ pub const BLOCKS: &[Block] = &[
   b("Form", "Footer", "HelpLink { … } at a pane's end", "ui.help(\"Help\").form_footer(&fs, |ui| _ = ui.button(\"Reset All…\"))"),
   b("List", "List", "List(items, selection: $sel) { … }", "List::new(n, 24.0).selection(&mut sel).show(ui, |ui, row| { … })"),
   b("List", "List sections", "Section(header:) in a List; .listStyle(…)", "List::new(n, 32.0).sections(&starts, 24.0, &head).list_style(ListStyle::Grouped)"),
-  b("List", "List behavior", "List(rows, selection: $sel) { … }.listRowBackground(…)", "let rows = ListRows { n, h: 22.0, ..ListRows::default() }; let b = ui.list_behavior(id, rows, false, &mut sel, &key); ui.with_id(id).scroll_area(b.style(style), |ui| ui.list_rows(id, rows, &sel, &key, |ui, i, k| { … }))"),
+  b("List", "List behavior", "List(rows, selection: $sel) { … }.listRowBackground(…)", "let b = ui.list_behavior(id, ListRows::new(n, 22.0), &mut sel, &key); ui.with_id(id).scroll_area(b.style(style), |ui| ui.list_rows(&b, |ui, i, k| { … }))"),
   b("Containers", "Tabs", "TabView { … }", "Tabs::new(&mut self.tab, &[\"One\", \"Two\"]).show(ui, |ui, i| { … })"),
   b("Containers", "Split", "HSplitView { … }", "Split::new(Axis::Horizontal).ratio(&mut self.side).show(ui, |ui, pane| { … })"),
   b("Containers", "Navigation split", "NavigationSplitView { … } detail: { … }", "Split::navigation().ratio(&mut self.side).show(ui, |ui, pane| { … })"),
@@ -465,17 +465,16 @@ impl Gallery {
       // Rows of its own over the list's behaviour: the selected one filled with the accent.
       "List behavior" => Self::variants(ui, Shown::Alone, |ui| {
         let (id, key) = (Id::of("own list"), |i: usize| i as u64);
-        let rows = ListRows { n: 40, h: 22.0, ..ListRows::default() };
-        let b = ui.list_behavior(id, rows, false, &mut self.own_rows, &key);
-        let sel = &self.own_rows;
+        let b = ui.list_behavior(id, ListRows::new(40, 22.0), &mut self.own_rows, &key);
+        let sel = b.selection();
 
         // The box's focus and the rows built in view, their ids the list's.
         let style = Style::new().w(px(220.0)).h(px(96.0)).pad(4.0).radius(8.0).bg(t.panel);
         let style = b.style(style);
         ui.with_id(id).scroll_area(style, |ui| {
-          ui.list_rows(id, rows, sel, &key, |ui, i, k| {
+          ui.list_rows(&b, |ui, i, k| {
             let on = sel.contains(k);
-            let row = Style::new().w(grow()).h(px(rows.h)).pad_xy(8.0, 0.0).radius(5.0);
+            let row = Style::new().w(grow()).h(px(22.0)).pad_xy(8.0, 0.0).radius(5.0);
             let fill = if on { t.accent } else { [0.0; 4] };
             let row = row.align(Align::Start, Align::Center).bg(fill);
             let text = TextStyle::new(t.font, if on { t.on_accent } else { t.text });
