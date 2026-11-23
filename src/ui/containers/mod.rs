@@ -4,7 +4,7 @@
 //! ([list]), menus ([menu]) and the picker ([popup]), tabs ([tabs]), a resizable split ([split])
 //! and the window's toolbar ([toolbar]). The scroll area, which menus and lists scroll in, is
 //! the behaviours' ([super::behavior], [super::Ui::scroll_area]), drawn as the environment says
-//! ([super::ScrollIndicatorStyle]).
+//! ([super::ScrollerKnob]).
 //! They plug into the [super::Ui] as add-ons: a menu tells its items about itself through
 //! [super::Ui::slot].
 

@@ -26,7 +26,7 @@ use std::time::Duration;
 pub use super::ControlSize;
 use super::store::Transition;
 use super::widgets::{ButtonRole, FieldStyle};
-use super::{Align, Dim, FocusRing, ScrollIndicatorStyle, Shadow, Style, TextStyle, Ui, grow, px};
+use super::{Align, Dim, FocusRing, Shadow, Style, TextStyle, Ui, grow, px};
 use crate::app::{Appearance, ColorScheme};
 use crate::scene::{Color, alpha, mix, rgb};
 use crate::text::{Font, Weight};
@@ -70,8 +70,6 @@ pub struct Theme {
   /// Menus, and their edge ([Sizes::menu_edge] wide).
   pub menu: Color,
   pub menu_line: Color,
-  /// Overlay scrollbars' thumbs.
-  pub thumb: Color,
   /// Grouped content on the ground: a form's plates.
   pub plate: Color,
   /// The third tier of text: disabled labels and values, a disabled pop-up's chevrons.
@@ -304,7 +302,6 @@ impl Theme {
     shadow: alpha(BLACK, 0.2),
     menu: WHITE,
     menu_line: alpha(BLACK, 0.25),
-    thumb: ScrollIndicatorStyle::LIGHT.thumb,
     plate: rgb(0xf8f8f8),
     tertiary: rgb(0xbfbfbf),
     link: rgb(0x0068da),
@@ -354,7 +351,6 @@ impl Theme {
     shadow: alpha(BLACK, 0.5),
     menu: rgb(0x1a1a1a),
     menu_line: alpha(WHITE, 0.25),
-    thumb: ScrollIndicatorStyle::DARK.thumb,
     field: rgb(0x252527),
     field_line: rgb(0x424245),
     faint: rgb(0x646468),
@@ -393,8 +389,8 @@ impl Theme {
   /// This theme in a window that isn't key, as AppKit draws its controls there: the accent a
   /// grey, the ground 20% toward black (light) or white (dark), as a switch's track, a check
   /// box, a slider's fill and a selected segment are there (14–23%), the marks on it in the
-  /// text's colour.
-  pub(crate) const fn inactive(self) -> Self {
+  /// text's colour; [Ui::controls_theme] while the window isn't key.
+  pub const fn inactive(self) -> Self {
     let grey = mix(self.bg, if self.scheme.is_dark() { WHITE } else { BLACK }, 0.2);
     Self { accent: grey, on_accent: self.text, ..self }
   }
@@ -637,17 +633,17 @@ impl Ui<'_> {
   }
 
   /// Sets the theme, kept until changed, over the OS's appearance; its focus ring is the one the
-  /// shell puts after each view, unless the view sets its own ([Ui::set_focus_ring]).
+  /// shell puts after each view, unless the view sets its own ([Ui::set_focus_ring]). Scroll
+  /// areas' knobs follow the appearance, not the theme, unless the environment sets them
+  /// ([crate::ScrollerKnob]).
   pub fn set_theme(&mut self, theme: Theme) {
     self.set_environment(Some(theme));
-    self.set_environment(Some(ScrollIndicatorStyle { thumb: theme.thumb, fade: theme.fade }));
   }
 
   /// Follows the OS's appearance again ([Theme::system]), the default: light or dark with
-  /// its accent, switching when it changes; the scrollbars too ([ScrollIndicatorStyle]).
+  /// its accent, switching when it changes.
   pub fn follow_system(&mut self) {
     self.set_environment::<Theme>(None);
-    self.set_environment::<ScrollIndicatorStyle>(None);
   }
 }
 

@@ -17,9 +17,9 @@ use nimbo::ui::{LabeledPairRole, ListRows, ScrollBar};
 use nimbo::{
   Align, Answer, App, Axes, Axis, Bitmap, Button, ButtonRole, ButtonStyle, Color, Config,
   ContentMode, ControlSize, Dialog, Float, Font, FormRow, FormStyle, Hotkey, Icon, Id, Item,
-  LinePattern, List, ListStyle, Menu, Picker, ScrollIndicatorStyle, Section, Selection, Shortcut,
-  Slider, Split, Style, Tabs, Tag, TextStyle, Tone, ToolbarItemPlacement, TruncationMode, Ui,
-  UnitPoint, WindowToolbarStyle, alpha, grow, px, t, tn,
+  LinePattern, List, ListStyle, Menu, Picker, ScrollerKnob, Section, Selection, Shortcut, Slider,
+  Split, Style, Tabs, Tag, TextStyle, Tone, ToolbarItemPlacement, TruncationMode, Ui, UnitPoint,
+  WindowToolbarStyle, alpha, grow, px, t, tn,
 };
 
 pub const SIDEBAR: &str = "sidebar";
@@ -108,8 +108,8 @@ pub const BLOCKS: &[Block] = &[
   b("Containers", "Unified toolbar", ".windowToolbarStyle(.unified)", "ui.window_toolbar_style(WindowToolbarStyle::Unified); ui.row(band, |ui| { … }) at the window's top"),
   b("Containers", "Menu", "Menu(\"Actions\") { Button(…) }", "ui.menu(\"Actions\", |ui| { ui.menu_item(\"Copy\"); })"),
   b("Containers", "Lazy column", "LazyVStack { ForEach(…) }", "ui.virtual_col(heights, |i| i, |ui, i| { … })"),
-  b("Containers", "Scroll behavior", "ScrollView { … }.scrollIndicators(.hidden).onScrollGeometryChange(…) { … }", "let b = ui.scroll_behavior(id, Axes::VERTICAL); ui.with_id(id).col(style.scroll(Axes::VERTICAL), |ui| { …; if let Some(bar) = b.bars[1] { … } })"),
-  b("Containers", "Scroll indicators", "NSScroller.knobStyle = .light (AppKit; SwiftUI has none)", "let old = ui.set_environment(Some(ScrollIndicatorStyle { thumb: red, ..ScrollIndicatorStyle::LIGHT })); ui.scroll_area(style, |ui| { … }); ui.set_environment(old)"),
+  b("Containers", "Scroll behavior", "ScrollView { … }.scrollIndicators(.hidden).onScrollGeometryChange(…) { … }", "let b = ui.scroll_behavior(id, Axes::VERTICAL); ui.with_id(id).col(style.scroll(Axes::VERTICAL), |ui| { …; if let Some(bar) = b.bar(Axis::Vertical) { ui.with_id(b.thumb(Axis::Vertical)).float(at).el(knob) } })"),
+  b("Containers", "Scroll indicators", "NSScroller.knobStyle = .light (AppKit; SwiftUI has none)", "ui.set_environment(Some(ScrollerKnob { color: red, ..ScrollerKnob::DARK })); ui.scroll_area(style, |ui| { … })"),
   b("Containers", "Stack queries", "Divider() follows its stack's axis (SwiftUI has no API for it)", "let line = match ui.parent_axis() { Some(Axis::Horizontal) => v, _ => h }; ui.child_count() == 0"),
   b("Presentation", "Alert", ".alert(\"Delete?\", isPresented: $ask) { Button(\"Delete\", role: .destructive) }", "Dialog::new(\"Delete?\").button(\"Delete\", ButtonRole::Destructive).show(ui, &mut self.ask)"),
   b("Presentation", "Context menu", ".contextMenu { Button(\"Copy\") { … } }", "ui.context_menu(r.id, || Menu::new(vec![Item::button(Action::Copy, \"Copy\")])); match ui.native_menu(id, at, menu) { NativeMenu::Unavailable => /* draw it */, NativeMenu::Unanswered => {}, NativeMenu::Answered(a) => … }"),
@@ -118,12 +118,12 @@ pub const BLOCKS: &[Block] = &[
   b("Modifiers", "Control size", ".controlSize(.small)", "ui.control_size(ControlSize::Small).row(Style::new(), |ui| { … })"),
   b("Modifiers", "Accessibility label", ".accessibilityLabel(\"Reset\")", "ui.a11y_label(\"Reset\").icon_button(Icon::RESET)"),
   b("Modifiers", "Keyboard shortcut", ".keyboardShortcut(\"z\", modifiers: .command)", "ui.keymap(&[bind(Shortcut::char('z').cmd(), Command::Undo)]).col(…)"),
-  b("Modifiers", "Environment", ".environment(\\.tint, .green); @Environment(\\.tint) var tint", "let old = ui.set_environment(Some(Tint(t.success))); ui.environment::<Tint>(); ui.set_environment(old)"),
+  b("Modifiers", "Environment", ".environment(\\.tint, .green); @Environment(\\.tint) var tint", "ui.set_environment(Some(Tint(t.success))); let tint = ui.environment::<Tint>()"),
   b("Modifiers", "Identity", "Box().id(item.id); .allowsHitTesting(false)", "ui.key(item.id).row(style, |ui| { … }); ui.with_id(id.key(\"box\")).allows_hit_testing(false).col(style, |ui| { … })"),
   b("Modifiers", "Widget parts", ".environment(\\.isEnabled, true); .help(tip) on a part", "let tip = ui.take_help(); ui.disabled_scope(false, |ui| { if let Some(tip) = &tip { ui.help(tip); } ui.button(\"Undo\") })"),
   b("Modifiers", "Frame request", "TimelineView(.animation) { context in … }", "ui.request_frame(); let k = ui.now().as_secs_f32() % 1.0"),
   b("Modifiers", "Accessibility pair", ".accessibilityLabeledPair(role: .label, id: \"volume\", in: ns)", "ui.a11y_labeled_pair(LabeledPairRole::Label, id, |ui| ui.text(\"Volume\", s)); ui.a11y_labeled_pair(LabeledPairRole::Content, id, |ui| ui.slider(&mut v, 0.0..=1.0))"),
-  b("Modifiers", "Controls theme", "@Environment(\\.controlActiveState) var state", "let t = ui.controls_theme(); ui.el(Style::new().bg(t.accent))"),
+  b("Modifiers", "Controls theme", "@Environment(\\.controlActiveState) var state", "let t = ui.controls_theme(); ui.el(Style::new().bg(t.accent)); let grey = ui.theme().inactive().accent"),
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -588,18 +588,17 @@ impl Gallery {
         let area = area.scroll(Axes::VERTICAL);
         ui.with_id(id).col(area, |ui| {
           (1..=8).for_each(|i| ui.text(format_args!("Line {i}"), t.label()));
-          let Some(bar) = b.bars[1] else { return };
+          let Some(bar) = b.bar(Axis::Vertical) else { return };
           let at = Float::parent().attach(UnitPoint::TOP_TRAILING).anchor(UnitPoint::TOP_TRAILING);
           let at = at.offset(-ScrollBar::INSET, ScrollBar::INSET + bar.pos);
           let thumb = Style::new().w(px(4.0)).h(px(bar.thumb)).radius(2.0).bg(t.accent);
-          ui.with_id(id.key(("thumb", 1usize))).float(at).el(thumb);
+          ui.with_id(b.thumb(Axis::Vertical)).float(at).el(thumb);
         });
       }),
 
-      // Red thumbs in this area alone: the style before it is put back after it.
+      // Red knobs in this area, put back after it for the gallery's other areas.
       "Scroll indicators" => Self::variants(ui, Shown::Alone, |ui| {
-        let red =
-          ScrollIndicatorStyle { thumb: alpha(t.danger, 0.6), ..ScrollIndicatorStyle::LIGHT };
+        let red = ScrollerKnob { color: alpha(t.danger, 0.6), ..ScrollerKnob::DARK };
         let old = ui.set_environment(Some(red));
         ui.scroll_area(Style::new().w(px(200.0)).h(px(60.0)), |ui| {
           (1..=8).for_each(|i| ui.text(format_args!("Line {i}"), t.label()))
@@ -645,7 +644,8 @@ impl Gallery {
         Self::variants(ui, Shown::Plain, |ui| _ = ui.a11y_label("Reset").icon_button(Icon::RESET))
       }
 
-      // Swatches that take their colour from the environment, put for the last two.
+      // Swatches that take their colour from the environment, put for the last two (and put
+      // back after them for the gallery's other blocks).
       "Environment" => Self::variants(ui, Shown::Alone, |ui| {
         let tile = |ui: &mut Ui| {
           let c = ui.environment::<Tint>().map_or(t.raised, |c| c.0);

@@ -404,7 +404,7 @@ nimbo: `ui.virtual_col(heights, |i| i, |ui, i| { … })`
 
 SwiftUI: `ScrollView { … }.scrollIndicators(.hidden).onScrollGeometryChange(…) { … }`
 
-nimbo: `let b = ui.scroll_behavior(id, Axes::VERTICAL); ui.with_id(id).col(style.scroll(Axes::VERTICAL), |ui| { …; if let Some(bar) = b.bars[1] { … } })`
+nimbo: `let b = ui.scroll_behavior(id, Axes::VERTICAL); ui.with_id(id).col(style.scroll(Axes::VERTICAL), |ui| { …; if let Some(bar) = b.bar(Axis::Vertical) { ui.with_id(b.thumb(Axis::Vertical)).float(at).el(knob) } })`
 
 ![Scroll behavior](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/scroll-behavior.png)
 
@@ -412,7 +412,7 @@ nimbo: `let b = ui.scroll_behavior(id, Axes::VERTICAL); ui.with_id(id).col(style
 
 SwiftUI: `NSScroller.knobStyle = .light (AppKit; SwiftUI has none)`
 
-nimbo: `let old = ui.set_environment(Some(ScrollIndicatorStyle { thumb: red, ..ScrollIndicatorStyle::LIGHT })); ui.scroll_area(style, |ui| { … }); ui.set_environment(old)`
+nimbo: `ui.set_environment(Some(ScrollerKnob { color: red, ..ScrollerKnob::DARK })); ui.scroll_area(style, |ui| { … })`
 
 ![Scroll indicators](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/scroll-indicators.png)
 
@@ -488,7 +488,7 @@ nimbo: `ui.keymap(&[bind(Shortcut::char('z').cmd(), Command::Undo)]).col(…)`
 
 SwiftUI: `.environment(\.tint, .green); @Environment(\.tint) var tint`
 
-nimbo: `let old = ui.set_environment(Some(Tint(t.success))); ui.environment::<Tint>(); ui.set_environment(old)`
+nimbo: `ui.set_environment(Some(Tint(t.success))); let tint = ui.environment::<Tint>()`
 
 ![Environment](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/environment.png)
 
@@ -528,6 +528,6 @@ nimbo: `ui.a11y_labeled_pair(LabeledPairRole::Label, id, |ui| ui.text("Volume", 
 
 SwiftUI: `@Environment(\.controlActiveState) var state`
 
-nimbo: `let t = ui.controls_theme(); ui.el(Style::new().bg(t.accent))`
+nimbo: `let t = ui.controls_theme(); ui.el(Style::new().bg(t.accent)); let grey = ui.theme().inactive().accent`
 
 ![Controls theme](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/controls-theme.png)

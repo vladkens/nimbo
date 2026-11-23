@@ -33,7 +33,7 @@
 //! - [Ui::split_behavior]: a divider's drag within both panes' minimums;
 //! - [Ui::scroll_behavior]: a scroll area's bars, a thumb dragged and a track clicked, shown while
 //!   the content moves or the pointer comes in ([ScrollBehavior]); [Ui::scroll_area] draws them
-//!   here, as the environment says ([ScrollIndicatorStyle]), since menus and lists scroll in it;
+//!   here, as the environment says ([ScrollerKnob]), since menus and lists scroll in it;
 //! - [Ui::menu_popup] and [Ui::menu_item_behavior]: a menu's open state, placement, keys and items;
 //! - [Ui::pop_up_behavior]: a pop-up button, opened by a click, Space, Enter or the arrows, letters
 //!   typed choosing an option ([TypeSelect]);
@@ -66,7 +66,7 @@ pub use field::{EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, TextInp
 use keyboard_types::Modifiers;
 pub use list::{ListBehavior, ListRows, Selection};
 pub use menu::{MenuPlacement, TYPE_SELECT, TypeSelect};
-pub use scroll::{ScrollBar, ScrollBehavior, ScrollIndicatorStyle};
+pub use scroll::{ScrollBar, ScrollBehavior, ScrollerKnob};
 pub use shortcut::hotkey_of;
 pub use split::SplitBehavior;
 

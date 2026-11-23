@@ -4,8 +4,8 @@
 //! scrollbars as macOS draws them, thin, shown while the content moves or the pointer comes in,
 //! then fading out; a thumb dragged, a track clicked to page ([Ui::scroll_behavior], for an app
 //! that draws its own); its content fading under its edges ([Ui::fade_edges]). Headless but
-//! drawn: menus and lists scroll in it, so its look is the environment's
-//! ([ScrollIndicatorStyle]), which the theme sets.
+//! drawn: menus and lists scroll in it, so its knobs are the environment's ([ScrollerKnob]), by
+//! default the appearance's.
 //!
 //! ```ignore
 //! ui.fade_edges(t.bg, 24.0).scroll_area(Style::new().grow(), |ui| {
@@ -18,7 +18,8 @@ use std::time::Duration;
 use crate::app::MouseButton;
 use crate::scene::{Color, Point, alpha};
 use crate::ui::{
-  Align, Axes, Float, Flow, Id, Kind, Response, Scroll, Style, Transition, Ui, UnitPoint, pct, px,
+  Align, Axes, Axis, Float, Flow, Id, Kind, Response, Scroll, Style, Transition, Ui, UnitPoint,
+  pct, px,
 };
 
 /// How long scrollbars stay after the content last moved or the pointer came in.
@@ -26,24 +27,25 @@ const BAR_SHOW: Duration = Duration::from_millis(1000);
 /// A thumb's least length.
 pub(super) const MIN_THUMB: f32 = 24.0;
 
-/// How [Ui::scroll_area] draws its thumbs, an environment value ([Ui::set_environment]), as
-/// AppKit's `NSScroller.knobStyle`: their colour and fade on a track's hover. The theme's
-/// ([Ui::set_theme]); without one, [Self::LIGHT] or [Self::DARK] by the OS's appearance.
+/// How [Ui::scroll_area] draws its scrollers' knobs (the thumbs), an environment value
+/// ([Ui::set_environment]), as AppKit's `NSScroller.knobStyle`: their colour, and how they
+/// thicken and darken while the pointer is on a track. Without one, [Self::DARK] in the light
+/// appearance, [Self::LIGHT] in the dark one.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ScrollIndicatorStyle {
-  pub thumb: Color,
-  pub fade: Transition,
+pub struct ScrollerKnob {
+  pub color: Color,
+  pub hover: Transition,
 }
 
-impl ScrollIndicatorStyle {
-  /// The light appearance's: black thumbs.
-  pub const LIGHT: Self = Self { thumb: alpha([0.0, 0.0, 0.0, 1.0], 0.24), fade: FADE };
-  /// The dark appearance's: white thumbs.
-  pub const DARK: Self = Self { thumb: alpha([1.0; 4], 0.26), fade: FADE };
+impl ScrollerKnob {
+  /// AppKit's `.dark`: a dark knob, for light content (the light appearance's).
+  pub const DARK: Self = Self { color: alpha([0.0, 0.0, 0.0, 1.0], 0.24), hover: HOVER };
+  /// AppKit's `.light`: a light knob, for dark content (the dark appearance's).
+  pub const LIGHT: Self = Self { color: alpha([1.0; 4], 0.26), hover: HOVER };
 }
 
-/// The thumbs' hover fade, the theme's ([crate::Theme::fade]).
-const FADE: Transition = Transition::smooth(6.0);
+/// The knobs' change on a track's hover, as the theme's hover fades ([crate::Theme::fade]).
+const HOVER: Transition = Transition::smooth(6.0);
 
 /// The fade the next scroll area draws under its edges ([Ui::fade_edges]): colour and length.
 struct EdgeFade(Color, f32);
@@ -62,7 +64,7 @@ pub(super) struct Bars {
   drag: [Option<f64>; 2],
 }
 
-/// A scroll area's bar along one axis ([ScrollBehavior::bars]): its lengths along it.
+/// A scroll area's bar along one axis ([ScrollBehavior::bar]): its lengths along it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ScrollBar {
   pub track: f32,
@@ -82,17 +84,39 @@ impl ScrollBar {
 }
 
 /// What a scroll area's bars do this frame ([Ui::scroll_behavior]): each axis's bar when its
-/// content overflows, 0 for horizontal.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+/// content overflows ([Self::bar]), its thumb dragged or not.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScrollBehavior {
-  pub bars: [Option<ScrollBar>; 2],
-  /// How far they have faded in, 0 to 1.
-  pub fade: f32,
-  /// Shown: they take clicks (the thumbs `id.key(("thumb", axis))`, the tracks
-  /// `id.key(("track", axis))`); fading out, they draw but take none.
+  /// How far the bars have faded in, 0 to 1: the opacity to draw them at.
+  pub opacity: f32,
+  /// Shown: they take clicks ([Self::thumb], [Self::track]); fading out, they draw but take
+  /// none.
   pub shown: bool,
-  /// The thumb being dragged, per axis.
-  pub drag: [bool; 2],
+  id: Id,
+  bars: [Option<ScrollBar>; 2],
+  drag: [bool; 2],
+}
+
+impl ScrollBehavior {
+  /// The bar along `axis`, when the content overflows along it.
+  pub fn bar(&self, axis: Axis) -> Option<ScrollBar> {
+    self.bars[axis.index()]
+  }
+
+  /// Whether the thumb along `axis` is being dragged.
+  pub fn dragged(&self, axis: Axis) -> bool {
+    self.drag[axis.index()]
+  }
+
+  /// The id of the thumb along `axis`, for the element drawing it, which takes its drag.
+  pub fn thumb(&self, axis: Axis) -> Id {
+    self.id.key(("thumb", axis.index()))
+  }
+
+  /// The id of the track along `axis`, for the element under the thumb, which takes its clicks.
+  pub fn track(&self, axis: Axis) -> Id {
+    self.id.key(("track", axis.index()))
+  }
 }
 
 fn axis(p: Point, ax: usize) -> f32 {
@@ -218,10 +242,11 @@ impl Ui<'_> {
       self.request_frame_in(u - now);
     }
 
-    let fade = self.animate(id.key("bars"), until.is_some() as u8 as f32, Transition::linear(5.0));
+    let opacity =
+      self.animate(id.key("bars"), until.is_some() as u8 as f32, Transition::linear(5.0));
     let drag = bars.drag.map(|d| d.is_some());
     *self.state::<Bars>(id) = bars;
-    ScrollBehavior { bars: geos, fade, shown: until.is_some(), drag }
+    ScrollBehavior { opacity, shown: until.is_some(), id, bars: geos, drag }
   }
 
   /// The next [Ui::scroll_area] fades its content out under its top and bottom edges, over `len`
@@ -233,16 +258,16 @@ impl Ui<'_> {
     self
   }
 
-  /// A container scrolling its children, with overlay scrollbars ([ScrollIndicatorStyle]).
-  /// `style` sets its size and padding, and the axes with [Style::scroll] (vertical by default),
-  /// as SwiftUI's `ScrollView`. Its id is the scroll container's ([Ui::scroll], [Ui::scroll_to]);
-  /// the thumbs are `id.key(("thumb", axis))`, the tracks `id.key(("track", axis))`, 0 for
-  /// horizontal.
+  /// A container scrolling its children, with overlay scrollbars, their knobs the
+  /// environment's ([ScrollerKnob]). `style` sets its size and padding, and the axes with
+  /// [Style::scroll] (vertical by default), as SwiftUI's `ScrollView`. Its id is the scroll
+  /// container's ([Ui::scroll], [Ui::scroll_to]); the thumbs and tracks are its behaviour's
+  /// ([ScrollBehavior::thumb], [ScrollBehavior::track]).
   pub fn scroll_area<R>(&mut self, style: Style, f: impl FnOnce(&mut Self) -> R) -> Response {
-    let look = match self.environment::<ScrollIndicatorStyle>() {
+    let knob = match self.environment::<ScrollerKnob>() {
       Some(&s) => s,
-      None if self.appearance().scheme.is_dark() => ScrollIndicatorStyle::DARK,
-      None => ScrollIndicatorStyle::LIGHT,
+      None if self.appearance().scheme.is_dark() => ScrollerKnob::LIGHT,
+      None => ScrollerKnob::DARK,
     };
 
     let id = self.take_id();
@@ -252,9 +277,10 @@ impl Ui<'_> {
       false => style.clip(),
     };
 
-    let ScrollBehavior { bars, fade, shown, drag } = self.scroll_behavior(id, style.scroll);
+    let b = self.scroll_behavior(id, style.scroll);
+    let (opacity, shown) = (b.opacity, b.shown);
     // Drawn from the last frame's content and viewport: again if the layout changes them.
-    if fade > 0.0 || shown {
+    if opacity > 0.0 || shown {
       self.settle(id);
     }
 
@@ -267,13 +293,13 @@ impl Ui<'_> {
         ui.float(Float::parent().clip()).push(Kind::Fade { color, len }, s, Flow::Row);
       }
 
-      for (ax, g) in bars.iter().enumerate() {
-        let Some(g) = g.as_ref().filter(|_| fade > 0.0 || shown) else { continue };
-        let (thumb, track) = (id.key(("thumb", ax)), id.key(("track", ax)));
-        let on = ui.hovered(track) || drag[ax];
-        let hot = ui.animate(track.key("hot"), on as u8 as f32, look.fade);
+      for (ax, axis) in [Axis::Horizontal, Axis::Vertical].into_iter().enumerate() {
+        let Some(g) = b.bar(axis).filter(|_| opacity > 0.0 || shown) else { continue };
+        let (thumb, track) = (b.thumb(axis), b.track(axis));
+        let on = ui.hovered(track) || b.dragged(axis);
+        let hot = ui.animate(track.key("hot"), on as u8 as f32, knob.hover);
         let thick = 6.0 + 2.0 * hot;
-        let color = alpha(look.thumb, look.thumb[3] * (1.0 + 0.6 * hot));
+        let color = alpha(knob.color, knob.color[3] * (1.0 + 0.6 * hot));
 
         let (at, s, pad) = match ax {
           0 => {
@@ -306,7 +332,7 @@ impl Ui<'_> {
         }
 
         let flow = if ax == 0 { Flow::Row } else { Flow::Column };
-        ui.float(at.clip()).container(flow, s.pads(pad).opacity(fade), |ui| {
+        ui.float(at.clip()).container(flow, s.pads(pad).opacity(opacity), |ui| {
           ui.el(gap);
           if shown {
             ui.with_id(thumb);
@@ -327,7 +353,7 @@ mod tests {
   use crate::harness::Harness;
   use crate::scene::{Size, rgb};
   use crate::ui::input::ScrollState;
-  use crate::ui::{Id, ScrollIndicatorStyle, Style, Ui, px};
+  use crate::ui::{Id, ScrollerKnob, Style, Ui, px};
 
   /// A scroll area 200 high over 1000 points of content, fading into red.
   struct Tall(f32);
@@ -475,7 +501,7 @@ mod tests {
     struct Red;
     impl App for Red {
       fn view(&mut self, ui: &mut Ui) {
-        let red = ScrollIndicatorStyle { thumb: rgb(0xff0000), ..ScrollIndicatorStyle::LIGHT };
+        let red = ScrollerKnob { color: rgb(0xff0000), ..ScrollerKnob::DARK };
         ui.set_environment(Some(red));
         ui.id("area").scroll_area(Style::new().w(px(200.0)).h(px(200.0)), |ui| {
           ui.el(Style::new().h(px(1000.0)));
