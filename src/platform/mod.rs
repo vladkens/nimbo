@@ -99,13 +99,14 @@
 //!   app's callbacks too), and for tests `describe() -> Vec<String>`, `opening()`, `closing()`,
 //!   `choose(path: &[usize])`; `available() -> Result<(), String>`.
 //! - `pub mod hotkey` ([crate::hotkey]): `Hotkeys` with `new(on: OnEdge)` (`on` runs on a thread of
-//!   its own), `set(&mut self, Option<Hotkey>) -> Result<(), String>` (`None`: no hotkey; `Err`
-//!   when the OS can't take it), `start(&mut self) -> Result<(), String>` (the listener),
+//!   its own), `set(&mut self, which: usize, Option<Hotkey>) -> Result<(), String>` (place `which`
+//!   < `MAX` from now on, its edges saying `which`; `None`: none there; `Err` when the OS can't
+//!   take it; the other places untouched), `start(&mut self) -> Result<(), String>` (the listener),
 //!   `escape(&mut self, on: bool)` (Escape taken from every app as `Edge::Escape`), and
-//!   `status(&self, &mut Status)` filling the listener, fallback, secure input, counts and, while
-//!   Escape is on, why it is not taken (`escape_error`). Besides, `modifier_alone() -> bool` (a
-//!   modifier key alone can be the hotkey) and `start_asks() -> bool` (`start` shows the desktop's
-//!   dialog).
+//!   `status(&self, &mut Status)` filling the listener, each slot's fallback, secure input, counts
+//!   and, while Escape is on, why it is not taken (`escape_error`). Besides, `modifier_alone() ->
+//!   bool` (a modifier key alone can be the hotkey) and `start_asks() -> bool` (`start` shows the
+//!   desktop's dialog).
 //! - `pub mod autostart` ([crate::autostart]): `available()`, `state(&AppInfo)`, `set(&AppInfo,
 //!   on)`, `open_settings()`.
 //! - `pub mod desktop` ([crate::desktop]): `install(&AppInfo, &Launcher) -> Result<bool, String>`
