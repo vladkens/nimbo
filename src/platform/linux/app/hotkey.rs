@@ -48,6 +48,11 @@ struct State {
   bus: Cell<P>,
   /// Each place's chord.
   hotkeys: Cell<[Option<Shortcut>; MAX]>,
+  /// Each place's chord as the session bound it: a place changed since takes no press until the
+  /// rebind binds it anew.
+  bound: Cell<[Option<Shortcut>; MAX]>,
+  /// The places pressed whose release has not come.
+  held: Cell<[bool; MAX]>,
   /// The session is made anew once the main loop is idle.
   rebinding: Cell<bool>,
   started: Cell<bool>,
@@ -96,6 +101,8 @@ impl Hotkeys {
       tx,
       bus: Cell::new(null_mut()),
       hotkeys: Cell::new([None; MAX]),
+      bound: Cell::new([None; MAX]),
+      held: Cell::new([false; MAX]),
       rebinding: Cell::new(false),
       started: Cell::new(false),
       listener: Cell::new(Listener::Off),
@@ -294,6 +301,15 @@ fn close_session(s: &State) {
     let _ = dbus::call(s.bus.get(), PORTAL, &session, iface, "Close", V::Tuple(Vec::new()), MS);
   }
 
+  // Its releases won't come: the places held are let go now.
+  let at = Instant::now();
+  for which in (0..MAX).filter(|&which| s.held.get()[which]) {
+    let _ = s.tx.send(Edge::Up { which, at });
+  }
+
+  s.held.set([false; MAX]);
+  s.bound.set([None; MAX]);
+
   if s.listener.get() != Listener::Failed {
     s.listener.set(Listener::Off);
   }
@@ -312,6 +328,7 @@ fn rebind(s: &Rc<State>) {
 /// after the first's (`Wavo`, `Wavo 2`).
 fn bind(s: &Rc<State>) {
   let Some(session) = s.session.borrow().clone() else { return };
+  s.bound.set(s.hotkeys.get());
   let app = super::info();
   let shortcut = |(which, k): (usize, Option<Shortcut>)| {
     let name =
@@ -458,13 +475,30 @@ unsafe fn edge(args: P, data: P, down: bool) {
   let args = Gv::borrowed(args);
   let ours = s.session.borrow().as_deref() == Some(&args.child(0).str());
   let Some(which) = place(&args.child(1).str()).filter(|_| ours) else { return };
+  if let Some(edge) = shortcut_edge(&s, which, down) {
+    s.events.set(s.events.get() + 1);
+    let _ = s.tx.send(edge);
+  }
+}
 
-  s.events.set(s.events.get() + 1);
+/// The edge of place `which`'s `Activated` (`down`) or `Deactivated`: a press while its hotkey is
+/// the one the session bound, a release of a press that came.
+fn shortcut_edge(s: &State, which: usize, down: bool) -> Option<Edge> {
+  let mut held = s.held.get();
+  let hotkey = s.hotkeys.get()[which];
+  match down {
+    true if hotkey.is_none() || hotkey != s.bound.get()[which] => return None,
+    false if !held[which] => return None,
+    _ => {}
+  }
+
+  held[which] = down;
+  s.held.set(held);
   let at = Instant::now();
-  let _ = s.tx.send(match down {
+  Some(match down {
     true => Edge::Down { which, at, repeat: false },
     false => Edge::Up { which, at },
-  });
+  })
 }
 
 unsafe extern "C" fn on_activated(_: P, _: S, _: S, _: S, _: S, args: P, data: P) {
@@ -495,6 +529,31 @@ mod tests {
     assert!(s.escape_error.is_some_and(|e| e.contains("Escape")));
     h.escape(false);
     assert_eq!((h.status().escape, h.status().escape_error), (false, None));
+  }
+
+  /// A place pressed whose hotkey changed since the session bound it takes no press; a release
+  /// comes after a press only, and a session closed lets go of the places held.
+  #[test]
+  fn the_portals_edges_of_the_hotkeys_bound() {
+    let (tx, rx) = channel();
+    let h = super::Hotkeys::new(Box::new(move |e| _ = tx.send(e)));
+    let s = &h.0;
+    let mut hotkeys = [None; MAX];
+    hotkeys[..2].copy_from_slice(&[Some(chord("ctrl+option+space")), Some(chord("ctrl+F5"))]);
+    s.hotkeys.set(hotkeys);
+    s.bound.set(hotkeys);
+    let edge = |which, down| shortcut_edge(s, which, down);
+
+    assert!(matches!(edge(0, true), Some(Edge::Down { which: 0, .. })));
+    assert_eq!((edge(1, false), edge(2, true)), (None, None), "not pressed, not bound");
+    hotkeys[1] = Some(chord("ctrl+F6"));
+    s.hotkeys.set(hotkeys);
+    assert_eq!(edge(1, true), None, "changed since bound");
+
+    close_session(s);
+    let up = rx.recv_timeout(std::time::Duration::from_secs(1));
+    assert!(matches!(up, Ok(Edge::Up { which: 0, .. })), "{up:?}");
+    assert_eq!(edge(0, false), None, "let go already");
   }
 
   /// Each place's id, the first as when there was one, and back.
