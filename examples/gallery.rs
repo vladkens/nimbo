@@ -13,7 +13,7 @@
 // A Windows app, not a console one: no terminal opens with its window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use nimbo::ui::{ListRows, ScrollBar};
+use nimbo::ui::{LabeledPairRole, ListRows, ScrollBar};
 use nimbo::{
   Align, Answer, App, Axes, Axis, Bitmap, Button, ButtonRole, ButtonStyle, Color, Config,
   ContentMode, ControlSize, Dialog, Float, Font, FormRow, FormStyle, Hotkey, Icon, Id, Item,
@@ -122,7 +122,7 @@ pub const BLOCKS: &[Block] = &[
   b("Modifiers", "Identity", "Box().id(item.id); .allowsHitTesting(false)", "ui.key(item.id).row(style, |ui| { … }); ui.with_id(id.key(\"box\")).allows_hit_testing(false).col(style, |ui| { … })"),
   b("Modifiers", "Widget parts", ".environment(\\.isEnabled, true); .help(tip) on a part", "let tip = ui.take_help(); ui.disabled_scope(false, |ui| { if let Some(tip) = &tip { ui.help(tip); } ui.button(\"Undo\") })"),
   b("Modifiers", "Frame request", "TimelineView(.animation) { context in … }", "ui.request_frame(); let k = ui.now().as_secs_f32() % 1.0"),
-  b("Modifiers", "Accessibility pair", ".accessibilityLabeledPair(role: .label, id: \"volume\", in: ns); Text(\"New\")", "let at = ui.element_count(); ui.text(\"Volume\", s); let old = ui.form_names(at..ui.element_count(), 0..0); ui.slider(&mut v, 0.0..=1.0); ui.set_slot(old); ui.a11y_row(row, Role::Row); ui.a11y_named(id, Role::StaticText, \"New\")"),
+  b("Modifiers", "Accessibility pair", ".accessibilityLabeledPair(role: .label, id: \"volume\", in: ns)", "ui.a11y_labeled_pair(LabeledPairRole::Label, id, |ui| ui.text(\"Volume\", s)); ui.a11y_labeled_pair(LabeledPairRole::Content, id, |ui| ui.slider(&mut v, 0.0..=1.0))"),
   b("Modifiers", "Controls theme", "@Environment(\\.controlActiveState) var state", "let t = ui.controls_theme(); ui.el(Style::new().bg(t.accent))"),
 ];
 
@@ -685,11 +685,11 @@ impl Gallery {
 
       // The slider named by the text before it; the badge by its own text.
       "Accessibility pair" => Self::variants(ui, Shown::Plain, |ui| {
-        let at = ui.element_count();
-        ui.text("Volume", t.label());
-        let old = ui.form_names(at..ui.element_count(), 0..0);
-        _ = ui.slider(&mut self.level, 0.0..=100.0);
-        ui.set_slot(old);
+        let pair = Id::of("volume");
+        ui.a11y_labeled_pair(LabeledPairRole::Label, pair, |ui| ui.text("Volume", t.label()));
+        ui.a11y_labeled_pair(LabeledPairRole::Content, pair, |ui| {
+          _ = ui.slider(&mut self.level, 0.0..=100.0);
+        });
         ui.badge("New", Tone::Accent);
       }),
 

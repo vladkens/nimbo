@@ -48,7 +48,8 @@ use std::rc::Rc;
 use super::theme::Theme;
 use super::widgets::{Icon, MarkShift};
 use super::{
-  Align, Cursor, Id, Response, Role, Shadow, State, Style, TextStyle, Ui, grow, px, rigid,
+  Align, Cursor, Id, LabeledPairRole, Response, Role, Shadow, State, Style, TextStyle, Ui, grow,
+  px, rigid,
 };
 use crate::locale::Localized;
 use crate::scene::{Color, Frame, Point, Quad, Rect, alpha, mix, rgb};
@@ -536,10 +537,13 @@ impl Ui<'_> {
       }
 
       let outer = ui.set_slot(Some(Plate::default()));
-      ui.col(fs.group.clip(), rows);
+      let mut n = 0;
+      ui.col(fs.group.clip(), |ui| {
+        rows(ui);
+        n = ui.child_count();
+      });
       // A row held down that the plate ends with, nothing built after it, rounds its fill as
       // the plate.
-      let n = ui.element_count();
       if let Some((_, end)) = ui.set_slot(outer).and_then(|p| p.held).filter(|h| h.0 == n) {
         end.set(fs.group.radii[0]);
       }
@@ -568,7 +572,7 @@ impl Ui<'_> {
   /// or icon tile `id.key("tile")`, a text footer `id.key("footer")`. The row takes no input, its
   /// controls do, unless [FormStyle::row] is [Style::hit]: then it is a row a click selects, named
   /// by its label's plain texts and described by its description's. Else the first control recorded
-  /// in it with no name of its own takes them as its name and description ([Ui::a11y]); either way
+  /// in it with no name of its own takes them ([Ui::a11y_labeled_pair], the row's id); either way
   /// they are not read again, and the label's and description's other elements are read after the
   /// one they name.
   pub fn form_row<R>(
@@ -591,7 +595,7 @@ impl Ui<'_> {
     let pressed = row.pressed;
     let end = pressed.then(|| Rc::new(Cell::new(0.0)));
     let held = end.clone();
-    let at = self.element_count();
+    let at = self.child_count();
     let plate = self.slot::<Plate>().and_then(|p| p.held.as_ref());
     let above = plate.is_some_and(|h| h.0 == at);
 
@@ -626,9 +630,6 @@ impl Ui<'_> {
 
     let r = self.disabled_scope(off, |ui| {
       ui.with_id(id).allows_hit_testing(style.hit).canvas_col(style.gap(0.0), hairline, |ui| {
-        // The names the row's label and description replace, put back once the row or its first
-        // control, in the line or the footer, took them.
-        let mut outer = None;
         ui.row(line, |ui| {
           if !tile.is_none() {
             let x = (fs.tile_x - pad_x).max(0.0);
@@ -640,27 +641,27 @@ impl Ui<'_> {
             });
           }
 
-          let (mut name, mut about) = (0..0, 0..0);
           let col = Style::new().w(grow()).gap(2.0).pads([top + fs.pad_y, 0.0, below, 0.0]);
           ui.col(col, |ui| {
             ui.row(Style::new().w(grow()).gap(6.0).align(Align::Start, Align::Center), |ui| {
               // A mark on the line sits on the capitals' middle.
               let outer = ui.set_slot(Some(MarkShift(shift)));
-              let at = ui.element_count();
-              label.build(ui, dim(fs.label), id.key("label"), line_h, 1.6);
-              name = at..ui.element_count();
+              ui.a11y_labeled_pair(LabeledPairRole::Label, id, |ui| {
+                label.build(ui, dim(fs.label), id.key("label"), line_h, 1.6)
+              });
               ui.set_slot(outer);
             });
 
-            let at = ui.element_count();
-            caption.build(ui, dim(fs.caption), id.key("caption"), 12.0, 1.6);
-            about = at..ui.element_count();
+            ui.a11y_labeled_pair(LabeledPairRole::Description, id, |ui| {
+              caption.build(ui, dim(fs.caption), id.key("caption"), 12.0, 1.6)
+            });
           });
 
-          outer = Some(ui.form_names(name, about));
+          // A row a click selects takes them; else its first control, in the line or the footer.
           if fs.row.hit {
-            ui.a11y_row(id, Role::Row).state(State::Disabled, off);
-            ui.set_slot(outer.take().flatten());
+            ui.a11y_labeled_pair(LabeledPairRole::Content, id, |ui| {
+              ui.a11y(id, Role::Row).state(State::Disabled, off);
+            });
           }
 
           // A slot as high as the row, at least the label's first line and the padding around
@@ -671,27 +672,25 @@ impl Ui<'_> {
             .min_h(top + fs.pad_y + below + line_h)
             .pads([over, 0.0, 0.0, 0.0])
             .align(Align::End, Align::Center);
-          ui.col(slot, |ui| {
-            ui.row(Style::new().gap(fs.gap).align(Align::Start, Align::Center), control)
+          ui.a11y_labeled_pair(LabeledPairRole::Content, id, |ui| {
+            ui.col(slot, |ui| {
+              ui.row(Style::new().gap(fs.gap).align(Align::Start, Align::Center), control)
+            })
           });
         });
         if !footer.is_none() {
           // Right under the description, 2 apart as it is from the label, and under the controls.
           let pad = Style::new().w(grow()).pads([2.0, 0.0, fs.pad_y, 0.0]);
-          ui.col(pad, |ui| footer.build(ui, dim(fs.caption), id.key("footer"), 12.0, 1.6));
-        }
-
-        if let Some(outer) = outer {
-          ui.set_slot(outer);
+          ui.a11y_labeled_pair(LabeledPairRole::Content, id, |ui| {
+            ui.col(pad, |ui| footer.build(ui, dim(fs.caption), id.key("footer"), 12.0, 1.6))
+          });
         }
       })
     });
-    // Held down, where its build ended, for the row under it and the section's end.
-    let n = self.element_count();
-    if let Some(end) = held
-      && let Some(p) = self.slot::<Plate>()
-    {
-      p.held = Some((n, end));
+    // Held down, its place among the plate's rows, for the row under it and the section's end.
+    let n = self.child_count();
+    if let Some(p) = self.slot::<Plate>() {
+      p.held = held.map(|end| (n, end));
     }
 
     r

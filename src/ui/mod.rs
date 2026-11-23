@@ -64,7 +64,7 @@ use std::hash::Hash;
 use std::num::NonZeroU8;
 use std::time::Duration;
 
-pub use a11y::{A11yNode, A11yTree, Action, Props, Role, State, Value};
+pub use a11y::{A11yNode, A11yTree, Action, LabeledPairRole, Props, Role, State, Value};
 pub use behavior::{
   Behavior, DialogBehavior, EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, ListBehavior,
   ListRows, MenuPlacement, ScrollBar, ScrollBehavior, ScrollIndicatorStyle, Selection,
@@ -895,12 +895,6 @@ impl<'a> Ui<'a> {
     self.st.stack.last().map_or(0, |s| s.1 as usize)
   }
 
-  /// How many elements the view has built so far this frame: whether anything was built between
-  /// two points, which elements a part spans ([Ui::form_names]).
-  pub fn element_count(&self) -> usize {
-    self.st.tree.nodes.len()
-  }
-
   /// Text, measured and wrapped by the layout. Takes anything `Display`, so
   /// `format_args!("{n}")` formats straight into the frame's text buffer. Returns nothing, so it
   /// fits `match` arms beside other statements; named text (`ui.id("x").text(..)`) still takes
@@ -1245,7 +1239,7 @@ mod tests {
   #[test]
   fn stacks_tell_their_axis_and_children() {
     let mut ui = Ui::new(UiState::default(), Size::new(10.0, 10.0), None, Duration::ZERO);
-    let at = ui.element_count();
+    let at = ui.st.tree.nodes.len();
     ui.row(Style::new(), |ui| {
       assert_eq!((ui.parent_axis(), ui.child_count()), (Some(Axis::Horizontal), 0));
       ui.el(Style::new());
@@ -1253,7 +1247,7 @@ mod tests {
       ui.col(Style::new(), |ui| assert_eq!(ui.parent_axis(), Some(Axis::Vertical)));
       ui.grid(2, Style::new(), |ui| assert_eq!(ui.parent_axis(), None));
     });
-    assert_eq!(ui.element_count() - at, 4);
+    assert_eq!(ui.st.tree.nodes.len() - at, 4);
   }
 
   /// A part enabled in a disabled container, which is disabled again after it.

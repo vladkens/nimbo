@@ -30,7 +30,7 @@ impl Ui<'_> {
     let pill = Style::new().h(px(h)).pad_xy(pad, 0.0).center().radius(r).bg(t.tint(tone));
     let pill = pill.w(rigid()).opacity(opacity);
     let text = s.to_string();
-    self.a11y_named(id, Role::StaticText, &text);
+    self.a11y(id, Role::StaticText).name_or(&text);
     self
       .with_id(id)
       .allows_hit_testing(false)

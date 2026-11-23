@@ -518,9 +518,9 @@ nimbo: `ui.request_frame(); let k = ui.now().as_secs_f32() % 1.0`
 
 ### Accessibility pair
 
-SwiftUI: `.accessibilityLabeledPair(role: .label, id: "volume", in: ns); Text("New")`
+SwiftUI: `.accessibilityLabeledPair(role: .label, id: "volume", in: ns)`
 
-nimbo: `let at = ui.element_count(); ui.text("Volume", s); let old = ui.form_names(at..ui.element_count(), 0..0); ui.slider(&mut v, 0.0..=1.0); ui.set_slot(old); ui.a11y_row(row, Role::Row); ui.a11y_named(id, Role::StaticText, "New")`
+nimbo: `ui.a11y_labeled_pair(LabeledPairRole::Label, id, |ui| ui.text("Volume", s)); ui.a11y_labeled_pair(LabeledPairRole::Content, id, |ui| ui.slider(&mut v, 0.0..=1.0))`
 
 ![Accessibility pair](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/accessibility-pair.png)
 
