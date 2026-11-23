@@ -13,11 +13,13 @@
 // A Windows app, not a console one: no terminal opens with its window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+use nimbo::ui::LabeledPairRole;
 use nimbo::{
-  Align, Answer, App, Axes, Axis, Bitmap, Button, ButtonRole, ButtonStyle, Config, ContentMode,
-  ControlSize, Dialog, Float, Font, FormRow, FormStyle, Hotkey, Icon, Item, LinePattern, List,
-  ListStyle, Menu, Picker, Section, Selection, Shortcut, Slider, Split, Style, Tabs, Tag,
-  TextStyle, Tone, ToolbarItemPlacement, TruncationMode, Ui, UnitPoint, grow, px, t, tn,
+  Align, Answer, App, Axes, Axis, Bitmap, Button, ButtonRole, ButtonStyle, Color, Config,
+  ContentMode, ControlSize, Dialog, Float, Font, FormRow, FormStyle, Hotkey, Icon, Id, Item,
+  LinePattern, List, ListRows, ListStyle, Menu, Picker, ScrollBar, ScrollerKnob, Section,
+  Selection, Shortcut, Slider, Split, Style, Tabs, Tag, TextStyle, Tone, ToolbarItemPlacement,
+  TruncationMode, Ui, UnitPoint, WindowToolbarStyle, alpha, grow, px, t, tn,
 };
 
 pub const SIDEBAR: &str = "sidebar";
@@ -98,19 +100,31 @@ pub const BLOCKS: &[Block] = &[
   b("Form", "Footer", "HelpLink { … } at a pane's end", "ui.help(\"Help\").form_footer(&fs, |ui| _ = ui.button(\"Reset All…\"))"),
   b("List", "List", "List(items, selection: $sel) { … }", "List::new(n, 24.0).selection(&mut sel).show(ui, |ui, row| { … })"),
   b("List", "List sections", "Section(header:) in a List; .listStyle(…)", "List::new(n, 32.0).sections(&starts, 24.0, &head).list_style(ListStyle::Grouped)"),
+  b("List", "List behavior", "List(rows, selection: $sel) { … }.listRowBackground(…)", "let b = ui.list_behavior(id, ListRows::new(n, 22.0), &mut sel, &key); ui.with_id(id).scroll_area(b.style(style), |ui| ui.list_rows(&b, |ui, i, k| { … }))"),
   b("Containers", "Tabs", "TabView { … }", "Tabs::new(&mut self.tab, &[\"One\", \"Two\"]).show(ui, |ui, i| { … })"),
   b("Containers", "Split", "HSplitView { … }", "Split::new(Axis::Horizontal).ratio(&mut self.side).show(ui, |ui, pane| { … })"),
   b("Containers", "Navigation split", "NavigationSplitView { … } detail: { … }", "Split::navigation().ratio(&mut self.side).show(ui, |ui, pane| { … })"),
   b("Containers", "Toolbar", "Detail().toolbar { ToolbarItem(placement: .principal) { … }; ToolbarItem(placement: .primaryAction) { … } } in a NavigationSplitView", "ui.toolbar(|ui| ui.toolbar_item(ToolbarItemPlacement::PrimaryAction, |ui| _ = ui.icon_button(Icon::DOC))) in a column"),
+  b("Containers", "Unified toolbar", ".windowToolbarStyle(.unified)", "ui.window_toolbar_style(WindowToolbarStyle::Unified); ui.row(band, |ui| { … }) at the window's top"),
   b("Containers", "Menu", "Menu(\"Actions\") { Button(…) }", "ui.menu(\"Actions\", |ui| { ui.menu_item(\"Copy\"); })"),
   b("Containers", "Lazy column", "LazyVStack { ForEach(…) }", "ui.virtual_col(heights, |i| i, |ui, i| { … })"),
+  b("Containers", "Scroll behavior", "ScrollView { … }.scrollIndicators(.hidden).onScrollGeometryChange(…) { … }", "let b = ui.scroll_behavior(id, Axes::VERTICAL); ui.with_id(id).col(style.scroll(Axes::VERTICAL), |ui| { …; if let Some(bar) = b.bar(Axis::Vertical) { ui.with_id(b.thumb(Axis::Vertical)).float(at).el(knob) } })"),
+  b("Containers", "Scroll indicators", "NSScroller.knobStyle = .light (AppKit; SwiftUI has none)", "ui.set_environment(Some(ScrollerKnob { color: red, ..ScrollerKnob::DARK })); ui.scroll_area(style, |ui| { … })"),
+  b("Containers", "Stack queries", "Divider() follows its stack's axis (SwiftUI has no API for it)", "let line = match ui.parent_axis() { Some(Axis::Horizontal) => v, _ => h }; ui.child_count() == 0"),
   b("Presentation", "Alert", ".alert(\"Delete?\", isPresented: $ask) { Button(\"Delete\", role: .destructive) }", "Dialog::new(\"Delete?\").button(\"Delete\", ButtonRole::Destructive).show(ui, &mut self.ask)"),
-  b("Presentation", "Context menu", ".contextMenu { Button(\"Copy\") { … } }", "ui.context_menu(r.id, || Menu::new(vec![Item::button(Action::Copy, \"Copy\")]))"),
-  b("Presentation", "Tooltip", ".help(\"Saves it\")", "ui.help(\"Saves it\").button(\"Save\")"),
+  b("Presentation", "Context menu", ".contextMenu { Button(\"Copy\") { … } }", "ui.context_menu(r.id, || Menu::new(vec![Item::button(Action::Copy, \"Copy\")])); match ui.native_menu(id, at, menu) { NativeMenu::Unavailable => /* draw it */, NativeMenu::Unanswered => {}, NativeMenu::Answered(a) => … }"),
+  b("Presentation", "Tooltip", ".help(\"Saves it\")", "ui.help(\"Saves it\").button(\"Save\"); for (id, tip) in ui.take_tooltips() { /* a look of its own */ }"),
   b("Modifiers", "Disabled", ".disabled(true)", "ui.disabled(true).col(Style::new(), |ui| { … })"),
   b("Modifiers", "Control size", ".controlSize(.small)", "ui.control_size(ControlSize::Small).row(Style::new(), |ui| { … })"),
   b("Modifiers", "Accessibility label", ".accessibilityLabel(\"Reset\")", "ui.a11y_label(\"Reset\").icon_button(Icon::RESET)"),
   b("Modifiers", "Keyboard shortcut", ".keyboardShortcut(\"z\", modifiers: .command)", "ui.keymap(&[bind(Shortcut::char('z').cmd(), Command::Undo)]).col(…)"),
+  b("Modifiers", "Environment", ".environment(\\.tint, .green); @Environment(\\.tint) var tint", "ui.set_environment(Some(Tint(t.success))); let tint = ui.environment::<Tint>()"),
+  b("Modifiers", "Identity", "Box().id(item.id); .allowsHitTesting(false)", "ui.key(item.id).row(style, |ui| { … }); ui.with_id(id.key(\"box\")).allows_hit_testing(false).col(style, |ui| { … })"),
+  b("Modifiers", "Widget parts", ".environment(\\.isEnabled, true); .help(tip) on a part", "let tip = ui.take_help(); ui.disabled_scope(false, |ui| { if let Some(tip) = &tip { ui.help(tip); } ui.button(\"Undo\") })"),
+  b("Modifiers", "Frame request", "TimelineView(.animation) { context in … }", "ui.request_frame(); let k = ui.now().as_secs_f32() % 1.0"),
+  b("Modifiers", "Accessibility pair", ".accessibilityLabeledPair(role: .label, id: \"volume\", in: ns)", "ui.a11y_labeled_pair(LabeledPairRole::Label, id, |ui| ui.text(\"Volume\", s)); ui.a11y_labeled_pair(LabeledPairRole::Content, id, |ui| ui.slider(&mut v, 0.0..=1.0))"),
+  b("Modifiers", "Controls theme", "@Environment(\\.controlActiveState) var state", "let t = ui.controls_theme(); ui.el(Style::new().bg(t.accent)); let grey = ui.theme().inactive().accent"),
+  b("Modifiers", "Color scheme", "@Environment(\\.colorScheme) var colorScheme", "let dark = ui.color_scheme().is_dark()"),
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -125,6 +139,9 @@ pub const SIZES: [Tag<Size>; 3] = [
   Tag::new(Size::Medium, "Medium"),
   Tag::new(Size::Large, "Large"),
 ];
+
+/// The environment block's value: the tint of the swatches built while it is there.
+pub struct Tint(pub Color);
 
 /// What the context menu does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -154,6 +171,8 @@ pub struct Gallery {
   /// The toolbar's sidebar share.
   pub bar_side: f32,
   pub rows: Selection,
+  /// The list behaviour block's, its second row selected at first.
+  pub own_rows: Selection,
   pub ask: bool,
   pub deleted: usize,
   pub copied: usize,
@@ -203,6 +222,11 @@ impl Default for Gallery {
       side: 0.4,
       bar_side: 0.4,
       rows: Selection::default(),
+      own_rows: {
+        let mut s = Selection::default();
+        s.select(1, 1);
+        s
+      },
       ask: false,
       deleted: 0,
       copied: 0,
@@ -438,6 +462,29 @@ impl Gallery {
         let list = list.style(Style::new().w(px(220.0)).h(px(88.0)));
         list.show(ui, |ui, row| ui.text(format_args!("Row {}", row.index + 1), t.label()));
       }),
+
+      // Rows of its own over the list's behaviour: the selected one filled with the accent.
+      "List behavior" => Self::variants(ui, Shown::Alone, |ui| {
+        let (id, key) = (Id::of("own list"), |i: usize| i as u64);
+        let b = ui.list_behavior(id, ListRows::new(40, 22.0), &mut self.own_rows, &key);
+        let sel = b.selection();
+
+        // The box's focus and the rows built in view, their ids the list's.
+        let style = Style::new().w(px(220.0)).h(px(96.0)).pad(4.0).radius(8.0).bg(t.panel);
+        let style = b.style(style);
+        ui.with_id(id).scroll_area(style, |ui| {
+          ui.list_rows(&b, |ui, i, k| {
+            let on = sel.contains(k);
+            let row = Style::new().w(grow()).h(px(22.0)).pad_xy(8.0, 0.0).radius(5.0);
+            let fill = if on { t.accent } else { [0.0; 4] };
+            let row = row.align(Align::Start, Align::Center).bg(fill);
+            let text = TextStyle::new(t.font, if on { t.on_accent } else { t.text });
+            ui.with_id(id.key(("row", k)))
+              .row(row, |ui| ui.text(format_args!("Row {}", i + 1), text));
+          });
+        });
+      }),
+
       "List sections" => Self::variants(ui, Shown::Plain, |ui| {
         let head = |ui: &mut Ui, g: usize| ui.text(["Today", "Yesterday"][g], t.section());
         let list = List::new(6, 30.0).sections(&[0, 3], 24.0, &head);
@@ -496,6 +543,30 @@ impl Gallery {
           });
         });
       }),
+
+      // A band of the app's own: at a window's top it would ask for a toolbar's title bar.
+      "Unified toolbar" => Self::variants(ui, Shown::Alone, |ui| {
+        let band = Style::new().w(px(360.0)).h(px(52.0)).radius(8.0).pad_xy(12.0, 0.0).bg(t.panel);
+        ui.window_toolbar_style(WindowToolbarStyle::Unified);
+        ui.row(band.align(Align::Start, Align::Center).gap(8.0), |ui| {
+          ui.text("Notes", t.label());
+          ui.spacer();
+          _ = ui.help("New Note").icon_button(Icon::DOC);
+        });
+      }),
+
+      // Each stack's axis and children so far, read where the text goes.
+      "Stack queries" => Self::variants(ui, Shown::Alone, |ui| {
+        let read = |ui: &mut Ui| {
+          let (axis, n) = (ui.parent_axis(), ui.child_count());
+          if let Some(axis) = axis {
+            ui.text(format_args!("{axis:?}, {n} before"), t.label());
+          }
+        };
+        ui.row(line(8.0), |ui| (0..2).for_each(|_| read(ui)));
+        ui.col(Style::new().gap(4.0), |ui| (0..2).for_each(|_| read(ui)));
+      }),
+
       "Menu" => Self::variants(ui, Shown::Plain, |ui| {
         ui.menu("Actions", |ui| {
           ui.menu_item("Copy");
@@ -508,6 +579,33 @@ impl Gallery {
           ui.virtual_col((0..1000).map(|_| 20.0), |i| i, item);
         });
       }),
+
+      // A bar of its own over the area's behaviour: a thin accent thumb, always shown.
+      "Scroll behavior" => Self::variants(ui, Shown::Alone, |ui| {
+        let id = Id::of("own scroll");
+        let b = ui.scroll_behavior(id, Axes::VERTICAL);
+        let area = Style::new().w(px(200.0)).h(px(60.0)).pad_xy(8.0, 4.0).radius(6.0).bg(t.panel);
+        let area = area.scroll(Axes::VERTICAL);
+        ui.with_id(id).col(area, |ui| {
+          (1..=8).for_each(|i| ui.text(format_args!("Line {i}"), t.label()));
+          let Some(bar) = b.bar(Axis::Vertical) else { return };
+          let at = Float::parent().attach(UnitPoint::TOP_TRAILING).anchor(UnitPoint::TOP_TRAILING);
+          let at = at.offset(-ScrollBar::INSET, ScrollBar::INSET + bar.pos);
+          let thumb = Style::new().w(px(4.0)).h(px(bar.thumb)).radius(2.0).bg(t.accent);
+          ui.with_id(b.thumb(Axis::Vertical)).float(at).el(thumb);
+        });
+      }),
+
+      // Red knobs in this area, put back after it for the gallery's other areas.
+      "Scroll indicators" => Self::variants(ui, Shown::Alone, |ui| {
+        let red = ScrollerKnob { color: alpha(t.danger, 0.6), ..ScrollerKnob::DARK };
+        let old = ui.set_environment(Some(red));
+        ui.scroll_area(Style::new().w(px(200.0)).h(px(60.0)), |ui| {
+          (1..=8).for_each(|i| ui.text(format_args!("Line {i}"), t.label()))
+        });
+        ui.set_environment(old);
+      }),
+
       "Alert" => {
         Self::variants(ui, Shown::Plain, |ui| {
           if ui.button("Delete…").clicked {
@@ -545,6 +643,69 @@ impl Gallery {
       "Accessibility label" => {
         Self::variants(ui, Shown::Plain, |ui| _ = ui.a11y_label("Reset").icon_button(Icon::RESET))
       }
+
+      // Swatches that take their colour from the environment, put for the last two (and put
+      // back after them for the gallery's other blocks).
+      "Environment" => Self::variants(ui, Shown::Alone, |ui| {
+        let tile = |ui: &mut Ui| {
+          let c = ui.environment::<Tint>().map_or(t.raised, |c| c.0);
+          ui.el(swatch(c));
+        };
+        tile(ui);
+        let old = ui.set_environment(Some(Tint(t.success)));
+        (0..2).for_each(|_| tile(ui));
+        ui.set_environment(old);
+      }),
+
+      // Keyed boxes: a key of its own each, the last a ready id.
+      "Identity" => Self::variants(ui, Shown::Alone, |ui| {
+        (0..3).for_each(|k| _ = ui.key(k).el(swatch(t.raised)));
+        ui.with_id(Id::of("identity").key("box")).allows_hit_testing(false).el(swatch(t.accent));
+      }),
+
+      // A part enabled in a disabled container, with the tip the widget was given.
+      "Widget parts" => Self::variants(ui, Shown::Plain, |ui| {
+        ui.button("Save");
+        let tip = ui.help("Always enabled").take_help();
+        ui.disabled_scope(false, |ui| {
+          if let Some(tip) = &tip {
+            ui.help(tip);
+          }
+
+          ui.button("Undo")
+        });
+      }),
+
+      // A bar that moves every frame.
+      "Frame request" => Self::variants(ui, Shown::Alone, |ui| {
+        ui.request_frame();
+        let k = ui.now().as_secs_f32() % 1.0;
+        ui.el(swatch(t.accent).w(px(28.0 + 120.0 * k)));
+      }),
+
+      // The slider named by the text before it; the badge by its own text.
+      "Accessibility pair" => Self::variants(ui, Shown::Plain, |ui| {
+        let pair = Id::of("volume");
+        ui.a11y_labeled_pair(LabeledPairRole::Label, pair, |ui| ui.text("Volume", t.label()));
+        ui.a11y_labeled_pair(LabeledPairRole::Content, pair, |ui| {
+          _ = ui.slider(&mut self.level, 0.0..=100.0);
+        });
+        ui.badge("New", Tone::Accent);
+      }),
+
+      // The accent while the window is key, a grey while it isn't, as the switch beside it.
+      "Controls theme" => Self::variants(ui, Shown::Alone, |ui| {
+        let c = ui.controls_theme();
+        ui.el(swatch(c.accent));
+        ui.toggle(&mut self.on, "");
+      }),
+
+      // Light or dark as drawn: the theme's when the app set one, else the OS's.
+      "Color scheme" => Self::variants(ui, Shown::Alone, |ui| {
+        let name = if ui.color_scheme().is_dark() { "Dark" } else { "Light" };
+        ui.text(name, t.label());
+      }),
+
       _ => Self::variants(ui, Shown::Plain, |ui| {
         let keys = Shortcut::char('z').cmd().label();
         ui.text(format_args!("{keys} undoes, in the window's keymap"), t.label());

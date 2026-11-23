@@ -5,10 +5,10 @@
 //! window's [Images] the first frame a view builds one and dropped after a frame that doesn't, so
 //! a view shows a logo or a photo without keeping an [ImageId].
 
+use super::{ContentMode, Flow, Id, Kind, Response, Style, Ui, UiState};
 use crate::bitmap::Bitmap;
 use crate::png::Png;
 use crate::scene::{ImageId, Images};
-use crate::ui::{ContentMode, Flow, Id, Kind, Response, Style, Ui, UiState};
 
 /// What [Ui::image] shows, as SwiftUI's `Image` is made from a name or an `NSImage`: from an
 /// [ImageId], a [Png] or a `&`[Bitmap].

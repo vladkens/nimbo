@@ -41,6 +41,7 @@
 //! right of the window's buttons, so the toggle follows the sidebar as it slides out. With the
 //! sidebar hidden, a toolbar at the window's leading edge has them there too.
 
+use crate::WindowToolbarStyle;
 use crate::scene::Rect;
 use crate::ui::{Align, ControlSize, Float, Id, Response, Style, Ui, grow, px};
 
@@ -92,7 +93,10 @@ impl Ui<'_> {
     // it is the content's header row. Not laid out yet, it is taken as at the top: the view
     // runs again on where it is ([Ui::settle]) before the frame shows.
     let at = self.rect(id).unwrap_or(Rect::new(0.0, 0.0, self.size().w, h));
-    self.st.toolbar |= at.y <= 0.0;
+    if at.y <= 0.0 {
+      self.window_toolbar_style(WindowToolbarStyle::Unified);
+    }
+
     let buttons = self.titlebar().and_then(|b| b.buttons).filter(|_| at.y <= 0.0);
     let column = self.slot::<Sidebar>().is_some();
     // Laid out elsewhere (a column sliding), the view runs again on where it is now.
@@ -112,8 +116,11 @@ impl Ui<'_> {
       self.drags_window();
     }
 
-    self.next_id = Some((id, false));
-    let ui = self.float(Float::parent().z(1)).control_size(ControlSize::Large);
+    let ui = self
+      .with_id(id)
+      .allows_hit_testing(false)
+      .float(Float::parent().z(1))
+      .control_size(ControlSize::Large);
     ui.row(band, |ui| {
       for (i, p) in [ToolbarItemPlacement::Navigation, ToolbarItemPlacement::PrimaryAction]
         .into_iter()
@@ -153,12 +160,14 @@ impl Ui<'_> {
     self.settle(slot);
     self.settle(slot.key(0));
     let room = Style::new().grow().min_w(0.0).clip().pads([0.0, 0.0, 0.0, off]);
-    self.next_id = Some((slot, false));
-    self.row(room.align(Align::Start, Align::Center), |ui| {
-      let was = ui.set_slot(Some(Building(ToolbarItemPlacement::Principal)));
-      ui.key(0).row(group, content);
-      ui.set_slot(was);
-    });
+    self.with_id(slot).allows_hit_testing(false).row(
+      room.align(Align::Start, Align::Center),
+      |ui| {
+        let was = ui.set_slot(Some(Building(ToolbarItemPlacement::Principal)));
+        ui.key(0).row(group, content);
+        ui.set_slot(was);
+      },
+    );
 
     // With principal items, the room ends a gap before the items after it.
     if w > 0.0 {

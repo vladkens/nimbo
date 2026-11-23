@@ -155,9 +155,7 @@ impl Ui<'_> {
     let t = self.theme();
     let id = self.take_id();
     // Enabled in a disabled container: its tip reads all the same.
-    let scope = std::mem::replace(&mut self.scope_off, false);
-    let b = self.button_behavior(id);
-    self.scope_off = scope;
+    let b = self.disabled_scope(false, |ui| ui.button_behavior(id));
     self.a11y(id, Role::Button).name_or(icon.name().unwrap_or_default());
 
     let hot = self.ctl_hot(id, b.hovered);
@@ -173,10 +171,13 @@ impl Ui<'_> {
     };
 
     // On a form label's line: in a box as high as the mark, moved onto the capitals' middle.
-    let help = self.next_help.take();
+    let help = self.take_help();
     let mut r = Response::default();
     self.row(Style::new().w(px(size)).h(px(size)), |ui| {
-      ui.next_help = help;
+      if let Some(tip) = &help {
+        ui.help(tip);
+      }
+
       r = ui.with_id(id).float(Float::parent().offset(0.0, dy).clip()).canvas(s, paint);
     });
     r.clicked = b.clicked;
@@ -282,7 +283,7 @@ mod tests {
   fn sizes_and_disabled_scope_a_container() {
     let mut h = Harness::new(Scoped::default(), Size::new(300.0, 300.0), 1.0);
     h.frame();
-    let z = h.rt.ui.theme.sizes;
+    let z = Theme::system(h.rt.ui.appearance()).sizes;
     let height = |n: &str| h.rect(Id::of(n)).unwrap().h;
     let large = z.control_h + 8.0;
     let hs = [height("small"), height("large"), height("inner"), height("regular")];

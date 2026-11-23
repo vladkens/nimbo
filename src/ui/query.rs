@@ -79,10 +79,19 @@ impl Ui<'_> {
     self.focused(id) && self.window_focused()
   }
 
-  /// Rings the focused box ([super::Style::focusable]) while the window is key; `None` leaves
-  /// focus for the widgets to show. Kept until changed.
+  /// Rings the focused box ([super::Style::focusable]) while the window is key with `ring` in
+  /// this frame, in place of the default, the ring of nimbo's theme, which the shell puts after
+  /// each view; `None` leaves focus for the widgets to show. For this frame only: a design system
+  /// of its own sets its ring each frame, as it draws its look, and nothing the shell puts after
+  /// the view overrides it; a view that stops setting it gets the default back.
   pub fn set_focus_ring(&mut self, ring: Option<FocusRing>) {
-    self.st.ring = ring;
+    self.st.own_ring = Some(ring);
+  }
+
+  /// Puts the default focus ring, which rings the focused box unless the view set its own this
+  /// frame ([Ui::set_focus_ring]): the shell's, after each view, from the theme it drew with.
+  pub(crate) fn set_default_focus_ring(&mut self, ring: FocusRing) {
+    self.st.ring = Some(ring);
   }
 
   // MARK: Keys

@@ -22,11 +22,8 @@
 //! It fades in, rising 8 points, over 120 ms of the runtime's clock. [Ui::modal] is the
 //! backdrop and the card alone, for a dialog of the app's own over the same behaviour.
 
-use keyboard_types::{Modifiers, NamedKey};
-
 use super::widgets::{Button, ButtonRole, Icon};
-use super::{Float, Id, Role, State, Style, TextStyle, Transition, Ui, grow, pct, px};
-use crate::keys::Key;
+use super::{Float, Id, Role, State, Style, TextStyle, Ui, grow, pct, px};
 use crate::scene::alpha;
 use crate::t;
 use crate::text::Weight;
@@ -34,21 +31,6 @@ use crate::ui::UnitPoint;
 
 /// Paint order of a dialog among overlays: over menus, under tooltips.
 const MODAL_Z: i32 = 1500;
-/// How fast a dialog fades in: 0 to 1 in 120 ms.
-const DIALOG_IN: Transition = Transition::smooth(1000.0 / 120.0);
-
-/// A modal dialog ([Ui::dialog_behavior]): how far it has faded in, the button chosen this
-/// frame (it closed then) and the one with focus.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct DialogBehavior {
-  pub id: Id,
-  /// 0 to 1 as it opens, on the runtime's clock.
-  pub shown: f32,
-  /// Clicked, Space on the focused button, Return (the default) or Escape (the cancel).
-  pub chosen: Option<usize>,
-  pub focus: Option<usize>,
-}
-
 /// The button a dialog closed with ([Dialog::show]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Answer {
@@ -178,115 +160,6 @@ impl<'s> Dialog<'s> {
 }
 
 impl Ui<'_> {
-  /// A modal dialog `id` over the window while `open`, its buttons `buttons` (the app builds
-  /// them, with [super::Behavior::style] for the Tab focus and its ring): opening, it takes
-  /// focus to its backdrop, which draws no ring (assistive technology sees the default button
-  /// focused then), and keeps it there and among the buttons: Tab and Shift-Tab move from the
-  /// `default` button, ringing the one they reach, and cycle them; nothing else gets focus.
-  /// Return chooses the default, Escape the `cancel` one, Space the focused one, a click any;
-  /// choosing closes it (`open` false) and gives focus back where it was. Keys go nowhere else
-  /// while it is open. The backdrop ([Ui::modal]) takes the pointer and does nothing with a
-  /// click, as a macOS alert. `shown` fades in from 0 as it opens.
-  pub fn dialog_behavior(
-    &mut self,
-    id: Id,
-    open: &mut bool,
-    buttons: &[Id],
-    default: usize,
-    cancel: usize,
-  ) -> DialogBehavior {
-    /// Open last frame, and the focus before it opened.
-    #[derive(Default)]
-    struct Modal {
-      open: bool,
-      prev: Option<Id>,
-    }
-
-    let backdrop = id.key("backdrop");
-    let inside = |f: Option<Id>| f.is_some_and(|f| f == backdrop || buttons.contains(&f));
-    let mut m = std::mem::take(self.state::<Modal>(id));
-    let mut b = DialogBehavior { id, ..DialogBehavior::default() };
-    if !*open || buttons.is_empty() {
-      // Closed by the app: focus goes back.
-      if m.open && inside(self.focus_id()) {
-        self.focus(m.prev);
-      }
-
-      return b;
-    }
-
-    let shown = id.key("shown");
-    if !m.open {
-      m = Modal { open: true, prev: self.focus_id().filter(|&f| !inside(Some(f))) };
-      self.focus(Some(backdrop));
-      // What scrolls under it stops: a trackpad's gesture, a wheel's momentum.
-      self.st.halt_scrolling();
-      // From nothing, whatever an earlier opening left.
-      self.animate(shown, 0.0, Transition::linear(0.0));
-    }
-
-    if !inside(self.focus_id()) {
-      self.focus(Some(backdrop));
-    }
-
-    let n = buttons.len();
-    let at = self.focus_id().and_then(|f| buttons.iter().position(|&b| b == f));
-    if let Some(f) = self.focus_id()
-      && let Some(k) = self.key_down(f)
-    {
-      match k.key {
-        Key::Named(NamedKey::Escape) => b.chosen = Some(cancel),
-        Key::Named(NamedKey::Enter) => b.chosen = Some(default),
-        Key::Named(NamedKey::Tab) => {
-          let step = if k.mods.contains(Modifiers::SHIFT) { n - 1 } else { 1 };
-          let next = (at.unwrap_or(default.min(n - 1)) + step) % n;
-          self.focus(Some(buttons[next]));
-        }
-        // Alt-Space opens the window menu on Windows.
-        Key::Char(' ') if k.mods.contains(Modifiers::ALT) => self.pass(f),
-        Key::Char(' ') if at.is_some() && (k.mods - Modifiers::SHIFT).is_empty() => {
-          self.flash(f);
-          b.chosen = at;
-        }
-        // The rest stops here: nothing under the dialog hears it.
-        _ => {}
-      }
-    }
-
-    // So do commands and text for the focused element (a menu's, an input method's).
-    if let Some(f) = self.focus_id() {
-      _ = (self.command(f), self.typed(f));
-    }
-
-    if let Some(i) = buttons.iter().position(|&id| self.clicked(id)) {
-      b.chosen = Some(i);
-    }
-
-    if let Some(i) = b.chosen {
-      b.chosen = Some(i.min(n - 1));
-      *open = false;
-      if inside(self.focus_id()) {
-        self.focus(m.prev);
-      }
-
-      *self.state::<Modal>(id) = Modal::default();
-      return b;
-    }
-
-    // Keys go to the dialog before the app's bindings: nothing under it hears them.
-    if let Some(f) = self.focus_id() {
-      self.grab_keys(f);
-    }
-
-    // The backdrop holds the keys; a screen reader is led to the default button.
-    self.a11y_focus(backdrop, buttons[default.min(n - 1)]);
-
-    b.focus = self.focus_id().and_then(|f| buttons.iter().position(|&b| b == f));
-    b.shown = self.animate(shown, 1.0, DIALOG_IN);
-    *self.state::<Modal>(id) = m;
-    b
-  }
-
   /// The backdrop of a modal dialog `id` over the whole window (`id.key("backdrop")`: it takes
   /// the pointer, so nothing under it is hovered, clicked or scrolled) and the card in the
   /// middle in `card`, built by `f`; `shown` (0 to 1, [Ui::dialog_behavior]'s) fades both in, the
@@ -295,22 +168,24 @@ impl Ui<'_> {
   /// around it.
   pub fn modal<R>(&mut self, id: Id, shown: f32, card: Style, f: impl FnOnce(&mut Self) -> R) {
     let scrim = self.theme().scrim();
-    let off = std::mem::replace(&mut self.scope_off, false);
-    let cover = Style::new().w(pct(100.0)).h(pct(100.0)).tab_focusable_quiet();
-    let cover = cover.bg(alpha(scrim, scrim[3] * shown));
-    self.a11y(id.key("card"), Role::Dialog).state(State::Modal, true);
-    self.with_id(id.key("backdrop")).float(Float::window().z(MODAL_Z)).el(cover);
-    let at = Float::window()
-      .attach(UnitPoint::CENTER)
-      .anchor(UnitPoint::CENTER)
-      .offset(0.0, (1.0 - shown) * 8.0);
-    self.with_id(id.key("card")).float(at.z(MODAL_Z + 1)).col(card.opacity(shown), f);
-    self.scope_off = off;
+    self.disabled_scope(false, |ui| {
+      let cover = Style::new().w(pct(100.0)).h(pct(100.0)).tab_focusable_quiet();
+      let cover = cover.bg(alpha(scrim, scrim[3] * shown));
+      ui.a11y(id.key("card"), Role::Dialog).state(State::Modal, true);
+      ui.with_id(id.key("backdrop")).float(Float::window().z(MODAL_Z)).el(cover);
+      let at = Float::window()
+        .attach(UnitPoint::CENTER)
+        .anchor(UnitPoint::CENTER)
+        .offset(0.0, (1.0 - shown) * 8.0);
+      ui.with_id(id.key("card")).float(at.z(MODAL_Z + 1)).col(card.opacity(shown), f);
+    });
   }
 }
 
 #[cfg(test)]
 mod tests {
+  use keyboard_types::{Modifiers, NamedKey};
+
   use super::*;
   use crate::app::{App, Cx, Event};
   use crate::harness::Harness;

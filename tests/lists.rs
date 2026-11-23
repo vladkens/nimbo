@@ -255,7 +255,7 @@ fn a_right_click_opens_the_row_menu_over_the_selection() {
     assert!(h.rect(popup).is_none());
 
     // The platform's menu: asked for, not drawn, with the selection's items.
-    h.native_menus();
+    h.set_native_menus(true);
     right(h, row(102), false);
     right(h, row(102), true);
     assert!(h.rect(popup).is_none(), "{os:?}");
@@ -280,7 +280,7 @@ fn a_right_click_off_the_rows_opens_no_menu() {
     assert!(h.rect(popup).is_none(), "{os:?}: drawn");
     assert_eq!(selected(h), [101, 103, 104], "{os:?}");
 
-    h.native_menus();
+    h.set_native_menus(true);
     right(h, thumb, false);
     right(h, thumb, true);
     assert!(h.context_menu(None).is_none(), "{os:?}: asked of the platform");

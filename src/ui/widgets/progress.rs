@@ -17,7 +17,7 @@ impl Ui<'_> {
     let (rail, fill) = (self.dim(t.track, off), self.dim(t.accent, off));
     let now = self.now().as_secs_f32();
     if k.is_none() && !off {
-      self.st.animating = true;
+      self.request_frame();
     }
 
     let value = k.map_or(Value::None, |k| Value::Number { now: k.into(), min: 0.0, max: 1.0 });
@@ -53,7 +53,10 @@ impl Ui<'_> {
     let (id, off) = (self.take_id(), self.take_disabled());
     let color = self.dim(t.muted, off);
     let turn = if off { 0.0 } else { self.now().as_secs_f32() / 0.9 * TAU };
-    self.st.animating |= !off;
+    if !off {
+      self.request_frame();
+    }
+
     self.a11y(id, Role::ProgressIndicator).state(State::Disabled, off);
     self.with_id(id).canvas(Style::new().w(px(size)).h(px(size)), move |f, r| {
       let w = (size / 8.0).max(1.5);
@@ -72,7 +75,7 @@ mod tests {
   use crate::app::App;
   use crate::harness::Harness;
   use crate::scene::Size;
-  use crate::ui::{ControlSize, Id, Style, Ui, grow};
+  use crate::ui::{ControlSize, Id, Style, Theme, Ui, grow};
 
   struct Bar(Option<f32>);
 
@@ -87,7 +90,7 @@ mod tests {
   fn a_bar_fills_its_share_and_an_unknown_one_animates() {
     let mut h = Harness::new(Bar(Some(0.5)), Size::new(220.0, 60.0), 1.0);
     let img = h.render();
-    let accent = h.rt.ui.theme.accent.map(|c| (c * 255.0).round() as u8);
+    let accent = Theme::system(h.rt.ui.appearance()).accent.map(|c| (c * 255.0).round() as u8);
     assert_eq!(img.pixel(60.0, 12.0), accent);
     assert_ne!(img.pixel(160.0, 12.0), accent);
     assert!(!h.rt.needs_frame());

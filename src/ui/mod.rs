@@ -28,8 +28,9 @@
 //! ```
 //!
 //! Widgets ([widgets]: label, button, text field, check box, switch, slider and the
-//! like) and containers ([containers]: scroll area, list, menu, picker, tabs, split) do
-//! this for an app in the look of the [Theme] set with [Ui::set_theme]:
+//! like) and containers ([containers]: list, menu, picker, tabs, split; the scroll area they
+//! scroll in is a behaviour's, [Ui::scroll_area]) do this for an app in the look of the theme
+//! the app sets (`Ui::set_theme`):
 //! `if ui.id("plus").button("+").clicked { .. }`; so do a settings form ([form]) and a modal
 //! dialog ([dialog]).
 //!
@@ -45,8 +46,11 @@ pub mod containers;
 pub mod dialog;
 pub mod form;
 mod id;
+mod image;
 pub mod input;
 mod layout;
+mod lazy;
+mod menus;
 mod paint;
 mod query;
 pub mod store;
@@ -61,19 +65,24 @@ use std::hash::Hash;
 use std::num::NonZeroU8;
 use std::time::Duration;
 
-pub use a11y::{A11yNode, A11yTree, Action, Props, Role, State, Value};
-pub use behavior::{Behavior, EditMenu, Editing, FieldBehavior, FieldKind};
-pub use containers::{
-  List, ListResponse, ListStyle, MenuPlacement, Picker, Row, Selection, Split, SplitBehavior, Tabs,
-  Tag, ToolbarItemPlacement, TypeSelect,
+pub use a11y::{A11yNode, A11yTree, Action, LabeledPairRole, Props, Role, State, Value};
+pub use behavior::{
+  Behavior, DialogBehavior, EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, ListBehavior,
+  ListRows, MenuPlacement, ScrollBar, ScrollBehavior, ScrollerKnob, SectionHeader, Selection,
+  SplitBehavior, TextInput, TypeSelect,
 };
-pub use dialog::{Answer, Dialog, DialogBehavior};
+pub use containers::{
+  List, ListResponse, ListStyle, Picker, Row, Split, Tabs, Tag, ToolbarItemPlacement,
+};
+pub use dialog::{Answer, Dialog};
 pub use form::{Content, FormRow, FormStyle, Glass, Section, TabItem};
 pub use id::Id;
+pub use image::ImageSource;
 pub(crate) use input::drags_window;
 pub use input::{Click, Press, Scroll};
 pub use layout::ContentMode;
 pub(crate) use layout::{Flow, Kind, Measure, Node, Sys, Tree};
+pub use menus::NativeMenu;
 pub use store::{Ease, Transition};
 pub use style::{
   Align, Axes, Axis, Clip, ControlSize, CoordinateSpace, Cursor, Dim, Float, Focus, FocusRing,
@@ -83,17 +92,15 @@ pub use style::{
 pub use textlayout::Edit;
 pub(crate) use textlayout::TextLayout;
 pub use theme::{ButtonLook, ButtonStyle, ControlBorder, Sizes, SwitchSize, Theme, Tone};
-pub use widgets::{
-  Button, ButtonRole, FieldStyle, Icon, IconPaint, ImageSource, Slider, TextInput,
-};
+pub use widgets::{Button, ButtonRole, Icon, IconPaint, Slider};
 
 use self::input::{Deliver, Input, ScrollState};
 use self::store::{Anim, Store};
-use crate::app::{Appearance, Clipboard, Event, MouseButton, Waker};
+use crate::app::{Appearance, Clipboard, ColorScheme, Event, MouseButton, Waker};
 use crate::keys::{Binding, Os};
 use crate::scene::{Frame, ImageId, Images, Point, Rect, Size};
 use crate::text::{Font, Metrics, TextSystem};
-use crate::{FileDialog, TitleBar};
+use crate::{FileDialog, TitleBar, WindowToolbarStyle};
 
 /// Which way focus moves among the focusable elements ([Ui::focus_next]): Tab and Shift-Tab,
 /// as SwiftUI's `FocusDirection`.
@@ -132,12 +139,14 @@ pub(crate) struct UiState {
   pub(crate) animating: bool,
   pub(crate) waker: Waker,
   pub(crate) clipboard: Box<dyn Clipboard>,
+  /// Values the whole window shares, one per type ([Ui::environment]).
+  env: Vec<Box<dyn Any>>,
+  /// The focus ring the view set this frame ([Ui::set_focus_ring]), over the default, which the
+  /// shell puts after each view ([Ui::set_default_focus_ring]).
+  own_ring: Option<Option<FocusRing>>,
   ring: Option<FocusRing>,
-  theme: Theme,
-  /// The OS's look, which the theme follows unless `pinned`.
+  /// The OS's look ([Ui::appearance]).
   appearance: Appearance,
-  /// The app set its theme ([Ui::set_theme]).
-  pinned: bool,
   /// What the last frame cost ([Ui::last_frame]).
   pub(crate) stats: FrameStats,
   /// The content size the app asked the window for ([Ui::set_window_size]), until the platform
@@ -148,14 +157,14 @@ pub(crate) struct UiState {
   /// The file panel asked for ([Ui::file_dialog]), until the platform takes it.
   pub(crate) file_dialog: Option<crate::FileDialog>,
   /// The platform shows context menus ([crate::Runtime::set_native_menus]); the one asked for
-  /// ([Ui::context_menu]) until it takes it; the press that opened one last.
+  /// ([Ui::native_menu]) until it takes it; the press that opened one last.
   pub(crate) native_menus: bool,
   pub(crate) context_menu: Option<(Id, Point, crate::Menu<usize>)>,
   pub(crate) menu_seq: u32,
   /// The title bar over the content ([Ui::titlebar]).
   pub(crate) titlebar: Option<TitleBar>,
-  /// The view built a toolbar ([Ui::toolbar]): the platform gives the title bar a toolbar's
-  /// height.
+  /// The view asked for a toolbar's title bar ([Ui::window_toolbar_style]): the platform gives
+  /// the title bar a toolbar's height.
   pub(crate) toolbar: bool,
   /// The images [Ui::image] and [Ui::rgba_image] added: their pixels' hash or a bitmap's
   /// identity, the image, and whether a view built it since the last frame.
@@ -193,8 +202,7 @@ impl FrameStats {
 }
 
 impl Default for UiState {
-  /// The dark theme and its focus ring, following the OS's appearance once the platform (or the
-  /// harness, `--appearance`) reports it.
+  /// The dark appearance until the platform (or the harness, `--appearance`) reports the OS's.
   fn default() -> Self {
     Self {
       tree: Tree::default(),
@@ -208,10 +216,10 @@ impl Default for UiState {
       animating: false,
       waker: Waker::default(),
       clipboard: Box::default(),
-      ring: Some(Theme::PLATES_DARK.focus_ring()),
-      theme: Theme::PLATES_DARK,
+      env: Vec::new(),
+      own_ring: None,
+      ring: None,
       appearance: Appearance::DARK,
-      pinned: false,
       stats: FrameStats::default(),
       resize: None,
       asked: None,
@@ -246,21 +254,9 @@ impl UiState {
     self.resize = (size != now).then_some(size);
   }
 
-  /// Takes the OS's new look; the theme follows unless the app set one.
+  /// Takes the OS's new look, which the theme follows unless the app set one (`Ui::theme`).
   pub(crate) fn set_appearance(&mut self, a: Appearance) {
     self.appearance = a;
-    if !self.pinned {
-      self.retheme(Theme::system(a));
-    }
-  }
-
-  /// Draws with `theme`; the focus ring follows unless the app set its own.
-  fn retheme(&mut self, theme: Theme) {
-    if self.ring == Some(self.theme.focus_ring()) {
-      self.ring = Some(theme.focus_ring());
-    }
-
-    self.theme = theme;
   }
 
   /// Whether the pointer is over `id` or an element inside it.
@@ -349,32 +345,6 @@ impl UiState {
     true
   }
 
-  /// Scrolls every scroll container around `id` the least that shows it, innermost first, by
-  /// the last frame's rects, up to an overlay placed on the window, which their offsets don't
-  /// move; an overlay on its parent skips that parent's, which doesn't move it either.
-  pub(crate) fn reveal_in_scrolls(&mut self, id: Id) {
-    let t = &self.last;
-    let Some(mut i) = t.find(id) else { return };
-    let mut r = t.nodes[i as usize].rect;
-    while i != 0 && !t.nodes[i as usize].float.is_some_and(|f| f.space == CoordinateSpace::Global) {
-      let float = t.nodes[i as usize].float.is_some();
-      i = t.nodes[i as usize].parent;
-      let n = &t.nodes[i as usize];
-      if float || n.style.scroll.is_empty() {
-        continue;
-      }
-
-      // In the container's content, then its offset after showing it.
-      let (x, y) = (f64::from(r.x - n.rect.x), f64::from(r.y - n.rect.y));
-      let c = [x + n.scroll[0], y + n.scroll[1], r.w.into(), r.h.into()];
-      let off = reveal_offset(n.scroll, n.rect, c);
-      let s = self.store.raw::<ScrollState>(n.id);
-      (s.offset, s.pending) = (off, Point::default());
-      let d = [(off[0] - n.scroll[0]) as f32, (off[1] - n.scroll[1]) as f32];
-      r = Rect::new(r.x - d[0], r.y - d[1], r.w, r.h);
-    }
-  }
-
   /// The pointer's shape: from the element a button is held on, else the innermost one under
   /// the pointer, or the nearest ancestor that sets one; the arrow when none does.
   pub fn cursor(&self) -> Cursor {
@@ -440,18 +410,6 @@ impl UiState {
   }
 }
 
-/// The offset of a scroll container showing `viewport` at `off` that moves the least to show
-/// `r`, a rect of its content.
-/// `r` is x, y, width and height, in `f64` as the offset.
-fn reveal_offset(off: [f64; 2], viewport: Rect, r: [f64; 4]) -> [f64; 2] {
-  let fit = |off: f64, lo: f64, len: f64, view: f32| match () {
-    _ if lo < off => lo,
-    _ if lo + len > off + f64::from(view) => (lo + len - f64::from(view)).min(lo),
-    _ => off,
-  };
-  [fit(off[0], r[0], r[2], viewport.w), fit(off[1], r[1], r[3], viewport.h)]
-}
-
 /// What an interactive element got from the pointer, as its builder returns it. Hover and press
 /// are known before building, from the last frame: query them first with [Ui::hovered] and
 /// [Ui::pressed] to pick the element's style. [Ui::click] has the details of a click.
@@ -507,6 +465,8 @@ pub struct Ui<'a> {
   next_autofocus: bool,
   /// The next element moves the window when pressed ([Ui::drags_window]).
   next_drag: bool,
+  /// The next element takes no pointer input of its own ([Ui::allows_hit_testing]).
+  next_no_hit: bool,
   /// The runtime's text system, lent while the view runs ([Ui::measure]).
   pub(crate) text: Option<TextSystem>,
   /// The runtime's images, lent while the view runs ([Ui::rgba_image]).
@@ -531,7 +491,7 @@ impl<'a> Ui<'a> {
     st.stack.push((0, 0));
     st.animating = false;
     st.input.moves = false;
-    (st.grab, st.ring_on, st.toolbar) = (None, None, false);
+    (st.grab, st.ring_on, st.toolbar, st.own_ring) = (None, None, false, None);
     st.input.now = now;
     let (next_id, next_float, next_keymap) = (None, None, None);
     let canvases = Vec::new();
@@ -551,6 +511,7 @@ impl<'a> Ui<'a> {
       scopes: Vec::new(),
       next_autofocus,
       next_drag: false,
+      next_no_hit: false,
       text: None,
       images: Images::default(),
       next_span: 1,
@@ -562,35 +523,15 @@ impl<'a> Ui<'a> {
     }
   }
 
-  /// The theme widgets draw with ([theme]), a copy.
-  pub fn theme(&self) -> Theme {
-    self.st.theme
-  }
-
-  /// The theme of controls filled with the accent: [Theme::inactive] while the window isn't key,
-  /// as AppKit's switches, check boxes, sliders, segments and progress bars turn grey there.
-  pub(crate) fn controls_theme(&self) -> Theme {
-    if self.window_focused() { self.st.theme } else { self.st.theme.inactive() }
-  }
-
-  /// Sets the theme, kept until changed, over the OS's appearance, and its focus ring
-  /// ([Ui::set_focus_ring] after this overrides the ring).
-  pub fn set_theme(&mut self, theme: Theme) {
-    self.st.theme = theme;
-    self.st.ring = Some(theme.focus_ring());
-    self.st.pinned = true;
-  }
-
-  /// Follows the OS's appearance again ([Theme::system]), the default: light or dark with
-  /// its accent, switching when it changes.
-  pub fn follow_system(&mut self) {
-    self.st.pinned = false;
-    self.st.retheme(Theme::system(self.st.appearance));
-  }
-
   /// The OS's look, for an app drawing in colours of its own: light or dark and the accent.
   pub fn appearance(&self) -> Appearance {
     self.st.appearance
+  }
+
+  /// Light or dark as the content is drawn, as SwiftUI's `colorScheme`: the environment's (a
+  /// theme the app set puts its own), else the OS's.
+  pub fn color_scheme(&self) -> ColorScheme {
+    self.environment::<ColorScheme>().copied().unwrap_or(self.st.appearance.scheme)
   }
 
   /// What the last frame cost: view, layout and paint times and the frames built so far.
@@ -620,6 +561,30 @@ impl<'a> Ui<'a> {
     old.and_then(|s| s.downcast().ok()).map(|s| *s)
   }
 
+  /// The value of type `T` the window shares, put with [Ui::set_environment]: what the whole
+  /// view reads, as SwiftUI's `@Environment` (the theme the app set, `Ui::theme`). Kept across
+  /// frames until changed.
+  pub fn environment<T: 'static>(&self) -> Option<&T> {
+    self.st.env.iter().find_map(|v| v.downcast_ref())
+  }
+
+  /// Puts `v` as the window's value of type `T` ([Ui::environment]), or clears it with `None`;
+  /// returns the one it replaces. Kept across frames, so a view may put it every frame: one
+  /// already there is replaced in place.
+  pub fn set_environment<T: 'static>(&mut self, v: Option<T>) -> Option<T> {
+    let env = &mut self.st.env;
+    let i = env.iter().position(|e| e.is::<T>());
+    match (i, v) {
+      (Some(i), Some(v)) => env[i].downcast_mut().map(|old| std::mem::replace(old, v)),
+      (Some(i), None) => env.swap_remove(i).downcast().ok().map(|old| *old),
+      (None, Some(v)) => {
+        env.push(Box::new(v));
+        None
+      }
+      (None, None) => None,
+    }
+  }
+
   /// Asks the window for a content size of `w` × `h` points: a preferences window whose height
   /// follows its tab. Asking the size asked last is nothing new, so a view may ask every frame;
   /// the platform resizes the window after the frame (macOS keeps its top edge in place), and
@@ -633,6 +598,15 @@ impl<'a> Ui<'a> {
   /// are; `None` for any other.
   pub fn titlebar(&self) -> Option<TitleBar> {
     self.st.titlebar
+  }
+
+  /// How the title bar shows a toolbar this frame ([WindowToolbarStyle]), as SwiftUI's
+  /// `.windowToolbarStyle`: [WindowToolbarStyle::Unified] gives it a toolbar's height for a band
+  /// the view draws at the window's top (nimbo's `ui.toolbar` asks it itself). Only a window whose
+  /// content runs under its title bar ([crate::Config::unified]) has one to change. Ask it each
+  /// frame; [WindowToolbarStyle::Automatic] takes back nothing asked in the frame.
+  pub fn window_toolbar_style(&mut self, style: WindowToolbarStyle) {
+    self.st.toolbar |= style == WindowToolbarStyle::Unified;
   }
 
   /// Asks the window for `w` points wide and as high as its content, between `min_h` and
@@ -720,6 +694,18 @@ impl<'a> Ui<'a> {
     self
   }
 
+  /// Whether the next element takes pointer input of its own, as SwiftUI's `.allowsHitTesting`:
+  /// `false` leaves it to what is under it, named or not, so a part a widget names off its own
+  /// id (`ui.with_id(id.key("box")).allows_hit_testing(false)`) has an identity, a rect and a
+  /// record for assistive technology but no hover, press or click, and a click on it is its
+  /// parent's. Unlike SwiftUI's, the elements inside it keep theirs, and a scroll container, a
+  /// focusable element and one with [Ui::help] keep the pointer, which they need to work (a
+  /// badge with a tip shows it). `true`, the default, changes nothing.
+  pub fn allows_hit_testing(&mut self, yes: bool) -> &mut Self {
+    self.next_no_hit = !yes;
+    self
+  }
+
   /// Places the next element out of the flow, as an overlay.
   pub fn float(&mut self, float: Float) -> &mut Self {
     self.next_float = Some(float);
@@ -740,8 +726,8 @@ impl<'a> Ui<'a> {
   }
 
   /// The next element shows `tip` under the pointer resting on it, a tooltip as macOS places one
-  /// (its left edge at the pointer, 19 below it, after [Theme::tip_delay], at once within
-  /// [Theme::tip_warm] of another), and reads it as its description to assistive technology, as
+  /// (its left edge at the pointer, 19 below it, after `Theme::tip_delay`, at once within
+  /// `Theme::tip_warm` of another), and reads it as its description to assistive technology, as
   /// SwiftUI's `.help`: any element, a text (read where it stands), a widget, a container or a
   /// canvas (read as a group, its children as ever). It takes the pointer, so a click on it is
   /// its own, not its parent's. The tip is `id.key("tip")` of the element's id.
@@ -750,10 +736,20 @@ impl<'a> Ui<'a> {
     self
   }
 
-  /// The tooltips the view asked for with [Ui::help], after it: each element built. One with no
-  /// record for assistive technology gets one to carry the tip: a text as itself, any other a
-  /// group, whose children are read as ever.
-  pub(crate) fn show_helps(&mut self) {
+  /// The tip [Ui::help] gave the next element, taken for a widget to put on a part of its own
+  /// with [Ui::help]: a mark in a box, a button built after others.
+  pub fn take_help(&mut self) -> Option<String> {
+    self.next_help.take()
+  }
+
+  /// The tooltips this frame asked for with [Ui::help] so far: each element built with one and
+  /// its tip, to show the one the pointer rests on in a design system's own look, at the end of
+  /// the view. Taken: the shell shows those left after the view (nimbo's styled tooltip), so
+  /// a view that takes them draws them all. Each tip is its element's description for assistive
+  /// technology, set here, so it is read however it is drawn; one with no record gets one to
+  /// carry it: a text as itself, any other a group, whose children are read as ever.
+  pub fn take_tooltips(&mut self) -> Vec<(Id, String)> {
+    let mut out = Vec::with_capacity(self.helps.len());
     for (i, tip) in std::mem::take(&mut self.helps) {
       let n = &self.st.tree.nodes[i as usize];
       let (id, text) = match n.kind {
@@ -761,15 +757,18 @@ impl<'a> Ui<'a> {
         _ => (n.id, None),
       };
 
-      if self.a11y_of(id).is_none() {
-        match text {
-          Some(text) => _ = self.a11y_label(&text).a11y(id, Role::StaticText),
-          None => _ = self.a11y(id, Role::Group),
+      match (self.a11y_of(id), text) {
+        (Some(a), _) => _ = a.description(&tip),
+        (None, Some(text)) => {
+          _ = self.a11y_label(&text).a11y(id, Role::StaticText).description(&tip)
         }
+        (None, None) => _ = self.a11y(id, Role::Group).description(&tip),
       }
 
-      self.tooltip(id, &tip);
+      out.push((id, tip));
     }
+
+    out
   }
 
   /// Disables the next widget ([widgets]) when `yes`: dimmed, not focusable, and its clicks
@@ -836,20 +835,14 @@ impl<'a> Ui<'a> {
     }
   }
 
-  /// Disables every widget `f` builds when `yes`, without a container of its own: a widget's
-  /// parts in a disabled one ([Ui::disabled] on a container for an app).
-  pub(crate) fn disabled_scope<R>(&mut self, yes: bool, f: impl FnOnce(&mut Self) -> R) -> R {
-    let was = self.scope_off;
-    self.scope_off |= yes;
+  /// Builds `f` with every widget in it disabled when `yes`, enabled when not, whatever the
+  /// containers around say, as SwiftUI's `.environment(\.isEnabled, !yes)`: a widget's parts as
+  /// it is, a part enabled in a disabled container (a modal dialog, an ⓘ in a disabled row).
+  pub fn disabled_scope<R>(&mut self, yes: bool, f: impl FnOnce(&mut Self) -> R) -> R {
+    let was = std::mem::replace(&mut self.scope_off, yes);
     let r = f(self);
     self.scope_off = was;
     r
-  }
-
-  /// Whether widgets built now are disabled by a container's [Ui::disabled]: for a canvas that
-  /// dims itself.
-  pub fn scope_disabled(&self) -> bool {
-    self.scope_off
   }
 
   /// Whether the next widget is disabled ([Ui::disabled], on it or on a container around it),
@@ -891,6 +884,24 @@ impl<'a> Ui<'a> {
   /// Takes the free space along the parent's axis.
   pub fn spacer(&mut self) -> Response {
     self.el(Style::new().grow())
+  }
+
+  /// The axis the container being built, the next element's parent, lays its children along:
+  /// horizontal in a row, vertical in a column (the window's root is one), as SwiftUI's
+  /// `Divider` follows its stack; `None` in a grid, which lays them along both.
+  pub fn parent_axis(&self) -> Option<Axis> {
+    let parent = self.st.stack.last().map_or(0, |s| s.0);
+    match self.st.tree.nodes[parent as usize].flow {
+      Flow::Row => Some(Axis::Horizontal),
+      Flow::Column => Some(Axis::Vertical),
+      Flow::Grid(_) => None,
+    }
+  }
+
+  /// How many children the container being built has so far, the next element's place among
+  /// them: 0 before its first (a section's first row, with no line above it).
+  pub fn child_count(&self) -> usize {
+    self.st.stack.last().map_or(0, |s| s.1 as usize)
   }
 
   /// Text, measured and wrapped by the layout. Takes anything `Display`, so
@@ -991,7 +1002,7 @@ impl<'a> Ui<'a> {
   }
 
   #[inline(always)]
-  fn push(&mut self, kind: Kind, style: Style, flow: Flow) -> (u32, Response) {
+  fn push(&mut self, kind: Kind, mut style: Style, flow: Flow) -> (u32, Response) {
     let (parent, count) = self.st.stack.last_mut().unwrap();
     let tree = &mut self.st.tree;
     let (id, named) = self
@@ -1011,8 +1022,13 @@ impl<'a> Ui<'a> {
     }
 
     let (drag, help) = (std::mem::take(&mut self.next_drag), self.next_help.take());
-    let hit = style.hit || named || scrolls || focus || style.cursor != Cursor::Inherit;
-    let hit = hit || help.is_some();
+    // Taken whatever the element is: the modifier is the next element's only. What needs the
+    // pointer to work, a scroll container, a focusable element, a tip, takes it anyway.
+    let off = std::mem::take(&mut self.next_no_hit);
+    let hit = style.hit || named || style.cursor != Cursor::Inherit;
+    let hit = (hit && !off) || scrolls || focus || help.is_some();
+    // Its style's `hit` turned off too: no hover as an interactive child's ancestor.
+    style.hit = hit;
     let tree = &mut self.st.tree;
     let i = tree.nodes.len() as u32;
     self.helps.extend(help.map(|tip| (i, tip)));
@@ -1038,11 +1054,10 @@ impl<'a> Ui<'a> {
     }
   }
 
-  /// Marks a node interactive, indexes it for hit testing (and a scroll container for the
-  /// layout) and reads its input; out of line, so plain elements build fast.
+  /// Indexes an interactive node for hit testing (and a scroll container for the layout) and
+  /// reads its input; out of line, so plain elements build fast.
   #[inline(never)]
   fn interactive(&mut self, i: u32, id: Id, scrolls: bool) -> Response {
-    self.st.tree.nodes[i as usize].style.hit = true;
     self.st.tree.hits.push(i);
     if scrolls {
       self.st.tree.scrolls.push(i);
@@ -1078,6 +1093,12 @@ impl<'a> Ui<'a> {
     v
   }
 
+  /// Asks for the next frame at the display's refresh, as an animation does while it moves: a
+  /// view that changes every frame (a spinner), as SwiftUI's `TimelineView(.animation)`.
+  pub fn request_frame(&mut self) {
+    self.st.animating = true;
+  }
+
   /// Asks for a frame `dt` from now (a timer); the app checks [Ui::now] when it comes.
   pub fn request_frame_in(&mut self, dt: Duration) {
     self.st.request_frame_at(self.now + dt);
@@ -1089,38 +1110,6 @@ impl<'a> Ui<'a> {
   /// portal that went away never answers.
   pub fn file_dialog(&mut self, dialog: FileDialog) {
     self.st.file_dialog = Some(dialog);
-  }
-
-  // MARK: Scrolling
-
-  /// A scroll container's offset, content and viewport as of the last frame and the input
-  /// since: what a scrollbar draws.
-  pub fn scroll(&self, id: Id) -> Option<Scroll> {
-    self.st.scroll(id)
-  }
-
-  /// Scrolls `id` to `offset`, clamped by the layout; stops wheel momentum.
-  pub fn scroll_to(&mut self, id: Id, offset: Point) {
-    self.scroll_exact(id, [offset.x.into(), offset.y.into()]);
-  }
-
-  /// [Ui::scroll_to] in `f64`: content past `f32`'s whole numbers (a virtual list of a million
-  /// rows) scrolls to the point.
-  pub(crate) fn scroll_exact(&mut self, id: Id, offset: [f64; 2]) {
-    let s = self.state::<ScrollState>(id);
-    (s.offset, s.pending) = (offset, Point::default());
-  }
-
-  /// Scrolls `id` the least that shows `r` (in its content: (0, 0) is its top-left corner at
-  /// offset 0), using the last frame's viewport: keeps a caret or a selected row visible.
-  pub fn reveal(&mut self, id: Id, r: Rect) {
-    self.reveal_exact(id, [r.x.into(), r.y.into(), r.w.into(), r.h.into()]);
-  }
-
-  /// [Ui::reveal] of x, y, width and height in `f64`, as [Ui::scroll_exact].
-  pub(crate) fn reveal_exact(&mut self, id: Id, r: [f64; 4]) {
-    let Some((off, viewport)) = self.st.scroll_exact(id) else { return };
-    self.scroll_exact(id, reveal_offset(off, viewport, r));
   }
 
   // MARK: Frame
@@ -1195,7 +1184,7 @@ impl<'a> Ui<'a> {
   /// Paints the laid-out tree, then keeps it as the last frame's.
   pub(crate) fn paint(mut self, f: &mut Frame) -> UiState {
     let st = &self.st;
-    let ring = st.ring.filter(|_| st.window_focused()).and_then(|r| {
+    let ring = st.own_ring.unwrap_or(st.ring).filter(|_| st.window_focused()).and_then(|r| {
       let i = st.tree.find(st.ring_on.or(st.input.focus)?)?;
       // Boxes get it, not selectable text.
       let n = &st.tree.nodes[i as usize];
@@ -1257,6 +1246,61 @@ mod tests {
     assert_eq!(ui.slot::<Menu>().map(|m| m.0), Some(1));
     ui.set_slot::<Menu>(None);
     assert!(ui.slot::<Menu>().is_none());
+  }
+
+  /// What a widget reads of the stack it is built in, and the elements built so far.
+  #[test]
+  fn stacks_tell_their_axis_and_children() {
+    let mut ui = Ui::new(UiState::default(), Size::new(10.0, 10.0), None, Duration::ZERO);
+    let at = ui.st.tree.nodes.len();
+    ui.row(Style::new(), |ui| {
+      assert_eq!((ui.parent_axis(), ui.child_count()), (Some(Axis::Horizontal), 0));
+      ui.el(Style::new());
+      assert_eq!(ui.child_count(), 1);
+      ui.col(Style::new(), |ui| assert_eq!(ui.parent_axis(), Some(Axis::Vertical)));
+      ui.grid(2, Style::new(), |ui| assert_eq!(ui.parent_axis(), None));
+    });
+    assert_eq!(ui.st.tree.nodes.len() - at, 4);
+  }
+
+  /// `allows_hit_testing(false)` is the next element's, whatever it is: a plain one built after
+  /// it takes input as ever.
+  #[test]
+  fn no_hit_testing_ends_with_the_next_element() {
+    let mut ui = Ui::new(UiState::default(), Size::new(10.0, 10.0), None, Duration::ZERO);
+    ui.allows_hit_testing(false).el(Style::new());
+    ui.id("b").el(Style::new());
+    let hit = |ui: &Ui, i: usize| ui.st.tree.nodes[i].style.hit;
+    let n = ui.st.tree.nodes.len();
+    assert!(!hit(&ui, n - 2) && hit(&ui, n - 1));
+  }
+
+  /// A part enabled in a disabled container, which is disabled again after it.
+  #[test]
+  fn a_disabled_scope_enables_too() {
+    let mut ui = Ui::new(UiState::default(), Size::new(10.0, 10.0), None, Duration::ZERO);
+    ui.disabled(true).col(Style::new(), |ui| {
+      ui.disabled_scope(false, |ui| assert!(!ui.take_disabled()));
+      assert!(ui.take_disabled());
+    });
+  }
+
+  /// What the window shares: one value per type, kept across frames, replaced in place.
+  #[test]
+  fn the_environment_is_kept_across_frames() {
+    struct Tint(u32);
+
+    let mut ui = Ui::new(UiState::default(), Size::new(10.0, 10.0), None, Duration::ZERO);
+    assert!(ui.environment::<Tint>().is_none());
+    assert!(ui.set_environment(Some(Tint(1))).is_none());
+    assert!(ui.set_environment(Some(1u8)).is_none());
+
+    let mut ui = Ui::new(ui.finish(), Size::new(10.0, 10.0), None, Duration::ZERO);
+    assert_eq!(ui.environment::<Tint>().map(|t| t.0), Some(1));
+    assert_eq!(ui.set_environment(Some(Tint(2))).map(|t| t.0), Some(1));
+    assert_eq!(ui.set_environment::<Tint>(None).map(|t| t.0), Some(2));
+    assert!(ui.environment::<Tint>().is_none());
+    assert_eq!(ui.environment::<u8>(), Some(&1));
   }
 
   /// A delivered event is read as its own kind only: asked as another, it stays unused and

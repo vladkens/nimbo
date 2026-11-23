@@ -334,6 +334,14 @@ nimbo: `List::new(n, 32.0).sections(&starts, 24.0, &head).list_style(ListStyle::
 
 ![List sections](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/list-sections.png)
 
+### List behavior
+
+SwiftUI: `List(rows, selection: $sel) { … }.listRowBackground(…)`
+
+nimbo: `let b = ui.list_behavior(id, ListRows::new(n, 22.0), &mut sel, &key); ui.with_id(id).scroll_area(b.style(style), |ui| ui.list_rows(&b, |ui, i, k| { … }))`
+
+![List behavior](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/list-behavior.png)
+
 ## Containers
 
 ### Tabs
@@ -368,6 +376,14 @@ nimbo: `ui.toolbar(|ui| ui.toolbar_item(ToolbarItemPlacement::PrimaryAction, |ui
 
 ![Toolbar](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/toolbar.png)
 
+### Unified toolbar
+
+SwiftUI: `.windowToolbarStyle(.unified)`
+
+nimbo: `ui.window_toolbar_style(WindowToolbarStyle::Unified); ui.row(band, |ui| { … }) at the window's top`
+
+![Unified toolbar](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/unified-toolbar.png)
+
 ### Menu
 
 SwiftUI: `Menu("Actions") { Button(…) }`
@@ -384,6 +400,30 @@ nimbo: `ui.virtual_col(heights, |i| i, |ui, i| { … })`
 
 ![Lazy column](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/lazy-column.png)
 
+### Scroll behavior
+
+SwiftUI: `ScrollView { … }.scrollIndicators(.hidden).onScrollGeometryChange(…) { … }`
+
+nimbo: `let b = ui.scroll_behavior(id, Axes::VERTICAL); ui.with_id(id).col(style.scroll(Axes::VERTICAL), |ui| { …; if let Some(bar) = b.bar(Axis::Vertical) { ui.with_id(b.thumb(Axis::Vertical)).float(at).el(knob) } })`
+
+![Scroll behavior](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/scroll-behavior.png)
+
+### Scroll indicators
+
+SwiftUI: `NSScroller.knobStyle = .light (AppKit; SwiftUI has none)`
+
+nimbo: `ui.set_environment(Some(ScrollerKnob { color: red, ..ScrollerKnob::DARK })); ui.scroll_area(style, |ui| { … })`
+
+![Scroll indicators](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/scroll-indicators.png)
+
+### Stack queries
+
+SwiftUI: `Divider() follows its stack's axis (SwiftUI has no API for it)`
+
+nimbo: `let line = match ui.parent_axis() { Some(Axis::Horizontal) => v, _ => h }; ui.child_count() == 0`
+
+![Stack queries](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/stack-queries.png)
+
 ## Presentation
 
 ### Alert
@@ -398,7 +438,7 @@ nimbo: `Dialog::new("Delete?").button("Delete", ButtonRole::Destructive).show(ui
 
 SwiftUI: `.contextMenu { Button("Copy") { … } }`
 
-nimbo: `ui.context_menu(r.id, || Menu::new(vec![Item::button(Action::Copy, "Copy")]))`
+nimbo: `ui.context_menu(r.id, || Menu::new(vec![Item::button(Action::Copy, "Copy")])); match ui.native_menu(id, at, menu) { NativeMenu::Unavailable => /* draw it */, NativeMenu::Unanswered => {}, NativeMenu::Answered(a) => … }`
 
 ![Context menu](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/context-menu.png)
 
@@ -406,7 +446,7 @@ nimbo: `ui.context_menu(r.id, || Menu::new(vec![Item::button(Action::Copy, "Copy
 
 SwiftUI: `.help("Saves it")`
 
-nimbo: `ui.help("Saves it").button("Save")`
+nimbo: `ui.help("Saves it").button("Save"); for (id, tip) in ui.take_tooltips() { /* a look of its own */ }`
 
 ![Tooltip](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/tooltip.png)
 
@@ -443,3 +483,59 @@ SwiftUI: `.keyboardShortcut("z", modifiers: .command)`
 nimbo: `ui.keymap(&[bind(Shortcut::char('z').cmd(), Command::Undo)]).col(…)`
 
 ![Keyboard shortcut](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/keyboard-shortcut.png)
+
+### Environment
+
+SwiftUI: `.environment(\.tint, .green); @Environment(\.tint) var tint`
+
+nimbo: `ui.set_environment(Some(Tint(t.success))); let tint = ui.environment::<Tint>()`
+
+![Environment](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/environment.png)
+
+### Identity
+
+SwiftUI: `Box().id(item.id); .allowsHitTesting(false)`
+
+nimbo: `ui.key(item.id).row(style, |ui| { … }); ui.with_id(id.key("box")).allows_hit_testing(false).col(style, |ui| { … })`
+
+![Identity](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/identity.png)
+
+### Widget parts
+
+SwiftUI: `.environment(\.isEnabled, true); .help(tip) on a part`
+
+nimbo: `let tip = ui.take_help(); ui.disabled_scope(false, |ui| { if let Some(tip) = &tip { ui.help(tip); } ui.button("Undo") })`
+
+![Widget parts](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/widget-parts.png)
+
+### Frame request
+
+SwiftUI: `TimelineView(.animation) { context in … }`
+
+nimbo: `ui.request_frame(); let k = ui.now().as_secs_f32() % 1.0`
+
+![Frame request](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/frame-request.png)
+
+### Accessibility pair
+
+SwiftUI: `.accessibilityLabeledPair(role: .label, id: "volume", in: ns)`
+
+nimbo: `ui.a11y_labeled_pair(LabeledPairRole::Label, id, |ui| ui.text("Volume", s)); ui.a11y_labeled_pair(LabeledPairRole::Content, id, |ui| ui.slider(&mut v, 0.0..=1.0))`
+
+![Accessibility pair](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/accessibility-pair.png)
+
+### Controls theme
+
+SwiftUI: `@Environment(\.controlActiveState) var state`
+
+nimbo: `let t = ui.controls_theme(); ui.el(Style::new().bg(t.accent)); let grey = ui.theme().inactive().accent`
+
+![Controls theme](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/controls-theme.png)
+
+### Color scheme
+
+SwiftUI: `@Environment(\.colorScheme) var colorScheme`
+
+nimbo: `let dark = ui.color_scheme().is_dark()`
+
+![Color scheme](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/color-scheme.png)

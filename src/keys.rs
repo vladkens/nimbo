@@ -618,6 +618,23 @@ impl Hotkey {
       Hotkey::Modifier(key) => modifier_label(*key),
     }
   }
+
+  /// The global hotkey a key press makes, or `None` when it makes none: a key with Ctrl, Alt
+  /// (Option) or Meta (⌘, Windows), or an F-key with any. The key is the physical one, as a US
+  /// keyboard has it (Shift-1 is `shift+1`).
+  pub fn from_key_event(k: &KeyEvent) -> Option<Self> {
+    let f = (1..=20).any(|n| f_key(n).is_some_and(|(c, _)| c == k.code));
+    if !(f || k.mods.intersects(Modifiers::CONTROL | Modifiers::ALT | Modifiers::META)) {
+      return None;
+    }
+
+    let key = match us_char(k.code, false) {
+      Some(c) => Key::Char(c),
+      None => Key::named(k.code).filter(|k| *k != Key::Named(NamedKey::Unidentified))?,
+    };
+
+    Some(Hotkey::Shortcut(Shortcut { key, mods: k.mods }))
+  }
 }
 
 /// A modifier key alone, by its side and the platform's mark or name: `Right ⌥`, `Left ⌘`

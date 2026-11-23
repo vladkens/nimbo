@@ -616,12 +616,12 @@ impl Float {
 }
 
 /// How big a control is, as SwiftUI's `ControlSize` ([super::Ui::control_size]): a button's
-/// height, font and padding ([super::Theme::button]), a switch's track, a badge's pill, a spinner.
+/// height, font and padding (`Theme::button`), a switch's track, a badge's pill, a spinner.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ControlSize {
-  /// [super::Sizes::small_h] high in the small font: dense rows, inline actions.
+  /// `Sizes::small_h` high in the small font: dense rows, inline actions.
   Small,
-  /// [super::Sizes::control_h] high in the body font.
+  /// `Sizes::control_h` high in the body font.
   #[default]
   Regular,
   /// 8 points taller, the font 2 points larger: a dialog's main actions.

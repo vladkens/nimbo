@@ -2,17 +2,16 @@
 
 //! The divider: a hairline across its stack, in the theme's line colour.
 
-use crate::ui::{Flow, Response, Style, Ui, grow, px};
+use crate::ui::{Axis, Response, Style, Ui, grow, px};
 
 impl Ui<'_> {
   /// A line a point thick in [crate::Theme::line] across the stack it is in, as SwiftUI's
   /// `Divider`: down a row, along a column (or a grid). It takes no input.
   pub fn divider(&mut self) -> Response {
     let t = self.theme();
-    let parent = self.st.stack.last().map_or(0, |s| s.0);
-    let line = match self.st.tree.nodes[parent as usize].flow {
-      Flow::Row => Style::new().w(px(1.0)).h(grow()),
-      _ => Style::new().w(grow()).h(px(1.0)),
+    let line = match self.parent_axis() {
+      Some(Axis::Horizontal) => Style::new().w(px(1.0)).h(grow()),
+      Some(Axis::Vertical) | None => Style::new().w(grow()).h(px(1.0)),
     };
 
     self.el(line.bg(t.line))

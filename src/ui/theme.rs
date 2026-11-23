@@ -25,8 +25,8 @@ use std::time::Duration;
 
 pub use super::ControlSize;
 use super::store::Transition;
-use super::widgets::{ButtonRole, FieldStyle};
-use super::{Align, Dim, FocusRing, Shadow, Style, TextStyle, grow, px};
+use super::widgets::ButtonRole;
+use super::{Align, Dim, FieldStyle, FocusRing, Shadow, Style, TextStyle, Ui, grow, px};
 use crate::app::{Appearance, ColorScheme};
 use crate::scene::{Color, alpha, mix, rgb};
 use crate::text::{Font, Weight};
@@ -70,8 +70,6 @@ pub struct Theme {
   /// Menus, and their edge ([Sizes::menu_edge] wide).
   pub menu: Color,
   pub menu_line: Color,
-  /// Overlay scrollbars' thumbs.
-  pub thumb: Color,
   /// Grouped content on the ground: a form's plates.
   pub plate: Color,
   /// The third tier of text: disabled labels and values, a disabled pop-up's chevrons.
@@ -304,7 +302,6 @@ impl Theme {
     shadow: alpha(BLACK, 0.2),
     menu: WHITE,
     menu_line: alpha(BLACK, 0.25),
-    thumb: alpha(BLACK, 0.24),
     plate: rgb(0xf8f8f8),
     tertiary: rgb(0xbfbfbf),
     link: rgb(0x0068da),
@@ -354,7 +351,6 @@ impl Theme {
     shadow: alpha(BLACK, 0.5),
     menu: rgb(0x1a1a1a),
     menu_line: alpha(WHITE, 0.25),
-    thumb: alpha(WHITE, 0.26),
     field: rgb(0x252527),
     field_line: rgb(0x424245),
     faint: rgb(0x646468),
@@ -393,8 +389,8 @@ impl Theme {
   /// This theme in a window that isn't key, as AppKit draws its controls there: the accent a
   /// grey, the ground 20% toward black (light) or white (dark), as a switch's track, a check
   /// box, a slider's fill and a selected segment are there (14–23%), the marks on it in the
-  /// text's colour.
-  pub(crate) const fn inactive(self) -> Self {
+  /// text's colour; [Ui::controls_theme] while the window isn't key.
+  pub const fn inactive(self) -> Self {
     let grey = mix(self.bg, if self.scheme.is_dark() { WHITE } else { BLACK }, 0.2);
     Self { accent: grey, on_accent: self.text, ..self }
   }
@@ -618,9 +614,46 @@ impl Theme {
   }
 }
 
+impl Ui<'_> {
+  /// The theme widgets draw with, a copy: the one the app set ([Ui::set_theme]), kept in the
+  /// environment ([Ui::environment]), else the OS's ([Theme::system]).
+  pub fn theme(&self) -> Theme {
+    match self.environment::<Theme>() {
+      Some(&t) => t,
+      None => Theme::system(self.appearance()),
+    }
+  }
+
+  /// The theme of controls filled with the accent: [Ui::theme], its accent a grey while the
+  /// window isn't key, as AppKit's switches, check boxes, sliders, segments and progress bars
+  /// turn grey there. For a control of the app's own that should do the same.
+  pub fn controls_theme(&self) -> Theme {
+    let t = self.theme();
+    if self.window_focused() { t } else { t.inactive() }
+  }
+
+  /// Sets the theme, kept until changed, over the OS's appearance, and its light or dark
+  /// ([Ui::color_scheme], which scroll areas' knobs follow); its focus ring is the one the shell
+  /// puts after each view, unless the view sets its own ([Ui::set_focus_ring]).
+  pub fn set_theme(&mut self, theme: Theme) {
+    self.set_environment(Some(theme));
+    self.set_environment(Some(theme.scheme));
+  }
+
+  /// Follows the OS's appearance again ([Theme::system]), the default: light or dark with
+  /// its accent, switching when it changes.
+  pub fn follow_system(&mut self) {
+    self.set_environment::<Theme>(None);
+    self.set_environment::<ColorScheme>(None);
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::app::{App, Event};
+  use crate::harness::Harness;
+  use crate::scene::Size;
 
   #[test]
   fn variants_read_the_palette() {
@@ -691,5 +724,83 @@ mod tests {
       assert!(near(over(t.pressed, ground), pressed), "{:?}", over(t.pressed, ground));
       assert!(near(over(t.track, plate), track), "{:?}", over(t.track, plate));
     }
+  }
+
+  /// Pins a theme or follows the OS's, and sets a focus ring of its own or doesn't, each frame.
+  #[derive(Default)]
+  struct Ringed {
+    pin: Option<Theme>,
+    own: Option<Option<FocusRing>>,
+    /// The colour scheme as the view last saw it.
+    scheme: Option<ColorScheme>,
+  }
+
+  impl App for Ringed {
+    fn view(&mut self, ui: &mut Ui) {
+      match self.pin {
+        Some(t) => ui.set_theme(t),
+        None => ui.follow_system(),
+      }
+
+      if let Some(r) = self.own {
+        ui.set_focus_ring(r);
+      }
+
+      self.scheme = Some(ui.color_scheme());
+    }
+  }
+
+  /// The theme's focus ring rings the focused box and follows the OS's appearance; one the app
+  /// sets in a frame overrides it there, whatever the theme, and the theme's comes back when the
+  /// app stops setting it.
+  #[test]
+  fn the_focus_ring_is_the_themes_unless_the_app_sets_one() {
+    let mut h = Harness::new(Ringed::default(), Size::new(40.0, 40.0), 1.0);
+    let ring = |h: &mut Harness<Ringed>| {
+      h.rt.redraw();
+      h.frame();
+      h.rt.ui.own_ring.unwrap_or(h.rt.ui.ring)
+    };
+    assert_eq!(ring(&mut h), Some(Theme::PLATES_DARK.focus_ring()));
+    h.event(Event::Appearance(Appearance::LIGHT));
+    assert_eq!(ring(&mut h), Some(Theme::PLATES_LIGHT.focus_ring()));
+
+    // The app's theme, then a ring of its own after it, then none.
+    let mine = Theme { focus: rgb(0xff0000), ..Theme::PLATES_DARK };
+    h.app_mut().pin = Some(mine);
+    assert_eq!(ring(&mut h), Some(mine.focus_ring()));
+    let green = FocusRing::new(rgb(0x00ff00));
+    h.app_mut().own = Some(Some(green));
+    assert_eq!(ring(&mut h), Some(green));
+    h.event(Event::Appearance(Appearance::DARK));
+    assert_eq!(ring(&mut h), Some(green));
+    h.app_mut().own = Some(None);
+    assert_eq!(ring(&mut h), None);
+
+    // The theme set again, the OS's followed again.
+    h.app_mut().own = None;
+    assert_eq!(ring(&mut h), Some(mine.focus_ring()));
+    h.app_mut().pin = None;
+    assert_eq!(ring(&mut h), Some(Theme::PLATES_DARK.focus_ring()));
+    h.event(Event::Appearance(Appearance::LIGHT));
+    assert_eq!(ring(&mut h), Some(Theme::PLATES_LIGHT.focus_ring()));
+  }
+
+  /// A theme the app set gives its light or dark (scroll areas' knobs follow it); following the
+  /// OS again gives the OS's.
+  #[test]
+  fn the_color_scheme_is_the_themes_or_the_oss() {
+    let mut h = Harness::new(Ringed::default(), Size::new(40.0, 40.0), 1.0);
+    h.event(Event::Appearance(Appearance::LIGHT));
+    let scheme = |h: &mut Harness<Ringed>| {
+      h.rt.redraw();
+      h.frame();
+      h.app().scheme
+    };
+    assert_eq!(scheme(&mut h), Some(ColorScheme::Light));
+    h.app_mut().pin = Some(Theme::PLATES_DARK);
+    assert_eq!(scheme(&mut h), Some(ColorScheme::Dark));
+    h.app_mut().pin = None;
+    assert_eq!(scheme(&mut h), Some(ColorScheme::Light));
   }
 }

@@ -570,7 +570,7 @@ fn a_right_click_opens_the_edit_menu() {
 #[test]
 fn a_native_edit_menu_is_asked_for_and_answered() {
   let h = &mut fields_on(Os::Mac, "hello", "moon");
-  h.native_menus();
+  h.set_native_menus(true);
   h.key(Key::Char('a'), CMD);
   right_click(h, NAME);
   assert!(menu(h).is_empty(), "nothing drawn");
@@ -607,7 +607,7 @@ fn a_native_edit_menu_is_asked_for_and_answered() {
 #[test]
 fn a_control_click_keeps_the_selection_for_its_menu() {
   let h = &mut fields_on(Os::Mac, "hello world", "XY");
-  h.native_menus();
+  h.set_native_menus(true);
   h.key(NamedKey::ArrowLeft, Modifiers::ALT | SHIFT);
 
   let r = h.rect(Id::of(NAME)).unwrap();

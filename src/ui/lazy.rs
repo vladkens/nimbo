@@ -13,13 +13,13 @@
 //!
 //! The column's place in its scroll area is the last frame's; when the layout shows more of it
 //! than was built (the first frame, the viewport grew, content above moved it) the view runs
-//! again at once (`Ui::partial_short`), so a frame never shows a gap. [List](super::List) is the
+//! again at once (`Ui::partial_short`), so a frame never shows a gap. `List` is the
 //! same for a list that is its own scroll area, with selection and keys.
 
 use std::hash::Hash;
 use std::ops::Range;
 
-use super::super::{Id, Style, Ui, grow, px};
+use super::{Id, Style, Ui, grow, px};
 
 /// How far past the viewport items are built, in points: a wheel step and more.
 const MARGIN: f64 = 200.0;
@@ -69,7 +69,7 @@ impl<'a> Ui<'a> {
   /// `key(i)`, unique and stable while it is the same thing, so what it builds keeps its ids,
   /// hover and focus as the column scrolls and items come and go before it. The column's id is
   /// the one set ([Ui::id], [Ui::key]) or its place among its siblings, not taking input. The
-  /// heights are summed each frame: for very long columns of sections, see [crate::List].
+  /// heights are summed each frame: for very long columns of sections, see `List`.
   pub fn virtual_col<K: Hash>(
     &mut self,
     heights: impl IntoIterator<Item = f32>,
