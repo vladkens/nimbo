@@ -8,50 +8,117 @@ msgid ""
 msgstr ""
 "Project-Id-Version: nimbo\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-15 04:28+0200\n"
+"POT-Creation-Date: 2026-11-23 22:44+0200\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "Language: \n"
 "MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=CHARSET\n"
+"Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: src/platform/macos/shell.rs:166
-msgid "Close Window"
+#: src/commands.rs:126
+msgid "Settings…"
 msgstr ""
 
-#: src/platform/macos/shell.rs:167
+#. Translators: the menu bar's menus, as macOS names them.
+#: src/commands.rs:170
+msgid "File"
+msgstr ""
+
+#: src/commands.rs:170
+msgid "Edit"
+msgstr ""
+
+#: src/commands.rs:170
+msgid "View"
+msgstr ""
+
+#: src/commands.rs:170
+msgid "Window"
+msgstr ""
+
+#: src/commands.rs:170 src/ui/widgets/button.rs:192
+msgid "Help"
+msgstr ""
+
+#: src/commands.rs:229
+#, rust-format
+msgid "About {name}"
+msgstr ""
+
+#: src/commands.rs:230
+msgid "Services"
+msgstr ""
+
+#: src/commands.rs:232
+#, rust-format
+msgid "Hide {name}"
+msgstr ""
+
+#: src/commands.rs:233
+msgid "Hide Others"
+msgstr ""
+
+#: src/commands.rs:234
+msgid "Show All"
+msgstr ""
+
+#: src/commands.rs:236
 #, rust-format
 msgid "Quit {name}"
 msgstr ""
 
-#: src/ui/behavior.rs:319
+#: src/commands.rs:237
+msgid "Close Window"
+msgstr ""
+
+#: src/commands.rs:238
+msgid "Undo"
+msgstr ""
+
+#: src/commands.rs:238
+msgid "Redo"
+msgstr ""
+
+#: src/commands.rs:240 src/ui/behavior.rs:332
 msgid "Cut"
 msgstr ""
 
-#: src/ui/behavior.rs:320
-msgid "Paste"
-msgstr ""
-
-#: src/ui/behavior.rs:321 src/ui/widgets/icon.rs:174
+#: src/commands.rs:241 src/ui/behavior.rs:334 src/ui/widgets/icon.rs:174
 msgid "Copy"
 msgstr ""
 
-#: src/ui/behavior.rs:323
+#: src/commands.rs:242 src/ui/behavior.rs:333
+msgid "Paste"
+msgstr ""
+
+#: src/commands.rs:243 src/ui/behavior.rs:336
 msgid "Select All"
 msgstr ""
 
-#: src/ui/dialog.rs:78
+#: src/commands.rs:247
+msgid "Enter Full Screen"
+msgstr ""
+
+#: src/commands.rs:250
+msgid "Minimize"
+msgstr ""
+
+#: src/commands.rs:250
+msgid "Zoom"
+msgstr ""
+
+#: src/commands.rs:252
+msgid "Bring All to Front"
+msgstr ""
+
+#: src/ui/dialog.rs:82
 msgid "OK"
 msgstr ""
 
-#: src/ui/dialog.rs:78
+#: src/ui/dialog.rs:83
 msgid "Cancel"
-msgstr ""
-
-#: src/ui/widgets/button.rs:202
-msgid "Help"
 msgstr ""
 
 #: src/ui/widgets/icon.rs:160

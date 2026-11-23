@@ -4,7 +4,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: nimbo\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-15 04:28+0200\n"
+"POT-Creation-Date: 2026-11-23 22:43+0200\n"
 "PO-Revision-Date: 2026-11-18 06:00+0200\n"
 "Last-Translator: \n"
 "Language-Team: none\n"
@@ -14,42 +14,109 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-#: src/platform/macos/shell.rs:166
-msgid "Close Window"
-msgstr "关闭窗口"
+#: src/commands.rs:126
+msgid "Settings…"
+msgstr "设置…"
 
-#: src/platform/macos/shell.rs:167
+#. Translators: the menu bar's menus, as macOS names them.
+#: src/commands.rs:170
+msgid "File"
+msgstr "文件"
+
+#: src/commands.rs:170
+msgid "Edit"
+msgstr "编辑"
+
+#: src/commands.rs:170
+msgid "View"
+msgstr "显示"
+
+#: src/commands.rs:170
+msgid "Window"
+msgstr "窗口"
+
+#: src/commands.rs:170 src/ui/widgets/button.rs:192
+msgid "Help"
+msgstr "帮助"
+
+#: src/commands.rs:229
+#, rust-format
+msgid "About {name}"
+msgstr "关于{name}"
+
+#: src/commands.rs:230
+msgid "Services"
+msgstr "服务"
+
+#: src/commands.rs:232
+#, rust-format
+msgid "Hide {name}"
+msgstr "隐藏{name}"
+
+#: src/commands.rs:233
+msgid "Hide Others"
+msgstr "隐藏其他"
+
+#: src/commands.rs:234
+msgid "Show All"
+msgstr "全部显示"
+
+#: src/commands.rs:236
 #, rust-format
 msgid "Quit {name}"
 msgstr "退出 {name}"
 
-#: src/ui/behavior.rs:319
+#: src/commands.rs:237
+msgid "Close Window"
+msgstr "关闭窗口"
+
+#: src/commands.rs:238
+msgid "Undo"
+msgstr "撤销"
+
+#: src/commands.rs:238
+msgid "Redo"
+msgstr "重做"
+
+#: src/commands.rs:240 src/ui/behavior.rs:332
 msgid "Cut"
 msgstr "剪切"
 
-#: src/ui/behavior.rs:320
-msgid "Paste"
-msgstr "粘贴"
-
-#: src/ui/behavior.rs:321 src/ui/widgets/icon.rs:174
+#: src/commands.rs:241 src/ui/behavior.rs:334 src/ui/widgets/icon.rs:174
 msgid "Copy"
 msgstr "拷贝"
 
-#: src/ui/behavior.rs:323
+#: src/commands.rs:242 src/ui/behavior.rs:333
+msgid "Paste"
+msgstr "粘贴"
+
+#: src/commands.rs:243 src/ui/behavior.rs:336
 msgid "Select All"
 msgstr "全选"
 
-#: src/ui/dialog.rs:78
+#: src/commands.rs:247
+msgid "Enter Full Screen"
+msgstr "进入全屏幕"
+
+#: src/commands.rs:250
+msgid "Minimize"
+msgstr "最小化"
+
+#: src/commands.rs:250
+msgid "Zoom"
+msgstr "缩放"
+
+#: src/commands.rs:252
+msgid "Bring All to Front"
+msgstr "前置全部窗口"
+
+#: src/ui/dialog.rs:82
 msgid "OK"
 msgstr "好"
 
-#: src/ui/dialog.rs:78
+#: src/ui/dialog.rs:83
 msgid "Cancel"
 msgstr "取消"
-
-#: src/ui/widgets/button.rs:202
-msgid "Help"
-msgstr "帮助"
 
 #: src/ui/widgets/icon.rs:160
 msgid "Settings"

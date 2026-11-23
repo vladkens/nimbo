@@ -113,6 +113,7 @@ pub const BLOCKS: &[Block] = &[
   b("Containers", "Stack queries", "Divider() follows its stack's axis (SwiftUI has no API for it)", "let line = match ui.parent_axis() { Some(Axis::Horizontal) => v, _ => h }; ui.child_count() == 0"),
   b("Presentation", "Alert", ".alert(\"Delete?\", isPresented: $ask) { Button(\"Delete\", role: .destructive) }", "Dialog::new(\"Delete?\").button(\"Delete\", ButtonRole::Destructive).show(ui, &mut self.ask)"),
   b("Presentation", "Context menu", ".contextMenu { Button(\"Copy\") { … } }", "ui.context_menu(r.id, || Menu::new(vec![Item::button(Action::Copy, \"Copy\")])); match ui.native_menu(id, at, menu) { NativeMenu::Unavailable => /* draw it */, NativeMenu::Unanswered => {}, NativeMenu::Answered(a) => … }"),
+  b("Presentation", "Menu bar", ".commands { CommandMenu(\"Track\") { Button(\"Play\") { … } }; CommandGroup(replacing: .newItem) { … } }", "main.set_commands(&Commands::new().menu(\"Track\", Menu::new(vec![Item::button(Act::Play, \"Play\")])).replacing(CommandGroupPlacement::NewItem, items), |main, act| …)"),
   b("Presentation", "Tooltip", ".help(\"Saves it\")", "ui.help(\"Saves it\").button(\"Save\"); for (id, tip) in ui.take_tooltips() { /* a look of its own */ }"),
   b("Modifiers", "Disabled", ".disabled(true)", "ui.disabled(true).col(Style::new(), |ui| { … })"),
   b("Modifiers", "Control size", ".controlSize(.small)", "ui.control_size(ControlSize::Small).row(Style::new(), |ui| { … })"),
@@ -142,6 +143,9 @@ pub const SIZES: [Tag<Size>; 3] = [
 
 /// The environment block's value: the tint of the swatches built while it is there.
 pub struct Tint(pub Color);
+
+/// The menu bar the "Menu bar" block's line makes.
+const MENU_BAR: &str = "File, Edit, View, Track, Window and Help in the menu bar (macOS)";
 
 /// What the context menu does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -630,6 +634,8 @@ impl Gallery {
           self.copied += 1;
         }
       }),
+
+      "Menu bar" => Self::variants(ui, Shown::Alone, |ui| ui.text(MENU_BAR, t.label())),
       "Tooltip" => Self::variants(ui, Shown::Plain, |ui| _ = ui.help("Saves it").button("Save")),
       "Disabled" => Self::variants(ui, Shown::Plain, |ui| {
         ui.button("Save");

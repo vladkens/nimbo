@@ -213,22 +213,27 @@ impl<A> Item<A> {
 /// `items` with each action replaced by its number, depth first ([Menu::tagged]); the actions
 /// go to `out` in that order.
 fn tag<A: Clone>(items: &[Item<A>], out: &mut Vec<A>) -> Vec<Item<usize>> {
-  let mut tagged = Vec::with_capacity(items.len());
+  map(items, &mut |a: &A| {
+    out.push(a.clone());
+    out.len() - 1
+  })
+}
+
+/// `items` with each action replaced by `f`'s answer, depth first in the order they show.
+pub(crate) fn map<A, B>(items: &[Item<A>], f: &mut impl FnMut(&A) -> B) -> Vec<Item<B>> {
+  let mut mapped = Vec::with_capacity(items.len());
   for it in items {
-    let n = out.len();
-    tagged.push(match it {
+    mapped.push(match it {
       Item::Button { action, label, role, enabled, key } => {
-        out.push(action.clone());
         let (label, role, enabled, key) = (label.clone(), *role, *enabled, *key);
-        Item::Button { action: n, label, role, enabled, key }
+        Item::Button { action: f(action), label, role, enabled, key }
       }
       Item::Toggle { action, label, is_on, enabled, key } => {
-        out.push(action.clone());
         let (label, is_on, enabled, key) = (label.clone(), *is_on, *enabled, *key);
-        Item::Toggle { action: n, label, is_on, enabled, key }
+        Item::Toggle { action: f(action), label, is_on, enabled, key }
       }
       Item::Submenu { label, enabled, menu } => {
-        let menu = Menu::new(tag(&menu.items, out));
+        let menu = Menu::new(map(&menu.items, f));
         Item::Submenu { label: label.clone(), enabled: *enabled, menu }
       }
       Item::Section(s) => Item::Section(s.clone()),
@@ -236,7 +241,7 @@ fn tag<A: Clone>(items: &[Item<A>], out: &mut Vec<A>) -> Vec<Item<usize>> {
     });
   }
 
-  tagged
+  mapped
 }
 
 /// The most characters an item's label shows ([Item::button]): a menu keeps its width whatever the

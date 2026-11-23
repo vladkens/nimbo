@@ -4,7 +4,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: nimbo\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-15 04:28+0200\n"
+"POT-Creation-Date: 2026-11-23 22:43+0200\n"
 "PO-Revision-Date: 2026-11-18 06:00+0200\n"
 "Last-Translator: \n"
 "Language-Team: none\n"
@@ -14,42 +14,109 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-#: src/platform/macos/shell.rs:166
-msgid "Close Window"
-msgstr "ウインドウを閉じる"
+#: src/commands.rs:126
+msgid "Settings…"
+msgstr "設定…"
 
-#: src/platform/macos/shell.rs:167
+#. Translators: the menu bar's menus, as macOS names them.
+#: src/commands.rs:170
+msgid "File"
+msgstr "ファイル"
+
+#: src/commands.rs:170
+msgid "Edit"
+msgstr "編集"
+
+#: src/commands.rs:170
+msgid "View"
+msgstr "表示"
+
+#: src/commands.rs:170
+msgid "Window"
+msgstr "ウインドウ"
+
+#: src/commands.rs:170 src/ui/widgets/button.rs:192
+msgid "Help"
+msgstr "ヘルプ"
+
+#: src/commands.rs:229
+#, rust-format
+msgid "About {name}"
+msgstr "{name}について"
+
+#: src/commands.rs:230
+msgid "Services"
+msgstr "サービス"
+
+#: src/commands.rs:232
+#, rust-format
+msgid "Hide {name}"
+msgstr "{name}を非表示"
+
+#: src/commands.rs:233
+msgid "Hide Others"
+msgstr "ほかを非表示"
+
+#: src/commands.rs:234
+msgid "Show All"
+msgstr "すべてを表示"
+
+#: src/commands.rs:236
 #, rust-format
 msgid "Quit {name}"
 msgstr "{name}を終了"
 
-#: src/ui/behavior.rs:319
+#: src/commands.rs:237
+msgid "Close Window"
+msgstr "ウインドウを閉じる"
+
+#: src/commands.rs:238
+msgid "Undo"
+msgstr "取り消す"
+
+#: src/commands.rs:238
+msgid "Redo"
+msgstr "やり直す"
+
+#: src/commands.rs:240 src/ui/behavior.rs:332
 msgid "Cut"
 msgstr "カット"
 
-#: src/ui/behavior.rs:320
-msgid "Paste"
-msgstr "ペースト"
-
-#: src/ui/behavior.rs:321 src/ui/widgets/icon.rs:174
+#: src/commands.rs:241 src/ui/behavior.rs:334 src/ui/widgets/icon.rs:174
 msgid "Copy"
 msgstr "コピー"
 
-#: src/ui/behavior.rs:323
+#: src/commands.rs:242 src/ui/behavior.rs:333
+msgid "Paste"
+msgstr "ペースト"
+
+#: src/commands.rs:243 src/ui/behavior.rs:336
 msgid "Select All"
 msgstr "すべてを選択"
 
-#: src/ui/dialog.rs:78
+#: src/commands.rs:247
+msgid "Enter Full Screen"
+msgstr "フルスクリーンにする"
+
+#: src/commands.rs:250
+msgid "Minimize"
+msgstr "しまう"
+
+#: src/commands.rs:250
+msgid "Zoom"
+msgstr "拡大／縮小"
+
+#: src/commands.rs:252
+msgid "Bring All to Front"
+msgstr "すべてを手前に移動"
+
+#: src/ui/dialog.rs:82
 msgid "OK"
 msgstr "OK"
 
-#: src/ui/dialog.rs:78
+#: src/ui/dialog.rs:83
 msgid "Cancel"
 msgstr "キャンセル"
-
-#: src/ui/widgets/button.rs:202
-msgid "Help"
-msgstr "ヘルプ"
 
 #: src/ui/widgets/icon.rs:160
 msgid "Settings"

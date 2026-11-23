@@ -1,16 +1,18 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The macOS platform: NSApplication and its windows ([shell]), each window's content our NSView
-//! ([view]: input, cursors, timers, occlusion, present through [surface]; its display link in
-//! [link]) and its nodes for assistive clients ([a11y]), the keyboard layout ([keyboard]), overlay
-//! panels ([overlay]), the clipboard on NSPasteboard, the CoreText text backend ([text]) and the
-//! performance cores and the preferred languages; the tray, global hotkeys and launch at login in
-//! [app]. macOS 11 or later, with the newer APIs behind run-time checks.
+//! The macOS platform: NSApplication and its windows ([shell]), its menu bar ([bar]), each
+//! window's content our NSView ([view]: input, cursors, timers, occlusion, present through
+//! [surface]; its display link in [link]) and its nodes for assistive clients ([a11y]), the
+//! keyboard layout ([keyboard]), overlay panels ([overlay]), the clipboard on NSPasteboard, the
+//! CoreText text backend ([text]) and the performance cores and the preferred languages; the tray,
+//! global hotkeys and launch at login in [app]. macOS 11 or later, with the newer APIs behind
+//! run-time checks.
 
 mod view;
 
 mod a11y;
 mod app;
+mod bar;
 mod files;
 pub mod image;
 mod input;

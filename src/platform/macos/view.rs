@@ -6,7 +6,8 @@
 //! refresh after the last frame at the soonest) and draws its frame there, leaving the display link
 //! paused. While the window is hidden (minimized, covered, on another space) frames wait until it
 //! shows again. Keys nobody used go through `interpretKeyEvents:`, which calls back `insertText:`
-//! and `doCommandBySelector:` (see [crate::keys]); the pointer's cursor follows the runtime's.
+//! and `doCommandBySelector:` (see [crate::keys]); the menu bar's Edit items (`copy:`) run the
+//! command their key would; the pointer's cursor follows the runtime's.
 //!
 //! The view is an `NSTextInputClient`: while a text field that takes input methods has focus
 //! ([Runtime::text_input]), it has an input context, so input methods compose marked text in the
@@ -29,9 +30,10 @@ use objc2::{
   sel,
 };
 use objc2_app_kit::{
-  NSDragOperation, NSDraggingInfo, NSEvent, NSEventModifierFlags, NSPasteboardTypeFileURL,
-  NSResponder, NSTextInputClient, NSTextInputContext, NSTrackingArea, NSTrackingAreaOptions,
-  NSView, NSWindow, NSWindowOcclusionState, NSWindowStyleMask,
+  NSApplication, NSDragOperation, NSDraggingInfo, NSEvent, NSEventModifierFlags, NSEventType,
+  NSMenuItem, NSPasteboardTypeFileURL, NSResponder, NSTextInputClient, NSTextInputContext,
+  NSTrackingArea, NSTrackingAreaOptions, NSView, NSWindow, NSWindowOcclusionState,
+  NSWindowStyleMask,
 };
 use objc2_foundation::{
   NSArray, NSAttributedString, NSAttributedStringKey, NSNotFound, NSObject, NSObjectProtocol,
@@ -315,6 +317,45 @@ define_class!(
       if offered || self.composing() || !self.send(Event::KeyDown(key_event(event))) {
         self.interpret(event);
       }
+    }
+
+    /// The menu bar's Edit items ([super::bar]): the command their key runs.
+    #[unsafe(method(undo:))]
+    fn undo(&self, _sender: Option<&AnyObject>) {
+      self.menu_command(Command::Undo);
+    }
+
+    #[unsafe(method(redo:))]
+    fn redo(&self, _sender: Option<&AnyObject>) {
+      self.menu_command(Command::Redo);
+    }
+
+    #[unsafe(method(cut:))]
+    fn cut(&self, _sender: Option<&AnyObject>) {
+      self.menu_command(Command::Cut);
+    }
+
+    #[unsafe(method(copy:))]
+    fn copy(&self, _sender: Option<&AnyObject>) {
+      self.menu_command(Command::Copy);
+    }
+
+    #[unsafe(method(paste:))]
+    fn paste(&self, _sender: Option<&AnyObject>) {
+      self.menu_command(Command::Paste);
+    }
+
+    #[unsafe(method(selectAll:))]
+    fn select_all(&self, _sender: Option<&AnyObject>) {
+      self.menu_command(Command::SelectAll);
+    }
+
+    /// An Edit item is enabled while something focused binds its command ([Runtime::can]); busy
+    /// up the stack, enabled, its command waiting for the runtime ([View::send]).
+    #[unsafe(method(validateMenuItem:))]
+    fn validate_menu_item(&self, item: &NSMenuItem) -> bool {
+      let name = item.action().map(|s| s.name().to_str().unwrap_or_default().to_owned());
+      name.as_deref().and_then(Command::from_selector).is_none_or(|cmd| self.can(cmd))
     }
 
     #[unsafe(method(keyUp:))]
@@ -746,6 +787,22 @@ impl View {
 
     self.ivars().key_equivalent.set(event.timestamp());
     self.send(Event::KeyDown(key_event(event)))
+  }
+
+  /// A command from the menu bar, as its key would run it; not for the key equivalent offered
+  /// already ([View::key_equivalent]), which nobody used.
+  fn menu_command(&self, cmd: Command) {
+    let event = NSApplication::sharedApplication(MainThreadMarker::from(self)).currentEvent();
+    let key = event.filter(|e| e.r#type() == NSEventType::KeyDown);
+    if key.is_none_or(|e| e.timestamp() != self.ivars().key_equivalent.get()) {
+      self.send(Event::Command(cmd));
+    }
+  }
+
+  /// Whether `cmd` has someone to run it ([Runtime::can]); busy up the stack, yes.
+  fn can(&self, cmd: Command) -> bool {
+    let Ok(mut state) = self.ivars().state.try_borrow_mut() else { return true };
+    state.as_mut().is_some_and(|st| st.rt.can(cmd))
   }
 
   /// Lets AppKit's text input turn a key nobody used into text or a command.

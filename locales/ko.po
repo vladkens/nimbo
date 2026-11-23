@@ -4,7 +4,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: nimbo\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-15 04:28+0200\n"
+"POT-Creation-Date: 2026-11-23 22:43+0200\n"
 "PO-Revision-Date: 2026-11-18 06:00+0200\n"
 "Last-Translator: \n"
 "Language-Team: none\n"
@@ -14,42 +14,109 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-#: src/platform/macos/shell.rs:166
-msgid "Close Window"
-msgstr "윈도우 닫기"
+#: src/commands.rs:126
+msgid "Settings…"
+msgstr "설정…"
 
-#: src/platform/macos/shell.rs:167
+#. Translators: the menu bar's menus, as macOS names them.
+#: src/commands.rs:170
+msgid "File"
+msgstr "파일"
+
+#: src/commands.rs:170
+msgid "Edit"
+msgstr "편집"
+
+#: src/commands.rs:170
+msgid "View"
+msgstr "보기"
+
+#: src/commands.rs:170
+msgid "Window"
+msgstr "윈도우"
+
+#: src/commands.rs:170 src/ui/widgets/button.rs:192
+msgid "Help"
+msgstr "도움말"
+
+#: src/commands.rs:229
+#, rust-format
+msgid "About {name}"
+msgstr "{name}에 관하여"
+
+#: src/commands.rs:230
+msgid "Services"
+msgstr "서비스"
+
+#: src/commands.rs:232
+#, rust-format
+msgid "Hide {name}"
+msgstr "{name} 가리기"
+
+#: src/commands.rs:233
+msgid "Hide Others"
+msgstr "기타 가리기"
+
+#: src/commands.rs:234
+msgid "Show All"
+msgstr "모두 보기"
+
+#: src/commands.rs:236
 #, rust-format
 msgid "Quit {name}"
 msgstr "{name} 종료"
 
-#: src/ui/behavior.rs:319
+#: src/commands.rs:237
+msgid "Close Window"
+msgstr "윈도우 닫기"
+
+#: src/commands.rs:238
+msgid "Undo"
+msgstr "실행 취소"
+
+#: src/commands.rs:238
+msgid "Redo"
+msgstr "실행 복귀"
+
+#: src/commands.rs:240 src/ui/behavior.rs:332
 msgid "Cut"
 msgstr "오려두기"
 
-#: src/ui/behavior.rs:320
-msgid "Paste"
-msgstr "붙여넣기"
-
-#: src/ui/behavior.rs:321 src/ui/widgets/icon.rs:174
+#: src/commands.rs:241 src/ui/behavior.rs:334 src/ui/widgets/icon.rs:174
 msgid "Copy"
 msgstr "복사하기"
 
-#: src/ui/behavior.rs:323
+#: src/commands.rs:242 src/ui/behavior.rs:333
+msgid "Paste"
+msgstr "붙여넣기"
+
+#: src/commands.rs:243 src/ui/behavior.rs:336
 msgid "Select All"
 msgstr "전체 선택"
 
-#: src/ui/dialog.rs:78
+#: src/commands.rs:247
+msgid "Enter Full Screen"
+msgstr "전체 화면 시작"
+
+#: src/commands.rs:250
+msgid "Minimize"
+msgstr "최소화"
+
+#: src/commands.rs:250
+msgid "Zoom"
+msgstr "확대/축소"
+
+#: src/commands.rs:252
+msgid "Bring All to Front"
+msgstr "모두 앞으로 가져오기"
+
+#: src/ui/dialog.rs:82
 msgid "OK"
 msgstr "확인"
 
-#: src/ui/dialog.rs:78
+#: src/ui/dialog.rs:83
 msgid "Cancel"
 msgstr "취소"
-
-#: src/ui/widgets/button.rs:202
-msgid "Help"
-msgstr "도움말"
 
 #: src/ui/widgets/icon.rs:160
 msgid "Settings"

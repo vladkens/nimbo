@@ -9,7 +9,7 @@
 //! start). Assistive technology reads the fields' text as shown, a composition in it, never the
 //! password's, and sets it, over a value the app set while composing. Windows' and Linux's keys
 //! (Ctrl, Insert, Home and End) and macOS's, each played on any host; the edit menu of a
-//! right-click, its items enabled as they can act, and what it runs.
+//! right-click, its items enabled as they can act, and what it runs; the menu bar's Edit items.
 
 #[path = "../examples/fields.rs"]
 #[expect(dead_code, reason = "its main and what this file doesn't use")]
@@ -102,6 +102,26 @@ fn mac_keys_paste_with_cmd() {
   h.key(Key::Char('a'), META);
   h.key(Key::Char('x'), META);
   assert_eq!((clipboard(h).as_deref(), h.app().name.as_str()), (Some("pasted"), ""));
+}
+
+/// The menu bar's Edit items run what their keys do in the focused field, and are disabled where
+/// nothing binds them: with no focus, or Paste on selectable text.
+#[test]
+fn the_menu_bars_edit_items_reach_the_field() {
+  let h = &mut fields_on(Os::Mac, "draft", "pasted");
+  assert!(h.menu_command(Command::SelectAll) && h.menu_command(Command::Cut));
+  assert_eq!((clipboard(h).as_deref(), h.app().name.as_str()), (Some("draft"), ""));
+  assert!(h.menu_command(Command::Paste) && h.menu_command(Command::Undo));
+  assert_eq!(h.app().name, "");
+  assert!(h.menu_command(Command::Redo));
+  assert_eq!(h.app().name, "draft");
+
+  h.click_id(Id::of(ABOUT));
+  assert!(!h.menu_command(Command::Paste), "selectable text binds no paste");
+  assert!(h.menu_command(Command::SelectAll) && h.menu_command(Command::Copy));
+  assert_eq!(clipboard(h).as_deref(), Some(TEXT));
+  h.set_focus(None);
+  assert!(!h.menu_command(Command::Copy));
 }
 
 /// On Windows and Linux Ctrl moves and deletes by words, with Shift selecting; Home and End go

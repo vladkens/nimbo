@@ -4,7 +4,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: nimbo\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-15 04:28+0200\n"
+"POT-Creation-Date: 2026-11-23 22:43+0200\n"
 "PO-Revision-Date: 2026-11-18 06:00+0200\n"
 "Last-Translator: \n"
 "Language-Team: none\n"
@@ -14,42 +14,109 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: src/platform/macos/shell.rs:166
-msgid "Close Window"
-msgstr "Chiudi finestra"
+#: src/commands.rs:126
+msgid "Settings…"
+msgstr "Impostazioni…"
 
-#: src/platform/macos/shell.rs:167
+#. Translators: the menu bar's menus, as macOS names them.
+#: src/commands.rs:170
+msgid "File"
+msgstr "File"
+
+#: src/commands.rs:170
+msgid "Edit"
+msgstr "Composizione"
+
+#: src/commands.rs:170
+msgid "View"
+msgstr "Vista"
+
+#: src/commands.rs:170
+msgid "Window"
+msgstr "Finestra"
+
+#: src/commands.rs:170 src/ui/widgets/button.rs:192
+msgid "Help"
+msgstr "Aiuto"
+
+#: src/commands.rs:229
+#, rust-format
+msgid "About {name}"
+msgstr "Informazioni su {name}"
+
+#: src/commands.rs:230
+msgid "Services"
+msgstr "Servizi"
+
+#: src/commands.rs:232
+#, rust-format
+msgid "Hide {name}"
+msgstr "Nascondi {name}"
+
+#: src/commands.rs:233
+msgid "Hide Others"
+msgstr "Nascondi altre"
+
+#: src/commands.rs:234
+msgid "Show All"
+msgstr "Mostra tutte"
+
+#: src/commands.rs:236
 #, rust-format
 msgid "Quit {name}"
 msgstr "Esci da {name}"
 
-#: src/ui/behavior.rs:319
+#: src/commands.rs:237
+msgid "Close Window"
+msgstr "Chiudi finestra"
+
+#: src/commands.rs:238
+msgid "Undo"
+msgstr "Annulla"
+
+#: src/commands.rs:238
+msgid "Redo"
+msgstr "Ripristina"
+
+#: src/commands.rs:240 src/ui/behavior.rs:332
 msgid "Cut"
 msgstr "Taglia"
 
-#: src/ui/behavior.rs:320
-msgid "Paste"
-msgstr "Incolla"
-
-#: src/ui/behavior.rs:321 src/ui/widgets/icon.rs:174
+#: src/commands.rs:241 src/ui/behavior.rs:334 src/ui/widgets/icon.rs:174
 msgid "Copy"
 msgstr "Copia"
 
-#: src/ui/behavior.rs:323
+#: src/commands.rs:242 src/ui/behavior.rs:333
+msgid "Paste"
+msgstr "Incolla"
+
+#: src/commands.rs:243 src/ui/behavior.rs:336
 msgid "Select All"
 msgstr "Seleziona tutto"
 
-#: src/ui/dialog.rs:78
+#: src/commands.rs:247
+msgid "Enter Full Screen"
+msgstr "Attiva modalità a tutto schermo"
+
+#: src/commands.rs:250
+msgid "Minimize"
+msgstr "Contrai"
+
+#: src/commands.rs:250
+msgid "Zoom"
+msgstr "Ridimensiona"
+
+#: src/commands.rs:252
+msgid "Bring All to Front"
+msgstr "Porta tutto in primo piano"
+
+#: src/ui/dialog.rs:82
 msgid "OK"
 msgstr "OK"
 
-#: src/ui/dialog.rs:78
+#: src/ui/dialog.rs:83
 msgid "Cancel"
 msgstr "Annulla"
-
-#: src/ui/widgets/button.rs:202
-msgid "Help"
-msgstr "Aiuto"
 
 #: src/ui/widgets/icon.rs:160
 msgid "Settings"

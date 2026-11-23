@@ -32,7 +32,7 @@ use objc2_core_graphics::{
 use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize, NSString};
 
 use super::super::mtm;
-use super::menu::{fill, update};
+use super::menu::{chooses, fill, update};
 use crate::svg::flatten;
 use crate::tray::{Menu, Set, State, TrayIcon};
 
@@ -219,7 +219,7 @@ impl Tray {
 
   fn build(&self, menu: &Menu<usize>) {
     self.0.menu.removeAllItems();
-    fill(self.0.mtm, &self.0.menu, &menu.items, &self.0.delegate);
+    fill(self.0.mtm, &self.0.menu, &menu.items, &chooses(&self.0.delegate));
   }
 
   pub fn state(&self) -> &State {

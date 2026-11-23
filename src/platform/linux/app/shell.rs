@@ -20,7 +20,8 @@ use super::super::dbus::cstr;
 use super::super::{FALSE, Fp, P, as_window, lib, load, slot};
 use super::running;
 use crate::app::{App, Event};
-use crate::shell::{AppInfo, Main, Presence};
+use crate::commands::Bar;
+use crate::shell::{AppInfo, Main, OnChosen, Presence};
 use crate::{Config, shell};
 
 /// The thread GTK runs on.
@@ -97,6 +98,9 @@ pub fn with_app(id: u64, f: &mut dyn FnMut(&mut dyn App)) -> bool {
 }
 
 pub fn set_presence(_: Presence) {}
+
+/// No menu bar: the windows bind the commands' keys ([crate::App::keymap]).
+pub fn set_commands(_: &dyn Fn(&str) -> Bar, _: OnChosen) {}
 
 pub fn terminating() -> bool {
   false
