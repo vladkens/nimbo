@@ -2,7 +2,7 @@
 
 //! A virtualized list's behaviour: its selection by row key ([Selection]), its keys and presses
 //! ([Ui::list_behavior]), and its rows in view built between two spacers that give its scroll
-//! area the whole content's height ([Ui::list_rows]); [crate::List] draws one, and its docs say
+//! area the whole content's height ([Ui::list_rows]); `List` draws one, and its docs say
 //! what each key and press does.
 
 use std::collections::HashSet;
@@ -135,7 +135,7 @@ impl Selection {
     self.anchor = Some((key(a), a));
   }
 
-  /// What a click on row `i` of `n` rows keyed by `key` does in a multi-select [List]: Cmd
+  /// What a click on row `i` of `n` rows keyed by `key` does in a multi-select `List`: Cmd
   /// toggles it ([Self::toggle]), else Shift extends to it ([Self::extend]), else it is selected
   /// alone ([Self::select]). A list's rows do it already; an app calls it for rows it lays out
   /// itself, such as rows grouped under headings.
@@ -312,7 +312,7 @@ impl<'a> Ui<'a> {
   /// while the row is the same thing), before it is built: a press selects a row into `sel` and
   /// focuses the list, the keys move and extend the selection, Enter and a double click activate
   /// a row, Delete asks to delete the selection; several rows at a time in a
-  /// [Selection::multiple] ([crate::List] has the whole of it). A row asked for by the keys or
+  /// [Selection::multiple] (`List` has the whole of it). A row asked for by the keys or
   /// [Ui::reveal_row] scrolls into view. A list with its rows selected to assistive technology, the
   /// cursor's row the active one. Build the list right after as a scroll area under `id` with
   /// [ListBehavior::style], its rows with [Ui::list_rows]; [Ui::disabled] before the call disables
@@ -527,7 +527,7 @@ impl<'a> Ui<'a> {
   /// A press on a row selects it (a click when no frame saw its press: a quick one), as the
   /// modifiers ask; a double click activates it. A secondary one, as a context menu opens
   /// ([Ui::context_press]), focuses the list and selects the row alone unless it is selected
-  /// (Finder's rule): the app's [Ui::context_menu] after it reads that selection.
+  /// (Finder's rule): the app's context menu after it reads that selection.
   #[expect(clippy::too_many_arguments, reason = "the list's state, its response and the rows")]
   fn list_press(
     &mut self,

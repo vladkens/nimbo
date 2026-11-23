@@ -44,7 +44,7 @@ impl ScrollerKnob {
   pub const LIGHT: Self = Self { color: alpha([1.0; 4], 0.26), hover: HOVER };
 }
 
-/// The knobs' change on a track's hover, as the theme's hover fades ([crate::Theme::fade]).
+/// The knobs' change on a track's hover, as the theme's hover fades (`Theme::fade`).
 const HOVER: Transition = Transition::smooth(6.0);
 
 /// The fade the next scroll area draws under its edges ([Ui::fade_edges]): colour and length.

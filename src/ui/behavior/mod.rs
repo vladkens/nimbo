@@ -20,7 +20,7 @@
 //! app then builds the element under that id with [Behavior::style], which makes it take focus by
 //! Tab while enabled, as AppKit's controls do, and show the pointing hand over it.
 //! [super::Ui::disabled] before the call disables it: no input is read, no hand. Hover fades are
-//! [super::Ui::hot]. What each one covers, each in a module of its own here:
+//! the look's (`Ui::hot`). What each one covers, each in a module of its own here:
 //!
 //! - [Ui::button_behavior]: click, Space while focused (flashes it pressed);
 //! - [Ui::toggle_behavior] (check box, switch): a button that flips a `bool`;
@@ -38,8 +38,7 @@
 //! - [Ui::pop_up_behavior]: a pop-up button, opened by a click, Space, Enter or the arrows, letters
 //!   typed choosing an option ([TypeSelect]);
 //! - [Ui::list_behavior] and [Ui::list_rows]: a virtualized list's selection ([Selection]), keys
-//!   and presses, and its rows in view, which the app draws ([super::List] draws them from the
-//!   theme);
+//!   and presses, and its rows in view, which the app draws (`List` draws them from the theme);
 //! - [Ui::text_field_behavior] and [Ui::selectable_behavior]: text editing on the editing model
 //!   ([crate::Editor]), drawn by [Ui::field_text] ([FieldBehavior] has the details);
 //! - [Ui::search_behavior]: a single-line field's, its text cleared by a ⊗ or Escape.

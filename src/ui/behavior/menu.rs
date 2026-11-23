@@ -126,7 +126,7 @@ struct MenuCx {
 impl Ui<'_> {
   /// The menu of the control `id` (its trigger, built before), opened and closed by `toggle`
   /// (the trigger's click) and placed by `place` ([MenuPlacement]): while open, `items`
-  /// ([Ui::menu_item], [Ui::menu_item_behavior]) in a `style` box, as an overlay; returns whether
+  /// (`Ui::menu_item`, [Ui::menu_item_behavior]) in a `style` box, as an overlay; returns whether
   /// it is open after this frame's input. A click on an enabled item or outside the menu closes
   /// it. The menu is `id.key("menu")`. Open, it has focus, kept from Tab: Up and Down move the
   /// highlight over the enabled items, letters typed move it to the first one their prefix

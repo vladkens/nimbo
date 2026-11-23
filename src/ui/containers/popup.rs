@@ -42,7 +42,7 @@ impl<'s, T: Copy> Tag<'s, T> {
 /// it, and stays filled, a shade darker, while its list is open. A click, Space, Enter or the
 /// arrows ([Ui::pop_up_behavior]) open its list over it, the current option checked,
 /// highlighted and over the button ([MenuPlacement::Over]); letters typed while it has focus,
-/// open or closed, go to the first option they start ([TypeSelect]). As wide as the current
+/// open or closed, go to the first option they start ([crate::TypeSelect]). As wide as the current
 /// label, up to [Picker::max_width], or [Picker::width]; the list is at least as wide as the
 /// button and [crate::Sizes::menu_w]. A `cur` that is none of the options shows no label. Its
 /// items are `id.key(("item", i))`, `i` counting options only; `changed` when one was picked that

@@ -28,8 +28,9 @@
 //! ```
 //!
 //! Widgets ([widgets]: label, button, text field, check box, switch, slider and the
-//! like) and containers ([containers]: scroll area, list, menu, picker, tabs, split) do
-//! this for an app in the look of the [Theme] set with [Ui::set_theme]:
+//! like) and containers ([containers]: list, menu, picker, tabs, split; the scroll area they
+//! scroll in is a behaviour's, [Ui::scroll_area]) do this for an app in the look of the theme
+//! the app sets (`Ui::set_theme`):
 //! `if ui.id("plus").button("+").clicked { .. }`; so do a settings form ([form]) and a modal
 //! dialog ([dialog]).
 //!
@@ -156,7 +157,7 @@ pub(crate) struct UiState {
   /// The file panel asked for ([Ui::file_dialog]), until the platform takes it.
   pub(crate) file_dialog: Option<crate::FileDialog>,
   /// The platform shows context menus ([crate::Runtime::set_native_menus]); the one asked for
-  /// ([Ui::context_menu]) until it takes it; the press that opened one last.
+  /// ([Ui::native_menu]) until it takes it; the press that opened one last.
   pub(crate) native_menus: bool,
   pub(crate) context_menu: Option<(Id, Point, crate::Menu<usize>)>,
   pub(crate) menu_seq: u32,
@@ -253,7 +254,7 @@ impl UiState {
     self.resize = (size != now).then_some(size);
   }
 
-  /// Takes the OS's new look, which the theme follows unless the app set one ([Ui::theme]).
+  /// Takes the OS's new look, which the theme follows unless the app set one (`Ui::theme`).
   pub(crate) fn set_appearance(&mut self, a: Appearance) {
     self.appearance = a;
   }
@@ -555,7 +556,7 @@ impl<'a> Ui<'a> {
   }
 
   /// The value of type `T` the window shares, put with [Ui::set_environment]: what the whole
-  /// view reads, as SwiftUI's `@Environment` (the theme the app set, [Ui::theme]). Kept across
+  /// view reads, as SwiftUI's `@Environment` (the theme the app set, `Ui::theme`). Kept across
   /// frames until changed.
   pub fn environment<T: 'static>(&self) -> Option<&T> {
     self.st.env.iter().find_map(|v| v.downcast_ref())
@@ -719,8 +720,8 @@ impl<'a> Ui<'a> {
   }
 
   /// The next element shows `tip` under the pointer resting on it, a tooltip as macOS places one
-  /// (its left edge at the pointer, 19 below it, after [Theme::tip_delay], at once within
-  /// [Theme::tip_warm] of another), and reads it as its description to assistive technology, as
+  /// (its left edge at the pointer, 19 below it, after `Theme::tip_delay`, at once within
+  /// `Theme::tip_warm` of another), and reads it as its description to assistive technology, as
   /// SwiftUI's `.help`: any element, a text (read where it stands), a widget, a container or a
   /// canvas (read as a group, its children as ever). It takes the pointer, so a click on it is
   /// its own, not its parent's. The tip is `id.key("tip")` of the element's id.

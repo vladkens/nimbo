@@ -1,7 +1,7 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! A search field's behaviour ([Ui::search_behavior]): a single-line text field's, its text
-//! cleared by a ⊗ or Escape, as macOS's search fields; [Ui::search_field] draws it.
+//! cleared by a ⊗ or Escape, as macOS's search fields; `Ui::search_field` draws it.
 
 use keyboard_types::NamedKey;
 

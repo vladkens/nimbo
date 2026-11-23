@@ -1,7 +1,7 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! A modal dialog's behaviour ([Ui::dialog_behavior]): its keys, its focus kept among its
-//! buttons and its fade; [crate::Dialog] draws one, [Ui::modal] is its backdrop and card.
+//! buttons and its fade; `Dialog` draws one, `Ui::modal` is its backdrop and card.
 
 use keyboard_types::{Modifiers, NamedKey};
 
@@ -31,7 +31,7 @@ impl Ui<'_> {
   /// `default` button, ringing the one they reach, and cycle them; nothing else gets focus.
   /// Return chooses the default, Escape the `cancel` one, Space the focused one, a click any;
   /// choosing closes it (`open` false) and gives focus back where it was. Keys go nowhere else
-  /// while it is open. The backdrop ([Ui::modal]) takes the pointer and does nothing with a
+  /// while it is open. The backdrop (`Ui::modal`) takes the pointer and does nothing with a
   /// click, as a macOS alert. `shown` fades in from 0 as it opens.
   pub fn dialog_behavior(
     &mut self,

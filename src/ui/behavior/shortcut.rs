@@ -2,7 +2,7 @@
 
 //! A shortcut recorder's behaviour ([Ui::shortcut_behavior]): recording a global hotkey, a
 //! chord ([Hotkey::from_key_event]) or a modifier key alone, with every key taken while it records;
-//! [Ui::shortcut] draws it.
+//! `Ui::shortcut` draws it.
 
 use keyboard_types::{Code, NamedKey};
 

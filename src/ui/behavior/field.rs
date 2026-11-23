@@ -13,7 +13,7 @@
 //! Escape. Keys come as commands ([crate::keys]), typed text and input method events ([Ime]);
 //! the mouse places the caret, drags a selection (scrolling at the edges), double-clicks a word,
 //! triple-clicks a line, and Shift-click extends. A secondary click (the right button) focuses it
-//! and asks for its edit menu ([FieldBehavior::menu], opened by [Ui::edit_menu]), whose choice
+//! and asks for its edit menu ([FieldBehavior::menu], opened by `Ui::edit_menu`), whose choice
 //! comes back as a command ([Ui::field_command]); the field keeps its focus look while the menu
 //! is open. The caret blinks on timers, so a window sleeps between blinks and stops when the
 //! field loses focus.
@@ -110,7 +110,7 @@ pub(super) struct FieldState {
   /// Requests made so far.
   reveals: u32,
   focused: bool,
-  /// The edit menu as last opened ([Ui::edit_menu]).
+  /// The edit menu as last opened (`Ui::edit_menu`).
   pub menu: EditMenu,
   /// A command from the edit menu, run as the field is built next ([Ui::field_command]).
   queued: Option<Command>,
@@ -164,7 +164,7 @@ pub struct FieldBehavior {
 }
 
 /// A text field's or selectable text's edit menu as a secondary click (the right button) opened
-/// it: where, and what it can do then ([Ui::edit_menu] draws it).
+/// it: where, and what it can do then (`Ui::edit_menu` draws it).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct EditMenu {
   /// Where the click was, in the frame it came; `None` after.

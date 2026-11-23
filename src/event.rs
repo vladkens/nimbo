@@ -99,7 +99,7 @@ pub enum Event {
   /// An input method composing or committing text, for the focused text field.
   Ime(Ime),
   /// The OS's light or dark setting or accent colour changed, or is first known (before the
-  /// first frame): the theme follows it unless the app set one ([crate::Ui::set_theme]).
+  /// first frame): the theme follows it unless the app set one (`Ui::set_theme`).
   Appearance(Appearance),
   /// A change in the system the app watches ([crate::Main::watch]), to read again
   /// ([crate::system]); redraws when the app uses it.
@@ -120,7 +120,7 @@ pub enum Event {
   /// The file picked in the panel the window asked for ([crate::Ui::file_dialog]); `None` when
   /// cancelled.
   FileDialog(Option<PathBuf>),
-  /// The item chosen in the context menu of `on` ([crate::Ui::context_menu]) the platform showed,
+  /// The item chosen in the context menu of `on` the platform showed ([crate::Ui::native_menu]),
   /// by its action's number ([crate::Menu]); `None` when dismissed. Delivered to `on` in a view
   /// pass, then to the app when no view took it.
   Menu {

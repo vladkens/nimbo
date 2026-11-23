@@ -1,7 +1,7 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! A slider's behaviour ([Ui::slider_behavior]): a value in a range set by a drag along the
-//! element or by the arrows, free or in steps; [crate::Slider] draws it.
+//! element or by the arrows, free or in steps; `Slider` draws it.
 
 use std::ops::RangeInclusive;
 
@@ -10,7 +10,7 @@ use crate::ui::{Behavior, Id, Role, Ui, Value};
 impl Ui<'_> {
   /// A horizontal slider over `range` on the element `id`, its track `inset` points in from
   /// either end (half a knob): a press, a click or a drag sets `v` from the pointer, Right and Up
-  /// raise it while focused, Left and Down lower it; with a `step` ([crate::Slider::step]) onto the
+  /// raise it while focused, Left and Down lower it; with a `step` (`Slider::step`) onto the
   /// step nearest from the range's start and by one step, else anywhere and by a twentieth of the
   /// range. `changed` when `v` moved.
   pub fn slider_behavior(

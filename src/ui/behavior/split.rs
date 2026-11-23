@@ -1,7 +1,7 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! A split's behaviour ([Ui::split_behavior]): its divider dragged within both panes'
-//! minimums, fitted to the split's size; [crate::Split] draws it.
+//! minimums, fitted to the split's size; `Split` draws it.
 
 use crate::scene::Point;
 use crate::ui::{Axis, Behavior, Id, Role, Ui, Value};

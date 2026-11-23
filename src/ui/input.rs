@@ -332,7 +332,7 @@ impl Ui<'_> {
   /// once a press: as it goes down, or as it is let go when no view saw it down, as AppKit and
   /// GTK open one; on Windows as it is let go (`WM_CONTEXTMENU` follows `WM_RBUTTONUP`, as in
   /// Explorer). The innermost element with a menu, by the last frame's parent chain, takes it;
-  /// `id` has one from this call ([Ui::context_menu]).
+  /// `id` has one from this call (a context menu built over it).
   pub fn context_press(&mut self, id: Id) -> Option<Point> {
     self.st.tree.menus.push(id);
     let input = &self.st.input;
