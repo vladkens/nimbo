@@ -249,7 +249,7 @@ struct ListState {
 
 /// What a list got this frame ([Ui::list_behavior]), read before its rows are built, which it
 /// builds ([Ui::list_rows]).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct ListBehavior<'s> {
   pub id: Id,
   /// Disabled by [Ui::disabled]: no input was read, and it gave its focus up.
@@ -266,22 +266,16 @@ pub struct ListBehavior<'s> {
   pub delete: bool,
   rows: ListRows<'s>,
   sel: &'s Selection,
-  key: &'s dyn Fn(usize) -> u64,
+  key: RowKeys<'s>,
 }
 
-impl fmt::Debug for ListBehavior<'_> {
+/// A list's row keys ([Ui::list_behavior]), shown by name alone.
+#[derive(Clone, Copy)]
+struct RowKeys<'s>(&'s dyn Fn(usize) -> u64);
+
+impl fmt::Debug for RowKeys<'_> {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    f.debug_struct("ListBehavior")
-      .field("id", &self.id)
-      .field("disabled", &self.disabled)
-      .field("focused", &self.focused)
-      .field("changed", &self.changed)
-      .field("pressed", &self.pressed)
-      .field("activated", &self.activated)
-      .field("delete", &self.delete)
-      .field("rows", &self.rows)
-      .field("selection", self.sel)
-      .finish_non_exhaustive()
+    f.write_str("RowKeys")
   }
 }
 
@@ -368,6 +362,7 @@ impl<'a> Ui<'a> {
     self.a11y(id, Role::List).state(State::Disabled, disabled).active(active);
     *self.state::<ListState>(id) = st;
     let Events { changed, pressed, activated, delete } = out;
+    let key = RowKeys(key);
     ListBehavior { id, disabled, focused, changed, pressed, activated, delete, rows, sel, key }
   }
 
@@ -383,7 +378,7 @@ impl<'a> Ui<'a> {
     b: &ListBehavior,
     mut row: impl FnMut(&mut Ui<'a>, usize, u64),
   ) -> Range<usize> {
-    let (id, rows, sel, key) = (b.id, b.rows, b.sel, b.key);
+    let (id, rows, sel, key) = (b.id, b.rows, b.sel, b.key.0);
     let mut st = std::mem::take(self.state::<ListState>(id));
     let view_h = self.scroll(id).map_or(self.size().h, |s| s.viewport.h);
     // The offset after the input and the scroll area's own (a thumb drag), clamped to the
