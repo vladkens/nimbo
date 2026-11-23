@@ -4,7 +4,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: nimbo\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-23 22:43+0200\n"
+"POT-Creation-Date: 2026-11-24 00:27+0200\n"
 "PO-Revision-Date: 2026-11-18 06:00+0200\n"
 "Last-Translator: \n"
 "Language-Team: none\n"
@@ -14,190 +14,144 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: src/commands.rs:126
 msgid "Settings…"
 msgstr "Ayarlar…"
 
 #. Translators: the menu bar's menus, as macOS names them.
-#: src/commands.rs:170
 msgid "File"
 msgstr "Dosya"
 
-#: src/commands.rs:170
 msgid "Edit"
 msgstr "Düzen"
 
-#: src/commands.rs:170
 msgid "View"
 msgstr "Görüntü"
 
-#: src/commands.rs:170
 msgid "Window"
 msgstr "Pencere"
 
-#: src/commands.rs:170 src/ui/widgets/button.rs:192
 msgid "Help"
 msgstr "Yardım"
 
-#: src/commands.rs:229
 #, rust-format
 msgid "About {name}"
 msgstr "{name} Hakkında"
 
-#: src/commands.rs:230
 msgid "Services"
 msgstr "Servisler"
 
-#: src/commands.rs:232
 #, rust-format
 msgid "Hide {name}"
 msgstr "{name} Uygulamasını Gizle"
 
-#: src/commands.rs:233
 msgid "Hide Others"
 msgstr "Diğerlerini Gizle"
 
-#: src/commands.rs:234
 msgid "Show All"
 msgstr "Tümünü Göster"
 
-#: src/commands.rs:236
 #, rust-format
 msgid "Quit {name}"
 msgstr "{name} Uygulamasından Çık"
 
-#: src/commands.rs:237
 msgid "Close Window"
 msgstr "Pencereyi Kapat"
 
-#: src/commands.rs:238
 msgid "Undo"
 msgstr "Geri Al"
 
-#: src/commands.rs:238
 msgid "Redo"
 msgstr "Yinele"
 
-#: src/commands.rs:240 src/ui/behavior.rs:332
 msgid "Cut"
 msgstr "Kes"
 
-#: src/commands.rs:241 src/ui/behavior.rs:334 src/ui/widgets/icon.rs:174
 msgid "Copy"
 msgstr "Kopyala"
 
-#: src/commands.rs:242 src/ui/behavior.rs:333
 msgid "Paste"
 msgstr "Yapıştır"
 
-#: src/commands.rs:243 src/ui/behavior.rs:336
 msgid "Select All"
 msgstr "Tümünü Seç"
 
-#: src/commands.rs:247
 msgid "Enter Full Screen"
 msgstr "Tam Ekrana Geç"
 
-#: src/commands.rs:250
 msgid "Minimize"
 msgstr "Küçült"
 
-#: src/commands.rs:250
 msgid "Zoom"
 msgstr "Büyüt/Küçült"
 
-#: src/commands.rs:252
 msgid "Bring All to Front"
 msgstr "Tümünü Öne Getir"
 
-#: src/ui/dialog.rs:82
 msgid "OK"
 msgstr "Tamam"
 
-#: src/ui/dialog.rs:83
 msgid "Cancel"
 msgstr "Vazgeç"
 
-#: src/ui/widgets/icon.rs:160
 msgid "Settings"
 msgstr "Ayarlar"
 
-#: src/ui/widgets/icon.rs:161
 msgid "Appearance"
 msgstr "Görünüm"
 
-#: src/ui/widgets/icon.rs:162
 msgid "Options"
 msgstr "Seçenekler"
 
-#: src/ui/widgets/icon.rs:163
 msgid "Info"
 msgstr "Bilgi"
 
-#: src/ui/widgets/icon.rs:164
 msgid "Warning"
 msgstr "Uyarı"
 
-#: src/ui/widgets/icon.rs:165
 msgid "Reset"
 msgstr "Sıfırla"
 
-#: src/ui/widgets/icon.rs:166
 msgid "Delete"
 msgstr "Sil"
 
-#: src/ui/widgets/icon.rs:167
 msgid "Folder"
 msgstr "Klasör"
 
-#: src/ui/widgets/icon.rs:168
 msgid "Document"
 msgstr "Belge"
 
-#: src/ui/widgets/icon.rs:169
 msgid "Open"
 msgstr "Aç"
 
-#: src/ui/widgets/icon.rs:170
 msgid "Done"
 msgstr "Bitti"
 
-#: src/ui/widgets/icon.rs:171
 msgid "Search"
 msgstr "Ara"
 
-#: src/ui/widgets/icon.rs:172
 msgid "Play"
 msgstr "Oynat"
 
-#: src/ui/widgets/icon.rs:173
 msgid "Clear"
 msgstr "Temizle"
 
-#: src/ui/widgets/icon.rs:175
 msgid "Download"
 msgstr "İndir"
 
-#: src/ui/widgets/icon.rs:176
 msgid "History"
 msgstr "Geçmiş"
 
-#: src/ui/widgets/icon.rs:177
 msgid "Stop"
 msgstr "Durdur"
 
-#: src/ui/widgets/icon.rs:178
 msgid "Dictate"
 msgstr "Dikte Et"
 
-#: src/ui/widgets/icon.rs:179
 msgid "Sidebar"
 msgstr "Kenar Çubuğu"
 
-#: src/ui/widgets/icon.rs:180
 msgid "Close"
 msgstr "Kapat"
 
-#: src/ui/widgets/icon.rs:181
 msgid "Accessibility"
 msgstr "Erişilebilirlik"

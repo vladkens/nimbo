@@ -4,7 +4,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: nimbo\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-23 22:43+0200\n"
+"POT-Creation-Date: 2026-11-24 00:27+0200\n"
 "PO-Revision-Date: 2026-11-18 06:00+0200\n"
 "Last-Translator: \n"
 "Language-Team: none\n"
@@ -14,190 +14,144 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n > 1);\n"
 
-#: src/commands.rs:126
 msgid "Settings…"
 msgstr "Ajustes…"
 
 #. Translators: the menu bar's menus, as macOS names them.
-#: src/commands.rs:170
 msgid "File"
 msgstr "Arquivo"
 
-#: src/commands.rs:170
 msgid "Edit"
 msgstr "Editar"
 
-#: src/commands.rs:170
 msgid "View"
 msgstr "Visualizar"
 
-#: src/commands.rs:170
 msgid "Window"
 msgstr "Janela"
 
-#: src/commands.rs:170 src/ui/widgets/button.rs:192
 msgid "Help"
 msgstr "Ajuda"
 
-#: src/commands.rs:229
 #, rust-format
 msgid "About {name}"
 msgstr "Sobre {name}"
 
-#: src/commands.rs:230
 msgid "Services"
 msgstr "Serviços"
 
-#: src/commands.rs:232
 #, rust-format
 msgid "Hide {name}"
 msgstr "Ocultar {name}"
 
-#: src/commands.rs:233
 msgid "Hide Others"
 msgstr "Ocultar Outros"
 
-#: src/commands.rs:234
 msgid "Show All"
 msgstr "Mostrar Tudo"
 
-#: src/commands.rs:236
 #, rust-format
 msgid "Quit {name}"
 msgstr "Encerrar {name}"
 
-#: src/commands.rs:237
 msgid "Close Window"
 msgstr "Fechar Janela"
 
-#: src/commands.rs:238
 msgid "Undo"
 msgstr "Desfazer"
 
-#: src/commands.rs:238
 msgid "Redo"
 msgstr "Refazer"
 
-#: src/commands.rs:240 src/ui/behavior.rs:332
 msgid "Cut"
 msgstr "Recortar"
 
-#: src/commands.rs:241 src/ui/behavior.rs:334 src/ui/widgets/icon.rs:174
 msgid "Copy"
 msgstr "Copiar"
 
-#: src/commands.rs:242 src/ui/behavior.rs:333
 msgid "Paste"
 msgstr "Colar"
 
-#: src/commands.rs:243 src/ui/behavior.rs:336
 msgid "Select All"
 msgstr "Selecionar Tudo"
 
-#: src/commands.rs:247
 msgid "Enter Full Screen"
 msgstr "Usar Tela Cheia"
 
-#: src/commands.rs:250
 msgid "Minimize"
 msgstr "Minimizar"
 
-#: src/commands.rs:250
 msgid "Zoom"
 msgstr "Zoom"
 
-#: src/commands.rs:252
 msgid "Bring All to Front"
 msgstr "Trazer Todas para a Frente"
 
-#: src/ui/dialog.rs:82
 msgid "OK"
 msgstr "OK"
 
-#: src/ui/dialog.rs:83
 msgid "Cancel"
 msgstr "Cancelar"
 
-#: src/ui/widgets/icon.rs:160
 msgid "Settings"
 msgstr "Ajustes"
 
-#: src/ui/widgets/icon.rs:161
 msgid "Appearance"
 msgstr "Aparência"
 
-#: src/ui/widgets/icon.rs:162
 msgid "Options"
 msgstr "Opções"
 
-#: src/ui/widgets/icon.rs:163
 msgid "Info"
 msgstr "Informações"
 
-#: src/ui/widgets/icon.rs:164
 msgid "Warning"
 msgstr "Aviso"
 
-#: src/ui/widgets/icon.rs:165
 msgid "Reset"
 msgstr "Redefinir"
 
-#: src/ui/widgets/icon.rs:166
 msgid "Delete"
 msgstr "Apagar"
 
-#: src/ui/widgets/icon.rs:167
 msgid "Folder"
 msgstr "Pasta"
 
-#: src/ui/widgets/icon.rs:168
 msgid "Document"
 msgstr "Documento"
 
-#: src/ui/widgets/icon.rs:169
 msgid "Open"
 msgstr "Abrir"
 
-#: src/ui/widgets/icon.rs:170
 msgid "Done"
 msgstr "OK"
 
-#: src/ui/widgets/icon.rs:171
 msgid "Search"
 msgstr "Buscar"
 
-#: src/ui/widgets/icon.rs:172
 msgid "Play"
 msgstr "Reproduzir"
 
-#: src/ui/widgets/icon.rs:173
 msgid "Clear"
 msgstr "Limpar"
 
-#: src/ui/widgets/icon.rs:175
 msgid "Download"
 msgstr "Baixar"
 
-#: src/ui/widgets/icon.rs:176
 msgid "History"
 msgstr "Histórico"
 
-#: src/ui/widgets/icon.rs:177
 msgid "Stop"
 msgstr "Parar"
 
-#: src/ui/widgets/icon.rs:178
 msgid "Dictate"
 msgstr "Ditar"
 
-#: src/ui/widgets/icon.rs:179
 msgid "Sidebar"
 msgstr "Barra Lateral"
 
-#: src/ui/widgets/icon.rs:180
 msgid "Close"
 msgstr "Fechar"
 
-#: src/ui/widgets/icon.rs:181
 msgid "Accessibility"
 msgstr "Acessibilidade"
