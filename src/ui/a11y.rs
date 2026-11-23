@@ -284,7 +284,7 @@ impl Access<'_> {
 /// A form row's label and caption, for the first control recorded in it with no name, which
 /// takes them from the slot ([Ui::form_names]): their plain texts as its name and description,
 /// those text elements, and the nodes the label and caption span.
-pub(crate) struct FormNames {
+pub struct FormNames {
   name: Span,
   description: Span,
   texts: Vec<Id>,
@@ -326,7 +326,7 @@ impl Ui<'_> {
 
   /// [Ui::a11y] named `name` unless [Ui::a11y_label] named it: an element that is never a form
   /// row's control, though it may be built among them (a badge).
-  pub(crate) fn a11y_named(&mut self, id: Id, role: Role, name: &str) -> Access<'_> {
+  pub fn a11y_named(&mut self, id: Id, role: Role, name: &str) -> Access<'_> {
     let recs = &mut self.st.tree.a11y;
     if recs.next.is_none() {
       recs.next = Some(put(&mut recs.text, name));
@@ -368,7 +368,7 @@ impl Ui<'_> {
 
   /// Records `id` as a form row a click selects, as `role`, named by the row's names in the slot
   /// ([Ui::form_names]) whatever named it before (its behaviour's record).
-  pub(crate) fn a11y_row(&mut self, id: Id, role: Role) -> Access<'_> {
+  pub fn a11y_row(&mut self, id: Id, role: Role) -> Access<'_> {
     self.a11y(id, role);
     if let Some(f) = self.set_slot::<FormNames>(None) {
       let recs = &mut self.st.tree.a11y;
@@ -381,12 +381,14 @@ impl Ui<'_> {
     self.a11y_of(id).unwrap()
   }
 
-  /// Gives the plain texts of a form row's label and caption, the nodes `label` and `caption`
-  /// of the tree being built, to the first record made with no name from now on, as its name
-  /// and description; those text elements are then not read. Plain: in no record and no element
-  /// with [Ui::help], so a badge or a term with a tooltip is read on its own. Returns the names
-  /// it replaces, for [Ui::set_slot] after the row's controls.
-  pub(crate) fn form_names(&mut self, label: Range<u32>, caption: Range<u32>) -> Option<FormNames> {
+  /// Gives the plain texts of a form row's label and caption, the elements `label` and `caption`
+  /// of this frame ([Ui::element_count]), to the first record made with no name from now on, as
+  /// its name and description; those text elements are then not read. Plain: in no record and no
+  /// element with [Ui::help], so a badge or a term with a tooltip is read on its own. Returns the
+  /// names it replaces, for [Ui::set_slot] after the row's controls.
+  pub fn form_names(&mut self, label: Range<usize>, caption: Range<usize>) -> Option<FormNames> {
+    let nodes = |r: Range<usize>| r.start as u32..r.end as u32;
+    let (label, caption) = (nodes(label), nodes(caption));
     let (name, mut texts) = self.plain_text(label.clone());
     let (description, more) = self.plain_text(caption.clone());
     texts.extend(more);

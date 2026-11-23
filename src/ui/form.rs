@@ -196,7 +196,7 @@ impl Piece {
 /// section's rows end at that count, nothing built after it.
 #[derive(Default)]
 struct Plate {
-  held: Option<(u32, Rc<Cell<f32>>)>,
+  held: Option<(usize, Rc<Cell<f32>>)>,
 }
 
 const WHITE: Color = [1.0; 4];
@@ -322,12 +322,10 @@ impl Content<'_> {
     match self {
       Content::None => {}
       Content::Text(s) => {
-        ui.next_id = Some((id, false));
-        ui.text(s, style);
+        ui.with_key(id).text(s, style);
       }
       Content::Icon(i) => {
-        ui.next_id = Some((id, false));
-        ui.icon(i.default_stroke(stroke), size, style.color);
+        ui.with_key(id).icon(i.default_stroke(stroke), size, style.color);
       }
       Content::Built(f) => f(ui, style),
     }
@@ -526,7 +524,7 @@ impl Ui<'_> {
   ) -> Response {
     let (fs, Section { header, footer }) = (*fs, section.into());
     // The page's first section starts at the page's top; the others 30 under the plate above.
-    let first = self.st.stack.last().is_none_or(|&(_, n)| n == 0);
+    let first = self.stack_len() == 0;
     let id = self.take_id();
     self.with_id(id).col(Style::new().w(grow()), |ui| {
       if !header.is_none() {
@@ -541,7 +539,7 @@ impl Ui<'_> {
       ui.col(fs.group.clip(), rows);
       // A row held down that the plate ends with, nothing built after it, rounds its fill as
       // the plate.
-      let n = ui.st.tree.nodes.len() as u32;
+      let n = ui.element_count();
       if let Some((_, end)) = ui.set_slot(outer).and_then(|p| p.held).filter(|h| h.0 == n) {
         end.set(fs.group.radii[0]);
       }
@@ -583,7 +581,7 @@ impl Ui<'_> {
     let t = self.theme();
     let id = self.take_id();
     let off = self.take_disabled();
-    let first = self.st.stack.last().is_none_or(|&(_, n)| n == 0);
+    let first = self.stack_len() == 0;
     let dim = |s: TextStyle| if off { s.color(t.tertiary) } else { s };
     let top = if first { 0.0 } else { fs.hairline };
 
@@ -593,7 +591,7 @@ impl Ui<'_> {
     let pressed = row.pressed;
     let end = pressed.then(|| Rc::new(Cell::new(0.0)));
     let held = end.clone();
-    let at = self.st.tree.nodes.len() as u32;
+    let at = self.element_count();
     let plate = self.slot::<Plate>().and_then(|p| p.held.as_ref());
     let above = plate.is_some_and(|h| h.0 == at);
 
@@ -627,8 +625,7 @@ impl Ui<'_> {
     let line = if footer.is_none() { line } else { line.align(Align::Start, Align::Center) };
 
     let r = self.disabled_scope(off, |ui| {
-      ui.next_id = Some((id, false));
-      ui.canvas_col(style.gap(0.0), hairline, |ui| {
+      ui.with_key(id).canvas_col(style.gap(0.0), hairline, |ui| {
         // The names the row's label and description replace, put back once the row or its first
         // control, in the line or the footer, took them.
         let mut outer = None;
@@ -649,15 +646,15 @@ impl Ui<'_> {
             ui.row(Style::new().w(grow()).gap(6.0).align(Align::Start, Align::Center), |ui| {
               // A mark on the line sits on the capitals' middle.
               let outer = ui.set_slot(Some(MarkShift(shift)));
-              let at = ui.st.tree.nodes.len() as u32;
+              let at = ui.element_count();
               label.build(ui, dim(fs.label), id.key("label"), line_h, 1.6);
-              name = at..ui.st.tree.nodes.len() as u32;
+              name = at..ui.element_count();
               ui.set_slot(outer);
             });
 
-            let at = ui.st.tree.nodes.len() as u32;
+            let at = ui.element_count();
             caption.build(ui, dim(fs.caption), id.key("caption"), 12.0, 1.6);
-            about = at..ui.st.tree.nodes.len() as u32;
+            about = at..ui.element_count();
           });
 
           outer = Some(ui.form_names(name, about));
@@ -690,7 +687,7 @@ impl Ui<'_> {
       })
     });
     // Held down, where its build ended, for the row under it and the section's end.
-    let n = self.st.tree.nodes.len() as u32;
+    let n = self.element_count();
     if let Some(end) = held
       && let Some(p) = self.slot::<Plate>()
     {
@@ -735,8 +732,8 @@ impl Ui<'_> {
     let fs = FormStyle { row: style, ..*fs };
     let mut r = self.disabled(off).with_id(id).form_row(&fs, row, |ui| {
       // Unnamed, a click on it is the row's.
-      ui.next_id = Some((id.key("chevron"), false));
-      ui.canvas(Style::new().w(px(14.0)).h(px(14.0)), move |f, r| chevron(f, r, turn, ink))
+      ui.with_key(id.key("chevron"))
+        .canvas(Style::new().w(px(14.0)).h(px(14.0)), move |f, r| chevron(f, r, turn, ink))
     });
     self.a11y(id, Role::Button).state(State::Expanded, open);
 
@@ -767,13 +764,15 @@ impl Ui<'_> {
   /// Settings ends a pane, SwiftUI's `HelpLink`. The response is the "?"'s: `clicked` opens the
   /// page's help; [Ui::help] on the footer is the "?"'s tip.
   pub fn form_footer(&mut self, fs: &FormStyle, buttons: impl FnOnce(&mut Self)) -> Response {
-    let (id, help) = (self.take_id(), self.next_help.take());
+    let (id, help) = (self.take_id(), self.take_help());
     let mut r = Response::default();
     // The row by a key of its own: the "?" has the id.
-    self.next_id = Some((id.key("footer"), false));
-    self.row(fs.footer, |ui| {
+    self.with_key(id.key("footer")).row(fs.footer, |ui| {
       buttons(ui);
-      ui.next_help = help;
+      if let Some(tip) = &help {
+        ui.help(tip);
+      }
+
       r = ui.with_id(id).help_button();
     });
     r
@@ -818,8 +817,7 @@ impl Ui<'_> {
 
     let ring = b.focused.then_some((t.focus_ring().color, t.focus_ring().width));
     let mut r = Response::default();
-    self.next_id = Some((id.key("head"), false));
-    self.col(head, |ui| {
+    self.with_key(id.key("head")).col(head, |ui| {
       if let Some(bar) = titlebar {
         let line = Style::new().w(grow()).h(px(bar.height)).center().clip();
         ui.row(line, |ui| ui.text(bar.title, fs.title));

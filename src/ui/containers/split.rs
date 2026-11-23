@@ -16,7 +16,7 @@
 use super::toolbar::Sidebar;
 use crate::scene::mix;
 pub use crate::ui::behavior::SplitBehavior;
-use crate::ui::{Axis, Cursor, Float, Flow, Response, Style, Ui, UnitPoint, grow, pct, px};
+use crate::ui::{Axis, Cursor, Float, Response, Style, Ui, UnitPoint, grow, pct, px};
 
 /// Two panes side by side or stacked ([Split::new]) with a divider to drag
 /// (`id.key("handle")`), as SwiftUI's `HSplitView` and `VSplitView`; or a sidebar beside its
@@ -100,9 +100,8 @@ impl<'s> Split<'s> {
     // The line takes the accent while dragged, fading in and out.
     let hot = ui.hot(handle, held || b.handle.hovered);
     let line = mix(t.line, t.accent, hot);
-    let flow = if ax == 0 { Flow::Row } else { Flow::Column };
     let sidebar = self.sidebar;
-    let mut resp = ui.with_id(id).container(flow, Style::new().grow().clip(), |ui| {
+    let panes = |ui: &mut Ui<'a>| {
       // A navigation split's leading pane is the sidebar column, the other the detail: a
       // toolbar in each is that column's ([Ui::toolbar]).
       let mut column = |ui: &mut Ui<'a>, i: usize, style: Style| {
@@ -119,7 +118,9 @@ impl<'s> Split<'s> {
         ui.with_id(handle).float(at).el(grip);
       });
       column(ui, 1, second);
-    });
+    };
+    let (ui, fill) = (ui.with_id(id), Style::new().grow().clip());
+    let mut resp = if ax == 0 { ui.row(fill, panes) } else { ui.col(fill, panes) };
     resp.changed = b.handle.changed;
     resp
   }

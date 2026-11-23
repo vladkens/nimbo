@@ -24,7 +24,8 @@
 //! field is what input methods ask about ([crate::ui::TextInput]).
 
 use crate::keys::{EDIT_KEYS, SELECT_KEYS};
-use crate::ui::{Axes, FieldBehavior, FieldKind, FieldStyle, Flow, Response, Style, TextStyle, Ui};
+use crate::scene::Point;
+use crate::ui::{Axes, FieldBehavior, FieldKind, FieldStyle, Response, Style, TextStyle, Ui};
 
 impl Ui<'_> {
   /// A text field over `text` in `style`'s look, as SwiftUI's `TextField` with a
@@ -54,13 +55,13 @@ impl Ui<'_> {
       frame = frame.opacity(self.theme().disabled);
     }
 
-    let (frame, axis) = match style.kind {
-      FieldKind::MultiLine => (frame.scroll(Axes::VERTICAL), Flow::Column),
-      _ => (frame.scroll(Axes::HORIZONTAL), Flow::Row),
+    let keys = self.keymap(EDIT_KEYS).with_id(b.id);
+    let text = |ui: &mut Self| ui.field_text(b, style, Style::new());
+    let r = match style.kind {
+      FieldKind::MultiLine => keys.col(frame.scroll(Axes::VERTICAL), text),
+      _ => keys.row(frame.scroll(Axes::HORIZONTAL), text),
     };
 
-    let keys = self.keymap(EDIT_KEYS).with_id(b.id);
-    let r = keys.container(axis, frame, |ui| ui.field_text(b, style, Style::new()));
     self.edit_menu(b);
     let (changed, submitted, cancelled, blurred) = (b.changed, b.submitted, b.cancelled, b.blurred);
     Response { hovered: b.hovered, changed, submitted, cancelled, blurred, ..r }
@@ -89,8 +90,21 @@ impl Ui<'_> {
     let b = self.selectable_behavior(id, text);
     self.keymap(SELECT_KEYS).field_text(&b, style, b.style(Style::new()));
     self.edit_menu(&b);
-    let r = self.st.response(id);
-    Response { focused: b.focused, ..r }
+    let (hovered, pressed, clicked) = (self.hovered(id), self.pressed(id), self.clicked(id));
+    Response { id, hovered, pressed, focused: b.focused, clicked, ..Response::default() }
+  }
+
+  /// The edit menu of a field or selectable text over its behaviour `b`, at the secondary click
+  /// that opened it ([crate::ui::FieldBehavior::menu]): [crate::ui::EditMenu::items] as
+  /// `b.id.key("edit")`'s context menu ([Ui::context_menu_at]), the native one or drawn in the
+  /// theme's look; the one chosen runs in the field ([Ui::field_command]).
+  pub fn edit_menu(&mut self, b: &FieldBehavior) {
+    let (id, m) = (b.id.key("edit"), b.menu);
+    // Disabled while open, a drawn one closes.
+    let off = b.disabled && !self.native_menus() && self.menu_open(id);
+    if let Some(cmd) = self.context_menu_at(id, m.at.or(off.then(Point::default)), || m.items()) {
+      self.field_command(b.id, cmd);
+    }
   }
 
   /// [Ui::selectable_text] in the theme's text, wrapping.

@@ -376,6 +376,14 @@ nimbo: `ui.toolbar(|ui| ui.toolbar_item(ToolbarItemPlacement::PrimaryAction, |ui
 
 ![Toolbar](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/toolbar.png)
 
+### Unified toolbar
+
+SwiftUI: `.windowToolbarStyle(.unified)`
+
+nimbo: `ui.unified_toolbar(); ui.row(band, |ui| { … }) at the window's top`
+
+![Unified toolbar](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/unified-toolbar.png)
+
 ### Menu
 
 SwiftUI: `Menu("Actions") { Button(…) }`
@@ -407,6 +415,14 @@ SwiftUI: `NSScroller.knobStyle = .light (AppKit; SwiftUI has none)`
 nimbo: `let old = ui.set_environment(Some(ScrollIndicatorStyle { thumb: red, ..ScrollIndicatorStyle::LIGHT })); ui.scroll_area(style, |ui| { … }); ui.set_environment(old)`
 
 ![Scroll indicators](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/scroll-indicators.png)
+
+### Stack queries
+
+SwiftUI: `Divider() follows its stack's axis (SwiftUI has no API for it)`
+
+nimbo: `let line = match ui.stack_axis() { Axis::Horizontal => v, Axis::Vertical => h }; ui.stack_len() == 0; ui.element_count()`
+
+![Stack queries](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/stack-queries.png)
 
 ## Presentation
 
@@ -475,6 +491,38 @@ SwiftUI: `.environment(\.tint, .green); @Environment(\.tint) var tint`
 nimbo: `let old = ui.set_environment(Some(Tint(t.success))); ui.environment::<Tint>(); ui.set_environment(old)`
 
 ![Environment](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/environment.png)
+
+### Identity
+
+SwiftUI: `Box().id(item.id)`
+
+nimbo: `ui.key(item.id).row(style, |ui| { … }); ui.with_key(id.key("box")).col(style, |ui| { … })`
+
+![Identity](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/identity.png)
+
+### Widget parts
+
+SwiftUI: `.environment(\.isEnabled, true); .help(tip) on a part`
+
+nimbo: `let tip = ui.take_help(); ui.disabled_scope(false, |ui| { if let Some(tip) = &tip { ui.help(tip); } ui.button("Undo") })`
+
+![Widget parts](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/widget-parts.png)
+
+### Frame request
+
+SwiftUI: `TimelineView(.animation) { context in … }`
+
+nimbo: `ui.request_frame(); let k = ui.now().as_secs_f32() % 1.0`
+
+![Frame request](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/frame-request.png)
+
+### Accessibility pair
+
+SwiftUI: `.accessibilityLabeledPair(role: .label, id: "volume", in: ns); Text("New")`
+
+nimbo: `let at = ui.element_count(); ui.text("Volume", s); let old = ui.form_names(at..ui.element_count(), 0..0); ui.slider(&mut v, 0.0..=1.0); ui.set_slot(old); ui.a11y_row(row, Role::Row); ui.a11y_named(id, Role::StaticText, "New")`
+
+![Accessibility pair](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/accessibility-pair.png)
 
 ### Controls theme
 

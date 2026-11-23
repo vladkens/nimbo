@@ -17,7 +17,7 @@ impl Ui<'_> {
     let (rail, fill) = (self.dim(t.track, off), self.dim(t.accent, off));
     let now = self.now().as_secs_f32();
     if k.is_none() && !off {
-      self.st.animating = true;
+      self.request_frame();
     }
 
     let value = k.map_or(Value::None, |k| Value::Number { now: k.into(), min: 0.0, max: 1.0 });
@@ -53,7 +53,10 @@ impl Ui<'_> {
     let (id, off) = (self.take_id(), self.take_disabled());
     let color = self.dim(t.muted, off);
     let turn = if off { 0.0 } else { self.now().as_secs_f32() / 0.9 * TAU };
-    self.st.animating |= !off;
+    if !off {
+      self.request_frame();
+    }
+
     self.a11y(id, Role::ProgressIndicator).state(State::Disabled, off);
     self.with_id(id).canvas(Style::new().w(px(size)).h(px(size)), move |f, r| {
       let w = (size / 8.0).max(1.5);

@@ -2,8 +2,8 @@
 
 //! Text editing: the behaviours of a text field and of selectable text
 //! ([Ui::text_field_behavior], [Ui::selectable_behavior]) on the editing model ([Editor]), their
-//! text drawn from them in a [FieldStyle] ([Ui::field_text]), their edit menu ([Ui::edit_menu]),
-//! and the focused field as an input method sees it ([TextInput]).
+//! text drawn from them in a [FieldStyle] ([Ui::field_text]), and the focused field as an input
+//! method sees it ([TextInput]).
 //!
 //! A text field's behaviour keeps its editor (selection, undo, marked text) in the store under
 //! its id and writes edits back to the app's text, reporting [FieldBehavior::changed]. A
@@ -110,10 +110,8 @@ pub(super) struct FieldState {
   /// Requests made so far.
   reveals: u32,
   focused: bool,
-  /// The edit menu as last opened, and whether it is open (or a native one waits for its
-  /// answer): the field keeps its focus look meanwhile ([Ui::edit_menu]).
+  /// The edit menu as last opened ([Ui::edit_menu]).
   pub menu: EditMenu,
-  pub menu_open: bool,
   /// A command from the edit menu, run as the field is built next ([Ui::field_command]).
   queued: Option<Command>,
 }
@@ -247,9 +245,11 @@ impl Ui<'_> {
       st.ed.replace(0..st.ed.text().len(), s);
     }
 
-    // The edit menu takes the focus while open; the field keeps its look, ring and all.
-    let focused = self.focused(id) || st.menu_open;
-    if st.menu_open {
+    // The edit menu takes the focus while open (or a native one waits for its answer); the field
+    // keeps its look, ring and all.
+    let menu_open = self.menu_open(id.key("edit"));
+    let focused = self.focused(id) || menu_open;
+    if menu_open {
       self.st.ring_on = Some(id);
     }
 
@@ -324,7 +324,8 @@ impl Ui<'_> {
   /// A text behaviour's pointer, focus (its edit menu's too) and edit menu, the menu's point
   /// taken.
   fn field_state(&self, id: Id, st: &mut FieldState, disabled: bool) -> FieldBehavior {
-    let focused = !disabled && (self.focused(id) || st.menu_open) && self.window_focused();
+    let menu_open = self.menu_open(id.key("edit"));
+    let focused = !disabled && (self.focused(id) || menu_open) && self.window_focused();
     let (hovered, text_id, menu) = (!disabled && self.hovered(id), st.text_id, st.menu);
     // Disabled, an edit menu's choice is dropped.
     st.menu.at = None;
@@ -735,21 +736,6 @@ fn drag_to(st: &mut FieldState, lay: &TextLayout, p: Point) {
 // MARK: Look
 
 impl Ui<'_> {
-  /// The edit menu of a field or selectable text over its behaviour `b`, at the secondary click
-  /// that opened it ([FieldBehavior::menu]): [EditMenu::items] as `b.id.key("edit")`'s context
-  /// menu ([Ui::context_menu_at]), the native one or drawn in the theme's look; the one chosen
-  /// runs in the field ([Ui::field_command]).
-  pub fn edit_menu(&mut self, b: &FieldBehavior) {
-    let (id, m) = (b.id.key("edit"), b.menu);
-    // Disabled while open, a drawn one closes.
-    let off = b.disabled && !self.native_menus() && self.menu_open(id);
-    let chosen = self.context_menu_at(id, m.at.or(off.then(Point::default)), || m.items());
-    self.state::<FieldState>(b.id).menu_open = self.menu_open(id);
-    if let Some(cmd) = chosen {
-      self.field_command(b.id, cmd);
-    }
-  }
-
   /// The text element of a field or selectable text, as its behaviour `b` has it: the text (a
   /// dot per character for a password), or the hint while it is empty, with the selection in
   /// `style.selection` (half as strong without focus in selectable text, none in a field), the

@@ -2,18 +2,6 @@
 # to that many pass; a line that allows more than is found, or more than the base branch's did,
 # fails, so the file only shrinks: fix a finding, lower or delete its line.
 
-# The styled controls build on the core's internals (`ui.st`, crate-private calls): public
-# building blocks replace them (docs/plans/20261118-layers.md, 3).
-private src/ui/containers/toolbar.rs st 1
-private src/ui/form.rs a11y_row 1
-private src/ui/form.rs disabled_scope 1
-private src/ui/form.rs form_names 1
-private src/ui/form.rs st 9
-private src/ui/widgets/badge.rs a11y_named 1
-private src/ui/widgets/divider.rs st 2
-private src/ui/widgets/field.rs st 1
-private src/ui/widgets/progress.rs st 2
-
 # OS gates outside src/platform/: what an API offers on each OS (a pane, a path, a key) chosen in
 # the module that documents it; the features pass decides which stay (docs/plans, 5).
 os src/app.rs target_os 1

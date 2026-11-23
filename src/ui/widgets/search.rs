@@ -44,8 +44,7 @@ impl Ui<'_> {
     let muted = self.dim(t.muted, b.disabled);
     let mut r = Response::default();
     // Its own id: the field may have taken its place's.
-    self.next_id = Some((id.key("wrap"), false));
-    self.row(wrap, |ui| {
+    self.with_key(id.key("wrap")).row(wrap, |ui| {
       r = ui.field_box(&b, &style);
 
       // Over the field, clipped to it: System Settings' magnifier (its ink 13 wide, 10 in from

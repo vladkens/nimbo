@@ -161,8 +161,8 @@ pub(crate) struct UiState {
   pub(crate) menu_seq: u32,
   /// The title bar over the content ([Ui::titlebar]).
   pub(crate) titlebar: Option<TitleBar>,
-  /// The view built a toolbar ([Ui::toolbar]): the platform gives the title bar a toolbar's
-  /// height.
+  /// The view asked for a toolbar's title bar ([Ui::unified_toolbar]): the platform gives the
+  /// title bar a toolbar's height.
   pub(crate) toolbar: bool,
   /// The images [Ui::image] and [Ui::rgba_image] added: their pixels' hash or a bitmap's
   /// identity, the image, and whether a view built it since the last frame.
@@ -343,32 +343,6 @@ impl UiState {
     true
   }
 
-  /// Scrolls every scroll container around `id` the least that shows it, innermost first, by
-  /// the last frame's rects, up to an overlay placed on the window, which their offsets don't
-  /// move; an overlay on its parent skips that parent's, which doesn't move it either.
-  pub(crate) fn reveal_in_scrolls(&mut self, id: Id) {
-    let t = &self.last;
-    let Some(mut i) = t.find(id) else { return };
-    let mut r = t.nodes[i as usize].rect;
-    while i != 0 && !t.nodes[i as usize].float.is_some_and(|f| f.space == CoordinateSpace::Global) {
-      let float = t.nodes[i as usize].float.is_some();
-      i = t.nodes[i as usize].parent;
-      let n = &t.nodes[i as usize];
-      if float || n.style.scroll.is_empty() {
-        continue;
-      }
-
-      // In the container's content, then its offset after showing it.
-      let (x, y) = (f64::from(r.x - n.rect.x), f64::from(r.y - n.rect.y));
-      let c = [x + n.scroll[0], y + n.scroll[1], r.w.into(), r.h.into()];
-      let off = reveal_offset(n.scroll, n.rect, c);
-      let s = self.store.raw::<ScrollState>(n.id);
-      (s.offset, s.pending) = (off, Point::default());
-      let d = [(off[0] - n.scroll[0]) as f32, (off[1] - n.scroll[1]) as f32];
-      r = Rect::new(r.x - d[0], r.y - d[1], r.w, r.h);
-    }
-  }
-
   /// The pointer's shape: from the element a button is held on, else the innermost one under
   /// the pointer, or the nearest ancestor that sets one; the arrow when none does.
   pub fn cursor(&self) -> Cursor {
@@ -432,18 +406,6 @@ impl UiState {
       blurred: false,
     }
   }
-}
-
-/// The offset of a scroll container showing `viewport` at `off` that moves the least to show
-/// `r`, a rect of its content.
-/// `r` is x, y, width and height, in `f64` as the offset.
-fn reveal_offset(off: [f64; 2], viewport: Rect, r: [f64; 4]) -> [f64; 2] {
-  let fit = |off: f64, lo: f64, len: f64, view: f32| match () {
-    _ if lo < off => lo,
-    _ if lo + len > off + f64::from(view) => (lo + len - f64::from(view)).min(lo),
-    _ => off,
-  };
-  [fit(off[0], r[0], r[2], viewport.w), fit(off[1], r[1], r[3], viewport.h)]
 }
 
 /// What an interactive element got from the pointer, as its builder returns it. Hover and press
@@ -627,6 +589,13 @@ impl<'a> Ui<'a> {
     self.st.titlebar
   }
 
+  /// Gives the title bar a toolbar's height this frame, as AppKit's unified toolbar (macOS an
+  /// empty `NSToolbar`), for a toolbar the view draws at the window's top ([Ui::toolbar] asks it
+  /// itself). Ask it each frame.
+  pub fn unified_toolbar(&mut self) {
+    self.st.toolbar = true;
+  }
+
   /// Asks the window for `w` points wide and as high as its content, between `min_h` and
   /// `max_h`: the height its elements take at their fit size, a scroll area at its content's
   /// whole height (so nothing scrolls while it fits; past `max_h` it scrolls), the text wrapped
@@ -712,6 +681,13 @@ impl<'a> Ui<'a> {
     self
   }
 
+  /// Keys the next element with a ready id, as [Ui::key] does: identity only, no pointer input.
+  /// A widget's part keyed off the widget's id (`id.key("box")`).
+  pub fn with_key(&mut self, id: Id) -> &mut Self {
+    self.next_id = Some((id, false));
+    self
+  }
+
   /// Places the next element out of the flow, as an overlay.
   pub fn float(&mut self, float: Float) -> &mut Self {
     self.next_float = Some(float);
@@ -740,6 +716,12 @@ impl<'a> Ui<'a> {
   pub fn help(&mut self, tip: &str) -> &mut Self {
     self.next_help = Some(tip.to_owned());
     self
+  }
+
+  /// The tip [Ui::help] gave the next element, taken for a widget to put on a part of its own
+  /// with [Ui::help]: a mark in a box, a button built after others.
+  pub fn take_help(&mut self) -> Option<String> {
+    self.next_help.take()
   }
 
   /// The tooltips the view asked for with [Ui::help], after it: each element built and its tip,
@@ -831,11 +813,11 @@ impl<'a> Ui<'a> {
     }
   }
 
-  /// Disables every widget `f` builds when `yes`, without a container of its own: a widget's
-  /// parts in a disabled one ([Ui::disabled] on a container for an app).
-  pub(crate) fn disabled_scope<R>(&mut self, yes: bool, f: impl FnOnce(&mut Self) -> R) -> R {
-    let was = self.scope_off;
-    self.scope_off |= yes;
+  /// Builds `f` with every widget in it disabled when `yes`, enabled when not, whatever the
+  /// containers around say, as SwiftUI's `.environment(\.isEnabled, !yes)`: a widget's parts as
+  /// it is, a part enabled in a disabled container (a modal dialog, an ⓘ in a disabled row).
+  pub fn disabled_scope<R>(&mut self, yes: bool, f: impl FnOnce(&mut Self) -> R) -> R {
+    let was = std::mem::replace(&mut self.scope_off, yes);
     let r = f(self);
     self.scope_off = was;
     r
@@ -886,6 +868,28 @@ impl<'a> Ui<'a> {
   /// Takes the free space along the parent's axis.
   pub fn spacer(&mut self) -> Response {
     self.el(Style::new().grow())
+  }
+
+  /// The axis the container being built lays its children along: horizontal in a row, vertical
+  /// in a column or a grid, as SwiftUI's `Divider` follows its stack.
+  pub fn stack_axis(&self) -> Axis {
+    let parent = self.st.stack.last().map_or(0, |s| s.0);
+    match self.st.tree.nodes[parent as usize].flow {
+      Flow::Row => Axis::Horizontal,
+      _ => Axis::Vertical,
+    }
+  }
+
+  /// How many children the container being built has so far: 0 before its first (a section's
+  /// first row, with no line above it).
+  pub fn stack_len(&self) -> usize {
+    self.st.stack.last().map_or(0, |s| s.1 as usize)
+  }
+
+  /// How many elements the view has built so far this frame: whether anything was built between
+  /// two points, which elements a part spans ([Ui::form_names]).
+  pub fn element_count(&self) -> usize {
+    self.st.tree.nodes.len()
   }
 
   /// Text, measured and wrapped by the layout. Takes anything `Display`, so
@@ -1073,6 +1077,12 @@ impl<'a> Ui<'a> {
     v
   }
 
+  /// Asks for the next frame at the display's refresh, as an animation does while it moves: a
+  /// view that changes every frame (a spinner), as SwiftUI's `TimelineView(.animation)`.
+  pub fn request_frame(&mut self) {
+    self.st.animating = true;
+  }
+
   /// Asks for a frame `dt` from now (a timer); the app checks [Ui::now] when it comes.
   pub fn request_frame_in(&mut self, dt: Duration) {
     self.st.request_frame_at(self.now + dt);
@@ -1084,38 +1094,6 @@ impl<'a> Ui<'a> {
   /// portal that went away never answers.
   pub fn file_dialog(&mut self, dialog: FileDialog) {
     self.st.file_dialog = Some(dialog);
-  }
-
-  // MARK: Scrolling
-
-  /// A scroll container's offset, content and viewport as of the last frame and the input
-  /// since: what a scrollbar draws.
-  pub fn scroll(&self, id: Id) -> Option<Scroll> {
-    self.st.scroll(id)
-  }
-
-  /// Scrolls `id` to `offset`, clamped by the layout; stops wheel momentum.
-  pub fn scroll_to(&mut self, id: Id, offset: Point) {
-    self.scroll_exact(id, [offset.x.into(), offset.y.into()]);
-  }
-
-  /// [Ui::scroll_to] in `f64`: content past `f32`'s whole numbers (a virtual list of a million
-  /// rows) scrolls to the point.
-  pub(crate) fn scroll_exact(&mut self, id: Id, offset: [f64; 2]) {
-    let s = self.state::<ScrollState>(id);
-    (s.offset, s.pending) = (offset, Point::default());
-  }
-
-  /// Scrolls `id` the least that shows `r` (in its content: (0, 0) is its top-left corner at
-  /// offset 0), using the last frame's viewport: keeps a caret or a selected row visible.
-  pub fn reveal(&mut self, id: Id, r: Rect) {
-    self.reveal_exact(id, [r.x.into(), r.y.into(), r.w.into(), r.h.into()]);
-  }
-
-  /// [Ui::reveal] of x, y, width and height in `f64`, as [Ui::scroll_exact].
-  pub(crate) fn reveal_exact(&mut self, id: Id, r: [f64; 4]) {
-    let Some((off, viewport)) = self.st.scroll_exact(id) else { return };
-    self.scroll_exact(id, reveal_offset(off, viewport, r));
   }
 
   // MARK: Frame
@@ -1252,6 +1230,30 @@ mod tests {
     assert_eq!(ui.slot::<Menu>().map(|m| m.0), Some(1));
     ui.set_slot::<Menu>(None);
     assert!(ui.slot::<Menu>().is_none());
+  }
+
+  /// What a widget reads of the stack it is built in, and the elements built so far.
+  #[test]
+  fn stacks_tell_their_axis_and_children() {
+    let mut ui = Ui::new(UiState::default(), Size::new(10.0, 10.0), None, Duration::ZERO);
+    let at = ui.element_count();
+    ui.row(Style::new(), |ui| {
+      assert_eq!((ui.stack_axis(), ui.stack_len()), (Axis::Horizontal, 0));
+      ui.el(Style::new());
+      assert_eq!(ui.stack_len(), 1);
+      ui.col(Style::new(), |ui| assert_eq!(ui.stack_axis(), Axis::Vertical));
+    });
+    assert_eq!(ui.element_count() - at, 3);
+  }
+
+  /// A part enabled in a disabled container, which is disabled again after it.
+  #[test]
+  fn a_disabled_scope_enables_too() {
+    let mut ui = Ui::new(UiState::default(), Size::new(10.0, 10.0), None, Duration::ZERO);
+    ui.disabled(true).col(Style::new(), |ui| {
+      ui.disabled_scope(false, |ui| assert!(!ui.take_disabled()));
+      assert!(ui.take_disabled());
+    });
   }
 
   /// What the window shares: one value per type, kept across frames, replaced in place.

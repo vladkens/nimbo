@@ -58,8 +58,7 @@ impl<'s> Tabs<'s> {
     let strip = if b.disabled { strip } else { strip.tab_focusable_quiet() };
     let mut r = Response::default();
     // The box of strip and page keyed apart from the strip, which has the id.
-    ui.next_id = Some((id.key("box"), false));
-    ui.col(Style::new().grow(), |ui| {
+    ui.with_key(id.key("box")).col(Style::new().grow(), |ui| {
       r = ui.with_id(id).row(strip, |ui| {
         for (i, title) in titles.iter().enumerate() {
           let tab = key(i, "tab");
@@ -90,8 +89,7 @@ impl<'s> Tabs<'s> {
       }
 
       if sel < n {
-        ui.next_id = Some((key(sel, "page"), false));
-        ui.col(Style::new().grow().clip(), |ui| page(ui, sel));
+        ui.with_key(key(sel, "page")).col(Style::new().grow().clip(), |ui| page(ui, sel));
       }
     });
     r.changed = b.changed;

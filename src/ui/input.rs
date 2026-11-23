@@ -608,6 +608,78 @@ impl UiState {
     let max = max_scroll(n);
     Some(([off[0].clamp(0.0, max[0]), off[1].clamp(0.0, max[1])], n.rect))
   }
+
+  /// Scrolls every scroll container around `id` the least that shows it, innermost first, by
+  /// the last frame's rects, up to an overlay placed on the window, which their offsets don't
+  /// move; an overlay on its parent skips that parent's, which doesn't move it either.
+  pub(crate) fn reveal_in_scrolls(&mut self, id: Id) {
+    let t = &self.last;
+    let Some(mut i) = t.find(id) else { return };
+    let mut r = t.nodes[i as usize].rect;
+    while i != 0 && !t.nodes[i as usize].float.is_some_and(|f| f.space == CoordinateSpace::Global) {
+      let float = t.nodes[i as usize].float.is_some();
+      i = t.nodes[i as usize].parent;
+      let n = &t.nodes[i as usize];
+      if float || n.style.scroll.is_empty() {
+        continue;
+      }
+
+      // In the container's content, then its offset after showing it.
+      let (x, y) = (f64::from(r.x - n.rect.x), f64::from(r.y - n.rect.y));
+      let c = [x + n.scroll[0], y + n.scroll[1], r.w.into(), r.h.into()];
+      let off = reveal_offset(n.scroll, n.rect, c);
+      let s = self.store.raw::<ScrollState>(n.id);
+      (s.offset, s.pending) = (off, Point::default());
+      let d = [(off[0] - n.scroll[0]) as f32, (off[1] - n.scroll[1]) as f32];
+      r = Rect::new(r.x - d[0], r.y - d[1], r.w, r.h);
+    }
+  }
+}
+
+// MARK: Scrolling
+
+impl Ui<'_> {
+  /// A scroll container's offset, content and viewport as of the last frame and the input
+  /// since: what a scrollbar draws.
+  pub fn scroll(&self, id: Id) -> Option<Scroll> {
+    self.st.scroll(id)
+  }
+
+  /// Scrolls `id` to `offset`, clamped by the layout; stops wheel momentum.
+  pub fn scroll_to(&mut self, id: Id, offset: Point) {
+    self.scroll_exact(id, [offset.x.into(), offset.y.into()]);
+  }
+
+  /// [Ui::scroll_to] in `f64`: content past `f32`'s whole numbers (a virtual list of a million
+  /// rows) scrolls to the point.
+  pub(crate) fn scroll_exact(&mut self, id: Id, offset: [f64; 2]) {
+    let s = self.state::<ScrollState>(id);
+    (s.offset, s.pending) = (offset, Point::default());
+  }
+
+  /// Scrolls `id` the least that shows `r` (in its content: (0, 0) is its top-left corner at
+  /// offset 0), using the last frame's viewport: keeps a caret or a selected row visible.
+  pub fn reveal(&mut self, id: Id, r: Rect) {
+    self.reveal_exact(id, [r.x.into(), r.y.into(), r.w.into(), r.h.into()]);
+  }
+
+  /// [Ui::reveal] of x, y, width and height in `f64`, as [Ui::scroll_exact].
+  pub(crate) fn reveal_exact(&mut self, id: Id, r: [f64; 4]) {
+    let Some((off, viewport)) = self.st.scroll_exact(id) else { return };
+    self.scroll_exact(id, reveal_offset(off, viewport, r));
+  }
+}
+
+/// The offset of a scroll container showing `viewport` at `off` that moves the least to show
+/// `r`, a rect of its content.
+/// `r` is x, y, width and height, in `f64` as the offset.
+fn reveal_offset(off: [f64; 2], viewport: Rect, r: [f64; 4]) -> [f64; 2] {
+  let fit = |off: f64, lo: f64, len: f64, view: f32| match () {
+    _ if lo < off => lo,
+    _ if lo + len > off + f64::from(view) => (lo + len - f64::from(view)).min(lo),
+    _ => off,
+  };
+  [fit(off[0], r[0], r[2], viewport.w), fit(off[1], r[1], r[3], viewport.h)]
 }
 
 #[cfg(test)]

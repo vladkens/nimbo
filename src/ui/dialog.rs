@@ -169,17 +169,17 @@ impl Ui<'_> {
   /// around it.
   pub fn modal<R>(&mut self, id: Id, shown: f32, card: Style, f: impl FnOnce(&mut Self) -> R) {
     let scrim = self.theme().scrim();
-    let off = std::mem::replace(&mut self.scope_off, false);
-    let cover = Style::new().w(pct(100.0)).h(pct(100.0)).tab_focusable_quiet();
-    let cover = cover.bg(alpha(scrim, scrim[3] * shown));
-    self.a11y(id.key("card"), Role::Dialog).state(State::Modal, true);
-    self.with_id(id.key("backdrop")).float(Float::window().z(MODAL_Z)).el(cover);
-    let at = Float::window()
-      .attach(UnitPoint::CENTER)
-      .anchor(UnitPoint::CENTER)
-      .offset(0.0, (1.0 - shown) * 8.0);
-    self.with_id(id.key("card")).float(at.z(MODAL_Z + 1)).col(card.opacity(shown), f);
-    self.scope_off = off;
+    self.disabled_scope(false, |ui| {
+      let cover = Style::new().w(pct(100.0)).h(pct(100.0)).tab_focusable_quiet();
+      let cover = cover.bg(alpha(scrim, scrim[3] * shown));
+      ui.a11y(id.key("card"), Role::Dialog).state(State::Modal, true);
+      ui.with_id(id.key("backdrop")).float(Float::window().z(MODAL_Z)).el(cover);
+      let at = Float::window()
+        .attach(UnitPoint::CENTER)
+        .anchor(UnitPoint::CENTER)
+        .offset(0.0, (1.0 - shown) * 8.0);
+      ui.with_id(id.key("card")).float(at.z(MODAL_Z + 1)).col(card.opacity(shown), f);
+    });
   }
 }
 

@@ -119,8 +119,7 @@ impl<'s> Slider<'s> {
       // As much room over the track as the labels take under it: the track stays in the middle,
       // in line with a row's title or the controls beside it.
       let lh = ui.line_height(style);
-      ui.next_id = Some((id.key("ticks"), false));
-      ui.col(width.pads([lh, 0.0, 0.0, 0.0]), |ui| {
+      ui.with_key(id.key("ticks")).col(width.pads([lh, 0.0, 0.0, 0.0]), |ui| {
         r = ui.with_id(id).canvas(s, paint);
         ui.row(Style::new().w(grow()), |ui| {
           // Left to right: where the last one ends, and where the next may start.
