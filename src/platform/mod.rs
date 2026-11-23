@@ -27,6 +27,12 @@
 //!     `front` places it at its [crate::Anchor] in the work area of the screen with the pointer
 //!     (where the OS lets an app place itself) and shows it without activating anything; a size the
 //!     app asks for keeps it at its anchor;
+//!   - `set_commands(bar: &dyn Fn(&str) -> commands::Bar, chosen: OnChosen)` ([crate::Commands]):
+//!     the menu bar where the OS has one (macOS), `bar` called with the app's name, an item of the
+//!     app's chosen running `chosen` with its action's number; before any, after `start`, the
+//!     standard bar (`Commands::new().bar(name)`); Edit's items run the command their key would in
+//!     the key window (`Event::Command`, enabled while `Runtime::can`); the window is offered a key
+//!     first, so the menu runs only what nobody used. Windows and Linux have no menu bar: nothing;
 //!   - `set_presence(Presence)`, `terminating() -> bool`, `quit()`; a second launch, where the OS
 //!     tells (macOS), runs `crate::shell::reopened`; a window shown or brought to the front comes
 //!     with `crate::shell::token()`, the activation token of the command being served, where the OS
@@ -40,7 +46,7 @@
 //!   `Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(<its clipboard>))`, and:
 //!   - window: `cfg.title`, `cfg.size` in points (content area), `cfg.resizable`, the least content
 //!     size `cfg.min()` (macOS: `contentMinSize`, Windows: `WM_GETMINMAXINFO`, Linux: the drawing
-//!     area's size request); minimal app menu where the OS has one (macOS: Quit);
+//!     area's size request);
 //!   - title bar: where `cfg.unified` and the OS draws the content under it (macOS: a full-size
 //!     content view under a transparent title bar, its title hidden), `Runtime::set_titlebar`
 //!     before each frame with a [crate::TitleBar] as the OS lays it out then: its height,

@@ -20,7 +20,10 @@
 //!    [crate::Event::Text]) or a command (`doCommandBySelector:`, [crate::Event::Command]), with
 //!    the system's bindings: arrows, Option and Cmd moves, Emacs-style Ctrl keys. Text and commands
 //!    go to the focused element, then the app; an unused Tab or Shift-Tab moves focus. A key with
-//!    Cmd that nobody used goes on to the menu (Cmd-Q), then to step 4.
+//!    Cmd that nobody used goes on to the menu bar (Cmd-Q), then to step 4.
+//!
+//! The menu bar's Edit items ([crate::Commands]) run the command their key would: the focused
+//! element, then those above it that bind the command, then the app.
 //!
 //! Windows and Linux have no `interpretKeyEvents:`: their windows get step 4's commands from
 //! [Os::command], the keys their own text fields bind. The harness has no AppKit either: it
@@ -691,8 +694,8 @@ pub fn lookup(map: &[Binding], k: &KeyEvent) -> Option<Command> {
   Os::CURRENT.lookup(map, k)
 }
 
-/// The edit menu's keys, which a text field binds on itself (AppKit gets them from the
-/// menu's key equivalents, which we don't have).
+/// The edit menu's keys, which a text field binds on itself: the key goes to it before the menu
+/// bar's items (macOS), which show them ([crate::Commands]), and Windows and Linux have no menu.
 pub const EDIT_KEYS: &[Binding] = &[
   bind(Shortcut::char('a').cmd(), Command::SelectAll),
   bind(Shortcut::char('c').cmd(), Command::Copy),

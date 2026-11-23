@@ -49,8 +49,8 @@ api-shots: # docs/api.md and its pictures (into the assets branch's worktree), f
 # GNU gettext 0.24 or later (`brew install gettext`), the first to read Rust; the locale module's
 # own strings are its tests'.
 i18n: # nimbo's own strings: locales/nimbo.pot from the code, merged into each language's .po
-	xgettext --language=Rust --keyword='t!:1' --keyword='tn!:1,2' --add-comments=Translators \
+	xgettext --language=Rust --keyword='t!:1' --keyword='tn!:1,2' --add-comments=Translators --no-location \
 	  --from-code=UTF-8 --package-name=nimbo -o locales/nimbo.pot \
 	  $$(find src -name '*.rs' -not -path 'src/locale/*' | sort)
-	for po in locales/*.po; do msgmerge -q --update --backup=none $$po locales/nimbo.pot; done
+	for po in locales/*.po; do msgmerge -q --update --backup=none --no-location $$po locales/nimbo.pot; done
 	for po in locales/*.po; do msgfmt -c --statistics -o /dev/null $$po || exit 1; done

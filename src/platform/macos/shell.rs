@@ -1,6 +1,6 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The app on AppKit: NSApplication with a minimal app menu and its delegate, the windows by id
+//! The app on AppKit: NSApplication with its menu bar ([bar]) and its delegate, the windows by id
 //! (an NSWindow each, its content our [View] with its own runtime, its own delegate), the
 //! activation policy that follows [Presence], and the main dispatch queue for [crate::Proxy].
 //!
@@ -17,6 +17,8 @@
 
 use std::any::TypeId;
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
+use std::mem::replace;
 
 use dispatch2::{DispatchQueue, MainThreadBound};
 use objc2::rc::Retained;
@@ -24,8 +26,8 @@ use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
   NSApplication, NSApplicationDelegate, NSApplicationTerminateReply, NSBackingStoreType, NSEvent,
-  NSEventModifierFlags, NSEventType, NSMenu, NSMenuItem, NSSystemColorsDidChangeNotification,
-  NSWindow, NSWindowDelegate, NSWindowStyleMask, NSWindowTitleVisibility,
+  NSEventModifierFlags, NSEventType, NSMenuItem, NSSystemColorsDidChangeNotification, NSWindow,
+  NSWindowDelegate, NSWindowStyleMask, NSWindowTitleVisibility,
 };
 use objc2_foundation::{
   NSDictionary, NSNotification, NSNotificationCenter, NSNumber, NSObject, NSObjectProtocol,
@@ -34,10 +36,11 @@ use objc2_foundation::{
 
 pub use super::app::{alert, is_main, post, send, set_presence};
 use super::view::View;
-use super::{Pasteboard, activate, appearance, mtm, overlay, titlebar};
+use super::{Pasteboard, activate, appearance, bar, mtm, overlay, titlebar};
 use crate::app::{App, Clock, Event, Runtime};
-use crate::shell::{Anchor, AppInfo, Main, Presence};
-use crate::{Config, shell, t};
+use crate::commands::{Bar, Commands};
+use crate::shell::{Anchor, AppInfo, Main, OnChosen, Presence};
+use crate::{Config, shell};
 
 struct Win {
   id: u64,
@@ -67,6 +70,15 @@ struct Shell {
   /// The system asked to quit (`applicationShouldTerminate:` answered «later»): the process ends
   /// once the app has finished.
   terminating: bool,
+  /// The app's name and delegate, the menu bar's target; the app's answer to an item of its own
+  /// chosen there, once it set the bar ([set_commands]), the items chosen it has yet to see and
+  /// whether it runs.
+  name: &'static str,
+  delegate: Option<Retained<Delegate>>,
+  chosen: Option<OnChosen>,
+  picked: VecDeque<usize>,
+  choosing: bool,
+  commands: bool,
 }
 
 thread_local! {
@@ -140,6 +152,27 @@ define_class!(
     fn quit_item(&self, _sender: Option<&AnyObject>) {
       quit();
     }
+
+    /// An item of the app's own in the menu bar ([set_commands]), by its action's number.
+    #[unsafe(method(chosen:))]
+    fn chosen(&self, sender: Option<&AnyObject>) {
+      let Some(item) = sender.and_then(|s| s.downcast_ref::<NSMenuItem>()) else { return };
+      shell(|s| s.picked.push_back(item.tag() as usize));
+      // One at a time: an item chosen in a nested loop of the answer runs after it, by the bar
+      // set then.
+      if shell(|s| replace(&mut s.choosing, true)) {
+        return;
+      }
+
+      while let Some(n) = shell(|s| s.picked.pop_front()) {
+        let Some(mut f) = shell(|s| s.chosen.take()) else { break };
+        f(&mut Main::here(), n);
+        // Kept unless it set another.
+        shell(|s| _ = s.chosen.get_or_insert(f));
+      }
+
+      shell(|s| s.choosing = false);
+    }
   }
 );
 
@@ -150,27 +183,19 @@ impl Delegate {
   }
 }
 
-fn main_menu(mtm: MainThreadMarker, name: &str, delegate: &Delegate) -> Retained<NSMenu> {
-  let item = |title: &str, action, key: &str| unsafe {
-    NSMenuItem::initWithTitle_action_keyEquivalent(
-      NSMenuItem::alloc(mtm),
-      &NSString::from_str(title),
-      Some(action),
-      &NSString::from_str(key),
-    )
-  };
-  let bar = NSMenu::new(mtm);
-  let app_item = NSMenuItem::new(mtm);
-  let app_menu = NSMenu::new(mtm);
-  // To the key window through the responder chain.
-  app_menu.addItem(&item(&t!("Close Window"), sel!(performClose:), "w"));
-  let quit = item(&t!("Quit {name}", name), sel!(quit:), "q");
-  // SAFETY: the delegate has `quit:` and lives as long as the app.
-  unsafe { quit.setTarget(Some(delegate)) };
-  app_menu.addItem(&quit);
-  app_item.setSubmenu(Some(&app_menu));
-  bar.addItem(&app_item);
-  bar
+/// The menu bar from `bar` for the app's name: the app's commands ([crate::Main::set_commands]),
+/// which replace the standard bar set after `start`, and the answer to its items.
+pub fn set_commands(bar: &dyn Fn(&str) -> Bar, chosen: OnChosen) {
+  let set = shell(|s| {
+    // Items chosen in the old bar have numbers of their own.
+    (s.chosen, s.commands) = (Some(chosen), true);
+    s.picked.clear();
+    Some((s.name, s.delegate.clone()?))
+  });
+  if let Some((name, delegate)) = set {
+    let mtm = mtm();
+    NSApplication::sharedApplication(mtm).setMainMenu(Some(&bar::menu(mtm, bar(name), &delegate)));
+  }
 }
 
 /// Sets the app up, runs `start`, then the AppKit loop until [quit].
@@ -204,7 +229,8 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
       None,
     )
   };
-  shell(|s| *s = Shell::default());
+  let name = info.name;
+  shell(|s| *s = Shell { name, delegate: Some(delegate.clone()), ..Shell::default() });
   super::app::set_presence(info.presence);
   if info.presence == Presence::Regular {
     activate(mtm);
@@ -212,7 +238,11 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
 
   start(&mut Main::here());
   // After `start`: in the language it chose, from the catalogs its windows gave.
-  ns_app.setMainMenu(Some(&main_menu(mtm, info.name, &delegate)));
+  if !shell(|s| s.commands) {
+    let (standard, _) = Commands::<()>::new().bar(name);
+    ns_app.setMainMenu(Some(&bar::menu(mtm, standard, &delegate)));
+  }
+
   if !shell(|s| s.quitting) {
     ns_app.run();
   }

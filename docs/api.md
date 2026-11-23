@@ -442,6 +442,14 @@ nimbo: `ui.context_menu(r.id, || Menu::new(vec![Item::button(Action::Copy, "Copy
 
 ![Context menu](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/context-menu.png)
 
+### Menu bar
+
+SwiftUI: `.commands { CommandMenu("Track") { Button("Play") { … } }; CommandGroup(replacing: .newItem) { … } }`
+
+nimbo: `main.set_commands(&Commands::new().menu("Track", Menu::new(vec![Item::button(Act::Play, "Play")])).replacing(CommandGroupPlacement::NewItem, items), |main, act| …)`
+
+![Menu bar](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/menu-bar.png)
+
 ### Tooltip
 
 SwiftUI: `.help("Saves it")`

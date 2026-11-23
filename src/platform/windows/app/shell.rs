@@ -30,7 +30,8 @@ use windows_sys::Win32::UI::WindowsAndMessaging::*;
 use super::super::{Timer, create, run_loop, settings, show_overlay, wide, with_window};
 use super::{hardware, host, paste, tray};
 use crate::app::{App, Event};
-use crate::shell::{AppInfo, Main, Presence};
+use crate::commands::Bar;
+use crate::shell::{AppInfo, Main, OnChosen, Presence};
 use crate::{Config, shell};
 
 type Job = Box<dyn FnOnce() + Send>;
@@ -144,6 +145,9 @@ pub fn quit() {
 
 /// Windows has no Dock: the taskbar follows the windows (see the module docs).
 pub fn set_presence(_: Presence) {}
+
+/// No menu bar: the windows bind the commands' keys ([crate::App::keymap]).
+pub fn set_commands(_: &dyn Fn(&str) -> Bar, _: OnChosen) {}
 
 pub fn terminating() -> bool {
   shell(|s| s.terminating)

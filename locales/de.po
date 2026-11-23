@@ -4,7 +4,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: nimbo\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-15 04:28+0200\n"
+"POT-Creation-Date: 2026-11-24 00:27+0200\n"
 "PO-Revision-Date: 2026-11-18 06:00+0200\n"
 "Last-Translator: \n"
 "Language-Team: none\n"
@@ -14,123 +14,144 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: src/platform/macos/shell.rs:166
-msgid "Close Window"
-msgstr "Fenster schließen"
+msgid "Settings…"
+msgstr "Einstellungen …"
 
-#: src/platform/macos/shell.rs:167
+#. Translators: the menu bar's menus, as macOS names them.
+msgid "File"
+msgstr "Ablage"
+
+msgid "Edit"
+msgstr "Bearbeiten"
+
+msgid "View"
+msgstr "Darstellung"
+
+msgid "Window"
+msgstr "Fenster"
+
+msgid "Help"
+msgstr "Hilfe"
+
+#, rust-format
+msgid "About {name}"
+msgstr "Über {name}"
+
+msgid "Services"
+msgstr "Dienste"
+
+#, rust-format
+msgid "Hide {name}"
+msgstr "{name} ausblenden"
+
+msgid "Hide Others"
+msgstr "Andere ausblenden"
+
+msgid "Show All"
+msgstr "Alle einblenden"
+
 #, rust-format
 msgid "Quit {name}"
 msgstr "{name} beenden"
 
-#: src/ui/behavior.rs:319
+msgid "Close Window"
+msgstr "Fenster schließen"
+
+msgid "Undo"
+msgstr "Widerrufen"
+
+msgid "Redo"
+msgstr "Wiederholen"
+
 msgid "Cut"
 msgstr "Ausschneiden"
 
-#: src/ui/behavior.rs:320
-msgid "Paste"
-msgstr "Einsetzen"
-
-#: src/ui/behavior.rs:321 src/ui/widgets/icon.rs:174
 msgid "Copy"
 msgstr "Kopieren"
 
-#: src/ui/behavior.rs:323
+msgid "Paste"
+msgstr "Einsetzen"
+
 msgid "Select All"
 msgstr "Alles auswählen"
 
-#: src/ui/dialog.rs:78
+msgid "Enter Full Screen"
+msgstr "Vollbildmodus aktivieren"
+
+msgid "Minimize"
+msgstr "Im Dock ablegen"
+
+msgid "Zoom"
+msgstr "Zoomen"
+
+msgid "Bring All to Front"
+msgstr "Alle nach vorne bringen"
+
 msgid "OK"
 msgstr "OK"
 
-#: src/ui/dialog.rs:78
 msgid "Cancel"
 msgstr "Abbrechen"
 
-#: src/ui/widgets/button.rs:202
-msgid "Help"
-msgstr "Hilfe"
-
-#: src/ui/widgets/icon.rs:160
 msgid "Settings"
 msgstr "Einstellungen"
 
-#: src/ui/widgets/icon.rs:161
 msgid "Appearance"
 msgstr "Erscheinungsbild"
 
-#: src/ui/widgets/icon.rs:162
 msgid "Options"
 msgstr "Optionen"
 
-#: src/ui/widgets/icon.rs:163
 msgid "Info"
 msgstr "Info"
 
-#: src/ui/widgets/icon.rs:164
 msgid "Warning"
 msgstr "Warnung"
 
-#: src/ui/widgets/icon.rs:165
 msgid "Reset"
 msgstr "Zurücksetzen"
 
-#: src/ui/widgets/icon.rs:166
 msgid "Delete"
 msgstr "Löschen"
 
-#: src/ui/widgets/icon.rs:167
 msgid "Folder"
 msgstr "Ordner"
 
-#: src/ui/widgets/icon.rs:168
 msgid "Document"
 msgstr "Dokument"
 
-#: src/ui/widgets/icon.rs:169
 msgid "Open"
 msgstr "Öffnen"
 
-#: src/ui/widgets/icon.rs:170
 msgid "Done"
 msgstr "Fertig"
 
-#: src/ui/widgets/icon.rs:171
 msgid "Search"
 msgstr "Suchen"
 
-#: src/ui/widgets/icon.rs:172
 msgid "Play"
 msgstr "Wiedergeben"
 
-#: src/ui/widgets/icon.rs:173
 msgid "Clear"
 msgstr "Leeren"
 
-#: src/ui/widgets/icon.rs:175
 msgid "Download"
 msgstr "Herunterladen"
 
-#: src/ui/widgets/icon.rs:176
 msgid "History"
 msgstr "Verlauf"
 
-#: src/ui/widgets/icon.rs:177
 msgid "Stop"
 msgstr "Stoppen"
 
-#: src/ui/widgets/icon.rs:178
 msgid "Dictate"
 msgstr "Diktieren"
 
-#: src/ui/widgets/icon.rs:179
 msgid "Sidebar"
 msgstr "Seitenleiste"
 
-#: src/ui/widgets/icon.rs:180
 msgid "Close"
 msgstr "Schließen"
 
-#: src/ui/widgets/icon.rs:181
 msgid "Accessibility"
 msgstr "Bedienungshilfen"

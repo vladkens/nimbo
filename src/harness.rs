@@ -12,7 +12,7 @@ use keyboard_types::{Code, Modifiers};
 use crate::app::{App, Clipboard, Clock, Event, Ime, MemClipboard, MouseButton, Runtime, Waker};
 pub use crate::cpu::Pixels;
 use crate::file_dialog::FileDialog;
-use crate::keys::{self, Key, KeyEvent, Os};
+use crate::keys::{self, Command, Key, KeyEvent, Os};
 use crate::locale::{self, Locale, Localizations};
 use crate::menu::{Item, Menu};
 use crate::scene::{Point, Rect, Size};
@@ -162,6 +162,13 @@ impl<A: App> Harness<A> {
     let item = answer.and_then(|a| find(&menu.items, a));
     self.event(Event::Menu { on, item });
     Some((at, menu))
+  }
+
+  /// Chooses the menu bar's item that runs `cmd` (macOS's Edit, [crate::Commands]) as the
+  /// person would: false, nothing run, while it is disabled (nothing focused binds `cmd`), else
+  /// whether it was used.
+  pub fn menu_command(&mut self, cmd: Command) -> bool {
+    self.rt.can(cmd) && self.event(Event::Command(cmd))
   }
 
   pub fn move_to(&mut self, x: f32, y: f32) -> bool {

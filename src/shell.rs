@@ -27,7 +27,7 @@ use crate::platform;
 use crate::platform::shell as imp;
 use crate::system::{self, Change};
 pub use crate::window::Anchor;
-use crate::{App, Config, Event, paste, runloop};
+use crate::{App, Commands, Config, Event, paste, runloop};
 
 /// Runs the event loop with no window: `start` opens what the app needs (windows, a
 /// [crate::tray::Tray], [crate::hotkey::Hotkeys]), then the loop runs until [Main::quit].
@@ -53,6 +53,8 @@ fn running(run: impl FnOnce()) {
 }
 
 pub(crate) type OnMain = Box<dyn FnOnce(&mut Main)>;
+/// The app's answer to an item of its own chosen in the menu bar, by the action's number.
+pub(crate) type OnChosen = Box<dyn FnMut(&mut Main, usize)>;
 type OnReopen = Box<dyn FnMut(&mut Main)>;
 type OnCommand = Box<dyn FnMut(&mut Main, &Command)>;
 type OnChange = Box<dyn FnMut(&mut Main, Change)>;
@@ -352,6 +354,23 @@ impl Main {
     let f: OnCommand = Box::new(f);
     hooks(|h| (h.instance, h.command) = (Some(instance), Some(f)));
     Ok(())
+  }
+
+  /// The menu bar: the standard menus with `commands` in place, `f` running with the action of an
+  /// item of theirs chosen (both replace those set before), labels in the language of the catalogs
+  /// given by then. macOS only: elsewhere the windows bind the keys ([App::keymap]).
+  pub fn set_commands<A: Clone + 'static>(
+    &mut self,
+    commands: &Commands<A>,
+    mut f: impl FnMut(&mut Main, A) + 'static,
+  ) {
+    let (_, actions) = commands.bar("");
+    let chosen = move |main: &mut Main, n: usize| {
+      if let Some(Some(a)) = actions.get(n) {
+        f(main, a.clone());
+      }
+    };
+    imp::set_commands(&|name| commands.bar(name).0, Box::new(chosen));
   }
 
   /// Closes the windows and ends the loop once the work already queued is done: [app] returns.

@@ -1,8 +1,8 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Menus on macOS: an NSMenu built from [Menu] ([fill], the tray's too) and changed in place
-//! ([update]), a context menu popped up over a view ([popup]) outside the window's borrow, and
-//! the key equivalents of shortcuts.
+//! Menus on macOS: an NSMenu built from [Menu] ([fill], the tray's and the menu bar's too) and
+//! changed in place ([update]), a context menu popped up over a view ([popup]) outside the window's
+//! borrow, and the key equivalents of shortcuts.
 
 use std::cell::Cell;
 
@@ -71,7 +71,7 @@ pub fn popup(
     ns.setAutomaticallyInsertsWritingToolsItems(false);
   }
 
-  fill(mtm, &ns, &menu.items, &target);
+  fill(mtm, &ns, &menu.items, &chooses(&target));
   // For the window's frame view, not ours: for a view that takes text AppKit adds its own
   // items (AutoFill, Writing Tools, Services), as Electron's menus show none for a view that
   // isn't a web page's (electron/electron#45138, 2025-03-28); its user defaults
@@ -89,9 +89,14 @@ pub fn popup(
   target.ivars().get().map(|tag| tag as usize)
 }
 
-/// Adds `items` to `menu`; the chosen ones send `chosen:` to `target` with their action number
-/// as the tag.
-pub fn fill(mtm: MainThreadMarker, menu: &NSMenu, items: &[Item<usize>], target: &AnyObject) {
+/// Adds `items` to `menu`, `act` giving each button and toggle its action by its action's number
+/// ([chooses]).
+pub fn fill(
+  mtm: MainThreadMarker,
+  menu: &NSMenu,
+  items: &[Item<usize>],
+  act: &dyn Fn(&NSMenuItem, usize),
+) {
   for it in items {
     if let Item::Divider = it {
       menu.addItem(&NSMenuItem::separatorItem(mtm));
@@ -121,23 +126,17 @@ pub fn fill(mtm: MainThreadMarker, menu: &NSMenu, items: &[Item<usize>], target:
       continue;
     }
 
-    let action = it.action().map(|_| sel!(chosen:));
     let none = (String::new(), NSEventModifierFlags::empty());
     let (key, mods) = it.shortcut().and_then(key_equivalent).unwrap_or(none);
-    // SAFETY: the action is the target's, which outlives the menu's use.
+    // SAFETY: no action yet.
     let item = unsafe {
       NSMenuItem::initWithTitle_action_keyEquivalent(
         NSMenuItem::alloc(mtm),
         &NSString::from_str(it.label()),
-        action,
+        None,
         &NSString::from_str(&key),
       )
     };
-    if let Some(&tag) = it.action() {
-      unsafe { item.setTarget(Some(target)) };
-      item.setTag(tag as isize);
-    }
-
     if !key.is_empty() {
       item.setKeyEquivalentModifierMask(mods);
     }
@@ -145,14 +144,32 @@ pub fn fill(mtm: MainThreadMarker, menu: &NSMenu, items: &[Item<usize>], target:
     item.setEnabled(it.is_enabled());
     let on = it.is_on();
     item.setState(if on { NSControlStateValueOn } else { NSControlStateValueOff });
+    if let Some(&n) = it.action() {
+      act(&item, n);
+    }
+
     if let Item::Submenu { menu: sub, .. } = it {
-      let submenu = NSMenu::new(mtm);
+      // The bar shows a submenu's title, not its item's.
+      let submenu = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(it.label()));
       submenu.setAutoenablesItems(false);
-      fill(mtm, &submenu, &sub.items, target);
+      fill(mtm, &submenu, &sub.items, act);
       item.setSubmenu(Some(&submenu));
     }
 
     menu.addItem(&item);
+  }
+}
+
+/// What [fill] gives an app's item in a context menu, the tray or the bar: `chosen:` sent to
+/// `target` with the action's number as the tag.
+pub fn chooses(target: &AnyObject) -> impl Fn(&NSMenuItem, usize) {
+  move |item, n| {
+    // SAFETY: the target has `chosen:` and outlives the menu's use.
+    unsafe {
+      item.setAction(Some(sel!(chosen:)));
+      item.setTarget(Some(target));
+    }
+    item.setTag(n as isize);
   }
 }
 
@@ -174,6 +191,7 @@ pub fn update(menu: &NSMenu, items: &[Item<usize>]) {
     let on = it.is_on();
     item.setState(if on { NSControlStateValueOn } else { NSControlStateValueOff });
     if let (Item::Submenu { menu: sub, .. }, Some(submenu)) = (it, item.submenu()) {
+      submenu.setTitle(&NSString::from_str(it.label()));
       update(&submenu, &sub.items);
     }
   }

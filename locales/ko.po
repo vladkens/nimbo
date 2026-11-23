@@ -4,7 +4,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: nimbo\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-11-15 04:28+0200\n"
+"POT-Creation-Date: 2026-11-24 00:27+0200\n"
 "PO-Revision-Date: 2026-11-18 06:00+0200\n"
 "Last-Translator: \n"
 "Language-Team: none\n"
@@ -14,123 +14,144 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-#: src/platform/macos/shell.rs:166
-msgid "Close Window"
-msgstr "윈도우 닫기"
+msgid "Settings…"
+msgstr "설정…"
 
-#: src/platform/macos/shell.rs:167
+#. Translators: the menu bar's menus, as macOS names them.
+msgid "File"
+msgstr "파일"
+
+msgid "Edit"
+msgstr "편집"
+
+msgid "View"
+msgstr "보기"
+
+msgid "Window"
+msgstr "윈도우"
+
+msgid "Help"
+msgstr "도움말"
+
+#, rust-format
+msgid "About {name}"
+msgstr "{name}에 관하여"
+
+msgid "Services"
+msgstr "서비스"
+
+#, rust-format
+msgid "Hide {name}"
+msgstr "{name} 가리기"
+
+msgid "Hide Others"
+msgstr "기타 가리기"
+
+msgid "Show All"
+msgstr "모두 보기"
+
 #, rust-format
 msgid "Quit {name}"
 msgstr "{name} 종료"
 
-#: src/ui/behavior.rs:319
+msgid "Close Window"
+msgstr "윈도우 닫기"
+
+msgid "Undo"
+msgstr "실행 취소"
+
+msgid "Redo"
+msgstr "실행 복귀"
+
 msgid "Cut"
 msgstr "오려두기"
 
-#: src/ui/behavior.rs:320
-msgid "Paste"
-msgstr "붙여넣기"
-
-#: src/ui/behavior.rs:321 src/ui/widgets/icon.rs:174
 msgid "Copy"
 msgstr "복사하기"
 
-#: src/ui/behavior.rs:323
+msgid "Paste"
+msgstr "붙여넣기"
+
 msgid "Select All"
 msgstr "전체 선택"
 
-#: src/ui/dialog.rs:78
+msgid "Enter Full Screen"
+msgstr "전체 화면 시작"
+
+msgid "Minimize"
+msgstr "최소화"
+
+msgid "Zoom"
+msgstr "확대/축소"
+
+msgid "Bring All to Front"
+msgstr "모두 앞으로 가져오기"
+
 msgid "OK"
 msgstr "확인"
 
-#: src/ui/dialog.rs:78
 msgid "Cancel"
 msgstr "취소"
 
-#: src/ui/widgets/button.rs:202
-msgid "Help"
-msgstr "도움말"
-
-#: src/ui/widgets/icon.rs:160
 msgid "Settings"
 msgstr "설정"
 
-#: src/ui/widgets/icon.rs:161
 msgid "Appearance"
 msgstr "모양"
 
-#: src/ui/widgets/icon.rs:162
 msgid "Options"
 msgstr "옵션"
 
-#: src/ui/widgets/icon.rs:163
 msgid "Info"
 msgstr "정보"
 
-#: src/ui/widgets/icon.rs:164
 msgid "Warning"
 msgstr "경고"
 
-#: src/ui/widgets/icon.rs:165
 msgid "Reset"
 msgstr "재설정"
 
-#: src/ui/widgets/icon.rs:166
 msgid "Delete"
 msgstr "삭제"
 
-#: src/ui/widgets/icon.rs:167
 msgid "Folder"
 msgstr "폴더"
 
-#: src/ui/widgets/icon.rs:168
 msgid "Document"
 msgstr "문서"
 
-#: src/ui/widgets/icon.rs:169
 msgid "Open"
 msgstr "열기"
 
-#: src/ui/widgets/icon.rs:170
 msgid "Done"
 msgstr "완료"
 
-#: src/ui/widgets/icon.rs:171
 msgid "Search"
 msgstr "검색"
 
-#: src/ui/widgets/icon.rs:172
 msgid "Play"
 msgstr "재생"
 
-#: src/ui/widgets/icon.rs:173
 msgid "Clear"
 msgstr "지우기"
 
-#: src/ui/widgets/icon.rs:175
 msgid "Download"
 msgstr "다운로드"
 
-#: src/ui/widgets/icon.rs:176
 msgid "History"
 msgstr "기록"
 
-#: src/ui/widgets/icon.rs:177
 msgid "Stop"
 msgstr "정지"
 
-#: src/ui/widgets/icon.rs:178
 msgid "Dictate"
 msgstr "받아쓰기"
 
-#: src/ui/widgets/icon.rs:179
 msgid "Sidebar"
 msgstr "사이드바"
 
-#: src/ui/widgets/icon.rs:180
 msgid "Close"
 msgstr "닫기"
 
-#: src/ui/widgets/icon.rs:181
 msgid "Accessibility"
 msgstr "손쉬운 사용"

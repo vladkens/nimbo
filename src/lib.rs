@@ -15,9 +15,10 @@
 //! `--locale <tag>`).
 //!
 //! An app with no window, or more than one, starts with [app]: windows on demand ([Main::open])
-//! and overlays, HUDs over every app ([Config::overlay]), work from other threads ([Proxy]), and
-//! what a tray app needs besides: an icon with a menu ([tray]), global hotkeys ([hotkey]), one
-//! instance that takes commands from a second launch ([instance], [Main::serve]), its folders and
+//! and overlays, HUDs over every app ([Config::overlay]), the menu bar's commands
+//! ([Main::set_commands]), work from other threads ([Proxy]), and what a tray app needs besides:
+//! an icon with a menu ([tray]), global hotkeys ([hotkey]), one instance that takes commands from
+//! a second launch ([instance], [Main::serve]), its folders and
 //! the user's Downloads ([paths]), launch at login ([autostart]), its launcher entry on Linux
 //! ([desktop]), alerts ([Main::alert]), its command line's console on Windows
 //! ([attach_console]) and an uninstall that undoes what nimbo set up ([uninstall]); and to reach
@@ -38,6 +39,7 @@ pub mod app;
 pub mod autostart;
 mod bitmap;
 pub mod clipboard;
+mod commands;
 pub(crate) mod cpu;
 pub mod desktop;
 mod event;
@@ -78,6 +80,7 @@ pub use app::{
 };
 pub use bitmap::Bitmap;
 pub use clipboard::SystemClipboard;
+pub use commands::{CommandGroupPlacement, Commands};
 pub use file_dialog::{FileDialog, FileDialogKind};
 pub use harness::Harness;
 /// Keys' W3C UI Events names: [Code] a key's place, [NamedKey] a key that types nothing,

@@ -539,14 +539,24 @@ impl<A: App> Runtime<A> {
     self.app_event(&Event::KeyDown(k))
   }
 
-  /// Text, a command, an input method's event or a modifier key: the focused element, the app,
-  /// then Tab and Shift-Tab move focus.
+  /// Text, a command, an input method's event or a modifier key: the focused element (a command
+  /// it didn't use then the elements above it that bind it, as its key would reach them: the
+  /// menu bar's Copy), the app, then Tab and Shift-Tab move focus.
   fn typed(&mut self, ev: Event) -> bool {
-    if let Some(id) = self.ui.focus()
+    let focus = self.ui.focus();
+    if let Some(id) = focus
       && self.deliver(id, ev.clone())
     {
       return true;
     }
+    if let Event::Command(cmd) = ev {
+      for id in self.binding(cmd).into_iter().filter(|&id| Some(id) != focus) {
+        if self.deliver(id, ev.clone()) {
+          return true;
+        }
+      }
+    }
+
     if self.app_event(&ev) {
       return true;
     }
@@ -556,6 +566,29 @@ impl<A: App> Runtime<A> {
       Event::Command(Command::InsertBacktab) => self.ui.focus_next(FocusDirection::Previous),
       _ => false,
     }
+  }
+
+  /// Whether a command chosen in the menu bar (Edit's Copy) has someone to run it: the focused
+  /// element or one above it binds it, or the app does ([App::keymap]). Lays the view out again
+  /// first when an event changed it.
+  pub fn can(&mut self, cmd: Command) -> bool {
+    self.fresh();
+    !self.binding(cmd).is_empty() || self.app.keymap().iter().any(|b| b.command == cmd)
+  }
+
+  /// The elements from the focused one up whose bindings run `cmd`, nearest first.
+  fn binding(&self, cmd: Command) -> Vec<Id> {
+    let (mut out, mut at) = (Vec::new(), self.ui.focus().and_then(|id| self.ui.last.find(id)));
+    while let Some(i) = at {
+      let n = &self.ui.last.nodes[i as usize];
+      if self.ui.last.keymap(i).is_some_and(|m| m.iter().any(|b| b.command == cmd)) {
+        out.push(n.id);
+      }
+
+      at = (i != 0).then_some(n.parent);
+    }
+
+    out
   }
 
   fn app_event(&mut self, ev: &Event) -> bool {
@@ -1420,6 +1453,29 @@ mod tests {
     assert_eq!(rt.ui.focus(), Some(Id::of("item")));
     assert!(rt.event(Event::Command(Command::InsertBacktab)));
     assert_eq!(rt.ui.focus(), Some(Id::of("item")));
+  }
+
+  /// A command chosen in the menu bar goes from the focused element up to those that bind it,
+  /// then the app; it can run while one of them binds it.
+  #[test]
+  fn menu_commands_reach_who_binds_them() {
+    let clock = Clock::Virtual(Duration::ZERO);
+    let size = Size::new(100.0, 100.0);
+    let mut rt =
+      Runtime::new(Keyed::default(), size, 1.0, clock, Box::new(MemClipboard::default()));
+    rt.frame();
+    assert!(!rt.can(Command::Undo) && rt.can(Command::Action("new")));
+
+    rt.ui.set_focus(Some(Id::of("item")));
+    assert!(rt.can(Command::Undo) && rt.can(Command::Action("panel")));
+    assert!(!rt.can(Command::Copy));
+    // The item passes it on: the panel above, which binds it, takes it.
+    assert!(rt.event(Event::Command(Command::Action("panel"))));
+    rt.app.item_takes = true;
+    assert!(rt.event(Event::Command(Command::Undo)));
+    assert!(rt.event(Event::Command(Command::Action("new"))));
+    let log = ["panel Action(\"panel\")", "item Undo", "item Action(\"new\")"];
+    assert_eq!(rt.app.log, log);
   }
 
   /// Counts its views, and the views run when each key came.
