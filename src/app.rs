@@ -699,7 +699,8 @@ impl<A: App> Runtime<A> {
 }
 
 /// Runs `app`'s view on `ui`, lending it the text system for [Ui::measure] and the images for
-/// [Ui::rgba_image] (moved in and back: an empty one holds its place, which allocates nothing).
+/// [Ui::rgba_image] (moved in and back: an empty one holds its place, which allocates nothing);
+/// then shows the tooltips it asked for ([Ui::help]) and puts the theme's focus ring.
 fn run_view<'a, A: App>(
   app: &'a mut A,
   text: &mut TextSystem,
@@ -710,7 +711,12 @@ fn run_view<'a, A: App>(
   ui.text = Some(std::mem::replace(text, TextSystem::new(scale)));
   std::mem::swap(images, &mut ui.images);
   app.view(ui);
-  ui.show_helps();
+  for (id, tip) in ui.take_helps() {
+    ui.tooltip(id, &tip);
+  }
+
+  // The theme's focus ring, as the view left the theme.
+  ui.set_default_focus_ring(ui.theme().focus_ring());
   std::mem::swap(images, &mut ui.images);
   if let Some(t) = ui.text.take() {
     *text = t;

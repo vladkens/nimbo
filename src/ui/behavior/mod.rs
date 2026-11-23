@@ -32,7 +32,8 @@
 //! - [Ui::dialog_behavior]: a modal dialog's keys, focus trap and fade ([super::dialog]);
 //! - [Ui::split_behavior]: a divider's drag within both panes' minimums;
 //! - [Ui::scroll_behavior]: a scroll area's bars, a thumb dragged and a track clicked, shown while
-//!   the content moves or the pointer comes in ([ScrollBehavior]);
+//!   the content moves or the pointer comes in ([ScrollBehavior]); [Ui::scroll_area] draws them
+//!   here, as the environment says ([ScrollIndicatorStyle]), since menus and lists scroll in it;
 //! - [Ui::menu_popup] and [Ui::menu_item_behavior]: a menu's open state, placement, keys and items;
 //! - [Ui::pop_up_behavior]: a pop-up button, opened by a click, Space, Enter or the arrows, letters
 //!   typed choosing an option ([TypeSelect]);
@@ -44,7 +45,8 @@
 //! - [Ui::search_behavior]: a single-line field's, its text cleared by a ⊗ or Escape.
 //!
 //! The looks over them are the widgets' and the containers' ([super::widgets],
-//! [super::containers]), which build on what is public here and in the core.
+//! [super::containers]), which build on what is public here and in the core; but the scroll
+//! area's, which is here.
 
 mod dialog;
 mod field;
@@ -64,7 +66,7 @@ pub use field::{EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, TextInp
 use keyboard_types::Modifiers;
 pub use list::{ListBehavior, ListRows, Selection};
 pub use menu::{MenuPlacement, TYPE_SELECT, TypeSelect};
-pub use scroll::{ScrollBar, ScrollBehavior};
+pub use scroll::{ScrollBar, ScrollBehavior, ScrollIndicatorStyle};
 pub use shortcut::hotkey_of;
 pub use split::SplitBehavior;
 

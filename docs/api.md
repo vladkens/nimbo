@@ -334,6 +334,14 @@ nimbo: `List::new(n, 32.0).sections(&starts, 24.0, &head).list_style(ListStyle::
 
 ![List sections](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/list-sections.png)
 
+### List behavior
+
+SwiftUI: `List(rows, selection: $sel) { … }.listRowBackground(…)`
+
+nimbo: `let rows = ListRows { n, h: 22.0, ..ListRows::default() }; let b = ui.list_behavior(id, rows, false, &mut sel, &key); ui.with_id(id).scroll_area(b.style(style), |ui| ui.list_rows(id, rows, &sel, &key, |ui, i, k| { … }))`
+
+![List behavior](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/list-behavior.png)
+
 ## Containers
 
 ### Tabs
@@ -383,6 +391,22 @@ SwiftUI: `LazyVStack { ForEach(…) }`
 nimbo: `ui.virtual_col(heights, |i| i, |ui, i| { … })`
 
 ![Lazy column](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/lazy-column.png)
+
+### Scroll behavior
+
+SwiftUI: `ScrollView { … }.scrollIndicators(.hidden).onScrollGeometryChange(…) { … }`
+
+nimbo: `let b = ui.scroll_behavior(id, Axes::VERTICAL); ui.with_id(id).col(style.scroll(Axes::VERTICAL), |ui| { …; if let Some(bar) = b.bars[1] { … } })`
+
+![Scroll behavior](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/scroll-behavior.png)
+
+### Scroll indicators
+
+SwiftUI: `NSScroller.knobStyle = .light (AppKit; SwiftUI has none)`
+
+nimbo: `let old = ui.set_environment(Some(ScrollIndicatorStyle { thumb: red, ..ScrollIndicatorStyle::LIGHT })); ui.scroll_area(style, |ui| { … }); ui.set_environment(old)`
+
+![Scroll indicators](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/scroll-indicators.png)
 
 ## Presentation
 
@@ -443,3 +467,19 @@ SwiftUI: `.keyboardShortcut("z", modifiers: .command)`
 nimbo: `ui.keymap(&[bind(Shortcut::char('z').cmd(), Command::Undo)]).col(…)`
 
 ![Keyboard shortcut](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/keyboard-shortcut.png)
+
+### Environment
+
+SwiftUI: `.environment(\.tint, .green); @Environment(\.tint) var tint`
+
+nimbo: `let old = ui.set_environment(Some(Tint(t.success))); ui.environment::<Tint>(); ui.set_environment(old)`
+
+![Environment](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/environment.png)
+
+### Controls theme
+
+SwiftUI: `@Environment(\.controlActiveState) var state`
+
+nimbo: `let t = ui.controls_theme(); ui.el(Style::new().bg(t.accent))`
+
+![Controls theme](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/controls-theme.png)

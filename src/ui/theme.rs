@@ -26,7 +26,7 @@ use std::time::Duration;
 pub use super::ControlSize;
 use super::store::Transition;
 use super::widgets::{ButtonRole, FieldStyle};
-use super::{Align, Dim, FocusRing, Shadow, Style, TextStyle, grow, px};
+use super::{Align, Dim, FocusRing, ScrollIndicatorStyle, Shadow, Style, TextStyle, Ui, grow, px};
 use crate::app::{Appearance, ColorScheme};
 use crate::scene::{Color, alpha, mix, rgb};
 use crate::text::{Font, Weight};
@@ -304,7 +304,7 @@ impl Theme {
     shadow: alpha(BLACK, 0.2),
     menu: WHITE,
     menu_line: alpha(BLACK, 0.25),
-    thumb: alpha(BLACK, 0.24),
+    thumb: ScrollIndicatorStyle::LIGHT.thumb,
     plate: rgb(0xf8f8f8),
     tertiary: rgb(0xbfbfbf),
     link: rgb(0x0068da),
@@ -354,7 +354,7 @@ impl Theme {
     shadow: alpha(BLACK, 0.5),
     menu: rgb(0x1a1a1a),
     menu_line: alpha(WHITE, 0.25),
-    thumb: alpha(WHITE, 0.26),
+    thumb: ScrollIndicatorStyle::DARK.thumb,
     field: rgb(0x252527),
     field_line: rgb(0x424245),
     faint: rgb(0x646468),
@@ -618,9 +618,47 @@ impl Theme {
   }
 }
 
+impl Ui<'_> {
+  /// The theme widgets draw with, a copy: the one the app set ([Ui::set_theme]), kept in the
+  /// environment ([Ui::environment]), else the OS's ([Theme::system]).
+  pub fn theme(&self) -> Theme {
+    match self.environment::<Theme>() {
+      Some(&t) => t,
+      None => Theme::system(self.appearance()),
+    }
+  }
+
+  /// The theme of controls filled with the accent: [Ui::theme], its accent a grey while the
+  /// window isn't key, as AppKit's switches, check boxes, sliders, segments and progress bars
+  /// turn grey there. For a control of the app's own that should do the same.
+  pub fn controls_theme(&self) -> Theme {
+    let t = self.theme();
+    if self.window_focused() { t } else { t.inactive() }
+  }
+
+  /// Sets the theme, kept until changed, over the OS's appearance, with its focus ring
+  /// ([Ui::set_focus_ring] after this overrides the ring) and its scrollbars
+  /// ([ScrollIndicatorStyle]).
+  pub fn set_theme(&mut self, theme: Theme) {
+    self.set_environment(Some(theme));
+    self.set_environment(Some(ScrollIndicatorStyle { thumb: theme.thumb, fade: theme.fade }));
+    self.set_focus_ring(Some(theme.focus_ring()));
+  }
+
+  /// Follows the OS's appearance again ([Theme::system]), the default: light or dark with
+  /// its accent, switching when it changes; the scrollbars too ([ScrollIndicatorStyle]).
+  pub fn follow_system(&mut self) {
+    self.set_environment::<Theme>(None);
+    self.set_environment::<ScrollIndicatorStyle>(None);
+  }
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::app::{App, Event};
+  use crate::harness::Harness;
+  use crate::scene::Size;
 
   #[test]
   fn variants_read_the_palette() {
@@ -691,5 +729,60 @@ mod tests {
       assert!(near(over(t.pressed, ground), pressed), "{:?}", over(t.pressed, ground));
       assert!(near(over(t.track, plate), track), "{:?}", over(t.track, plate));
     }
+  }
+
+  /// Pins a theme or follows the OS's, and sets a focus ring of its own or doesn't, each frame.
+  #[derive(Default)]
+  struct Ringed {
+    pin: Option<Theme>,
+    own: Option<Option<FocusRing>>,
+  }
+
+  impl App for Ringed {
+    fn view(&mut self, ui: &mut Ui) {
+      match self.pin {
+        Some(t) => ui.set_theme(t),
+        None => ui.follow_system(),
+      }
+
+      if let Some(r) = self.own {
+        ui.set_focus_ring(r);
+      }
+    }
+  }
+
+  /// The theme's focus ring rings the focused box and follows the OS's appearance; one the app
+  /// sets after [Ui::set_theme] overrides it, and the theme set again puts its own back.
+  #[test]
+  fn the_focus_ring_is_the_themes_unless_the_app_sets_one() {
+    let mut h = Harness::new(Ringed::default(), Size::new(40.0, 40.0), 1.0);
+    let ring = |h: &mut Harness<Ringed>| {
+      h.rt.redraw();
+      h.frame();
+      h.rt.ui.own_ring.unwrap_or(h.rt.ui.ring)
+    };
+    assert_eq!(ring(&mut h), Some(Theme::PLATES_DARK.focus_ring()));
+    h.event(Event::Appearance(Appearance::LIGHT));
+    assert_eq!(ring(&mut h), Some(Theme::PLATES_LIGHT.focus_ring()));
+
+    // The app's theme, then a ring of its own after it, then none.
+    let mine = Theme { focus: rgb(0xff0000), ..Theme::PLATES_DARK };
+    h.app_mut().pin = Some(mine);
+    assert_eq!(ring(&mut h), Some(mine.focus_ring()));
+    let green = FocusRing::new(rgb(0x00ff00));
+    h.app_mut().own = Some(Some(green));
+    assert_eq!(ring(&mut h), Some(green));
+    h.event(Event::Appearance(Appearance::DARK));
+    assert_eq!(ring(&mut h), Some(green));
+    h.app_mut().own = Some(None);
+    assert_eq!(ring(&mut h), None);
+
+    // The theme set again, the OS's followed again.
+    h.app_mut().own = None;
+    assert_eq!(ring(&mut h), Some(mine.focus_ring()));
+    h.app_mut().pin = None;
+    assert_eq!(ring(&mut h), Some(Theme::PLATES_DARK.focus_ring()));
+    h.event(Event::Appearance(Appearance::LIGHT));
+    assert_eq!(ring(&mut h), Some(Theme::PLATES_LIGHT.focus_ring()));
   }
 }

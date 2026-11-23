@@ -72,7 +72,7 @@ mod tests {
   use crate::app::App;
   use crate::harness::Harness;
   use crate::scene::Size;
-  use crate::ui::{ControlSize, Id, Style, Ui, grow};
+  use crate::ui::{ControlSize, Id, Style, Theme, Ui, grow};
 
   struct Bar(Option<f32>);
 
@@ -87,7 +87,7 @@ mod tests {
   fn a_bar_fills_its_share_and_an_unknown_one_animates() {
     let mut h = Harness::new(Bar(Some(0.5)), Size::new(220.0, 60.0), 1.0);
     let img = h.render();
-    let accent = h.rt.ui.theme.accent.map(|c| (c * 255.0).round() as u8);
+    let accent = Theme::system(h.rt.ui.appearance()).accent.map(|c| (c * 255.0).round() as u8);
     assert_eq!(img.pixel(60.0, 12.0), accent);
     assert_ne!(img.pixel(160.0, 12.0), accent);
     assert!(!h.rt.needs_frame());

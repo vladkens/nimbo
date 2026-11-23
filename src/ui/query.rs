@@ -79,10 +79,23 @@ impl Ui<'_> {
     self.focused(id) && self.window_focused()
   }
 
-  /// Rings the focused box ([super::Style::focusable]) while the window is key; `None` leaves
-  /// focus for the widgets to show. Kept until changed.
+  /// Rings the focused box ([super::Style::focusable]) while the window is key in place of the
+  /// theme's ring ([super::Theme::focus_ring]); `None` leaves focus for the widgets to show.
+  /// Kept until [Ui::set_theme] puts the theme's back, so set it after; the theme's own follows
+  /// the theme.
   pub fn set_focus_ring(&mut self, ring: Option<FocusRing>) {
-    self.st.ring = ring;
+    self.st.own_ring = Some(ring);
+  }
+
+  /// Puts the theme's focus ring, which rings the focused box unless the app set its own
+  /// ([Ui::set_focus_ring]): the shell's, after each view, from the theme it drew with. An app's
+  /// ring the same as it becomes the theme's again.
+  pub(crate) fn set_default_focus_ring(&mut self, ring: FocusRing) {
+    if self.st.own_ring == Some(Some(ring)) {
+      self.st.own_ring = None;
+    }
+
+    self.st.ring = Some(ring);
   }
 
   // MARK: Keys

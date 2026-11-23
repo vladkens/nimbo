@@ -67,8 +67,8 @@ use std::time::Duration;
 pub use a11y::{A11yNode, A11yTree, Action, Props, Role, State, Value};
 pub use behavior::{
   Behavior, DialogBehavior, EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, ListBehavior,
-  ListRows, MenuPlacement, ScrollBar, ScrollBehavior, Selection, SplitBehavior, TextInput,
-  TypeSelect,
+  ListRows, MenuPlacement, ScrollBar, ScrollBehavior, ScrollIndicatorStyle, Selection,
+  SplitBehavior, TextInput, TypeSelect,
 };
 pub use containers::{
   List, ListResponse, ListStyle, Picker, Row, Split, Tabs, Tag, ToolbarItemPlacement,
@@ -137,12 +137,14 @@ pub(crate) struct UiState {
   pub(crate) animating: bool,
   pub(crate) waker: Waker,
   pub(crate) clipboard: Box<dyn Clipboard>,
+  /// Values the whole window shares, one per type ([Ui::environment]).
+  env: Vec<Box<dyn Any>>,
+  /// The focus ring the app set ([Ui::set_focus_ring]), over the theme's, which the shell puts
+  /// each frame ([Ui::set_default_focus_ring]).
+  own_ring: Option<Option<FocusRing>>,
   ring: Option<FocusRing>,
-  theme: Theme,
-  /// The OS's look, which the theme follows unless `pinned`.
+  /// The OS's look ([Ui::appearance]).
   appearance: Appearance,
-  /// The app set its theme ([Ui::set_theme]).
-  pinned: bool,
   /// What the last frame cost ([Ui::last_frame]).
   pub(crate) stats: FrameStats,
   /// The content size the app asked the window for ([Ui::set_window_size]), until the platform
@@ -198,8 +200,7 @@ impl FrameStats {
 }
 
 impl Default for UiState {
-  /// The dark theme and its focus ring, following the OS's appearance once the platform (or the
-  /// harness, `--appearance`) reports it.
+  /// The dark appearance until the platform (or the harness, `--appearance`) reports the OS's.
   fn default() -> Self {
     Self {
       tree: Tree::default(),
@@ -213,10 +214,10 @@ impl Default for UiState {
       animating: false,
       waker: Waker::default(),
       clipboard: Box::default(),
-      ring: Some(Theme::PLATES_DARK.focus_ring()),
-      theme: Theme::PLATES_DARK,
+      env: Vec::new(),
+      own_ring: None,
+      ring: None,
       appearance: Appearance::DARK,
-      pinned: false,
       stats: FrameStats::default(),
       resize: None,
       asked: None,
@@ -251,21 +252,9 @@ impl UiState {
     self.resize = (size != now).then_some(size);
   }
 
-  /// Takes the OS's new look; the theme follows unless the app set one.
+  /// Takes the OS's new look, which the theme follows unless the app set one ([Ui::theme]).
   pub(crate) fn set_appearance(&mut self, a: Appearance) {
     self.appearance = a;
-    if !self.pinned {
-      self.retheme(Theme::system(a));
-    }
-  }
-
-  /// Draws with `theme`; the focus ring follows unless the app set its own.
-  fn retheme(&mut self, theme: Theme) {
-    if self.ring == Some(self.theme.focus_ring()) {
-      self.ring = Some(theme.focus_ring());
-    }
-
-    self.theme = theme;
   }
 
   /// Whether the pointer is over `id` or an element inside it.
@@ -567,32 +556,6 @@ impl<'a> Ui<'a> {
     }
   }
 
-  /// The theme widgets draw with ([theme]), a copy.
-  pub fn theme(&self) -> Theme {
-    self.st.theme
-  }
-
-  /// The theme of controls filled with the accent: [Theme::inactive] while the window isn't key,
-  /// as AppKit's switches, check boxes, sliders, segments and progress bars turn grey there.
-  pub(crate) fn controls_theme(&self) -> Theme {
-    if self.window_focused() { self.st.theme } else { self.st.theme.inactive() }
-  }
-
-  /// Sets the theme, kept until changed, over the OS's appearance, and its focus ring
-  /// ([Ui::set_focus_ring] after this overrides the ring).
-  pub fn set_theme(&mut self, theme: Theme) {
-    self.st.theme = theme;
-    self.st.ring = Some(theme.focus_ring());
-    self.st.pinned = true;
-  }
-
-  /// Follows the OS's appearance again ([Theme::system]), the default: light or dark with
-  /// its accent, switching when it changes.
-  pub fn follow_system(&mut self) {
-    self.st.pinned = false;
-    self.st.retheme(Theme::system(self.st.appearance));
-  }
-
   /// The OS's look, for an app drawing in colours of its own: light or dark and the accent.
   pub fn appearance(&self) -> Appearance {
     self.st.appearance
@@ -623,6 +586,30 @@ impl<'a> Ui<'a> {
     }
 
     old.and_then(|s| s.downcast().ok()).map(|s| *s)
+  }
+
+  /// The value of type `T` the window shares, put with [Ui::set_environment]: what the whole
+  /// view reads, as SwiftUI's `@Environment` (the theme the app set, [Ui::theme]). Kept across
+  /// frames until changed.
+  pub fn environment<T: 'static>(&self) -> Option<&T> {
+    self.st.env.iter().find_map(|v| v.downcast_ref())
+  }
+
+  /// Puts `v` as the window's value of type `T` ([Ui::environment]), or clears it with `None`;
+  /// returns the one it replaces. Kept across frames, so a view may put it every frame: one
+  /// already there is replaced in place.
+  pub fn set_environment<T: 'static>(&mut self, v: Option<T>) -> Option<T> {
+    let env = &mut self.st.env;
+    let i = env.iter().position(|e| e.is::<T>());
+    match (i, v) {
+      (Some(i), Some(v)) => env[i].downcast_mut().map(|old| std::mem::replace(old, v)),
+      (Some(i), None) => env.swap_remove(i).downcast().ok().map(|old| *old),
+      (None, Some(v)) => {
+        env.push(Box::new(v));
+        None
+      }
+      (None, None) => None,
+    }
   }
 
   /// Asks the window for a content size of `w` × `h` points: a preferences window whose height
@@ -755,10 +742,11 @@ impl<'a> Ui<'a> {
     self
   }
 
-  /// The tooltips the view asked for with [Ui::help], after it: each element built. One with no
-  /// record for assistive technology gets one to carry the tip: a text as itself, any other a
-  /// group, whose children are read as ever.
-  pub(crate) fn show_helps(&mut self) {
+  /// The tooltips the view asked for with [Ui::help], after it: each element built and its tip,
+  /// for the shell to show. One with no record for assistive technology gets one to carry the
+  /// tip: a text as itself, any other a group, whose children are read as ever.
+  pub(crate) fn take_helps(&mut self) -> Vec<(Id, String)> {
+    let mut out = Vec::with_capacity(self.helps.len());
     for (i, tip) in std::mem::take(&mut self.helps) {
       let n = &self.st.tree.nodes[i as usize];
       let (id, text) = match n.kind {
@@ -773,8 +761,10 @@ impl<'a> Ui<'a> {
         }
       }
 
-      self.tooltip(id, &tip);
+      out.push((id, tip));
     }
+
+    out
   }
 
   /// Disables the next widget ([widgets]) when `yes`: dimmed, not focusable, and its clicks
@@ -1200,7 +1190,7 @@ impl<'a> Ui<'a> {
   /// Paints the laid-out tree, then keeps it as the last frame's.
   pub(crate) fn paint(mut self, f: &mut Frame) -> UiState {
     let st = &self.st;
-    let ring = st.ring.filter(|_| st.window_focused()).and_then(|r| {
+    let ring = st.own_ring.unwrap_or(st.ring).filter(|_| st.window_focused()).and_then(|r| {
       let i = st.tree.find(st.ring_on.or(st.input.focus)?)?;
       // Boxes get it, not selectable text.
       let n = &st.tree.nodes[i as usize];
@@ -1262,6 +1252,24 @@ mod tests {
     assert_eq!(ui.slot::<Menu>().map(|m| m.0), Some(1));
     ui.set_slot::<Menu>(None);
     assert!(ui.slot::<Menu>().is_none());
+  }
+
+  /// What the window shares: one value per type, kept across frames, replaced in place.
+  #[test]
+  fn the_environment_is_kept_across_frames() {
+    struct Tint(u32);
+
+    let mut ui = Ui::new(UiState::default(), Size::new(10.0, 10.0), None, Duration::ZERO);
+    assert!(ui.environment::<Tint>().is_none());
+    assert!(ui.set_environment(Some(Tint(1))).is_none());
+    assert!(ui.set_environment(Some(1u8)).is_none());
+
+    let mut ui = Ui::new(ui.finish(), Size::new(10.0, 10.0), None, Duration::ZERO);
+    assert_eq!(ui.environment::<Tint>().map(|t| t.0), Some(1));
+    assert_eq!(ui.set_environment(Some(Tint(2))).map(|t| t.0), Some(1));
+    assert_eq!(ui.set_environment::<Tint>(None).map(|t| t.0), Some(2));
+    assert!(ui.environment::<Tint>().is_none());
+    assert_eq!(ui.environment::<u8>(), Some(&1));
   }
 
   /// A delivered event is read as its own kind only: asked as another, it stays unused and

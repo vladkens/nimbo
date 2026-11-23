@@ -60,7 +60,7 @@ mod tests {
   use crate::app::App;
   use crate::harness::Harness;
   use crate::scene::Size;
-  use crate::ui::{Id, Ui};
+  use crate::ui::{Id, Theme, Ui};
 
   #[derive(Default)]
   struct Boxes {
@@ -84,7 +84,7 @@ mod tests {
     assert!(h.app().on);
     h.leave();
     h.wait(std::time::Duration::from_millis(300));
-    let accent = h.rt.ui.theme.accent.map(|c| (c * 255.0).round() as u8);
+    let accent = Theme::system(h.rt.ui.appearance()).accent.map(|c| (c * 255.0).round() as u8);
     assert_eq!(h.render().pixel(x, y), accent);
 
     h.app_mut().off = true;

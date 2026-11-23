@@ -236,7 +236,7 @@ mod tests {
   use crate::harness::Harness;
   use crate::keys::Key;
   use crate::scene::Size;
-  use crate::ui::{FormRow, FormStyle, Id};
+  use crate::ui::{FormRow, FormStyle, Id, Theme};
 
   /// A pop-up the app can disable.
   #[derive(Default)]
@@ -367,7 +367,7 @@ mod tests {
     let mut h = Harness::new(Long { value, max: None }, Size::new(560.0, 200.0), 1.0);
     h.frame();
     let w = h.rect(Id::of("pick")).unwrap().w;
-    assert!(w > h.rt.ui.theme.sizes.menu_w, "{w}");
+    assert!(w > Theme::system(h.rt.ui.appearance()).sizes.menu_w, "{w}");
     assert!(h.rect(Id::of("row")).unwrap().h < 60.0, "the label on one line");
   }
 }

@@ -282,7 +282,7 @@ mod tests {
   fn sizes_and_disabled_scope_a_container() {
     let mut h = Harness::new(Scoped::default(), Size::new(300.0, 300.0), 1.0);
     h.frame();
-    let z = h.rt.ui.theme.sizes;
+    let z = Theme::system(h.rt.ui.appearance()).sizes;
     let height = |n: &str| h.rect(Id::of(n)).unwrap().h;
     let large = z.control_h + 8.0;
     let hs = [height("small"), height("large"), height("inner"), height("regular")];

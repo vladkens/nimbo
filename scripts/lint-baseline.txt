@@ -2,10 +2,6 @@
 # to that many pass; a line that allows more than is found, or more than the base branch's did,
 # fails, so the file only shrinks: fix a finding, lower or delete its line.
 
-# The core keeps the styled layer's Theme for its focus ring, tooltips and appearance: it goes
-# into the environment, a value the styled layer sets (docs/plans/20261118-layers.md, 3).
-layer src/ui/mod.rs -> ui/theme.rs::Theme 1
-
 # The styled controls build on the core's internals (`ui.st`, crate-private calls): public
 # building blocks replace them (docs/plans/20261118-layers.md, 3).
 private src/ui/containers/toolbar.rs st 1
@@ -14,14 +10,9 @@ private src/ui/form.rs disabled_scope 1
 private src/ui/form.rs form_names 1
 private src/ui/form.rs st 9
 private src/ui/widgets/badge.rs a11y_named 1
-private src/ui/widgets/checkbox.rs controls_theme 1
 private src/ui/widgets/divider.rs st 2
 private src/ui/widgets/field.rs st 1
-private src/ui/widgets/progress.rs controls_theme 1
 private src/ui/widgets/progress.rs st 2
-private src/ui/widgets/segmented.rs controls_theme 1
-private src/ui/widgets/slider.rs controls_theme 1
-private src/ui/widgets/toggle.rs controls_theme 1
 
 # OS gates outside src/platform/: what an API offers on each OS (a pane, a path, a key) chosen in
 # the module that documents it; the features pass decides which stay (docs/plans, 5).

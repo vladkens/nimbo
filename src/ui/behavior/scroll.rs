@@ -1,19 +1,52 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! A scroll area's scrollbars' behaviour ([Ui::scroll_behavior]): overlay bars as macOS has
-//! them, shown while the content moves or the pointer comes in, then fading out; a thumb
-//! dragged, a track clicked to page. [Ui::scroll_area] draws them.
+//! The scroll area ([Ui::scroll_area]): a container scrolling its children under overlay
+//! scrollbars as macOS draws them, thin, shown while the content moves or the pointer comes in,
+//! then fading out; a thumb dragged, a track clicked to page ([Ui::scroll_behavior], for an app
+//! that draws its own); its content fading under its edges ([Ui::fade_edges]). Headless but
+//! drawn: menus and lists scroll in it, so its look is the environment's
+//! ([ScrollIndicatorStyle]), which the theme sets.
+//!
+//! ```ignore
+//! ui.fade_edges(t.bg, 24.0).scroll_area(Style::new().grow(), |ui| {
+//!   for f in &self.files { ui.label(f) }
+//! });
+//! ```
 
 use std::time::Duration;
 
 use crate::app::MouseButton;
-use crate::scene::Point;
-use crate::ui::{Axes, Id, Scroll, Transition, Ui};
+use crate::scene::{Color, Point, alpha};
+use crate::ui::{
+  Align, Axes, Float, Flow, Id, Kind, Response, Scroll, Style, Transition, Ui, UnitPoint, pct, px,
+};
 
 /// How long scrollbars stay after the content last moved or the pointer came in.
 const BAR_SHOW: Duration = Duration::from_millis(1000);
 /// A thumb's least length.
 pub(super) const MIN_THUMB: f32 = 24.0;
+
+/// How [Ui::scroll_area] draws its thumbs, an environment value ([Ui::set_environment]), as
+/// AppKit's `NSScroller.knobStyle`: their colour and fade on a track's hover. The theme's
+/// ([Ui::set_theme]); without one, [Self::LIGHT] or [Self::DARK] by the OS's appearance.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScrollIndicatorStyle {
+  pub thumb: Color,
+  pub fade: Transition,
+}
+
+impl ScrollIndicatorStyle {
+  /// The light appearance's: black thumbs.
+  pub const LIGHT: Self = Self { thumb: alpha([0.0, 0.0, 0.0, 1.0], 0.24), fade: FADE };
+  /// The dark appearance's: white thumbs.
+  pub const DARK: Self = Self { thumb: alpha([1.0; 4], 0.26), fade: FADE };
+}
+
+/// The thumbs' hover fade, the theme's ([crate::Theme::fade]).
+const FADE: Transition = Transition::smooth(6.0);
+
+/// The fade the next scroll area draws under its edges ([Ui::fade_edges]): colour and length.
+struct EdgeFade(Color, f32);
 
 /// A scroll area's scrollbars between frames.
 #[derive(Default)]
@@ -189,5 +222,273 @@ impl Ui<'_> {
     let drag = bars.drag.map(|d| d.is_some());
     *self.state::<Bars>(id) = bars;
     ScrollBehavior { bars: geos, fade, shown: until.is_some(), drag }
+  }
+
+  /// The next [Ui::scroll_area] fades its content out under its top and bottom edges, over `len`
+  /// points into `color` (the ground it sits on), as CSS's `mask-image` does: an edge fades in
+  /// as the content scrolls away from it, fully once it has moved `len`. Drawn under the
+  /// scrollbars; takes no pointer input.
+  pub fn fade_edges(&mut self, color: Color, len: f32) -> &mut Self {
+    self.set_slot(Some(EdgeFade(color, len)));
+    self
+  }
+
+  /// A container scrolling its children, with overlay scrollbars ([ScrollIndicatorStyle]).
+  /// `style` sets its size and padding, and the axes with [Style::scroll] (vertical by default),
+  /// as SwiftUI's `ScrollView`. Its id is the scroll container's ([Ui::scroll], [Ui::scroll_to]);
+  /// the thumbs are `id.key(("thumb", axis))`, the tracks `id.key(("track", axis))`, 0 for
+  /// horizontal.
+  pub fn scroll_area<R>(&mut self, style: Style, f: impl FnOnce(&mut Self) -> R) -> Response {
+    let look = match self.environment::<ScrollIndicatorStyle>() {
+      Some(&s) => s,
+      None if self.appearance().scheme.is_dark() => ScrollIndicatorStyle::DARK,
+      None => ScrollIndicatorStyle::LIGHT,
+    };
+
+    let id = self.take_id();
+    let mask = self.set_slot::<EdgeFade>(None);
+    let style = match style.scroll.is_empty() {
+      true => style.scroll(Axes::VERTICAL),
+      false => style.clip(),
+    };
+
+    let ScrollBehavior { bars, fade, shown, drag } = self.scroll_behavior(id, style.scroll);
+    // Drawn from the last frame's content and viewport: again if the layout changes them.
+    if fade > 0.0 || shown {
+      self.settle(id);
+    }
+
+    self.with_id(id).container(Flow::Column, style, |ui| {
+      f(ui);
+      // The fades over the content, under the scrollbars, out of the pointer's way: the paint
+      // pass draws them by the offset the layout settled on.
+      if let Some(EdgeFade(color, len)) = mask.filter(|_| style.scroll.at(1)) {
+        let s = Style::new().w(pct(100.0)).h(pct(100.0));
+        ui.float(Float::parent().clip()).push(Kind::Fade { color, len }, s, Flow::Row);
+      }
+
+      for (ax, g) in bars.iter().enumerate() {
+        let Some(g) = g.as_ref().filter(|_| fade > 0.0 || shown) else { continue };
+        let (thumb, track) = (id.key(("thumb", ax)), id.key(("track", ax)));
+        let on = ui.hovered(track) || drag[ax];
+        let hot = ui.animate(track.key("hot"), on as u8 as f32, look.fade);
+        let thick = 6.0 + 2.0 * hot;
+        let color = alpha(look.thumb, look.thumb[3] * (1.0 + 0.6 * hot));
+
+        let (at, s, pad) = match ax {
+          0 => {
+            let at = Float::parent()
+              .attach(UnitPoint::BOTTOM_LEADING)
+              .anchor(UnitPoint::BOTTOM_LEADING)
+              .offset(ScrollBar::INSET, 0.0);
+            let s =
+              Style::new().w(px(g.track)).h(px(ScrollBar::BREADTH)).align(Align::Start, Align::End);
+            (at, s, [0.0, 0.0, 2.0, 0.0])
+          }
+          _ => {
+            let at = Float::parent()
+              .attach(UnitPoint::TOP_TRAILING)
+              .anchor(UnitPoint::TOP_TRAILING)
+              .offset(0.0, ScrollBar::INSET);
+            let s =
+              Style::new().w(px(ScrollBar::BREADTH)).h(px(g.track)).align(Align::End, Align::Start);
+            (at, s, [0.0, 2.0, 0.0, 0.0])
+          }
+        };
+
+        let (gap, bar) = match ax {
+          0 => (Style::new().w(px(g.pos)), Style::new().w(px(g.thumb)).h(px(thick))),
+          _ => (Style::new().h(px(g.pos)), Style::new().w(px(thick)).h(px(g.thumb))),
+        };
+        // Fading out they draw but take no clicks.
+        if shown {
+          ui.with_id(track);
+        }
+
+        let flow = if ax == 0 { Flow::Row } else { Flow::Column };
+        ui.float(at.clip()).container(flow, s.pads(pad).opacity(fade), |ui| {
+          ui.el(gap);
+          if shown {
+            ui.with_id(thumb);
+          }
+
+          ui.el(bar.radius(thick / 2.0).bg(color));
+        });
+      }
+    })
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use std::time::Duration;
+
+  use crate::app::App;
+  use crate::harness::Harness;
+  use crate::scene::{Size, rgb};
+  use crate::ui::input::ScrollState;
+  use crate::ui::{Id, ScrollIndicatorStyle, Style, Ui, px};
+
+  /// A scroll area 200 high over 1000 points of content, fading into red.
+  struct Tall(f32);
+
+  impl App for Tall {
+    fn view(&mut self, ui: &mut Ui) {
+      let s = Style::new().w(px(200.0)).h(px(200.0));
+      ui.id("area").fade_edges(rgb(0xff0000), 20.0).scroll_area(s, |ui| {
+        ui.el(Style::new().w(px(200.0)).h(px(self.0)).bg(rgb(0x0000ff)));
+      });
+    }
+  }
+
+  /// 53 million points of content under a 2-point prefix, past `f32`'s whole numbers: at the
+  /// end, frames that draw the bars leave the offset exactly there.
+  #[test]
+  fn the_bars_keep_an_offset_past_f32() {
+    struct Long;
+    impl App for Long {
+      fn view(&mut self, ui: &mut Ui) {
+        ui.id("area").scroll_area(Style::new().w(px(200.0)).h(px(300.0)), |ui| {
+          ui.el(Style::new().h(px(2.0)));
+          ui.el(Style::new().h(px(52_998_000.0)));
+          ui.el(Style::new().h(px(2_000.0)));
+        });
+      }
+    }
+
+    let mut h = Harness::new(Long, Size::new(200.0, 300.0), 2.0);
+    let area = Id::of("area");
+    h.frame();
+    h.rt.ui.store.raw::<ScrollState>(area).offset[1] = 1e12;
+    h.rt.redraw();
+    for _ in 0..3 {
+      h.frame();
+    }
+
+    let end = 2.0 + 52_998_000.0 + 2_000.0 - 300.0;
+    assert_eq!(h.rt.ui.scroll_exact(area).map(|s| s.0[1]), Some(end));
+  }
+
+  /// The same content, its thumb dragged past the track's end: the offset reaches the end
+  /// exactly, not the nearest `f32`.
+  #[test]
+  fn a_thumb_dragged_past_the_end_reaches_it_exactly() {
+    struct Long;
+    impl App for Long {
+      fn view(&mut self, ui: &mut Ui) {
+        ui.id("area").scroll_area(Style::new().w(px(200.0)).h(px(300.0)), |ui| {
+          ui.el(Style::new().h(px(2.0)));
+          ui.el(Style::new().h(px(52_998_000.0)));
+          ui.el(Style::new().h(px(2_000.0)));
+        });
+      }
+    }
+
+    let mut h = Harness::new(Long, Size::new(200.0, 300.0), 2.0);
+    let area = Id::of("area");
+    h.frame();
+    h.move_to(195.0, 150.0);
+    h.wait(Duration::from_millis(300));
+
+    let thumb = h.rect(area.key(("thumb", 1usize))).expect("a thumb");
+    let (x, y) = (thumb.x + thumb.w / 2.0, thumb.y + thumb.h / 2.0);
+    h.press(x, y);
+    h.move_to(x, y + 1000.0);
+    h.frame();
+    h.release(x, y + 1000.0);
+    for _ in 0..3 {
+      h.frame();
+    }
+
+    let end = 2.0 + 52_998_000.0 + 2_000.0 - 300.0;
+    assert_eq!(h.rt.ui.scroll_exact(area).map(|s| s.0[1]), Some(end));
+  }
+
+  #[test]
+  fn edges_fade_as_the_content_scrolls_away_and_the_thumb_drags() {
+    let mut h = Harness::new(Tall(1000.0), Size::new(200.0, 200.0), 1.0);
+    let area = Id::of("area");
+
+    // At the top: no fade above, the full one below.
+    let img = h.render();
+    assert_eq!(img.pixel(100.0, 1.0), [0, 0, 255, 255]);
+    assert!(img.pixel(100.0, 199.0)[0] > 200, "{:?}", img.pixel(100.0, 199.0));
+
+    // Scrolled 10 down: half the fade above.
+    h.rt.ui.store.raw::<ScrollState>(area).offset[1] = 10.0;
+    h.rt.redraw();
+    let top = h.render().pixel(100.0, 0.0);
+    assert!(top[0] > 100 && top[0] < 150 && top[2] > 100, "{top:?}");
+
+    // The pointer in the bar's strip shows the bars; the thumb drags the content 4 points per
+    // point (800 over a track of 196 less the thumb of 40).
+    h.move_to(195.0, 100.0);
+    h.wait(Duration::from_millis(300));
+    let thumb = h.rect(area.key(("thumb", 1usize))).expect("a thumb");
+    let (x, y) = (thumb.x + thumb.w / 2.0, thumb.y + thumb.h / 2.0);
+    h.press(x, y);
+    h.move_to(x, y + 10.0);
+    h.frame();
+    let off = h.rt.ui.scroll(area).unwrap().offset.y;
+    assert!((off - (10.0 + 10.0 * 800.0 / 156.0)).abs() < 0.5, "{off}");
+    h.release(x, y + 10.0);
+
+    // A drag no frame saw held: its last move counts.
+    h.frame();
+    let thumb = h.rect(area.key(("thumb", 1usize))).unwrap();
+    let (x, y) = (thumb.x + thumb.w / 2.0, thumb.y + thumb.h / 2.0);
+    h.press(x, y);
+    h.move_to(x, y + 10.0);
+    h.release(x, y + 10.0);
+    h.frame();
+    let now = h.rt.ui.scroll(area).unwrap().offset.y;
+    assert!((now - off - 10.0 * 800.0 / 156.0).abs() < 0.5, "{off} → {now}");
+    let off = now;
+
+    // A click on the track below the thumb pages down.
+    h.click(195.0, 190.0);
+    h.frame();
+    assert!(h.rt.ui.scroll(area).unwrap().offset.y > off + 150.0);
+
+    // The pointer resting on the track keeps the bars, with no frames.
+    h.move_to(195.0, 100.0);
+    h.wait(Duration::from_millis(300));
+    assert!(h.wait(Duration::from_millis(3000)) == 0 && h.rt.due_in().is_none());
+    assert!(h.rect(area.key(("thumb", 1usize))).is_some());
+
+    // The content twice as tall: the thumb fits it in the frame that shows it.
+    h.app_mut().0 = 2000.0;
+    h.frame();
+    let thumb = h.rect(area.key(("thumb", 1usize))).unwrap();
+    assert!((thumb.h - 24.0).abs() < 0.5, "{thumb:?}");
+
+    // Left alone, the bars fade out and the frames stop.
+    h.leave();
+    h.wait(Duration::from_millis(2000));
+    assert!(h.rect(area.key(("thumb", 1usize))).is_none());
+    assert!(!h.frame());
+  }
+
+  /// The thumbs in the environment's colour, here red.
+  #[test]
+  fn the_thumbs_are_the_environments() {
+    struct Red;
+    impl App for Red {
+      fn view(&mut self, ui: &mut Ui) {
+        let red = ScrollIndicatorStyle { thumb: rgb(0xff0000), ..ScrollIndicatorStyle::LIGHT };
+        ui.set_environment(Some(red));
+        ui.id("area").scroll_area(Style::new().w(px(200.0)).h(px(200.0)), |ui| {
+          ui.el(Style::new().h(px(1000.0)));
+        });
+      }
+    }
+
+    let mut h = Harness::new(Red, Size::new(200.0, 200.0), 1.0);
+    h.frame();
+    h.move_to(195.0, 100.0);
+    h.wait(Duration::from_millis(300));
+    let thumb = h.rect(Id::of("area").key(("thumb", 1usize))).expect("a thumb");
+    let p = h.render().pixel(thumb.x + thumb.w / 2.0, thumb.y + thumb.h / 2.0);
+    assert!(p[0] > 200 && p[1] < 60 && p[2] < 60, "{p:?}");
   }
 }
