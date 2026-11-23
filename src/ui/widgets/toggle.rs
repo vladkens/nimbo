@@ -1,31 +1,16 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The switch: a pill knob sliding over a track, grey off and the accent on, in the rows' size
-//! or the large one ([crate::Sizes::switch], [crate::Sizes::switch_large]).
+//! or the large one ([crate::Sizes::switch], [crate::Sizes::switch_large]), over
+//! [Ui::toggle_behavior].
 
 use crate::scene::mix;
-use crate::ui::{
-  Align, Behavior, ControlSize, Id, Response, Role, Shadow, Style, Transition, Ui, Value, px, rigid,
-};
+use crate::ui::{Align, ControlSize, Response, Role, Shadow, Style, Transition, Ui, px, rigid};
 
 /// How fast the knob slides: across in 140 ms, eased.
 const SLIDE: Transition = Transition::smooth(1000.0 / 140.0);
 
 impl Ui<'_> {
-  /// A check box or switch over `on`, flipped by a click or Space while focused: `changed` when
-  /// it was, `on` its value after. A check box on or off to assistive technology; a switch's look
-  /// refines it.
-  pub fn toggle_behavior(&mut self, id: Id, on: &mut bool) -> Behavior {
-    let mut b = self.button_behavior(id);
-    if b.clicked {
-      *on = !*on;
-    }
-
-    (b.changed, b.on) = (b.clicked, *on);
-    self.a11y(id, Role::CheckBox).value(if *on { Value::On } else { Value::Off });
-    b
-  }
-
   /// A switch with a label, toggling `on`, as SwiftUI's `Toggle` in the `.switch` style: in the
   /// rows' size ([crate::Sizes::switch]), or the large one ([crate::Sizes::switch_large]) of a
   /// header row by a big icon at [ControlSize::Large] ([Ui::control_size]). A pill knob, as far

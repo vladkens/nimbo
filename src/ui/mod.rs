@@ -65,12 +65,15 @@ use std::num::NonZeroU8;
 use std::time::Duration;
 
 pub use a11y::{A11yNode, A11yTree, Action, Props, Role, State, Value};
-pub use behavior::{Behavior, EditMenu, Editing, FieldBehavior, FieldKind};
-pub use containers::{
-  List, ListResponse, ListStyle, MenuPlacement, Picker, Row, Selection, Split, SplitBehavior, Tabs,
-  Tag, ToolbarItemPlacement, TypeSelect,
+pub use behavior::{
+  Behavior, DialogBehavior, EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, ListBehavior,
+  ListRows, MenuPlacement, ScrollBar, ScrollBehavior, Selection, SplitBehavior, TextInput,
+  TypeSelect,
 };
-pub use dialog::{Answer, Dialog, DialogBehavior};
+pub use containers::{
+  List, ListResponse, ListStyle, Picker, Row, Split, Tabs, Tag, ToolbarItemPlacement,
+};
+pub use dialog::{Answer, Dialog};
 pub use form::{Content, FormRow, FormStyle, Glass, Section, TabItem};
 pub use id::Id;
 pub use image::ImageSource;
@@ -87,7 +90,7 @@ pub use style::{
 pub use textlayout::Edit;
 pub(crate) use textlayout::TextLayout;
 pub use theme::{ButtonLook, ButtonStyle, ControlBorder, Sizes, SwitchSize, Theme, Tone};
-pub use widgets::{Button, ButtonRole, FieldStyle, Icon, IconPaint, Slider, TextInput};
+pub use widgets::{Button, ButtonRole, Icon, IconPaint, Slider};
 
 use self::input::{Deliver, Input, ScrollState};
 use self::store::{Anim, Store};

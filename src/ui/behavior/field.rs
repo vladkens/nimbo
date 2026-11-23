@@ -1,46 +1,9 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Headless controls: what a widget does (hover, press, click, focus, keys, the value it edits)
-//! without how it looks, for an app that draws its own. Every styled widget ([super::widgets])
-//! is one of these plus drawing from the theme; the rule for a new widget is the same: its input
-//! in a `*_behavior` here, its look over the [Behavior] in the widget.
-//!
-//! ```ignore
-//! let b = ui.button_behavior(Id::of("play"));
-//! let fill = if b.pressed { DOWN } else if b.hovered { OVER } else { REST };
-//! ui.with_id(b.id).canvas(b.style(Style::new().w(px(32.0)).h(px(32.0))), move |f, r| {
-//!   f.quad(Quad::new(r, fill).radius(16.0));
-//! });
-//! if b.clicked { self.play() }
-//! ```
-//!
-//! A behaviour reads the input for its id before the element is built, as of the last frame and
-//! the input since ([super::Ui::hovered] and the like), applies it and returns a [Behavior]. The
-//! app then builds the element under that id with [Behavior::style], which makes it take focus by
-//! Tab while enabled, as AppKit's controls do, and show the pointing hand over it.
-//! [super::Ui::disabled] before the call disables it: no input is read, no hand. Hover fades are
-//! [super::Ui::hot]. What each one covers:
-//!
-//! - [Ui::button_behavior]: click, Space while focused (flashes it pressed);
-//! - [Ui::toggle_behavior] (check box, switch): a button that flips a `bool`;
-//! - [Ui::slider_behavior]: a drag along the element onto the nearest step if it has one, the
-//!   arrows move a step or a twentieth;
-//! - [Ui::pick_behavior] (tabs, segmented control, toolbar tabs): one of `n` items by a click, the
-//!   arrows step;
-//! - [Ui::shortcut_behavior]: a shortcut recorder over a global hotkey ([crate::Hotkey]);
-//! - [Ui::dialog_behavior]: a modal dialog's keys, focus trap and fade ([super::dialog]);
-//! - [Ui::split_behavior]: a divider's drag within both panes' minimums;
-//! - [Ui::menu_popup] and [Ui::menu_item_behavior]: a menu's open state, keys and items;
-//! - [Ui::pop_up_behavior]: a pop-up button, opened by a click, Space, Enter or the arrows, letters
-//!   typed choosing an option ([super::containers::TypeSelect]);
-//! - [super::List] with [super::List::unstyled] rows: selection, keys and scrolling, rows drawn by
-//!   the app from [super::Row];
-//! - [Ui::text_field_behavior] and [Ui::selectable_behavior]: text editing on the editing model
-//!   ([Editor]), drawn by [Ui::field_text] ([super::widgets]);
-//! - [Ui::search_behavior]: a single-line field's, its text cleared by a ⊗ or Escape.
-//!
-//! The widgets' and containers' behaviours live beside their looks, in [super::widgets] and
-//! [super::containers].
+//! Text editing: the behaviours of a text field and of selectable text
+//! ([Ui::text_field_behavior], [Ui::selectable_behavior]) on the editing model ([Editor]), their
+//! text drawn from them in a [FieldStyle] ([Ui::field_text]), their edit menu ([Ui::edit_menu]),
+//! and the focused field as an input method sees it ([TextInput]).
 //!
 //! A text field's behaviour keeps its editor (selection, undo, marked text) in the store under
 //! its id and writes edits back to the app's text, reporting [FieldBehavior::changed]. A
@@ -64,20 +27,21 @@
 use std::ops::Range;
 use std::time::Duration;
 
-use keyboard_types::Modifiers;
-
-use super::input::ScrollState;
-use super::textlayout::{Edit, TextLayout};
-use super::{Cursor, Focus, Id, Role, State, Style, Ui, UiState};
 use crate::app::{Ime, MouseButton};
-use crate::keys::{Command, Delete, Key, Move};
+use crate::keys::{Command, Delete, Move};
 use crate::menu::{Item, Menu};
-use crate::scene::{Point, Rect};
+use crate::scene::{Color, Point, Rect, alpha};
 use crate::t;
 use crate::text::edit::{
-  Editor, Lines, Mono, Sel, graphemes, para_range, range_from_utf16, snap, word_range,
+  Editor, Lines, Mono, Sel, graphemes, para_range, range_from_utf16, range_to_utf16, snap,
+  to_utf16, utf16_len, word_range,
 };
+use crate::ui::input::ScrollState;
 use crate::ui::textlayout::Hit;
+use crate::ui::{
+  Align, Cursor, Edit, Focus, Id, Role, Style, TextLayout, TextLines, TextStyle, Tree, Ui, UiState,
+  grow,
+};
 
 /// The caret shows this long after it moves, then hides as long, and so on.
 const BLINK: Duration = Duration::from_millis(500);
@@ -86,112 +50,7 @@ const AUTOSCROLL: Duration = Duration::from_millis(16);
 /// How far past the element's edge a drag reaches per frame, sideways.
 const AUTOSCROLL_X: f32 = 16.0;
 /// What a password shows for each character.
-pub(crate) const DOT: &str = "•";
-
-/// What a control got this frame, read before it is built; see the module's docs.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Behavior {
-  pub id: Id,
-  /// Disabled by [Ui::disabled]: no input was read and the rest is false.
-  pub disabled: bool,
-  pub hovered: bool,
-  /// A button held on it with the pointer over it, or Space flashing it.
-  pub pressed: bool,
-  /// A button went down on it and is held, wherever the pointer is (drags).
-  pub held: bool,
-  /// Focused in the key window: when to draw a focus ring of its own.
-  pub focused: bool,
-  /// Clicked with the left button, or activated by Space.
-  pub clicked: bool,
-  /// The value it edits changed, written back already.
-  pub changed: bool,
-  /// Chosen or highlighted: the selected tab, a menu's highlighted item.
-  pub on: bool,
-}
-
-impl Behavior {
-  /// The control's box: takes focus by Tab and shows the pointing hand while enabled; disabled,
-  /// neither, whatever `s` asked for, so Tab passes it by.
-  pub const fn style(&self, s: Style) -> Style {
-    match self.disabled {
-      true => Style { focus: Focus::None, cursor: Cursor::Inherit, ..s },
-      false => s.tab_focusable().cursor(Cursor::Pointer),
-    }
-  }
-
-  /// A part of a control that doesn't take focus itself (a tab, a menu's item): the pointing
-  /// hand while enabled.
-  pub const fn pointer(&self, s: Style) -> Style {
-    if self.disabled { s } else { s.cursor(Cursor::Pointer) }
-  }
-}
-
-impl Ui<'_> {
-  /// Whether Space was pressed on `id` (focused), which flashes it pressed; another key goes on
-  /// unused, Space with Cmd, Ctrl or Alt too (Alt-Space opens the window menu on Windows). A
-  /// key something built before used (a dialog around it) stays used.
-  pub(super) fn activated(&mut self, id: Id) -> bool {
-    match self.key_unused(id) {
-      Some(k) if k.key == Key::Char(' ') && (k.mods - Modifiers::SHIFT).is_empty() => {
-        self.flash(id);
-        true
-      }
-      Some(_) => {
-        self.pass(id);
-        false
-      }
-      None => false,
-    }
-  }
-
-  /// The disabled flag and autofocus for `id`, recorded for assistive technology as `role`
-  /// ([Ui::a11y]); a disabled behaviour, or `None` to read input. Disabled while focused, it
-  /// gives focus up: its keys no longer route through it.
-  pub(super) fn begin(&mut self, id: Id, role: Role) -> Option<Behavior> {
-    // Autofocus reads the disabled flag, so before it is taken.
-    self.take_autofocus(id);
-    let off = self.take_disabled();
-    self.a11y(id, role).state(State::Disabled, off);
-    if off && self.focused(id) {
-      self.focus(None);
-    }
-
-    off.then_some(Behavior { id, disabled: true, ..Behavior::default() })
-  }
-
-  /// Pointer state of `id`, without keys.
-  pub(super) fn pointer_state(&self, id: Id) -> Behavior {
-    Behavior {
-      id,
-      hovered: self.hovered(id),
-      pressed: self.pressed(id),
-      held: self.held(id),
-      focused: self.focus_visible(id),
-      clicked: self.clicked(id),
-      ..Behavior::default()
-    }
-  }
-
-  /// Gives `id` the key presses while it has focus before any binding of its own, of its
-  /// ancestors or of the app ([crate::keys] has the order), this frame: a shortcut recorder
-  /// recording, a modal dialog. A key it doesn't use goes on as usual.
-  pub fn grab_keys(&mut self, id: Id) {
-    self.st.grab = Some(id);
-  }
-
-  /// A button: hover, press, and a click or Space while focused.
-  pub fn button_behavior(&mut self, id: Id) -> Behavior {
-    if let Some(b) = self.begin(id, Role::Button) {
-      return b;
-    }
-
-    let mut b = self.pointer_state(id);
-    b.clicked |= self.activated(id);
-    b
-  }
-}
-
-// MARK: Text
+const DOT: &str = "•";
 
 /// What a text field takes, as SwiftUI's `TextField`, `TextField(axis: .vertical)` and
 /// `SecureField`.
@@ -229,7 +88,7 @@ impl FieldState {
 
 /// A field's or selectable text's state in the store, under its id.
 #[derive(Default)]
-pub(crate) struct FieldState {
+pub(super) struct FieldState {
   pub ed: Editor,
   /// The text element: the field's inner one, or the selectable text itself.
   pub text_id: Id,
@@ -263,7 +122,7 @@ impl FieldState {
   /// Clears the text as one edit that undoes, a composition dropped first, and the app's
   /// `text` with it, at `now`: the caret shows and scrolls into view. A search field's ⊗ and
   /// Escape.
-  pub(crate) fn clear(&mut self, text: &mut String, now: Duration) {
+  pub(super) fn clear(&mut self, text: &mut String, now: Duration) {
     self.ed.discard_marked();
     if !self.ed.text().is_empty() {
       self.ed.replace(0..self.ed.text().len(), "");
@@ -597,7 +456,7 @@ impl Ui<'_> {
 impl Ui<'_> {
   /// Gives the next element the text element's id: named (taking the pointer) for selectable
   /// text, not in a field, whose box takes it.
-  pub(crate) fn text_id(&mut self, b: &FieldBehavior) -> &mut Self {
+  fn text_id(&mut self, b: &FieldBehavior) -> &mut Self {
     self.next_id = Some((b.text_id, b.text_id == b.id));
     self
   }
@@ -730,7 +589,7 @@ fn drag(
 
 /// The part of element `id` of the last tree that shows, inside the clips of its ancestors (a
 /// scrolled page): where a drag past the edges scrolls.
-fn visible(t: &super::Tree, id: Id) -> Option<Rect> {
+fn visible(t: &Tree, id: Id) -> Option<Rect> {
   let mut i = t.find(id)? as usize;
   let n = &t.nodes[i];
   let mut r = n.style.clip_rect(n.rect).unwrap_or(n.rect);
@@ -873,147 +732,213 @@ fn drag_to(st: &mut FieldState, lay: &TextLayout, p: Point) {
   st.ed.select(sel);
 }
 
+// MARK: Look
+
+impl Ui<'_> {
+  /// The edit menu of a field or selectable text over its behaviour `b`, at the secondary click
+  /// that opened it ([FieldBehavior::menu]): [EditMenu::items] as `b.id.key("edit")`'s context
+  /// menu ([Ui::context_menu_at]), the native one or drawn in the theme's look; the one chosen
+  /// runs in the field ([Ui::field_command]).
+  pub fn edit_menu(&mut self, b: &FieldBehavior) {
+    let (id, m) = (b.id.key("edit"), b.menu);
+    // Disabled while open, a drawn one closes.
+    let off = b.disabled && !self.native_menus() && self.menu_open(id);
+    let chosen = self.context_menu_at(id, m.at.or(off.then(Point::default)), || m.items());
+    self.state::<FieldState>(b.id).menu_open = self.menu_open(id);
+    if let Some(cmd) = chosen {
+      self.field_command(b.id, cmd);
+    }
+  }
+
+  /// The text element of a field or selectable text, as its behaviour `b` has it: the text (a
+  /// dot per character for a password), or the hint while it is empty, with the selection in
+  /// `style.selection` (half as strong without focus in selectable text, none in a field), the
+  /// caret and the marked text's underline. `node` styles the element itself.
+  pub fn field_text(&mut self, b: &FieldBehavior, style: &FieldStyle, node: Style) {
+    let st = std::mem::take(self.st.store.raw::<FieldState>(b.id));
+    let mut e = b.edit;
+    e.caret_color = style.caret;
+    e.sel_color = match (b.focused, st.editable()) {
+      _ if b.disabled => [0.0; 4],
+      (true, _) => style.selection,
+      (false, false) => alpha(style.selection, style.selection[3] * 0.5),
+      (false, true) => [0.0; 4],
+    };
+
+    let s = st.ed.text();
+    let (ts, empty) = (style.text, s.is_empty() && !style.hint.is_empty());
+    match (empty, st.secure()) {
+      (true, _) => {
+        e.placeholder = true;
+        let ts = ts.color(style.placeholder);
+        self.text_id(b).edit_text(style.hint, ts, e, node);
+      }
+      (false, true) => {
+        let dots = DOT.repeat(graphemes(s).count());
+        self.text_id(b).edit_text(&dots, ts, e, node);
+      }
+      (false, false) => _ = self.text_id(b).edit_text(s, ts, e, node),
+    }
+
+    *self.st.store.raw::<FieldState>(b.id) = st;
+  }
+}
+
+// MARK: Input methods
+
+/// The focused text field as an input method sees it: ranges are UTF-16 offsets of its text
+/// (the marked text included), rects are in the window, in points.
+pub struct TextInput<'a> {
+  ed: &'a Editor,
+  /// The last frame's layout of its text, when it shows the text as it is.
+  lay: Option<TextLayout<'a>>,
+}
+
+impl TextInput<'_> {
+  pub fn text(&self) -> &str {
+    self.ed.text()
+  }
+
+  /// The length in UTF-16 code units.
+  pub fn len(&self) -> usize {
+    utf16_len(self.ed.text())
+  }
+
+  pub fn is_empty(&self) -> bool {
+    self.ed.text().is_empty()
+  }
+
+  pub fn marked(&self) -> Option<Range<usize>> {
+    self.ed.marked().map(|r| range_to_utf16(self.ed.text(), r))
+  }
+
+  pub fn selected(&self) -> Range<usize> {
+    range_to_utf16(self.ed.text(), self.ed.sel().range())
+  }
+
+  /// The text of `r`, clamped to the text, and the range it took.
+  pub fn substring(&self, r: Range<usize>) -> (String, Range<usize>) {
+    let s = self.ed.text();
+    let b = range_from_utf16(s, r.start.min(r.end)..r.end);
+    (s[b.clone()].to_owned(), range_to_utf16(s, b))
+  }
+
+  /// Where `r` is on its first line, and the part of it there: the caret's rect when it is
+  /// empty. `None` before the field is laid out with its text.
+  pub fn rect(&self, r: Range<usize>) -> Option<(Rect, Range<usize>)> {
+    let (s, lay) = (self.ed.text(), self.lay.as_ref()?);
+    let b = range_from_utf16(s, r.start.min(r.end)..r.end);
+    let k = lay.line_of(b.start);
+    let end = b.end.min(lay.range(k).end).max(b.start);
+    let (x0, x1) = (lay.x_in(k, b.start), lay.x_in(k, end));
+    let y = lay.rect.y + k as f32 * lay.line_h;
+    let rect = Rect::new(lay.rect.x + x0, y, x1 - x0, lay.line_h);
+    Some((rect, range_to_utf16(s, b.start..end)))
+  }
+
+  /// The caret's rect, or the start of the marked text while composing: where the candidate
+  /// window goes, under it.
+  pub fn caret_rect(&self) -> Option<Rect> {
+    let r = self.marked().unwrap_or_else(|| self.selected());
+    self.rect(r.start..r.start).map(|(rect, _)| rect)
+  }
+
+  /// The offset nearest to `p` in the window.
+  pub fn index(&self, p: Point) -> Option<usize> {
+    let lay = self.lay.as_ref()?;
+    Some(to_utf16(self.ed.text(), lay.hit(p, Hit::Nearest)))
+  }
+}
+
+impl UiState {
+  /// The focused text field for an input method; `None` unless an editable field that takes
+  /// input methods (not a password) has focus.
+  pub fn text_input(&self) -> Option<TextInput<'_>> {
+    let id = self.input.focus?;
+    let st = self.store.peek::<FieldState>(id).filter(|s| s.editable() && !s.secure())?;
+    let lay = TextLayout::of(&self.last, st.text_id).filter(|l| l.text == st.ed.text());
+    Some(TextInput { ed: &st.ed, lay })
+  }
+}
+
+/// How a text field looks: its box, text, placeholder and selection, and what it holds: one
+/// line or many, or a password. `const` builders, like [Style].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FieldStyle {
+  /// The box: size, padding, background, border, radius. A single-line field lays out as a
+  /// row, a multi-line one as a column; both scroll.
+  pub frame: Style,
+  pub text: TextStyle,
+  /// Shown, in `placeholder`, while the text is empty.
+  pub hint: &'static str,
+  pub placeholder: Color,
+  pub selection: Color,
+  pub caret: Color,
+  /// The border's colour while focused; transparent keeps the frame's.
+  pub focus_border: Color,
+  /// One line, many, or a password ([FieldStyle::kind]).
+  pub kind: FieldKind,
+}
+
+impl FieldStyle {
+  /// A single-line field growing along its parent, with `text`'s font and colour.
+  pub const fn new(text: TextStyle) -> Self {
+    Self {
+      frame: Style::new().w(grow()).pad_xy(6.0, 4.0).align(Align::Start, Align::Center),
+      text: text.nowrap(),
+      hint: "",
+      placeholder: alpha(text.color, 0.4),
+      selection: [0.25, 0.47, 0.95, 0.45],
+      caret: text.color,
+      focus_border: [0.0; 4],
+      kind: FieldKind::SingleLine,
+    }
+  }
+
+  pub const fn frame(self, frame: Style) -> Self {
+    Self { frame, ..self }
+  }
+
+  /// A field of `kind`: a multi-line one wraps its text, the others keep one line.
+  pub const fn kind(self, kind: FieldKind) -> Self {
+    let lines = if let FieldKind::MultiLine = kind { TextLines::Wrap } else { TextLines::NoWrap };
+    Self { text: TextStyle { lines, ..self.text }, kind, ..self }
+  }
+
+  pub const fn hint(self, hint: &'static str) -> Self {
+    Self { hint, ..self }
+  }
+
+  pub const fn placeholder(self, placeholder: Color) -> Self {
+    Self { placeholder, ..self }
+  }
+
+  pub const fn selection(self, selection: Color) -> Self {
+    Self { selection, ..self }
+  }
+
+  pub const fn caret(self, caret: Color) -> Self {
+    Self { caret, ..self }
+  }
+
+  pub const fn focus_border(self, focus_border: Color) -> Self {
+    Self { focus_border, ..self }
+  }
+}
+
 #[cfg(test)]
 mod tests {
-  use std::time::Duration;
+  use keyboard_types::Modifiers;
 
   use super::*;
   use crate::NamedKey;
-  use crate::app::{App, Cx, Event};
+  use crate::app::App;
   use crate::harness::Harness;
-  use crate::scene::{Color, Quad, Size};
+  use crate::scene::Size;
   use crate::ui::{Theme, px};
 
   const REST: Color = [0.2, 0.2, 0.2, 1.0];
   const OVER: Color = [0.0, 0.0, 1.0, 1.0];
-  const DOWN: Color = [1.0, 0.0, 0.0, 1.0];
-
-  /// A round button the app draws itself, on the button's behaviour.
-  #[derive(Default)]
-  struct Round {
-    plays: usize,
-    off: bool,
-  }
-
-  impl App for Round {
-    fn view(&mut self, ui: &mut Ui) {
-      let b = ui.disabled(self.off).button_behavior(Id::of("play"));
-      let fill = match (b.pressed, b.hovered) {
-        (true, _) => DOWN,
-        (_, true) => OVER,
-        _ => REST,
-      };
-
-      let s = b.style(Style::new().w(px(40.0)).h(px(40.0)));
-      ui.with_id(b.id).canvas(s, move |f, r| f.quad(Quad::new(r, fill).radius(20.0)));
-      if b.clicked {
-        self.plays += 1;
-      }
-    }
-  }
-
-  #[test]
-  fn a_custom_drawn_button_on_the_behaviour() {
-    let mut h = Harness::new(Round::default(), Size::new(100.0, 100.0), 1.0);
-    let px = |h: &mut Harness<Round>| h.render().pixel(20.0, 20.0);
-    assert_eq!(px(&mut h), [51, 51, 51, 255]);
-
-    // Hovered, held, clicked: the app's colours, one play.
-    h.move_to(20.0, 20.0);
-    assert_eq!(px(&mut h), [0, 0, 255, 255]);
-    h.press(20.0, 20.0);
-    assert_eq!(px(&mut h), [255, 0, 0, 255]);
-    h.release(20.0, 20.0);
-    assert_eq!(h.app().plays, 1);
-
-    // Tab focuses it, Space plays and flashes it pressed.
-    h.leave();
-    h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!(h.focused(), Some(Id::of("play")));
-    h.key(Key::Char(' '), Modifiers::empty());
-    assert_eq!(h.app().plays, 2);
-    assert_eq!(px(&mut h), [255, 0, 0, 255]);
-
-    // Space again before the flash ends: pressed until the second one ends, then at rest.
-    h.wait(Duration::from_millis(80));
-    h.key(Key::Char(' '), Modifiers::empty());
-    h.wait(Duration::from_millis(60));
-    assert_eq!(px(&mut h), [255, 0, 0, 255]);
-    h.wait(Duration::from_millis(100));
-    assert_eq!((px(&mut h), h.app().plays), ([51, 51, 51, 255], 3));
-
-    // Alt-Space is the window menu's on Windows: it goes on unused.
-    assert!(!h.key(Key::Char(' '), Modifiers::ALT));
-    assert_eq!(h.app().plays, 3);
-
-    // Disabled while focused: focus goes, no input, and Tab passes it by.
-    h.app_mut().off = true;
-    h.rt.redraw();
-    h.frame();
-    assert_eq!(h.focused(), None);
-    h.click(20.0, 20.0);
-    assert_eq!(h.app().plays, 3);
-    h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!(h.focused(), None);
-  }
-
-  /// A button, and a timer a second away that the app sets on T.
-  struct Alarm;
-
-  impl App for Alarm {
-    fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
-      let Event::KeyDown(k) = ev else { return false };
-      if k.key != Key::Char('t') {
-        return false;
-      }
-
-      cx.after(Duration::from_secs(1));
-      true
-    }
-
-    fn view(&mut self, ui: &mut Ui) {
-      let b = ui.button_behavior(Id::of("ok"));
-      ui.with_id(b.id).el(b.style(Style::new().w(px(20.0)).h(px(20.0))));
-    }
-  }
-
-  #[test]
-  fn a_flash_keeps_the_apps_timer() {
-    let mut h = Harness::new(Alarm, Size::new(100.0, 100.0), 1.0);
-    h.frame();
-    h.key(NamedKey::Tab, Modifiers::empty());
-    h.key(Key::Char('t'), Modifiers::empty());
-    h.key(Key::Char(' '), Modifiers::empty());
-    // The flash's frame comes first, then the timer's, which it did not replace.
-    assert_eq!(h.rt.due_in(), Some(Duration::from_millis(120)));
-    h.wait(Duration::from_millis(200));
-    assert_eq!(h.rt.due_in(), Some(Duration::from_millis(800)));
-    assert!(h.wait(Duration::from_millis(800)) > 0);
-    assert!(!h.rt.needs_frame() && h.rt.due_in().is_none());
-  }
-
-  /// A disabled control whose own style asks for focus, then an enabled one.
-  struct Pair;
-
-  impl App for Pair {
-    fn view(&mut self, ui: &mut Ui) {
-      let sq = Style::new().w(px(20.0)).h(px(20.0));
-      let a = ui.disabled(true).button_behavior(Id::of("a"));
-      ui.with_id(a.id).el(a.style(sq.tab_focusable().cursor(Cursor::Pointer)));
-      let c = ui.button_behavior(Id::of("c"));
-      ui.with_id(c.id).el(c.style(sq));
-    }
-  }
-
-  #[test]
-  fn tab_passes_a_disabled_control_by_whatever_its_style() {
-    let mut h = Harness::new(Pair, Size::new(100.0, 100.0), 1.0);
-    h.frame();
-    h.move_to(10.0, 10.0);
-    assert_eq!(h.rt.cursor(), Cursor::Arrow);
-    h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!(h.focused(), Some(Id::of("c")));
-  }
 
   /// A field the app draws itself: its own box over the behaviour, the text from it.
   #[derive(Default)]

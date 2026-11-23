@@ -60,146 +60,19 @@
 //! Either, with nothing selected, goes on to the app. The row the keys moved to scrolls into view;
 //! so does [Ui::reveal_row]. Disabled ([Ui::disabled]), it takes no input or focus and dims.
 //!
-//! The list is the behaviour, its rows' fills the look: [List::unstyled] leaves the fills to
-//! the app, which draws them from [Row].
+//! The behaviour is [Ui::list_behavior] and [Ui::list_rows] (selection, keys, presses,
+//! virtualization), its rows' fills the look: [List::unstyled] leaves the fills to the app, which
+//! draws them from [Row].
 
-use std::collections::HashSet;
-use std::hash::BuildHasherDefault;
 use std::ops::Range;
 
-use keyboard_types::Modifiers;
-
-use crate::app::MouseButton;
-use crate::keys::{Binding, CMD, Command, Delete, Extent, Move, Os, Shortcut, bind};
-use crate::scene::{Frame, Point, Rect, alpha};
-use crate::text::FxHasher;
+use crate::scene::{Frame, Rect, alpha};
+pub use crate::ui::behavior::Selection;
 use crate::ui::form::Piece;
-use crate::ui::input::ScrollState;
-use crate::ui::{Align, Cursor, Focus, FormStyle, Id, Role, State, Style, Ui, grow, px};
-
-/// Rows built past each edge of the viewport.
-const OVERSCAN: usize = 2;
-
-/// Cmd-A selects every row of a multi-select list.
-const MULTI_KEYS: &[Binding] = &[bind(Shortcut::char('a').cmd(), Command::SelectAll)];
-
-type KeySet = HashSet<u64, BuildHasherDefault<FxHasher>>;
+use crate::ui::{Align, Cursor, FormStyle, Id, ListRows, Style, Ui, grow, px};
 
 /// What builds a section's header: `head(ui, section)`.
 type Head<'s> = &'s dyn Fn(&mut Ui<'_>, usize);
-
-// MARK: Selection
-
-/// The selected rows of a list, by row key. The cursor is the row keys move from (the last one
-/// pressed or moved to), the anchor where Shift extends from. Each keeps the index it was last
-/// seen at as a hint, so finding it again is one lookup unless rows moved, then a scan.
-#[derive(Clone, Debug, Default)]
-pub struct Selection {
-  keys: KeySet,
-  cursor: Option<(u64, usize)>,
-  anchor: Option<(u64, usize)>,
-}
-
-/// Row `at`'s index among `n` rows keyed by `key`: its hint, else a scan.
-fn find(at: (u64, usize), n: usize, key: &dyn Fn(usize) -> u64) -> Option<usize> {
-  if at.1 < n && key(at.1) == at.0 {
-    return Some(at.1);
-  }
-
-  (0..n).find(|&i| key(i) == at.0)
-}
-
-impl Selection {
-  pub fn contains(&self, key: u64) -> bool {
-    self.keys.contains(&key)
-  }
-
-  pub fn len(&self) -> usize {
-    self.keys.len()
-  }
-
-  pub fn is_empty(&self) -> bool {
-    self.keys.is_empty()
-  }
-
-  /// The selected keys, in no order.
-  pub fn keys(&self) -> impl Iterator<Item = u64> + '_ {
-    self.keys.iter().copied()
-  }
-
-  /// The cursor row's key.
-  pub fn cursor(&self) -> Option<u64> {
-    self.cursor.map(|c| c.0)
-  }
-
-  /// The cursor row's index among `n` rows keyed by `key`, if it is still there.
-  pub fn cursor_index(&self, n: usize, key: &dyn Fn(usize) -> u64) -> Option<usize> {
-    find(self.cursor?, n, key)
-  }
-
-  pub fn clear(&mut self) {
-    self.keys.clear();
-    (self.cursor, self.anchor) = (None, None);
-  }
-
-  /// Keeps the keys `f` keeps (rows still there after a delete or a reload), the cursor and the
-  /// anchor too while theirs is kept; `f` is asked once per key.
-  pub fn retain(&mut self, mut f: impl FnMut(u64) -> bool) {
-    // A cursor or an anchor off the selection (Cmd-click took its row out) is asked about here;
-    // one on a selected row goes with its key.
-    let off = |at: Option<(u64, usize)>| at.map(|a| a.0).filter(|k| !self.keys.contains(k));
-    let (c, a) = (off(self.cursor), off(self.anchor));
-    let keep_c = c.map(&mut f);
-    let keep_a = if a == c { keep_c } else { a.map(&mut f) };
-    self.keys.retain(|&k| f(k));
-    self.cursor = self.cursor.filter(|c| keep_c.unwrap_or_else(|| self.keys.contains(&c.0)));
-    self.anchor = self.anchor.filter(|a| keep_a.unwrap_or_else(|| self.keys.contains(&a.0)));
-  }
-
-  /// Selects only row `i`, keyed `key`, with the cursor and the anchor on it.
-  pub fn select(&mut self, key: u64, i: usize) {
-    self.keys.clear();
-    self.keys.insert(key);
-    (self.cursor, self.anchor) = (Some((key, i)), Some((key, i)));
-  }
-
-  /// Adds row `i` or takes it out (Cmd-click); the cursor and the anchor go to it.
-  pub fn toggle(&mut self, key: u64, i: usize) {
-    if !self.keys.remove(&key) {
-      self.keys.insert(key);
-    }
-
-    (self.cursor, self.anchor) = (Some((key, i)), Some((key, i)));
-  }
-
-  /// Selects the rows from the anchor to row `i` (Shift-click, Shift-arrows), in place of what
-  /// was selected; the cursor goes to `i`, the anchor stays (or starts at `i`).
-  pub fn extend(&mut self, i: usize, n: usize, key: &dyn Fn(usize) -> u64) {
-    let a = self.anchor.and_then(|a| find(a, n, key)).unwrap_or(i);
-    self.keys.clear();
-    self.keys.extend((a.min(i)..=a.max(i)).map(key));
-    self.cursor = Some((key(i), i));
-    self.anchor = Some((key(a), a));
-  }
-
-  /// What a click on row `i` of `n` rows keyed by `key` does in a multi-select [List]: Cmd
-  /// toggles it ([Self::toggle]), else Shift extends to it ([Self::extend]), else it is selected
-  /// alone ([Self::select]). A list's rows do it already; an app calls it for rows it lays out
-  /// itself, such as rows grouped under headings.
-  pub fn click(&mut self, i: usize, mods: Modifiers, n: usize, key: &dyn Fn(usize) -> u64) {
-    match (mods.contains(CMD), mods.shift()) {
-      (true, _) => self.toggle(key(i), i),
-      (_, true) => self.extend(i, n, key),
-      _ => self.select(key(i), i),
-    }
-  }
-
-  /// Selects all `n` rows, the cursor staying.
-  pub fn select_all(&mut self, n: usize, key: &dyn Fn(usize) -> u64) {
-    self.keys.clear();
-    self.keys.extend((0..n).map(key));
-  }
-}
 
 // MARK: List
 
@@ -236,48 +109,6 @@ pub struct ListResponse {
   pub focused: bool,
 }
 
-/// Where a list's rows lie from the top of its content: `n` rows `h` high, and a header `head`
-/// high above the first row of each section (`starts`, ascending, none empty), `gap` above it
-/// unless it is at the top.
-#[derive(Clone, Copy)]
-struct Spans<'s> {
-  n: usize,
-  h: f32,
-  starts: &'s [usize],
-  head: f32,
-  gap: f32,
-}
-
-impl Spans<'_> {
-  /// The headers above row `i`'s own: those of the sections that start before it.
-  fn heads(&self, i: usize) -> usize {
-    self.starts.partition_point(|&s| s < i)
-  }
-
-  /// The top of row `i`, or of its section's header when it starts one; the content's height
-  /// for `n`.
-  fn top(&self, i: usize) -> f32 {
-    i as f32 * self.h + self.above(self.heads(i))
-  }
-
-  /// The height of the first `k` headers with their gaps.
-  fn above(&self, k: usize) -> f32 {
-    let top = (self.starts.first() == Some(&0)) as usize;
-    k as f32 * self.head + k.saturating_sub(top) as f32 * self.gap
-  }
-
-  /// The row at depth `y`, or under the header there, clamped to the rows.
-  fn at(&self, y: f32) -> usize {
-    let g = self.starts.partition_point(|&s| self.top(s) <= y);
-    let (from, y) = match g {
-      0 => (0, y),
-      g => (self.starts[g - 1], y - self.starts[g - 1] as f32 * self.h - self.above(g)),
-    };
-
-    (from + (y / self.h).floor().max(0.0) as usize).min(self.n.saturating_sub(1))
-  }
-}
-
 /// A [List]'s look ([List::list_style]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ListStyle {
@@ -290,20 +121,6 @@ pub enum ListStyle {
   /// form page and the rows as a form's, unless [List::style] or [List::row_style] say otherwise.
   /// SwiftUI's `InsetGroupedListStyle` is this on iOS only; on macOS it has none.
   Grouped,
-}
-
-/// A list's state in the store, under its id.
-#[derive(Default)]
-struct ListState {
-  /// The selection, when the app doesn't hold it.
-  sel: Selection,
-  /// A row to scroll into view once the list knows its viewport.
-  reveal: Option<usize>,
-  /// The press a pass saw last ([crate::ui::Press::seq]).
-  pressed: Option<u32>,
-  /// The rows built last time, keyed as then, from index `from`: what a press can be on.
-  shown: Vec<u64>,
-  from: usize,
 }
 
 /// A virtualized list ([Ui::list] for the simple case); see the module's docs.
@@ -392,14 +209,12 @@ impl<'s> List<'s> {
   /// Builds the rows in view with `row(ui, row)` inside the list's scroll area, after applying
   /// the input since the last frame.
   pub fn show<'a>(self, ui: &mut Ui<'a>, mut f: impl FnMut(&mut Ui<'a>, Row)) -> ListResponse {
+    /// The selection, when the app doesn't hold it.
+    #[derive(Default)]
+    struct Own(Selection);
+
     let t = ui.theme();
     let id = ui.take_id();
-    // Disabled: no input, no focus, dimmed.
-    let disabled = ui.take_disabled();
-    if disabled && ui.focused(id) {
-      ui.focus(None);
-    }
-
     let List { n, h, fill, multi, look, .. } = self;
     let grouped = look == ListStyle::Grouped;
     let fs = FormStyle::plates(&t);
@@ -413,80 +228,29 @@ impl<'s> List<'s> {
     let (starts, head_h, head) = self.sections.unwrap_or((&[], 0.0, &|_, _| {}));
     // Grouped, the space between plates above each header but one at the top.
     let gap = if grouped { fs.page.gap + fs.head_pad[0] } else { 0.0 };
-    let sp = Spans { n, h, starts, head: head_h, gap };
+    let rows = ListRows { n, h, starts, head_h, gap, pad: [style.pad[0], style.pad[2]] };
     let keyf = self.key;
     let key = move |i: usize| keyf.map_or(i as u64, |k| k(i));
-    let mut st = std::mem::take(ui.state::<ListState>(id));
     let mut own = None;
     let sel = match self.sel {
       Some(s) => s,
-      None => own.insert(std::mem::take(&mut st.sel)),
+      None => own.insert(std::mem::take(&mut ui.state::<Own>(id).0)),
     };
 
+    let b = ui.list_behavior(id, rows, multi, sel, &key);
+    let (disabled, focused) = (b.disabled, b.focused);
     // Its selection in the accent while it has focus in the key window.
-    let focused = ui.focus_visible(id);
-    let mut out = ListResponse { id, focused, ..Default::default() };
-    let sc = ui.scroll(id);
-    let view_h = sc.map_or(ui.size().h, |s| s.viewport.h);
-    if n > 0 && !disabled {
-      ui.list_keys(id, &mut st, sel, &mut out, (sp, view_h, multi), &key);
-    }
-
-    if !disabled {
-      ui.list_press(id, &mut st, sel, &mut out, n, multi, &key);
-    }
-
-    // Scroll a row into view, by the last frame's viewport; the first and the last with the
-    // list's padding.
-    // Not laid out yet, it waits for the next frame, which comes at once.
-    match (st.reveal, sc) {
-      (Some(i), Some(sc)) => {
-        st.reveal = None;
-        let top = if i == 0 { 0.0 } else { style.pad[0] + sp.top(i) };
-        let end = style.pad[0] + sp.top(i + 1) + if i + 1 == n { style.pad[2] } else { 0.0 };
-        if i < n {
-          ui.reveal(id, Rect::new(sc.offset.x, top, 1.0, end - top));
-        }
-      }
-      (Some(_), None) => ui.st.animating = true,
-      _ => {}
-    }
-
     let sel_bg = match focused {
       true => t.selection,
       false => alpha(t.text, if t.scheme.is_dark() { 0.10 } else { 0.08 }),
     };
 
-    st.shown.clear();
+    // Disabled, it dims.
+    let style = b.style(style.gap(0.0));
+    let style = if disabled { style.opacity(t.disabled) } else { style };
+    let sel: &Selection = sel;
     let mut shown = 0..0;
-    if multi && !disabled {
-      ui.keymap(MULTI_KEYS);
-    }
-
-    let style = match disabled {
-      true => style.gap(0.0).opacity(t.disabled),
-      false => style.focusable_quiet().gap(0.0),
-    };
-
-    // A list of rows, the cursor's the active one.
-    let active = sel.cursor.map(|c| id.key(("row", c.0)));
-    ui.a11y(id, Role::List).state(State::Disabled, disabled).active(active);
     ui.with_id(id).scroll_area(style, |ui| {
-      // The offset after the input and the scroll area's own (a thumb drag), clamped to the
-      // content as it is now.
-      let (pad_t, pad_b) = (style.pad[0], style.pad[2]);
-      let total = sp.top(n);
-      let max = (pad_t + total + pad_b - view_h).max(0.0);
-      let off = ui.scroll_raw(id).y.clamp(0.0, max);
-      let at = |y: f32| sp.at(y - pad_t);
-      shown = match n {
-        0 => 0..0,
-        _ => at(off).saturating_sub(OVERSCAN)..(at(off + view_h) + 1 + OVERSCAN).min(n),
-      };
-      ui.el(Style::new().h(px(sp.top(shown.start))));
-      st.shown.extend(shown.clone().map(key));
-      st.from = shown.start;
-
       // A header: the rows' side padding, its content at the bottom, by its first row.
       let [_, pad_r, _, pad_l] = row.pad;
       let below = if grouped { fs.head_pad[2] } else { 4.0 };
@@ -494,22 +258,20 @@ impl<'s> List<'s> {
       let hs = hs.align(Align::Start, Align::End);
       let dim = if disabled { t.disabled } else { 1.0 };
       let mut above = false;
-      for (i, &k) in shown.clone().zip(&st.shown) {
-        let g = sp.heads(i);
-        let starts_here = starts.get(g) == Some(&i);
-        if starts_here {
-          let hs = hs.h(px(sp.above(g + 1) - sp.above(g)));
-          ui.key(("head", k)).row(hs, |ui| head(ui, g));
+
+      shown = ui.list_rows(id, rows, sel, &key, |ui, i, k| {
+        let header = rows.header(i);
+        if let Some((g, head_h)) = header {
+          ui.key(("head", k)).row(hs.h(px(head_h)), |ui| head(ui, g));
         }
 
         let rid = id.key(("row", k));
         let selected = sel.contains(k);
         let hover = ui.hot(rid, !disabled && ui.hovered(rid));
         let bg = if fill && selected { sel_bg } else { [0.0; 4] };
-
-        ui.a11y(rid, Role::Row).state(State::Selected, selected);
-        let cursor = sel.cursor.is_some_and(|c| c.0 == k);
+        let cursor = sel.cursor() == Some(k);
         let r = Row { index: i, key: k, id: rid, selected, hover, cursor, focused };
+
         // Disabled, the same id (keyed in the list) taking no input.
         let ui = match disabled {
           true => ui.key(("row", k)),
@@ -519,13 +281,13 @@ impl<'s> List<'s> {
         let s = if disabled { row.h(px(h)) } else { row.h(px(h)).cursor(Cursor::Pointer) };
         if !grouped {
           ui.row(s.bg(bg), |ui| f(ui, r));
-          continue;
+          return;
         }
 
         // A piece of its section's plate, rounded at the section's ends; the fill and the
         // hairline painted over it.
-        let first = i == 0 || starts_here;
-        let last = i + 1 == n || starts.get(sp.heads(i + 1)) == Some(&(i + 1));
+        let first = i == 0 || header.is_some();
+        let last = i + 1 == n || rows.header(i + 1).is_some();
         let corner = fs.group.radii[0];
         let (top, end) = (first as u8 as f32 * corner, last as u8 as f32 * corner);
         let radii = [top, top, end, end];
@@ -536,24 +298,15 @@ impl<'s> List<'s> {
         let paint = move |f: &mut Frame, at: Rect| piece.paint(f, at);
         ui.canvas_row(Style { radii, ..s.bg(fs.group.bg) }, paint, |ui| f(ui, r));
         above = selected;
-      }
-
-      ui.el(Style::new().h(px(total - sp.top(shown.end))));
-      // What the built rows cover, for the runtime to run the view again if the layout shows
-      // more (the ends are open when they reach the list's).
-      let lo = if shown.start == 0 { f32::NEG_INFINITY } else { pad_t + sp.top(shown.start) };
-      let hi = if shown.end == n { f32::INFINITY } else { pad_t + sp.top(shown.end) };
-      let node = ui.st.stack.last().unwrap().0;
-      ui.st.tree.partial.push((node, node, lo.into(), hi.into()));
+      });
     });
 
     if let Some(own) = own {
-      st.sel = own;
+      ui.state::<Own>(id).0 = own;
     }
 
-    *ui.state::<ListState>(id) = st;
-    out.shown = shown;
-    out
+    let (changed, pressed, activated, delete) = (b.changed, b.pressed, b.activated, b.delete);
+    ListResponse { id, changed, pressed, activated, delete, shown, focused }
   }
 }
 
@@ -569,365 +322,21 @@ impl<'a> Ui<'a> {
   ) -> ListResponse {
     List::new(count, row_h).show(self.with_id(id), |ui, r| row(ui, r.index))
   }
-
-  /// Scrolls row `i` of list `id` into view, the least that shows it, in the list's next build.
-  pub fn reveal_row(&mut self, id: Id, i: usize) {
-    self.state::<ListState>(id).reveal = Some(i);
-  }
-
-  /// A scroll container's offset as last set, before the layout clamps it.
-  fn scroll_raw(&self, id: Id) -> Point {
-    let raw = self.st.store.peek::<ScrollState>(id);
-    let raw = raw.map(|s| Point::new(s.offset[0] as f32, s.offset[1] as f32));
-    raw.or_else(|| self.scroll(id).map(|s| s.offset)).unwrap_or_default()
-  }
-
-  /// The list's keys, as commands: the cursor moves (Shift extends a multi-select), Enter
-  /// activates, Cmd-A selects all, Delete asks to delete the selection, Escape clears it; `geo` is
-  /// where the rows lie, the viewport's height and whether several rows can be selected.
-  fn list_keys(
-    &mut self,
-    id: Id,
-    st: &mut ListState,
-    sel: &mut Selection,
-    out: &mut ListResponse,
-    geo: (Spans, f32, bool),
-    key: &dyn Fn(usize) -> u64,
-  ) {
-    let (sp, view_h, multi) = geo;
-    let n = sp.n;
-    let Some(c) = self.command(id) else { return };
-    let cur = sel.cursor_index(n, key);
-    // A page: the farthest row within a viewport of the cursor's row, by the rows' own tops
-    // (under their headers), its bottom from the cursor's top going down, its top from the
-    // cursor's bottom going up; at least one row.
-    let page = |dir: isize| {
-      let c = cur.unwrap_or(0);
-      let top = |i: usize| i as f32 * sp.h + sp.above(sp.heads(i + 1));
-      let reach = view_h - sp.h;
-      match dir > 0 {
-        true => {
-          let y = top(c) + reach;
-          let i = sp.at(y);
-          let i = if top(i) > y { i.saturating_sub(1) } else { i };
-          i.max(c + 1).min(n - 1)
-        }
-        false => {
-          let y = top(c) - reach;
-          let i = sp.at(y);
-          let i = if top(i) < y { i + 1 } else { i };
-          i.min(c.saturating_sub(1))
-        }
-      }
-    };
-    let step = |d: isize| match cur {
-      Some(c) => (c as isize + d).clamp(0, n as isize - 1) as usize,
-      None if d > 0 => 0,
-      None => n - 1,
-    };
-    use Delete::*;
-    use Move::*;
-    let (to, shift) = match c {
-      Command::Move(Up, s) => (step(-1), s),
-      Command::Move(Down, s) => (step(1), s),
-      Command::Move(PageUp, s) => (page(-1), s),
-      Command::Move(PageDown, s) => (page(1), s),
-      Command::ScrollPageUp => (page(-1), Extent::Caret),
-      Command::ScrollPageDown => (page(1), Extent::Caret),
-      Command::Move(DocStart | LineStart, s) => (0, s),
-      Command::Move(DocEnd | LineEnd, s) => (n - 1, s),
-      Command::ScrollToTop => (0, Extent::Caret),
-      Command::ScrollToBottom => (n - 1, Extent::Caret),
-      Command::InsertNewline => {
-        out.activated = cur;
-        return;
-      }
-      Command::SelectAll if multi => {
-        sel.select_all(n, key);
-        out.changed = true;
-        return;
-      }
-      Command::Delete(Backward | Forward | ToLineStart) if !sel.is_empty() => {
-        out.delete = true;
-        return;
-      }
-      Command::Cancel if !sel.is_empty() => {
-        sel.clear();
-        out.changed = true;
-        return;
-      }
-      _ => {
-        self.pass(id);
-        return;
-      }
-    };
-
-    match shift == Extent::Selection && multi {
-      true => sel.extend(to, n, key),
-      false => sel.select(key(to), to),
-    }
-
-    (st.reveal, out.changed) = (Some(to), true);
-  }
-
-  /// A press on a row selects it (a click when no frame saw its press: a quick one), as the
-  /// modifiers ask; a double click activates it. A secondary one, as a context menu opens
-  /// ([Ui::context_press]), focuses the list and selects the row alone unless it is selected
-  /// (Finder's rule): the app's [Ui::context_menu] after it reads that selection.
-  #[expect(clippy::too_many_arguments, reason = "the list's state, its response and the rows")]
-  fn list_press(
-    &mut self,
-    id: Id,
-    st: &mut ListState,
-    sel: &mut Selection,
-    out: &mut ListResponse,
-    n: usize,
-    multi: bool,
-    key: &dyn Fn(usize) -> u64,
-  ) {
-    // The secondary button's press, on Windows its release (a Control-click is the Mac's).
-    let win = self.st.os == Os::Windows;
-    let press = self
-      .press()
-      .filter(|p| p.button == MouseButton::Left || p.button == MouseButton::Right && !win);
-    // A press is seen once; a click whose press no pass saw (a quick one) stands for it.
-    let both = |b| matches!(b, MouseButton::Left | MouseButton::Right);
-    let click = self.st.input.click.filter(|c| both(c.button));
-    let hit = match (press, click) {
-      (Some(p), _) if st.pressed != Some(p.seq) => Some((p.id, p.mods, p.clicks, p.button, p.seq)),
-      (None, Some(c)) if st.pressed != Some(c.seq) => {
-        Some((c.id, c.mods, c.clicks, c.button, c.seq))
-      }
-      _ => None,
-    };
-
-    st.pressed = press.map(|p| p.seq).or(click.map(|c| c.seq)).or(st.pressed);
-    let Some((on, mods, clicks, button, seq)) = hit else { return };
-    let right = button == MouseButton::Right;
-    // Its index as built, a hint that saves a scan unless the rows moved since; a press on an
-    // element in a row is the row's (text with a tooltip), unless that element is a control
-    // (focusable: a button) or, for a secondary one, has a menu of its own, as in SwiftUI.
-    let row = |on: Id| st.shown.iter().position(|&k| id.key(("row", k)) == on);
-    let (t, mut own) = (&self.st.last, false);
-    let mut up = t.find(on);
-    let at = row(on).or_else(|| {
-      loop {
-        let n = &t.nodes[up? as usize];
-        if let Some(at) = row(n.id) {
-          break Some(at);
-        }
-
-        if n.id == id || up == Some(0) {
-          break None;
-        }
-
-        own |= if right { t.menus.contains(&n.id) } else { n.style.focus != Focus::None };
-        up = Some(n.parent);
-      }
-    });
-    if own {
-      return;
-    }
-
-    let Some((k, i)) =
-      at.and_then(|at| Some((st.shown[at], find((st.shown[at], st.from + at), n, key)?)))
-    else {
-      // Off the rows (the scrollbar, the padding) the list's menu, a row's, opens none; with
-      // none of its own, its parent's does.
-      if right && self.st.last.menus.contains(&id) && self.st.last.within(on, id) {
-        self.st.menu_seq = seq;
-      }
-
-      // A plain press on its ground clears the selection, as a table view's on macOS.
-      let plain = !mods.contains(CMD) && !mods.shift();
-      if !right && plain && !sel.is_empty() && self.list_ground(on, id) {
-        sel.clear();
-        out.changed = true;
-      }
-
-      return;
-    };
-    match (right, multi) {
-      (true, _) => {
-        self.focus(Some(id));
-        if sel.contains(k) {
-          return;
-        }
-
-        sel.select(k, i);
-      }
-      (_, true) => sel.click(i, mods, n, key),
-      _ => sel.select(k, i),
-    }
-
-    (out.pressed, out.changed) = (Some(i), true);
-    if clicks == 2 && !right {
-      out.activated = Some(i);
-    }
-  }
-
-  /// Whether element `on`, off the rows, is list `id`'s ground: a header, the padding, the room
-  /// under the rows; not a control in them (a disabled one too, by its role) nor a scrollbar.
-  fn list_ground(&self, on: Id, id: Id) -> bool {
-    let t = &self.st.last;
-    if (0..2usize).any(|ax| t.within(on, id.key(("track", ax)))) {
-      return false;
-    }
-
-    let mut up = t.find(on);
-    while let Some(i) = up {
-      let n = &t.nodes[i as usize];
-      if n.id == id {
-        return true;
-      }
-
-      if i == 0 || t.a11y.role(n.id).is_some_and(Role::control) {
-        return false;
-      }
-
-      up = Some(n.parent);
-    }
-
-    false
-  }
 }
 
 #[cfg(test)]
 mod tests {
   use std::time::Duration;
 
+  use keyboard_types::Modifiers;
+
   use super::*;
   use crate::app::Event;
-  use crate::keys::CMD;
+  use crate::keys::{CMD, Os};
   use crate::scene::{Point, Size};
   use crate::ui::UiState;
+  use crate::ui::input::ScrollState;
   use crate::ui::layout::tests::Fake;
-
-  #[test]
-  fn selection_by_key_survives_moves() {
-    let rows = |v: &'static [u64]| move |i: usize| v[i];
-    let mut s = Selection::default();
-    let key = rows(&[10, 11, 12, 13, 14]);
-    s.select(12, 2);
-    assert_eq!((s.cursor(), s.cursor_index(5, &key)), (Some(12), Some(2)));
-
-    // Shift extends from the anchor, both ways, replacing the range.
-    s.extend(4, 5, &key);
-    assert_eq!(sorted(&s), [12, 13, 14]);
-    s.extend(0, 5, &key);
-    assert_eq!(sorted(&s), [10, 11, 12]);
-
-    // Cmd toggles and moves the anchor.
-    s.toggle(11, 1);
-    assert_eq!(sorted(&s), [10, 12]);
-    s.extend(3, 5, &key);
-    assert_eq!(sorted(&s), [11, 12, 13]);
-
-    // Rows inserted above: found again by key.
-    let moved = rows(&[1, 2, 10, 11, 12, 13, 14]);
-    assert_eq!(s.cursor_index(7, &moved), Some(5));
-    assert!(s.contains(13) && !s.contains(1));
-    s.select_all(7, &moved);
-    assert_eq!(s.len(), 7);
-
-    // Rows gone: their keys go, the cursor with its row; the rest stays.
-    s.retain(|k| k != 13 && k != 2);
-    assert_eq!((s.len(), s.cursor()), (5, None));
-    s.select(12, 4);
-    s.retain(|k| k != 2);
-    assert_eq!((sorted(&s), s.cursor()), (vec![12], Some(12)));
-
-    // Each key is asked once: a predicate that drops 12 and would keep it when asked again
-    // leaves no cursor on it.
-    s.select_all(7, &moved);
-    let mut asked = Vec::new();
-    s.retain(|k| {
-      asked.push(k);
-      k != 12 || asked.iter().filter(|&&a| a == 12).count() > 1
-    });
-    asked.sort_unstable();
-    assert_eq!(asked, [1, 2, 10, 11, 12, 13, 14]);
-    assert!(!s.contains(12) && s.cursor().is_none());
-
-    // A row Cmd-click took out keeps the cursor and the anchor while `f` keeps it, asked once.
-    s.select_all(7, &moved);
-    s.toggle(13, 5);
-    asked.clear();
-    s.retain(|k| {
-      asked.push(k);
-      k != 2
-    });
-    asked.sort_unstable();
-    assert_eq!(asked, [1, 2, 10, 11, 12, 13, 14]);
-    assert_eq!((s.contains(13), s.cursor()), (false, Some(13)));
-
-    s.extend(6, 7, &moved);
-    assert_eq!(sorted(&s), [13, 14]);
-    s.toggle(13, 5);
-    s.retain(|k| k != 13);
-    assert_eq!((sorted(&s), s.cursor()), (vec![14], None));
-    s.clear();
-    assert!(s.is_empty() && s.cursor().is_none());
-  }
-
-  #[test]
-  fn rows_lie_under_their_headers() {
-    // Rows 0-2 and 3-5, 10 high, under headers 5 high.
-    let sp = Spans { n: 6, h: 10.0, starts: &[0, 3], head: 5.0, gap: 0.0 };
-    let tops: Vec<f32> = (0..=6).map(|i| sp.top(i)).collect();
-    assert_eq!(tops, [0.0, 15.0, 25.0, 35.0, 50.0, 60.0, 70.0]);
-    // A header's depth is its first row's; past the end, the last row.
-    let at = [(0.0, 0), (4.9, 0), (5.0, 0), (15.0, 1), (34.9, 2), (36.0, 3), (49.9, 3)];
-    for (y, i) in at.into_iter().chain([(50.0, 4), (1e6, 5), (-3.0, 0)]) {
-      assert_eq!(sp.at(y), i, "at {y}");
-    }
-
-    // Rows before the first section have no header; with none, rows only.
-    let sp = Spans { starts: &[2], ..sp };
-    assert_eq!((sp.top(2), sp.top(3), sp.at(26.0)), (20.0, 35.0, 2));
-    let sp = Spans { starts: &[], ..sp };
-    assert_eq!((sp.top(6), sp.at(25.0)), (60.0, 2));
-    // A gap of 20 above each header but one at the top.
-    let sp = Spans { starts: &[0, 3], gap: 20.0, ..sp };
-    assert_eq!((sp.top(1), sp.top(3), sp.top(4), sp.top(6)), (15.0, 35.0, 70.0, 90.0));
-    assert_eq!((sp.at(50.0), sp.at(64.0), sp.at(75.0)), (3, 3, 4));
-    let sp = Spans { starts: &[2], ..sp };
-    assert_eq!((sp.top(2), sp.top(3), sp.at(30.0)), (20.0, 55.0, 2));
-  }
-
-  #[test]
-  fn selection_click_follows_modifiers() {
-    let key = |i: usize| [10, 11, 12, 13, 14][i];
-    let (none, shift) = (Modifiers::empty(), Modifiers::SHIFT);
-    let mut s = Selection::default();
-
-    // Shift with no anchor yet starts at the row.
-    s.click(2, shift, 5, &key);
-    assert_eq!(sorted(&s), [12]);
-
-    // A plain click selects the row alone.
-    s.select_all(5, &key);
-    s.click(2, none, 5, &key);
-    assert_eq!((sorted(&s), s.cursor()), (vec![12], Some(12)));
-
-    // Shift extends from the anchor, both ways, replacing the range.
-    s.click(4, shift, 5, &key);
-    assert_eq!(sorted(&s), [12, 13, 14]);
-    s.click(0, shift, 5, &key);
-    assert_eq!((sorted(&s), s.cursor()), (vec![10, 11, 12], Some(10)));
-
-    // Cmd toggles, out and back in, and wins over Shift.
-    s.click(1, CMD, 5, &key);
-    assert_eq!(sorted(&s), [10, 12]);
-    s.click(4, CMD | shift, 5, &key);
-    assert_eq!(sorted(&s), [10, 12, 14]);
-    s.click(4, CMD, 5, &key);
-    assert_eq!(sorted(&s), [10, 12]);
-
-    // Shift after Cmd extends from the row Cmd clicked last.
-    s.click(2, shift, 5, &key);
-    assert_eq!(sorted(&s), [12, 13, 14]);
-  }
 
   fn sorted(s: &Selection) -> Vec<u64> {
     let mut v: Vec<_> = s.keys().collect();

@@ -12,9 +12,8 @@
 //! Only the selected page is built; the others keep their state (scroll offsets, selections)
 //! by being retained ([Ui::retain]). The behaviour is [Ui::pick_behavior].
 
-use crate::keys::{Command, Move};
 use crate::scene::{Rect, alpha, mix};
-use crate::ui::{Align, Axes, Behavior, Id, Response, Role, State, Style, Ui, grow, px};
+use crate::ui::{Align, Axes, Response, Style, Ui, grow, px};
 
 /// A tab strip over pages, one shown (`sel`). Tabs are keyed by title (`id.key(("tab",
 /// title))`) and so are pages (`id.key(("page", title))`); a title seen before also takes its
@@ -100,66 +99,13 @@ impl<'s> Tabs<'s> {
   }
 }
 
-impl Ui<'_> {
-  /// A step from the arrows while `id` has focus, as the platform's commands, along x and y on
-  /// the screen: `[-1, 0]` for Left, `[1, 0]` Right, `[0, -1]` Up, `[0, 1]` Down; each caller
-  /// says which way is forward (a tab list's Down, a slider's Up). Other commands go on unused.
-  pub(crate) fn arrows(&mut self, id: Id) -> [i32; 2] {
-    match self.command(id) {
-      Some(Command::Move(Move::Left, _)) => [-1, 0],
-      Some(Command::Move(Move::Right, _)) => [1, 0],
-      Some(Command::Move(Move::Up, _)) => [0, -1],
-      Some(Command::Move(Move::Down, _)) => [0, 1],
-      Some(_) => {
-        self.pass(id);
-        [0, 0]
-      }
-      None => [0, 0],
-    }
-  }
-
-  /// One of `n` items picked by a click on `item(i)`, or by the arrows while `id` is focused
-  /// (from none, the first): tabs, a segmented control. `at` is the picked one; `changed` when
-  /// it moved. A tab list of tabs, the picked one selected, to assistive technology; a look
-  /// refines them (a segmented control's radio buttons).
-  pub fn pick_behavior(
-    &mut self,
-    id: Id,
-    n: usize,
-    item: impl Fn(usize) -> Id,
-    at: &mut Option<usize>,
-  ) -> Behavior {
-    let (off, was) = (self.begin(id, Role::TabList), *at);
-    if off.is_none() {
-      // Right and Down to the next item.
-      let [x, y] = self.arrows(id);
-      let step = x + y;
-      if step != 0 && n > 0 {
-        let i = at.map_or(0, |i| (i as i32 + step).clamp(0, n as i32 - 1));
-        *at = Some(i as usize);
-      }
-
-      for i in 0..n {
-        if self.clicked(item(i)) {
-          *at = Some(i);
-        }
-      }
-    }
-
-    for i in 0..n {
-      self.a11y(item(i), Role::Tab).state(State::Selected, *at == Some(i));
-    }
-
-    off.unwrap_or_else(|| Behavior { changed: *at != was, ..self.pointer_state(id) })
-  }
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
   use crate::app::App;
   use crate::harness::Harness;
   use crate::scene::Size;
+  use crate::ui::Id;
   use crate::ui::input::ScrollState;
 
   /// Two tabs of the same title, each page a scroll area.

@@ -10,67 +10,18 @@
 //! A click on the ⊗ (`id.key("clear")`) clears the text and focuses the field, ready for the
 //! next search; Escape clears it too, before the app's bindings, and goes on to them only when
 //! the field is empty already, so an Escape that cleared it doesn't also close a dialog. While
-//! an input method composes, Escape is the input method's.
-
-use keyboard_types::NamedKey;
+//! an input method composes, Escape is the input method's. The behaviour is
+//! [Ui::search_behavior].
 
 use super::icon::{self, Icon};
-use crate::app::MouseButton;
-use crate::keys::Key;
 use crate::scene::mix;
-use crate::ui::behavior::FieldState;
-use crate::ui::{
-  Align, Cursor, FieldBehavior, FieldKind, FieldStyle, Float, Id, Response, Role, Style, Ui, grow,
-  px,
-};
+use crate::ui::{Align, Cursor, FieldStyle, Float, Response, Role, Style, Ui, grow, px};
 
 /// The ⊗'s side, and how far in it is from the field's right edge.
 const MARK: f32 = 14.0;
 const INSET: f32 = 8.0;
 
 impl Ui<'_> {
-  /// A search field's input: [Ui::text_field_behavior]'s on one line, and a click on
-  /// `id.key("clear")` (the ⊗ a look draws while there is text) or Escape clears the text,
-  /// `changed`, an input method's composition with it, as one edit that undoes. The ⊗ (a press
-  /// of the left button on it) focuses the field; Escape is the
-  /// field's before any binding while there is text and nothing composing, else it goes on.
-  pub fn search_behavior(&mut self, id: Id, text: &mut String) -> FieldBehavior {
-    let off = self.next_disabled || self.scope_off;
-    let x = id.key("clear");
-    // The ⊗ is the field's: a press on it leaves the focus there, or brings it.
-    if !off && self.press().is_some_and(|p| p.id == x && p.button == MouseButton::Left) {
-      self.focus(Some(id));
-    }
-
-    // A click on the ⊗ clears what it was shown over, whatever the app set since.
-    let had = !text.is_empty();
-    let mut cleared = !off && self.clicked(x);
-    if cleared {
-      self.focus(Some(id));
-    }
-
-    if let Some(k) = self.key_down(id) {
-      let composing = self.state::<FieldState>(id).ed.marked().is_some();
-      match k.key == Key::Named(NamedKey::Escape) && k.mods.is_empty() {
-        true if had && !composing => cleared = true,
-        _ => self.pass(id),
-      }
-    }
-
-    if cleared {
-      let now = self.now;
-      self.state::<FieldState>(id).clear(text, now);
-    }
-
-    let mut b = self.text_field_behavior(id, text, FieldKind::SingleLine);
-    if b.focused && !text.is_empty() {
-      self.grab_keys(id);
-    }
-
-    b.changed |= cleared && had;
-    b
-  }
-
   /// A search field over `text` ([Ui::search_behavior]) in `style`'s look, as SwiftUI's
   /// `.searchable` field: its box with a magnifier at the left in the muted colour and, while
   /// there is text, a ⊗ at the right (darker under the pointer), the text kept clear of it; its

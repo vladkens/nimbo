@@ -757,7 +757,7 @@ PLACES = {
     "event.rs": "ui",
     "window.rs": "ui",
     "ui": "ui",
-    "ui/behavior.rs": "headless",
+    "ui/behavior": "headless",
     **{f"ui/{x}": "styled" for x in ("containers", "dialog.rs", "form.rs", "theme.rs", "widgets")},
     **{x: "shell" for x in ("app.rs", "shell.rs", "tray", "platform")},
     "harness.rs": "harness",

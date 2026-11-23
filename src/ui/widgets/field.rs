@@ -2,7 +2,8 @@
 
 //! Text fields and selectable text: the text behaviours ([Ui::text_field_behavior],
 //! [Ui::selectable_behavior]) in a box drawn from a [FieldStyle], the theme's by default
-//! ([crate::ui::Theme::field]).
+//! ([crate::ui::Theme::field]); the text in it is [Ui::field_text]'s, the edit menu
+//! [Ui::edit_menu]'s.
 //!
 //! ```ignore
 //! let r = ui.id("name").field(&mut self.name, "Your name");
@@ -20,19 +21,10 @@
 //! ([SELECT_KEYS]) and shows no ring, its selection dimmed while it has no focus. A right-click
 //! opens the edit menu at the pointer ([Ui::edit_menu]): Cut, Copy, Paste and Select All, or
 //! Copy and Select All in selectable text, the platform's own menu in a window. The focused
-//! field is what input methods ask about ([TextInput]).
-
-use std::ops::Range;
+//! field is what input methods ask about ([crate::ui::TextInput]).
 
 use crate::keys::{EDIT_KEYS, SELECT_KEYS};
-use crate::scene::{Color, Point, Rect, alpha};
-use crate::text::edit::{Editor, graphemes, range_from_utf16, range_to_utf16, to_utf16, utf16_len};
-use crate::ui::behavior::{DOT, FieldKind, FieldState};
-use crate::ui::textlayout::Hit;
-use crate::ui::{
-  Align, Axes, FieldBehavior, Flow, Response, Style, TextLayout, TextLines, TextStyle, Ui, UiState,
-  grow,
-};
+use crate::ui::{Axes, FieldBehavior, FieldKind, FieldStyle, Flow, Response, Style, TextStyle, Ui};
 
 impl Ui<'_> {
   /// A text field over `text` in `style`'s look, as SwiftUI's `TextField` with a
@@ -106,196 +98,6 @@ impl Ui<'_> {
     let t = self.theme();
     let style = FieldStyle { text: TextStyle::new(t.font, t.text), ..t.field() };
     self.selectable_text(text, &style)
-  }
-
-  /// The edit menu of a field or selectable text over its behaviour `b`, at the secondary click
-  /// that opened it ([FieldBehavior::menu]): [EditMenu::items] as `b.id.key("edit")`'s context
-  /// menu ([Ui::context_menu_at]), the native one or drawn in the theme's look; the one chosen
-  /// runs in the field ([Ui::field_command]).
-  pub fn edit_menu(&mut self, b: &FieldBehavior) {
-    let (id, m) = (b.id.key("edit"), b.menu);
-    // Disabled while open, a drawn one closes.
-    let off = b.disabled && !self.native_menus() && self.menu_open(id);
-    let chosen = self.context_menu_at(id, m.at.or(off.then(Point::default)), || m.items());
-    self.state::<FieldState>(b.id).menu_open = self.menu_open(id);
-    if let Some(cmd) = chosen {
-      self.field_command(b.id, cmd);
-    }
-  }
-
-  /// The text element of a field or selectable text, as its behaviour `b` has it: the text (a
-  /// dot per character for a password), or the hint while it is empty, with the selection in
-  /// `style.selection` (half as strong without focus in selectable text, none in a field), the
-  /// caret and the marked text's underline. `node` styles the element itself.
-  pub fn field_text(&mut self, b: &FieldBehavior, style: &FieldStyle, node: Style) {
-    let st = std::mem::take(self.st.store.raw::<FieldState>(b.id));
-    let mut e = b.edit;
-    e.caret_color = style.caret;
-    e.sel_color = match (b.focused, st.editable()) {
-      _ if b.disabled => [0.0; 4],
-      (true, _) => style.selection,
-      (false, false) => alpha(style.selection, style.selection[3] * 0.5),
-      (false, true) => [0.0; 4],
-    };
-
-    let s = st.ed.text();
-    let (ts, empty) = (style.text, s.is_empty() && !style.hint.is_empty());
-    match (empty, st.secure()) {
-      (true, _) => {
-        e.placeholder = true;
-        let ts = ts.color(style.placeholder);
-        self.text_id(b).edit_text(style.hint, ts, e, node);
-      }
-      (false, true) => {
-        let dots = DOT.repeat(graphemes(s).count());
-        self.text_id(b).edit_text(&dots, ts, e, node);
-      }
-      (false, false) => _ = self.text_id(b).edit_text(s, ts, e, node),
-    }
-
-    *self.st.store.raw::<FieldState>(b.id) = st;
-  }
-}
-
-// MARK: Input methods
-
-/// The focused text field as an input method sees it: ranges are UTF-16 offsets of its text
-/// (the marked text included), rects are in the window, in points.
-pub struct TextInput<'a> {
-  ed: &'a Editor,
-  /// The last frame's layout of its text, when it shows the text as it is.
-  lay: Option<TextLayout<'a>>,
-}
-
-impl TextInput<'_> {
-  pub fn text(&self) -> &str {
-    self.ed.text()
-  }
-
-  /// The length in UTF-16 code units.
-  pub fn len(&self) -> usize {
-    utf16_len(self.ed.text())
-  }
-
-  pub fn is_empty(&self) -> bool {
-    self.ed.text().is_empty()
-  }
-
-  pub fn marked(&self) -> Option<Range<usize>> {
-    self.ed.marked().map(|r| range_to_utf16(self.ed.text(), r))
-  }
-
-  pub fn selected(&self) -> Range<usize> {
-    range_to_utf16(self.ed.text(), self.ed.sel().range())
-  }
-
-  /// The text of `r`, clamped to the text, and the range it took.
-  pub fn substring(&self, r: Range<usize>) -> (String, Range<usize>) {
-    let s = self.ed.text();
-    let b = range_from_utf16(s, r.start.min(r.end)..r.end);
-    (s[b.clone()].to_owned(), range_to_utf16(s, b))
-  }
-
-  /// Where `r` is on its first line, and the part of it there: the caret's rect when it is
-  /// empty. `None` before the field is laid out with its text.
-  pub fn rect(&self, r: Range<usize>) -> Option<(Rect, Range<usize>)> {
-    let (s, lay) = (self.ed.text(), self.lay.as_ref()?);
-    let b = range_from_utf16(s, r.start.min(r.end)..r.end);
-    let k = lay.line_of(b.start);
-    let end = b.end.min(lay.range(k).end).max(b.start);
-    let (x0, x1) = (lay.x_in(k, b.start), lay.x_in(k, end));
-    let y = lay.rect.y + k as f32 * lay.line_h;
-    let rect = Rect::new(lay.rect.x + x0, y, x1 - x0, lay.line_h);
-    Some((rect, range_to_utf16(s, b.start..end)))
-  }
-
-  /// The caret's rect, or the start of the marked text while composing: where the candidate
-  /// window goes, under it.
-  pub fn caret_rect(&self) -> Option<Rect> {
-    let r = self.marked().unwrap_or_else(|| self.selected());
-    self.rect(r.start..r.start).map(|(rect, _)| rect)
-  }
-
-  /// The offset nearest to `p` in the window.
-  pub fn index(&self, p: Point) -> Option<usize> {
-    let lay = self.lay.as_ref()?;
-    Some(to_utf16(self.ed.text(), lay.hit(p, Hit::Nearest)))
-  }
-}
-
-impl UiState {
-  /// The focused text field for an input method; `None` unless an editable field that takes
-  /// input methods (not a password) has focus.
-  pub fn text_input(&self) -> Option<TextInput<'_>> {
-    let id = self.input.focus?;
-    let st = self.store.peek::<FieldState>(id).filter(|s| s.editable() && !s.secure())?;
-    let lay = TextLayout::of(&self.last, st.text_id).filter(|l| l.text == st.ed.text());
-    Some(TextInput { ed: &st.ed, lay })
-  }
-}
-
-/// How a text field looks: its box, text, placeholder and selection, and what it holds: one
-/// line or many, or a password. `const` builders, like [Style].
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FieldStyle {
-  /// The box: size, padding, background, border, radius. A single-line field lays out as a
-  /// row, a multi-line one as a column; both scroll.
-  pub frame: Style,
-  pub text: TextStyle,
-  /// Shown, in `placeholder`, while the text is empty.
-  pub hint: &'static str,
-  pub placeholder: Color,
-  pub selection: Color,
-  pub caret: Color,
-  /// The border's colour while focused; transparent keeps the frame's.
-  pub focus_border: Color,
-  /// One line, many, or a password ([FieldStyle::kind]).
-  pub kind: FieldKind,
-}
-
-impl FieldStyle {
-  /// A single-line field growing along its parent, with `text`'s font and colour.
-  pub const fn new(text: TextStyle) -> Self {
-    Self {
-      frame: Style::new().w(grow()).pad_xy(6.0, 4.0).align(Align::Start, Align::Center),
-      text: text.nowrap(),
-      hint: "",
-      placeholder: alpha(text.color, 0.4),
-      selection: [0.25, 0.47, 0.95, 0.45],
-      caret: text.color,
-      focus_border: [0.0; 4],
-      kind: FieldKind::SingleLine,
-    }
-  }
-
-  pub const fn frame(self, frame: Style) -> Self {
-    Self { frame, ..self }
-  }
-
-  /// A field of `kind`: a multi-line one wraps its text, the others keep one line.
-  pub const fn kind(self, kind: FieldKind) -> Self {
-    let lines = if let FieldKind::MultiLine = kind { TextLines::Wrap } else { TextLines::NoWrap };
-    Self { text: TextStyle { lines, ..self.text }, kind, ..self }
-  }
-
-  pub const fn hint(self, hint: &'static str) -> Self {
-    Self { hint, ..self }
-  }
-
-  pub const fn placeholder(self, placeholder: Color) -> Self {
-    Self { placeholder, ..self }
-  }
-
-  pub const fn selection(self, selection: Color) -> Self {
-    Self { selection, ..self }
-  }
-
-  pub const fn caret(self, caret: Color) -> Self {
-    Self { caret, ..self }
-  }
-
-  pub const fn focus_border(self, focus_border: Color) -> Self {
-    Self { focus_border, ..self }
   }
 }
 

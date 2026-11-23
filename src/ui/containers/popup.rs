@@ -1,17 +1,15 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The picker: one value of a few, as SwiftUI's `Picker` in the menu style, drawn as macOS draws
-//! a pop-up button, its list a menu over the button.
+//! a pop-up button, its list a menu over the button; its input is [Ui::pop_up_behavior].
 //!
 //! ```ignore
 //! ui.id("launch").picker(&mut self.launch, &[Tag::new(Launch::Window, "Show the window"), ..]);
 //! Picker::new(&mut self.lang).option(0, "System Default").divider().options(&LANGS).show(ui);
 //! ```
 
-use crate::keys::{Command, Move};
 use crate::scene::{Color, Frame, Point, Rect, alpha, mix};
-use crate::ui::containers::menu::{MenuPlacement, TypeSelect};
-use crate::ui::{Align, Behavior, Id, Response, Role, State, Style, Ui, grow, px, rigid};
+use crate::ui::{Align, MenuPlacement, Response, Role, State, Style, Ui, grow, px, rigid};
 
 /// An option of a picker or a segmented control, as SwiftUI's `Text(label).tag(value)`:
 /// `const`, so a list of them is a constant:
@@ -227,52 +225,6 @@ impl Ui<'_> {
   pub fn picker<T: PartialEq + Copy>(&mut self, cur: &mut T, options: &[Tag<T>]) -> Response {
     Picker::new(cur).options(options).show(self)
   }
-
-  /// A pop-up button `id` over one of `n` options labelled `label(i)`, `at` the chosen one: a
-  /// button ([Ui::button_behavior]) whose `clicked` (a click, Space, Enter, Up or Down) opens or
-  /// closes its list. Letters typed while it has focus and its list is closed choose the first
-  /// option starting with them, as NSPopUpButton does ([TypeSelect]): `changed` then.
-  pub fn pop_up_behavior<'l>(
-    &mut self,
-    id: Id,
-    n: usize,
-    label: impl Fn(usize) -> &'l str,
-    at: &mut Option<usize>,
-  ) -> Behavior {
-    let mut b = self.button_behavior(id);
-    // Its value the current option's label; expanded while open ([Ui::menu_popup]).
-    if b.disabled {
-      self.a11y(id, Role::PopUpButton).text(at.map_or("", label));
-      return b;
-    }
-
-    match self.command(id) {
-      Some(Command::InsertNewline | Command::Move(Move::Up | Move::Down, _)) => {
-        self.flash(id);
-        b.clicked = true;
-      }
-      Some(_) => self.pass(id),
-      None => {}
-    }
-
-    let now = self.now();
-    let mut ts = std::mem::take(self.state::<TypeSelect>(id));
-    if let Some(s) = self.typed(id) {
-      match ts.push_str(s, now) {
-        true => {
-          if let Some(i) = ts.find(n, |i| Some(label(i))) {
-            b.changed = *at != Some(i);
-            *at = Some(i);
-          }
-        }
-        false => self.pass(id),
-      }
-    }
-
-    *self.state::<TypeSelect>(id) = ts;
-    self.a11y(id, Role::PopUpButton).text(at.map_or("", label));
-    b
-  }
 }
 
 #[cfg(test)]
@@ -284,7 +236,7 @@ mod tests {
   use crate::harness::Harness;
   use crate::keys::Key;
   use crate::scene::Size;
-  use crate::ui::{FormRow, FormStyle};
+  use crate::ui::{FormRow, FormStyle, Id};
 
   /// A pop-up the app can disable.
   #[derive(Default)]
