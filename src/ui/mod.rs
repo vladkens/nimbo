@@ -81,6 +81,7 @@ pub(crate) use input::drags_window;
 pub use input::{Click, Press, Scroll};
 pub use layout::ContentMode;
 pub(crate) use layout::{Flow, Kind, Measure, Node, Sys, Tree};
+pub use menus::NativeMenu;
 pub use store::{Ease, Transition};
 pub use style::{
   Align, Axes, Axis, Clip, ControlSize, CoordinateSpace, Cursor, Dim, Float, Focus, FocusRing,

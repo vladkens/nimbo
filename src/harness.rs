@@ -133,10 +133,17 @@ impl<A: App> Harness<A> {
     Some(asked)
   }
 
-  /// Plays a platform that shows context menus itself: they are asked for, not drawn, and
-  /// [Harness::context_menu] answers them.
+  /// Plays a platform that shows context menus itself, when `on`: they are asked for, not drawn
+  /// ([crate::Ui::native_menu]), and [Harness::context_menu] answers them. Off by default: the
+  /// harness draws them.
+  pub fn set_native_menus(&mut self, on: bool) {
+    self.rt.set_native_menus(on);
+  }
+
+  /// [Harness::set_native_menus] on, the name the apps' tests still call.
+  #[doc(hidden)]
   pub fn native_menus(&mut self) {
-    self.rt.set_native_menus(true);
+    self.set_native_menus(true);
   }
 
   /// Answers the context menu the app asked for ([crate::Ui::context_menu]) as the person

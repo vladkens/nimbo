@@ -20,7 +20,7 @@ use crate::menu::{Item, Menu};
 use crate::scene::{Point, alpha};
 pub use crate::ui::behavior::{MenuPlacement, TYPE_SELECT, TypeSelect};
 use crate::ui::containers::popup::check as check_mark;
-use crate::ui::{Align, Button, Id, Response, Role, State, Style, Ui, grow, px};
+use crate::ui::{Align, Button, Id, NativeMenu, Response, Role, State, Style, Ui, grow, px};
 
 impl Ui<'_> {
   /// A button that opens a menu of `items` ([Ui::menu_item]) under it: [Ui::menu_popup] in
@@ -65,9 +65,9 @@ impl Ui<'_> {
   /// The context menu of the element `id`, built before or after it: a secondary press on it or
   /// inside it ([Ui::context_press]) opens `menu()` at the pointer (the closure runs only then,
   /// and while a drawn one is open); returns the id of the item chosen. In a window the
-  /// platform shows its own menu (`Runtime::set_native_menus`), free to go past the
-  /// window's edges, and the answer comes in a later pass as [Event::Menu]; in the harness it is
-  /// drawn ([Ui::menu_popup] of `id` at the point): a check column, headers in secondary text,
+  /// platform shows its own menu ([Ui::native_menu]), free to go past the window's edges, and
+  /// the answer comes in a later pass as [crate::Event::Menu]; in the harness it is drawn
+  /// ([Ui::menu_popup] of `id` at the point): a check column, headers in secondary text,
   /// shortcuts at the right, destructive items red, a submenu's items under its label; each item
   /// `id.key(item.id)`.
   pub fn context_menu<A: Clone + 'static>(
@@ -87,10 +87,23 @@ impl Ui<'_> {
     at: Option<Point>,
     menu: impl FnOnce() -> Menu<A>,
   ) -> Option<A> {
-    if self.native_menus() {
-      return self.native_menu(id, at, menu);
+    // Run once, by the platform's menu or the drawn one.
+    let mut menu = Some(menu);
+    let mut build = || menu.take().map_or_else(Menu::default, |m| m());
+    match self.native_menu(id, at, &mut build) {
+      NativeMenu::Unavailable => self.drawn_context_menu(id, at, build),
+      NativeMenu::Unanswered => None,
+      NativeMenu::Answered(a) => a,
     }
+  }
 
+  /// [Ui::context_menu_at] drawn: where the platform shows none ([NativeMenu::Unavailable]).
+  pub(crate) fn drawn_context_menu<A: Clone + 'static>(
+    &mut self,
+    id: Id,
+    at: Option<Point>,
+    menu: impl FnOnce() -> Menu<A>,
+  ) -> Option<A> {
     let t = self.theme();
     let menu = (at.is_some() || self.menu_open(id)).then(|| menu().tagged());
     let (check, mut chosen) = (menu.as_ref().is_some_and(|m| checks(&m.0.items)), None);
@@ -348,7 +361,7 @@ mod tests {
     use crate::keys::Os;
     let mut h = Harness::new(Boxed::default(), Size::new(300.0, 300.0), 1.0);
     h.set_os(Os::Mac);
-    h.native_menus();
+    h.set_native_menus(true);
     h.frame();
 
     let r = h.rect(Id::of("b")).unwrap();
@@ -391,7 +404,7 @@ mod tests {
   #[test]
   fn a_native_menu_answered_while_its_element_is_gone_is_closed() {
     let mut h = Harness::new(Gone { shown: true }, Size::new(300.0, 300.0), 1.0);
-    h.native_menus();
+    h.set_native_menus(true);
     h.frame();
     h.right_click(50.0, 20.0);
     h.frame();

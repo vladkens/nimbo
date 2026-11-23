@@ -438,7 +438,7 @@ nimbo: `Dialog::new("Delete?").button("Delete", ButtonRole::Destructive).show(ui
 
 SwiftUI: `.contextMenu { Button("Copy") { … } }`
 
-nimbo: `ui.context_menu(r.id, || Menu::new(vec![Item::button(Action::Copy, "Copy")]))`
+nimbo: `ui.context_menu(r.id, || Menu::new(vec![Item::button(Action::Copy, "Copy")])); match ui.native_menu(id, at, menu) { NativeMenu::Unavailable => /* draw it */, NativeMenu::Unanswered => {}, NativeMenu::Answered(a) => … }`
 
 ![Context menu](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/context-menu.png)
 

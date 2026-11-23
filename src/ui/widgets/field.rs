@@ -25,7 +25,9 @@
 
 use crate::keys::{EDIT_KEYS, SELECT_KEYS};
 use crate::scene::Point;
-use crate::ui::{Axes, FieldBehavior, FieldKind, FieldStyle, Response, Style, TextStyle, Ui};
+use crate::ui::{
+  Axes, FieldBehavior, FieldKind, FieldStyle, NativeMenu, Response, Style, TextStyle, Ui,
+};
 
 impl Ui<'_> {
   /// A text field over `text` in `style`'s look, as SwiftUI's `TextField` with a
@@ -100,9 +102,17 @@ impl Ui<'_> {
   /// theme's look; the one chosen runs in the field ([Ui::field_command]).
   pub fn edit_menu(&mut self, b: &FieldBehavior) {
     let (id, m) = (b.id.key("edit"), b.menu);
-    // Disabled while open, a drawn one closes.
-    let off = b.disabled && !self.native_menus() && self.menu_open(id);
-    if let Some(cmd) = self.context_menu_at(id, m.at.or(off.then(Point::default)), || m.items()) {
+    let chosen = match self.native_menu(id, m.at, || m.items()) {
+      NativeMenu::Answered(cmd) => cmd,
+      NativeMenu::Unanswered => None,
+      NativeMenu::Unavailable => {
+        // Disabled while open, a drawn one closes.
+        let off = b.disabled && self.menu_open(id);
+        self.drawn_context_menu(id, m.at.or(off.then(Point::default)), || m.items())
+      }
+    };
+
+    if let Some(cmd) = chosen {
       self.field_command(b.id, cmd);
     }
   }

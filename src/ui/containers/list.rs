@@ -732,7 +732,7 @@ mod tests {
   fn a_right_click_on_a_rows_element_is_the_rows_unless_it_has_a_menu() {
     use crate::harness::Harness;
     let mut h = Harness::new(Buttons::default(), Size::new(200.0, 200.0), 1.0);
-    h.native_menus();
+    h.set_native_menus(true);
     h.frame();
     let at = |h: &Harness<Buttons>, i: usize| {
       let r = h.rect(Id::of(("b", i))).unwrap();
@@ -850,7 +850,7 @@ mod tests {
   fn a_list_with_no_menu_leaves_the_press_off_its_rows_to_its_parent() {
     use crate::harness::Harness;
     let mut h = Harness::new(Inside, Size::new(300.0, 300.0), 1.0);
-    h.native_menus();
+    h.set_native_menus(true);
     h.frame();
     h.right_click(100.0, 150.0);
     h.frame();
