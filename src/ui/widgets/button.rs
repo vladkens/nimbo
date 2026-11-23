@@ -131,9 +131,9 @@ impl Ui<'_> {
   /// An ⓘ, 16 points, muted, in the label colour while held, halfway there under the pointer
   /// where the theme hovers controls ([crate::Theme::hover_all]): with [Ui::help] on it, an
   /// explanation longer than a line, as SwiftUI's `Image(systemName: "info.circle").help(…)`.
-  /// A button by its behaviour, named "Info". A mark is there for its tip: a container's
-  /// [Ui::disabled] leaves it enabled. In a form row's label ([crate::FormRow::new]) it sits on
-  /// the middle of the label's capitals, the line keeping its height.
+  /// A button by its behaviour, named "Info". A mark is there for its tip: [Ui::disabled], on it
+  /// or on a container around, leaves it enabled. In a form row's label ([crate::FormRow::new]) it
+  /// sits on the middle of the label's capitals, the line keeping its height.
   pub fn info_button(&mut self) -> Response {
     let t = self.theme();
     self.mark_button(Icon::INFO, [t.muted, t.text])
@@ -154,7 +154,7 @@ impl Ui<'_> {
   fn mark_button(&mut self, icon: Icon, ink: [Color; 2]) -> Response {
     let t = self.theme();
     let id = self.take_id();
-    // Enabled in a disabled container: its tip reads all the same.
+    // Enabled whatever disabled it: its tip reads all the same.
     let b = self.environment(Enabled(true)).button_behavior(id);
     self.a11y(id, Role::Button).name_or(icon.name().unwrap_or_default());
 
