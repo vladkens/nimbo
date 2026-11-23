@@ -698,9 +698,9 @@ impl<'a> Ui<'a> {
   /// `false` leaves it to what is under it, named or not, so a part a widget names off its own
   /// id (`ui.with_id(id.key("box")).allows_hit_testing(false)`) has an identity, a rect and a
   /// record for assistive technology but no hover, press or click, and a click on it is its
-  /// parent's. Unlike SwiftUI's, the elements inside it keep theirs. Not for a scroll container,
-  /// a focusable element or one with [Ui::help], which take the pointer to work. `true`, the
-  /// default, changes nothing.
+  /// parent's. Unlike SwiftUI's, the elements inside it keep theirs, and a scroll container, a
+  /// focusable element and one with [Ui::help] keep the pointer, which they need to work (a
+  /// badge with a tip shows it). `true`, the default, changes nothing.
   pub fn allows_hit_testing(&mut self, yes: bool) -> &mut Self {
     self.next_no_hit = !yes;
     self
@@ -745,8 +745,9 @@ impl<'a> Ui<'a> {
   /// The tooltips this frame asked for with [Ui::help] so far: each element built with one and
   /// its tip, to show the one the pointer rests on in a design system's own look, at the end of
   /// the view. Taken: the shell shows those left after the view (nimbo's styled tooltip), so
-  /// a view that takes them draws them all. One with no record for assistive technology gets one
-  /// to carry the tip: a text as itself, any other a group, whose children are read as ever.
+  /// a view that takes them draws them all. Each tip is its element's description for assistive
+  /// technology, set here, so it is read however it is drawn; one with no record gets one to
+  /// carry it: a text as itself, any other a group, whose children are read as ever.
   pub fn take_tooltips(&mut self) -> Vec<(Id, String)> {
     let mut out = Vec::with_capacity(self.helps.len());
     for (i, tip) in std::mem::take(&mut self.helps) {
@@ -756,11 +757,12 @@ impl<'a> Ui<'a> {
         _ => (n.id, None),
       };
 
-      if self.a11y_of(id).is_none() {
-        match text {
-          Some(text) => _ = self.a11y_label(&text).a11y(id, Role::StaticText),
-          None => _ = self.a11y(id, Role::Group),
+      match (self.a11y_of(id), text) {
+        (Some(a), _) => _ = a.description(&tip),
+        (None, Some(text)) => {
+          _ = self.a11y_label(&text).a11y(id, Role::StaticText).description(&tip)
         }
+        (None, None) => _ = self.a11y(id, Role::Group).description(&tip),
       }
 
       out.push((id, tip));
@@ -1020,8 +1022,11 @@ impl<'a> Ui<'a> {
     }
 
     let (drag, help) = (std::mem::take(&mut self.next_drag), self.next_help.take());
-    let hit = style.hit || named || scrolls || focus || style.cursor != Cursor::Inherit;
-    let hit = (hit || help.is_some()) && !std::mem::take(&mut self.next_no_hit);
+    // Taken whatever the element is: the modifier is the next element's only. What needs the
+    // pointer to work, a scroll container, a focusable element, a tip, takes it anyway.
+    let off = std::mem::take(&mut self.next_no_hit);
+    let hit = style.hit || named || style.cursor != Cursor::Inherit;
+    let hit = (hit && !off) || scrolls || focus || help.is_some();
     let tree = &mut self.st.tree;
     let i = tree.nodes.len() as u32;
     self.helps.extend(help.map(|tip| (i, tip)));
@@ -1255,6 +1260,18 @@ mod tests {
       ui.grid(2, Style::new(), |ui| assert_eq!(ui.parent_axis(), None));
     });
     assert_eq!(ui.st.tree.nodes.len() - at, 4);
+  }
+
+  /// `allows_hit_testing(false)` is the next element's, whatever it is: a plain one built after
+  /// it takes input as ever.
+  #[test]
+  fn no_hit_testing_ends_with_the_next_element() {
+    let mut ui = Ui::new(UiState::default(), Size::new(10.0, 10.0), None, Duration::ZERO);
+    ui.allows_hit_testing(false).el(Style::new());
+    ui.id("b").el(Style::new());
+    let hit = |ui: &Ui, i: usize| ui.st.tree.nodes[i].style.hit;
+    let n = ui.st.tree.nodes.len();
+    assert!(!hit(&ui, n - 2) && hit(&ui, n - 1));
   }
 
   /// A part enabled in a disabled container, which is disabled again after it.

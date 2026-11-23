@@ -29,14 +29,10 @@ impl Ui<'_> {
   /// [crate::Theme::tip_delay], or at once within [crate::Theme::tip_warm] of another tooltip
   /// showing, until it leaves or a button goes down. As macOS places one: its left edge at the
   /// pointer, its top 19 below it, where the pointer was when it showed; moved into the window
-  /// near its edges. Run for each element with [Ui::help] after the view built it; the tip is
-  /// `target.key("tip")`, an overlay that doesn't take the pointer. `text` is the target's
-  /// description for assistive technology ([Ui::a11y]), shown or not.
+  /// near its edges. Run for each element [Ui::take_tooltips] hands out, which made `text` the
+  /// target's description for assistive technology; the tip is `target.key("tip")`, an overlay
+  /// that doesn't take the pointer.
   pub(crate) fn tooltip(&mut self, target: Id, text: &str) {
-    if let Some(a) = self.a11y_of(target) {
-      a.description(text);
-    }
-
     let t = self.theme();
     let tip = target.key("tip");
     let over = self.hovered(target) && self.press().is_none();
@@ -91,7 +87,7 @@ mod tests {
   use crate::app::App;
   use crate::harness::Harness;
   use crate::scene::{Frame, Rect, Size};
-  use crate::ui::{Id, LinePattern, Style, Theme, Ui, grow, px};
+  use crate::ui::{FormRow, FormStyle, Id, LinePattern, Style, Theme, Tone, Ui, grow, px};
 
   /// `help` on a button, a text, a box with a text in it and a canvas.
   struct Helped;
@@ -236,5 +232,54 @@ mod tests {
     h.frame();
     let tip = h.rect(Id::of("b").key("tip")).unwrap();
     assert!(tip.x + tip.w <= 300.0 - 4.0 + 0.5, "{tip:?}");
+  }
+
+  /// `help` on elements that take no input of their own: a badge and a form row with no
+  /// controls.
+  struct Inert;
+
+  impl App for Inert {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.help("In testing").id("beta").badge("Beta", Tone::Neutral);
+      let fs = FormStyle::plates(&ui.theme());
+      ui.help("What it is").id("row").form_row(&fs, FormRow::new("Row"), |_| {});
+    }
+  }
+
+  /// They take the pointer for their tips, as any element with one.
+  #[test]
+  fn a_badge_and_a_plain_form_row_show_their_tips() {
+    let mut h = Harness::new(Inert, Size::new(300.0, 200.0), 1.0);
+    h.frame();
+    for (name, tip) in [("beta", "In testing"), ("row", "What it is")] {
+      let r = h.rect(Id::of(name)).unwrap();
+      h.move_to(r.x + 4.0, r.y + r.h / 2.0);
+      h.wait(Duration::from_millis(400));
+      assert_eq!(h.text(Id::of(name).key("tip").nth(0)), Some(tip), "{name}");
+      h.leave();
+      h.wait(Duration::from_millis(600));
+    }
+  }
+
+  /// A view that shows the tips in a look of its own.
+  struct Own;
+
+  impl App for Own {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.help("Saves it").id("save").button("Save");
+      let t = ui.theme();
+      ui.help("Errors per 100 words").id("wer").text("WER 4.5%", t.label());
+      assert_eq!(ui.take_tooltips().len(), 2);
+    }
+  }
+
+  /// The tips it takes still describe their elements to assistive technology.
+  #[test]
+  fn taken_tips_still_describe_their_elements() {
+    let mut h = Harness::new(Own, Size::new(300.0, 200.0), 1.0);
+    h.frame();
+    let tree = h.a11y();
+    assert!(tree.contains(r#"button "Save" desc "Saves it""#), "{tree}");
+    assert!(tree.contains(r#"static text "WER 4.5%" desc "Errors per 100 words""#), "{tree}");
   }
 }

@@ -9,9 +9,9 @@
 //! one [Ui::a11y_label] gave the next record, else the label of the labeled pair it is the
 //! content of ([Ui::a11y_labeled_pair]: a form row's, its caption the description), else, for
 //! roles titled by their text (a button, a tab), the text inside it. A control with text of its
-//! own (a button's label) keeps it, or a name and a description set since, over the pair's,
-//! whose label and description are then read as they are; one whose text is its value (a
-//! shortcut recorder) is not named by it.
+//! own (a button's label) keeps it, or a name and a description set before or since, over the
+//! pair's, whose label and description are then read as they are; one whose text is its value
+//! (a shortcut recorder) is not named by it.
 //! Only the focused window's focus reads as focused. Leaf roles (a button, a field) hide the
 //! text inside them; plain text anywhere else is static text, with no record.
 //!
@@ -324,7 +324,8 @@ impl Records {
 impl Ui<'_> {
   /// Records `id` for assistive technology as `role`, or sets the role of its record this
   /// frame: a widget refining its behaviour's. A new record takes the name [Ui::a11y_label] set,
-  /// else, unnamed, the labeled pair's whose content is being built ([Ui::a11y_labeled_pair]).
+  /// else, unnamed, the labeled pair's whose content is being built ([Ui::a11y_labeled_pair]); the
+  /// pair's own id takes its name and description where it has none of its own.
   pub fn a11y(&mut self, id: Id, role: Role) -> Access<'_> {
     let recs = &mut self.st.tree.a11y;
     let found = recs.index.get(&id).copied();
@@ -338,7 +339,10 @@ impl Ui<'_> {
     if let Some(c) = pair.filter(|&c| unnamed || recs.pairs[c].id == id) {
       let pair = &mut recs.pairs[c];
       pair.k = Some(i);
-      [recs.list[i].1.name, recs.list[i].1.description] = pair.names;
+      let p = &mut recs.list[i].1;
+      for (own, names) in [&mut p.name, &mut p.description].into_iter().zip(pair.names) {
+        *own = if own.0 == own.1 { names } else { *own };
+      }
     }
 
     Access { recs, i }
@@ -382,8 +386,9 @@ impl Ui<'_> {
   /// elements are read after it. The content is the element recorded with the pair's id, else the
   /// first control recorded in it with no name of its own ([Ui::a11y]); static text reads its
   /// own. A control with text of its own (a button's label) keeps it, its label and description
-  /// then read as they are. The parts may come in any order; a pair with no content leaves its
-  /// texts read as they are.
+  /// then read as they are, and a name or a description given it on its own ([Ui::a11y_label],
+  /// [Access::name]) keeps over the pair's. The parts may come in any order; a pair with no
+  /// content leaves its texts read as they are.
   ///
   /// ```ignore
   /// ui.a11y_labeled_pair(LabeledPairRole::Label, id, |ui| ui.text("Volume", s));
@@ -409,12 +414,16 @@ impl Ui<'_> {
     let (text, ids) = self.plain_text(nodes.clone());
     let recs = &mut self.st.tree.a11y;
     let (j, span) = (usize::from(part == LabeledPairRole::Description), put(&mut recs.text, &text));
+
     let pair = &mut recs.pairs[c];
-    (pair.names[j], pair.parts[j]) = (span, nodes);
+    let was = std::mem::replace(&mut pair.names[j], span);
+    pair.parts[j] = nodes;
     pair.texts.extend(ids);
+    // Content built before it takes it, unless named or described since on its own.
     if let Some(k) = pair.k {
       let p = &mut recs.list[k].1;
-      *[&mut p.name, &mut p.description][j] = span;
+      let own = if j == 0 { &mut p.name } else { &mut p.description };
+      *own = if *own == was || own.0 == own.1 { span } else { *own };
     }
 
     r
@@ -871,6 +880,46 @@ mod tests {
       ui.a11y_labeled_pair(LabeledPairRole::Label, pair, |ui| ui.text("Volume", T));
     });
     assert_eq!(s, "static text \"New\"\nslider \"Volume\"\n");
+  }
+
+  /// A name and a description given on their own win over the pair's, whichever part comes
+  /// first: a control named since it took the pair, and the element with the pair's id named
+  /// before.
+  #[test]
+  fn an_explicit_name_wins_over_a_labeled_pair() {
+    let pair = |ui: &mut Ui, id: Id, part: LabeledPairRole, s: &str| {
+      ui.a11y_labeled_pair(part, id, |ui| ui.text(s, T));
+    };
+    let s = dump(|ui| {
+      // The content first, named after it took the pair.
+      let (a, level) = (Id::of("a"), Id::of("level"));
+      ui.a11y_labeled_pair(LabeledPairRole::Content, a, |ui| {
+        ui.a11y(level, Role::Slider);
+        ui.a11y_of(level).unwrap().name("Explicit name").description("Explicit description");
+        ui.with_id(level).el(Style::new().w(px(30.0)).h(px(16.0)));
+      });
+      pair(ui, a, LabeledPairRole::Label, "Pair label");
+      pair(ui, a, LabeledPairRole::Description, "Pair description");
+
+      // The pair's own id, named by `a11y_label`, before and after its label.
+      for (k, first) in [("b", true), ("c", false)] {
+        let b = Id::of(k);
+        if !first {
+          pair(ui, b, LabeledPairRole::Label, "Pair label");
+        }
+
+        ui.a11y_labeled_pair(LabeledPairRole::Content, b, |ui| {
+          ui.a11y_label("Explicit name").a11y(b, Role::Slider);
+          ui.with_id(b).el(Style::new().w(px(30.0)).h(px(16.0)));
+        });
+        if first {
+          pair(ui, b, LabeledPairRole::Label, "Pair label");
+        }
+      }
+    });
+    let want = "slider \"Explicit name\" desc \"Explicit description\"\nslider \"Explicit \
+                name\"\nslider \"Explicit name\"\n";
+    assert_eq!(s, want);
   }
 
   /// A form row's label and caption name its first unnamed control and aren't read again; a
