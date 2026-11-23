@@ -96,7 +96,7 @@ pub use widgets::{Button, ButtonRole, Icon, IconPaint, Slider};
 
 use self::input::{Deliver, Input, ScrollState};
 use self::store::{Anim, Store};
-use crate::app::{Appearance, Clipboard, Event, MouseButton, Waker};
+use crate::app::{Appearance, Clipboard, ColorScheme, Event, MouseButton, Waker};
 use crate::keys::{Binding, Os};
 use crate::scene::{Frame, ImageId, Images, Point, Rect, Size};
 use crate::text::{Font, Metrics, TextSystem};
@@ -526,6 +526,12 @@ impl<'a> Ui<'a> {
   /// The OS's look, for an app drawing in colours of its own: light or dark and the accent.
   pub fn appearance(&self) -> Appearance {
     self.st.appearance
+  }
+
+  /// Light or dark as the content is drawn, as SwiftUI's `colorScheme`: the environment's (a
+  /// theme the app set puts its own), else the OS's.
+  pub fn color_scheme(&self) -> ColorScheme {
+    self.environment::<ColorScheme>().copied().unwrap_or(self.st.appearance.scheme)
   }
 
   /// What the last frame cost: view, layout and paint times and the frames built so far.

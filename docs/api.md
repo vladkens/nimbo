@@ -531,3 +531,11 @@ SwiftUI: `@Environment(\.controlActiveState) var state`
 nimbo: `let t = ui.controls_theme(); ui.el(Style::new().bg(t.accent)); let grey = ui.theme().inactive().accent`
 
 ![Controls theme](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/controls-theme.png)
+
+### Color scheme
+
+SwiftUI: `@Environment(\.colorScheme) var colorScheme`
+
+nimbo: `let dark = ui.color_scheme().is_dark()`
+
+![Color scheme](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/color-scheme.png)

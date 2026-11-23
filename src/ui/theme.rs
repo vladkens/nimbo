@@ -632,18 +632,19 @@ impl Ui<'_> {
     if self.window_focused() { t } else { t.inactive() }
   }
 
-  /// Sets the theme, kept until changed, over the OS's appearance; its focus ring is the one the
-  /// shell puts after each view, unless the view sets its own ([Ui::set_focus_ring]). Scroll
-  /// areas' knobs follow the appearance, not the theme, unless the environment sets them
-  /// ([crate::ScrollerKnob]).
+  /// Sets the theme, kept until changed, over the OS's appearance, and its light or dark
+  /// ([Ui::color_scheme], which scroll areas' knobs follow); its focus ring is the one the shell
+  /// puts after each view, unless the view sets its own ([Ui::set_focus_ring]).
   pub fn set_theme(&mut self, theme: Theme) {
     self.set_environment(Some(theme));
+    self.set_environment(Some(theme.scheme));
   }
 
   /// Follows the OS's appearance again ([Theme::system]), the default: light or dark with
   /// its accent, switching when it changes.
   pub fn follow_system(&mut self) {
     self.set_environment::<Theme>(None);
+    self.set_environment::<ColorScheme>(None);
   }
 }
 
@@ -730,6 +731,8 @@ mod tests {
   struct Ringed {
     pin: Option<Theme>,
     own: Option<Option<FocusRing>>,
+    /// The colour scheme as the view last saw it.
+    scheme: Option<ColorScheme>,
   }
 
   impl App for Ringed {
@@ -742,6 +745,8 @@ mod tests {
       if let Some(r) = self.own {
         ui.set_focus_ring(r);
       }
+
+      self.scheme = Some(ui.color_scheme());
     }
   }
 
@@ -779,5 +784,23 @@ mod tests {
     assert_eq!(ring(&mut h), Some(Theme::PLATES_DARK.focus_ring()));
     h.event(Event::Appearance(Appearance::LIGHT));
     assert_eq!(ring(&mut h), Some(Theme::PLATES_LIGHT.focus_ring()));
+  }
+
+  /// A theme the app set gives its light or dark (scroll areas' knobs follow it); following the
+  /// OS again gives the OS's.
+  #[test]
+  fn the_color_scheme_is_the_themes_or_the_oss() {
+    let mut h = Harness::new(Ringed::default(), Size::new(40.0, 40.0), 1.0);
+    h.event(Event::Appearance(Appearance::LIGHT));
+    let scheme = |h: &mut Harness<Ringed>| {
+      h.rt.redraw();
+      h.frame();
+      h.app().scheme
+    };
+    assert_eq!(scheme(&mut h), Some(ColorScheme::Light));
+    h.app_mut().pin = Some(Theme::PLATES_DARK);
+    assert_eq!(scheme(&mut h), Some(ColorScheme::Dark));
+    h.app_mut().pin = None;
+    assert_eq!(scheme(&mut h), Some(ColorScheme::Light));
   }
 }

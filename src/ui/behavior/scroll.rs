@@ -5,7 +5,7 @@
 //! then fading out; a thumb dragged, a track clicked to page ([Ui::scroll_behavior], for an app
 //! that draws its own); its content fading under its edges ([Ui::fade_edges]). Headless but
 //! drawn: menus and lists scroll in it, so its knobs are the environment's ([ScrollerKnob]), by
-//! default the appearance's.
+//! default the color scheme's ([Ui::color_scheme]).
 //!
 //! ```ignore
 //! ui.fade_edges(t.bg, 24.0).scroll_area(Style::new().grow(), |ui| {
@@ -266,7 +266,7 @@ impl Ui<'_> {
   pub fn scroll_area<R>(&mut self, style: Style, f: impl FnOnce(&mut Self) -> R) -> Response {
     let knob = match self.environment::<ScrollerKnob>() {
       Some(&s) => s,
-      None if self.appearance().scheme.is_dark() => ScrollerKnob::LIGHT,
+      None if self.color_scheme().is_dark() => ScrollerKnob::LIGHT,
       None => ScrollerKnob::DARK,
     };
 

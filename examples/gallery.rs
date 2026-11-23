@@ -124,6 +124,7 @@ pub const BLOCKS: &[Block] = &[
   b("Modifiers", "Frame request", "TimelineView(.animation) { context in … }", "ui.request_frame(); let k = ui.now().as_secs_f32() % 1.0"),
   b("Modifiers", "Accessibility pair", ".accessibilityLabeledPair(role: .label, id: \"volume\", in: ns)", "ui.a11y_labeled_pair(LabeledPairRole::Label, id, |ui| ui.text(\"Volume\", s)); ui.a11y_labeled_pair(LabeledPairRole::Content, id, |ui| ui.slider(&mut v, 0.0..=1.0))"),
   b("Modifiers", "Controls theme", "@Environment(\\.controlActiveState) var state", "let t = ui.controls_theme(); ui.el(Style::new().bg(t.accent)); let grey = ui.theme().inactive().accent"),
+  b("Modifiers", "Color scheme", "@Environment(\\.colorScheme) var colorScheme", "let dark = ui.color_scheme().is_dark()"),
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -697,6 +698,12 @@ impl Gallery {
         let c = ui.controls_theme();
         ui.el(swatch(c.accent));
         ui.toggle(&mut self.on, "");
+      }),
+
+      // Light or dark as drawn: the theme's when the app set one, else the OS's.
+      "Color scheme" => Self::variants(ui, Shown::Alone, |ui| {
+        let name = if ui.color_scheme().is_dark() { "Dark" } else { "Light" };
+        ui.text(name, t.label());
       }),
 
       _ => Self::variants(ui, Shown::Plain, |ui| {
