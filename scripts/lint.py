@@ -38,10 +38,13 @@ The layer rules look at the whole crate on every run (errors):
                 then text, render, OS services, the ui core, headless behaviour, the styled
                 design system, the shell, the harness, the crate root; PLACES puts each file in
                 one); a `pub use` counts only when its file uses the name too; the platform
-                facades (FACADES) are the platform's front and may be used from any layer
-  private       a file of the styled layer reaches into the ui core's state (`.st`), implements
-                a core type, or calls a `pub(crate)` / `pub(super)` function of a lower layer,
-                which a design system outside the crate couldn't
+                facades (FACADES) are the platform's front and may be used from any layer; or
+                calls a method of `Ui` / `UiState` that only a higher layer defines, by its name
+  private       a file of the styled layer uses what a lower layer keeps to the crate, which a
+                design system outside the crate couldn't: a field (`ui.st`, `self.next_id`), a
+                type, a method or a function (a path to it or a name its `use` brings in) that
+                is not `pub` there, by its name, unless a lower layer has a `pub` one of the
+                name, the styled layer one of its own or std's types a method
   os            OS crates or `cfg(target_os)`-style gates outside src/platform/
   unplaced      a file of the crate no PLACES entry covers, or an entry no file matches
 
@@ -795,21 +798,34 @@ FACADES = {"src/platform/mod.rs"} | {
 BASELINE = "scripts/lint-baseline.txt"
 PUB_USE = re.compile(r"^\s*pub(?:\([^)]*\))?\s+use\b")
 MACRO = re.compile(r"#\[macro_export\]\s*macro_rules!\s*(\w+)")
-PRIVATE_FN = re.compile(
-    r"\bpub\((?:crate|super|in [^)]*)\)\s+(?:const\s+)?(?:unsafe\s+)?fn\s+(\w+)"
+VIS = r"(?:(pub(?:\([^)]*\))?)\s+)?"
+TYPE_DEF = re.compile(rf"^[ \t]*{VIS}(?:struct|enum|union|trait|type)\s+(\w+)", re.MULTILINE)
+FN_DEF = re.compile(
+    rf"^[ \t]*{VIS}(?:(?:const|async|unsafe|extern\s*\"\")\s+)*fn\s+(\w+)[^(]*"
+    r"\(\s*(?:&\s*(?:'\w+\s+)?)?(?:mut\s+)?(self\b)?",
+    re.MULTILINE,
 )
-PUBLIC_FN = re.compile(r"\bpub\s+(?:const\s+)?(?:unsafe\s+)?fn\s+(\w+)")
-CALL = re.compile(r"(?:\.|::)\s*(\w+)\s*(?:::<[^>]*>)?\s*\(")
-STATE = re.compile(r"\.\s*st\b(?!\s*\()")
-# Methods of std types that a private function of the crate may share a name with.
+STRUCT = re.compile(rf"^[ \t]*{VIS}struct\s+(\w+)[^;{{(]*\{{", re.MULTILINE)
+FIELD = re.compile(r"^\s*(?:#\[[^\]]*\]\s*)*(pub(?:\([^)]*\))?\s+)?(\w+)\s*:")
+# An impl or trait block, the trait it implements and its type.
+IMPL = re.compile(
+    r"^[ \t]*(?:pub(?:\([^)]*\))?\s+)?(?:unsafe\s+)?(impl|trait)\b\s*(?:<(?:[^<>]|<[^<>]*>)*>)?"
+    r"\s*([^{\n]*?\bfor\s+)?(?:\w+::)*(\w+)[^{\n]*\{",
+    re.MULTILINE,
+)
+METHOD = re.compile(r"\.\s*(\w+)\s*(?:::<[^>]*>)?\s*\(")
+# A function called by a path, or by its bare name: `::` when the path names it.
+CALL = re.compile(r"(?:(::)\s*|(?<![\w.:])(?<!fn ))(\w+)\s*(?:::<[^>]*>)?\s*\(")
+FIELD_USE = re.compile(r"\b(?:self|ui)\s*\.\s*(\w+)\b(?!\s*(?:\(|::))")
+TYPE_USE = re.compile(r"(?<![\w.])[A-Z]\w*")
+# Methods of std types that a function of the crate may share a name with.
 STD_NAMES = {"take", "get", "insert", "remove", "push", "pop", "len", "contains", "clear", "iter"}
 STD_NAMES |= {"map", "set", "replace", "new", "hash", "finish", "read", "write", "fmt", "cmp", "eq"}
+STD_NAMES |= {"open", "retain"}
 OS_CRATE = re.compile(r"\b(objc2\w*|block2|dispatch2|windows_sys)\s*::")
 OS_GATE = re.compile(
     r"\bcfg(?:_attr)?\s*!?\s*\((?:[^\];{}()]|\()*?\b(target_os|target_family|target_vendor|windows|unix)\b"
 )
-# The core's state, which only the core adds methods to.
-CORE_IMPL = re.compile(r"^[ \t]*impl\b[^{\n]*\b(UiState|Tree|Store|Input)\b[^{\n]*\{", re.MULTILINE)
 
 
 @functools.cache
@@ -949,20 +965,85 @@ def edges(scans: "Scans") -> list[tuple[str, int, str, str]]:
     return out
 
 
-def private_fns(scans: "Scans") -> set[str]:
-    """Names of the functions the lower layers keep to the crate: not named `pub` anywhere, nor
-    defined in the styled layer."""
-    low = LAYERS[: LAYERS.index("headless") + 1]
-    private, public = set(), set()
-    for path in scans.names:
-        text = "\n".join(scans[path].codes)
-        public.update(PUBLIC_FN.findall(text))
-        if layer(path) == "styled":
-            public.update(FN.findall(text))
-        elif layer(path) in low and not path.startswith("src/platform/"):
-            private.update(PRIVATE_FN.findall(text))
+@dataclass
+class Def:
+    kind: str  # fn, method (a fn that takes self), field or type
+    name: str
+    public: bool  # `pub`, or a trait's
+    owner: str | None  # the type a fn is implemented on, or a field's struct
 
-    return private - public - STD_NAMES
+
+def defs(sc: Scan) -> list[Def]:
+    """The items a file defines outside tests: its types, its structs' fields and its functions,
+    those of an impl block with its type."""
+    if hasattr(sc, "defs"):
+        return sc.defs
+
+    # What a function body defines is its own.
+    found = {p: [m for i, m in matches(sc, p) if not sc.body[i]] for p in (IMPL, TYPE_DEF, STRUCT)}
+    text, fns = sc.text, [m for i, m in matches(sc, FN_DEF) if not sc.body[i]]
+    blocks = [(m.start(), closing(text, m.end() - 1), m) for m in found[IMPL]]
+    out = [Def("type", m[2], m[1] == "pub", None) for m in found[TYPE_DEF]]
+    for m in found[STRUCT]:
+        body = text[m.end() : closing(text, m.end() - 1) - 1]
+        fields = (FIELD.match(x) for x in items(body))
+        out += [Def("field", f[2], (f[1] or "").strip() == "pub", m[2]) for f in fields if f]
+
+    for m in fns:
+        imp = next((b for a, z, b in reversed(blocks) if a < m.start() < z), None)
+        # A trait's functions are as public as the trait.
+        public = m[1] == "pub" or bool(imp and (imp[1] == "trait" or imp[2]))
+        out.append(Def("method" if m[3] else "fn", m[2], public, imp and imp[3]))
+
+    sc.defs = out
+    return out
+
+
+def hidden(scans: "Scans") -> dict[str, set[str]]:
+    """Per kind, the names of what the lower layers keep to the crate: not public in them, nor
+    defined in the styled layer, nor a method std's types share."""
+    low = LAYERS[: LAYERS.index("headless") + 1]
+    private, public = collections.defaultdict(set), collections.defaultdict(set)
+    # The platform's own files are behind its facades, their `pub` the platform's only.
+    for path in (x for x in scans.names if not x.startswith("src/platform/") or x in FACADES):
+        at = layer(path)
+        for d in defs(scans[path]) if at in low or at == "styled" else []:
+            # A styled file's `self` and `ui` are a Ui or its own type: another's field is no
+            # name it could reach.
+            if at == "styled" or d.public and d.kind != "field":
+                public[d.kind].add(d.name)
+            else:
+                private[d.kind].add(d.name)
+
+    return {k: private[k] - public[k] - STD_NAMES for k in ("fn", "method", "field", "type")}
+
+
+def upward(scans: "Scans") -> list[Hit]:
+    """Calls of a method of Ui or UiState that only a higher layer defines, by its name."""
+    ui, lowest = {}, collections.defaultdict(lambda: len(LAYERS))
+    for path in scans.names:
+        if (at := layer(path)) is None:
+            continue
+
+        for d in (d for d in defs(scans[path]) if d.kind == "method"):
+            lowest[d.name] = min(lowest[d.name], LAYERS.index(at))
+            if d.owner in ("Ui", "UiState"):
+                ui.setdefault(d.name, path)
+
+    out = []
+    for path in scans.names:
+        at = layer(path)
+        for i, m in matches(scans[path], METHOD) if at else []:
+            file = ui.get(m[1])
+            if file and lowest[m[1]] > LAYERS.index(at) and m[1] not in STD_NAMES:
+                msg = (
+                    f"{path[4:]} ({at}) -> .{m[1]}() of {file[4:]} ({layer(file)}): a lower layer "
+                    "may not call a method a higher one adds; move it down, or hand it in"
+                )
+                key = f"layer {path} -> {file[4:]}::{m[1]}"
+                out.append(Hit(path, i + 1, "layer", msg, key=key))
+
+    return out
 
 
 def layering(scans: "Scans", since: str | None = None) -> list[Hit]:
@@ -981,11 +1062,12 @@ def layering(scans: "Scans", since: str | None = None) -> list[Hit]:
         key = f"layer {path} -> {file[4:]}::{name}"
         out.append(Hit(path, line, "layer", msg, key=key))
 
-    hidden = private_fns(scans)
+    out += upward(scans)
+    kept = hidden(scans)
     for path in scans.names:
         sc, at = scans[path], layer(path)
         if at is not None:
-            out += styled(path, sc, hidden) if at == "styled" else []
+            out += styled(path, sc, kept) if at == "styled" else []
             out += os_code(path, sc) if not path.startswith("src/platform/") else []
 
     return baselined(out, scans.top, since)
@@ -1002,24 +1084,22 @@ def matches(sc: Scan, pattern: re.Pattern) -> list[tuple[int, re.Match]]:
     return [(i, m) for i, m in found if not sc.test[i]]
 
 
-def styled(path: str, sc: Scan, hidden: set[str]) -> list[Hit]:
-    """What the styled layer takes from the core that a design system outside the crate
-    couldn't."""
+def styled(path: str, sc: Scan, kept: dict[str, set[str]]) -> list[Hit]:
+    """What the styled layer takes from the lower ones that a design system outside the crate
+    couldn't: a field, type, method or function they keep to the crate ([hidden])."""
     out = []
-    for i, m in matches(sc, STATE):
-        msg = "`st`, the core's state: the styled layer builds on the public ui only"
-        out.append(Hit(path, i + 1, "private", msg, key=f"private {path} st"))
-
-    for i, m in matches(sc, CALL):
-        if m[1] in hidden:
-            msg = f"`{m[1]}` is the crate's own: a design system outside it couldn't call it"
-            out.append(Hit(path, i + 1, "private", msg, key=f"private {path} {m[1]}"))
-
-    for i, m in matches(sc, CORE_IMPL):
-        msg = f"`impl {m[1]}`: the styled layer adds no methods to the core's state"
-        out.append(Hit(path, i + 1, "private", msg, key=f"private {path} impl {m[1]}"))
-
-    return out
+    found = [(i, "field", m[1]) for i, m in matches(sc, FIELD_USE)]
+    found += [(i, "type", m[0]) for i, m in matches(sc, TYPE_USE)]
+    found += [(i, "method", m[1]) for i, m in matches(sc, METHOD)]
+    # A function the file brings in by a `use`, or names by a path.
+    brought = {name for _, m in matches(sc, USE) for _, name in named(m[1])}
+    found += [(i, "fn", m[2]) for i, m in matches(sc, CALL) if m[1] or m[2] in brought]
+    msg = "`{}` is the crate's own: a design system outside it couldn't use it"
+    return [
+        Hit(path, i + 1, "private", msg.format(name), key=f"private {path} {name}")
+        for i, kind, name in sorted(found)
+        if name in kept[kind]
+    ]
 
 
 def os_code(path: str, sc: Scan) -> list[Hit]:
