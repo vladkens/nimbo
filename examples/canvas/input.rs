@@ -95,7 +95,7 @@ impl Input {
           _ => return false,
         };
 
-        self.move_to(Point::new(self.pos.x + dx, self.pos.y + dy), cx.size);
+        self.move_to(Point::new(self.pos.x + dx, self.pos.y + dy), cx.size());
       }
       Event::Command(Command::Copy) => {
         let text = format!("{},{}", self.pos.x.round(), self.pos.y.round());
@@ -104,7 +104,7 @@ impl Input {
       Event::Command(Command::Paste) => {
         let Some(text) = cx.clipboard().read() else { return false };
         let Some(p) = parse_point(&text) else { return false };
-        self.move_to(p, cx.size);
+        self.move_to(p, cx.size());
       }
       Event::Mods(m) => {
         let was = std::mem::replace(&mut self.shift, m.shift());
@@ -122,7 +122,7 @@ impl Input {
   /// under a pointer that stays (arrows, a paste, the wheel). Returns whether it changed.
   fn track(&mut self, cx: &mut Cx) -> bool {
     let was = self.hover;
-    self.hover = cx.mouse.is_some_and(|p| self.square().contains(p));
+    self.hover = cx.mouse().is_some_and(|p| self.square().contains(p));
     self.hover != was
   }
 
@@ -130,7 +130,7 @@ impl Input {
     match *ev {
       Event::MouseMove { pos, .. } => match self.grab {
         Some(g) => {
-          self.move_to(Point::new(pos.x - g.x, pos.y - g.y), cx.size);
+          self.move_to(Point::new(pos.x - g.x, pos.y - g.y), cx.size());
           true
         }
         None => false,
@@ -150,7 +150,7 @@ impl Input {
 
         // Grown or shrunk about its centre.
         let corner = Point::new(self.pos.x - grow / 2.0, self.pos.y - grow / 2.0);
-        self.move_to(corner, cx.size);
+        self.move_to(corner, cx.size());
         grow != 0.0
       }
       _ => false,
@@ -165,7 +165,7 @@ impl App for Input {
 
   fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
     // Back inside a window that shrank since, before the event sees it.
-    self.move_to(self.pos, cx.size);
+    self.move_to(self.pos, cx.size());
     let used = self.handle(cx, ev);
     self.track(cx) || used
   }
@@ -182,11 +182,11 @@ impl App for Input {
   fn paint(&mut self, f: &mut Frame) {
     // Kept inside a window that shrank, its hover from where the pointer is now; the cursor
     // follows at the next event.
-    self.move_to(self.pos, f.size);
+    self.move_to(self.pos, f.size());
     self.hover = f.hover(self.square());
-    f.rect(Rect::new(0.0, 0.0, f.size.w, f.size.h), self.bg(), 0.0);
+    f.rect(Rect::new(0.0, 0.0, f.size().w, f.size().h), self.bg(), 0.0);
     if self.focused {
-      f.rect(Rect::new(0.0, 0.0, f.size.w, BAR), GREEN, 0.0);
+      f.rect(Rect::new(0.0, 0.0, f.size().w, BAR), GREEN, 0.0);
     }
 
     let sq = self.square();

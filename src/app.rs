@@ -115,17 +115,42 @@ impl Clock {
 /// What `App::event` gets besides the event: the window, the clock, the clipboard and the
 /// pointer routed through the last frame's tree.
 pub struct Cx<'a> {
-  pub size: Size,
-  pub scale: f32,
-  pub mouse: Option<Point>,
-  pub now: Duration,
-  pub waker: &'a Waker,
+  pub(crate) size: Size,
+  pub(crate) scale: f32,
+  pub(crate) mouse: Option<Point>,
+  pub(crate) now: Duration,
+  pub(crate) waker: &'a Waker,
   quit: &'a mut bool,
   redraw: bool,
   ui: &'a mut UiState,
 }
 
 impl Cx<'_> {
+  /// The view's size in points.
+  pub fn size(&self) -> Size {
+    self.size
+  }
+
+  /// Pixels per point.
+  pub fn scale(&self) -> f32 {
+    self.scale
+  }
+
+  /// The pointer in points, `None` when it is outside the view.
+  pub fn mouse(&self) -> Option<Point> {
+    self.mouse
+  }
+
+  /// Time from the runtime's clock: real in a window, virtual in the harness.
+  pub fn now(&self) -> Duration {
+    self.now
+  }
+
+  /// Wakes the loop from another thread ([Waker]).
+  pub fn waker(&self) -> &Waker {
+    self.waker
+  }
+
   /// Ends the app (the loop stops, the window closes); the harness records it.
   pub fn quit(&mut self) {
     *self.quit = true;

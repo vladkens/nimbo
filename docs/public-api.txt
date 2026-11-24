@@ -1823,11 +1823,6 @@ pub const fn nimbo::Config::size(&self) -> nimbo::Size
 pub const fn nimbo::Config::title(&self) -> &'static str
 pub const fn nimbo::Config::unified(self) -> Self
 pub struct nimbo::Cx<'a>
-pub nimbo::Cx::mouse: core::option::Option<nimbo::Point>
-pub nimbo::Cx::now: core::time::Duration
-pub nimbo::Cx::scale: f32
-pub nimbo::Cx::size: nimbo::Size
-pub nimbo::Cx::waker: &'a nimbo::Waker
 impl nimbo::Cx<'_>
 pub fn nimbo::Cx<'_>::after(&mut self, core::time::Duration)
 pub fn nimbo::Cx<'_>::click(&self) -> core::option::Option<nimbo::Click>
@@ -1837,11 +1832,16 @@ pub fn nimbo::Cx<'_>::flash(&mut self, nimbo::Id)
 pub fn nimbo::Cx<'_>::focus(&mut self, core::option::Option<nimbo::Id>)
 pub fn nimbo::Cx<'_>::focused(&self) -> core::option::Option<nimbo::Id>
 pub fn nimbo::Cx<'_>::hovered(&self, nimbo::Id) -> bool
+pub fn nimbo::Cx<'_>::mouse(&self) -> core::option::Option<nimbo::Point>
+pub fn nimbo::Cx<'_>::now(&self) -> core::time::Duration
 pub fn nimbo::Cx<'_>::quit(&mut self)
 pub fn nimbo::Cx<'_>::rect(&self, nimbo::Id) -> core::option::Option<nimbo::Rect>
 pub fn nimbo::Cx<'_>::redraw(&mut self)
+pub fn nimbo::Cx<'_>::scale(&self) -> f32
 pub fn nimbo::Cx<'_>::set_window_size(&mut self, f32, f32)
+pub fn nimbo::Cx<'_>::size(&self) -> nimbo::Size
 pub fn nimbo::Cx<'_>::target(&self) -> core::option::Option<nimbo::Id>
+pub fn nimbo::Cx<'_>::waker(&self) -> &nimbo::Waker
 pub struct nimbo::Dialog<'s>
 impl<'s> nimbo::Dialog<'s>
 pub fn nimbo::Dialog<'s>::button(self, &'s str, nimbo::ButtonRole) -> Self
@@ -2090,10 +2090,6 @@ pub fn nimbo::FormStyle::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt:
 impl core::marker::Copy for nimbo::FormStyle
 impl core::marker::StructuralPartialEq for nimbo::FormStyle
 pub struct nimbo::Frame<'a>
-pub nimbo::Frame::mouse: core::option::Option<nimbo::Point>
-pub nimbo::Frame::now: core::time::Duration
-pub nimbo::Frame::scale: f32
-pub nimbo::Frame::size: nimbo::Size
 impl nimbo::Frame<'_>
 pub fn nimbo::Frame<'_>::animate(&mut self)
 pub fn nimbo::Frame<'_>::hover(&self, nimbo::Rect) -> bool
@@ -2103,12 +2099,16 @@ pub fn nimbo::Frame<'_>::layer(&mut self)
 pub fn nimbo::Frame<'_>::line(&mut self, nimbo::Point, nimbo::Point, f32, nimbo::Color)
 pub fn nimbo::Frame<'_>::measure(&mut self, &str, nimbo::Font) -> f32
 pub fn nimbo::Frame<'_>::metrics(&mut self, nimbo::Font) -> nimbo::Metrics
+pub fn nimbo::Frame<'_>::mouse(&self) -> core::option::Option<nimbo::Point>
+pub fn nimbo::Frame<'_>::now(&self) -> core::time::Duration
 pub fn nimbo::Frame<'_>::polyline(&mut self, &[nimbo::Point], f32, nimbo::Color)
 pub fn nimbo::Frame<'_>::pop_clip(&mut self)
 pub fn nimbo::Frame<'_>::push_clip(&mut self, nimbo::Rect)
 pub fn nimbo::Frame<'_>::quad(&mut self, nimbo::Quad)
 pub fn nimbo::Frame<'_>::rect(&mut self, nimbo::Rect, nimbo::Color, f32)
+pub fn nimbo::Frame<'_>::scale(&self) -> f32
 pub fn nimbo::Frame<'_>::shadow(&mut self, nimbo::Rect, f32, f32, nimbo::Color)
+pub fn nimbo::Frame<'_>::size(&self) -> nimbo::Size
 pub fn nimbo::Frame<'_>::text(&mut self, f32, f32, &str, nimbo::Font, nimbo::Color) -> f32
 pub fn nimbo::Frame<'_>::text_at(&mut self, f32, f32, impl core::fmt::Display, nimbo::Font, nimbo::Color, f32) -> f32
 #[non_exhaustive] pub struct nimbo::FrameStats

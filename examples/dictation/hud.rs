@@ -46,7 +46,7 @@ pub struct Hud {
 
 impl App for Hud {
   fn paint(&mut self, f: &mut Frame) {
-    let t = f.now.saturating_sub(*self.start.get_or_insert(f.now));
+    let t = f.now().saturating_sub(*self.start.get_or_insert(f.now()));
     let p = pill();
     let r = p.h / 2.0;
     f.shadow(Rect::new(p.x, p.y + 2.0, p.w, p.h), r, 6.0, alpha([0.0, 0.0, 0.0, 1.0], 0.35));
