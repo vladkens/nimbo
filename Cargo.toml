@@ -68,7 +68,7 @@ system = ["objc2-foundation/NSDistributedNotificationCenter"]
 png = []
 # Pictures decoded by the OS (photos).
 bitmap = ["dep:objc2-image-io"]
-# The headless harness that runs an app in tests and writes shots, and `run_example`.
+# The headless harness that runs an app in tests and writes shots.
 harness = ["png"]
 # Every feature an app may use; the harness apart.
 full = ["styled", "tray", "hotkey", "paste", "permissions", "instance", "autostart", "system", "png", "bitmap"]

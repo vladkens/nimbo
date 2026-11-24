@@ -40,8 +40,7 @@
 //!   - `post(delay: Duration, f: Box<dyn FnOnce() + Send>)` from any thread, run by the loop also
 //!     in modal loops (a menu open, a live resize); `is_main() -> bool`.
 //!
-//!   An example's window ([crate::run_example]) is one window whose close quits ([crate::shell]
-//!   `window`). A window's app that quits ([crate::Cx::quit]) quits the app. Each window owns a
+//!   A window's app that quits ([crate::Cx::quit]) quits the app. Each window owns a
 //!   `Runtime` made with
 //!   `Runtime::new(app, cfg.size, scale, Clock::real(), Box::new(<its clipboard>))`, and:
 //!   - window: `cfg.title`, `cfg.size` in points (content area), `cfg.resizable`, the least content

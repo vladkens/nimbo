@@ -10,9 +10,9 @@
 //! (`platform`) or by the headless [Harness], both drawing with nimbo's CPU renderer. The scene,
 //! the renderer and the laid-out tree are the crate's own, so they can change without breaking an
 //! app. Its strings show in the user's language from the app's gettext catalogs ([t!], below).
-//! Examples start with [run_example], which opens a window, or with `--shot <file.png>` runs the
-//! harness instead (in the dark appearance unless `--appearance light`, in English unless
-//! `--locale <tag>`).
+//! The examples (`examples/`) open a window, or with `--shot <file.png>` render it in the harness
+//! instead (in the dark appearance unless `--appearance light`, in English unless `--locale
+//! <tag>`).
 //!
 //! What an app builds with is at the crate's root, one name each, as SwiftUI's one namespace
 //! (`nimbo::Button`, `nimbo::Icon`). A module is a service of its own that an app names as it
@@ -206,9 +206,6 @@ mod ui;
 pub mod uninstall;
 mod window;
 
-#[cfg(feature = "harness")]
-use std::path::PathBuf;
-
 pub use app::{App, Appearance, ColorScheme, Cx, Event, Ime, MouseButton, Phase, Waker};
 #[cfg(feature = "bitmap")]
 pub use bitmap::Bitmap;
@@ -267,144 +264,6 @@ pub mod __private {
   pub use crate::locale::{format, plural};
 }
 
-#[cfg(feature = "harness")]
-const USAGE: &str = "usage: [--shot <file.png>] [--scale <n>] [--size <w>x<h>] \
-  [--appearance light|dark] [--locale <tag>|pseudo]";
-
-#[cfg(feature = "harness")]
-#[derive(Debug, Default, PartialEq)]
-struct Args {
-  shot: Option<PathBuf>,
-  scale: f32,
-  /// The view size in points instead of the config's.
-  size: Option<Size>,
-  /// The OS appearance the harness reports; dark by default.
-  appearance: Option<Appearance>,
-  /// The language ([Locale]): the system's in a window, English in a shot unless given.
-  locale: Option<Locale>,
-}
-
-#[cfg(feature = "harness")]
-impl Args {
-  fn parse(args: &[String]) -> Result<Self, String> {
-    let mut out = Self { scale: 2.0, ..Self::default() };
-    let mut it = args.iter();
-    while let Some(arg) = it.next() {
-      match arg.as_str() {
-        "--shot" => out.shot = Some(it.next().ok_or("--shot needs a path")?.into()),
-        "--scale" => {
-          let v = it.next().ok_or("--scale needs a number")?;
-          out.scale = v.parse().map_err(|e| format!("--scale: {e}"))?;
-          if !positive(out.scale) {
-            return Err(format!("--scale: {v} is not a positive number"));
-          }
-        }
-
-        "--size" => {
-          let v = it.next().ok_or("--size needs <w>x<h>")?;
-          let (w, h) = v.split_once('x').ok_or("--size needs <w>x<h>")?;
-          let num = |s: &str| match s.parse::<f32>() {
-            Ok(n) if positive(n) => Ok(n),
-            Ok(_) => Err(format!("--size: {s} is not a positive number")),
-            Err(e) => Err(format!("--size: {e}")),
-          };
-          out.size = Some(Size::new(num(w)?, num(h)?));
-        }
-
-        "--appearance" => {
-          let scheme = it.next().ok_or("--appearance needs light or dark")?;
-          let scheme = scheme.parse().map_err(|e| format!("--appearance: {e}"))?;
-          out.appearance = Some(Appearance { scheme, accent: None });
-        }
-        "--locale" => {
-          let tag = it.next().ok_or("--locale needs a language tag")?;
-          // Read once per process: it lives as long as it.
-          out.locale = Some(Locale::Tag(Box::leak(tag.clone().into_boxed_str())));
-        }
-        _ => return Err(format!("unknown argument {arg}")),
-      }
-    }
-
-    Ok(out)
-  }
-}
-
-#[cfg(feature = "harness")]
-/// A finite number above zero: a scale or a size the harness can render.
-fn positive(n: f32) -> bool {
-  n.is_finite() && n > 0.0
-}
-
-#[cfg(feature = "harness")]
-/// The entry point of every example: [run_args] with the process's whole command line, exiting
-/// with the usage on any argument it doesn't know; an app with its own arguments takes them and
-/// passes the rest to [run_args].
-pub fn run_example<A: App + 'static>(cfg: Config, app: A, script: impl FnOnce(&mut Harness<A>)) {
-  let args: Vec<String> = std::env::args().skip(1).collect();
-  run_args(cfg, app, script, &args);
-}
-
-#[cfg(feature = "harness")]
-/// With no `args` it opens a window and runs until it closes; with `--shot <file.png>` it runs
-/// the app in the [Harness] at `cfg.size` (or `--size`) and `--scale` (default 2), first applying
-/// `script` (the state the shot shows), then writing the PNG. Unknown arguments print the usage
-/// and exit with status 2. For an app that parses its own command line and passes the rest on:
-///
-/// ```no_run
-/// struct Settings;
-/// impl nimbo::App for Settings {}
-///
-/// // `myapp settings --shot settings.png`: the app takes `settings`, the rest opens the window
-/// // or renders its shot.
-/// let args: Vec<String> = std::env::args().skip(1).collect();
-/// if let Some((command, rest)) = args.split_first()
-///   && command == "settings"
-/// {
-///   nimbo::run_args(nimbo::Config::new("Settings", 640.0, 480.0), Settings, |_| {}, rest);
-/// }
-/// ```
-pub fn run_args<A: App + 'static>(
-  cfg: Config,
-  app: A,
-  script: impl FnOnce(&mut Harness<A>),
-  args: &[String],
-) {
-  let args = Args::parse(args).unwrap_or_else(|e| {
-    eprintln!("{e}\n{USAGE}");
-    std::process::exit(2);
-  });
-  let Some(path) = &args.shot else {
-    if let Some(l) = args.locale {
-      locale::set(l);
-    }
-
-    return shell::window(&cfg, Box::new(app));
-  };
-
-  let mut h = harness(&cfg, app, &args);
-  script(&mut h);
-  if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
-    std::fs::create_dir_all(dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
-  }
-
-  h.shot(path).unwrap_or_else(|e| panic!("{e}"));
-  println!("{}: wrote {}", cfg.title, path.display());
-}
-
-#[cfg(feature = "harness")]
-/// The harness [run_args] shoots in, at the size and scale of `args`, in its language (English
-/// unless `--locale` says otherwise); the app first hears the appearance, dark unless
-/// `--appearance` says otherwise, as a window tells it the OS's.
-fn harness<A: App>(cfg: &Config, app: A, args: &Args) -> Harness<A> {
-  let mut h = Harness::new(app, args.size.unwrap_or(cfg.size), args.scale);
-  h.set_locale(args.locale.unwrap_or(Locale::Tag("en")), cfg.localizations);
-  h.set_transparent(cfg.overlay.is_some());
-  // A unified window's title bar as macOS's.
-  h.set_titlebar(cfg.unified.then(|| harness::mac_titlebar(cfg.title, false)));
-  h.event(Event::Appearance(args.appearance.unwrap_or(Appearance::DARK)));
-  h
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -414,90 +273,6 @@ mod tests {
   #[should_panic(expected = "side² RGBA")]
   fn an_icon_of_the_wrong_size_is_refused() {
     let _ = Config::new("a", 1.0, 1.0).icon(2, &[0; 4]);
-  }
-
-  #[test]
-  fn shots_tell_the_appearance() {
-    #[derive(Default)]
-    struct Seen(Option<Appearance>);
-    impl App for Seen {
-      fn event(&mut self, _cx: &mut Cx, ev: &Event) -> bool {
-        if let Event::Appearance(a) = ev {
-          self.0 = Some(*a);
-        }
-
-        true
-      }
-    }
-
-    // The app hears the first one, the default dark too, and the theme follows it.
-    let cfg = Config::new("a", 100.0, 100.0);
-    let seen = |s: &str| {
-      let h = harness(&cfg, Seen::default(), &parse(s).unwrap());
-      (h.app().0, h.rt.ui.appearance())
-    };
-    assert_eq!(seen(""), (Some(Appearance::DARK), Appearance::DARK));
-    assert_eq!(seen("--appearance light"), (Some(Appearance::LIGHT), Appearance::LIGHT));
-  }
-
-  /// An overlay's shot is transparent where it draws nothing, a window's black.
-  #[test]
-  fn overlay_shots_are_transparent() {
-    struct Nothing;
-    impl App for Nothing {}
-
-    let args = parse("").unwrap();
-    let cfg = Config::new("a", 10.0, 10.0);
-    let corner = |cfg: &Config| harness(cfg, Nothing, &args).render().pixel(1.0, 1.0);
-    assert_eq!(corner(&cfg), [0, 0, 0, 255]);
-    assert_eq!(corner(&cfg.overlay(Anchor::Center)), [0; 4]);
-  }
-
-  fn parse(s: &str) -> Result<Args, String> {
-    Args::parse(&s.split_whitespace().map(String::from).collect::<Vec<_>>())
-  }
-
-  #[test]
-  fn args() {
-    let a = parse("--shot a.png --scale 1").unwrap();
-    assert_eq!(a, Args { shot: Some("a.png".into()), scale: 1.0, ..Args::default() });
-    assert_eq!(parse("").unwrap(), Args { scale: 2.0, ..Args::default() });
-
-    assert_eq!(parse("--size 1280x800").unwrap().size, Some(Size::new(1280.0, 800.0)));
-    assert_eq!(parse("--appearance light").unwrap().appearance, Some(Appearance::LIGHT));
-    assert!(parse("--appearance blue").is_err());
-    assert_eq!(parse("--locale ru").unwrap().locale, Some(Locale::Tag("ru")));
-    assert!(parse("--locale").is_err());
-    assert!(parse("--size 10").is_err());
-    for bad in ["0", "-1", "inf", "NaN"] {
-      assert!(parse(&format!("--scale {bad}")).is_err(), "--scale {bad}");
-      assert!(parse(&format!("--size {bad}x10")).is_err(), "--size {bad}x10");
-      assert!(parse(&format!("--size 10x{bad}")).is_err(), "--size 10x{bad}");
-    }
-
-    assert!(parse("--shot").is_err());
-    assert!(parse("--what").is_err());
-  }
-
-  /// The arguments given, not the process's (the test runner's), pick the shot.
-  #[test]
-  fn run_args_shoots_with_the_arguments_given() {
-    struct Blank;
-    impl App for Blank {}
-
-    let dir = std::env::temp_dir().join(format!("nimbo-run-args-{}", std::process::id()));
-    let path = dir.join("shot.png");
-    let args = ["--shot", path.to_str().unwrap(), "--scale", "1", "--size", "40x30"];
-    let args: Vec<String> = args.map(String::from).to_vec();
-    let mut scripted = false;
-    run_args(Config::new("a", 100.0, 100.0), Blank, |_| scripted = true, &args);
-    let png = std::fs::read(&path).unwrap();
-    std::fs::remove_dir_all(&dir).unwrap();
-    assert!(scripted);
-    assert_eq!(&png[1..4], b"PNG");
-    // IHDR's width and height, big-endian: `--size` at `--scale`.
-    let size = |at: usize| u32::from_be_bytes(png[at..at + 4].try_into().unwrap());
-    assert_eq!((size(16), size(20)), (40, 30));
   }
 
   #[test]

@@ -12,6 +12,9 @@
 // A Windows app, not a console one: no terminal opens with its window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[path = "common/example.rs"]
+mod example;
+
 use nimbo::{
   App, ButtonConfiguration, ButtonStyle, Config, Font, Id, Style, TextStyle, Ui, Weight, mix, px,
   rigid,
@@ -84,7 +87,8 @@ impl App for Counter {
 fn main() {
   // The shot: counted to 3, the pointer resting on + after the fade.
   let cfg = Config::new("counter", 360.0, 300.0).icon(64, &ICON);
-  nimbo::run_example(cfg, Counter::default(), |h| {
+  let args: Vec<String> = std::env::args().skip(1).collect();
+  example::run(cfg, Counter::default(), &args, |h| {
     h.frame();
     for _ in 0..3 {
       h.click_id(Id::of(PLUS));

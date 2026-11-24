@@ -1919,11 +1919,13 @@ pub struct nimbo::Config
 impl nimbo::Config
 pub const nimbo::Config::MIN_SIZE: nimbo::Size
 pub const fn nimbo::Config::fixed(self) -> Self
+pub const fn nimbo::Config::get_localizations(&self) -> nimbo::Localizations
 pub const fn nimbo::Config::get_overlay(&self) -> core::option::Option<nimbo::Anchor>
 pub const fn nimbo::Config::hidden(self) -> Self
 pub const fn nimbo::Config::icon(self, u32, &'static [u8]) -> Self
 pub const fn nimbo::Config::is_hidden(&self) -> bool
 pub const fn nimbo::Config::is_resizable(&self) -> bool
+pub const fn nimbo::Config::is_unified(&self) -> bool
 pub const fn nimbo::Config::localizations(self, nimbo::Localizations) -> Self
 pub const fn nimbo::Config::min(&self) -> nimbo::Size
 pub const fn nimbo::Config::min_size(self, f32, f32) -> Self
@@ -3855,7 +3857,5 @@ pub const fn nimbo::pct(f32) -> nimbo::Dim
 pub const fn nimbo::px(f32) -> nimbo::Dim
 pub const fn nimbo::rgb(u32) -> nimbo::Color
 pub const fn nimbo::rigid() -> nimbo::Dim
-pub fn nimbo::run_args<A: nimbo::App + 'static>(nimbo::Config, A, impl core::ops::function::FnOnce(&mut nimbo::Harness<A>), &[alloc::string::String])
-pub fn nimbo::run_example<A: nimbo::App + 'static>(nimbo::Config, A, impl core::ops::function::FnOnce(&mut nimbo::Harness<A>))
 pub type nimbo::Color = [f32; 4]
 pub type nimbo::Localizations = &'static [(&'static str, &'static str)]

@@ -18,6 +18,8 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 pub mod browser;
+#[path = "../common/example.rs"]
+mod example;
 
 use std::path::PathBuf;
 
@@ -218,5 +220,5 @@ fn main() {
   let hidden = args.iter().position(|a| a == "--no-sidebar").map(|i| args.remove(i));
   let app = Files { sidebar: hidden.is_none(), ..Files::default() };
   let cfg = Config::new("Files", SIZE.w, SIZE.h).min_size(640.0, 360.0).unified();
-  nimbo::run_args(cfg, app, browser::shot, &args);
+  example::run(cfg, app, &args, browser::shot);
 }

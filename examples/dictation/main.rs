@@ -23,6 +23,8 @@
 
 pub mod account;
 pub mod diagnostics;
+#[path = "../common/example.rs"]
+mod example;
 pub mod history;
 pub mod hud;
 pub mod settings;
@@ -459,19 +461,19 @@ fn main() {
   let Some((window, rest)) = args.split_first() else { return run() };
   let lid = hardware::lid_closed;
   match window.as_str() {
-    "settings" => nimbo::run_args(settings::config(), Settings::default(), settings::shot, rest),
+    "settings" => example::run(settings::config(), Settings::default(), rest, settings::shot),
     "account" => {
       let cfg = Config::new("Account", account::SIZE.w, account::SIZE.h);
-      nimbo::run_args(cfg, Account::new(), account::shot, rest)
+      example::run(cfg, Account::new(), rest, account::shot)
     }
-    "history" => nimbo::run_args(history::config(), History::default(), history::shot, rest),
+    "history" => example::run(history::config(), History::default(), rest, history::shot),
     // Only their shots: the system's changes reach Diagnostics through the app's watch, and
     // the HUD alone would wait hidden.
     "diagnostics" if rest.iter().any(|a| a == "--shot") => {
-      nimbo::run_args(diagnostics::config(), Diagnostics::new(lid), diagnostics::shot, rest)
+      example::run(diagnostics::config(), Diagnostics::new(lid), rest, diagnostics::shot)
     }
     "hud" if rest.iter().any(|a| a == "--shot") => {
-      nimbo::run_args(hud::CONFIG, Hud::default(), hud::shot, rest)
+      example::run(hud::CONFIG, Hud::default(), rest, hud::shot)
     }
     _ => {
       eprintln!("unknown window {window}\n{USAGE}");

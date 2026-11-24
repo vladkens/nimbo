@@ -67,7 +67,7 @@ The default is the window and the styled widgets. The rest is a feature to turn 
 An app builds its frame as an element tree in `view`, and reads clicks where it builds the buttons:
 
 ```rust
-use nimbo::{App, Config, Font, Style, TextStyle, Ui};
+use nimbo::{App, AppInfo, Config, Font, Main, Style, TextStyle, Ui};
 
 #[derive(Default)]
 struct Counter {
@@ -87,11 +87,14 @@ impl App for Counter {
 }
 
 fn main() {
-  nimbo::run_example(Config::new("Counter", 320.0, 240.0), Counter::default(), |_| {});
+  nimbo::app(AppInfo::new("com.example.counter", "Counter"), |main| {
+    let cfg = Config::new("Counter", 320.0, 240.0);
+    main.open(&cfg, Counter::default()).on_close(Main::quit);
+  });
 }
 ```
 
-`nimbo::run_example` opens the window; `-- --shot counter.png` renders it to a file without one.
+`nimbo::app` runs the app, which opens its window and quits when it closes.
 
 ### How a frame is built
 
@@ -110,7 +113,7 @@ cargo run --release --example gallery                          # every building 
 cargo run --release --example gallery -- --shot gallery.png    # the same, rendered without a window
 ```
 
-Each building block beside its SwiftUI counterpart, with a picture: [docs/api.md](docs/api.md), made from the gallery's table ([examples/gallery/blocks.rs](examples/gallery/blocks.rs)) by `make api-shots`.
+Every example takes `--shot <file.png>` (with `--appearance light`, `--locale <tag>`) to render its window to a file ([examples/common/example.rs](examples/common/example.rs)). Each building block beside its SwiftUI counterpart, with a picture: [docs/api.md](docs/api.md), made from the gallery's table ([examples/gallery/blocks.rs](examples/gallery/blocks.rs)) by `make api-shots`.
 
 - `counter`: buttons, hover, focus
 - `gallery`: a catalog of every building block, each page its SwiftUI line, its nimbo line and the block in its variants

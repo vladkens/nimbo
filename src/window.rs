@@ -150,6 +150,16 @@ impl Config {
     self.overlay
   }
 
+  /// The content runs under the title bar ([Config::unified]).
+  pub const fn is_unified(&self) -> bool {
+    self.unified
+  }
+
+  /// The app's translations ([Config::localizations]).
+  pub const fn get_localizations(&self) -> Localizations {
+    self.localizations
+  }
+
   /// The least content size the user can resize the window to, [Config::MIN_SIZE] unless set.
   pub const fn min_size(self, w: f32, h: f32) -> Self {
     Self { min_size: Size::new(w, h), ..self }
