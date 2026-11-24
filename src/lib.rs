@@ -39,8 +39,8 @@
 //! field, never built whole. What an app gives (a style, a font) keeps its fields private: it
 //! starts from a constructor or a constant and changes by `const` builders named as the field
 //! (`Style::new().pad(8.0)`), so a field added breaks nothing; where an app reads one back, a
-//! getter, `get_` before a name a builder holds ([TextStyle::get_color]). The theme and its sizes,
-//! read far more than built, read by the field's name and change by `with_` it
+//! getter, `get_` before a name a builder holds ([TextStyle::get_color]). The theme, its sizes and
+//! a form's style, read far more than built, read by the field's name and change by `with_` it
 //! (`Theme::PLATES_DARK.with_text(WHITE)`).
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(

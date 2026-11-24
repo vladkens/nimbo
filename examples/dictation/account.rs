@@ -105,8 +105,8 @@ impl Account {
       // the label.
       let row = FormRow::new("Custom vocabulary").caption("Names and terms it should know.");
       ui.form_row(fs, row, |ui| {
-        let pads = [fs.pad_y, 0.0, fs.pad_y, 0.0];
-        ui.col(Style::new().w(px(FIELD_W)).h(px(84.0 + 2.0 * fs.pad_y)).pads(pads), |ui| {
+        let pads = [fs.pad_y(), 0.0, fs.pad_y(), 0.0];
+        ui.col(Style::new().w(px(FIELD_W)).h(px(84.0 + 2.0 * fs.pad_y())).pads(pads), |ui| {
           let notes = TextField::new(&mut self.notes, "One a line").axis(Axis::Vertical);
           if notes.show(ui.id(NOTES)).changed {
             self.changes.push(NOTES);
@@ -126,9 +126,9 @@ impl Account {
 impl nimbo::App for Account {
   fn view(&mut self, ui: &mut Ui) {
     let fs = FormStyle::plates(&ui.theme());
-    ui.col(Style::new().grow().bg(fs.bg), |ui| {
+    ui.col(Style::new().grow().bg(fs.bg()), |ui| {
       ui.form_scroll(&fs, Style::new().grow(), |ui| {
-        ui.col(fs.page.w(grow()), |ui| self.page(ui, &fs));
+        ui.col(fs.page().w(grow()), |ui| self.page(ui, &fs));
       });
     });
   }
