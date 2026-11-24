@@ -60,7 +60,7 @@ nimbo: `ui.float(Float::parent().attach(UnitPoint::TOP_TRAILING).anchor(UnitPoin
 
 SwiftUI: `Text("Title").font(.headline).foregroundStyle(.secondary)`
 
-nimbo: `ui.text("Title", TextStyle::new(t.bold, t.muted))`
+nimbo: `ui.text("Title", TextStyle::new(t.bold(), t.secondary()))`
 
 ![Text](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/text.png)
 
@@ -108,7 +108,7 @@ nimbo: `if ui.link("Learn more…").clicked { nimbo::open::url(URL)? }`
 
 SwiftUI: `Image(systemName: "gear")`
 
-nimbo: `ui.icon(Icon::GEAR, 20.0, t.text)`
+nimbo: `ui.icon(Icon::GEAR, 20.0, t.text())`
 
 ![Image](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/image.png)
 
@@ -640,7 +640,7 @@ nimbo: `ui.keymap(&[Binding::new(Shortcut::char('z').cmd(), Command::Undo)]).col
 
 SwiftUI: `.environment(\.tint, .green) { … }; @Environment(\.tint) var tint`
 
-nimbo: `ui.environment(Tint(t.success)).row(style, |ui| { … }); ui.set_environment(Some(Tint(t.success))) for the window; let tint = ui.environment_value::<Tint>()`
+nimbo: `ui.environment(Tint(t.success())).row(style, |ui| { … }); ui.set_environment(Some(Tint(t.success()))) for the window; let tint = ui.environment_value::<Tint>()`
 
 ![Environment](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/environment.png)
 
@@ -696,7 +696,7 @@ nimbo: `ui.a11y_labeled_pair(LabeledPairRole::Label, id, |ui| ui.text("Volume", 
 
 SwiftUI: `@Environment(\.controlActiveState) var state`
 
-nimbo: `let t = ui.controls_theme(); ui.el(Style::new().bg(t.accent)); let grey = ui.theme().inactive().accent`
+nimbo: `let t = ui.controls_theme(); ui.el(Style::new().bg(t.accent())); let grey = ui.theme().inactive().accent()`
 
 ![Controls theme](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/controls-theme.png)
 

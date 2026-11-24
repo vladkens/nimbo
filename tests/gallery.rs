@@ -147,16 +147,16 @@ fn every_widget_in_both_themes() {
     h.leave();
     h.wait(Duration::from_millis(300));
     assert!(h.app().wrap);
-    assert_eq!(h.render().pixel(r.x + 8.0, r.y + r.h / 2.0 - 6.0), px(t.accent), "{look:?}");
+    assert_eq!(h.render().pixel(r.x + 8.0, r.y + r.h / 2.0 - 6.0), px(t.accent()), "{look:?}");
 
     let mut h = on("Switch", look);
     let (switch, r) = node(&h, Role::Switch, "Live");
     let at = |h: &mut H| h.render().pixel(r.x + 6.0, r.y + r.h / 2.0);
-    assert_eq!(at(&mut h), px(t.accent), "on, in the accent");
+    assert_eq!(at(&mut h), px(t.accent()), "on, in the accent");
     h.click_id(switch);
     h.leave();
     h.wait(Duration::from_millis(200));
-    assert!(!h.app().live && at(&mut h) != px(t.accent), "{look:?}");
+    assert!(!h.app().live && at(&mut h) != px(t.accent()), "{look:?}");
 
     let mut h = on("Slider", look);
     let s = node(&h, Role::Slider, "Zoom").1;
@@ -205,7 +205,7 @@ fn every_widget_in_both_themes() {
     let dialog = Id::of(DIALOG);
     let card = h.rect(dialog.key("card")).expect("the dialog");
     let fill = h.render().pixel(card.x + card.w / 2.0, card.y + 8.0);
-    assert_eq!(fill, px(t.dialog), "{look:?}");
+    assert_eq!(fill, px(t.dialog_fill()), "{look:?}");
 
     h.key(NamedKey::Escape, Modifiers::empty());
     h.frame();
@@ -229,7 +229,7 @@ fn the_search_field_in_both_themes() {
     let (field, r) = node(&h, Role::TextField, "Search");
     // White over the ground, as macOS's search fields: 30% in light, 12% in dark.
     let fill = alpha([1.0; 4], if look == Appearance::LIGHT { 0.3 } else { 0.12 });
-    let want = px(mix(t.bg, alpha(fill, 1.0), fill[3]));
+    let want = px(mix(t.bg(), alpha(fill, 1.0), fill[3]));
     let got = h.render().pixel(r.x + r.w / 2.0, r.y + 4.0);
     assert!(diff(got, want) <= 1, "{look:?}: {got:?}, not {want:?}");
 
@@ -322,7 +322,7 @@ fn steps(look: Appearance) -> (H, Id, Rect) {
 /// Where `v` of the stepped slider's 10..=90 sits along it, its track half a knob in from either
 /// end.
 fn level_x(r: Rect, v: f32) -> f32 {
-  let inset = Theme::PLATES_LIGHT.sizes.knob[0] / 2.0;
+  let inset = Theme::PLATES_LIGHT.sizes().knob()[0] / 2.0;
   r.x + inset + (r.w - 2.0 * inset) * (v - 10.0) / 80.0
 }
 
@@ -338,7 +338,7 @@ fn a_stepped_slider_snaps_drags_and_clicks() {
   h.move_to(level_x(r, 47.0), y);
   h.frame();
   assert_eq!(h.app().level, 50.0);
-  let knob = px(Theme::PLATES_LIGHT.knob);
+  let knob = px(Theme::PLATES_LIGHT.knob());
   assert_eq!(h.render().pixel(level_x(r, 50.0), y), knob, "the knob jumped to the step");
 
   h.release(level_x(r, 47.0), y);
@@ -389,8 +389,8 @@ fn a_stepped_slider_marks_its_steps() {
   for (look, t) in LOOKS {
     let (mut h, _, r) = steps(look);
     // A quarter point above and left of a dot's middle: inside it, off its rim.
-    let y = r.y + r.h / 2.0 + t.sizes.knob[1] / 2.0 - 1.25;
-    let dot = px(t.tertiary);
+    let y = r.y + r.h / 2.0 + t.sizes().knob()[1] / 2.0 - 1.25;
+    let dot = px(t.tertiary());
     let img = h.render();
     for v in [10.0, 20.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0] {
       let got = img.pixel(level_x(r, v) - 0.25, y);
@@ -427,7 +427,7 @@ fn a_row_footer_spans_its_row() {
     let ends = (slider.x + slider.w - toggle.x - toggle.w).abs();
     assert!(ends < 0.5 && slider.y >= toggle.y + toggle.h, "{look:?}: {slider:?}, {toggle:?}");
 
-    let (img, plate) = (h.render(), px(t.plate));
+    let (img, plate) = (h.render(), px(t.plate()));
     let on_plate = |x: f32, y: f32| diff(img.pixel(x, y), plate) <= 2;
     let y = slider.y + slider.h - 2.0;
     let pad = (1..40).find(|&d| !on_plate(slider.x - d as f32 + 0.5, y));

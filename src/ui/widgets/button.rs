@@ -190,7 +190,7 @@ pub(crate) fn draw(
   let (pressed, off) = (c.pressed, !c.enabled);
   let bg = if pressed { s.pressed } else { mix(s.bg, s.hover, hot) };
   let ink = match muted {
-    true => mix(t.muted, t.text, if pressed { 1.0 } else { hot }),
+    true => mix(t.secondary, t.text, if pressed { 1.0 } else { hot }),
     false => s.text.color,
   };
 
@@ -215,7 +215,7 @@ impl Ui<'_> {
   /// sits on the middle of the label's capitals, the line keeping its height.
   pub fn info_button(&mut self) -> Response {
     let t = self.theme();
-    self.mark_button(Icon::INFO, [t.muted, t.text])
+    self.mark_button(Icon::INFO, [t.secondary, t.text])
   }
 
   /// A warning mark in the ⓘ's size and place ([Ui::info_button]): a triangle with a "!" cut out

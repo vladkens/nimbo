@@ -24,12 +24,12 @@ impl ButtonStyle for Pill {
   fn make_body(&self, ui: &mut Ui, mut c: ButtonConfiguration) {
     let t = ui.theme();
     let (k, ink) = match (c.is_enabled(), c.is_pressed()) {
-      (false, _) => (0.06, alpha(t.accent, 0.4)),
-      (true, pressed) => (if pressed { 0.3 } else { 0.15 }, t.accent),
+      (false, _) => (0.06, alpha(t.accent(), 0.4)),
+      (true, pressed) => (if pressed { 0.3 } else { 0.15 }, t.accent()),
     };
 
     let s = Style::new().h(px(24.0)).pad_xy(12.0, 0.0).gap(5.0).center().radius(12.0);
-    ui.row(s.bg(alpha(t.accent, k)), |ui| c.label(ui, TextStyle::new(t.font, ink)));
+    ui.row(s.bg(alpha(t.accent(), k)), |ui| c.label(ui, TextStyle::new(t.font(), ink)));
   }
 }
 
@@ -41,11 +41,11 @@ impl ToggleStyle for Dot {
   fn make_body(&self, ui: &mut Ui, mut c: ToggleConfiguration) {
     let t = ui.theme();
     let k = if c.is_enabled() { 1.0 } else { 0.4 };
-    let dot = Style::new().w(px(12.0)).h(px(12.0)).radius(6.0).border(1.5, alpha(t.accent, k));
-    let dot = if c.is_on() { dot.bg(alpha(t.accent, k)) } else { dot };
+    let dot = Style::new().w(px(12.0)).h(px(12.0)).radius(6.0).border(1.5, alpha(t.accent(), k));
+    let dot = if c.is_on() { dot.bg(alpha(t.accent(), k)) } else { dot };
     ui.row(Style::new().gap(6.0).center(), |ui| {
       ui.el(dot);
-      c.label(ui, TextStyle::new(t.font, alpha(t.text, k)));
+      c.label(ui, TextStyle::new(t.font(), alpha(t.text(), k)));
     });
   }
 }
@@ -59,7 +59,7 @@ impl SliderStyle for Meter {
     let t = ui.theme();
     let a = if c.is_enabled() { 1.0 } else { 0.4 };
     let (k, track, fill, notch) =
-      (c.fraction(), alpha(t.accent, 0.15 * a), alpha(t.accent, a), alpha(t.bg, 0.8));
+      (c.fraction(), alpha(t.accent(), 0.15 * a), alpha(t.accent(), a), alpha(t.bg(), 0.8));
     let notches: Vec<f32> = c.steps().map(|(_, p)| p).filter(|p| *p > 0.0 && *p < 1.0).collect();
     c.root(ui).canvas(Style::new().w(grow()).h(px(8.0)), move |f, r| {
       f.rect(r, track, 4.0);
@@ -78,12 +78,12 @@ struct Underline;
 impl TextFieldStyle for Underline {
   fn make_body(&self, ui: &mut Ui, mut c: TextFieldConfiguration) {
     let t = ui.theme();
-    let line = if c.is_focused() { t.accent } else { t.line };
+    let line = if c.is_focused() { t.accent() } else { t.line() };
     let s = Style::new().w(grow()).h(px(24.0)).pad_xy(2.0, 0.0).borders([0.0, 0.0, 1.0, 0.0], line);
     let s = s.align(Align::Start, Align::Center).focusable_quiet().scroll(c.axis().into());
-    let s = if c.is_enabled() { s } else { s.opacity(t.disabled) };
-    let text = FieldStyle::new(TextStyle::new(t.font, t.text)).placeholder(t.faint);
-    ui.row(s, |ui| c.text(ui, &text.caret(t.accent)));
+    let s = if c.is_enabled() { s } else { s.opacity(t.disabled()) };
+    let text = FieldStyle::new(TextStyle::new(t.font(), t.text())).placeholder(t.faint());
+    ui.row(s, |ui| c.text(ui, &text.caret(t.accent())));
   }
 }
 
@@ -100,13 +100,13 @@ impl PickerStyle for Chips {
       for i in 0..c.len() {
         let on = c.selection() == Some(i);
         let (bg, ink) = match on {
-          true => (alpha(t.accent, k), alpha(t.on_accent, k)),
-          false => (alpha(t.accent, 0.12 * k), alpha(t.accent, k)),
+          true => (alpha(t.accent(), k), alpha(t.on_accent(), k)),
+          false => (alpha(t.accent(), 0.12 * k), alpha(t.accent(), k)),
         };
 
         let chip = Style::new().h(px(22.0)).pad_xy(10.0, 0.0).center().radius(11.0).bg(bg);
         ui.with_id(c.item_id(i))
-          .row(b.pointer(chip), |ui| ui.text(c.label(i), TextStyle::new(t.font, ink)));
+          .row(b.pointer(chip), |ui| ui.text(c.label(i), TextStyle::new(t.font(), ink)));
       }
     });
   }
@@ -274,7 +274,7 @@ impl Gallery {
         ui.hotkey_recorder(&mut self.hotkey);
         // The ⊗ that clears one, which the plates themes leave to a reset button.
         let t = ui.theme();
-        ui.set_theme(nimbo::Theme { hotkey_recorder_clear: true, ..t });
+        ui.set_theme(t.with_hotkey_recorder_clear(true));
         ui.hotkey_recorder(&mut self.hotkey);
         ui.set_theme(t);
       }),
@@ -285,16 +285,16 @@ impl Gallery {
         let b = ui.button_behavior(id);
         let fill = match (b.pressed, b.hovered) {
           (true, _) => t.accent_hover(),
-          (_, true) => mix(t.accent, t.accent_hover(), 0.5),
-          _ => t.accent,
+          (_, true) => mix(t.accent(), t.accent_hover(), 0.5),
+          _ => t.accent(),
         };
 
         let (fill, mark) = match b.disabled {
-          true => (alpha(fill, t.disabled), alpha([1.0; 4], t.disabled)),
+          true => (alpha(fill, t.disabled()), alpha([1.0; 4], t.disabled())),
           false => (fill, [1.0; 4]),
         };
 
-        let ring = if b.focused { t.focus } else { [0.0; 4] };
+        let ring = if b.focused { t.focus() } else { [0.0; 4] };
         let s = Style::new().w(px(28.0)).h(px(28.0));
 
         ui.control(&b).canvas(s, move |f, r| {

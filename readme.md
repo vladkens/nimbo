@@ -77,8 +77,8 @@ struct Counter {
 impl App for Counter {
   fn view(&mut self, ui: &mut Ui) {
     let t = ui.theme();
-    ui.col(Style::new().grow().center().gap(16.0).bg(t.bg), |ui| {
-      ui.text(self.count, TextStyle::new(Font::ui(48.0), t.text));
+    ui.col(Style::new().grow().center().gap(16.0).bg(t.bg()), |ui| {
+      ui.text(self.count, TextStyle::new(Font::ui(48.0), t.text()));
       if ui.button("Add one").clicked {
         self.count += 1;
       }

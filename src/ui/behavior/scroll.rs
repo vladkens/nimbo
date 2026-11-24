@@ -8,7 +8,7 @@
 //! default the color scheme's ([Ui::color_scheme]).
 //!
 //! ```ignore
-//! ui.fade_edges(t.bg, 24.0).scroll_area(Style::new().grow(), |ui| {
+//! ui.fade_edges(t.bg(), 24.0).scroll_area(Style::new().grow(), |ui| {
 //!   for f in &self.files { ui.label(f) }
 //! });
 //! ```

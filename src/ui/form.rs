@@ -245,9 +245,9 @@ impl FormStyle {
 
     Self {
       head: TextStyle::new(t.bold, t.text).line_limit(1),
-      note: TextStyle::new(small, t.muted).nowrap(),
+      note: TextStyle::new(small, t.secondary).nowrap(),
       head_pad: [20.0, 10.0, 10.0, 10.0],
-      subtitle: TextStyle::new(small, t.muted).line_h(14.0),
+      subtitle: TextStyle::new(small, t.secondary).line_h(14.0),
       subtitle_gap: 1.5,
       foot_pad: [6.0, 10.0, 0.0, 10.0],
       group: Style::new().w(grow()).bg(t.plate).radius(12.0),
@@ -258,11 +258,14 @@ impl FormStyle {
       hairline: 1.0,
       inset: [10.0, 10.0],
       label: TextStyle::new(t.font, t.text).line_h(16.0),
-      caption: TextStyle::new(small, t.muted).line_h(14.0),
+      caption: TextStyle::new(small, t.secondary).line_h(14.0),
       tile: Style::new().w(px(h)).h(px(h)).center().radius(6.0).bg(t.raised),
       tile_x: 12.0,
-      tile_text: TextStyle::new(Font { size: 11.0, ..t.font }.weight(Weight::Semibold), t.muted)
-        .nowrap(),
+      tile_text: TextStyle::new(
+        Font { size: 11.0, ..t.font }.weight(Weight::Semibold),
+        t.secondary,
+      )
+      .nowrap(),
       tile_icon: (h * 0.6).round(),
       page: Style::new().w(grow()).pads([12.0, 20.0, 20.0, 20.0]).gap(10.0),
       toolbar: Style::new()
@@ -272,9 +275,9 @@ impl FormStyle {
         .center()
         .bg(t.bg)
         .borders([0.0, 0.0, 0.5, 0.0], toolbar_line),
-      title: TextStyle::new(t.bold, t.muted).nowrap(),
+      title: TextStyle::new(t.bold, t.secondary).nowrap(),
       tab,
-      tab_text: TextStyle::new(Font { size: 11.0, ..t.font }.weight(Weight::Medium), t.muted)
+      tab_text: TextStyle::new(Font { size: 11.0, ..t.font }.weight(Weight::Medium), t.secondary)
         .nowrap(),
       tab_icon: 26.0,
       tab_stroke: 1.4,
@@ -639,7 +642,7 @@ impl Ui<'_> {
       false => fs.row.hit().tab_focusable().cursor(Cursor::Pointer),
     };
 
-    let ink = if off { t.tertiary } else { t.muted };
+    let ink = if off { t.tertiary } else { t.secondary };
     let row = FormRow { pressed, ..row };
     let fs = FormStyle { row: style, ..*fs };
     let mut r = self.with_id(id).form_row(&fs, row, |ui| {
@@ -1014,7 +1017,7 @@ mod tests {
     fn view(&mut self, ui: &mut Ui) {
       ui.set_theme(Theme::PLATES_LIGHT);
       let fs = FormStyle::plates(&ui.theme());
-      let muted = ui.theme().muted;
+      let muted = ui.theme().secondary;
 
       // With `widgets` an icon and a button after the texts.
       let caption = |wer: &'static str, widgets: bool| {

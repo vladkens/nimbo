@@ -183,7 +183,7 @@ impl Ui<'_> {
       ui.text(label, t.label().color(ink));
       if !key.is_empty() {
         ui.el(Style::new().w(grow()).min_w(20.0));
-        ui.text(&key, t.label().color(if b.on { ink } else { t.muted }).nowrap());
+        ui.text(&key, t.label().color(if b.on { ink } else { t.secondary }).nowrap());
       }
     });
     if b.clicked {

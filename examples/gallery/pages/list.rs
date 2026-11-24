@@ -17,13 +17,13 @@ struct Stripes;
 impl ListStyle for Stripes {
   fn make_body<'a>(&self, ui: &mut Ui<'a>, mut c: ListConfiguration<'_, 'a>) {
     let t = ui.theme();
-    let frame = c.frame().radius(8.0).bg(t.panel);
-    let frame = if c.is_enabled() { frame } else { frame.opacity(t.disabled) };
+    let frame = c.frame().radius(8.0).bg(t.panel());
+    let frame = if c.is_enabled() { frame } else { frame.opacity(t.disabled()) };
     ui.scroll_area(frame, |ui| {
       c.rows(ui, |ui, mut r| {
         let fill = match (r.is_selected(), r.index() % 2) {
-          (true, _) => alpha(t.accent, if r.is_focused() { 0.35 } else { 0.15 }),
-          (false, 1) => alpha(t.text, 0.04),
+          (true, _) => alpha(t.accent(), if r.is_focused() { 0.35 } else { 0.15 }),
+          (false, 1) => alpha(t.text(), 0.04),
           _ => [0.0; 4],
         };
 
@@ -49,7 +49,7 @@ impl Gallery {
       "List style" => Self::variants(ui, Shown::Plain, |ui| {
         let frame = Style::new().w(px(160.0)).h(px(88.0));
         let text = |row: Row| match row.selected {
-          true => TextStyle::new(t.font, t.accent),
+          true => TextStyle::new(t.font(), t.accent()),
           false => t.label(),
         };
         let [plain_rows, rows] = &mut self.styled_rows;
@@ -76,15 +76,15 @@ impl Gallery {
         let sel = b.selection();
 
         // The box's focus and the rows built in view, their ids the list's.
-        let style = Style::new().w(px(220.0)).h(px(96.0)).pad(4.0).radius(8.0).bg(t.panel);
+        let style = Style::new().w(px(220.0)).h(px(96.0)).pad(4.0).radius(8.0).bg(t.panel());
         let style = b.style(style);
         ui.with_id(id).scroll_area(style, |ui| {
           ui.list_rows(&b, |ui, i, k| {
             let on = sel.contains(k);
             let row = Style::new().w(grow()).h(px(22.0)).pad_xy(8.0, 0.0).radius(5.0);
-            let fill = if on { t.accent } else { [0.0; 4] };
+            let fill = if on { t.accent() } else { [0.0; 4] };
             let row = row.align(Align::Start, Align::Center).bg(fill);
-            let text = TextStyle::new(t.font, if on { t.on_accent } else { t.text });
+            let text = TextStyle::new(t.font(), if on { t.on_accent() } else { t.text() });
             ui.with_id(id.key(("row", k)))
               .row(row, |ui| ui.text(format_args!("Row {}", i + 1), text));
           });

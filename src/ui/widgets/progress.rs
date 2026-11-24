@@ -51,7 +51,7 @@ impl Ui<'_> {
     };
 
     let (id, off) = (self.take_id(), !self.environment_value::<Enabled>().0);
-    let color = self.dim(t.muted, off);
+    let color = self.dim(t.secondary, off);
     let turn = if off { 0.0 } else { self.now().as_secs_f32() / 0.9 * TAU };
     if !off {
       self.request_frame();
