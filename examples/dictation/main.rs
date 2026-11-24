@@ -149,6 +149,15 @@ pub struct State {
   pasting: bool,
 }
 
+impl State {
+  /// Pauses the hotkeys while Settings records one, or lets them go again.
+  fn pause(&mut self, paused: bool) {
+    if let Some(h) = &mut self.hotkeys {
+      h.pause(paused);
+    }
+  }
+}
+
 pub type Shared = Rc<RefCell<State>>;
 
 fn shown(state: &Shared) -> Shown {
@@ -223,8 +232,17 @@ fn show_settings(main: &mut Main, state: &Shared) {
     return w.front();
   }
 
-  let w = main.open(&settings::config(), Settings::default());
-  w.on_close(|_| STATE.with(|s| s.borrow_mut().settings = None));
+  // Its recorder pauses the hotkeys while it records; closed, they work again.
+  let pause_hotkeys =
+    |paused| STATE.with(|s| s.try_borrow_mut().map(|mut s| s.pause(paused)).is_ok());
+  let w = main.open(&settings::config(), Settings { pause_hotkeys, ..Settings::default() });
+  w.on_close(|_| {
+    STATE.with(|s| {
+      let mut s = s.borrow_mut();
+      s.settings = None;
+      s.pause(false);
+    });
+  });
   state.borrow_mut().settings = Some(w);
 }
 

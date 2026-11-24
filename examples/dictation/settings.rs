@@ -153,6 +153,11 @@ pub struct Settings {
   /// The question the dialog asks, while it is open.
   pub ask: Option<Ask>,
   pub resets: usize,
+  /// Pauses the app's hotkeys (or lets them go again), `true` once done: while the recorder has
+  /// the keys, the app's own hotkey would take the chord it records.
+  pub pause_hotkeys: fn(bool) -> bool,
+  /// The hotkeys paused for the recorder.
+  pub paused: bool,
 }
 
 impl Default for Settings {
@@ -175,6 +180,8 @@ impl Default for Settings {
       cache: 128,
       ask: None,
       resets: 0,
+      pause_hotkeys: |_| true,
+      paused: false,
     }
   }
 }
@@ -427,6 +434,12 @@ impl App for Settings {
       });
     });
     self.confirm(ui);
+
+    // Also when the recorder lost its focus with the page, or the window lost the keys.
+    let recording = ui.focused(Id::of(HOTKEY)) && ui.window_focused();
+    if recording != self.paused && (self.pause_hotkeys)(recording) {
+      self.paused = recording;
+    }
   }
 }
 

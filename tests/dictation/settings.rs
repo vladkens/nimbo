@@ -4,12 +4,12 @@
 //! follows their height; switches flip, a row disabled by another setting ignores clicks; a select
 //! opens over its button and chooses by letters typed, closed and open; the shortcut recorder
 //! records a chord and a modifier key alone, Escape and a click elsewhere stop it, Backspace clears
-//! it, the reset puts the default back; the slider drags and steps, greys with the selected
-//! segment while the window isn't key; the dialog asks before clearing
-//! the cache and resetting all: Return chooses its default, Escape cancels, Tab and Space the
-//! action, its backdrop dims the page and takes the pointer; a row's switch keeps its width and
-//! place beside a long description that wraps. A row's warning takes its ⓘ's place, in the
-//! theme's warning colour, and shows in one tooltip with the ⓘ's tip under it; a disabled row's
+//! it, the reset puts the default back, the app's hotkeys pause while it has the keys; the slider
+//! drags and steps, greys with the selected segment while the window isn't key; the dialog asks
+//! before clearing the cache and resetting all: Return chooses its default, Escape cancels, Tab and
+//! Space the action, its backdrop dims the page and takes the pointer; a row's switch keeps its
+//! width and place beside a long description that wraps. A row's warning takes its ⓘ's place, in
+//! the theme's warning colour, and shows in one tooltip with the ⓘ's tip under it; a disabled row's
 //! ⓘ stays enabled and shows its tip. Assistive technology reads the controls by their
 //! rows with their values, and the dialog as modal, its default button focused until it gives
 //! the focus back, and the focus only while the window has it; its actions flip a switch, step
@@ -517,4 +517,36 @@ fn the_account_tab_shows_the_fields() {
   assert_eq!(h.app().account.name, "Ada");
   let lines = ["text field \"Name\" value \"Ada\" focused", "secure text field \"API key\""];
   reads(&h.a11y(), &lines);
+}
+
+thread_local! {
+  /// The app's hotkeys as Settings left them, on this test's thread.
+  static PAUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// The app's hotkeys pause while the recorder has the keys, so its chord reaches the recorder,
+/// and work again when it loses them: to another control or with the window.
+#[test]
+fn the_recorder_pauses_the_apps_hotkeys() {
+  let pause_hotkeys = |paused| {
+    PAUSED.set(paused);
+    true
+  };
+  let mut h =
+    Harness::new(Settings { pause_hotkeys, ..Settings::default() }, Size::new(WIDTH, 560.0), 2.0);
+  h.frame();
+  assert!(!PAUSED.get());
+
+  h.click_id(Id::of(HOTKEY));
+  h.frame();
+  assert!(PAUSED.get(), "recording");
+  h.event(Event::Focus(false));
+  h.frame();
+  assert!(!PAUSED.get(), "the window lost the keys");
+  h.event(Event::Focus(true));
+  h.frame();
+  assert!(PAUSED.get());
+  h.set_focus(Some(Id::of(LOGIN)));
+  h.frame();
+  assert!(!PAUSED.get(), "another control");
 }
