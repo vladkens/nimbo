@@ -707,15 +707,18 @@ fn titled(p: &Props) -> bool {
 }
 
 /// The text inside node `i` of `t`, the texts joined by spaces, leaving out the records inside
-/// it but a text's own (a text with a tip, [Ui::help]), the hidden texts and the nodes `not` (a
-/// labeled pair's label and description).
+/// it but a text's own and an unnamed group (what a tip makes, [Ui::help]), the hidden texts and
+/// the nodes `not` (a labeled pair's label and description).
 fn inner_text(t: &Tree, recs: &Records, at: &[u32], i: usize, not: &[Range<u32>]) -> String {
   let (mut out, mut k) = (String::new(), i);
   while k < t.nodes[i].end as usize {
     let n = &t.nodes[k];
-    let text =
-      |r: &(Id, Props)| r.1.role == Role::StaticText && matches!(n.kind, Kind::Text { .. });
-    let other = at[k] != NONE && !recs.list.get(at[k] as usize).is_some_and(text);
+    let through = |(_, p): &(Id, Props)| match p.role {
+      Role::StaticText => matches!(n.kind, Kind::Text { .. }),
+      Role::Group => p.name.0 == p.name.1,
+      _ => false,
+    };
+    let other = at[k] != NONE && !recs.list.get(at[k] as usize).is_some_and(through);
     let skip = k != i && (other || not.iter().any(|r| r.contains(&(k as u32))));
     if !skip && let Kind::Text { range, .. } = n.kind {
       let s = t.str(range.0, range.1).trim();
@@ -964,12 +967,17 @@ mod tests {
       let fs = FormStyle::plates(&ui.theme());
       ui.form_row(&fs, FormRow::new("Account"), |ui| {
         _ = ui.button(|ui: &mut Ui, s: TextStyle| ui.help("Signs out").text("Out", s));
+        // A tip on a container of the label: a group.
+        _ = ui.button(|ui: &mut Ui, s: TextStyle| {
+          ui.help("Saves it").row(Style::new(), |ui| ui.text("Save", s))
+        });
       });
 
       _ = ui.take_tooltips();
     });
     assert!(s.starts_with("row \"Model\" desc"), "{s}");
     assert!(s.lines().any(|l| l.starts_with("button \"Out\"")), "{s}");
+    assert!(s.lines().any(|l| l.starts_with("button \"Save\"")), "{s}");
   }
 
   /// A button keeps its own text, and the row's label is read; a text that is the value (a
