@@ -62,9 +62,9 @@ SCENARIOS = {
     "set", "AXTextField:Search widgets", "Sliders", "sleep", "0.5", "count",
     "dump",
   ],
-  # The row cut by the list's bottom edge scrolled into view (its whole frame at its centre); an
-  # open menu over the rows: a hit on its items finds them, not the rows under them.
-  "lists": [
+  # The browser's row cut by the list's bottom edge scrolled into view (its whole frame at its
+  # centre); an open menu over the rows: a hit on its items finds them, not the rows under them.
+  "files": [
     "scroll", "AXRow:Item 000019 678 KB", "sleep", "0.5", "count",
     "hit", "AXRow:Item 000019 678 KB",
     "press", "AXButton:Actions", "sleep", "0.5",

@@ -1,8 +1,8 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Tests of `examples/lists.rs` through the harness: the 100k-row list builds only the rows in
-//! view and scrolls by the wheel and the keys, selects by click, Shift-click, Cmd-click and the
-//! arrows, opens a row by Enter; the menu opens, moves over its enabled items and runs one,
+//! Tests of `examples/files/browser.rs` alone through the harness: the 100k-row list builds only
+//! the rows in view and scrolls by the wheel and the keys, selects by click, Shift-click, Cmd-click
+//! and the arrows, opens a row by Enter; the menu opens, moves over its enabled items and runs one,
 //! closes by Escape or a click outside; a right-click keeps a selection it is inside or selects
 //! its row, and opens the row menu (drawn, or asked of the platform) on the press or, on
 //! Windows, the release, never off the rows; the pop-up button chooses by letters typed, closed
@@ -10,31 +10,21 @@
 //! Assistive technology reads the rows, the selection and the cursor, the menu's highlight, the
 //! tabs, presses a tab and scrolls a cut row into view.
 
-#[path = "../examples/lists.rs"]
-#[expect(dead_code, reason = "its main and what this file doesn't use")]
-// The example sets the Windows subsystem, an attribute of its own crate, not of this module.
-#[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
-mod lists;
-
-#[expect(dead_code, reason = "this file uses a part of the helpers")]
-mod common;
-
 use std::time::Duration;
 
-use common::{mid, reads};
-use lists::*;
 use nimbo::ui::Action;
-use nimbo::{
-  CMD, Event, Harness, Id, Key, Modifiers, MouseButton, NamedKey, Os, Phase, Point, Size,
-};
+use nimbo::{CMD, Event, Harness, Id, Key, Modifiers, MouseButton, NamedKey, Os, Phase, Point};
 
-type H = Harness<Lists>;
+use crate::common::{mid, reads};
+use crate::files::browser::*;
+
+type H = Harness<Browser>;
 
 const NONE: Modifiers = Modifiers::empty();
 
-/// The example, its first frame built.
+/// The browser, its first frame built.
 fn lists() -> H {
-  let mut h = Harness::new(Lists::new(), Size::new(760.0, 480.0), 2.0);
+  let mut h = Harness::new(Browser::new(), SIZE, 2.0);
   h.render();
   h
 }
@@ -391,7 +381,7 @@ fn tabs_switch_and_keep_the_hidden_page_scroll() {
   h.frame();
   assert_eq!(offset(&h, notes), 60.0);
 
-  h.click_id(tabs.key(("tab", "Details")));
+  h.click_id(tabs.key(("tab", "Info")));
   h.frame();
   assert!(h.rect(notes).is_none());
 
@@ -467,7 +457,7 @@ fn the_tabs_and_the_divider_read_their_state() {
   let mut h = lists();
   h.click_id(Id::of(TABS).key(("tab", "Notes")));
   h.frame();
-  let lines = ["tab list", "tab \"Details\"", "tab \"Notes\" selected", "splitter 0.45 in 0..1"];
+  let lines = ["tab list", "tab \"Info\"", "tab \"Notes\" selected", "splitter 0.45 in 0..1"];
   reads(&h.a11y(), &lines);
 }
 
