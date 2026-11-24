@@ -268,9 +268,9 @@ impl Settings {
       });
       ui.form_row(fs, FormRow::new("Text size"), |ui| {
         let t = ui.theme();
-        ui.text("A", t.label().font(nimbo::Font { size: 10.0, ..t.font }));
+        ui.text("A", t.label().font(t.font.size(10.0)));
         ui.id(TEXT_SIZE).slider(&mut self.text_size, 10.0..=20.0);
-        ui.text("A", t.label().font(nimbo::Font { size: 16.0, ..t.font }));
+        ui.text("A", t.label().font(t.font.size(16.0)));
       });
     });
     ui.form_section(fs, "Motion", |ui| {
@@ -340,7 +340,7 @@ impl Settings {
       let accent = t.accent;
       ui.canvas(Style::new().w(px(64.0)).h(px(64.0)), move |f, r| app_icon(f, r, accent));
       ui.el(Style::new().h(px(10.0)));
-      ui.text("Example", t.label().font(nimbo::Font { size: 20.0, ..t.bold }));
+      ui.text("Example", t.label().font(t.bold.size(20.0)));
       ui.el(Style::new().h(px(2.0)));
       ui.text("Version 1.0.0", fs.note);
       ui.el(Style::new().h(px(8.0)));

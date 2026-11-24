@@ -13,9 +13,9 @@
 use std::time::Duration;
 
 use nimbo::{
-  Align, App, Axis, ButtonRole, Config, Cx, Event, Float, Font, Harness, Icon, Id, Item, List,
-  Menu, Modifiers, Selection, Shortcut, Size, Split, Style, Tabs, Tag, TextStyle,
-  ToolbarItemPlacement, Ui, alpha, grow, px,
+  Align, App, Axis, ButtonRole, Config, Cx, Event, Float, Harness, Icon, Id, Item, List, Menu,
+  Modifiers, Selection, Shortcut, Size, Split, Style, Tabs, Tag, TextStyle, ToolbarItemPlacement,
+  Ui, alpha, grow, px,
 };
 
 /// The rows of the folder, besides those added ([Browser::added]).
@@ -187,7 +187,7 @@ impl Browser {
   pub fn toolbar_items(&mut self, ui: &mut Ui) {
     let t = ui.theme();
     ui.toolbar_item(ToolbarItemPlacement::Navigation, |ui| {
-      ui.text(self.folder, TextStyle::new(Font { size: 15.0, ..t.bold }, t.text).nowrap());
+      ui.text(self.folder, TextStyle::new(t.bold.size(15.0), t.text).nowrap());
     });
 
     ui.toolbar_item(ToolbarItemPlacement::PrimaryAction, |ui| {

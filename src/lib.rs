@@ -36,7 +36,10 @@
 //!
 //! What an app reads and the enums that may grow are `#[non_exhaustive]`, so a minor release can
 //! add to them: a `match` on one keeps a `_` arm, and such a struct is read or changed field by
-//! field, never built whole.
+//! field, never built whole. What an app gives (a style, a font) keeps its fields private: it
+//! starts from a constructor or a constant and changes by `const` builders named as the field
+//! (`Style::new().pad(8.0)`), so a field added breaks nothing; where an app reads one back, a
+//! getter, `get_` before a name a builder holds ([TextStyle::get_color]).
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(
   not(all(feature = "full", feature = "harness")),

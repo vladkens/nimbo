@@ -227,7 +227,8 @@ fn the_search_field_in_both_themes() {
     h.event(Event::Appearance(look));
     h.frame();
     let (field, r) = node(&h, Role::TextField, "Search");
-    let fill = t.search().frame.bg;
+    // White over the ground, as macOS's search fields: 30% in light, 12% in dark.
+    let fill = alpha([1.0; 4], if look == Appearance::LIGHT { 0.3 } else { 0.12 });
     let want = px(mix(t.bg, alpha(fill, 1.0), fill[3]));
     let got = h.render().pixel(r.x + r.w / 2.0, r.y + 4.0);
     assert!(diff(got, want) <= 1, "{look:?}: {got:?}, not {want:?}");

@@ -164,7 +164,7 @@ impl Gallery {
     let code = Style::new().w(grow()).pad(10.0).gap(4.0).radius(8.0).bg(t.raised);
     ui.id(PAGE).scroll_area(Style::new().grow(), |ui| {
       ui.col(Style::new().w(grow()).pad(20.0).gap(14.0), |ui| {
-        ui.text(block.name, TextStyle::new(Font { size: 20.0, ..t.bold }, t.text));
+        ui.text(block.name, TextStyle::new(t.bold.size(20.0), t.text));
         ui.col(code, |ui| {
           ui.text("SWIFTUI", t.section());
           ui.selectable_text(block.swiftui, mono);

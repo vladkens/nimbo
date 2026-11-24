@@ -137,7 +137,7 @@ fn check(h: &mut Harness<Text>, p: &Palette) {
   let (g, next) = (line.glyphs[at], line.glyphs[at + 1]);
 
   // About an em wide, in any font: a colour one, or the missing glyph's box.
-  let em = SCRIPTS[2].font.size;
+  let em = SCRIPTS[2].font.get_size();
   assert!((0.5 * em..2.0 * em).contains(&(next.x - g.x)), "{g:?} {next:?}");
   let color = h.text_system().is_color(g);
   if cfg!(target_os = "linux") && !color {

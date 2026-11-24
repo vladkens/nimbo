@@ -26,9 +26,9 @@ use crate::t;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Icon {
   /// The path data.
-  pub d: &'static str,
+  pub(crate) d: &'static str,
   /// How it is drawn: stroked, or filled (a play triangle).
-  pub paint: IconPaint,
+  pub(crate) paint: IconPaint,
 }
 
 /// How an [Icon] is drawn, as SF Symbols' rendering: a stroke, of the width the app gave it in

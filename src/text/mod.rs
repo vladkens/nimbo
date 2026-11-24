@@ -49,9 +49,9 @@ pub enum Design {
 /// The system UI font in a [Design]; `size` in points.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Font {
-  pub size: f32,
-  pub weight: Weight,
-  pub design: Design,
+  pub(crate) size: f32,
+  pub(crate) weight: Weight,
+  pub(crate) design: Design,
 }
 
 impl Font {
@@ -66,6 +66,15 @@ impl Font {
 
   pub const fn weight(self, weight: Weight) -> Self {
     Self { weight, ..self }
+  }
+
+  /// The same font in `size` points: a title from the bold body font.
+  pub const fn size(self, size: f32) -> Self {
+    Self { size, ..self }
+  }
+
+  pub const fn get_size(&self) -> f32 {
+    self.size
   }
 }
 

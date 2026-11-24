@@ -294,7 +294,7 @@ impl Gallery {
           false => (fill, [1.0; 4]),
         };
 
-        let ring = if b.focused { t.focus_ring().color } else { [0.0; 4] };
+        let ring = if b.focused { t.focus } else { [0.0; 4] };
         let s = Style::new().w(px(28.0)).h(px(28.0));
 
         ui.control(&b).canvas(s, move |f, r| {
