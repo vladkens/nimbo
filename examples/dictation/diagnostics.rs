@@ -5,8 +5,8 @@
 //! each `Event::System` and redraws: the lid, the changes of each kind and the last. The app's
 //! hook given to `Main::watch` keeps the same [Seen] for the tray's menu.
 //!
-//! `cargo run --release --example dictation -- diagnostics [--shot <file.png>]` opens it alone;
-//! the shot is the window after a change of the lid.
+//! `cargo run --release --example dictation -- diagnostics --shot <file.png>` renders it alone:
+//! the window after a change of the lid.
 
 use nimbo::system::Change;
 use nimbo::{App, Config, Cx, Event, FormRow, FormStyle, Harness, Style, Ui, grow};

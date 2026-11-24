@@ -57,7 +57,8 @@ pub const LINES: [&str; 3] = [
   "The meeting moves to half past three",
 ];
 
-const USAGE: &str = "usage: dictation [history|diagnostics|hud] [--shot <file.png>] [options]";
+const USAGE: &str =
+  "usage: dictation [history [--shot <file.png>] | diagnostics|hud --shot <file.png>] [options]";
 
 /// What the menu shows: whether a dictation records, launch at login (`None` where the app
 /// can't: a bare binary on macOS), the hotkey's label and what the system reported.
@@ -112,13 +113,16 @@ pub struct Dictation {
   pub recording: bool,
   /// What each heard, oldest first.
   pub said: Vec<String>,
+  /// What was heard since the last paste: a dictation stopped during another's countdown waits
+  /// for it.
+  pub unpasted: Vec<String>,
   /// Pastes a line where the user types: [paste_here], a fake in the tests.
   pub paste: fn(&str),
 }
 
 impl Default for Dictation {
   fn default() -> Self {
-    Self { recording: false, said: Vec::new(), paste: paste_here }
+    Self { recording: false, said: Vec::new(), unpasted: Vec::new(), paste: paste_here }
   }
 }
 
@@ -159,18 +163,19 @@ pub fn dictate(state: &Shared) -> Option<String> {
 
   let line = LINES[d.said.len() % LINES.len()].to_owned();
   d.said.push(line.clone());
+  d.unpasted.push(line.clone());
   Some(line)
 }
 
-/// Pastes the last line heard; the state's borrow ends before the paste, which may run the
-/// loop.
-pub fn paste_last(state: &Shared) {
-  let (line, paste) = {
-    let d = &state.borrow().dictation;
-    (d.said.last().cloned(), d.paste)
+/// Pastes what was heard since the last paste, the lines joined by spaces; the state's borrow
+/// ends before the paste, which may run the loop.
+pub fn paste_unpasted(state: &Shared) {
+  let (lines, paste) = {
+    let d = &mut state.borrow_mut().dictation;
+    (std::mem::take(&mut d.unpasted), d.paste)
   };
-  if let Some(line) = line {
-    paste(&line);
+  if !lines.is_empty() {
+    paste(&lines.join(" "));
   }
 }
 
@@ -217,7 +222,7 @@ fn show_diagnostics(main: &mut Main, state: &Shared) {
 }
 
 /// Starts a dictation, showing the HUD; or stops it, hiding the HUD, adding the line to an open
-/// History and pasting it `secs` from now.
+/// History and pasting it `secs` from now, with what was heard meanwhile.
 fn toggle_dictation(main: &mut Main, state: &Shared, secs: u64) {
   let hud = state.borrow().hud.clone();
   let Some(line) = dictate(state) else {
@@ -265,7 +270,7 @@ fn paste_in(main: &mut Main, secs: u64) {
   }
 
   match secs {
-    0 => STATE.with(paste_last),
+    0 => STATE.with(paste_unpasted),
     _ => main.proxy().after(Duration::from_secs(1), move |main| paste_in(main, secs - 1)),
   }
 }
@@ -401,10 +406,11 @@ fn main() {
   let lid = hardware::lid_closed;
   match window.as_str() {
     "history" => nimbo::run_args(history::config(), History::default(), history::shot, rest),
-    "diagnostics" => {
+    // Only their shots: the system's changes reach Diagnostics through the app's watch, and
+    // the HUD alone would wait hidden.
+    "diagnostics" if rest.iter().any(|a| a == "--shot") => {
       nimbo::run_args(diagnostics::config(), Diagnostics::new(lid), diagnostics::shot, rest)
     }
-    // Only its shot: alone it would wait hidden.
     "hud" if rest.iter().any(|a| a == "--shot") => {
       nimbo::run_args(hud::CONFIG, Hud::default(), hud::shot, rest)
     }
