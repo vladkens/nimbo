@@ -226,6 +226,22 @@ nimbo: `Slider::new(&mut self.level, 10.0..=90.0).step(10.0).tick_label(|v| (v =
 
 ![Slider steps](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/slider-steps.png)
 
+### Slider style
+
+SwiftUI: `Slider(value: $zoom, in: 0...200) (SwiftUI has no slider style)`
+
+nimbo: `ui.slider_style(&PlainSliderStyle).col(style, |ui| { ui.slider(&mut self.zoom, 0.0..=200.0); }); ui.slider(&mut self.zoom, 0.0..=200.0)`
+
+![Slider style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/slider-style.png)
+
+### Custom slider style
+
+SwiftUI: `struct Meter: ProgressViewStyle { … } (SwiftUI has no slider style)`
+
+nimbo: `impl SliderStyle for Meter { fn make_body(&self, ui: &mut Ui, c: SliderConfiguration) { let k = c.fraction(); c.root(ui).canvas(style, move |f, r| { … }); } } Slider::new(&mut self.level, 10.0..=90.0).step(10.0).show(ui.slider_style(&Meter))`
+
+![Custom slider style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/custom-slider-style.png)
+
 ### Picker
 
 SwiftUI: `Picker("Size", selection: $size) { …; Divider(); … }`

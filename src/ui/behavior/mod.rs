@@ -27,7 +27,8 @@
 //! - [Ui::toggle_behavior]: a button that flips a `bool`; [Ui::toggle] over it, drawn by a
 //!   [ToggleStyle] ([Ui::toggle_style]);
 //! - [Ui::slider_behavior]: a drag along the element onto the nearest step if it has one, the
-//!   arrows move a step or a twentieth;
+//!   arrows move a step or a twentieth; the [Slider] over it, drawn by a [SliderStyle]
+//!   ([Ui::slider_style]);
 //! - [Ui::pick_behavior] (tabs, segmented control, toolbar tabs): one of `n` items by a click, the
 //!   arrows step;
 //! - [Ui::shortcut_behavior]: a shortcut recorder over a global hotkey ([crate::Hotkey]);
@@ -72,6 +73,7 @@ use keyboard_types::Modifiers;
 pub use list::{ListBehavior, ListRows, SectionHeader, Selection};
 pub use menu::{MenuPlacement, TYPE_SELECT, TypeSelect};
 pub use scroll::{ScrollBar, ScrollBehavior, ScrollerKnob};
+pub use slider::{PlainSliderStyle, Slider, SliderConfiguration, SliderStyle};
 pub use split::SplitBehavior;
 pub use toggle::{PlainToggleStyle, ToggleConfiguration, ToggleStyle};
 

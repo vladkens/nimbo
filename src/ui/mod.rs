@@ -74,8 +74,9 @@ pub use a11y::{A11yNode, A11yTree, Action, LabeledPairRole, Props, Role, State, 
 pub use behavior::{
   Behavior, Button, ButtonConfiguration, ButtonRole, ButtonStyle, Content, DialogBehavior,
   EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, ListBehavior, ListRows, MenuPlacement,
-  PlainButtonStyle, PlainToggleStyle, ScrollBar, ScrollBehavior, ScrollerKnob, SectionHeader,
-  Selection, SplitBehavior, TextInput, ToggleConfiguration, ToggleStyle, TypeSelect,
+  PlainButtonStyle, PlainSliderStyle, PlainToggleStyle, ScrollBar, ScrollBehavior, ScrollerKnob,
+  SectionHeader, Selection, Slider, SliderConfiguration, SliderStyle, SplitBehavior, TextInput,
+  ToggleConfiguration, ToggleStyle, TypeSelect,
 };
 pub use containers::{
   List, ListResponse, ListStyle, Picker, Row, Split, Tabs, Tag, ToolbarItemPlacement,
@@ -102,7 +103,7 @@ pub(crate) use textlayout::TextLayout;
 pub use theme::{ControlBorder, Sizes, SwitchSize, Theme, Tone};
 pub use widgets::{
   BorderedButtonStyle, BorderedProminentButtonStyle, BorderlessButtonStyle, ButtonToggleStyle,
-  CheckboxToggleStyle, Slider, SwitchToggleStyle,
+  CheckboxToggleStyle, LinearSliderStyle, SwitchToggleStyle,
 };
 
 use self::input::{Deliver, Input, ScrollState};

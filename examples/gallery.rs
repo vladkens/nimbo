@@ -19,10 +19,10 @@ use nimbo::{
   Button, ButtonConfiguration, ButtonRole, ButtonStyle, ButtonToggleStyle, CheckboxToggleStyle,
   Color, Config, Content, ContentMode, ControlSize, Cursor, Dialog, Enabled, EnvironmentValue,
   Float, Font, FormRow, FormStyle, Hotkey, Icon, Id, Item, LinePattern, List, ListRows, ListStyle,
-  Menu, Picker, PlainToggleStyle, Quad, Rect, ScrollBar, ScrollerKnob, Section, Selection,
-  Shortcut, Slider, Split, Style, Tabs, Tag, TextStyle, ToggleConfiguration, ToggleStyle, Tone,
-  ToolbarItemPlacement, TruncationMode, Ui, UnitPoint, WindowToolbarStyle, alpha, grow, mix, px, t,
-  tn,
+  Menu, Picker, PlainSliderStyle, PlainToggleStyle, Quad, Rect, ScrollBar, ScrollerKnob, Section,
+  Selection, Shortcut, Slider, SliderConfiguration, SliderStyle, Split, Style, Tabs, Tag,
+  TextStyle, ToggleConfiguration, ToggleStyle, Tone, ToolbarItemPlacement, TruncationMode, Ui,
+  UnitPoint, WindowToolbarStyle, alpha, grow, mix, px, t, tn,
 };
 
 pub const SIDEBAR: &str = "sidebar";
@@ -63,6 +63,27 @@ impl ToggleStyle for Dot {
     ui.row(Style::new().gap(6.0).center(), |ui| {
       ui.el(dot);
       c.label(ui, TextStyle::new(t.font, alpha(t.text, k)));
+    });
+  }
+}
+
+/// A slider style of the gallery's own: a capsule filled in the accent up to the value, a notch
+/// at each step between its ends, no knob; faint when disabled.
+struct Meter;
+
+impl SliderStyle for Meter {
+  fn make_body(&self, ui: &mut Ui, c: SliderConfiguration) {
+    let t = ui.theme();
+    let a = if c.is_enabled() { 1.0 } else { 0.4 };
+    let (k, track, fill, notch) =
+      (c.fraction(), alpha(t.accent, 0.15 * a), alpha(t.accent, a), alpha(t.bg, 0.8));
+    let notches: Vec<f32> = c.steps().map(|(_, p)| p).filter(|p| *p > 0.0 && *p < 1.0).collect();
+    c.root(ui).canvas(Style::new().w(grow()).h(px(8.0)), move |f, r| {
+      f.rect(r, track, 4.0);
+      f.rect(Rect::new(r.x, r.y, r.w * k, r.h), fill, 4.0);
+      for p in &notches {
+        f.rect(Rect::new(r.x + r.w * p - 0.5, r.y, 1.0, r.h), notch, 0.0);
+      }
     });
   }
 }
@@ -124,6 +145,8 @@ pub const BLOCKS: &[Block] = &[
   b("Controls", "Custom toggle style", "struct Dot: ToggleStyle { func makeBody(configuration: Configuration) -> some View { HStack { Circle()…; configuration.label } } }", "impl ToggleStyle for Dot { fn make_body(&self, ui: &mut Ui, mut c: ToggleConfiguration) { ui.row(style, |ui| { ui.el(dot(c.is_on())); c.label(ui, s); }); } } ui.toggle_style(&Dot).toggle(&mut self.live, \"Live\"); ui.toggle_style(&PlainToggleStyle).toggle(&mut self.wrap, \"Plain\")"),
   b("Controls", "Slider", "Slider(value: $zoom, in: 0...200)", "ui.slider(&mut self.zoom, 0.0..=200.0)"),
   b("Controls", "Slider steps", "Slider(value: $level, in: 10...90, step: 10) { … } tick: { v in SliderTick(v) { … } }", "Slider::new(&mut self.level, 10.0..=90.0).step(10.0).tick_label(|v| (v == 50.0).then(|| \"50%\".into())).show(ui)"),
+  b("Controls", "Slider style", "Slider(value: $zoom, in: 0...200) (SwiftUI has no slider style)", "ui.slider_style(&PlainSliderStyle).col(style, |ui| { ui.slider(&mut self.zoom, 0.0..=200.0); }); ui.slider(&mut self.zoom, 0.0..=200.0)"),
+  b("Controls", "Custom slider style", "struct Meter: ProgressViewStyle { … } (SwiftUI has no slider style)", "impl SliderStyle for Meter { fn make_body(&self, ui: &mut Ui, c: SliderConfiguration) { let k = c.fraction(); c.root(ui).canvas(style, move |f, r| { … }); } } Slider::new(&mut self.level, 10.0..=90.0).step(10.0).show(ui.slider_style(&Meter))"),
   b("Controls", "Picker", "Picker(\"Size\", selection: $size) { …; Divider(); … }", "Picker::new(&mut self.size).options(&A).divider().options(&B).show(ui)"),
   b("Controls", "Segmented picker", "Picker(…) { … }.pickerStyle(.segmented)", "ui.segmented(&mut self.view, &[Tag::new(0, \"List\").count(128), Tag::new(1, \"Grid\")])"),
   b("Controls", "Text field", "TextField(\"Name\", text: $name)", "ui.field(&mut self.name, \"Name\")"),
@@ -518,6 +541,24 @@ impl Gallery {
         ui.col(Style::new().w(px(160.0)), |ui| _ = s.show(ui.a11y_label("Level")));
         ui.text(format_args!("{:.0}%", self.level), t.muted().nowrap());
       }),
+
+      // A plain slider by its column, the one after it in the window's style.
+      "Slider style" => Self::variants(ui, Shown::Plain, |ui| {
+        ui.col(Style::new().w(px(160.0)).gap(8.0), |ui| {
+          ui.slider_style(&PlainSliderStyle).col(Style::new().w(grow()), |ui| {
+            _ = ui.a11y_label("Zoom").slider(&mut self.zoom, 0.0..=200.0)
+          });
+          _ = ui.a11y_label("Zoom").slider(&mut self.zoom, 0.0..=200.0);
+        });
+      }),
+      "Custom slider style" => Self::variants(ui, Shown::Plain, |ui| {
+        let s = Slider::new(&mut self.level, 10.0..=90.0).step(10.0);
+        ui.col(Style::new().w(px(160.0)), |ui| {
+          _ = s.show(ui.slider_style(&Meter).a11y_label("Level"))
+        });
+        ui.text(format_args!("{:.0}%", self.level), t.muted().nowrap());
+      }),
+
       "Picker" => Self::variants(ui, Shown::Plain, |ui| {
         let p = Picker::new(&mut self.size).options(&SIZES[..1]).divider();
         p.options(&SIZES[1..]).show(ui.a11y_label("Size"));
