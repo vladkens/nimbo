@@ -142,7 +142,7 @@ struct Stripes;
 impl ListStyle for Stripes {
   fn make_body<'a>(&self, ui: &mut Ui<'a>, mut c: ListConfiguration<'_, 'a>) {
     let t = ui.theme();
-    let frame = c.frame().pad(4.0).radius(8.0).bg(t.panel);
+    let frame = c.frame().radius(8.0).bg(t.panel);
     let frame = if c.is_enabled() { frame } else { frame.opacity(t.disabled) };
     ui.scroll_area(frame, |ui| {
       c.rows(ui, |ui, mut r| {
@@ -792,7 +792,8 @@ impl Gallery {
         inset.show(ui, |ui, row| ui.text(format_args!("Row {}", row.index + 1), t.label()));
       }),
       "Custom list style" => Self::variants(ui, Shown::Plain, |ui| {
-        let list = List::new(40, 24.0).style(Style::new().w(px(220.0)).h(px(96.0)));
+        // Padded in the list's box, where its keys scroll the rows to.
+        let list = List::new(40, 24.0).style(Style::new().w(px(220.0)).h(px(96.0)).pad(4.0));
         let list = list.selection(&mut self.styled_rows[1]);
         let ui = ui.list_style(&Stripes);
         list.show(ui, |ui, row| ui.text(format_args!("Row {}", row.index + 1), t.label()));

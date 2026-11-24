@@ -7,9 +7,10 @@
 //! chooses by letters, a segment picks, a tooltip shows, a recorder records and its ⊗ clears,
 //! the alert asks in its theme, Escape closes it, its action counts), the search field draws in
 //! its theme and clears from its ⊗; a stepped slider lands on its steps from the pointer and the
-//! keys and marks them with dots and labels; a row's footer spans its row; assistive technology
-//! reads each widget by its role, the ⊗ marks beside their controls; and `docs/api.md` is the
-//! gallery's, and so are its pictures on the `assets` branch when its worktree is there.
+//! keys and marks them with dots and labels; a row's footer spans its row; End in a custom list
+//! shows its last row whole; assistive technology reads each widget by its role, the ⊗ marks
+//! beside their controls; and `docs/api.md` is the gallery's, and so are its pictures on the
+//! `assets` branch when its worktree is there.
 
 #[path = "../examples/gallery.rs"]
 #[expect(dead_code, reason = "its main and what this file doesn't use")]
@@ -556,4 +557,17 @@ fn the_api_doc_is_the_gallerys() {
   }
 
   _ = std::fs::remove_dir_all(&fresh);
+}
+
+/// End in the custom list style shows its last row whole, inside the box's padding.
+#[test]
+fn a_custom_list_ends_on_its_last_row() {
+  let mut h = gallery(page("Custom list style"), true);
+  let (_, list) = node(&h, Role::List, "");
+  let (x, y) = mid(node(&h, Role::Row, "Row 1").1);
+  h.click(x, y);
+  h.key(NamedKey::End, Modifiers::empty());
+  h.wait(Duration::from_millis(400));
+  let (_, last) = node(&h, Role::Row, "Row 40");
+  assert!((last.y + last.h - (list.y + list.h - 4.0)).abs() < 0.5, "{last:?} in {list:?}");
 }
