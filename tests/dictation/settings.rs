@@ -521,24 +521,16 @@ fn the_account_tab_shows_the_fields() {
 }
 
 thread_local! {
-  /// The app's hotkeys as Settings left them, and whether the app's state is busy, on this test's
-  /// thread.
+  /// The app's hotkeys as Settings left them, on this test's thread.
   static PAUSED: Cell<bool> = const { Cell::new(false) };
-  static BUSY: Cell<bool> = const { Cell::new(false) };
 }
 
 /// The app's hotkeys pause while the recorder has the keys, so its chord reaches the recorder,
-/// and work again when it loses them: to another control or with the window; while the app is
-/// busy, a frame later.
+/// and work again when it loses them: to another control, or with the window at once, as a
+/// hidden window may not draw again.
 #[test]
 fn the_recorder_pauses_the_apps_hotkeys() {
-  let pause_hotkeys = |paused| {
-    if !BUSY.get() {
-      PAUSED.set(paused);
-    }
-
-    !BUSY.get()
-  };
+  let pause_hotkeys = |paused| PAUSED.set(paused);
   let mut h =
     Harness::new(Settings { pause_hotkeys, ..Settings::default() }, Size::new(WIDTH, 560.0), 2.0);
   h.frame();
@@ -547,20 +539,9 @@ fn the_recorder_pauses_the_apps_hotkeys() {
   h.click_id(Id::of(HOTKEY));
   h.frame();
   assert!(PAUSED.get(), "recording");
-  BUSY.set(true);
   h.event(Event::Focus(false));
-  h.wait(Duration::from_millis(500));
-  assert!(PAUSED.get(), "busy");
-  assert!(h.needs_frame() || h.due_in().is_some(), "a frame to try again");
-  BUSY.set(false);
-  h.wait(Duration::from_millis(100));
   assert!(!PAUSED.get(), "the window lost the keys");
 
-  h.event(Event::Focus(true));
-  h.frame();
-  assert!(PAUSED.get());
-  h.event(Event::Focus(false));
-  assert!(!PAUSED.get(), "at once, without a frame: a hidden window may not draw");
   h.event(Event::Focus(true));
   h.frame();
   assert!(PAUSED.get());

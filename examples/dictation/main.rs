@@ -27,7 +27,7 @@ pub mod history;
 pub mod hud;
 pub mod settings;
 
-use std::cell::RefCell;
+use std::cell::{OnceCell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -37,8 +37,8 @@ use nimbo::instance::{self, Claim, Instance};
 use nimbo::paste::Paste;
 use nimbo::tray::{Item, Menu, Tray, TrayIcon};
 use nimbo::{
-  App, AppInfo, Config, Hotkey, Main, Png, Presence, Shortcut, Window, autostart, desktop, focus,
-  hardware, paste, tray,
+  App, AppInfo, Config, Hotkey, Main, Png, Presence, Proxy, Shortcut, Window, autostart, desktop,
+  focus, hardware, paste, tray,
 };
 
 use self::account::Account;
@@ -233,8 +233,6 @@ fn show_settings(main: &mut Main, state: &Shared) {
   }
 
   // Its recorder pauses the hotkeys while it records; closed, they work again.
-  let pause_hotkeys =
-    |paused| STATE.with(|s| s.try_borrow_mut().map(|mut s| s.pause(paused)).is_ok());
   let w = main.open(&settings::config(), Settings { pause_hotkeys, ..Settings::default() });
   w.on_close(|_| {
     STATE.with(|s| {
@@ -325,6 +323,17 @@ fn paste_in(main: &mut Main, secs: u64) {
 thread_local! {
   /// The app's state, on the main thread, where the hotkey's work is posted.
   static STATE: Shared = Shared::default();
+  /// The way back to the main loop, for work that finds the state busy.
+  static PROXY: OnceCell<Proxy> = const { OnceCell::new() };
+}
+
+/// Pauses the hotkeys while Settings records one, or lets them go again; with the state busy (a
+/// nested loop), from the main loop once it is free.
+fn pause_hotkeys(paused: bool) {
+  STATE.with(|s| match s.try_borrow_mut() {
+    Ok(mut s) => s.pause(paused),
+    Err(_) => _ = PROXY.with(|p| p.get().map(|p| p.post(move |_| pause_hotkeys(paused)))),
+  });
 }
 
 fn start(main: &mut Main, instance: Option<Instance>) {
@@ -338,6 +347,7 @@ fn start(main: &mut Main, instance: Option<Instance>) {
   }
 
   let state = STATE.with(Rc::clone);
+  PROXY.with(|p| _ = p.set(main.proxy()));
   let tray = Tray::new(TrayIcon::Path { size: 18.0, d: ICON.into(), even_odd: true }, INFO.name);
   if let Err(e) = tray::available() {
     eprintln!("tray: {e}");

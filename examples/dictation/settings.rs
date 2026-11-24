@@ -153,9 +153,9 @@ pub struct Settings {
   /// The question the dialog asks, while it is open.
   pub ask: Option<Ask>,
   pub resets: usize,
-  /// Pauses the app's hotkeys (or lets them go again), `true` once done: while the recorder has
-  /// the keys, the app's own hotkey would take the chord it records.
-  pub pause_hotkeys: fn(bool) -> bool,
+  /// Pauses the app's hotkeys, or lets them go again: while the recorder has the keys, the app's
+  /// own hotkey would take the chord it records.
+  pub pause_hotkeys: fn(bool),
   /// The hotkeys paused for the recorder.
   pub paused: bool,
 }
@@ -180,7 +180,7 @@ impl Default for Settings {
       cache: 128,
       ask: None,
       resets: 0,
-      pause_hotkeys: |_| true,
+      pause_hotkeys: |_| {},
       paused: false,
     }
   }
@@ -420,7 +420,8 @@ impl App for Settings {
   /// The window losing the keys lets the hotkeys go at once: hidden or covered, it may not run
   /// its view again until it shows.
   fn event(&mut self, _: &mut Cx, ev: &Event) -> bool {
-    if *ev == Event::Focus(false) && self.paused && (self.pause_hotkeys)(false) {
+    if *ev == Event::Focus(false) && self.paused {
+      (self.pause_hotkeys)(false);
       self.paused = false;
     }
 
@@ -446,14 +447,11 @@ impl App for Settings {
     });
     self.confirm(ui);
 
-    // Also when the recorder lost its focus with the page, or the window lost the keys; while
-    // the app's state is busy, again on the next frame.
+    // Also when the recorder lost its focus with the page.
     let recording = ui.focused(Id::of(HOTKEY)) && ui.window_focused();
     if recording != self.paused {
-      match (self.pause_hotkeys)(recording) {
-        true => self.paused = recording,
-        false => ui.request_frame_in(Duration::from_millis(50)),
-      }
+      (self.pause_hotkeys)(recording);
+      self.paused = recording;
     }
   }
 }
