@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.11"
 # ///
-"""Makes docs/api.md and its pictures from the gallery's table (examples/gallery.rs).
+"""Makes docs/api.md and its pictures from the gallery's table (examples/gallery/blocks.rs).
 
 The gallery prints the page (`--api`) and the blocks' slugs (`--list`); each picture is a block
 alone, as high as its variants, in the light appearance at 2x, from the harness without a window

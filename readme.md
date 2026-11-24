@@ -110,7 +110,7 @@ cargo run --release --example gallery                          # every building 
 cargo run --release --example gallery -- --shot gallery.png    # the same, rendered without a window
 ```
 
-Each building block beside its SwiftUI counterpart, with a picture: [docs/api.md](docs/api.md), made from the gallery's table ([examples/gallery.rs](examples/gallery.rs)) by `make api-shots`.
+Each building block beside its SwiftUI counterpart, with a picture: [docs/api.md](docs/api.md), made from the gallery's table ([examples/gallery/blocks.rs](examples/gallery/blocks.rs)) by `make api-shots`.
 
 - `counter`: buttons, hover, focus
 - `gallery`: a catalog of every building block, each page its SwiftUI line, its nimbo line and the block in its variants
