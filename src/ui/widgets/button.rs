@@ -4,10 +4,10 @@
 //! variants at the control size ([Ui::control_size]); the ⓘ that explains a row, the warning mark
 //! that tells what is wrong with it, and the round "?" that opens a page's help.
 
-use super::icon::{self, Icon};
 pub use crate::menu::ButtonRole;
 use crate::scene::{Color, Frame, Rect, mix};
 use crate::t;
+use crate::ui::icon::{self, Icon};
 use crate::ui::theme::{ButtonLook, ButtonStyle};
 use crate::ui::{ControlSize, Enabled, Float, Response, Role, Style, TextStyle, Ui, px};
 
@@ -87,7 +87,7 @@ impl<'s> Button<'s> {
     };
 
     let bg = if b.pressed { s.pressed } else { mix(s.bg, s.hover, hot) };
-    let frame = ui.control(s.frame.bg(bg), &b);
+    let frame = ui.dim_style(s.frame.bg(bg), b.disabled);
     // An icon button's mark is muted until the pointer is on it.
     let ink = match square && self.look.is_none() && !self.selected {
       true => mix(t.muted, t.text, if b.pressed { 1.0 } else { hot }),
@@ -97,7 +97,7 @@ impl<'s> Button<'s> {
     let ink = ui.dim(ink, b.disabled);
 
     let size = (s.text.font.size + 2.0).round();
-    let mut r = ui.with_id(id).row(frame, |ui| {
+    let mut r = ui.control(&b).row(frame, |ui| {
       if let Some(i) = self.icon {
         let i = i.default_stroke(1.6);
         ui.canvas(Style::new().w(px(size)).h(px(size)), move |f, r| icon::draw(f, i, r, ink));
@@ -162,10 +162,10 @@ impl Ui<'_> {
     let size = (t.font.size + 3.0).round();
     let k = if b.pressed { 1.0 } else { 0.5 * hot };
     let color = self.dim(mix(ink[0], ink[1], k), b.disabled);
-    let s = self.control(Style::new().w(px(size)).h(px(size)).radius(size / 2.0), &b);
+    let s = self.dim_style(Style::new().w(px(size)).h(px(size)).radius(size / 2.0), b.disabled);
     let paint = move |f: &mut Frame, r: Rect| icon::draw(f, icon.default_stroke(1.5), r, color);
     let Some(&mut MarkShift(dy)) = self.slot::<MarkShift>() else {
-      let mut r = self.with_id(id).canvas(s, paint);
+      let mut r = self.control(&b).canvas(s, paint);
       r.clicked = b.clicked;
       return r;
     };
@@ -178,7 +178,7 @@ impl Ui<'_> {
         ui.help(tip);
       }
 
-      r = ui.with_id(id).float(Float::parent().offset(0.0, dy).clip()).canvas(s, paint);
+      r = ui.control(&b).float(Float::parent().offset(0.0, dy).clip()).canvas(s, paint);
     });
     r.clicked = b.clicked;
     r
@@ -194,9 +194,10 @@ impl Ui<'_> {
     let hot = self.ctl_hot(id, b.hovered);
     let d = t.sizes.control_h;
     let bg = if b.pressed { t.pressed } else { mix(t.raised, t.hover, hot) };
-    let s = self.control(Style::new().w(px(d)).h(px(d)).center().radius(d / 2.0).bg(bg), &b);
+    let s = Style::new().w(px(d)).h(px(d)).center().radius(d / 2.0).bg(bg);
+    let s = self.dim_style(s, b.disabled);
     let text = TextStyle::new(t.bold, t.text).nowrap();
-    let mut r = self.with_id(id).row(s, |ui| ui.text("?", text));
+    let mut r = self.control(&b).row(s, |ui| ui.text("?", text));
     r.clicked = b.clicked;
     r
   }
@@ -206,9 +207,11 @@ impl Ui<'_> {
 mod tests {
   use crate::app::App;
   use crate::harness::Harness;
+  use crate::keys::Key;
   use crate::scene::{Rect, Size};
   use crate::text::Font;
-  use crate::ui::{ControlSize, Icon, Id, Response, Style, TextStyle, Theme, Ui, px};
+  use crate::ui::{ControlSize, Cursor, Icon, Id, Response, Style, TextStyle, Theme, Ui, px};
+  use crate::{Modifiers, NamedKey};
 
   /// A disabled button, its last response kept.
   #[derive(Default)]
@@ -346,5 +349,52 @@ mod tests {
     };
     let (on, off) = (darkest(false), darkest(true));
     assert!(off > on + 40, "the ink at {on} enabled, {off} disabled");
+  }
+
+  /// A button the app made not focusable with a pointer of its own, which it may later make
+  /// focusable again; a disabled one the app asks focus for; and a field that asks to be focused
+  /// but is not focusable.
+  #[derive(Default)]
+  struct Own {
+    focusable: bool,
+    clicks: usize,
+    text: String,
+  }
+
+  impl App for Own {
+    fn view(&mut self, ui: &mut Ui) {
+      let ui = ui.focusable(self.focusable).pointer_style(Cursor::Crosshair);
+      if ui.id("own").button("Own").clicked {
+        self.clicks += 1;
+      }
+
+      ui.focusable(true).disabled(true).id("off").button("Off");
+      ui.autofocus().focusable(false).id("field").field(&mut self.text, "");
+    }
+  }
+
+  #[test]
+  fn the_apps_focus_and_pointer_win_over_the_controls() {
+    let mut h = Harness::new(Own::default(), Size::new(300.0, 100.0), 1.0);
+    h.frame();
+    assert_eq!(h.focused(), None, "the field doesn't autofocus");
+    let r = h.rect(Id::of("own")).unwrap();
+    h.move_to(r.x + 4.0, r.y + 4.0);
+    assert_eq!(h.rt.cursor(), Cursor::Crosshair);
+    h.key(NamedKey::Tab, Modifiers::empty());
+    assert_eq!(h.focused(), None, "Tab passes all three by");
+
+    // Focusable, it takes Tab; made not focusable while focused, it gives focus up and Space
+    // no longer clicks it.
+    h.app_mut().focusable = true;
+    h.rt.redraw();
+    h.frame();
+    h.key(NamedKey::Tab, Modifiers::empty());
+    assert_eq!(h.focused(), Some(Id::of("own")));
+    h.key(Key::Char(' '), Modifiers::empty());
+    assert_eq!(h.app().clicks, 1);
+    h.app_mut().focusable = false;
+    h.key(Key::Char(' '), Modifiers::empty());
+    assert_eq!((h.focused(), h.app().clicks), (None, 1));
   }
 }

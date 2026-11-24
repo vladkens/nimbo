@@ -31,9 +31,9 @@ impl Ui<'_> {
     let ([w, h], [kw, kh]) = (sw.track, sw.knob);
     let inset = (h - kh) / 2.0;
     let row = Style::new().w(rigid()).gap((h / 3.0).round()).align(Align::Start, Align::Center);
-    let row = self.control(row.radius(h / 2.0), &b);
+    let row = self.dim_style(row.radius(h / 2.0), b.disabled);
 
-    let mut r = self.with_id(id).row(row, |ui| {
+    let mut r = self.control(&b).row(row, |ui| {
       let track = Style::new().w(px(w)).h(px(h)).pad(inset).radius(h / 2.0);
       ui.row(track.bg(mix(rest, mix(t.accent, t.accent_hover(), hot), k)), |ui| {
         ui.el(Style::new().w(px((w - 2.0 * inset - kw) * k)));

@@ -17,8 +17,8 @@ impl Ui<'_> {
     self.a11y(id, Role::Link);
     let hot = self.ctl_hot(id, b.hovered);
     let text = style.color(mix(style.color, t.text, hot));
-    let s = self.control(Style::new().radius(3.0), &b);
-    let mut r = self.with_id(id).row(s, |ui| ui.text(label, text));
+    let s = self.dim_style(Style::new().radius(3.0), b.disabled);
+    let mut r = self.control(&b).row(s, |ui| ui.text(label, text));
     r.clicked = b.clicked;
     r
   }

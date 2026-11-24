@@ -132,7 +132,6 @@ impl<'s, T: PartialEq + Copy> Picker<'s, T> {
       (None, None) => frame.w(rigid()),
     };
 
-    let frame = b.style(frame);
     let label = at.map_or("", |i| labels[i]);
     let (text, ink) = match b.disabled {
       true => (t.label().color(t.tertiary), t.tertiary),
@@ -140,7 +139,7 @@ impl<'s, T: PartialEq + Copy> Picker<'s, T> {
     };
 
     let cap = alpha(t.raised, t.raised[3] * if b.disabled { 0.5 } else { 1.0 - hot });
-    let mut r = ui.with_id(id).row(frame, |ui| {
+    let mut r = ui.control(&b).row(frame, |ui| {
       match self.width {
         Some(_) => _ = ui.col(Style::new().w(grow()), |ui| ui.text(label, text)),
         None => ui.text(label, text),

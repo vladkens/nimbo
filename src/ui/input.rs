@@ -686,7 +686,7 @@ fn reveal_offset(off: [f64; 2], viewport: Rect, r: [f64; 4]) -> [f64; 2] {
 mod tests {
   use super::*;
   use crate::ui::layout::tests::Fake;
-  use crate::ui::{Float, FocusDirection, Style, Ui, UnitPoint, px};
+  use crate::ui::{Cursor, Float, FocusDirection, Style, Ui, UnitPoint, px};
 
   /// A frame of a 200 x 100 window built by `f`.
   fn frame(st: UiState, f: impl FnOnce(&mut Ui)) -> UiState {
@@ -758,14 +758,14 @@ mod tests {
       ui.id("a").el(field);
       let id = ui.autofocus().disabled(true).id("b").take_id();
       let off = ui.button_behavior(id);
-      ui.with_id(id).el(off.style(field));
+      ui.control(&off).el(field);
     });
     assert_eq!(st.focus(), Some(a));
 
     let st = frame(st, |ui| {
       ui.id("a").el(field);
       let off = ui.disabled(true).autofocus().button_behavior(Id::of("c"));
-      ui.with_id(Id::of("c")).el(off.style(field));
+      ui.control(&off).el(field);
     });
     assert_eq!(st.focus(), Some(a));
   }
@@ -903,6 +903,63 @@ mod tests {
     assert_eq!(st.focus(), Some(field));
     st.focus_next(FocusDirection::Next);
     assert_eq!(st.focus(), Some(btn));
+  }
+
+  /// `focusable(false)` takes the focus a style asks for away, `focusable(true)` gives Tab's to
+  /// a plain element; each the next element's only.
+  #[test]
+  fn focusable_overrides_the_style() {
+    let sq = Style::new().w(px(20.0)).h(px(20.0));
+    let mut st = frame(UiState::default(), |ui| {
+      ui.id("asks").focusable(false).el(sq.focusable());
+      ui.id("plain").focusable(true).el(sq);
+      ui.id("after").el(sq);
+    });
+    let plain = Id::of("plain");
+
+    // A click on the one that asked takes no focus, nor on the plain one: Tab's only.
+    ev(&mut st, down(5.0, 5.0));
+    ev(&mut st, down(25.0, 5.0));
+    assert_eq!(st.focus(), None);
+
+    st.focus_next(FocusDirection::Next);
+    assert_eq!(st.focus(), Some(plain));
+    st.focus_next(FocusDirection::Next);
+    assert_eq!(st.focus(), Some(plain), "the only one in Tab order");
+  }
+
+  /// A plain element made not focusable while it has the focus gives it up.
+  #[test]
+  fn focusable_false_takes_the_focus_away() {
+    let sq = Style::new().w(px(20.0)).h(px(20.0)).focusable();
+    let mut st = frame(UiState::default(), |ui| _ = ui.id("a").el(sq));
+    st.set_focus(Some(Id::of("a")));
+    let st = frame(st, |ui| _ = ui.id("a").el(sq));
+    assert_eq!(st.focus(), Some(Id::of("a")));
+
+    let st = frame(st, |ui| _ = ui.id("a").focusable(false).el(sq));
+    assert_eq!(st.focus(), None);
+  }
+
+  /// `pointer_style` sets the pointer over the next element over its style's, and makes a plain
+  /// one take the pointer to show it.
+  #[test]
+  fn pointer_style_overrides_the_style() {
+    let sq = Style::new().w(px(20.0)).h(px(20.0));
+    let mut st = frame(UiState::default(), |ui| {
+      ui.row(Style::new().cursor(Cursor::Text), |ui| {
+        ui.pointer_style(Cursor::Pointer).el(sq);
+        ui.pointer_style(Cursor::Inherit).el(sq.cursor(Cursor::Crosshair));
+        ui.el(sq.cursor(Cursor::Grab));
+      });
+    });
+    let mut over = |x: f32| {
+      ev(&mut st, Event::MouseMove { pos: Point::new(x, 5.0), mods: Modifiers::empty() });
+      st.cursor()
+    };
+    assert_eq!(over(5.0), Cursor::Pointer);
+    assert_eq!(over(25.0), Cursor::Text, "the parent's");
+    assert_eq!(over(45.0), Cursor::Grab, "the next element's only");
   }
 
   #[test]

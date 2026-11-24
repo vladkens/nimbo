@@ -32,7 +32,6 @@ mod button;
 mod checkbox;
 mod divider;
 mod field;
-pub mod icon;
 mod label;
 mod link;
 mod progress;
@@ -45,10 +44,11 @@ mod tooltip;
 
 pub(crate) use button::MarkShift;
 pub use button::{Button, ButtonRole};
-pub use icon::{Icon, IconPaint};
 pub use slider::Slider;
 
-use super::{Behavior, Id, Style, Ui};
+// Where apps found them before icons moved into the core.
+pub use super::icon::{self, Icon, IconPaint};
+use super::{Id, Style, Ui};
 use crate::scene::{Color, alpha, mix};
 
 impl Ui<'_> {
@@ -69,7 +69,7 @@ impl Ui<'_> {
   /// `c` dimmed as opacity dims an element when `off`, for what opacity doesn't reach
   /// (canvases): an opaque colour mixed toward the ground, so strokes stay opaque where they
   /// overlap; a translucent one fainter.
-  fn dim(&self, c: Color, off: bool) -> Color {
+  pub(crate) fn dim(&self, c: Color, off: bool) -> Color {
     let t = self.theme();
     match (off, c[3] < 1.0) {
       (false, _) => c,
@@ -78,13 +78,10 @@ impl Ui<'_> {
     }
   }
 
-  /// A control's box over its behaviour: focusable by Tab with the pointing hand
-  /// ([Behavior::style]), or dimmed when disabled.
-  fn control(&self, s: Style, b: &Behavior) -> Style {
-    match b.disabled {
-      true => b.style(s).opacity(self.theme().disabled),
-      false => b.style(s),
-    }
+  /// A control's box, dimmed when `off`: what a disabled control looks like, its root built
+  /// with [Ui::control].
+  fn dim_style(&self, s: Style, off: bool) -> Style {
+    if off { s.opacity(self.theme().disabled) } else { s }
   }
 }
 

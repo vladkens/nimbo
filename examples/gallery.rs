@@ -13,13 +13,14 @@
 // A Windows app, not a console one: no terminal opens with its window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use nimbo::ui::LabeledPairRole;
+use nimbo::ui::{LabeledPairRole, icon};
 use nimbo::{
-  Align, Answer, App, Axes, Axis, Bitmap, Button, ButtonRole, ButtonStyle, Color, Config,
-  ContentMode, ControlSize, Dialog, Enabled, EnvironmentValue, Float, Font, FormRow, FormStyle,
-  Hotkey, Icon, Id, Item, LinePattern, List, ListRows, ListStyle, Menu, Picker, ScrollBar,
-  ScrollerKnob, Section, Selection, Shortcut, Slider, Split, Style, Tabs, Tag, TextStyle, Tone,
-  ToolbarItemPlacement, TruncationMode, Ui, UnitPoint, WindowToolbarStyle, alpha, grow, px, t, tn,
+  Align, Answer, App, Axes, Axis, Bitmap, Button, ButtonRole, ButtonStyle, Color, Config, Content,
+  ContentMode, ControlSize, Cursor, Dialog, Enabled, EnvironmentValue, Float, Font, FormRow,
+  FormStyle, Hotkey, Icon, Id, Item, LinePattern, List, ListRows, ListStyle, Menu, Picker, Quad,
+  Rect, ScrollBar, ScrollerKnob, Section, Selection, Shortcut, Slider, Split, Style, Tabs, Tag,
+  TextStyle, Tone, ToolbarItemPlacement, TruncationMode, Ui, UnitPoint, WindowToolbarStyle, alpha,
+  grow, mix, px, t, tn,
 };
 
 pub const SIDEBAR: &str = "sidebar";
@@ -73,6 +74,7 @@ pub const BLOCKS: &[Block] = &[
   b("Text", "Selectable text", "Text(log).textSelection(.enabled)", "ui.selectable(&log)"),
   b("Text", "Link", "Link(\"Learn more\", destination: url)", "if ui.link(\"Learn more…\").clicked { nimbo::open::url(URL)? }"),
   b("Text", "Image", "Image(systemName: \"gear\")", "ui.icon(Icon::GEAR, 20.0, t.text)"),
+  b("Text", "Label content", "Label { Text(title) } icon: { Image(systemName: \"folder\") }; configuration.label in a style", "let label: Content = Icon::FOLDER.into(); label.build(ui.with_id(id.key(\"label\")), t.label())"),
   b("Text", "Photo", "Image(nsImage: NSImage(data: file)!).resizable().aspectRatio(contentMode: .fill).frame(width: 80, height: 80).clipped()", "let photo = Bitmap::decode(&file, 240)?; ui.aspect_ratio(ContentMode::Fill).image(&photo, Style::new().w(px(80.0)).h(px(80.0)))"),
   b("Controls", "Button", "Button(\"Save\") { … }.buttonStyle(.borderedProminent)", "Button::new(\"Save\").style(ButtonStyle::BorderedProminent).show(ui)"),
   b("Controls", "Button role", "Button(\"Delete\", role: .destructive) { … }", "Button::new(\"Delete\").role(ButtonRole::Destructive).show(ui)"),
@@ -90,6 +92,7 @@ pub const BLOCKS: &[Block] = &[
   b("Controls", "Spinner", "ProgressView()", "ui.spinner()"),
   b("Controls", "Badge", ".badge(\"New\")", "ui.badge(\"New\", Tone::Accent)"),
   b("Controls", "Shortcut recorder", "KeyboardShortcut (SwiftUI has no recorder)", "ui.shortcut(&mut self.hotkey)"),
+  b("Controls", "Control behavior", "Button(action:) { … }.buttonStyle(MyStyle()), a look of the app's own", "let b = ui.button_behavior(id); ui.control(&b).canvas(style, move |f, r| { … }); if b.clicked { … }"),
   b("Controls", "Help marks", "Image(systemName: \"info.circle\").help(tip); HelpLink { … }", "ui.help(tip).info_button(); ui.help(why).warning_button(); ui.help_button()"),
   b("Form", "Section", "Section { … } header: { … } footer: { … }", "ui.form_section(&fs, Section::new(header).footer(\"…\"), |ui| { … })"),
   b("Form", "Form row", "LabeledContent { Toggle(…) } label: { Text(title); Text(subtitle) }", "ui.form_row(&fs, FormRow::new(\"Open at login\").caption(\"…\"), |ui| ui.toggle(&mut on, \"\"))"),
@@ -122,6 +125,7 @@ pub const BLOCKS: &[Block] = &[
   b("Modifiers", "Environment", ".environment(\\.tint, .green) { … }; @Environment(\\.tint) var tint", "ui.environment(Tint(t.success)).row(style, |ui| { … }); ui.set_environment(Some(Tint(t.success))) for the window; let tint = ui.environment_value::<Tint>()"),
   b("Modifiers", "Group", "Group { Button(\"Save\"); Toggle(…) }.disabled(true)", "ui.disabled(true).group(|ui| { ui.button(\"Save\"); ui.toggle(&mut on, \"\"); }); ui.button(\"Open\")"),
   b("Modifiers", "Identity", "Box().id(item.id); .allowsHitTesting(false)", "ui.key(item.id).row(style, |ui| { … }); ui.with_id(id.key(\"box\")).allows_hit_testing(false).col(style, |ui| { … })"),
+  b("Modifiers", "Focus and pointer", ".focusable(); .pointerStyle(.link)", "ui.focusable(true).pointer_style(Cursor::Pointer).row(style, |ui| { … })"),
   b("Modifiers", "Widget parts", ".environment(\\.isEnabled, true); .help(tip) on a part", "let tip = ui.take_help(); if let Some(tip) = &tip { ui.help(tip); } ui.environment(Enabled(true)).button(\"Undo\")"),
   b("Modifiers", "Frame request", "TimelineView(.animation) { context in … }", "ui.request_frame(); let k = ui.now().as_secs_f32() % 1.0"),
   b("Modifiers", "Accessibility pair", ".accessibilityLabeledPair(role: .label, id: \"volume\", in: ns)", "ui.a11y_labeled_pair(LabeledPairRole::Label, id, |ui| ui.text(\"Volume\", s)); ui.a11y_labeled_pair(LabeledPairRole::Content, id, |ui| ui.slider(&mut v, 0.0..=1.0))"),
@@ -384,6 +388,16 @@ impl Gallery {
           ui.icon(icon.stroke(1.6), 20.0, t.text);
         }
       }),
+
+      // What a label shows, a text and an icon, built in a text style as a look would.
+      "Label content" => Self::variants(ui, Shown::Alone, |ui| {
+        let id = Id::of("label content");
+        let labels: [Content; 3] = [Icon::FOLDER.into(), "Data folder".into(), Icon::INFO.into()];
+        for (k, label) in labels.into_iter().enumerate() {
+          label.build(ui.with_id(id.key(k)), t.label());
+        }
+      }),
+
       "Photo" => Self::variants(ui, Shown::Alone, |ui| {
         // Stretched to its box, then in its aspect: filling a square, fitting it.
         if let Some(photo) = &self.photo {
@@ -463,6 +477,31 @@ impl Gallery {
         ui.shortcut(&mut self.hotkey);
         ui.set_theme(t);
       }),
+
+      // A round button the app draws on a button's behaviour: Tab focuses it, the hand over it.
+      "Control behavior" => Self::variants(ui, Shown::Plain, |ui| {
+        let id = ui.take_id();
+        let b = ui.button_behavior(id);
+        let fill = match (b.pressed, b.hovered) {
+          (true, _) => t.accent_hover(),
+          (_, true) => mix(t.accent, t.accent_hover(), 0.5),
+          _ => t.accent,
+        };
+
+        let (fill, mark) = match b.disabled {
+          true => (alpha(fill, t.disabled), alpha([1.0; 4], t.disabled)),
+          false => (fill, [1.0; 4]),
+        };
+
+        let ring = if b.focused { t.focus_ring().color } else { [0.0; 4] };
+        let s = Style::new().w(px(28.0)).h(px(28.0));
+
+        ui.control(&b).canvas(s, move |f, r| {
+          f.quad(Quad::new(r, fill).radius(14.0).border(2.0, ring));
+          icon::draw(f, Icon::PLAY, Rect::new(r.x + 7.0, r.y + 7.0, 14.0, 14.0), mark);
+        });
+      }),
+
       "Help marks" => Self::variants(ui, Shown::Plain, |ui| {
         ui.help("An ⓘ explains what one line can't").info_button();
         ui.help("A warning tells what is wrong").warning_button();
@@ -679,6 +718,13 @@ impl Gallery {
       "Identity" => Self::variants(ui, Shown::Alone, |ui| {
         (0..3).for_each(|k| _ = ui.key(k).el(swatch(t.raised)));
         ui.with_id(Id::of("identity").key("box")).allows_hit_testing(false).el(swatch(t.accent));
+      }),
+
+      // A swatch Tab focuses with the hand over it, and a focusable one Tab passes by.
+      "Focus and pointer" => Self::variants(ui, Shown::Alone, |ui| {
+        let id = Id::of("focus and pointer");
+        ui.with_id(id).focusable(true).pointer_style(Cursor::Pointer).el(swatch(t.accent));
+        ui.with_id(id.key("not")).focusable(false).el(swatch(t.raised).focusable());
       }),
 
       // A part enabled in a disabled container, with the tip the widget was given.

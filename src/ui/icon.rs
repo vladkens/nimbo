@@ -6,25 +6,23 @@
 //! (<https://lucide.dev>).
 //!
 //! ```ignore
-//! ui.icon(Icon::INFO, 16.0, t.muted);
 //! ui.with_id(id).canvas(s, move |f, r| icon::draw(f, Icon::RESET.stroke(1.5), r, color));
-//! if ui.icon_button(Icon::TRASH).clicked { self.ask = true }
 //! ```
 //!
 //! The path syntax is SVG's whole (`M L H V C S Q T A Z`, absolute and relative, implicit
 //! repeats). A filled icon fills its subpaths by the non-zero rule, SVG's default, its edges
 //! smoothed by a hairline of its outline. Draw icons in an opaque colour: the round joints of a
-//! translucent one overlap darker. [Ui::icon] dims an icon in a disabled scope by mixing it
-//! toward the ground instead. The built-in set is drawn for nimbo, thinner than Lucide's:
-//! stroke them 1.6 units wide ([Icon::stroke]).
+//! translucent one overlap darker. The built-in set is drawn for nimbo, thinner than Lucide's:
+//! stroke them 1.6 units wide ([Icon::stroke]). A label shows one in its text's colour
+//! ([super::Content]); the theme's image (`ui.icon`) and buttons (`ui.icon_button`) draw them in
+//! the widgets' look.
 
 use crate::locale::Localized;
 use crate::scene::{Color, Frame, Point, Rect};
 use crate::svg::{flatten, spans};
 use crate::t;
-use crate::ui::{Enabled, Response, Style, Ui, px};
 
-/// SVG path data in a 24 × 24 view box, drawn as a stroke or filled ([draw], [Ui::icon]).
+/// SVG path data in a 24 × 24 view box, drawn as a stroke or filled ([draw]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Icon {
   /// The path data.
@@ -35,7 +33,7 @@ pub struct Icon {
 
 /// How an [Icon] is drawn, as SF Symbols' rendering: a stroke, of the width the app gave it in
 /// view box units ([Icon::stroke]) or, with none given, of the widget's that draws it (a
-/// button's 1.6, [Ui::icon]'s Lucide's 2: [Icon::default_stroke]); or a fill.
+/// button's 1.6, the theme's image's Lucide's 2: [Icon::default_stroke]); or a fill.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum IconPaint {
   Stroke(Option<f32>),
@@ -231,24 +229,19 @@ fn fill(f: &mut Frame, polys: &[Vec<Point>], color: Color) {
   }
 }
 
-impl Ui<'_> {
-  /// `icon` `size` points square in `color`, as SwiftUI's `Image(systemName:)`: stroked as
-  /// its paint says ([Icon::stroke]), by default as Lucide draws it at 24 points (thinner below:
-  /// 1.5 points at 18). Disabled ([Ui::disabled], on it or a container around it), dimmed toward
-  /// the ground.
-  pub fn icon(&mut self, icon: Icon, size: f32, color: Color) -> Response {
-    let off = !self.environment_value::<Enabled>().0;
-    let color = self.dim(color, off);
-    let s = Style::new().w(px(size)).h(px(size));
-    self.canvas(s, move |f, r| draw(f, icon.default_stroke(2.0), r, color))
-  }
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
   use crate::app::App;
-  use crate::ui::grow;
+  use crate::harness::Harness;
+  use crate::scene::Size;
+  use crate::ui::{Style, Ui, grow, px};
+
+  /// `icon` `size` points square in black, as Lucide draws it.
+  fn black(ui: &mut Ui, icon: Icon, size: f32) {
+    let s = Style::new().w(px(size)).h(px(size));
+    ui.canvas(s, move |f, r| draw(f, icon, r, [0.0, 0.0, 0.0, 1.0]));
+  }
 
   #[test]
   fn every_built_in_icon_parses_whole() {
@@ -269,15 +262,15 @@ mod tests {
     fn view(&mut self, ui: &mut Ui) {
       let row = Style::new().w(grow()).h(grow()).bg([1.0; 4]);
       ui.row(row, |ui| {
-        ui.icon(Icon::PLAY, 48.0, [0.0, 0.0, 0.0, 1.0]);
-        ui.icon(Icon::new(Icon::PLAY.d), 48.0, [0.0, 0.0, 0.0, 1.0]);
+        black(ui, Icon::PLAY, 48.0);
+        black(ui, Icon::new(Icon::PLAY.d), 48.0);
       });
     }
   }
 
   #[test]
   fn a_filled_icon_fills_inside_its_outline() {
-    let mut h = crate::Harness::new(Icons, crate::Size::new(96.0, 48.0), 2.0);
+    let mut h = Harness::new(Icons, Size::new(96.0, 48.0), 2.0);
     h.frame();
     let img = h.render();
     // The triangle's middle (12.5, 12 in its view box), its tip, and outside it.
@@ -299,15 +292,15 @@ mod tests {
       let icon = Icon::filled("M2 2H22V22H2ZM6.3 6.3H17.7V17.7H6.3Z");
       let touching = Icon::filled("M2 2H8.25V22H2ZM8.25 2H22V22H8.25Z");
       ui.row(row, |ui| {
-        ui.icon(icon, 24.0, [0.0, 0.0, 0.0, 1.0]);
-        ui.icon(touching, 24.0, [0.0, 0.0, 0.0, 1.0]);
+        black(ui, icon, 24.0);
+        black(ui, touching, 24.0);
       });
     }
   }
 
   #[test]
   fn a_compound_fill_has_no_seams_inside() {
-    let mut h = crate::Harness::new(Nested, crate::Size::new(48.0, 24.0), 1.0);
+    let mut h = Harness::new(Nested, Size::new(48.0, 24.0), 1.0);
     h.frame();
     let img = h.render();
     for x in (3..21).chain(27..45) {

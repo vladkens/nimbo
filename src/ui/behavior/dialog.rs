@@ -25,14 +25,14 @@ pub struct DialogBehavior {
 
 impl Ui<'_> {
   /// A modal dialog `id` over the window while `open`, its buttons `buttons` (the app builds
-  /// them, with [super::Behavior::style] for the Tab focus and its ring): opening, it takes
-  /// focus to its backdrop, which draws no ring (assistive technology sees the default button
-  /// focused then), and keeps it there and among the buttons: Tab and Shift-Tab move from the
-  /// `default` button, ringing the one they reach, and cycle them; nothing else gets focus.
-  /// Return chooses the default, Escape the `cancel` one, Space the focused one, a click any;
-  /// choosing closes it (`open` false) and gives focus back where it was. Keys go nowhere else
-  /// while it is open. The backdrop (`Ui::modal`) takes the pointer and does nothing with a
-  /// click, as a macOS alert. `shown` fades in from 0 as it opens.
+  /// each on [Ui::control], for the Tab focus and its ring): opening, it takes focus to its
+  /// backdrop, which draws no ring (assistive technology sees the default button focused then),
+  /// and keeps it there and among the buttons: Tab and Shift-Tab move from the `default` button,
+  /// ringing the one they reach, and cycle them; nothing else gets focus. Return chooses the
+  /// default, Escape the `cancel` one, Space the focused one, a click any; choosing closes it
+  /// (`open` false) and gives focus back where it was. Keys go nowhere else while it is open. The
+  /// backdrop (`Ui::modal`) takes the pointer and does nothing with a click, as a macOS alert.
+  /// `shown` fades in from 0 as it opens.
   pub fn dialog_behavior(
     &mut self,
     id: Id,

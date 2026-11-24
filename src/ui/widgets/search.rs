@@ -13,8 +13,8 @@
 //! an input method composes, Escape is the input method's. The behaviour is
 //! [Ui::search_behavior].
 
-use super::icon::{self, Icon};
 use crate::scene::mix;
+use crate::ui::icon::{self, Icon};
 use crate::ui::{Align, Cursor, FieldStyle, Float, Response, Role, Style, Ui, grow, px};
 
 /// The ⊗'s side, and how far in it is from the field's right edge.
