@@ -75,7 +75,7 @@ mod split;
 mod text_field;
 mod toggle;
 
-pub use button::{Button, ButtonConfiguration, ButtonRole, ButtonStyle, PlainButtonStyle};
+pub use button::{Button, ButtonConfiguration, ButtonStyle, PlainButtonStyle};
 pub use content::Content;
 pub use dialog::DialogBehavior;
 #[cfg(feature = "styled")]

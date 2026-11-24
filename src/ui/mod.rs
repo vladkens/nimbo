@@ -40,19 +40,21 @@ use std::hash::Hash;
 use std::num::NonZeroU8;
 use std::time::Duration;
 
-pub use a11y::{Action, LabeledPairRole, Role, State, Value};
+pub use a11y::{Action, Role};
+#[cfg(feature = "headless")]
+pub use a11y::{State, Value};
 #[cfg(feature = "styled")]
 pub(crate) use behavior::DrawnEditMenu;
 #[cfg(feature = "headless")]
 pub use behavior::{
-  Behavior, Button, ButtonConfiguration, ButtonRole, ButtonStyle, Content, DialogBehavior,
-  EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, HelpConfiguration, HelpStyle,
-  InlinePickerStyle, List, ListBehavior, ListConfiguration, ListLayout, ListResponse,
-  ListRowConfiguration, ListRows, ListStyle, MenuPlacement, Picker, PickerConfiguration,
-  PickerStyle, PlainButtonStyle, PlainHelpStyle, PlainListStyle, PlainSliderStyle,
-  PlainTextFieldStyle, PlainToggleStyle, Row, ScrollBar, ScrollBehavior, ScrollerKnob,
-  SectionHeader, Selection, Slider, SliderConfiguration, SliderStyle, SplitBehavior, Tag,
-  TextField, TextFieldConfiguration, TextFieldStyle, ToggleConfiguration, ToggleStyle, TypeSelect,
+  Behavior, Button, ButtonConfiguration, ButtonStyle, Content, DialogBehavior, EditMenu, Editing,
+  FieldBehavior, FieldKind, FieldStyle, HelpConfiguration, HelpStyle, InlinePickerStyle, List,
+  ListBehavior, ListConfiguration, ListLayout, ListResponse, ListRowConfiguration, ListRows,
+  ListStyle, MenuPlacement, Picker, PickerConfiguration, PickerStyle, PlainButtonStyle,
+  PlainHelpStyle, PlainListStyle, PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle, Row,
+  ScrollBar, ScrollBehavior, ScrollerKnob, SectionHeader, Selection, Slider, SliderConfiguration,
+  SliderStyle, SplitBehavior, Tag, TextField, TextFieldConfiguration, TextFieldStyle,
+  ToggleConfiguration, ToggleStyle, TypeSelect,
 };
 #[cfg(feature = "styled")]
 pub use containers::{

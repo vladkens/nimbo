@@ -7,7 +7,7 @@
 use std::time::{Duration, Instant};
 
 use crate::TitleBar;
-pub use crate::clipboard::{Clipboard, MemClipboard};
+pub use crate::clipboard::Clipboard;
 pub use crate::event::{
   Appearance, ColorScheme, Event, Ime, MouseButton, Phase, WHEEL_LINE, Waker,
 };
@@ -820,6 +820,7 @@ mod tests {
   use std::sync::mpsc;
 
   use super::*;
+  use crate::clipboard::MemClipboard;
   use crate::keys::{CMD, Key, Shortcut};
   use crate::scene::Rect;
   use crate::ui::{Float, Kind, Style, TextStyle, Theme, Transition, grow, px};

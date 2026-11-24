@@ -44,11 +44,12 @@ use std::cell::Cell;
 use std::f32::consts::FRAC_PI_2;
 use std::rc::Rc;
 
+use super::a11y::LabeledPairRole;
 use super::theme::Theme;
 use super::widgets::MarkShift;
 use super::{
-  Align, Content, Cursor, Enabled, LabeledPairRole, Response, Role, Shadow, State, Style, Tag,
-  TextStyle, Ui, grow, px, rigid,
+  Align, Content, Cursor, Enabled, Response, Role, Shadow, State, Style, Tag, TextStyle, Ui, grow,
+  px, rigid,
 };
 use crate::locale::Localized;
 use crate::scene::{Color, Frame, Point, Quad, Rect, alpha, mix, rgb};

@@ -42,8 +42,8 @@ use super::view::View;
 use crate::app::Event;
 use crate::scene::Point;
 use crate::text::edit::{range_from_utf16, utf16_len};
-use crate::ui::a11y::{A11yNode, A11yTree, TextSpan};
-use crate::ui::{Action, Id, Role, State, UiState, Value};
+use crate::ui::a11y::{A11yNode, A11yTree, State, TextSpan, Value};
+use crate::ui::{Action, Id, Role, UiState};
 
 // MARK: Roles
 

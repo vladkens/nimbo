@@ -7,7 +7,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use super::{Element, Image, mac_titlebar, us_key};
-use crate::app::{App, Clipboard, Clock, Event, Ime, MemClipboard, MouseButton, Runtime, Waker};
+use crate::app::{App, Clipboard, Clock, Event, Ime, MouseButton, Runtime, Waker};
+use crate::clipboard::MemClipboard;
 use crate::file_dialog::FileDialog;
 use crate::keys::{Command, Key, KeyEvent, Os};
 use crate::locale::{self, Locale, Localizations};

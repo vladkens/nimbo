@@ -25,9 +25,10 @@
 use super::icon::Icon;
 use super::widgets::{ButtonLook, Face, Variant, draw, look};
 use super::{
-  Button, ButtonConfiguration, ButtonRole, ButtonStyle, ControlSize, Enabled, Float, Id, Role,
-  State, Style, TextStyle, Theme, Ui, grow, pct, px,
+  Button, ButtonConfiguration, ButtonStyle, ControlSize, Enabled, Float, Id, Role, State, Style,
+  TextStyle, Theme, Ui, grow, pct, px,
 };
+use crate::menu::ButtonRole;
 use crate::scene::alpha;
 use crate::t;
 use crate::text::Weight;

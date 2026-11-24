@@ -5,13 +5,14 @@
 //! control size ([Ui::control_size]), the icon button; the ⓘ that explains a row, the warning
 //! mark that tells what is wrong with it, and the round "?" that opens a page's help.
 
+use crate::menu::ButtonRole;
 use crate::scene::{Color, Frame, Rect, alpha, mix};
 use crate::t;
 use crate::text::{Font, Weight};
 use crate::ui::icon::Icon;
 use crate::ui::{
-  ButtonConfiguration, ButtonRole, ButtonStyle, ControlSize, Dim, Enabled, Float, Id, Response,
-  Role, Style, TextStyle, Theme, ToggleConfiguration, Ui, px,
+  ButtonConfiguration, ButtonStyle, ControlSize, Dim, Enabled, Float, Id, Response, Role, Style,
+  TextStyle, Theme, ToggleConfiguration, Ui, px,
 };
 
 const WHITE: Color = [1.0; 4];
