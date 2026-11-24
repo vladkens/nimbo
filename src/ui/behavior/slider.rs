@@ -420,7 +420,11 @@ mod tests {
 
   impl SliderStyle for Wrapped {
     fn make_body(&self, ui: &mut Ui<'_>, c: SliderConfiguration<'_>) {
-      ui.col(Style::new(), |ui| _ = c.root(ui).el(Style::new().w(px(100.0)).h(px(10.0))));
+      // Another control first, unnamed, and a container taking its id.
+      ui.slider_style(&PlainSliderStyle).slider(&mut 0.5, 0.0..=1.0);
+      let id = ui.take_id();
+      ui.with_id(id)
+        .col(Style::new(), |ui| _ = c.root(ui).el(Style::new().w(px(100.0)).h(px(10.0))));
     }
   }
 

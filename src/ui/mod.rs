@@ -865,7 +865,7 @@ impl<'a> Ui<'a> {
       Some((id, _)) => id,
       None => {
         let &(parent, count) = self.st.stack.last().unwrap();
-        self.st.tree.nodes[parent as usize].id.nth(count as usize)
+        around(self.pending_root, self.st.tree.nodes[parent as usize].id.nth(count as usize))
       }
     };
 
@@ -1029,18 +1029,12 @@ impl<'a> Ui<'a> {
   fn node(&mut self, kind: Kind, mut style: Style, flow: Flow) -> (u32, Response) {
     let (parent, count) = self.st.stack.last_mut().unwrap();
     let tree = &mut self.st.tree;
-    let (id, named) = self
-      .next_id
-      .take()
-      .unwrap_or_else(|| (tree.nodes[*parent as usize].id.nth(*count as usize), false));
-    let id = match self.pending_root {
-      Some(r) if r == id && !named => id.key("around"),
-      Some(r) if r == id => {
-        self.pending_root = None;
-        id
-      }
-      _ => id,
-    };
+    let place = tree.nodes[*parent as usize].id.nth(*count as usize);
+    let (id, named) =
+      self.next_id.take().unwrap_or_else(|| (around(self.pending_root, place), false));
+    if named && self.pending_root == Some(id) {
+      self.pending_root = None;
+    }
 
     *count += 1;
     let parent = *parent;
@@ -1281,6 +1275,12 @@ impl<'a> Ui<'a> {
     self.st.input.ended = None;
     self.st
   }
+}
+
+/// The id of the place `place`: its own, or keyed when it is that of a control's root yet to be
+/// built (`root`), which takes it by name.
+fn around(root: Option<Id>, place: Id) -> Id {
+  if root == Some(place) { place.key("around") } else { place }
 }
 
 #[cfg(test)]
