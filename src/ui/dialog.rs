@@ -23,7 +23,7 @@
 //! backdrop and the card alone, for a dialog of the app's own over the same behaviour.
 
 use super::icon::Icon;
-use super::widgets::{ButtonLook, Variant, draw, look};
+use super::widgets::{ButtonLook, Face, Variant, draw, look};
 use super::{
   Button, ButtonConfiguration, ButtonRole, ButtonStyle, ControlSize, Enabled, Float, Id, Role,
   State, Style, TextStyle, Theme, Ui, grow, pct, px,
@@ -173,10 +173,10 @@ impl<'s> Dialog<'s> {
 struct DialogButton;
 
 impl ButtonStyle for DialogButton {
-  fn make_body(&self, ui: &mut Ui<'_>, c: ButtonConfiguration<'_>) {
+  fn make_body(&self, ui: &mut Ui<'_>, mut c: ButtonConfiguration<'_>) {
     let s = dialog_look(&ui.theme(), c.role().unwrap_or(ButtonRole::Confirm));
     let hot = ui.ctl_hot(c.id(), c.is_hovered());
-    draw(ui, c, s, hot, false);
+    draw(ui, Face::of(&c), s, hot, false, |ui, s| c.label(ui, s));
   }
 }
 

@@ -182,9 +182,33 @@ nimbo: `ui.toggle(&mut self.live, "Live")`
 
 SwiftUI: `Toggle("Wrap", isOn: $wrap).toggleStyle(.checkbox)`
 
-nimbo: `ui.checkbox(&mut self.wrap, "Wrap")`
+nimbo: `ui.toggle_style(&CheckboxToggleStyle).toggle(&mut self.wrap, "Wrap")`
 
 ![Check box](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/check-box.png)
+
+### Button toggle
+
+SwiftUI: `Toggle("Bold", isOn: $bold).toggleStyle(.button)`
+
+nimbo: `ui.toggle_style(&ButtonToggleStyle).toggle(&mut self.bold, "Bold")`
+
+![Button toggle](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/button-toggle.png)
+
+### Toggle style
+
+SwiftUI: `VStack { Toggle("Wrap", …); Toggle("Numbers", …) }.toggleStyle(.checkbox)`
+
+nimbo: `ui.toggle_style(&CheckboxToggleStyle).col(style, |ui| { ui.toggle(&mut self.wrap, "Wrap"); ui.toggle(&mut self.numbers, "Numbers"); }); ui.toggle(&mut self.live, "Live")`
+
+![Toggle style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/toggle-style.png)
+
+### Custom toggle style
+
+SwiftUI: `struct Dot: ToggleStyle { func makeBody(configuration: Configuration) -> some View { HStack { Circle()…; configuration.label } } }`
+
+nimbo: `impl ToggleStyle for Dot { fn make_body(&self, ui: &mut Ui, mut c: ToggleConfiguration) { ui.row(style, |ui| { ui.el(dot(c.is_on())); c.label(ui, s); }); } } ui.toggle_style(&Dot).toggle(&mut self.live, "Live"); ui.toggle_style(&PlainToggleStyle).toggle(&mut self.wrap, "Plain")`
+
+![Custom toggle style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/custom-toggle-style.png)
 
 ### Slider
 

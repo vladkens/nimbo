@@ -1,40 +1,35 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The check box: a box with a label over the toggle behaviour ([Ui::toggle_behavior]).
+//! The check box ([CheckboxToggleStyle]): a box with a check before the label.
 
 use crate::scene::{Color, Point, Rect, alpha, mix};
-use crate::ui::{Align, Response, Style, Theme, Ui, px, rigid};
+use crate::ui::{Align, Style, Theme, ToggleConfiguration, ToggleStyle, Ui, px, rigid};
 
-impl Ui<'_> {
-  /// A check box with a label, toggling `on`; `changed` when it did. Off, filled with the track
-  /// and no border where controls are flat ([Theme::flat]), else a bordered box; on, the
-  /// accent with a white check.
-  pub fn checkbox(&mut self, on: &mut bool, label: &str) -> Response {
-    let t = self.controls_theme();
-    let id = self.take_id();
-    let b = self.toggle_behavior(id, on);
-    let hot = self.ctl_hot(id, b.hovered);
-    let (fill, edge) = check_fill(&t, *on, hot);
-    let mark = alpha(t.on_accent, if b.disabled { t.disabled } else { 1.0 });
+/// The check box, as SwiftUI's `.checkbox`: off, filled with the track and no border where
+/// controls are flat ([Theme::flat]), else a bordered box; on, the accent with a white check.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CheckboxToggleStyle;
 
-    let c = t.sizes.check;
-    let row = Style::new().w(rigid()).gap((c * 0.4).round()).align(Align::Start, Align::Center);
-    let row = row.radius(3.0);
-    let row = self.dim_style(row, b.disabled);
-    let checked = *on;
-    let mut r = self.control(&b).row(row, |ui| {
-      let b = Style::new().w(px(c)).h(px(c)).bg(fill).radius(c / 4.0).border(edge.0, edge.1);
-      match checked {
-        true => _ = ui.canvas(b, move |f, r| f.polyline(&check(r), c / 8.0, mark)),
+impl ToggleStyle for CheckboxToggleStyle {
+  fn make_body(&self, ui: &mut Ui<'_>, mut c: ToggleConfiguration<'_>) {
+    let t = ui.controls_theme();
+    let (on, off) = (c.is_on(), !c.is_enabled());
+    let hot = ui.ctl_hot(c.id(), c.is_hovered());
+    let (fill, edge) = check_fill(&t, on, hot);
+    let mark = alpha(t.on_accent, if off { t.disabled } else { 1.0 });
+
+    let d = t.sizes.check;
+    let row = Style::new().w(rigid()).gap((d * 0.4).round()).align(Align::Start, Align::Center);
+    let row = ui.dim_style(row.radius(3.0), off);
+    ui.row(row, |ui| {
+      let b = Style::new().w(px(d)).h(px(d)).bg(fill).radius(d / 4.0).border(edge.0, edge.1);
+      match on {
+        true => _ = ui.canvas(b, move |f, r| f.polyline(&check(r), d / 8.0, mark)),
         false => _ = ui.el(b),
       }
 
-      if !label.is_empty() {
-        ui.text(label, t.label());
-      }
+      c.label(ui, t.label());
     });
-    (r.clicked, r.changed) = (b.clicked, b.changed);
-    r
   }
 }
 
@@ -60,7 +55,7 @@ mod tests {
   use crate::app::App;
   use crate::harness::Harness;
   use crate::scene::Size;
-  use crate::ui::{Id, Theme, Ui};
+  use crate::ui::{CheckboxToggleStyle, Id, Theme, Ui};
 
   #[derive(Default)]
   struct Boxes {
@@ -70,7 +65,8 @@ mod tests {
 
   impl App for Boxes {
     fn view(&mut self, ui: &mut Ui) {
-      ui.disabled(self.off).id("c").checkbox(&mut self.on, "Wrap lines");
+      let ui = ui.toggle_style(&CheckboxToggleStyle).disabled(self.off);
+      ui.id("c").toggle(&mut self.on, "Wrap lines");
     }
   }
 

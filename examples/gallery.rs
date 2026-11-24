@@ -16,10 +16,11 @@
 use nimbo::ui::{LabeledPairRole, icon};
 use nimbo::{
   Align, Answer, App, Axes, Axis, Bitmap, BorderedProminentButtonStyle, BorderlessButtonStyle,
-  Button, ButtonConfiguration, ButtonRole, ButtonStyle, Color, Config, Content, ContentMode,
-  ControlSize, Cursor, Dialog, Enabled, EnvironmentValue, Float, Font, FormRow, FormStyle, Hotkey,
-  Icon, Id, Item, LinePattern, List, ListRows, ListStyle, Menu, Picker, Quad, Rect, ScrollBar,
-  ScrollerKnob, Section, Selection, Shortcut, Slider, Split, Style, Tabs, Tag, TextStyle, Tone,
+  Button, ButtonConfiguration, ButtonRole, ButtonStyle, ButtonToggleStyle, CheckboxToggleStyle,
+  Color, Config, Content, ContentMode, ControlSize, Cursor, Dialog, Enabled, EnvironmentValue,
+  Float, Font, FormRow, FormStyle, Hotkey, Icon, Id, Item, LinePattern, List, ListRows, ListStyle,
+  Menu, Picker, PlainToggleStyle, Quad, Rect, ScrollBar, ScrollerKnob, Section, Selection,
+  Shortcut, Slider, Split, Style, Tabs, Tag, TextStyle, ToggleConfiguration, ToggleStyle, Tone,
   ToolbarItemPlacement, TruncationMode, Ui, UnitPoint, WindowToolbarStyle, alpha, grow, mix, px, t,
   tn,
 };
@@ -46,6 +47,23 @@ impl ButtonStyle for Pill {
 
     let s = Style::new().h(px(24.0)).pad_xy(12.0, 0.0).gap(5.0).center().radius(12.0);
     ui.row(s.bg(alpha(t.accent, k)), |ui| c.label(ui, TextStyle::new(t.font, ink)));
+  }
+}
+
+/// A toggle style of the gallery's own: a dot in the accent before the label, filled while on,
+/// ringed while off; faint when disabled.
+struct Dot;
+
+impl ToggleStyle for Dot {
+  fn make_body(&self, ui: &mut Ui, mut c: ToggleConfiguration) {
+    let t = ui.theme();
+    let k = if c.is_enabled() { 1.0 } else { 0.4 };
+    let dot = Style::new().w(px(12.0)).h(px(12.0)).radius(6.0).border(1.5, alpha(t.accent, k));
+    let dot = if c.is_on() { dot.bg(alpha(t.accent, k)) } else { dot };
+    ui.row(Style::new().gap(6.0).center(), |ui| {
+      ui.el(dot);
+      c.label(ui, TextStyle::new(t.font, alpha(t.text, k)));
+    });
   }
 }
 
@@ -100,7 +118,10 @@ pub const BLOCKS: &[Block] = &[
   b("Controls", "Button style", "HStack { Button(\"Cut\") { … }; Button(\"Copy\") { … } }.buttonStyle(.borderless)", "ui.button_style(&BorderlessButtonStyle).row(style, |ui| { ui.button(\"Cut\"); ui.button(\"Copy\"); }); ui.button(\"Paste\")"),
   b("Controls", "Custom button style", "struct Pill: ButtonStyle { func makeBody(configuration: Configuration) -> some View { configuration.label.padding(…).background(…) } }", "impl ButtonStyle for Pill { fn make_body(&self, ui: &mut Ui, mut c: ButtonConfiguration) { ui.row(style, |ui| c.label(ui, s)); } } ui.button_style(&Pill).button(\"Pill\")"),
   b("Controls", "Switch", "Toggle(\"Live\", isOn: $live)", "ui.toggle(&mut self.live, \"Live\")"),
-  b("Controls", "Check box", "Toggle(\"Wrap\", isOn: $wrap).toggleStyle(.checkbox)", "ui.checkbox(&mut self.wrap, \"Wrap\")"),
+  b("Controls", "Check box", "Toggle(\"Wrap\", isOn: $wrap).toggleStyle(.checkbox)", "ui.toggle_style(&CheckboxToggleStyle).toggle(&mut self.wrap, \"Wrap\")"),
+  b("Controls", "Button toggle", "Toggle(\"Bold\", isOn: $bold).toggleStyle(.button)", "ui.toggle_style(&ButtonToggleStyle).toggle(&mut self.bold, \"Bold\")"),
+  b("Controls", "Toggle style", "VStack { Toggle(\"Wrap\", …); Toggle(\"Numbers\", …) }.toggleStyle(.checkbox)", "ui.toggle_style(&CheckboxToggleStyle).col(style, |ui| { ui.toggle(&mut self.wrap, \"Wrap\"); ui.toggle(&mut self.numbers, \"Numbers\"); }); ui.toggle(&mut self.live, \"Live\")"),
+  b("Controls", "Custom toggle style", "struct Dot: ToggleStyle { func makeBody(configuration: Configuration) -> some View { HStack { Circle()…; configuration.label } } }", "impl ToggleStyle for Dot { fn make_body(&self, ui: &mut Ui, mut c: ToggleConfiguration) { ui.row(style, |ui| { ui.el(dot(c.is_on())); c.label(ui, s); }); } } ui.toggle_style(&Dot).toggle(&mut self.live, \"Live\"); ui.toggle_style(&PlainToggleStyle).toggle(&mut self.wrap, \"Plain\")"),
   b("Controls", "Slider", "Slider(value: $zoom, in: 0...200)", "ui.slider(&mut self.zoom, 0.0..=200.0)"),
   b("Controls", "Slider steps", "Slider(value: $level, in: 10...90, step: 10) { … } tick: { v in SliderTick(v) { … } }", "Slider::new(&mut self.level, 10.0..=90.0).step(10.0).tick_label(|v| (v == 50.0).then(|| \"50%\".into())).show(ui)"),
   b("Controls", "Picker", "Picker(\"Size\", selection: $size) { …; Divider(); … }", "Picker::new(&mut self.size).options(&A).divider().options(&B).show(ui)"),
@@ -195,6 +216,9 @@ pub struct Gallery {
   pub only: bool,
   pub live: bool,
   pub wrap: bool,
+  pub numbers: bool,
+  pub bold: bool,
+  pub italic: bool,
   pub zoom: f32,
   pub level: f32,
   pub size: Size,
@@ -247,6 +271,9 @@ impl Default for Gallery {
       only: false,
       live: true,
       wrap: false,
+      numbers: true,
+      bold: true,
+      italic: false,
       zoom: 60.0,
       level: 30.0,
       size: Size::Medium,
@@ -457,7 +484,27 @@ impl Gallery {
       }),
 
       "Switch" => Self::variants(ui, Shown::Sized, |ui| _ = ui.toggle(&mut self.live, "Live")),
-      "Check box" => Self::variants(ui, Shown::Plain, |ui| _ = ui.checkbox(&mut self.wrap, "Wrap")),
+      "Check box" => Self::variants(ui, Shown::Plain, |ui| {
+        _ = ui.toggle_style(&CheckboxToggleStyle).toggle(&mut self.wrap, "Wrap")
+      }),
+      "Button toggle" => Self::variants(ui, Shown::Sized, |ui| {
+        ui.toggle_style(&ButtonToggleStyle).toggle(&mut self.bold, "Bold");
+        ui.toggle_style(&ButtonToggleStyle).toggle(&mut self.italic, "Italic");
+      }),
+
+      // Two check boxes by their column, the switch after it in the window's style.
+      "Toggle style" => Self::variants(ui, Shown::Plain, |ui| {
+        ui.toggle_style(&CheckboxToggleStyle).col(Style::new().gap(6.0), |ui| {
+          ui.toggle(&mut self.wrap, "Wrap");
+          ui.toggle(&mut self.numbers, "Numbers");
+        });
+        ui.toggle(&mut self.live, "Live");
+      }),
+      "Custom toggle style" => Self::variants(ui, Shown::Plain, |ui| {
+        ui.toggle_style(&Dot).toggle(&mut self.live, "Live");
+        ui.toggle_style(&PlainToggleStyle).toggle(&mut self.wrap, "Plain");
+      }),
+
       // A slider fills the width it is offered: 160 here.
       "Slider" => Self::variants(ui, Shown::Plain, |ui| {
         ui.col(Style::new().w(px(160.0)), |ui| {

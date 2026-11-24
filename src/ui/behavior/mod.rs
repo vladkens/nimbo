@@ -24,7 +24,8 @@
 //!
 //! - [Ui::button_behavior]: click, Space while focused (flashes it pressed); the [Button] over it,
 //!   drawn by a [ButtonStyle] ([Ui::button_style]);
-//! - [Ui::toggle_behavior] (check box, switch): a button that flips a `bool`;
+//! - [Ui::toggle_behavior]: a button that flips a `bool`; [Ui::toggle] over it, drawn by a
+//!   [ToggleStyle] ([Ui::toggle_style]);
 //! - [Ui::slider_behavior]: a drag along the element onto the nearest step if it has one, the
 //!   arrows move a step or a twentieth;
 //! - [Ui::pick_behavior] (tabs, segmented control, toolbar tabs): one of `n` items by a click, the
@@ -72,6 +73,7 @@ pub use list::{ListBehavior, ListRows, SectionHeader, Selection};
 pub use menu::{MenuPlacement, TYPE_SELECT, TypeSelect};
 pub use scroll::{ScrollBar, ScrollBehavior, ScrollerKnob};
 pub use split::SplitBehavior;
+pub use toggle::{PlainToggleStyle, ToggleConfiguration, ToggleStyle};
 
 use super::{Cursor, Enabled, Id, Role, State, Style, Ui};
 use crate::keys::{Command, Key, Move};
