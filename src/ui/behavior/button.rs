@@ -348,6 +348,10 @@ mod tests {
         ui.id("p").button("Refresh settings");
         ui.text("A note beside it, long enough to wrap", TextStyle::new(Font::ui(13.0), [0.0; 4]));
       });
+      let s = TextStyle::new(Font::ui(13.0), [0.0; 4]);
+      ui.id("solo")
+        .allows_hit_testing(false)
+        .row(Style::new(), |ui| ui.help("Tip").text("Solo", s));
     }
   }
 
@@ -363,6 +367,12 @@ mod tests {
     assert_eq!(h.rt.ui.hover().len(), 2, "the label's text, then the button");
     h.click(r.x + r.w / 2.0, r.y + r.h / 2.0);
     assert_eq!(h.app().clicks, 1);
+
+    // With nothing around, the press is its own.
+    let r = h.rect(Id::of("solo")).unwrap();
+    h.press(r.x + r.w / 2.0, r.y + r.h / 2.0);
+    assert!(h.rt.ui.press().is_some());
+    h.release(r.x + r.w / 2.0, r.y + r.h / 2.0);
 
     let wide = h.rect(Id::of("p")).unwrap().w;
     h.app_mut().w = 120.0;
