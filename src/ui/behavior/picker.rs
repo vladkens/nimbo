@@ -165,6 +165,8 @@ impl<'s> PickerConfiguration<'s> {
   pub fn segments(&mut self, ui: &mut Ui) -> Behavior {
     debug_assert!(self.picked.b.is_none(), "a picker runs one input");
     let id = self.id;
+    // A menu left open by another style before closes with it.
+    ui.st.close_menu(id);
     let b = ui.pick_behavior(id, self.len(), |i| id.key(("item", i)), &mut self.picked.at);
     ui.a11y(id, Role::RadioGroup);
     for i in 0..self.len() {
@@ -484,6 +486,35 @@ mod tests {
     assert_ne!(side("c"), (60.0, 20.0));
     let a = h.a11y();
     assert!(a.lines().any(|l| l.trim() == "pop up button value \"A\""), "{a}");
+  }
+
+  /// The shell's pop-up, or the squares.
+  struct Switched(bool);
+
+  impl App for Switched {
+    fn view(&mut self, ui: &mut Ui) {
+      if self.0 {
+        ui.picker_style(&Squares);
+      }
+
+      ui.id("p").picker(&mut 'a', &ABC);
+    }
+  }
+
+  /// A menu open when the style turns to segments closes: back to the pop-up, it stays closed.
+  #[test]
+  fn segments_close_a_menu_left_open() {
+    let mut h = Harness::new(Switched(false), Size::new(300.0, 200.0), 1.0);
+    h.frame();
+    assert!(h.click_id(Id::of("p")));
+    assert!(h.rt.ui.menu_open(Id::of("p")));
+    for squares in [true, false] {
+      h.app_mut().0 = squares;
+      h.rt.redraw();
+      h.frame();
+    }
+
+    assert!(!h.rt.ui.menu_open(Id::of("p")));
   }
 
   /// With no shell, inline: each option an element, no fill.
