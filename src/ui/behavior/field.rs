@@ -54,6 +54,7 @@ const DOT: &str = "•";
 /// What a text field takes, as SwiftUI's `TextField`, `TextField(axis: .vertical)` and
 /// `SecureField`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FieldKind {
   /// One line, scrolling sideways; Enter submits.
   #[default]
@@ -136,6 +137,7 @@ impl FieldState {
 /// What a text field or selectable text got this frame, read before it is built; see the
 /// module's docs. [Ui::field_text] draws its text from it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct FieldBehavior {
   pub id: Id,
   /// The text element: `id.key("text")` in a field, `id` itself for selectable text.
@@ -165,6 +167,7 @@ pub struct FieldBehavior {
 /// A text field's or selectable text's edit menu as a secondary click (the right button) opened
 /// it: where, and what it can do then ([Ui::edit_menu] draws it).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct EditMenu {
   /// Where the click was, in the frame it came; `None` after.
   pub at: Option<Point>,

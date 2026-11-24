@@ -29,6 +29,7 @@ const FACE_CAP: usize = 256;
 pub(crate) const SMOOTH: bool = true;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Weight {
   Regular,
   Medium,
@@ -38,6 +39,7 @@ pub enum Weight {
 
 /// The system font's design, as SwiftUI's `Font.Design`: SF Pro or SF Mono on macOS.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Design {
   #[default]
   Default,
@@ -69,6 +71,7 @@ impl Font {
 
 /// Vertical metrics of a font in points.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct Metrics {
   pub ascent: f32,
   pub descent: f32,
@@ -118,6 +121,7 @@ pub(crate) struct Raster {
 /// is the pen position in points from the line start, `y` how far the shaper raised it above
 /// the baseline (a mark on a capital, or on another mark).
 #[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub struct Glyph {
   pub face: u16,
   pub id: u16,

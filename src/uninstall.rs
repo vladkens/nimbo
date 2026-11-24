@@ -50,6 +50,7 @@ use crate::{AppInfo, autostart};
 
 /// One thing [system] undid, or why it couldn't; shown as `<what>` or `<what> failed: <why>`.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct Step {
   /// What was undone: `launch at login off`.
   pub what: &'static str,

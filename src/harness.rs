@@ -510,6 +510,7 @@ pub fn us_key(key: Key, mods: Modifiers) -> KeyEvent {
 }
 
 /// Offscreen frame pixels with their backing scale.
+#[non_exhaustive]
 pub struct Image {
   pub scale: f32,
   pub pixels: Pixels,

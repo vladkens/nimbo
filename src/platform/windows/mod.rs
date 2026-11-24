@@ -65,6 +65,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetFocus;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::app::{App, Appearance, Clipboard, Clock, Event, MouseButton, Runtime};
+use crate::clipboard::Sealed;
 use crate::cpu::Renderer;
 use crate::cpu::raster::IRect;
 use crate::platform::{Pace, points};
@@ -957,6 +958,8 @@ impl WinClipboard {
     Self { owner: owner as isize }
   }
 }
+
+impl Sealed for WinClipboard {}
 
 impl Clipboard for WinClipboard {
   fn read(&self) -> Option<String> {

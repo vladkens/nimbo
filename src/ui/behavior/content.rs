@@ -17,6 +17,7 @@ use crate::ui::{Style, TextStyle, Ui, px};
 /// closure's texts take the style or one made from it (`s.underline(LinePattern::Dot)` on a term
 /// with [Ui::help]); a canvas of its own reads `Enabled` ([Ui::environment_value]).
 #[derive(Default)]
+#[non_exhaustive]
 pub enum Content<'s> {
   #[default]
   None,

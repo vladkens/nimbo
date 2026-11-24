@@ -194,8 +194,9 @@ pub struct Ledger;
 
 impl ListStyle for Ledger {
   fn layout(&self, _: &Ui) -> ListLayout {
-    let d = ListLayout::default();
-    ListLayout { frame: d.frame.pad(5.0), ..d }
+    let mut l = ListLayout::default();
+    l.frame = l.frame.pad(5.0);
+    l
   }
 
   fn make_body<'a>(&self, ui: &mut Ui<'a>, mut c: ListConfiguration<'_, 'a>) {

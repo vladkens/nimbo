@@ -20,9 +20,9 @@ use std::time::Duration;
 
 use nimbo::ui::widgets::icon;
 use nimbo::{
-  Align, Answer, App, Appearance, ButtonRole, ColorScheme, Config, ControlSize, Cx, Dialog, Event,
-  FormRow, FormStyle, Harness, Hotkey, Icon, Id, Picker, Rect, Section, SegmentedPickerStyle,
-  Style, TabItem, Tag, TextStyle, Theme, Tone, Ui, grow, px,
+  Align, Answer, App, ButtonRole, ColorScheme, Config, ControlSize, Cx, Dialog, Event, FormRow,
+  FormStyle, Harness, Hotkey, Icon, Id, Picker, Rect, Section, SegmentedPickerStyle, Style,
+  TabItem, Tag, TextStyle, Theme, Tone, Ui, grow, px,
 };
 
 use super::account::{self, Account};
@@ -429,11 +429,13 @@ impl App for Settings {
   }
 
   fn view(&mut self, ui: &mut Ui) {
-    let a = ui.appearance();
+    let mut a = ui.appearance();
     match self.look {
       Look::System => ui.follow_system(),
-      Look::Light => ui.set_theme(Theme::system(Appearance { scheme: ColorScheme::Light, ..a })),
-      Look::Dark => ui.set_theme(Theme::system(Appearance { scheme: ColorScheme::Dark, ..a })),
+      Look::Light | Look::Dark => {
+        a.scheme = if self.look == Look::Light { ColorScheme::Light } else { ColorScheme::Dark };
+        ui.set_theme(Theme::system(a));
+      }
     }
 
     // The window as high as the page, in the OS's font.

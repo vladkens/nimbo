@@ -32,6 +32,7 @@ use crate::{Main, svg};
 /// for the menu bar and the highlight; Windows fills it white on a dark taskbar, black on a light
 /// one; a Linux panel with its text colour).
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum TrayIcon {
   /// Straight (not premultiplied) RGBA, rows top-down, `scale` pixels per point (2 for an image
   /// drawn for Retina): 36 × 36 at 2 fills the menu bar's 18 pt.

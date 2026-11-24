@@ -22,6 +22,7 @@ use crate::system::Change;
 
 /// A keyboard layout or an input mode (Kana of the Japanese input method), as the user picks it.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct InputSource {
   /// The OS's id: `com.apple.keylayout.Russian`.
   pub id: String,

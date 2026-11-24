@@ -98,6 +98,7 @@ struct Open {
 
 /// Where a menu opens ([Ui::menu_popup]).
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum MenuPlacement {
   /// Under its trigger, or above it where it doesn't fit.
   Below,

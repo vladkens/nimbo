@@ -53,6 +53,7 @@ struct Item {
 }
 
 /// BGRA pixels of a frame (premultiplied), top row first: a harness shot's ([crate::harness]).
+#[non_exhaustive]
 pub struct Pixels {
   pub w: usize,
   pub h: usize,

@@ -10,6 +10,7 @@ use crate::text::Font;
 
 /// How an element is sized along one axis.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub enum Dim {
   /// Wraps its content (text, children and padding).
   #[default]
@@ -43,6 +44,7 @@ pub const fn rigid() -> Dim {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Align {
   #[default]
   Start,
@@ -52,6 +54,7 @@ pub enum Align {
 
 /// The pointer's shape over an element ([Style::cursor]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Cursor {
   /// The parent's; the arrow at the root.
   #[default]
@@ -75,6 +78,7 @@ pub enum Cursor {
 
 /// What an element clips its children to ([Style::clip], [Style::clip_content]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Clip {
   #[default]
   None,
@@ -87,6 +91,7 @@ pub enum Clip {
 
 /// How an element takes focus ([Style::focusable], [Style::tab_focusable]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Focus {
   #[default]
   None,
@@ -554,6 +559,7 @@ pub struct Float {
 /// Where an overlay is placed ([Float]), as SwiftUI's `CoordinateSpace`: in its parent, or in
 /// the window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CoordinateSpace {
   Local,
   Global,
@@ -628,6 +634,7 @@ impl Float {
 /// How big a control is, as SwiftUI's `ControlSize` ([super::Ui::control_size]): a button's
 /// height, font and padding (`Theme::button_padding`), a switch's track, a badge's pill, a spinner.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ControlSize {
   /// `Sizes::small_h` high in the small font: dense rows, inline actions.
   Small,

@@ -47,6 +47,7 @@ use crate::ui::{Align, ControlSize, Float, Id, Response, Style, Ui, grow, px};
 
 /// Where a toolbar item sits ([Ui::toolbar_item]), as SwiftUI's `ToolbarItemPlacement`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ToolbarItemPlacement {
   /// At the leading end, beside the window's buttons: a sidebar toggle, back and forward.
   Navigation,

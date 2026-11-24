@@ -10,6 +10,7 @@ use crate::keys::Shortcut;
 /// What a button or a menu item does, as SwiftUI's `ButtonRole`: a [crate::Dialog]'s buttons are
 /// told apart by it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ButtonRole {
   /// The action that goes ahead, the default one.
   Confirm,
@@ -75,6 +76,7 @@ impl<A> Menu<A> {
 /// ([crate::tray::Tray::on_item], [crate::Ui::context_menu]), a submenu, a section's title, or a
 /// divider. A label longer than [LABEL] is shortened to fit ([Item::button]).
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum Item<A> {
   Button {
     action: A,

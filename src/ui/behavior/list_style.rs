@@ -91,6 +91,7 @@ pub trait ListStyle: 'static {
 /// Where a list's rows lie and the boxes a [ListStyle] builds them in ([ListStyle::layout]); the
 /// app's [List::style] and [List::row_style] take the place of `frame` and `row`.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct ListLayout {
   /// The list's box, a scroll area: its size and padding, the rows under the top's.
   pub frame: Style,
@@ -263,6 +264,7 @@ impl<'a> ListRowConfiguration<'_, 'a> {
 
 /// A row being built, as its content sees it: where it is and how it shows.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct Row {
   pub index: usize,
   pub key: u64,
@@ -277,6 +279,7 @@ pub struct Row {
 
 /// What a list got this frame.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ListResponse {
   pub id: Id,
   /// The selection changed.

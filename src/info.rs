@@ -16,6 +16,7 @@ pub struct AppInfo {
 
 /// Where the app shows besides its windows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Presence {
   /// In the Dock and in ⌘Tab, as most apps.
   #[default]

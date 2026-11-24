@@ -71,6 +71,7 @@ pub(super) struct Bars {
 
 /// A scroll area's bar along one axis ([ScrollBehavior::bar]): its lengths along it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct ScrollBar {
   pub track: f32,
   pub thumb: f32,

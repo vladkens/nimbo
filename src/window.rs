@@ -15,6 +15,7 @@ use crate::{AppInfo, Main, Ui, Window, locale};
 /// less the menu bar, the Dock or the taskbar) of the screen with the pointer, a margin in points
 /// from its top or bottom edge, or in its middle.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum Anchor {
   Top(f32),
   Center,

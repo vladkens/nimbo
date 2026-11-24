@@ -35,6 +35,7 @@ pub struct Icon {
 /// view box units ([Icon::stroke]) or, with none given, of the widget's that draws it (a
 /// button's 1.6, the theme's image's Lucide's 2: [Icon::default_stroke]); or a fill.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum IconPaint {
   Stroke(Option<f32>),
   Fill,
