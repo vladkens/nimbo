@@ -27,7 +27,7 @@ pub mod history;
 pub mod hud;
 pub mod settings;
 
-use std::cell::{OnceCell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -235,11 +235,8 @@ fn show_settings(main: &mut Main, state: &Shared) {
   // Its recorder pauses the hotkeys while it records; closed, they work again.
   let w = main.open(&settings::config(), Settings { pause_hotkeys, ..Settings::default() });
   w.on_close(|_| {
-    STATE.with(|s| {
-      let mut s = s.borrow_mut();
-      s.settings = None;
-      s.pause(false);
-    });
+    STATE.with(|s| s.borrow_mut().settings = None);
+    pause_hotkeys(false);
   });
   state.borrow_mut().settings = Some(w);
 }
@@ -325,14 +322,17 @@ thread_local! {
   static STATE: Shared = Shared::default();
   /// The way back to the main loop, for work that finds the state busy.
   static PROXY: OnceCell<Proxy> = const { OnceCell::new() };
+  /// What Settings asked of the hotkeys last.
+  static PAUSED: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Pauses the hotkeys while Settings records one, or lets them go again; with the state busy (a
-/// nested loop), from the main loop once it is free.
+/// nested loop), from the main loop once it is free, as asked last by then.
 fn pause_hotkeys(paused: bool) {
+  PAUSED.set(paused);
   STATE.with(|s| match s.try_borrow_mut() {
     Ok(mut s) => s.pause(paused),
-    Err(_) => _ = PROXY.with(|p| p.get().map(|p| p.post(move |_| pause_hotkeys(paused)))),
+    Err(_) => _ = PROXY.with(|p| p.get().map(|p| p.post(|_| pause_hotkeys(PAUSED.get())))),
   });
 }
 
