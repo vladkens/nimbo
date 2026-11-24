@@ -13,10 +13,10 @@ use crate::keys::{Command, Key, KeyEvent, Os};
 use crate::locale::{self, Locale, Localizations};
 use crate::menu::{Item, Menu};
 use crate::scene::{Point, Rect, Size};
-use crate::text::TextSystem;
 #[cfg(all(test, feature = "headless"))]
 use crate::text::edit::Editor;
 use crate::text::edit::utf16_len;
+use crate::text::{Font, Metrics};
 use crate::ui::a11y::A11yTree;
 use crate::ui::{Action, Cursor, Id, Kind, Role, Scroll, TextInput};
 use crate::{Error, Modifiers, TitleBar, cpu};
@@ -404,9 +404,14 @@ impl<A: App> Harness<A> {
     self.rt.clipboard()
   }
 
-  /// The text system the frames shape and measure with, at the harness's scale.
-  pub fn text_system(&mut self) -> &mut TextSystem {
-    &mut self.rt.text
+  /// The advance width of `s` in points, as a frame measures it ([crate::Frame::measure]).
+  pub fn measure(&mut self, s: &str, font: Font) -> f32 {
+    self.rt.text.measure(s, font)
+  }
+
+  /// `font`'s metrics in points, as a frame reads them ([crate::Frame::metrics]).
+  pub fn metrics(&mut self, font: Font) -> Metrics {
+    self.rt.text.metrics(font)
   }
 
   /// Whether the next display refresh would build a frame: something changed, an animation

@@ -28,7 +28,7 @@ pub enum Content<'s> {
 }
 
 /// What a [Content::Built] runs: it builds the content in its style.
-pub type Build<'s> = Box<dyn FnOnce(&mut Ui, TextStyle) + 's>;
+pub(crate) type Build<'s> = Box<dyn FnOnce(&mut Ui, TextStyle) + 's>;
 
 impl Content<'_> {
   /// Shows nothing: none, or an empty text.

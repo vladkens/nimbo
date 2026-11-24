@@ -760,7 +760,8 @@ pub(crate) use edit::{Delete, Extent, Move};
 #[non_exhaustive]
 pub enum Command {
   /// Moves the caret, or extends the selection (the `…AndModifySelection:` selectors): the
-  /// editor's, for a field, a list or a menu to take.
+  /// editor's, for a field, a list or a menu to take. Hidden, as [Command::Delete]: a variant
+  /// can't be private, and its payload is the editor's own type, which an app can't name.
   #[doc(hidden)]
   Move(Move, Extent),
   /// Deletes text: the editor's.

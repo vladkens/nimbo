@@ -38,8 +38,8 @@ pub enum TrayIcon {
   /// drawn for Retina): 36 × 36 at 2 fills the menu bar's 18 pt.
   Rgba { w: u32, h: u32, scale: f32, px: Vec<u8> },
   /// SVG path data in a `size` × `size` view box, filled (non-zero, or even-odd), drawn at the
-  /// size the OS shows it, so crisp at every scale. Arcs and curves are flattened
-  /// ([crate::svg::flatten]).
+  /// size the OS shows it, so crisp at every scale: SVG's whole path syntax, arcs and curves
+  /// flattened into pieces of about 2 pixels.
   Path { size: f32, d: String, even_odd: bool },
 }
 
@@ -49,8 +49,10 @@ impl TrayIcon {
     Self::Path { size, d: d.into(), even_odd: false }
   }
 
-  /// An icon file: an SVG of `<path>`s in a square view box ([crate::svg::document] says what
-  /// it reads), drawn as [TrayIcon::Path].
+  /// An icon file, drawn as [TrayIcon::Path]: a square `viewBox` from `0 0` and `<path>`s filled
+  /// by one rule (`fill-rule="evenodd"` on each or on a group around them, or none) that don't
+  /// overlap; groups, titles and comments are passed over. Any other element, a `transform` or
+  /// `style`, an unfilled path or data that doesn't parse is an [Error::Invalid].
   pub fn from_svg(svg: &str) -> Result<Self, Error> {
     let (size, d, even_odd) = svg::document(svg)?;
     Ok(Self::Path { size, d, even_odd })
@@ -288,7 +290,9 @@ pub fn available() -> Result<(), Error> {
 }
 
 /// For the tray scenario (`tests/dictation/detached.rs`): a tray with nothing on screen, the menu
-/// as the OS got it, and its items chosen without opening it.
+/// as the OS got it, and its items chosen without opening it. Hidden, and only with the harness:
+/// a test's hook, not an app's.
+#[cfg(feature = "harness")]
 #[doc(hidden)]
 impl<A: Clone + PartialEq + 'static> Tray<A> {
   pub fn detached(icon: TrayIcon, tooltip: &str) -> Self {

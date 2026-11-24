@@ -31,9 +31,10 @@ pub struct Launcher<'a> {
   pub(crate) comment: &'a str,
   /// The menu's categories by the Desktop Menu spec: `Utility`, `AudioVideo`, `Development`.
   pub(crate) categories: &'a [&'a str],
-  /// The app's icon, square, its side one of the icon theme's sizes ([SIDES]), 256 for every
-  /// size the desktop shows: `Png::icon(include_bytes!("icon.png"))`. Decoded only when [install]
-  /// writes it, not on a launch that finds the entry current.
+  /// The app's icon, square, its side one of the icon theme's sizes (16, 22, 24, 32, 48, 64, 96,
+  /// 128, 256 or 512), 256 for every size the desktop shows:
+  /// `Png::icon(include_bytes!("icon.png"))`. Decoded only when [install] writes it, not on a
+  /// launch that finds the entry current.
   pub(crate) icon: Png,
 }
 
@@ -63,9 +64,6 @@ impl<'a> Launcher<'a> {
     self.icon
   }
 }
-
-/// The icon sides the hicolor theme looks under.
-pub const SIDES: [u32; 10] = [16, 22, 24, 32, 48, 64, 96, 128, 256, 512];
 
 /// Writes the app's launcher entry and icon where they differ from what is there (first run, the
 /// AppImage moved): `true` when it wrote. Nothing for an executable outside the home folder
@@ -143,6 +141,8 @@ pub(crate) fn install_in(
     return Ok(false);
   }
 
+  // The icon sides the hicolor theme looks under.
+  const SIDES: [u32; 10] = [16, 22, 24, 32, 48, 64, 96, 128, 256, 512];
   let (side, h, px) = l.icon().rgba();
   if side != h || !SIDES.contains(&side) {
     return Err(format!("a {side} × {h} icon: square, its side one of {SIDES:?}"));

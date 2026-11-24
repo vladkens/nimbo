@@ -118,7 +118,7 @@ pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {
     clusters.extend(idx.iter().map(at));
   }
 
-  Line { glyphs, clusters, width, ink: Ink::default(), epoch: 0 }
+  Line { glyphs, clusters, width, ink: Ink::default() }
 }
 
 fn ns_font(font: Retained<NSFont>) -> CFRetained<CTFont> {

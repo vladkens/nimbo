@@ -298,7 +298,7 @@ mod tests {
   fn wrapped_paragraphs_fill_items_of_their_measured_heights() {
     let mut h = Harness::new(Paragraphs { narrow: 0.0 }, Size::new(200.0, 2000.0), 2.0);
     settle(&mut h);
-    let line_h = h.text_system().metrics(paragraph(7).1.font).line_height();
+    let line_h = h.metrics(paragraph(7).1.font).line_height();
     let text = |i: usize| h.rect(Id::of(("text", i))).unwrap();
     for i in 0..8 {
       let item = h.rect(Id::of("col").key(i)).unwrap();

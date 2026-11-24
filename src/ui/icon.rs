@@ -153,9 +153,8 @@ impl Icon {
     "M7.8 10.2 12 11l4.2-.8M12 11v3.2l-2.3 3.6M12 14.2l2.3 3.6"
   ));
 
-  /// Every built-in icon, for a gallery and the tests, with what a button showing it alone does
-  /// ([Icon::name]).
-  pub const ALL: [(&'static str, Self, Localized); 22] = [
+  /// Every built-in icon, for the tests, with what a button showing it alone does ([Icon::name]).
+  pub(crate) const ALL: &[(&'static str, Self, Localized)] = &[
     ("gear", Self::GEAR, t!("Settings")),
     ("contrast", Self::CONTRAST, t!("Appearance")),
     ("sliders", Self::SLIDERS, t!("Options")),

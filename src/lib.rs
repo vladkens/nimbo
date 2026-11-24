@@ -195,10 +195,10 @@ mod png;
 mod runloop;
 mod scene;
 mod shell;
-pub mod svg;
+mod svg;
 #[cfg(feature = "system")]
 pub mod system;
-pub mod text;
+mod text;
 #[cfg(feature = "tray")]
 pub mod tray;
 mod ui;
@@ -224,7 +224,7 @@ pub use menu::{ButtonRole, Item, Menu};
 pub use png::Png;
 pub use scene::{Color, Frame, ImageId, Images, Point, Quad, Rect, Size, alpha, mix, rgb};
 pub use shell::{Anchor, AppInfo, Main, Presence, Proxy, Window, WindowId, app, attach_console};
-pub use text::{Design, Font, Weight};
+pub use text::{Design, Font, Metrics, Weight};
 pub use ui::{
   Align, Axes, Axis, Click, Clip, ContentMode, ControlSize, CoordinateSpace, Cursor, Dim, Ease,
   Enabled, EnvironmentValue, Float, Focus, FocusDirection, FocusRing, FrameStats, Icon, IconPaint,

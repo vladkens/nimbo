@@ -217,7 +217,6 @@ pub const fn nimbo::desktop::Launcher<'a>::new(nimbo::Png) -> Self
 impl<'a> core::clone::Clone for nimbo::desktop::Launcher<'a>
 pub fn nimbo::desktop::Launcher<'a>::clone(&self) -> Self
 impl<'a> core::marker::Copy for nimbo::desktop::Launcher<'a>
-pub const nimbo::desktop::SIDES: [u32; 10]
 pub fn nimbo::desktop::install(&nimbo::AppInfo, &nimbo::desktop::Launcher<'_>) -> core::result::Result<bool, nimbo::Error>
 pub fn nimbo::desktop::uninstall(&nimbo::AppInfo) -> core::result::Result<(), nimbo::Error>
 pub mod nimbo::focus
@@ -478,9 +477,7 @@ pub fn nimbo::paste::Paste::eq(&self, &Self) -> bool
 impl core::fmt::Debug for nimbo::paste::Paste
 pub fn nimbo::paste::Paste::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for nimbo::paste::Paste
-pub const nimbo::paste::CAP: core::time::Duration
 pub const nimbo::paste::PORTAL_WAIT: core::time::Duration
-pub const nimbo::paste::RESTORE: core::time::Duration
 pub fn nimbo::paste::post(nimbo::Shortcut) -> core::result::Result<(), nimbo::Error>
 pub fn nimbo::paste::ready() -> bool
 pub fn nimbo::paste::text(&str, nimbo::paste::Paste) -> core::result::Result<(), nimbo::paste::NotPasted>
@@ -527,10 +524,6 @@ pub fn nimbo::permissions::open_pane(nimbo::permissions::Pane) -> core::result::
 pub fn nimbo::permissions::request_accessibility() -> bool
 pub fn nimbo::permissions::request_microphone(impl core::ops::function::FnOnce(bool) + core::marker::Send + 'static)
 pub fn nimbo::permissions::secure_input() -> bool
-pub mod nimbo::svg
-pub fn nimbo::svg::document(&str) -> core::result::Result<(f32, alloc::string::String, bool), nimbo::Error>
-pub fn nimbo::svg::flatten(&str, f32, &mut alloc::vec::Vec<alloc::vec::Vec<nimbo::Point>>) -> core::result::Result<(), nimbo::Error>
-pub fn nimbo::svg::spans(&[alloc::vec::Vec<nimbo::Point>], f32, bool, &mut alloc::vec::Vec<(f32, i32)>, impl core::ops::function::FnMut(f32, f32))
 pub mod nimbo::system
 #[non_exhaustive] pub enum nimbo::system::Change
 pub nimbo::system::Change::AudioInputs
@@ -548,112 +541,6 @@ impl core::hash::Hash for nimbo::system::Change
 pub fn nimbo::system::Change::hash<__H: core::hash::Hasher>(&self, &mut __H)
 impl core::marker::Copy for nimbo::system::Change
 impl core::marker::StructuralPartialEq for nimbo::system::Change
-pub mod nimbo::text
-#[non_exhaustive] pub enum nimbo::text::Design
-pub nimbo::text::Design::Default
-pub nimbo::text::Design::Monospaced
-impl core::clone::Clone for nimbo::text::Design
-pub fn nimbo::text::Design::clone(&self) -> Self
-impl core::cmp::Eq for nimbo::text::Design
-impl core::cmp::PartialEq for nimbo::text::Design
-pub fn nimbo::text::Design::eq(&self, &Self) -> bool
-impl core::default::Default for nimbo::text::Design
-pub fn nimbo::text::Design::default() -> Self
-impl core::fmt::Debug for nimbo::text::Design
-pub fn nimbo::text::Design::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for nimbo::text::Design
-pub fn nimbo::text::Design::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for nimbo::text::Design
-impl core::marker::StructuralPartialEq for nimbo::text::Design
-#[non_exhaustive] pub enum nimbo::text::Weight
-pub nimbo::text::Weight::Bold
-pub nimbo::text::Weight::Medium
-pub nimbo::text::Weight::Regular
-pub nimbo::text::Weight::Semibold
-impl core::clone::Clone for nimbo::text::Weight
-pub fn nimbo::text::Weight::clone(&self) -> Self
-impl core::cmp::Eq for nimbo::text::Weight
-impl core::cmp::PartialEq for nimbo::text::Weight
-pub fn nimbo::text::Weight::eq(&self, &Self) -> bool
-impl core::fmt::Debug for nimbo::text::Weight
-pub fn nimbo::text::Weight::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for nimbo::text::Weight
-impl core::marker::StructuralPartialEq for nimbo::text::Weight
-pub struct nimbo::text::Font
-impl nimbo::text::Font
-pub const fn nimbo::text::Font::get_size(&self) -> f32
-pub const fn nimbo::text::Font::mono(f32) -> Self
-pub const fn nimbo::text::Font::size(self, f32) -> Self
-pub const fn nimbo::text::Font::ui(f32) -> Self
-pub const fn nimbo::text::Font::weight(self, nimbo::text::Weight) -> Self
-impl core::clone::Clone for nimbo::text::Font
-pub fn nimbo::text::Font::clone(&self) -> Self
-impl core::cmp::PartialEq for nimbo::text::Font
-pub fn nimbo::text::Font::eq(&self, &Self) -> bool
-impl core::fmt::Debug for nimbo::text::Font
-pub fn nimbo::text::Font::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for nimbo::text::Font
-impl core::marker::StructuralPartialEq for nimbo::text::Font
-#[non_exhaustive] pub struct nimbo::text::Glyph
-pub nimbo::text::Glyph::face: u16
-pub nimbo::text::Glyph::id: u16
-pub nimbo::text::Glyph::x: f32
-pub nimbo::text::Glyph::y: f32
-impl core::clone::Clone for nimbo::text::Glyph
-pub fn nimbo::text::Glyph::clone(&self) -> Self
-impl core::fmt::Debug for nimbo::text::Glyph
-pub fn nimbo::text::Glyph::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for nimbo::text::Glyph
-pub struct nimbo::text::Ink
-pub nimbo::text::Ink::down: f32
-pub nimbo::text::Ink::left: f32
-pub nimbo::text::Ink::right: f32
-pub nimbo::text::Ink::up: f32
-impl core::clone::Clone for nimbo::text::Ink
-pub fn nimbo::text::Ink::clone(&self) -> Self
-impl core::cmp::PartialEq for nimbo::text::Ink
-pub fn nimbo::text::Ink::eq(&self, &Self) -> bool
-impl core::default::Default for nimbo::text::Ink
-pub fn nimbo::text::Ink::default() -> Self
-impl core::fmt::Debug for nimbo::text::Ink
-pub fn nimbo::text::Ink::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for nimbo::text::Ink
-impl core::marker::StructuralPartialEq for nimbo::text::Ink
-pub struct nimbo::text::Line
-pub nimbo::text::Line::clusters: alloc::vec::Vec<u32>
-pub nimbo::text::Line::glyphs: alloc::vec::Vec<nimbo::text::Glyph>
-pub nimbo::text::Line::ink: nimbo::text::Ink
-pub nimbo::text::Line::width: f32
-impl core::fmt::Debug for nimbo::text::Line
-pub fn nimbo::text::Line::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-#[non_exhaustive] pub struct nimbo::text::Metrics
-pub nimbo::text::Metrics::ascent: f32
-pub nimbo::text::Metrics::cap_height: f32
-pub nimbo::text::Metrics::descent: f32
-pub nimbo::text::Metrics::leading: f32
-pub nimbo::text::Metrics::x_height: f32
-impl nimbo::text::Metrics
-pub fn nimbo::text::Metrics::line_height(&self) -> f32
-impl core::clone::Clone for nimbo::text::Metrics
-pub fn nimbo::text::Metrics::clone(&self) -> Self
-impl core::cmp::PartialEq for nimbo::text::Metrics
-pub fn nimbo::text::Metrics::eq(&self, &Self) -> bool
-impl core::default::Default for nimbo::text::Metrics
-pub fn nimbo::text::Metrics::default() -> Self
-impl core::fmt::Debug for nimbo::text::Metrics
-pub fn nimbo::text::Metrics::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for nimbo::text::Metrics
-impl core::marker::StructuralPartialEq for nimbo::text::Metrics
-pub struct nimbo::text::TextSystem
-impl nimbo::text::TextSystem
-pub fn nimbo::text::TextSystem::carets(&mut self, &str, nimbo::text::Font, impl core::ops::function::FnMut(usize, f32))
-pub fn nimbo::text::TextSystem::is_color(&mut self, nimbo::text::Glyph) -> bool
-pub fn nimbo::text::TextSystem::is_current(&self, &nimbo::text::Line) -> bool
-pub fn nimbo::text::TextSystem::layout(&mut self, &str, nimbo::text::Font) -> alloc::rcs::rc::Rc<nimbo::text::Line>
-pub fn nimbo::text::TextSystem::measure(&mut self, &str, nimbo::text::Font) -> f32
-pub fn nimbo::text::TextSystem::metrics(&mut self, nimbo::text::Font) -> nimbo::text::Metrics
-pub fn nimbo::text::TextSystem::scale(&self) -> f32
-pub fn nimbo::text::TextSystem::smoothing(&self) -> bool
 pub mod nimbo::tray
 #[non_exhaustive] pub enum nimbo::tray::TrayIcon
 pub nimbo::tray::TrayIcon::Path
@@ -1117,19 +1004,19 @@ impl core::marker::StructuralPartialEq for nimbo::Cursor
 #[non_exhaustive] pub enum nimbo::Design
 pub nimbo::Design::Default
 pub nimbo::Design::Monospaced
-impl core::clone::Clone for nimbo::text::Design
-pub fn nimbo::text::Design::clone(&self) -> Self
-impl core::cmp::Eq for nimbo::text::Design
-impl core::cmp::PartialEq for nimbo::text::Design
-pub fn nimbo::text::Design::eq(&self, &Self) -> bool
-impl core::default::Default for nimbo::text::Design
-pub fn nimbo::text::Design::default() -> Self
-impl core::fmt::Debug for nimbo::text::Design
-pub fn nimbo::text::Design::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for nimbo::text::Design
-pub fn nimbo::text::Design::hash<__H: core::hash::Hasher>(&self, &mut __H)
-impl core::marker::Copy for nimbo::text::Design
-impl core::marker::StructuralPartialEq for nimbo::text::Design
+impl core::clone::Clone for nimbo::Design
+pub fn nimbo::Design::clone(&self) -> Self
+impl core::cmp::Eq for nimbo::Design
+impl core::cmp::PartialEq for nimbo::Design
+pub fn nimbo::Design::eq(&self, &Self) -> bool
+impl core::default::Default for nimbo::Design
+pub fn nimbo::Design::default() -> Self
+impl core::fmt::Debug for nimbo::Design
+pub fn nimbo::Design::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for nimbo::Design
+pub fn nimbo::Design::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for nimbo::Design
+impl core::marker::StructuralPartialEq for nimbo::Design
 #[non_exhaustive] pub enum nimbo::Dim
 pub nimbo::Dim::Fit
 pub nimbo::Dim::Grow(f32)
@@ -1689,15 +1576,15 @@ pub nimbo::Weight::Bold
 pub nimbo::Weight::Medium
 pub nimbo::Weight::Regular
 pub nimbo::Weight::Semibold
-impl core::clone::Clone for nimbo::text::Weight
-pub fn nimbo::text::Weight::clone(&self) -> Self
-impl core::cmp::Eq for nimbo::text::Weight
-impl core::cmp::PartialEq for nimbo::text::Weight
-pub fn nimbo::text::Weight::eq(&self, &Self) -> bool
-impl core::fmt::Debug for nimbo::text::Weight
-pub fn nimbo::text::Weight::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for nimbo::text::Weight
-impl core::marker::StructuralPartialEq for nimbo::text::Weight
+impl core::clone::Clone for nimbo::Weight
+pub fn nimbo::Weight::clone(&self) -> Self
+impl core::cmp::Eq for nimbo::Weight
+impl core::cmp::PartialEq for nimbo::Weight
+pub fn nimbo::Weight::eq(&self, &Self) -> bool
+impl core::fmt::Debug for nimbo::Weight
+pub fn nimbo::Weight::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for nimbo::Weight
+impl core::marker::StructuralPartialEq for nimbo::Weight
 #[non_exhaustive] pub enum nimbo::WindowToolbarStyle
 pub nimbo::WindowToolbarStyle::Automatic
 pub nimbo::WindowToolbarStyle::Unified
@@ -2104,20 +1991,20 @@ pub fn nimbo::FocusRing::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt:
 impl core::marker::Copy for nimbo::FocusRing
 impl core::marker::StructuralPartialEq for nimbo::FocusRing
 pub struct nimbo::Font
-impl nimbo::text::Font
-pub const fn nimbo::text::Font::get_size(&self) -> f32
-pub const fn nimbo::text::Font::mono(f32) -> Self
-pub const fn nimbo::text::Font::size(self, f32) -> Self
-pub const fn nimbo::text::Font::ui(f32) -> Self
-pub const fn nimbo::text::Font::weight(self, nimbo::text::Weight) -> Self
-impl core::clone::Clone for nimbo::text::Font
-pub fn nimbo::text::Font::clone(&self) -> Self
-impl core::cmp::PartialEq for nimbo::text::Font
-pub fn nimbo::text::Font::eq(&self, &Self) -> bool
-impl core::fmt::Debug for nimbo::text::Font
-pub fn nimbo::text::Font::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for nimbo::text::Font
-impl core::marker::StructuralPartialEq for nimbo::text::Font
+impl nimbo::Font
+pub const fn nimbo::Font::get_size(&self) -> f32
+pub const fn nimbo::Font::mono(f32) -> Self
+pub const fn nimbo::Font::size(self, f32) -> Self
+pub const fn nimbo::Font::ui(f32) -> Self
+pub const fn nimbo::Font::weight(self, nimbo::Weight) -> Self
+impl core::clone::Clone for nimbo::Font
+pub fn nimbo::Font::clone(&self) -> Self
+impl core::cmp::PartialEq for nimbo::Font
+pub fn nimbo::Font::eq(&self, &Self) -> bool
+impl core::fmt::Debug for nimbo::Font
+pub fn nimbo::Font::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for nimbo::Font
+impl core::marker::StructuralPartialEq for nimbo::Font
 pub struct nimbo::FormRow<'s>
 impl<'s> nimbo::FormRow<'s>
 pub fn nimbo::FormRow<'s>::caption(self, impl core::convert::Into<nimbo::Content<'s>>) -> Self
@@ -2214,17 +2101,16 @@ pub fn nimbo::Frame<'_>::image(&mut self, nimbo::ImageId, nimbo::Rect, f32)
 pub fn nimbo::Frame<'_>::images(&mut self) -> &mut nimbo::Images
 pub fn nimbo::Frame<'_>::layer(&mut self)
 pub fn nimbo::Frame<'_>::line(&mut self, nimbo::Point, nimbo::Point, f32, nimbo::Color)
-pub fn nimbo::Frame<'_>::measure(&mut self, &str, nimbo::text::Font) -> f32
-pub fn nimbo::Frame<'_>::metrics(&mut self, nimbo::text::Font) -> nimbo::text::Metrics
+pub fn nimbo::Frame<'_>::measure(&mut self, &str, nimbo::Font) -> f32
+pub fn nimbo::Frame<'_>::metrics(&mut self, nimbo::Font) -> nimbo::Metrics
 pub fn nimbo::Frame<'_>::polyline(&mut self, &[nimbo::Point], f32, nimbo::Color)
 pub fn nimbo::Frame<'_>::pop_clip(&mut self)
 pub fn nimbo::Frame<'_>::push_clip(&mut self, nimbo::Rect)
 pub fn nimbo::Frame<'_>::quad(&mut self, nimbo::Quad)
 pub fn nimbo::Frame<'_>::rect(&mut self, nimbo::Rect, nimbo::Color, f32)
 pub fn nimbo::Frame<'_>::shadow(&mut self, nimbo::Rect, f32, f32, nimbo::Color)
-pub fn nimbo::Frame<'_>::text(&mut self, f32, f32, &str, nimbo::text::Font, nimbo::Color) -> f32
-pub fn nimbo::Frame<'_>::text_at(&mut self, f32, f32, impl core::fmt::Display, nimbo::text::Font, nimbo::Color, f32) -> f32
-pub fn nimbo::Frame<'_>::text_system(&mut self) -> &mut nimbo::text::TextSystem
+pub fn nimbo::Frame<'_>::text(&mut self, f32, f32, &str, nimbo::Font, nimbo::Color) -> f32
+pub fn nimbo::Frame<'_>::text_at(&mut self, f32, f32, impl core::fmt::Display, nimbo::Font, nimbo::Color, f32) -> f32
 #[non_exhaustive] pub struct nimbo::FrameStats
 pub nimbo::FrameStats::count: u64
 pub nimbo::FrameStats::layout: core::time::Duration
@@ -2293,8 +2179,10 @@ pub fn nimbo::Harness<A>::ime_mark(&mut self, &str) -> bool
 pub fn nimbo::Harness<A>::key(&mut self, impl core::convert::Into<nimbo::Key>, nimbo::Modifiers) -> bool
 pub fn nimbo::Harness<A>::key_event(&mut self, nimbo::KeyEvent) -> bool
 pub fn nimbo::Harness<A>::leave(&mut self) -> bool
+pub fn nimbo::Harness<A>::measure(&mut self, &str, nimbo::Font) -> f32
 pub fn nimbo::Harness<A>::menu_command(&mut self, nimbo::Command) -> bool
 pub fn nimbo::Harness<A>::menu_open(&self, nimbo::Id) -> bool
+pub fn nimbo::Harness<A>::metrics(&mut self, nimbo::Font) -> nimbo::Metrics
 pub fn nimbo::Harness<A>::mouse(&self) -> core::option::Option<nimbo::Point>
 pub fn nimbo::Harness<A>::move_to(&mut self, f32, f32) -> bool
 pub fn nimbo::Harness<A>::needs_frame(&mut self) -> bool
@@ -2319,7 +2207,6 @@ pub fn nimbo::Harness<A>::shot(&mut self, &std::path::Path) -> core::result::Res
 pub fn nimbo::Harness<A>::size(&self) -> nimbo::Size
 pub fn nimbo::Harness<A>::text(&self, nimbo::Id) -> core::option::Option<&str>
 pub fn nimbo::Harness<A>::text_input(&mut self) -> core::option::Option<nimbo::TextInput<'_>>
-pub fn nimbo::Harness<A>::text_system(&mut self) -> &mut nimbo::text::TextSystem
 pub fn nimbo::Harness<A>::type_text(&mut self, &str) -> bool
 pub fn nimbo::Harness<A>::wait(&mut self, core::time::Duration) -> usize
 pub fn nimbo::Harness<A>::waker(&self) -> &nimbo::Waker
@@ -2337,7 +2224,6 @@ impl<'s> core::marker::Copy for nimbo::HelpConfiguration<'s>
 pub struct nimbo::Icon
 impl nimbo::Icon
 pub const nimbo::Icon::ACCESSIBILITY: Self
-pub const nimbo::Icon::ALL: [(&'static str, Self, nimbo::Localized); 22]
 pub const nimbo::Icon::CHECK: Self
 pub const nimbo::Icon::CLEAR: Self
 pub const nimbo::Icon::CONTRAST: Self
@@ -2638,6 +2524,24 @@ pub fn nimbo::MenuPickerStyle::fmt(&self, &mut core::fmt::Formatter<'_>) -> core
 impl core::marker::Copy for nimbo::MenuPickerStyle
 impl nimbo::PickerStyle for nimbo::MenuPickerStyle
 pub fn nimbo::MenuPickerStyle::make_body(&self, &mut nimbo::Ui<'_>, nimbo::PickerConfiguration<'_>)
+#[non_exhaustive] pub struct nimbo::Metrics
+pub nimbo::Metrics::ascent: f32
+pub nimbo::Metrics::cap_height: f32
+pub nimbo::Metrics::descent: f32
+pub nimbo::Metrics::leading: f32
+pub nimbo::Metrics::x_height: f32
+impl nimbo::Metrics
+pub fn nimbo::Metrics::line_height(&self) -> f32
+impl core::clone::Clone for nimbo::Metrics
+pub fn nimbo::Metrics::clone(&self) -> Self
+impl core::cmp::PartialEq for nimbo::Metrics
+pub fn nimbo::Metrics::eq(&self, &Self) -> bool
+impl core::default::Default for nimbo::Metrics
+pub fn nimbo::Metrics::default() -> Self
+impl core::fmt::Debug for nimbo::Metrics
+pub fn nimbo::Metrics::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for nimbo::Metrics
+impl core::marker::StructuralPartialEq for nimbo::Metrics
 pub struct nimbo::Modifiers(_)
 impl nimbo::Modifiers
 pub const nimbo::Modifiers::ALT: Self
@@ -3286,12 +3190,12 @@ pub fn nimbo::TextInput<'_>::text(&self) -> &str
 pub struct nimbo::TextStyle
 impl nimbo::TextStyle
 pub const fn nimbo::TextStyle::color(self, nimbo::Color) -> Self
-pub const fn nimbo::TextStyle::font(self, nimbo::text::Font) -> Self
+pub const fn nimbo::TextStyle::font(self, nimbo::Font) -> Self
 pub const fn nimbo::TextStyle::get_color(&self) -> nimbo::Color
-pub const fn nimbo::TextStyle::get_font(&self) -> nimbo::text::Font
+pub const fn nimbo::TextStyle::get_font(&self) -> nimbo::Font
 pub const fn nimbo::TextStyle::line_h(self, f32) -> Self
 pub const fn nimbo::TextStyle::line_limit(self, u16) -> Self
-pub const fn nimbo::TextStyle::new(nimbo::text::Font, nimbo::Color) -> Self
+pub const fn nimbo::TextStyle::new(nimbo::Font, nimbo::Color) -> Self
 pub const fn nimbo::TextStyle::nowrap(self) -> Self
 pub const fn nimbo::TextStyle::strikethrough(self, nimbo::LinePattern) -> Self
 pub const fn nimbo::TextStyle::truncation(self, nimbo::TruncationMode) -> Self
@@ -3331,7 +3235,7 @@ pub const fn nimbo::Theme::with_accent(self, nimbo::Color) -> Self
 impl nimbo::Theme
 pub const fn nimbo::Theme::accent(&self) -> nimbo::Color
 pub const fn nimbo::Theme::bg(&self) -> nimbo::Color
-pub const fn nimbo::Theme::bold(&self) -> nimbo::text::Font
+pub const fn nimbo::Theme::bold(&self) -> nimbo::Font
 pub const fn nimbo::Theme::control_border(&self) -> nimbo::ControlBorder
 pub const fn nimbo::Theme::danger(&self) -> nimbo::Color
 pub const fn nimbo::Theme::dialog_fill(&self) -> nimbo::Color
@@ -3341,7 +3245,7 @@ pub const fn nimbo::Theme::faint(&self) -> nimbo::Color
 pub const fn nimbo::Theme::field_fill(&self) -> nimbo::Color
 pub const fn nimbo::Theme::field_line(&self) -> nimbo::Color
 pub const fn nimbo::Theme::focus(&self) -> nimbo::Color
-pub const fn nimbo::Theme::font(&self) -> nimbo::text::Font
+pub const fn nimbo::Theme::font(&self) -> nimbo::Font
 pub const fn nimbo::Theme::ghost(&self) -> nimbo::Color
 pub const fn nimbo::Theme::glass(&self) -> bool
 pub const fn nimbo::Theme::hotkey_recorder_clear(&self) -> bool
@@ -3363,7 +3267,7 @@ pub const fn nimbo::Theme::secondary(&self) -> nimbo::Color
 pub const fn nimbo::Theme::selection(&self) -> nimbo::Color
 pub const fn nimbo::Theme::shadow(&self) -> nimbo::Color
 pub const fn nimbo::Theme::sizes(&self) -> nimbo::Sizes
-pub const fn nimbo::Theme::small(&self) -> nimbo::text::Font
+pub const fn nimbo::Theme::small(&self) -> nimbo::Font
 pub const fn nimbo::Theme::success(&self) -> nimbo::Color
 pub const fn nimbo::Theme::tertiary(&self) -> nimbo::Color
 pub const fn nimbo::Theme::text(&self) -> nimbo::Color
@@ -3373,7 +3277,7 @@ pub const fn nimbo::Theme::track(&self) -> nimbo::Color
 pub const fn nimbo::Theme::track_hover(&self) -> nimbo::Color
 pub const fn nimbo::Theme::warning(&self) -> nimbo::Color
 pub const fn nimbo::Theme::with_bg(self, nimbo::Color) -> Self
-pub const fn nimbo::Theme::with_bold(self, nimbo::text::Font) -> Self
+pub const fn nimbo::Theme::with_bold(self, nimbo::Font) -> Self
 pub const fn nimbo::Theme::with_control_border(self, nimbo::ControlBorder) -> Self
 pub const fn nimbo::Theme::with_danger(self, nimbo::Color) -> Self
 pub const fn nimbo::Theme::with_dialog_fill(self, nimbo::Color) -> Self
@@ -3383,7 +3287,7 @@ pub const fn nimbo::Theme::with_faint(self, nimbo::Color) -> Self
 pub const fn nimbo::Theme::with_field_fill(self, nimbo::Color) -> Self
 pub const fn nimbo::Theme::with_field_line(self, nimbo::Color) -> Self
 pub const fn nimbo::Theme::with_focus(self, nimbo::Color) -> Self
-pub const fn nimbo::Theme::with_font(self, nimbo::text::Font) -> Self
+pub const fn nimbo::Theme::with_font(self, nimbo::Font) -> Self
 pub const fn nimbo::Theme::with_ghost(self, nimbo::Color) -> Self
 pub const fn nimbo::Theme::with_glass(self, bool) -> Self
 pub const fn nimbo::Theme::with_hotkey_recorder_clear(self, bool) -> Self
@@ -3405,7 +3309,7 @@ pub const fn nimbo::Theme::with_secondary(self, nimbo::Color) -> Self
 pub const fn nimbo::Theme::with_selection(self, nimbo::Color) -> Self
 pub const fn nimbo::Theme::with_shadow(self, nimbo::Color) -> Self
 pub const fn nimbo::Theme::with_sizes(self, nimbo::Sizes) -> Self
-pub const fn nimbo::Theme::with_small(self, nimbo::text::Font) -> Self
+pub const fn nimbo::Theme::with_small(self, nimbo::Font) -> Self
 pub const fn nimbo::Theme::with_success(self, nimbo::Color) -> Self
 pub const fn nimbo::Theme::with_tertiary(self, nimbo::Color) -> Self
 pub const fn nimbo::Theme::with_text(self, nimbo::Color) -> Self
@@ -3663,7 +3567,7 @@ pub fn nimbo::Ui<'a>::last_frame(&self) -> nimbo::FrameStats
 pub fn nimbo::Ui<'a>::line_height(&mut self, nimbo::TextStyle) -> f32
 pub fn nimbo::Ui<'a>::measure(&mut self, &str, nimbo::TextStyle) -> f32
 pub fn nimbo::Ui<'a>::measure_wrapped(&mut self, &str, nimbo::TextStyle, f32) -> nimbo::Size
-pub fn nimbo::Ui<'a>::metrics(&mut self, nimbo::text::Font) -> nimbo::text::Metrics
+pub fn nimbo::Ui<'a>::metrics(&mut self, nimbo::Font) -> nimbo::Metrics
 pub fn nimbo::Ui<'a>::mouse(&self) -> core::option::Option<nimbo::Point>
 pub fn nimbo::Ui<'a>::now(&self) -> core::time::Duration
 pub fn nimbo::Ui<'a>::parent_axis(&self) -> core::option::Option<nimbo::Axis>

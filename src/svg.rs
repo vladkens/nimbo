@@ -88,7 +88,7 @@ impl Cur<'_> {
 /// Flattens SVG path data into polylines in view box units, one per subpath (a closed one ends
 /// at its start); curves in pieces of about 2 pixels at `px` pixels per unit; [Error::Invalid]
 /// where the data doesn't parse.
-pub fn flatten(d: &str, px: f32, out: &mut Vec<Vec<Point>>) -> Result<(), Error> {
+pub(crate) fn flatten(d: &str, px: f32, out: &mut Vec<Vec<Point>>) -> Result<(), Error> {
   path(d, px, out).map_err(Error::Invalid)
 }
 
@@ -284,7 +284,7 @@ fn arc(
 /// Calls `span` with each stretch, left to right, of the horizontal line at `y` inside the
 /// closed polylines `polys`, by the non-zero rule or `even_odd`; `xs` is scratch for the
 /// crossings. What the tray icons and the filled widget icons fill.
-pub fn spans(
+pub(crate) fn spans(
   polys: &[Vec<Point>],
   y: f32,
   even_odd: bool,
@@ -330,7 +330,7 @@ pub fn spans(
 /// or none) that don't overlap (joined, they fill as one path); groups, titles and comments are
 /// passed over. Any other element, a `transform` or `style`, an unfilled path (`fill="none"` on
 /// it or a group around it) or data that doesn't parse is an [Error::Invalid].
-pub fn document(svg: &str) -> Result<(f32, String, bool), Error> {
+pub(crate) fn document(svg: &str) -> Result<(f32, String, bool), Error> {
   read(svg).map_err(Error::Invalid)
 }
 
