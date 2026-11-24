@@ -367,6 +367,7 @@ mod tests {
     assert_eq!(h.rt.ui.hover().len(), 2, "the label's text, then the button");
     h.click(r.x + r.w / 2.0, r.y + r.h / 2.0);
     assert_eq!(h.app().clicks, 1);
+    assert!(h.a11y().lines().any(|l| l.trim().starts_with("button \"Tipped\"")), "{}", h.a11y());
 
     // With nothing around, the press is its own.
     let r = h.rect(Id::of("solo")).unwrap();
