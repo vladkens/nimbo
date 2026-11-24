@@ -2,9 +2,9 @@
 
 //! The Account tab of the settings, its text fields on the form's plates: a name, an e-mail with
 //! a placeholder, the organisation (disabled), the service's API key (secure) and a custom
-//! vocabulary over several lines, with a note under them to select and copy. Enter in a
-//! single-line field submits it; Tab moves between the fields. Input methods compose in place
-//! (try Pinyin or Japanese).
+//! vocabulary over several lines, with a note under them to select and copy; who is signed in.
+//! Enter in a single-line field submits it; Tab moves between the fields. Input methods compose in
+//! place (try Pinyin or Japanese).
 //!
 //! `cargo run --release --example dictation -- account` opens it alone in a window;
 //! `-- account --shot account.png` renders it without one: the name typed, the e-mail empty, a
@@ -116,6 +116,12 @@ impl Account {
           }
         });
       });
+    });
+
+    // Who is signed in: a tile of initials beside the button that ends it.
+    ui.form_section(fs, "Signed In", |ui| {
+      let row = FormRow::new("Alex Doe").caption("alex@example.com").tile("AD");
+      ui.form_row(fs, row, |ui| ui.button("Sign Out…"));
     });
   }
 }

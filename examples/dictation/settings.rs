@@ -273,11 +273,6 @@ impl Settings {
   }
 
   fn advanced(&mut self, ui: &mut Ui, fs: &FormStyle) {
-    ui.form_section(fs, "Account", |ui| {
-      let row = FormRow::new("Alex Doe").caption("alex@example.com").tile("AD");
-      ui.form_row(fs, row, |ui| ui.button("Sign Out…"));
-    });
-
     let used = format!("{} MB used", self.cache + 512);
     let storage = |ui: &mut Ui, s: TextStyle| {
       ui.text("Storage", s);
