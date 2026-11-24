@@ -5,7 +5,6 @@
 
 use std::ops::Range;
 
-use keyboard_types::{Modifiers, NamedKey};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2_app_kit::{NSCursor, NSEvent, NSEventModifierFlags, NSEventPhase};
@@ -16,6 +15,7 @@ use crate::app::{MouseButton, Phase};
 use crate::keys::{self, Key, KeyEvent};
 use crate::scene::{Point, Size};
 use crate::ui::Cursor;
+use crate::{Modifiers, NamedKey};
 
 pub const NOT_FOUND: NSRange = NSRange::new(NSNotFound as usize, 0);
 

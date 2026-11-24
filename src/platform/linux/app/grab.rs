@@ -19,13 +19,11 @@ use std::rc::Rc;
 use std::sync::mpsc::Sender;
 use std::time::Instant;
 
-use keyboard_types::Code;
-
 use super::super::{Fp, P, dbus, gtk, keys};
 use super::{X11, trap, x11};
-use crate::Modifiers;
 use crate::hotkey::{Edge, MAX};
 use crate::keys::Shortcut;
+use crate::{Code, Modifiers};
 
 /// The lock modifiers each grab is made with and without: `LockMask` and `Mod2Mask`.
 const LOCKS: [c_uint; 4] = [0, 2, 16, 2 | 16];

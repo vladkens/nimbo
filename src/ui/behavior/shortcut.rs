@@ -4,10 +4,9 @@
 //! chord ([Hotkey::from_key_event]) or a modifier key alone, with every key taken while it records;
 //! `Ui::shortcut` draws it.
 
-use keyboard_types::{Code, NamedKey};
-
 use crate::keys::{Hotkey, Key, is_modifier};
 use crate::ui::{Behavior, Id, Role, Ui};
+use crate::{Code, NamedKey};
 
 /// A recorder between frames: recording, the focus to give back after, the modifier keys
 /// down, and the one down alone, which is the hotkey if it comes up so.
@@ -120,9 +119,8 @@ impl Ui<'_> {
 
 #[cfg(test)]
 mod tests {
-  use keyboard_types::Modifiers;
-
   use super::*;
+  use crate::Modifiers;
   use crate::app::{App, Event};
   use crate::harness::{Harness, us_key};
   use crate::keys::Shortcut;

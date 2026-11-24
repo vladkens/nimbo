@@ -25,7 +25,6 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use keyboard_types::Code;
 use objc2_core_foundation::{CFMachPort, CFRetained, CFRunLoop, kCFRunLoopCommonModes};
 use objc2_core_graphics::{
   CGEvent, CGEventField, CGEventFlags, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
@@ -34,6 +33,7 @@ use objc2_core_graphics::{
 
 use super::super::keyboard::{code as key_at, device_flag, kvk};
 use super::tap_flags;
+use crate::Code;
 use crate::hotkey::{Edge, Listener, MAX, OnEdge, Status};
 use crate::keys::{Hotkey, is_modifier};
 
@@ -669,9 +669,8 @@ fn general_flag(key: Code) -> u64 {
 
 #[cfg(test)]
 mod tests {
-  use keyboard_types::Modifiers;
-
   use super::*;
+  use crate::Modifiers;
   use crate::keys::Shortcut;
 
   const DOWN: Hit = Hit::Down { which: 0, repeat: false };

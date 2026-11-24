@@ -6,10 +6,8 @@
 //! Ctrl or Super, a non-Latin layout's character is a Latin one's, so shortcuts work on a Russian
 //! layout.
 
-use keyboard_types::{Code, Modifiers, NamedKey};
-
 use crate::keys::{self, Key, KeyEvent};
-use crate::platform;
+use crate::{Code, Modifiers, NamedKey, platform};
 
 /// GdkModifierType: Shift, Control, Mod1 (Alt), Mod4 and the virtual Super (the Super keys).
 const SHIFT: u32 = 1;

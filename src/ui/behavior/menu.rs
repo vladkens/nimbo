@@ -7,9 +7,8 @@
 
 use std::time::Duration;
 
-use keyboard_types::NamedKey;
-
 use super::scroll::{Bars, MIN_THUMB};
+use crate::NamedKey;
 use crate::keys::{Command, Key, Move};
 use crate::scene::{Point, Rect};
 use crate::ui::{Behavior, Enabled, Float, Id, Role, State, Style, Ui, UnitPoint, grow, pct};
@@ -445,13 +444,12 @@ impl Ui<'_> {
 
 #[cfg(test)]
 mod tests {
-  use keyboard_types::{Modifiers, NamedKey};
-
   use super::*;
   use crate::app::App;
   use crate::harness::{Harness, mac_titlebar};
   use crate::scene::Size;
   use crate::ui::px;
+  use crate::{Modifiers, NamedKey};
 
   /// A menu of 30 items, taller than its window, opened by a button the app can disable; the
   /// item run last and what [Ui::menu_popup] returned last.

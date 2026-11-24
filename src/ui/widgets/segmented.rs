@@ -71,13 +71,12 @@ impl PickerStyle for SegmentedPickerStyle {
 
 #[cfg(test)]
 mod tests {
-  use keyboard_types::{Modifiers, NamedKey};
-
   use super::SegmentedPickerStyle;
   use crate::app::App;
   use crate::harness::Harness;
   use crate::scene::Size;
   use crate::ui::{Id, Style, Tag, Ui, px};
+  use crate::{Modifiers, NamedKey};
 
   struct Seg(u8);
 

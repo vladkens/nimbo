@@ -11,7 +11,7 @@
 
 </div>
 
-`nimbo` is a desktop UI toolkit for Rust that draws every widget itself, on the CPU, over a thin native layer for the window, the input and the text: AppKit and CoreText on macOS, Win32 and DirectWrite on Windows, GTK 3 with FreeType and HarfBuzz on Linux. The look follows macOS System Settings, measured from its screenshots, in light and dark. A settings window, a tray app or a HUD takes a few hundred lines and 12 crates, and the whole toolkit builds from scratch in about 10 seconds.
+`nimbo` is a desktop UI toolkit for Rust that draws every widget itself, on the CPU, over a thin native layer for the window, the input and the text: AppKit and CoreText on macOS, Win32 and DirectWrite on Windows, GTK 3 with FreeType and HarfBuzz on Linux. The look follows macOS System Settings, measured from its screenshots, in light and dark. A settings window, a tray app or a HUD takes a few hundred lines and 11 crates, and the whole toolkit builds from scratch in about 10 seconds.
 
 ## 🌟 Features
 
@@ -23,7 +23,7 @@
 - 📂 **Files and photos**: the system's open and save panels, files dragged onto a window, photos (JPEG, PNG, GIF; HEIC and WebP where the system has their decoders) decoded by the system at the size they show
 - 🌐 **Translations**: strings marked with `t!` and `tn!`, translated from gettext `.po` catalogs (`xgettext`, `msgmerge`, Poedit) with each language's plural forms, in the system's language or the app's choice; a pseudo language finds the strings left unmarked
 - 🧪 **A headless harness**: every example renders to a PNG without a window; tests click, type and check pixels and what a screen reader reads, in parallel
-- 📦 **12 crates on macOS, 4 on Windows, 2 on Linux**: GTK is loaded at run time, nothing to link
+- 📦 **11 crates on macOS, 2 on Windows, none on Linux**: GTK is loaded at run time, nothing to link
 
 <div align="center">
   <img src="docs/settings.png" alt="the settings window of the dictation example on macOS" width="700" />
@@ -125,8 +125,8 @@ Measured on an Apple M2, rustc 1.99, 2026-10-25, without a compiler cache:
 
 - **10.1 s** a clean release build of the `counter` example (8.3 s debug)
 - **1.1 MB** its release binary (0.87 MB stripped)
-- **12 / 4 / 2** crates in the default build on macOS / Windows / Linux, nimbo excluded
-- **14 / 4 / 2** with every feature (`full`)
+- **11 / 2 / 0** crates in the default build on macOS / Windows / Linux, nimbo excluded
+- **13 / 2 / 0** with every feature (`full`)
 
 ## 🤝 Contributing
 

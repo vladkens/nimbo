@@ -37,14 +37,13 @@ use std::cell::Cell;
 use std::time::Duration;
 
 use dispatch2::{DispatchQueue, DispatchTime};
-use keyboard_types::Modifiers;
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSAlert, NSApplication, NSApplicationActivationPolicy};
 use objc2_core_graphics::CGEventFlags;
 use objc2_foundation::NSString;
 
-use crate::Event;
 use crate::shell::Presence;
+use crate::{Event, Modifiers};
 
 thread_local! {
   static PRESENCE: Cell<Presence> = const { Cell::new(Presence::Regular) };

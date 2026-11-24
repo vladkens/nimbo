@@ -1,7 +1,7 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Keys: what a key press reports ([KeyEvent]: our [Key], and the W3C UI Events [Code] and
-//! [Modifiers] of the `keyboard-types` crate), shortcuts as keymaps and settings write them
+//! Keys: what a key press reports ([KeyEvent]: its [Key], [Code] and [Modifiers], by their W3C
+//! UI Events names), shortcuts as keymaps and settings write them
 //! ([Shortcut], global [Hotkey]s) and their labels, bindings ([Binding]), and the commands keys
 //! become ([Command]), named after AppKit's key binding selectors (`moveWordLeft:`,
 //! `deleteBackward:`, `insertNewline:`).
@@ -31,7 +31,9 @@
 //! platform it plays ([crate::Harness::set_os]), for macOS [standard], the part of AppKit's
 //! standard bindings we model.
 
-use keyboard_types::{Code, Modifiers, NamedKey};
+mod w3c;
+
+pub use w3c::{Code, Modifiers, NamedKey};
 
 #[cfg(feature = "paste")]
 use crate::platform;
@@ -88,9 +90,9 @@ impl Os {
   }
 }
 
-/// A key: the character it types, or its name. A [Copy] twin of `keyboard_types::Key`, whose
-/// characters are a `String`: a key press types one character here, and keymaps match keys in
-/// `const` patterns, without an allocation per key and binding.
+/// A key: the character it types, or its name. [Copy], unlike W3C's `key` string: a key press
+/// types one character here, and keymaps match keys in `const` patterns, without an allocation
+/// per key and binding.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Key {
@@ -1094,7 +1096,7 @@ mod tests {
   #[test]
   fn posted_keys_hold_the_modifiers_around_the_key() {
     use Code::{
-      AltRight as RAlt, ControlLeft as LCtrl, ControlRight as RCtrl, F24 as Mask, KeyA, KeyV,
+      AltRight as RAlt, ControlLeft as LCtrl, ControlRight as RCtrl, F20 as Mask, KeyA, KeyV,
       MetaRight as RWin, ShiftRight as RShift,
     };
     let s = |want, held: &[Code], key| strokes(want, key, Some, |c| held.contains(&c), Some(Mask));

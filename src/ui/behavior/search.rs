@@ -3,9 +3,8 @@
 //! A search field's behaviour ([Ui::search_behavior]): a single-line text field's, its text
 //! cleared by a ⊗ or Escape, as macOS's search fields; `Ui::search_field` draws it.
 
-use keyboard_types::NamedKey;
-
 use super::field::FieldState;
+use crate::NamedKey;
 use crate::app::MouseButton;
 use crate::keys::Key;
 use crate::ui::{Enabled, FieldBehavior, FieldKind, Id, Ui};

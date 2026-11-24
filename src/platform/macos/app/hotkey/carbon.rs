@@ -15,9 +15,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::SyncSender as Sender;
 use std::time::{Duration, Instant};
 
-use keyboard_types::Modifiers;
-
 use super::{DEDUPE, Hit, KEY_ESCAPE, Raw, Shared, Source};
+use crate::Modifiers;
 use crate::hotkey::MAX;
 
 type OSStatus = i32;

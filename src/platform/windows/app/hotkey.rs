@@ -23,7 +23,6 @@ use std::sync::mpsc::{Receiver, Sender, SyncSender, channel, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use keyboard_types::{Code, Modifiers};
 use windows_sys::Win32::Foundation::{GetLastError, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
@@ -34,6 +33,7 @@ use super::lone_vk;
 use crate::hotkey::{Edge, Listener, MAX, OnEdge, Status};
 use crate::keys::Hotkey;
 use crate::platform::scan_code;
+use crate::{Code, Modifiers};
 
 /// How often the held chords' keys are looked at, for their release.
 const POLL: Duration = Duration::from_millis(10);

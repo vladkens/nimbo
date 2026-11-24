@@ -161,7 +161,7 @@ mod tests {
     let tabs = Id::of("tabs");
     h.rt.ui.set_focus(Some(tabs));
     for _ in 0..9 {
-      h.key(keyboard_types::NamedKey::ArrowRight, keyboard_types::Modifiers::empty());
+      h.key(crate::NamedKey::ArrowRight, crate::Modifiers::empty());
       h.frame();
     }
 

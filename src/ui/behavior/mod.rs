@@ -82,7 +82,6 @@ pub use dialog::DialogBehavior;
 pub(crate) use field::DrawnEditMenu;
 pub use field::{EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle};
 pub use help::{HelpConfiguration, HelpStyle, PlainHelpStyle};
-use keyboard_types::Modifiers;
 pub use list::{ListBehavior, ListRows, SectionHeader, Selection};
 pub use list_style::{
   List, ListConfiguration, ListLayout, ListResponse, ListRowConfiguration, ListStyle,
@@ -97,6 +96,7 @@ pub use text_field::{PlainTextFieldStyle, TextField, TextFieldConfiguration, Tex
 pub use toggle::{PlainToggleStyle, ToggleConfiguration, ToggleStyle};
 
 use super::{Cursor, Enabled, Id, Role, State, Style, Ui};
+use crate::Modifiers;
 use crate::keys::{Command, Key, Move};
 
 /// What a control got this frame, read before it is built; see the module's docs.

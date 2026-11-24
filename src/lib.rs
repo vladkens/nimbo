@@ -112,12 +112,9 @@ pub use commands::{CommandGroupPlacement, Commands};
 pub use file_dialog::{FileDialog, FileDialogKind};
 #[cfg(feature = "harness")]
 pub use harness::Harness;
-/// Keys' W3C UI Events names: [Code] a key's place, [NamedKey] a key that types nothing,
-/// [Modifiers] the modifier keys held.
-pub use keyboard_types::{self, Code, Modifiers, NamedKey};
 pub use keys::{
-  Binding, CMD, Command, Delete, EDIT_KEYS, Extent, Hotkey, Key, KeyEvent, Move, Os, SELECT_KEYS,
-  Shortcut, bind, shortcut,
+  Binding, CMD, Code, Command, Delete, EDIT_KEYS, Extent, Hotkey, Key, KeyEvent, Modifiers, Move,
+  NamedKey, Os, SELECT_KEYS, Shortcut, bind, shortcut,
 };
 pub use locale::{Locale, Localizations, Localized};
 pub use menu::{ButtonRole, Item, Menu};

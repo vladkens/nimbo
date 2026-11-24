@@ -68,8 +68,6 @@ impl ToggleStyle for ButtonToggleStyle {
 mod tests {
   use std::time::Duration;
 
-  use keyboard_types::{Modifiers, NamedKey};
-
   use crate::app::App;
   use crate::harness::Harness;
   use crate::keys::Key;
@@ -78,6 +76,7 @@ mod tests {
     ButtonToggleStyle, CheckboxToggleStyle, Icon, Id, PlainToggleStyle, Style, Theme, ToggleStyle,
     Ui,
   };
+  use crate::{Modifiers, NamedKey};
 
   #[derive(Default)]
   struct Switch {

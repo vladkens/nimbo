@@ -352,7 +352,7 @@ impl Settings {
 
   fn about(&mut self, ui: &mut Ui, fs: &FormStyle) {
     ui.form_section(fs, "Licenses", |ui| {
-      for (name, what) in [("nimbo", "MIT License"), ("keyboard-types", "MIT or Apache-2.0")] {
+      for (name, what) in [("nimbo", "MIT License"), ("objc2", "MIT License")] {
         ui.form_row(fs, FormRow::new(name).caption(what), |ui| ui.icon_button(Icon::EXTERNAL));
       }
     });

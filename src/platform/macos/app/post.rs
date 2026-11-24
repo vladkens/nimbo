@@ -8,13 +8,13 @@
 //! The session's modifier state takes the flags of each event posted there, so the up carries the
 //! modifiers held before the post; with the shortcut's on it, ⌘ stayed down for every event after.
 
-use keyboard_types::Modifiers;
 use objc2_core_graphics::{
   CGEvent, CGEventField, CGEventFlags, CGEventSource, CGEventSourceStateID, CGEventTapLocation,
 };
 
 use super::super::keyboard;
 use super::{POSTED, tap_flags};
+use crate::Modifiers;
 use crate::keys::{Key, Shortcut};
 
 /// The modifier flags a key holds or locks, restored on the up.

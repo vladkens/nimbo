@@ -794,12 +794,11 @@ fn run_view<'a, A: App>(
 mod tests {
   use std::sync::mpsc;
 
-  use keyboard_types::{Code, Modifiers};
-
   use super::*;
   use crate::keys::{self, CMD, Key, Shortcut};
   use crate::scene::Rect;
   use crate::ui::{Float, Kind, Style, TextStyle, Theme, Transition, grow, px};
+  use crate::{Code, Modifiers};
 
   #[derive(Default)]
   struct Probe {

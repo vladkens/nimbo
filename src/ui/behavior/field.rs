@@ -873,14 +873,12 @@ impl FieldStyle {
 
 #[cfg(test)]
 mod tests {
-  use keyboard_types::Modifiers;
-
   use super::*;
-  use crate::NamedKey;
   use crate::app::App;
   use crate::harness::Harness;
   use crate::scene::Size;
   use crate::ui::{Theme, px};
+  use crate::{Modifiers, NamedKey};
 
   const REST: Color = [0.2, 0.2, 0.2, 1.0];
   const OVER: Color = [0.0, 0.0, 1.0, 1.0];

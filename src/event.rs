@@ -8,13 +8,12 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
-use keyboard_types::{Code, Modifiers};
-
 use crate::geom::{Color, Point};
 use crate::keys::{Command, KeyEvent};
 #[cfg(feature = "system")]
 use crate::system::Change;
 use crate::ui::{Action, Id, Role};
+use crate::{Code, Modifiers};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]

@@ -7,8 +7,6 @@
 use std::path::Path;
 use std::time::Duration;
 
-use keyboard_types::{Code, Modifiers};
-
 use crate::app::{App, Clipboard, Clock, Event, Ime, MemClipboard, MouseButton, Runtime, Waker};
 pub use crate::cpu::Pixels;
 use crate::file_dialog::FileDialog;
@@ -21,7 +19,7 @@ use crate::text::TextSystem;
 use crate::text::edit::Editor;
 use crate::text::edit::utf16_len;
 use crate::ui::{A11yTree, Action, Cursor, Id, Kind, Role, Scroll, TextInput};
-use crate::{TitleBar, cpu, png};
+use crate::{Code, Modifiers, TitleBar, cpu, png};
 
 /// A display refresh at 120 Hz, the step of [Harness::wait].
 pub const TICK: Duration = Duration::from_nanos(8_333_333);

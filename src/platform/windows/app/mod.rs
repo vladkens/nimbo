@@ -39,7 +39,6 @@ use std::path::PathBuf;
 use std::ptr::{null, null_mut};
 use std::sync::atomic::{AtomicIsize, Ordering};
 
-use keyboard_types::Code;
 use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
@@ -48,6 +47,8 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
   VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN,
 };
 use windows_sys::Win32::UI::Shell::{FOLDERID_Downloads, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
+
+use crate::Code;
 
 /// The shell's window ([shell::run]'s), as a number for other threads; 0 when there is none. An
 /// atomic, not a lock: [shell::post] runs in callbacks that must never wait (Windows' audio
