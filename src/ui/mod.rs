@@ -781,7 +781,8 @@ impl<'a> Ui<'a> {
   /// the view. Taken: the shell shows those left after the view (nimbo's styled tooltip), so
   /// a view that takes them draws them all. Each tip is its element's description for assistive
   /// technology, set here, so it is read however it is drawn; one with no record gets one to
-  /// carry it: a text as itself, any other a group, whose children are read as ever.
+  /// carry it: in a control (a button's label), the control's, unless it has one; else a text
+  /// as itself, any other a group, whose children are read as ever.
   pub fn take_tooltips(&mut self) -> Vec<(Id, String)> {
     let mut out = Vec::with_capacity(self.helps.len());
     for (i, tip) in std::mem::take(&mut self.helps) {
@@ -790,6 +791,15 @@ impl<'a> Ui<'a> {
         Kind::Text { range, .. } => (n.id, Some(self.st.tree.str(range.0, range.1).to_owned())),
         _ => (n.id, None),
       };
+
+      // A node of its own in a control would take its hits from assistive technology.
+      if self.a11y_of(id).is_none()
+        && let Some(c) = self.a11y_control_around(i)
+      {
+        _ = c.description_or(&tip);
+        out.push((id, tip));
+        continue;
+      }
 
       match (self.a11y_of(id), text) {
         (Some(a), _) => _ = a.description(&tip),

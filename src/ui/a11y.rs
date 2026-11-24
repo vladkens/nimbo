@@ -259,6 +259,12 @@ impl Access<'_> {
     self
   }
 
+  /// A description when nothing described it: a tip inside a control.
+  pub(crate) fn description_or(mut self, s: &str) -> Self {
+    let d = self.props().description;
+    if d.0 == d.1 { self.description(s) } else { self }
+  }
+
   /// A field's text as its value.
   pub fn text(mut self, s: &str) -> Self {
     self.props().value = Value::Text(put(&mut self.recs.text, s));
@@ -354,6 +360,26 @@ impl Ui<'_> {
     let recs = &mut self.st.tree.a11y;
     let i = *recs.index.get(&id)?;
     Some(Access { recs, i })
+  }
+
+  /// The record of the control node `i` is in: its nearest recorded ancestor, when that is a
+  /// leaf (a button whose label `i` is part of).
+  pub(super) fn a11y_control_around(&mut self, i: u32) -> Option<Access<'_>> {
+    let t = &self.st.tree;
+    let mut k = i;
+    let at = loop {
+      if k == 0 {
+        return None;
+      }
+
+      k = t.nodes[k as usize].parent;
+      if let Some(&r) = t.a11y.index.get(&t.nodes[k as usize].id) {
+        break r;
+      }
+    };
+
+    let recs = &mut self.st.tree.a11y;
+    recs.list[at].1.role.leaf().then_some(Access { recs, i: at })
   }
 
   /// The text assistive technology sets on `id` ([Action::SetValue]), seen once: a text
@@ -976,8 +1002,10 @@ mod tests {
       _ = ui.take_tooltips();
     });
     assert!(s.starts_with("row \"Model\" desc"), "{s}");
-    assert!(s.lines().any(|l| l.starts_with("button \"Out\"")), "{s}");
-    assert!(s.lines().any(|l| l.starts_with("button \"Save\"")), "{s}");
+    // The tips describe the buttons: no node inside takes their hits.
+    assert!(s.contains("button \"Out\" desc \"Signs out\"\n"), "{s}");
+    assert!(s.contains("button \"Save\" desc \"Saves it\"\n"), "{s}");
+    assert!(!s.contains("static text \"Out\"") && !s.contains("group"), "{s}");
   }
 
   /// A button keeps its own text, and the row's label is read; a text that is the value (a
