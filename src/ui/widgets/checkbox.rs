@@ -20,9 +20,9 @@ impl Ui<'_> {
     let c = t.sizes.check;
     let row = Style::new().w(rigid()).gap((c * 0.4).round()).align(Align::Start, Align::Center);
     let row = row.radius(3.0);
-    let row = self.control(row, &b);
+    let row = self.dim_style(row, b.disabled);
     let checked = *on;
-    let mut r = self.with_id(id).row(row, |ui| {
+    let mut r = self.control(&b).row(row, |ui| {
       let b = Style::new().w(px(c)).h(px(c)).bg(fill).radius(c / 4.0).border(edge.0, edge.1);
       match checked {
         true => _ = ui.canvas(b, move |f, r| f.polyline(&check(r), c / 8.0, mark)),

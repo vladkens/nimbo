@@ -860,7 +860,7 @@ mod tests {
       for (name, off) in [("a", true), ("b", false)] {
         let b = ui.disabled(off).button_behavior(Id::of(name));
         ui.a11y(b.id, Role::Button);
-        ui.with_id(b.id).row(b.style(Style::new()), |ui| ui.text(name, T));
+        ui.control(&b).row(Style::new(), |ui| ui.text(name, T));
       }
     });
     assert_eq!(st.a11y_tree().to_string(), "button \"a\" disabled\nbutton \"b\" focused\n");

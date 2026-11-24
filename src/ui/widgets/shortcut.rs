@@ -13,11 +13,11 @@
 //! on any layout. It shows as the platform writes it ([Hotkey::label]): `⌃⌥Space`, `Right ⌥` on
 //! macOS, `Ctrl+Alt+Space`, `Right Alt` elsewhere.
 
-use super::icon::{self, Icon};
 use crate::hotkey;
 use crate::keys::Hotkey;
 use crate::scene::mix;
 use crate::text::Weight;
+use crate::ui::icon::{self, Icon};
 use crate::ui::{Cursor, Float, Response, Role, Style, Ui, UnitPoint, px};
 
 /// The recorder's width: the same recording, set or empty.
@@ -47,9 +47,10 @@ impl Ui<'_> {
 
     let x = if t.shortcut_clear { 22.0 } else { 10.0 };
     let frame = Style::new().w(px(W)).h(px(h)).pad_xy(x, 0.0).gap(6.0).center().radius(h / 2.0);
-    let frame = self.control(frame.bg(bg).border(if b.on { 1.0 } else { 0.0 }, t.accent), &b);
+    let frame = frame.bg(bg).border(if b.on { 1.0 } else { 0.0 }, t.accent);
+    let frame = self.dim_style(frame, b.disabled);
     let label = t.label();
-    let mut r = self.with_id(id).row(frame, |ui| {
+    let mut r = self.control(&b).row(frame, |ui| {
       match (b.on, *value) {
         (true, _) => {
           ui.el(Style::new().w(px(7.0)).h(px(7.0)).radius(3.5).bg(t.danger));

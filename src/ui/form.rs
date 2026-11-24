@@ -42,14 +42,14 @@
 
 use std::cell::Cell;
 use std::f32::consts::FRAC_PI_2;
-use std::fmt;
 use std::rc::Rc;
 
+use super::icon::Icon;
 use super::theme::Theme;
-use super::widgets::{Icon, MarkShift};
+use super::widgets::MarkShift;
 use super::{
-  Align, Cursor, Enabled, Id, LabeledPairRole, Response, Role, Shadow, State, Style, TextStyle, Ui,
-  grow, px, rigid,
+  Align, Content, Cursor, Enabled, LabeledPairRole, Response, Role, Shadow, State, Style,
+  TextStyle, Ui, grow, px, rigid,
 };
 use crate::locale::Localized;
 use crate::scene::{Color, Frame, Point, Quad, Rect, alpha, mix, rgb};
@@ -292,89 +292,6 @@ impl FormStyle {
   }
 }
 
-/// What a part of a form shows, a row's label, description or tile ([FormRow]) or a section's
-/// header or footer ([Section]), as SwiftUI's labels take a string or a view (egui's
-/// `impl Into<WidgetText>`): a text, an icon, or what a closure builds in the part's text style
-/// (dimmed in a disabled row, as SwiftUI passes a foreground style down); from a `&str`, a
-/// `&String`, a [Localized] (`t!("…")`), an [Icon] or `FnOnce(&mut Ui, TextStyle)`, whose
-/// parameters need their types written. A closure's texts take the style or one made from it
-/// (`s.line_limit(1)`, `s.underline(LinePattern::Dot)` on a term with [Ui::help]); its widgets dim
-/// themselves in a disabled row; a canvas of its own reads [Enabled] ([Ui::environment_value]).
-#[derive(Default)]
-pub enum Content<'s> {
-  #[default]
-  None,
-  Text(&'s str),
-  Icon(Icon),
-  Built(Build<'s>),
-}
-
-/// What a [Content::Built] runs: it builds the content in its style.
-pub type Build<'s> = Box<dyn FnOnce(&mut Ui, TextStyle) + 's>;
-
-impl Content<'_> {
-  fn is_none(&self) -> bool {
-    matches!(self, Content::None | Content::Text(""))
-  }
-
-  /// Builds it in `style`, a text or an icon as `id`, an icon `size` points square stroked
-  /// `stroke` wide.
-  fn build(self, ui: &mut Ui, style: TextStyle, id: Id, size: f32, stroke: f32) {
-    match self {
-      Content::None => {}
-      Content::Text(s) => {
-        ui.with_id(id).allows_hit_testing(false).text(s, style);
-      }
-      Content::Icon(i) => {
-        ui.with_id(id).allows_hit_testing(false).icon(i.default_stroke(stroke), size, style.color);
-      }
-      Content::Built(f) => f(ui, style),
-    }
-  }
-}
-
-impl<'s> From<&'s str> for Content<'s> {
-  fn from(s: &'s str) -> Self {
-    Content::Text(s)
-  }
-}
-
-impl<'s> From<&'s String> for Content<'s> {
-  fn from(s: &'s String) -> Self {
-    Content::Text(s)
-  }
-}
-
-impl From<Localized> for Content<'_> {
-  fn from(s: Localized) -> Self {
-    Content::Text(s.as_str())
-  }
-}
-
-impl From<Icon> for Content<'_> {
-  fn from(i: Icon) -> Self {
-    Content::Icon(i)
-  }
-}
-
-impl<'s, F: FnOnce(&mut Ui, TextStyle) -> R + 's, R> From<F> for Content<'s> {
-  fn from(f: F) -> Self {
-    Content::Built(Box::new(move |ui, s| _ = f(ui, s)))
-  }
-}
-
-/// Its text, `…` for one built.
-impl fmt::Debug for Content<'_> {
-  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-    match self {
-      Content::None => f.write_str(""),
-      Content::Text(s) => f.write_str(s),
-      Content::Icon(i) => write!(f, "{:?}", i.name()),
-      Content::Built(_) => f.write_str("…"),
-    }
-  }
-}
-
 /// A row of a form section ([Ui::form_row]), as SwiftUI's `LabeledContent`: its label,
 /// description, leading tile and footer, each [Content].
 #[derive(Debug, Default)]
@@ -528,12 +445,12 @@ impl Ui<'_> {
     let first = self.child_count() == 0;
     let id = self.take_id();
     self.with_id(id).col(Style::new().w(grow()), |ui| {
-      if !header.is_none() {
+      if !header.is_empty() {
         let [top, r, b, l] = fs.head_pad;
         let head = Style::new().w(grow()).pads([if first { 0.0 } else { top }, r, b, l]);
         let head = head.gap(12.0).align(Align::Start, Align::Center);
         let line = ui.head_line(&fs);
-        ui.row(head.min_h(line), |ui| header.build(ui, fs.head, id.key("header"), line, 1.6));
+        ui.row(head.min_h(line), |ui| header.build(ui.with_id(id.key("header")), fs.head));
       }
 
       let outer = ui.set_slot(Some(Plate::default()));
@@ -548,9 +465,9 @@ impl Ui<'_> {
         end.set(fs.group.radii[0]);
       }
 
-      if !footer.is_none() {
+      if !footer.is_empty() {
         let pad = Style::new().w(grow()).pads(fs.foot_pad);
-        ui.col(pad, |ui| footer.build(ui, fs.caption, id.key("footer"), 12.0, 1.6));
+        ui.col(pad, |ui| footer.build(ui.with_id(id.key("footer")), fs.caption));
       }
     })
   }
@@ -566,7 +483,8 @@ impl Ui<'_> {
   /// it is the first, held down (a [Ui::form_disclosure]'s) or right under a row held down. The
   /// controls keep their width and place at the right edge, centred on the row's height; the label
   /// and description wrap in what is left, the row growing taller. [Ui::disabled] on it dims its
-  /// label and description to [super::Theme::tertiary] and disables its widgets but an ⓘ or warning
+  /// label and description to [super::Theme::tertiary], its tile as a disabled image
+  /// ([Ui::icon]), and disables its widgets but an ⓘ or warning
   /// mark (in a row a click selects, assistive technology reads it disabled with its row). A text
   /// label is `id.key("label")` of the row's id, a text description `id.key("caption")`, a text
   /// or icon tile `id.key("tile")`, a text footer `id.key("footer")`. The row takes no input, its
@@ -587,6 +505,9 @@ impl Ui<'_> {
     let off = !self.environment_value::<Enabled>().0;
     let first = self.child_count() == 0;
     let dim = |s: TextStyle| if off { s.color(t.tertiary) } else { s };
+    // The tile dims as a disabled image does ([Ui::icon]), letters and icon alike; an icon is as
+    // high as the text's line.
+    let tile_text = fs.tile_text.color(self.dim(fs.tile_text.color, off)).line_h(fs.tile_icon);
     let top = if first { 0.0 } else { fs.hairline };
 
     // Held down, a fill over its whole piece of the plate, as a grouped list's selection:
@@ -621,24 +542,23 @@ impl Ui<'_> {
     // The line of the tile, the label and the controls, as high as the row's least height; the
     // footer under it. With a footer the line ends at the description, its padding under the
     // footer, and the tile and controls keep their centre on the label and description.
-    let below = if footer.is_none() { fs.pad_y } else { 0.0 };
+    let below = if footer.is_empty() { fs.pad_y } else { 0.0 };
     let over = top + fs.pad_y - below;
     let line = Style::new().w(grow()).min_h(style.min[1] - fs.pad_y + below).gap(style.gap);
     // Over a footer, a control taller than the label's line would leave the label above its
     // middle: the two centre on each other.
-    let line = if footer.is_none() { line } else { line.align(Align::Start, Align::Center) };
+    let line = if footer.is_empty() { line } else { line.align(Align::Start, Align::Center) };
 
     // Disabled as its own, it is the row's scope.
     let r =
       self.with_id(id).allows_hit_testing(style.hit).canvas_col(style.gap(0.0), hairline, |ui| {
         ui.row(line, |ui| {
-          if !tile.is_none() {
+          if !tile.is_empty() {
             let x = (fs.tile_x - pad_x).max(0.0);
             let slot =
               Style::new().h(grow()).pads([over, x, 0.0, x]).align(Align::Start, Align::Center);
             ui.row(slot, |ui| {
-              let k = id.key("tile");
-              ui.row(fs.tile, |ui| tile.build(ui, fs.tile_text, k, fs.tile_icon, 1.6))
+              ui.row(fs.tile, |ui| tile.build(ui.with_id(id.key("tile")), tile_text))
             });
           }
 
@@ -648,13 +568,13 @@ impl Ui<'_> {
               // A mark on the line sits on the capitals' middle.
               let outer = ui.set_slot(Some(MarkShift(shift)));
               ui.a11y_labeled_pair(LabeledPairRole::Label, id, |ui| {
-                label.build(ui, dim(fs.label), id.key("label"), line_h, 1.6)
+                label.build(ui.with_id(id.key("label")), dim(fs.label))
               });
               ui.set_slot(outer);
             });
 
             ui.a11y_labeled_pair(LabeledPairRole::Description, id, |ui| {
-              caption.build(ui, dim(fs.caption), id.key("caption"), 12.0, 1.6)
+              caption.build(ui.with_id(id.key("caption")), dim(fs.caption))
             });
           });
 
@@ -679,11 +599,11 @@ impl Ui<'_> {
             })
           });
         });
-        if !footer.is_none() {
+        if !footer.is_empty() {
           // Right under the description, 2 apart as it is from the label, and under the controls.
           let pad = Style::new().w(grow()).pads([2.0, 0.0, fs.pad_y, 0.0]);
           ui.a11y_labeled_pair(LabeledPairRole::Content, id, |ui| {
-            ui.col(pad, |ui| footer.build(ui, dim(fs.caption), id.key("footer"), 12.0, 1.6))
+            ui.col(pad, |ui| footer.build(ui.with_id(id.key("footer")), dim(fs.caption)))
           });
         }
       });

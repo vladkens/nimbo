@@ -1,10 +1,13 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The label: one line of text in the theme's colour.
+//! The label and the image: one line of text in the theme's colour, and an icon; each dimmed
+//! when disabled.
 
 use std::fmt::Display;
 
-use crate::ui::{Enabled, Ui};
+use crate::scene::Color;
+use crate::ui::icon::{self, Icon};
+use crate::ui::{Enabled, Response, Style, Ui, px};
 
 impl Ui<'_> {
   /// One line of text in the theme's colour, cut with "…" when it doesn't fit; dimmed when
@@ -16,6 +19,17 @@ impl Ui<'_> {
     }
 
     self.text(s, style);
+  }
+
+  /// `icon` `size` points square in `color`, as SwiftUI's `Image(systemName:)`: stroked as
+  /// its paint says ([Icon::stroke]), by default as Lucide draws it at 24 points (thinner below:
+  /// 1.5 points at 18). Disabled ([Ui::disabled], on it or a container around it), dimmed toward
+  /// the ground.
+  pub fn icon(&mut self, icon: Icon, size: f32, color: Color) -> Response {
+    let off = !self.environment_value::<Enabled>().0;
+    let color = self.dim(color, off);
+    let s = Style::new().w(px(size)).h(px(size));
+    self.canvas(s, move |f, r| icon::draw(f, icon.default_stroke(2.0), r, color))
   }
 }
 

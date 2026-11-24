@@ -49,6 +49,7 @@ pub mod containers;
 pub mod dialog;
 mod environment;
 pub mod form;
+pub mod icon;
 mod id;
 mod image;
 pub mod input;
@@ -71,16 +72,17 @@ use std::time::Duration;
 
 pub use a11y::{A11yNode, A11yTree, Action, LabeledPairRole, Props, Role, State, Value};
 pub use behavior::{
-  Behavior, DialogBehavior, EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, ListBehavior,
-  ListRows, MenuPlacement, ScrollBar, ScrollBehavior, ScrollerKnob, SectionHeader, Selection,
-  SplitBehavior, TextInput, TypeSelect,
+  Behavior, Content, DialogBehavior, EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle,
+  ListBehavior, ListRows, MenuPlacement, ScrollBar, ScrollBehavior, ScrollerKnob, SectionHeader,
+  Selection, SplitBehavior, TextInput, TypeSelect,
 };
 pub use containers::{
   List, ListResponse, ListStyle, Picker, Row, Split, Tabs, Tag, ToolbarItemPlacement,
 };
 pub use dialog::{Answer, Dialog};
 pub use environment::{Enabled, EnvironmentValue};
-pub use form::{Content, FormRow, FormStyle, Glass, Section, TabItem};
+pub use form::{FormRow, FormStyle, Glass, Section, TabItem};
+pub use icon::{Icon, IconPaint};
 pub use id::Id;
 pub use image::ImageSource;
 pub(crate) use input::drags_window;
@@ -97,7 +99,7 @@ pub use style::{
 pub use textlayout::Edit;
 pub(crate) use textlayout::TextLayout;
 pub use theme::{ButtonLook, ButtonStyle, ControlBorder, Sizes, SwitchSize, Theme, Tone};
-pub use widgets::{Button, ButtonRole, Icon, IconPaint, Slider};
+pub use widgets::{Button, ButtonRole, Slider};
 
 use self::input::{Deliver, Input, ScrollState};
 use self::store::{Anim, Store};
@@ -152,6 +154,9 @@ pub(crate) struct UiState {
   /// shell puts after each view ([Ui::set_default_focus_ring]).
   own_ring: Option<Option<FocusRing>>,
   ring: Option<FocusRing>,
+  /// The focus and pointer the app set on controls whose behaviours have read them, by the id of
+  /// the root each is for, until it is built ([Ui::take_control_modifiers]); cleared each frame.
+  control_mods: Vec<(Id, Option<bool>, Option<Cursor>)>,
   /// The OS's look ([Ui::appearance]).
   appearance: Appearance,
   /// What the last frame cost ([Ui::last_frame]).
@@ -227,6 +232,7 @@ impl Default for UiState {
       scoped: environment::Scoped::default(),
       own_ring: None,
       ring: None,
+      control_mods: Vec::new(),
       appearance: Appearance::DARK,
       stats: FrameStats::default(),
       resize: None,
@@ -464,6 +470,10 @@ pub struct Ui<'a> {
   next_drag: bool,
   /// The next element takes no pointer input of its own ([Ui::allows_hit_testing]).
   next_no_hit: bool,
+  /// The next element's focus and pointer, over its style's ([Ui::focusable],
+  /// [Ui::pointer_style]).
+  next_focus: Option<bool>,
+  next_cursor: Option<Cursor>,
   /// The runtime's text system, lent while the view runs ([Ui::measure]).
   pub(crate) text: Option<TextSystem>,
   /// The runtime's images, lent while the view runs ([Ui::rgba_image]).
@@ -486,6 +496,7 @@ impl<'a> Ui<'a> {
     st.tree.clear(size);
     st.stack.clear();
     st.stack.push((0, 0));
+    st.control_mods.clear();
     st.animating = false;
     st.input.moves = false;
     (st.grab, st.ring_on, st.toolbar, st.own_ring) = (None, None, false, None);
@@ -504,6 +515,8 @@ impl<'a> Ui<'a> {
       next_autofocus: false,
       next_drag: false,
       next_no_hit: false,
+      next_focus: None,
+      next_cursor: None,
       text: None,
       images: Images::default(),
       next_span: 1,
@@ -674,6 +687,50 @@ impl<'a> Ui<'a> {
     self
   }
 
+  /// Whether the next element takes focus, as SwiftUI's `.focusable`: `true` by Tab, as AppKit's
+  /// controls take it, unless its style asks for focus of its own kind ([Style::focusable] and
+  /// the like); `false` none, whatever its style asks, so Tab passes it by.
+  pub fn focusable(&mut self, yes: bool) -> &mut Self {
+    self.next_focus = Some(yes);
+    self
+  }
+
+  /// The pointer's shape over the next element, as SwiftUI's `.pointerStyle`, whatever its style
+  /// says ([Style::cursor]): [Cursor::Pointer], the pointing hand, over a control;
+  /// [Cursor::Inherit] the parent's.
+  pub fn pointer_style(&mut self, cursor: Cursor) -> &mut Self {
+    self.next_cursor = Some(cursor);
+    self
+  }
+
+  /// Takes [Ui::focusable] and [Ui::pointer_style] set for the next element off it for control
+  /// `id`'s root, the element built under `id`, for a behaviour to read before the widget builds
+  /// anything around its root; what is set after still wins. Disabled (`off`), the root takes no
+  /// focus and the parent's pointer, whatever its style asks. Whether the control takes focus:
+  /// `false` when the app said not.
+  fn take_control_modifiers(&mut self, id: Id, off: bool) -> bool {
+    let (focus, cursor) = (self.next_focus.take(), self.next_cursor.take());
+    self.take_kept_modifiers(id);
+    if off || focus.is_some() || cursor.is_some() {
+      let kept = if off { (Some(false), Some(Cursor::Inherit)) } else { (focus, cursor) };
+      self.st.control_mods.push((id, kept.0, kept.1));
+    }
+
+    focus != Some(false)
+  }
+
+  /// The focus and pointer kept for control `id`'s root ([Ui::take_control_modifiers]), taken.
+  fn take_kept_modifiers(&mut self, id: Id) -> (Option<bool>, Option<Cursor>) {
+    let mods = &mut self.st.control_mods;
+    match mods.iter().position(|m| m.0 == id) {
+      Some(i) => {
+        let (_, focus, cursor) = mods.swap_remove(i);
+        (focus, cursor)
+      }
+      None => (None, None),
+    }
+  }
+
   /// Places the next element out of the flow, as an overlay.
   pub fn float(&mut self, float: Float) -> &mut Self {
     self.next_float = Some(float);
@@ -792,9 +849,10 @@ impl<'a> Ui<'a> {
   }
 
   /// Applies [Ui::autofocus] to `id`, for widgets given their id: focuses it when the last
-  /// frame did not have it, unless it is disabled ([Ui::disabled]).
+  /// frame did not have it, unless it is disabled ([Ui::disabled]) or not focusable
+  /// ([Ui::focusable]).
   pub fn take_autofocus(&mut self, id: Id) {
-    let off = !self.environment_value::<Enabled>().0;
+    let off = !self.environment_value::<Enabled>().0 || self.next_focus == Some(false);
     if std::mem::take(&mut self.next_autofocus) && !off && self.st.last.find(id).is_none() {
       self.st.input.focus = Some(id);
     }
@@ -952,6 +1010,29 @@ impl<'a> Ui<'a> {
       .unwrap_or_else(|| (tree.nodes[*parent as usize].id.nth(*count as usize), false));
     *count += 1;
     let parent = *parent;
+    // The modifiers over its style, before what they decide: focus, the pointer, hit testing; a
+    // control's root those its behaviour took where none are set since.
+    let (mut focus, mut cursor) = (self.next_focus.take(), self.next_cursor.take());
+    if !self.st.control_mods.is_empty() {
+      let (f, c) = self.take_kept_modifiers(id);
+      (focus, cursor) = (focus.or(f), cursor.or(c));
+    }
+
+    match focus {
+      // Made not focusable while it has the focus, it gives the focus up.
+      Some(false) if self.st.input.focus == Some(id) => {
+        style.focus = Focus::None;
+        self.st.set_focus(None);
+      }
+      Some(false) => style.focus = Focus::None,
+      Some(true) if style.focus == Focus::None => style.focus = Focus::Tab,
+      _ => {}
+    }
+
+    if let Some(cursor) = cursor {
+      style.cursor = cursor;
+    }
+
     let scrolls = !style.scroll.is_empty();
     let focus = style.focus != Focus::None;
     if self.next_autofocus {

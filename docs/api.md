@@ -112,6 +112,14 @@ nimbo: `ui.icon(Icon::GEAR, 20.0, t.text)`
 
 ![Image](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/image.png)
 
+### Label content
+
+SwiftUI: `Label { Text(title) } icon: { Image(systemName: "folder") }; configuration.label in a style`
+
+nimbo: `let label: Content = Icon::FOLDER.into(); label.build(ui.with_id(id.key("label")), t.label())`
+
+![Label content](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/label-content.png)
+
 ### Photo
 
 SwiftUI: `Image(nsImage: NSImage(data: file)!).resizable().aspectRatio(contentMode: .fill).frame(width: 80, height: 80).clipped()`
@@ -249,6 +257,14 @@ SwiftUI: `KeyboardShortcut (SwiftUI has no recorder)`
 nimbo: `ui.shortcut(&mut self.hotkey)`
 
 ![Shortcut recorder](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/shortcut-recorder.png)
+
+### Control behavior
+
+SwiftUI: `Button(action:) { … }.buttonStyle(MyStyle()), a look of the app's own`
+
+nimbo: `let b = ui.button_behavior(id); ui.control(&b).canvas(style, move |f, r| { … }); if b.clicked { … }`
+
+![Control behavior](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/control-behavior.png)
 
 ### Help marks
 
@@ -515,6 +531,14 @@ SwiftUI: `Box().id(item.id); .allowsHitTesting(false)`
 nimbo: `ui.key(item.id).row(style, |ui| { … }); ui.with_id(id.key("box")).allows_hit_testing(false).col(style, |ui| { … })`
 
 ![Identity](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/identity.png)
+
+### Focus and pointer
+
+SwiftUI: `.focusable(); .pointerStyle(.link)`
+
+nimbo: `ui.focusable(true).pointer_style(Cursor::Pointer).row(style, |ui| { … })`
+
+![Focus and pointer](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/focus-and-pointer.png)
 
 ### Widget parts
 

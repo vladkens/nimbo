@@ -9,7 +9,7 @@
 //! ```ignore
 //! let b = ui.button_behavior(Id::of("play"));
 //! let fill = if b.pressed { DOWN } else if b.hovered { OVER } else { REST };
-//! ui.with_id(b.id).canvas(b.style(Style::new().w(px(32.0)).h(px(32.0))), move |f, r| {
+//! ui.control(&b).canvas(Style::new().w(px(32.0)).h(px(32.0)), move |f, r| {
 //!   f.quad(Quad::new(r, fill).radius(16.0));
 //! });
 //! if b.clicked { self.play() }
@@ -17,8 +17,8 @@
 //!
 //! A behaviour reads the input for its id before the element is built, as of the last frame and
 //! the input since ([super::Ui::hovered] and the like), applies it and returns a [Behavior]. The
-//! app then builds the element under that id with [Behavior::style], which makes it take focus by
-//! Tab while enabled, as AppKit's controls do, and show the pointing hand over it.
+//! app then builds the element as the control's root with [Ui::control]: under its id, taking
+//! focus by Tab while enabled, as AppKit's controls do, and showing the pointing hand over it.
 //! [super::Ui::disabled] before the call disables it: no input is read, no hand. Hover fades are
 //! the look's (`Ui::hot`). What each one covers, each in a module of its own here:
 //!
@@ -47,6 +47,7 @@
 //! [super::containers]), which build on what is public here and in the core; but the scroll
 //! area's, which is here.
 
+mod content;
 mod dialog;
 mod field;
 mod list;
@@ -60,6 +61,7 @@ mod slider;
 mod split;
 mod toggle;
 
+pub use content::{Build, Content};
 pub use dialog::DialogBehavior;
 pub use field::{EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, TextInput};
 use keyboard_types::Modifiers;
@@ -68,7 +70,7 @@ pub use menu::{MenuPlacement, TYPE_SELECT, TypeSelect};
 pub use scroll::{ScrollBar, ScrollBehavior, ScrollerKnob};
 pub use split::SplitBehavior;
 
-use super::{Cursor, Enabled, Focus, Id, Role, State, Style, Ui};
+use super::{Cursor, Enabled, Id, Role, State, Style, Ui};
 use crate::keys::{Command, Key, Move};
 
 /// What a control got this frame, read before it is built; see the module's docs.
@@ -93,15 +95,6 @@ pub struct Behavior {
 }
 
 impl Behavior {
-  /// The control's box: takes focus by Tab and shows the pointing hand while enabled; disabled,
-  /// neither, whatever `s` asked for, so Tab passes it by.
-  pub const fn style(&self, s: Style) -> Style {
-    match self.disabled {
-      true => Style { focus: Focus::None, cursor: Cursor::Inherit, ..s },
-      false => s.tab_focusable().cursor(Cursor::Pointer),
-    }
-  }
-
   /// A part of a control that doesn't take focus itself (a tab, a menu's item): the pointing
   /// hand while enabled.
   pub const fn pointer(&self, s: Style) -> Style {
@@ -110,6 +103,22 @@ impl Behavior {
 }
 
 impl Ui<'_> {
+  /// Makes the next element control `b`'s root: under its id ([Ui::with_id]), taking focus by Tab
+  /// ([Ui::focusable]) and showing the pointing hand ([Ui::pointer_style]) while enabled, unless
+  /// the app set its own on the control; disabled, neither, whatever its style or the app asks, so
+  /// Tab passes it by.
+  pub fn control(&mut self, b: &Behavior) -> &mut Self {
+    let mods = self.take_kept_modifiers(b.id);
+    let (focus, cursor) = match b.disabled {
+      true => (Some(false), Some(Cursor::Inherit)),
+      false => (self.next_focus.or(mods.0), self.next_cursor.or(mods.1)),
+    };
+
+    self.next_focus = focus.or(Some(true));
+    self.next_cursor = cursor.or(Some(Cursor::Pointer));
+    self.with_id(b.id)
+  }
+
   /// Whether Space was pressed on `id` (focused), which flashes it pressed; another key goes on
   /// unused, Space with Cmd, Ctrl or Alt too (Alt-Space opens the window menu on Windows). A
   /// key something built before used (a dialog around it) stays used.
@@ -128,14 +137,16 @@ impl Ui<'_> {
   }
 
   /// The disabled flag and autofocus for `id`, recorded for assistive technology as `role`
-  /// ([Ui::a11y]); a disabled behaviour, or `None` to read input. Disabled while focused, it
+  /// ([Ui::a11y]), and the focus and pointer the app set for its root ([Ui::focusable]); a
+  /// disabled behaviour, or `None` to read input. Disabled or not focusable while focused, it
   /// gives focus up: its keys no longer route through it.
   fn begin(&mut self, id: Id, role: Role) -> Option<Behavior> {
-    // Autofocus reads the disabled flag, so before it is taken.
+    // Autofocus reads the disabled and focusable flags, so before they are taken.
     self.take_autofocus(id);
     let off = !self.environment_value::<Enabled>().0;
+    let focusable = self.take_control_modifiers(id, off);
     self.a11y(id, role).state(State::Disabled, off);
-    if off && self.focused(id) {
+    if (off || !focusable) && self.focused(id) {
       self.focus(None);
     }
 
@@ -222,8 +233,8 @@ mod tests {
         _ => REST,
       };
 
-      let s = b.style(Style::new().w(px(40.0)).h(px(40.0)));
-      ui.with_id(b.id).canvas(s, move |f, r| f.quad(Quad::new(r, fill).radius(20.0)));
+      let s = Style::new().w(px(40.0)).h(px(40.0));
+      ui.control(&b).canvas(s, move |f, r| f.quad(Quad::new(r, fill).radius(20.0)));
       if b.clicked {
         self.plays += 1;
       }
@@ -236,9 +247,10 @@ mod tests {
     let px = |h: &mut Harness<Round>| h.render().pixel(20.0, 20.0);
     assert_eq!(px(&mut h), [51, 51, 51, 255]);
 
-    // Hovered, held, clicked: the app's colours, one play.
+    // Hovered, held, clicked: the app's colours under the pointing hand, one play.
     h.move_to(20.0, 20.0);
     assert_eq!(px(&mut h), [0, 0, 255, 255]);
+    assert_eq!(h.rt.cursor(), Cursor::Pointer);
     h.press(20.0, 20.0);
     assert_eq!(px(&mut h), [255, 0, 0, 255]);
     h.release(20.0, 20.0);
@@ -264,11 +276,13 @@ mod tests {
     assert!(!h.key(Key::Char(' '), Modifiers::ALT));
     assert_eq!(h.app().plays, 3);
 
-    // Disabled while focused: focus goes, no input, and Tab passes it by.
+    // Disabled while focused: focus goes, no input, no hand, and Tab passes it by.
     h.app_mut().off = true;
     h.rt.redraw();
     h.frame();
     assert_eq!(h.focused(), None);
+    h.move_to(21.0, 20.0);
+    assert_eq!(h.rt.cursor(), Cursor::Arrow);
     h.click(20.0, 20.0);
     assert_eq!(h.app().plays, 3);
     h.key(NamedKey::Tab, Modifiers::empty());
@@ -291,7 +305,7 @@ mod tests {
 
     fn view(&mut self, ui: &mut Ui) {
       let b = ui.button_behavior(Id::of("ok"));
-      ui.with_id(b.id).el(b.style(Style::new().w(px(20.0)).h(px(20.0))));
+      ui.control(&b).el(Style::new().w(px(20.0)).h(px(20.0)));
     }
   }
 
@@ -317,10 +331,43 @@ mod tests {
     fn view(&mut self, ui: &mut Ui) {
       let sq = Style::new().w(px(20.0)).h(px(20.0));
       let a = ui.disabled(true).button_behavior(Id::of("a"));
-      ui.with_id(a.id).el(a.style(sq.tab_focusable().cursor(Cursor::Pointer)));
+      ui.control(&a).el(sq.tab_focusable().cursor(Cursor::Pointer));
+      // Built under its id without [Ui::control]: disabled all the same.
+      let d = ui.disabled(true).button_behavior(Id::of("d"));
+      ui.with_id(d.id).el(sq.tab_focusable().cursor(Cursor::Pointer));
       let c = ui.button_behavior(Id::of("c"));
-      ui.with_id(c.id).el(c.style(sq));
+      ui.control(&c).el(sq);
     }
+  }
+
+  /// Two controls whose behaviours both run before their roots are built, as a split's divider
+  /// after a button in its first pane: each root keeps what the app set on it.
+  struct Ahead;
+
+  impl App for Ahead {
+    fn view(&mut self, ui: &mut Ui) {
+      let sq = Style::new().w(px(20.0)).h(px(20.0));
+      let a = ui.focusable(false).button_behavior(Id::of("a"));
+      let b = ui.pointer_style(Cursor::Crosshair).button_behavior(Id::of("b"));
+      ui.row(Style::new(), |ui| {
+        ui.control(&a).el(sq);
+        ui.control(&b).el(sq);
+      });
+    }
+  }
+
+  #[test]
+  fn controls_built_after_their_behaviours_keep_their_modifiers() {
+    let mut h = Harness::new(Ahead, Size::new(100.0, 100.0), 1.0);
+    h.frame();
+    h.move_to(10.0, 10.0);
+    assert_eq!(h.rt.cursor(), Cursor::Pointer);
+    h.move_to(30.0, 10.0);
+    assert_eq!(h.rt.cursor(), Cursor::Crosshair);
+    h.key(NamedKey::Tab, Modifiers::empty());
+    assert_eq!(h.focused(), Some(Id::of("b")));
+    h.key(NamedKey::Tab, Modifiers::empty());
+    assert_eq!(h.focused(), Some(Id::of("b")), "a is not in Tab order");
   }
 
   #[test]
@@ -328,6 +375,8 @@ mod tests {
     let mut h = Harness::new(Pair, Size::new(100.0, 100.0), 1.0);
     h.frame();
     h.move_to(10.0, 10.0);
+    assert_eq!(h.rt.cursor(), Cursor::Arrow);
+    h.move_to(10.0, 30.0);
     assert_eq!(h.rt.cursor(), Cursor::Arrow);
     h.key(NamedKey::Tab, Modifiers::empty());
     assert_eq!(h.focused(), Some(Id::of("c")));

@@ -136,7 +136,7 @@ mod tests {
   impl App for Chords {
     fn view(&mut self, ui: &mut Ui) {
       let b = ui.shortcut_behavior(Id::of("rec"), &mut self.0, false, false);
-      ui.with_id(b.id).el(b.style(Style::new().w(px(160.0)).h(px(22.0))));
+      ui.control(&b).el(Style::new().w(px(160.0)).h(px(22.0)));
     }
   }
 

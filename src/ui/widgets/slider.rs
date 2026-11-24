@@ -90,7 +90,7 @@ impl<'s> Slider<'s> {
 
     let dots: Vec<f32> = steps.iter().map(|&(_, k)| k).collect();
     let width = Style::new().w(grow()).min_w(MIN_W);
-    let s = b.style(width.h(px(kh + 4.0)));
+    let s = width.h(px(kh + 4.0));
     let paint = move |f: &mut Frame, r: Rect| {
       let (x0, w, cy) = (r.x + kw / 2.0, r.w - kw, r.y + r.h / 2.0);
       f.rect(Rect::new(x0 - rh / 2.0, cy - rh / 2.0, w + rh, rh), rail, rh / 2.0);
@@ -111,7 +111,7 @@ impl<'s> Slider<'s> {
     };
 
     let mut r = if labels.is_empty() {
-      ui.with_id(id).canvas(s, paint)
+      ui.control(&b).canvas(s, paint)
     } else {
       let style = TextStyle::new(t.small, ui.dim(t.muted, b.disabled)).nowrap();
       let mut r = Response::default();
@@ -122,7 +122,7 @@ impl<'s> Slider<'s> {
       ui.with_id(id.key("ticks")).allows_hit_testing(false).col(
         width.pads([lh, 0.0, 0.0, 0.0]),
         |ui| {
-          r = ui.with_id(id).canvas(s, paint);
+          r = ui.control(&b).canvas(s, paint);
           ui.row(Style::new().w(grow()), |ui| {
             // Left to right: where the last one ends, and where the next may start.
             let (mut end, mut free) = (0.0, 0.0);

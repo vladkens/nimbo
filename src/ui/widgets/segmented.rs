@@ -38,13 +38,13 @@ impl Ui<'_> {
     };
 
     // Its labels' width: text beside it wraps instead.
-    let frame = self.control(frame.w(rigid()), &b);
+    let frame = self.dim_style(frame.w(rigid()), b.disabled);
     let n = options.len();
     let on_at = |i: usize| options.get(i).is_some_and(|o| o.value == *cur);
     // macOS's divider, 1 × 14: #bdbdbd on the light capsule, #6d6d6d on the dark one.
     let ink = if t.scheme.is_dark() { [1.0; 4] } else { [0.0, 0.0, 0.0, 1.0] };
     let divider = alpha(ink, if t.scheme.is_dark() { 0.26 } else { 0.18 });
-    let mut r = self.with_id(id).row(frame, |ui| {
+    let mut r = self.control(&b).row(frame, |ui| {
       for (i, o) in options.iter().enumerate() {
         let seg = id.key(i);
         let on = on_at(i);
