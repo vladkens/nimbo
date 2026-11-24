@@ -45,10 +45,8 @@ nimbo is written by AI agents (Claude Code, Codex) following [agents.md](agents.
 
 ## 📥 Installation
 
-nimbo isn't released yet; take it from git:
-
 ```sh
-cargo add nimbo --git https://github.com/vladkens/nimbo
+cargo add nimbo
 ```
 
 The default is the window and the styled widgets. The rest is a feature to turn on, listed in [Cargo.toml](Cargo.toml): `tray`, `hotkey`, `paste`, `permissions`, `instance`, `autostart`, `system`, `png`, `bitmap`, or `full` for all of them; `headless` alone keeps the behaviours without nimbo's look, and `harness` runs an app in tests.
@@ -56,7 +54,7 @@ The default is the window and the styled widgets. The rest is a feature to turn 
 <details>
 <summary>Requirements per OS</summary>
 
-- **macOS** 14 or later: an app sets `MACOSX_DEPLOYMENT_TARGET=14.0`, as `.cargo/config.toml` here does.
+- **macOS** 11 or later; an app sets nothing.
 - **Windows**: `#![cfg_attr(windows, windows_subsystem = "windows")]` in `main.rs`, so no console opens with the window.
 - **Linux**: GTK 3 at run time (every desktop has it), on Wayland or X11. Overlays on Wayland need `libgtk-layer-shell`, the tray icon a panel with StatusNotifierItems, file panels the desktop's portals (GNOME, KDE), and on Wayland hotkeys and a paste into another app the portals too (X11 grabs the hotkey and types with XTest).
 
