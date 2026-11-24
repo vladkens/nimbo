@@ -445,18 +445,18 @@ mod tests {
     let px = |h: &mut Harness<Pick>, x: f32| h.render().pixel(x, 10.0);
     let rgb = |c: [f32; 4]| c.map(|v| (v * 255.0) as u8);
     assert_eq!((px(&mut h, 10.0), px(&mut h, 30.0)), (rgb(ON), rgb(UP)));
-    assert_eq!(h.rt.cursor(), Cursor::Arrow);
+    assert_eq!(h.cursor(), Cursor::Arrow);
 
     // Hovered under the hand the root gives it, clicked: the value written back.
     h.move_to(30.0, 10.0);
-    assert_eq!((px(&mut h, 30.0), h.rt.cursor()), (rgb(OVER), Cursor::Pointer));
+    assert_eq!((px(&mut h, 30.0), h.cursor()), (rgb(OVER), Cursor::Pointer));
     h.click(30.0, 10.0);
     assert_eq!((h.app().cur, h.app().changes), ('b', 1));
     assert_eq!(px(&mut h, 30.0), rgb(ON));
 
     // Focused by Tab, stepped by the arrows; radio buttons in a group.
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!(h.focused(), Some(Id::of("p")));
+    assert_eq!(h.focus_id(), Some(Id::of("p")));
     h.key(NamedKey::ArrowRight, Modifiers::empty());
     assert_eq!((h.app().cur, h.app().changes), ('c', 2));
     h.frame();
@@ -467,14 +467,14 @@ mod tests {
 
     // Disabled: its own red, no hand, no focus, no picks.
     h.app_mut().off = true;
-    h.rt.redraw();
+    h.redraw();
     assert_eq!(px(&mut h, 10.0), rgb(OFF));
-    assert_eq!(h.focused(), None);
+    assert_eq!(h.focus_id(), None);
     h.move_to(11.0, 10.0);
-    assert_eq!(h.rt.cursor(), Cursor::Arrow);
+    assert_eq!(h.cursor(), Cursor::Arrow);
     h.click(10.0, 10.0);
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!((h.focused(), h.app().cur, h.app().changes), (None, 'c', 2));
+    assert_eq!((h.focus_id(), h.app().cur, h.app().changes), (None, 'c', 2));
     assert!(h.a11y().contains("radio button off disabled"), "{}", h.a11y());
   }
 
@@ -524,18 +524,18 @@ mod tests {
     h.frame();
     h.key(NamedKey::Tab, Modifiers::empty());
     assert!(h.click_id(Id::of("p")));
-    assert!(h.rt.ui.menu_open(Id::of("p")));
+    assert!(h.menu_open(Id::of("p")));
     h.app_mut().0 = true;
-    h.rt.redraw();
+    h.redraw();
     h.frame();
-    assert_eq!(h.focused(), Some(Id::of("p")));
+    assert_eq!(h.focus_id(), Some(Id::of("p")));
     h.key(NamedKey::ArrowRight, Modifiers::empty());
     assert_eq!(h.app().1, 'b');
 
     h.app_mut().0 = false;
-    h.rt.redraw();
+    h.redraw();
     h.frame();
-    assert!(!h.rt.ui.menu_open(Id::of("p")));
+    assert!(!h.menu_open(Id::of("p")));
   }
 
   /// With no shell, inline: each option an element, no fill.

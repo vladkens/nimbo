@@ -425,7 +425,7 @@ mod tests {
     let area = Id::of("area");
     h.frame();
     h.rt.ui.store.raw::<ScrollState>(area).offset[1] = 1e12;
-    h.rt.redraw();
+    h.redraw();
     for _ in 0..3 {
       h.frame();
     }
@@ -481,7 +481,7 @@ mod tests {
 
     // Scrolled 10 down: half the fade above.
     h.rt.ui.store.raw::<ScrollState>(area).offset[1] = 10.0;
-    h.rt.redraw();
+    h.redraw();
     let top = h.render().pixel(100.0, 0.0);
     assert!(top[0] > 100 && top[0] < 150 && top[2] > 100, "{top:?}");
 
@@ -494,7 +494,7 @@ mod tests {
     h.press(x, y);
     h.move_to(x, y + 10.0);
     h.frame();
-    let off = h.rt.ui.scroll(area).unwrap().offset.y;
+    let off = h.scroll(area).unwrap().offset.y;
     assert!((off - (10.0 + 10.0 * 800.0 / 156.0)).abs() < 0.5, "{off}");
     h.release(x, y + 10.0);
 
@@ -506,19 +506,19 @@ mod tests {
     h.move_to(x, y + 10.0);
     h.release(x, y + 10.0);
     h.frame();
-    let now = h.rt.ui.scroll(area).unwrap().offset.y;
+    let now = h.scroll(area).unwrap().offset.y;
     assert!((now - off - 10.0 * 800.0 / 156.0).abs() < 0.5, "{off} → {now}");
     let off = now;
 
     // A click on the track below the thumb pages down.
     h.click(195.0, 190.0);
     h.frame();
-    assert!(h.rt.ui.scroll(area).unwrap().offset.y > off + 150.0);
+    assert!(h.scroll(area).unwrap().offset.y > off + 150.0);
 
     // The pointer resting on the track keeps the bars, with no frames.
     h.move_to(195.0, 100.0);
     h.wait(Duration::from_millis(300));
-    assert!(h.wait(Duration::from_millis(3000)) == 0 && h.rt.due_in().is_none());
+    assert!(h.wait(Duration::from_millis(3000)) == 0 && h.due_in().is_none());
     assert!(h.rect(area.key(("thumb", 1usize))).is_some());
 
     // The content twice as tall: the thumb fits it in the frame that shows it.

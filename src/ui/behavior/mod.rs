@@ -282,7 +282,7 @@ mod tests {
     // Hovered, held, clicked: the app's colours under the pointing hand, one play.
     h.move_to(20.0, 20.0);
     assert_eq!(px(&mut h), [0, 0, 255, 255]);
-    assert_eq!(h.rt.cursor(), Cursor::Pointer);
+    assert_eq!(h.cursor(), Cursor::Pointer);
     h.press(20.0, 20.0);
     assert_eq!(px(&mut h), [255, 0, 0, 255]);
     h.release(20.0, 20.0);
@@ -291,7 +291,7 @@ mod tests {
     // Tab focuses it, Space plays and flashes it pressed.
     h.leave();
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!(h.focused(), Some(Id::of("play")));
+    assert_eq!(h.focus_id(), Some(Id::of("play")));
     h.key(Key::Char(' '), Modifiers::empty());
     assert_eq!(h.app().plays, 2);
     assert_eq!(px(&mut h), [255, 0, 0, 255]);
@@ -310,15 +310,15 @@ mod tests {
 
     // Disabled while focused: focus goes, no input, no hand, and Tab passes it by.
     h.app_mut().off = true;
-    h.rt.redraw();
+    h.redraw();
     h.frame();
-    assert_eq!(h.focused(), None);
+    assert_eq!(h.focus_id(), None);
     h.move_to(21.0, 20.0);
-    assert_eq!(h.rt.cursor(), Cursor::Arrow);
+    assert_eq!(h.cursor(), Cursor::Arrow);
     h.click(20.0, 20.0);
     assert_eq!(h.app().plays, 3);
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!(h.focused(), None);
+    assert_eq!(h.focus_id(), None);
   }
 
   /// A button, and a timer a second away that the app sets on T.
@@ -349,11 +349,11 @@ mod tests {
     h.key(Key::Char('t'), Modifiers::empty());
     h.key(Key::Char(' '), Modifiers::empty());
     // The flash's frame comes first, then the timer's, which it did not replace.
-    assert_eq!(h.rt.due_in(), Some(Duration::from_millis(120)));
+    assert_eq!(h.due_in(), Some(Duration::from_millis(120)));
     h.wait(Duration::from_millis(200));
-    assert_eq!(h.rt.due_in(), Some(Duration::from_millis(800)));
+    assert_eq!(h.due_in(), Some(Duration::from_millis(800)));
     assert!(h.wait(Duration::from_millis(800)) > 0);
-    assert!(!h.rt.needs_frame() && h.rt.due_in().is_none());
+    assert!(!h.needs_frame() && h.due_in().is_none());
   }
 
   /// A disabled control whose own style asks for focus, then an enabled one.
@@ -393,13 +393,13 @@ mod tests {
     let mut h = Harness::new(Ahead, Size::new(100.0, 100.0), 1.0);
     h.frame();
     h.move_to(10.0, 10.0);
-    assert_eq!(h.rt.cursor(), Cursor::Pointer);
+    assert_eq!(h.cursor(), Cursor::Pointer);
     h.move_to(30.0, 10.0);
-    assert_eq!(h.rt.cursor(), Cursor::Crosshair);
+    assert_eq!(h.cursor(), Cursor::Crosshair);
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!(h.focused(), Some(Id::of("b")));
+    assert_eq!(h.focus_id(), Some(Id::of("b")));
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!(h.focused(), Some(Id::of("b")), "a is not in Tab order");
+    assert_eq!(h.focus_id(), Some(Id::of("b")), "a is not in Tab order");
   }
 
   #[test]
@@ -407,10 +407,10 @@ mod tests {
     let mut h = Harness::new(Pair, Size::new(100.0, 100.0), 1.0);
     h.frame();
     h.move_to(10.0, 10.0);
-    assert_eq!(h.rt.cursor(), Cursor::Arrow);
+    assert_eq!(h.cursor(), Cursor::Arrow);
     h.move_to(10.0, 30.0);
-    assert_eq!(h.rt.cursor(), Cursor::Arrow);
+    assert_eq!(h.cursor(), Cursor::Arrow);
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!(h.focused(), Some(Id::of("c")));
+    assert_eq!(h.focus_id(), Some(Id::of("c")));
   }
 }

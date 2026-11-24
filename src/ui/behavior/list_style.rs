@@ -534,9 +534,9 @@ mod tests {
 
     // Hovered under the hand the list gave it, selected by a click, which focuses the list.
     h.move_to(50.0, 30.0);
-    assert_eq!((px(&mut h, 30.0), h.rt.cursor()), (rgb(OVER), Cursor::Pointer));
+    assert_eq!((px(&mut h, 30.0), h.cursor()), (rgb(OVER), Cursor::Pointer));
     h.click(50.0, 30.0);
-    assert_eq!((px(&mut h, 30.0), h.focused()), (rgb(ON), Some(Id::of("list"))));
+    assert_eq!((px(&mut h, 30.0), h.focus_id()), (rgb(ON), Some(Id::of("list"))));
     h.event(Event::Focus(false));
     assert_eq!(px(&mut h, 30.0), rgb(AWAY));
     h.event(Event::Focus(true));
@@ -545,11 +545,11 @@ mod tests {
 
     // Disabled: its own red, no hand, no focus, no selection by a click.
     h.app_mut().off = true;
-    h.rt.redraw();
+    h.redraw();
     assert_eq!(px(&mut h, 50.0), rgb(OFF));
-    assert_eq!(h.focused(), None);
+    assert_eq!(h.focus_id(), None);
     h.move_to(50.0, 51.0);
-    assert_eq!(h.rt.cursor(), Cursor::Arrow);
+    assert_eq!(h.cursor(), Cursor::Arrow);
     h.click(50.0, 50.0);
     assert_eq!(h.app().sel.cursor(), Some(1));
   }

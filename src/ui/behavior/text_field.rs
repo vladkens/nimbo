@@ -285,9 +285,9 @@ mod tests {
 
     // The I-beam over it; a click focuses it, typing writes back.
     h.move_to(100.0, 15.0);
-    assert_eq!(h.rt.cursor(), Cursor::Text);
+    assert_eq!(h.cursor(), Cursor::Text);
     h.click(100.0, 15.0);
-    assert_eq!((h.focused(), px(&mut h)), (Some(Id::of("f")), rgb(FOCUSED)));
+    assert_eq!((h.focus_id(), px(&mut h)), (Some(Id::of("f")), rgb(FOCUSED)));
     h.type_text("hi");
     assert_eq!((h.app().text.as_str(), h.app().changes), ("hi", 1));
     h.frame();
@@ -296,9 +296,9 @@ mod tests {
 
     // Out, and back by Tab; the edit menu, drawn in the harness, whatever the style.
     h.click(150.0, 80.0);
-    assert_eq!(h.focused(), None);
+    assert_eq!(h.focus_id(), None);
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!(h.focused(), Some(Id::of("f")));
+    assert_eq!(h.focus_id(), Some(Id::of("f")));
     h.right_click(100.0, 15.0);
     h.frame();
     h.frame();
@@ -307,15 +307,15 @@ mod tests {
 
     // Disabled: its own red, no I-beam, no focus, no typing.
     h.app_mut().off = true;
-    h.rt.redraw();
+    h.redraw();
     assert_eq!(px(&mut h), rgb(OFF));
-    assert_eq!(h.focused(), None);
+    assert_eq!(h.focus_id(), None);
     h.move_to(101.0, 15.0);
-    assert_eq!(h.rt.cursor(), Cursor::Arrow);
+    assert_eq!(h.cursor(), Cursor::Arrow);
     h.click(100.0, 15.0);
     h.key(NamedKey::Tab, Modifiers::empty());
     h.key(Key::Char('x'), Modifiers::empty());
-    assert_eq!((h.focused(), h.app().text.as_str()), (None, "hi"));
+    assert_eq!((h.focus_id(), h.app().text.as_str()), (None, "hi"));
   }
 
   /// Fields in a container given the block style, and one after it.

@@ -906,7 +906,7 @@ mod tests {
     let mut h = Harness::new(Own::default(), Size::new(200.0, 100.0), 1.0);
     h.frame();
     h.click(10.0, 10.0);
-    assert_eq!(h.rt.cursor(), Cursor::Text);
+    assert_eq!(h.cursor(), Cursor::Text);
     h.type_text("hi");
     assert_eq!(h.app().text, "hi");
     let b = *h.app().seen.last().unwrap();

@@ -336,11 +336,11 @@ mod tests {
     let (x0, y) = (r.x + 10.0, r.y + 10.0);
     let px = |h: &mut Harness<Bars>, x: f32| h.render().pixel(x, y);
     let rgb = |c: [f32; 4]| c.map(|v| (v * 255.0) as u8);
-    assert_eq!((px(&mut h, x0 + 50.0), h.rt.cursor()), (rgb(RIGHT), Cursor::Arrow));
+    assert_eq!((px(&mut h, x0 + 50.0), h.cursor()), (rgb(RIGHT), Cursor::Arrow));
 
     // The hand over it; a click on its track, inside the padding, sets the value from there.
     h.move_to(x0 + 50.0, y);
-    assert_eq!(h.rt.cursor(), Cursor::Pointer);
+    assert_eq!(h.cursor(), Cursor::Pointer);
     h.click(x0 + 75.0, y);
     assert_eq!(h.app().v, 0.75);
     assert_eq!((px(&mut h, x0 + 70.0), px(&mut h, x0 + 80.0)), (rgb(LEFT), rgb(RIGHT)));
@@ -349,21 +349,21 @@ mod tests {
 
     // Focused by Tab, raised by Right a twentieth.
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!(h.focused(), Some(Id::of("bar")));
+    assert_eq!(h.focus_id(), Some(Id::of("bar")));
     h.key(NamedKey::ArrowRight, Modifiers::empty());
     assert_eq!(h.app().v, 0.05);
     assert!(h.a11y().contains("slider"), "{}", h.a11y());
 
     // Disabled: its own red, no hand, no focus, no input.
     h.app_mut().off = true;
-    h.rt.redraw();
+    h.redraw();
     assert_eq!(px(&mut h, x0 + 50.0), [255, 0, 0, 255]);
-    assert_eq!(h.focused(), None);
+    assert_eq!(h.focus_id(), None);
     h.move_to(x0 + 51.0, y);
-    assert_eq!(h.rt.cursor(), Cursor::Arrow);
+    assert_eq!(h.cursor(), Cursor::Arrow);
     h.click(x0 + 90.0, y);
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!((h.focused(), h.app().v), (None, 0.05));
+    assert_eq!((h.focus_id(), h.app().v), (None, 0.05));
     assert!(h.a11y().contains("disabled"), "{}", h.a11y());
   }
 

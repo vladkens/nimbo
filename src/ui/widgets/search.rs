@@ -191,7 +191,7 @@ mod tests {
     h.click_menu_item("Paste");
     h.frame();
     assert_eq!((h.app().text.as_str(), h.app().changes), ("moon", 1));
-    assert_eq!(h.focused(), Some(Id::of("s")));
+    assert_eq!(h.focus_id(), Some(Id::of("s")));
 
     // Escape closes the menu before the app's own Escape, and leaves the text.
     h.right_click(r.x + 40.0, r.y + 10.0);
@@ -215,15 +215,15 @@ mod tests {
     let field = h.rect(Id::of("s")).unwrap();
     assert!(x.x + x.w <= field.x + field.w - 8.0 && x.w == 14.0, "{x:?} in {field:?}");
     h.move_to(x.x + 7.0, x.y + 7.0);
-    assert_eq!(h.rt.cursor(), Cursor::Pointer);
+    assert_eq!(h.cursor(), Cursor::Pointer);
 
     // Clicked from outside the field: cleared, `changed`, and the field focused for the next.
     h.click(5.0, 95.0);
-    assert_eq!(h.focused(), None);
+    assert_eq!(h.focus_id(), None);
     h.click_id(Id::of("s").key("clear"));
     h.frame();
     assert_eq!((h.app().text.as_str(), h.app().changes), ("", 2));
-    assert_eq!(h.focused(), Some(Id::of("s")));
+    assert_eq!(h.focus_id(), Some(Id::of("s")));
     assert!(clear(&h).is_none());
     assert_eq!(h.text(Id::of("s").key("text")), Some("Search"), "the hint again");
   }
@@ -235,9 +235,9 @@ mod tests {
     let y = field.y + field.h / 2.0;
     // The magnifier, 8 in: the I-beam, and a click focuses the field.
     h.move_to(field.x + 16.0, y);
-    assert_eq!(h.rt.cursor(), Cursor::Text);
+    assert_eq!(h.cursor(), Cursor::Text);
     h.click(field.x + 16.0, y);
-    assert_eq!(h.focused(), Some(Id::of("s")));
+    assert_eq!(h.focus_id(), Some(Id::of("s")));
     // Just left of the ⊗: the field's, nothing cleared.
     h.click(x.x - 2.0, y);
     h.frame();
@@ -255,7 +255,7 @@ mod tests {
     h.frame();
     assert_eq!((h.app().text.as_str(), h.app().changes, h.app().cancels), ("", 3, 0));
     assert_eq!(h.text(Id::of("s").key("text")), Some("Search"));
-    assert_eq!(h.focused(), Some(Id::of("s")));
+    assert_eq!(h.focus_id(), Some(Id::of("s")));
     // Empty, it is the app's.
     assert!(h.key(NamedKey::Escape, NONE));
     assert_eq!((h.app().changes, h.app().cancels), (3, 1));
@@ -314,7 +314,7 @@ mod tests {
     h.frame();
     h.move_to(x.x - 4.0, y);
     h.frame();
-    assert!(h.rt.due_in().is_some_and(|d| d <= std::time::Duration::from_millis(16)));
+    assert!(h.due_in().is_some_and(|d| d <= std::time::Duration::from_millis(16)));
   }
 
   /// The ⊗'s cross is cut out: the field's ground over what it sits on shows through.
@@ -458,7 +458,7 @@ mod tests {
     h.frame();
     h.event(Event::MouseUp { pos, button, mods });
     h.frame();
-    assert_eq!((h.focused(), h.app().text.as_str()), (None, "moon"));
+    assert_eq!((h.focus_id(), h.app().text.as_str()), (None, "moon"));
   }
 
   /// Held on the ⊗ a while, the field keeps the focus; released, it clears.
@@ -469,7 +469,7 @@ mod tests {
     let x = clear(&h).unwrap();
     h.press(x.x + 7.0, x.y + 7.0);
     h.frame();
-    assert_eq!((h.focused(), h.app().blurs), (Some(Id::of("s")), 0));
+    assert_eq!((h.focus_id(), h.app().blurs), (Some(Id::of("s")), 0));
     h.release(x.x + 7.0, x.y + 7.0);
     h.frame();
     assert_eq!((h.app().text.as_str(), h.app().blurs), ("", 0));
@@ -492,7 +492,7 @@ mod tests {
     h.frame();
     assert!(clear(&h).is_none());
     h.click_id(Id::of("s"));
-    assert_eq!(h.focused(), None);
+    assert_eq!(h.focus_id(), None);
     h.key(NamedKey::Escape, NONE);
     assert_eq!((h.app().text.as_str(), h.app().changes), ("moon", 0));
   }

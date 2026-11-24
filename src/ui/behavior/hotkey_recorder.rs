@@ -147,7 +147,7 @@ mod tests {
       h.event(Event::Modifier { key: Code::AltRight, down });
     }
 
-    assert_eq!((h.app().0, h.focused()), (None, Some(Id::of("rec"))), "still recording");
+    assert_eq!((h.app().0, h.focus_id()), (None, Some(Id::of("rec"))), "still recording");
     h.key('k', Modifiers::CONTROL);
     let ctrl_k = Hotkey::Shortcut(Shortcut { key: Key::Char('k'), mods: Modifiers::CONTROL });
     assert_eq!(h.app().0, Some(ctrl_k));

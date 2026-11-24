@@ -176,7 +176,7 @@ fn pc_keys_undo_and_redo() {
 fn the_first_field_has_the_focus_from_the_start() {
   let mut h = fields();
   assert!(!h.frame(), "a frame without changes");
-  assert_eq!(h.focused(), Some(Id::of(NAME)));
+  assert_eq!(h.focus_id(), Some(Id::of(NAME)));
   assert_eq!(h.due_in(), Some(Duration::from_millis(500)));
 }
 
@@ -185,7 +185,7 @@ fn typing_word_moves_undo_and_the_clipboard() {
   let h = &mut fields();
   let name = Id::of(NAME);
   h.click_id(name);
-  assert_eq!(h.focused(), Some(name));
+  assert_eq!(h.focus_id(), Some(name));
   assert!(h.text_input().is_some(), "a field takes input methods");
   assert!(h.type_text("Hello world"));
   assert_eq!(h.app().name, "Hello world");
@@ -231,7 +231,7 @@ fn typing_word_moves_undo_and_the_clipboard() {
   assert!(!h.key(NamedKey::Enter, NONE));
   assert_eq!(h.app().submitted, Some((NAME, "Howd worldHowd world".to_owned())));
   h.key(NamedKey::Tab, NONE);
-  assert_eq!(h.focused(), Some(Id::of(EMAIL)));
+  assert_eq!(h.focus_id(), Some(Id::of(EMAIL)));
 }
 
 #[test]
@@ -421,17 +421,17 @@ fn placeholder_disabled_and_selectable() {
   // Disabled: no focus by a click or Tab, its text unchanged.
   let off = Id::of(OFF);
   h.click_id(off);
-  assert_ne!(h.focused(), Some(off));
+  assert_ne!(h.focus_id(), Some(off));
   h.click_id(Id::of(NOTES));
   h.key(NamedKey::Tab, NONE);
-  assert_ne!(h.focused(), Some(off));
+  assert_ne!(h.focus_id(), Some(off));
 
   // Selectable text: a word by a double click, copied; typing changes nothing.
   let about = Id::of(ABOUT);
   let r = h.rect(about).unwrap();
   h.press_with(r.x + 20.0, r.y + 8.0, 2, NONE);
   h.release(r.x + 20.0, r.y + 8.0);
-  assert_eq!(h.focused(), Some(about));
+  assert_eq!(h.focus_id(), Some(about));
   assert_eq!(selected(h, about), "Nothing");
   assert!(h.text_input().is_none(), "selectable text takes no input method");
   h.key(Key::Char('c'), CMD);
@@ -442,7 +442,7 @@ fn placeholder_disabled_and_selectable() {
   // Without a focused field the window sleeps: no caret, no timer.
   h.click(SIZE.w - 4.0, SIZE.h - 4.0);
   h.wait(Duration::from_millis(600));
-  assert_eq!((h.focused(), h.due_in()), (None, None));
+  assert_eq!((h.focus_id(), h.due_in()), (None, None));
   assert!(!h.frame());
 }
 
@@ -572,7 +572,7 @@ fn a_right_click_opens_the_edit_menu() {
   h.key(NamedKey::Escape, NONE);
   h.frame();
   assert!(menu(h).is_empty());
-  assert_eq!(h.focused(), Some(Id::of(NAME)));
+  assert_eq!(h.focus_id(), Some(Id::of(NAME)));
   right_click(h, NAME);
   choose(h, "Select All");
   assert_eq!(sel(h, NAME), (0, 5));
@@ -616,7 +616,7 @@ fn a_native_edit_menu_is_asked_for_and_answered() {
   assert_eq!(on, [false, false, false, true], "nothing selected, nothing to paste");
   h.frame();
   assert!(!h.menu_open(Id::of(NAME).key("edit")));
-  assert_eq!((h.focused(), h.app().name.as_str()), (Some(Id::of(NAME)), "hello"));
+  assert_eq!((h.focus_id(), h.app().name.as_str()), (Some(Id::of(NAME)), "hello"));
   assert!(h.context_menu(None).is_none(), "asked once");
 }
 
@@ -649,7 +649,7 @@ fn the_edit_menus_paste_pastes() {
   right_click(h, NAME);
   choose(h, "Paste");
   assert_eq!(h.app().name, "moon");
-  assert_eq!(h.focused(), Some(Id::of(NAME)));
+  assert_eq!(h.focus_id(), Some(Id::of(NAME)));
 
   h.clipboard().write("");
   right_click(h, NAME);
@@ -675,7 +675,7 @@ fn selectable_texts_edit_menu_copies() {
   let h = &mut fields();
   right_click(h, ABOUT);
   assert_eq!(menu(h), ["Copy disabled", "Select All"]);
-  assert_eq!(h.focused(), Some(Id::of(ABOUT).key("edit").key("menu")));
+  assert_eq!(h.focus_id(), Some(Id::of(ABOUT).key("edit").key("menu")));
   choose(h, "Select All");
   right_click(h, ABOUT);
   assert_eq!(menu(h), ["Copy", "Select All"]);

@@ -603,7 +603,7 @@ mod tests {
   fn the_focus_ring_is_the_themes_unless_the_app_sets_one() {
     let mut h = Harness::new(Ringed::default(), Size::new(40.0, 40.0), 1.0);
     let ring = |h: &mut Harness<Ringed>| {
-      h.rt.redraw();
+      h.redraw();
       h.frame();
       h.rt.ui.own_ring.unwrap_or(h.rt.ui.ring)
     };
@@ -639,7 +639,7 @@ mod tests {
     let mut h = Harness::new(Ringed::default(), Size::new(40.0, 40.0), 1.0);
     h.event(Event::Appearance(Appearance::LIGHT));
     let scheme = |h: &mut Harness<Ringed>| {
-      h.rt.redraw();
+      h.redraw();
       h.frame();
       h.app().scheme
     };

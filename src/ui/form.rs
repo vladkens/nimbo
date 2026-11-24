@@ -1287,13 +1287,13 @@ mod tests {
     h.set_focus(Some(fold));
     for _ in 0..3 {
       h.key(NamedKey::Tab, Modifiers::empty());
-      assert_ne!(h.focused(), Some(off), "out of the Tab order");
+      assert_ne!(h.focus_id(), Some(off), "out of the Tab order");
     }
 
     h.set_focus(Some(fold));
     h.app_mut().1 = true;
     h.frame();
-    assert_eq!(h.focused(), None, "the focus let go");
+    assert_eq!(h.focus_id(), None, "the focus let go");
     assert!(read(&h, "\"Other models\"").contains("disabled"));
     h.key(Key::Char(' '), Modifiers::empty());
     h.frame();

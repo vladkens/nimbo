@@ -8,7 +8,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::app::{App, Clipboard, Clock, Event, Ime, MemClipboard, MouseButton, Runtime, Waker};
-pub use crate::cpu::Pixels;
+use crate::cpu::Pixels;
 use crate::file_dialog::FileDialog;
 use crate::keys::{self, Command, Key, KeyEvent, Os};
 use crate::locale::{self, Locale, Localizations};
@@ -50,6 +50,7 @@ impl<A: App> Harness<A> {
     Self { rt, cpu: cpu::Renderer::new() }
   }
 
+  /// The app, to read its state.
   pub fn app(&self) -> &A {
     &self.rt.app
   }
@@ -121,6 +122,8 @@ impl<A: App> Harness<A> {
     self.rt.waker()
   }
 
+  /// Sends `ev` as the window would; returns whether it was used. The other inputs are made of
+  /// it.
   pub fn event(&mut self, ev: Event) -> bool {
     self.rt.event(ev)
   }
@@ -139,12 +142,6 @@ impl<A: App> Harness<A> {
   /// harness draws them.
   pub fn set_native_menus(&mut self, on: bool) {
     self.rt.set_native_menus(on);
-  }
-
-  /// [Harness::set_native_menus] on, the name the apps' tests still call.
-  #[doc(hidden)]
-  pub fn native_menus(&mut self) {
-    self.set_native_menus(true);
   }
 
   /// Answers the context menu the app asked for ([crate::Ui::context_menu]) as the person
@@ -172,6 +169,7 @@ impl<A: App> Harness<A> {
     self.rt.can(cmd) && self.event(Event::Command(cmd))
   }
 
+  /// Moves the pointer to (x, y). Returns whether it was used.
   pub fn move_to(&mut self, x: f32, y: f32) -> bool {
     self.event(Event::MouseMove { pos: Point::new(x, y), mods: Modifiers::empty() })
   }
@@ -303,8 +301,8 @@ impl<A: App> Harness<A> {
     frames
   }
 
-  /// The focused element.
-  pub fn focused(&self) -> Option<Id> {
+  /// The focused element ([crate::Ui::focus_id]).
+  pub fn focus_id(&self) -> Option<Id> {
     self.rt.ui.focus()
   }
 
@@ -495,6 +493,7 @@ impl<A: App> Harness<A> {
     Image { scale, pixels }
   }
 
+  /// Renders the current state ([Self::render]) into a PNG at `path`.
   pub fn shot(&mut self, path: &Path) -> Result<(), Error> {
     self.render().save_png(path)
   }
@@ -514,7 +513,8 @@ pub struct Element {
 // MARK: US keyboard
 
 /// The event AppKit reports for `key` with `mods` on a US keyboard. A character may be given
-/// shifted or not: `Char('1')` or `Char('!')` with Shift is `'!'`.
+/// shifted or not: `Char('1')` or `Char('!')` with Shift is `'!'`. How a test makes a
+/// [KeyEvent] for [Harness::key_event] or [Event::KeyDown].
 pub fn us_key(key: Key, mods: Modifiers) -> KeyEvent {
   let (key, code, mods) = match key {
     Key::Char(c) => match keys::us_code(c) {
@@ -539,11 +539,21 @@ pub fn us_key(key: Key, mods: Modifiers) -> KeyEvent {
 /// Offscreen frame pixels with their backing scale.
 #[non_exhaustive]
 pub struct Image {
-  pub scale: f32,
-  pub pixels: Pixels,
+  scale: f32,
+  pixels: Pixels,
 }
 
 impl Image {
+  /// Pixels per point.
+  pub fn scale(&self) -> f32 {
+    self.scale
+  }
+
+  /// The size in points.
+  pub fn size(&self) -> Size {
+    Size::new(self.pixels.w as f32 / self.scale, self.pixels.h as f32 / self.scale)
+  }
+
   /// RGBA at a point (in points, like events).
   pub fn pixel(&self, x: f32, y: f32) -> [u8; 4] {
     let px = ((x * self.scale) as usize).min(self.pixels.w - 1);
@@ -587,11 +597,11 @@ mod tests {
     let big = (0..5).map(|i| (abc.clone(), 100.0 + 20.0 * i as f32)).collect();
     let mut h = Harness::new(Lines(big), size, 2.0);
     h.render();
-    h.rt.redraw();
+    h.redraw();
     h.render();
 
     h.app_mut().0 = hello();
-    h.rt.redraw();
+    h.redraw();
     let img = h.render();
     let fresh = Harness::new(Lines(hello()), size, 2.0).render();
     assert!(img.pixels.data == fresh.pixels.data, "glyphs missing from the snapshot");

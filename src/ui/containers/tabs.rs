@@ -177,7 +177,7 @@ mod tests {
     h.frame();
     let page = Id::of(("page", 0usize));
     h.rt.ui.store.raw::<ScrollState>(page).offset[1] = 50.0;
-    h.rt.redraw();
+    h.redraw();
     h.frame();
 
     // The second "Same" is its own tab; the first page's offset outlives it hidden.
@@ -187,6 +187,6 @@ mod tests {
     assert!(h.rect(page).is_none());
     h.click_id(Id::of("tabs").key(("tab", "Same")));
     h.frame();
-    assert_eq!(h.rt.ui.scroll(page).unwrap().offset.y, 50.0);
+    assert_eq!(h.scroll(page).unwrap().offset.y, 50.0);
   }
 }

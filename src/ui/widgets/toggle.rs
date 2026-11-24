@@ -126,7 +126,7 @@ mod tests {
     let mut h = Harness::new(Window(None), Size::new(200.0, 100.0), 1.0);
     let mut a11y = |s| {
       h.app_mut().0 = s;
-      h.rt.redraw();
+      h.redraw();
       h.frame();
       h.a11y()
     };
@@ -194,7 +194,7 @@ mod tests {
     };
     let on = [ink(&mut h, "s"), ink(&mut h, "c")];
     h.app_mut().0 = true;
-    h.rt.redraw();
+    h.redraw();
     let off = [ink(&mut h, "s"), ink(&mut h, "c")];
     assert!(off[0] * 2 < on[0] && off[1] * 2 < on[1], "{on:?} enabled, {off:?} disabled");
   }

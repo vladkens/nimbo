@@ -217,7 +217,7 @@ mod tests {
     h.move_to(10.0, 70.0);
     h.frame();
     assert!(h.editor(Id::of("t")).unwrap().sel().head > 0);
-    assert!(h.rt.due_in().is_some_and(|d| d <= std::time::Duration::from_millis(16)));
+    assert!(h.due_in().is_some_and(|d| d <= std::time::Duration::from_millis(16)));
   }
 
   #[test]
@@ -226,9 +226,9 @@ mod tests {
     h.frame();
     let note = h.rect(Id::of("note")).unwrap();
     h.move_to(note.x + 5.0, note.y + 5.0);
-    assert_eq!(h.rt.cursor(), Cursor::Arrow);
+    assert_eq!(h.cursor(), Cursor::Arrow);
     h.click(note.x + 5.0, note.y + 5.0);
-    assert_eq!(h.focused(), None);
+    assert_eq!(h.focus_id(), None);
     assert!(h.click_id(Id::of("b")));
     assert_eq!(h.app().clicks, 1);
     h.click_id(Id::of("f"));

@@ -999,7 +999,7 @@ mod tests {
 
     // The OS turns light: the next frame is light, from the view up.
     assert!(h.event(Event::Appearance(Appearance::LIGHT)));
-    assert!(h.rt.needs_frame());
+    assert!(h.needs_frame());
     assert_eq!(ground(&mut h), px(Theme::PLATES_LIGHT.bg));
     assert_eq!(h.app().seen.last(), Some(&(ColorScheme::Light, Theme::PLATES_LIGHT.accent)));
 
@@ -1036,10 +1036,10 @@ mod tests {
     let mut h = crate::Harness::new(Lid::default(), Size::new(40.0, 40.0), 1.0);
     h.frame();
     assert!(h.event(Event::System(Change::Lid)));
-    assert!(h.rt.needs_frame());
+    assert!(h.needs_frame());
     h.frame();
     assert!(!h.event(Event::System(Change::AudioInputs)));
-    assert!(!h.rt.needs_frame());
+    assert!(!h.needs_frame());
     assert_eq!(h.app().0, 1);
   }
 
@@ -1083,7 +1083,7 @@ mod tests {
 
     // Another page: the frame is built at the new size.
     h.app_mut().0 = 60.0;
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     assert_eq!(h.rt.size, Size::new(100.0, 60.0));
     assert_eq!(h.rt.ui.last.nodes[1].rect.h, 60.0);
@@ -1138,14 +1138,14 @@ mod tests {
 
     // More than the most: the rest scrolls.
     h.app_mut().rows = 30;
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     let list = h.rt.ui.last.get(crate::Id::of("list")).unwrap();
     assert_eq!((h.rt.size, list.rect.h, list.content[1]), (Size::new(200.0, 500.0), 460.0, 900.0));
 
     // Nothing in it: the least.
     h.app_mut().rows = 0;
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     assert_eq!(h.rt.size, Size::new(200.0, 50.0));
   }
@@ -1173,11 +1173,11 @@ mod tests {
     );
 
     // Built again: kept; not built: dropped.
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     assert_eq!(h.rt.images.size(images[0]), Some((2, 2)));
     h.app_mut().0 = 0;
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     assert_eq!((h.rt.images.size(images[0]), h.rt.ui.pictures.len()), (None, 0));
   }
@@ -1210,11 +1210,11 @@ mod tests {
     let kept = h.cpu.image_pixels(images[0]).unwrap();
     assert!(std::sync::Arc::ptr_eq(kept, &h.app().0[0].px));
 
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     assert_eq!(h.rt.ui.pictures.len(), 2);
     h.app_mut().0.clear();
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     assert_eq!((h.rt.images.size(images[0]), h.rt.ui.pictures.len()), (None, 0));
   }

@@ -331,7 +331,7 @@ mod tests {
     let push = Theme::system(h.rt.ui.appearance()).sizes.control_h;
     let height = |h: &mut Harness<Window>, s| {
       h.app_mut().0 = s;
-      h.rt.redraw();
+      h.redraw();
       h.frame();
       h.rect(Id::of("b")).unwrap().h
     };
@@ -504,24 +504,24 @@ mod tests {
   fn the_apps_focus_and_pointer_win_over_the_controls() {
     let mut h = Harness::new(Own::default(), Size::new(300.0, 100.0), 1.0);
     h.frame();
-    assert_eq!(h.focused(), None, "the field doesn't autofocus");
+    assert_eq!(h.focus_id(), None, "the field doesn't autofocus");
     let r = h.rect(Id::of("own")).unwrap();
     h.move_to(r.x + 4.0, r.y + 4.0);
-    assert_eq!(h.rt.cursor(), Cursor::Crosshair);
+    assert_eq!(h.cursor(), Cursor::Crosshair);
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!(h.focused(), None, "Tab passes all three by");
+    assert_eq!(h.focus_id(), None, "Tab passes all three by");
 
     // Focusable, it takes Tab; made not focusable while focused, it gives focus up and Space
     // no longer clicks it.
     h.app_mut().focusable = true;
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!(h.focused(), Some(Id::of("own")));
+    assert_eq!(h.focus_id(), Some(Id::of("own")));
     h.key(Key::Char(' '), Modifiers::empty());
     assert_eq!(h.app().clicks, 1);
     h.app_mut().focusable = false;
     h.key(Key::Char(' '), Modifiers::empty());
-    assert_eq!((h.focused(), h.app().clicks), (None, 1));
+    assert_eq!((h.focus_id(), h.app().clicks), (None, 1));
   }
 }

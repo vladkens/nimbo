@@ -15,22 +15,18 @@ use crate::common::{diff, px};
 
 /// The pixels of `area` (in points) as (x, y, RGBA), in pixels.
 fn pixels(img: &Image, area: Rect) -> impl Iterator<Item = (usize, usize, [u8; 4])> + '_ {
-  let s = img.scale;
+  let (s, size) = (img.scale(), img.size());
   let (x0, y0) = ((area.x * s).max(0.0) as usize, (area.y * s).max(0.0) as usize);
-  let x1 = (((area.x + area.w) * s).ceil() as usize).min(img.pixels.w);
-  let y1 = (((area.y + area.h) * s).ceil() as usize).min(img.pixels.h);
-  (y0..y1).flat_map(move |y| {
-    (x0..x1).map(move |x| {
-      let i = (y * img.pixels.w + x) * 4;
-      let [b, g, r, a] = img.pixels.data[i..i + 4].try_into().unwrap();
-      (x, y, [r, g, b, a])
-    })
-  })
+  let x1 = ((area.x + area.w).min(size.w) * s).ceil() as usize;
+  let y1 = ((area.y + area.h).min(size.h) * s).ceil() as usize;
+  // Each pixel's centre, in points.
+  let at = move |i: usize| (i as f32 + 0.5) / s;
+  (y0..y1).flat_map(move |y| (x0..x1).map(move |x| (x, y, img.pixel(at(x), at(y)))))
 }
 
 /// The box of the pixels in `area` that differ from the ground, in points: x0, y0, x1, y1.
 fn ink_box(img: &Image, area: Rect, bg: [u8; 4]) -> Option<[f32; 4]> {
-  let s = img.scale;
+  let s = img.scale();
   pixels(img, area).filter(|p| diff(p.2, bg) > 8).fold(None, |b, (x, y, _)| {
     let (x, y) = (x as f32 / s, y as f32 / s);
     let [x0, y0, x1, y1] = b.unwrap_or([x, y, x, y]);
@@ -62,7 +58,7 @@ fn inside_its_box(h: &mut Harness<Text>, img: &Image, x: f32, s: &Sample, bg: [u
   let b = line_box(h, x, s);
   let area = Rect::new(b.x - 6.0, b.y - 2.0, b.w + 12.0, b.h + 4.0);
   let ink = ink_box(img, area, bg).unwrap_or_else(|| panic!("no ink: {}", s.text));
-  let m = 1.0 / img.scale + 1.01;
+  let m = 1.0 / img.scale() + 1.01;
   let inside =
     ink[0] >= b.x - m && ink[1] >= b.y - m && ink[2] <= b.x + b.w + m && ink[3] <= b.y + b.h + m;
   assert!(inside, "{}: ink {ink:?} outside {b:?}", s.text);
@@ -124,7 +120,7 @@ fn check(h: &mut Harness<Text>, p: &Palette) {
     .enumerate()
     .map(|(k, &y)| {
       let s = Sample { y, text: SUBPIXEL, font: SUBPIXEL_FONT };
-      let b = line_box(h, subpixel_x(k, img.scale), &s);
+      let b = line_box(h, subpixel_x(k, img.scale()), &s);
       centroid(&img, Rect::new(b.x - 2.0, y - cap - 1.0, b.w + 4.0, cap + 1.5), bg)
     })
     .collect();
