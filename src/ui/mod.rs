@@ -468,6 +468,9 @@ pub struct Ui<'a> {
   canvases: Vec<Option<Canvas<'a>>>,
   /// The next element's id, and whether it is named (interactive).
   next_id: Option<(Id, bool)>,
+  /// A control's id whose root is yet to be built, inside what its style builds around it: an
+  /// element there never takes it by its place.
+  pending_root: Option<Id>,
   next_float: Option<Float>,
   next_keymap: Option<&'static [Binding]>,
   /// The next element's tooltip ([Ui::help]), and the elements with one built, by node.
@@ -517,6 +520,7 @@ impl<'a> Ui<'a> {
       st,
       canvases,
       next_id,
+      pending_root: None,
       next_float,
       next_keymap,
       next_help: None,
@@ -1029,6 +1033,15 @@ impl<'a> Ui<'a> {
       .next_id
       .take()
       .unwrap_or_else(|| (tree.nodes[*parent as usize].id.nth(*count as usize), false));
+    let id = match self.pending_root {
+      Some(r) if r == id && !named => id.key("around"),
+      Some(r) if r == id => {
+        self.pending_root = None;
+        id
+      }
+      _ => id,
+    };
+
     *count += 1;
     let parent = *parent;
     // The modifiers over its style, before what they decide: focus, the pointer, hit testing; a

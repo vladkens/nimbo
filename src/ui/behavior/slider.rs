@@ -217,14 +217,15 @@ impl<'s> Slider<'s> {
   pub fn show(self, ui: &mut Ui) -> Response {
     let style = ui.environment_value::<&dyn SliderStyle>();
     let id = ui.take_id();
-    // Its place taken: a style may build around its root, the next place's then, never its id
-    // (the place's when unnamed, or one a widget took for it).
-    ui.st.stack.last_mut().unwrap().1 += 1;
     let range = (*self.range.start(), *self.range.end());
     let b = ui.slider_behavior(id, self.value, self.range, self.step);
     let (value, step, label) = (*self.value, self.step, self.label);
     let root = ui.st.tree.nodes.len();
+    // A style may build around its root: what it builds there never takes the root's id (its
+    // place's when unnamed, or one a widget took for it).
+    let outer = ui.pending_root.replace(id);
     style.make_body(ui, SliderConfiguration { b, value, range, step, label });
+    ui.pending_root = outer;
     debug_assert!(
       ui.st.tree.nodes[root..].iter().any(|n| n.id == id),
       "a slider style builds the slider's root"
@@ -436,6 +437,11 @@ mod tests {
     });
     let ids: HashSet<_> = ui.st.tree.nodes.iter().map(|n| n.id).collect();
     assert_eq!(ids.len(), ui.st.tree.nodes.len());
+
+    // One place each.
+    let mut ui = Ui::new(UiState::default(), Size::new(300.0, 100.0), None, Duration::ZERO);
+    ui.slider(&mut 0.5, 0.0..=1.0);
+    assert_eq!(ui.child_count(), 1);
   }
 
   /// A step that doesn't divide the range ends it at its last step, from the pointer and from
