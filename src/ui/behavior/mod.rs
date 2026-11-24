@@ -43,7 +43,9 @@
 //! - the [Picker] over one of them, drawn by a [PickerStyle] ([Ui::picker_style]) that chooses its
 //!   input: the pop-up's and its menu, or the segments' ([PickerConfiguration]);
 //! - [Ui::list_behavior] and [Ui::list_rows]: a virtualized list's selection ([Selection]), keys
-//!   and presses, and its rows in view, which the app draws (`List` draws them from the theme);
+//!   and presses, and its rows in view, which the app draws; the [List] over them, drawn by a
+//!   [ListStyle] ([Ui::list_style]);
+//! - [Ui::help]'s tooltip: when it shows and where, drawn by a [HelpStyle] ([Ui::help_style]);
 //! - [Ui::text_field_behavior] and [Ui::selectable_behavior]: text editing on the editing model
 //!   ([crate::Editor]), drawn by [Ui::field_text] ([FieldBehavior] has the details), with the edit
 //!   menu ([Ui::edit_menu]); the [TextField] over it, drawn by a [TextFieldStyle]
@@ -58,7 +60,9 @@ mod button;
 mod content;
 mod dialog;
 mod field;
+mod help;
 mod list;
+mod list_style;
 mod menu;
 mod pick;
 mod picker;
@@ -76,8 +80,13 @@ pub use content::{Build, Content};
 pub use dialog::DialogBehavior;
 pub(crate) use field::DrawnEditMenu;
 pub use field::{EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, TextInput};
+pub use help::{HelpConfiguration, HelpStyle, PlainHelpStyle};
 use keyboard_types::Modifiers;
 pub use list::{ListBehavior, ListRows, SectionHeader, Selection};
+pub use list_style::{
+  List, ListConfiguration, ListLayout, ListResponse, ListRowConfiguration, ListStyle,
+  PlainListStyle, Row,
+};
 pub use menu::{MenuPlacement, TYPE_SELECT, TypeSelect};
 pub use picker::{InlinePickerStyle, Picker, PickerConfiguration, PickerStyle, Tag};
 pub use scroll::{ScrollBar, ScrollBehavior, ScrollerKnob};

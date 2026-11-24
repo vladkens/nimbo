@@ -1,6 +1,6 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Containers drawn from the theme, each its headless behaviour plus its look: virtualized lists
+//! Containers drawn from the theme, each its headless behaviour plus its look: the list's styles
 //! ([list]), menus ([menu]) and the picker's menu style ([popup]), tabs ([tabs]), a resizable split
 //! ([split]) and the window's toolbar ([toolbar]). The scroll area, which menus and lists scroll
 //! in, is the behaviours' ([super::behavior], [super::Ui::scroll_area]), drawn as the environment
@@ -15,7 +15,7 @@ pub mod split;
 pub mod tabs;
 pub mod toolbar;
 
-pub use list::{List, ListResponse, ListStyle, Row};
+pub use list::{InsetGroupedListStyle, InsetListStyle};
 pub use popup::MenuPickerStyle;
 pub use split::Split;
 pub use tabs::Tabs;

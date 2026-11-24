@@ -22,8 +22,6 @@
 //! the app sets a theme, it follows the OS ([Theme::system]): light or dark, with the user's
 //! accent, switching live when they change; [super::Ui::follow_system] goes back to it.
 
-use std::time::Duration;
-
 pub use super::ControlSize;
 use super::store::Transition;
 use super::{
@@ -114,10 +112,6 @@ pub struct Theme {
   pub field_line: Color,
   /// Fainter than muted: placeholders.
   pub faint: Color,
-  /// How long the pointer rests on an element before its tooltip shows, and how long after one
-  /// hid the next shows at once, as the pointer moves along a row of icons.
-  pub tip_delay: Duration,
-  pub tip_warm: Duration,
   /// The shortcut recorder shows a ⊗ that clears it ([super::Ui::shortcut]); off in the
   /// plates themes, whose recorder sits by a reset button (Backspace clears while recording).
   pub shortcut_clear: bool,
@@ -261,8 +255,6 @@ impl Theme {
     field: WHITE,
     field_line: rgb(0xdadade),
     faint: rgb(0xb2b2b7),
-    tip_delay: Duration::from_millis(200),
-    tip_warm: Duration::from_millis(1000),
     shortcut_clear: false,
     glass: true,
   };
