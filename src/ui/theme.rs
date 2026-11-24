@@ -5,15 +5,15 @@
 //! default one, changes what it wants and sets it, or builds its own.
 //!
 //! An app changes the look in three steps, from the least work to the most:
-//! - a style where the widget has one: `Button::new("Save").style(ButtonStyle::BorderedProminent)`;
-//! - a style derived from the theme, changed for one widget:
-//!   `t.button(ButtonStyle::Bordered).height(36.0)` given to [super::Button::style],
-//!   `t.field().hint("Search")` to [super::Ui::text_field];
+//! - a style where the widget has one:
+//!   `ui.button_style(&BorderedProminentButtonStyle).button("Save")` ([super::Ui::button_style]);
+//! - a style derived from the theme, changed for one widget: `t.field().hint("Search")` given to
+//!   [super::Ui::text_field];
 //! - its own theme: `const MINE: Theme = Theme { accent: rgb(0xe06c75), ..Theme::PLATES_DARK }` and
 //!   `ui.set_theme(MINE)`.
 //!
-//! An app that wants a widget to look different altogether draws its own over the widget's
-//! behaviour ([super::behavior]).
+//! An app that wants a widget to look different altogether writes a style of its own
+//! ([super::ButtonStyle]) or draws its own over the widget's behaviour ([super::behavior]).
 //!
 //! The default look is macOS 26 System Settings' neutral greys, as measured from its
 //! screenshots: [Theme::PLATES_LIGHT] and [Theme::PLATES_DARK], borderless translucent grey
@@ -25,9 +25,8 @@ use std::time::Duration;
 
 pub use super::ControlSize;
 use super::store::Transition;
-use super::widgets::ButtonRole;
 use super::{
-  Align, Dim, EnvironmentValue, FieldStyle, FocusRing, Shadow, Style, TextStyle, Ui, grow, px,
+  Align, EnvironmentValue, FieldStyle, FocusRing, Shadow, Style, TextStyle, Ui, grow, px,
 };
 use crate::app::{Appearance, ColorScheme};
 use crate::scene::{Color, alpha, mix, rgb};
@@ -126,19 +125,6 @@ pub struct Theme {
   pub glass: bool,
 }
 
-/// A button's style, as SwiftUI's `.buttonStyle` ([Theme::button]); its role tints it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ButtonStyle {
-  /// A raised grey fill (with the theme's border, if it has one): `.bordered`.
-  #[default]
-  Bordered,
-  /// The accent's fill, the danger's for a destructive role: the default action,
-  /// `.borderedProminent`.
-  BorderedProminent,
-  /// No fill until hovered: toolbars, icon buttons, close buttons; `.borderless`.
-  Borderless,
-}
-
 /// Whether a theme's controls have a border ([Theme::control_border]), and how wide in points.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ControlBorder {
@@ -225,57 +211,6 @@ pub enum Tone {
   Success,
   Danger,
   Warning,
-}
-
-/// How a button looks at rest, hovered and held, and its text. `const` builders, like [Style].
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ButtonLook {
-  /// Size, padding, radius and border; the fill comes from below.
-  pub frame: Style,
-  pub bg: Color,
-  pub hover: Color,
-  pub pressed: Color,
-  pub text: TextStyle,
-}
-
-impl ButtonLook {
-  pub const fn height(self, h: f32) -> Self {
-    Self { frame: self.frame.h(px(h)), ..self }
-  }
-
-  pub const fn w(self, w: Dim) -> Self {
-    Self { frame: self.frame.w(w), ..self }
-  }
-
-  pub const fn h(self, h: Dim) -> Self {
-    Self { frame: self.frame.h(h), ..self }
-  }
-
-  pub const fn radius(self, r: f32) -> Self {
-    Self { frame: self.frame.radius(r), ..self }
-  }
-
-  /// Padding left and right of the label.
-  pub const fn pad_x(self, x: f32) -> Self {
-    Self { frame: self.frame.pad_xy(x, 0.0), ..self }
-  }
-
-  pub const fn min_w(self, w: f32) -> Self {
-    Self { frame: self.frame.min_w(w), ..self }
-  }
-
-  pub const fn text(self, text: TextStyle) -> Self {
-    Self { text, ..self }
-  }
-
-  pub const fn font(self, font: Font) -> Self {
-    Self { text: self.text.font(font), ..self }
-  }
-
-  /// Fill at rest, hovered and held.
-  pub const fn colors(self, bg: Color, hover: Color, pressed: Color) -> Self {
-    Self { bg, hover, pressed, ..self }
-  }
 }
 
 impl Theme {
@@ -460,63 +395,18 @@ impl Theme {
     TextStyle::new(self.small.weight(Weight::Semibold), self.muted).line_limit(1)
   }
 
-  /// A button's look in `style` at the regular size, with no role ([Theme::button_for]).
-  pub const fn button(&self, style: ButtonStyle) -> ButtonLook {
-    self.button_for(style, None, ControlSize::Regular)
-  }
-
-  /// A button's look in `style` at `size` ([crate::Ui::control_size]), tinted by its `role`: a
-  /// destructive prominent one filled with the danger colour, any other destructive one's label
-  /// in it.
-  pub const fn button_for(
-    &self,
-    style: ButtonStyle,
-    role: Option<ButtonRole>,
-    size: ControlSize,
-  ) -> ButtonLook {
+  /// The padding at each side of a push button's label at `size` ([crate::Ui::control_size]):
+  /// half its height, rounded, 12 at 24 points; with [Sizes::control_h], for lining things up
+  /// with one.
+  pub fn button_padding(&self, size: ControlSize) -> f32 {
     let z = self.sizes;
-    let (h, font) = match size {
-      ControlSize::Small => (z.small_h, self.small),
-      ControlSize::Regular => (z.control_h, self.font),
-      ControlSize::Large => (z.control_h + 8.0, Font { size: self.font.size + 2.0, ..self.font }),
+    let h = match size {
+      ControlSize::Small => z.small_h,
+      ControlSize::Regular => z.control_h,
+      ControlSize::Large => z.control_h + 8.0,
     };
 
-    // Padding grows with the height: 12 at 24, 18 at 36. Its label's width, as AppKit's push
-    // buttons keep theirs: text beside it wraps instead ([ButtonLook::w] changes it).
-    let pad = (h * 0.5).round();
-    let frame = Style::new().w(Dim::Rigid).h(px(h)).min_w(h).pad_xy(pad, 0.0).gap(5.0).center();
-    let frame = frame.radius(if h < z.control_h { self.radius - 1.0 } else { self.radius });
-    let text = TextStyle::new(font, self.text).line_limit(1);
-    let destructive = matches!(role, Some(ButtonRole::Destructive));
-    let red = if destructive { text.color(self.danger) } else { text };
-
-    let (frame, bg, hover, pressed, text) = match style {
-      ButtonStyle::Bordered => {
-        let frame = frame.border(self.control_border.width(), self.line);
-        (frame, self.raised, self.hover, self.pressed, red)
-      }
-      ButtonStyle::BorderedProminent if destructive => {
-        let c = self.danger;
-        let (h, p) = (mix(c, WHITE, 0.12), mix(c, BLACK, 0.15));
-        (frame, c, h, p, text.color(self.on_accent))
-      }
-      ButtonStyle::BorderedProminent => {
-        let c = self.accent;
-        let p = mix(c, BLACK, 0.15);
-        let text = text.color(self.on_accent).font(font.weight(Weight::Medium));
-        (frame, c, self.accent_hover(), p, text)
-      }
-      ButtonStyle::Borderless => (frame, alpha(self.ghost, 0.0), self.ghost, self.hover, red),
-    };
-
-    ButtonLook { frame, bg, hover, pressed, text }
-  }
-
-  /// `s` showing a selected or toggled-on state: tinted with the accent, the label in it.
-  pub const fn selected(&self, s: ButtonLook) -> ButtonLook {
-    let c = self.accent;
-    let s = s.colors(alpha(c, 0.18), alpha(c, 0.25), alpha(c, 0.32));
-    ButtonLook { text: s.text.color(c), ..s }
+    (h * 0.5).round()
   }
 
   /// A modal dialog's card ([super::Dialog]), a macOS 26 alert's as measured: the
@@ -530,28 +420,6 @@ impl Theme {
       .radius(25.0)
       .border(self.sizes.menu_edge, edge)
       .shadow(Shadow::new(10.0, 36.0, self.shadow))
-  }
-
-  /// A dialog's button by its role, a macOS 26 alert's: a capsule 28 high in the body font,
-  /// padded 12; Cancel a translucent grey of the text over the card, the action the accent, or
-  /// red when destructive.
-  pub const fn dialog_button(&self, role: ButtonRole) -> ButtonLook {
-    let h = 28.0;
-    let style = match role {
-      ButtonRole::Cancel => ButtonStyle::Bordered,
-      _ => ButtonStyle::BorderedProminent,
-    };
-
-    let s = self.button_for(style, Some(role), ControlSize::Regular);
-    let s = ButtonLook { frame: s.frame.border(0.0, [0.0; 4]), ..s };
-    let s = s.height(h).radius(h / 2.0).pad_x(12.0).font(self.font);
-    match style {
-      ButtonStyle::Bordered | ButtonStyle::Borderless => {
-        let (k, c) = (if self.scheme.is_dark() { 0.09 } else { 0.07 }, self.text);
-        s.colors(alpha(c, k), alpha(c, k + 0.04), alpha(c, k + 0.1))
-      }
-      _ => s,
-    }
   }
 
   /// The backdrop under a modal dialog ([super::Ui::modal]): black at 20% (light) or 45%
@@ -662,31 +530,6 @@ mod tests {
   use crate::app::{App, Event};
   use crate::harness::Harness;
   use crate::scene::Size;
-
-  #[test]
-  fn variants_read_the_palette() {
-    let t = Theme::PLATES_DARK;
-    assert_eq!(t.button(ButtonStyle::BorderedProminent).bg, t.accent);
-    assert_eq!(t.button(ButtonStyle::Borderless).bg[3], 0.0);
-    assert_eq!(t.button(ButtonStyle::Bordered).frame.border_color, t.line);
-    assert_eq!(Theme::PLATES_LIGHT.button(ButtonStyle::Bordered).frame.border, [0.0; 4]);
-    const TALL: ButtonLook = Theme::PLATES_LIGHT.button(ButtonStyle::Bordered).height(36.0);
-    assert_eq!(TALL.frame.size[1], px(36.0));
-
-    // Sizes and builders, all const.
-    const KEY: ButtonLook = Theme::PLATES_DARK
-      .button(ButtonStyle::Bordered)
-      .w(super::super::grow())
-      .h(px(40.0))
-      .radius(12.0);
-    assert_eq!((KEY.frame.size[1], KEY.frame.radii), (px(40.0), [12.0; 4]));
-    let small = t.button_for(ButtonStyle::Borderless, None, ControlSize::Small);
-    let large = t.button_for(ButtonStyle::Borderless, None, ControlSize::Large);
-    assert_eq!((small.frame.size[1], small.text.font), (px(t.sizes.small_h), t.small));
-    assert_eq!((large.frame.size[1], large.text.font.size), (px(32.0), 15.0));
-    let on = t.selected(t.button(ButtonStyle::Bordered));
-    assert_eq!((on.text.color, on.bg[3]), (t.accent, 0.18));
-  }
 
   #[test]
   fn the_system_theme_follows_the_os_accent() {

@@ -72,9 +72,10 @@ use std::time::Duration;
 
 pub use a11y::{A11yNode, A11yTree, Action, LabeledPairRole, Props, Role, State, Value};
 pub use behavior::{
-  Behavior, Content, DialogBehavior, EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle,
-  ListBehavior, ListRows, MenuPlacement, ScrollBar, ScrollBehavior, ScrollerKnob, SectionHeader,
-  Selection, SplitBehavior, TextInput, TypeSelect,
+  Behavior, Button, ButtonConfiguration, ButtonRole, ButtonStyle, Content, DialogBehavior,
+  EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, ListBehavior, ListRows, MenuPlacement,
+  PlainButtonStyle, ScrollBar, ScrollBehavior, ScrollerKnob, SectionHeader, Selection,
+  SplitBehavior, TextInput, TypeSelect,
 };
 pub use containers::{
   List, ListResponse, ListStyle, Picker, Row, Split, Tabs, Tag, ToolbarItemPlacement,
@@ -98,8 +99,10 @@ pub use style::{
 };
 pub use textlayout::Edit;
 pub(crate) use textlayout::TextLayout;
-pub use theme::{ButtonLook, ButtonStyle, ControlBorder, Sizes, SwitchSize, Theme, Tone};
-pub use widgets::{Button, ButtonRole, Slider};
+pub use theme::{ControlBorder, Sizes, SwitchSize, Theme, Tone};
+pub use widgets::{
+  BorderedButtonStyle, BorderedProminentButtonStyle, BorderlessButtonStyle, Slider,
+};
 
 use self::input::{Deliver, Input, ScrollState};
 use self::store::{Anim, Store};
@@ -148,6 +151,9 @@ pub(crate) struct UiState {
   pub(crate) clipboard: Box<dyn Clipboard>,
   /// Values the whole window shares, one per type ([Ui::set_environment]).
   env: Vec<Box<dyn Any>>,
+  /// The shell's defaults under the window's values, one per type
+  /// ([UiState::set_environment_default]).
+  env_defaults: Vec<Box<dyn Any>>,
   /// Values scoped to the elements being built ([Ui::environment]).
   scoped: environment::Scoped,
   /// The focus ring the view set this frame ([Ui::set_focus_ring]), over the default, which the
@@ -229,6 +235,7 @@ impl Default for UiState {
       waker: Waker::default(),
       clipboard: Box::default(),
       env: Vec::new(),
+      env_defaults: Vec::new(),
       scoped: environment::Scoped::default(),
       own_ring: None,
       ring: None,

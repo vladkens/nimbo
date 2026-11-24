@@ -1,6 +1,6 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Widgets drawn from the theme ([Ui::theme]): label, link, button (variants, an [Icon]), ⓘ and
+//! Widgets drawn from the theme ([Ui::theme]): label, link, button styles (an [Icon] too), ⓘ and
 //! "?" buttons, text field, search field and selectable text, check box, switch, slider,
 //! segmented control, progress bar and spinner, badge, tooltip, the shortcut recorder, and
 //! images from pixels; each at the control size ([Ui::control_size]). Each control is its behaviour
@@ -9,7 +9,7 @@
 //!
 //! ```ignore
 //! if ui.button("Refresh").clicked { self.refresh() }
-//! if Button::new("Save").style(ButtonStyle::BorderedProminent).show(ui).clicked { self.save() }
+//! if ui.button_style(&BorderedProminentButtonStyle).button("Save").clicked { self.save() }
 //! ui.disabled(!self.dirty).button("Revert");
 //! ui.checkbox(&mut self.wrap, "Wrap lines");
 //! Slider::new(&mut self.level, 10.0..=90.0).step(10.0).show(ui);
@@ -42,8 +42,8 @@ mod slider;
 mod toggle;
 mod tooltip;
 
-pub(crate) use button::MarkShift;
-pub use button::{Button, ButtonRole};
+pub use button::{BorderedButtonStyle, BorderedProminentButtonStyle, BorderlessButtonStyle};
+pub(crate) use button::{ButtonLook, MarkShift, Variant, draw, look};
 pub use slider::Slider;
 
 // Where apps found them before icons moved into the core.

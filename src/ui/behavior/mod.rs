@@ -22,7 +22,8 @@
 //! [super::Ui::disabled] before the call disables it: no input is read, no hand. Hover fades are
 //! the look's (`Ui::hot`). What each one covers, each in a module of its own here:
 //!
-//! - [Ui::button_behavior]: click, Space while focused (flashes it pressed);
+//! - [Ui::button_behavior]: click, Space while focused (flashes it pressed); the [Button] over it,
+//!   drawn by a [ButtonStyle] ([Ui::button_style]);
 //! - [Ui::toggle_behavior] (check box, switch): a button that flips a `bool`;
 //! - [Ui::slider_behavior]: a drag along the element onto the nearest step if it has one, the
 //!   arrows move a step or a twentieth;
@@ -47,6 +48,7 @@
 //! [super::containers]), which build on what is public here and in the core; but the scroll
 //! area's, which is here.
 
+mod button;
 mod content;
 mod dialog;
 mod field;
@@ -61,6 +63,7 @@ mod slider;
 mod split;
 mod toggle;
 
+pub use button::{Button, ButtonConfiguration, ButtonRole, ButtonStyle, PlainButtonStyle};
 pub use content::{Build, Content};
 pub use dialog::DialogBehavior;
 pub use field::{EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, TextInput};

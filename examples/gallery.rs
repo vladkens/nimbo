@@ -15,12 +15,13 @@
 
 use nimbo::ui::{LabeledPairRole, icon};
 use nimbo::{
-  Align, Answer, App, Axes, Axis, Bitmap, Button, ButtonRole, ButtonStyle, Color, Config, Content,
-  ContentMode, ControlSize, Cursor, Dialog, Enabled, EnvironmentValue, Float, Font, FormRow,
-  FormStyle, Hotkey, Icon, Id, Item, LinePattern, List, ListRows, ListStyle, Menu, Picker, Quad,
-  Rect, ScrollBar, ScrollerKnob, Section, Selection, Shortcut, Slider, Split, Style, Tabs, Tag,
-  TextStyle, Tone, ToolbarItemPlacement, TruncationMode, Ui, UnitPoint, WindowToolbarStyle, alpha,
-  grow, mix, px, t, tn,
+  Align, Answer, App, Axes, Axis, Bitmap, BorderedProminentButtonStyle, BorderlessButtonStyle,
+  Button, ButtonConfiguration, ButtonRole, ButtonStyle, Color, Config, Content, ContentMode,
+  ControlSize, Cursor, Dialog, Enabled, EnvironmentValue, Float, Font, FormRow, FormStyle, Hotkey,
+  Icon, Id, Item, LinePattern, List, ListRows, ListStyle, Menu, Picker, Quad, Rect, ScrollBar,
+  ScrollerKnob, Section, Selection, Shortcut, Slider, Split, Style, Tabs, Tag, TextStyle, Tone,
+  ToolbarItemPlacement, TruncationMode, Ui, UnitPoint, WindowToolbarStyle, alpha, grow, mix, px, t,
+  tn,
 };
 
 pub const SIDEBAR: &str = "sidebar";
@@ -30,6 +31,23 @@ pub const DIALOG: &str = "dialog";
 pub const BLOCK: &str = "block";
 /// The width of a page, and of a block's picture.
 pub const WIDTH: f32 = 520.0;
+
+/// A button style of the gallery's own: a capsule tinted with the accent, deeper while held,
+/// faint when disabled.
+struct Pill;
+
+impl ButtonStyle for Pill {
+  fn make_body(&self, ui: &mut Ui, mut c: ButtonConfiguration) {
+    let t = ui.theme();
+    let (k, ink) = match (c.is_enabled(), c.is_pressed()) {
+      (false, _) => (0.06, alpha(t.accent, 0.4)),
+      (true, pressed) => (if pressed { 0.3 } else { 0.15 }, t.accent),
+    };
+
+    let s = Style::new().h(px(24.0)).pad_xy(12.0, 0.0).gap(5.0).center().radius(12.0);
+    ui.row(s.bg(alpha(t.accent, k)), |ui| c.label(ui, TextStyle::new(t.font, ink)));
+  }
+}
 
 /// A building block: its group, name, SwiftUI's line and nimbo's.
 pub struct Block {
@@ -76,9 +94,11 @@ pub const BLOCKS: &[Block] = &[
   b("Text", "Image", "Image(systemName: \"gear\")", "ui.icon(Icon::GEAR, 20.0, t.text)"),
   b("Text", "Label content", "Label { Text(title) } icon: { Image(systemName: \"folder\") }; configuration.label in a style", "let label: Content = Icon::FOLDER.into(); label.build(ui.with_id(id.key(\"label\")), t.label())"),
   b("Text", "Photo", "Image(nsImage: NSImage(data: file)!).resizable().aspectRatio(contentMode: .fill).frame(width: 80, height: 80).clipped()", "let photo = Bitmap::decode(&file, 240)?; ui.aspect_ratio(ContentMode::Fill).image(&photo, Style::new().w(px(80.0)).h(px(80.0)))"),
-  b("Controls", "Button", "Button(\"Save\") { … }.buttonStyle(.borderedProminent)", "Button::new(\"Save\").style(ButtonStyle::BorderedProminent).show(ui)"),
+  b("Controls", "Button", "Button(\"Save\") { … }.buttonStyle(.borderedProminent)", "ui.button_style(&BorderedProminentButtonStyle).button(\"Save\")"),
   b("Controls", "Button role", "Button(\"Delete\", role: .destructive) { … }", "Button::new(\"Delete\").role(ButtonRole::Destructive).show(ui)"),
   b("Controls", "Icon button", "Button { Image(systemName: \"trash\") }.buttonStyle(.borderless)", "ui.icon_button(Icon::TRASH)"),
+  b("Controls", "Button style", "HStack { Button(\"Cut\") { … }; Button(\"Copy\") { … } }.buttonStyle(.borderless)", "ui.button_style(&BorderlessButtonStyle).row(style, |ui| { ui.button(\"Cut\"); ui.button(\"Copy\"); }); ui.button(\"Paste\")"),
+  b("Controls", "Custom button style", "struct Pill: ButtonStyle { func makeBody(configuration: Configuration) -> some View { configuration.label.padding(…).background(…) } }", "impl ButtonStyle for Pill { fn make_body(&self, ui: &mut Ui, mut c: ButtonConfiguration) { ui.row(style, |ui| c.label(ui, s)); } } ui.button_style(&Pill).button(\"Pill\")"),
   b("Controls", "Switch", "Toggle(\"Live\", isOn: $live)", "ui.toggle(&mut self.live, \"Live\")"),
   b("Controls", "Check box", "Toggle(\"Wrap\", isOn: $wrap).toggleStyle(.checkbox)", "ui.checkbox(&mut self.wrap, \"Wrap\")"),
   b("Controls", "Slider", "Slider(value: $zoom, in: 0...200)", "ui.slider(&mut self.zoom, 0.0..=200.0)"),
@@ -407,20 +427,35 @@ impl Gallery {
           ui.aspect_ratio(ContentMode::Fit).image(photo, square);
         }
       }),
+
       "Button" => Self::variants(ui, Shown::Sized, |ui| {
         ui.button("Bordered");
-        Button::new("Prominent").style(ButtonStyle::BorderedProminent).show(ui);
-        Button::new("Borderless").style(ButtonStyle::Borderless).show(ui);
+        ui.button_style(&BorderedProminentButtonStyle).button("Prominent");
+        ui.button_style(&BorderlessButtonStyle).button("Borderless");
       }),
       "Button role" => Self::variants(ui, Shown::Sized, |ui| {
         Button::new("Delete").role(ButtonRole::Destructive).show(ui);
-        let red = Button::new("Delete").style(ButtonStyle::BorderedProminent);
-        red.role(ButtonRole::Destructive).show(ui);
+        let red = Button::new("Delete").role(ButtonRole::Destructive);
+        red.show(ui.button_style(&BorderedProminentButtonStyle));
       }),
       "Icon button" => Self::variants(ui, Shown::Sized, |ui| {
         ui.a11y_label("Reset").icon_button(Icon::RESET);
         ui.icon_button(Icon::TRASH);
       }),
+
+      // Two buttons borderless by their row, the one after it in the window's style.
+      "Button style" => Self::variants(ui, Shown::Sized, |ui| {
+        ui.button_style(&BorderlessButtonStyle).row(line(10.0), |ui| {
+          ui.button("Cut");
+          ui.button("Copy");
+        });
+        ui.button("Paste");
+      }),
+      "Custom button style" => Self::variants(ui, Shown::Plain, |ui| {
+        ui.button_style(&Pill).button("Pill");
+        Button::new("Open").icon(Icon::FOLDER).show(ui.button_style(&Pill));
+      }),
+
       "Switch" => Self::variants(ui, Shown::Sized, |ui| _ = ui.toggle(&mut self.live, "Live")),
       "Check box" => Self::variants(ui, Shown::Plain, |ui| _ = ui.checkbox(&mut self.wrap, "Wrap")),
       // A slider fills the width it is offered: 160 here.
