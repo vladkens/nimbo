@@ -54,14 +54,22 @@ SCENARIOS: dict[str, tuple[str, list[str], list[str]]] = {
     "shot",
     "press", "AXCloseButton", "sleep", "0.5", "count",
   ]),
-  "gallery": ("gallery", [], [
+  # The gallery's blocks alone (`gallery <slug>`): its pages open on layout, with no controls.
+  "toggles": ("gallery", ["toggle-style"], [
     "dump", "count",
-    "press", "AXCheckBox:Off", "sleep", "0.5", "count",
+    "press", "AXCheckBox:Wrap", "sleep", "0.5", "count",
     "press", "AXCheckBox:Live", "sleep", "1", "count",
-    "hit", "AXSlider", "hit", "AXTextField:Search widgets",
-    "inc", "AXSlider", "sleep", "0.5", "count",
-    "focus", "AXTextField:Search widgets", "sleep", "0.5", "count", "focused",
-    "set", "AXTextField:Search widgets", "Sliders", "sleep", "0.5", "count",
+    "dump",
+  ]),
+  "slider": ("gallery", ["slider"], [
+    "hit", "AXSlider:Zoom",
+    "inc", "AXSlider:Zoom", "sleep", "0.5", "count",
+    "dump",
+  ]),
+  "search": ("gallery", ["search-field"], [
+    "hit", "AXTextField:Search",
+    "focus", "AXTextField:Search", "sleep", "0.5", "count", "focused",
+    "set", "AXTextField:Search", "Sliders", "sleep", "0.5", "count",
     "dump",
   ]),
   # The browser's row cut by the list's bottom edge scrolled into view (its whole frame at its
