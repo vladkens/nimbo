@@ -51,7 +51,9 @@ impl ToggleStyle for SwitchToggleStyle {
         let (ring, drop) = ([0.0, 0.0, 0.0, 0.04], [0.0, 0.0, 0.0, 0.14]);
         ui.el(knob.border(0.5, ring).shadow(Shadow::new(0.5, 2.5, drop)));
       });
-      c.label(ui, t.label());
+      // An icon draws past the row's opacity: dimmed on its own.
+      let s = t.label();
+      c.label(ui, s.color(ui.dim(s.color, c.is_icon_only() && !c.is_enabled())));
     });
   }
 }
@@ -72,7 +74,10 @@ mod tests {
   use crate::harness::Harness;
   use crate::keys::Key;
   use crate::scene::Size;
-  use crate::ui::{ButtonToggleStyle, Id, PlainToggleStyle, Style, Theme, ToggleStyle, Ui};
+  use crate::ui::{
+    ButtonToggleStyle, CheckboxToggleStyle, Icon, Id, PlainToggleStyle, Style, Theme, ToggleStyle,
+    Ui,
+  };
 
   #[derive(Default)]
   struct Switch {
@@ -158,5 +163,40 @@ mod tests {
     let (on, off) = (fill(&h, "on"), fill(&h, "off"));
     assert!(on[2] > on[0] + 20 && off[2] == off[0], "{on:?} on, {off:?} off");
     assert!(h.a11y().contains("check box \"On\" on"), "{}", h.a11y());
+  }
+
+  /// A switch and a check box with an icon label, enabled or not.
+  struct Icons(bool);
+
+  impl App for Icons {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.set_theme(Theme::PLATES_LIGHT);
+      let ground = Style::new().grow().gap(20.0).bg(ui.theme().bg);
+      ui.disabled(self.0).col(ground, |ui| {
+        ui.id("s").toggle(&mut true, Icon::GEAR);
+        ui.toggle_style(&CheckboxToggleStyle).id("c").toggle(&mut true, Icon::GEAR);
+      });
+    }
+  }
+
+  /// Disabled, an icon label dims as the control does: it draws past the row's opacity.
+  #[test]
+  fn a_disabled_toggle_dims_its_icon() {
+    let mut h = Harness::new(Icons(false), Size::new(200.0, 100.0), 1.0);
+    h.frame();
+    // The icon's box, the row's end.
+    let ink = |h: &mut Harness<Icons>, n: &str| {
+      let (r, img) = (h.rect(Id::of(n)).unwrap(), h.render());
+      let xs = (r.x + r.w - 15.0) as u32..(r.x + r.w) as u32;
+      let ys = (r.y + r.h / 2.0 - 7.0) as u32..(r.y + r.h / 2.0 + 7.0) as u32;
+      xs.flat_map(|x| ys.clone().map(move |y| (x, y)))
+        .map(|(x, y)| 255 - img.pixel(x as f32, y as f32)[0] as u32)
+        .sum::<u32>()
+    };
+    let on = [ink(&mut h, "s"), ink(&mut h, "c")];
+    h.app_mut().0 = true;
+    h.rt.redraw();
+    let off = [ink(&mut h, "s"), ink(&mut h, "c")];
+    assert!(off[0] * 2 < on[0] && off[1] * 2 < on[1], "{on:?} enabled, {off:?} disabled");
   }
 }

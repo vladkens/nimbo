@@ -28,7 +28,9 @@ impl ToggleStyle for CheckboxToggleStyle {
         false => _ = ui.el(b),
       }
 
-      c.label(ui, t.label());
+      // An icon draws past the row's opacity: dimmed on its own.
+      let s = t.label();
+      c.label(ui, s.color(ui.dim(s.color, c.is_icon_only() && off)));
     });
   }
 }
