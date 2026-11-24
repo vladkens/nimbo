@@ -165,6 +165,9 @@ pub(crate) struct UiState {
   /// The focus and pointer the app set on controls whose behaviours have read them, by the id of
   /// the root each is for, until it is built ([Ui::take_control_modifiers]); cleared each frame.
   control_mods: Vec<(Id, Option<bool>, Option<Cursor>)>,
+  /// The ids of controls whose roots are yet to be built, inside what their styles build around
+  /// them ([Ui::control_body]): an element there never takes one by its place; cleared each frame.
+  roots: Vec<Id>,
   /// The OS's look ([Ui::appearance]).
   appearance: Appearance,
   /// What the last frame cost ([Ui::last_frame]).
@@ -242,6 +245,7 @@ impl Default for UiState {
       own_ring: None,
       ring: None,
       control_mods: Vec::new(),
+      roots: Vec::new(),
       appearance: Appearance::DARK,
       stats: FrameStats::default(),
       resize: None,
@@ -468,9 +472,6 @@ pub struct Ui<'a> {
   canvases: Vec<Option<Canvas<'a>>>,
   /// The next element's id, and whether it is named (interactive).
   next_id: Option<(Id, bool)>,
-  /// A control's id whose root is yet to be built, inside what its style builds around it: an
-  /// element there never takes it by its place.
-  pending_root: Option<Id>,
   next_float: Option<Float>,
   next_keymap: Option<&'static [Binding]>,
   /// The next element's tooltip ([Ui::help]), and the elements with one built, by node.
@@ -509,6 +510,8 @@ impl<'a> Ui<'a> {
     st.stack.clear();
     st.stack.push((0, 0));
     st.control_mods.clear();
+    st.roots.clear();
+
     st.animating = false;
     st.input.moves = false;
     (st.grab, st.ring_on, st.toolbar, st.own_ring) = (None, None, false, None);
@@ -520,7 +523,6 @@ impl<'a> Ui<'a> {
       st,
       canvases,
       next_id,
-      pending_root: None,
       next_float,
       next_keymap,
       next_help: None,
@@ -858,6 +860,15 @@ impl<'a> Ui<'a> {
     self
   }
 
+  /// Builds the body of the control `id` with `f` in a [Ui::group], its root anywhere in it:
+  /// what is built around the root never takes its id by its place.
+  pub(crate) fn control_body<R>(&mut self, id: Id, f: impl FnOnce(&mut Self) -> R) -> R {
+    self.st.roots.push(id);
+    let r = self.group(f);
+    self.st.roots.retain(|&k| k != id);
+    r
+  }
+
   /// The id the next element gets, taken for a widget to name its element with: the one set
   /// by [Ui::id] or [Ui::key], else its position among its siblings.
   pub fn take_id(&mut self) -> Id {
@@ -865,7 +876,7 @@ impl<'a> Ui<'a> {
       Some((id, _)) => id,
       None => {
         let &(parent, count) = self.st.stack.last().unwrap();
-        around(self.pending_root, self.st.tree.nodes[parent as usize].id.nth(count as usize))
+        around(&self.st.roots, self.st.tree.nodes[parent as usize].id.nth(count as usize))
       }
     };
 
@@ -1030,10 +1041,10 @@ impl<'a> Ui<'a> {
     let (parent, count) = self.st.stack.last_mut().unwrap();
     let tree = &mut self.st.tree;
     let place = tree.nodes[*parent as usize].id.nth(*count as usize);
-    let (id, named) =
-      self.next_id.take().unwrap_or_else(|| (around(self.pending_root, place), false));
-    if named && self.pending_root == Some(id) {
-      self.pending_root = None;
+    let roots = &mut self.st.roots;
+    let (id, named) = self.next_id.take().unwrap_or_else(|| (around(roots, place), false));
+    if named && !roots.is_empty() {
+      roots.retain(|&r| r != id);
     }
 
     *count += 1;
@@ -1278,9 +1289,13 @@ impl<'a> Ui<'a> {
 }
 
 /// The id of the place `place`: its own, or keyed when it is that of a control's root yet to be
-/// built (`root`), which takes it by name.
-fn around(root: Option<Id>, place: Id) -> Id {
-  if root == Some(place) { place.key("around") } else { place }
+/// built (`roots`), which takes it by name.
+fn around(roots: &[Id], mut place: Id) -> Id {
+  while roots.contains(&place) {
+    place = place.key("around");
+  }
+
+  place
 }
 
 #[cfg(test)]

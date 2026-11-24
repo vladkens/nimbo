@@ -221,11 +221,10 @@ impl<'s> Slider<'s> {
     let b = ui.slider_behavior(id, self.value, self.range, self.step);
     let (value, step, label) = (*self.value, self.step, self.label);
     let root = ui.st.tree.nodes.len();
-    // A style may build around its root: what it builds there never takes the root's id (its
-    // place's when unnamed, or one a widget took for it).
-    let outer = ui.pending_root.replace(id);
-    style.make_body(ui, SliderConfiguration { b, value, range, step, label });
-    ui.pending_root = outer;
+    // A style may build around its root; the values put for it reach all it builds.
+    ui.control_body(id, |ui| {
+      style.make_body(ui, SliderConfiguration { b, value, range, step, label })
+    });
     debug_assert!(
       ui.st.tree.nodes[root..].iter().any(|n| n.id == id),
       "a slider style builds the slider's root"
@@ -292,7 +291,8 @@ mod tests {
   use crate::app::App;
   use crate::harness::Harness;
   use crate::scene::{Quad, Size};
-  use crate::ui::{Cursor, UiState};
+  use crate::text::Font;
+  use crate::ui::{Cursor, TextStyle, UiState};
   use crate::{Modifiers, NamedKey};
 
   const LEFT: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
@@ -420,12 +420,49 @@ mod tests {
 
   impl SliderStyle for Wrapped {
     fn make_body(&self, ui: &mut Ui<'_>, c: SliderConfiguration<'_>) {
-      // Another control first, unnamed, and a container taking its id.
-      ui.slider_style(&PlainSliderStyle).slider(&mut 0.5, 0.0..=1.0);
+      // Another control first, unnamed, wrapped too, and a container taking its id.
+      ui.slider_style(&Inner).slider(&mut 0.5, 0.0..=1.0);
       let id = ui.take_id();
       ui.with_id(id)
         .col(Style::new(), |ui| _ = c.root(ui).el(Style::new().w(px(100.0)).h(px(10.0))));
     }
+  }
+
+  /// A bar in a column of its own.
+  struct Inner;
+
+  impl SliderStyle for Inner {
+    fn make_body(&self, ui: &mut Ui<'_>, c: SliderConfiguration<'_>) {
+      ui.col(Style::new(), |ui| _ = c.root(ui).el(Style::new().w(px(100.0)).h(px(10.0))));
+    }
+  }
+
+  /// A label before the bar, and a button after it.
+  struct Labeled;
+
+  impl SliderStyle for Labeled {
+    fn make_body(&self, ui: &mut Ui<'_>, c: SliderConfiguration<'_>) {
+      ui.text("Level", TextStyle::new(Font::ui(13.0), [0.0; 4]));
+      c.root(ui).el(Style::new().w(px(100.0)).h(px(10.0)));
+      ui.id("reset").button("Reset");
+    }
+  }
+
+  struct Reset;
+
+  impl App for Reset {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.slider_style(&Labeled).disabled(true).slider(&mut 0.5, 0.0..=1.0);
+    }
+  }
+
+  /// What a style builds around its root is disabled with it.
+  #[test]
+  fn a_disabled_slider_disables_all_its_style_builds() {
+    let mut h = Harness::new(Reset, Size::new(300.0, 100.0), 1.0);
+    h.frame();
+    let a = h.a11y();
+    assert!(a.lines().any(|l| l.trim() == "button \"Reset\" disabled"), "{a}");
   }
 
   /// Unnamed sliders whose style builds around their root: each has an id of its own.
