@@ -318,7 +318,7 @@ impl Ui<'_> {
 
   /// Text the user selects with the mouse and the keyboard (Shift-arrows) and copies: a double
   /// click selects a word, a triple click a line; Cmd-A and Cmd-C come from its bindings
-  /// ([crate::keys::SELECT_KEYS]). Build it under `id` with [Ui::field_text].
+  /// (`SELECT_KEYS`). Build it under `id` with [Ui::field_text].
   pub fn selectable_behavior(&mut self, id: Id, text: &str) -> FieldBehavior {
     let disabled = self.begin(id, Role::StaticText).is_some();
     let mut st = std::mem::take(self.state::<FieldState>(id));
@@ -875,10 +875,9 @@ impl FieldStyle {
 mod tests {
   use super::*;
   use crate::app::App;
-  use crate::harness::Harness;
   use crate::scene::Size;
   use crate::ui::{Theme, px};
-  use crate::{Modifiers, NamedKey};
+  use crate::{Harness, Modifiers, NamedKey};
 
   const REST: Color = [0.2, 0.2, 0.2, 1.0];
   const OVER: Color = [0.0, 0.0, 1.0, 1.0];

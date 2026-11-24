@@ -102,8 +102,8 @@ impl<'s> Tabs<'s> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::Harness;
   use crate::app::App;
-  use crate::harness::Harness;
   use crate::scene::Size;
   use crate::ui::Id;
   use crate::ui::input::ScrollState;

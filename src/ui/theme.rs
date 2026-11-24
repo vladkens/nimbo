@@ -980,8 +980,8 @@ impl Ui<'_> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::Harness;
   use crate::app::{App, Event};
-  use crate::harness::Harness;
   use crate::scene::Size;
 
   #[test]

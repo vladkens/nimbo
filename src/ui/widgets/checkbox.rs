@@ -54,8 +54,8 @@ fn check(r: Rect) -> [Point; 3] {
 
 #[cfg(test)]
 mod tests {
+  use crate::Harness;
   use crate::app::App;
-  use crate::harness::Harness;
   use crate::scene::Size;
   use crate::ui::{CheckboxToggleStyle, Id, Theme, Ui};
 

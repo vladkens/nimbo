@@ -34,8 +34,8 @@ use super::super::dbus::{self, Gv, V, VTable};
 use super::super::dl::fns;
 use super::super::{Fp, P, S, appearance, connect, lib, load};
 use super::menu::{self, nodes};
-use crate::tray::{Menu, Set, State, TrayIcon};
-use crate::{paths, platform};
+use crate::tray::{Set, State, TrayIcon};
+use crate::{Menu, paths, platform};
 
 const SNI: &str = "org.kde.StatusNotifierItem";
 const SNI_PATH: &str = "/StatusNotifierItem";

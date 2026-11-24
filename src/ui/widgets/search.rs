@@ -16,7 +16,7 @@
 use super::field::field_frame;
 use crate::keys::EDIT_KEYS;
 use crate::scene::mix;
-use crate::ui::icon::{self, Icon};
+use crate::ui::icon::Icon;
 use crate::ui::{
   Align, Axes, Cursor, FieldBehavior, FieldStyle, Float, Response, Role, Style, Ui, grow, px,
 };
@@ -59,7 +59,7 @@ impl Ui<'_> {
       let cover = cover.align(Align::Start, Align::Center);
       ui.float(Float::parent().clip()).row(cover, |ui| {
         let s = Style::new().w(px(17.0)).h(px(17.0));
-        ui.canvas(s, move |f, r| icon::draw(f, Icon::SEARCH, r, muted));
+        ui.canvas(s, move |f, r| Icon::SEARCH.draw(f, r, muted));
 
         if clear {
           let x = id.key("clear");
@@ -68,7 +68,7 @@ impl Ui<'_> {
           ui.a11y(x, Role::Button).name("Clear");
           let hot = ui.ctl_hot(x, ui.hovered(x));
           let mark = mix(t.faint, t.secondary, hot);
-          ui.with_id(x).canvas(s, move |f, r| icon::draw(f, Icon::CLEAR, r, mark));
+          ui.with_id(x).canvas(s, move |f, r| Icon::CLEAR.draw(f, r, mark));
         }
       });
     });
@@ -96,11 +96,10 @@ impl Ui<'_> {
 #[cfg(test)]
 mod tests {
   use crate::app::{App, Cx, Event, MouseButton};
-  use crate::harness::Harness;
   use crate::keys::{Binding, Command, Key, Shortcut};
   use crate::scene::{Rect, Size};
   use crate::ui::{Cursor, Id, Style, Ui, grow, pct};
-  use crate::{Modifiers, NamedKey};
+  use crate::{Harness, Modifiers, NamedKey};
 
   const NONE: Modifiers = Modifiers::empty();
   /// The tests play macOS's keys on any host ([Harness::set_os]).

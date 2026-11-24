@@ -123,11 +123,10 @@ pub(super) fn check(f: &mut Frame, r: Rect, c: Color) {
 mod tests {
   use super::*;
   use crate::app::{App, Event};
-  use crate::harness::Harness;
   use crate::keys::Key;
   use crate::scene::Size;
   use crate::ui::{FormRow, FormStyle, Id, Picker, Tag, Theme};
-  use crate::{Modifiers, NamedKey};
+  use crate::{Harness, Modifiers, NamedKey};
 
   /// A pop-up the app can disable.
   #[derive(Default)]

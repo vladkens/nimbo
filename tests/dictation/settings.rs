@@ -19,7 +19,7 @@
 use std::cell::Cell;
 use std::time::Duration;
 
-use nimbo::ui::Action;
+use nimbo::a11y::Action;
 use nimbo::{
   Appearance, Code, Event, Harness, Hotkey, Id, Key, Modifiers, NamedKey, Rect, Size, Theme, hotkey,
 };

@@ -120,12 +120,12 @@ impl Ui<'_> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::Modifiers;
   use crate::app::{App, Event};
-  use crate::harness::{Harness, us_key};
+  use crate::harness::us_key;
   use crate::keys::Shortcut;
   use crate::scene::Size;
   use crate::ui::{Style, px};
+  use crate::{Harness, Modifiers};
 
   /// A recorder's behaviour where a modifier key alone can't be the hotkey (Linux).
   #[derive(Default)]

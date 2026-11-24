@@ -6,7 +6,7 @@
 //! (<https://lucide.dev>).
 //!
 //! ```ignore
-//! ui.with_id(id).canvas(s, move |f, r| icon::draw(f, Icon::RESET.stroke(1.5), r, color));
+//! ui.with_id(id).canvas(s, move |f, r| Icon::RESET.stroke(1.5).draw(f, r, color));
 //! ```
 //!
 //! The path syntax is SVG's whole (`M L H V C S Q T A Z`, absolute and relative, implicit
@@ -22,7 +22,7 @@ use crate::scene::{Color, Frame, Point, Rect};
 use crate::svg::{flatten, spans};
 use crate::t;
 
-/// SVG path data in a 24 × 24 view box, drawn as a stroke or filled ([draw]).
+/// SVG path data in a 24 × 24 view box, drawn as a stroke or filled ([Icon::draw]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Icon {
   /// The path data.
@@ -185,35 +185,36 @@ impl Icon {
   pub fn name(self) -> Option<&'static str> {
     Self::ALL.iter().find(|a| a.1 == self).map(|a| a.2.as_str())
   }
+
+  /// Draws the icon into `r` (its view box stretched over it) in `color`, on a canvas
+  /// ([crate::Ui::canvas]): stroked as [Icon::stroke] says, or filled. Data that doesn't parse
+  /// draws as far as it parsed.
+  pub fn draw(self, f: &mut Frame, r: Rect, color: Color) {
+    let (kx, ky) = (r.w / VIEW, r.h / VIEW);
+    let mut lines = Vec::new();
+    _ = flatten(self.d, kx.max(ky) * f.scale, &mut lines);
+    for p in lines.iter_mut().flatten() {
+      *p = Point::new(r.x + p.x * kx, r.y + p.y * ky);
+    }
+
+    // A filled icon's outline a pixel wide, over the fill's edges.
+    let stroke = match self.paint {
+      IconPaint::Fill => {
+        fill(f, &lines, color);
+        1.0 / f.scale
+      }
+      // Drawn with no width given: Lucide's.
+      IconPaint::Stroke(w) => w.unwrap_or(2.0) * kx.min(ky),
+    };
+
+    for l in &lines {
+      f.polyline(l, stroke, color);
+    }
+  }
 }
 
 /// The side of an icon's view box.
 const VIEW: f32 = 24.0;
-
-/// Draws `icon` into `r` (its view box stretched over it) in `color`, stroked `width` view box
-/// units wide (Lucide's are 2), or filled. Data that doesn't parse draws as far as it parsed.
-pub fn draw(f: &mut Frame, icon: Icon, r: Rect, color: Color) {
-  let (kx, ky) = (r.w / VIEW, r.h / VIEW);
-  let mut lines = Vec::new();
-  _ = flatten(icon.d, kx.max(ky) * f.scale, &mut lines);
-  for p in lines.iter_mut().flatten() {
-    *p = Point::new(r.x + p.x * kx, r.y + p.y * ky);
-  }
-
-  // A filled icon's outline a pixel wide, over the fill's edges.
-  let stroke = match icon.paint {
-    IconPaint::Fill => {
-      fill(f, &lines, color);
-      1.0 / f.scale
-    }
-    // Drawn with no width given: Lucide's.
-    IconPaint::Stroke(w) => w.unwrap_or(2.0) * kx.min(ky),
-  };
-
-  for l in &lines {
-    f.polyline(l, stroke, color);
-  }
-}
 
 /// Fills the closed polylines `polys` (in points) non-zero: a rect a pixel high for each span
 /// of each pixel row.
@@ -233,15 +234,15 @@ fn fill(f: &mut Frame, polys: &[Vec<Point>], color: Color) {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::Harness;
   use crate::app::App;
-  use crate::harness::Harness;
   use crate::scene::Size;
   use crate::ui::{Style, Ui, grow, px};
 
   /// `icon` `size` points square in black, as Lucide draws it.
   fn black(ui: &mut Ui, icon: Icon, size: f32) {
     let s = Style::new().w(px(size)).h(px(size));
-    ui.canvas(s, move |f, r| draw(f, icon, r, [0.0, 0.0, 0.0, 1.0]));
+    ui.canvas(s, move |f, r| icon.draw(f, r, [0.0, 0.0, 0.0, 1.0]));
   }
 
   #[test]

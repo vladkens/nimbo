@@ -368,8 +368,8 @@ impl Ui<'_> {
 mod tests {
   use std::time::Duration;
 
+  use crate::Harness;
   use crate::app::App;
-  use crate::harness::Harness;
   use crate::scene::{Size, rgb};
   use crate::ui::input::ScrollState;
   use crate::ui::{Axes, Axis, Float, Id, ScrollerKnob, Style, Ui, px};

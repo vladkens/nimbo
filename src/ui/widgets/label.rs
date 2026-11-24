@@ -6,7 +6,7 @@
 use std::fmt::Display;
 
 use crate::scene::Color;
-use crate::ui::icon::{self, Icon};
+use crate::ui::icon::Icon;
 use crate::ui::{Enabled, Response, Style, Ui, px};
 
 impl Ui<'_> {
@@ -29,14 +29,14 @@ impl Ui<'_> {
     let off = !self.environment_value::<Enabled>().0;
     let color = self.dim(color, off);
     let s = Style::new().w(px(size)).h(px(size));
-    self.canvas(s, move |f, r| icon::draw(f, icon.default_stroke(2.0), r, color))
+    self.canvas(s, move |f, r| icon.default_stroke(2.0).draw(f, r, color))
   }
 }
 
 #[cfg(test)]
 mod tests {
+  use crate::Harness;
   use crate::app::App;
-  use crate::harness::Harness;
   use crate::scene::Size;
   use crate::ui::{Id, Kind, Theme, Ui};
 

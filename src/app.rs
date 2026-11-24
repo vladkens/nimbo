@@ -31,7 +31,7 @@ use crate::ui::{
 pub trait App {
   /// Handles one input event, after the runtime routed it through the last frame's tree:
   /// `cx` tells what is under the pointer and what was clicked ([Cx::clicked]). Keys, text and
-  /// commands come here when the focused element did not use them (see [crate::keys] for the
+  /// commands come here when the focused element did not use them (the crate's doc has the
   /// order). Returns true when the event was used, which redraws the frame; a key with Cmd that
   /// returns false goes on to the menu (Cmd-Q), an unused key on to text input.
   fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {

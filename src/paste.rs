@@ -32,10 +32,11 @@ use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use crate::clipboard::{Offer, Snapshot, SystemClipboard};
+use crate::clipboard::{Clipboard, Offer, Snapshot, SystemClipboard};
 use crate::focus::{self, Focused};
 use crate::keys::{CMD, Key, Shortcut};
-use crate::{Clipboard, Error, Modifiers, keys, permissions, platform, runloop};
+pub use crate::keys::{post, ready};
+use crate::{Error, Modifiers, keys, permissions, platform, runloop};
 
 /// How long after the offer's read the clipboard comes back: some apps read it more than once.
 pub const RESTORE: Duration = Duration::from_millis(500);

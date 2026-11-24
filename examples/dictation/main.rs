@@ -35,10 +35,10 @@ use nimbo::desktop::Launcher;
 use nimbo::hotkey::{Edge, Hotkeys};
 use nimbo::instance::{self, Claim, Instance};
 use nimbo::paste::Paste;
-use nimbo::tray::{Item, Menu, Tray, TrayIcon};
+use nimbo::tray::{Tray, TrayIcon};
 use nimbo::{
-  App, AppInfo, Config, Hotkey, Main, Png, Presence, Proxy, Shortcut, Window, autostart, desktop,
-  focus, hardware, paste, tray,
+  App, AppInfo, Config, Hotkey, Item, Main, Menu, Png, Presence, Proxy, Shortcut, Window,
+  autostart, desktop, focus, hardware, paste, tray,
 };
 
 use self::account::Account;

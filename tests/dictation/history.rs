@@ -7,7 +7,7 @@
 //! numbers, scroll to their end and their middle a row apart; rows read as rows and press; a
 //! dictation said now joins Today at the top.
 
-use nimbo::ui::{Action, Role};
+use nimbo::a11y::{Action, Role};
 use nimbo::{Event, Harness, Id, Modifiers, Phase, Point, Rect, Size};
 
 use crate::common::{mid, reads};

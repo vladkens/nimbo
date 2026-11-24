@@ -340,7 +340,7 @@ impl Main {
     imp::set_presence(p);
   }
 
-  /// The language of the app's strings from now on ([crate::locale]), as SwiftUI's
+  /// The language of the app's strings from now on ([crate::t!]), as SwiftUI's
   /// `.environment(\.locale, …)` on every window: each redraws in it, one busy up the stack (the
   /// caller's own) a moment later. [Locale::System] by default. Menus and dialogs the OS draws
   /// keep the language the app started in.
@@ -349,7 +349,7 @@ impl Main {
     redraw(windows());
   }
 
-  /// The app's catalogs ([crate::locale]) from now on, as a window's [Config::localizations]
+  /// The app's catalogs ([crate::t!]) from now on, as a window's [Config::localizations]
   /// gives them: for strings shown before any window opens, a menu-bar app's tray menu. Empty,
   /// the English texts again.
   pub fn set_localizations(&mut self, catalogs: Localizations) {

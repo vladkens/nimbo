@@ -15,7 +15,7 @@
 //! A Linux panel shows the item only with a StatusNotifierItem host: KDE Plasma, Xfce, LXQt,
 //! Cinnamon and MATE have one, GNOME only with the AppIndicator extension (Ubuntu ships it on).
 //! [available] says whether the session has one; the tray waits for one that starts later.
-//! [Item::button] fits a long name (a device, a file) to an item.
+//! [crate::Item::button] fits a long name (a device, a file) to an item.
 
 #[cfg(any(test, not(target_os = "macos")))]
 mod icon;
@@ -24,9 +24,9 @@ use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::marker::PhantomData;
 
-pub use crate::menu::{Item, LABEL, Menu};
+pub use crate::menu::LABEL;
 use crate::platform::tray as imp;
-use crate::{Error, Main, svg};
+use crate::{Error, Main, Menu, svg};
 
 /// The icon, a template: only its alpha counts, and the OS's colour fills it (macOS tints it
 /// for the menu bar and the highlight; Windows fills it white on a dark taskbar, black on a light
@@ -234,9 +234,9 @@ impl<A: Clone + PartialEq + 'static> Tray<A> {
   }
 
   /// Replaces the menu, also while it opens ([Tray::on_open]). While it is open, one of the same
-  /// items but for labels, checks and enabled states ([Item]) changes it in place on macOS, its
-  /// submenus staying open (a countdown in it); any other waits until it closes (the last one set
-  /// wins): rebuilt, an open menu would close its submenus.
+  /// items but for labels, checks and enabled states ([crate::Item]) changes it in place on macOS,
+  /// its submenus staying open (a countdown in it); any other waits until it closes (the last one
+  /// set wins): rebuilt, an open menu would close its submenus.
   pub fn set_menu(&self, menu: &Menu<A>) {
     let (menu, actions) = menu.tagged();
     let state = self.0.state();
@@ -320,6 +320,7 @@ impl<A: Clone + PartialEq + 'static> Tray<A> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::Item;
 
   /// An SVG file's ring of two paths fills even-odd, as the file draws it.
   #[test]

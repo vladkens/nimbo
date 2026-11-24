@@ -76,7 +76,7 @@ mod text_field;
 mod toggle;
 
 pub use button::{Button, ButtonConfiguration, ButtonRole, ButtonStyle, PlainButtonStyle};
-pub use content::{Build, Content};
+pub use content::Content;
 pub use dialog::DialogBehavior;
 #[cfg(feature = "styled")]
 pub(crate) use field::DrawnEditMenu;
@@ -87,7 +87,7 @@ pub use list_style::{
   List, ListConfiguration, ListLayout, ListResponse, ListRowConfiguration, ListStyle,
   PlainListStyle, Row,
 };
-pub use menu::{MenuPlacement, TYPE_SELECT, TypeSelect};
+pub use menu::{MenuPlacement, TypeSelect};
 pub use picker::{InlinePickerStyle, Picker, PickerConfiguration, PickerStyle, Tag};
 pub use scroll::{ScrollBar, ScrollBehavior, ScrollerKnob};
 pub use slider::{PlainSliderStyle, Slider, SliderConfiguration, SliderStyle};
@@ -199,7 +199,7 @@ impl Ui<'_> {
   }
 
   /// Gives `id` the key presses while it has focus before any binding of its own, of its
-  /// ancestors or of the app ([crate::keys] has the order), this frame: a hotkey recorder
+  /// ancestors or of the app (the crate's doc has the order), this frame: a hotkey recorder
   /// recording, a modal dialog. A key it doesn't use goes on as usual.
   pub fn grab_keys(&mut self, id: Id) {
     self.st.grab = Some(id);
@@ -239,11 +239,10 @@ mod tests {
   use std::time::Duration;
 
   use super::*;
-  use crate::NamedKey;
   use crate::app::{App, Cx, Event};
-  use crate::harness::Harness;
   use crate::scene::{Color, Quad, Size};
   use crate::ui::px;
+  use crate::{Harness, NamedKey};
 
   const REST: Color = [0.2, 0.2, 0.2, 1.0];
   const OVER: Color = [0.0, 0.0, 1.0, 1.0];

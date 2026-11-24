@@ -4,7 +4,6 @@
 //! system's styles and in the gallery's own, progress, a badge, a hotkey recorder, a control
 //! drawn on a button's behaviour and help marks.
 
-use nimbo::ui::icon;
 use nimbo::{
   Align, Axis, BorderedProminentButtonStyle, BorderlessButtonStyle, Button, ButtonConfiguration,
   ButtonRole, ButtonStyle, ButtonToggleStyle, CheckboxToggleStyle, FieldStyle, Icon,
@@ -299,7 +298,7 @@ impl Gallery {
 
         ui.control(&b).canvas(s, move |f, r| {
           f.quad(Quad::new(r, fill).radius(14.0).border(2.0, ring));
-          icon::draw(f, Icon::PLAY, Rect::new(r.x + 7.0, r.y + 7.0, 14.0, 14.0), mark);
+          Icon::PLAY.draw(f, Rect::new(r.x + 7.0, r.y + 7.0, 14.0, 14.0), mark);
         });
       }),
 

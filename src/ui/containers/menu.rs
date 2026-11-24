@@ -208,10 +208,9 @@ mod tests {
 
   use super::*;
   use crate::app::{App, Event, MouseButton, Phase};
-  use crate::harness::Harness;
   use crate::scene::Size;
   use crate::ui::{ControlSize, TextStyle};
-  use crate::{Modifiers, NamedKey};
+  use crate::{Harness, Modifiers, NamedKey};
 
   /// A menu inside a scroll area over tall content; its items count their runs.
   #[derive(Default)]

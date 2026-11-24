@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use common::{diff, mid, px, reads};
 use gallery::*;
-use nimbo::ui::{Action, Role};
+use nimbo::a11y::{Action, Role};
 use nimbo::{Appearance, Event, Harness, Id, Modifiers, NamedKey, Rect, Size, Theme, alpha, mix};
 
 type H = Harness<Gallery>;

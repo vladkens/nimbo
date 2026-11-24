@@ -7,7 +7,7 @@
 use std::fmt;
 
 use crate::locale::Localized;
-use crate::ui::icon::{self, Icon};
+use crate::ui::icon::Icon;
 use crate::ui::{Style, TextStyle, Ui, px};
 
 /// What a label shows, as SwiftUI's labels take a string or a view: a text, an icon, or what a
@@ -48,7 +48,7 @@ impl Content<'_> {
         let (size, color) = (ui.line_height(style), style.color);
         let s = Style::new().w(px(size)).h(px(size));
         let i = i.default_stroke(1.6);
-        ui.with_id(id).allows_hit_testing(false).canvas(s, move |f, r| icon::draw(f, i, r, color));
+        ui.with_id(id).allows_hit_testing(false).canvas(s, move |f, r| i.draw(f, r, color));
       }
       Content::Built(f) => f(ui, style),
     }

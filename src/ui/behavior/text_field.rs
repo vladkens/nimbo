@@ -233,12 +233,11 @@ mod tests {
 
   use super::*;
   use crate::app::App;
-  use crate::harness::Harness;
   use crate::keys::Key;
   use crate::scene::{Color, Size};
   use crate::text::Font;
   use crate::ui::{Id, UiState, px};
-  use crate::{Modifiers, NamedKey};
+  use crate::{Harness, Modifiers, NamedKey};
 
   const REST: Color = [0.0, 0.0, 1.0, 1.0];
   const FOCUSED: Color = [0.0, 1.0, 0.0, 1.0];

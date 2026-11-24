@@ -27,8 +27,8 @@ impl HelpStyle for TooltipHelpStyle {
 mod tests {
   use std::time::Duration;
 
+  use crate::Harness;
   use crate::app::App;
-  use crate::harness::Harness;
   use crate::scene::{Frame, Rect, Size};
   use crate::ui::{FormRow, FormStyle, Id, LinePattern, Style, Theme, Tone, Ui, grow, px};
 

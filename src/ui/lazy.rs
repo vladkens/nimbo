@@ -187,8 +187,8 @@ fn spacer(ui: &mut Ui, h: f64) {
 
 #[cfg(test)]
 mod tests {
+  use crate::Harness;
   use crate::app::App;
-  use crate::harness::Harness;
   use crate::scene::Size;
   use crate::ui::{Id, Style, TextStyle, Theme, Ui, grow, px};
 

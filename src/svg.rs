@@ -1,7 +1,7 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! SVG path data (`d`) into polylines: the reader the widget icons stroke or fill
-//! ([crate::ui::icon]) and the tray fills ([crate::tray::TrayIcon]), and the spans a
+//! ([crate::Icon]) and the tray fills ([crate::tray::TrayIcon]), and the spans a
 //! scanline fills ([spans]). SVG's whole path syntax (`M L H V C S Q T A Z`, absolute and
 //! relative, implicit repeats); curves and arcs in pieces of about 2 pixels. [document] reads an
 //! icon file's `<path>`s into one path.

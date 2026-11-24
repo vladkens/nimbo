@@ -397,10 +397,9 @@ mod tests {
 
   use super::*;
   use crate::app::App;
-  use crate::harness::Harness;
   use crate::scene::{Quad, Size};
   use crate::ui::{Cursor, UiState};
-  use crate::{Modifiers, NamedKey};
+  use crate::{Harness, Modifiers, NamedKey};
 
   const UP: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
   const OVER: [f32; 4] = [0.0, 1.0, 0.0, 1.0];

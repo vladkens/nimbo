@@ -171,8 +171,8 @@ impl EnvironmentValue for &'static dyn HelpStyle {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::Harness;
   use crate::app::{App, Appearance};
-  use crate::harness::Harness;
   use crate::scene::Size;
   use crate::ui::{UiState, px};
 
