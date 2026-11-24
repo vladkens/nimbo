@@ -13,20 +13,24 @@
 //! an input method composes, Escape is the input method's. The behaviour is
 //! [Ui::search_behavior].
 
+use super::field::field_frame;
+use crate::keys::EDIT_KEYS;
 use crate::scene::mix;
 use crate::ui::icon::{self, Icon};
-use crate::ui::{Align, Cursor, FieldStyle, Float, Response, Role, Style, Ui, grow, px};
+use crate::ui::{
+  Align, Axes, Cursor, FieldBehavior, FieldStyle, Float, Response, Role, Style, Ui, grow, px,
+};
 
 /// The ⊗'s side, and how far in it is from the field's right edge.
 const MARK: f32 = 14.0;
 const INSET: f32 = 8.0;
 
 impl Ui<'_> {
-  /// A search field over `text` ([Ui::search_behavior]) in `style`'s look, as SwiftUI's
-  /// `.searchable` field: its box with a magnifier at the left in the muted colour and, while
-  /// there is text, a ⊗ at the right (darker under the pointer), the text kept clear of it; its
-  /// id from [Ui::id] or [Ui::key], else its place. [Ui::disabled] dims it, with no ⊗.
-  pub fn search_field(&mut self, text: &mut String, style: &FieldStyle) -> Response {
+  /// A search field over `text` ([Ui::search_behavior]) in `style`'s look, `prompt` shown while
+  /// empty, as SwiftUI's `.searchable` field: a magnifier at the left in the muted colour and,
+  /// while there is text, a ⊗ at the right (darker under the pointer), the text kept clear of it;
+  /// its id from [Ui::id] or [Ui::key], else its place. [Ui::disabled] dims it, with no ⊗.
+  pub fn search_field(&mut self, text: &mut String, prompt: &str, style: &FieldStyle) -> Response {
     let (t, id) = (self.theme(), self.take_id());
     let b = self.search_behavior(id, text);
     let clear = !text.is_empty() && !b.disabled;
@@ -45,7 +49,7 @@ impl Ui<'_> {
     let mut r = Response::default();
     // Its own id: the field may have taken its place's.
     self.with_id(id.key("wrap")).allows_hit_testing(false).row(wrap, |ui| {
-      r = ui.field_box(&b, &style);
+      r = ui.search_box(&b, prompt, &style);
 
       // Over the field, clipped to it: System Settings' magnifier (its ink 13 wide, 10 in from
       // the edge) and the ⊗.
@@ -69,11 +73,28 @@ impl Ui<'_> {
     r
   }
 
-  /// A [Ui::search_field] in the theme's look ([crate::ui::Theme::search]), `hint` shown while
-  /// it is empty.
-  pub fn search(&mut self, text: &mut String, hint: &'static str) -> Response {
-    let style = self.theme().search().hint(hint);
-    self.search_field(text, &style)
+  /// A [Ui::search_field] in the theme's look ([crate::ui::Theme::search]), `prompt` shown
+  /// while it is empty.
+  pub fn search(&mut self, text: &mut String, prompt: &str) -> Response {
+    let style = self.theme().search();
+    self.search_field(text, prompt, &style)
+  }
+
+  /// The search field's box and text in `style` over its behaviour `b`, and its edit menu.
+  fn search_box(&mut self, b: &FieldBehavior, prompt: &str, style: &FieldStyle) -> Response {
+    // Named by its prompt when nothing else names it, as a browser names a field.
+    if let Some(a) = self.a11y_of(b.id) {
+      a.name_or(prompt);
+    }
+
+    let frame = b.style(field_frame(self, style, b.focused, !b.disabled));
+    let keys = self.keymap(EDIT_KEYS).with_id(b.id);
+    let r = keys.row(frame.scroll(Axes::HORIZONTAL), |ui| {
+      ui.field_text(b, prompt, style, Style::new());
+    });
+    self.edit_menu(b);
+    let (changed, submitted, cancelled, blurred) = (b.changed, b.submitted, b.cancelled, b.blurred);
+    Response { hovered: b.hovered, changed, submitted, cancelled, blurred, ..r }
   }
 }
 
@@ -122,15 +143,15 @@ mod tests {
     fn view(&mut self, ui: &mut Ui) {
       let t = ui.theme();
       let frame = t.search().frame;
-      let style = match self.narrow {
-        true => t.search().frame(frame.w(pct(50.0)).max_w(100.0).h(pct(60.0))).hint(HINT),
-        false => t.search().hint("Search"),
+      let (style, prompt) = match self.narrow {
+        true => (t.search().frame(frame.w(pct(50.0)).max_w(100.0).h(pct(60.0))), HINT),
+        false => (t.search(), "Search"),
       };
 
       let ground = if self.red { [1.0, 0.0, 0.0, 1.0] } else { t.bg };
       let left = if self.narrow { 40.0 } else { 0.0 };
       ui.row(Style::new().grow().pads([0.0, 0.0, 0.0, left]).bg(ground), |ui| {
-        let r = ui.disabled(self.off).id("s").search_field(&mut self.text, &style);
+        let r = ui.disabled(self.off).id("s").search_field(&mut self.text, prompt, &style);
         self.changes += r.changed as u32;
         self.blurs += r.blurred as u32;
       });

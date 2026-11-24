@@ -262,15 +262,23 @@ nimbo: `ui.segmented(&mut self.view, &[Tag::new(0, "List").count(128), Tag::new(
 
 SwiftUI: `TextField("Name", text: $name)`
 
-nimbo: `ui.field(&mut self.name, "Name")`
+nimbo: `ui.text_field(&mut self.name, "Name")`
 
 ![Text field](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/text-field.png)
+
+### Multi-line field
+
+SwiftUI: `TextField("Notes", text: $notes, axis: .vertical)`
+
+nimbo: `TextField::new(&mut self.notes, "Notes").kind(FieldKind::MultiLine).show(ui)`
+
+![Multi-line field](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/multi-line-field.png)
 
 ### Secure field
 
 SwiftUI: `SecureField("Password", text: $key)`
 
-nimbo: `ui.password_field(&mut self.key, "Password")`
+nimbo: `ui.secure_field(&mut self.key, "Password")`
 
 ![Secure field](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/secure-field.png)
 
@@ -281,6 +289,22 @@ SwiftUI: `.searchable(text: $query)`
 nimbo: `ui.search(&mut self.query, "Search")`
 
 ![Search field](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/search-field.png)
+
+### Text field style
+
+SwiftUI: `VStack { TextField("Name", text: $name); TextField("City", text: $city) }.textFieldStyle(.plain)`
+
+nimbo: `ui.text_field_style(&PlainTextFieldStyle).col(style, |ui| { ui.text_field(&mut self.name, "Name"); ui.text_field(&mut self.city, "City"); }); ui.text_field(&mut self.email, "E-mail")`
+
+![Text field style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/text-field-style.png)
+
+### Custom text field style
+
+SwiftUI: `struct Underline: TextFieldStyle { func _body(configuration: TextField<_Label>) -> some View { configuration.padding(…).overlay(alignment: .bottom) { … } } }`
+
+nimbo: `impl TextFieldStyle for Underline { fn make_body(&self, ui: &mut Ui, mut c: TextFieldConfiguration) { ui.row(style.scroll(c.axis().into()), |ui| c.text(ui, &fs)); } } ui.text_field_style(&Underline).text_field(&mut self.city, "City")`
+
+![Custom text field style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/custom-text-field-style.png)
 
 ### Progress
 

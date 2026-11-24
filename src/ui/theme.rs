@@ -7,13 +7,14 @@
 //! An app changes the look in three steps, from the least work to the most:
 //! - a style where the widget has one:
 //!   `ui.button_style(&BorderedProminentButtonStyle).button("Save")` ([super::Ui::button_style]);
-//! - a style derived from the theme, changed for one widget: `t.field().hint("Search")` given to
-//!   [super::Ui::text_field];
+//! - a style derived from the theme, changed for one widget: `FieldStyle { text: mono, ..t.field()
+//!   }` given to [super::Ui::selectable_text];
 //! - its own theme: `const MINE: Theme = Theme { accent: rgb(0xe06c75), ..Theme::PLATES_DARK }` and
 //!   `ui.set_theme(MINE)`.
 //!
 //! An app that wants a widget to look different altogether writes a style of its own
-//! ([super::ButtonStyle]) or draws its own over the widget's behaviour ([super::behavior]).
+//! ([super::ButtonStyle], [super::TextFieldStyle]) or draws its own over the widget's behaviour
+//! ([super::behavior]).
 //!
 //! The default look is macOS 26 System Settings' neutral greys, as measured from its
 //! screenshots: [Theme::PLATES_LIGHT] and [Theme::PLATES_DARK], borderless translucent grey
@@ -444,9 +445,9 @@ impl Theme {
     FocusRing::new(self.focus)
   }
 
-  /// A single-line text field: [Sizes::control_h] high at least, the field's ground and edge
-  /// in the control's corners, the faint placeholder, the accent's caret and a selection of it
-  /// (`.kind(FieldKind::MultiLine)` and a height for notes). Focused, the ring.
+  /// A text field's look ([super::RoundedBorderTextFieldStyle]): [Sizes::control_h] high at
+  /// least, the field's ground and edge in the control's corners, the faint placeholder, the
+  /// accent's caret and a selection of it. Focused, the ring.
   pub const fn field(&self) -> FieldStyle {
     let frame = Style::new()
       .w(grow())
@@ -467,7 +468,7 @@ impl Theme {
   /// A search field ([super::Ui::search]): [Theme::field]'s box [Sizes::control_h] + 4 high,
   /// padded 30 at the left for the magnifier and 10 at the right. Where controls are flat
   /// ([Theme::flat]), System Settings' sidebar field: the ground a touch lighter, a half-point
-  /// edge, the hint in the muted colour.
+  /// edge, the prompt in the muted colour.
   pub const fn search(&self) -> FieldStyle {
     let f = self.field();
     let frame = f.frame.h(px(self.sizes.control_h + 4.0)).pads([0.0, 10.0, 0.0, 30.0]);

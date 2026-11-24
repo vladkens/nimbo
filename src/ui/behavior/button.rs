@@ -174,30 +174,36 @@ pub struct PlainButtonStyle;
 
 impl ButtonStyle for PlainButtonStyle {
   fn make_body(&self, ui: &mut Ui<'_>, mut c: ButtonConfiguration<'_>) {
-    let s = plain_text(ui, c.is_enabled(), c.is_pressed());
+    let s = plain_label(ui, c.is_enabled(), c.is_pressed());
     // Rigid, as every control: the text beside it wraps, the label never does.
     ui.row(Style::new().w(Dim::Rigid).gap(5.0).center(), |ui| c.label(ui, s));
   }
 }
 
-/// The plain styles' label: one line of the system font at the control size, in the text colour
-/// of the colour scheme, fainter while `pressed`, dimmed unless `enabled`.
-pub(super) fn plain_text(ui: &Ui, enabled: bool, pressed: bool) -> TextStyle {
-  // macOS's label colours: 85% of black or white, its secondary's 50%, its tertiary's 25%.
+/// The plain styles' text: the system font at the control size ([Ui::control_size]) in black or
+/// white of the colour scheme at opacity `a`.
+pub(super) fn plain_text(ui: &Ui, a: f32) -> TextStyle {
   let ink = if ui.color_scheme().is_dark() { 1.0 } else { 0.0 };
-  let a = match (enabled, pressed) {
-    (false, _) => 0.25,
-    (true, true) => 0.5,
-    (true, false) => 0.85,
-  };
-
   let size = match ui.environment_value::<ControlSize>() {
     ControlSize::Small => 11.0,
     ControlSize::Regular => 13.0,
     ControlSize::Large => 15.0,
   };
 
-  TextStyle::new(Font::ui(size), [ink, ink, ink, a]).line_limit(1)
+  TextStyle::new(Font::ui(size), [ink, ink, ink, a])
+}
+
+/// The plain styles' label: one line of [plain_text], fainter while `pressed`, dimmed unless
+/// `enabled`.
+pub(super) fn plain_label(ui: &Ui, enabled: bool, pressed: bool) -> TextStyle {
+  // macOS's label colours: 85% of black or white, its secondary's 50%, its tertiary's 25%.
+  let a = match (enabled, pressed) {
+    (false, _) => 0.25,
+    (true, true) => 0.5,
+    (true, false) => 0.85,
+  };
+
+  plain_text(ui, a).line_limit(1)
 }
 
 /// [PlainButtonStyle] where neither a container nor the window nor the shell put one.
