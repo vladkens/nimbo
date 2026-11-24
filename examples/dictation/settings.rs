@@ -396,7 +396,8 @@ impl Settings {
         Ask::ClearCache => self.cache = 0,
         Ask::ResetAll => {
           let (page, resets) = (self.page, self.resets + 1);
-          *self = Self { page, resets, ..Self::default() };
+          let (pause_hotkeys, paused) = (self.pause_hotkeys, self.paused);
+          *self = Self { page, resets, pause_hotkeys, paused, ..Self::default() };
         }
       }
     }
@@ -435,10 +436,14 @@ impl App for Settings {
     });
     self.confirm(ui);
 
-    // Also when the recorder lost its focus with the page, or the window lost the keys.
+    // Also when the recorder lost its focus with the page, or the window lost the keys; while
+    // the app's state is busy, again on the next frame.
     let recording = ui.focused(Id::of(HOTKEY)) && ui.window_focused();
-    if recording != self.paused && (self.pause_hotkeys)(recording) {
-      self.paused = recording;
+    if recording != self.paused {
+      match (self.pause_hotkeys)(recording) {
+        true => self.paused = recording,
+        false => ui.request_frame_in(Duration::from_millis(50)),
+      }
     }
   }
 }

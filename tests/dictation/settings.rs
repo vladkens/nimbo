@@ -16,6 +16,7 @@
 //! the slider, choose in a select, move the focus, and reach only the dialog while it is open.
 //! The Account tab shows the fields (`tests/dictation/account.rs` tests them alone).
 
+use std::cell::Cell;
 use std::time::Duration;
 
 use nimbo::ui::Action;
@@ -520,17 +521,23 @@ fn the_account_tab_shows_the_fields() {
 }
 
 thread_local! {
-  /// The app's hotkeys as Settings left them, on this test's thread.
-  static PAUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+  /// The app's hotkeys as Settings left them, and whether the app's state is busy, on this test's
+  /// thread.
+  static PAUSED: Cell<bool> = const { Cell::new(false) };
+  static BUSY: Cell<bool> = const { Cell::new(false) };
 }
 
 /// The app's hotkeys pause while the recorder has the keys, so its chord reaches the recorder,
-/// and work again when it loses them: to another control or with the window.
+/// and work again when it loses them: to another control or with the window; while the app is
+/// busy, a frame later.
 #[test]
 fn the_recorder_pauses_the_apps_hotkeys() {
   let pause_hotkeys = |paused| {
-    PAUSED.set(paused);
-    true
+    if !BUSY.get() {
+      PAUSED.set(paused);
+    }
+
+    !BUSY.get()
   };
   let mut h =
     Harness::new(Settings { pause_hotkeys, ..Settings::default() }, Size::new(WIDTH, 560.0), 2.0);
@@ -540,9 +547,15 @@ fn the_recorder_pauses_the_apps_hotkeys() {
   h.click_id(Id::of(HOTKEY));
   h.frame();
   assert!(PAUSED.get(), "recording");
+  BUSY.set(true);
   h.event(Event::Focus(false));
-  h.frame();
+  h.wait(Duration::from_millis(500));
+  assert!(PAUSED.get(), "busy");
+  assert!(h.needs_frame() || h.due_in().is_some(), "a frame to try again");
+  BUSY.set(false);
+  h.wait(Duration::from_millis(100));
   assert!(!PAUSED.get(), "the window lost the keys");
+
   h.event(Event::Focus(true));
   h.frame();
   assert!(PAUSED.get());
