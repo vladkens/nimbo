@@ -13,9 +13,9 @@
 use std::time::Duration;
 
 use nimbo::{
-  Align, App, Axis, ButtonRole, Config, Float, Font, Harness, Icon, Id, Item, List, Menu,
-  Modifiers, Selection, Shortcut, Size, Split, Style, Tabs, Tag, TextStyle, ToolbarItemPlacement,
-  Ui, alpha, grow, px,
+  Align, App, Axis, ButtonRole, Config, Cx, Event, Float, Font, Harness, Icon, Id, Item, List,
+  Menu, Modifiers, Selection, Shortcut, Size, Split, Style, Tabs, Tag, TextStyle,
+  ToolbarItemPlacement, Ui, alpha, grow, px,
 };
 
 /// The rows of the folder, besides those added ([Browser::added]).
@@ -110,6 +110,31 @@ impl Browser {
   /// Adds `entry` at the top of the list.
   pub fn add(&mut self, entry: Entry) {
     self.added.push(entry);
+  }
+
+  /// Files dragged over the list light it; dropped there, they join it. Whether `ev` was one of
+  /// those.
+  pub fn drags(&mut self, cx: &mut Cx, ev: &Event) -> bool {
+    let list = cx.hovered(Id::of(LIST));
+    match ev {
+      Event::DragOver { .. } => self.over = list,
+      Event::DragExit => self.over = false,
+      Event::Drop { paths, .. } => {
+        if list {
+          for p in paths {
+            let name =
+              p.file_name().map_or_else(|| p.display().to_string(), |n| n.display().to_string());
+            let size = std::fs::metadata(p).ok().filter(|m| m.is_file()).map(|m| m.len());
+            self.add(Entry { name, size });
+          }
+        }
+
+        self.over = false;
+      }
+      _ => return false,
+    }
+
+    true
   }
 
   /// A new folder at the top, selected and shown.
@@ -365,6 +390,10 @@ const NOTE: [&str; 3] = [
 ];
 
 impl App for Browser {
+  fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
+    self.drags(cx, ev)
+  }
+
   fn view(&mut self, ui: &mut Ui) {
     let t = ui.theme();
     ui.col(Style::new().grow().bg(t.bg), |ui| {

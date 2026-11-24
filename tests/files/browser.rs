@@ -8,8 +8,9 @@
 //! Windows, the release, never off the rows; the pop-up button chooses by letters typed, closed
 //! and open; the tabs switch and keep the hidden page's scroll; the split's divider drags.
 //! Assistive technology reads the rows, the selection and the cursor, the menu's highlight, the
-//! tabs, presses a tab and scrolls a cut row into view.
+//! tabs, presses a tab and scrolls a cut row into view. Files dropped on the list join it.
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use nimbo::ui::Action;
@@ -480,4 +481,18 @@ fn an_assistive_scroll_shows_a_cut_row() {
   assert!(h.act(row(k), Action::ScrollToVisible));
   assert!(offset(&h, Id::of(LIST)) > 0.0);
   assert!(bottom(&h, k) <= list.y + list.h + 0.5, "row {k} at {:?} in {list:?}", h.rect(row(k)));
+}
+
+/// The browser alone takes files dropped on its list too.
+#[test]
+fn files_dropped_on_the_browser_alone_join_it() {
+  let mut h = lists();
+  let (x, y) = mid(h.rect(Id::of(LIST)).unwrap());
+  let (pos, paths) = (Point::new(x, y), vec![PathBuf::from("/tmp/a.txt")]);
+  h.event(Event::DragOver { pos, paths: paths.clone() });
+  assert!(h.app().over);
+  h.event(Event::Drop { pos, paths });
+  h.frame();
+  assert_eq!(h.app().name(h.app().key(0)), "a.txt");
+  assert!(!h.app().over);
 }

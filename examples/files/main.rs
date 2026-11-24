@@ -26,7 +26,7 @@ use nimbo::{
   ToolbarItemPlacement, Transition, Ui, px, rgb,
 };
 
-use self::browser::{Browser, Entry, LIST as ROWS_LIST};
+use self::browser::Browser;
 
 pub const TOGGLE: &str = "toggle";
 pub const SPLIT: &str = "sidebar";
@@ -153,32 +153,16 @@ impl Files {
 
 impl App for Files {
   fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
-    let list = cx.hovered(Id::of(ROWS_LIST));
-    match ev {
-      Event::DragOver { .. } => self.browser.over = list,
-      Event::DragExit => self.browser.over = false,
-      Event::Drop { paths, .. } => {
-        if list {
-          for p in paths {
-            let name =
-              p.file_name().map_or_else(|| p.display().to_string(), |n| n.display().to_string());
-            let size = std::fs::metadata(p).ok().filter(|m| m.is_file()).map(|m| m.len());
-            self.browser.add(Entry { name, size });
-          }
-        }
-
-        self.browser.over = false;
-      }
-      Event::FileDialog(path) => {
-        self.browser.note = Some(match path {
-          Some(p) => format!("Picked {}", p.display()),
-          None => "Cancelled".into(),
-        });
-        self.picked = Some(path.clone());
-      }
-      _ => return false,
+    if self.browser.drags(cx, ev) {
+      return true;
     }
 
+    let Event::FileDialog(path) = ev else { return false };
+    self.browser.note = Some(match path {
+      Some(p) => format!("Picked {}", p.display()),
+      None => "Cancelled".into(),
+    });
+    self.picked = Some(path.clone());
     true
   }
 
