@@ -1,13 +1,13 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The control blocks, built live: buttons, toggles, sliders, pickers and text fields in the
-//! system's styles and in the gallery's own, progress, a badge, a shortcut recorder, a control
+//! system's styles and in the gallery's own, progress, a badge, a hotkey recorder, a control
 //! drawn on a button's behaviour and help marks.
 
 use nimbo::ui::icon;
 use nimbo::{
-  Align, BorderedProminentButtonStyle, BorderlessButtonStyle, Button, ButtonConfiguration,
-  ButtonRole, ButtonStyle, ButtonToggleStyle, CheckboxToggleStyle, FieldKind, FieldStyle, Icon,
+  Align, Axis, BorderedProminentButtonStyle, BorderlessButtonStyle, Button, ButtonConfiguration,
+  ButtonRole, ButtonStyle, ButtonToggleStyle, CheckboxToggleStyle, FieldStyle, Icon,
   InlinePickerStyle, Picker, PickerConfiguration, PickerStyle, PlainSliderStyle,
   PlainTextFieldStyle, PlainToggleStyle, Quad, Rect, SegmentedPickerStyle, Slider,
   SliderConfiguration, SliderStyle, Style, Tag, TextField, TextFieldConfiguration, TextFieldStyle,
@@ -232,14 +232,14 @@ impl Gallery {
       // A multi-line field fills the height its parent gives it.
       "Multi-line field" => Self::variants(ui, Shown::Plain, |ui| {
         ui.col(Style::new().w(px(200.0)).h(px(60.0)), |ui| {
-          _ = TextField::new(&mut self.notes, "Notes").kind(FieldKind::MultiLine).show(ui)
+          _ = TextField::new(&mut self.notes, "Notes").axis(Axis::Vertical).show(ui)
         });
       }),
       "Secure field" => Self::variants(ui, Shown::Plain, |ui| {
         ui.col(Style::new().w(px(200.0)), |ui| _ = ui.secure_field(&mut self.key, "Password"));
       }),
       "Search field" => Self::variants(ui, Shown::Plain, |ui| {
-        ui.col(Style::new().w(px(200.0)), |ui| _ = ui.search(&mut self.query, "Search"));
+        ui.col(Style::new().w(px(200.0)), |ui| _ = ui.search_field(&mut self.query, "Search"));
       }),
 
       // Two fields plain by their column, the one after it in the window's style.
@@ -270,12 +270,12 @@ impl Gallery {
         ui.badge("Conflict", Tone::Warning);
       }),
 
-      "Shortcut recorder" => Self::variants(ui, Shown::Plain, |ui| {
-        ui.shortcut(&mut self.hotkey);
+      "Hotkey recorder" => Self::variants(ui, Shown::Plain, |ui| {
+        ui.hotkey_recorder(&mut self.hotkey);
         // The ⊗ that clears one, which the plates themes leave to a reset button.
         let t = ui.theme();
-        ui.set_theme(nimbo::Theme { shortcut_clear: true, ..t });
-        ui.shortcut(&mut self.hotkey);
+        ui.set_theme(nimbo::Theme { hotkey_recorder_clear: true, ..t });
+        ui.hotkey_recorder(&mut self.hotkey);
         ui.set_theme(t);
       }),
 

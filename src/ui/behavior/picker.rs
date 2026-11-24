@@ -27,15 +27,20 @@
 use super::button::plain_text;
 use super::{Behavior, MenuPlacement};
 use crate::ui::{
-  Enabled, EnvironmentValue, Id, LinePattern, Response, Role, State, Style, Ui, Value, px,
+  Enabled, EnvironmentValue, Icon, Id, LinePattern, Response, Role, State, Style, Ui, Value, px,
 };
 
-/// An option of a [Picker], as SwiftUI's `Text(label).tag(value)`: `const`, so a list of them is
-/// a constant: `const LAUNCH: [Tag<Launch>; 2] = [Tag::new(Launch::Window, "Open a window"), ..]`.
+/// A value and its label, as SwiftUI's `.tag(value)` on a view: an option of a [Picker]
+/// (`Text(label).tag(value)`) or a tab of a toolbar (`.tabItem { Label(label, systemImage:) }`);
+/// `const`, so a list of them is a constant:
+/// `const LAUNCH: [Tag<Launch>; 2] = [Tag::new(Launch::Window, "Open a window"), ..]`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tag<'s, T> {
   pub value: T,
   pub label: &'s str,
+  /// An icon by the label: over it in a toolbar's tab; a picker's style shows it if it draws one
+  /// ([PickerConfiguration::icon]).
+  pub icon: Option<Icon>,
   /// A count drawn after the label, dimmed, by the styles that show one (the segments); the
   /// menu shows none.
   pub count: Option<usize>,
@@ -43,11 +48,16 @@ pub struct Tag<'s, T> {
 
 impl<'s, T> Tag<'s, T> {
   pub const fn new(value: T, label: &'s str) -> Self {
-    Self { value, label, count: None }
+    Self { value, label, icon: None, count: None }
   }
 }
 
 impl<'s, T: Copy> Tag<'s, T> {
+  /// With `icon` by the label, as SwiftUI's `Label(label, systemImage:)`.
+  pub const fn icon(self, icon: Icon) -> Self {
+    Self { icon: Some(icon), ..self }
+  }
+
   /// With `n` after the label, dimmed: a filter's matches.
   pub const fn count(self, n: usize) -> Self {
     Self { count: Some(n), ..self }
@@ -81,8 +91,8 @@ struct Picked {
 #[derive(Debug)]
 pub struct PickerConfiguration<'s> {
   id: Id,
-  /// Each option's label and count.
-  options: Vec<(&'s str, Option<usize>)>,
+  /// Each option's label, icon and count.
+  options: Vec<(&'s str, Option<Icon>, Option<usize>)>,
   /// The options a divider follows.
   lines: Vec<usize>,
   width: Option<f32>,
@@ -111,9 +121,14 @@ impl<'s> PickerConfiguration<'s> {
     self.options[i].0
   }
 
+  /// Option `i`'s icon ([Tag::icon]).
+  pub fn icon(&self, i: usize) -> Option<Icon> {
+    self.options[i].1
+  }
+
   /// Option `i`'s count ([Tag::count]).
   pub fn count(&self, i: usize) -> Option<usize> {
-    self.options[i].1
+    self.options[i].2
   }
 
   /// Whether a divider stands between option `i` and the next ([Picker::divider]).
@@ -279,7 +294,7 @@ impl<'s, T: PartialEq + Copy> Picker<'s, T> {
     let mut picked = Picked { at: was, ..Picked::default() };
     let config = PickerConfiguration {
       id,
-      options: tags.iter().map(|o| (o.label, o.count)).collect(),
+      options: tags.iter().map(|o| (o.label, o.icon, o.count)).collect(),
       lines,
       width: self.width,
       max_width: self.max_width,

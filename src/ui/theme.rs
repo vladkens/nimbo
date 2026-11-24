@@ -7,8 +7,8 @@
 //! An app changes the look in three steps, from the least work to the most:
 //! - a style where the widget has one:
 //!   `ui.button_style(&BorderedProminentButtonStyle).button("Save")` ([super::Ui::button_style]);
-//! - a style derived from the theme, changed for one widget: `FieldStyle { text: mono, ..t.field()
-//!   }` given to [super::Ui::selectable_text];
+//! - a style derived from the theme, changed for one widget: `t.body().font(mono)` given to
+//!   [super::Ui::selectable_text];
 //! - its own theme: `const MINE: Theme = Theme { accent: rgb(0xe06c75), ..Theme::PLATES_DARK }` and
 //!   `ui.set_theme(MINE)`.
 //!
@@ -112,9 +112,9 @@ pub struct Theme {
   pub field_line: Color,
   /// Fainter than muted: placeholders.
   pub faint: Color,
-  /// The shortcut recorder shows a ⊗ that clears it ([super::Ui::shortcut]); off in the
+  /// The hotkey recorder shows a ⊗ that clears it ([super::Ui::hotkey_recorder]); off in the
   /// plates themes, whose recorder sits by a reset button (Backspace clears while recording).
-  pub shortcut_clear: bool,
+  pub hotkey_recorder_clear: bool,
   /// The selected toolbar tab is macOS 26's Liquid Glass tile in dark appearances
   /// ([super::form::Glass]); off, or in light ones, the raised tile ([Theme::tab_tile]).
   pub glass: bool,
@@ -257,7 +257,7 @@ impl Theme {
     field: WHITE,
     field_line: rgb(0xdadade),
     faint: rgb(0xb2b2b7),
-    shortcut_clear: false,
+    hotkey_recorder_clear: false,
     glass: true,
   };
 
@@ -459,7 +459,7 @@ impl Theme {
       .caret(self.accent)
   }
 
-  /// A search field ([super::Ui::search]): [Theme::field]'s box [Sizes::control_h] + 4 high,
+  /// A search field ([super::Ui::search_field]): [Theme::field]'s box [Sizes::control_h] + 4 high,
   /// padded 30 at the left for the magnifier and 10 at the right. Where controls are flat
   /// ([Theme::flat]), System Settings' sidebar field: the ground a touch lighter, a half-point
   /// edge, the prompt in the muted colour.

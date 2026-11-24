@@ -17,7 +17,7 @@
 //! An app with no window, or more than one, starts with [app()]: windows on demand ([Main::open])
 //! and overlays, HUDs over every app ([Config::overlay]), the menu bar's commands
 //! ([Main::set_commands]), work from other threads ([Proxy]), and what a tray app needs besides:
-//! an icon with a menu ([tray]), global hotkeys ([hotkey]), one instance that takes commands from
+//! an icon with a menu ([tray]), global hotkeys ([hotkey]), one instance that takes messages from
 //! a second launch ([instance], [Main::serve]), its folders and
 //! the user's Downloads ([paths]), launch at login ([autostart]), its launcher entry on Linux
 //! ([desktop]), alerts ([Main::alert]), its command line's console on Windows
@@ -138,7 +138,7 @@ pub use ui::{
   ButtonToggleStyle, CheckboxToggleStyle, ControlBorder, Dialog, FormRow, FormStyle,
   InsetGroupedListStyle, InsetListStyle, LinearSliderStyle, MenuPickerStyle,
   RoundedBorderTextFieldStyle, Section, SegmentedPickerStyle, Sizes, Split, SwitchToggleStyle,
-  TabItem, Tabs, Theme, Tone, ToolbarItemPlacement, TooltipHelpStyle,
+  Tabs, Theme, Tone, ToolbarItemPlacement, TooltipHelpStyle,
 };
 #[cfg(feature = "headless")]
 pub use ui::{

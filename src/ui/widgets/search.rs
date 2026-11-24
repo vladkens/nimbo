@@ -4,7 +4,7 @@
 //! it has text, as macOS's search fields; its look from the theme ([crate::ui::Theme::search]).
 //!
 //! ```ignore
-//! if ui.id("search").search(&mut self.query, "Search models").changed { self.filter() }
+//! if ui.id("search").search_field(&mut self.query, "Search models").changed { self.filter() }
 //! ```
 //!
 //! A click on the ⊗ (`id.key("clear")`) clears the text and focuses the field, ready for the
@@ -26,12 +26,14 @@ const MARK: f32 = 14.0;
 const INSET: f32 = 8.0;
 
 impl Ui<'_> {
-  /// A search field over `text` ([Ui::search_behavior]) in `style`'s look, `prompt` shown while
-  /// empty, as SwiftUI's `.searchable` field: a magnifier at the left in the muted colour and,
-  /// while there is text, a ⊗ at the right (darker under the pointer), the text kept clear of it;
-  /// its id from [Ui::id] or [Ui::key], else its place. [Ui::disabled] dims it, with no ⊗.
-  pub fn search_field(&mut self, text: &mut String, prompt: &str, style: &FieldStyle) -> Response {
+  /// A search field over `text` ([Ui::search_behavior]) in the theme's look
+  /// ([crate::ui::Theme::search]), `prompt` shown while empty, as SwiftUI's `.searchable` field:
+  /// a magnifier at the left in the muted colour and, while there is text, a ⊗ at the right
+  /// (darker under the pointer), the text kept clear of it; as wide as its parent gives it, its
+  /// id from [Ui::id] or [Ui::key], else its place. [Ui::disabled] dims it, with no ⊗.
+  pub fn search_field(&mut self, text: &mut String, prompt: &str) -> Response {
     let (t, id) = (self.theme(), self.take_id());
+    let style = t.search();
     let b = self.search_behavior(id, text);
     let clear = !text.is_empty() && !b.disabled;
     // The frame's size goes to the box the marks sit in, which the field fills, its text
@@ -40,7 +42,7 @@ impl Ui<'_> {
     let wrap = Style { size: f.size, min: f.min, max: f.max, ..Style::new() };
     let (min, max) = (Style::new().min, Style::new().max);
     let frame = Style { size: [grow(); 2], min, max, ..f }.clip_content();
-    let mut style = FieldStyle { frame, ..*style };
+    let mut style = FieldStyle { frame, ..style };
     if clear {
       style.frame.pad[1] = style.frame.pad[1].max(INSET + MARK + 6.0);
     }
@@ -73,13 +75,6 @@ impl Ui<'_> {
     r
   }
 
-  /// A [Ui::search_field] in the theme's look ([crate::ui::Theme::search]), `prompt` shown
-  /// while it is empty.
-  pub fn search(&mut self, text: &mut String, prompt: &str) -> Response {
-    let style = self.theme().search();
-    self.search_field(text, prompt, &style)
-  }
-
   /// The search field's box and text in `style` over its behaviour `b`, and its edit menu.
   fn search_box(&mut self, b: &FieldBehavior, prompt: &str, style: &FieldStyle) -> Response {
     // Named by its prompt when nothing else names it, as a browser names a field.
@@ -104,7 +99,7 @@ mod tests {
   use crate::harness::Harness;
   use crate::keys::{Binding, Command, Key, Shortcut, bind};
   use crate::scene::{Rect, Size};
-  use crate::ui::{Cursor, Id, Style, Ui, pct};
+  use crate::ui::{Cursor, Id, Style, Ui, grow, pct};
   use crate::{Modifiers, NamedKey};
 
   const NONE: Modifiers = Modifiers::empty();
@@ -114,7 +109,7 @@ mod tests {
   const HINT: &str = "Search models and history";
 
   /// A search field, the changes it reported, and the app's own Escape: what the field gives
-  /// back. `narrow`: 40 in, half the rest wide, at most 100, and 60% of the window high;
+  /// back. `narrow`: 40 in, half the rest wide, at most 100;
   /// `red`: on a red ground.
   #[derive(Default)]
   struct Find {
@@ -142,18 +137,19 @@ mod tests {
 
     fn view(&mut self, ui: &mut Ui) {
       let t = ui.theme();
-      let frame = t.search().frame;
-      let (style, prompt) = match self.narrow {
-        true => (t.search().frame(frame.w(pct(50.0)).max_w(100.0).h(pct(60.0))), HINT),
-        false => (t.search(), "Search"),
+      let (column, prompt) = match self.narrow {
+        true => (Style::new().w(pct(50.0)).max_w(100.0), HINT),
+        false => (Style::new().w(grow()), "Search"),
       };
 
       let ground = if self.red { [1.0, 0.0, 0.0, 1.0] } else { t.bg };
       let left = if self.narrow { 40.0 } else { 0.0 };
       ui.row(Style::new().grow().pads([0.0, 0.0, 0.0, left]).bg(ground), |ui| {
-        let r = ui.disabled(self.off).id("s").search_field(&mut self.text, prompt, &style);
-        self.changes += r.changed as u32;
-        self.blurs += r.blurred as u32;
+        ui.col(column, |ui| {
+          let r = ui.disabled(self.off).id("s").search_field(&mut self.text, prompt);
+          self.changes += r.changed as u32;
+          self.blurs += r.blurred as u32;
+        });
       });
     }
   }
@@ -485,7 +481,7 @@ mod tests {
     h.app_mut().narrow = true;
     h.frame();
     let (field, x) = (h.rect(Id::of("s")).unwrap(), clear(&h).unwrap());
-    assert_eq!((field.w, field.h), (100.0, 60.0));
+    assert_eq!(field.w, 100.0);
     assert!(x.x > field.x + field.w / 2.0 && x.x + x.w <= field.x + field.w - 8.0, "{x:?}");
   }
 

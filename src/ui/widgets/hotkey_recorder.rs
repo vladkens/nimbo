@@ -1,10 +1,10 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The shortcut recorder: a capsule showing a global [Hotkey] that records a new one, a chord
+//! The hotkey recorder: a capsule showing a global [Hotkey] that records a new one, a chord
 //! or a modifier key alone where the platform can grab one ([crate::hotkey::modifier_alone]).
 //!
 //! ```ignore
-//! if ui.id("hotkey").shortcut(&mut self.hotkey).changed { self.save() }
+//! if ui.id("hotkey").hotkey_recorder(&mut self.hotkey).changed { self.save() }
 //! let text = self.hotkey.map(|h| h.to_string()); // "ctrl+option+space", "right_option"
 //! ```
 //!
@@ -24,19 +24,19 @@ use crate::ui::{Cursor, Float, Response, Role, Style, Ui, UnitPoint, px};
 const W: f32 = 160.0;
 
 impl Ui<'_> {
-  /// A shortcut recorder over `value` ([Ui::shortcut_behavior]; a modifier key alone where
-  /// [crate::hotkey::modifier_alone]), 160 wide whatever it shows: a
-  /// capsule with the hotkey ([Hotkey::label]), "Record Shortcut" when empty, and a ⊗ that
-  /// clears it (`id.key("clear")`) where the theme has one ([crate::Theme::shortcut_clear]: not
-  /// the plates themes, whose recorder sits by a reset button); recording, the ground with an
-  /// accent edge and the focus ring, a red dot and "Type a shortcut…". `changed` when a hotkey
-  /// was recorded or the value cleared.
-  pub fn shortcut(&mut self, value: &mut Option<Hotkey>) -> Response {
+  /// A hotkey recorder over `value` ([Ui::hotkey_recorder_behavior]; a modifier key alone where
+  /// [crate::hotkey::modifier_alone]), 160 wide whatever it shows: a capsule with the hotkey
+  /// ([Hotkey::label]), "Record Shortcut" when empty, and a ⊗ that clears it (`id.key("clear")`)
+  /// where the theme has one ([crate::Theme::hotkey_recorder_clear]: not the plates themes, whose
+  /// recorder sits by a reset button); recording, the ground with an accent edge and the focus
+  /// ring, a red dot and "Type a shortcut…". `changed` when a hotkey was recorded or the value
+  /// cleared.
+  pub fn hotkey_recorder(&mut self, value: &mut Option<Hotkey>) -> Response {
     let t = self.theme();
     let id = self.take_id();
     let clear = id.key("clear");
     let lone = hotkey::modifier_alone();
-    let b = self.shortcut_behavior(id, value, t.shortcut_clear, lone);
+    let b = self.hotkey_recorder_behavior(id, value, t.hotkey_recorder_clear, lone);
     let hot = self.ctl_hot(id, b.hovered);
     let h = t.sizes.control_h;
     let bg = match (b.on, b.pressed) {
@@ -45,7 +45,7 @@ impl Ui<'_> {
       _ => mix(t.raised, t.hover, hot),
     };
 
-    let x = if t.shortcut_clear { 22.0 } else { 10.0 };
+    let x = if t.hotkey_recorder_clear { 22.0 } else { 10.0 };
     let frame = Style::new().w(px(W)).h(px(h)).pad_xy(x, 0.0).gap(6.0).center().radius(h / 2.0);
     let frame = frame.bg(bg).border(if b.on { 1.0 } else { 0.0 }, t.accent);
     let frame = self.dim_style(frame, b.disabled);
@@ -60,7 +60,7 @@ impl Ui<'_> {
         (_, Some(v)) => ui.text(v.label(), label.font(t.font.weight(Weight::Medium))),
       }
 
-      if value.is_some() && !b.on && !b.disabled && t.shortcut_clear {
+      if value.is_some() && !b.on && !b.disabled && t.hotkey_recorder_clear {
         let at = Float::parent()
           .attach(UnitPoint::TRAILING)
           .anchor(UnitPoint::TRAILING)
@@ -107,7 +107,7 @@ mod tests {
     }
 
     fn view(&mut self, ui: &mut Ui) {
-      ui.id("rec").shortcut(&mut self.value);
+      ui.id("rec").hotkey_recorder(&mut self.value);
     }
   }
 

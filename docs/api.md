@@ -92,7 +92,7 @@ nimbo: `ui.text("WER", s.underline(LinePattern::Dot)); s.strikethrough(LinePatte
 
 SwiftUI: `Text(log).textSelection(.enabled)`
 
-nimbo: `ui.selectable(&log)`
+nimbo: `ui.selectable_text(&log, t.body())`
 
 ![Selectable text](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/selectable-text.png)
 
@@ -286,7 +286,7 @@ nimbo: `ui.text_field(&mut self.name, "Name")`
 
 SwiftUI: `TextField("Notes", text: $notes, axis: .vertical)`
 
-nimbo: `TextField::new(&mut self.notes, "Notes").kind(FieldKind::MultiLine).show(ui)`
+nimbo: `TextField::new(&mut self.notes, "Notes").axis(Axis::Vertical).show(ui)`
 
 ![Multi-line field](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/multi-line-field.png)
 
@@ -302,7 +302,7 @@ nimbo: `ui.secure_field(&mut self.key, "Password")`
 
 SwiftUI: `.searchable(text: $query)`
 
-nimbo: `ui.search(&mut self.query, "Search")`
+nimbo: `ui.search_field(&mut self.query, "Search")`
 
 ![Search field](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/search-field.png)
 
@@ -346,13 +346,13 @@ nimbo: `ui.badge("New", Tone::Accent)`
 
 ![Badge](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/badge.png)
 
-### Shortcut recorder
+### Hotkey recorder
 
 SwiftUI: `KeyboardShortcut (SwiftUI has no recorder)`
 
-nimbo: `ui.shortcut(&mut self.hotkey)`
+nimbo: `ui.hotkey_recorder(&mut self.hotkey)`
 
-![Shortcut recorder](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/shortcut-recorder.png)
+![Hotkey recorder](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/hotkey-recorder.png)
 
 ### Control behavior
 
@@ -382,9 +382,9 @@ nimbo: `ui.form_section(&fs, Section::new(header).footer("…"), |ui| { … })`
 
 ### Form row
 
-SwiftUI: `LabeledContent { Toggle(…) } label: { Text(title); Text(subtitle) }`
+SwiftUI: `LabeledContent { Toggle(isOn: $on) {} } label: { Text(title); Text(subtitle) }`
 
-nimbo: `ui.form_row(&fs, FormRow::new("Open at login").caption("…"), |ui| ui.toggle(&mut on, ""))`
+nimbo: `ui.form_row(&fs, FormRow::new("Open at login").caption("…"), |ui| ui.toggle(&mut on, ()))`
 
 ![Form row](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/form-row.png)
 
@@ -419,6 +419,14 @@ SwiftUI: `DisclosureGroup("Other models") { … }`
 nimbo: `ui.form_disclosure(&fs, FormRow::new("Other models"), |ui| { … })`
 
 ![Disclosure](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/disclosure.png)
+
+### Toolbar tabs
+
+SwiftUI: `TabView(selection: $page) { General().tabItem { Label("General", systemImage: "gear") }.tag(Page.general) } in a Settings scene`
+
+nimbo: `ui.toolbar_tabs(&fs, &mut self.page, &[Tag::new(Page::General, "General").icon(Icon::GEAR), Tag::new(Page::About, "About").icon(Icon::INFO)])`
+
+![Toolbar tabs](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/toolbar-tabs.png)
 
 ### Footer
 
@@ -640,7 +648,7 @@ nimbo: `ui.environment(Tint(t.success)).row(style, |ui| { … }); ui.set_environ
 
 SwiftUI: `Group { Button("Save"); Toggle(…) }.disabled(true)`
 
-nimbo: `ui.disabled(true).group(|ui| { ui.button("Save"); ui.toggle(&mut on, ""); }); ui.button("Open")`
+nimbo: `ui.disabled(true).group(|ui| { ui.button("Save"); ui.toggle(&mut on, ()); }); ui.button("Open")`
 
 ![Group](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/group.png)
 

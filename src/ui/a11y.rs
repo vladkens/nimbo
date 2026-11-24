@@ -11,7 +11,7 @@
 //! roles titled by their text (a button, a tab), the text inside it. A control with text of its
 //! own (a button's label) keeps it, or a name and a description set before or since, over the
 //! pair's, whose label and description are then read as they are; one whose text is its value
-//! (a shortcut recorder) is not named by it.
+//! (a hotkey recorder) is not named by it.
 //! Only the focused window's focus reads as focused. Leaf roles (a button, a field) hide the
 //! text inside them; plain text anywhere else is static text, with no record.
 //!
@@ -1014,7 +1014,7 @@ mod tests {
   }
 
   /// A button keeps its own text, and the row's label is read; a text that is the value (a
-  /// shortcut recorder's) names nothing.
+  /// hotkey recorder's) names nothing.
   #[test]
   fn a_control_with_text_of_its_own_keeps_it_in_a_form_row() {
     let s = dump(|ui| {

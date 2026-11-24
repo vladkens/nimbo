@@ -128,7 +128,9 @@ impl EnvironmentValue for &'static dyn ToggleStyle {
 impl Ui<'_> {
   /// A toggle over `on` showing `label` ([Content]), as SwiftUI's `Toggle`: flipped by a click or
   /// Space while focused, `changed` when it was; drawn by the environment's [ToggleStyle]
-  /// ([Ui::toggle_style]) at the control size. An icon alone names it when nothing else does.
+  /// ([Ui::toggle_style]) at the control size. An icon alone names it when nothing else does;
+  /// `()` shows none, as `Toggle(isOn:) {}`: a form row's switch, named by its row
+  /// (`ui.form_row(&fs, row, |ui| ui.toggle(&mut on, ()))`).
   pub fn toggle<'s>(&mut self, on: &mut bool, label: impl Into<Content<'s>>) -> Response {
     let style = self.environment_value::<&dyn ToggleStyle>();
     let id = self.take_id();

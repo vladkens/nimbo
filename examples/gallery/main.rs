@@ -19,8 +19,8 @@ mod blocks;
 mod pages;
 
 use nimbo::{
-  App, Bitmap, Config, FieldStyle, Font, HelpStyle, Hotkey, List, Selection, Style, Tag, TextStyle,
-  Ui, grow, px,
+  App, Bitmap, Config, Font, HelpStyle, Hotkey, List, Selection, Style, Tag, TextStyle, Ui, grow,
+  px,
 };
 
 pub use self::blocks::{BLOCKS, Block, GROUPS};
@@ -167,9 +167,9 @@ impl Gallery {
         ui.text(block.name, TextStyle::new(Font { size: 20.0, ..t.bold }, t.text));
         ui.col(code, |ui| {
           ui.text("SWIFTUI", t.section());
-          ui.selectable_text(block.swiftui, &FieldStyle { text: mono, ..t.field() });
+          ui.selectable_text(block.swiftui, mono);
           ui.text("NIMBO", t.section());
-          ui.selectable_text(block.nimbo, &FieldStyle { text: mono, ..t.field() });
+          ui.selectable_text(block.nimbo, mono);
         });
         self.demo(ui, block);
       });

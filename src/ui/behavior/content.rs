@@ -13,7 +13,8 @@ use crate::ui::{Style, TextStyle, Ui, px};
 /// What a label shows, as SwiftUI's labels take a string or a view: a text, an icon, or what a
 /// closure builds in the label's text style (dimmed in a disabled form row, as SwiftUI passes a
 /// foreground style down); from a `&str`, a `&String`, a [Localized] (`t!("…")`, or a reference to
-/// one), an [Icon] or `FnOnce(&mut Ui, TextStyle)`, whose parameters need their types written. A
+/// one), an [Icon] or `FnOnce(&mut Ui, TextStyle)`, whose parameters need their types written;
+/// `()` shows nothing, as SwiftUI's empty label `{}` (a toggle in a form row, named by the row). A
 /// closure's texts take the style or one made from it (`s.underline(LinePattern::Dot)` on a term
 /// with [Ui::help]); a canvas of its own reads `Enabled` ([Ui::environment_value]).
 #[derive(Default)]
@@ -75,6 +76,13 @@ impl From<Localized> for Content<'_> {
 impl From<&Localized> for Content<'_> {
   fn from(s: &Localized) -> Self {
     Content::Text(s.as_str())
+  }
+}
+
+/// Nothing: [Content::None].
+impl From<()> for Content<'_> {
+  fn from((): ()) -> Self {
+    Content::None
   }
 }
 

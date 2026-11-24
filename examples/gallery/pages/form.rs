@@ -1,11 +1,11 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The form blocks, built live in the form's look on its ground: a section, rows (a composed label,
-//! a tile, a footer), a disclosure and a pane's footer.
+//! a tile, a footer), a disclosure, a pane's footer and the toolbar's tabs.
 
 use nimbo::{
-  ControlSize, FormRow, FormStyle, Icon, LinePattern, Section, Slider, Style, TextStyle, Tone, Ui,
-  grow,
+  ControlSize, FormRow, FormStyle, Icon, LinePattern, Section, Slider, Style, Tag, TextStyle, Tone,
+  Ui, grow,
 };
 
 use super::{Gallery, Shown};
@@ -14,12 +14,12 @@ impl Gallery {
   /// A form block in the form's look, on its ground.
   pub(super) fn form(&mut self, ui: &mut Ui, name: &str) {
     let fs = FormStyle::plates(&ui.theme());
-    let (on, level) = (&mut self.on, &mut self.level);
+    let (on, level, tab) = (&mut self.on, &mut self.level, &mut self.tab);
     Self::variants(ui, Shown::Plain, |ui| {
       let row = |ui: &mut Ui, on: &mut bool, level: &mut f32| match name {
         "Form row" => {
           let row = FormRow::new("Open at login").caption("Starts with your Mac, in the menu bar.");
-          ui.form_row(&fs, row, |ui| ui.toggle(on, ""))
+          ui.form_row(&fs, row, |ui| ui.toggle(on, ()))
         }
 
         "Composed label" => {
@@ -49,13 +49,13 @@ impl Gallery {
             s.show(ui.disabled(off).a11y_label("Level"));
           };
           let row = FormRow::new(&name).caption("Only on battery.").footer(footer);
-          ui.form_row(&fs, row, |ui| ui.toggle(on, ""))
+          ui.form_row(&fs, row, |ui| ui.toggle(on, ()))
         }
         "Disclosure" => {
           let row = FormRow::new("Other models").caption("2 more");
           ui.form_disclosure(&fs, row, |ui| ui.form_row(&fs, FormRow::new("whisper-tiny"), |_| {}))
         }
-        _ => ui.form_row(&fs, FormRow::new("Row"), |ui| ui.toggle(on, "")),
+        _ => ui.form_row(&fs, FormRow::new("Row"), |ui| ui.toggle(on, ())),
       };
 
       let page = Style::new().w(grow()).gap(10.0).pad(10.0).radius(12.0).bg(fs.bg);
@@ -68,6 +68,12 @@ impl Gallery {
           };
           let section = Section::new(head).footer("Kept until you clear it.");
           _ = ui.form_section(&fs, section, |ui| row(ui, on, level));
+        }
+
+        "Toolbar tabs" => {
+          let tabs =
+            [Tag::new(0, "General").icon(Icon::GEAR), Tag::new(1, "About").icon(Icon::INFO)];
+          _ = ui.toolbar_tabs(&fs, tab, &tabs);
         }
         "Footer" => {
           ui.form_section(&fs, "Section", |ui| row(ui, on, level));

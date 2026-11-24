@@ -21,8 +21,8 @@ use std::time::Duration;
 use nimbo::ui::widgets::icon;
 use nimbo::{
   Align, Answer, App, ButtonRole, ColorScheme, Config, ControlSize, Cx, Dialog, Event, FormRow,
-  FormStyle, Harness, Hotkey, Icon, Id, Picker, Rect, Section, SegmentedPickerStyle, Style,
-  TabItem, Tag, TextStyle, Theme, Tone, Ui, grow, px,
+  FormStyle, Harness, Hotkey, Icon, Id, Picker, Rect, Section, SegmentedPickerStyle, Style, Tag,
+  TextStyle, Theme, Tone, Ui, grow, px,
 };
 
 use super::account::{self, Account};
@@ -64,12 +64,12 @@ pub enum Page {
   About,
 }
 
-pub const PAGES: [TabItem<Page>; 5] = [
-  TabItem::new(Page::General, Icon::GEAR, "General"),
-  TabItem::new(Page::Account, account::PERSON, "Account"),
-  TabItem::new(Page::Appearance, Icon::CONTRAST, "Appearance"),
-  TabItem::new(Page::Advanced, Icon::SLIDERS, "Advanced"),
-  TabItem::new(Page::About, Icon::INFO, "About"),
+pub const PAGES: [Tag<Page>; 5] = [
+  Tag::new(Page::General, "General").icon(Icon::GEAR),
+  Tag::new(Page::Account, "Account").icon(account::PERSON),
+  Tag::new(Page::Appearance, "Appearance").icon(Icon::CONTRAST),
+  Tag::new(Page::Advanced, "Advanced").icon(Icon::SLIDERS),
+  Tag::new(Page::About, "About").icon(Icon::INFO),
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -211,7 +211,7 @@ impl Settings {
     ui.form_section(fs, "Startup", |ui| {
       let warning = self.login.then_some(LOGIN_WARNING);
       let row = FormRow::new(marked("Open at login", LOGIN_ROW, warning, None));
-      ui.id(LOGIN_ROW).form_row(fs, row, |ui| ui.id(LOGIN).toggle(&mut self.login, ""));
+      ui.id(LOGIN_ROW).form_row(fs, row, |ui| ui.id(LOGIN).toggle(&mut self.login, ()));
       let row = FormRow::new(marked("On launch", LAUNCH_ROW, None, Some(TIP_LAUNCH)));
       ui.id(LAUNCH_ROW).form_row(fs, row, |ui| ui.id(LAUNCH).picker(&mut self.launch, &LAUNCHES));
       let row = FormRow::new("Language").caption("Applies the next time the app starts.");
@@ -232,7 +232,7 @@ impl Settings {
       let warning = (self.hotkey == default).then_some(HOTKEY_WARNING);
       let row = FormRow::new(marked("Show the app", HOTKEY_ROW, warning, Some(TIP_HOTKEY)));
       ui.id(HOTKEY_ROW).form_row(fs, row, |ui| {
-        ui.id(HOTKEY).shortcut(&mut self.hotkey);
+        ui.id(HOTKEY).hotkey_recorder(&mut self.hotkey);
 
         // An icon names itself to assistive technology only by a label.
         let ui = ui.disabled(self.hotkey == default).a11y_label("Reset");
@@ -245,7 +245,7 @@ impl Settings {
 
     ui.form_section(fs, "Updates", |ui| {
       let row = FormRow::new("Check for updates automatically");
-      ui.form_row(fs, row, |ui| ui.id(UPDATES).toggle(&mut self.updates, ""));
+      ui.form_row(fs, row, |ui| ui.id(UPDATES).toggle(&mut self.updates, ()));
       let label = |ui: &mut Ui, s: TextStyle| {
         ui.text("Download them in the background", s);
         ui.control_size(ControlSize::Small).badge("Beta", Tone::Neutral);
@@ -253,7 +253,7 @@ impl Settings {
       };
       ui.disabled(!self.updates)
         .id(DOWNLOAD_ROW)
-        .form_row(fs, FormRow::new(label), |ui| ui.id(DOWNLOAD).toggle(&mut self.download, ""));
+        .form_row(fs, FormRow::new(label), |ui| ui.id(DOWNLOAD).toggle(&mut self.download, ()));
       let channels = [Tag::new(Channel::Stable, "Stable"), Tag::new(Channel::Beta, "Beta")];
       ui.form_row(fs, FormRow::new("Channel"), |ui| {
         ui.picker_style(&SegmentedPickerStyle).id(CHANNEL).picker(&mut self.channel, &channels)
@@ -275,7 +275,7 @@ impl Settings {
     });
     ui.form_section(fs, "Motion", |ui| {
       let row = FormRow::new("Reduce motion").caption(MOTION_NOTE);
-      ui.id(MOTION_ROW).form_row(fs, row, |ui| ui.id(MOTION).toggle(&mut self.motion, ""));
+      ui.id(MOTION_ROW).form_row(fs, row, |ui| ui.id(MOTION).toggle(&mut self.motion, ()));
     });
   }
 
@@ -318,7 +318,7 @@ impl Settings {
           false => ui.badge("Off", Tone::Warning),
         };
 
-        ui.toggle(&mut self.reports, "")
+        ui.toggle(&mut self.reports, ())
       });
       ui.form_row(fs, FormRow::new("Logging"), |ui| ui.picker(&mut self.logging, &LOGGING));
     });

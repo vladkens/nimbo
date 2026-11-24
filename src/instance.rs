@@ -1,10 +1,10 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! One instance of the app: the first launch holds a lock in its folder while it runs and takes
-//! one-line commands from other processes (a second launch's [OPEN], an uninstaller's [QUIT],
+//! one-line messages from other processes (a second launch's [OPEN], an uninstaller's [QUIT],
 //! the app's own); a second launch finds it, sends what it wanted and ends.
 //!
-//! | | the lock | where commands come |
+//! | | the lock | where messages come |
 //! |---|---|---|
 //! | macOS | `instance.lock` in the folder | a Unix socket, `$TMPDIR/nimbo-<hash>.sock` |
 //! | Linux | the same | a Unix socket, `$XDG_RUNTIME_DIR/nimbo-<hash>.sock` |
@@ -30,9 +30,9 @@
 //! nimbo::app(INFO, |main| {
 //!   // A second launch's "open" runs this, as a reopen from the Dock does.
 //!   main.on_reopen(|_main| { /* show the settings */ });
-//!   // "quit" quits after the handler; the app's own commands come here.
+//!   // "quit" quits after the handler; the app's own messages come here.
 //!   if let Some(instance) = instance {
-//!     _ = main.serve(instance, |_main, cmd| eprintln!("command: {}", cmd.name));
+//!     _ = main.serve(instance, |_main, msg| eprintln!("message: {}", msg.name));
 //!   }
 //! });
 //! ```
@@ -61,12 +61,12 @@ const LOCK: &str = "instance.lock";
 /// How long [send_in] may take: the instance may still be starting, and on Windows the pipe
 /// may serve another sender, then the instance reads the line.
 const SEND_WAIT: Duration = Duration::from_secs(3);
-/// How long a sender tries while the lock is held but nothing takes the command: an instance
+/// How long a sender tries while the lock is held but nothing takes the message: an instance
 /// that started at the same time has yet to listen.
 const STARTING: Duration = Duration::from_secs(1);
 /// How long a sender may take to send its line.
 pub(crate) const READ_TIMEOUT: Duration = Duration::from_secs(1);
-/// The longest line taken: a command and an activation token.
+/// The longest line taken: a message and an activation token.
 pub(crate) const MAX_LINE: usize = 1024;
 
 /// What [claim] found.
@@ -77,25 +77,25 @@ pub enum Claim {
   Running,
 }
 
-/// The app's one instance: its lock and the place commands come to, let go when dropped.
+/// The app's one instance: its lock and the place messages come to, let go when dropped.
 pub struct Instance(imp::Server);
 
 impl Instance {
-  /// Calls `on` with each command, on a thread of its own; once.
-  pub(crate) fn listen(&mut self, on: impl Fn(Command) + Send + 'static) -> io::Result<()> {
+  /// Calls `on` with each message, on a thread of its own; once.
+  pub(crate) fn listen(&mut self, on: impl Fn(Message) + Send + 'static) -> io::Result<()> {
     self.0.serve(move |line| {
-      if let Some(cmd) = Command::parse(line) {
+      if let Some(cmd) = Message::parse(line) {
         on(cmd);
       }
     })
   }
 }
 
-/// A command from another process, sent as one line: `<name>`, or `<name>\t<token>`, neither
+/// A message from another process, sent as one line: `<name>`, or `<name>\t<token>`, neither
 /// with a tab or a line break in it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct Command {
+pub struct Message {
   /// What it asks: [OPEN], [QUIT] or the app's own.
   pub name: String,
   /// The desktop's activation token the sender was started with (`XDG_ACTIVATION_TOKEN` on
@@ -104,7 +104,7 @@ pub struct Command {
   pub token: Option<String>,
 }
 
-impl Command {
+impl Message {
   /// `name` sent by this process, with the token it was started with.
   fn new(name: &str) -> Self {
     let env = |k| std::env::var(k).ok().filter(|t: &String| !t.is_empty());
@@ -146,7 +146,7 @@ pub fn claim(app: &AppInfo) -> io::Result<Claim> {
 }
 
 /// Becomes the instance for the folder `dir`, which exists, unless another process is: the lock
-/// `instance.lock` in it, and the place commands come to.
+/// `instance.lock` in it, and the place messages come to.
 pub fn claim_in(dir: &Path) -> io::Result<Claim> {
   let lock = imp::lock_file(&dir.join(LOCK))?;
   match lock.try_lock() {
@@ -156,22 +156,22 @@ pub fn claim_in(dir: &Path) -> io::Result<Claim> {
   }
 }
 
-/// Sends the command `name` to the app's instance: [send_in] its data folder.
+/// Sends the message `name` to the app's instance: [send_in] its data folder.
 pub fn send(app: &AppInfo, name: &str) -> io::Result<()> {
   send_in(&paths::data_dir(app.id), name)
 }
 
-/// Sends the command `name` to the instance for `dir`, with this process's activation token
-/// ([Command::token]), within 3 s: an instance that holds the lock but doesn't listen yet (it
+/// Sends the message `name` to the instance for `dir`, with this process's activation token
+/// ([Message::token]), within 3 s: an instance that holds the lock but doesn't listen yet (it
 /// started at the same time) is given a second; `Err` when none runs. On Windows it waits until
 /// the instance has read it, and lets it come to the front: this process, in front, allows it.
 pub fn send_in(dir: &Path, name: &str) -> io::Result<()> {
-  deliver(dir, &Command::new(name), Instant::now() + SEND_WAIT)
+  deliver(dir, &Message::new(name), Instant::now() + SEND_WAIT)
 }
 
 /// Sends `cmd` by `deadline`, tried again for up to [STARTING] while nothing takes it but an
 /// instance holds the lock.
-fn deliver(dir: &Path, cmd: &Command, deadline: Instant) -> io::Result<()> {
+fn deliver(dir: &Path, cmd: &Message, deadline: Instant) -> io::Result<()> {
   let bad = || io::Error::new(ErrorKind::InvalidInput, "a command is one line without tabs");
   let line = cmd.line().ok_or_else(bad)?;
   let retry = deadline.min(Instant::now() + STARTING);
@@ -209,7 +209,7 @@ pub fn quit_and_wait_in(dir: &Path, timeout: Duration) -> io::Result<()> {
 
     if !asked {
       asked = true;
-      _ = deliver(dir, &Command::new(QUIT), deadline);
+      _ = deliver(dir, &Message::new(QUIT), deadline);
     }
 
     thread::sleep(Duration::from_millis(20));
@@ -264,7 +264,7 @@ pub(crate) fn read_polled(
     line.extend_from_slice(&buf[..n]);
   }
 
-  // The first line alone: what comes after is not the command's.
+  // The first line alone: what comes after is not the message's.
   line.truncate(line.iter().position(|&b| b == b'\n').map_or(line.len(), |i| i + 1));
   String::from_utf8(line).ok()
 }
@@ -296,8 +296,8 @@ mod tests {
     }
   }
 
-  /// The instance for `dir`, its commands sent to the receiver.
-  fn serve(dir: &Path) -> (Instance, mpsc::Receiver<Command>) {
+  /// The instance for `dir`, its messages sent to the receiver.
+  fn serve(dir: &Path) -> (Instance, mpsc::Receiver<Message>) {
     let Ok(Claim::Primary(mut instance)) = claim_in(dir) else {
       panic!("{} is taken", dir.display())
     };
@@ -306,7 +306,7 @@ mod tests {
     (instance, rx)
   }
 
-  fn recv(rx: &mpsc::Receiver<Command>) -> Command {
+  fn recv(rx: &mpsc::Receiver<Message>) -> Message {
     rx.recv_timeout(Duration::from_secs(2)).unwrap()
   }
 
@@ -327,7 +327,7 @@ mod tests {
     let dir = Dir::new("send");
     let (instance, rx) = serve(&dir.0);
     let open =
-      Command { name: OPEN.into(), token: Some("gnome-shell/App/1234-1-host_TIME42".into()) };
+      Message { name: OPEN.into(), token: Some("gnome-shell/App/1234-1-host_TIME42".into()) };
     deliver(&dir.0, &open, Instant::now() + SEND_WAIT).unwrap();
     assert_eq!(recv(&rx), open);
     send_in(&dir.0, "show settings").unwrap();
@@ -425,26 +425,26 @@ mod tests {
 
   #[test]
   fn lines_round_trip() {
-    let cmd = |name: &str, token: Option<&str>| Command {
+    let cmd = |name: &str, token: Option<&str>| Message {
       name: name.into(),
       token: token.map(String::from),
     };
-    let line = |c: &Command| c.line();
+    let line = |c: &Message| c.line();
     for c in
       [cmd("open", None), cmd("open", Some("x11-123_TIME9")), cmd("show settings", Some("t"))]
     {
       let l = line(&c).unwrap();
       assert!(l.ends_with('\n') && l.matches('\n').count() == 1, "{l:?}");
-      assert_eq!(Command::parse(&l), Some(c.clone()));
+      assert_eq!(Message::parse(&l), Some(c.clone()));
     }
 
     assert_eq!(line(&cmd("open", Some("t"))).unwrap(), "open\tt\n");
-    assert_eq!(Command::parse("open\r\n"), Some(cmd("open", None)), "a Windows line");
-    assert_eq!(Command::parse(" quit "), Some(cmd("quit", None)), "no line break");
-    assert_eq!(Command::parse("open\t"), Some(cmd("open", None)));
-    assert_eq!(Command::parse("open\tt\nmore\n"), Some(cmd("open", Some("t"))), "the first line");
+    assert_eq!(Message::parse("open\r\n"), Some(cmd("open", None)), "a Windows line");
+    assert_eq!(Message::parse(" quit "), Some(cmd("quit", None)), "no line break");
+    assert_eq!(Message::parse("open\t"), Some(cmd("open", None)));
+    assert_eq!(Message::parse("open\tt\nmore\n"), Some(cmd("open", Some("t"))), "the first line");
     for bad in ["", "\n", "\tt\n", " \n"] {
-      assert_eq!(Command::parse(bad), None, "{bad:?}");
+      assert_eq!(Message::parse(bad), None, "{bad:?}");
     }
 
     for bad in ["", " ", "a\tb", "a\nb", "a\rb", &"x".repeat(MAX_LINE)] {

@@ -23,7 +23,7 @@ use std::time::Duration;
 
 pub use crate::info::{AppInfo, Presence};
 #[cfg(feature = "instance")]
-use crate::instance::{Command, Instance, OPEN, QUIT};
+use crate::instance::{Instance, Message, OPEN, QUIT};
 use crate::locale::{self, Locale, Localizations};
 #[cfg(feature = "paste")]
 use crate::paste;
@@ -66,13 +66,13 @@ pub(crate) type OnMain = Box<dyn FnOnce(&mut Main)>;
 pub(crate) type OnChosen = Box<dyn FnMut(&mut Main, usize)>;
 type OnReopen = Box<dyn FnMut(&mut Main)>;
 #[cfg(feature = "instance")]
-type OnCommand = Box<dyn FnMut(&mut Main, &Command)>;
+type OnMessage = Box<dyn FnMut(&mut Main, &Message)>;
 #[cfg(feature = "system")]
 type OnChange = Box<dyn FnMut(&mut Main, Change)>;
 
 /// What every platform's loop keeps alike: the open windows by id, each with its app's type and
 /// close callback, the reopen and quit hooks, and the instance served with its handler, the
-/// commands that came while one runs, the activation token of the one it handles (and whether a
+/// messages that came while one runs, the activation token of the one it handles (and whether a
 /// window used it), and the hook of the system's changes with those that came while it runs.
 #[derive(Default)]
 struct Hooks {
@@ -82,9 +82,9 @@ struct Hooks {
   #[cfg(feature = "instance")]
   instance: Option<Instance>,
   #[cfg(feature = "instance")]
-  command: Option<OnCommand>,
+  command: Option<OnMessage>,
   #[cfg(feature = "instance")]
-  queued: Option<VecDeque<Command>>,
+  queued: Option<VecDeque<Message>>,
   token: Option<(String, bool)>,
   #[cfg(feature = "system")]
   change: Option<OnChange>,
@@ -139,12 +139,12 @@ pub(crate) fn reopened() {
   hooks(|h| _ = h.reopen.get_or_insert(f));
 }
 
-/// A command came to the instance [Main::serve] keeps: the reopen hook for a bare [OPEN], then
-/// the handler, the command's activation token kept meanwhile, then [Main::quit] for [QUIT]. One
+/// A message came to the instance [Main::serve] keeps: the reopen hook for a bare [OPEN], then
+/// the handler, the message's activation token kept meanwhile, then [Main::quit] for [QUIT]. One
 /// that comes while another runs (from a nested loop: a dialog, a paste waiting for the portal)
 /// is queued and runs after it. `quit` is [Main::quit], a test's fake in tests.
 #[cfg(feature = "instance")]
-fn command(main: &mut Main, cmd: Command, quit: &dyn Fn(&mut Main)) {
+fn command(main: &mut Main, cmd: Message, quit: &dyn Fn(&mut Main)) {
   let busy = hooks(|h| h.queued.as_mut().map(|q| q.push_back(cmd.clone())).is_some());
   if busy {
     return;
@@ -160,9 +160,9 @@ fn command(main: &mut Main, cmd: Command, quit: &dyn Fn(&mut Main)) {
   hooks(|h| h.queued = None);
 }
 
-/// One command, as [command] says.
+/// One message, as [command] says.
 #[cfg(feature = "instance")]
-fn handle(main: &mut Main, cmd: &Command, quit: &dyn Fn(&mut Main)) {
+fn handle(main: &mut Main, cmd: &Message, quit: &dyn Fn(&mut Main)) {
   hooks(|h| h.token = cmd.token.clone().map(|t| (t, false)));
   if cmd.name == OPEN {
     reopened();
@@ -253,7 +253,7 @@ fn redraw(ids: Vec<u64>) {
   }
 }
 
-/// The activation token of the command being handled, for a window that shows or comes to the
+/// The activation token of the message being handled, for a window that shows or comes to the
 /// front meanwhile: used by it.
 #[cfg_attr(
   not(any(test, target_os = "linux")),
@@ -365,21 +365,21 @@ impl Main {
   }
 
   /// Serves the app's one instance ([crate::instance::claim]) until the loop ends, keeping it
-  /// and its lock (replacing an earlier one): `f` runs on the main thread with each command
+  /// and its lock (replacing an earlier one): `f` runs on the main thread with each message
   /// another process sends ([crate::instance::send]), one at a time; a bare [OPEN] runs
   /// [Main::on_reopen]'s hook first, and [QUIT] quits after it ([Main::quit]: the app's cleanup
   /// is in [Main::on_quit]). While they run, a window [Main::open] shows or [Window::front] brings
-  /// forward comes to the front with the command's activation token (Linux; Windows lets it
+  /// forward comes to the front with the message's activation token (Linux; Windows lets it
   /// through the sender). `Err` when its thread can't start.
   #[cfg(feature = "instance")]
   pub fn serve(
     &mut self,
     mut instance: Instance,
-    f: impl FnMut(&mut Main, &Command) + 'static,
+    f: impl FnMut(&mut Main, &Message) + 'static,
   ) -> io::Result<()> {
     let proxy = self.proxy();
     instance.listen(move |cmd| proxy.post(move |main| command(main, cmd, &Main::quit)))?;
-    let f: OnCommand = Box::new(f);
+    let f: OnMessage = Box::new(f);
     hooks(|h| (h.instance, h.command) = (Some(instance), Some(f)));
     Ok(())
   }
@@ -613,7 +613,7 @@ mod tests {
     assert_eq!(ran.get(), 3);
   }
 
-  /// A command runs the handler with its token kept meanwhile; a bare "open" the reopen hook
+  /// A message runs the handler with its token kept meanwhile; a bare "open" the reopen hook
   /// first, with the token too; "quit" quits after the handler.
   #[test]
   fn commands_run_their_handler_with_the_token() {
@@ -622,7 +622,7 @@ mod tests {
     Main::here().on_reopen(move |_| s.borrow_mut().push(format!("reopen {:?}", token())));
     let s = seen.clone();
     let f =
-      move |_: &mut Main, c: &Command| s.borrow_mut().push(format!("{} {:?}", c.name, token()));
+      move |_: &mut Main, c: &Message| s.borrow_mut().push(format!("{} {:?}", c.name, token()));
     hooks(|h| h.command = Some(Box::new(f)));
     let s = seen.clone();
     let quit = move |_: &mut Main| s.borrow_mut().push("quits".into());
@@ -642,13 +642,13 @@ mod tests {
     HOOKS.take();
   }
 
-  /// A command that comes while the handler runs (a nested loop dispatches it) waits for it,
+  /// A message that comes while the handler runs (a nested loop dispatches it) waits for it,
   /// then runs with its own token; the first keeps its token meanwhile.
   #[test]
   fn a_command_during_the_handler_runs_after_it() {
     let seen = Rc::new(RefCell::new(Vec::new()));
     let s = seen.clone();
-    let f = move |main: &mut Main, c: &Command| {
+    let f = move |main: &mut Main, c: &Message| {
       if c.name == "first" {
         command(main, cmd("second", Some("t2")), &|_| {});
       }
@@ -759,7 +759,7 @@ mod tests {
     HOOKS.take();
   }
 
-  fn cmd(name: &str, token: Option<&str>) -> Command {
-    Command { name: name.into(), token: token.map(Into::into) }
+  fn cmd(name: &str, token: Option<&str>) -> Message {
+    Message { name: name.into(), token: token.map(Into::into) }
   }
 }

@@ -11,8 +11,8 @@
 //! key, a word of the note selected and an input method composing in the vocabulary.
 
 use nimbo::{
-  FieldKind, FieldStyle, FormRow, FormStyle, Harness, Icon, Id, Modifiers, Point, Section, Size,
-  Style, TextField, TextStyle, Ui, grow, px,
+  Axis, FormRow, FormStyle, Harness, Icon, Id, Modifiers, Point, Section, Size, Style, TextField,
+  TextStyle, Ui, grow, px,
 };
 
 /// The tab alone: as wide as the settings window, as high as its page.
@@ -97,11 +97,8 @@ impl Account {
       });
     });
 
-    // The note in the footer's style, but for the field's selection.
-    let note = |ui: &mut Ui, s: TextStyle| {
-      let style = FieldStyle { text: s, ..ui.theme().field() };
-      _ = ui.id(ABOUT).selectable_text(TEXT, &style);
-    };
+    // The note in the footer's style.
+    let note = |ui: &mut Ui, s: TextStyle| _ = ui.id(ABOUT).selectable_text(TEXT, s);
     ui.form_section(fs, Section::new("Transcription").footer(note), |ui| {
       self.field(ui, fs, PASSWORD, "API key", "Required");
       // A multi-line field fills the height its parent gives it; the row pads it as it does
@@ -110,7 +107,7 @@ impl Account {
       ui.form_row(fs, row, |ui| {
         let pads = [fs.pad_y, 0.0, fs.pad_y, 0.0];
         ui.col(Style::new().w(px(FIELD_W)).h(px(84.0 + 2.0 * fs.pad_y)).pads(pads), |ui| {
-          let notes = TextField::new(&mut self.notes, "One a line").kind(FieldKind::MultiLine);
+          let notes = TextField::new(&mut self.notes, "One a line").axis(Axis::Vertical);
           if notes.show(ui.id(NOTES)).changed {
             self.changes.push(NOTES);
           }

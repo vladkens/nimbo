@@ -98,7 +98,7 @@ pub use containers::{
 pub use dialog::{Answer, Dialog};
 pub use environment::{Enabled, EnvironmentValue};
 #[cfg(feature = "styled")]
-pub use form::{FormRow, FormStyle, Glass, Section, TabItem};
+pub use form::{FormRow, FormStyle, Glass, Section};
 pub use icon::{Icon, IconPaint};
 pub use id::Id;
 pub use image::ImageSource;

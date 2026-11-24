@@ -337,7 +337,7 @@ mod tests {
           });
           ui.toolbar_item(ToolbarItemPlacement::PrimaryAction, |ui| {
             ui.col(Style::new().w(px(120.0)), |ui| {
-              _ = ui.id("find").search(&mut self.query, "Search")
+              _ = ui.id("find").search_field(&mut self.query, "Search")
             });
           });
           ui.toolbar_item(ToolbarItemPlacement::PrimaryAction, |ui| {
