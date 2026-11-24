@@ -144,7 +144,7 @@ impl SliderConfiguration<'_> {
   /// step: for tick marks. None with no step, one where the step is longer than the range.
   pub fn steps(&self) -> impl ExactSizeIterator<Item = (f32, f32)> + use<> {
     let ((lo, hi), s) = (self.range, self.step.unwrap_or(1.0));
-    let n = self.step.map_or(0, |s| last_step(lo, hi, s) as usize + 1);
+    let n = self.step.map_or(0, |s| (last_step(lo, hi, s) as usize).saturating_add(1));
     let place = move |i: f32| if hi != lo { s * i / (hi - lo) } else { 0.0 };
     (0..n).map(move |i| (lo + s * i as f32, place(i as f32)))
   }
@@ -216,6 +216,13 @@ impl<'s> Slider<'s> {
   /// Builds it under the id set for it: its behaviour, then the style's body.
   pub fn show(self, ui: &mut Ui) -> Response {
     let style = ui.environment_value::<&dyn SliderStyle>();
+    // Unnamed, keyed off its place: a style may build around its root, which takes the place.
+    if ui.next_id.is_none() {
+      let &(parent, n) = ui.st.stack.last().unwrap();
+      let id = ui.st.tree.nodes[parent as usize].id.nth(n as usize).key("slider");
+      ui.next_id = Some((id, false));
+    }
+
     let id = ui.take_id();
     let range = (*self.range.start(), *self.range.end());
     let b = ui.slider_behavior(id, self.value, self.range, self.step);
@@ -281,6 +288,7 @@ impl Ui<'_> {
 
 #[cfg(test)]
 mod tests {
+  use std::collections::HashSet;
   use std::time::Duration;
 
   use super::*;
@@ -407,6 +415,28 @@ mod tests {
     assert_eq!(steps, [(0.0, 0.0), (4.0, 0.4), (8.0, 0.8)]);
     assert_eq!((c(None).steps().len(), c(None).fraction()), (0, 0.4));
     assert_eq!((c(None).tick_label(4.0), c(None).tick_label(8.0)), (Some("4".into()), None));
+    assert_eq!(c(Some(1e-20)).steps().len(), usize::MAX, "too many to count: as many as fit");
+  }
+
+  /// A bar in a column of its own, its root inside.
+  struct Wrapped;
+
+  impl SliderStyle for Wrapped {
+    fn make_body(&self, ui: &mut Ui<'_>, c: SliderConfiguration<'_>) {
+      ui.col(Style::new(), |ui| _ = c.root(ui).el(Style::new().w(px(100.0)).h(px(10.0))));
+    }
+  }
+
+  /// Unnamed sliders whose style builds around their root: each has an id of its own.
+  #[test]
+  fn a_style_builds_around_an_unnamed_root() {
+    let mut ui = Ui::new(UiState::default(), Size::new(300.0, 100.0), None, Duration::ZERO);
+    ui.slider_style(&Wrapped).col(Style::new(), |ui| {
+      ui.slider(&mut 0.5, 0.0..=1.0);
+      ui.slider(&mut 0.5, 0.0..=1.0);
+    });
+    let ids: HashSet<_> = ui.st.tree.nodes.iter().map(|n| n.id).collect();
+    assert_eq!(ids.len(), ui.st.tree.nodes.len());
   }
 
   /// A step that doesn't divide the range ends it at its last step, from the pointer and from
