@@ -213,6 +213,9 @@ pub(crate) struct Tree {
   pub scrolls: Vec<u32>,
   /// Elements that move the window when pressed ([super::Ui::drags_window]), in tree order.
   pub drags: Vec<u32>,
+  /// Elements hit for their tip alone ([super::Ui::help]), in tree order: hovered, but a press
+  /// goes on to the interactive element around them.
+  pub tips: Vec<u32>,
   /// Elements with key bindings, in tree order.
   pub keymaps: Vec<(u32, &'static [Binding])>,
   /// Elements with a context menu ([super::Ui::context_press]).
@@ -246,6 +249,7 @@ impl Tree {
     self.hits.clear();
     self.scrolls.clear();
     self.drags.clear();
+    self.tips.clear();
     self.keymaps.clear();
     self.menus.clear();
 

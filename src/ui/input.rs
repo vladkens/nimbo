@@ -407,7 +407,9 @@ impl UiState {
       Event::MouseExit | Event::DragExit => self.hover_at(None, false),
       Event::MouseDown { pos, button, clicks, mods } => {
         let mut changed = self.hover_at(Some(pos), false);
-        let top = self.input.hover.first().copied();
+        // A tip's element only shows its tip: the press is the element's around it.
+        let tip = |id| self.last.find(id).is_some_and(|i| self.last.tips.binary_search(&i).is_ok());
+        let top = self.input.hover.iter().copied().find(|&id| !tip(id));
         // Another button pressed meanwhile leaves the press to the first one's release.
         if self.input.press.is_none_or(|p| p.button == button) {
           self.input.presses += 1;

@@ -21,7 +21,7 @@ use super::{Behavior, Content};
 pub use crate::menu::ButtonRole;
 use crate::text::Font;
 use crate::ui::icon::{self, Icon};
-use crate::ui::{ControlSize, EnvironmentValue, Id, Response, Style, TextStyle, Ui, px};
+use crate::ui::{ControlSize, Dim, EnvironmentValue, Id, Response, Style, TextStyle, Ui, px};
 
 /// How a button looks, as SwiftUI's `ButtonStyle`: [ButtonStyle::make_body] builds the button's
 /// root, its first element, under its id, with the focus and the pointing hand the behaviour
@@ -198,7 +198,8 @@ impl ButtonStyle for PlainButtonStyle {
     };
 
     let s = TextStyle::new(Font::ui(size), [ink, ink, ink, a]).line_limit(1);
-    ui.row(Style::new().gap(5.0).center(), |ui| c.label(ui, s));
+    // Rigid, as every control: the text beside it wraps, the label never does.
+    ui.row(Style::new().w(Dim::Rigid).gap(5.0).center(), |ui| c.label(ui, s));
   }
 }
 
@@ -330,6 +331,44 @@ mod tests {
     ui.id("b").button("B");
     let n = ui.st.tree.nodes.iter().find(|n| n.id == Id::of("b")).unwrap();
     assert_eq!((n.style.bg, n.style.size[1]), ([0.0; 4], Style::new().size[1]));
+  }
+
+  /// A label with a tip of its own, and a plain button beside a note wrapping in `w`.
+  #[derive(Default)]
+  struct Tipped {
+    clicks: usize,
+    w: f32,
+  }
+
+  impl App for Tipped {
+    fn view(&mut self, ui: &mut Ui) {
+      let label = |ui: &mut Ui, s: TextStyle| ui.help("Tip").text("Tipped", s);
+      self.clicks += ui.id("t").button(label).clicked as usize;
+      ui.row(Style::new().w(px(self.w)), |ui| {
+        ui.id("p").button("Refresh settings");
+        ui.text("A note beside it, long enough to wrap", TextStyle::new(Font::ui(13.0), [0.0; 4]));
+      });
+    }
+  }
+
+  /// A press on a part shown only for its tip is the button's, and the plain button keeps its
+  /// width beside a note that wraps.
+  #[test]
+  fn a_tip_in_the_label_and_a_note_beside_leave_the_button_whole() {
+    let mut h =
+      Harness::new(Tipped { w: 600.0, ..Tipped::default() }, Size::new(600.0, 200.0), 1.0);
+    h.frame();
+    let r = h.rect(Id::of("t")).unwrap();
+    h.move_to(r.x + r.w / 2.0, r.y + r.h / 2.0);
+    assert_eq!(h.rt.ui.hover().len(), 2, "the label's text, then the button");
+    h.click(r.x + r.w / 2.0, r.y + r.h / 2.0);
+    assert_eq!(h.app().clicks, 1);
+
+    let wide = h.rect(Id::of("p")).unwrap().w;
+    h.app_mut().w = 120.0;
+    h.rt.redraw();
+    h.frame();
+    assert_eq!(h.rect(Id::of("p")).unwrap().w, wide);
   }
 
   /// An icon alone names its button.

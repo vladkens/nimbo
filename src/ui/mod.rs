@@ -761,8 +761,9 @@ impl<'a> Ui<'a> {
   /// (its left edge at the pointer, 19 below it, after `Theme::tip_delay`, at once within
   /// `Theme::tip_warm` of another), and reads it as its description to assistive technology, as
   /// SwiftUI's `.help`: any element, a text (read where it stands), a widget, a container or a
-  /// canvas (read as a group, its children as ever). It takes the pointer, so a click on it is
-  /// its own, not its parent's. The tip is `id.key("tip")` of the element's id.
+  /// canvas (read as a group, its children as ever). It takes the hover for the tip alone: a
+  /// press on it is the interactive element's around it (a button whose label has a tip). The tip
+  /// is `id.key("tip")` of the element's id.
   pub fn help(&mut self, tip: &str) -> &mut Self {
     self.next_help = Some(tip.to_owned());
     self
@@ -1055,13 +1056,15 @@ impl<'a> Ui<'a> {
     // pointer to work, a scroll container, a focusable element, a tip, takes it anyway.
     let off = std::mem::take(&mut self.next_no_hit);
     let hit = style.hit || named || style.cursor != Cursor::Inherit;
-    let hit = (hit && !off) || scrolls || focus || help.is_some();
+    let own = (hit && !off) || scrolls || focus;
+    let hit = own || help.is_some();
     // Its style's `hit` turned off too: no hover as an interactive child's ancestor.
     style.hit = hit;
     let tree = &mut self.st.tree;
     let i = tree.nodes.len() as u32;
     self.helps.extend(help.map(|tip| (i, tip)));
     tree.drags.extend(drag.then_some(i));
+    tree.tips.extend((hit && !own).then_some(i));
 
     let float = self.next_float.take();
     if float.is_some() {
