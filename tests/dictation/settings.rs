@@ -559,6 +559,11 @@ fn the_recorder_pauses_the_apps_hotkeys() {
   h.event(Event::Focus(true));
   h.frame();
   assert!(PAUSED.get());
+  h.event(Event::Focus(false));
+  assert!(!PAUSED.get(), "at once, without a frame: a hidden window may not draw");
+  h.event(Event::Focus(true));
+  h.frame();
+  assert!(PAUSED.get());
   h.set_focus(Some(Id::of(LOGIN)));
   h.frame();
   assert!(!PAUSED.get(), "another control");

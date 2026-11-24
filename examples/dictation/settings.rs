@@ -20,9 +20,9 @@ use std::time::Duration;
 
 use nimbo::ui::widgets::icon;
 use nimbo::{
-  Align, Answer, App, Appearance, ButtonRole, ColorScheme, Config, ControlSize, Dialog, FormRow,
-  FormStyle, Harness, Hotkey, Icon, Id, Picker, Rect, Section, SegmentedPickerStyle, Style,
-  TabItem, Tag, TextStyle, Theme, Tone, Ui, grow, px,
+  Align, Answer, App, Appearance, ButtonRole, ColorScheme, Config, ControlSize, Cx, Dialog, Event,
+  FormRow, FormStyle, Harness, Hotkey, Icon, Id, Picker, Rect, Section, SegmentedPickerStyle,
+  Style, TabItem, Tag, TextStyle, Theme, Tone, Ui, grow, px,
 };
 
 use super::account::{self, Account};
@@ -417,6 +417,16 @@ fn app_icon(f: &mut nimbo::Frame, r: Rect, accent: nimbo::Color) {
 }
 
 impl App for Settings {
+  /// The window losing the keys lets the hotkeys go at once: hidden or covered, it may not run
+  /// its view again until it shows.
+  fn event(&mut self, _: &mut Cx, ev: &Event) -> bool {
+    if *ev == Event::Focus(false) && self.paused && (self.pause_hotkeys)(false) {
+      self.paused = false;
+    }
+
+    false
+  }
+
   fn view(&mut self, ui: &mut Ui) {
     let a = ui.appearance();
     match self.look {
