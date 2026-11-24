@@ -21,6 +21,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::Error;
 use crate::platform::image;
 
 /// A decoded picture: its size in pixels and premultiplied RGBA pixels, rows top-down, shared by
@@ -42,17 +43,17 @@ impl Bitmap {
   /// The picture in `file`, the bytes of an image file, shrunk on decoding so that its longer
   /// side is at most `side` pixels (keeping its aspect; `u32::MAX` for its full size): 600 for a
   /// photo shown 300 points wide on a Retina screen, which costs 600 px of memory however large
-  /// the photo. Turned upright as its EXIF orientation says. An error when the OS can't read it
-  /// (another format, a broken file), when the file declares over a gigapixel, when the picture
-  /// would be over 128 Mi pixels (512 MiB; a smaller `side` decodes it), or when there is no
-  /// memory for it. Colours come in sRGB: macOS converts an embedded profile (Display P3, Adobe
+  /// the photo. Turned upright as its EXIF orientation says. [Error::Invalid] when the OS can't
+  /// read it (another format, a broken file), when the file declares over a gigapixel, when the
+  /// picture would be over 128 Mi pixels (512 MiB; a smaller `side` decodes it), or when there is
+  /// no memory for it. Colours come in sRGB: macOS converts an embedded profile (Display P3, Adobe
   /// RGB); Windows and Linux ignore it, taking the values as sRGB.
   ///
   /// ```ignore
   /// let photo = Bitmap::decode(&std::fs::read(path)?, 600)?;
   /// ```
-  pub fn decode(file: &[u8], side: u32) -> Result<Self, String> {
-    let (w, h, px) = image::decode(file, side.max(1))?;
+  pub fn decode(file: &[u8], side: u32) -> Result<Self, Error> {
+    let (w, h, px) = image::decode(file, side.max(1)).map_err(Error::Invalid)?;
     debug_assert_eq!(px.len(), w as usize * h as usize * 4);
     Ok(Self { w, h, px: Arc::new(px), key: next_key() })
   }

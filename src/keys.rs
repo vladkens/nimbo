@@ -36,7 +36,7 @@ mod w3c;
 pub use w3c::{Code, Modifiers, NamedKey};
 
 #[cfg(feature = "paste")]
-use crate::platform;
+use crate::{Error, platform};
 
 /// The command key, `cmd` in a shortcut in the app: ⌘ ([Modifiers::META]) on macOS, Ctrl
 /// ([Modifiers::CONTROL]) on Windows and Linux, as their shortcuts use them.
@@ -1020,13 +1020,13 @@ pub fn ready() -> bool {
 /// | macOS | `CGEvent`s posted at the HID level, the modifiers as their flags | Accessibility ([crate::permissions::accessibility]); Secure Input may swallow them |
 /// | Windows | `SendInput`: the modifier keys down, the key, the modifiers up | an app in focus that does not run elevated above this one |
 /// | Linux | XTest (`libXtst`, loaded at run time) on X11; on Wayland the RemoteDesktop portal's keyboard | Wayland: the user's approval, asked once (the desktop's dialog) |
-pub fn post(s: Shortcut) -> Result<(), String> {
+pub fn post(s: Shortcut) -> Result<(), Error> {
   let key = match s.key {
     Key::Char(c) => Key::Char(lower(c)),
     k => k,
   };
 
-  platform::post::post(Shortcut { key, ..s })
+  platform::post::post(Shortcut { key, ..s }).map_err(Error::System)
 }
 
 /// The presses that send `key` with modifiers `want` where modifier keys are pressed (Windows,

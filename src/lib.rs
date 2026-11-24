@@ -57,6 +57,7 @@ mod commands;
 pub(crate) mod cpu;
 #[cfg(feature = "autostart")]
 pub mod desktop;
+mod error;
 mod event;
 mod file_dialog;
 pub mod focus;
@@ -109,6 +110,7 @@ pub use app::{
 pub use bitmap::Bitmap;
 pub use clipboard::SystemClipboard;
 pub use commands::{CommandGroupPlacement, Commands};
+pub use error::Error;
 pub use file_dialog::{FileDialog, FileDialogKind};
 #[cfg(feature = "harness")]
 pub use harness::Harness;

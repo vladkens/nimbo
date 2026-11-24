@@ -26,7 +26,7 @@ use std::marker::PhantomData;
 
 pub use crate::menu::{Item, LABEL, Menu};
 use crate::platform::tray as imp;
-use crate::{Main, svg};
+use crate::{Error, Main, svg};
 
 /// The icon, a template: only its alpha counts, and the OS's colour fills it (macOS tints it
 /// for the menu bar and the highlight; Windows fills it white on a dark taskbar, black on a light
@@ -51,7 +51,7 @@ impl TrayIcon {
 
   /// An icon file: an SVG of `<path>`s in a square view box ([crate::svg::document] says what
   /// it reads), drawn as [TrayIcon::Path].
-  pub fn from_svg(svg: &str) -> Result<Self, String> {
+  pub fn from_svg(svg: &str) -> Result<Self, Error> {
     let (size, d, even_odd) = svg::document(svg)?;
     Ok(Self::Path { size, d, even_odd })
   }
@@ -280,10 +280,11 @@ impl<A: Clone + PartialEq + 'static> Tray<A> {
   }
 }
 
-/// Whether the OS shows a tray icon now: `Err` with the reason when it doesn't (Linux: no
-/// StatusNotifierItem host on the session bus). A [Tray] made anyway shows once a host starts.
-pub fn available() -> Result<(), String> {
-  imp::available()
+/// Whether the OS shows a tray icon now: [Error::Unsupported] with the reason when it doesn't
+/// (Linux: no StatusNotifierItem host on the session bus). A [Tray] made anyway shows once a
+/// host starts.
+pub fn available() -> Result<(), Error> {
+  imp::available().map_err(Error::Unsupported)
 }
 
 /// For the tray scenario (`tests/dictation/detached.rs`): a tray with nothing on screen, the menu

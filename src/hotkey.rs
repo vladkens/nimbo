@@ -26,6 +26,7 @@
 
 use std::time::Instant;
 
+use crate::Error;
 use crate::keys::Hotkey;
 use crate::platform::hotkey as imp;
 
@@ -94,11 +95,11 @@ pub struct Slot {
   pub hotkey: Option<Hotkey>,
   /// Why the place's hotkey is refused: past [MAX], an earlier place's, or the OS's refusal
   /// (another app has it, a key this platform can't see alone).
-  pub error: Option<String>,
+  pub error: Option<Error>,
   /// The source that works without the listener holds the chord (macOS: Carbon's hotkey, which
   /// also works under Secure Input; Windows: `RegisterHotKey`).
   pub fallback: bool,
-  pub fallback_error: Option<String>,
+  pub fallback_error: Option<Error>,
 }
 
 /// What [Hotkeys] does now, for a status line or diagnostics.
@@ -109,12 +110,12 @@ pub struct Status {
   pub slots: Vec<Slot>,
   pub listener: Listener,
   /// Why the listener last failed.
-  pub listener_error: Option<String>,
+  pub listener_error: Option<Error>,
   pub paused: bool,
   /// Escape is taken now: [Hotkeys::escape] is on and a source here has it.
   pub escape: bool,
   /// Why Escape is on but not taken: the platform can't (Linux on Wayland) or no source is up.
-  pub escape_error: Option<String>,
+  pub escape_error: Option<Error>,
   /// Some app keeps key presses from the listener (macOS Secure Input: a password field, a
   /// terminal's secure keyboard entry); the fallback still hears chords.
   pub secure_input: bool,
@@ -143,7 +144,7 @@ pub(crate) type OnEdge = Box<dyn Fn(Edge) + Send>;
 #[derive(Debug, Clone, Default)]
 struct Place {
   hotkey: Option<Hotkey>,
-  error: Option<String>,
+  error: Option<Error>,
 }
 
 /// The app's global hotkeys: one [Hotkeys] per app, made and used on the main thread while
@@ -169,7 +170,7 @@ impl Hotkeys {
   /// has it, a key this platform can't see alone) is refused alone ([Slot::error]); the `Err` is
   /// the first refusal. A place as it was is left alone, so a hotkey held stays held; a refused
   /// one is tried again. While paused they are taken once the pause ends.
-  pub fn set(&mut self, hotkeys: &[Option<Hotkey>]) -> Result<(), String> {
+  pub fn set(&mut self, hotkeys: &[Option<Hotkey>]) -> Result<(), Error> {
     let changed = changed(&self.places, hotkeys);
     self.places.resize_with(hotkeys.len().max(self.places.len()), Place::default);
     // Each place changed lets its hotkey go before any takes its new one: two places swapping
@@ -220,7 +221,7 @@ impl Hotkeys {
 
     let taken = self.imp.set(which, want);
     if want.is_some() {
-      place.error = taken.err();
+      place.error = taken.err().map(Error::System);
     }
   }
 
@@ -229,8 +230,8 @@ impl Hotkeys {
   /// starting it. macOS: the event tap needs Accessibility access (System Settings → Privacy &
   /// Security), chords work without it through the fallback; Linux: on Wayland the portal asks
   /// the user to approve the shortcut, on X11 the chord is grabbed already.
-  pub fn start(&mut self) -> Result<(), String> {
-    self.imp.start()
+  pub fn start(&mut self) -> Result<(), Error> {
+    self.imp.start().map_err(Error::System)
   }
 
   pub fn status(&self) -> Status {
@@ -263,13 +264,14 @@ fn changed(places: &[Place], hotkeys: &[Option<Hotkey>]) -> Vec<usize> {
 
 /// Why place `which` of `hotkeys` is refused before the OS is asked: past [MAX], or an earlier
 /// place has its hotkey. None past the list: the place went.
-fn refused(hotkeys: &[Option<Hotkey>], which: usize) -> Option<String> {
+fn refused(hotkeys: &[Option<Hotkey>], which: usize) -> Option<Error> {
   let hotkey = hotkeys.get(which).copied().flatten()?;
   if which >= MAX {
-    return Some(format!("more than {MAX} hotkeys"));
+    return Some(Error::Invalid(format!("more than {MAX} hotkeys")));
   }
 
-  hotkeys[..which].contains(&Some(hotkey)).then(|| "the app has this hotkey already".into())
+  let taken = hotkeys[..which].contains(&Some(hotkey));
+  taken.then(|| Error::Invalid("the app has this hotkey already".into()))
 }
 
 #[cfg(test)]
@@ -281,7 +283,7 @@ mod tests {
   }
 
   fn places(texts: &[&str], refused: &[usize]) -> Vec<Place> {
-    let error = |i| refused.contains(&i).then(|| "taken".to_string());
+    let error = |i| refused.contains(&i).then(|| Error::System("taken".into()));
     keys(texts)
       .into_iter()
       .enumerate()
@@ -317,12 +319,12 @@ mod tests {
     let refusals: Vec<_> = (0..hotkeys.len()).map(|i| refused(&hotkeys, i)).collect();
     assert_eq!(refusals[0], None);
     assert_eq!(refusals[1], None);
-    assert!(refusals[2].as_deref().is_some_and(|e| e.contains("already")));
-    assert_eq!((refusals[3].as_deref(), refusals[4].as_deref()), (None, None), "empty");
+    assert!(refusals[2].as_ref().is_some_and(|e| e.to_string().contains("already")));
+    assert_eq!((&refusals[3], &refusals[4]), (&None, &None), "empty");
 
     let mut many = keys(&["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9"]);
     assert_eq!(refused(&many, MAX - 1), None);
-    assert!(refused(&many, MAX).is_some_and(|e| e.contains("more than 8")));
+    assert!(refused(&many, MAX).is_some_and(|e| e.to_string().contains("more than 8")));
     many[MAX] = None;
     assert_eq!(refused(&many, MAX), None);
   }

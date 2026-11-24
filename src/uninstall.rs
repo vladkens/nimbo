@@ -46,7 +46,7 @@ use std::{fmt, fs, io, thread};
 
 use crate::paths::{OS, Os};
 use crate::platform::uninstall as imp;
-use crate::{AppInfo, autostart};
+use crate::{AppInfo, Error, autostart};
 
 /// One thing [system] undid, or why it couldn't; shown as `<what>` or `<what> failed: <why>`.
 #[derive(Debug)]
@@ -54,7 +54,7 @@ use crate::{AppInfo, autostart};
 pub struct Step {
   /// What was undone: `launch at login off`.
   pub what: &'static str,
-  pub result: Result<(), String>,
+  pub result: Result<(), Error>,
 }
 
 impl fmt::Display for Step {
@@ -207,7 +207,8 @@ mod tests {
   #[test]
   fn steps_read_as_what_was_done() {
     let done = Step { what: "launch at login off", result: Ok(()) };
-    let failed = Step { what: "permissions reset", result: Err("no such app".into()) };
+    let failed =
+      Step { what: "permissions reset", result: Err(Error::System("no such app".into())) };
     assert_eq!(done.to_string(), "launch at login off");
     assert_eq!(failed.to_string(), "permissions reset failed: no such app");
   }

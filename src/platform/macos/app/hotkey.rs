@@ -33,9 +33,9 @@ use objc2_core_graphics::{
 
 use super::super::keyboard::{code as key_at, device_flag, kvk};
 use super::tap_flags;
-use crate::Code;
 use crate::hotkey::{Edge, Listener, MAX, OnEdge, Status};
 use crate::keys::{Hotkey, is_modifier};
+use crate::{Code, Error};
 
 mod carbon;
 
@@ -278,10 +278,10 @@ impl Hotkeys {
       TAP_STARTING => Listener::Starting,
       _ => Listener::Off,
     };
-    out.listener_error = s.tap_error.lock().unwrap().clone();
+    out.listener_error = s.tap_error.lock().ok().and_then(|e| e.clone()).map(Error::System);
     for (which, slot) in out.slots.iter_mut().enumerate().take(MAX) {
       slot.fallback = self.carbon.registered(which);
-      slot.fallback_error = self.carbon_errors[which].clone();
+      slot.fallback_error = self.carbon_errors[which].clone().map(Error::System);
     }
 
     out.secure_input = super::permissions::secure_input();
@@ -297,7 +297,8 @@ impl Hotkeys {
     let tap = out.listener == Listener::Active && !out.secure_input;
     if s.escape.load(Ordering::Relaxed) && !tap && !self.carbon.escape_registered() {
       let why = self.escape_error.as_deref().unwrap_or("not registered");
-      out.escape_error = Some(format!("no event tap, and Carbon's hotkey for Escape: {why}"));
+      let why = format!("no event tap, and Carbon's hotkey for Escape: {why}");
+      out.escape_error = Some(Error::System(why));
     }
   }
 }

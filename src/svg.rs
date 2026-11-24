@@ -6,6 +6,7 @@
 //! relative, implicit repeats); curves and arcs in pieces of about 2 pixels. [document] reads an
 //! icon file's `<path>`s into one path.
 
+use crate::Error;
 use crate::geom::Point;
 
 /// Reads path data: commands, numbers and arc flags.
@@ -85,8 +86,13 @@ impl Cur<'_> {
 }
 
 /// Flattens SVG path data into polylines in view box units, one per subpath (a closed one ends
-/// at its start); curves in pieces of about 2 pixels at `px` pixels per unit.
-pub fn flatten(d: &str, px: f32, out: &mut Vec<Vec<Point>>) -> Result<(), String> {
+/// at its start); curves in pieces of about 2 pixels at `px` pixels per unit; [Error::Invalid]
+/// where the data doesn't parse.
+pub fn flatten(d: &str, px: f32, out: &mut Vec<Vec<Point>>) -> Result<(), Error> {
+  path(d, px, out).map_err(Error::Invalid)
+}
+
+fn path(d: &str, px: f32, out: &mut Vec<Vec<Point>>) -> Result<(), String> {
   let mut c = Cur { s: d.as_bytes(), i: 0 };
   let (mut at, mut start) = (Point::new(0.0, 0.0), Point::new(0.0, 0.0));
   // The last control point, for S and T, and the command it came from.
@@ -323,8 +329,12 @@ pub fn spans(
 /// `0 0`, and paths filled by one rule (`fill-rule="evenodd"`, on each or a group around them,
 /// or none) that don't overlap (joined, they fill as one path); groups, titles and comments are
 /// passed over. Any other element, a `transform` or `style`, an unfilled path (`fill="none"` on
-/// it or a group around it) or data that doesn't parse is an error.
-pub fn document(svg: &str) -> Result<(f32, String, bool), String> {
+/// it or a group around it) or data that doesn't parse is an [Error::Invalid].
+pub fn document(svg: &str) -> Result<(f32, String, bool), Error> {
+  read(svg).map_err(Error::Invalid)
+}
+
+fn read(svg: &str) -> Result<(f32, String, bool), String> {
   let (mut size, mut paths, mut rules) = (None, Vec::new(), Vec::new());
   // Each open element's fill and fill rule, which the elements in it inherit.
   let mut fills = vec![(true, false)];
@@ -387,7 +397,7 @@ pub fn document(svg: &str) -> Result<(f32, String, bool), String> {
           return Err("a <path> not filled".into());
         }
 
-        flatten(d, 1.0, &mut Vec::new())?;
+        path(d, 1.0, &mut Vec::new())?;
         // A path's first `m` is from the origin, not from where the path before it ended.
         paths.push(if d.trim_start().starts_with('m') { format!("M0 0{d}") } else { d.into() });
         rules.push(fill.1);
@@ -478,7 +488,7 @@ mod tests {
       (r#"<path d="M1 1h2"/>"#.into(), "no <svg>"),
       (one("<path d=\"M1 1h2\""), "unclosed"),
     ] {
-      let e = document(&bad).unwrap_err();
+      let e = document(&bad).unwrap_err().to_string();
       assert!(e.contains(why), "{bad}: {e}");
     }
   }

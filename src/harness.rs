@@ -19,7 +19,7 @@ use crate::text::TextSystem;
 use crate::text::edit::Editor;
 use crate::text::edit::utf16_len;
 use crate::ui::{A11yTree, Action, Cursor, Id, Kind, Role, Scroll, TextInput};
-use crate::{Code, Modifiers, TitleBar, cpu, png};
+use crate::{Code, Error, Modifiers, TitleBar, cpu, png};
 
 /// A display refresh at 120 Hz, the step of [Harness::wait].
 pub const TICK: Duration = Duration::from_nanos(8_333_333);
@@ -477,7 +477,7 @@ impl<A: App> Harness<A> {
     Image { scale, pixels }
   }
 
-  pub fn shot(&mut self, path: &Path) -> Result<(), String> {
+  pub fn shot(&mut self, path: &Path) -> Result<(), Error> {
     self.render().save_png(path)
   }
 }
@@ -525,8 +525,8 @@ impl Image {
   }
 
   /// Writes a PNG, tagged sRGB.
-  pub fn save_png(&self, path: &Path) -> Result<(), String> {
-    png::write(path, &self.pixels)
+  pub fn save_png(&self, path: &Path) -> Result<(), Error> {
+    png::write(path, &self.pixels).map_err(Error::System)
   }
 }
 

@@ -751,6 +751,7 @@ SERVICES = (
 PLACES = {
     **{x: "base" for x in ("clipboard", "geom.rs", "info.rs", "keys.rs", "locale", "menu.rs")},
     "keys": "base",
+    "error.rs": "base",
     "commands.rs": "base",
     "clipboard/system.rs": "service",
     "text": "text",

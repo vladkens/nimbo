@@ -35,7 +35,7 @@ use std::time::{Duration, Instant};
 use crate::clipboard::{Offer, Snapshot, SystemClipboard};
 use crate::focus::{self, Focused};
 use crate::keys::{CMD, Key, Shortcut};
-use crate::{Clipboard, Modifiers, keys, permissions, platform, runloop};
+use crate::{Clipboard, Error, Modifiers, keys, permissions, platform, runloop};
 
 /// How long after the offer's read the clipboard comes back: some apps read it more than once.
 pub const RESTORE: Duration = Duration::from_millis(500);
@@ -153,7 +153,7 @@ struct Sys {
   give_back: fn(Offer, &Snapshot) -> bool,
   /// Other apps can paste the offer.
   reaches: fn(Offer) -> bool,
-  post: fn(Shortcut) -> Result<(), String>,
+  post: fn(Shortcut) -> Result<(), Error>,
   focus: fn() -> Option<Focused>,
   hidden: fn() -> bool,
   accessibility: fn() -> bool,
@@ -274,7 +274,7 @@ fn paste_now(sys: Sys, text: &str, opts: Paste) -> Result<(), NotPasted> {
   let key = paste_key(&target);
   (sys.post)(key).map_err(|why| {
     settle(sys, Some(id));
-    NotPasted::NotSent { key: key.label(), why }
+    NotPasted::NotSent { key: key.label(), why: why.to_string() }
   })
 }
 
@@ -297,7 +297,7 @@ fn check_focus(sys: Sys, target: &Focused) -> Result<(), NotPasted> {
     _ => return Ok(()),
   };
 
-  Err(NotPasted::Unanswered { app: now.name.clone(), what, why: why.clone() })
+  Err(NotPasted::Unanswered { app: now.name.clone(), what, why: why.to_string() })
 }
 
 /// The shortcut that pastes into `target`.
@@ -405,7 +405,7 @@ mod tests {
     reaches: |_| world(|w| !w.unreached),
     post: |key| {
       world(|w| match w.post_error.clone() {
-        Some(e) => Err(e),
+        Some(e) => Err(Error::System(e)),
         None => {
           let _: () = w.posted.push(key);
           Ok(())
@@ -645,7 +645,7 @@ mod tests {
     assert_eq!(refused(opts), NotPasted::SecureField);
 
     let opts = setup("TextEdit");
-    world(|w| w.focus.as_mut().unwrap().window = Err("busy".into()));
+    world(|w| w.focus.as_mut().unwrap().window = Err(Error::System("busy".into())));
     let e = refused(opts);
     assert_eq!(e.to_string(), "TextEdit did not tell its focused window (busy)");
 

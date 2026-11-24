@@ -7,8 +7,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::AppInfo;
 use crate::uninstall::{Step, remove_file};
+use crate::{AppInfo, Error};
 
 pub fn steps(app: &AppInfo) -> Vec<Step> {
   let home = std::env::var_os("HOME").map(PathBuf::from);
@@ -33,8 +33,8 @@ fn steps_with(
   let plist = home.map(|h| h.join(format!("Library/Preferences/{id}.plist")));
   let defaults = defaults.and(plist.map_or(Ok(()), |p| remove_file(&p)));
   vec![
-    Step { what: "permissions reset", result: permissions },
-    Step { what: "defaults removed", result: defaults },
+    Step { what: "permissions reset", result: permissions.map_err(Error::System) },
+    Step { what: "defaults removed", result: defaults.map_err(Error::System) },
   ]
 }
 
