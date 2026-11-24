@@ -826,14 +826,14 @@ impl UiState {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FieldStyle {
   /// The box: size, padding, background, border, radius.
-  pub frame: Style,
-  pub text: TextStyle,
+  pub(crate) frame: Style,
+  pub(crate) text: TextStyle,
   /// The prompt's colour, shown while the text is empty.
-  pub placeholder: Color,
-  pub selection: Color,
-  pub caret: Color,
+  pub(crate) placeholder: Color,
+  pub(crate) selection: Color,
+  pub(crate) caret: Color,
   /// The border's colour while focused; transparent keeps the frame's.
-  pub focus_border: Color,
+  pub(crate) focus_border: Color,
 }
 
 impl FieldStyle {

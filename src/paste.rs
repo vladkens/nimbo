@@ -22,8 +22,8 @@
 //! let target = nimbo::focus::current();
 //! // ...and later, on the main thread, the text goes there if the focus is still there, and the
 //! // caller still waits for it.
-//! let deadline = Some(std::time::Instant::now() + std::time::Duration::from_secs(3));
-//! if let Err(e) = paste::text("Hello", Paste { restore: true, target, deadline }) {
+//! let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+//! if let Err(e) = paste::text("Hello", Paste::new(target).deadline(deadline)) {
 //!   eprintln!("not pasted: {e}");
 //! }
 //! ```
@@ -56,22 +56,37 @@ const TERMINALS: [&str; 20] = [
   "terminology", "guake", "tilda", "blackbox", "st",
 ];
 
-/// How [text] pastes.
+/// How [text] pastes: `Paste::new(target)`, the clipboard given back after.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Paste {
-  /// The clipboard the user had comes back after the paste; otherwise the text stays on it, as
-  /// if copied (on Wayland marked for clipboard managers to skip: only the paste's own way
-  /// reaches the clipboard there).
-  pub restore: bool,
-  /// Where the text goes, as [focus::current] found it when the user asked: the paste is refused
-  /// when the focus moved from it since. `None` (not known) refuses it, unless the OS hides the
-  /// focus ([focus::hidden]: Wayland): then it goes wherever the focus is.
-  pub target: Option<Focused>,
+  pub(crate) restore: bool,
+  pub(crate) target: Option<Focused>,
+  pub(crate) deadline: Option<Instant>,
+}
+
+impl Paste {
+  /// To `target`, where the user typed as [focus::current] found it when they asked: the paste
+  /// is refused when the focus moved from it since. `None` (not known) refuses it, unless the OS
+  /// hides the focus ([focus::hidden]: Wayland): then it goes wherever the focus is. The
+  /// clipboard comes back after, and the caller waits as long as it takes.
+  pub fn new(target: Option<Focused>) -> Self {
+    Self { restore: true, target, deadline: None }
+  }
+
+  /// Whether the clipboard the user had comes back after the paste (the default); otherwise the
+  /// text stays on it, as if copied (on Wayland marked for clipboard managers to skip: only the
+  /// paste's own way reaches the clipboard there).
+  pub fn restore(self, restore: bool) -> Self {
+    Self { restore, ..self }
+  }
+
   /// When the caller stops waiting for the paste, best about 100 ms before it gives up: past it
   /// once the clipboard is read and the focus checked, nothing changes, and past it after the
   /// offer (Wayland's portal dialog) the clipboard comes back; no shortcut goes either way (a
   /// paste a minute late lands wherever the focus is by then).
-  pub deadline: Option<Instant>,
+  pub fn deadline(self, deadline: Instant) -> Self {
+    Self { deadline: Some(deadline), ..self }
+  }
 }
 
 /// Why [text] did not paste.
@@ -83,7 +98,7 @@ pub enum NotPasted {
   /// Another paste is under way: called from a nested loop it runs (a clipboard read, the
   /// portal's dialog).
   Busy,
-  /// The app in focus is not known: when the user asked ([Paste::target] `None`), or now.
+  /// The app in focus is not known: when the user asked ([Paste::new] of `None`), or now.
   Unknown,
   /// The focus moved from the target to another app, or another window of it.
   FocusMoved { from: String, to: String },

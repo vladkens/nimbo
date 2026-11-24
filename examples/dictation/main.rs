@@ -47,11 +47,8 @@ use self::history::History;
 use self::hud::Hud;
 use self::settings::Settings;
 
-pub const INFO: AppInfo = AppInfo {
-  id: "com.example.nimbo-dictation",
-  name: "Nimbo Dictation",
-  presence: Presence::Accessory,
-};
+pub const INFO: AppInfo =
+  AppInfo::new("com.example.nimbo-dictation", "Nimbo Dictation").presence(Presence::Accessory);
 pub const HOTKEY: &str = "ctrl+option+space";
 /// A ring, filled even-odd.
 pub const ICON: &str = "M9 1a8 8 0 1 0 0 16A8 8 0 1 0 9 1Zm0 4a4 4 0 1 1 0 8 4 4 0 1 1 0-8Z";
@@ -283,8 +280,7 @@ fn toggle_dictation(main: &mut Main, state: &Shared, secs: u64) {
 /// Pastes `text` where the user types now: the clipboard comes back after the paste, unless
 /// something else was copied meanwhile.
 fn paste_here(text: &str) {
-  let opts = Paste { restore: true, target: focus::current(), deadline: None };
-  if let Err(e) = paste::text(text, opts) {
+  if let Err(e) = paste::text(text, Paste::new(focus::current())) {
     eprintln!("paste: {e}");
   }
 }
@@ -341,14 +337,14 @@ fn start(main: &mut Main, instance: Option<Instance>) {
   // only then is the icon decoded.
   let icon = Png::icon(include_bytes!("../../docs/brand/mark-iris.png"));
   let launcher =
-    Launcher { comment: "A dictation app made with nimbo", categories: &["Utility"], icon };
+    Launcher::new(icon).comment("A dictation app made with nimbo").categories(&["Utility"]);
   if let Err(e) = desktop::install(&INFO, &launcher) {
     eprintln!("desktop: {e}");
   }
 
   let state = STATE.with(Rc::clone);
   PROXY.with(|p| _ = p.set(main.proxy()));
-  let tray = Tray::new(TrayIcon::Path { size: 18.0, d: ICON.into(), even_odd: true }, INFO.name);
+  let tray = Tray::new(TrayIcon::Path { size: 18.0, d: ICON.into(), even_odd: true }, INFO.name());
   if let Err(e) = tray::available() {
     eprintln!("tray: {e}");
   }

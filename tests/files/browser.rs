@@ -251,8 +251,8 @@ fn a_right_click_opens_the_row_menu_over_the_selection() {
     right(h, row(102), true);
     assert!(h.rect(popup).is_none(), "{os:?}");
     let (_, menu) = h.context_menu(Some("Delete")).expect("a menu asked for");
-    let section = matches!(menu.items[0], nimbo::Item::Section(_));
-    assert_eq!((menu.items[0].label(), section), ("Item 000103", true));
+    let section = matches!(menu.items()[0], nimbo::Item::Section(_));
+    assert_eq!((menu.items()[0].label(), section), ("Item 000103", true));
     assert_eq!(h.app().chosen.last(), Some(&(RowAction::Delete, vec![102])), "{os:?}");
   }
 }

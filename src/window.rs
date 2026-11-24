@@ -75,18 +75,18 @@ pub enum WindowToolbarStyle {
 
 /// A window's title and initial content size in points; the harness renders at this size.
 pub struct Config {
-  pub title: &'static str,
-  pub size: Size,
+  pub(crate) title: &'static str,
+  pub(crate) size: Size,
   /// The least content size the window resizes to, in points ([Config::min]).
-  pub min_size: Size,
+  pub(crate) min_size: Size,
   /// The window can be resized (the default).
-  pub resizable: bool,
+  pub(crate) resizable: bool,
   /// Opened without showing ([Config::hidden]) until [Window::front].
-  pub hidden: bool,
+  pub(crate) hidden: bool,
   /// An overlay and where it shows ([Config::overlay]); `None` for a window.
-  pub overlay: Option<Anchor>,
+  pub(crate) overlay: Option<Anchor>,
   /// The content runs under the title bar ([Config::unified]).
-  pub unified: bool,
+  pub(crate) unified: bool,
   /// The window's icon off macOS ([Config::icon]): its side and straight RGBA pixels, `side`²
   /// of them, as only the builder checks; or a PNG's ([Config::png_icon]).
   #[cfg_attr(target_os = "macos", expect(dead_code, reason = "a macOS window has no icon"))]
@@ -95,7 +95,7 @@ pub struct Config {
   #[cfg_attr(target_os = "macos", expect(dead_code, reason = "a macOS window has no icon"))]
   pub(crate) png_icon: Option<Png>,
   /// The app's catalogs ([Config::localizations]).
-  pub localizations: Localizations,
+  pub(crate) localizations: Localizations,
 }
 
 impl Config {
@@ -126,6 +126,28 @@ impl Config {
   /// [Main::set_localizations], which needs no window.
   pub const fn localizations(self, catalogs: Localizations) -> Self {
     Self { localizations: catalogs, ..self }
+  }
+
+  pub const fn title(&self) -> &'static str {
+    self.title
+  }
+
+  /// The initial content size in points: the harness's (`Harness::new(app, CONFIG.size(), 2.0)`).
+  pub const fn size(&self) -> Size {
+    self.size
+  }
+
+  pub const fn is_resizable(&self) -> bool {
+    self.resizable
+  }
+
+  pub const fn is_hidden(&self) -> bool {
+    self.hidden
+  }
+
+  /// Where the overlay shows ([Config::overlay]); `None` for a window.
+  pub const fn get_overlay(&self) -> Option<Anchor> {
+    self.overlay
   }
 
   /// The least content size the user can resize the window to, [Config::MIN_SIZE] unless set.

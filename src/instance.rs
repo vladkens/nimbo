@@ -19,8 +19,7 @@
 //! use nimbo::instance::{self, Claim};
 //! use nimbo::{AppInfo, Presence};
 //!
-//! const INFO: AppInfo =
-//!   AppInfo { id: "com.example.app", name: "App", presence: Presence::Regular };
+//! const INFO: AppInfo = AppInfo::new("com.example.app", "App");
 //! let instance = match instance::claim(&INFO) {
 //!   Ok(Claim::Primary(instance)) => Some(instance),
 //!   Ok(Claim::Running) => return instance::send(&INFO, instance::OPEN).unwrap_or_default(),

@@ -597,10 +597,10 @@ fn a_native_edit_menu_is_asked_for_and_answered() {
   let r = h.rect(Id::of(NAME)).unwrap();
   let (at, asked) = h.context_menu(Some("Copy")).expect("a menu asked for");
   assert_eq!((at.x, at.y), (r.x + 12.0, r.y + 8.0), "at the pointer");
-  let items: Vec<_> = asked.items.iter().map(|i| (i.label(), i.is_enabled())).collect();
+  let items: Vec<_> = asked.items().iter().map(|i| (i.label(), i.is_enabled())).collect();
   let want = [("Cut", true), ("Copy", true), ("Paste", true), ("", false), ("Select All", true)];
   assert_eq!(items, want);
-  assert!(matches!(asked.items[3], nimbo::Item::Divider));
+  assert!(matches!(asked.items()[3], nimbo::Item::Divider));
 
   h.frame();
   assert_eq!(clipboard(h).as_deref(), Some("hello"));
@@ -611,7 +611,7 @@ fn a_native_edit_menu_is_asked_for_and_answered() {
   right_click(h, NAME);
   assert!(h.menu_open(Id::of(NAME).key("edit")));
   let (_, asked) = h.context_menu(None).unwrap();
-  let on = asked.items.iter().filter(|i| i.action().is_some()).map(|i| i.is_enabled());
+  let on = asked.items().iter().filter(|i| i.action().is_some()).map(|i| i.is_enabled());
   let on: Vec<_> = on.collect();
   assert_eq!(on, [false, false, false, true], "nothing selected, nothing to paste");
   h.frame();

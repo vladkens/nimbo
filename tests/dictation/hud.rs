@@ -13,15 +13,15 @@ use crate::dictation::hud::{self, CONFIG, DOT, FILL, Hud, PILL_H, pill};
 
 /// The HUD as `--shot` renders it: transparent, as its config is an overlay's.
 fn hud() -> Harness<Hud> {
-  let mut h = Harness::new(Hud::default(), CONFIG.size, 2.0);
-  h.set_transparent(CONFIG.overlay.is_some());
+  let mut h = Harness::new(Hud::default(), CONFIG.size(), 2.0);
+  h.set_transparent(CONFIG.get_overlay().is_some());
   hud::shot(&mut h);
   h
 }
 
 #[test]
 fn an_overlay_at_the_bottom_shown_on_demand() {
-  let shown = (CONFIG.overlay, CONFIG.hidden, CONFIG.resizable);
+  let shown = (CONFIG.get_overlay(), CONFIG.is_hidden(), CONFIG.is_resizable());
   assert_eq!(shown, (Some(Anchor::Bottom(44.0)), true, false));
 }
 
@@ -31,7 +31,7 @@ fn transparent_around_the_pill_and_its_shadow() {
   let img = h.render();
   let p = pill();
   // The corners, clear of the pill's rounding and its shadow.
-  for (x, y) in [(1.0, 1.0), (CONFIG.size.w - 1.0, 1.0), (1.0, CONFIG.size.h - 1.0)] {
+  for (x, y) in [(1.0, 1.0), (CONFIG.size().w - 1.0, 1.0), (1.0, CONFIG.size().h - 1.0)] {
     assert_eq!(img.pixel(x, y), [0; 4], "({x}, {y})");
   }
 

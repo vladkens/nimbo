@@ -124,7 +124,7 @@ impl Gallery {
 
       // Red knobs in this area, put back after it for the gallery's other areas.
       "Scroll indicators" => Self::variants(ui, Shown::Alone, |ui| {
-        let red = ScrollerKnob { color: alpha(t.danger(), 0.6), ..ScrollerKnob::DARK };
+        let red = ScrollerKnob::DARK.color(alpha(t.danger(), 0.6));
         let old = ui.set_environment(Some(red));
         ui.scroll_area(Style::new().w(px(200.0)).h(px(60.0)), |ui| {
           (1..=8).for_each(|i| ui.text(format_args!("Line {i}"), t.label()))

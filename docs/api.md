@@ -548,7 +548,7 @@ nimbo: `let b = ui.scroll_behavior(id, Axes::VERTICAL); ui.with_id(id).col(style
 
 SwiftUI: `NSScroller.knobStyle = .light (AppKit; SwiftUI has none)`
 
-nimbo: `ui.set_environment(Some(ScrollerKnob { color: red, ..ScrollerKnob::DARK })); ui.scroll_area(style, |ui| { … })`
+nimbo: `ui.set_environment(Some(ScrollerKnob::DARK.color(red))); ui.scroll_area(style, |ui| { … })`
 
 ![Scroll indicators](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/scroll-indicators.png)
 
