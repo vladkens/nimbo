@@ -117,11 +117,9 @@ Each building block beside its SwiftUI counterpart, with a picture: [docs/api.md
 - `settings`: a macOS-style settings window
 - `custom-look`: a whole look of its own over the headless styles, light and dark
 - `files`: a file browser: sidebar in the title bar, 100k rows, menus, panels, drops
-- `history`: 86,000 rows a day at a time in a grouped list, built in view only
 - `fields`: text fields and input methods
 - `canvas`: below the widgets: shapes, text, pointer and keys, frame pacing
-- `tray`: a tray icon, a global hotkey
-- `hud`: an overlay over every app
+- `dictation`: a menu-bar app: tray, global hotkey, HUD, paste, history, system changes
 
 ## 📏 Size
 

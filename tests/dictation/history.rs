@@ -1,24 +1,17 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Tests of `examples/history.rs` through the harness: of 86,000 rows a day at a time only those
-//! in view are built, under a scroll area as tall as all of them; the end builds the last rows;
-//! rows and days sit where a whole build would put them; a selection and the rows' ids hold
-//! across scrolling; a row from the middle is revealed; a million rows, past `f32`'s whole
-//! numbers, scroll to their end and their middle a row apart; rows read as rows and press.
+//! Tests of `examples/dictation/history.rs` through the harness: of 86,000 rows a day at a time
+//! only those in view are built, under a scroll area as tall as all of them; the end builds the
+//! last rows; rows and days sit where a whole build would put them; a selection and the rows' ids
+//! hold across scrolling; a row from the middle is revealed; a million rows, past `f32`'s whole
+//! numbers, scroll to their end and their middle a row apart; rows read as rows and press; a
+//! dictation said now joins Today at the top.
 
-#[path = "../examples/history.rs"]
-#[expect(dead_code, reason = "its main and what this file doesn't use")]
-// The example sets the Windows subsystem, an attribute of its own crate, not of this module.
-#[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
-mod history;
-
-#[expect(dead_code, reason = "this file uses a part of the helpers")]
-mod common;
-
-use common::{mid, reads};
-use history::{History, LIST, PER_DAY, ROW_H, ROWS};
 use nimbo::ui::{Action, Role};
 use nimbo::{Event, Harness, Id, Modifiers, Phase, Point, Rect, Size};
+
+use crate::common::{mid, reads};
+use crate::dictation::history::{History, LIST, PER_DAY, ROW_H, ROWS};
 
 type H = Harness<History>;
 
@@ -201,4 +194,22 @@ fn rows_read_and_press_as_rows() {
   assert!(h.act(third.unwrap().id, Action::Press));
   assert!(h.app().sel.contains(entry(0, 2)));
   reads(&h.a11y(), &[&format!("row {:?} selected desc \"23:57 · 5.8 s\"", name(0, 2))]);
+}
+
+/// A dictation said now is the first row of Today, the rows before it a row down under their own
+/// ids, the next day still a full one.
+#[test]
+fn a_dictation_said_now_joins_today_at_the_top() {
+  let mut h = history();
+  let first = rect(&h, row(0, 0)).unwrap();
+  h.app_mut().add("Water the plants".into());
+  h.frame();
+
+  let new = Id::of(LIST).key(("row", ROWS as u64 + 1));
+  assert_eq!(rect(&h, new), Some(first), "on top");
+  assert_eq!(rect(&h, row(0, 0)).unwrap().y, first.y + ROW_H, "the old top a row down");
+  let days = &h.app().days;
+  assert_eq!((days[0].1, days[1].1), (PER_DAY + 1, PER_DAY));
+  assert_eq!(h.app().entry(1, 0), entry(1, 0), "yesterday's rows keep their ids");
+  reads(&h.a11y(), &["row \"Water the plants\" desc \"23:59 · 8.1 s\""]);
 }

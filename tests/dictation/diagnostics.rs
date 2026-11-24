@@ -1,27 +1,21 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Tests of `examples/system.rs` through the harness, with a fake lid: a change of the system
-//! reaches the window as `Event::System`, which reads again and redraws (the count, the last
-//! kind, the lid), the rows keeping their heights; other events change nothing; the tray's menu
-//! from what came.
+//! Tests of `examples/dictation/diagnostics.rs` through the harness, with a fake lid: a change of
+//! the system reaches the window as `Event::System`, which reads again and redraws (the count,
+//! the last kind, the lid), the rows keeping their heights; other events change nothing.
 
-#[path = "../examples/system.rs"]
-#[expect(dead_code, reason = "its main and what this file doesn't use")]
-// The example sets the Windows subsystem, an attribute of its own crate, not of this module.
-#[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
-mod example;
-
-use example::{COUNT, KINDS, LAST, LID, Seen, System};
 use nimbo::harness::Image;
 use nimbo::system::Change;
 use nimbo::{Event, Harness, Id, Rect, Size};
+
+use crate::dictation::diagnostics::{COUNT, Diagnostics, KINDS, LAST, LID, Seen};
 
 fn closed() -> Option<bool> {
   Some(true)
 }
 
-fn window() -> Harness<System> {
-  Harness::new(System::new(|| Some(false)), Size::new(420.0, 310.0), 2.0)
+fn window() -> Harness<Diagnostics> {
+  Harness::new(Diagnostics::new(|| Some(false)), Size::new(420.0, 310.0), 2.0)
 }
 
 fn count(kind: Change) -> Id {
@@ -82,18 +76,4 @@ fn other_events_change_nothing() {
   h.event(Event::Focus(true));
   h.move_to(10.0, 10.0);
   assert_eq!(h.app().seen, Seen::new(Some(false)));
-}
-
-/// The tray's menu: the lid and the audio changes, both kinds counted.
-#[test]
-fn the_tray_menu() {
-  let mut s = Seen::new(None);
-  let labels =
-    |s: &Seen| example::menu(s).items.iter().map(|i| i.label().to_owned()).collect::<Vec<_>>();
-  assert_eq!(labels(&s)[..2], ["Lid: None", "Audio changes: 0"]);
-  s.add(Change::AudioInputs, Some(false));
-  s.add(Change::DefaultInput, Some(false));
-  s.add(Change::Lid, Some(true));
-  assert_eq!(labels(&s)[..2], ["Lid: Closed", "Audio changes: 2"]);
-  assert_eq!(s.last, Some(Change::Lid));
 }

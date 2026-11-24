@@ -1,25 +1,18 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! A HUD in an overlay ([nimbo::Config::overlay]): a recording pill at the bottom centre of the
+//! The recording HUD in an overlay ([nimbo::Config::overlay]): a pill at the bottom centre of the
 //! screen with the pointer, over every app and Space, never taking the focus and letting the
 //! mouse through: a red dot, a level meter of bars that follow a made-up level, and the time.
-//! The pill and its shadow are drawn inside the overlay, transparent around them.
+//! The pill and its shadow are drawn inside the overlay, transparent around them. The app shows
+//! it while a dictation records and hides it when it stops.
 //!
-//! `cargo run --release --example hud` shows it for [SHOW], hides it for [HIDDEN] and shows it
-//! again, at the pointer's screen then, until it quits after [RUN]; `-- --shot hud.png` renders
-//! it in the harness, transparent around the pill.
-
-// A Windows app, not a console one: no terminal opens with it.
-#![cfg_attr(windows, windows_subsystem = "windows")]
+//! `cargo run --release --example dictation -- hud --shot hud.png` renders it in the harness,
+//! transparent around the pill.
 
 use std::time::Duration;
 
-use nimbo::{
-  Anchor, App, AppInfo, Color, Config, Font, Frame, Main, Presence, Rect, Weight, alpha, rgb,
-};
+use nimbo::{Anchor, App, Color, Config, Font, Frame, Harness, Rect, Weight, alpha, rgb};
 
-pub const INFO: AppInfo =
-  AppInfo { id: "com.example.nimbo-hud", name: "Nimbo HUD", presence: Presence::Accessory };
 /// The overlay: the pill and a margin around it for its shadow, 44 points above the Dock or the
 /// taskbar.
 pub const CONFIG: Config = Config::new("HUD", PILL_W + 2.0 * MARGIN, PILL_H + 2.0 * MARGIN)
@@ -29,9 +22,6 @@ pub const PILL_W: f32 = 168.0;
 pub const PILL_H: f32 = 40.0;
 pub const MARGIN: f32 = 16.0;
 pub const BARS: usize = 12;
-pub const SHOW: Duration = Duration::from_secs(6);
-pub const HIDDEN: Duration = Duration::from_secs(1);
-pub const RUN: Duration = Duration::from_secs(10);
 
 pub const FILL: Color = rgb(0x262628);
 pub const DOT: Color = rgb(0xff453a);
@@ -78,27 +68,8 @@ impl App for Hud {
   }
 }
 
-fn start(main: &mut Main) {
-  let hud = main.open(&CONFIG, Hud::default());
-  hud.on_close(Main::quit);
-  hud.front();
-  let (id, proxy) = (hud.id(), main.proxy());
-  let hud = move |main: &mut Main| main.window::<Hud>(id);
-  proxy.after(SHOW, move |main| _ = hud(main).map(|w| w.hide()));
-  proxy.after(SHOW + HIDDEN, move |main| _ = hud(main).map(|w| w.front()));
-  proxy.after(RUN, Main::quit);
-}
-
 /// The shot: a second and a half into the recording.
-pub fn shot(h: &mut nimbo::Harness<Hud>) {
+pub fn shot(h: &mut Harness<Hud>) {
   h.frame();
   h.wait(Duration::from_millis(1500));
-}
-
-fn main() {
-  if std::env::args().any(|a| a == "--shot") {
-    return nimbo::run_example(CONFIG, Hud::default(), shot);
-  }
-
-  nimbo::app(INFO, start);
 }

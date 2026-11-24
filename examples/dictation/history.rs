@@ -1,18 +1,17 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! A long list built in view only ([nimbo::List] in sections, grouped on a form's plates):
-//! 86,000 dictations, newest first, a plate a day under its date and count, each row its text
-//! and when it was said, a click selecting it and Copy at its right. Only the rows on screen, and
-//! a margin, are built; the scroll area is as tall as every row.
+//! The History window, a long list built in view only ([nimbo::List] in sections, grouped on a
+//! form's plates): 86,000 made-up dictations, newest first, a plate a day under its date and
+//! count, each row its text and when it was said, a click selecting it and Copy at its right; a
+//! dictation stopped in the app joins Today at the top. Only the rows on screen, and a margin,
+//! are built; the scroll area is as tall as every row.
 //!
-//! `cargo run --release --example history [-- --shot <file.png>]`
-
-// A Windows app, not a console one: no terminal opens with its window.
-#![cfg_attr(windows, windows_subsystem = "windows")]
+//! `cargo run --release --example dictation -- history [--shot <file.png>]` opens it alone.
 
 use nimbo::ui::Role;
 use nimbo::{
-  App, Config, FormStyle, Icon, Id, InsetGroupedListStyle, List, Selection, Style, Ui, grow,
+  App, Config, FormStyle, Harness, Icon, Id, InsetGroupedListStyle, List, Selection, Size, Style,
+  Ui, grow,
 };
 
 pub const ROWS: usize = 86_000;
@@ -21,6 +20,7 @@ pub const PER_DAY: usize = 140;
 /// A row: the text and the line under it, padded as the plates' rows are.
 pub const ROW_H: f32 = 52.0;
 pub const LIST: &str = "list";
+pub const SIZE: Size = Size::new(560.0, 520.0);
 
 pub struct History {
   pub rows: usize,
@@ -31,6 +31,8 @@ pub struct History {
   pub copied: Option<u64>,
   /// A row to scroll into view: its day and its place in it.
   pub reveal: Option<(usize, usize)>,
+  /// What was said in the app, oldest first: the newest rows.
+  pub said: Vec<String>,
 }
 
 impl Default for History {
@@ -50,12 +52,37 @@ impl History {
     };
     let days = (0..n).map(|d| (day(d), PER_DAY.min(rows - d * PER_DAY))).collect();
     let starts = (0..n).map(|d| d * PER_DAY).collect();
-    Self { rows, days, starts, sel: Selection::default(), copied: None, reveal: None }
+    let sel = Selection::default();
+    Self { rows, days, starts, sel, copied: None, reveal: None, said: Vec::new() }
   }
 
   /// The dictation of row `i` of day `g`: its number, newest first.
   pub fn entry(&self, g: usize, i: usize) -> u64 {
-    (self.rows - g * PER_DAY - i) as u64
+    (self.rows - self.starts[g] - i) as u64
+  }
+
+  /// A dictation said now: the first row of Today, the days after it a row later.
+  pub fn add(&mut self, text: String) {
+    if self.days.is_empty() {
+      self.days.push(("Today".into(), 0));
+      self.starts.push(0);
+    }
+
+    self.said.push(text);
+    self.rows += 1;
+    self.days[0].1 += 1;
+    for s in &mut self.starts[1..] {
+      *s += 1;
+    }
+  }
+
+  /// What dictation `e` said: one of [Self::said], or a made-up line.
+  pub fn text(&self, e: u64) -> String {
+    let made = (self.rows - self.said.len()) as u64;
+    match e.checked_sub(made + 1) {
+      Some(k) => self.said[k as usize].clone(),
+      None => format!("Dictation {e}: what was said, on one line"),
+    }
   }
 }
 
@@ -83,7 +110,7 @@ impl App for History {
       list.show(ui.list_style(&InsetGroupedListStyle).id(LIST), |ui, row| {
         let i = row.index - starts[starts.partition_point(|&s| s <= row.index) - 1];
         let e = row.key;
-        let text = format!("Dictation {e}: what was said, on one line");
+        let text = self.text(e);
         let caption =
           format!("{:02}:{:02} · {}.{} s", 23 - i / 7 % 24, 59 - i % 60, 2 + e % 9, e % 10);
 
@@ -104,12 +131,15 @@ impl App for History {
   }
 }
 
-fn main() {
-  // The shot: the page's top, the second row selected.
-  nimbo::run_example(Config::new("History", 560.0, 520.0), History::default(), |h| {
-    h.frame();
-    let e = h.app().entry(0, 1);
-    h.app_mut().sel.select(e, 1);
-    h.frame();
-  });
+/// The shot: the page's top, the second row selected.
+pub fn shot(h: &mut Harness<History>) {
+  h.frame();
+  let e = h.app().entry(0, 1);
+  h.app_mut().sel.select(e, 1);
+  h.frame();
+}
+
+/// The window as the app opens it.
+pub fn config() -> Config {
+  Config::new("History", SIZE.w, SIZE.h)
 }
