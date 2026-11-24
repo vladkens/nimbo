@@ -74,14 +74,15 @@ pub use a11y::{A11yNode, A11yTree, Action, LabeledPairRole, Props, Role, State, 
 pub(crate) use behavior::DrawnEditMenu;
 pub use behavior::{
   Behavior, Button, ButtonConfiguration, ButtonRole, ButtonStyle, Content, DialogBehavior,
-  EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, ListBehavior, ListRows, MenuPlacement,
-  PlainButtonStyle, PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle, ScrollBar,
-  ScrollBehavior, ScrollerKnob, SectionHeader, Selection, Slider, SliderConfiguration, SliderStyle,
-  SplitBehavior, TextField, TextFieldConfiguration, TextFieldStyle, TextInput, ToggleConfiguration,
-  ToggleStyle, TypeSelect,
+  EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, InlinePickerStyle, ListBehavior,
+  ListRows, MenuPlacement, Picker, PickerConfiguration, PickerStyle, PlainButtonStyle,
+  PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle, ScrollBar, ScrollBehavior, ScrollerKnob,
+  SectionHeader, Selection, Slider, SliderConfiguration, SliderStyle, SplitBehavior, Tag,
+  TextField, TextFieldConfiguration, TextFieldStyle, TextInput, ToggleConfiguration, ToggleStyle,
+  TypeSelect,
 };
 pub use containers::{
-  List, ListResponse, ListStyle, Picker, Row, Split, Tabs, Tag, ToolbarItemPlacement,
+  List, ListResponse, ListStyle, MenuPickerStyle, Row, Split, Tabs, ToolbarItemPlacement,
 };
 pub use dialog::{Answer, Dialog};
 pub use environment::{Enabled, EnvironmentValue};
@@ -105,7 +106,8 @@ pub(crate) use textlayout::TextLayout;
 pub use theme::{ControlBorder, Sizes, SwitchSize, Theme, Tone};
 pub use widgets::{
   BorderedButtonStyle, BorderedProminentButtonStyle, BorderlessButtonStyle, ButtonToggleStyle,
-  CheckboxToggleStyle, LinearSliderStyle, RoundedBorderTextFieldStyle, SwitchToggleStyle,
+  CheckboxToggleStyle, LinearSliderStyle, RoundedBorderTextFieldStyle, SegmentedPickerStyle,
+  SwitchToggleStyle,
 };
 
 use self::input::{Deliver, Input, ScrollState};

@@ -1,7 +1,8 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! A pop-up button's behaviour ([Ui::pop_up_behavior]): a button that opens its list, letters
-//! typed choosing an option ([TypeSelect]); `Picker` draws one.
+//! typed choosing an option ([TypeSelect]); the picker's menu style draws one over it
+//! ([super::PickerConfiguration::pop_up]).
 
 use crate::keys::{Command, Move};
 use crate::ui::{Behavior, Id, Role, TypeSelect, Ui};

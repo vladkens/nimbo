@@ -17,8 +17,9 @@ use crate::scene::{Frame, Images, Point, Rect, Scene, Size};
 use crate::text::TextSystem;
 use crate::ui::{
   Action, BorderedButtonStyle, ButtonStyle, Click, Cursor, DrawnEditMenu, FocusDirection,
-  FrameStats, Id, LinearSliderStyle, Role, RoundedBorderTextFieldStyle, SliderStyle,
-  SwitchToggleStyle, Sys, TextFieldStyle, TextInput, ToggleStyle, Ui, UiState, drags_window,
+  FrameStats, Id, LinearSliderStyle, MenuPickerStyle, PickerStyle, Role,
+  RoundedBorderTextFieldStyle, SliderStyle, SwitchToggleStyle, Sys, TextFieldStyle, TextInput,
+  ToggleStyle, Ui, UiState, drags_window,
 };
 
 /// An application: owns its state, reacts to events and draws the frame from it, as an element
@@ -238,6 +239,7 @@ impl<A: App> Runtime<A> {
     ui.set_environment_default(DrawnEditMenu(|ui, id, at, m| {
       ui.drawn_context_menu(id, at, || m.items())
     }));
+    ui.set_environment_default::<&dyn PickerStyle>(&MenuPickerStyle);
     Self {
       app,
       size,

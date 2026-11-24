@@ -18,12 +18,13 @@ use nimbo::{
   Align, Answer, App, Axes, Axis, Bitmap, BorderedProminentButtonStyle, BorderlessButtonStyle,
   Button, ButtonConfiguration, ButtonRole, ButtonStyle, ButtonToggleStyle, CheckboxToggleStyle,
   Color, Config, Content, ContentMode, ControlSize, Cursor, Dialog, Enabled, EnvironmentValue,
-  FieldKind, FieldStyle, Float, Font, FormRow, FormStyle, Hotkey, Icon, Id, Item, LinePattern,
-  List, ListRows, ListStyle, Menu, Picker, PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle,
-  Quad, Rect, ScrollBar, ScrollerKnob, Section, Selection, Shortcut, Slider, SliderConfiguration,
-  SliderStyle, Split, Style, Tabs, Tag, TextField, TextFieldConfiguration, TextFieldStyle,
-  TextStyle, ToggleConfiguration, ToggleStyle, Tone, ToolbarItemPlacement, TruncationMode, Ui,
-  UnitPoint, WindowToolbarStyle, alpha, grow, mix, px, t, tn,
+  FieldKind, FieldStyle, Float, Font, FormRow, FormStyle, Hotkey, Icon, Id, InlinePickerStyle,
+  Item, LinePattern, List, ListRows, ListStyle, Menu, Picker, PickerConfiguration, PickerStyle,
+  PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle, Quad, Rect, ScrollBar, ScrollerKnob,
+  Section, SegmentedPickerStyle, Selection, Shortcut, Slider, SliderConfiguration, SliderStyle,
+  Split, Style, Tabs, Tag, TextField, TextFieldConfiguration, TextFieldStyle, TextStyle,
+  ToggleConfiguration, ToggleStyle, Tone, ToolbarItemPlacement, TruncationMode, Ui, UnitPoint,
+  WindowToolbarStyle, alpha, grow, mix, px, t, tn,
 };
 
 pub const SIDEBAR: &str = "sidebar";
@@ -105,6 +106,34 @@ impl TextFieldStyle for Underline {
   }
 }
 
+/// A picker style of the gallery's own: the options as capsules, the selected one filled with the
+/// accent, faint when disabled.
+struct Chips;
+
+impl PickerStyle for Chips {
+  fn make_body(&self, ui: &mut Ui, mut c: PickerConfiguration) {
+    let t = ui.theme();
+    let b = c.segments(ui);
+    let k = if c.is_enabled() { 1.0 } else { 0.4 };
+    ui.row(Style::new().gap(4.0), |ui| {
+      for i in 0..c.len() {
+        let on = c.selection() == Some(i);
+        let (bg, ink) = match on {
+          true => (alpha(t.accent, k), alpha(t.on_accent, k)),
+          false => (alpha(t.accent, 0.12 * k), alpha(t.accent, k)),
+        };
+
+        let chip = Style::new().h(px(22.0)).pad_xy(10.0, 0.0).center().radius(11.0).bg(bg);
+        ui.with_id(c.item_id(i))
+          .row(b.pointer(chip), |ui| ui.text(c.label(i), TextStyle::new(t.font, ink)));
+      }
+    });
+  }
+}
+
+/// The views a picker shows.
+const VIEWS: [Tag<u8>; 3] = [Tag::new(0, "List"), Tag::new(1, "Grid"), Tag::new(2, "Columns")];
+
 /// A building block: its group, name, SwiftUI's line and nimbo's.
 pub struct Block {
   pub group: &'static str,
@@ -165,7 +194,9 @@ pub const BLOCKS: &[Block] = &[
   b("Controls", "Slider style", "Slider(value: $zoom, in: 0...200) (SwiftUI has no slider style)", "ui.slider_style(&PlainSliderStyle).col(style, |ui| { ui.slider(&mut self.zoom, 0.0..=200.0); }); ui.slider(&mut self.zoom, 0.0..=200.0)"),
   b("Controls", "Custom slider style", "struct Meter: ProgressViewStyle { … } (SwiftUI has no slider style)", "impl SliderStyle for Meter { fn make_body(&self, ui: &mut Ui, c: SliderConfiguration) { let k = c.fraction(); c.root(ui).canvas(style, move |f, r| { … }); } } Slider::new(&mut self.level, 10.0..=90.0).step(10.0).show(ui.slider_style(&Meter))"),
   b("Controls", "Picker", "Picker(\"Size\", selection: $size) { …; Divider(); … }", "Picker::new(&mut self.size).options(&A).divider().options(&B).show(ui)"),
-  b("Controls", "Segmented picker", "Picker(…) { … }.pickerStyle(.segmented)", "ui.segmented(&mut self.view, &[Tag::new(0, \"List\").count(128), Tag::new(1, \"Grid\")])"),
+  b("Controls", "Segmented picker", "Picker(…) { … }.pickerStyle(.segmented)", "ui.picker_style(&SegmentedPickerStyle).picker(&mut self.view, &[Tag::new(0, \"List\").count(128), Tag::new(1, \"Grid\")])"),
+  b("Controls", "Picker style", "VStack { Picker(…) { … } }.pickerStyle(.inline); Picker(…) { … }", "ui.picker_style(&InlinePickerStyle).row(style, |ui| _ = ui.picker(&mut self.size, &SIZES)); ui.picker(&mut self.size, &SIZES)"),
+  b("Controls", "Custom picker style", "struct Chips: PickerStyle (SwiftUI's is closed: its styles are the system's)", "impl PickerStyle for Chips { fn make_body(&self, ui: &mut Ui, mut c: PickerConfiguration) { let b = c.segments(ui); ui.row(style, |ui| for i in 0..c.len() { ui.with_id(c.item_id(i)).row(b.pointer(chip), |ui| ui.text(c.label(i), s)); }); } } ui.picker_style(&Chips).picker(&mut self.view, &VIEWS)"),
   b("Controls", "Text field", "TextField(\"Name\", text: $name)", "ui.text_field(&mut self.name, \"Name\")"),
   b("Controls", "Multi-line field", "TextField(\"Notes\", text: $notes, axis: .vertical)", "TextField::new(&mut self.notes, \"Notes\").kind(FieldKind::MultiLine).show(ui)"),
   b("Controls", "Secure field", "SecureField(\"Password\", text: $key)", "ui.secure_field(&mut self.key, \"Password\")"),
@@ -596,7 +627,18 @@ impl Gallery {
           Tag::new(1, "Grid").count(12),
           Tag::new(2, "Columns").count(3),
         ];
-        ui.segmented(&mut self.view, &views);
+        ui.picker_style(&SegmentedPickerStyle).picker(&mut self.view, &views);
+      }),
+
+      // Pickers inline by their row, the one after it in the window's style.
+      "Picker style" => Self::variants(ui, Shown::Plain, |ui| {
+        ui.picker_style(&InlinePickerStyle).row(line(10.0), |ui| {
+          _ = ui.a11y_label("Size").picker(&mut self.size, &SIZES);
+        });
+        ui.a11y_label("Size").picker(&mut self.size, &SIZES);
+      }),
+      "Custom picker style" => Self::variants(ui, Shown::Plain, |ui| {
+        ui.picker_style(&Chips).picker(&mut self.view, &VIEWS);
       }),
 
       "Text field" => Self::variants(ui, Shown::Plain, |ui| {

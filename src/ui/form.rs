@@ -818,7 +818,7 @@ mod tests {
   use crate::keys::Key;
   use crate::scene::{Point, Size};
   use crate::ui::layout::Kind;
-  use crate::ui::{ControlSize, Id, LinePattern, Tag, Tone};
+  use crate::ui::{ControlSize, Id, LinePattern, SegmentedPickerStyle, Tag, Tone};
 
   /// A section of one row and a footer with the "?" alone, nothing named.
   #[derive(Default)]
@@ -871,7 +871,10 @@ mod tests {
       };
       let control = |ui: &mut Ui, id: &str| match ctl {
         Ctl::Switch => ui.id(id).toggle(&mut false, ""),
-        Ctl::Segments => ui.id(id).segmented(&mut 0, &[Tag::new(0, "Light"), Tag::new(1, "Dark")]),
+        Ctl::Segments => {
+          let options = [Tag::new(0, "Light"), Tag::new(1, "Dark")];
+          ui.picker_style(&SegmentedPickerStyle).id(id).picker(&mut 0, &options)
+        }
         Ctl::Use => ui.id(id).button("Use"),
       };
 

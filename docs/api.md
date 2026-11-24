@@ -254,9 +254,25 @@ nimbo: `Picker::new(&mut self.size).options(&A).divider().options(&B).show(ui)`
 
 SwiftUI: `Picker(…) { … }.pickerStyle(.segmented)`
 
-nimbo: `ui.segmented(&mut self.view, &[Tag::new(0, "List").count(128), Tag::new(1, "Grid")])`
+nimbo: `ui.picker_style(&SegmentedPickerStyle).picker(&mut self.view, &[Tag::new(0, "List").count(128), Tag::new(1, "Grid")])`
 
 ![Segmented picker](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/segmented-picker.png)
+
+### Picker style
+
+SwiftUI: `VStack { Picker(…) { … } }.pickerStyle(.inline); Picker(…) { … }`
+
+nimbo: `ui.picker_style(&InlinePickerStyle).row(style, |ui| _ = ui.picker(&mut self.size, &SIZES)); ui.picker(&mut self.size, &SIZES)`
+
+![Picker style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/picker-style.png)
+
+### Custom picker style
+
+SwiftUI: `struct Chips: PickerStyle (SwiftUI's is closed: its styles are the system's)`
+
+nimbo: `impl PickerStyle for Chips { fn make_body(&self, ui: &mut Ui, mut c: PickerConfiguration) { let b = c.segments(ui); ui.row(style, |ui| for i in 0..c.len() { ui.with_id(c.item_id(i)).row(b.pointer(chip), |ui| ui.text(c.label(i), s)); }); } } ui.picker_style(&Chips).picker(&mut self.view, &VIEWS)`
+
+![Custom picker style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/custom-picker-style.png)
 
 ### Text field
 
