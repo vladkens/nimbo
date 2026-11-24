@@ -5,16 +5,13 @@
 //! shadow, gradients down and across, an image scaled up, lines of four widths, a polyline and
 //! a clip.
 //!
-//! `cargo run --release --example shapes` opens it in a window, which follows the OS's light or
+//! `cargo run --release --example canvas` opens it in a window, which follows the OS's light or
 //! dark setting; `-- --shot shapes.png [--appearance light]` renders it without one.
-
-// A Windows app, not a console one: no terminal opens with its window.
-#![cfg_attr(windows, windows_subsystem = "windows")]
 
 use std::f32::consts::TAU;
 
 use nimbo::{
-  App, Axis, Color, Config, Cx, Event, Frame, ImageId, Point, Quad, Rect, Size, alpha, mix, rgb,
+  App, Axis, Color, Cx, Event, Frame, ImageId, Point, Quad, Rect, Size, alpha, mix, rgb,
 };
 
 pub const SIZE: Size = Size::new(480.0, 340.0);
@@ -161,8 +158,4 @@ impl App for Shapes {
     f.polyline(&wave, 3.0, AMBER);
     f.pop_clip();
   }
-}
-
-fn main() {
-  nimbo::run_example(Config::new("shapes", SIZE.w, SIZE.h), Shapes::default(), |_| {});
 }

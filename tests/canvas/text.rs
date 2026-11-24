@@ -1,25 +1,17 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Tests of `examples/text.rs` through the harness, in the dark and the light appearance, at
-//! scale 2 and 1, with checks that hold for any system font: every line's ink inside its line
-//! box, wider strings measuring wider, a monospaced font, a combining accent taking no room, the
-//! ink colour reached, a clipped line cut at its panel, subpixel positions moving the ink a
-//! quarter pixel, and the emoji in colour where the OS has a colour font. CJK is checked where a
-//! font has it.
+//! Tests of `examples/canvas/text.rs` through the harness, in the dark and the light appearance, at
+//! scale 2 and 1, with checks that hold for any system font: every line's ink inside its line box,
+//! wider strings measuring wider, a monospaced font, a combining accent taking no room, the ink
+//! colour reached, a clipped line cut at its panel, subpixel positions moving the ink a quarter
+//! pixel, and the emoji in colour where the OS has a colour font. CJK is checked where a font has
+//! it.
 
-#[path = "../examples/text.rs"]
-#[expect(dead_code, reason = "its main and what this file doesn't use")]
-// The example sets the Windows subsystem, an attribute of its own crate, not of this module.
-#[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
-mod text;
-
-#[expect(dead_code, reason = "this file uses a part of the helpers")]
-mod common;
-
-use common::{diff, px};
 use nimbo::harness::Image;
 use nimbo::{Appearance, Event, Font, Harness, Rect, Weight};
-use text::*;
+
+use crate::canvas::text::*;
+use crate::common::{diff, px};
 
 /// The pixels of `area` (in points) as (x, y, RGBA), in pixels.
 fn pixels(img: &Image, area: Rect) -> impl Iterator<Item = (usize, usize, [u8; 4])> + '_ {

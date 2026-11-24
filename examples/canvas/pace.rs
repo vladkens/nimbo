@@ -6,15 +6,12 @@
 //! still, the loop sleeps until something happens.
 //!
 //! `scripts/pace.py` (`make pace`) runs it in a window, traced, and counts the frames while it
-//! moves and the wakeups once it is still. `cargo run --release --example pace` opens it;
-//! `-- --shot pace.png` renders its first frame.
-
-// A Windows app, not a console one: no terminal opens with its window.
-#![cfg_attr(windows, windows_subsystem = "windows")]
+//! moves and the wakeups once it is still. `cargo run --release --example canvas -- pace`
+//! opens it; `-- pace --shot pace.png` renders its first frame.
 
 use std::time::{Duration, Instant};
 
-use nimbo::{App, Config, Frame, Rect, Size, rgb};
+use nimbo::{App, Frame, Rect, Size, rgb};
 
 pub const SIZE: Size = Size::new(320.0, 80.0);
 /// How long the bar moves, from the first frame.
@@ -51,8 +48,4 @@ impl App for Pace {
     let x = t.min(RUN).as_secs_f32().fract() * (f.size.w - BAR_W);
     f.rect(Rect::new(x, 0.0, BAR_W, f.size.h), rgb(0x3b82f6), 0.0);
   }
-}
-
-fn main() {
-  nimbo::run_example(Config::new("pace", SIZE.w, SIZE.h).fixed(), Pace::default(), |_| {});
 }

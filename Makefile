@@ -45,7 +45,7 @@ features: # the library with each feature alone, none and the default, on every 
 	RUSTFLAGS="-D warnings" CARGO_TARGET_DIR=target/features cargo build --lib --no-default-features --features headless
 
 pace: # frame pacing in a window of this session: fps while animating, wakeups when still
-	cargo build --release --example pace
+	cargo build --release --example canvas
 	uv run scripts/pace.py
 
 size: # code, docs and tests per module; ARGS="--files", "--map" (each file and what it does), "--check" (at most 600 lines of library code added since main) or "--vs main"
