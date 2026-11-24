@@ -257,11 +257,12 @@ fn paste_here(text: &str) {
   }
 }
 
-/// The seconds left to the paste beside the icon, each second, then the paste.
+/// The seconds left to the paste beside the icon, each second, then the paste. It counts as
+/// pasting until the paste ends (it may run the loop): what is heard meanwhile goes after it.
 fn paste_in(main: &mut Main, secs: u64) {
   let tray = STATE.with(|s| {
     let mut s = s.borrow_mut();
-    s.pasting = secs > 0;
+    s.pasting = true;
     s.tray.clone()
   });
   let title = if secs == 0 { String::new() } else { secs.to_string() };
@@ -269,9 +270,18 @@ fn paste_in(main: &mut Main, secs: u64) {
     tray.set_title(&title);
   }
 
-  match secs {
-    0 => STATE.with(paste_unpasted),
-    _ => main.proxy().after(Duration::from_secs(1), move |main| paste_in(main, secs - 1)),
+  if secs > 0 {
+    return main.proxy().after(Duration::from_secs(1), move |main| paste_in(main, secs - 1));
+  }
+
+  STATE.with(paste_unpasted);
+  let more = STATE.with(|s| {
+    let mut s = s.borrow_mut();
+    s.pasting = false;
+    !s.dictation.unpasted.is_empty()
+  });
+  if more {
+    paste_in(main, 1);
   }
 }
 
