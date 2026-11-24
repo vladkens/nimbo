@@ -1,10 +1,10 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Harness tests for `examples/settings.rs`: the toolbar turns pages and the window follows
-//! their height; switches flip, a row disabled by another setting ignores clicks; a select opens
-//! over its button and chooses by letters typed, closed and open; the shortcut recorder records
-//! a chord and a modifier key alone, Escape and a click elsewhere stop it, Backspace clears it,
-//! the reset puts the default back; the slider drags and steps, greys with the selected
+//! Harness tests for `examples/dictation/settings.rs`: the toolbar turns pages and the window
+//! follows their height; switches flip, a row disabled by another setting ignores clicks; a select
+//! opens over its button and chooses by letters typed, closed and open; the shortcut recorder
+//! records a chord and a modifier key alone, Escape and a click elsewhere stop it, Backspace clears
+//! it, the reset puts the default back; the slider drags and steps, greys with the selected
 //! segment while the window isn't key; the dialog asks before clearing
 //! the cache and resetting all: Return chooses its default, Escape cancels, Tab and Space the
 //! action, its backdrop dims the page and takes the pointer; a row's switch keeps its width and
@@ -14,24 +14,18 @@
 //! rows with their values, and the dialog as modal, its default button focused until it gives
 //! the focus back, and the focus only while the window has it; its actions flip a switch, step
 //! the slider, choose in a select, move the focus, and reach only the dialog while it is open.
-
-#[path = "../examples/settings.rs"]
-#[expect(dead_code, reason = "its main and what this file doesn't use")]
-// The example sets the Windows subsystem, an attribute of its own crate, not of this module.
-#[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
-mod settings;
-
-#[expect(dead_code, reason = "this file uses a part of the helpers")]
-mod common;
+//! The Account tab shows the fields (`tests/dictation/account.rs` tests them alone).
 
 use std::time::Duration;
 
-use common::{mid, px, reads};
 use nimbo::ui::Action;
 use nimbo::{
   Appearance, Code, Event, Harness, Hotkey, Id, Key, Modifiers, NamedKey, Rect, Size, Theme, hotkey,
 };
-use settings::*;
+
+use crate::common::{mid, px, reads};
+use crate::dictation::account;
+use crate::dictation::settings::*;
 
 type H = Harness<Settings>;
 
@@ -509,4 +503,18 @@ fn a_disabled_rows_info_shows_its_tip() {
   let info = format!("button \"Info\" desc {TIP_DOWNLOAD:?}");
   reads(&h.a11y(), &[&info, "switch \"Download them in the background\" off disabled"]);
   assert_eq!(tip(&mut h, DOWNLOAD_ROW), TIP_DOWNLOAD);
+}
+
+/// The Account tab shows the fields of `examples/dictation/account.rs`, its first one focused,
+/// what is typed going to the settings' account.
+#[test]
+fn the_account_tab_shows_the_fields() {
+  let mut h = start();
+  turn(&mut h, Page::Account);
+  assert_eq!(h.focused(), Some(Id::of(account::NAME)));
+  h.type_text("Ada");
+  h.frame();
+  assert_eq!(h.app().account.name, "Ada");
+  let lines = ["text field \"Name\" value \"Ada\" focused", "secure text field \"API key\""];
+  reads(&h.a11y(), &lines);
 }

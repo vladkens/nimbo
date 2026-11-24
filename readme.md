@@ -26,7 +26,7 @@
 - 📦 **12 crates on macOS, 4 on Windows, 2 on Linux**: GTK is loaded at run time, nothing to link
 
 <div align="center">
-  <img src="docs/settings.png" alt="the settings example on macOS" width="700" />
+  <img src="docs/settings.png" alt="the settings window of the dictation example on macOS" width="700" />
 </div>
 
 ## 🧭 Why nimbo
@@ -114,12 +114,10 @@ Each building block beside its SwiftUI counterpart, with a picture: [docs/api.md
 
 - `counter`: buttons, hover, focus
 - `gallery`: a catalog of every building block, each page its SwiftUI line, its nimbo line and the block in its variants
-- `settings`: a macOS-style settings window
 - `custom-look`: a whole look of its own over the headless styles, light and dark
 - `files`: a file browser: sidebar in the title bar, 100k rows, menus, panels, drops
-- `fields`: text fields and input methods
 - `canvas`: below the widgets: shapes, text, pointer and keys, frame pacing
-- `dictation`: a menu-bar app: tray, global hotkey, HUD, paste, history, system changes
+- `dictation`: a menu-bar app: tray, global hotkey, HUD, paste, settings, history
 
 ## 📏 Size
 

@@ -1,31 +1,23 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Tests of `examples/fields.rs` through the harness: typing, moves by word and line, selection by
-//! Shift and the mouse (click, drag, double and triple click), the clipboard, undo and redo, Enter
-//! and Tab; an input method's composition kept out of the value until committed, a commit and a new
-//! composition back to back, a value the app sets meanwhile held, Enter completing it; the
-//! password's dots, clipboard and input method; the placeholder, the disabled field, selectable
-//! text, and the caret's blink timers only while a field has focus (the first one from the
-//! start). Assistive technology reads the fields' text as shown, a composition in it, never the
-//! password's, and sets it, over a value the app set while composing. Windows' and Linux's keys
-//! (Ctrl, Insert, Home and End) and macOS's, each played on any host; the edit menu of a
-//! right-click, its items enabled as they can act, and what it runs; the menu bar's Edit items.
-
-#[path = "../examples/fields.rs"]
-#[expect(dead_code, reason = "its main and what this file doesn't use")]
-// The example sets the Windows subsystem, an attribute of its own crate, not of this module.
-#[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
-mod fields;
-
-#[expect(dead_code, reason = "this file uses a part of the helpers")]
-mod common;
+//! Tests of `examples/dictation/account.rs` through the harness, the tab alone: typing, moves by
+//! word and line, selection by Shift and the mouse (click, drag, double and triple click), the
+//! clipboard, undo and redo, Enter and Tab; an input method's composition kept out of the value
+//! until committed, a commit and a new composition back to back, a value the app sets meanwhile
+//! held, Enter completing it; the password's dots, clipboard and input method; the placeholder, the
+//! disabled field, selectable text, and the caret's blink timers only while a field has focus (the
+//! first one from the start). Assistive technology reads the fields' text as shown, a composition
+//! in it, never the password's, and sets it, over a value the app set while composing. Windows' and
+//! Linux's keys (Ctrl, Insert, Home and End) and macOS's, each played on any host; the edit menu of
+//! a right-click, its items enabled as they can act, and what it runs; the menu bar's Edit items.
 
 use std::time::Duration;
 
-use common::reads;
-use fields::*;
 use nimbo::ui::Action;
 use nimbo::{Command, Event, Harness, Id, Key, Modifiers, NamedKey, Os, Sel};
+
+use crate::common::reads;
+use crate::dictation::account::*;
 
 const NONE: Modifiers = Modifiers::empty();
 const CTRL: Modifiers = Modifiers::CONTROL;
@@ -38,17 +30,17 @@ fn text_of(id: &str) -> Id {
   Id::of(id).key("text")
 }
 
-fn sel(h: &Harness<Fields>, id: &str) -> Sel {
+fn sel(h: &Harness<Account>, id: &str) -> Sel {
   h.editor(Id::of(id)).unwrap().sel()
 }
 
-fn clipboard(h: &mut Harness<Fields>) -> Option<String> {
+fn clipboard(h: &mut Harness<Account>) -> Option<String> {
   h.clipboard().read()
 }
 
 /// The fields, laid out once.
-fn fields() -> Harness<Fields> {
-  let mut h = Harness::new(Fields::new(), SIZE, 2.0);
+fn fields() -> Harness<Account> {
+  let mut h = Harness::new(Account::new(), SIZE, 2.0);
   h.set_os(Os::Mac);
   h.frame();
   h
@@ -56,7 +48,7 @@ fn fields() -> Harness<Fields> {
 
 /// The fields with `os`'s keys, the name field focused with `text` in it and the clipboard
 /// holding `clip`.
-fn fields_on(os: Os, text: &str, clip: &str) -> Harness<Fields> {
+fn fields_on(os: Os, text: &str, clip: &str) -> Harness<Account> {
   let mut h = fields();
   h.set_os(os);
   h.clipboard().write(clip);
@@ -294,7 +286,7 @@ fn the_caret_stays_in_view() {
   h.key(Key::Char('a'), CMD);
   h.type_text(&"a long name that does not fit the field ".repeat(3));
   h.frame();
-  let off = |h: &Harness<Fields>| h.scroll(name).unwrap().offset.x;
+  let off = |h: &Harness<Account>| h.scroll(name).unwrap().offset.x;
   assert!(off(h) > 0.0, "the end in view");
   h.key(NamedKey::ArrowLeft, CMD);
   h.frame();
@@ -433,10 +425,10 @@ fn placeholder_disabled_and_selectable() {
   h.press_with(r.x + 20.0, r.y + 8.0, 2, NONE);
   h.release(r.x + 20.0, r.y + 8.0);
   assert_eq!(h.focused(), Some(about));
-  assert_eq!(h.editor(about).unwrap().selected(), "Selectable");
+  assert_eq!(h.editor(about).unwrap().selected(), "Nothing");
   assert!(h.text_input().is_none(), "selectable text takes no input method");
   h.key(Key::Char('c'), CMD);
-  assert_eq!(clipboard(h).as_deref(), Some("Selectable"));
+  assert_eq!(clipboard(h).as_deref(), Some("Nothing"));
   h.type_text("x");
   assert_eq!(h.editor(about).unwrap().text(), TEXT);
 
@@ -472,9 +464,9 @@ fn fields_read_their_text_but_never_the_password() {
   let lines = [
     "text field \"Name\" value \"Ann\"",
     "text field \"E-mail\" value \"\"",
-    "secure text field \"Password\" focused",
-    "text area \"Notes\" value \"\"",
-    "text field \"Disabled\" value \"Read only\" disabled",
+    "secure text field \"API key\" focused",
+    "text area \"Custom vocabulary\" value \"\" desc \"Names and terms it should know.\"",
+    "text field \"Organisation\" value \"Example Inc.\" disabled",
   ];
   reads(&dump, &lines);
   reads(&dump, &[&format!("static text {TEXT:?}")]);
@@ -494,7 +486,7 @@ fn assistive_technology_sets_a_fields_text() {
   let dump = h.a11y();
   assert!(!dump.contains("sécret") && !dump.contains('•'), "{dump}");
   assert!(!h.act(Id::of(OFF), Action::SetValue("x".into())));
-  assert_eq!(h.app().off, "Read only");
+  assert_eq!(h.app().off, "Example Inc.");
 }
 
 /// A text set by assistive technology while the app's value waits on a composition replaces
@@ -527,12 +519,12 @@ fn a_composition_reads_as_the_field_shows_it() {
   h.click_id(Id::of(PASSWORD));
   h.ime_mark("xy");
   let dump = h.a11y();
-  reads(&dump, &["secure text field \"Password\" focused"]);
+  reads(&dump, &["secure text field \"API key\" focused"]);
   assert!(!dump.contains("xy"), "{dump}");
 }
 
 /// A right-click at the left of `id`'s box, the menu it opens laid out and placed.
-fn right_click(h: &mut Harness<Fields>, id: &str) {
+fn right_click(h: &mut Harness<Account>, id: &str) {
   let r = h.rect(Id::of(id)).unwrap();
   h.right_click(r.x + 12.0, r.y + 8.0);
   h.frame();
@@ -540,7 +532,7 @@ fn right_click(h: &mut Harness<Fields>, id: &str) {
 }
 
 /// The edit menu's items as assistive technology reads them: `Cut` or `Cut disabled`.
-fn menu(h: &Harness<Fields>) -> Vec<String> {
+fn menu(h: &Harness<Account>) -> Vec<String> {
   let tree = h.a11y();
   let items = tree.lines().filter_map(|l| l.trim().strip_prefix("menu item ")).map(|l| {
     let (name, rest) = l.trim_start_matches('"').split_once('"').unwrap();
@@ -551,7 +543,7 @@ fn menu(h: &Harness<Fields>) -> Vec<String> {
 
 /// Chooses the item labelled `item` in the open edit menu: Cut, Copy, Paste and Select All in a
 /// field, Copy and Select All in selectable text; the field runs it as it is built next.
-fn choose(h: &mut Harness<Fields>, item: &str) {
+fn choose(h: &mut Harness<Account>, item: &str) {
   h.click_menu_item(item);
   h.frame();
 }
