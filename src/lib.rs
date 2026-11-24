@@ -1,12 +1,12 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! nimbo: a small custom-drawn UI toolkit. Its own CPU renderer for drawing; the OS for the
-//! window, input and text behind [platform] (AppKit and CoreText on macOS, Win32 and DirectWrite
+//! window, input and text behind `platform` (AppKit and CoreText on macOS, Win32 and DirectWrite
 //! on Windows, GTK 3 with fontconfig, FreeType and HarfBuzz on Linux), nothing else.
 //!
 //! An [App] gets [Event]s and builds each frame as an element tree on a [Ui] (laid out and painted
 //! by [ui]; [App::view] says how often a view runs and what it may change) and/or paints shapes,
-//! images and [text] through a [Frame]; the runtime drives it, fed by the window ([platform]) or
+//! images and [text] through a [Frame]; the runtime drives it, fed by the window (`platform`) or
 //! by the headless [Harness], both drawing with nimbo's CPU renderer. The scene, the renderer
 //! and the laid-out tree are the crate's own, so they can change without breaking an app.
 //! Its strings show in the user's language from the app's gettext catalogs ([locale], [t!]).
@@ -82,7 +82,7 @@ pub mod paste;
 pub mod paths;
 #[cfg(feature = "permissions")]
 pub mod permissions;
-pub mod platform;
+pub(crate) mod platform;
 #[cfg(feature = "png")]
 mod png;
 mod runloop;
@@ -115,8 +115,8 @@ pub use file_dialog::{FileDialog, FileDialogKind};
 #[cfg(feature = "harness")]
 pub use harness::Harness;
 pub use keys::{
-  Binding, CMD, Code, Command, Delete, EDIT_KEYS, Extent, Hotkey, Key, KeyEvent, Modifiers, Move,
-  NamedKey, Os, SELECT_KEYS, Shortcut, bind, shortcut,
+  Binding, CMD, Code, Command, EDIT_KEYS, Hotkey, Key, KeyEvent, Modifiers, NamedKey, Os,
+  SELECT_KEYS, Shortcut, shortcut,
 };
 pub use locale::{Locale, Localizations, Localized};
 pub use menu::{ButtonRole, Item, Menu};
@@ -124,7 +124,6 @@ pub use menu::{ButtonRole, Item, Menu};
 pub use png::Png;
 pub use scene::{Color, Frame, ImageId, Images, Point, Quad, Rect, Size, alpha, mix, rgb};
 pub use shell::{Anchor, AppInfo, Main, Presence, Proxy, Window, WindowId, app, attach_console};
-pub use text::edit::{Editor, Lines, Mono, Sel};
 pub use text::{Design, Font, Weight};
 pub use ui::{
   Align, Axes, Axis, Click, Clip, ContentMode, ControlSize, CoordinateSpace, Cursor, Dim, Ease,

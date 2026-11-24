@@ -76,7 +76,7 @@ use std::hash::Hash;
 use std::num::NonZeroU8;
 use std::time::Duration;
 
-pub use a11y::{A11yNode, A11yTree, Action, LabeledPairRole, Props, Role, State, Value};
+pub use a11y::{Action, LabeledPairRole, Role, State, Value};
 #[cfg(feature = "styled")]
 pub(crate) use behavior::DrawnEditMenu;
 #[cfg(feature = "headless")]
@@ -113,9 +113,9 @@ pub use style::{
   LinePattern, Shadow, Style, TextLines, TextStyle, TruncationMode, UnitPoint, grow, pct, px,
   rigid,
 };
+pub use textlayout::TextInput;
 #[cfg(feature = "headless")]
 pub(crate) use textlayout::TextLayout;
-pub use textlayout::{Edit, TextInput};
 #[cfg(feature = "styled")]
 pub use theme::{ControlBorder, Sizes, SwitchSize, Theme, Tone};
 #[cfg(feature = "styled")]

@@ -14,7 +14,7 @@
 use std::time::Duration;
 
 use nimbo::ui::Action;
-use nimbo::{Command, Event, Harness, Id, Key, Modifiers, NamedKey, Os, Sel};
+use nimbo::{Command, Event, Harness, Id, Key, Modifiers, NamedKey, Os};
 
 use crate::common::reads;
 use crate::dictation::account::*;
@@ -30,8 +30,15 @@ fn text_of(id: &str) -> Id {
   Id::of(id).key("text")
 }
 
-fn sel(h: &Harness<Account>, id: &str) -> Sel {
-  h.editor(Id::of(id)).unwrap().sel()
+/// A field's selection: its anchor and head.
+fn sel(h: &Harness<Account>, id: &str) -> (usize, usize) {
+  h.selection(Id::of(id)).unwrap()
+}
+
+/// The text selected in a field or selectable text.
+fn selected(h: &Harness<Account>, id: Id) -> &str {
+  let (a, b) = h.selection(id).unwrap();
+  &h.text(id).unwrap()[a.min(b)..a.max(b)]
 }
 
 fn clipboard(h: &mut Harness<Account>) -> Option<String> {
@@ -123,21 +130,21 @@ fn pc_keys_move_and_delete_by_words() {
   for os in [Os::Windows, Os::Linux] {
     let h = &mut fields_on(os, "alpha beta gamma", "");
     h.key(NamedKey::ArrowLeft, CTRL);
-    assert_eq!(sel(h, NAME), Sel::caret(11), "{os:?}");
+    assert_eq!(sel(h, NAME), (11, 11), "{os:?}");
     h.key(NamedKey::ArrowLeft, CTRL | SHIFT);
-    assert_eq!(sel(h, NAME), Sel::new(11, 6), "{os:?}");
+    assert_eq!(sel(h, NAME), (11, 6), "{os:?}");
 
     h.key(NamedKey::Home, NONE);
-    assert_eq!(sel(h, NAME), Sel::caret(0), "{os:?}");
+    assert_eq!(sel(h, NAME), (0, 0), "{os:?}");
     h.key(NamedKey::ArrowRight, CTRL);
-    assert_eq!(sel(h, NAME), Sel::caret(5), "{os:?}");
+    assert_eq!(sel(h, NAME), (5, 5), "{os:?}");
     h.key(NamedKey::End, SHIFT);
-    assert_eq!(sel(h, NAME), Sel::new(5, 16), "{os:?}");
+    assert_eq!(sel(h, NAME), (5, 16), "{os:?}");
 
     h.key(NamedKey::Home, CTRL);
-    assert_eq!(sel(h, NAME), Sel::caret(0), "{os:?}");
+    assert_eq!(sel(h, NAME), (0, 0), "{os:?}");
     h.key(NamedKey::End, CTRL);
-    assert_eq!(sel(h, NAME), Sel::caret(16), "{os:?}");
+    assert_eq!(sel(h, NAME), (16, 16), "{os:?}");
 
     h.key(NamedKey::Backspace, CTRL);
     assert_eq!(h.app().name, "alpha beta ", "{os:?}");
@@ -190,11 +197,11 @@ fn typing_word_moves_undo_and_the_clipboard() {
 
   // Alt-Left a word, Cmd-Left the line's start, Shift-Alt-Right selects a word.
   h.key(NamedKey::ArrowLeft, Modifiers::ALT);
-  assert_eq!(sel(h, NAME), Sel::caret(6));
+  assert_eq!(sel(h, NAME), (6, 6));
   h.key(NamedKey::ArrowLeft, CMD);
-  assert_eq!(sel(h, NAME), Sel::caret(0));
+  assert_eq!(sel(h, NAME), (0, 0));
   h.key(NamedKey::ArrowRight, Modifiers::ALT | Modifiers::SHIFT);
-  assert_eq!(sel(h, NAME), Sel::new(0, 5));
+  assert_eq!(sel(h, NAME), (0, 5));
   h.type_text("Howdy");
   assert_eq!(h.app().name, "Howdy world");
   h.key(NamedKey::Backspace, NONE);
@@ -240,17 +247,17 @@ fn the_mouse_selects() {
 
   // A click at the text's start puts the caret there.
   h.click(t.x + 1.0, y);
-  assert_eq!(sel(h, NAME), Sel::caret(0));
+  assert_eq!(sel(h, NAME), (0, 0));
 
   // A double click selects the word under it, a triple click the line.
   let w = h.rect(text_of(NAME)).unwrap().w;
   let mid = t.x + w / 2.0;
   h.press_with(mid, y, 2, NONE);
   h.release(mid, y);
-  assert_eq!(h.editor(name).unwrap().selected(), "beta");
+  assert_eq!(selected(h, name), "beta");
   h.press_with(mid, y, 3, NONE);
   h.release(mid, y);
-  assert_eq!(h.editor(name).unwrap().selected(), "alpha beta gamma");
+  assert_eq!(selected(h, name), "alpha beta gamma");
 
   // A drag from the start to the end selects what it went over, frames between.
   h.press(t.x + 1.0, y);
@@ -258,7 +265,7 @@ fn the_mouse_selects() {
   h.move_to(t.x + w + 4.0, y);
   h.frame();
   h.release(t.x + w + 4.0, y);
-  assert_eq!(sel(h, NAME), Sel::new(0, 16));
+  assert_eq!(sel(h, NAME), (0, 16));
 
   // A drag that comes and goes between frames (press, move, release) selects all the same.
   h.click(t.x + 1.0, y);
@@ -266,14 +273,14 @@ fn the_mouse_selects() {
   h.move_to(mid, y);
   h.release(mid, y);
   let s = sel(h, NAME);
-  assert!(s.anchor == 0 && (6..=11).contains(&s.head), "{s:?}");
+  assert!(s.0 == 0 && (6..=11).contains(&s.1), "{s:?}");
 
   // Shift-click extends from the anchor.
   h.click(t.x + 1.0, y);
   h.press_with(mid, y, 1, Modifiers::SHIFT);
   h.release(mid, y);
   let s = sel(h, NAME);
-  assert!(s.anchor == 0 && (6..=11).contains(&s.head), "{s:?}");
+  assert!(s.0 == 0 && (6..=11).contains(&s.1), "{s:?}");
 }
 
 /// The caret scrolled into view: at the end of a long line, then at its start, the second asked
@@ -318,7 +325,7 @@ fn input_methods_compose_apart_from_the_value() {
   assert!(h.ime_mark("n"));
   assert!(h.ime_mark("ni"));
   assert_eq!(h.app().notes, "ab");
-  assert_eq!(h.editor(notes).unwrap().text(), "abni");
+  assert_eq!(h.text(notes).unwrap(), "abni");
   assert_eq!(h.text_input().unwrap().marked(), Some(2..4));
   assert!(h.text_input().unwrap().caret_rect().is_some(), "where the candidates go");
 
@@ -338,12 +345,12 @@ fn input_methods_compose_apart_from_the_value() {
   h.ime_mark("h");
   assert!(h.ime_commit("好"));
   h.ime_mark("m");
-  assert_eq!((h.app().notes.as_str(), h.editor(notes).unwrap().text()), ("ab你好", "ab你好m"));
+  assert_eq!((h.app().notes.as_str(), h.text(notes).unwrap()), ("ab你好", "ab你好m"));
 
   // A value the app sets while composing waits for the end; a commit makes it stale.
   h.app_mut().notes = "from the app".into();
   h.frame();
-  assert_eq!(h.editor(notes).unwrap().text(), "ab你好m");
+  assert_eq!(h.text(notes).unwrap(), "ab你好m");
   h.ime_commit("吗");
   h.frame();
   assert_eq!(h.app().notes, "ab你好吗");
@@ -354,7 +361,7 @@ fn input_methods_compose_apart_from_the_value() {
   h.frame();
   h.ime_mark("");
   h.frame();
-  assert_eq!(h.editor(notes).unwrap().text(), "from the app");
+  assert_eq!(h.text(notes).unwrap(), "from the app");
   assert_eq!(h.app().notes, "from the app");
 
   // Enter during a composition only completes it: no line break.
@@ -395,14 +402,14 @@ fn a_password_shows_dots_and_keeps_its_secret() {
   h.key(Key::Char('x'), CMD);
   assert_eq!((clipboard(h), h.app().password.as_str()), (before, "sécret"));
   h.key(NamedKey::ArrowLeft, Modifiers::ALT);
-  assert_eq!(sel(h, PASSWORD), Sel::caret(0));
+  assert_eq!(sel(h, PASSWORD), (0, 0));
 
   // A click lands between dots, in the text's offsets: after the second character.
   h.frame();
   let t = h.rect(text_of(PASSWORD)).unwrap();
   let dot = t.w / 6.0;
   h.click(t.x + dot * 2.0 + 0.5, t.y + t.h / 2.0);
-  assert_eq!(sel(h, PASSWORD), Sel::caret(3));
+  assert_eq!(sel(h, PASSWORD), (3, 3));
 }
 
 #[test]
@@ -425,12 +432,12 @@ fn placeholder_disabled_and_selectable() {
   h.press_with(r.x + 20.0, r.y + 8.0, 2, NONE);
   h.release(r.x + 20.0, r.y + 8.0);
   assert_eq!(h.focused(), Some(about));
-  assert_eq!(h.editor(about).unwrap().selected(), "Nothing");
+  assert_eq!(selected(h, about), "Nothing");
   assert!(h.text_input().is_none(), "selectable text takes no input method");
   h.key(Key::Char('c'), CMD);
   assert_eq!(clipboard(h).as_deref(), Some("Nothing"));
   h.type_text("x");
-  assert_eq!(h.editor(about).unwrap().text(), TEXT);
+  assert_eq!(h.text(about).unwrap(), TEXT);
 
   // Without a focused field the window sleeps: no caret, no timer.
   h.click(SIZE.w - 4.0, SIZE.h - 4.0);
@@ -502,7 +509,7 @@ fn an_assistive_value_supersedes_one_held() {
   h.frame();
   assert!(h.act(name, Action::SetValue("old".into())));
   h.frame();
-  assert_eq!((h.app().name.as_str(), h.editor(name).unwrap().text()), ("old", "old"));
+  assert_eq!((h.app().name.as_str(), h.text(name).unwrap()), ("old", "old"));
   reads(&h.a11y(), &["text field \"Name\" value \"old\" focused"]);
 }
 
@@ -568,7 +575,7 @@ fn a_right_click_opens_the_edit_menu() {
   assert_eq!(h.focused(), Some(Id::of(NAME)));
   right_click(h, NAME);
   choose(h, "Select All");
-  assert_eq!(sel(h, NAME), Sel::new(0, 5));
+  assert_eq!(sel(h, NAME), (0, 5));
   right_click(h, NAME);
   assert_eq!(menu(h), ["Cut", "Copy", "Paste", "Select All"]);
   choose(h, "Cut");

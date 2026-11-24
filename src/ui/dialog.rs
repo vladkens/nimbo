@@ -229,7 +229,7 @@ mod tests {
   use super::*;
   use crate::app::{App, Cx, Event};
   use crate::harness::Harness;
-  use crate::keys::{Binding, CMD, Command, Shortcut, bind};
+  use crate::keys::{Binding, CMD, Command, Shortcut};
   use crate::scene::Size;
   use crate::{Modifiers, NamedKey};
 
@@ -242,7 +242,7 @@ mod tests {
 
   impl App for Under {
     fn keymap(&self) -> &[Binding] {
-      const KEYS: &[Binding] = &[bind(Shortcut::char('z').cmd(), Command::Action("undo"))];
+      const KEYS: &[Binding] = &[Binding::new(Shortcut::char('z').cmd(), Command::Action("undo"))];
       KEYS
     }
 

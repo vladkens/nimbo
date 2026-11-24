@@ -34,7 +34,7 @@ pub(crate) struct Stop {
 /// The selection, caret and marked text of an editable or selectable text element, as byte
 /// offsets of its text, and how to draw them ([super::Ui::edit_text]).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Edit {
+pub(crate) struct Edit {
   /// Anchor and head.
   pub sel: (u32, u32),
   /// Draws the caret at the head.
@@ -49,10 +49,8 @@ pub struct Edit {
   /// The text shown is a placeholder for an empty one.
   pub placeholder: bool,
   /// The text element.
-  #[doc(hidden)]
   pub node: u32,
   /// Its caret stops in `Tree::stops`, filled by the layout.
-  #[doc(hidden)]
   pub stops: (u32, u32),
 }
 
@@ -60,7 +58,13 @@ impl Ui<'_> {
   /// Text with a selection, caret and marked text ([Edit]), laid out over its whole text with
   /// caret stops; `node` styles the element (cursor, focus, input). What text fields and
   /// selectable text build on.
-  pub fn edit_text(&mut self, s: &str, style: TextStyle, edit: Edit, node: Style) -> Response {
+  pub(crate) fn edit_text(
+    &mut self,
+    s: &str,
+    style: TextStyle,
+    edit: Edit,
+    node: Style,
+  ) -> Response {
     let text = &mut self.st.tree.text;
     let start = text.len() as u32;
     text.push_str(s);

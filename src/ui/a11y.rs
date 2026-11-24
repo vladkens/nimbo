@@ -26,12 +26,12 @@
 //! under its own parent), its rect in window points clipped to the scroll areas around it, and
 //! a node clipped away entirely left out; an open modal dialog leaves out what is behind it. A
 //! leaf has no children (a record inside it, a recorder's ⊗, is beside it), what is inside a
-//! disabled node is disabled, and a hit ([A11yTree::at]) finds the topmost overlay as a click
+//! disabled node is disabled, and a hit (the adapter's) finds the topmost overlay as a click
 //! does.
 //!
 //! Assistive technology acts on a node by [crate::Event::A11y], which the runtime takes through
 //! the input paths ([Action]), so a click, Space and VoiceOver's press run the same code. A node
-//! takes the actions its role and states allow ([A11yNode::can]); others are refused.
+//! takes the actions its role and states allow (`A11yNode::can`); others are refused.
 
 use std::collections::HashMap;
 use std::fmt::{self, Display};
@@ -41,11 +41,11 @@ use std::ops::Range;
 
 use super::{Focus, Id, Kind, Tree, Ui, UiState};
 use crate::app::Event;
-use crate::scene::{Point, Rect};
+use crate::scene::Rect;
 use crate::text::FxHasher;
 
 /// A byte range of a string arena; empty when unset.
-pub type Span = (u32, u32);
+pub(crate) type Span = (u32, u32);
 
 // MARK: Roles, values, actions
 
@@ -111,7 +111,9 @@ impl Role {
 pub enum Value {
   #[default]
   None,
-  /// A field's text, in the arena of the records or the tree that holds it.
+  /// A field's text, in the arena of the records or the tree that holds it: [Access::text]
+  /// sets it.
+  #[doc(hidden)]
   Text(Span),
   /// A slider's or a progress indicator's number, in its range.
   Number {
@@ -126,7 +128,7 @@ pub enum Value {
   Mixed,
 }
 
-/// A state a node has or not, a bit of [Props::states].
+/// A state a node has or not.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum State {
@@ -161,7 +163,7 @@ pub enum Action {
 
 impl Action {
   /// Its bit in [A11yNode::actions].
-  pub fn bit(&self) -> u8 {
+  pub(crate) fn bit(&self) -> u8 {
     use Action::*;
     1 << match self {
       Press => 0,
@@ -177,7 +179,7 @@ impl Action {
 /// What an element is to assistive technology; its strings are in the arena of the records or
 /// the tree that holds it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Props {
+pub(crate) struct Props {
   pub role: Role,
   pub name: Span,
   pub description: Span,
@@ -287,7 +289,7 @@ impl Access<'_> {
     self
   }
 
-  /// The descendant with the cursor ([Props::active]).
+  /// The descendant with the cursor: a list's cursor row, a menu's highlighted item.
   pub fn active(mut self, id: Option<Id>) -> Self {
     self.props().active = id;
     self
@@ -492,8 +494,7 @@ impl Ui<'_> {
 
 /// A node of the assembled tree ([A11yTree]).
 #[derive(Clone, Copy, Debug, PartialEq)]
-#[non_exhaustive]
-pub struct A11yNode {
+pub(crate) struct A11yNode {
   pub id: Id,
   pub props: Props,
   /// In window points, clipped to the scroll areas around it.
@@ -501,10 +502,10 @@ pub struct A11yNode {
   pub parent: Option<u32>,
   /// One past the last node inside it: the nodes are in pre-order.
   pub end: u32,
-  /// The [Action]s it takes, as [Action::bit]s ([A11yNode::can]).
+  /// The [Action]s it takes, as [Action::bit]s (`A11yNode::can`).
   pub actions: u8,
   /// The overlay it shows in, by z: 0 the window's tree, else one past its place in
-  /// `Tree::floats` ([A11yTree::at]).
+  /// `Tree::floats`: a hit finds the topmost.
   pub layer: u16,
 }
 
@@ -533,7 +534,7 @@ fn actions(p: &Props, focusable: bool) -> u8 {
 /// The last frame as assistive technology sees it (`UiState::a11y_tree`). Its [Display] is one
 /// line per node, indented by depth: `switch "Open at login" off`.
 #[derive(Clone, Debug, Default)]
-pub struct A11yTree {
+pub(crate) struct A11yTree {
   pub nodes: Vec<A11yNode>,
   /// The nodes' strings, back to back.
   pub text: String,
@@ -547,13 +548,6 @@ impl A11yTree {
   /// The first node of `id`.
   pub fn get(&self, id: Id) -> Option<&A11yNode> {
     self.nodes.iter().find(|n| n.id == id)
-  }
-
-  /// The node at `p` in window points, as a click finds it: the deepest in the topmost overlay
-  /// there (an open menu's item, not the row under it).
-  pub fn at(&self, p: Point) -> Option<u32> {
-    let on = self.nodes.iter().zip(0..).filter(|(n, _)| n.rect.contains(p));
-    on.max_by_key(|&(n, i)| (n.layer, i)).map(|(_, i)| i)
   }
 
   /// Adds a node inside the `open` ones but the leaves, which have no children (a recorder's
@@ -1112,10 +1106,10 @@ mod tests {
     assert_eq!(shape, want);
   }
 
-  /// An open menu over the rows under it, built inside the first: a hit there finds its item,
-  /// not the row it covers.
+  /// An open menu over the rows under it, built inside the first: its item is in an overlay above
+  /// the row it covers, so a hit there finds it.
   #[test]
-  fn a_hit_finds_the_overlay_on_top() {
+  fn an_overlay_is_above_the_rows_it_covers() {
     let row = Style::new().w(px(100.0)).h(px(20.0));
     let st = frame(UiState::default(), |ui| {
       ui.a11y(Id::of("r0"), Role::Row);
@@ -1130,10 +1124,9 @@ mod tests {
     });
 
     let t = st.a11y_tree();
-    let at = |x, y| t.at(Point::new(x, y)).map(|i| t.nodes[i as usize].id);
-    assert_eq!(at(2.0, 25.0), Some(Id::of("go")));
-    assert_eq!(at(50.0, 25.0), Some(Id::of("r1")));
-    assert_eq!(at(50.0, 5.0), Some(Id::of("r0")));
+    let (go, r1) = (t.get(Id::of("go")).unwrap(), t.get(Id::of("r1")).unwrap());
+    assert!(r1.rect.contains(Point::new(go.rect.x + 1.0, go.rect.y + 1.0)), "{go:?} over {r1:?}");
+    assert!(go.layer > r1.layer && r1.layer == t.get(Id::of("r0")).unwrap().layer);
   }
 
   /// A record inside a leaf (a recorder's ⊗) is beside it; what is inside a disabled node is

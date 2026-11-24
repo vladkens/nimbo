@@ -11,7 +11,7 @@
 
 use nimbo::{
   App, Binding, Color, Command, Cursor, Cx, Event, Float, Frame, Key, MouseButton, NamedKey, Point,
-  Quad, Rect, Shortcut, Size, Style, Ui, bind, mix, px, rgb,
+  Quad, Rect, Shortcut, Size, Style, Ui, mix, px, rgb,
 };
 
 pub const SIZE: Size = Size::new(480.0, 320.0);
@@ -37,8 +37,8 @@ pub const WHITE: Color = rgb(0xffffff);
 
 /// Copy and paste, as the edit menu binds them: Cmd on macOS, Ctrl elsewhere.
 const KEYS: &[Binding] = &[
-  bind(Shortcut::char('c').cmd(), Command::Copy),
-  bind(Shortcut::char('v').cmd(), Command::Paste),
+  Binding::new(Shortcut::char('c').cmd(), Command::Copy),
+  Binding::new(Shortcut::char('v').cmd(), Command::Paste),
 ];
 
 pub struct Input {

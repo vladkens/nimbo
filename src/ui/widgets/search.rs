@@ -97,7 +97,7 @@ impl Ui<'_> {
 mod tests {
   use crate::app::{App, Cx, Event, MouseButton};
   use crate::harness::Harness;
-  use crate::keys::{Binding, Command, Key, Shortcut, bind};
+  use crate::keys::{Binding, Command, Key, Shortcut};
   use crate::scene::{Rect, Size};
   use crate::ui::{Cursor, Id, Style, Ui, grow, pct};
   use crate::{Modifiers, NamedKey};
@@ -125,7 +125,7 @@ mod tests {
   impl App for Find {
     fn keymap(&self) -> &[Binding] {
       const KEYS: &[Binding] =
-        &[bind(Shortcut::new(Key::Named(NamedKey::Escape)), Command::Cancel)];
+        &[Binding::new(Shortcut::new(Key::Named(NamedKey::Escape)), Command::Cancel)];
       KEYS
     }
 

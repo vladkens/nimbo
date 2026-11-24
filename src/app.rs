@@ -1,7 +1,7 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The seams between an app and the world: events in, a scene out, with the clock, clipboard
-//! and waker injected, so one app runs the same in a window ([crate::platform]) and in the
+//! and waker injected, so one app runs the same in a window (`platform`) and in the
 //! headless harness ([crate::harness]).
 
 use std::time::{Duration, Instant};
@@ -795,7 +795,7 @@ mod tests {
   use std::sync::mpsc;
 
   use super::*;
-  use crate::keys::{self, CMD, Key, Shortcut};
+  use crate::keys::{CMD, Key, Shortcut};
   use crate::scene::Rect;
   use crate::ui::{Float, Kind, Style, TextStyle, Theme, Transition, grow, px};
   use crate::{Code, Modifiers};
@@ -1400,14 +1400,14 @@ mod tests {
     item_takes: bool,
   }
 
-  const ITEM_KEYS: &[Binding] = &[keys::bind(Shortcut::char('z').cmd(), Command::Undo)];
+  const ITEM_KEYS: &[Binding] = &[Binding::new(Shortcut::char('z').cmd(), Command::Undo)];
   const PANEL_KEYS: &[Binding] = &[
-    keys::bind(Shortcut::char('z').cmd(), Command::Action("panel undo")),
-    keys::bind(Shortcut::char('p').cmd(), Command::Action("panel")),
+    Binding::new(Shortcut::char('z').cmd(), Command::Action("panel undo")),
+    Binding::new(Shortcut::char('p').cmd(), Command::Action("panel")),
   ];
   const APP_KEYS: &[Binding] = &[
-    keys::bind(Shortcut::char('p').cmd(), Command::Action("app")),
-    keys::bind(Shortcut::char('n').cmd(), Command::Action("new")),
+    Binding::new(Shortcut::char('p').cmd(), Command::Action("app")),
+    Binding::new(Shortcut::char('n').cmd(), Command::Action("new")),
   ];
 
   impl App for Keyed {

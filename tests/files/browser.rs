@@ -13,7 +13,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use nimbo::ui::Action;
+use nimbo::ui::{Action, Role};
 use nimbo::{CMD, Event, Harness, Id, Key, Modifiers, MouseButton, NamedKey, Os, Phase, Point};
 
 use crate::common::{mid, reads};
@@ -312,7 +312,7 @@ fn the_row_menu_draws_its_model() {
     assert!(dump.contains(line), "{line}: {dump}");
   }
 
-  let (r, img) = (h.rect(h.menu_item("Delete").unwrap()).unwrap(), h.render());
+  let (r, img) = (h.find(Role::MenuItem, "Delete").unwrap().rect, h.render());
   let red = (0..r.w as usize).map(|x| img.pixel(r.x + x as f32, r.y + r.h / 2.0));
   assert!(red.into_iter().any(|p| p[0] > p[1] + 80), "red text");
 }

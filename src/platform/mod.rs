@@ -252,7 +252,6 @@ compile_error!("nimbo runs on macOS, Windows and Linux");
 #[cfg(any(test, target_os = "windows"))]
 use std::time::{Duration, Instant};
 
-pub use imp::appearance;
 #[cfg(feature = "hotkey")]
 pub(crate) use imp::hotkey;
 #[cfg(feature = "bitmap")]
@@ -312,6 +311,39 @@ pub(crate) fn scan_code(scan: u16) -> Code {
   SET1.get(scan as usize).copied().unwrap_or(Unidentified)
 }
 
+/// [crate::text::edit::from_utf16] for a shaper's many lookups (CoreText's and DirectWrite's string
+/// indices): a table of the byte offsets by UTF-16 offset, none for ASCII, where the two are the
+/// same.
+#[cfg(any(test, target_os = "macos", target_os = "windows"))]
+pub(crate) struct Utf16Bytes<'a> {
+  s: &'a str,
+  bytes: Vec<u32>,
+}
+
+#[cfg(any(test, target_os = "macos", target_os = "windows"))]
+impl<'a> Utf16Bytes<'a> {
+  pub fn new(s: &'a str) -> Self {
+    let bytes = match s.is_ascii() {
+      true => Vec::new(),
+      false => s
+        .char_indices()
+        .flat_map(|(i, c)| std::iter::repeat_n(i as u32, c.len_utf16()))
+        .chain([s.len() as u32])
+        .collect(),
+    };
+
+    Self { s, bytes }
+  }
+
+  /// The byte offset of UTF-16 offset `u`, as `from_utf16` gives it.
+  pub fn at(&self, u: usize) -> u32 {
+    match self.bytes.is_empty() {
+      true => u.min(self.s.len()) as u32,
+      false => self.bytes.get(u).copied().unwrap_or(self.s.len() as u32),
+    }
+  }
+}
+
 /// Frames an interval apart from the start of each, so the time spent drawing one doesn't add to
 /// the gap: 8 ms frames at 60 Hz still come every 16.7 ms, not every 25 (40 fps). For Windows'
 /// loop, paced by a timer; macOS has its display link, Linux GDK's frame clock.
@@ -346,6 +378,20 @@ mod tests {
   use crate::cpu::Renderer;
   use crate::keys::us_char;
   use crate::scene::Size;
+  use crate::text::edit::from_utf16;
+
+  /// The table gives the byte offsets `from_utf16` does, ASCII or not.
+  #[test]
+  fn utf16_bytes_are_from_utf16s() {
+    let s = "aé👍🏽\n";
+    let table = Utf16Bytes::new(s);
+    for u in 0..9 {
+      assert_eq!(table.at(u), from_utf16(s, u) as u32, "{u}");
+    }
+
+    let ascii = Utf16Bytes::new("ab");
+    assert_eq!((ascii.at(1), ascii.at(2), ascii.at(99), Utf16Bytes::new("").at(1)), (1, 2, 2, 0));
+  }
 
   /// 8 ms frames at 60 Hz: the next is due 8.7 ms after one ends, and a second holds 60 of them.
   #[test]

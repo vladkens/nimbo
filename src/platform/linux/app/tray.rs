@@ -32,7 +32,7 @@ use std::sync::OnceLock;
 
 use super::super::dbus::{self, Gv, V, VTable};
 use super::super::dl::fns;
-use super::super::{Fp, P, S, connect, lib, load};
+use super::super::{Fp, P, S, appearance, connect, lib, load};
 use super::menu::{self, nodes};
 use crate::tray::{Menu, Set, State, TrayIcon};
 use crate::{paths, platform};
@@ -220,7 +220,7 @@ impl Tray {
   fn paint(&self, icon: &TrayIcon) {
     let gnome = std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| d.contains("GNOME"));
     let boxed = ["FLATPAK_ID", "SNAP"].iter().any(|v| std::env::var_os(v).is_some());
-    let tint = if gnome || platform::appearance().scheme.is_dark() { [255; 3] } else { [0; 3] };
+    let tint = if gnome || appearance().scheme.is_dark() { [255; 3] } else { [0; 3] };
     let pixmap = |side: u32| {
       let rgba = icon.pixels(side, tint);
       let argb = rgba.chunks(4).flat_map(|p| [p[3], p[0], p[1], p[2]]).collect();

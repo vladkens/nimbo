@@ -22,7 +22,7 @@ use objc2_core_text::{
   CTFont, CTFontOrientation, CTFontSymbolicTraits, CTLine, CTRun, kCTFontAttributeName,
 };
 
-use crate::text::edit::Utf16Bytes;
+use crate::platform::Utf16Bytes;
 use crate::text::{Design, Font, Glyph, GlyphBox, Ink, Line, Metrics, Raster, Weight};
 
 /// A CTFont at its point size.

@@ -179,7 +179,7 @@ impl std::str::FromStr for ColorScheme {
 }
 
 /// The OS's look: its [ColorScheme], and the accent colour the user picked, if the OS has one
-/// ([crate::platform::appearance]).
+/// ([crate::Ui::appearance]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[non_exhaustive]
 pub struct Appearance {

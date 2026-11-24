@@ -36,9 +36,9 @@ use crate::text::edit::{
   Editor, Lines, Mono, Sel, graphemes, para_range, range_from_utf16, snap, word_range,
 };
 use crate::ui::input::ScrollState;
-use crate::ui::textlayout::Hit;
+use crate::ui::textlayout::{Edit, Hit};
 use crate::ui::{
-  Align, Cursor, Edit, EnvironmentValue, Focus, Id, NativeMenu, Role, Style, TextInput, TextLayout,
+  Align, Cursor, EnvironmentValue, Focus, Id, NativeMenu, Role, Style, TextInput, TextLayout,
   TextStyle, Tree, Ui, UiState, grow,
 };
 
@@ -161,7 +161,7 @@ pub struct FieldBehavior {
   pub menu: EditMenu,
   /// The selection, marked text, caret and reveal to draw, in offsets of the text shown;
   /// [Ui::field_text] fills in the colours.
-  pub edit: Edit,
+  pub(crate) edit: Edit,
 }
 
 /// A text field's or selectable text's edit menu as a secondary click (the right button) opened

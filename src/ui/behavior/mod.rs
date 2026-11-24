@@ -47,8 +47,8 @@
 //!   [ListStyle] ([Ui::list_style]);
 //! - [Ui::help]'s tooltip: when it shows and where, drawn by a [HelpStyle] ([Ui::help_style]);
 //! - [Ui::text_field_behavior] and [Ui::selectable_behavior]: text editing on the editing model
-//!   ([crate::Editor]), drawn by [Ui::field_text] ([FieldBehavior] has the details), with the edit
-//!   menu ([Ui::edit_menu]); the [TextField] over it, drawn by a [TextFieldStyle]
+//!   (`Editor`), drawn by [Ui::field_text] ([FieldBehavior] has the details), with the edit menu
+//!   ([Ui::edit_menu]); the [TextField] over it, drawn by a [TextFieldStyle]
 //!   ([Ui::text_field_style]);
 //! - [Ui::search_behavior]: a single-line field's, its text cleared by a ⊗ or Escape.
 //!

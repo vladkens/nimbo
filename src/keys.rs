@@ -680,15 +680,18 @@ impl std::fmt::Display for Hotkey {
 
 /// A shortcut in the app and the command it runs, as SwiftUI's `.keyboardShortcut` on a command.
 /// `const`, so a keymap is a constant:
-/// `const KEYS: &[Binding] = &[bind(Shortcut::char('z').cmd(), Command::Undo)]`.
+/// `const KEYS: &[Binding] = &[Binding::new(Shortcut::char('z').cmd(), Command::Undo)]`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Binding {
   pub keys: Shortcut,
   pub command: Command,
 }
 
-pub const fn bind(keys: Shortcut, command: Command) -> Binding {
-  Binding { keys, command }
+impl Binding {
+  /// `keys` running `command`.
+  pub const fn new(keys: Shortcut, command: Command) -> Self {
+    Self { keys, command }
+  }
 }
 
 /// The shortcut of the first binding in `map` that runs `cmd`: to show it beside the command,
@@ -705,82 +708,91 @@ pub fn lookup(map: &[Binding], k: &KeyEvent) -> Option<Command> {
 /// The edit menu's keys, which a text field binds on itself: the key goes to it before the menu
 /// bar's items (macOS), which show them ([crate::Commands]), and Windows and Linux have no menu.
 pub const EDIT_KEYS: &[Binding] = &[
-  bind(Shortcut::char('a').cmd(), Command::SelectAll),
-  bind(Shortcut::char('c').cmd(), Command::Copy),
-  bind(Shortcut::char('x').cmd(), Command::Cut),
-  bind(Shortcut::char('v').cmd(), Command::Paste),
-  bind(Shortcut::char('z').cmd(), Command::Undo),
-  bind(Shortcut::char('z').cmd().shift(), Command::Redo),
+  Binding::new(Shortcut::char('a').cmd(), Command::SelectAll),
+  Binding::new(Shortcut::char('c').cmd(), Command::Copy),
+  Binding::new(Shortcut::char('x').cmd(), Command::Cut),
+  Binding::new(Shortcut::char('v').cmd(), Command::Paste),
+  Binding::new(Shortcut::char('z').cmd(), Command::Undo),
+  Binding::new(Shortcut::char('z').cmd().shift(), Command::Redo),
 ];
 
 /// The keys of selectable text: select all and copy.
 pub const SELECT_KEYS: &[Binding] = &[
-  bind(Shortcut::char('a').cmd(), Command::SelectAll),
-  bind(Shortcut::char('c').cmd(), Command::Copy),
+  Binding::new(Shortcut::char('a').cmd(), Command::SelectAll),
+  Binding::new(Shortcut::char('c').cmd(), Command::Copy),
 ];
 
 // MARK: Commands
 
-/// Where a caret move goes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum Move {
-  Left,
-  Right,
-  WordLeft,
-  WordRight,
-  /// To the start of the visual line (Cmd-Left).
-  LineStart,
-  LineEnd,
-  /// To the start of the line between line breaks (Ctrl-A).
-  ParagraphStart,
-  ParagraphEnd,
-  Up,
-  Down,
-  PageUp,
-  PageDown,
-  DocStart,
-  DocEnd,
-}
+/// The editor's moves and deletes, which [Command::Move] and [Command::Delete] carry from the
+/// platform's keys to a text field: `pub` in a private module, so the commands can carry them
+/// while an app can't name them.
+mod edit {
+  /// Where a caret move goes.
+  #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+  pub enum Move {
+    Left,
+    Right,
+    WordLeft,
+    WordRight,
+    /// To the start of the visual line (Cmd-Left).
+    LineStart,
+    LineEnd,
+    /// To the start of the line between line breaks (Ctrl-A).
+    ParagraphStart,
+    ParagraphEnd,
+    Up,
+    Down,
+    PageUp,
+    PageDown,
+    DocStart,
+    DocEnd,
+  }
 
-/// What a delete removes when nothing is selected (a selection is removed as a whole).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum Delete {
-  Backward,
-  Forward,
-  WordBackward,
-  WordForward,
-  /// To the start of the visual line (Cmd-Backspace).
-  ToLineStart,
-  ToLineEnd,
-  ToParagraphStart,
-  /// To the end of the line between line breaks (Ctrl-K).
-  ToParagraphEnd,
-}
+  /// What a delete removes when nothing is selected (a selection is removed as a whole).
+  #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+  pub enum Delete {
+    Backward,
+    Forward,
+    WordBackward,
+    WordForward,
+    /// To the start of the visual line (Cmd-Backspace).
+    ToLineStart,
+    ToLineEnd,
+    ToParagraphStart,
+    /// To the end of the line between line breaks (Ctrl-K).
+    ToParagraphEnd,
+  }
 
-/// What a move does ([Command::Move]): moves the caret, or extends the selection from its
-/// anchor, as Shift does.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Extent {
-  Caret,
-  Selection,
-}
+  /// What a move does ([super::Command::Move]): moves the caret, or extends the selection
+  /// from its anchor, as Shift does.
+  #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+  pub enum Extent {
+    Caret,
+    Selection,
+  }
 
-impl Extent {
-  /// [Extent::Selection] with Shift held, else Caret.
-  pub const fn by(shift: bool) -> Self {
-    if shift { Extent::Selection } else { Extent::Caret }
+  impl Extent {
+    /// [Extent::Selection] with Shift held, else Caret.
+    pub const fn by(shift: bool) -> Self {
+      if shift { Extent::Selection } else { Extent::Caret }
+    }
   }
 }
+
+pub(crate) use edit::{Delete, Extent, Move};
 
 /// A command from a key: AppKit's text commands (`doCommandBySelector:`), the edit menu's
 /// (from bindings) and the app's own ([Command::Action]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Command {
-  /// Moves the caret, or extends the selection (the `…AndModifySelection:` selectors).
+  /// Moves the caret, or extends the selection (the `…AndModifySelection:` selectors): the
+  /// editor's, for a field, a list or a menu to take.
+  #[doc(hidden)]
   Move(Move, Extent),
+  /// Deletes text: the editor's.
+  #[doc(hidden)]
   Delete(Delete),
   InsertNewline,
   InsertTab,
@@ -798,7 +810,7 @@ pub enum Command {
   ScrollPageDown,
   ScrollToTop,
   ScrollToBottom,
-  /// The app's own command, by name: `bind(Shortcut::char('n').cmd(), Command::Action("new"))`.
+  /// The app's own command, by name: `Command::Action("new")` in a [Binding].
   Action(&'static str),
 }
 
@@ -1173,8 +1185,8 @@ mod tests {
     assert!(ev(Key::Char('='), CMD).is(Shortcut::char('=').cmd()));
     assert!(!ev(Key::Named(ArrowLeft), Modifiers::SHIFT).is(Shortcut::new(Key::Named(ArrowLeft))));
     let map = [
-      bind(Shortcut::char('z').cmd(), Command::Undo),
-      bind(Shortcut::char('z').cmd().shift(), Command::Redo),
+      Binding::new(Shortcut::char('z').cmd(), Command::Undo),
+      Binding::new(Shortcut::char('z').cmd().shift(), Command::Redo),
     ];
     assert_eq!(lookup(&map, &ev(Key::Char('Z'), CMD_SHIFT)), Some(Command::Redo));
     assert_eq!(lookup(&map, &ev(Key::Char('y'), CMD)), None);
@@ -1200,8 +1212,8 @@ mod tests {
 
     // In the app, the command key: ⌘ on macOS, Ctrl elsewhere.
     let map = [
-      bind(Shortcut::char('z').cmd(), Command::Undo),
-      bind(Shortcut::char('z').cmd().shift(), Command::Redo),
+      Binding::new(Shortcut::char('z').cmd(), Command::Undo),
+      Binding::new(Shortcut::char('z').cmd().shift(), Command::Redo),
     ];
     let redo = shortcut(&map, Command::Redo).map(|k| k.label());
     let want = if cfg!(target_os = "macos") { "⇧⌘Z" } else { "Ctrl+Shift+Z" };
@@ -1503,8 +1515,8 @@ mod tests {
   #[test]
   fn bindings_follow_the_platform() {
     let map = [
-      bind(Shortcut::char('v').cmd(), Command::Paste),
-      bind(Shortcut::char('a').ctrl(), Command::SelectAll),
+      Binding::new(Shortcut::char('v').cmd(), Command::Paste),
+      Binding::new(Shortcut::char('a').ctrl(), Command::SelectAll),
     ];
     let (ctrl, meta) = (Modifiers::CONTROL, Modifiers::META);
     for (os, cmd, other) in
