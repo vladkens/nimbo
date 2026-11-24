@@ -403,13 +403,13 @@ impl Ui<'_> {
     let c = self.st.tree.a11y.pair(id);
     if part == LabeledPairRole::Content {
       let outer = self.st.tree.a11y.content.replace(c);
-      let r = build(self);
+      let r = self.group(build);
       self.st.tree.a11y.content = outer;
       return r;
     }
 
     let at = self.st.tree.nodes.len() as u32;
-    let r = build(self);
+    let r = self.group(build);
     let nodes = at..self.st.tree.nodes.len() as u32;
     let (text, ids) = self.plain_text(nodes.clone());
     let recs = &mut self.st.tree.a11y;
@@ -1107,7 +1107,7 @@ mod tests {
   #[test]
   fn a_disabled_containers_items_are_disabled() {
     let st = frame(UiState::default(), |ui| {
-      ui.disabled_scope(true, |ui| {
+      ui.disabled(true).col(Style::new(), |ui| {
         ui.id("seg").segmented(&mut 0, &[Tag::new(0, "A"), Tag::new(1, "B")]);
         ui.list(Id::of("list"), 1, 20.0, |ui, _| ui.text("One", T));
       });

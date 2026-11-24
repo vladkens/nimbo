@@ -178,9 +178,8 @@ impl Ui<'_> {
   /// An item of the toolbar being built ([Ui::toolbar]) at `placement`: what `content` builds,
   /// an icon button as a rule, with the items before it at that end. Outside a toolbar, nothing.
   pub fn toolbar_item(&mut self, placement: ToolbarItemPlacement, content: impl FnOnce(&mut Self)) {
-    if self.slot::<Building>().is_some_and(|b| b.0 == placement) {
-      content(self);
-    }
+    let here = self.slot::<Building>().is_some_and(|b| b.0 == placement);
+    self.group(|ui| here.then(|| content(ui)));
   }
 
   /// The height of the band a toolbar takes over the top of the window ([Ui::toolbar]): the title

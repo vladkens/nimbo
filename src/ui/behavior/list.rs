@@ -17,7 +17,7 @@ use crate::keys::{Binding, CMD, Command, Delete, Extent, Move, Os, Shortcut, bin
 use crate::scene::{Point, Rect};
 use crate::text::FxHasher;
 use crate::ui::input::ScrollState;
-use crate::ui::{Focus, Id, Role, State, Style, Ui, px};
+use crate::ui::{Enabled, Focus, Id, Role, State, Style, Ui, px};
 
 /// Rows built past each edge of the viewport.
 const OVERSCAN: usize = 2;
@@ -318,7 +318,7 @@ impl<'a> Ui<'a> {
     sel: &'s mut Selection,
     key: &'s dyn Fn(usize) -> u64,
   ) -> ListBehavior<'s> {
-    let disabled = self.take_disabled();
+    let disabled = !self.environment_value::<Enabled>().0;
     if disabled && self.focused(id) {
       self.focus(None);
     }
@@ -374,6 +374,15 @@ impl<'a> Ui<'a> {
   /// as it is now; when the layout shows more than was built, the view runs again at once, so a
   /// frame never shows a gap.
   pub fn list_rows(
+    &mut self,
+    b: &ListBehavior,
+    row: impl FnMut(&mut Ui<'a>, usize, u64),
+  ) -> Range<usize> {
+    // The values put for them reach every row past the spacer above.
+    self.group(|ui| ui.rows_in_view(b, row))
+  }
+
+  fn rows_in_view(
     &mut self,
     b: &ListBehavior,
     mut row: impl FnMut(&mut Ui<'a>, usize, u64),

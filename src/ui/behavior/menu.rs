@@ -12,7 +12,7 @@ use keyboard_types::NamedKey;
 use super::scroll::{Bars, MIN_THUMB};
 use crate::keys::{Command, Key, Move};
 use crate::scene::{Point, Rect};
-use crate::ui::{Behavior, Float, Id, Role, State, Style, Ui, UnitPoint, grow, pct};
+use crate::ui::{Behavior, Enabled, Float, Id, Role, State, Style, Ui, UnitPoint, grow, pct};
 
 /// Paint order of menus among overlays.
 const MENU_Z: i32 = 1000;
@@ -141,6 +141,18 @@ impl Ui<'_> {
   /// Its first frame lays it out out of sight, to place it. Opening it stops what was
   /// scrolling under it; wheel events around it scroll nothing.
   pub fn menu_popup<R>(
+    &mut self,
+    id: Id,
+    toggle: bool,
+    place: MenuPlacement,
+    style: Style,
+    items: impl FnOnce(&mut Self) -> R,
+  ) -> bool {
+    // The values put for it reach its items past the cover, and end with it when it is closed.
+    self.group(|ui| ui.menu_popup_in(id, toggle, place, style, items))
+  }
+
+  fn menu_popup_in<R>(
     &mut self,
     id: Id,
     toggle: bool,
@@ -390,7 +402,7 @@ impl Ui<'_> {
   /// highlighted (under the pointer, by the menu's keys, or by letters typed that start its
   /// label), `clicked` when clicked or run by Enter. Outside a menu, `on` while hovered.
   pub fn menu_item_behavior(&mut self, id: Id, label: &str) -> Behavior {
-    let off = self.take_disabled();
+    let off = !self.environment_value::<Enabled>().0;
     self.a11y(id, Role::MenuItem).state(State::Disabled, off);
     // In a menu: its place among the items, and whether its keys highlight or run it.
     let (cur, run, inside) = match self.slot::<MenuCx>() {

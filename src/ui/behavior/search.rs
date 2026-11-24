@@ -8,7 +8,7 @@ use keyboard_types::NamedKey;
 use super::field::FieldState;
 use crate::app::MouseButton;
 use crate::keys::Key;
-use crate::ui::{FieldBehavior, FieldKind, Id, Ui};
+use crate::ui::{Enabled, FieldBehavior, FieldKind, Id, Ui};
 
 impl Ui<'_> {
   /// A search field's input: [Ui::text_field_behavior]'s on one line, and a click on
@@ -17,7 +17,7 @@ impl Ui<'_> {
   /// of the left button on it) focuses the field; Escape is the
   /// field's before any binding while there is text and nothing composing, else it goes on.
   pub fn search_behavior(&mut self, id: Id, text: &mut String) -> FieldBehavior {
-    let off = self.next_disabled || self.scope_off;
+    let off = !self.environment_value::<Enabled>().0;
     let x = id.key("clear");
     // The ⊗ is the field's: a press on it leaves the focus there, or brings it.
     if !off && self.press().is_some_and(|p| p.id == x && p.button == MouseButton::Left) {

@@ -91,6 +91,11 @@ impl<'s, T: PartialEq + Copy> Picker<'s, T> {
   }
 
   pub fn show(self, ui: &mut Ui) -> Response {
+    // The values put for it reach its menu too.
+    ui.group(|ui| self.build(ui))
+  }
+
+  fn build(self, ui: &mut Ui) -> Response {
     let t = ui.theme();
     let id = ui.take_id();
     let options: Vec<(T, &str)> = self.entries.iter().flatten().copied().collect();

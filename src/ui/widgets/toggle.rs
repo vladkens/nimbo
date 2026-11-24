@@ -17,7 +17,7 @@ impl Ui<'_> {
   /// in from the track's end as from its top, slides over the track, grey off and the accent on;
   /// a soft ring and a small drop shadow under it.
   pub fn toggle(&mut self, on: &mut bool, label: &str) -> Response {
-    let (t, size) = (self.controls_theme(), self.take_control_size());
+    let (t, size) = (self.controls_theme(), self.environment_value::<ControlSize>());
     let id = self.take_id();
     let b = self.toggle_behavior(id, on);
 

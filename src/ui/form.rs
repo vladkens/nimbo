@@ -48,8 +48,8 @@ use std::rc::Rc;
 use super::theme::Theme;
 use super::widgets::{Icon, MarkShift};
 use super::{
-  Align, Cursor, Id, LabeledPairRole, Response, Role, Shadow, State, Style, TextStyle, Ui, grow,
-  px, rigid,
+  Align, Cursor, Enabled, Id, LabeledPairRole, Response, Role, Shadow, State, Style, TextStyle, Ui,
+  grow, px, rigid,
 };
 use crate::locale::Localized;
 use crate::scene::{Color, Frame, Point, Quad, Rect, alpha, mix, rgb};
@@ -299,7 +299,7 @@ impl FormStyle {
 /// `&String`, a [Localized] (`t!("…")`), an [Icon] or `FnOnce(&mut Ui, TextStyle)`, whose
 /// parameters need their types written. A closure's texts take the style or one made from it
 /// (`s.line_limit(1)`, `s.underline(LinePattern::Dot)` on a term with [Ui::help]); its widgets dim
-/// themselves in a disabled row; a canvas of its own reads [Ui::take_disabled].
+/// themselves in a disabled row; a canvas of its own reads [Enabled] ([Ui::environment_value]).
 #[derive(Default)]
 pub enum Content<'s> {
   #[default]
@@ -584,7 +584,7 @@ impl Ui<'_> {
     let fs = *fs;
     let t = self.theme();
     let id = self.take_id();
-    let off = self.take_disabled();
+    let off = !self.environment_value::<Enabled>().0;
     let first = self.child_count() == 0;
     let dim = |s: TextStyle| if off { s.color(t.tertiary) } else { s };
     let top = if first { 0.0 } else { fs.hairline };
@@ -628,8 +628,9 @@ impl Ui<'_> {
     // middle: the two centre on each other.
     let line = if footer.is_none() { line } else { line.align(Align::Start, Align::Center) };
 
-    let r = self.disabled_scope(off, |ui| {
-      ui.with_id(id).allows_hit_testing(style.hit).canvas_col(style.gap(0.0), hairline, |ui| {
+    // Disabled as its own, it is the row's scope.
+    let r =
+      self.with_id(id).allows_hit_testing(style.hit).canvas_col(style.gap(0.0), hairline, |ui| {
         ui.row(line, |ui| {
           if !tile.is_none() {
             let x = (fs.tile_x - pad_x).max(0.0);
@@ -685,8 +686,7 @@ impl Ui<'_> {
             ui.col(pad, |ui| footer.build(ui, dim(fs.caption), id.key("footer"), 12.0, 1.6))
           });
         }
-      })
-    });
+      });
     // Held down, its place among the plate's rows, for the row under it and the section's end.
     let n = self.child_count();
     if let Some(p) = self.slot::<Plate>() {
@@ -713,6 +713,16 @@ impl Ui<'_> {
     row: FormRow,
     rows: impl FnOnce(&mut Self) -> R,
   ) -> Response {
+    // The values put for it reach the rows under it too.
+    self.group(|ui| ui.disclosure(fs, row, rows))
+  }
+
+  fn disclosure<R>(
+    &mut self,
+    fs: &FormStyle,
+    row: FormRow,
+    rows: impl FnOnce(&mut Self) -> R,
+  ) -> Response {
     let (id, t) = (self.take_id(), self.theme());
     // Disabled before the behaviour: it reads so and lets go of the focus.
     let b = self.button_behavior(id);
@@ -729,7 +739,7 @@ impl Ui<'_> {
     let ink = if off { t.tertiary } else { t.muted };
     let row = FormRow { pressed, ..row };
     let fs = FormStyle { row: style, ..*fs };
-    let mut r = self.disabled(off).with_id(id).form_row(&fs, row, |ui| {
+    let mut r = self.with_id(id).form_row(&fs, row, |ui| {
       // Unnamed, a click on it is the row's.
       ui.with_id(id.key("chevron"))
         .allows_hit_testing(false)

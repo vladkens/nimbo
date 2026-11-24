@@ -9,7 +9,7 @@ pub use crate::menu::ButtonRole;
 use crate::scene::{Color, Frame, Rect, mix};
 use crate::t;
 use crate::ui::theme::{ButtonLook, ButtonStyle};
-use crate::ui::{Float, Response, Role, Style, TextStyle, Ui, px};
+use crate::ui::{ControlSize, Enabled, Float, Response, Role, Style, TextStyle, Ui, px};
 
 /// How far below the middle of the line a mark ([Ui::info_button], [Ui::warning_button]) goes,
 /// while a form row builds its label ([crate::FormRow::new]): onto its capitals' middle.
@@ -63,7 +63,7 @@ impl<'s> Button<'s> {
   }
 
   pub fn show(self, ui: &mut Ui) -> Response {
-    let (t, size) = (ui.theme(), ui.take_control_size());
+    let (t, size) = (ui.theme(), ui.environment_value::<ControlSize>());
     let square = self.label.is_empty() && self.icon.is_some();
     let s = self.look.unwrap_or_else(|| {
       let s = t.button_for(self.style, self.role, size);
@@ -131,9 +131,9 @@ impl Ui<'_> {
   /// An ⓘ, 16 points, muted, in the label colour while held, halfway there under the pointer
   /// where the theme hovers controls ([crate::Theme::hover_all]): with [Ui::help] on it, an
   /// explanation longer than a line, as SwiftUI's `Image(systemName: "info.circle").help(…)`.
-  /// A button by its behaviour, named "Info". A mark is there for its tip: a container's
-  /// [Ui::disabled] leaves it enabled. In a form row's label ([crate::FormRow::new]) it sits on
-  /// the middle of the label's capitals, the line keeping its height.
+  /// A button by its behaviour, named "Info". A mark is there for its tip: [Ui::disabled], on it
+  /// or on a container around, leaves it enabled. In a form row's label ([crate::FormRow::new]) it
+  /// sits on the middle of the label's capitals, the line keeping its height.
   pub fn info_button(&mut self) -> Response {
     let t = self.theme();
     self.mark_button(Icon::INFO, [t.muted, t.text])
@@ -154,8 +154,8 @@ impl Ui<'_> {
   fn mark_button(&mut self, icon: Icon, ink: [Color; 2]) -> Response {
     let t = self.theme();
     let id = self.take_id();
-    // Enabled in a disabled container: its tip reads all the same.
-    let b = self.disabled_scope(false, |ui| ui.button_behavior(id));
+    // Enabled whatever disabled it: its tip reads all the same.
+    let b = self.environment(Enabled(true)).button_behavior(id);
     self.a11y(id, Role::Button).name_or(icon.name().unwrap_or_default());
 
     let hot = self.ctl_hot(id, b.hovered);
@@ -273,12 +273,13 @@ mod tests {
       ui.disabled(true).col(Style::new(), |ui| {
         self.0 += ui.id("off").button("Off").clicked as usize;
       });
+      self.0 += 100 * ui.disabled(true).id("one").button("One").clicked as usize;
       self.0 += 10 * ui.id("on").button("On").clicked as usize;
     }
   }
 
   /// [Ui::control_size] sizes the next widget or every widget in the next container, until it
-  /// closes; [Ui::disabled] on a container disables what is in it, not what follows.
+  /// closes; [Ui::disabled] on a container or a widget disables what is in it, not what follows.
   #[test]
   fn sizes_and_disabled_scope_a_container() {
     let mut h = Harness::new(Scoped::default(), Size::new(300.0, 300.0), 1.0);
@@ -289,8 +290,9 @@ mod tests {
     let hs = [height("small"), height("large"), height("inner"), height("regular")];
     assert_eq!(hs, [z.small_h, large, z.small_h, z.control_h]);
     h.click_id(Id::of("off"));
+    h.click_id(Id::of("one"));
     h.click_id(Id::of("on"));
-    assert_eq!(h.app().0, 10, "only the button after the container clicked");
+    assert_eq!(h.app().0, 10, "only the button after the disabled ones clicked");
   }
 
   /// Icon buttons of the same icon, at the button's width and at one the app gave it.

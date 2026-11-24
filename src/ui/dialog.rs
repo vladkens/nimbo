@@ -23,7 +23,7 @@
 //! backdrop and the card alone, for a dialog of the app's own over the same behaviour.
 
 use super::widgets::{Button, ButtonRole, Icon};
-use super::{Float, Id, Role, State, Style, TextStyle, Ui, grow, pct, px};
+use super::{Enabled, Float, Id, Role, State, Style, TextStyle, Ui, grow, pct, px};
 use crate::scene::alpha;
 use crate::t;
 use crate::text::Weight;
@@ -98,6 +98,11 @@ impl<'s> Dialog<'s> {
   /// Shows it while `open`, as SwiftUI's `isPresented`: the answer once a button closed it
   /// (`open` is then false). Its buttons are `id.key("cancel")` and `id.key("action")`.
   pub fn show(self, ui: &mut Ui, open: &mut bool) -> Option<Answer> {
+    // The values put for it reach its card, and end with it when it is closed.
+    ui.group(|ui| self.build(ui, open))
+  }
+
+  fn build(self, ui: &mut Ui, open: &mut bool) -> Option<Answer> {
     let t = ui.theme();
     let id = ui.take_id();
     let (cancel, action) = (id.key("cancel"), id.key("action"));
@@ -168,16 +173,18 @@ impl Ui<'_> {
   /// around it.
   pub fn modal<R>(&mut self, id: Id, shown: f32, card: Style, f: impl FnOnce(&mut Self) -> R) {
     let scrim = self.theme().scrim();
-    self.disabled_scope(false, |ui| {
-      let cover = Style::new().w(pct(100.0)).h(pct(100.0)).tab_focusable_quiet();
-      let cover = cover.bg(alpha(scrim, scrim[3] * shown));
-      ui.a11y(id.key("card"), Role::Dialog).state(State::Modal, true);
+    let cover = Style::new().w(pct(100.0)).h(pct(100.0)).tab_focusable_quiet();
+    let cover = cover.bg(alpha(scrim, scrim[3] * shown));
+    self.a11y(id.key("card"), Role::Dialog).state(State::Modal, true);
+    let at = Float::window()
+      .attach(UnitPoint::CENTER)
+      .anchor(UnitPoint::CENTER)
+      .offset(0.0, (1.0 - shown) * 8.0);
+    let card = card.opacity(shown);
+    // The values put for it reach the card past the backdrop.
+    self.group(|ui| {
       ui.with_id(id.key("backdrop")).float(Float::window().z(MODAL_Z)).el(cover);
-      let at = Float::window()
-        .attach(UnitPoint::CENTER)
-        .anchor(UnitPoint::CENTER)
-        .offset(0.0, (1.0 - shown) * 8.0);
-      ui.with_id(id.key("card")).float(at.z(MODAL_Z + 1)).col(card.opacity(shown), f);
+      ui.with_id(id.key("card")).float(at.z(MODAL_Z + 1)).environment(Enabled(true)).col(card, f);
     });
   }
 }
@@ -270,5 +277,22 @@ mod tests {
     h.key(NamedKey::Enter, Modifiers::empty());
     h.frame();
     assert_eq!(h.app().1, Some(Answer::Cancel), "Return keeps things");
+  }
+
+  /// The values put for a modal reach its card past the backdrop: its size, and enabled in a
+  /// disabled container.
+  #[test]
+  fn a_modals_values_reach_its_card() {
+    use std::time::Duration;
+
+    use crate::ui::{ControlSize, UiState};
+    let mut ui = Ui::new(UiState::default(), Size::new(200.0, 200.0), None, Duration::ZERO);
+    let mut seen = None;
+    ui.disabled(true).col(Style::new(), |ui| {
+      ui.control_size(ControlSize::Small).modal(Id::of("d"), 1.0, Style::new(), |ui| {
+        seen = Some((ui.environment_value::<ControlSize>(), ui.environment_value::<Enabled>()));
+      });
+    });
+    assert_eq!(seen, Some((ControlSize::Small, Enabled(true))));
   }
 }

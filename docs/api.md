@@ -494,11 +494,19 @@ nimbo: `ui.keymap(&[bind(Shortcut::char('z').cmd(), Command::Undo)]).col(…)`
 
 ### Environment
 
-SwiftUI: `.environment(\.tint, .green); @Environment(\.tint) var tint`
+SwiftUI: `.environment(\.tint, .green) { … }; @Environment(\.tint) var tint`
 
-nimbo: `ui.set_environment(Some(Tint(t.success))); let tint = ui.environment::<Tint>()`
+nimbo: `ui.environment(Tint(t.success)).row(style, |ui| { … }); ui.set_environment(Some(Tint(t.success))) for the window; let tint = ui.environment_value::<Tint>()`
 
 ![Environment](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/environment.png)
+
+### Group
+
+SwiftUI: `Group { Button("Save"); Toggle(…) }.disabled(true)`
+
+nimbo: `ui.disabled(true).group(|ui| { ui.button("Save"); ui.toggle(&mut on, ""); }); ui.button("Open")`
+
+![Group](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/group.png)
 
 ### Identity
 
@@ -512,7 +520,7 @@ nimbo: `ui.key(item.id).row(style, |ui| { … }); ui.with_id(id.key("box")).allo
 
 SwiftUI: `.environment(\.isEnabled, true); .help(tip) on a part`
 
-nimbo: `let tip = ui.take_help(); ui.disabled_scope(false, |ui| { if let Some(tip) = &tip { ui.help(tip); } ui.button("Undo") })`
+nimbo: `let tip = ui.take_help(); if let Some(tip) = &tip { ui.help(tip); } ui.environment(Enabled(true)).button("Undo")`
 
 ![Widget parts](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/widget-parts.png)
 
