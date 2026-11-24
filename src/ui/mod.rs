@@ -2,7 +2,7 @@
 
 //! The element tree an app builds each frame it redraws ([crate::App::view], which says how
 //! often that is and what a view may change), its flex layout
-//! ([layout]) and the paint pass that turns it into the frame's scene ([paint]).
+//! (`layout`) and the paint pass that turns it into the frame's scene (`paint`).
 //!
 //! ```ignore
 //! ui.row(Style::new().pad(8.0).gap(8.0).bg(PANEL), |ui| {
@@ -44,10 +44,14 @@
 //! the app's own reads as the theme's does.
 
 pub mod a11y;
+#[cfg(feature = "headless")]
 pub mod behavior;
+#[cfg(feature = "styled")]
 pub mod containers;
+#[cfg(feature = "styled")]
 pub mod dialog;
 mod environment;
+#[cfg(feature = "styled")]
 pub mod form;
 pub mod icon;
 mod id;
@@ -61,7 +65,9 @@ mod query;
 pub mod store;
 mod style;
 mod textlayout;
+#[cfg(feature = "styled")]
 pub mod theme;
+#[cfg(feature = "styled")]
 pub mod widgets;
 
 use std::any::Any;
@@ -71,7 +77,9 @@ use std::num::NonZeroU8;
 use std::time::Duration;
 
 pub use a11y::{A11yNode, A11yTree, Action, LabeledPairRole, Props, Role, State, Value};
+#[cfg(feature = "styled")]
 pub(crate) use behavior::DrawnEditMenu;
+#[cfg(feature = "headless")]
 pub use behavior::{
   Behavior, Button, ButtonConfiguration, ButtonRole, ButtonStyle, Content, DialogBehavior,
   EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, HelpConfiguration, HelpStyle,
@@ -80,14 +88,16 @@ pub use behavior::{
   PickerStyle, PlainButtonStyle, PlainHelpStyle, PlainListStyle, PlainSliderStyle,
   PlainTextFieldStyle, PlainToggleStyle, Row, ScrollBar, ScrollBehavior, ScrollerKnob,
   SectionHeader, Selection, Slider, SliderConfiguration, SliderStyle, SplitBehavior, Tag,
-  TextField, TextFieldConfiguration, TextFieldStyle, TextInput, ToggleConfiguration, ToggleStyle,
-  TypeSelect,
+  TextField, TextFieldConfiguration, TextFieldStyle, ToggleConfiguration, ToggleStyle, TypeSelect,
 };
+#[cfg(feature = "styled")]
 pub use containers::{
   InsetGroupedListStyle, InsetListStyle, MenuPickerStyle, Split, Tabs, ToolbarItemPlacement,
 };
+#[cfg(feature = "styled")]
 pub use dialog::{Answer, Dialog};
 pub use environment::{Enabled, EnvironmentValue};
+#[cfg(feature = "styled")]
 pub use form::{FormRow, FormStyle, Glass, Section, TabItem};
 pub use icon::{Icon, IconPaint};
 pub use id::Id;
@@ -103,9 +113,12 @@ pub use style::{
   LinePattern, Shadow, Style, TextLines, TextStyle, TruncationMode, UnitPoint, grow, pct, px,
   rigid,
 };
-pub use textlayout::Edit;
+#[cfg(feature = "headless")]
 pub(crate) use textlayout::TextLayout;
+pub use textlayout::{Edit, TextInput};
+#[cfg(feature = "styled")]
 pub use theme::{ControlBorder, Sizes, SwitchSize, Theme, Tone};
+#[cfg(feature = "styled")]
 pub use widgets::{
   BorderedButtonStyle, BorderedProminentButtonStyle, BorderlessButtonStyle, ButtonToggleStyle,
   CheckboxToggleStyle, LinearSliderStyle, RoundedBorderTextFieldStyle, SegmentedPickerStyle,

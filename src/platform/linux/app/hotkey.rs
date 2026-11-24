@@ -26,14 +26,13 @@ use std::rc::{Rc, Weak};
 use std::sync::mpsc::{Sender, channel};
 use std::time::Instant;
 
-use keyboard_types::NamedKey;
-
 use super::super::dbus::{self, Gv, PORTAL, PORTAL_PATH as PATH, V, portal, request};
+use super::super::keys::keysym;
 use super::super::{Fp, P, S, gtk};
 use super::grab::Grab;
 use crate::Modifiers;
 use crate::hotkey::{Edge, Listener, MAX, OnEdge, Status};
-use crate::keys::{Hotkey, Key, Shortcut};
+use crate::keys::{Hotkey, Shortcut};
 
 const SHORTCUTS: &str = "org.freedesktop.portal.GlobalShortcuts";
 /// The first place's shortcut id, the others' after a dash ([id]).
@@ -374,52 +373,6 @@ pub fn trigger(k: &Shortcut) -> Option<String> {
   Some(held.collect::<String>() + &keysym(k.key)?)
 }
 
-/// The xkb keysym name of `key` (`xkbcommon-keysyms.h` without `XKB_KEY_`): a letter or digit
-/// itself, `space`, `minus`, `Return`, `Page_Up`, `F12`.
-pub fn keysym(key: Key) -> Option<String> {
-  let name = match key {
-    Key::Char(c) if c.is_ascii_alphanumeric() => return Some(c.to_ascii_lowercase().to_string()),
-    Key::Char(c) => match c {
-      ' ' => "space",
-      '-' => "minus",
-      '=' => "equal",
-      '[' => "bracketleft",
-      ']' => "bracketright",
-      '\\' => "backslash",
-      ';' => "semicolon",
-      '\'' => "apostrophe",
-      ',' => "comma",
-      '.' => "period",
-      '/' => "slash",
-      '`' => "grave",
-      _ => return None,
-    },
-    Key::Named(k) => match k {
-      NamedKey::Enter => "Return",
-      NamedKey::Tab => "Tab",
-      NamedKey::Backspace => "BackSpace",
-      NamedKey::Delete => "Delete",
-      NamedKey::Escape => "Escape",
-      NamedKey::ArrowUp => "Up",
-      NamedKey::ArrowDown => "Down",
-      NamedKey::ArrowLeft => "Left",
-      NamedKey::ArrowRight => "Right",
-      NamedKey::Home => "Home",
-      NamedKey::End => "End",
-      NamedKey::PageUp => "Page_Up",
-      NamedKey::PageDown => "Page_Down",
-      NamedKey::Insert => "Insert",
-      k => {
-        let name = k.to_string();
-        let f = name.strip_prefix('F').is_some_and(|n| n.parse::<u8>().is_ok());
-        return f.then_some(name);
-      }
-    },
-  };
-
-  Some(name.into())
-}
-
 // MARK: Callbacks
 
 /// `GSourceFunc`: the places set since the idle was added bind together.
@@ -571,7 +524,5 @@ mod tests {
     assert_eq!(trigger(&chord("ctrl+pagedown")).as_deref(), Some("CTRL+Page_Down"));
     assert_eq!(trigger(&chord("alt+'")).as_deref(), Some("ALT+apostrophe"));
     assert_eq!(trigger(&chord("ctrl+K")).as_deref(), Some("CTRL+k"));
-    assert_eq!(keysym(Key::Named(NamedKey::Backspace)).as_deref(), Some("BackSpace"));
-    assert_eq!(keysym(Key::Char('!')), None);
   }
 }

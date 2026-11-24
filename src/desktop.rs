@@ -9,7 +9,7 @@
 //! | macOS, Windows | nothing: the app bundle or the exe carries its name and icon |
 //! | Linux | `$XDG_DATA_HOME/applications/<id>.desktop` (`~/.local/share` without it) and its icon, `$XDG_DATA_HOME/icons/hicolor/<side>x<side>/apps/<id>.png` |
 //!
-//! The tray's icons go in `$XDG_DATA_HOME/icons` ([tray_icon]); [uninstall] removes them too.
+//! The tray's icons go in `$XDG_DATA_HOME/icons` ([crate::tray]); [uninstall] removes them too.
 //!
 //! The entry runs `$APPIMAGE` when set, else the executable running now, and names the window's
 //! class ([crate::AppInfo::id]) so the desktop matches the app's windows to it. Inside Flatpak
@@ -73,48 +73,6 @@ pub(crate) fn unlist(data: &Path, app: &AppInfo) -> Result<(), String> {
 #[cfg(any(all(test, unix), target_os = "linux"))]
 fn entry(data: &Path, app: &AppInfo) -> PathBuf {
   data.join(format!("applications/{}.desktop", app.id))
-}
-
-/// The start of the names of app `id`'s tray icons ([tray_icon]), with no dash: KIconLoader
-/// looks for a name's shorter forms (up to a dash) in each theme first, and `<id>` alone is the
-/// launcher's icon.
-#[cfg(any(all(test, unix), target_os = "linux"))]
-fn tray_icons(id: &str) -> String {
-  format!("{}.tray", id.replace('-', "_"))
-}
-
-/// The file `name` is one of app `id`'s tray icons: its start, 16 hex digits, `-symbolic.svg`.
-#[cfg(any(all(test, unix), target_os = "linux"))]
-fn is_tray_icon(name: &str, id: &str) -> bool {
-  let hash = name.strip_prefix(&tray_icons(id)).and_then(|n| n.strip_suffix("-symbolic.svg"));
-  hash.is_some_and(|h| h.len() == 16 && h.bytes().all(|b| b.is_ascii_hexdigit()))
-}
-
-/// Writes a tray icon's `svg` for app `id` at the top of the data folder `data`'s `icons` (no
-/// theme's: KIconLoader and GTK look there each time, in a theme only in the folders there were
-/// as they started), named by its content, as panels keep an icon by its name, and `-symbolic`
-/// for GNOME to colour it; with `clean` (the run's first) removes the app's others, as a host
-/// may still ask for one of this run's. Its name, as `IconName` gives it.
-#[cfg(any(all(test, unix), target_os = "linux"))]
-pub(crate) fn tray_icon(data: &Path, id: &str, svg: &str, clean: bool) -> Result<String, String> {
-  use std::hash::{Hash, Hasher};
-  let mut hash = std::hash::DefaultHasher::new();
-  svg.hash(&mut hash);
-  let (prefix, icons) = (tray_icons(id), data.join("icons"));
-  let name = format!("{prefix}{:016x}-symbolic", hash.finish());
-  let file = icons.join(format!("{name}.svg"));
-  if !file.exists() {
-    platform::write::file(&file, svg.as_bytes())?;
-  }
-
-  for e in std::fs::read_dir(&icons).into_iter().flatten().flatten().filter(|_| clean) {
-    let n = e.file_name().to_string_lossy().into_owned();
-    if is_tray_icon(&n, id) && n != format!("{name}.svg") {
-      _ = std::fs::remove_file(e.path());
-    }
-  }
-
-  Ok(name)
 }
 
 /// Dates the icon theme's folder `hicolor` now, as an icon in it changed: a cache older than it
@@ -195,9 +153,9 @@ pub(crate) fn uninstall_in(data: &Path, app: &AppInfo) -> Result<(), String> {
   let sizes = dirs.iter().map(|d| d.path()).filter(|p| p.is_dir());
   let icons = sizes.map(|p| p.join(format!("apps/{}.png", app.id)));
   let tray = std::fs::read_dir(data.join("icons")).into_iter().flatten().flatten();
-  let tray = tray
-    .map(|e| e.path())
-    .filter(|p| p.file_name().is_some_and(|n| is_tray_icon(&n.to_string_lossy(), app.id)));
+  let tray = tray.map(|e| e.path()).filter(|p| {
+    p.file_name().is_some_and(|n| platform::write::is_tray_icon(&n.to_string_lossy(), app.id))
+  });
   for path in icons.chain(tray).chain([entry(data, app)]) {
     match std::fs::remove_file(&path) {
       Ok(()) if path.starts_with(&hicolor) => date(&hicolor).map_err(err)?,
@@ -213,33 +171,6 @@ pub(crate) fn uninstall_in(data: &Path, app: &AppInfo) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-  /// A tray icon is named by its content, with one dash; the run's first removes the app's
-  /// others, and no other app's.
-  #[cfg(unix)]
-  #[test]
-  fn tray_icons_by_their_content() {
-    use super::*;
-    let data = std::env::temp_dir().join(format!("nimbo-tray-icons-{}", std::process::id()));
-    _ = std::fs::remove_dir_all(&data);
-    let id = "com.example.my-app";
-    let a = tray_icon(&data, id, "<svg>a</svg>", false).unwrap();
-    assert!(a.starts_with("com.example.my_app.tray") && a.ends_with("-symbolic"), "{a}");
-    assert_eq!(a.matches('-').count(), 1);
-    let file = |n: &str| data.join(format!("icons/{n}.svg"));
-    assert_eq!(std::fs::read_to_string(file(&a)).unwrap(), "<svg>a</svg>");
-    assert_eq!(tray_icon(&data, id, "<svg>a</svg>", false), Ok(a.clone()));
-
-    let b = tray_icon(&data, id, "<svg>b</svg>", false).unwrap();
-    assert!(file(&a).exists() && file(&b).exists(), "the run's are kept");
-    let other = tray_icon(&data, "com.example.my-app.tray", "<svg>o</svg>", false).unwrap();
-    std::fs::write(data.join("icons/other.svg"), "").unwrap();
-    let c = tray_icon(&data, id, "<svg>c</svg>", true).unwrap();
-    assert!(!file(&a).exists() && !file(&b).exists() && file(&c).exists());
-    assert!(file(&other).exists() && file("other").exists(), "only the app's go");
-    assert!(!is_tray_icon("com.example.my_app.tray0123-symbolic.svg", id));
-    _ = std::fs::remove_dir_all(&data);
-  }
-
   /// A package's executable gets no entry of the app's own: anywhere outside the home folder.
   #[cfg(unix)]
   #[test]
@@ -318,8 +249,10 @@ mod tests {
     }
 
     std::fs::write(hicolor.join("icon-theme.cache"), b"").unwrap();
-    let tray =
-      data.join(format!("icons/{}.svg", tray_icon(&data, APP.id, "<svg/>", false).unwrap()));
+    let tray = data.join(format!(
+      "icons/{}.svg",
+      platform::write::tray_icon(&data, APP.id, "<svg/>", false).unwrap()
+    ));
     std::fs::File::open(&hicolor).unwrap().set_modified(old).unwrap();
     uninstall_in(&data, &APP).unwrap();
     assert!(std::fs::metadata(&hicolor).unwrap().modified().unwrap() > old, "dated");

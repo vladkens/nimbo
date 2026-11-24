@@ -10,26 +10,37 @@
 //! a microphone's transport and the lid and their changes ([hardware]).
 
 pub mod activity;
+#[cfg(feature = "autostart")]
 pub mod autostart;
+#[cfg(feature = "autostart")]
 pub mod desktop;
 pub mod focus;
+#[cfg(feature = "system")]
 pub mod hardware;
+#[cfg(feature = "hotkey")]
 pub mod hotkey;
+#[cfg(feature = "system")]
 pub mod input_source;
 pub mod menu;
 pub mod open;
 pub mod paste;
+#[cfg(feature = "permissions")]
 pub mod permissions;
+#[cfg(feature = "paste")]
 pub mod post;
+#[cfg(feature = "tray")]
 pub mod tray;
+#[cfg(feature = "autostart")]
 pub mod uninstall;
 
 use std::cell::Cell;
 use std::time::Duration;
 
 use dispatch2::{DispatchQueue, DispatchTime};
+use keyboard_types::Modifiers;
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSAlert, NSApplication, NSApplicationActivationPolicy};
+use objc2_core_graphics::CGEventFlags;
 use objc2_foundation::NSString;
 
 use crate::Event;
@@ -85,4 +96,18 @@ pub fn alert(title: &str, message: &str) {
   alert.setInformativeText(&NSString::from_str(message));
   super::activate(mtm);
   alert.runModal();
+}
+
+/// The posted events' source user data: the hotkey tap passes them on unjudged.
+const POSTED: i64 = u32::from_be_bytes(*b"nmbo") as i64;
+
+/// The event tap's modifier flags for a chord's modifiers.
+fn tap_flags(mods: Modifiers) -> u64 {
+  let flags = [
+    (Modifiers::CONTROL, CGEventFlags::MaskControl),
+    (Modifiers::ALT, CGEventFlags::MaskAlternate),
+    (Modifiers::SHIFT, CGEventFlags::MaskShift),
+    (Modifiers::META, CGEventFlags::MaskCommand),
+  ];
+  flags.iter().filter(|(m, _)| mods.contains(*m)).fold(0, |all, (_, f)| all | f.0)
 }

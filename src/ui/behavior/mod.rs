@@ -78,8 +78,9 @@ mod toggle;
 pub use button::{Button, ButtonConfiguration, ButtonRole, ButtonStyle, PlainButtonStyle};
 pub use content::{Build, Content};
 pub use dialog::DialogBehavior;
+#[cfg(feature = "styled")]
 pub(crate) use field::DrawnEditMenu;
-pub use field::{EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, TextInput};
+pub use field::{EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle};
 pub use help::{HelpConfiguration, HelpStyle, PlainHelpStyle};
 use keyboard_types::Modifiers;
 pub use list::{ListBehavior, ListRows, SectionHeader, Selection};

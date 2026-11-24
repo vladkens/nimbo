@@ -5,10 +5,9 @@
 //! properties, and the layout tree `GetLayout` returns, as plain data ([V]).
 
 use super::super::dbus::V;
-use super::hotkey::keysym;
-use crate::Modifiers;
+use super::super::keys::keysym;
 use crate::keys::Shortcut;
-use crate::tray::{Item, Menu};
+use crate::{Item, Menu, Modifiers};
 
 /// An item of the menu by its number: the root (`item` none) or an item, and its children's
 /// numbers.

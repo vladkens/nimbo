@@ -116,16 +116,6 @@ pub(crate) fn zeroed(w: u32, h: u32) -> Result<Vec<u8>, String> {
   Ok(px)
 }
 
-/// `rgba`'s straight pixels premultiplied, in place.
-pub(crate) fn premultiply(rgba: &mut [u8]) {
-  for p in rgba.as_chunks_mut::<4>().0 {
-    let a = p[3] as u32;
-    for c in &mut p[..3] {
-      *c = ((*c as u32 * a + 127) / 255) as u8;
-    }
-  }
-}
-
 /// The size of a `w` × `h` picture shrunk so its longer side is at most `side`, keeping its
 /// aspect.
 pub(crate) fn fit(w: u32, h: u32, side: u32) -> (u32, u32) {
@@ -175,6 +165,7 @@ pub(crate) fn orient(w: u32, h: u32, px: Vec<u8>, o: u16) -> Result<(u32, u32, V
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::scene::premultiply;
 
   // `tests/images/`: a 64 × 48 picture of four quadrants (red, green, blue, yellow from the top
   // left), as a JPEG, a GIF, a PNG whose yellow is half transparent, and as JPEGs stored turned

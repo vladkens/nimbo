@@ -238,6 +238,7 @@ use linux as imp;
 /// One instance ([crate::instance]): Linux's Unix socket on macOS too, a named pipe on Windows.
 #[cfg_attr(unix, path = "linux/app/instance.rs")]
 #[cfg_attr(windows, path = "windows/app/instance.rs")]
+#[cfg(feature = "instance")]
 pub(crate) mod instance;
 
 /// Linux's, for its files in the user's folders: on every Unix for [crate::desktop]'s tests.
@@ -252,16 +253,25 @@ compile_error!("nimbo runs on macOS, Windows and Linux");
 use std::time::{Duration, Instant};
 
 pub use imp::appearance;
-#[cfg(target_os = "macos")]
+#[cfg(feature = "hotkey")]
+pub(crate) use imp::hotkey;
+#[cfg(feature = "bitmap")]
+pub(crate) use imp::image;
+#[cfg(all(target_os = "macos", feature = "permissions"))]
 pub(crate) use imp::permissions;
-#[cfg(target_os = "linux")]
+#[cfg(feature = "paste")]
+pub(crate) use imp::post;
+#[cfg(all(target_os = "linux", feature = "instance"))]
 pub(crate) use imp::startup_complete;
-pub(crate) use imp::{
-  activity, autostart, clipboard, desktop, focus, hardware, hotkey, image, input_source, languages,
-  open, paste, perf_cores, post, shell, text, tray, uninstall,
-};
+#[cfg(feature = "tray")]
+pub(crate) use imp::tray;
+pub(crate) use imp::{activity, clipboard, focus, languages, open, paste, perf_cores, shell, text};
 #[cfg(target_os = "windows")]
 pub(crate) use imp::{attach_console, downloads};
+#[cfg(feature = "autostart")]
+pub(crate) use imp::{autostart, desktop, uninstall};
+#[cfg(feature = "system")]
+pub(crate) use imp::{hardware, input_source};
 #[cfg(any(test, target_os = "windows", target_os = "linux"))]
 use keyboard_types::Code;
 

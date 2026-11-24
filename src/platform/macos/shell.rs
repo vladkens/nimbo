@@ -34,7 +34,9 @@ use objc2_foundation::{
   NSPoint, NSRect, NSSize, NSString, NSUserDefaults, ns_string,
 };
 
-pub use super::app::{alert, is_main, post, send, set_presence};
+#[cfg(feature = "system")]
+pub use super::app::send;
+pub use super::app::{alert, is_main, post, set_presence};
 use super::view::View;
 use super::{Pasteboard, activate, appearance, bar, mtm, overlay, titlebar};
 use crate::app::{App, Clock, Event, Runtime};

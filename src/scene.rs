@@ -8,7 +8,6 @@ use std::fmt::{Display, Write};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::bitmap::premultiply;
 pub use crate::geom::{Axis, Color, Point, Rect, Size, alpha, mix, rgb};
 use crate::text::{Font, Metrics, TextSystem};
 
@@ -164,6 +163,16 @@ impl Layer {
 }
 
 /// Instance counts of a frame.
+/// `rgba`'s straight pixels premultiplied, in place.
+pub(crate) fn premultiply(rgba: &mut [u8]) {
+  for p in rgba.as_chunks_mut::<4>().0 {
+    let a = p[3] as u32;
+    for c in &mut p[..3] {
+      *c = ((*c as u32 * a + 127) / 255) as u8;
+    }
+  }
+}
+
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Counts {

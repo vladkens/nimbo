@@ -21,8 +21,8 @@ use std::time::Instant;
 
 use keyboard_types::Code;
 
-use super::super::{Fp, P, dbus, gtk};
-use super::{X11, remote, trap, x11};
+use super::super::{Fp, P, dbus, gtk, keys};
+use super::{X11, trap, x11};
 use crate::Modifiers;
 use crate::hotkey::{Edge, MAX};
 use crate::keys::Shortcut;
@@ -244,7 +244,7 @@ impl Inner {
 
 /// The X keycode of the key at `code`: its evdev code past X's 8.
 fn keycode(code: Option<Code>) -> Option<u8> {
-  u8::try_from(remote::evdev(code?)? + 8).ok()
+  u8::try_from(keys::evdev(code?)? + 8).ok()
 }
 
 /// The X modifier mask of `mods`.

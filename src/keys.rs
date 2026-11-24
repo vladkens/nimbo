@@ -33,6 +33,7 @@
 
 use keyboard_types::{Code, Modifiers, NamedKey};
 
+#[cfg(feature = "paste")]
 use crate::platform;
 
 /// The command key, `cmd` in a shortcut in the app: ⌘ ([Modifiers::META]) on macOS, Ctrl
@@ -80,7 +81,7 @@ impl Os {
   }
 
   /// The command a key that types nothing runs in a text field when nobody used it, as the
-  /// platform's own text fields bind it: AppKit's ([standard]), or Windows' and GTK's ([pc]).
+  /// platform's own text fields bind it: AppKit's ([standard]), or Windows' and GTK's (`pc`).
   pub fn command(self, k: &KeyEvent) -> Option<Command> {
     if let Os::Mac = self { standard(k) } else { pc(k, self) }
   }
@@ -989,6 +990,7 @@ pub fn printable(s: &str) -> bool {
 
 // MARK: Posting keys
 
+#[cfg(feature = "paste")]
 /// Whether [post] works now without asking the user: macOS has Accessibility access, Linux on
 /// Wayland has the RemoteDesktop portal's session or its saved approval (which the user may have
 /// revoked since: only the next session tells), X11 has XTest; Windows always. An app offers its
@@ -997,6 +999,7 @@ pub fn ready() -> bool {
   platform::post::ready()
 }
 
+#[cfg(feature = "paste")]
 /// Sends shortcut `s` to the app in focus as key presses, as if typed: `cmd+v` pastes there. A
 /// character is the key that types it on the layout in use (on macOS with ⌘ held, as apps match
 /// ⌘ shortcuts: ⌘V on a Russian layout, or in Dvorak), with Shift added where it needs it

@@ -14,7 +14,7 @@ pub fn steps(app: &AppInfo) -> Vec<Step> {
   let off = super::autostart::set(app, false).map(drop);
   let entry = super::desktop::uninstall(app).and(off);
   let dir = paths::config_dir(app.id);
-  let token = remove_file(&dir.join(super::remote::TOKEN));
+  let token = remove_file(&dir.join(super::TOKEN));
   // The folder made for the token, unless the app keeps more in it.
   _ = fs::remove_dir(&dir);
   vec![

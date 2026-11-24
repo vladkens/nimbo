@@ -30,6 +30,7 @@ use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
+use super::lone_vk;
 use crate::hotkey::{Edge, Listener, MAX, OnEdge, Status};
 use crate::keys::Hotkey;
 use crate::platform::scan_code;
@@ -350,7 +351,7 @@ unsafe extern "system" fn hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
   // SAFETY: for HC_ACTION, lParam points to the event's KBDLLHOOKSTRUCT.
   let k = (code == HC_ACTION as i32).then(|| unsafe { &*(lp as *const KBDLLHOOKSTRUCT) });
   let fake = k.is_some_and(|k| k.vkCode == VK_LCONTROL as u32 && k.scanCode == ALTGR_CTRL);
-  let posted = k.is_some_and(|k| k.dwExtraInfo == super::post::POSTED);
+  let posted = k.is_some_and(|k| k.dwExtraInfo == super::POSTED);
   if let Some(k) = k.filter(|_| !fake && !posted) {
     // AltGr's Left Ctrl, filtered, is no key of the user's: Right Alt stays alone. Nor are the
     // app's own posted keys: a held hotkey lifted and put back for them is still held.
@@ -506,23 +507,6 @@ fn mods_of(m: Modifiers) -> u32 {
     (Modifiers::META, MOD_WIN),
   ];
   bits.iter().filter(|(k, _)| m.contains(*k)).fold(0, |all, (_, b)| all | b)
-}
-
-/// The left or right modifier key at `code`.
-pub(super) fn lone_vk(code: Code) -> Option<u32> {
-  let vk = match code {
-    Code::ControlLeft => VK_LCONTROL,
-    Code::ControlRight => VK_RCONTROL,
-    Code::ShiftLeft => VK_LSHIFT,
-    Code::ShiftRight => VK_RSHIFT,
-    Code::AltLeft => VK_LMENU,
-    Code::AltRight => VK_RMENU,
-    Code::MetaLeft => VK_LWIN,
-    Code::MetaRight => VK_RWIN,
-    _ => return None,
-  };
-
-  Some(vk as u32)
 }
 
 /// A named key's virtual key, the same on every layout.

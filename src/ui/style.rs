@@ -102,7 +102,7 @@ pub enum Focus {
   TabQuiet,
 }
 
-/// How the focused element is ringed when the window is key ([Ui::set_focus_ring]): a border
+/// How the focused element is ringed when the window is key ([crate::Ui::set_focus_ring]): a border
 /// `width` wide, `gap` outside the element, following its corners.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FocusRing {
@@ -174,8 +174,8 @@ pub struct Style {
   /// The axes it scrolls its children along when they overflow; implies `clip`.
   pub scroll: Axes,
   /// Takes pointer input (hover, press, click, wheel) and hides what is under it from the
-  /// pointer. Named elements ([Ui::id]), scroll containers, focusable elements and those with
-  /// a cursor always do.
+  /// pointer. Named elements ([crate::Ui::id]), scroll containers, focusable elements and those
+  /// with a cursor always do.
   pub hit: bool,
   /// Takes focus by Tab, and when clicked unless [Focus::Tab].
   pub focus: Focus,

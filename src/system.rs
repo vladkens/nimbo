@@ -98,8 +98,6 @@ impl Change {
 const SETTLE: Duration = Duration::from_millis(250);
 /// …or this long after it began.
 const CAP: Duration = Duration::from_secs(1);
-/// A window busy up the stack is tried again after this.
-pub(crate) const RETRY: Duration = Duration::from_millis(100);
 
 /// Whether a burst that began at `first` and was last told at `last` is delivered at `now`
 /// (nanoseconds), else how long it waits.

@@ -18,8 +18,8 @@ use std::ptr::{null, null_mut};
 use std::sync::OnceLock;
 
 use super::super::dl::fns;
+use super::super::keys::keysym;
 use super::super::{FALSE, Fp, P, S, connect_id, gtk, lib, slot, window_busy, with_data};
-use super::hotkey::keysym;
 use crate::app::Event;
 use crate::keys::Shortcut;
 use crate::scene::Point;

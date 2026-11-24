@@ -38,6 +38,7 @@ mod link;
 mod progress;
 mod search;
 mod segmented;
+#[cfg(feature = "hotkey")]
 pub mod shortcut;
 mod slider;
 mod toggle;
