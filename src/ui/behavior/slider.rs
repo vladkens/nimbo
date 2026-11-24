@@ -216,14 +216,10 @@ impl<'s> Slider<'s> {
   /// Builds it under the id set for it: its behaviour, then the style's body.
   pub fn show(self, ui: &mut Ui) -> Response {
     let style = ui.environment_value::<&dyn SliderStyle>();
-    // Unnamed, keyed off its place: a style may build around its root, which takes the place.
-    if ui.next_id.is_none() {
-      let &(parent, n) = ui.st.stack.last().unwrap();
-      let id = ui.st.tree.nodes[parent as usize].id.nth(n as usize).key("slider");
-      ui.next_id = Some((id, false));
-    }
-
     let id = ui.take_id();
+    // Its place taken: a style may build around its root, the next place's then, never its id
+    // (the place's when unnamed, or one a widget took for it).
+    ui.st.stack.last_mut().unwrap().1 += 1;
     let range = (*self.range.start(), *self.range.end());
     let b = ui.slider_behavior(id, self.value, self.range, self.step);
     let (value, step, label) = (*self.value, self.step, self.label);
@@ -434,6 +430,9 @@ mod tests {
     ui.slider_style(&Wrapped).col(Style::new(), |ui| {
       ui.slider(&mut 0.5, 0.0..=1.0);
       ui.slider(&mut 0.5, 0.0..=1.0);
+      // The place's id a widget took for it.
+      let id = ui.take_id();
+      ui.with_id(id).slider(&mut 0.5, 0.0..=1.0);
     });
     let ids: HashSet<_> = ui.st.tree.nodes.iter().map(|n| n.id).collect();
     assert_eq!(ids.len(), ui.st.tree.nodes.len());
