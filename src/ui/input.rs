@@ -407,11 +407,14 @@ impl UiState {
       Event::MouseExit | Event::DragExit => self.hover_at(None, false),
       Event::MouseDown { pos, button, clicks, mods } => {
         let mut changed = self.hover_at(Some(pos), false);
-        // A tip's element only shows its tip: the press is the element's around it, its own
-        // with none (which hides the tip).
+        // A tip's element only shows its tip: the left press is the element's around it, its
+        // own with none (which hides the tip). Other buttons keep the innermost, where a
+        // context menu's owner is found up its parents.
         let tip = |id| self.last.find(id).is_some_and(|i| self.last.tips.binary_search(&i).is_ok());
+        let left = button == MouseButton::Left;
         let hover = &self.input.hover;
-        let top = hover.iter().copied().find(|&id| !tip(id)).or(hover.first().copied());
+        let top = hover.iter().copied().find(|&id| !(left && tip(id))).or(hover.first().copied());
+
         // Another button pressed meanwhile leaves the press to the first one's release.
         if self.input.press.is_none_or(|p| p.button == button) {
           self.input.presses += 1;

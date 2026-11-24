@@ -762,8 +762,9 @@ impl<'a> Ui<'a> {
   /// `Theme::tip_warm` of another), and reads it as its description to assistive technology, as
   /// SwiftUI's `.help`: any element, a text (read where it stands), a widget, a container or a
   /// canvas (read as a group, its children as ever). It takes the hover for the tip alone: a
-  /// press on it is the interactive element's around it (a button whose label has a tip). The tip
-  /// is `id.key("tip")` of the element's id.
+  /// primary press on it is the interactive element's around it (a button whose label has a
+  /// tip), a secondary one opens its own context menu if it has one. The tip is `id.key("tip")`
+  /// of the element's id.
   pub fn help(&mut self, tip: &str) -> &mut Self {
     self.next_help = Some(tip.to_owned());
     self
