@@ -50,7 +50,7 @@ check-api: # the public API with every feature on each system against docs/publi
 	done
 
 public-api: # docs/public-api.txt, the public API with every feature, from rustdoc
-	$(PUBLIC_API) aarch64-apple-darwin > target/public-api.txt && mv target/public-api.txt docs/public-api.txt
+	mkdir -p target && $(PUBLIC_API) aarch64-apple-darwin > target/public-api.txt && mv target/public-api.txt docs/public-api.txt
 
 # Its own target dir: warnings are errors here, and the flag would rebuild the usual one's crates.
 features: # the library with each feature alone, none and the default, on every system; then the base and headless built; needs cargo-hack (`cargo install cargo-hack`)
