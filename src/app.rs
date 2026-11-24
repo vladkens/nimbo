@@ -771,10 +771,15 @@ fn run_view<'a, A: App>(
   ui.text = Some(std::mem::replace(text, TextSystem::new(scale)));
   std::mem::swap(images, &mut ui.images);
   app.view(ui);
+  // Taken in every build: taking them gives assistive technology their descriptions.
+  let tips = ui.take_tooltips();
   #[cfg(feature = "headless")]
-  for (id, tip) in ui.take_tooltips() {
+  for (id, tip) in tips {
     ui.tooltip(id, &tip);
   }
+
+  #[cfg(not(feature = "headless"))]
+  drop(tips);
 
   // The theme's focus ring, as the view left the theme.
   #[cfg(feature = "styled")]
