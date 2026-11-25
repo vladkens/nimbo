@@ -1,0 +1,138 @@
+// Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
+
+//! Text fields and selectable text: a name, an e-mail with a placeholder, a password, notes over
+//! several lines, a disabled field and a paragraph to select and copy. Enter in a single-line
+//! field shows what it submitted; Tab moves between the fields. Input methods compose in place
+//! (try Pinyin or Japanese).
+//!
+//! `cargo run --release --example fields` opens it in a window; `-- --shot fields.png` renders
+//! it without one: the name typed, the e-mail empty, a password, a word of the paragraph
+//! selected and an input method composing in the notes.
+
+// A Windows app, not a console one: no terminal opens with its window.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
+#[path = "common/example.rs"]
+mod example;
+
+use nimbo::{
+  Align, App, Axis, Config, Id, Modifiers, Point, Size, Style, TextField, TextStyle, Ui, grow, px,
+};
+
+pub const SIZE: Size = Size::new(460.0, 340.0);
+
+pub const NAME: &str = "name";
+pub const EMAIL: &str = "email";
+pub const PASSWORD: &str = "password";
+pub const NOTES: &str = "notes";
+pub const OFF: &str = "off";
+pub const ABOUT: &str = "about";
+
+/// The paragraph to select.
+pub const TEXT: &str = "Selectable text takes the pointer and the keys as a field does, but \
+  only selects and copies: double-click a word, triple-click a line, Shift and the arrows.";
+
+#[derive(Default)]
+pub struct Fields {
+  pub name: String,
+  pub email: String,
+  pub password: String,
+  pub notes: String,
+  pub off: String,
+  /// What Enter submitted last, and from which field.
+  pub submitted: Option<(&'static str, String)>,
+  /// Fields whose text changed, in order.
+  pub changes: Vec<&'static str>,
+}
+
+impl Fields {
+  pub fn new() -> Self {
+    let off = "Read only".to_owned();
+    Self { off, ..Self::default() }
+  }
+}
+
+impl App for Fields {
+  fn view(&mut self, ui: &mut Ui) {
+    let t = ui.theme();
+    let row = Style::new().w(grow()).gap(12.0).align(Align::Start, Align::Center);
+    let label = Style::new().w(px(72.0));
+    ui.col(Style::new().grow().pad(20.0).gap(12.0).bg(t.bg()), |ui| {
+      let single: [(&'static str, &str, &'static str); 3] =
+        [(NAME, "Name", ""), (EMAIL, "E-mail", "name@example.com"), (PASSWORD, "Password", "")];
+      for (id, title, hint) in single {
+        ui.row(row, |ui| {
+          ui.row(label, |ui| ui.text(title, t.label()));
+          let text = match id {
+            NAME => &mut self.name,
+            EMAIL => &mut self.email,
+            _ => &mut self.password,
+          };
+
+          // Named by its label for assistive technology; the first field takes the focus as the
+          // window opens.
+          ui.a11y_label(title);
+          let ui = if id == NAME { ui.id(id).autofocus() } else { ui.id(id) };
+          let r = match id {
+            PASSWORD => ui.secure_field(text, "Required"),
+            _ => ui.text_field(text, hint),
+          };
+
+          if r.changed {
+            self.changes.push(id);
+          }
+
+          // A password is not shown back.
+          if r.submitted {
+            let shown = if id == PASSWORD { "•••".to_owned() } else { text.clone() };
+            self.submitted = Some((id, shown));
+          }
+        });
+      }
+
+      ui.row(row.align(Align::Start, Align::Start), |ui| {
+        ui.row(label.pads([4.0, 0.0, 0.0, 0.0]), |ui| ui.text("Notes", t.label()));
+        // A multi-line field fills the height its parent gives it.
+        ui.col(Style::new().w(grow()).h(px(84.0)), |ui| {
+          let notes = TextField::new(&mut self.notes, "A few lines").axis(Axis::Vertical);
+          if notes.show(ui.a11y_label("Notes").id(NOTES)).changed {
+            self.changes.push(NOTES);
+          }
+        });
+      });
+
+      ui.row(row, |ui| {
+        ui.row(label, |ui| ui.text("Disabled", t.label()));
+        ui.disabled(true).a11y_label("Disabled").id(OFF).text_field(&mut self.off, "");
+      });
+
+      ui.id(ABOUT).selectable_text(TEXT, TextStyle::new(t.font(), t.text()));
+      if let Some((id, text)) = &self.submitted {
+        ui.text(format_args!("Submitted {id}: {text}"), t.label().color(t.secondary()));
+      }
+    });
+  }
+}
+
+fn main() {
+  let args: Vec<String> = std::env::args().skip(1).collect();
+  example::run(Config::new("fields", SIZE.w, SIZE.h), Fields::new(), &args, |h| {
+    h.frame();
+    h.click_id(Id::of(NAME));
+    h.type_text("Ada Lovelace");
+    h.click_id(Id::of(PASSWORD));
+    h.type_text("secret");
+
+    // A word of the paragraph, double-clicked: it stays selected, dimmed, as the notes take
+    // the focus and an input method composes there.
+    let r = h.rect(Id::of(ABOUT)).unwrap();
+    let p = Point::new(r.x + 30.0, r.y + 8.0);
+    h.press_with(p.x, p.y, 2, Modifiers::empty());
+    h.release(p.x, p.y);
+
+    h.click_id(Id::of(NOTES));
+    h.type_text("Notes over lines: ");
+    h.ime_mark("にほん");
+    h.frame();
+  });
+}

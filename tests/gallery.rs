@@ -1,6 +1,6 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Harness tests for `examples/gallery/`: every block has a page that builds, named by the
+//! Harness tests for `examples/gallery.rs`: every block has a page that builds, named by the
 //! block; the sidebar turns the pages; a block's disabled variant reads disabled and its sizes
 //! differ; a block alone is as high as its variants; in each appearance the widgets work and draw
 //! in its theme (a check box checks in its accent, a switch slides, the slider drags, a picker
@@ -12,7 +12,7 @@
 //! beside their controls; and `docs/api.md` is the gallery's, and so are its pictures on the
 //! `assets` branch when its worktree is there.
 
-#[path = "../examples/gallery/main.rs"]
+#[path = "../examples/gallery.rs"]
 #[expect(dead_code, reason = "its main and what this file doesn't use")]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
 #[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]

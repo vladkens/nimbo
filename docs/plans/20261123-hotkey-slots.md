@@ -19,7 +19,7 @@ Not in this work: keys taken while a hotkey is held and fn as a chord modifier (
 
 ## Tasks
 
-- [x] 1. Portable API: `src/hotkey.rs` (`MAX`, `Edge`, `Slot`, `Status`, `set`, the diff), the contract in `src/platform/mod.rs`, `examples/tray.rs` (now `examples/dictation/main.rs`). Pure tests of the diff, duplicates, `MAX`, the pause.
+- [x] 1. Portable API: `src/hotkey.rs` (`MAX`, `Edge`, `Slot`, `Status`, `set`, the diff), the contract in `src/platform/mod.rs`, `examples/tray.rs`. Pure tests of the diff, duplicates, `MAX`, the pause.
 - [x] 2. macOS: the tap's places and two-edge verdicts, Carbon per place, the hotkey thread. `judge` tests: two chords, a chord and a modifier alone with its modifier (two edges), two modifiers alone, Escape with places; `route`'s dedupe per place.
 - [x] 3. Windows: places, one timer, [Lone] over several keys. Tests of [Lone].
 - [x] 4. Linux: X11 grabs per place (the `Keys` tests), the portal's shortcuts per place (the id of each, unit-tested).
