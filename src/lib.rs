@@ -144,75 +144,51 @@
 //!
 //! An English string changed becomes fuzzy in the catalogs and shows in English until a
 //! translator confirms it; one removed becomes obsolete (`#~`).
-#![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(
-  not(all(feature = "full", feature = "harness")),
-  expect(
-    dead_code,
-    reason = "what a feature left off uses; the full build (clippy, tests) checks it"
-  )
-)]
 
 pub mod activity;
 mod app;
-#[cfg(feature = "autostart")]
 pub mod autostart;
-#[cfg(feature = "bitmap")]
 mod bitmap;
 pub mod clipboard;
 mod commands;
 pub(crate) mod cpu;
-#[cfg(feature = "autostart")]
 pub mod desktop;
 mod error;
 mod event;
 mod file_dialog;
 pub mod focus;
 pub(crate) mod geom;
-#[cfg(feature = "system")]
 pub mod hardware;
-#[cfg(feature = "harness")]
 pub mod harness;
-#[cfg(feature = "hotkey")]
 pub mod hotkey;
 mod info;
-#[cfg(feature = "system")]
 pub mod input_source;
-#[cfg(feature = "instance")]
 pub mod instance;
 mod keys;
 mod locale;
 mod menu;
 pub mod open;
-#[cfg(feature = "paste")]
 pub mod paste;
 pub mod paths;
-#[cfg(feature = "permissions")]
 pub mod permissions;
 pub(crate) mod platform;
-#[cfg(feature = "png")]
 mod png;
 mod runloop;
 mod scene;
 mod shell;
 mod svg;
-#[cfg(feature = "system")]
 pub mod system;
 mod text;
-#[cfg(feature = "tray")]
 pub mod tray;
 mod ui;
-#[cfg(feature = "autostart")]
 pub mod uninstall;
 mod window;
 
 pub use app::{App, Appearance, ColorScheme, Cx, Event, Ime, MouseButton, Phase, Waker};
-#[cfg(feature = "bitmap")]
 pub use bitmap::Bitmap;
 pub use commands::{CommandGroupPlacement, Commands};
 pub use error::Error;
 pub use file_dialog::{FileDialog, FileDialogKind};
-#[cfg(feature = "harness")]
 pub use harness::run::Harness;
 pub use keys::{
   Binding, CMD, CTRL, Code, Command, Hotkey, Key, KeyEvent, Modifiers, NamedKey, Os, Shortcut,
@@ -220,35 +196,28 @@ pub use keys::{
 };
 pub use locale::{Locale, Localizations, Localized};
 pub use menu::{ButtonRole, Item, Menu};
-#[cfg(feature = "png")]
 pub use png::Png;
 pub use scene::{Color, Frame, ImageId, Images, Point, Quad, Rect, Size, alpha, mix, rgb};
 pub use shell::{Anchor, AppInfo, Main, Presence, Proxy, Window, WindowId, app, attach_console};
 pub use text::{Design, Font, Metrics, Weight};
 pub use ui::{
-  Align, Axes, Axis, Click, Clip, ContentMode, ControlSize, CoordinateSpace, Cursor, Dim, Ease,
-  Enabled, EnvironmentValue, Float, Focus, FocusDirection, FocusRing, FrameStats, Icon, IconPaint,
-  Id, ImageSource, LinePattern, NativeMenu, Press, Response, Scroll, Shadow, Style, TextInput,
-  TextLines, TextStyle, Transition, TruncationMode, Ui, UnitPoint, grow, pct, px, rigid,
-};
-#[cfg(feature = "styled")]
-pub use ui::{
-  Answer, BorderedButtonStyle, BorderedProminentButtonStyle, BorderlessButtonStyle,
-  ButtonToggleStyle, CheckboxToggleStyle, ControlBorder, Dialog, FormRow, FormStyle, Glass,
-  InsetGroupedListStyle, InsetListStyle, LinearSliderStyle, MenuPickerStyle,
-  RoundedBorderTextFieldStyle, Section, SegmentedPickerStyle, Sizes, Split, SwitchSize,
-  SwitchToggleStyle, Tabs, Theme, Tone, ToolbarItemPlacement, TooltipHelpStyle,
-};
-#[cfg(feature = "headless")]
-pub use ui::{
-  Behavior, Button, ButtonConfiguration, ButtonStyle, Content, DialogBehavior, EditMenu, Editing,
-  FieldBehavior, FieldKind, FieldStyle, HelpConfiguration, HelpStyle, InlinePickerStyle, List,
-  ListBehavior, ListConfiguration, ListLayout, ListResponse, ListRowConfiguration, ListRows,
-  ListStyle, MenuPlacement, Picker, PickerConfiguration, PickerStyle, PlainButtonStyle,
-  PlainHelpStyle, PlainListStyle, PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle, Row,
-  ScrollBar, ScrollBehavior, ScrollerKnob, SectionHeader, Selection, Slider, SliderConfiguration,
-  SliderStyle, SplitBehavior, Tag, TextField, TextFieldConfiguration, TextFieldStyle,
-  ToggleConfiguration, ToggleStyle, TypeSelect,
+  Align, Answer, Axes, Axis, Behavior, BorderedButtonStyle, BorderedProminentButtonStyle,
+  BorderlessButtonStyle, Button, ButtonConfiguration, ButtonStyle, ButtonToggleStyle,
+  CheckboxToggleStyle, Click, Clip, Content, ContentMode, ControlBorder, ControlSize,
+  CoordinateSpace, Cursor, Dialog, DialogBehavior, Dim, Ease, EditMenu, Editing, Enabled,
+  EnvironmentValue, FieldBehavior, FieldKind, FieldStyle, Float, Focus, FocusDirection, FocusRing,
+  FormRow, FormStyle, FrameStats, Glass, HelpConfiguration, HelpStyle, Icon, IconPaint, Id,
+  ImageSource, InlinePickerStyle, InsetGroupedListStyle, InsetListStyle, LinePattern,
+  LinearSliderStyle, List, ListBehavior, ListConfiguration, ListLayout, ListResponse,
+  ListRowConfiguration, ListRows, ListStyle, MenuPickerStyle, MenuPlacement, NativeMenu, Picker,
+  PickerConfiguration, PickerStyle, PlainButtonStyle, PlainHelpStyle, PlainListStyle,
+  PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle, Press, Response,
+  RoundedBorderTextFieldStyle, Row, Scroll, ScrollBar, ScrollBehavior, ScrollerKnob, Section,
+  SectionHeader, SegmentedPickerStyle, Selection, Shadow, Sizes, Slider, SliderConfiguration,
+  SliderStyle, Split, SplitBehavior, Style, SwitchSize, SwitchToggleStyle, Tabs, Tag, TextField,
+  TextFieldConfiguration, TextFieldStyle, TextInput, TextLines, TextStyle, Theme,
+  ToggleConfiguration, ToggleStyle, Tone, ToolbarItemPlacement, TooltipHelpStyle, Transition,
+  TruncationMode, TypeSelect, Ui, UnitPoint, grow, pct, px, rigid,
 };
 pub use window::{Config, TitleBar, WindowToolbarStyle};
 

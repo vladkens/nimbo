@@ -16,14 +16,10 @@ use crate::keys::{Binding, Command, Extent, KeyEvent, Move};
 use crate::scene::{Frame, Images, Point, Rect, Scene, Size};
 use crate::text::TextSystem;
 use crate::ui::{
-  Action, Click, Cursor, FocusDirection, FrameStats, Id, Role, Sys, TextInput, Ui, UiState,
-  drags_window,
-};
-#[cfg(feature = "styled")]
-use crate::ui::{
-  BorderedButtonStyle, ButtonStyle, DrawnEditMenu, HelpStyle, InsetListStyle, LinearSliderStyle,
-  ListStyle, MenuPickerStyle, PickerStyle, RoundedBorderTextFieldStyle, SliderStyle,
-  SwitchToggleStyle, TextFieldStyle, ToggleStyle, TooltipHelpStyle,
+  Action, BorderedButtonStyle, ButtonStyle, Click, Cursor, DrawnEditMenu, FocusDirection,
+  FrameStats, HelpStyle, Id, InsetListStyle, LinearSliderStyle, ListStyle, MenuPickerStyle,
+  PickerStyle, Role, RoundedBorderTextFieldStyle, SliderStyle, SwitchToggleStyle, Sys,
+  TextFieldStyle, TextInput, ToggleStyle, TooltipHelpStyle, Ui, UiState, drags_window,
 };
 
 /// An application: owns its state, reacts to events and draws the frame from it, as an element
@@ -260,7 +256,6 @@ impl<A: App> Runtime<A> {
     ui.waker = waker.clone();
     ui.clipboard = clipboard;
 
-    #[cfg(feature = "styled")]
     styled_defaults(&mut ui);
 
     Self {
@@ -767,7 +762,6 @@ impl<A: App> Runtime<A> {
 }
 
 /// The window's looks, System Settings': what the core and the headless widgets don't name.
-#[cfg(feature = "styled")]
 fn styled_defaults(ui: &mut UiState) {
   ui.set_environment_default::<&dyn ButtonStyle>(&BorderedButtonStyle);
   ui.set_environment_default::<&dyn ToggleStyle>(&SwitchToggleStyle);
@@ -798,16 +792,11 @@ fn run_view<'a, A: App>(
   app.view(ui);
   // Taken in every build: taking them gives assistive technology their descriptions.
   let tips = ui.take_tooltips();
-  #[cfg(feature = "headless")]
   for (id, tip) in tips {
     ui.tooltip(id, &tip);
   }
 
-  #[cfg(not(feature = "headless"))]
-  drop(tips);
-
   // The theme's focus ring, as the view left the theme.
-  #[cfg(feature = "styled")]
   ui.set_default_focus_ring(ui.theme().focus_ring());
   std::mem::swap(images, &mut ui.images);
   if let Some(t) = ui.text.take() {

@@ -2,14 +2,13 @@
 name = "nimbo"
 version = "0.0.1"
 edition = "2024"
-rust-version = "1.95"
 description = "A small, fast, custom-drawn desktop UI toolkit: one look on macOS, Windows and Linux."
 authors = ["vladkens"]
 license = "MIT"
 repository = "https://github.com/vladkens/nimbo"
 documentation = "https://docs.rs/nimbo"
 readme = "readme.md"
-include = ["/src/**/*.rs", "/Cargo.toml", "/Cargo.lock", "/LICENSE", "/readme.md", "/locales"]
+include = ["/src/**/*.rs", "/Cargo.toml", "/Cargo.lock", "/LICENSE", "/readme.md"]
 keywords = ["gui", "ui", "desktop", "widgets", "toolkit"]
 categories = ["gui"]
 
@@ -17,58 +16,18 @@ categories = ["gui"]
 block2 = { version = "0.6.2", default-features = false, features = ["std"] }
 dispatch2 = { version = "0.3.1", default-features = false, features = ["std", "objc2", "block2"] }
 objc2 = { version = "0.6.5", default-features = false, features = ["std"] }
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSApplication", "NSResponder", "NSView", "NSWindow", "NSEvent", "NSGraphics", "NSRunningApplication", "NSMenu", "NSMenuItem", "NSGraphicsContext", "NSAppearance", "NSColor", "NSColorSpace", "block2", "NSTrackingArea", "NSCursor", "NSPasteboard", "NSFont", "NSFontDescriptor", "NSTextInputClient", "NSTextInputContext", "NSControl", "objc2-core-graphics", "NSPanel", "NSScreen", "NSWorkspace", "NSAlert", "NSPasteboardItem", "NSSavePanel", "NSOpenPanel", "NSDragging", "NSAccessibility", "NSAccessibilityConstants", "NSAccessibilityElement", "NSAccessibilityProtocols", "NSToolbar", "NSButton", "NSCell"] }
-objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFString", "CFDictionary", "CFNumber", "CFCGTypes", "CFAttributedString", "CFArray", "CFRunLoop", "CFData"] }
-objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGBitmapContext", "CGColorSpace", "CGContext", "CGImage", "CGPath", "CGEvent", "CGEventTypes"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSApplication", "NSResponder", "NSView", "NSWindow", "NSEvent", "NSGraphics", "NSRunningApplication", "NSMenu", "NSMenuItem", "NSGraphicsContext", "NSAppearance", "NSColor", "NSColorSpace", "block2", "NSTrackingArea", "NSCursor", "NSPasteboard", "NSFont", "NSFontDescriptor", "NSTextInputClient", "NSTextInputContext", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSButton", "NSControl", "NSImage", "NSBezierPath", "NSCell", "objc2-core-graphics", "NSPanel", "NSScreen", "NSWorkspace", "NSAlert", "NSPasteboardItem", "NSSavePanel", "NSOpenPanel", "NSDragging", "NSAccessibility", "NSAccessibilityConstants", "NSAccessibilityElement", "NSAccessibilityProtocols", "NSToolbar"] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFString", "CFDictionary", "CFNumber", "CFCGTypes", "CFAttributedString", "CFArray", "CFMachPort", "CFRunLoop", "CFData"] }
+objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGBitmapContext", "CGColorSpace", "CGContext", "CGImage", "CGPath", "CGEvent", "CGEventTypes", "CGEventSource", "CGRemoteOperation"] }
 objc2-core-text = { version = "0.3.2", default-features = false, features = ["std", "objc2-core-graphics", "CTFont", "CTLine", "CTRun", "CTStringAttributes", "CTFontDescriptor", "CTFontTraits"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSGeometry", "NSRunLoop", "NSObject", "NSNotification", "NSArray", "NSUserDefaults", "NSAttributedString", "NSRange", "NSObjCRuntime", "NSBundle", "NSError", "NSEnumerator", "NSURL", "NSData", "NSProcessInfo", "NSValue", "NSDictionary", "NSLocale"] }
-objc2-image-io = { version = "0.3.2", default-features = false, features = ["std", "CGImageSource", "CGImageProperties", "objc2-core-graphics"], optional = true }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSString", "NSGeometry", "NSRunLoop", "NSObject", "NSNotification", "NSArray", "NSUserDefaults", "NSAttributedString", "NSRange", "NSObjCRuntime", "NSBundle", "NSError", "NSEnumerator", "NSURL", "NSData", "NSProcessInfo", "NSValue", "NSDictionary", "NSDistributedNotificationCenter", "NSLocale"] }
+objc2-image-io = { version = "0.3.2", default-features = false, features = ["std", "CGImageSource", "CGImageProperties", "objc2-core-graphics"] }
 objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["std", "objc2-core-foundation", "CALayer", "CADisplayLink", "CAFrameRateRange", "CATransaction"] }
-objc2-service-management = { version = "0.3.2", default-features = false, features = ["std", "SMAppService", "objc2-foundation", "objc2"], optional = true }
+objc2-service-management = { version = "0.3.2", default-features = false, features = ["std", "SMAppService", "objc2-foundation", "objc2"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.61.2", default-features = false, features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_IO", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_Ole", "Win32_System_Pipes", "Win32_System_Power", "Win32_System_Registry", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_System_Variant", "Win32_UI_HiDpi", "Win32_UI_Input_Ime", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_Shell_Common", "Win32_UI_WindowsAndMessaging"] }
 
-# The crate itself, for its tests and examples: the harness and every feature (`cargo add` refuses
-# a dependency on the crate itself). Without a version, `cargo publish` leaves it out.
-[dev-dependencies]
-nimbo = { path = ".", features = ["harness", "full"] }
-
-# docs.rs: every feature, each item marked with the features it needs, on the three systems.
-[package.metadata.docs.rs]
-all-features = true
-targets = ["aarch64-apple-darwin", "x86_64-pc-windows-msvc", "x86_64-unknown-linux-gnu"]
-rustdoc-args = ["--cfg", "docsrs"]
-
 [lints.clippy]
 # Long paths in code through a `use` (clippy.toml).
 absolute_paths = "warn"
-
-[features]
-default = ["styled"]
-# The ui's headless behaviour, a design system's base: buttons, toggles, fields, lists, menus.
-headless = []
-# The design system that looks like macOS System Settings, over the headless behaviour.
-styled = ["headless"]
-# A status item or tray icon with its menu.
-tray = ["objc2-app-kit/NSStatusBar", "objc2-app-kit/NSStatusItem", "objc2-app-kit/NSStatusBarButton", "objc2-app-kit/NSImage", "objc2-app-kit/NSBezierPath"]
-# Global hotkeys.
-hotkey = ["permissions", "objc2-core-foundation/CFMachPort"]
-# Keys posted to the app in focus and a paste that gives the clipboard back.
-paste = ["permissions", "objc2-core-graphics/CGEventSource", "objc2-core-graphics/CGRemoteOperation"]
-# The OS's permissions: Accessibility, Secure Input, the microphone (macOS).
-permissions = []
-# One instance that takes commands from a second launch.
-instance = []
-# Launch at login, the launcher entry (Linux) and an uninstall that undoes what nimbo set up.
-autostart = ["png", "dep:objc2-service-management"]
-# The system's changes as they come, and the hardware and input sources they are about.
-system = ["objc2-foundation/NSDistributedNotificationCenter"]
-# PNGs an app ships, decoded by nimbo.
-png = []
-# Pictures decoded by the OS (photos).
-bitmap = ["dep:objc2-image-io"]
-# The headless harness that runs an app in tests and writes shots.
-harness = ["png"]
-# Every feature an app may use; the harness apart.
-full = ["styled", "tray", "hotkey", "paste", "permissions", "instance", "autostart", "system", "png", "bitmap"]

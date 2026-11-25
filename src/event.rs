@@ -10,7 +10,6 @@ use std::sync::{Arc, OnceLock};
 
 use crate::geom::{Color, Point};
 use crate::keys::{Command, KeyEvent};
-#[cfg(feature = "system")]
 use crate::system::Change;
 use crate::ui::{Action, Id, Role};
 use crate::{Code, Modifiers};
@@ -105,7 +104,6 @@ pub enum Event {
   Appearance(Appearance),
   /// A change in the system the app watches ([crate::Main::watch]), to read again
   /// ([crate::system]); redraws when the app uses it.
-  #[cfg(feature = "system")]
   System(Change),
   /// Files dragged over the window, the pointer at `pos`; the hover follows it, so
   /// [crate::Cx::hovered] tells where they would go.

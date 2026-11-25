@@ -8,14 +8,10 @@
 //! behaviours, the environment.
 
 pub(crate) mod a11y;
-#[cfg(feature = "headless")]
 pub(crate) mod behavior;
-#[cfg(feature = "styled")]
 pub(crate) mod containers;
-#[cfg(feature = "styled")]
 pub(crate) mod dialog;
 mod environment;
-#[cfg(feature = "styled")]
 pub(crate) mod form;
 pub(crate) mod icon;
 mod id;
@@ -29,9 +25,7 @@ mod query;
 pub(crate) mod store;
 mod style;
 mod textlayout;
-#[cfg(feature = "styled")]
 pub(crate) mod theme;
-#[cfg(feature = "styled")]
 pub(crate) mod widgets;
 
 use std::any::Any;
@@ -40,12 +34,8 @@ use std::hash::Hash;
 use std::num::NonZeroU8;
 use std::time::Duration;
 
-pub use a11y::{Action, Role};
-#[cfg(feature = "headless")]
-pub use a11y::{State, Value};
-#[cfg(feature = "styled")]
+pub use a11y::{Action, Role, State, Value};
 pub(crate) use behavior::DrawnEditMenu;
-#[cfg(feature = "headless")]
 pub use behavior::{
   Behavior, Button, ButtonConfiguration, ButtonStyle, Content, DialogBehavior, EditMenu, Editing,
   FieldBehavior, FieldKind, FieldStyle, HelpConfiguration, HelpStyle, InlinePickerStyle, List,
@@ -56,14 +46,11 @@ pub use behavior::{
   SliderStyle, SplitBehavior, Tag, TextField, TextFieldConfiguration, TextFieldStyle,
   ToggleConfiguration, ToggleStyle, TypeSelect,
 };
-#[cfg(feature = "styled")]
 pub use containers::{
   InsetGroupedListStyle, InsetListStyle, MenuPickerStyle, Split, Tabs, ToolbarItemPlacement,
 };
-#[cfg(feature = "styled")]
 pub use dialog::{Answer, Dialog};
 pub use environment::{Enabled, EnvironmentValue};
-#[cfg(feature = "styled")]
 pub use form::{FormRow, FormStyle, Glass, Section};
 pub use icon::{Icon, IconPaint};
 pub use id::Id;
@@ -80,11 +67,8 @@ pub use style::{
   rigid,
 };
 pub use textlayout::TextInput;
-#[cfg(feature = "headless")]
 pub(crate) use textlayout::TextLayout;
-#[cfg(feature = "styled")]
 pub use theme::{ControlBorder, Sizes, SwitchSize, Theme, Tone};
-#[cfg(feature = "styled")]
 pub use widgets::{
   BorderedButtonStyle, BorderedProminentButtonStyle, BorderlessButtonStyle, ButtonToggleStyle,
   CheckboxToggleStyle, LinearSliderStyle, RoundedBorderTextFieldStyle, SegmentedPickerStyle,

@@ -14,7 +14,7 @@ use crate::keys::{Command, Key, KeyEvent, Os};
 use crate::locale::{self, Locale, Localizations};
 use crate::menu::{Item, Menu};
 use crate::scene::{Point, Rect, Size};
-#[cfg(all(test, feature = "headless"))]
+#[cfg(test)]
 use crate::text::edit::Editor;
 use crate::text::edit::utf16_len;
 use crate::text::{Font, Metrics};
@@ -306,7 +306,6 @@ impl<A: App> Harness<A> {
   /// The text of `id`: a text field's or selectable text's as it is now, typed since the last
   /// frame too, else a text element's in the last frame built.
   pub fn text(&self, id: Id) -> Option<&str> {
-    #[cfg(feature = "headless")]
     if let Some(ed) = self.rt.ui.editor(id) {
       return Some(ed.text());
     }
@@ -320,14 +319,13 @@ impl<A: App> Harness<A> {
 
   /// The selection of a text field or selectable text as it is now: its anchor and its head, the
   /// end that moves, as byte offsets of [Self::text]; a caret is both.
-  #[cfg(feature = "headless")]
   pub fn selection(&self, id: Id) -> Option<(usize, usize)> {
     let sel = self.rt.ui.editor(id)?.sel();
     Some((sel.anchor, sel.head))
   }
 
   /// The editor of a text field or selectable text.
-  #[cfg(all(test, feature = "headless"))]
+  #[cfg(test)]
   pub(crate) fn editor(&self, id: Id) -> Option<&Editor> {
     self.rt.ui.editor(id)
   }

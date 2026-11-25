@@ -14,7 +14,6 @@
 
 mod app;
 mod files;
-#[cfg(feature = "bitmap")]
 pub mod image;
 mod input;
 mod keyboard;
@@ -28,18 +27,11 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-#[cfg(feature = "hotkey")]
-pub use app::hotkey;
 use app::paste::Open;
-#[cfg(feature = "paste")]
-pub use app::post;
-#[cfg(feature = "tray")]
-pub use app::tray;
-pub use app::{activity, attach_console, downloads, focus, open, paste, shell};
-#[cfg(feature = "autostart")]
-pub use app::{autostart, desktop, uninstall};
-#[cfg(feature = "system")]
-pub use app::{hardware, input_source};
+pub use app::{
+  activity, attach_console, autostart, desktop, downloads, focus, hardware, hotkey, input_source,
+  open, paste, post, shell, tray, uninstall,
+};
 pub use settings::{appearance, languages};
 use windows_sys::Win32::Foundation::{
   CloseHandle, FILETIME, HANDLE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,

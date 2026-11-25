@@ -6,7 +6,6 @@
 
 use crate::geom::{Point, Rect, Size};
 use crate::locale::Localizations;
-#[cfg(feature = "png")]
 use crate::png::Png;
 #[cfg(doc)]
 use crate::{AppInfo, Main, Ui, Window, locale};
@@ -91,7 +90,6 @@ pub struct Config {
   /// of them, as only the builder checks; or a PNG's ([Config::png_icon]).
   #[cfg_attr(target_os = "macos", expect(dead_code, reason = "a macOS window has no icon"))]
   pub(crate) icon: Option<(u32, &'static [u8])>,
-  #[cfg(feature = "png")]
   #[cfg_attr(target_os = "macos", expect(dead_code, reason = "a macOS window has no icon"))]
   pub(crate) png_icon: Option<Png>,
   /// The app's catalogs ([Config::localizations]).
@@ -114,7 +112,6 @@ impl Config {
       overlay,
       unified,
       icon,
-      #[cfg(feature = "png")]
       png_icon: None,
       localizations: &[],
     }
@@ -181,17 +178,11 @@ impl Config {
   /// ([AppInfo::id]).
   pub const fn icon(self, side: u32, px: &'static [u8]) -> Self {
     assert!(px.len() == side as usize * side as usize * 4, "an icon is side² RGBA pixels");
-    Self {
-      icon: Some((side, px)),
-      #[cfg(feature = "png")]
-      png_icon: None,
-      ..self
-    }
+    Self { icon: Some((side, px)), png_icon: None, ..self }
   }
 
   /// [Config::icon] from a square PNG the app ships, decoded as the first window opens (not on
   /// macOS): `Png::icon(include_bytes!("icon.png"))` for the app's icon, its margin cut.
-  #[cfg(feature = "png")]
   pub const fn png_icon(self, png: Png) -> Self {
     Self { png_icon: Some(png), icon: None, ..self }
   }
@@ -199,10 +190,7 @@ impl Config {
   /// The window's icon: its side and pixels, a PNG's decoded now.
   #[cfg_attr(target_os = "macos", expect(dead_code, reason = "a macOS window has no icon"))]
   pub(crate) fn window_icon(&self) -> Option<(u32, &'static [u8])> {
-    let icon = self.icon;
-    #[cfg(feature = "png")]
-    let icon = icon.or_else(|| self.png_icon.map(|png| png.square()));
-    icon
+    self.icon.or_else(|| self.png_icon.map(|png| png.square()))
   }
 
   /// A window [Main::open] makes without showing it, until [Window::front].

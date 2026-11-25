@@ -11,8 +11,6 @@
 
 use std::ops::Range;
 
-#[cfg(not(feature = "headless"))]
-use super::UiState;
 use super::layout::{Kind, Line, Tree};
 use super::{Id, Response, Style, TextStyle, Ui};
 use crate::app::{Event, Ime};
@@ -381,14 +379,6 @@ impl TextInput<'_> {
   pub fn index(&self, p: Point) -> Option<usize> {
     let lay = self.lay.as_ref()?;
     Some(to_utf16(self.ed.text(), lay.hit(p, Hit::Nearest)))
-  }
-}
-
-/// No text field without the headless behaviour: none for an input method.
-#[cfg(not(feature = "headless"))]
-impl UiState {
-  pub fn text_input(&self) -> Option<TextInput<'_>> {
-    None
   }
 }
 

@@ -10,27 +10,18 @@
 //! a microphone's transport and the lid and their changes ([hardware]).
 
 pub mod activity;
-#[cfg(feature = "autostart")]
 pub mod autostart;
-#[cfg(feature = "autostart")]
 pub mod desktop;
 pub mod focus;
-#[cfg(feature = "system")]
 pub mod hardware;
-#[cfg(feature = "hotkey")]
 pub mod hotkey;
-#[cfg(feature = "system")]
 pub mod input_source;
 pub mod menu;
 pub mod open;
 pub mod paste;
-#[cfg(feature = "permissions")]
 pub mod permissions;
-#[cfg(feature = "paste")]
 pub mod post;
-#[cfg(feature = "tray")]
 pub mod tray;
-#[cfg(feature = "autostart")]
 pub mod uninstall;
 
 use std::cell::Cell;

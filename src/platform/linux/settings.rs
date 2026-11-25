@@ -125,7 +125,6 @@ pub fn watch() {
 }
 
 unsafe extern "C" fn on_changed(_: P, _: P, _: P) {
-  #[cfg(feature = "tray")]
   super::app::tray::repaint();
   unsafe { deliver(null_mut()) };
 }
@@ -151,7 +150,6 @@ unsafe extern "C" fn refit(_: P) -> c_int {
 /// `SettingChanged(namespace, key, value)`: one in the appearance namespace.
 unsafe extern "C" fn on_portal(_: P, _: S, _: S, _: S, _: S, args: P, _: P) {
   if Gv::borrowed(args).child(0).str() == NAMESPACE {
-    #[cfg(feature = "tray")]
     super::app::tray::repaint();
     unsafe { deliver(null_mut()) };
   }

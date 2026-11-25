@@ -33,7 +33,6 @@ mod button;
 mod checkbox;
 mod divider;
 mod field;
-#[cfg(feature = "hotkey")]
 pub(crate) mod hotkey_recorder;
 mod label;
 mod link;

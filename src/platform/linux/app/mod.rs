@@ -10,50 +10,21 @@
 //! uninstall removes ([uninstall]); the lid and the audio inputs' changes ([hardware]).
 
 pub mod activity;
-#[cfg(feature = "autostart")]
 pub mod autostart;
-#[cfg(feature = "autostart")]
 pub mod desktop;
 pub mod focus;
-#[cfg(feature = "hotkey")]
 mod grab;
 pub(super) mod gtk_menu;
-#[cfg(feature = "system")]
 pub mod hardware;
-#[cfg(feature = "hotkey")]
 pub mod hotkey;
-#[cfg(feature = "system")]
 pub mod input_source;
-#[cfg(feature = "tray")]
 mod menu;
 pub mod open;
 pub mod paste;
-#[cfg(feature = "paste")]
 pub mod post;
-#[cfg(feature = "paste")]
 mod remote;
-#[cfg(not(feature = "paste"))]
-mod remote {
-  //! Without the paste no RemoteDesktop session starts: the clipboard is GTK's alone.
-
-  pub(super) enum State {}
-
-  pub(super) fn clipboard() -> Option<std::rc::Rc<State>> {
-    None
-  }
-
-  pub(super) fn offer(s: &State, _: Vec<String>) -> bool {
-    match *s {}
-  }
-
-  pub(super) fn snapshot(s: &State) -> crate::clipboard::Snapshot {
-    match *s {}
-  }
-}
 pub mod shell;
-#[cfg(feature = "tray")]
 pub mod tray;
-#[cfg(feature = "autostart")]
 pub mod uninstall;
 
 use std::cell::Cell;

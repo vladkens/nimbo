@@ -289,10 +289,9 @@ pub fn available() -> Result<(), Error> {
   imp::available().map_err(Error::Unsupported)
 }
 
-/// For the tray scenario (`tests/dictation/detached.rs`): a tray with nothing on screen, the menu
+/// For the tray scenario (`tests/tray/detached.rs`): a tray with nothing on screen, the menu
 /// as the OS got it, and its items chosen without opening it. Hidden, and only with the harness:
 /// a test's hook, not an app's.
-#[cfg(feature = "harness")]
 #[doc(hidden)]
 impl<A: Clone + PartialEq + 'static> Tray<A> {
   pub fn detached(icon: TrayIcon, tooltip: &str) -> Self {
