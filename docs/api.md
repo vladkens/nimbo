@@ -134,7 +134,7 @@ nimbo: `let photo = Bitmap::decode(&file, 240)?; ui.aspect_ratio(ContentMode::Fi
 
 SwiftUI: `Button("Save") { … }.buttonStyle(.borderedProminent)`
 
-nimbo: `Button::new("Save").style(ButtonStyle::BorderedProminent).show(ui)`
+nimbo: `ui.button_style(&BorderedProminentButtonStyle).button("Save")`
 
 ![Button](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/button.png)
 
@@ -153,6 +153,22 @@ SwiftUI: `Button { Image(systemName: "trash") }.buttonStyle(.borderless)`
 nimbo: `ui.icon_button(Icon::TRASH)`
 
 ![Icon button](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/icon-button.png)
+
+### Button style
+
+SwiftUI: `HStack { Button("Cut") { … }; Button("Copy") { … } }.buttonStyle(.borderless)`
+
+nimbo: `ui.button_style(&BorderlessButtonStyle).row(style, |ui| { ui.button("Cut"); ui.button("Copy"); }); ui.button("Paste")`
+
+![Button style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/button-style.png)
+
+### Custom button style
+
+SwiftUI: `struct Pill: ButtonStyle { func makeBody(configuration: Configuration) -> some View { configuration.label.padding(…).background(…) } }`
+
+nimbo: `impl ButtonStyle for Pill { fn make_body(&self, ui: &mut Ui, mut c: ButtonConfiguration) { ui.row(style, |ui| c.label(ui, s)); } } ui.button_style(&Pill).button("Pill")`
+
+![Custom button style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/custom-button-style.png)
 
 ### Switch
 

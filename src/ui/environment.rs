@@ -2,7 +2,8 @@
 
 //! The environment: values the view reads by type ([EnvironmentValue]), scoped to an element and
 //! what is built inside it ([Ui::environment]), put for the whole window ([Ui::set_environment]),
-//! or the type's default; [ControlSize] and [Enabled] among them.
+//! the shell's default ([UiState::set_environment_default]: the styled looks), or the type's
+//! default; [ControlSize] and [Enabled] among them.
 //!
 //! ```ignore
 //! ui.environment(ControlSize::Small).row(Style::new(), |ui| {
@@ -13,7 +14,7 @@
 
 use std::any::{Any, TypeId};
 
-use super::{ControlSize, Ui};
+use super::{ControlSize, Ui, UiState};
 use crate::app::ColorScheme;
 
 /// A value of the environment, its type its key: what [Ui::environment_value] reads when neither
@@ -151,11 +152,12 @@ impl Ui<'_> {
   }
 
   /// The value of type `T` here: the innermost an element around put ([Ui::environment]), one
-  /// put for the next element too, else the window's ([Ui::set_environment]), else the type's
-  /// default ([EnvironmentValue::default_value]).
+  /// put for the next element too, else the window's ([Ui::set_environment]), else the shell's
+  /// default, else the type's ([EnvironmentValue::default_value]).
   pub fn environment_value<T: EnvironmentValue>(&self) -> T {
     let window = || self.st.env.iter().find_map(|v| v.downcast_ref::<T>());
-    match self.st.scoped.get::<T>().or_else(window) {
+    let shell = || self.st.env_defaults.iter().find_map(|v| v.downcast_ref::<T>());
+    match self.st.scoped.get::<T>().or_else(window).or_else(shell) {
       Some(v) => v.clone(),
       None => T::default_value(self),
     }
@@ -175,6 +177,19 @@ impl Ui<'_> {
         None
       }
       (None, None) => None,
+    }
+  }
+}
+
+impl UiState {
+  /// Puts `v` as the window's default of type `T`, under the values the view puts, over the
+  /// type's own default: the shell's, which names the styled looks the core and the headless
+  /// layer don't know (the bordered button style).
+  pub(crate) fn set_environment_default<T: EnvironmentValue>(&mut self, v: T) {
+    let defaults = &mut self.env_defaults;
+    match defaults.iter_mut().find_map(|d| d.downcast_mut::<T>()) {
+      Some(old) => *old = v,
+      None => defaults.push(Box::new(v)),
     }
   }
 }
@@ -242,6 +257,20 @@ mod tests {
     assert_eq!(ui.environment_value::<Tint>(), Tint(3));
     assert_eq!(ui.set_environment::<Tint>(None), Some(Tint(3)));
     assert_eq!(ui.environment_value::<Tint>(), Tint(0));
+  }
+
+  /// The shell's default under the window's value, over the type's own.
+  #[test]
+  fn the_shells_default_is_under_the_windows() {
+    let mut st = UiState::default();
+    st.set_environment_default(Tint(5));
+    st.set_environment_default(Tint(6));
+    let mut ui = ui(st);
+    assert_eq!(ui.environment_value::<Tint>(), Tint(6));
+    ui.set_environment(Some(Tint(1)));
+    assert_eq!(ui.environment_value::<Tint>(), Tint(1));
+    ui.set_environment::<Tint>(None);
+    assert_eq!(ui.environment_value::<Tint>(), Tint(6));
   }
 
   /// The defaults come from the window's appearance.

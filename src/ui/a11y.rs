@@ -259,6 +259,12 @@ impl Access<'_> {
     self
   }
 
+  /// A description when nothing described it: a tip inside a control.
+  pub(crate) fn description_or(mut self, s: &str) -> Self {
+    let d = self.props().description;
+    if d.0 == d.1 { self.description(s) } else { self }
+  }
+
   /// A field's text as its value.
   pub fn text(mut self, s: &str) -> Self {
     self.props().value = Value::Text(put(&mut self.recs.text, s));
@@ -354,6 +360,26 @@ impl Ui<'_> {
     let recs = &mut self.st.tree.a11y;
     let i = *recs.index.get(&id)?;
     Some(Access { recs, i })
+  }
+
+  /// The record of the control node `i` is in: its nearest recorded ancestor, when that is a
+  /// leaf (a button whose label `i` is part of).
+  pub(super) fn a11y_control_around(&mut self, i: u32) -> Option<Access<'_>> {
+    let t = &self.st.tree;
+    let mut k = i;
+    let at = loop {
+      if k == 0 {
+        return None;
+      }
+
+      k = t.nodes[k as usize].parent;
+      if let Some(&r) = t.a11y.index.get(&t.nodes[k as usize].id) {
+        break r;
+      }
+    };
+
+    let recs = &mut self.st.tree.a11y;
+    recs.list[at].1.role.leaf().then_some(Access { recs, i: at })
   }
 
   /// The text assistive technology sets on `id` ([Action::SetValue]), seen once: a text
@@ -570,7 +596,7 @@ impl UiState {
     let mut later: Vec<(u32, u32)> = Vec::new();
     for (f, k) in recs.pairs.iter().filter_map(|f| Some((f, f.k?))) {
       let (id, p) = recs.list[k];
-      let named = |i: u32| titled(&p) && !inner_text(t, &at, i as usize, &f.texts).is_empty();
+      let named = |i: u32| titled(&p) && !inner_text(t, recs, &at, i as usize, &f.parts).is_empty();
       let node = t.find(id);
       let mine = node.is_some_and(named);
       own[k] = if mine { f.names } else { own[k] };
@@ -681,7 +707,7 @@ impl UiState {
         }
 
         if name.0 == name.1 && titled(&p) {
-          props.name = put(&mut out.text, &inner_text(t, &at, i, &[]));
+          props.name = put(&mut out.text, &inner_text(t, recs, &at, i, &[]));
         }
 
         props.states |= u8::from(focus == Some(id)) << State::Focused as u8;
@@ -707,12 +733,19 @@ fn titled(p: &Props) -> bool {
 }
 
 /// The text inside node `i` of `t`, the texts joined by spaces, leaving out the records inside
-/// it, the hidden texts and those of ids `not`.
-fn inner_text(t: &Tree, at: &[u32], i: usize, not: &[Id]) -> String {
+/// it but a text's own and an unnamed group (what a tip makes, [Ui::help]), the hidden texts and
+/// the nodes `not` (a labeled pair's label and description).
+fn inner_text(t: &Tree, recs: &Records, at: &[u32], i: usize, not: &[Range<u32>]) -> String {
   let (mut out, mut k) = (String::new(), i);
   while k < t.nodes[i].end as usize {
     let n = &t.nodes[k];
-    let skip = k != i && (at[k] != NONE || not.contains(&n.id));
+    let through = |(_, p): &(Id, Props)| match p.role {
+      Role::StaticText => matches!(n.kind, Kind::Text { .. }),
+      Role::Group => p.name.0 == p.name.1,
+      _ => false,
+    };
+    let other = at[k] != NONE && !recs.list.get(at[k] as usize).is_some_and(through);
+    let skip = k != i && (other || not.iter().any(|r| r.contains(&(k as u32))));
     if !skip && let Kind::Text { range, .. } = n.kind {
       let s = t.str(range.0, range.1).trim();
       if !out.is_empty() && !s.is_empty() {
@@ -941,6 +974,38 @@ mod tests {
     let want = "button \"Help\"\nswitch \"Open at login\" off desc \"Starts with the \
                 system\"\nbutton \"More\"\nstatic text \"Plain\"\nstatic text \"Note\"\n";
     assert_eq!(s, want);
+  }
+
+  /// A row a click selects is named by its form row's label and caption, a term with a tip among
+  /// them too: they aren't text of its own; a button's label with a tip is.
+  #[test]
+  fn a_tip_in_a_caption_leaves_a_selectable_row_named_by_it() {
+    let s = dump(|ui| {
+      let mut fs = FormStyle::plates(&ui.theme());
+      fs.row = fs.row.hit();
+      let caption = |ui: &mut Ui, s: TextStyle| {
+        ui.help("Errors per 100 words").text("WER 4.5%", s);
+        ui.text(" · 274 MB", s);
+      };
+      ui.form_row(&fs, FormRow::new("Model").caption(caption), |_| {});
+
+      // A button's tipped label is its own text, in a row of the default style.
+      let fs = FormStyle::plates(&ui.theme());
+      ui.form_row(&fs, FormRow::new("Account"), |ui| {
+        _ = ui.button(|ui: &mut Ui, s: TextStyle| ui.help("Signs out").text("Out", s));
+        // A tip on a container of the label: a group.
+        _ = ui.button(|ui: &mut Ui, s: TextStyle| {
+          ui.help("Saves it").row(Style::new(), |ui| ui.text("Save", s))
+        });
+      });
+
+      _ = ui.take_tooltips();
+    });
+    assert!(s.starts_with("row \"Model\" desc"), "{s}");
+    // The tips describe the buttons: no node inside takes their hits.
+    assert!(s.contains("button \"Out\" desc \"Signs out\"\n"), "{s}");
+    assert!(s.contains("button \"Save\" desc \"Saves it\"\n"), "{s}");
+    assert!(!s.contains("static text \"Out\"") && !s.contains("group"), "{s}");
   }
 
   /// A button keeps its own text, and the row's label is read; a text that is the value (a

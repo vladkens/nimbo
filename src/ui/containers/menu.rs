@@ -212,7 +212,7 @@ mod tests {
   use crate::app::{App, Event, MouseButton, Phase};
   use crate::harness::Harness;
   use crate::scene::Size;
-  use crate::ui::ControlSize;
+  use crate::ui::{ControlSize, TextStyle};
 
   /// A menu inside a scroll area over tall content; its items count their runs.
   #[derive(Default)]
@@ -424,6 +424,34 @@ mod tests {
     h.app_mut().shown = true;
     h.frame();
     assert!(!h.rt.ui.menu_open(Id::of("el")));
+  }
+
+  /// An unnamed tipped row with a menu of its own in a button with one: its id.
+  #[derive(Default)]
+  struct Tipped(Option<Id>);
+
+  impl App for Tipped {
+    fn view(&mut self, ui: &mut Ui) {
+      let b = ui.id("b").button(|ui: &mut Ui, _: TextStyle| {
+        let row = ui.help("Tip").row(Style::new().w(px(80.0)).h(px(20.0)), |_| {});
+        ui.context_menu(row.id, || Menu::new(vec![Item::button("in", "In")]));
+        self.0 = Some(row.id);
+      });
+      ui.context_menu(b.id, || Menu::new(vec![Item::button("out", "Out")]));
+    }
+  }
+
+  /// A secondary press on a tipped element opens its own menu, not the one around it.
+  #[test]
+  fn a_tipped_element_keeps_its_context_menu() {
+    let mut h = Harness::new(Tipped::default(), Size::new(300.0, 300.0), 1.0);
+    h.set_native_menus(true);
+    h.frame();
+    let row = h.app().0.unwrap();
+    let r = h.rect(row).unwrap();
+    h.right_click(r.x + r.w / 2.0, r.y + r.h / 2.0);
+    h.frame();
+    assert!(h.rt.ui.menu_open(row) && !h.rt.ui.menu_open(Id::of("b")));
   }
 
   /// A menu enabled in a disabled container, sized: what it was given reaches its items.

@@ -72,9 +72,10 @@ use std::time::Duration;
 
 pub use a11y::{A11yNode, A11yTree, Action, LabeledPairRole, Props, Role, State, Value};
 pub use behavior::{
-  Behavior, Content, DialogBehavior, EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle,
-  ListBehavior, ListRows, MenuPlacement, ScrollBar, ScrollBehavior, ScrollerKnob, SectionHeader,
-  Selection, SplitBehavior, TextInput, TypeSelect,
+  Behavior, Button, ButtonConfiguration, ButtonRole, ButtonStyle, Content, DialogBehavior,
+  EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, ListBehavior, ListRows, MenuPlacement,
+  PlainButtonStyle, ScrollBar, ScrollBehavior, ScrollerKnob, SectionHeader, Selection,
+  SplitBehavior, TextInput, TypeSelect,
 };
 pub use containers::{
   List, ListResponse, ListStyle, Picker, Row, Split, Tabs, Tag, ToolbarItemPlacement,
@@ -98,8 +99,10 @@ pub use style::{
 };
 pub use textlayout::Edit;
 pub(crate) use textlayout::TextLayout;
-pub use theme::{ButtonLook, ButtonStyle, ControlBorder, Sizes, SwitchSize, Theme, Tone};
-pub use widgets::{Button, ButtonRole, Slider};
+pub use theme::{ControlBorder, Sizes, SwitchSize, Theme, Tone};
+pub use widgets::{
+  BorderedButtonStyle, BorderedProminentButtonStyle, BorderlessButtonStyle, Slider,
+};
 
 use self::input::{Deliver, Input, ScrollState};
 use self::store::{Anim, Store};
@@ -148,6 +151,9 @@ pub(crate) struct UiState {
   pub(crate) clipboard: Box<dyn Clipboard>,
   /// Values the whole window shares, one per type ([Ui::set_environment]).
   env: Vec<Box<dyn Any>>,
+  /// The shell's defaults under the window's values, one per type
+  /// ([UiState::set_environment_default]).
+  env_defaults: Vec<Box<dyn Any>>,
   /// Values scoped to the elements being built ([Ui::environment]).
   scoped: environment::Scoped,
   /// The focus ring the view set this frame ([Ui::set_focus_ring]), over the default, which the
@@ -229,6 +235,7 @@ impl Default for UiState {
       waker: Waker::default(),
       clipboard: Box::default(),
       env: Vec::new(),
+      env_defaults: Vec::new(),
       scoped: environment::Scoped::default(),
       own_ring: None,
       ring: None,
@@ -754,8 +761,10 @@ impl<'a> Ui<'a> {
   /// (its left edge at the pointer, 19 below it, after `Theme::tip_delay`, at once within
   /// `Theme::tip_warm` of another), and reads it as its description to assistive technology, as
   /// SwiftUI's `.help`: any element, a text (read where it stands), a widget, a container or a
-  /// canvas (read as a group, its children as ever). It takes the pointer, so a click on it is
-  /// its own, not its parent's. The tip is `id.key("tip")` of the element's id.
+  /// canvas (read as a group, its children as ever). It takes the hover for the tip alone: a
+  /// primary press on it is the interactive element's around it (a button whose label has a
+  /// tip), a secondary one opens its own context menu if it has one. The tip is `id.key("tip")`
+  /// of the element's id.
   pub fn help(&mut self, tip: &str) -> &mut Self {
     self.next_help = Some(tip.to_owned());
     self
@@ -772,7 +781,8 @@ impl<'a> Ui<'a> {
   /// the view. Taken: the shell shows those left after the view (nimbo's styled tooltip), so
   /// a view that takes them draws them all. Each tip is its element's description for assistive
   /// technology, set here, so it is read however it is drawn; one with no record gets one to
-  /// carry it: a text as itself, any other a group, whose children are read as ever.
+  /// carry it: in a control (a button's label), the control's, unless it has one; else a text
+  /// as itself, any other a group, whose children are read as ever.
   pub fn take_tooltips(&mut self) -> Vec<(Id, String)> {
     let mut out = Vec::with_capacity(self.helps.len());
     for (i, tip) in std::mem::take(&mut self.helps) {
@@ -781,6 +791,15 @@ impl<'a> Ui<'a> {
         Kind::Text { range, .. } => (n.id, Some(self.st.tree.str(range.0, range.1).to_owned())),
         _ => (n.id, None),
       };
+
+      // A node of its own in a control would take its hits from assistive technology.
+      if self.a11y_of(id).is_none()
+        && let Some(c) = self.a11y_control_around(i)
+      {
+        _ = c.description_or(&tip);
+        out.push((id, tip));
+        continue;
+      }
 
       match (self.a11y_of(id), text) {
         (Some(a), _) => _ = a.description(&tip),
@@ -1048,13 +1067,15 @@ impl<'a> Ui<'a> {
     // pointer to work, a scroll container, a focusable element, a tip, takes it anyway.
     let off = std::mem::take(&mut self.next_no_hit);
     let hit = style.hit || named || style.cursor != Cursor::Inherit;
-    let hit = (hit && !off) || scrolls || focus || help.is_some();
+    let own = (hit && !off) || scrolls || focus;
+    let hit = own || help.is_some();
     // Its style's `hit` turned off too: no hover as an interactive child's ancestor.
     style.hit = hit;
     let tree = &mut self.st.tree;
     let i = tree.nodes.len() as u32;
     self.helps.extend(help.map(|tip| (i, tip)));
     tree.drags.extend(drag.then_some(i));
+    tree.tips.extend((hit && !own).then_some(i));
 
     let float = self.next_float.take();
     if float.is_some() {
