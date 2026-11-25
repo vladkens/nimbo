@@ -1,8 +1,9 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! Tests of `examples/dictation/` through the harness, a module per window, each alone at its
-//! size: [history], [diagnostics] and [hud]; the tray's menu in [tray] (with the detached tray's
-//! scenario where it needs no main thread); here a dictation from start to History.
+//! size: [settings] (its Account tab alone in [account]), [history], [diagnostics] and [hud];
+//! the tray's menu in [tray] (with the detached tray's scenario where it needs no main thread);
+//! here a dictation from start to History.
 
 #[path = "../../examples/dictation/main.rs"]
 #[expect(dead_code, reason = "its main and what these tests don't use")]
@@ -13,11 +14,13 @@ mod dictation;
 #[path = "../common/mod.rs"]
 mod common;
 
+mod account;
 #[cfg(not(target_os = "macos"))]
 mod detached;
 mod diagnostics;
 mod history;
 mod hud;
+mod settings;
 mod tray;
 
 use std::cell::RefCell;

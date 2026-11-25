@@ -1,32 +1,31 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! A demo app's settings window in macOS 26 System Settings' look ([nimbo::FormStyle::plates]):
-//! toolbar tabs (General, Appearance, Advanced, About) over pages of grey plates, in a window
-//! 680 wide whose height follows the page. General has switches (one with a warning while it is
-//! on), pickers (one with an ⓘ tooltip, one with a description and a divider), a shortcut
+//! The app's settings window in macOS 26 System Settings' look ([nimbo::FormStyle::plates]):
+//! toolbar tabs (General, Account, Appearance, Advanced, About) over pages of grey plates, in a
+//! window 680 wide whose height follows the page. General has switches (one with a warning while
+//! it is on), pickers (one with an ⓘ tooltip, one with a description and a divider), a shortcut
 //! recorder with its reset (a warning and an ⓘ in one tooltip while it is the default) under a
 //! section header with a grey line, a row disabled by another setting, with a badge after its
-//! name, whose ⓘ still shows its tooltip, and a segmented control; Appearance the look (which
-//! applies at once), a slider and a switch with a long description that wraps beside it;
-//! Advanced tiles, badges, a section header with a note, a task's progress under its description
-//! and buttons, two of which ask in a modal dialog first, and a footer with the "?"; About the
-//! app and its licenses. Pages fade out under the edges of their scroll area; light or dark and in
-//! the accent the system has.
+//! name, whose ⓘ still shows its tooltip, and a segmented control; Account the text fields
+//! ([super::account]); Appearance the look (which applies at once), a slider and a switch with a
+//! long description that wraps beside it; Advanced tiles, badges, a section header with a note, a
+//! task's progress under its description and buttons, two of which ask in a modal dialog first,
+//! and a footer with the "?"; About the app and its licenses. Pages fade out under the edges of
+//! their scroll area; light or dark and in the accent the system has.
 //!
-//! `cargo run --release --example settings [-- --shot <file.png>]`: the shot rests the pointer
-//! on the ⓘ of "On launch" until its tooltip shows.
-
-// A Windows app, not a console one: no terminal opens with its window.
-#![cfg_attr(windows, windows_subsystem = "windows")]
+//! `cargo run --release --example dictation -- settings [--shot <file.png>]` opens it alone;
+//! the shot rests the pointer on the ⓘ of "On launch" until its tooltip shows.
 
 use std::time::Duration;
 
 use nimbo::ui::widgets::icon;
 use nimbo::{
-  Align, Answer, App, Appearance, ButtonRole, ColorScheme, Config, ControlSize, Dialog, FormRow,
-  FormStyle, Hotkey, Icon, Id, Picker, Rect, Section, SegmentedPickerStyle, Style, TabItem, Tag,
-  TextStyle, Theme, Tone, Ui, grow, px,
+  Align, Answer, App, Appearance, ButtonRole, ColorScheme, Config, ControlSize, Cx, Dialog, Event,
+  FormRow, FormStyle, Harness, Hotkey, Icon, Id, Picker, Rect, Section, SegmentedPickerStyle,
+  Style, TabItem, Tag, TextStyle, Theme, Tone, Ui, grow, px,
 };
+
+use super::account::{self, Account};
 
 pub const TABS: &str = "tabs";
 pub const LOGIN: &str = "login";
@@ -59,13 +58,15 @@ pub const WIDTH: f32 = 680.0;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Page {
   General,
+  Account,
   Appearance,
   Advanced,
   About,
 }
 
-pub const PAGES: [TabItem<Page>; 4] = [
+pub const PAGES: [TabItem<Page>; 5] = [
   TabItem::new(Page::General, Icon::GEAR, "General"),
+  TabItem::new(Page::Account, account::PERSON, "Account"),
   TabItem::new(Page::Appearance, Icon::CONTRAST, "Appearance"),
   TabItem::new(Page::Advanced, Icon::SLIDERS, "Advanced"),
   TabItem::new(Page::About, Icon::INFO, "About"),
@@ -138,6 +139,7 @@ pub struct Settings {
   pub launch: Launch,
   pub lang: usize,
   pub hotkey: Option<Hotkey>,
+  pub account: Account,
   pub updates: bool,
   pub download: bool,
   pub channel: Channel,
@@ -151,6 +153,11 @@ pub struct Settings {
   /// The question the dialog asks, while it is open.
   pub ask: Option<Ask>,
   pub resets: usize,
+  /// Pauses the app's hotkeys, or lets them go again: while the recorder has the keys, the app's
+  /// own hotkey would take the chord it records.
+  pub pause_hotkeys: fn(bool),
+  /// The hotkeys paused for the recorder.
+  pub paused: bool,
 }
 
 impl Default for Settings {
@@ -161,6 +168,7 @@ impl Default for Settings {
       launch: Launch::Restore,
       lang: 0,
       hotkey: Hotkey::parse(DEFAULT_HOTKEY).ok(),
+      account: Account::new(),
       updates: true,
       download: false,
       channel: Channel::Stable,
@@ -172,6 +180,8 @@ impl Default for Settings {
       cache: 128,
       ask: None,
       resets: 0,
+      pause_hotkeys: |_| {},
+      paused: false,
     }
   }
 }
@@ -270,11 +280,6 @@ impl Settings {
   }
 
   fn advanced(&mut self, ui: &mut Ui, fs: &FormStyle) {
-    ui.form_section(fs, "Account", |ui| {
-      let row = FormRow::new("Alex Doe").caption("alex@example.com").tile("AD");
-      ui.form_row(fs, row, |ui| ui.button("Sign Out…"));
-    });
-
     let used = format!("{} MB used", self.cache + 512);
     let storage = |ui: &mut Ui, s: TextStyle| {
       ui.text("Storage", s);
@@ -365,6 +370,7 @@ impl Settings {
 
     ui.col(page, |ui| match self.page {
       Page::General => self.general(ui, fs),
+      Page::Account => self.account.page(ui, fs),
       Page::Appearance => self.appearance(ui, fs),
       Page::Advanced => self.advanced(ui, fs),
       Page::About => self.about(ui, fs),
@@ -390,7 +396,8 @@ impl Settings {
         Ask::ClearCache => self.cache = 0,
         Ask::ResetAll => {
           let (page, resets) = (self.page, self.resets + 1);
-          *self = Self { page, resets, ..Self::default() };
+          let (pause_hotkeys, paused) = (self.pause_hotkeys, self.paused);
+          *self = Self { page, resets, pause_hotkeys, paused, ..Self::default() };
         }
       }
     }
@@ -410,6 +417,17 @@ fn app_icon(f: &mut nimbo::Frame, r: Rect, accent: nimbo::Color) {
 }
 
 impl App for Settings {
+  /// The window losing the keys lets the hotkeys go at once: hidden or covered, it may not run
+  /// its view again until it shows.
+  fn event(&mut self, _: &mut Cx, ev: &Event) -> bool {
+    if *ev == Event::Focus(false) && self.paused {
+      (self.pause_hotkeys)(false);
+      self.paused = false;
+    }
+
+    false
+  }
+
   fn view(&mut self, ui: &mut Ui) {
     let a = ui.appearance();
     match self.look {
@@ -428,19 +446,26 @@ impl App for Settings {
       });
     });
     self.confirm(ui);
+
+    // Also when the recorder lost its focus with the page.
+    let recording = ui.focused(Id::of(HOTKEY)) && ui.window_focused();
+    if recording != self.paused {
+      (self.pause_hotkeys)(recording);
+      self.paused = recording;
+    }
   }
 }
 
-fn main() {
-  nimbo::run_example(
-    Config::new("Settings", WIDTH, 560.0).fixed().unified(),
-    Settings::default(),
-    |h| {
-      h.frame();
-      h.frame();
-      let r = h.rect(Id::of(LAUNCH_ROW).key("info")).expect("the ⓘ of On launch");
-      h.move_to(r.x + r.w / 2.0, r.y + r.h / 2.0);
-      h.wait(Duration::from_millis(400));
-    },
-  );
+/// The window as the app opens it; the page sets its height.
+pub fn config() -> Config {
+  Config::new("Settings", WIDTH, 560.0).fixed().unified()
+}
+
+/// The shot: the pointer on the ⓘ of "On launch" until its tooltip shows.
+pub fn shot(h: &mut Harness<Settings>) {
+  h.frame();
+  h.frame();
+  let r = h.rect(Id::of(LAUNCH_ROW).key("info")).expect("the ⓘ of On launch");
+  h.move_to(r.x + r.w / 2.0, r.y + r.h / 2.0);
+  h.wait(Duration::from_millis(400));
 }

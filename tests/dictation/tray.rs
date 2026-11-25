@@ -32,6 +32,7 @@ fn the_example() {
   let l = labels(&idle);
   assert_eq!(l[0], ("Ctrl+Alt+Space starts a dictation".into(), false, false));
   assert_eq!(l[1].0, "Start Dictation");
+  assert!(l.iter().any(|i| i.0 == "Settings…" && i.1), "Settings… whether open or not");
   assert_eq!(login(&l), Some(("Launch at Login".into(), false, false)), "no launch at login");
 
   let recording = Shown { recording: true, login: Some(true), ..idle.clone() };
@@ -69,11 +70,11 @@ fn the_tray_menu() {
   assert_eq!(s.last, Some(Change::Lid));
 }
 
-/// Showing History when it is closed (a second launch's "open", a reopen) opens it, which
+/// Showing Settings when it is closed (a second launch's "open", a reopen) opens it, which
 /// borrows the state again: the lookup lets its borrow go first.
 #[test]
 fn a_closed_window_is_looked_up_without_holding_the_state() {
   let state = dictation::Shared::default();
-  assert!(dictation::open_window(&state, |s| &s.history).is_none());
+  assert!(dictation::open_window(&state, |s| &s.settings).is_none());
   assert!(state.try_borrow_mut().is_ok(), "the state is free to open the window");
 }
