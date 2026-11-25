@@ -19,16 +19,16 @@
 //! ```no_run
 //! use std::time::Duration;
 //!
-//! use nimbo::{AppInfo, Presence, instance, paths, uninstall};
+//! use nimbo::{AppInfo, instance, paths, uninstall};
 //!
-//! const INFO: AppInfo =
-//!   AppInfo { id: "com.example.app", name: "App", presence: Presence::Regular };
+//! const INFO: AppInfo = AppInfo::new("com.example.app", "App");
 //! instance::quit_and_wait(&INFO, Duration::from_secs(5))?;
 //! for step in uninstall::system(&INFO) {
 //!   println!("{step}");
 //! }
 //!
-//! let dirs = [paths::data_dir(INFO.id), paths::config_dir(INFO.id), paths::cache_dir(INFO.id)];
+//! let id = INFO.id();
+//! let dirs = [paths::data_dir(id), paths::config_dir(id), paths::cache_dir(id)];
 //! for path in uninstall::outermost(dirs).into_iter().chain(uninstall::app_path()) {
 //!   if let Err(e) = uninstall::remove(&path) {
 //!     println!("could not remove {}: {e}", path.display());

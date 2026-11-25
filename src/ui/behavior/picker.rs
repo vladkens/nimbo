@@ -36,14 +36,14 @@ use crate::ui::{
 /// `const LAUNCH: [Tag<Launch>; 2] = [Tag::new(Launch::Window, "Open a window"), ..]`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tag<'s, T> {
-  pub value: T,
-  pub label: &'s str,
+  pub(crate) value: T,
+  pub(crate) label: &'s str,
   /// An icon by the label: over it in a toolbar's tab; a picker's style shows it if it draws one
   /// ([PickerConfiguration::icon]).
-  pub icon: Option<Icon>,
+  pub(crate) icon: Option<Icon>,
   /// A count drawn after the label, dimmed, by the styles that show one (the segments); the
   /// menu shows none.
-  pub count: Option<usize>,
+  pub(crate) count: Option<usize>,
 }
 
 impl<'s, T> Tag<'s, T> {
@@ -61,6 +61,14 @@ impl<'s, T: Copy> Tag<'s, T> {
   /// With `n` after the label, dimmed: a filter's matches.
   pub const fn count(self, n: usize) -> Self {
     Self { count: Some(n), ..self }
+  }
+
+  pub const fn value(&self) -> T {
+    self.value
+  }
+
+  pub const fn label(&self) -> &'s str {
+    self.label
   }
 }
 

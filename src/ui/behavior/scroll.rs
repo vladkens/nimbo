@@ -32,8 +32,8 @@ pub(super) const MIN_THUMB: f32 = 24.0;
 /// a track. [Self::DARK] in the light color scheme ([Ui::color_scheme]), [Self::LIGHT] in the dark.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScrollerKnob {
-  pub color: Color,
-  pub hover: Transition,
+  pub(crate) color: Color,
+  pub(crate) hover: Transition,
 }
 
 impl ScrollerKnob {
@@ -41,6 +41,11 @@ impl ScrollerKnob {
   pub const DARK: Self = Self { color: alpha([0.0, 0.0, 0.0, 1.0], 0.24), hover: HOVER };
   /// AppKit's `.light`: a light knob, for dark content (the dark appearance's).
   pub const LIGHT: Self = Self { color: alpha([1.0; 4], 0.26), hover: HOVER };
+
+  /// In `color`, as an app's own knob: `ScrollerKnob::DARK.color(red)`.
+  pub const fn color(self, color: Color) -> Self {
+    Self { color, ..self }
+  }
 }
 
 impl EnvironmentValue for ScrollerKnob {

@@ -222,9 +222,9 @@ impl Settings {
     });
 
     let shortcuts = |ui: &mut Ui, s: TextStyle| {
-      ui.col(Style::new().w(grow()).gap(fs.subtitle_gap), |ui| {
+      ui.col(Style::new().w(grow()).gap(fs.subtitle_gap()), |ui| {
         ui.text("Shortcuts", s);
-        ui.text("Work in every app, while this one runs.", fs.subtitle);
+        ui.text("Work in every app, while this one runs.", fs.subtitle());
       });
     };
     ui.form_section(fs, Section::new(shortcuts), |ui| {
@@ -284,7 +284,7 @@ impl Settings {
     let storage = |ui: &mut Ui, s: TextStyle| {
       ui.text("Storage", s);
       ui.spacer();
-      ui.text(&used, fs.note);
+      ui.text(&used, fs.note());
     };
     ui.form_section(fs, Section::new(storage), |ui| {
       let folder = |ui: &mut Ui, s: TextStyle| ui.text("Data folder", s.line_limit(1));
@@ -342,7 +342,7 @@ impl Settings {
       ui.el(Style::new().h(px(10.0)));
       ui.text("Example", t.label().font(t.bold().size(20.0)));
       ui.el(Style::new().h(px(2.0)));
-      ui.text("Version 1.0.0", fs.note);
+      ui.text("Version 1.0.0", fs.note());
       ui.el(Style::new().h(px(8.0)));
       ui.text("A demo of nimbo's settings form, dialog and widgets.", t.label());
       ui.el(Style::new().h(px(10.0)));
@@ -363,9 +363,9 @@ impl Settings {
     let page = match self.page {
       Page::About => {
         self.about_head(ui, fs);
-        fs.page.pads([20.0, 20.0, 20.0, 20.0])
+        fs.page().pads([20.0, 20.0, 20.0, 20.0])
       }
-      _ => fs.page,
+      _ => fs.page(),
     };
 
     ui.col(page, |ui| match self.page {
@@ -441,7 +441,7 @@ impl App for Settings {
     // The window as high as the page, in the OS's font.
     ui.fit_window_height(WIDTH, 300.0, 720.0);
     let fs = FormStyle::plates(&ui.theme());
-    ui.col(Style::new().grow().bg(fs.bg), |ui| {
+    ui.col(Style::new().grow().bg(fs.bg()), |ui| {
       ui.id(TABS).toolbar_tabs(&fs, &mut self.page, &PAGES);
       ui.id(("page", self.page as u8)).form_scroll(&fs, Style::new().grow(), |ui| {
         ui.col(Style::new().w(grow()), |ui| self.page(ui, &fs));

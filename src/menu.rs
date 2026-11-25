@@ -24,7 +24,7 @@ pub enum ButtonRole {
 /// type `A` (an enum of what its menus do), as SwiftUI's menus run a button's action.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Menu<A> {
-  pub items: Vec<Item<A>>,
+  pub(crate) items: Vec<Item<A>>,
 }
 
 impl<A> Default for Menu<A> {
@@ -36,6 +36,11 @@ impl<A> Default for Menu<A> {
 impl<A> Menu<A> {
   pub fn new(items: Vec<Item<A>>) -> Self {
     Self { items }
+  }
+
+  /// Its items, in the order they show.
+  pub fn items(&self) -> &[Item<A>] {
+    &self.items
   }
 
   /// The menu with each action replaced by its number, depth first in the order they show,

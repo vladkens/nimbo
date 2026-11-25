@@ -58,13 +58,13 @@ impl Gallery {
         _ => ui.form_row(&fs, FormRow::new("Row"), |ui| ui.toggle(on, ())),
       };
 
-      let page = Style::new().w(grow()).gap(10.0).pad(10.0).radius(12.0).bg(fs.bg);
+      let page = Style::new().w(grow()).gap(10.0).pad(10.0).radius(12.0).bg(fs.bg());
       ui.col(page, |ui| match name {
         "Section" => {
           let head = |ui: &mut Ui, s: TextStyle| {
             ui.text("Storage", s);
             ui.spacer();
-            ui.text("640 MB used", fs.note);
+            ui.text("640 MB used", fs.note());
           };
           let section = Section::new(head).footer("Kept until you clear it.");
           _ = ui.form_section(&fs, section, |ui| row(ui, on, level));

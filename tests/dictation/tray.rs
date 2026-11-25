@@ -23,7 +23,7 @@ fn detached_tray() {
 fn the_example() {
   let labels = |s: &Shown| {
     let m = dictation::menu(s);
-    let items = m.items.iter().map(|i| (i.label().to_owned(), i.is_enabled(), i.is_on()));
+    let items = m.items().iter().map(|i| (i.label().to_owned(), i.is_enabled(), i.is_on()));
     items.collect::<Vec<_>>()
   };
   let login = |l: &[(String, bool, bool)]| l.iter().find(|i| i.0 == "Launch at Login").cloned();
@@ -58,8 +58,8 @@ fn the_tray_menu() {
   // The two lines from the lid's on.
   let labels = |s: &Seen| {
     let m = dictation::menu(&Shown { seen: s.clone(), ..Shown::default() });
-    let lid = m.items.iter().position(|i| i.label().starts_with("Lid:")).unwrap();
-    m.items[lid..lid + 2].iter().map(|i| i.label().to_owned()).collect::<Vec<_>>()
+    let lid = m.items().iter().position(|i| i.label().starts_with("Lid:")).unwrap();
+    m.items()[lid..lid + 2].iter().map(|i| i.label().to_owned()).collect::<Vec<_>>()
   };
 
   assert_eq!(labels(&s), ["Lid: None", "Audio changes: 0"]);

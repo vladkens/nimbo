@@ -233,8 +233,8 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
   };
   let name = info.name;
   shell(|s| *s = Shell { name, delegate: Some(delegate.clone()), ..Shell::default() });
-  super::app::set_presence(info.presence);
-  if info.presence == Presence::Regular {
+  super::app::set_presence(info.get_presence());
+  if info.get_presence() == Presence::Regular {
     activate(mtm);
   }
 

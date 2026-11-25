@@ -39,8 +39,7 @@
 //!   }
 //! }
 //!
-//! const INFO: AppInfo =
-//!   AppInfo { id: "com.example.rec", name: "Rec", presence: Presence::Accessory };
+//! const INFO: AppInfo = AppInfo::new("com.example.rec", "Rec").presence(Presence::Accessory);
 //! nimbo::app(INFO, |main| {
 //!   let kinds = [Change::AudioInputs, Change::DefaultInput, Change::Lid];
 //!   // The tray's menu built again here; the windows hear it after.

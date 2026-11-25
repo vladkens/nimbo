@@ -96,17 +96,17 @@ impl App for History {
     let (rows, days, starts) = (self.rows, &self.days, &self.starts);
     let key = |i: usize| (rows - i) as u64;
     let head = |ui: &mut Ui, g: usize| {
-      ui.text(&days[g].0, fs.head);
+      ui.text(&days[g].0, fs.head());
       ui.spacer();
-      ui.text(format!("{} dictations", days[g].1), fs.note);
+      ui.text(format!("{} dictations", days[g].1), fs.note());
     };
-    let head_h = ui.metrics(fs.head.get_font()).line_height() + fs.head_pad[2];
+    let head_h = ui.metrics(fs.head().get_font()).line_height() + fs.head_pad()[2];
 
     let mut copied = None;
     let mut sel = std::mem::take(&mut self.sel);
     let list = List::new(rows, ROW_H).key(&key).selection(&mut sel);
     let list = list.sections(starts, head_h, &head);
-    ui.col(Style::new().grow().bg(fs.bg), |ui| {
+    ui.col(Style::new().grow().bg(fs.bg()), |ui| {
       list.show(ui.list_style(&InsetGroupedListStyle).id(LIST), |ui, row| {
         let i = row.index - starts[starts.partition_point(|&s| s <= row.index) - 1];
         let e = row.key;
@@ -115,8 +115,8 @@ impl App for History {
           format!("{:02}:{:02} · {}.{} s", 23 - i / 7 % 24, 59 - i % 60, 2 + e % 9, e % 10);
 
         ui.col(Style::new().w(grow()).gap(2.0), |ui| {
-          ui.text(&text, fs.label.line_limit(1));
-          ui.text(&caption, fs.caption.line_limit(1));
+          ui.text(&text, fs.label().line_limit(1));
+          ui.text(&caption, fs.caption().line_limit(1));
         });
         if ui.key("copy").icon_button(Icon::COPY).clicked {
           copied = Some(e);

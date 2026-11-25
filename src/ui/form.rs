@@ -22,7 +22,7 @@
 //! let fs = FormStyle::plates(&ui.theme());
 //! ui.set_window_size(680.0, self.page.height());
 //! ui.id("tabs").toolbar_tabs(&fs, &mut self.page, &[Tag::new(Page::General, "General").icon(Icon::GEAR), ..]);
-//! ui.id(("page", self.page as u8)).form_scroll(&fs, Style::new().grow(), |ui| ui.col(fs.page, |ui| {
+//! ui.id(("page", self.page as u8)).form_scroll(&fs, Style::new().grow(), |ui| ui.col(fs.page(), |ui| {
 //!   ui.form_section(&fs, "Startup", |ui| {
 //!     let label = |ui: &mut Ui, s: TextStyle| {
 //!       ui.text("On launch", s);
@@ -54,70 +54,320 @@ use crate::locale::Localized;
 use crate::scene::{Color, Frame, Point, Quad, Rect, alpha, mix, rgb};
 use crate::text::{Font, Weight};
 
-/// A settings window's look; see the module's docs. Plain values, so an app adjusts one:
-/// `FormStyle { inset: [0.0, 0.0], ..FormStyle::plates(t) }`.
+/// A settings window's look; see the module's docs. Read and changed as the theme is:
+/// `FormStyle::plates(t).with_inset([0.0, 0.0])`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FormStyle {
+  pub(crate) head: TextStyle,
+  pub(crate) note: TextStyle,
+  pub(crate) head_pad: [f32; 4],
+  pub(crate) subtitle: TextStyle,
+  pub(crate) subtitle_gap: f32,
+  pub(crate) foot_pad: [f32; 4],
+  pub(crate) group: Style,
+  pub(crate) row: Style,
+  pub(crate) pad_y: f32,
+  pub(crate) gap: f32,
+  pub(crate) divider: Color,
+  pub(crate) hairline: f32,
+  pub(crate) inset: [f32; 2],
+  pub(crate) label: TextStyle,
+  pub(crate) caption: TextStyle,
+  pub(crate) tile: Style,
+  pub(crate) tile_x: f32,
+  pub(crate) tile_text: TextStyle,
+  pub(crate) tile_icon: f32,
+  pub(crate) page: Style,
+  pub(crate) toolbar: Style,
+  pub(crate) title: TextStyle,
+  pub(crate) tab: Style,
+  pub(crate) tab_text: TextStyle,
+  pub(crate) tab_icon: f32,
+  pub(crate) tab_stroke: f32,
+  pub(crate) tab_on: Style,
+  pub(crate) tab_glass: Option<Glass>,
+  pub(crate) footer: Style,
+  pub(crate) bg: Color,
+  pub(crate) fade: f32,
+}
+
+impl FormStyle {
   /// A section's title, and the note at its right ("4 files · 2.2 GB").
-  pub head: TextStyle,
-  pub note: TextStyle,
+  pub const fn head(&self) -> TextStyle {
+    self.head
+  }
+
+  pub const fn with_head(self, head: TextStyle) -> Self {
+    Self { head, ..self }
+  }
+
+  pub const fn note(&self) -> TextStyle {
+    self.note
+  }
+
+  pub const fn with_note(self, note: TextStyle) -> Self {
+    Self { note, ..self }
+  }
+
   /// Around a section's title: top, right, bottom, left; in by the row's padding, so the title
   /// lines up with the labels. The page's first section has no top.
-  pub head_pad: [f32; 4],
+  pub const fn head_pad(&self) -> [f32; 4] {
+    self.head_pad
+  }
+
+  pub const fn with_head_pad(self, head_pad: [f32; 4]) -> Self {
+    Self { head_pad, ..self }
+  }
+
   /// A grey line under a section's title in its header ([Section]), this far below it.
-  pub subtitle: TextStyle,
-  pub subtitle_gap: f32,
+  pub const fn subtitle(&self) -> TextStyle {
+    self.subtitle
+  }
+
+  pub const fn with_subtitle(self, subtitle: TextStyle) -> Self {
+    Self { subtitle, ..self }
+  }
+
+  pub const fn subtitle_gap(&self) -> f32 {
+    self.subtitle_gap
+  }
+
+  pub const fn with_subtitle_gap(self, subtitle_gap: f32) -> Self {
+    Self { subtitle_gap, ..self }
+  }
+
   /// Around a section's footer ([Section::footer]): top, right, bottom, left.
-  pub foot_pad: [f32; 4],
+  pub const fn foot_pad(&self) -> [f32; 4] {
+    self.foot_pad
+  }
+
+  pub const fn with_foot_pad(self, foot_pad: [f32; 4]) -> Self {
+    Self { foot_pad, ..self }
+  }
+
   /// A section's plate of rows: fill and radius.
-  pub group: Style,
+  pub const fn group(&self) -> Style {
+    self.group
+  }
+
+  pub const fn with_group(self, group: Style) -> Self {
+    Self { group, ..self }
+  }
+
   /// A row's box: least height (of a first row; the others add the hairline), padding at the
   /// sides, gap between the tile, the label and the controls.
-  pub row: Style,
+  pub const fn row(&self) -> Style {
+    self.row
+  }
+
+  pub const fn with_row(self, row: Style) -> Self {
+    Self { row, ..self }
+  }
+
   /// Above and below the label and its description; the controls centre on the label's first
   /// line, as far from the row's top.
-  pub pad_y: f32,
+  pub const fn pad_y(&self) -> f32 {
+    self.pad_y
+  }
+
+  pub const fn with_pad_y(self, pad_y: f32) -> Self {
+    Self { pad_y, ..self }
+  }
+
   /// Between the controls at a row's right.
-  pub gap: f32,
+  pub const fn gap(&self) -> f32 {
+    self.gap
+  }
+
+  pub const fn with_gap(self, gap: f32) -> Self {
+    Self { gap, ..self }
+  }
+
   /// The hairline above every row but the first: its colour and thickness, in from the plate's
   /// left and right.
-  pub divider: Color,
-  pub hairline: f32,
-  pub inset: [f32; 2],
+  pub const fn divider(&self) -> Color {
+    self.divider
+  }
+
+  pub const fn with_divider(self, divider: Color) -> Self {
+    Self { divider, ..self }
+  }
+
+  pub const fn hairline(&self) -> f32 {
+    self.hairline
+  }
+
+  pub const fn with_hairline(self, hairline: f32) -> Self {
+    Self { hairline, ..self }
+  }
+
+  pub const fn inset(&self) -> [f32; 2] {
+    self.inset
+  }
+
+  pub const fn with_inset(self, inset: [f32; 2]) -> Self {
+    Self { inset, ..self }
+  }
+
   /// The label; it wraps (`label.line_limit(1)` keeps one line).
-  pub label: TextStyle,
+  pub const fn label(&self) -> TextStyle {
+    self.label
+  }
+
+  pub const fn with_label(self, label: TextStyle) -> Self {
+    Self { label, ..self }
+  }
+
   /// The grey description under a label; it wraps.
-  pub caption: TextStyle,
+  pub const fn caption(&self) -> TextStyle {
+    self.caption
+  }
+
+  pub const fn with_caption(self, caption: TextStyle) -> Self {
+    Self { caption, ..self }
+  }
+
   /// A row's leading tile ([FormRow::tile]): its box, centred in the row, [FormStyle::tile_x] in
   /// from the plate; its text, and an icon's size (in the text's colour).
-  pub tile: Style,
-  pub tile_x: f32,
-  pub tile_text: TextStyle,
-  pub tile_icon: f32,
+  pub const fn tile(&self) -> Style {
+    self.tile
+  }
+
+  pub const fn with_tile(self, tile: Style) -> Self {
+    Self { tile, ..self }
+  }
+
+  pub const fn tile_x(&self) -> f32 {
+    self.tile_x
+  }
+
+  pub const fn with_tile_x(self, tile_x: f32) -> Self {
+    Self { tile_x, ..self }
+  }
+
+  pub const fn tile_text(&self) -> TextStyle {
+    self.tile_text
+  }
+
+  pub const fn with_tile_text(self, tile_text: TextStyle) -> Self {
+    Self { tile_text, ..self }
+  }
+
+  pub const fn tile_icon(&self) -> f32 {
+    self.tile_icon
+  }
+
+  pub const fn with_tile_icon(self, tile_icon: f32) -> Self {
+    Self { tile_icon, ..self }
+  }
+
   /// The page under the toolbar: padding and the gap between sections.
-  pub page: Style,
+  pub const fn page(&self) -> Style {
+    self.page
+  }
+
+  pub const fn with_page(self, page: Style) -> Self {
+    Self { page, ..self }
+  }
+
   /// The toolbar of tabs, and a tab: its box, label, icon size and stroke, and the selected
   /// one: the tab on a raised tile (fill, hairline, shadow), or on a glass one when
   /// `tab_glass` is set, its icon and label in the accent. A grey tile under the pointer. Under
   /// a title bar the app draws ([crate::Config::unified]) the toolbar starts with the title,
   /// centred in a line as high as the title bar, and the tabs right under it, without the top
   /// padding.
-  pub toolbar: Style,
-  pub title: TextStyle,
-  pub tab: Style,
-  pub tab_text: TextStyle,
-  pub tab_icon: f32,
-  pub tab_stroke: f32,
-  pub tab_on: Style,
-  pub tab_glass: Option<Glass>,
+  pub const fn toolbar(&self) -> Style {
+    self.toolbar
+  }
+
+  pub const fn with_toolbar(self, toolbar: Style) -> Self {
+    Self { toolbar, ..self }
+  }
+
+  pub const fn title(&self) -> TextStyle {
+    self.title
+  }
+
+  pub const fn with_title(self, title: TextStyle) -> Self {
+    Self { title, ..self }
+  }
+
+  pub const fn tab(&self) -> Style {
+    self.tab
+  }
+
+  pub const fn with_tab(self, tab: Style) -> Self {
+    Self { tab, ..self }
+  }
+
+  pub const fn tab_text(&self) -> TextStyle {
+    self.tab_text
+  }
+
+  pub const fn with_tab_text(self, tab_text: TextStyle) -> Self {
+    Self { tab_text, ..self }
+  }
+
+  pub const fn tab_icon(&self) -> f32 {
+    self.tab_icon
+  }
+
+  pub const fn with_tab_icon(self, tab_icon: f32) -> Self {
+    Self { tab_icon, ..self }
+  }
+
+  pub const fn tab_stroke(&self) -> f32 {
+    self.tab_stroke
+  }
+
+  pub const fn with_tab_stroke(self, tab_stroke: f32) -> Self {
+    Self { tab_stroke, ..self }
+  }
+
+  pub const fn tab_on(&self) -> Style {
+    self.tab_on
+  }
+
+  pub const fn with_tab_on(self, tab_on: Style) -> Self {
+    Self { tab_on, ..self }
+  }
+
+  pub const fn tab_glass(&self) -> Option<Glass> {
+    self.tab_glass
+  }
+
+  pub const fn with_tab_glass(self, tab_glass: Option<Glass>) -> Self {
+    Self { tab_glass, ..self }
+  }
+
   /// The page's footer under the last plate ([Ui::form_footer]): its box, right-aligned buttons
   /// and their gap.
-  pub footer: Style,
+  pub const fn footer(&self) -> Style {
+    self.footer
+  }
+
+  pub const fn with_footer(self, footer: Style) -> Self {
+    Self { footer, ..self }
+  }
+
   /// The window's ground, under the page.
-  pub bg: Color,
+  pub const fn bg(&self) -> Color {
+    self.bg
+  }
+
+  pub const fn with_bg(self, bg: Color) -> Self {
+    Self { bg, ..self }
+  }
+
   /// How far the page's content fades out under the edges of its scroll area
   /// ([Ui::form_scroll], [Ui::fade_edges]); 0 for none.
-  pub fade: f32,
+  pub const fn fade(&self) -> f32 {
+    self.fade
+  }
+
+  pub const fn with_fade(self, fade: f32) -> Self {
+    Self { fade, ..self }
+  }
 }
 
 /// The selected toolbar tab as macOS 26's Liquid Glass in dark ([Theme::glass]), measured
@@ -127,15 +377,57 @@ pub struct FormStyle {
 /// glow from `#282828` that fades into the fill within 6 points.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Glass {
+  pub(crate) ground: Color,
+  pub(crate) fill: Color,
+  pub(crate) rim: Color,
+  pub(crate) light: Color,
+  pub(crate) glow: Color,
+}
+
+impl Glass {
   /// The bar under the tile.
-  pub ground: Color,
+  pub const fn ground(&self) -> Color {
+    self.ground
+  }
+
+  pub const fn with_ground(self, ground: Color) -> Self {
+    Self { ground, ..self }
+  }
+
   /// The tile inside its rim, opaque.
-  pub fill: Color,
+  pub const fn fill(&self) -> Color {
+    self.fill
+  }
+
+  pub const fn with_fill(self, fill: Color) -> Self {
+    Self { fill, ..self }
+  }
+
   /// The rim down the sides.
-  pub rim: Color,
+  pub const fn rim(&self) -> Color {
+    self.rim
+  }
+
+  pub const fn with_rim(self, rim: Color) -> Self {
+    Self { rim, ..self }
+  }
+
   /// The light along the top and bottom edges and the glow inside them, at their brightest.
-  pub light: Color,
-  pub glow: Color,
+  pub const fn light(&self) -> Color {
+    self.light
+  }
+
+  pub const fn with_light(self, light: Color) -> Self {
+    Self { light, ..self }
+  }
+
+  pub const fn glow(&self) -> Color {
+    self.glow
+  }
+
+  pub const fn with_glow(self, glow: Color) -> Self {
+    Self { glow, ..self }
+  }
 }
 
 impl Glass {
@@ -1422,5 +1714,90 @@ mod tests {
     assert!(h.rt.drags_window(Point::new(150.0, 16.0)), "the title line drags the window");
     assert!(h.rt.drags_window(Point::new(5.0, tab.y + 10.0)), "so does the bar beside the tabs");
     assert!(!h.rt.drags_window(Point::new(tab.x + 10.0, tab.y + 10.0)), "a tab is clicked");
+  }
+
+  #[test]
+  fn every_with_sets_its_field() {
+    let t = FormStyle::plates(&Theme::PLATES_LIGHT)
+      .with_head(TextStyle::new(Font::mono(0.0), rgb(0)))
+      .with_note(TextStyle::new(Font::mono(1.0), rgb(1)))
+      .with_head_pad([2.0, 0.5, 1.0, 1.5])
+      .with_subtitle(TextStyle::new(Font::mono(3.0), rgb(3)))
+      .with_subtitle_gap(4.5)
+      .with_foot_pad([5.0, 0.5, 1.0, 1.5])
+      .with_group(Style::new().pad(6.0))
+      .with_row(Style::new().pad(7.0))
+      .with_pad_y(8.5)
+      .with_gap(9.5)
+      .with_divider(rgb(11))
+      .with_hairline(11.5)
+      .with_inset([12.0, 0.5])
+      .with_label(TextStyle::new(Font::mono(13.0), rgb(13)))
+      .with_caption(TextStyle::new(Font::mono(14.0), rgb(14)))
+      .with_tile(Style::new().pad(15.0))
+      .with_tile_x(16.5)
+      .with_tile_text(TextStyle::new(Font::mono(17.0), rgb(17)))
+      .with_tile_icon(18.5)
+      .with_page(Style::new().pad(19.0))
+      .with_toolbar(Style::new().pad(20.0))
+      .with_title(TextStyle::new(Font::mono(21.0), rgb(21)))
+      .with_tab(Style::new().pad(22.0))
+      .with_tab_text(TextStyle::new(Font::mono(23.0), rgb(23)))
+      .with_tab_icon(24.5)
+      .with_tab_stroke(25.5)
+      .with_tab_on(Style::new().pad(26.0))
+      .with_tab_glass(None)
+      .with_footer(Style::new().pad(28.0))
+      .with_bg(rgb(30))
+      .with_fade(30.5);
+    assert_eq!(
+      t,
+      FormStyle {
+        head: TextStyle::new(Font::mono(0.0), rgb(0)),
+        note: TextStyle::new(Font::mono(1.0), rgb(1)),
+        head_pad: [2.0, 0.5, 1.0, 1.5],
+        subtitle: TextStyle::new(Font::mono(3.0), rgb(3)),
+        subtitle_gap: 4.5,
+        foot_pad: [5.0, 0.5, 1.0, 1.5],
+        group: Style::new().pad(6.0),
+        row: Style::new().pad(7.0),
+        pad_y: 8.5,
+        gap: 9.5,
+        divider: rgb(11),
+        hairline: 11.5,
+        inset: [12.0, 0.5],
+        label: TextStyle::new(Font::mono(13.0), rgb(13)),
+        caption: TextStyle::new(Font::mono(14.0), rgb(14)),
+        tile: Style::new().pad(15.0),
+        tile_x: 16.5,
+        tile_text: TextStyle::new(Font::mono(17.0), rgb(17)),
+        tile_icon: 18.5,
+        page: Style::new().pad(19.0),
+        toolbar: Style::new().pad(20.0),
+        title: TextStyle::new(Font::mono(21.0), rgb(21)),
+        tab: Style::new().pad(22.0),
+        tab_text: TextStyle::new(Font::mono(23.0), rgb(23)),
+        tab_icon: 24.5,
+        tab_stroke: 25.5,
+        tab_on: Style::new().pad(26.0),
+        tab_glass: None,
+        footer: Style::new().pad(28.0),
+        bg: rgb(30),
+        fade: 30.5
+      }
+    );
+  }
+
+  #[test]
+  fn every_glass_with_sets_its_colour() {
+    let t = FormStyle::plates(&Theme::PLATES_DARK)
+      .tab_glass()
+      .unwrap()
+      .with_ground(rgb(1))
+      .with_fill(rgb(2))
+      .with_rim(rgb(3))
+      .with_light(rgb(4))
+      .with_glow(rgb(5));
+    assert_eq!(t, Glass { ground: rgb(1), fill: rgb(2), rim: rgb(3), light: rgb(4), glow: rgb(5) });
   }
 }

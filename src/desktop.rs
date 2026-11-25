@@ -23,17 +23,45 @@ use crate::{AppInfo, Error, Png};
 #[cfg(any(all(test, unix), target_os = "linux"))]
 use crate::{autostart, platform, png};
 
-/// What the launcher shows besides the app's name.
+/// What the launcher shows besides the app's name:
+/// `Launcher::new(Png::icon(ICON)).comment("…").categories(&["Utility"])`.
 #[derive(Clone, Copy)]
 pub struct Launcher<'a> {
   /// A tooltip's line: what the app does.
-  pub comment: &'a str,
+  pub(crate) comment: &'a str,
   /// The menu's categories by the Desktop Menu spec: `Utility`, `AudioVideo`, `Development`.
-  pub categories: &'a [&'a str],
+  pub(crate) categories: &'a [&'a str],
   /// The app's icon, square, its side one of the icon theme's sizes ([SIDES]), 256 for every
   /// size the desktop shows: `Png::icon(include_bytes!("icon.png"))`. Decoded only when [install]
   /// writes it, not on a launch that finds the entry current.
-  pub icon: Png,
+  pub(crate) icon: Png,
+}
+
+impl<'a> Launcher<'a> {
+  /// With the app's `icon`, no comment and no categories.
+  pub const fn new(icon: Png) -> Self {
+    Self { comment: "", categories: &[], icon }
+  }
+
+  pub const fn comment(self, comment: &'a str) -> Self {
+    Self { comment, ..self }
+  }
+
+  pub const fn categories(self, categories: &'a [&'a str]) -> Self {
+    Self { categories, ..self }
+  }
+
+  pub const fn get_comment(&self) -> &'a str {
+    self.comment
+  }
+
+  pub const fn get_categories(&self) -> &'a [&'a str] {
+    self.categories
+  }
+
+  pub const fn icon(&self) -> Png {
+    self.icon
+  }
 }
 
 /// The icon sides the hicolor theme looks under.
@@ -94,13 +122,13 @@ pub(crate) fn install_in(
 ) -> Result<bool, String> {
   use std::hash::{Hash, Hasher};
   let mut hash = std::hash::DefaultHasher::new();
-  l.icon.hash(&mut hash);
+  l.icon().hash(&mut hash);
   let (stamp, id) = (format!("{:016x}", hash.finish()), app.id);
-  let categories: String = l.categories.iter().map(|c| format!("{c};")).collect();
+  let categories: String = l.get_categories().iter().map(|c| format!("{c};")).collect();
   // Startup notification: GLib hands a launch its activation token, which a second launch sends
   // to the instance ([crate::instance]) for its window to come to the front.
   let keys = [
-    ("Comment", l.comment),
+    ("Comment", l.get_comment()),
     ("Categories", &categories),
     ("StartupWMClass", id),
     ("StartupNotify", "true"),
@@ -115,7 +143,7 @@ pub(crate) fn install_in(
     return Ok(false);
   }
 
-  let (side, h, px) = l.icon.rgba();
+  let (side, h, px) = l.icon().rgba();
   if side != h || !SIDES.contains(&side) {
     return Err(format!("a {side} × {h} icon: square, its side one of {SIDES:?}"));
   }
