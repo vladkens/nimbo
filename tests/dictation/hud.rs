@@ -1,23 +1,15 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Tests of `examples/hud.rs` through the harness: the overlay's config, its frame transparent
-//! around the pill and its shadow, the pill, dot and bars where they are, and the meter moving
-//! on every frame while it records.
-
-#[path = "../examples/hud.rs"]
-#[expect(dead_code, reason = "its main and what this file doesn't use")]
-// The example sets the Windows subsystem, an attribute of its own crate, not of this module.
-#[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
-mod hud;
-
-#[expect(dead_code, reason = "this file uses a part of the helpers")]
-mod common;
+//! Tests of `examples/dictation/hud.rs` through the harness: the overlay's config, its frame
+//! transparent around the pill and its shadow, the pill, dot and bars where they are, and the
+//! meter moving on every frame while it records.
 
 use std::time::Duration;
 
-use common::{diff, px};
-use hud::{CONFIG, DOT, FILL, Hud, PILL_H, pill};
 use nimbo::{Anchor, Harness};
+
+use crate::common::{diff, px};
+use crate::dictation::hud::{self, CONFIG, DOT, FILL, Hud, PILL_H, pill};
 
 /// The HUD as `--shot` renders it: transparent, as its config is an overlay's.
 fn hud() -> Harness<Hud> {

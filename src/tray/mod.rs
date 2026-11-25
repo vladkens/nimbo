@@ -285,8 +285,8 @@ pub fn available() -> Result<(), String> {
   imp::available()
 }
 
-/// For the tray scenario (`tests/tray.rs`): a tray with nothing on screen, the menu as the OS
-/// got it, and its items chosen without opening it.
+/// For the tray scenario (`tests/dictation/detached.rs`): a tray with nothing on screen, the menu
+/// as the OS got it, and its items chosen without opening it.
 #[doc(hidden)]
 impl<A: Clone + PartialEq + 'static> Tray<A> {
   pub fn detached(icon: TrayIcon, tooltip: &str) -> Self {

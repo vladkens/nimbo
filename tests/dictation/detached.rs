@@ -5,8 +5,8 @@
 //! disabled and destructive items, separators, a submenu), rebuilt as it opens, kept while open
 //! (a new one waits for it to close, the app told as it closes), and items chosen through the OS's
 //! own path, reaching the app by id; icons from RGBA and from path data, and the title beside them
-//! where the OS has one. A plain test on Windows and Linux (`tests/tray.rs`); on macOS the NSMenu
-//! and NSImage are main thread only, which the test harness isn't.
+//! where the OS has one. A plain test on Windows and Linux (`tests/dictation/tray.rs`); on macOS
+//! the NSMenu and NSImage are main thread only, which the test harness isn't.
 
 use std::cell::RefCell;
 use std::rc::Rc;
