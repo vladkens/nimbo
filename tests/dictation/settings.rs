@@ -2,7 +2,7 @@
 
 //! Harness tests for `examples/dictation/settings.rs`: the toolbar turns pages and the window
 //! follows their height; switches flip, a row disabled by another setting ignores clicks; a select
-//! opens over its button and chooses by letters typed, closed and open; the shortcut recorder
+//! opens over its button and chooses by letters typed, closed and open; the hotkey recorder
 //! records a chord and a modifier key alone, Escape and a click elsewhere stop it, Backspace clears
 //! it, the reset puts the default back, the app's hotkeys pause while it has the keys; the slider
 //! drags and steps, greys with the selected segment while the window isn't key; the dialog asks

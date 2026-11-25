@@ -34,8 +34,8 @@ use crate::platform::hotkey as imp;
 pub const MAX: usize = 8;
 
 /// A modifier key alone can be the hotkey ([Hotkey::Modifier]): on macOS and Windows; Linux's
-/// grab and portal take only chords, so the shortcut recorder ([crate::Ui::shortcut]) records none
-/// there.
+/// grab and portal take only chords, so the hotkey recorder ([crate::Ui::hotkey_recorder]) records
+/// none there.
 pub fn modifier_alone() -> bool {
   imp::modifier_alone()
 }
@@ -189,7 +189,7 @@ impl Hotkeys {
     self.places.iter().find_map(|p| p.error.clone()).map_or(Ok(()), Err)
   }
 
-  /// While a shortcut recorder records a new hotkey the current ones are not matched: their keys
+  /// While a hotkey recorder records a new hotkey the current ones are not matched: their keys
   /// reach the window.
   pub fn pause(&mut self, paused: bool) {
     if self.paused != paused {

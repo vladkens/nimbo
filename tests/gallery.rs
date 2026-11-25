@@ -196,7 +196,7 @@ fn every_widget_in_both_themes() {
     h.wait(Duration::from_millis(400));
     assert!(h.rect(save.key("tip")).is_some(), "the tip after a rest");
 
-    let mut h = on("Shortcut recorder", look);
+    let mut h = on("Hotkey recorder", look);
     // The recorder: a button with no name, its shortcut its value.
     let t2 = h.a11y_tree();
     let rec =
@@ -465,7 +465,7 @@ fn a_row_footer_spans_its_row() {
 #[test]
 fn clear_marks_are_beside_their_controls() {
   for (name, first) in
-    [("Shortcut recorder", "button value "), ("Search field", "text field \"Search\" value")]
+    [("Hotkey recorder", "button value "), ("Search field", "text field \"Search\" value")]
   {
     let h = gallery(page(name), false);
     let dump = h.a11y();

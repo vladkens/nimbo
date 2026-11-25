@@ -82,7 +82,7 @@ pub enum Event {
   /// Modifier keys changed.
   Mods(Modifiers),
   /// A modifier key went down or up, by its place ([Code::AltRight], [Code::Fn]): what a
-  /// shortcut recorder needs to take one alone (`right_option`). After the [Event::Mods] it
+  /// hotkey recorder needs to take one alone (`right_option`). After the [Event::Mods] it
   /// changed; to the focused element first ([crate::Ui::modifier_key]), then the app. Autorepeats
   /// send none.
   Modifier {

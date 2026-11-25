@@ -51,7 +51,9 @@ impl Gallery {
         ui.text("struck", t.label().strikethrough(LinePattern::Solid));
       }),
       "Selectable text" => Self::variants(ui, Shown::Plain, |ui| {
-        ui.col(Style::new().w(px(300.0)), |ui| _ = ui.selectable("Select this text and copy it."));
+        ui.col(Style::new().w(px(300.0)), |ui| {
+          _ = ui.selectable_text("Select this text and copy it.", t.body())
+        });
       }),
       "Link" => Self::variants(ui, Shown::Plain, |ui| _ = ui.link("Learn more…")),
       "Image" => Self::variants(ui, Shown::Alone, |ui| {

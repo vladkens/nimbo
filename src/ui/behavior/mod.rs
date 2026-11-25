@@ -31,7 +31,7 @@
 //!   ([Ui::slider_style]);
 //! - [Ui::pick_behavior] (tabs, segmented control, toolbar tabs): one of `n` items by a click, the
 //!   arrows step;
-//! - [Ui::shortcut_behavior]: a shortcut recorder over a global hotkey ([crate::Hotkey]);
+//! - [Ui::hotkey_recorder_behavior]: a recorder of a global hotkey ([crate::Hotkey]);
 //! - [Ui::dialog_behavior]: a modal dialog's keys, focus trap and fade ([super::dialog]);
 //! - [Ui::split_behavior]: a divider's drag within both panes' minimums;
 //! - [Ui::scroll_behavior]: a scroll area's bars, a thumb dragged and a track clicked, shown while
@@ -61,6 +61,7 @@ mod content;
 mod dialog;
 mod field;
 mod help;
+mod hotkey_recorder;
 mod list;
 mod list_style;
 mod menu;
@@ -69,7 +70,6 @@ mod picker;
 mod pop_up;
 mod scroll;
 mod search;
-mod shortcut;
 mod slider;
 mod split;
 mod text_field;
@@ -199,7 +199,7 @@ impl Ui<'_> {
   }
 
   /// Gives `id` the key presses while it has focus before any binding of its own, of its
-  /// ancestors or of the app ([crate::keys] has the order), this frame: a shortcut recorder
+  /// ancestors or of the app ([crate::keys] has the order), this frame: a hotkey recorder
   /// recording, a modal dialog. A key it doesn't use goes on as usual.
   pub fn grab_keys(&mut self, id: Id) {
     self.st.grab = Some(id);

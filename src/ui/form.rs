@@ -21,7 +21,7 @@
 //! ```ignore
 //! let fs = FormStyle::plates(&ui.theme());
 //! ui.set_window_size(680.0, self.page.height());
-//! ui.id("tabs").toolbar_tabs(&fs, &mut self.page, &[TabItem::new(Page::General, Icon::GEAR, "General"), ..]);
+//! ui.id("tabs").toolbar_tabs(&fs, &mut self.page, &[Tag::new(Page::General, "General").icon(Icon::GEAR), ..]);
 //! ui.id(("page", self.page as u8)).form_scroll(&fs, Style::new().grow(), |ui| ui.col(fs.page, |ui| {
 //!   ui.form_section(&fs, "Startup", |ui| {
 //!     let label = |ui: &mut Ui, s: TextStyle| {
@@ -44,11 +44,10 @@ use std::cell::Cell;
 use std::f32::consts::FRAC_PI_2;
 use std::rc::Rc;
 
-use super::icon::Icon;
 use super::theme::Theme;
 use super::widgets::MarkShift;
 use super::{
-  Align, Content, Cursor, Enabled, LabeledPairRole, Response, Role, Shadow, State, Style,
+  Align, Content, Cursor, Enabled, LabeledPairRole, Response, Role, Shadow, State, Style, Tag,
   TextStyle, Ui, grow, px, rigid,
 };
 use crate::locale::Localized;
@@ -339,8 +338,8 @@ impl<'s> FormRow<'s> {
   }
 
   /// A tile before the label, as SwiftUI's `Label`'s icon: letters (an account's initials) in
-  /// [FormStyle::tile_text], an [Icon] [FormStyle::tile_icon] points square in its colour, or
-  /// what a closure builds.
+  /// [FormStyle::tile_text], an [Icon](super::Icon) [FormStyle::tile_icon] points square in its
+  /// colour, or what a closure builds.
   pub fn tile(self, tile: impl Into<Content<'s>>) -> Self {
     Self { tile: tile.into(), ..self }
   }
@@ -354,26 +353,10 @@ impl<'s> FormRow<'s> {
   /// let row = FormRow::new("Turn off below 50%").footer(|ui: &mut Ui, _: TextStyle| {
   ///   ui.disabled(!on).slider(&mut level, 10.0..=90.0);
   /// });
-  /// ui.form_row(&fs, row, |ui| ui.toggle(&mut on, ""));
+  /// ui.form_row(&fs, row, |ui| ui.toggle(&mut on, ()));
   /// ```
   pub fn footer(self, footer: impl Into<Content<'s>>) -> Self {
     Self { footer: footer.into(), ..self }
-  }
-}
-
-/// A toolbar tab ([Ui::toolbar_tabs]): its value, icon and label, as SwiftUI's
-/// `.tabItem { Label(label, systemImage:) }` and `.tag(value)`; `const`, so a toolbar is a
-/// constant.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct TabItem<'s, T> {
-  pub value: T,
-  pub icon: Icon,
-  pub label: &'s str,
-}
-
-impl<'s, T> TabItem<'s, T> {
-  pub const fn new(value: T, icon: Icon, label: &'s str) -> Self {
-    Self { value, icon, label }
   }
 }
 
@@ -708,19 +691,20 @@ impl Ui<'_> {
     r
   }
 
-  /// A toolbar of tabs, one per [TabItem], centred, as a `TabView` of `.tabItem`s in a `Settings`
-  /// scene: the icon over the label, the one equal to `cur` raised on a tile, in the accent
-  /// ([FormStyle::tab_on]); no hover fill, as System Settings' toolbar, only the pointing hand. A
-  /// click picks a tab; so do Left and Right while the toolbar has focus (Tab gives it, ringing the
-  /// selected tab). `changed` when `cur` changed. Tabs are `id.key(i)`. Under a title bar the app
-  /// draws ([Ui::titlebar]) the window's title tops it, and a press on it anywhere but a tab moves
-  /// the window. The page under it is the app's: keyed by its tab (`ui.id(("page", tab))`), each
-  /// tab's widgets keep their own state, so a switch doesn't slide from another tab's on a change.
+  /// A toolbar of tabs, one per [Tag], centred, as a `TabView` of `.tabItem`s in a `Settings`
+  /// scene: the icon ([Tag::icon]) over the label, the one equal to `cur` raised on a tile, in the
+  /// accent ([FormStyle::tab_on]); no hover fill, as System Settings' toolbar, only the pointing
+  /// hand. A click picks a tab; so do Left and Right while the toolbar has focus (Tab gives it,
+  /// ringing the selected tab). `changed` when `cur` changed. Tabs are `id.key(i)`. Under a title
+  /// bar the app draws ([Ui::titlebar]) the window's title tops it, and a press on it anywhere but
+  /// a tab moves the window. The page under it is the app's: keyed by its tab (`ui.id(("page",
+  /// tab))`), each tab's widgets keep their own state, so a switch doesn't slide from another tab's
+  /// on a change.
   pub fn toolbar_tabs<T: PartialEq + Copy>(
     &mut self,
     fs: &FormStyle,
     cur: &mut T,
-    items: &[TabItem<'_, T>],
+    items: &[Tag<'_, T>],
   ) -> Response {
     let fs = *fs;
     let (t, key) = (self.theme(), self.window_focused());
@@ -756,7 +740,7 @@ impl Ui<'_> {
       }
 
       r = ui.with_id(id).row(bar, |ui| {
-        for (i, &TabItem { value: v, icon, label }) in items.iter().enumerate() {
+        for (i, &Tag { value: v, icon, label, .. }) in items.iter().enumerate() {
           let tab = id.key(i);
           let on = v == *cur;
           // No hover fill, as System Settings' toolbar: the pointing hand says it's a tab.
@@ -783,7 +767,10 @@ impl Ui<'_> {
           let s = b.pointer(tile);
           ui.with_id(tab).canvas_col(s, paint, |ui| {
             // Canvases draw past the bar's opacity: the icon dims itself.
-            ui.disabled(b.disabled).icon(icon.default_stroke(fs.tab_stroke), fs.tab_icon, color);
+            if let Some(icon) = icon {
+              ui.disabled(b.disabled).icon(icon.default_stroke(fs.tab_stroke), fs.tab_icon, color);
+            }
+
             ui.text(label, fs.tab_text.color(color));
           });
         }
@@ -816,7 +803,7 @@ mod tests {
   use crate::keys::Key;
   use crate::scene::{Point, Size};
   use crate::ui::layout::Kind;
-  use crate::ui::{ControlSize, Id, LinePattern, SegmentedPickerStyle, Tag, Tone};
+  use crate::ui::{ControlSize, Icon, Id, LinePattern, SegmentedPickerStyle, Tone};
   use crate::{Modifiers, NamedKey};
 
   /// A section of one row and a footer with the "?" alone, nothing named.
@@ -829,7 +816,7 @@ mod tests {
       ui.col(fs.page, |ui| {
         ui.form_section(&fs, "Section", |ui| {
           ui.disabled(true)
-            .form_row(&fs, FormRow::new("Row"), |ui| ui.id("t").toggle(&mut self.0, ""));
+            .form_row(&fs, FormRow::new("Row"), |ui| ui.id("t").toggle(&mut self.0, ()));
         });
         ui.form_footer(&fs, |_| {});
       });
@@ -869,7 +856,7 @@ mod tests {
         ui.id("beta").badge("Beta", Tone::Neutral);
       };
       let control = |ui: &mut Ui, id: &str| match ctl {
-        Ctl::Switch => ui.id(id).toggle(&mut false, ""),
+        Ctl::Switch => ui.id(id).toggle(&mut false, ()),
         Ctl::Segments => {
           let options = [Tag::new(0, "Light"), Tag::new(1, "Dark")];
           ui.picker_style(&SegmentedPickerStyle).id(id).picker(&mut 0, &options)
@@ -901,7 +888,7 @@ mod tests {
       ui.col(fs.page, |ui| {
         ui.form_section(&fs, Section::default(), |ui| {
           let row = FormRow::new("Switch").caption("What it does");
-          ui.id("switch").form_row(&fs, row, |ui| ui.toggle(&mut false, ""));
+          ui.id("switch").form_row(&fs, row, |ui| ui.toggle(&mut false, ()));
 
           let tall = |ui: &mut Ui, id: &str| {
             let slot = Style::new().h(px(row_h)).align(Align::Center, Align::Center);
@@ -1320,7 +1307,7 @@ mod tests {
     fn view(&mut self, ui: &mut Ui) {
       ui.set_theme(Theme::PLATES_LIGHT);
       let fs = FormStyle::plates(&ui.theme());
-      let tabs = [TabItem::new(0, Icon::GEAR, "General"), TabItem::new(1, Icon::INFO, "About")];
+      let tabs = [Tag::new(0, "General").icon(Icon::GEAR), Tag::new(1, "About").icon(Icon::INFO)];
       ui.col(Style::new().grow().bg(fs.bg), |ui| {
         ui.disabled(self.0).id("bar").toolbar_tabs(&fs, &mut 0, &tabs);
       });
@@ -1394,7 +1381,7 @@ mod tests {
     impl App for Unnamed {
       fn view(&mut self, ui: &mut Ui) {
         let fs = FormStyle::plates(&ui.theme());
-        ui.toolbar_tabs(&fs, &mut 0, &[TabItem::new(0, Icon::GEAR, "General")]);
+        ui.toolbar_tabs(&fs, &mut 0, &[Tag::new(0, "General").icon(Icon::GEAR)]);
       }
     }
 

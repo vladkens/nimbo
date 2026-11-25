@@ -10,8 +10,8 @@
 //! let r = ui.id("name").text_field(&mut self.name, "Your name");
 //! if r.submitted { self.save() }
 //! ui.id("key").secure_field(&mut self.key, "API key");
-//! TextField::new(&mut self.notes, "Notes").kind(FieldKind::MultiLine).show(ui.id("notes"));
-//! ui.id("about").selectable(ABOUT);
+//! TextField::new(&mut self.notes, "Notes").axis(Axis::Vertical).show(ui.id("notes"));
+//! ui.id("about").selectable_text(ABOUT, t.body());
 //! ```
 //!
 //! The app owns the text; the field writes edits back and reports them in its
@@ -66,26 +66,20 @@ pub(super) fn field_frame(ui: &Ui, style: &FieldStyle, focused: bool, enabled: b
 }
 
 impl Ui<'_> {
-  /// Text the user can select and copy, as SwiftUI's `.textSelection(.enabled)` on a `Text`, in
-  /// `style`'s text and selection colour (its box is not drawn): an I-beam over it, focus
-  /// without a ring for the keys, its selection dimmed when the focus goes; its id from
+  /// Text the user can select and copy in `style`, as SwiftUI's `.textSelection(.enabled)` on a
+  /// `Text`, selected in the theme's field colour ([crate::ui::Theme::field]): an I-beam over it,
+  /// focus without a ring for the keys, its selection dimmed when the focus goes; its id from
   /// [Ui::id] or [Ui::key], else its place. [Ui::disabled] makes it plain text.
-  pub fn selectable_text(&mut self, text: &str, style: &FieldStyle) -> Response {
+  pub fn selectable_text(&mut self, text: &str, style: TextStyle) -> Response {
+    let style = FieldStyle { text: style, ..self.theme().field() };
     self.group(|ui| {
       let id = ui.take_id();
       let b = ui.selectable_behavior(id, text);
-      ui.keymap(SELECT_KEYS).field_text(&b, "", style, b.style(Style::new()));
+      ui.keymap(SELECT_KEYS).field_text(&b, "", &style, b.style(Style::new()));
       ui.edit_menu(&b);
       let (hovered, pressed, clicked) = (ui.hovered(id), ui.pressed(id), ui.clicked(id));
       Response { id, hovered, pressed, focused: b.focused, clicked, ..Response::default() }
     })
-  }
-
-  /// [Ui::selectable_text] in the theme's text, wrapping.
-  pub fn selectable(&mut self, text: &str) -> Response {
-    let t = self.theme();
-    let style = FieldStyle { text: TextStyle::new(t.font, t.text), ..t.field() };
-    self.selectable_text(text, &style)
   }
 }
 
@@ -106,7 +100,8 @@ mod tests {
 
   impl App for Off {
     fn view(&mut self, ui: &mut Ui) {
-      ui.disabled(true).id("note").selectable("Plain text");
+      let body = ui.theme().body();
+      ui.disabled(true).id("note").selectable_text("Plain text", body);
       if ui.id("b").button("B").clicked {
         self.clicks += 1;
       }
@@ -121,7 +116,8 @@ mod tests {
   impl App for Page {
     fn view(&mut self, ui: &mut Ui) {
       let page = Style::new().w(px(200.0)).h(px(40.0)).scroll(Axes::VERTICAL);
-      ui.id("page").col(page, |ui| _ = ui.id("t").selectable(&"line\n".repeat(20)));
+      let body = ui.theme().body();
+      ui.id("page").col(page, |ui| _ = ui.id("t").selectable_text(&"line\n".repeat(20), body));
     }
   }
 

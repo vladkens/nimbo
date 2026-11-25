@@ -17,7 +17,7 @@
 //! }
 //!
 //! ui.text_field_style(&Underlined).text_field(&mut self.name, "Name");
-//! TextField::new(&mut self.notes, "Notes").kind(FieldKind::MultiLine).show(ui);
+//! TextField::new(&mut self.notes, "Notes").axis(Axis::Vertical).show(ui);
 //! ```
 
 use super::FieldBehavior;
@@ -79,7 +79,7 @@ impl TextFieldConfiguration<'_> {
     self.prompt
   }
 
-  /// One line, many or a password ([TextField::kind]).
+  /// One line, many ([TextField::axis]) or a password ([Ui::secure_field]).
   pub fn kind(&self) -> FieldKind {
     self.kind
   }
@@ -104,9 +104,10 @@ impl TextFieldConfiguration<'_> {
   }
 }
 
-/// A text field over the app's text, as SwiftUI's `TextField`: one line, many or a password
-/// ([FieldKind]), its prompt shown while it is empty, drawn by the environment's
-/// [TextFieldStyle] ([Ui::text_field_style]) over [Ui::text_field_behavior].
+/// A text field over the app's text, as SwiftUI's `TextField`: one line or many
+/// ([TextField::axis]), its prompt shown while it is empty, drawn by the environment's
+/// [TextFieldStyle] ([Ui::text_field_style]) over [Ui::text_field_behavior]. A password's is
+/// [Ui::secure_field].
 #[derive(Debug)]
 pub struct TextField<'a, 's> {
   text: &'a mut String,
@@ -119,9 +120,15 @@ impl<'a, 's> TextField<'a, 's> {
     Self { text, prompt, kind: FieldKind::SingleLine }
   }
 
-  /// One line (the default), many, as SwiftUI's `TextField(axis: .vertical)`, or a password, as
-  /// `SecureField`.
-  pub fn kind(self, kind: FieldKind) -> Self {
+  /// Where text past its width goes, as SwiftUI's `TextField(axis:)`: sideways on one line (the
+  /// default), or down onto lines wrapped at its width ([Axis::Vertical]), Enter a line break;
+  /// give its frame a height, it scrolls past it.
+  pub fn axis(self, axis: Axis) -> Self {
+    let kind = match axis {
+      Axis::Horizontal => FieldKind::SingleLine,
+      Axis::Vertical => FieldKind::MultiLine,
+    };
+
     Self { kind, ..self }
   }
 
@@ -210,7 +217,7 @@ impl Ui<'_> {
   /// A [TextField] for a password, as SwiftUI's `SecureField`: a dot per character, no input
   /// method, nothing copied.
   pub fn secure_field(&mut self, text: &mut String, prompt: &str) -> Response {
-    TextField::new(text, prompt).kind(FieldKind::Secure).show(self)
+    TextField { kind: FieldKind::Secure, ..TextField::new(text, prompt) }.show(self)
   }
 
   /// Draws the next text field, or every text field built in the next container, in `style`, as

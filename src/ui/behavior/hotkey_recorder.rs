@@ -1,8 +1,8 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! A shortcut recorder's behaviour ([Ui::shortcut_behavior]): recording a global hotkey, a
+//! A hotkey recorder's behaviour ([Ui::hotkey_recorder_behavior]): recording a global hotkey, a
 //! chord ([Hotkey::from_key_event]) or a modifier key alone, with every key taken while it records;
-//! `Ui::shortcut` draws it.
+//! `Ui::hotkey_recorder` draws it.
 
 use crate::keys::{Hotkey, Key, is_modifier};
 use crate::ui::{Behavior, Id, Role, Ui};
@@ -19,7 +19,7 @@ struct Rec {
 }
 
 impl Ui<'_> {
-  /// A shortcut recorder over `value`: a click, or Space while focused, starts recording (`on`)
+  /// A hotkey recorder over `value`: a click, or Space while focused, starts recording (`on`)
   /// and focuses it; the next chord typed ([Hotkey::from_key_event]), or with `lone` a modifier key
   /// pressed and released with nothing else between ([crate::Event::Modifier]: left or right, fn),
   /// becomes the value and stops it, `changed`. Escape stops it unchanged, Backspace or Delete
@@ -27,7 +27,7 @@ impl Ui<'_> {
   /// `clear`, a click on `id.key("clear")` (a ⊗ the look draws) clears the value too. Every key
   /// is taken while recording, before the app's bindings ([Ui::grab_keys]), so none reaches
   /// anything else: Cmd-Z records, it doesn't undo.
-  pub fn shortcut_behavior(
+  pub fn hotkey_recorder_behavior(
     &mut self,
     id: Id,
     value: &mut Option<Hotkey>,
@@ -133,7 +133,7 @@ mod tests {
 
   impl App for Chords {
     fn view(&mut self, ui: &mut Ui) {
-      let b = ui.shortcut_behavior(Id::of("rec"), &mut self.0, false, false);
+      let b = ui.hotkey_recorder_behavior(Id::of("rec"), &mut self.0, false, false);
       ui.control(&b).el(Style::new().w(px(160.0)).h(px(22.0)));
     }
   }

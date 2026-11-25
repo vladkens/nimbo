@@ -2,7 +2,7 @@
 
 //! Widgets drawn from the theme ([Ui::theme]): label, link, button styles (an [Icon] too), ⓘ and
 //! "?" buttons, text field, search field and selectable text, check box, switch, slider style,
-//! segmented picker style, progress bar and spinner, badge, tooltip, the shortcut recorder, and
+//! segmented picker style, progress bar and spinner, badge, tooltip, the hotkey recorder, and
 //! images from pixels; each at the control size ([Ui::control_size]). Each control is its behaviour
 //! (`*_behavior`, as [super::behavior] lists) plus drawing from the theme: an app that wants its
 //! own look draws over the same behaviour.
@@ -33,13 +33,13 @@ mod button;
 mod checkbox;
 mod divider;
 mod field;
+#[cfg(feature = "hotkey")]
+pub mod hotkey_recorder;
 mod label;
 mod link;
 mod progress;
 mod search;
 mod segmented;
-#[cfg(feature = "hotkey")]
-pub mod shortcut;
 mod slider;
 mod toggle;
 mod tooltip;

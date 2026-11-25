@@ -27,11 +27,11 @@ impl Gallery {
     match name {
       "Disabled" => Self::variants(ui, Shown::Plain, |ui| {
         ui.button("Save");
-        ui.toggle(&mut self.on, "");
+        ui.toggle(&mut self.on, ());
       }),
       "Control size" => Self::variants(ui, Shown::Sized, |ui| {
         ui.button("Save");
-        ui.toggle(&mut self.on, "");
+        ui.toggle(&mut self.on, ());
         ui.badge("Beta", Tone::Neutral);
       }),
       "Accessibility label" => {
@@ -49,7 +49,7 @@ impl Gallery {
       "Group" => Self::variants(ui, Shown::Alone, |ui| {
         ui.disabled(true).group(|ui| {
           ui.button("Save");
-          ui.toggle(&mut self.on, "");
+          ui.toggle(&mut self.on, ());
         });
         ui.button("Open");
       }),
@@ -99,7 +99,7 @@ impl Gallery {
       "Controls theme" => Self::variants(ui, Shown::Alone, |ui| {
         let c = ui.controls_theme();
         ui.el(swatch(c.accent));
-        ui.toggle(&mut self.on, "");
+        ui.toggle(&mut self.on, ());
       }),
 
       // Light or dark as drawn: the theme's when the app set one, else the OS's.
