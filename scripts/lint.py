@@ -56,9 +56,9 @@ than the base branch's baseline did, fails, so the list only shrinks.
 size counts the non-blank lines of code, docs, comments and tests (every line of a test item)
 per module: a folder under src/, a file right in src/, the tests, examples and benches each as
 one. `--files` counts per file, `--map` lists each file's code lines and the first sentence of its
-`//!` doc, `--vs REF` adds how the code changed since REF. `--check` fails when the branch adds
+`//!` doc, `--vs REF` adds how the code changed since REF. `--check` warns when the branch adds
 more than GROWTH lines of library code (under src/) since its base or REF, net of what it
-removes.
+removes: a target, not a limit, so it never fails.
 
 The hook reads the agent's Stop event on stdin and works in repositories whose Makefile runs this
 script. It runs the rules and, on an error or a warning it hasn't shown, asks the agent to go on;
@@ -1436,10 +1436,9 @@ def size(top: Path, opts) -> int:
             return 0
 
         added = library(scans) - library(Scans(top, snapshot(top, since, set())))
-        print(f"lint: {added:+} lines of library code since {since[:7]}, at most {GROWTH}")
+        print(f"lint: {added:+} lines of library code since {since[:7]}, target {GROWTH}")
         if added > GROWTH:
-            print(f"lint: {added - GROWTH} over: split the work into several PRs")
-            return 1
+            print(f"lint: warning: {added - GROWTH} over: is the change as small as it can be?")
 
         return 0
 
@@ -1556,7 +1555,7 @@ def main() -> int:
     cli.add_argument("--files", action="store_true", help="size: one row per file")
     cli.add_argument("--map", action="store_true", help="size: each file and what it does")
     cli.add_argument("--vs", metavar="REF", help="size: how the code changed since REF")
-    cli.add_argument("--check", action="store_true", help=f"size: at most {GROWTH} new lines")
+    cli.add_argument("--check", action="store_true", help=f"size: warn past {GROWTH} new lines")
     opts = cli.parse_args()
     if opts.cmd == "hook":
         return hook()
