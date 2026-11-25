@@ -53,5 +53,6 @@ A small custom-drawn desktop UI toolkit in Rust: its own CPU renderer draws ever
 
 - Before reviewing or changing an API or a platform's input code, read `docs/review.md`: the bugs reviews missed here, as patterns with their cases. Add a pattern when a bug of a new kind turns up.
 - For multi-step work keep a checklist in `docs/plans/yyyymmdd-<name>.md` and tick it during the work; when done add `Done: yyyy-mm-dd` and a short `## Result`, and move it to `docs/plans/completed/`.
-- `make check` (it needs nightly rustfmt, `rustup target add x86_64-pc-windows-msvc x86_64-unknown-linux-gnu` and, on a Mac, Xcode's clang for `scripts/macos-min.py`) and `make test` pass before a commit; `make prepare` formats the code, adds the blank lines `make check` asks for and applies clippy's fixes.
+- `make check` (it needs nightly rustfmt, `rustup target add x86_64-pc-windows-msvc x86_64-unknown-linux-gnu`, cargo-public-api with the Makefile's `API_NIGHTLY` and, on a Mac, Xcode's clang for `scripts/macos-min.py`) and `make test` pass before a commit; `make prepare` formats the code, adds the blank lines `make check` asks for and applies clippy's fixes.
+- `docs/public-api.txt` is the public API with every feature, the same on each system: a change to it runs `make public-api`, so it shows in the PR's diff. After a release (a `v*` tag) CI's cargo-semver-checks compares the API with it: a release PR fails when its version's bump is too small.
 - A commit is one short lowercase line, `<area>: <what changed>`, with no body; docs go in the same commit.
