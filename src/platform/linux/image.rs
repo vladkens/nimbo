@@ -13,7 +13,8 @@ use std::ptr::null_mut;
 use std::sync::OnceLock;
 
 use super::dl::{Lib, fns};
-use crate::bitmap::{MAX_PIXELS, premultiply, size, zeroed};
+use crate::bitmap::{MAX_PIXELS, size, zeroed};
+use crate::scene::premultiply;
 
 type P = *mut c_void;
 

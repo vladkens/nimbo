@@ -7,16 +7,18 @@
 use std::fmt;
 
 use crate::locale::Localized;
-use crate::ui::icon::{self, Icon};
+use crate::ui::icon::Icon;
 use crate::ui::{Style, TextStyle, Ui, px};
 
 /// What a label shows, as SwiftUI's labels take a string or a view: a text, an icon, or what a
 /// closure builds in the label's text style (dimmed in a disabled form row, as SwiftUI passes a
-/// foreground style down); from a `&str`, a `&String`, a [Localized] (`t!("…")`), an [Icon] or
-/// `FnOnce(&mut Ui, TextStyle)`, whose parameters need their types written. A closure's texts
-/// take the style or one made from it (`s.underline(LinePattern::Dot)` on a term with
-/// [Ui::help]); a canvas of its own reads `Enabled` ([Ui::environment_value]).
+/// foreground style down); from a `&str`, a `&String`, a [Localized] (`t!("…")`, or a reference to
+/// one), an [Icon] or `FnOnce(&mut Ui, TextStyle)`, whose parameters need their types written;
+/// `()` shows nothing, as SwiftUI's empty label `{}` (a toggle in a form row, named by the row). A
+/// closure's texts take the style or one made from it (`s.underline(LinePattern::Dot)` on a term
+/// with [Ui::help]); a canvas of its own reads `Enabled` ([Ui::environment_value]).
 #[derive(Default)]
+#[non_exhaustive]
 pub enum Content<'s> {
   #[default]
   None,
@@ -26,7 +28,7 @@ pub enum Content<'s> {
 }
 
 /// What a [Content::Built] runs: it builds the content in its style.
-pub type Build<'s> = Box<dyn FnOnce(&mut Ui, TextStyle) + 's>;
+pub(crate) type Build<'s> = Box<dyn FnOnce(&mut Ui, TextStyle) + 's>;
 
 impl Content<'_> {
   /// Shows nothing: none, or an empty text.
@@ -46,7 +48,7 @@ impl Content<'_> {
         let (size, color) = (ui.line_height(style), style.color);
         let s = Style::new().w(px(size)).h(px(size));
         let i = i.default_stroke(1.6);
-        ui.with_id(id).allows_hit_testing(false).canvas(s, move |f, r| icon::draw(f, i, r, color));
+        ui.with_id(id).allows_hit_testing(false).canvas(s, move |f, r| i.draw(f, r, color));
       }
       Content::Built(f) => f(ui, style),
     }
@@ -68,6 +70,19 @@ impl<'s> From<&'s String> for Content<'s> {
 impl From<Localized> for Content<'_> {
   fn from(s: Localized) -> Self {
     Content::Text(s.as_str())
+  }
+}
+
+impl From<&Localized> for Content<'_> {
+  fn from(s: &Localized) -> Self {
+    Content::Text(s.as_str())
+  }
+}
+
+/// Nothing: [Content::None].
+impl From<()> for Content<'_> {
+  fn from((): ()) -> Self {
+    Content::None
   }
 }
 

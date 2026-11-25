@@ -12,16 +12,16 @@ use std::ptr::null_mut;
 use std::rc::{Rc, Weak};
 
 use windows_sys::Win32::Foundation::{LPARAM, POINT, WPARAM};
-use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::UI::HiDpi::{GetDpiForSystem, GetSystemMetricsForDpi};
 use windows_sys::Win32::UI::Shell::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-use super::super::{settings, wide};
+use super::super::{hicon, settings, wide};
 use super::host;
 use super::menu::{build, track};
 use super::shell::WM_TRAY;
-use crate::tray::{Menu, Set, State, TrayIcon};
+use crate::Menu;
+use crate::tray::{Set, State, TrayIcon};
 
 /// `NIN_KEYSELECT`: the icon chosen with the keyboard.
 const NIN_KEYSELECT: u32 = NIN_SELECT | 1;
@@ -298,43 +298,6 @@ fn taskbar_light() -> bool {
   settings::dword(key, "SystemUsesLightTheme") == Some(1)
 }
 
-/// An icon of straight RGBA `px`, `side` pixels square: a 32-bit colour bitmap with its alpha,
-/// and an empty mask.
-pub(crate) fn hicon(side: i32, px: &[u8]) -> HICON {
-  let mut info: BITMAPINFO = unsafe { std::mem::zeroed() };
-  info.bmiHeader = BITMAPINFOHEADER {
-    biSize: size_of::<BITMAPINFOHEADER>() as u32,
-    biWidth: side,
-    biHeight: -side,
-    biPlanes: 1,
-    biBitCount: 32,
-    biCompression: BI_RGB,
-    ..unsafe { std::mem::zeroed() }
-  };
-  let mut bits = null_mut();
-  // SAFETY: a new section of `side²` pixels, filled before it is used.
-  unsafe {
-    let color = CreateDIBSection(null_mut(), &info, DIB_RGB_COLORS, &mut bits, null_mut(), 0);
-    if color.is_null() {
-      return null_mut();
-    }
-
-    let dst = std::slice::from_raw_parts_mut(bits.cast::<u8>(), px.len());
-    for (d, s) in dst.as_chunks_mut::<4>().0.iter_mut().zip(px.as_chunks::<4>().0) {
-      *d = [s[2], s[1], s[0], s[3]];
-    }
-
-    // The mask is unused with an alpha channel, but must hold defined bits: rows of whole words.
-    let mask_bits = vec![0u8; (side as usize).div_ceil(16) * 2 * side as usize];
-    let mask = CreateBitmap(side, side, 1, 1, mask_bits.as_ptr().cast());
-    let ii = ICONINFO { fIcon: 1, xHotspot: 0, yHotspot: 0, hbmMask: mask, hbmColor: color };
-    let icon = CreateIconIndirect(&ii);
-    DeleteObject(mask);
-    DeleteObject(color);
-    icon
-  }
-}
-
 /// `menu`'s items in the tray's shared format, a submenu's indented by `depth`.
 fn describe(menu: HMENU, depth: usize, out: &mut Vec<String>) {
   let pad = "  ".repeat(depth);
@@ -369,7 +332,8 @@ fn describe(menu: HMENU, depth: usize, out: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::tray::{self, Item, TrayIcon};
+  use crate::Item;
+  use crate::tray::{self, TrayIcon};
 
   /// A menu dismissed (Escape, a click outside) chooses nothing and keeps the callback.
   #[test]

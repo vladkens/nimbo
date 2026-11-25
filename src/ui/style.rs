@@ -10,6 +10,7 @@ use crate::text::Font;
 
 /// How an element is sized along one axis.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub enum Dim {
   /// Wraps its content (text, children and padding).
   #[default]
@@ -43,6 +44,7 @@ pub const fn rigid() -> Dim {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Align {
   #[default]
   Start,
@@ -52,6 +54,7 @@ pub enum Align {
 
 /// The pointer's shape over an element ([Style::cursor]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Cursor {
   /// The parent's; the arrow at the root.
   #[default]
@@ -75,6 +78,7 @@ pub enum Cursor {
 
 /// What an element clips its children to ([Style::clip], [Style::clip_content]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Clip {
   #[default]
   None,
@@ -87,6 +91,7 @@ pub enum Clip {
 
 /// How an element takes focus ([Style::focusable], [Style::tab_focusable]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Focus {
   #[default]
   None,
@@ -102,13 +107,13 @@ pub enum Focus {
   TabQuiet,
 }
 
-/// How the focused element is ringed when the window is key ([Ui::set_focus_ring]): a border
+/// How the focused element is ringed when the window is key ([crate::Ui::set_focus_ring]): a border
 /// `width` wide, `gap` outside the element, following its corners.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FocusRing {
-  pub color: Color,
-  pub width: f32,
-  pub gap: f32,
+  pub(crate) color: Color,
+  pub(crate) width: f32,
+  pub(crate) gap: f32,
 }
 
 impl FocusRing {
@@ -129,9 +134,9 @@ impl FocusRing {
 /// A soft shadow under the element's shape.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Shadow {
-  pub offset: Point,
-  pub blur: f32,
-  pub color: Color,
+  pub(crate) offset: Point,
+  pub(crate) blur: f32,
+  pub(crate) color: Color,
 }
 
 impl Shadow {
@@ -148,39 +153,39 @@ impl Shadow {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Style {
   /// Width and height.
-  pub size: [Dim; 2],
-  pub min: [f32; 2],
-  pub max: [f32; 2],
+  pub(crate) size: [Dim; 2],
+  pub(crate) min: [f32; 2],
+  pub(crate) max: [f32; 2],
   /// Top, right, bottom, left, as in CSS.
-  pub pad: [f32; 4],
+  pub(crate) pad: [f32; 4],
   /// Between children along the container's axis.
-  pub gap: f32,
+  pub(crate) gap: f32,
   /// Of the children within the inner box, horizontally and vertically.
-  pub align: [Align; 2],
-  pub bg: Color,
+  pub(crate) align: [Align; 2],
+  pub(crate) bg: Color,
   /// Border widths inside the box: top, right, bottom, left.
-  pub border: [f32; 4],
-  pub border_color: Color,
+  pub(crate) border: [f32; 4],
+  pub(crate) border_color: Color,
   /// Corner radii: top-left, top-right, bottom-right, bottom-left.
-  pub radii: [f32; 4],
+  pub(crate) radii: [f32; 4],
   /// Drawn when its colour isn't transparent (not an `Option`: four bytes keep a laid-out node
   /// in five cache lines).
-  pub shadow: Shadow,
+  pub(crate) shadow: Shadow,
   /// Clips the children to the box, or inside its padding; the box can then shrink below its
   /// content.
-  pub clip: Clip,
+  pub(crate) clip: Clip,
   /// Multiplies the alpha of everything the element and its children draw, except canvases.
-  pub opacity: f32,
+  pub(crate) opacity: f32,
   /// The axes it scrolls its children along when they overflow; implies `clip`.
-  pub scroll: Axes,
+  pub(crate) scroll: Axes,
   /// Takes pointer input (hover, press, click, wheel) and hides what is under it from the
-  /// pointer. Named elements ([Ui::id]), scroll containers, focusable elements and those with
-  /// a cursor always do.
-  pub hit: bool,
+  /// pointer. Named elements ([crate::Ui::id]), scroll containers, focusable elements and those
+  /// with a cursor always do.
+  pub(crate) hit: bool,
   /// Takes focus by Tab, and when clicked unless [Focus::Tab].
-  pub focus: Focus,
+  pub(crate) focus: Focus,
   /// The pointer's shape over it and the elements inside it that don't set their own.
-  pub cursor: Cursor,
+  pub(crate) cursor: Cursor,
 }
 
 impl Default for Style {
@@ -253,6 +258,11 @@ impl Style {
   /// Top, right, bottom, left.
   pub const fn pads(self, pad: [f32; 4]) -> Self {
     Self { pad, ..self }
+  }
+
+  /// Its padding: top, right, bottom, left.
+  pub const fn get_pad(&self) -> [f32; 4] {
+    self.pad
   }
 
   pub const fn gap(self, gap: f32) -> Self {
@@ -369,16 +379,16 @@ impl Style {
 /// Font, colour and wrapping of a text element.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TextStyle {
-  pub font: Font,
-  pub color: Color,
+  pub(crate) font: Font,
+  pub(crate) color: Color,
   /// How it takes lines: wrapping, one line as wide as it is, or at most some cut with "…".
-  pub lines: TextLines,
+  pub(crate) lines: TextLines,
   /// Distance between baselines in points; `None` takes the font's ([crate::Ui::line_height]).
-  pub line_h: Option<f32>,
+  pub(crate) line_h: Option<f32>,
   /// A line under each laid-out line, in the text's colour ([TextStyle::underline]).
-  pub underline: Option<LinePattern>,
+  pub(crate) underline: Option<LinePattern>,
   /// A line through the middle of the lowercase letters ([TextStyle::strikethrough]).
-  pub strikethrough: Option<LinePattern>,
+  pub(crate) strikethrough: Option<LinePattern>,
 }
 
 /// A set of axes, as SwiftUI's `Axis.Set`: what a scroll area scrolls along
@@ -403,6 +413,16 @@ impl Axes {
   /// [Axes::contains] of the axis at `[x, y]` index `ax`.
   pub(crate) const fn at(self, ax: usize) -> bool {
     self.0 & (1 << ax) != 0
+  }
+}
+
+/// The one axis.
+impl From<Axis> for Axes {
+  fn from(axis: Axis) -> Self {
+    match axis {
+      Axis::Horizontal => Self::HORIZONTAL,
+      Axis::Vertical => Self::VERTICAL,
+    }
   }
 }
 
@@ -492,6 +512,14 @@ impl TextStyle {
     Self { font, ..self }
   }
 
+  pub const fn get_color(&self) -> Color {
+    self.color
+  }
+
+  pub const fn get_font(&self) -> Font {
+    self.font
+  }
+
   /// One line as wide as the text ([TextLines::NoWrap]); SwiftUI's `.fixedSize()`.
   pub const fn nowrap(self) -> Self {
     Self { lines: TextLines::NoWrap, ..self }
@@ -528,22 +556,23 @@ impl TextStyle {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Float {
   /// Placed in its parent's space, or the window's.
-  pub space: CoordinateSpace,
+  pub(crate) space: CoordinateSpace,
   /// Keeps its ancestors' clips (an overlay scrollbar inside a scrolled panel); overlays
   /// otherwise draw and take the pointer outside them.
-  pub clip: bool,
+  pub(crate) clip: bool,
   /// The target's point to attach to.
-  pub attach: UnitPoint,
+  pub(crate) attach: UnitPoint,
   /// The element's own point placed there.
-  pub anchor: UnitPoint,
-  pub offset: Point,
+  pub(crate) anchor: UnitPoint,
+  pub(crate) offset: Point,
   /// Paint order among overlays, higher on top; equal ones keep tree order.
-  pub z: i32,
+  pub(crate) z: i32,
 }
 
 /// Where an overlay is placed ([Float]), as SwiftUI's `CoordinateSpace`: in its parent, or in
 /// the window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CoordinateSpace {
   Local,
   Global,
@@ -616,8 +645,9 @@ impl Float {
 }
 
 /// How big a control is, as SwiftUI's `ControlSize` ([super::Ui::control_size]): a button's
-/// height, font and padding (`Theme::button`), a switch's track, a badge's pill, a spinner.
+/// height, font and padding (`Theme::button_padding`), a switch's track, a badge's pill, a spinner.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ControlSize {
   /// `Sizes::small_h` high in the small font: dense rows, inline actions.
   Small,
@@ -626,4 +656,16 @@ pub enum ControlSize {
   Regular,
   /// 8 points taller, the font 2 points larger: a dialog's main actions.
   Large,
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn builders_read_back() {
+    assert_eq!(Style::new().pad_xy(10.0, 4.0).get_pad(), [4.0, 10.0, 4.0, 10.0]);
+    let s = TextStyle::new(Font::ui(13.0), [0.0; 4]).color([1.0; 4]).font(Font::mono(11.0));
+    assert_eq!((s.get_color(), s.get_font().get_size()), ([1.0; 4], 11.0));
+  }
 }

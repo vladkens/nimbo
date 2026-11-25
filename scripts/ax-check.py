@@ -4,16 +4,18 @@
 # ///
 """Checks what assistive technology sees of the examples in the macOS test VM.
 
-Builds the examples (release) and the AX dumper (scripts/ax-dump.swift, Swift: the AX client API
-is C and Objective-C, and the guest has no toolchain), copies them to the VM, starts each example
-in the desktop session, then runs its scenario through the dumper: a dump, actions (press, step,
-set a value, focus), the notifications seen, a dump again; takes a screenshot (to compare the
-frames with the controls), quits the example and prints everything.
+Builds the scenarios' examples (release) and the AX dumper (scripts/ax-dump.swift, Swift: the AX
+client API is C and Objective-C, and the guest has no toolchain), copies them to the VM, starts
+each scenario's example with its arguments (a window of a bigger demo: `dictation settings`) in
+the desktop session, then runs its ops through the dumper: a dump, actions (press, step, set a
+value, focus), the notifications seen, a dump again; takes a screenshot (to compare the frames
+with the controls), quits the example and prints everything. A name that is no scenario runs
+that example with no arguments and dumps it.
 
 The VM is ~/Code/vm's macOS profile, prepared once with `./vm prepare macos --test-host`
 (`./vm exec macos --gui` runs trusted for Accessibility). Nothing opens on this machine.
 
-uv run scripts/ax-check.py [example...]      default: settings gallery
+uv run scripts/ax-check.py [scenario...]     default: every scenario
 """
 
 import subprocess
@@ -27,10 +29,10 @@ VM = Path.home() / "Code/vm/vm"
 OUT = ROOT / "target/ax"
 GUEST = "nimbo"
 
-# The ops after the pid, run in order by ax-dump (see its header); at "shot" (else at the end)
-# the script takes the screenshot.
-SCENARIOS = {
-  "settings": [
+# Each scenario: the example, its arguments, and the ops after the pid, run in order by ax-dump
+# (see its header); at "shot" (else at the end) the script takes the screenshot.
+SCENARIOS: dict[str, tuple[str, list[str], list[str]]] = {
+  "settings": ("dictation", ["settings"], [
     "dump", "count", "focused",
     "hit", "AXCheckBox:Open at login", "hit", "AXRadioButton:Beta",
     "press", "AXCheckBox:Open at login", "sleep", "1", "count",
@@ -51,25 +53,33 @@ SCENARIOS = {
     "dump",
     "shot",
     "press", "AXCloseButton", "sleep", "0.5", "count",
-  ],
-  "gallery": [
+  ]),
+  # The gallery's blocks alone (`gallery <slug>`): its pages open on layout, with no controls.
+  "toggles": ("gallery", ["toggle-style"], [
     "dump", "count",
-    "press", "AXCheckBox:Off", "sleep", "0.5", "count",
+    "press", "AXCheckBox:Wrap", "sleep", "0.5", "count",
     "press", "AXCheckBox:Live", "sleep", "1", "count",
-    "hit", "AXSlider", "hit", "AXTextField:Search widgets",
-    "inc", "AXSlider", "sleep", "0.5", "count",
-    "focus", "AXTextField:Search widgets", "sleep", "0.5", "count", "focused",
-    "set", "AXTextField:Search widgets", "Sliders", "sleep", "0.5", "count",
     "dump",
-  ],
-  # The row cut by the list's bottom edge scrolled into view (its whole frame at its centre); an
-  # open menu over the rows: a hit on its items finds them, not the rows under them.
-  "lists": [
+  ]),
+  "slider": ("gallery", ["slider"], [
+    "hit", "AXSlider:Zoom",
+    "inc", "AXSlider:Zoom", "sleep", "0.5", "count",
+    "dump",
+  ]),
+  "search": ("gallery", ["search-field"], [
+    "hit", "AXTextField:Search",
+    "focus", "AXTextField:Search", "sleep", "0.5", "count", "focused",
+    "set", "AXTextField:Search", "Sliders", "sleep", "0.5", "count",
+    "dump",
+  ]),
+  # The browser's row cut by the list's bottom edge scrolled into view (its whole frame at its
+  # centre); an open menu over the rows: a hit on its items finds them, not the rows under them.
+  "files": ("files", [], [
     "scroll", "AXRow:Item 000019 678 KB", "sleep", "0.5", "count",
     "hit", "AXRow:Item 000019 678 KB",
     "press", "AXButton:Actions", "sleep", "0.5",
     "hit", "AXMenuItem:Go to First", "hit", "AXMenuItem:Open", "shot",
-  ],
+  ]),
 }
 
 
@@ -107,16 +117,18 @@ def drive(pid: str, ops: list[str]) -> None:
   print(rs.stdout + rs.stderr, flush=True)
 
 
-def shoot(config: Path, example: str) -> None:
-  """A screenshot of the guest's screen, to target/ax/<example>.png."""
-  shot, out = f"{GUEST}/{example}.png", OUT / f"{example}.png"
+def shoot(config: Path, name: str) -> None:
+  """A screenshot of the guest's screen, to target/ax/<name>.png."""
+  shot, out = f"{GUEST}/{name}.png", OUT / f"{name}.png"
   run(*gui("screencapture", "-x", shot))
   run("scp", "-F", str(config), f"vm-macos:{shot}", str(out))
   print(f"screenshot: {out}")
 
 
 def main() -> None:
-  examples = sys.argv[1:] or list(SCENARIOS)
+  names = sys.argv[1:] or list(SCENARIOS)
+  scenarios = {n: SCENARIOS.get(n, (n, [], ["dump"])) for n in names}
+  examples = sorted({example for example, _, _ in scenarios.values()})
   OUT.mkdir(parents=True, exist_ok=True)
   args = [a for e in examples for a in ("--example", e)]
   subprocess.run(["cargo", "build", "--release", *args], cwd=ROOT, check=True)
@@ -134,17 +146,16 @@ def main() -> None:
   rsync = ["rsync", "-a", "-e", f"ssh -F {config}", "--rsync-path=/usr/bin/rsync"]
   run(*rsync, *bins, f"vm-macos:{GUEST}/")
 
-  for example in examples:
-    print(f"== {example}", flush=True)
+  for name, (example, argv, ops) in scenarios.items():
+    print(f"== {name}", flush=True)
     run(*ssh, "pkill", "-x", example, check=False)
-    app = subprocess.Popen(gui(f"{GUEST}/{example}"))
+    app = subprocess.Popen(gui(f"{GUEST}/{example}", *argv))
     try:
       pid = started(ssh, example)
       time.sleep(1.5)
-      ops = SCENARIOS.get(example, ["dump"])
       cut = ops.index("shot") if "shot" in ops else len(ops)
       drive(pid, ops[:cut])
-      shoot(config, example)
+      shoot(config, name)
       drive(pid, ops[cut + 1 :])
     finally:
       run(*ssh, "pkill", "-x", example, check=False)

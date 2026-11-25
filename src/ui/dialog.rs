@@ -23,8 +23,12 @@
 //! backdrop and the card alone, for a dialog of the app's own over the same behaviour.
 
 use super::icon::Icon;
-use super::widgets::{Button, ButtonRole};
-use super::{Enabled, Float, Id, Role, State, Style, TextStyle, Ui, grow, pct, px};
+use super::widgets::{ButtonLook, Face, Variant, draw, look};
+use super::{
+  Button, ButtonConfiguration, ButtonStyle, ControlSize, Enabled, Float, Id, Role, State, Style,
+  TextStyle, Theme, Ui, grow, pct, px,
+};
+use crate::menu::ButtonRole;
 use crate::scene::alpha;
 use crate::t;
 use crate::text::Weight;
@@ -34,6 +38,7 @@ use crate::ui::UnitPoint;
 const MODAL_Z: i32 = 1500;
 /// The button a dialog closed with ([Dialog::show]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Answer {
   /// Cancel, Escape, or Return in a destructive dialog.
   Cancel,
@@ -121,11 +126,11 @@ impl<'s> Dialog<'s> {
     let w = self.width.min(ui.size().w - 32.0).max(160.0);
     let tone = if destructive { t.danger } else { t.accent };
     let card = t.dialog().w(px(w));
-    let (cs, act) = (t.dialog_button(ButtonRole::Cancel), t.dialog_button(self.role));
+    let text = dialog_look(&t, ButtonRole::Cancel).text;
     // Side by side while both labels fit half the row with 16 at each side, as macOS's alerts;
     // else stacked.
     let half = (w - card.pad[1] - card.pad[3] - 8.0) / 2.0;
-    let fits = |ui: &mut Ui, label: &str| ui.measure(label, cs.text) + 2.0 * 16.0 <= half;
+    let fits = |ui: &mut Ui, label: &str| ui.measure(label, text) + 2.0 * 16.0 <= half;
     let stack = !(fits(ui, self.cancel) && fits(ui, self.action));
     ui.a11y_label(self.title).modal(id, b.shown, card, |ui| {
       // The icon at the card's padding: the margin in its view box brings its ink in line
@@ -145,9 +150,10 @@ impl<'s> Dialog<'s> {
         }
       });
 
-      let cancel_b = Button::new(self.cancel).look(cs.w(grow()));
-      let action_b = Button::new(self.action).look(act.w(grow()));
+      let cancel_b = Button::new(self.cancel).role(ButtonRole::Cancel);
+      let action_b = Button::new(self.action).role(self.role);
       let s = Style::new().w(grow());
+      let ui = ui.button_style(&DialogButton);
       match stack {
         false => {
           _ = ui.row(s.gap(8.0), |ui| {
@@ -163,6 +169,35 @@ impl<'s> Dialog<'s> {
     });
     None
   }
+}
+
+/// A dialog's button by its role, a macOS 26 alert's ([dialog_look]).
+struct DialogButton;
+
+impl ButtonStyle for DialogButton {
+  fn make_body(&self, ui: &mut Ui<'_>, mut c: ButtonConfiguration<'_>) {
+    let s = dialog_look(&ui.theme(), c.role().unwrap_or(ButtonRole::Confirm));
+    let hot = ui.ctl_hot(c.id(), c.is_hovered());
+    draw(ui, Face::of(&c), s, hot, false, |ui, s| c.label(ui, s));
+  }
+}
+
+/// A dialog's button by its role, a macOS 26 alert's: a capsule 28 high filling its share of the
+/// row, in the body font, padded 12; Cancel a translucent grey of the text over the card, the
+/// action the accent, or red when destructive.
+fn dialog_look(t: &Theme, role: ButtonRole) -> ButtonLook {
+  let h = 28.0;
+  let cancel = role == ButtonRole::Cancel;
+  let v = if cancel { Variant::Bordered } else { Variant::Prominent };
+  let s = look(t, v, Some(role), ControlSize::Regular);
+  let frame = s.frame.border(0.0, [0.0; 4]).h(px(h)).radius(h / 2.0).pad_xy(12.0, 0.0);
+  let s = ButtonLook { frame: frame.w(grow()), text: s.text.font(t.font), ..s };
+  if !cancel {
+    return s;
+  }
+
+  let (k, c) = (if t.scheme.is_dark() { 0.09 } else { 0.07 }, t.text);
+  ButtonLook { bg: alpha(c, k), hover: alpha(c, k + 0.04), pressed: alpha(c, k + 0.1), ..s }
 }
 
 impl Ui<'_> {
@@ -192,13 +227,11 @@ impl Ui<'_> {
 
 #[cfg(test)]
 mod tests {
-  use keyboard_types::{Modifiers, NamedKey};
-
   use super::*;
   use crate::app::{App, Cx, Event};
-  use crate::harness::Harness;
-  use crate::keys::{Binding, CMD, Command, Shortcut, bind};
+  use crate::keys::{Binding, CMD, Command, Shortcut};
   use crate::scene::Size;
+  use crate::{Harness, Modifiers, NamedKey};
 
   /// A dialog over an app that binds Cmd-Z and hears every key and command.
   #[derive(Default)]
@@ -209,7 +242,7 @@ mod tests {
 
   impl App for Under {
     fn keymap(&self) -> &[Binding] {
-      const KEYS: &[Binding] = &[bind(Shortcut::char('z').cmd(), Command::Action("undo"))];
+      const KEYS: &[Binding] = &[Binding::new(Shortcut::char('z').cmd(), Command::Action("undo"))];
       KEYS
     }
 
@@ -239,13 +272,13 @@ mod tests {
     // Tab and Shift-Tab cycle the buttons, one step each, from a button too.
     let tab = |h: &mut Harness<Under>, mods| h.key(NamedKey::Tab, mods);
     tab(&mut h, Modifiers::empty());
-    assert_eq!(h.focused(), Some(d.key("cancel")));
+    assert_eq!(h.focus_id(), Some(d.key("cancel")));
     tab(&mut h, Modifiers::empty());
-    assert_eq!(h.focused(), Some(d.key("action")));
+    assert_eq!(h.focus_id(), Some(d.key("action")));
     tab(&mut h, Modifiers::SHIFT);
-    assert_eq!(h.focused(), Some(d.key("cancel")));
+    assert_eq!(h.focus_id(), Some(d.key("cancel")));
     tab(&mut h, Modifiers::SHIFT);
-    assert_eq!(h.focused(), Some(d.key("action")));
+    assert_eq!(h.focus_id(), Some(d.key("action")));
     h.key('a', Modifiers::empty());
     assert_eq!(h.app().heard, 0);
 

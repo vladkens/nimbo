@@ -8,7 +8,7 @@
 //! default the color scheme's ([Ui::color_scheme]).
 //!
 //! ```ignore
-//! ui.fade_edges(t.bg, 24.0).scroll_area(Style::new().grow(), |ui| {
+//! ui.fade_edges(t.bg(), 24.0).scroll_area(Style::new().grow(), |ui| {
 //!   for f in &self.files { ui.label(f) }
 //! });
 //! ```
@@ -32,8 +32,8 @@ pub(super) const MIN_THUMB: f32 = 24.0;
 /// a track. [Self::DARK] in the light color scheme ([Ui::color_scheme]), [Self::LIGHT] in the dark.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScrollerKnob {
-  pub color: Color,
-  pub hover: Transition,
+  pub(crate) color: Color,
+  pub(crate) hover: Transition,
 }
 
 impl ScrollerKnob {
@@ -41,6 +41,11 @@ impl ScrollerKnob {
   pub const DARK: Self = Self { color: alpha([0.0, 0.0, 0.0, 1.0], 0.24), hover: HOVER };
   /// AppKit's `.light`: a light knob, for dark content (the dark appearance's).
   pub const LIGHT: Self = Self { color: alpha([1.0; 4], 0.26), hover: HOVER };
+
+  /// In `color`, as an app's own knob: `ScrollerKnob::DARK.color(red)`.
+  pub const fn color(self, color: Color) -> Self {
+    Self { color, ..self }
+  }
 }
 
 impl EnvironmentValue for ScrollerKnob {
@@ -71,6 +76,7 @@ pub(super) struct Bars {
 
 /// A scroll area's bar along one axis ([ScrollBehavior::bar]): its lengths along it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct ScrollBar {
   pub track: f32,
   pub thumb: f32,
@@ -362,8 +368,8 @@ impl Ui<'_> {
 mod tests {
   use std::time::Duration;
 
+  use crate::Harness;
   use crate::app::App;
-  use crate::harness::Harness;
   use crate::scene::{Size, rgb};
   use crate::ui::input::ScrollState;
   use crate::ui::{Axes, Axis, Float, Id, ScrollerKnob, Style, Ui, px};
@@ -424,7 +430,7 @@ mod tests {
     let area = Id::of("area");
     h.frame();
     h.rt.ui.store.raw::<ScrollState>(area).offset[1] = 1e12;
-    h.rt.redraw();
+    h.redraw();
     for _ in 0..3 {
       h.frame();
     }
@@ -480,7 +486,7 @@ mod tests {
 
     // Scrolled 10 down: half the fade above.
     h.rt.ui.store.raw::<ScrollState>(area).offset[1] = 10.0;
-    h.rt.redraw();
+    h.redraw();
     let top = h.render().pixel(100.0, 0.0);
     assert!(top[0] > 100 && top[0] < 150 && top[2] > 100, "{top:?}");
 
@@ -493,7 +499,7 @@ mod tests {
     h.press(x, y);
     h.move_to(x, y + 10.0);
     h.frame();
-    let off = h.rt.ui.scroll(area).unwrap().offset.y;
+    let off = h.scroll(area).unwrap().offset.y;
     assert!((off - (10.0 + 10.0 * 800.0 / 156.0)).abs() < 0.5, "{off}");
     h.release(x, y + 10.0);
 
@@ -505,19 +511,19 @@ mod tests {
     h.move_to(x, y + 10.0);
     h.release(x, y + 10.0);
     h.frame();
-    let now = h.rt.ui.scroll(area).unwrap().offset.y;
+    let now = h.scroll(area).unwrap().offset.y;
     assert!((now - off - 10.0 * 800.0 / 156.0).abs() < 0.5, "{off} → {now}");
     let off = now;
 
     // A click on the track below the thumb pages down.
     h.click(195.0, 190.0);
     h.frame();
-    assert!(h.rt.ui.scroll(area).unwrap().offset.y > off + 150.0);
+    assert!(h.scroll(area).unwrap().offset.y > off + 150.0);
 
     // The pointer resting on the track keeps the bars, with no frames.
     h.move_to(195.0, 100.0);
     h.wait(Duration::from_millis(300));
-    assert!(h.wait(Duration::from_millis(3000)) == 0 && h.rt.due_in().is_none());
+    assert!(h.wait(Duration::from_millis(3000)) == 0 && h.due_in().is_none());
     assert!(h.rect(area.key(("thumb", 1usize))).is_some());
 
     // The content twice as tall: the thumb fits it in the frame that shows it.

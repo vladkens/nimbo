@@ -4,7 +4,7 @@
 //! whole clipboard taken and put back ([Snapshot]) around text that tells when it is read
 //! ([SystemClipboard::offer]); see the parent module.
 
-use super::Clipboard;
+use super::{Clipboard, Sealed};
 use crate::platform::{clipboard, paste as imp};
 
 /// The system clipboard, plain text, as each window's runtime has it: for code outside a window
@@ -13,6 +13,8 @@ use crate::platform::{clipboard, paste as imp};
 /// serves the text to other apps; with no app running it reads nothing and writes nothing there.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemClipboard;
+
+impl Sealed for SystemClipboard {}
 
 impl Clipboard for SystemClipboard {
   fn read(&self) -> Option<String> {
@@ -28,6 +30,7 @@ impl Clipboard for SystemClipboard {
 
 /// Every item on the clipboard with the bytes of each of its types, to put back as it was.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Snapshot {
   /// Each item's types (the OS's names: see the module docs) with their bytes.
   pub items: Vec<Vec<(String, Vec<u8>)>>,

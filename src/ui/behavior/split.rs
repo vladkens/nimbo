@@ -9,6 +9,7 @@ use crate::ui::{Axis, Behavior, Id, Role, Ui, Value};
 /// A split's divider ([Ui::split_behavior]): its handle's input, and the first pane's share
 /// to show and the panes' minimums, both fitted to the split's size.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct SplitBehavior {
   pub handle: Behavior,
   pub shown: f32,

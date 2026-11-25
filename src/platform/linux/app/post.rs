@@ -14,12 +14,11 @@ use std::ffi::{c_int, c_uint, c_ulong};
 use std::ptr::null;
 use std::sync::OnceLock;
 
-use keyboard_types::{Modifiers, NamedKey};
-
 use super::super::dl::{Lib, fns};
 use super::super::{P, keys, lib};
 use super::{X11, x11};
 use crate::keys::{Key, Shortcut, f_key, strokes};
+use crate::{Modifiers, NamedKey};
 
 fns!(#[expect(non_snake_case, reason = "XTest's names")] Xtst {
   fn XTestFakeKeyEvent(d: P, code: c_uint, press: c_int, delay: c_ulong) -> c_int;

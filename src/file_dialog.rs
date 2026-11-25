@@ -12,6 +12,7 @@ use std::path::PathBuf;
 
 /// Which panel a [FileDialog] is, as SwiftUI's `fileImporter` and `fileExporter`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FileDialogKind {
   #[default]
   Open,
@@ -22,14 +23,14 @@ pub enum FileDialogKind {
 /// `FileDialog::save("Export").name("history.tar")`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FileDialog {
-  pub kind: FileDialogKind,
-  pub title: String,
+  pub(crate) kind: FileDialogKind,
+  pub(crate) title: String,
   /// The extensions it takes, without the dot; any file when empty.
-  pub types: Vec<String>,
+  pub(crate) types: Vec<String>,
   /// The folder it starts in; the OS's choice (the last one used) when `None`.
-  pub dir: Option<PathBuf>,
+  pub(crate) dir: Option<PathBuf>,
   /// The name a save panel suggests.
-  pub name: Option<String>,
+  pub(crate) name: Option<String>,
 }
 
 impl FileDialog {
@@ -47,5 +48,37 @@ impl FileDialog {
 
   pub fn name(self, name: &str) -> Self {
     Self { name: Some(name.into()), ..self }
+  }
+
+  /// The folder it starts in; `None` (the default) the OS's choice, the last one used.
+  pub fn dir(self, dir: impl Into<Option<PathBuf>>) -> Self {
+    Self { dir: dir.into(), ..self }
+  }
+
+  pub fn kind(&self) -> FileDialogKind {
+    self.kind
+  }
+
+  pub fn get_types(&self) -> &[String] {
+    &self.types
+  }
+
+  pub fn get_name(&self) -> Option<&str> {
+    self.name.as_deref()
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn a_save_panel_reads_back_what_was_asked() {
+    let d = FileDialog::save("Export").types(&["zip"]).name("a.zip").dir(PathBuf::from("/tmp"));
+    assert_eq!(
+      (d.kind(), d.get_types(), d.get_name()),
+      (FileDialogKind::Save, &["zip".into()][..], Some("a.zip"))
+    );
+    assert_eq!(d.dir.as_deref(), Some(std::path::Path::new("/tmp")));
   }
 }

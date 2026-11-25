@@ -12,10 +12,11 @@
 //! Windows and Linux start the executable that is running now (Linux: `$APPIMAGE` when set);
 //! moved, the entry is stale until [set] is called again.
 
-use crate::AppInfo;
 use crate::platform::autostart as imp;
+use crate::{AppInfo, Error};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum State {
   Enabled,
   /// Registered, but the user has to allow it in the OS's settings ([open_settings]): macOS
@@ -31,21 +32,21 @@ impl State {
   }
 }
 
-/// `Err` with the reason when this process cannot launch at login (macOS: below 13, or not run
-/// from an app bundle).
-pub fn available() -> Result<(), String> {
-  imp::available()
+/// [Error::Unsupported] with the reason when this process cannot launch at login (macOS: below
+/// 13, or not run from an app bundle).
+pub fn available() -> Result<(), Error> {
+  imp::available().map_err(Error::Unsupported)
 }
 
-pub fn state(app: &AppInfo) -> Result<State, String> {
-  imp::available()?;
-  imp::state(app)
+pub fn state(app: &AppInfo) -> Result<State, Error> {
+  available()?;
+  imp::state(app).map_err(Error::System)
 }
 
 /// Registers the app to launch at login, or unregisters it; the state after.
-pub fn set(app: &AppInfo, on: bool) -> Result<State, String> {
-  imp::available()?;
-  imp::set(app, on)
+pub fn set(app: &AppInfo, on: bool) -> Result<State, Error> {
+  available()?;
+  imp::set(app, on).map_err(Error::System)
 }
 
 /// Opens the OS's login items settings (macOS: Login Items; Windows: Settings → Apps →

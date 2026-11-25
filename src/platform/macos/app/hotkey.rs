@@ -25,7 +25,6 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use keyboard_types::{Code, Modifiers};
 use objc2_core_foundation::{CFMachPort, CFRetained, CFRunLoop, kCFRunLoopCommonModes};
 use objc2_core_graphics::{
   CGEvent, CGEventField, CGEventFlags, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
@@ -33,8 +32,10 @@ use objc2_core_graphics::{
 };
 
 use super::super::keyboard::{code as key_at, device_flag, kvk};
+use super::tap_flags;
 use crate::hotkey::{Edge, Listener, MAX, OnEdge, Status};
 use crate::keys::{Hotkey, is_modifier};
+use crate::{Code, Error};
 
 mod carbon;
 
@@ -277,10 +278,10 @@ impl Hotkeys {
       TAP_STARTING => Listener::Starting,
       _ => Listener::Off,
     };
-    out.listener_error = s.tap_error.lock().unwrap().clone();
+    out.listener_error = s.tap_error.lock().ok().and_then(|e| e.clone()).map(Error::System);
     for (which, slot) in out.slots.iter_mut().enumerate().take(MAX) {
       slot.fallback = self.carbon.registered(which);
-      slot.fallback_error = self.carbon_errors[which].clone();
+      slot.fallback_error = self.carbon_errors[which].clone().map(Error::System);
     }
 
     out.secure_input = super::permissions::secure_input();
@@ -296,7 +297,8 @@ impl Hotkeys {
     let tap = out.listener == Listener::Active && !out.secure_input;
     if s.escape.load(Ordering::Relaxed) && !tap && !self.carbon.escape_registered() {
       let why = self.escape_error.as_deref().unwrap_or("not registered");
-      out.escape_error = Some(format!("no event tap, and Carbon's hotkey for Escape: {why}"));
+      let why = format!("no event tap, and Carbon's hotkey for Escape: {why}");
+      out.escape_error = Some(Error::System(why));
     }
   }
 }
@@ -442,7 +444,7 @@ unsafe extern "C-unwind" fn tap_callback(
   // SAFETY: the event is valid for the duration of the callback.
   let event = Some(unsafe { event.as_ref() });
   // The app's own posted keys ([super::post]) are no key of the user's.
-  if CGEvent::integer_value_field(event, CGEventField::EventSourceUserData) == super::post::POSTED {
+  if CGEvent::integer_value_field(event, CGEventField::EventSourceUserData) == super::POSTED {
     return pass;
   }
 
@@ -666,20 +668,10 @@ fn general_flag(key: Code) -> u64 {
   }
 }
 
-/// The event tap's modifier flags for a chord's modifiers.
-pub(super) fn tap_flags(mods: Modifiers) -> u64 {
-  let flags = [
-    (Modifiers::CONTROL, CGEventFlags::MaskControl),
-    (Modifiers::ALT, CGEventFlags::MaskAlternate),
-    (Modifiers::SHIFT, CGEventFlags::MaskShift),
-    (Modifiers::META, CGEventFlags::MaskCommand),
-  ];
-  flags.iter().filter(|(m, _)| mods.contains(*m)).fold(0, |all, (_, f)| all | f.0)
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::Modifiers;
   use crate::keys::Shortcut;
 
   const DOWN: Hit = Hit::Down { which: 0, repeat: false };

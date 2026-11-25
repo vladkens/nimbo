@@ -51,7 +51,7 @@ impl Ui<'_> {
     };
 
     let (id, off) = (self.take_id(), !self.environment_value::<Enabled>().0);
-    let color = self.dim(t.muted, off);
+    let color = self.dim(t.secondary, off);
     let turn = if off { 0.0 } else { self.now().as_secs_f32() / 0.9 * TAU };
     if !off {
       self.request_frame();
@@ -72,8 +72,8 @@ impl Ui<'_> {
 
 #[cfg(test)]
 mod tests {
+  use crate::Harness;
   use crate::app::App;
-  use crate::harness::Harness;
   use crate::scene::Size;
   use crate::ui::{ControlSize, Id, Style, Theme, Ui, grow};
 
@@ -93,11 +93,11 @@ mod tests {
     let accent = Theme::system(h.rt.ui.appearance()).accent.map(|c| (c * 255.0).round() as u8);
     assert_eq!(img.pixel(60.0, 12.0), accent);
     assert_ne!(img.pixel(160.0, 12.0), accent);
-    assert!(!h.rt.needs_frame());
+    assert!(!h.needs_frame());
     h.app_mut().0 = None;
-    h.rt.redraw();
+    h.redraw();
     h.frame();
-    assert!(h.rt.needs_frame());
+    assert!(h.needs_frame());
   }
 
   /// A disabled spinner, then a button.
@@ -136,7 +136,7 @@ mod tests {
   fn a_disabled_spinner_stands_still_and_leaves_the_next_widget_enabled() {
     let mut h = Harness::new(Still::default(), Size::new(200.0, 60.0), 1.0);
     h.frame();
-    assert!(!h.rt.needs_frame());
+    assert!(!h.needs_frame());
     h.click_id(Id::of("b"));
     assert_eq!(h.app().0, 1);
   }

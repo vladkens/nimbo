@@ -1,333 +1,86 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Virtualized lists: only the rows in view, and a few around them, are built each frame,
-//! between two spacers that give the scroll area the whole content height, so a list of 100k
-//! rows costs what the forty on screen do and its scrollbar is right.
-//!
-//! [List] is nimbo's take on SwiftUI's `List` (with its `Section`s, selection, context menus and
-//! keyboard): its behaviour is the target to move towards, not a 1:1 copy. The app builds only
-//! what a row and a section header show; the list does the selection, the clicks, the keys and
-//! the highlight.
-//!
-//! ```ignore
-//! ui.list(Id::of("rows"), self.rows.len(), 22.0, |ui, i| ui.label(&self.rows[i]));
-//! let r = List::new(self.files.len(), 22.0)
-//!   .key(&|i| self.files[i].id)
-//!   .multi()
-//!   .selection(&mut self.sel)
-//!   .show(ui.id("files"), |ui, row| ui.label(&self.files[row.index].name));
-//! if let Some(i) = r.activated { self.open(i) }
-//! if r.delete { self.ask_delete() } // the app's confirmation, then `self.sel.retain(..)`
-//!
-//! // Rows grouped by day: `starts` the first row of each day, its header 32 high.
-//! let head = |ui: &mut Ui, g: usize| {
-//!   ui.text(&self.days[g].title, t.label());
-//!   ui.spacer();
-//!   ui.text(&self.days[g].note, t.muted());
-//! };
-//! let list = List::new(self.entries.len(), 44.0).sections(&self.starts, 32.0, &head);
-//! ```
-//!
-//! Sections, as SwiftUI's `Section(header:)`: the rows stay one run of indices, `starts` says
-//! where each section begins and a header is built with `head(ui, section)` above its first row.
-//! Headers are not rows: they take no selection, focus or keys, Shift and Cmd-A cover the rows
-//! only, and all are one height, so where a row lies is still arithmetic (a binary search of
-//! `starts`) and a list of 100k rows in a thousand sections costs what one without them does. A
-//! header's box has the rows' side padding, its content at the bottom.
-//!
-//! The look is a plain list, or [ListStyle::Grouped] ([List::list_style]): each section's rows on
-//! a rounded plate as a grouped form's ([FormStyle::plates]), the header over it, the list's
-//! own selection filling a row's piece of the plate. No hover fill, as SwiftUI's on macOS;
-//! [Row::hover] is there for an app that draws its own.
-//!
-//! The rows to build come from the scroll offset as of the last frame and the input since,
-//! clamped to the new content; when the layout shows more than was built (the viewport grew,
-//! the offset was clamped) the view runs again at once, so a frame never shows a gap.
-//!
-//! Selection is by row key ([List::key], the index by default), never by visible element: it
-//! stays right when rows scroll out, are inserted above or the list is re-sorted. It lives in
-//! the app ([List::selection]) or the list's own state. A press selects, on a row's text too,
-//! but one on a control in it (a button) is the control's, as in SwiftUI; with [List::multi],
-//! Cmd-click (Ctrl-click on Windows and Linux) toggles a row and Shift-click selects from the
-//! anchor; a secondary click selects the row alone unless it is selected, for the app's context
-//! menu ([Ui::context_menu]), which one off the rows (the scrollbar, a header) doesn't open. A
-//! plain press on the list's ground (a header, the padding, the room under the rows; not a
-//! control there nor a scrollbar) clears the selection, as a table view's on macOS. Keys,
-//! while the list has focus (a press gives it), come as the platform's commands: Up and Down (Shift
-//! extends), Page Up and Page Down, Home and End or Cmd-Up and Cmd-Down, Cmd-A, and Enter, which
-//! activates the row, as a double click does. Delete or Backspace (Cmd-Backspace too on a Mac) ask
-//! to delete the selection ([ListResponse::delete], SwiftUI's `onDeleteCommand`); Escape clears it.
-//! Either, with nothing selected, goes on to the app. The row the keys moved to scrolls into view;
-//! so does [Ui::reveal_row]. Disabled ([Ui::disabled]), it takes no input or focus and dims.
-//!
-//! The behaviour is [Ui::list_behavior] and [Ui::list_rows] (selection, keys, presses,
-//! virtualization), its rows' fills the look: [List::unstyled] leaves the fills to the app, which
-//! draws them from [Row].
+//! The System Settings lists over the headless [List]: rows edge to edge, the selected one filled
+//! ([InsetListStyle], the window's default, which the shell puts), or each section's rows on a
+//! rounded plate as a grouped form's ([InsetGroupedListStyle]). No hover fill, as SwiftUI's on
+//! macOS; [Row::hovered] is there for an app that draws its own.
 
-use std::ops::Range;
-
-use crate::scene::{Frame, Rect, alpha};
-use crate::ui::behavior::Selection;
+use crate::scene::{Color, Frame, Rect, alpha};
 use crate::ui::form::Piece;
-use crate::ui::{Align, Cursor, FormStyle, Id, ListRows, Style, Ui, grow, px};
+use crate::ui::{FormStyle, ListConfiguration, ListLayout, ListStyle, Style, Theme, Ui};
+#[cfg(doc)]
+use crate::ui::{List, Row};
 
-/// What builds a section's header: `head(ui, section)`.
-type Head<'s> = &'s dyn Fn(&mut Ui<'_>, usize);
-
-// MARK: List
-
-/// A row being built: where it is and how it shows.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Row {
-  pub index: usize,
-  pub key: u64,
-  /// The row's element: `list.key(("row", key))`.
-  pub id: Id,
-  pub selected: bool,
-  /// The hover fade, 0 to 1.
-  pub hover: f32,
-  /// The row keys move from.
-  pub cursor: bool,
-  /// The list has focus (selected rows are drawn in the accent then).
-  pub focused: bool,
+/// The selected rows' fill: the accent while the list has focus in the key window, else grey.
+fn selection(t: &Theme, focused: bool) -> Color {
+  match focused {
+    true => t.selection,
+    false => alpha(t.text, if t.scheme.is_dark() { 0.10 } else { 0.08 }),
+  }
 }
 
-/// What a list got this frame.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ListResponse {
-  pub id: Id,
-  /// The selection changed.
-  pub changed: bool,
-  /// A row was pressed (and selected as the press asked).
-  pub pressed: Option<usize>,
-  /// A row was double-clicked, or Enter pressed on the cursor row.
-  pub activated: Option<usize>,
-  /// Delete or Backspace with rows selected: the app asks to delete them.
-  pub delete: bool,
-  /// The rows built.
-  pub shown: Range<usize>,
-  pub focused: bool,
-}
+/// Rows edge to edge, a selected one filled: in the accent while the list has focus, else grey;
+/// dimmed when disabled. The window's default, which the shell puts.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct InsetListStyle;
 
-/// A [List]'s look ([List::list_style]).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ListStyle {
-  /// Rows edge to edge, a selected one filled, as SwiftUI's `.plain`.
-  #[default]
-  Plain,
-  /// Each section's rows on a rounded plate, as a grouped form's ([FormStyle::plates]): the
-  /// header above it, a hairline between rows (inside the row's height, at its top; none beside
-  /// a selected row), the selection filling a row's piece of the plate. The box is padded as a
-  /// form page and the rows as a form's, unless [List::style] or [List::row_style] say otherwise.
-  /// SwiftUI's `InsetGroupedListStyle` is this on iOS only; on macOS it has none.
-  Grouped,
-}
-
-/// A virtualized list ([Ui::list] for the simple case); see the module's docs.
-pub struct List<'s> {
-  n: usize,
-  h: f32,
-  key: Option<&'s dyn Fn(usize) -> u64>,
-  sel: Option<&'s mut Selection>,
-  multi: bool,
-  /// Where each section starts, its header's height and what builds it.
-  sections: Option<(&'s [usize], f32, Head<'s>)>,
-  /// The box and the rows' as the app set them, else the look's.
-  style: Option<Style>,
-  row: Option<Style>,
-  /// Rows filled from the theme when selected.
-  fill: bool,
-  /// Plain, or each section's rows on a plate ([List::list_style]).
-  look: ListStyle,
-}
-
-impl<'s> List<'s> {
-  /// `count` rows `row_h` high, growing to fill its parent.
-  pub fn new(count: usize, row_h: f32) -> Self {
-    Self {
-      n: count,
-      h: row_h,
-      key: None,
-      sel: None,
-      multi: false,
-      sections: None,
-      style: None,
-      row: None,
-      fill: true,
-      look: ListStyle::Plain,
-    }
-  }
-
-  /// Row keys, unique and stable while the row is the same thing; the index by default.
-  pub fn key(self, key: &'s dyn Fn(usize) -> u64) -> Self {
-    Self { key: Some(key), ..self }
-  }
-
-  /// The selection, held by the app; without it the list keeps its own.
-  pub fn selection(self, sel: &'s mut Selection) -> Self {
-    Self { sel: Some(sel), ..self }
-  }
-
-  /// Several rows at a time: Cmd-click toggles, Shift-click and Shift-arrows extend, Cmd-A
-  /// selects all. The list sets its selection's mode ([Selection::multiple]) as each build says:
-  /// one built without it selects one row at a time.
-  pub fn multi(self) -> Self {
-    Self { multi: true, ..self }
-  }
-
-  /// Rows in sections, as SwiftUI's `Section(header:)`: section `g` starts at row `starts[g]`
-  /// (ascending, none empty), under a header `head_h` high built with `head(ui, g)`, which
-  /// takes no selection, focus or keys (see the module's docs). Rows before the first start have
-  /// none; grouped, a header but one at the top has the gap between plates above it, on
-  /// top of `head_h`. One slice and one callback rather than a section per value: the app keeps the
-  /// starts it has, the list finds a row's place by a binary search of them, and it builds only
-  /// the headers in view, as it does the rows.
-  pub fn sections(self, starts: &'s [usize], head_h: f32, head: Head<'s>) -> Self {
-    Self { sections: Some((starts, head_h, head)), ..self }
-  }
-
-  /// The list's box (a scroll area): its size and padding; its gap is 0.
-  pub fn style(self, style: Style) -> Self {
-    Self { style: Some(style), ..self }
-  }
-
-  /// Each row's box: width, padding, gap and alignment; the list sets its height and fill.
-  pub fn row_style(self, row: Style) -> Self {
-    Self { row: Some(row), ..self }
-  }
-
-  /// The list's look, as SwiftUI's `.listStyle` ([ListStyle]); plain by default.
-  pub fn list_style(self, look: ListStyle) -> Self {
-    Self { look, ..self }
-  }
-
-  /// Rows with no fill: the app draws selection and hover itself from [Row], the list keeps
-  /// the behaviour (selection, keys, scrolling, virtualization).
-  pub fn unstyled(self) -> Self {
-    Self { fill: false, ..self }
-  }
-
-  /// Builds the rows in view with `row(ui, row)` inside the list's scroll area, after applying
-  /// the input since the last frame.
-  pub fn show<'a>(self, ui: &mut Ui<'a>, mut f: impl FnMut(&mut Ui<'a>, Row)) -> ListResponse {
-    /// The selection, when the app doesn't hold it.
-    #[derive(Default)]
-    struct Own(Selection);
-
+impl ListStyle for InsetListStyle {
+  fn make_body<'a>(&self, ui: &mut Ui<'a>, mut c: ListConfiguration<'_, 'a>) {
     let t = ui.theme();
-    let id = ui.take_id();
-    let List { n, h, fill, multi, look, .. } = self;
-    let grouped = look == ListStyle::Grouped;
-    let fs = FormStyle::plates(&t);
-    let row = Style::new().w(grow()).align(Align::Start, Align::Center);
-    let (style, row) = match grouped {
-      true => (Style::new().grow().pads(fs.page.pad), row.pad_xy(fs.row.pad[1], 0.0).gap(fs.gap)),
-      false => (Style::new().grow(), row.pads([0.0, 14.0, 0.0, 10.0]).gap(8.0)),
-    };
+    let fill = selection(&t, c.is_focused());
+    let frame = if c.is_enabled() { c.frame() } else { c.frame().opacity(t.disabled) };
+    ui.scroll_area(frame, |ui| {
+      c.rows(ui, |ui, mut r| {
+        let bg = if r.is_selected() { fill } else { [0.0; 4] };
+        ui.row(r.frame().bg(bg), |ui| r.content(ui));
+      })
+    });
+  }
+}
 
-    let (style, row) = (self.style.unwrap_or(style), self.row.unwrap_or(row));
-    let (starts, head_h, head) = self.sections.unwrap_or((&[], 0.0, &|_, _| {}));
-    // Grouped, the space between plates above each header but one at the top.
-    let gap = if grouped { fs.page.gap + fs.head_pad[0] } else { 0.0 };
-    let rows = ListRows::new(n, h).sections(starts, head_h).section_spacing(gap);
-    let rows = rows.padding(style.pad[0], style.pad[2]);
-    let keyf = self.key;
-    let key = move |i: usize| keyf.map_or(i as u64, |k| k(i));
-    let mut own = None;
-    let sel = match self.sel {
-      Some(s) => s,
-      None => own.insert(std::mem::take(&mut ui.state::<Own>(id).0)),
-    };
+/// Each section's rows on a rounded plate, as a grouped form's ([FormStyle::plates]): the header
+/// above it, a hairline between rows (inside the row's height, at its top; none beside a
+/// selected row), the selection filling a row's piece of the plate. The box is padded as a form
+/// page and the rows as a form's, unless [List::style] or [List::row_style] say otherwise; a
+/// header but one at the top has the gap between plates above it. SwiftUI's
+/// `InsetGroupedListStyle` is this on iOS only; on macOS it has none.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct InsetGroupedListStyle;
 
-    // The mode is this build's, whatever the selection had.
-    if sel.is_multiple() != multi {
-      *sel = std::mem::take(sel).multiple(multi);
+impl ListStyle for InsetGroupedListStyle {
+  fn layout(&self, ui: &Ui<'_>) -> ListLayout {
+    let (fs, d) = (FormStyle::plates(&ui.theme()), ListLayout::default());
+    ListLayout {
+      frame: d.frame.pads(fs.page.pad),
+      row: d.row.pad_xy(fs.row.pad[1], 0.0).gap(fs.gap),
+      section_spacing: fs.page.gap + fs.head_pad[0],
+      header_padding: fs.head_pad[2],
     }
+  }
 
-    let b = ui.list_behavior(id, rows, sel, &key);
-    let (disabled, focused) = (b.disabled, b.focused);
-    // Its selection in the accent while it has focus in the key window.
-    let sel_bg = match focused {
-      true => t.selection,
-      false => alpha(t.text, if t.scheme.is_dark() { 0.10 } else { 0.08 }),
-    };
-
-    // Disabled, it dims.
-    let style = b.style(style.gap(0.0));
-    let style = if disabled { style.opacity(t.disabled) } else { style };
-    let sel = b.selection();
-    let mut shown = 0..0;
-    ui.with_id(id).scroll_area(style, |ui| {
-      // A header: the rows' side padding, its content at the bottom, by its first row.
-      let [_, pad_r, _, pad_l] = row.pad;
-      let below = if grouped { fs.head_pad[2] } else { 4.0 };
-      let hs = Style { pad: [0.0, pad_r, below, pad_l], ..row }.bg([0.0; 4]);
-      let hs = hs.align(Align::Start, Align::End);
-      let dim = if disabled { t.disabled } else { 1.0 };
-      let mut above = false;
-
-      shown = ui.list_rows(&b, |ui, i, k| {
-        let header = rows.header(i);
-        if let Some(head_at) = header {
-          ui.key(("head", k)).row(hs.h(px(head_at.height)), |ui| head(ui, head_at.section));
-        }
-
-        let rid = id.key(("row", k));
-        let selected = sel.contains(k);
-        let hover = ui.hot(rid, !disabled && ui.hovered(rid));
-        let bg = if fill && selected { sel_bg } else { [0.0; 4] };
-        let cursor = sel.cursor() == Some(k);
-        let r = Row { index: i, key: k, id: rid, selected, hover, cursor, focused };
-
-        // Disabled, the same id (keyed in the list) taking no input.
-        let ui = match disabled {
-          true => ui.key(("row", k)),
-          false => ui.with_id(rid),
-        };
-
-        let s = if disabled { row.h(px(h)) } else { row.h(px(h)).cursor(Cursor::Pointer) };
-        if !grouped {
-          ui.row(s.bg(bg), |ui| f(ui, r));
-          return;
-        }
-
+  fn make_body<'a>(&self, ui: &mut Ui<'a>, mut c: ListConfiguration<'_, 'a>) {
+    let t = ui.theme();
+    let (fs, fill) = (FormStyle::plates(&t), selection(&t, c.is_focused()));
+    let dim = if c.is_enabled() { 1.0 } else { t.disabled };
+    let frame = if c.is_enabled() { c.frame() } else { c.frame().opacity(dim) };
+    ui.scroll_area(frame, |ui| {
+      c.rows(ui, |ui, mut r| {
         // A piece of its section's plate, rounded at the section's ends; the fill and the
         // hairline painted over it.
-        let first = i == 0 || header.is_some();
-        let last = i + 1 == n || rows.header(i + 1).is_some();
+        let bg = if r.is_selected() { fill } else { [0.0; 4] };
         let corner = fs.group.radii[0];
-        let (top, end) = (first as u8 as f32 * corner, last as u8 as f32 * corner);
+        let (top, end) = (r.is_first() as u8 as f32 * corner, r.is_last() as u8 as f32 * corner);
         let radii = [top, top, end, end];
-        let lined = (!first && !selected && !above) as u8 as f32;
+        let lined = (!r.is_first() && !r.is_selected() && !r.is_after_selected()) as u8 as f32;
         let line = alpha(fs.divider, fs.divider[3] * dim * lined);
+
         let (dimmed, inset, hair) = (alpha(bg, bg[3] * dim), fs.inset, fs.hairline);
         let piece = Piece { fill: dimmed, radii, line, inset, hair };
         let paint = move |f: &mut Frame, at: Rect| piece.paint(f, at);
-        ui.canvas_row(Style { radii, ..s.bg(fs.group.bg) }, paint, |ui| f(ui, r));
-        above = selected;
-      });
+        let s = Style { radii, ..r.frame().bg(fs.group.bg) };
+        ui.canvas_row(s, paint, |ui| r.content(ui));
+      })
     });
-
-    let (changed, pressed, activated, delete) = (b.changed, b.pressed, b.activated, b.delete);
-    if let Some(own) = own {
-      ui.state::<Own>(id).0 = own;
-    }
-
-    ListResponse { id, changed, pressed, activated, delete, shown, focused }
-  }
-}
-
-impl<'a> Ui<'a> {
-  /// A list of `count` rows `row_h` high, built with `row(ui, index)` only for the rows in view;
-  /// one selected at a time ([List] for the rest).
-  pub fn list(
-    &mut self,
-    id: Id,
-    count: usize,
-    row_h: f32,
-    mut row: impl FnMut(&mut Ui<'a>, usize),
-  ) -> ListResponse {
-    List::new(count, row_h).show(self.with_id(id), |ui, r| row(ui, r.index))
   }
 }
 
@@ -335,15 +88,14 @@ impl<'a> Ui<'a> {
 mod tests {
   use std::time::Duration;
 
-  use keyboard_types::Modifiers;
-
   use super::*;
+  use crate::Modifiers;
   use crate::app::Event;
   use crate::keys::{CMD, Os};
   use crate::scene::{Point, Size};
-  use crate::ui::UiState;
   use crate::ui::input::ScrollState;
   use crate::ui::layout::tests::Fake;
+  use crate::ui::{Id, List, PlainListStyle, Selection, UiState, grow, px};
 
   fn sorted(s: &Selection) -> Vec<u64> {
     let mut v: Vec<_> = s.keys().collect();
@@ -399,7 +151,7 @@ mod tests {
 
   #[test]
   fn a_row_revealed_early_a_cancelled_press_and_a_disabled_list() {
-    use crate::harness::Harness;
+    use crate::Harness;
     let mut h = Harness::new(Rows::default(), Size::new(300.0, 300.0), 1.0);
     let row = |k: u64| Id::of("list").key(("row", k));
 
@@ -441,11 +193,11 @@ mod tests {
     h.frame();
     h.app_mut().off = true;
     h.frame();
-    assert_eq!(h.focused(), None);
+    assert_eq!(h.focus_id(), None);
     let c = h.rect(row(498)).unwrap();
     h.click(c.x + 5.0, c.y + 5.0);
     h.frame();
-    assert_eq!((h.app().sel.cursor(), h.focused()), (Some(497), None));
+    assert_eq!((h.app().sel.cursor(), h.focus_id()), (Some(497), None));
     assert!(h.click_id(Id::of("b")));
     assert_eq!(h.app().clicks, 1);
   }
@@ -471,8 +223,7 @@ mod tests {
 
   #[test]
   fn headers_take_no_selection_keys_or_cmd_a() {
-    use crate::NamedKey as K;
-    use crate::harness::Harness;
+    use crate::{Harness, NamedKey as K};
     let mut h = Harness::new(Days::default(), Size::new(300.0, 300.0), 1.0);
     let id = Id::of("list");
     let (row, head) = (|k: u64| id.key(("row", k)), |k: u64| id.key(("head", k)));
@@ -532,8 +283,7 @@ mod tests {
   /// The mode is the build's: a list built again without `.multi()` selects one row at a time.
   #[test]
   fn a_list_selects_one_row_again_without_multi() {
-    use crate::NamedKey as K;
-    use crate::harness::Harness;
+    use crate::{Harness, NamedKey as K};
     let mut h = Harness::new(Modes(true, Selection::default()), Size::new(300.0, 100.0), 1.0);
     h.frame();
     h.app_mut().0 = false;
@@ -569,8 +319,7 @@ mod tests {
 
   #[test]
   fn a_page_is_a_viewport_over_the_headers() {
-    use crate::NamedKey as K;
-    use crate::harness::Harness;
+    use crate::{Harness, NamedKey as K};
     let mut h = Harness::new(Threes::default(), Size::new(300.0, 300.0), 1.0);
     let id = Id::of("list");
     let row = |k: u64| id.key(("row", k));
@@ -596,8 +345,7 @@ mod tests {
 
   #[test]
   fn delete_asks_and_escape_clears() {
-    use crate::NamedKey as K;
-    use crate::harness::Harness;
+    use crate::{Harness, NamedKey as K};
     let mut h = Harness::new(Days::default(), Size::new(300.0, 300.0), 1.0);
     let none = Modifiers::empty();
     h.set_os(Os::Mac);
@@ -626,14 +374,14 @@ mod tests {
   impl crate::App for Plates {
     fn view(&mut self, ui: &mut Ui) {
       let head = |ui: &mut Ui, _: usize| ui.label("head");
-      let list = List::new(6, 20.0).sections(&[0, 3], 20.0, &head).list_style(ListStyle::Grouped);
-      list.selection(&mut self.sel).show(ui.id("list"), |_, _| {});
+      let list = List::new(6, 20.0).sections(&[0, 3], 20.0, &head).selection(&mut self.sel);
+      list.show(ui.list_style(&InsetGroupedListStyle).id("list"), |_, _| {});
     }
   }
 
   #[test]
   fn inset_grouped_rows_lie_on_a_plate_per_section() {
-    use crate::harness::Harness;
+    use crate::Harness;
     let mut h = Harness::new(Plates::default(), Size::new(300.0, 300.0), 1.0);
     let id = Id::of("list");
     let (row, head) = (|k: u64| id.key(("row", k)), |k: u64| id.key(("head", k)));
@@ -685,11 +433,11 @@ mod tests {
 
   #[test]
   fn a_press_near_the_end_finds_its_row_without_a_scan() {
-    use crate::harness::Harness;
+    use crate::Harness;
     let mut h = Harness::new(Counted::default(), Size::new(200.0, 200.0), 1.0);
     h.frame();
     h.rt.ui.store.raw::<ScrollState>(Id::of("list")).offset[1] = 1_999_000.0;
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     let row = Id::of("list").key(("row", 99_955u64 * 7));
     let r = h.rect(row).expect("row 99955 built");
@@ -697,7 +445,7 @@ mod tests {
     h.app().calls.set(0);
     h.click(r.x + 5.0, r.y + 5.0);
     let calls = h.app().calls.get();
-    assert_eq!(h.focused(), Some(Id::of("list")));
+    assert_eq!(h.focus_id(), Some(Id::of("list")));
     assert!(calls < 100, "{calls} key calls for one press");
   }
 
@@ -755,7 +503,7 @@ mod tests {
   /// on a row's text, named for a tooltip, selects the row, Cmd-click adding it.
   #[test]
   fn a_click_on_a_rows_button_is_the_buttons_on_its_text_the_rows() {
-    use crate::harness::Harness;
+    use crate::Harness;
     let mut h = Harness::new(Buttons::default(), Size::new(200.0, 200.0), 1.0);
     h.frame();
     h.click_id(Id::of(("t", 1)));
@@ -776,7 +524,7 @@ mod tests {
 
   #[test]
   fn a_right_click_on_a_rows_element_is_the_rows_unless_it_has_a_menu() {
-    use crate::harness::Harness;
+    use crate::Harness;
     let mut h = Harness::new(Buttons::default(), Size::new(200.0, 200.0), 1.0);
     h.set_native_menus(true);
     h.frame();
@@ -834,7 +582,7 @@ mod tests {
   /// scrollbar or off the list keeps it.
   #[test]
   fn a_press_on_the_lists_ground_clears_the_selection() {
-    use crate::harness::Harness;
+    use crate::Harness;
     let mut h = Harness::new(Ground::default(), Size::new(300.0, 300.0), 1.0);
     let id = Id::of("list");
     let row = |k: u64| id.key(("row", k));
@@ -894,7 +642,7 @@ mod tests {
 
   #[test]
   fn a_list_with_no_menu_leaves_the_press_off_its_rows_to_its_parent() {
-    use crate::harness::Harness;
+    use crate::Harness;
     let mut h = Harness::new(Inside, Size::new(300.0, 300.0), 1.0);
     h.set_native_menus(true);
     h.frame();
@@ -914,7 +662,7 @@ mod tests {
       ui.col(Style::new().w(px(200.0)).h(px(100.0)), |ui| {
         let list = List::new(3, 20.0).selection(&mut self.sel).style(Style::new().grow());
         let list = list.row_style(Style::new().w(grow()).pad(8.0));
-        let list = if self.bare { list.unstyled() } else { list };
+        let ui = if self.bare { ui.list_style(&PlainListStyle) } else { ui };
         let inner = Style::new().w(px(10.0)).h(px(4.0));
         list.show(ui.id("list"), |ui, row| _ = ui.id(("in", row.index)).el(inner));
       });
@@ -924,7 +672,7 @@ mod tests {
   /// A row style's padding moves the row's content in.
   #[test]
   fn a_row_styles_padding_moves_the_content_in() {
-    use crate::harness::Harness;
+    use crate::Harness;
     let mut h = Harness::new(Bare::default(), Size::new(300.0, 300.0), 1.0);
     h.frame();
     let row = h.rect(Id::of("list").key(("row", 1u64))).unwrap();
@@ -932,14 +680,14 @@ mod tests {
     assert_eq!((inner.x - row.x, inner.y - row.y), (8.0, 8.0));
   }
 
-  /// Unstyled, a selected row keeps the list's ground for the app to paint.
+  /// Plain, a selected row keeps the list's ground for the app to paint.
   #[test]
-  fn unstyled_rows_leave_the_selection_to_the_app() {
-    use crate::harness::Harness;
+  fn plain_rows_leave_the_selection_to_the_app() {
+    use crate::Harness;
     let mut h = Harness::new(Bare::default(), Size::new(300.0, 300.0), 1.0);
     h.frame();
     let row = h.rect(Id::of("list").key(("row", 1u64))).unwrap();
-    // Styled, the selection fills the row; unstyled, the row shows the ground as a row below.
+    // Inset, the selection fills the row; plain, the row shows the ground as a row below.
     h.click_id(Id::of("list").key(("row", 1u64)));
     h.frame();
     let filled = h.render().pixel(row.x + 150.0, row.y + 10.0);

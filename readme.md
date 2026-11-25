@@ -11,7 +11,7 @@
 
 </div>
 
-`nimbo` is a desktop UI toolkit for Rust that draws every widget itself, on the CPU, over a thin native layer for the window, the input and the text: AppKit and CoreText on macOS, Win32 and DirectWrite on Windows, GTK 3 with FreeType and HarfBuzz on Linux. The look follows macOS System Settings, measured from its screenshots, in light and dark. A settings window, a tray app or a HUD takes a few hundred lines and 14 crates, and the whole toolkit builds from scratch in about 10 seconds.
+`nimbo` is a desktop UI toolkit for Rust that draws every widget itself, on the CPU, over a thin native layer for the window, the input and the text: AppKit and CoreText on macOS, Win32 and DirectWrite on Windows, GTK 3 with FreeType and HarfBuzz on Linux. The look follows macOS System Settings, measured from its screenshots, in light and dark. A settings window, a tray app or a HUD takes a few hundred lines and 11 crates, and the whole toolkit builds from scratch in about 10 seconds.
 
 ## 🌟 Features
 
@@ -23,10 +23,10 @@
 - 📂 **Files and photos**: the system's open and save panels, files dragged onto a window, photos (JPEG, PNG, GIF; HEIC and WebP where the system has their decoders) decoded by the system at the size they show
 - 🌐 **Translations**: strings marked with `t!` and `tn!`, translated from gettext `.po` catalogs (`xgettext`, `msgmerge`, Poedit) with each language's plural forms, in the system's language or the app's choice; a pseudo language finds the strings left unmarked
 - 🧪 **A headless harness**: every example renders to a PNG without a window; tests click, type and check pixels and what a screen reader reads, in parallel
-- 📦 **14 crates on macOS, 4 on Windows, 2 on Linux**: GTK is loaded at run time, nothing to link
+- 📦 **11 crates on macOS, 2 on Windows, none on Linux**: GTK is loaded at run time, nothing to link
 
 <div align="center">
-  <img src="docs/settings.png" alt="the settings example on macOS" width="700" />
+  <img src="docs/settings.png" alt="the settings window of the dictation example on macOS" width="700" />
 </div>
 
 ## 🧭 Why nimbo
@@ -51,6 +51,8 @@ nimbo isn't released yet; take it from git:
 cargo add nimbo --git https://github.com/vladkens/nimbo
 ```
 
+The default is the window and the styled widgets. The rest is a feature to turn on, listed in [Cargo.toml](Cargo.toml): `tray`, `hotkey`, `paste`, `permissions`, `instance`, `autostart`, `system`, `png`, `bitmap`, or `full` for all of them; `headless` alone keeps the behaviours without nimbo's look, and `harness` runs an app in tests.
+
 <details>
 <summary>Requirements per OS</summary>
 
@@ -65,7 +67,7 @@ cargo add nimbo --git https://github.com/vladkens/nimbo
 An app builds its frame as an element tree in `view`, and reads clicks where it builds the buttons:
 
 ```rust
-use nimbo::{App, Config, Font, Style, TextStyle, Ui};
+use nimbo::{App, AppInfo, Config, Font, Main, Style, TextStyle, Ui};
 
 #[derive(Default)]
 struct Counter {
@@ -75,8 +77,8 @@ struct Counter {
 impl App for Counter {
   fn view(&mut self, ui: &mut Ui) {
     let t = ui.theme();
-    ui.col(Style::new().grow().center().gap(16.0).bg(t.bg), |ui| {
-      ui.text(self.count, TextStyle::new(Font::ui(48.0), t.text));
+    ui.col(Style::new().grow().center().gap(16.0).bg(t.bg()), |ui| {
+      ui.text(self.count, TextStyle::new(Font::ui(48.0), t.text()));
       if ui.button("Add one").clicked {
         self.count += 1;
       }
@@ -85,11 +87,14 @@ impl App for Counter {
 }
 
 fn main() {
-  nimbo::run_example(Config::new("Counter", 320.0, 240.0), Counter::default(), |_| {});
+  nimbo::app(AppInfo::new("com.example.counter", "Counter"), |main| {
+    let cfg = Config::new("Counter", 320.0, 240.0);
+    main.open(&cfg, Counter::default()).on_close(Main::quit);
+  });
 }
 ```
 
-`nimbo::run_example` opens the window; `-- --shot counter.png` renders it to a file without one.
+`nimbo::app` runs the app, which opens its window and quits when it closes.
 
 ### How a frame is built
 
@@ -108,21 +113,14 @@ cargo run --release --example gallery                          # every building 
 cargo run --release --example gallery -- --shot gallery.png    # the same, rendered without a window
 ```
 
-Each building block beside its SwiftUI counterpart, with a picture: [docs/api.md](docs/api.md), made from the gallery's table ([examples/gallery.rs](examples/gallery.rs)) by `make api-shots`.
+Every example takes `--shot <file.png>` (with `--appearance light`, `--locale <tag>`) to render its window to a file ([examples/common/example.rs](examples/common/example.rs)). Each building block beside its SwiftUI counterpart, with a picture: [docs/api.md](docs/api.md), made from the gallery's table ([examples/gallery/blocks.rs](examples/gallery/blocks.rs)) by `make api-shots`.
 
 - `counter`: buttons, hover, focus
 - `gallery`: a catalog of every building block, each page its SwiftUI line, its nimbo line and the block in its variants
-- `settings`: a macOS-style settings window
-- `notes`: a sidebar shown and hidden from a toolbar in the title bar
-- `files`: open and save panels, drag and drop
-- `lists`: a list of 100,000 rows, menus, tabs, a split
-- `history`: 86,000 rows a day at a time in a grouped list, built in view only
-- `fields`: text fields and input methods
-- `text`: fonts, scripts, emoji
-- `shapes`: what the renderer draws
-- `input`: mouse, keys, clipboard
-- `tray`: a tray icon, a global hotkey
-- `hud`: an overlay over every app
+- `custom-look`: a whole look of its own over the headless styles, light and dark
+- `files`: a file browser: sidebar in the title bar, 100k rows, menus, panels, drops
+- `canvas`: below the widgets: shapes, text, pointer and keys, frame pacing
+- `dictation`: a menu-bar app: tray, global hotkey, HUD, paste, settings, history
 
 ## 📏 Size
 
@@ -130,7 +128,8 @@ Measured on an Apple M2, rustc 1.99, 2026-10-25, without a compiler cache:
 
 - **10.1 s** a clean release build of the `counter` example (8.3 s debug)
 - **1.1 MB** its release binary (0.87 MB stripped)
-- **14 / 4 / 2** crates in the build on macOS / Windows / Linux, nimbo excluded
+- **11 / 2 / 0** crates in the default build on macOS / Windows / Linux, nimbo excluded
+- **13 / 2 / 0** with every feature (`full`)
 
 ## 🤝 Contributing
 

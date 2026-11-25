@@ -183,7 +183,7 @@ impl Ui<'_> {
       ui.text(label, t.label().color(ink));
       if !key.is_empty() {
         ui.el(Style::new().w(grow()).min_w(20.0));
-        ui.text(&key, t.label().color(if b.on { ink } else { t.muted }).nowrap());
+        ui.text(&key, t.label().color(if b.on { ink } else { t.secondary }).nowrap());
       }
     });
     if b.clicked {
@@ -206,13 +206,11 @@ fn checks(items: &[Item<usize>]) -> bool {
 mod tests {
   use std::time::Duration;
 
-  use keyboard_types::{Modifiers, NamedKey};
-
   use super::*;
   use crate::app::{App, Event, MouseButton, Phase};
-  use crate::harness::Harness;
   use crate::scene::Size;
-  use crate::ui::ControlSize;
+  use crate::ui::{ControlSize, TextStyle};
+  use crate::{Harness, Modifiers, NamedKey};
 
   /// A menu inside a scroll area over tall content; its items count their runs.
   #[derive(Default)]
@@ -257,18 +255,18 @@ mod tests {
 
     // A wheel's momentum still running as it opens stops.
     wheel(&mut h, 350.0, 250.0);
-    let at = h.rt.ui.scroll(area).unwrap().offset.y;
+    let at = h.scroll(area).unwrap().offset.y;
     assert!(at > 0.0);
     h.click_id(menu);
     h.frame();
     h.frame();
-    assert_eq!(h.focused(), Some(menu.key("menu")));
+    assert_eq!(h.focus_id(), Some(menu.key("menu")));
 
     // Over the open menu, or the cover around it: nothing under them scrolls.
     let r = h.rect(Id::of("one")).unwrap();
     wheel(&mut h, r.x + 5.0, r.y + 5.0);
     wheel(&mut h, 350.0, 250.0);
-    assert_eq!(h.rt.ui.scroll(area).unwrap().offset.y, at);
+    assert_eq!(h.scroll(area).unwrap().offset.y, at);
 
     // The pointer highlights an item; Down skips the disabled one; Enter runs it.
     h.move_to(r.x + 5.0, r.y + 5.0);
@@ -277,7 +275,7 @@ mod tests {
     h.key(NamedKey::Enter, Modifiers::empty());
     h.frame();
     assert_eq!(h.app().runs, [0, 0, 1]);
-    assert!(h.rect(menu.key("menu")).is_none() && h.focused().is_none());
+    assert!(h.rect(menu.key("menu")).is_none() && h.focus_id().is_none());
 
     // Its button disabled while it is open, it closes.
     h.click_id(menu);
@@ -414,7 +412,7 @@ mod tests {
     h.frame();
     h.right_click(50.0, 20.0);
     h.frame();
-    assert!(h.rt.ui.menu_open(Id::of("el")));
+    assert!(h.menu_open(Id::of("el")));
 
     let (on, ..) = h.rt.take_context_menu().unwrap();
     h.app_mut().shown = false;
@@ -423,7 +421,35 @@ mod tests {
     h.frame();
     h.app_mut().shown = true;
     h.frame();
-    assert!(!h.rt.ui.menu_open(Id::of("el")));
+    assert!(!h.menu_open(Id::of("el")));
+  }
+
+  /// An unnamed tipped row with a menu of its own in a button with one: its id.
+  #[derive(Default)]
+  struct Tipped(Option<Id>);
+
+  impl App for Tipped {
+    fn view(&mut self, ui: &mut Ui) {
+      let b = ui.id("b").button(|ui: &mut Ui, _: TextStyle| {
+        let row = ui.help("Tip").row(Style::new().w(px(80.0)).h(px(20.0)), |_| {});
+        ui.context_menu(row.id, || Menu::new(vec![Item::button("in", "In")]));
+        self.0 = Some(row.id);
+      });
+      ui.context_menu(b.id, || Menu::new(vec![Item::button("out", "Out")]));
+    }
+  }
+
+  /// A secondary press on a tipped element opens its own menu, not the one around it.
+  #[test]
+  fn a_tipped_element_keeps_its_context_menu() {
+    let mut h = Harness::new(Tipped::default(), Size::new(300.0, 300.0), 1.0);
+    h.set_native_menus(true);
+    h.frame();
+    let row = h.app().0.unwrap();
+    let r = h.rect(row).unwrap();
+    h.right_click(r.x + r.w / 2.0, r.y + r.h / 2.0);
+    h.frame();
+    assert!(h.menu_open(row) && !h.menu_open(Id::of("b")));
   }
 
   /// A menu enabled in a disabled container, sized: what it was given reaches its items.

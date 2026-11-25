@@ -1,13 +1,11 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The slider: a knob on a track filled in the accent up to it, over a value in a range, free or
-//! in steps marked by dots under the track, some of them labelled; its input is
-//! [Ui::slider_behavior].
-
-use std::ops::RangeInclusive;
+//! The slider's look from the theme ([SliderStyle]): [LinearSliderStyle], a knob on a track
+//! filled in the accent up to it, its steps marked by dots under the track, some of them
+//! labelled.
 
 use crate::scene::{Frame, Quad, Rect, alpha, mix};
-use crate::ui::{Response, Style, TextStyle, Ui, grow, px};
+use crate::ui::{SliderConfiguration, SliderStyle, Style, TextStyle, Ui, grow, px};
 
 /// Steps closer than this, in points, get no dots: they would run into a line.
 const DENSE: f32 = 4.0;
@@ -15,82 +13,51 @@ const DENSE: f32 = 4.0;
 /// The least room between two tick labels, in points.
 const LABEL_GAP: f32 = 4.0;
 
-/// What [Slider::tick_label] takes.
-type TickLabel<'s> = Box<dyn Fn(f32) -> Option<String> + 's>;
+/// The theme's slider, as macOS's: a knob ([crate::Sizes::knob], a capsule when wider than high)
+/// on a track [crate::Sizes::rail] thick, filled in the accent up to it, the knob's shadow deeper
+/// under the pointer where the theme hovers controls; a dot under the track at each step
+/// ([crate::Slider::step]), as macOS's tick marks, none where steps are closer than 4 points. It
+/// fills the width it is offered, as SwiftUI's, and is at least 160 points wide: that much among
+/// a form row's controls, which keep their width, the row's whole width in its footer
+/// ([crate::FormRow::footer]). The shell's default.
+///
+/// Tick labels ([crate::Slider::tick_label]) are in the theme's small muted text, centred on
+/// their step's dot and kept within the slider's width; one that would run into the label before
+/// it, or is wider than the slider, is left out, and all of them where the steps have no dots.
+/// They are placed along the slider's width in the last frame (the view runs again when the
+/// layout changes it), with as much room over the track as they take under it.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LinearSliderStyle;
 
-/// A horizontal slider over a range, as SwiftUI's `Slider(value:in:step:)`: a knob
-/// ([crate::Sizes::knob], a capsule when wider than high) on a track [crate::Sizes::rail] thick,
-/// filled in the accent up to it, the knob's shadow deeper under the pointer where the theme
-/// hovers controls. It fills the width it is offered, as SwiftUI's, and is at least 160 points
-/// wide: that much among a form row's controls, which keep their width, the row's whole width in
-/// its footer ([crate::FormRow::footer]). [Ui::slider] is one with no step.
-pub struct Slider<'s> {
-  value: &'s mut f32,
-  range: RangeInclusive<f32>,
-  step: Option<f32>,
-  label: Option<TickLabel<'s>>,
-}
-
-impl<'s> Slider<'s> {
-  pub fn new(value: &'s mut f32, range: RangeInclusive<f32>) -> Self {
-    Self { value, range, step: None, label: None }
-  }
-
-  /// The distance between its values from the range's start, as SwiftUI's `step:`: a press, a
-  /// click or a drag lands on the step nearest the pointer, the arrows (and assistive
-  /// technology's increment) move one step. A dot under the track marks each step, as macOS's
-  /// tick marks (none where steps are closer than 4 points). The last step is the last that fits
-  /// in the range: the range's end only when the step divides it.
-  pub fn step(self, step: f32) -> Self {
-    Self { step: Some(step).filter(|s| s.is_finite() && *s > 0.0), ..self }
-  }
-
-  /// A label under each step that `label` gives one for, as the labels of SwiftUI's
-  /// `Slider(…, tick:)`: `|v| (v == 50.0).then(|| format!("{v}%"))`, in the theme's small muted
-  /// text. Centred on the step's dot and kept within the slider's width; one that would run into
-  /// the label before it, or is wider than the slider, is left out, and all of them where the
-  /// steps have no dots. A text, not [crate::Content]: it is placed by its width, measured
-  /// before the layout, along the slider's width in the last frame (the view runs again when the
-  /// layout changes it).
-  pub fn tick_label(self, label: impl Fn(f32) -> Option<String> + 's) -> Self {
-    Self { label: Some(Box::new(label)), ..self }
-  }
-
-  pub fn show(self, ui: &mut Ui) -> Response {
+impl SliderStyle for LinearSliderStyle {
+  fn make_body(&self, ui: &mut Ui<'_>, c: SliderConfiguration<'_>) {
     const MIN_W: f32 = 160.0;
     let t = ui.controls_theme();
     let ([kw, kh], rh) = (t.sizes.knob, t.sizes.rail);
-    let id = ui.take_id();
-    let (lo, hi) = (*self.range.start(), *self.range.end());
-    let v = self.value;
-    let b = ui.slider_behavior(id, v, self.range, self.step, kw / 2.0);
-    let hot = ui.ctl_hot(id, b.hovered || b.held);
+    let (id, off) = (c.id(), !c.is_enabled());
+    let (lo, hi) = (*c.range().start(), *c.range().end());
+    let hot = ui.ctl_hot(id, c.is_hovered() || c.is_held());
     // Its width from the last frame, for the dots and the labels: the view runs again when the
     // layout gives it another.
-    if self.step.is_some() {
+    if c.step().is_some() {
       ui.settle(id);
     }
 
     let w = ui.rect(id).map_or(MIN_W, |r| r.w.max(MIN_W));
-    let k = if hi != lo { ((*v - lo) / (hi - lo)).clamp(0.0, 1.0) } else { 0.0 };
-    let a = if b.disabled { t.disabled } else { 1.0 };
+    let k = c.fraction();
+    let a = if off { t.disabled } else { 1.0 };
     let rail = alpha(mix(t.track, t.track_hover, hot), t.track[3] * a);
     let (fill, knob, dot) = (alpha(t.accent, a), alpha(t.knob, a), alpha(t.tertiary, a));
     let drop = [0.0, 0.0, 0.0, (0.25 + 0.1 * hot) * a];
     // Each step's value and its place along the track, 0 to 1, when their dots are apart enough
     // to draw: a few dozen at most.
-    let marked =
-      self.step.filter(|s| last_step(lo, hi, *s) >= 1.0 && (w - kw) * s / (hi - lo) >= DENSE);
-    let steps: Vec<(f32, f32)> = match marked {
-      Some(s) => (0..=last_step(lo, hi, s) as usize)
-        .map(|i| (lo + s * i as f32, s * i as f32 / (hi - lo)))
-        .collect(),
-      None => Vec::new(),
-    };
+    let marked = c.step().filter(|s| c.steps().len() > 1 && (w - kw) * s / (hi - lo) >= DENSE);
+    let steps: Vec<(f32, f32)> = if marked.is_some() { c.steps().collect() } else { Vec::new() };
 
     let dots: Vec<f32> = steps.iter().map(|&(_, k)| k).collect();
     let width = Style::new().w(grow()).min_w(MIN_W);
-    let s = width.h(px(kh + 4.0));
+    // The track half a knob in from either end, where the knob's centre stops.
+    let s = width.h(px(kh + 4.0)).pad_xy(kw / 2.0, 0.0);
     let paint = move |f: &mut Frame, r: Rect| {
       let (x0, w, cy) = (r.x + kw / 2.0, r.w - kw, r.y + r.h / 2.0);
       f.rect(Rect::new(x0 - rh / 2.0, cy - rh / 2.0, w + rh, rh), rail, rh / 2.0);
@@ -105,58 +72,63 @@ impl<'s> Slider<'s> {
       f.quad(Quad::new(at, knob).radius(kh / 2.0).border(0.5, [0.0, 0.0, 0.0, 0.1 * a]));
     };
 
-    let labels: Vec<(f32, String)> = match &self.label {
-      Some(f) => steps.iter().filter_map(|&(v, k)| Some((k, f(v)?))).collect(),
-      None => Vec::new(),
-    };
+    let labels: Vec<(f32, String)> =
+      steps.iter().filter_map(|&(v, k)| Some((k, c.tick_label(v)?))).collect();
+    if labels.is_empty() {
+      c.root(ui).canvas(s, paint);
+      return;
+    }
 
-    let mut r = if labels.is_empty() {
-      ui.control(&b).canvas(s, paint)
-    } else {
-      let style = TextStyle::new(t.small, ui.dim(t.muted, b.disabled)).nowrap();
-      let mut r = Response::default();
-
-      // As much room over the track as the labels take under it: the track stays in the middle,
-      // in line with a row's title or the controls beside it.
-      let lh = ui.line_height(style);
-      ui.with_id(id.key("ticks")).allows_hit_testing(false).col(
-        width.pads([lh, 0.0, 0.0, 0.0]),
-        |ui| {
-          r = ui.control(&b).canvas(s, paint);
-          ui.row(Style::new().w(grow()), |ui| {
-            // Left to right: where the last one ends, and where the next may start.
-            let (mut end, mut free) = (0.0, 0.0);
-            for (k, label) in &labels {
-              let lw = ui.measure(label, style);
-              let at = (kw / 2.0 + (w - kw) * k - lw / 2.0).min(w - lw).max(0.0);
-              if at < free || at + lw > w {
-                continue;
-              }
-
-              ui.el(Style::new().w(px(at - end)));
-              ui.text(label, style);
-              (end, free) = (at + lw, at + lw + LABEL_GAP);
+    let style = TextStyle::new(t.small, ui.dim(t.secondary, off)).nowrap();
+    // As much room over the track as the labels take under it: the track stays in the middle,
+    // in line with a row's title or the controls beside it.
+    let lh = ui.line_height(style);
+    ui.with_id(id.key("ticks")).allows_hit_testing(false).col(
+      width.pads([lh, 0.0, 0.0, 0.0]),
+      |ui| {
+        c.root(ui).canvas(s, paint);
+        ui.row(Style::new().w(grow()), |ui| {
+          // Left to right: where the last one ends, and where the next may start.
+          let (mut end, mut free) = (0.0, 0.0);
+          for (k, label) in &labels {
+            let lw = ui.measure(label, style);
+            let at = (kw / 2.0 + (w - kw) * k - lw / 2.0).min(w - lw).max(0.0);
+            if at < free || at + lw > w {
+              continue;
             }
-          });
-        },
-      );
-      r
-    };
 
-    r.changed = b.changed;
-    r
+            ui.el(Style::new().w(px(at - end)));
+            ui.text(label, style);
+            (end, free) = (at + lw, at + lw + LABEL_GAP);
+          }
+        });
+      },
+    );
   }
 }
 
-impl Ui<'_> {
-  /// A [Slider] over `range` with no step: `v` anywhere in it.
-  pub fn slider(&mut self, v: &mut f32, range: RangeInclusive<f32>) -> Response {
-    Slider::new(v, range).show(self)
-  }
-}
+#[cfg(test)]
+mod tests {
+  use crate::Harness;
+  use crate::app::App;
+  use crate::scene::Size;
+  use crate::ui::{Id, Theme, Ui};
 
-/// The index of the last step of `s` from `lo` within `lo..=hi`: 0 when the range is shorter;
-/// [Ui::slider_behavior] snaps onto the same last step.
-fn last_step(lo: f32, hi: f32, s: f32) -> f32 {
-  ((hi - lo) / s + 1e-4).floor().max(0.0)
+  struct One;
+
+  impl App for One {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.id("s").slider(&mut 0.5, 0.0..=1.0);
+    }
+  }
+
+  /// Under the shell the theme's: as high as its knob and 4, at least 160 wide.
+  #[test]
+  fn linear_is_the_shells_default() {
+    let mut h = Harness::new(One, Size::new(100.0, 100.0), 1.0);
+    h.frame();
+    let r = h.rect(Id::of("s")).unwrap();
+    let kh = Theme::PLATES_DARK.sizes.knob[1];
+    assert_eq!((r.w, r.h), (160.0, kh + 4.0));
+  }
 }

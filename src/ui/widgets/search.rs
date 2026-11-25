@@ -4,7 +4,7 @@
 //! it has text, as macOS's search fields; its look from the theme ([crate::ui::Theme::search]).
 //!
 //! ```ignore
-//! if ui.id("search").search(&mut self.query, "Search models").changed { self.filter() }
+//! if ui.id("search").search_field(&mut self.query, "Search models").changed { self.filter() }
 //! ```
 //!
 //! A click on the ⊗ (`id.key("clear")`) clears the text and focuses the field, ready for the
@@ -13,21 +13,27 @@
 //! an input method composes, Escape is the input method's. The behaviour is
 //! [Ui::search_behavior].
 
+use super::field::field_frame;
+use crate::keys::EDIT_KEYS;
 use crate::scene::mix;
-use crate::ui::icon::{self, Icon};
-use crate::ui::{Align, Cursor, FieldStyle, Float, Response, Role, Style, Ui, grow, px};
+use crate::ui::icon::Icon;
+use crate::ui::{
+  Align, Axes, Cursor, FieldBehavior, FieldStyle, Float, Response, Role, Style, Ui, grow, px,
+};
 
 /// The ⊗'s side, and how far in it is from the field's right edge.
 const MARK: f32 = 14.0;
 const INSET: f32 = 8.0;
 
 impl Ui<'_> {
-  /// A search field over `text` ([Ui::search_behavior]) in `style`'s look, as SwiftUI's
-  /// `.searchable` field: its box with a magnifier at the left in the muted colour and, while
-  /// there is text, a ⊗ at the right (darker under the pointer), the text kept clear of it; its
+  /// A search field over `text` ([Ui::search_behavior]) in the theme's look
+  /// ([crate::ui::Theme::search]), `prompt` shown while empty, as SwiftUI's `.searchable` field:
+  /// a magnifier at the left in the muted colour and, while there is text, a ⊗ at the right
+  /// (darker under the pointer), the text kept clear of it; as wide as its parent gives it, its
   /// id from [Ui::id] or [Ui::key], else its place. [Ui::disabled] dims it, with no ⊗.
-  pub fn search_field(&mut self, text: &mut String, style: &FieldStyle) -> Response {
+  pub fn search_field(&mut self, text: &mut String, prompt: &str) -> Response {
     let (t, id) = (self.theme(), self.take_id());
+    let style = t.search();
     let b = self.search_behavior(id, text);
     let clear = !text.is_empty() && !b.disabled;
     // The frame's size goes to the box the marks sit in, which the field fills, its text
@@ -36,16 +42,16 @@ impl Ui<'_> {
     let wrap = Style { size: f.size, min: f.min, max: f.max, ..Style::new() };
     let (min, max) = (Style::new().min, Style::new().max);
     let frame = Style { size: [grow(); 2], min, max, ..f }.clip_content();
-    let mut style = FieldStyle { frame, ..*style };
+    let mut style = FieldStyle { frame, ..style };
     if clear {
       style.frame.pad[1] = style.frame.pad[1].max(INSET + MARK + 6.0);
     }
 
-    let muted = self.dim(t.muted, b.disabled);
+    let muted = self.dim(t.secondary, b.disabled);
     let mut r = Response::default();
     // Its own id: the field may have taken its place's.
     self.with_id(id.key("wrap")).allows_hit_testing(false).row(wrap, |ui| {
-      r = ui.field_box(&b, &style);
+      r = ui.search_box(&b, prompt, &style);
 
       // Over the field, clipped to it: System Settings' magnifier (its ink 13 wide, 10 in from
       // the edge) and the ⊗.
@@ -53,7 +59,7 @@ impl Ui<'_> {
       let cover = cover.align(Align::Start, Align::Center);
       ui.float(Float::parent().clip()).row(cover, |ui| {
         let s = Style::new().w(px(17.0)).h(px(17.0));
-        ui.canvas(s, move |f, r| icon::draw(f, Icon::SEARCH, r, muted));
+        ui.canvas(s, move |f, r| Icon::SEARCH.draw(f, r, muted));
 
         if clear {
           let x = id.key("clear");
@@ -61,30 +67,39 @@ impl Ui<'_> {
           let s = Style::new().w(px(MARK)).h(px(MARK)).cursor(Cursor::Pointer);
           ui.a11y(x, Role::Button).name("Clear");
           let hot = ui.ctl_hot(x, ui.hovered(x));
-          let mark = mix(t.faint, t.muted, hot);
-          ui.with_id(x).canvas(s, move |f, r| icon::draw(f, Icon::CLEAR, r, mark));
+          let mark = mix(t.faint, t.secondary, hot);
+          ui.with_id(x).canvas(s, move |f, r| Icon::CLEAR.draw(f, r, mark));
         }
       });
     });
     r
   }
 
-  /// A [Ui::search_field] in the theme's look ([crate::ui::Theme::search]), `hint` shown while
-  /// it is empty.
-  pub fn search(&mut self, text: &mut String, hint: &'static str) -> Response {
-    let style = self.theme().search().hint(hint);
-    self.search_field(text, &style)
+  /// The search field's box and text in `style` over its behaviour `b`, and its edit menu.
+  fn search_box(&mut self, b: &FieldBehavior, prompt: &str, style: &FieldStyle) -> Response {
+    // Named by its prompt when nothing else names it, as a browser names a field.
+    if let Some(a) = self.a11y_of(b.id) {
+      a.name_or(prompt);
+    }
+
+    let frame = b.style(field_frame(self, style, b.focused, !b.disabled));
+    let keys = self.keymap(EDIT_KEYS).with_id(b.id);
+    let r = keys.row(frame.scroll(Axes::HORIZONTAL), |ui| {
+      ui.field_text(b, prompt, style, Style::new());
+    });
+    self.edit_menu(b);
+    let (changed, submitted, cancelled, blurred) = (b.changed, b.submitted, b.cancelled, b.blurred);
+    Response { hovered: b.hovered, changed, submitted, cancelled, blurred, ..r }
   }
 }
 
 #[cfg(test)]
 mod tests {
   use crate::app::{App, Cx, Event, MouseButton};
-  use crate::harness::Harness;
-  use crate::keys::{Binding, Command, Key, Shortcut, bind};
+  use crate::keys::{Binding, Command, Key, Shortcut};
   use crate::scene::{Rect, Size};
-  use crate::ui::{Cursor, Id, Style, Ui, pct};
-  use crate::{Modifiers, NamedKey};
+  use crate::ui::{Cursor, Id, Style, Ui, grow, pct};
+  use crate::{Harness, Modifiers, NamedKey};
 
   const NONE: Modifiers = Modifiers::empty();
   /// The tests play macOS's keys on any host ([Harness::set_os]).
@@ -93,7 +108,7 @@ mod tests {
   const HINT: &str = "Search models and history";
 
   /// A search field, the changes it reported, and the app's own Escape: what the field gives
-  /// back. `narrow`: 40 in, half the rest wide, at most 100, and 60% of the window high;
+  /// back. `narrow`: 40 in, half the rest wide, at most 100;
   /// `red`: on a red ground.
   #[derive(Default)]
   struct Find {
@@ -109,7 +124,7 @@ mod tests {
   impl App for Find {
     fn keymap(&self) -> &[Binding] {
       const KEYS: &[Binding] =
-        &[bind(Shortcut::new(Key::Named(NamedKey::Escape)), Command::Cancel)];
+        &[Binding::new(Shortcut::new(Key::Named(NamedKey::Escape)), Command::Cancel)];
       KEYS
     }
 
@@ -121,18 +136,19 @@ mod tests {
 
     fn view(&mut self, ui: &mut Ui) {
       let t = ui.theme();
-      let frame = t.search().frame;
-      let style = match self.narrow {
-        true => t.search().frame(frame.w(pct(50.0)).max_w(100.0).h(pct(60.0))).hint(HINT),
-        false => t.search().hint("Search"),
+      let (column, prompt) = match self.narrow {
+        true => (Style::new().w(pct(50.0)).max_w(100.0), HINT),
+        false => (Style::new().w(grow()), "Search"),
       };
 
       let ground = if self.red { [1.0, 0.0, 0.0, 1.0] } else { t.bg };
       let left = if self.narrow { 40.0 } else { 0.0 };
       ui.row(Style::new().grow().pads([0.0, 0.0, 0.0, left]).bg(ground), |ui| {
-        let r = ui.disabled(self.off).id("s").search_field(&mut self.text, &style);
-        self.changes += r.changed as u32;
-        self.blurs += r.blurred as u32;
+        ui.col(column, |ui| {
+          let r = ui.disabled(self.off).id("s").search_field(&mut self.text, prompt);
+          self.changes += r.changed as u32;
+          self.blurs += r.blurred as u32;
+        });
       });
     }
   }
@@ -174,7 +190,7 @@ mod tests {
     h.click_menu_item("Paste");
     h.frame();
     assert_eq!((h.app().text.as_str(), h.app().changes), ("moon", 1));
-    assert_eq!(h.focused(), Some(Id::of("s")));
+    assert_eq!(h.focus_id(), Some(Id::of("s")));
 
     // Escape closes the menu before the app's own Escape, and leaves the text.
     h.right_click(r.x + 40.0, r.y + 10.0);
@@ -198,15 +214,15 @@ mod tests {
     let field = h.rect(Id::of("s")).unwrap();
     assert!(x.x + x.w <= field.x + field.w - 8.0 && x.w == 14.0, "{x:?} in {field:?}");
     h.move_to(x.x + 7.0, x.y + 7.0);
-    assert_eq!(h.rt.cursor(), Cursor::Pointer);
+    assert_eq!(h.cursor(), Cursor::Pointer);
 
     // Clicked from outside the field: cleared, `changed`, and the field focused for the next.
     h.click(5.0, 95.0);
-    assert_eq!(h.focused(), None);
+    assert_eq!(h.focus_id(), None);
     h.click_id(Id::of("s").key("clear"));
     h.frame();
     assert_eq!((h.app().text.as_str(), h.app().changes), ("", 2));
-    assert_eq!(h.focused(), Some(Id::of("s")));
+    assert_eq!(h.focus_id(), Some(Id::of("s")));
     assert!(clear(&h).is_none());
     assert_eq!(h.text(Id::of("s").key("text")), Some("Search"), "the hint again");
   }
@@ -218,9 +234,9 @@ mod tests {
     let y = field.y + field.h / 2.0;
     // The magnifier, 8 in: the I-beam, and a click focuses the field.
     h.move_to(field.x + 16.0, y);
-    assert_eq!(h.rt.cursor(), Cursor::Text);
+    assert_eq!(h.cursor(), Cursor::Text);
     h.click(field.x + 16.0, y);
-    assert_eq!(h.focused(), Some(Id::of("s")));
+    assert_eq!(h.focus_id(), Some(Id::of("s")));
     // Just left of the ⊗: the field's, nothing cleared.
     h.click(x.x - 2.0, y);
     h.frame();
@@ -238,7 +254,7 @@ mod tests {
     h.frame();
     assert_eq!((h.app().text.as_str(), h.app().changes, h.app().cancels), ("", 3, 0));
     assert_eq!(h.text(Id::of("s").key("text")), Some("Search"));
-    assert_eq!(h.focused(), Some(Id::of("s")));
+    assert_eq!(h.focus_id(), Some(Id::of("s")));
     // Empty, it is the app's.
     assert!(h.key(NamedKey::Escape, NONE));
     assert_eq!((h.app().changes, h.app().cancels), (3, 1));
@@ -297,7 +313,7 @@ mod tests {
     h.frame();
     h.move_to(x.x - 4.0, y);
     h.frame();
-    assert!(h.rt.due_in().is_some_and(|d| d <= std::time::Duration::from_millis(16)));
+    assert!(h.due_in().is_some_and(|d| d <= std::time::Duration::from_millis(16)));
   }
 
   /// The ⊗'s cross is cut out: the field's ground over what it sits on shows through.
@@ -441,7 +457,7 @@ mod tests {
     h.frame();
     h.event(Event::MouseUp { pos, button, mods });
     h.frame();
-    assert_eq!((h.focused(), h.app().text.as_str()), (None, "moon"));
+    assert_eq!((h.focus_id(), h.app().text.as_str()), (None, "moon"));
   }
 
   /// Held on the ⊗ a while, the field keeps the focus; released, it clears.
@@ -452,7 +468,7 @@ mod tests {
     let x = clear(&h).unwrap();
     h.press(x.x + 7.0, x.y + 7.0);
     h.frame();
-    assert_eq!((h.focused(), h.app().blurs), (Some(Id::of("s")), 0));
+    assert_eq!((h.focus_id(), h.app().blurs), (Some(Id::of("s")), 0));
     h.release(x.x + 7.0, x.y + 7.0);
     h.frame();
     assert_eq!((h.app().text.as_str(), h.app().blurs), ("", 0));
@@ -464,7 +480,7 @@ mod tests {
     h.app_mut().narrow = true;
     h.frame();
     let (field, x) = (h.rect(Id::of("s")).unwrap(), clear(&h).unwrap());
-    assert_eq!((field.w, field.h), (100.0, 60.0));
+    assert_eq!(field.w, 100.0);
     assert!(x.x > field.x + field.w / 2.0 && x.x + x.w <= field.x + field.w - 8.0, "{x:?}");
   }
 
@@ -475,7 +491,7 @@ mod tests {
     h.frame();
     assert!(clear(&h).is_none());
     h.click_id(Id::of("s"));
-    assert_eq!(h.focused(), None);
+    assert_eq!(h.focus_id(), None);
     h.key(NamedKey::Escape, NONE);
     assert_eq!((h.app().text.as_str(), h.app().changes), ("moon", 0));
   }

@@ -20,6 +20,7 @@ use std::time::Duration;
 
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+#[cfg(feature = "system")]
 use windows_sys::Win32::System::Power::POWERBROADCAST_SETTING;
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::HiDpi::{
@@ -28,7 +29,11 @@ use windows_sys::Win32::UI::HiDpi::{
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use super::super::{Timer, create, run_loop, settings, show_overlay, wide, with_window};
-use super::{hardware, host, paste, tray};
+#[cfg(feature = "system")]
+use super::hardware;
+#[cfg(feature = "tray")]
+use super::tray;
+use super::{host, paste};
 use crate::app::{App, Event};
 use crate::commands::Bar;
 use crate::shell::{AppInfo, Main, OnChosen, Presence};
@@ -84,6 +89,7 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
   }
 
   shell::finish(close);
+  #[cfg(feature = "tray")]
   tray::removed();
   // Work posted after the loop is dropped unrun: the closures are let go here.
   super::HOST.store(0, Ordering::Release);
@@ -210,11 +216,13 @@ unsafe extern "system" fn host_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
       0
     }
 
+    #[cfg(feature = "tray")]
     WM_TRAY => {
       tray::notify(wp, lp);
       0
     }
 
+    #[cfg(feature = "system")]
     WM_POWERBROADCAST if wp == PBT_POWERSETTINGCHANGE as WPARAM => {
       // SAFETY: the message's setting, a header and its data.
       hardware::power(unsafe { &*(lp as *const POWERBROADCAST_SETTING) });
@@ -239,12 +247,14 @@ unsafe extern "system" fn host_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM
       std::process::exit(0);
     }
 
+    #[cfg(feature = "tray")]
     m if m == tray::taskbar_created() => {
       tray::added_again();
       0
     }
 
     m if settings::changed(m, lp) => {
+      #[cfg(feature = "tray")]
       tray::retint();
       unsafe { DefWindowProcW(hwnd, msg, wp, lp) }
     }

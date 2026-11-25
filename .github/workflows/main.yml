@@ -26,12 +26,63 @@ jobs:
           save-if: ${{ github.event_name != 'pull_request' }}
       - run: rustup toolchain install nightly --profile minimal --component rustfmt
       - run: rustup target add x86_64-pc-windows-msvc x86_64-unknown-linux-gnu
+      # The public API's nightly, pinned in the Makefile, and its tool, for make check-api.
+      - run: rustup toolchain install "$(sed -n 's/^API_NIGHTLY := //p' Makefile)" --profile minimal --target aarch64-apple-darwin,x86_64-pc-windows-msvc,x86_64-unknown-linux-gnu
+      - uses: taiki-e/cache-cargo-install-action@v3
+        with:
+          tool: cargo-public-api@0.52.0
       - run: sudo apt-get update && sudo apt-get install -y libfontconfig1 libfreetype6 libharfbuzz0b fonts-dejavu-core libgtk-3-0t64
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
       - run: make check
       - run: make test
+      # The API against the last release, the `v*` tag before this commit; off until the first one.
+      # A release PR or commit fails when its version's bump is too small for the changes since;
+      # any other PR keeps the version and only warns of the bump its changes will need.
+      - id: release
+        run: echo "tag=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null)" >> "$GITHUB_OUTPUT"
+      - if: steps.release.outputs.tag == ''
+        run: echo "::notice::no release tag yet, so no semver checks until the first release"
+      - if: steps.release.outputs.tag != ''
+        uses: taiki-e/install-action@cargo-semver-checks
+      - if: steps.release.outputs.tag != ''
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          RELEASE: "${{ startsWith(github.event.pull_request.title, 'release: v') || startsWith(github.event.head_commit.message, 'release: v') }}"
+        run: |
+          if cargo semver-checks --baseline-rev "$TAG" --all-features; then exit 0; fi
+          if [ "$RELEASE" = true ]; then exit 1; fi
+          echo "::warning::the changes since $TAG need the version bump above in the next release"
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb xauth
       - run: xvfb-run -a make pace
+      - run: cargo publish --dry-run
+
+  # The Mac: the library's checks and tests, each feature alone on every system, the docs.rs build.
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the merge base with main, for the size check
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.event_name != 'pull_request' }}
+          cache-directories: target/features
+      - run: rustup toolchain install nightly --profile minimal --component rustfmt
+      - run: rustup target add x86_64-pc-windows-msvc x86_64-unknown-linux-gnu
+      # The public API's nightly, pinned in the Makefile, and its tool, for make check-api.
+      - run: rustup toolchain install "$(sed -n 's/^API_NIGHTLY := //p' Makefile)" --profile minimal --target aarch64-apple-darwin,x86_64-pc-windows-msvc,x86_64-unknown-linux-gnu
+      - uses: taiki-e/cache-cargo-install-action@v3
+        with:
+          tool: cargo-public-api@0.52.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: taiki-e/install-action@cargo-hack
+      - run: make check
+      - run: make test
+      - run: make features
+      - run: cargo +nightly doc --all-features --no-deps
+        env:
+          RUSTDOCFLAGS: --cfg docsrs -D warnings
 
   build:
     if: "github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' || startsWith(github.event.pull_request.title, 'release: v')"
@@ -42,7 +93,7 @@ jobs:
 
   publish:
     if: github.ref == 'refs/heads/main'
-    needs: [test, build]
+    needs: [test, macos, build]
     runs-on: ubuntu-latest
     permissions:
       attestations: write

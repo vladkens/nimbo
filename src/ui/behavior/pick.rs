@@ -1,7 +1,8 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Picking one of a few items ([Ui::pick_behavior]): tabs, a segmented control, the toolbar's
-//! tabs; their looks are `Tabs`, `Ui::segmented` and `Ui::toolbar_tabs`.
+//! Picking one of a few items ([Ui::pick_behavior]): tabs, a picker's segments, the toolbar's
+//! tabs; their looks are `Tabs`, the picker styles over [super::PickerConfiguration::segments]
+//! and `Ui::toolbar_tabs`.
 
 use crate::ui::{Behavior, Id, Role, State, Ui};
 

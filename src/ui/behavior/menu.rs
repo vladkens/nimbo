@@ -7,9 +7,8 @@
 
 use std::time::Duration;
 
-use keyboard_types::NamedKey;
-
 use super::scroll::{Bars, MIN_THUMB};
+use crate::NamedKey;
 use crate::keys::{Command, Key, Move};
 use crate::scene::{Point, Rect};
 use crate::ui::{Behavior, Enabled, Float, Id, Role, State, Style, Ui, UnitPoint, grow, pct};
@@ -20,10 +19,10 @@ const MENU_Z: i32 = 1000;
 const EDGE: f32 = 6.0;
 /// How long letters typed one after another keep adding to a type-select prefix, as in
 /// AppKit's menus.
-pub const TYPE_SELECT: Duration = Duration::from_millis(1000);
+const TYPE_SELECT: Duration = Duration::from_millis(1000);
 
 /// Type-to-select in a list of labelled items (a menu, a pop-up button): letters typed within
-/// [TYPE_SELECT] of each other make a prefix, and the first item starting with it is chosen.
+/// a second of each other make a prefix, and the first item starting with it is chosen.
 #[derive(Default)]
 pub struct TypeSelect {
   prefix: String,
@@ -31,7 +30,7 @@ pub struct TypeSelect {
 }
 
 impl TypeSelect {
-  /// Adds `c`, typed at `now`; a pause longer than [TYPE_SELECT] starts a new prefix.
+  /// Adds `c`, typed at `now`; a pause longer than a second starts a new prefix.
   pub fn push(&mut self, c: char, now: Duration) -> &mut Self {
     if self.at.is_none_or(|t| now.saturating_sub(t) > TYPE_SELECT) {
       self.prefix.clear();
@@ -98,6 +97,7 @@ struct Open {
 
 /// Where a menu opens ([Ui::menu_popup]).
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum MenuPlacement {
   /// Under its trigger, or above it where it doesn't fit.
   Below,
@@ -278,6 +278,21 @@ impl Ui<'_> {
     open
   }
 
+  /// Closes the menu of `id` a style left open, the focus back where it was before it opened:
+  /// another style builds the control now.
+  pub(crate) fn dismiss_menu(&mut self, id: Id) {
+    if !self.menu_open(id) {
+      return;
+    }
+
+    let st = std::mem::take(self.state::<Open>(id));
+    if self.focus_id().is_none_or(|f| f == id.key("menu")) {
+      self.focus(st.prev);
+    }
+
+    self.set_menu_open(id, false);
+  }
+
   /// An open menu's keys and pointer: the pointer moving onto an item highlights it, Up and
   /// Down step over the enabled items, letters typed go to the first one they start; whether
   /// to close (Escape), and the item to run (Enter, Space).
@@ -429,13 +444,12 @@ impl Ui<'_> {
 
 #[cfg(test)]
 mod tests {
-  use keyboard_types::{Modifiers, NamedKey};
-
   use super::*;
   use crate::app::App;
-  use crate::harness::{Harness, mac_titlebar};
+  use crate::harness::mac_titlebar;
   use crate::scene::Size;
   use crate::ui::px;
+  use crate::{Harness, Modifiers, NamedKey};
 
   /// A menu of 30 items, taller than its window, opened by a button the app can disable; the
   /// item run last and what [Ui::menu_popup] returned last.
@@ -478,11 +492,11 @@ mod tests {
     let track = h.rect(list.key(("track", 1usize))).expect("a scrollbar");
     h.click(track.x + track.w / 2.0, track.y + track.h - 4.0);
     h.frame();
-    assert!(h.rect(menu).is_some() && h.rt.ui.scroll(list).unwrap().offset.y > 0.0);
+    assert!(h.rect(menu).is_some() && h.scroll(list).unwrap().offset.y > 0.0);
 
     // Tab leaves focus in it.
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!(h.focused(), Some(menu));
+    assert_eq!(h.focus_id(), Some(menu));
 
     // The pointer on an item, Down past it, then the pointer moving within it: it takes the
     // highlight back, and Enter runs it.

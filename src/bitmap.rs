@@ -21,6 +21,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::Error;
 use crate::platform::image;
 
 /// A decoded picture: its size in pixels and premultiplied RGBA pixels, rows top-down, shared by
@@ -42,17 +43,17 @@ impl Bitmap {
   /// The picture in `file`, the bytes of an image file, shrunk on decoding so that its longer
   /// side is at most `side` pixels (keeping its aspect; `u32::MAX` for its full size): 600 for a
   /// photo shown 300 points wide on a Retina screen, which costs 600 px of memory however large
-  /// the photo. Turned upright as its EXIF orientation says. An error when the OS can't read it
-  /// (another format, a broken file), when the file declares over a gigapixel, when the picture
-  /// would be over 128 Mi pixels (512 MiB; a smaller `side` decodes it), or when there is no
-  /// memory for it. Colours come in sRGB: macOS converts an embedded profile (Display P3, Adobe
+  /// the photo. Turned upright as its EXIF orientation says. [Error::Invalid] when the OS can't
+  /// read it (another format, a broken file), when the file declares over a gigapixel, when the
+  /// picture would be over 128 Mi pixels (512 MiB; a smaller `side` decodes it), or when there is
+  /// no memory for it. Colours come in sRGB: macOS converts an embedded profile (Display P3, Adobe
   /// RGB); Windows and Linux ignore it, taking the values as sRGB.
   ///
   /// ```ignore
   /// let photo = Bitmap::decode(&std::fs::read(path)?, 600)?;
   /// ```
-  pub fn decode(file: &[u8], side: u32) -> Result<Self, String> {
-    let (w, h, px) = image::decode(file, side.max(1))?;
+  pub fn decode(file: &[u8], side: u32) -> Result<Self, Error> {
+    let (w, h, px) = image::decode(file, side.max(1)).map_err(Error::Invalid)?;
     debug_assert_eq!(px.len(), w as usize * h as usize * 4);
     Ok(Self { w, h, px: Arc::new(px), key: next_key() })
   }
@@ -116,16 +117,6 @@ pub(crate) fn zeroed(w: u32, h: u32) -> Result<Vec<u8>, String> {
   Ok(px)
 }
 
-/// `rgba`'s straight pixels premultiplied, in place.
-pub(crate) fn premultiply(rgba: &mut [u8]) {
-  for p in rgba.as_chunks_mut::<4>().0 {
-    let a = p[3] as u32;
-    for c in &mut p[..3] {
-      *c = ((*c as u32 * a + 127) / 255) as u8;
-    }
-  }
-}
-
 /// The size of a `w` × `h` picture shrunk so its longer side is at most `side`, keeping its
 /// aspect.
 pub(crate) fn fit(w: u32, h: u32, side: u32) -> (u32, u32) {
@@ -175,6 +166,7 @@ pub(crate) fn orient(w: u32, h: u32, px: Vec<u8>, o: u16) -> Result<(u32, u32, V
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::scene::premultiply;
 
   // `tests/images/`: a 64 × 48 picture of four quadrants (red, green, blue, yellow from the top
   // left), as a JPEG, a GIF, a PNG whose yellow is half transparent, and as JPEGs stored turned

@@ -22,7 +22,7 @@ use objc2_core_text::{
   CTFont, CTFontOrientation, CTFontSymbolicTraits, CTLine, CTRun, kCTFontAttributeName,
 };
 
-use crate::text::edit::Utf16Bytes;
+use crate::platform::Utf16Bytes;
 use crate::text::{Design, Font, Glyph, GlyphBox, Ink, Line, Metrics, Raster, Weight};
 
 /// A CTFont at its point size.
@@ -118,7 +118,7 @@ pub fn shape(face: &Face, s: &str, mut index: impl FnMut(Face) -> u16) -> Line {
     clusters.extend(idx.iter().map(at));
   }
 
-  Line { glyphs, clusters, width, ink: Ink::default(), epoch: 0 }
+  Line { glyphs, clusters, width, ink: Ink::default() }
 }
 
 fn ns_font(font: Retained<NSFont>) -> CFRetained<CTFont> {

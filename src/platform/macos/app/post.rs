@@ -2,23 +2,20 @@
 
 //! Shortcuts posted as key events on macOS: a key down and up from a private event source, the
 //! modifiers as the events' flags (no modifier key goes down, so keys the user still holds stay
-//! theirs), at the HID level, where the app in focus gets them as typed, marked [POSTED] so the
-//! app's own hotkey tap lets them pass unseen. Needs Accessibility.
+//! theirs), at the HID level, where the app in focus gets them as typed, marked [super::POSTED] so
+//! the app's own hotkey tap lets them pass unseen. Needs Accessibility.
 //!
 //! The session's modifier state takes the flags of each event posted there, so the up carries the
 //! modifiers held before the post; with the shortcut's on it, ⌘ stayed down for every event after.
 
-use keyboard_types::Modifiers;
 use objc2_core_graphics::{
   CGEvent, CGEventField, CGEventFlags, CGEventSource, CGEventSourceStateID, CGEventTapLocation,
 };
 
 use super::super::keyboard;
-use super::hotkey::tap_flags;
+use super::{POSTED, tap_flags};
+use crate::Modifiers;
 use crate::keys::{Key, Shortcut};
-
-/// The posted events' source user data: the hotkey tap passes them on unjudged.
-pub(super) const POSTED: i64 = u32::from_be_bytes(*b"nmbo") as i64;
 
 /// The modifier flags a key holds or locks, restored on the up.
 const HELD: u64 = CGEventFlags::MaskAlphaShift.0

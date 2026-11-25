@@ -34,7 +34,9 @@ use objc2_foundation::{
   NSPoint, NSRect, NSSize, NSString, NSUserDefaults, ns_string,
 };
 
-pub use super::app::{alert, is_main, post, send, set_presence};
+#[cfg(feature = "system")]
+pub use super::app::send;
+pub use super::app::{alert, is_main, post, set_presence};
 use super::view::View;
 use super::{Pasteboard, activate, appearance, bar, mtm, overlay, titlebar};
 use crate::app::{App, Clock, Event, Runtime};
@@ -122,8 +124,8 @@ define_class!(
       NSApplicationTerminateReply::TerminateLater
     }
 
-    /// Windows close; the app quits only through [quit] (`nimbo::run_example` quits when its
-    /// window closes).
+    /// Windows close; the app quits only through [quit] (an example quits when its window
+    /// closes: `examples/common/example.rs`).
     #[unsafe(method(applicationShouldTerminateAfterLastWindowClosed:))]
     fn should_terminate_after_last(&self, _app: &NSApplication) -> bool {
       false
@@ -231,8 +233,8 @@ pub fn run(info: &AppInfo, start: impl FnOnce(&mut Main)) {
   };
   let name = info.name;
   shell(|s| *s = Shell { name, delegate: Some(delegate.clone()), ..Shell::default() });
-  super::app::set_presence(info.presence);
-  if info.presence == Presence::Regular {
+  super::app::set_presence(info.get_presence());
+  if info.get_presence() == Presence::Regular {
     activate(mtm);
   }
 

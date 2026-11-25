@@ -1,19 +1,20 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Widgets drawn from the theme ([Ui::theme]): label, link, button (variants, an [Icon]), ⓘ and
-//! "?" buttons, text field, search field and selectable text, check box, switch, slider,
-//! segmented control, progress bar and spinner, badge, tooltip, the shortcut recorder, and
+//! Widgets drawn from the theme ([Ui::theme]): label, link, button styles (an [Icon] too), ⓘ and
+//! "?" buttons, text field, search field and selectable text, check box, switch, slider style,
+//! segmented picker style, progress bar and spinner, badge, tooltip, the hotkey recorder, and
 //! images from pixels; each at the control size ([Ui::control_size]). Each control is its behaviour
 //! (`*_behavior`, as [super::behavior] lists) plus drawing from the theme: an app that wants its
 //! own look draws over the same behaviour.
 //!
 //! ```ignore
 //! if ui.button("Refresh").clicked { self.refresh() }
-//! if Button::new("Save").style(ButtonStyle::BorderedProminent).show(ui).clicked { self.save() }
+//! if ui.button_style(&BorderedProminentButtonStyle).button("Save").clicked { self.save() }
 //! ui.disabled(!self.dirty).button("Revert");
-//! ui.checkbox(&mut self.wrap, "Wrap lines");
+//! ui.toggle_style(&CheckboxToggleStyle).toggle(&mut self.wrap, "Wrap lines");
 //! Slider::new(&mut self.level, 10.0..=90.0).step(10.0).show(ui);
-//! ui.id("size").segmented(&mut self.size, &[Tag::new(Size::Small, "Small"), Tag::new(Size::Large, "Large")]);
+//! ui.slider_style(&MySliderStyle).slider(&mut self.zoom, 0.0..=200.0);
+//! ui.picker_style(&SegmentedPickerStyle).picker(&mut self.size, &SIZES);
 //! ui.help("Back to the default").icon_button(Icon::RESET);
 //! ui.control_size(ControlSize::Small).row(Style::new(), |ui| ui.button("Small"));
 //! ```
@@ -32,22 +33,26 @@ mod button;
 mod checkbox;
 mod divider;
 mod field;
+#[cfg(feature = "hotkey")]
+pub(crate) mod hotkey_recorder;
 mod label;
 mod link;
 mod progress;
 mod search;
 mod segmented;
-pub mod shortcut;
 mod slider;
 mod toggle;
 mod tooltip;
 
-pub(crate) use button::MarkShift;
-pub use button::{Button, ButtonRole};
-pub use slider::Slider;
+pub use button::{BorderedButtonStyle, BorderedProminentButtonStyle, BorderlessButtonStyle};
+pub(crate) use button::{ButtonLook, Face, MarkShift, Variant, draw, look};
+pub use checkbox::CheckboxToggleStyle;
+pub use field::RoundedBorderTextFieldStyle;
+pub use segmented::SegmentedPickerStyle;
+pub use slider::LinearSliderStyle;
+pub use toggle::{ButtonToggleStyle, SwitchToggleStyle};
+pub use tooltip::TooltipHelpStyle;
 
-// Where apps found them before icons moved into the core.
-pub use super::icon::{self, Icon, IconPaint};
 use super::{Id, Style, Ui};
 use crate::scene::{Color, alpha, mix};
 
@@ -97,7 +102,7 @@ mod tests {
       ui.set_theme(t);
       // Composited over the ground, a dimmed colour is nearer the ground than the colour.
       let over = |c: Color| -> f32 { t.bg[0] * (1.0 - c[3]) + c[0] * c[3] };
-      for c in [t.track, t.accent, t.raised, t.muted] {
+      for c in [t.track, t.accent, t.raised, t.secondary] {
         let d = ui.dim(c, true);
         assert!((over(d) - t.bg[0]).abs() < (over(c) - t.bg[0]).abs(), "{c:?} dims to {d:?}");
       }

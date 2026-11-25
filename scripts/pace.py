@@ -4,10 +4,10 @@
 # ///
 """Checks frame pacing in a real window.
 
-Runs the pace example (examples/pace.rs, release build) traced, counts the frames presented
-while its bar moves and the wakeups once it is still, prints both and fails when frames come
-slower than PACE_MIN fps (55; at 60 Hz, frames paced from their end come at about 40) or the
-still window wakes at all. Both are timed from its first frame, not from the launch: a CI
+Runs the canvas example's pace page (examples/canvas/pace.rs, release build) traced, counts the
+frames presented while its bar moves and the wakeups once it is still, prints both and fails when
+frames come slower than PACE_MIN fps (55; at 60 Hz, frames paced from their end come at about 40)
+or the still window wakes at all. Both are timed from its first frame, not from the launch: a CI
 runner's cold first launch takes 0.1-1.2 s and at times more, which left the bar moving in a
 still window timed from the launch.
 
@@ -16,7 +16,7 @@ It runs in the session's display: on Linux Wayland if WAYLAND_DISPLAY is set, el
 are the context switches of all its threads: /proc on Linux, the raw thread performance
 counters on Windows. macOS paces by its display link: not checked.
 
-uv run scripts/pace.py [binary]      default target/release/examples/pace
+uv run scripts/pace.py [binary]      default target/release/examples/canvas, run as `<binary> pace`
 """
 
 import os
@@ -113,7 +113,7 @@ def main() -> int:
     if hasattr(signal, name):
       signal.signal(getattr(signal, name), lambda *_: sys.exit(1))
 
-  binary = sys.argv[1] if len(sys.argv) > 1 else "target/release/examples/pace"
+  binary = sys.argv[1] if len(sys.argv) > 1 else "target/release/examples/canvas"
   least = os.environ.get("PACE_MIN", "55")
   env = {**os.environ, "NIMBO_TRACE": "1"}
 
@@ -123,7 +123,7 @@ def main() -> int:
     log = Path(tmp) / "trace.log"
     with log.open("w") as out:
       launched = time.time()
-      app = subprocess.Popen([binary], stderr=out, env=env)
+      app = subprocess.Popen([binary, "pace"], stderr=out, env=env)
 
     # The app must last the whole run: once it ends, its counts stand still (or go, with its
     # threads) and would pass as no wakeups.
