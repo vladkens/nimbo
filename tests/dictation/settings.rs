@@ -109,10 +109,10 @@ fn general_switches_select_and_recorder() {
   // The recorder: a click records the next chord, then a modifier alone.
   let rec = Id::of(HOTKEY);
   h.click_id(rec);
-  assert_eq!(h.focused(), Some(rec));
+  assert_eq!(h.focus_id(), Some(rec));
   h.key('k', Modifiers::CONTROL | Modifiers::SHIFT);
   assert_eq!(hotkey(&h).as_deref(), Some("ctrl+shift+k"));
-  assert_ne!(h.focused(), Some(rec));
+  assert_ne!(h.focus_id(), Some(rec));
   h.click_id(rec);
   h.event(Event::Modifier { key: Code::AltRight, down: true });
   h.event(Event::Modifier { key: Code::AltRight, down: false });
@@ -140,7 +140,7 @@ fn general_switches_select_and_recorder() {
   // Escape stops it unchanged, Backspace clears it.
   key(&mut h, NamedKey::Escape);
   assert_eq!(hotkey(&h).as_deref(), Some(lone));
-  assert_ne!(h.focused(), Some(rec));
+  assert_ne!(h.focus_id(), Some(rec));
   h.click_id(rec);
   key(&mut h, NamedKey::Backspace);
   assert_eq!(h.app().hotkey, None);
@@ -242,11 +242,11 @@ fn advanced_asks_in_a_dialog() {
   h.click_id(Id::of(CLEAR_CACHE));
   h.frame();
   key(&mut h, NamedKey::Tab);
-  assert_eq!(h.focused(), Some(confirm.key("action")));
+  assert_eq!(h.focus_id(), Some(confirm.key("action")));
   key(&mut h, NamedKey::Tab);
-  assert_eq!(h.focused(), Some(confirm.key("cancel")));
+  assert_eq!(h.focus_id(), Some(confirm.key("cancel")));
   key(&mut h, NamedKey::Tab);
-  assert_eq!(h.focused(), Some(confirm.key("action")));
+  assert_eq!(h.focus_id(), Some(confirm.key("action")));
 
   h.key(' ', Modifiers::ALT);
   assert_eq!(h.app().ask, Some(Ask::ClearCache));
@@ -349,12 +349,12 @@ fn the_dialog_takes_the_focus_and_gives_it_back() {
   key(&mut h, ' ');
   h.frame();
   assert_eq!(h.app().ask, Some(Ask::ClearCache));
-  assert_eq!(h.focused(), Some(confirm.key("backdrop")));
+  assert_eq!(h.focus_id(), Some(confirm.key("backdrop")));
   reads(&h.a11y(), &["button \"Cancel\" focused"]);
 
   key(&mut h, NamedKey::Escape);
   h.frame();
-  assert_eq!((h.app().ask, h.focused()), (None, Some(clear)));
+  assert_eq!((h.app().ask, h.focus_id()), (None, Some(clear)));
   reads(&h.a11y(), &["button \"Clear…\" focused"]);
 }
 
@@ -402,9 +402,9 @@ fn assistive_presses_choose_in_a_select() {
 fn an_assistive_focus_moves_the_focus() {
   let mut h = start();
   assert!(h.act(Id::of(LANG), Action::Focus));
-  assert_eq!(h.focused(), Some(Id::of(LANG)));
+  assert_eq!(h.focus_id(), Some(Id::of(LANG)));
   assert!(!h.act(Id::of(RESET), Action::Focus));
-  assert_eq!(h.focused(), Some(Id::of(LANG)));
+  assert_eq!(h.focus_id(), Some(Id::of(LANG)));
 }
 
 /// The focus reads only while the window has it: leaving and coming back change the tree, so
@@ -512,7 +512,7 @@ fn a_disabled_rows_info_shows_its_tip() {
 fn the_account_tab_shows_the_fields() {
   let mut h = start();
   turn(&mut h, Page::Account);
-  assert_eq!(h.focused(), Some(Id::of(account::NAME)));
+  assert_eq!(h.focus_id(), Some(Id::of(account::NAME)));
   h.type_text("Ada");
   h.frame();
   assert_eq!(h.app().account.name, "Ada");

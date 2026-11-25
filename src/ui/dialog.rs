@@ -229,7 +229,7 @@ mod tests {
   use super::*;
   use crate::app::{App, Cx, Event};
   use crate::harness::Harness;
-  use crate::keys::{Binding, CMD, Command, Shortcut, bind};
+  use crate::keys::{Binding, CMD, Command, Shortcut};
   use crate::scene::Size;
   use crate::{Modifiers, NamedKey};
 
@@ -242,7 +242,7 @@ mod tests {
 
   impl App for Under {
     fn keymap(&self) -> &[Binding] {
-      const KEYS: &[Binding] = &[bind(Shortcut::char('z').cmd(), Command::Action("undo"))];
+      const KEYS: &[Binding] = &[Binding::new(Shortcut::char('z').cmd(), Command::Action("undo"))];
       KEYS
     }
 
@@ -272,13 +272,13 @@ mod tests {
     // Tab and Shift-Tab cycle the buttons, one step each, from a button too.
     let tab = |h: &mut Harness<Under>, mods| h.key(NamedKey::Tab, mods);
     tab(&mut h, Modifiers::empty());
-    assert_eq!(h.focused(), Some(d.key("cancel")));
+    assert_eq!(h.focus_id(), Some(d.key("cancel")));
     tab(&mut h, Modifiers::empty());
-    assert_eq!(h.focused(), Some(d.key("action")));
+    assert_eq!(h.focus_id(), Some(d.key("action")));
     tab(&mut h, Modifiers::SHIFT);
-    assert_eq!(h.focused(), Some(d.key("cancel")));
+    assert_eq!(h.focus_id(), Some(d.key("cancel")));
     tab(&mut h, Modifiers::SHIFT);
-    assert_eq!(h.focused(), Some(d.key("action")));
+    assert_eq!(h.focus_id(), Some(d.key("action")));
     h.key('a', Modifiers::empty());
     assert_eq!(h.app().heard, 0);
 

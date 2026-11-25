@@ -286,7 +286,7 @@ mod tests {
     assert!(!h.rt.drags_window(Point::new(320.0, 60.0)), "under the bar, the content");
     h.move_to(toggle.x, toggle.y);
     h.frame();
-    assert_eq!(h.rt.cursor(), Cursor::Pointer);
+    assert_eq!(h.cursor(), Cursor::Pointer);
     h.click(toggle.x, toggle.y);
     assert_eq!(h.app().0, 1);
   }
@@ -533,7 +533,7 @@ mod tests {
       assert!(!h.drags_window(end.x, end.y));
       h.click(end.x, end.y);
       h.frame();
-      assert_eq!(h.focused(), Some(Id::of("find")), "{w}");
+      assert_eq!(h.focus_id(), Some(Id::of("find")), "{w}");
     }
   }
 
@@ -550,7 +550,7 @@ mod tests {
     assert!(!h.drags_window(f.x, f.y));
     h.click(f.x, f.y);
     h.frame();
-    assert_eq!(h.focused(), Some(Id::of("find")));
+    assert_eq!(h.focus_id(), Some(Id::of("find")));
     h.move_to(f.x, f.y);
     h.frame();
     assert_eq!(h.cursor(), Cursor::Text);

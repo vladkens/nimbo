@@ -218,11 +218,11 @@ mod tests {
     let px = |h: &mut Harness<Squares>| h.render().pixel(20.0, 20.0);
     let rgb = |c: [f32; 4]| c.map(|v| (v * 255.0) as u8);
     assert_eq!(px(&mut h), rgb(OFF));
-    assert_eq!(h.rt.cursor(), Cursor::Arrow);
+    assert_eq!(h.cursor(), Cursor::Arrow);
 
     // Under the hand, held, flipped on; focused by Tab and flipped off by Space.
     h.move_to(20.0, 20.0);
-    assert_eq!(h.rt.cursor(), Cursor::Pointer);
+    assert_eq!(h.cursor(), Cursor::Pointer);
     h.press(20.0, 20.0);
     assert_eq!(px(&mut h), [255; 4]);
     h.release(20.0, 20.0);
@@ -230,7 +230,7 @@ mod tests {
     assert!(h.a11y().contains("check box on"), "{}", h.a11y());
 
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!(h.focused(), Some(Id::of("sq")));
+    assert_eq!(h.focus_id(), Some(Id::of("sq")));
     h.key(Key::Char(' '), Modifiers::empty());
     assert_eq!((h.app().on, h.app().flips), (false, 2));
     h.frame();
@@ -238,14 +238,14 @@ mod tests {
 
     // Disabled: its own red, no hand, no focus, no flips.
     h.app_mut().disabled = true;
-    h.rt.redraw();
+    h.redraw();
     assert_eq!(px(&mut h), [255, 0, 0, 255]);
-    assert_eq!(h.focused(), None);
+    assert_eq!(h.focus_id(), None);
     h.move_to(21.0, 20.0);
-    assert_eq!(h.rt.cursor(), Cursor::Arrow);
+    assert_eq!(h.cursor(), Cursor::Arrow);
     h.click(20.0, 20.0);
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!((h.focused(), h.app().on, h.app().flips), (None, false, 2));
+    assert_eq!((h.focus_id(), h.app().on, h.app().flips), (None, false, 2));
   }
 
   /// Toggles in a container given the square style, and one after it.

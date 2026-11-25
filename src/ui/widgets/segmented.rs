@@ -125,7 +125,7 @@ mod tests {
     assert!(h.click_id(Id::of("v").key(("item", 2usize))));
     assert_eq!(h.app().0, 3);
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!(h.focused(), Some(Id::of("v")));
+    assert_eq!(h.focus_id(), Some(Id::of("v")));
     h.key(NamedKey::ArrowLeft, Modifiers::empty());
     assert_eq!(h.app().0, 2);
   }

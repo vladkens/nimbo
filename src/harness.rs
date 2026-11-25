@@ -8,17 +8,18 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::app::{App, Clipboard, Clock, Event, Ime, MemClipboard, MouseButton, Runtime, Waker};
-pub use crate::cpu::Pixels;
+use crate::cpu::Pixels;
 use crate::file_dialog::FileDialog;
 use crate::keys::{self, Command, Key, KeyEvent, Os};
 use crate::locale::{self, Locale, Localizations};
 use crate::menu::{Item, Menu};
 use crate::scene::{Point, Rect, Size};
 use crate::text::TextSystem;
-#[cfg(feature = "headless")]
+#[cfg(all(test, feature = "headless"))]
 use crate::text::edit::Editor;
 use crate::text::edit::utf16_len;
-use crate::ui::{A11yTree, Action, Cursor, Id, Kind, Role, Scroll, TextInput};
+use crate::ui::a11y::A11yTree;
+use crate::ui::{Action, Cursor, Id, Kind, Role, Scroll, TextInput};
 use crate::{Code, Error, Modifiers, TitleBar, cpu, png};
 
 /// A display refresh at 120 Hz, the step of [Harness::wait].
@@ -49,6 +50,7 @@ impl<A: App> Harness<A> {
     Self { rt, cpu: cpu::Renderer::new() }
   }
 
+  /// The app, to read its state.
   pub fn app(&self) -> &A {
     &self.rt.app
   }
@@ -120,6 +122,8 @@ impl<A: App> Harness<A> {
     self.rt.waker()
   }
 
+  /// Sends `ev` as the window would; returns whether it was used. The other inputs are made of
+  /// it.
   pub fn event(&mut self, ev: Event) -> bool {
     self.rt.event(ev)
   }
@@ -138,12 +142,6 @@ impl<A: App> Harness<A> {
   /// harness draws them.
   pub fn set_native_menus(&mut self, on: bool) {
     self.rt.set_native_menus(on);
-  }
-
-  /// [Harness::set_native_menus] on, the name the apps' tests still call.
-  #[doc(hidden)]
-  pub fn native_menus(&mut self) {
-    self.set_native_menus(true);
   }
 
   /// Answers the context menu the app asked for ([crate::Ui::context_menu]) as the person
@@ -171,6 +169,7 @@ impl<A: App> Harness<A> {
     self.rt.can(cmd) && self.event(Event::Command(cmd))
   }
 
+  /// Moves the pointer to (x, y). Returns whether it was used.
   pub fn move_to(&mut self, x: f32, y: f32) -> bool {
     self.event(Event::MouseMove { pos: Point::new(x, y), mods: Modifiers::empty() })
   }
@@ -219,10 +218,13 @@ impl<A: App> Harness<A> {
   }
 
   /// Clicks the item labelled `label` of the drawn menu open in the last frame, as
-  /// [Self::context_menu] chooses one the platform shows; panics when it isn't there.
+  /// [Self::context_menu] chooses one the platform shows; panics when none or several (a
+  /// submenu's, a picker's option) have that label, so a test never takes the wrong one.
   pub fn click_menu_item(&mut self, label: &str) -> bool {
-    let id = self.menu_item(label).unwrap_or_else(|| panic!("no menu item {label:?}"));
-    self.click_id(id)
+    let mut found = self.find_all(Role::MenuItem).into_iter().filter(|e| e.name == label);
+    let item = found.next().unwrap_or_else(|| panic!("no menu item {label:?}"));
+    assert!(found.next().is_none(), "more than one menu item {label:?}");
+    self.click_id(item.id)
   }
 
   /// Presses and releases `key` with `mods` as on a US keyboard (Shift-1 is `'!'`, Shift-A
@@ -299,8 +301,8 @@ impl<A: App> Harness<A> {
     frames
   }
 
-  /// The focused element.
-  pub fn focused(&self) -> Option<Id> {
+  /// The focused element ([crate::Ui::focus_id]).
+  pub fn focus_id(&self) -> Option<Id> {
     self.rt.ui.focus()
   }
 
@@ -309,21 +311,14 @@ impl<A: App> Harness<A> {
     self.rt.ui.last.rect(id)
   }
 
-  /// The item labelled `label` of a drawn menu in the last frame built, found by its name to
-  /// assistive technology ([Self::a11y_tree]); its rect is [Self::rect]. Panics when more than one
-  /// item has that label (a submenu's, a picker's option), so a test never takes the wrong one.
-  pub fn menu_item(&self, label: &str) -> Option<Id> {
-    let t = self.a11y_tree();
-    let items = t.nodes.iter().filter(|n| n.props.role == Role::MenuItem);
-    let mut found = items.filter(|n| t.str(n.props.name) == label).map(|n| n.id);
-    let id = found.next()?;
-    assert!(found.next().is_none(), "more than one menu item {label:?}");
-
-    Some(id)
-  }
-
-  /// The text of a text element in the last frame built.
+  /// The text of `id`: a text field's or selectable text's as it is now, typed since the last
+  /// frame too, else a text element's in the last frame built.
   pub fn text(&self, id: Id) -> Option<&str> {
+    #[cfg(feature = "headless")]
+    if let Some(ed) = self.rt.ui.editor(id) {
+      return Some(ed.text());
+    }
+
     let t = &self.rt.ui.last;
     match t.get(id)?.kind {
       Kind::Text { range, .. } => Some(t.str(range.0, range.1)),
@@ -331,20 +326,41 @@ impl<A: App> Harness<A> {
     }
   }
 
-  /// The editor of a text field or selectable text.
+  /// The selection of a text field or selectable text as it is now: its anchor and its head, the
+  /// end that moves, as byte offsets of [Self::text]; a caret is both.
   #[cfg(feature = "headless")]
-  pub fn editor(&self, id: Id) -> Option<&Editor> {
+  pub fn selection(&self, id: Id) -> Option<(usize, usize)> {
+    let sel = self.rt.ui.editor(id)?.sel();
+    Some((sel.anchor, sel.head))
+  }
+
+  /// The editor of a text field or selectable text.
+  #[cfg(all(test, feature = "headless"))]
+  pub(crate) fn editor(&self, id: Id) -> Option<&Editor> {
     self.rt.ui.editor(id)
   }
 
   /// The last frame as assistive technology sees it, one line per node indented by depth:
-  /// `switch "Open at login" off` ([Self::a11y_tree]).
+  /// `switch "Open at login" off`.
   pub fn a11y(&self) -> String {
     self.a11y_tree().to_string()
   }
 
-  /// The last frame as assistive technology sees it: its nodes, roles, names and values.
-  pub fn a11y_tree(&self) -> A11yTree {
+  /// The first node of the last frame that assistive technology reads as `role` named `name`.
+  pub fn find(&self, role: Role, name: &str) -> Option<Element> {
+    self.find_all(role).into_iter().find(|e| e.name == name)
+  }
+
+  /// The nodes of the last frame that assistive technology reads as `role`, in the order it
+  /// reads them.
+  pub fn find_all(&self, role: Role) -> Vec<Element> {
+    let t = self.a11y_tree();
+    let of = t.nodes.iter().filter(|n| n.props.role == role);
+    of.map(|n| Element { id: n.id, role, name: t.str(n.props.name).into(), rect: n.rect }).collect()
+  }
+
+  /// The last frame as assistive technology sees it.
+  pub(crate) fn a11y_tree(&self) -> A11yTree {
     self.rt.ui.a11y_tree()
   }
 
@@ -477,15 +493,28 @@ impl<A: App> Harness<A> {
     Image { scale, pixels }
   }
 
+  /// Renders the current state ([Self::render]) into a PNG at `path`.
   pub fn shot(&mut self, path: &Path) -> Result<(), Error> {
     self.render().save_png(path)
   }
 }
 
+/// A node of the last frame as assistive technology reads it ([Harness::find]).
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct Element {
+  pub id: Id,
+  pub role: Role,
+  pub name: String,
+  /// In window points, clipped to the scroll areas around it.
+  pub rect: Rect,
+}
+
 // MARK: US keyboard
 
 /// The event AppKit reports for `key` with `mods` on a US keyboard. A character may be given
-/// shifted or not: `Char('1')` or `Char('!')` with Shift is `'!'`.
+/// shifted or not: `Char('1')` or `Char('!')` with Shift is `'!'`. How a test makes a
+/// [KeyEvent] for [Harness::key_event] or [Event::KeyDown].
 pub fn us_key(key: Key, mods: Modifiers) -> KeyEvent {
   let (key, code, mods) = match key {
     Key::Char(c) => match keys::us_code(c) {
@@ -510,11 +539,21 @@ pub fn us_key(key: Key, mods: Modifiers) -> KeyEvent {
 /// Offscreen frame pixels with their backing scale.
 #[non_exhaustive]
 pub struct Image {
-  pub scale: f32,
-  pub pixels: Pixels,
+  scale: f32,
+  pixels: Pixels,
 }
 
 impl Image {
+  /// Pixels per point.
+  pub fn scale(&self) -> f32 {
+    self.scale
+  }
+
+  /// The size in points.
+  pub fn size(&self) -> Size {
+    Size::new(self.pixels.w as f32 / self.scale, self.pixels.h as f32 / self.scale)
+  }
+
   /// RGBA at a point (in points, like events).
   pub fn pixel(&self, x: f32, y: f32) -> [u8; 4] {
     let px = ((x * self.scale) as usize).min(self.pixels.w - 1);
@@ -558,11 +597,11 @@ mod tests {
     let big = (0..5).map(|i| (abc.clone(), 100.0 + 20.0 * i as f32)).collect();
     let mut h = Harness::new(Lines(big), size, 2.0);
     h.render();
-    h.rt.redraw();
+    h.redraw();
     h.render();
 
     h.app_mut().0 = hello();
-    h.rt.redraw();
+    h.redraw();
     let img = h.render();
     let fresh = Harness::new(Lines(hello()), size, 2.0).render();
     assert!(img.pixels.data == fresh.pixels.data, "glyphs missing from the snapshot");

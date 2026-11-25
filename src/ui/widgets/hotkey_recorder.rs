@@ -83,7 +83,7 @@ mod tests {
   use super::*;
   use crate::app::{App, Cx, Event};
   use crate::harness::Harness;
-  use crate::keys::{Binding, CMD, Command, Key, Shortcut, bind};
+  use crate::keys::{Binding, CMD, Command, Key, Shortcut};
   use crate::scene::Size;
   use crate::ui::Id;
 
@@ -96,7 +96,7 @@ mod tests {
 
   impl App for Undo {
     fn keymap(&self) -> &[Binding] {
-      const KEYS: &[Binding] = &[bind(Shortcut::char('z').cmd(), Command::Action("undo"))];
+      const KEYS: &[Binding] = &[Binding::new(Shortcut::char('z').cmd(), Command::Action("undo"))];
       KEYS
     }
 

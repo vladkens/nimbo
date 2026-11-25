@@ -219,7 +219,7 @@ mod tests {
     assert!(h.a11y().contains(r#"button "A" desc "Saves it""#), "{}", h.a11y());
 
     h.app_mut().0 = false;
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     let tip = h.rect(Id::of("a").key("tip")).unwrap();
     assert_ne!((tip.w, tip.h), (30.0, 10.0));

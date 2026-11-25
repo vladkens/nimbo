@@ -109,7 +109,7 @@ pub const BLOCKS: &[Block] = &[
   b("Modifiers", "Disabled", ".disabled(true)", "ui.disabled(true).col(Style::new(), |ui| { … })"),
   b("Modifiers", "Control size", ".controlSize(.small)", "ui.control_size(ControlSize::Small).row(Style::new(), |ui| { … })"),
   b("Modifiers", "Accessibility label", ".accessibilityLabel(\"Reset\")", "ui.a11y_label(\"Reset\").icon_button(Icon::RESET)"),
-  b("Modifiers", "Keyboard shortcut", ".keyboardShortcut(\"z\", modifiers: .command)", "ui.keymap(&[bind(Shortcut::char('z').cmd(), Command::Undo)]).col(…)"),
+  b("Modifiers", "Keyboard shortcut", ".keyboardShortcut(\"z\", modifiers: .command)", "ui.keymap(&[Binding::new(Shortcut::char('z').cmd(), Command::Undo)]).col(…)"),
   b("Modifiers", "Environment", ".environment(\\.tint, .green) { … }; @Environment(\\.tint) var tint", "ui.environment(Tint(t.success)).row(style, |ui| { … }); ui.set_environment(Some(Tint(t.success))) for the window; let tint = ui.environment_value::<Tint>()"),
   b("Modifiers", "Group", "Group { Button(\"Save\"); Toggle(…) }.disabled(true)", "ui.disabled(true).group(|ui| { ui.button(\"Save\"); ui.toggle(&mut on, ()); }); ui.button(\"Open\")"),
   b("Modifiers", "Identity", "Box().id(item.id); .allowsHitTesting(false)", "ui.key(item.id).row(style, |ui| { … }); ui.with_id(id.key(\"box\")).allows_hit_testing(false).col(style, |ui| { … })"),

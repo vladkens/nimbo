@@ -1,7 +1,7 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The seams between an app and the world: events in, a scene out, with the clock, clipboard
-//! and waker injected, so one app runs the same in a window ([crate::platform]) and in the
+//! and waker injected, so one app runs the same in a window (`platform`) and in the
 //! headless harness ([crate::harness]).
 
 use std::time::{Duration, Instant};
@@ -795,7 +795,7 @@ mod tests {
   use std::sync::mpsc;
 
   use super::*;
-  use crate::keys::{self, CMD, Key, Shortcut};
+  use crate::keys::{CMD, Key, Shortcut};
   use crate::scene::Rect;
   use crate::ui::{Float, Kind, Style, TextStyle, Theme, Transition, grow, px};
   use crate::{Code, Modifiers};
@@ -999,7 +999,7 @@ mod tests {
 
     // The OS turns light: the next frame is light, from the view up.
     assert!(h.event(Event::Appearance(Appearance::LIGHT)));
-    assert!(h.rt.needs_frame());
+    assert!(h.needs_frame());
     assert_eq!(ground(&mut h), px(Theme::PLATES_LIGHT.bg));
     assert_eq!(h.app().seen.last(), Some(&(ColorScheme::Light, Theme::PLATES_LIGHT.accent)));
 
@@ -1036,10 +1036,10 @@ mod tests {
     let mut h = crate::Harness::new(Lid::default(), Size::new(40.0, 40.0), 1.0);
     h.frame();
     assert!(h.event(Event::System(Change::Lid)));
-    assert!(h.rt.needs_frame());
+    assert!(h.needs_frame());
     h.frame();
     assert!(!h.event(Event::System(Change::AudioInputs)));
-    assert!(!h.rt.needs_frame());
+    assert!(!h.needs_frame());
     assert_eq!(h.app().0, 1);
   }
 
@@ -1083,7 +1083,7 @@ mod tests {
 
     // Another page: the frame is built at the new size.
     h.app_mut().0 = 60.0;
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     assert_eq!(h.rt.size, Size::new(100.0, 60.0));
     assert_eq!(h.rt.ui.last.nodes[1].rect.h, 60.0);
@@ -1138,14 +1138,14 @@ mod tests {
 
     // More than the most: the rest scrolls.
     h.app_mut().rows = 30;
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     let list = h.rt.ui.last.get(crate::Id::of("list")).unwrap();
     assert_eq!((h.rt.size, list.rect.h, list.content[1]), (Size::new(200.0, 500.0), 460.0, 900.0));
 
     // Nothing in it: the least.
     h.app_mut().rows = 0;
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     assert_eq!(h.rt.size, Size::new(200.0, 50.0));
   }
@@ -1173,11 +1173,11 @@ mod tests {
     );
 
     // Built again: kept; not built: dropped.
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     assert_eq!(h.rt.images.size(images[0]), Some((2, 2)));
     h.app_mut().0 = 0;
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     assert_eq!((h.rt.images.size(images[0]), h.rt.ui.pictures.len()), (None, 0));
   }
@@ -1210,11 +1210,11 @@ mod tests {
     let kept = h.cpu.image_pixels(images[0]).unwrap();
     assert!(std::sync::Arc::ptr_eq(kept, &h.app().0[0].px));
 
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     assert_eq!(h.rt.ui.pictures.len(), 2);
     h.app_mut().0.clear();
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     assert_eq!((h.rt.images.size(images[0]), h.rt.ui.pictures.len()), (None, 0));
   }
@@ -1400,14 +1400,14 @@ mod tests {
     item_takes: bool,
   }
 
-  const ITEM_KEYS: &[Binding] = &[keys::bind(Shortcut::char('z').cmd(), Command::Undo)];
+  const ITEM_KEYS: &[Binding] = &[Binding::new(Shortcut::char('z').cmd(), Command::Undo)];
   const PANEL_KEYS: &[Binding] = &[
-    keys::bind(Shortcut::char('z').cmd(), Command::Action("panel undo")),
-    keys::bind(Shortcut::char('p').cmd(), Command::Action("panel")),
+    Binding::new(Shortcut::char('z').cmd(), Command::Action("panel undo")),
+    Binding::new(Shortcut::char('p').cmd(), Command::Action("panel")),
   ];
   const APP_KEYS: &[Binding] = &[
-    keys::bind(Shortcut::char('p').cmd(), Command::Action("app")),
-    keys::bind(Shortcut::char('n').cmd(), Command::Action("new")),
+    Binding::new(Shortcut::char('p').cmd(), Command::Action("app")),
+    Binding::new(Shortcut::char('n').cmd(), Command::Action("new")),
   ];
 
   impl App for Keyed {

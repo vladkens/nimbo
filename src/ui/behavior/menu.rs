@@ -492,11 +492,11 @@ mod tests {
     let track = h.rect(list.key(("track", 1usize))).expect("a scrollbar");
     h.click(track.x + track.w / 2.0, track.y + track.h - 4.0);
     h.frame();
-    assert!(h.rect(menu).is_some() && h.rt.ui.scroll(list).unwrap().offset.y > 0.0);
+    assert!(h.rect(menu).is_some() && h.scroll(list).unwrap().offset.y > 0.0);
 
     // Tab leaves focus in it.
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!(h.focused(), Some(menu));
+    assert_eq!(h.focus_id(), Some(menu));
 
     // The pointer on an item, Down past it, then the pointer moving within it: it takes the
     // highlight back, and Enter runs it.

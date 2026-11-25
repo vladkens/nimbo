@@ -116,7 +116,7 @@ fn at_scale_1() {
   let mut h = Harness::new(Shapes::default(), SIZE, 1.0);
   h.event(Event::Appearance(Appearance::LIGHT));
   let img = h.render();
-  assert_eq!((img.pixels.w, img.pixels.h), (SIZE.w as usize, SIZE.h as usize));
+  assert_eq!(img.size(), SIZE);
   assert_eq!(img.pixel(5.0, 5.0), px(LIGHT.bg));
   assert_eq!(img.pixel(mid(SQUARE).0, mid(SQUARE).1), px(RED));
 }

@@ -278,31 +278,31 @@ mod tests {
     let px = |h: &mut Harness<Squares>| h.render().pixel(20.0, 20.0);
     let rgb = |c: [f32; 4]| c.map(|v| (v * 255.0) as u8);
     assert_eq!(px(&mut h), rgb(UP));
-    assert_eq!(h.rt.cursor(), Cursor::Arrow);
+    assert_eq!(h.cursor(), Cursor::Arrow);
 
     // Hovered under the hand, held, clicked; focused by Tab and pressed by Space.
     h.move_to(20.0, 20.0);
-    assert_eq!((px(&mut h), h.rt.cursor()), (rgb(OVER), Cursor::Pointer));
+    assert_eq!((px(&mut h), h.cursor()), (rgb(OVER), Cursor::Pointer));
     h.press(20.0, 20.0);
     assert_eq!(px(&mut h), rgb(DOWN));
     h.release(20.0, 20.0);
     assert_eq!(h.app().clicks, 1);
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!(h.focused(), Some(Id::of("sq")));
+    assert_eq!(h.focus_id(), Some(Id::of("sq")));
     h.key(Key::Char(' '), Modifiers::empty());
     assert_eq!(h.app().clicks, 2);
     assert!(h.a11y().contains("button"), "{}", h.a11y());
 
     // Disabled: its own red, no hand, no focus, no clicks.
     h.app_mut().off = true;
-    h.rt.redraw();
+    h.redraw();
     assert_eq!(px(&mut h), [255, 0, 0, 255]);
-    assert_eq!(h.focused(), None);
+    assert_eq!(h.focus_id(), None);
     h.move_to(21.0, 20.0);
-    assert_eq!(h.rt.cursor(), Cursor::Arrow);
+    assert_eq!(h.cursor(), Cursor::Arrow);
     h.click(20.0, 20.0);
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!((h.focused(), h.app().clicks), (None, 2));
+    assert_eq!((h.focus_id(), h.app().clicks), (None, 2));
   }
 
   /// Buttons in a container given the square style, and one after it.
@@ -380,7 +380,7 @@ mod tests {
 
     let wide = h.rect(Id::of("p")).unwrap().w;
     h.app_mut().w = 120.0;
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     assert_eq!(h.rect(Id::of("p")).unwrap().w, wide);
   }

@@ -42,9 +42,7 @@ fn page(name: &str) -> usize {
 /// The first node assistive technology reads as `role` named `name`, in the enabled line: its
 /// id and rect.
 fn node(h: &H, role: Role, name: &str) -> (Id, Rect) {
-  let t = h.a11y_tree();
-  let n = t.nodes.iter().find(|n| n.props.role == role && t.str(n.props.name) == name);
-  let n = n.unwrap_or_else(|| panic!("no {role:?} {name:?} in\n{}", h.a11y()));
+  let n = h.find(role, name).unwrap_or_else(|| panic!("no {role:?} {name:?} in\n{}", h.a11y()));
   (n.id, n.rect)
 }
 
@@ -97,16 +95,11 @@ fn variants_are_disabled_and_sized() {
     tree.lines().map(str::trim).filter(|l| l.starts_with("switch")).collect();
   assert_eq!(switches.len(), 4, "enabled, disabled, small, large: {tree}");
   assert!(!switches[0].contains("disabled") && switches[1].contains("disabled"), "{switches:?}");
-  let t = h.a11y_tree();
-  let widths: Vec<f32> =
-    t.nodes.iter().filter(|n| n.props.role == Role::Switch).map(|n| n.rect.w).collect();
+  let widths: Vec<f32> = h.find_all(Role::Switch).iter().map(|n| n.rect.w).collect();
   assert!(widths[3] > widths[0], "large wider: {widths:?}");
   let h = gallery(page("Button"), false);
-  let t = h.a11y_tree();
-  let hs: Vec<f32> = (t.nodes.iter())
-    .filter(|n| n.props.role == Role::Button && t.str(n.props.name) == "Bordered")
-    .map(|n| n.rect.h)
-    .collect();
+  let buttons = h.find_all(Role::Button);
+  let hs: Vec<f32> = buttons.iter().filter(|n| n.name == "Bordered").map(|n| n.rect.h).collect();
   assert!(hs.len() == 4 && hs[2] < hs[0] && hs[3] > hs[0], "small, large: {hs:?}");
 }
 
@@ -198,10 +191,8 @@ fn every_widget_in_both_themes() {
 
     let mut h = on("Hotkey recorder", look);
     // The recorder: a button with no name, its shortcut its value.
-    let t2 = h.a11y_tree();
-    let rec =
-      t2.nodes.iter().find(|n| n.props.role == Role::Button && t2.str(n.props.name).is_empty());
-    h.click_id(rec.expect("a recorder").id);
+    let rec = h.find(Role::Button, "").expect("a recorder");
+    h.click_id(rec.id);
     h.key(NamedKey::F5, Modifiers::ALT);
     assert_eq!(h.app().hotkey.map(|k| k.to_string()).as_deref(), Some("option+f5"));
     h.frame();
@@ -303,8 +294,7 @@ fn every_widget_has_its_role() {
 #[test]
 fn segments_step_down_and_up() {
   let mut h = gallery(page("Segmented picker"), false);
-  let t = h.a11y_tree();
-  let group = t.nodes.iter().find(|n| n.props.role == Role::RadioGroup).expect("a radio group");
+  let group = h.find_all(Role::RadioGroup).into_iter().next().expect("a radio group");
   h.set_focus(Some(group.id));
   let key = |h: &mut H, k: NamedKey| {
     h.key(k, Modifiers::empty());
@@ -413,12 +403,8 @@ fn a_stepped_slider_marks_its_steps() {
       assert!(diff(got, dot) > 40, "{look:?}: no dot {what}: {got:?}");
     }
 
-    let tree = h.a11y_tree();
     let label = |name: &str| {
-      let n = tree
-        .nodes
-        .iter()
-        .find(|n| n.props.role == Role::StaticText && tree.str(n.props.name) == name);
+      let n = h.find(Role::StaticText, name);
       n.unwrap_or_else(|| panic!("no {name:?} in\n{}", h.a11y())).rect
     };
     let (first, mid50, last) = (label("10%"), label("50%"), label("90%"));

@@ -13,7 +13,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use nimbo::ui::Action;
+use nimbo::ui::{Action, Role};
 use nimbo::{CMD, Event, Harness, Id, Key, Modifiers, MouseButton, NamedKey, Os, Phase, Point};
 
 use crate::common::{mid, reads};
@@ -111,7 +111,7 @@ fn the_trackpad_scrolls_the_rows() {
 fn click_shift_click_and_cmd_click_select() {
   let mut h = scrolled();
   select_some(&mut h);
-  assert_eq!(h.focused(), Some(Id::of(LIST)));
+  assert_eq!(h.focus_id(), Some(Id::of(LIST)));
 }
 
 /// Down moves the cursor from the last row clicked; Shift-Down extends; Enter opens.
@@ -160,7 +160,7 @@ fn the_menu_runs_the_highlighted_item() {
   h.click_id(row(1));
   h.key(Key::Char('a'), CMD);
   open(&mut h, menu);
-  assert_eq!(h.focused(), Some(popup));
+  assert_eq!(h.focus_id(), Some(popup));
 
   h.key(NamedKey::ArrowDown, NONE);
   h.key(NamedKey::ArrowDown, NONE);
@@ -229,7 +229,7 @@ fn a_right_click_opens_the_row_menu_over_the_selection() {
     assert_eq!(h.rect(popup).is_some(), os == Os::Mac, "{os:?}");
     right(h, row(103), true);
     assert_eq!(selected(h), [101, 103, 104], "{os:?}: inside, kept");
-    assert!(h.rect(popup).is_some() && h.focused() == Some(popup));
+    assert!(h.rect(popup).is_some() && h.focus_id() == Some(popup));
 
     h.click_menu_item("Open");
     h.frame();
@@ -312,7 +312,7 @@ fn the_row_menu_draws_its_model() {
     assert!(dump.contains(line), "{line}: {dump}");
   }
 
-  let (r, img) = (h.rect(h.menu_item("Delete").unwrap()).unwrap(), h.render());
+  let (r, img) = (h.find(Role::MenuItem, "Delete").unwrap().rect, h.render());
   let red = (0..r.w as usize).map(|x| img.pixel(r.x + x as f32, r.y + r.h / 2.0));
   assert!(red.into_iter().any(|p| p[0] > p[1] + 80), "red text");
 }
@@ -354,7 +354,7 @@ fn the_pop_up_button_opens_over_itself() {
   h.key(Key::Char(' '), NONE);
   h.frame();
   h.frame();
-  assert_eq!(h.focused(), Some(sort.key("menu")));
+  assert_eq!(h.focus_id(), Some(sort.key("menu")));
 
   // The button sits by the window's top.
   let (b, m) = (h.rect(sort).unwrap(), h.rect(sort.key("menu")).unwrap());
@@ -363,7 +363,7 @@ fn the_pop_up_button_opens_over_itself() {
   h.key(Key::Char('d'), NONE);
   h.key(NamedKey::Enter, NONE);
   h.frame();
-  assert_eq!((h.app().sort, h.focused()), (3, Some(sort)));
+  assert_eq!((h.app().sort, h.focus_id()), (3, Some(sort)));
 }
 
 /// A click on Notes shows its page; scrolled, then back and forth, it keeps its offset. Focused,

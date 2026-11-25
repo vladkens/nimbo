@@ -19,7 +19,7 @@ use windows_sys::Win32::Foundation::RECT;
 use windows_sys::core::{BOOL, GUID, HRESULT};
 
 use super::wide;
-use crate::text::edit::Utf16Bytes;
+use crate::platform::Utf16Bytes;
 use crate::text::{Design, Font, Glyph, GlyphBox, Ink, Line, Metrics, Raster, Weight};
 
 // MARK: COM

@@ -98,7 +98,7 @@ fn tab_goes_through_the_enabled_controls() {
       .map(|_| {
         h.key(NamedKey::Tab, Modifiers::empty());
         h.frame();
-        h.focused()
+        h.focus_id()
       })
       .collect::<Vec<_>>()
   };
@@ -249,7 +249,7 @@ fn disabled_controls_ignore_input() {
   for _ in 0..8 {
     h.key(NamedKey::Tab, Modifiers::empty());
     h.frame();
-    assert_ne!(h.focused(), Some(Id::of(BLOOM)));
+    assert_ne!(h.focus_id(), Some(Id::of(BLOOM)));
   }
 
   assert!(h.app().bloom);

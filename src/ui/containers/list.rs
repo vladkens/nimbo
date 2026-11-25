@@ -193,11 +193,11 @@ mod tests {
     h.frame();
     h.app_mut().off = true;
     h.frame();
-    assert_eq!(h.focused(), None);
+    assert_eq!(h.focus_id(), None);
     let c = h.rect(row(498)).unwrap();
     h.click(c.x + 5.0, c.y + 5.0);
     h.frame();
-    assert_eq!((h.app().sel.cursor(), h.focused()), (Some(497), None));
+    assert_eq!((h.app().sel.cursor(), h.focus_id()), (Some(497), None));
     assert!(h.click_id(Id::of("b")));
     assert_eq!(h.app().clicks, 1);
   }
@@ -441,7 +441,7 @@ mod tests {
     let mut h = Harness::new(Counted::default(), Size::new(200.0, 200.0), 1.0);
     h.frame();
     h.rt.ui.store.raw::<ScrollState>(Id::of("list")).offset[1] = 1_999_000.0;
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     let row = Id::of("list").key(("row", 99_955u64 * 7));
     let r = h.rect(row).expect("row 99955 built");
@@ -449,7 +449,7 @@ mod tests {
     h.app().calls.set(0);
     h.click(r.x + 5.0, r.y + 5.0);
     let calls = h.app().calls.get();
-    assert_eq!(h.focused(), Some(Id::of("list")));
+    assert_eq!(h.focus_id(), Some(Id::of("list")));
     assert!(calls < 100, "{calls} key calls for one press");
   }
 

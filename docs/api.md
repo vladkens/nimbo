@@ -632,7 +632,7 @@ nimbo: `ui.a11y_label("Reset").icon_button(Icon::RESET)`
 
 SwiftUI: `.keyboardShortcut("z", modifiers: .command)`
 
-nimbo: `ui.keymap(&[bind(Shortcut::char('z').cmd(), Command::Undo)]).col(…)`
+nimbo: `ui.keymap(&[Binding::new(Shortcut::char('z').cmd(), Command::Undo)]).col(…)`
 
 ![Keyboard shortcut](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/keyboard-shortcut.png)
 

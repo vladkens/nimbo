@@ -86,7 +86,7 @@ mod tests {
     assert_eq!(h.render().pixel(x, y), accent);
 
     h.app_mut().off = true;
-    h.rt.redraw();
+    h.redraw();
     h.click_id(Id::of("c"));
     assert!(h.app().on);
   }
