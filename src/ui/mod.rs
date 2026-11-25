@@ -74,8 +74,9 @@ pub use a11y::{A11yNode, A11yTree, Action, LabeledPairRole, Props, Role, State, 
 pub use behavior::{
   Behavior, Button, ButtonConfiguration, ButtonRole, ButtonStyle, Content, DialogBehavior,
   EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, ListBehavior, ListRows, MenuPlacement,
-  PlainButtonStyle, PlainToggleStyle, ScrollBar, ScrollBehavior, ScrollerKnob, SectionHeader,
-  Selection, SplitBehavior, TextInput, ToggleConfiguration, ToggleStyle, TypeSelect,
+  PlainButtonStyle, PlainSliderStyle, PlainToggleStyle, ScrollBar, ScrollBehavior, ScrollerKnob,
+  SectionHeader, Selection, Slider, SliderConfiguration, SliderStyle, SplitBehavior, TextInput,
+  ToggleConfiguration, ToggleStyle, TypeSelect,
 };
 pub use containers::{
   List, ListResponse, ListStyle, Picker, Row, Split, Tabs, Tag, ToolbarItemPlacement,
@@ -102,7 +103,7 @@ pub(crate) use textlayout::TextLayout;
 pub use theme::{ControlBorder, Sizes, SwitchSize, Theme, Tone};
 pub use widgets::{
   BorderedButtonStyle, BorderedProminentButtonStyle, BorderlessButtonStyle, ButtonToggleStyle,
-  CheckboxToggleStyle, Slider, SwitchToggleStyle,
+  CheckboxToggleStyle, LinearSliderStyle, SwitchToggleStyle,
 };
 
 use self::input::{Deliver, Input, ScrollState};
@@ -164,6 +165,9 @@ pub(crate) struct UiState {
   /// The focus and pointer the app set on controls whose behaviours have read them, by the id of
   /// the root each is for, until it is built ([Ui::take_control_modifiers]); cleared each frame.
   control_mods: Vec<(Id, Option<bool>, Option<Cursor>)>,
+  /// The ids of controls whose roots are yet to be built, inside what their styles build around
+  /// them ([Ui::control_body]): an element there never takes one by its place; cleared each frame.
+  roots: Vec<Id>,
   /// The OS's look ([Ui::appearance]).
   appearance: Appearance,
   /// What the last frame cost ([Ui::last_frame]).
@@ -241,6 +245,7 @@ impl Default for UiState {
       own_ring: None,
       ring: None,
       control_mods: Vec::new(),
+      roots: Vec::new(),
       appearance: Appearance::DARK,
       stats: FrameStats::default(),
       resize: None,
@@ -505,6 +510,8 @@ impl<'a> Ui<'a> {
     st.stack.clear();
     st.stack.push((0, 0));
     st.control_mods.clear();
+    st.roots.clear();
+
     st.animating = false;
     st.input.moves = false;
     (st.grab, st.ring_on, st.toolbar, st.own_ring) = (None, None, false, None);
@@ -853,6 +860,15 @@ impl<'a> Ui<'a> {
     self
   }
 
+  /// Builds the body of the control `id` with `f` in a [Ui::group], its root anywhere in it:
+  /// what is built around the root never takes its id by its place.
+  pub(crate) fn control_body<R>(&mut self, id: Id, f: impl FnOnce(&mut Self) -> R) -> R {
+    self.st.roots.push(id);
+    let r = self.group(f);
+    self.st.roots.retain(|&k| k != id);
+    r
+  }
+
   /// The id the next element gets, taken for a widget to name its element with: the one set
   /// by [Ui::id] or [Ui::key], else its position among its siblings.
   pub fn take_id(&mut self) -> Id {
@@ -860,7 +876,7 @@ impl<'a> Ui<'a> {
       Some((id, _)) => id,
       None => {
         let &(parent, count) = self.st.stack.last().unwrap();
-        self.st.tree.nodes[parent as usize].id.nth(count as usize)
+        around(&self.st.roots, self.st.tree.nodes[parent as usize].id.nth(count as usize))
       }
     };
 
@@ -1024,10 +1040,13 @@ impl<'a> Ui<'a> {
   fn node(&mut self, kind: Kind, mut style: Style, flow: Flow) -> (u32, Response) {
     let (parent, count) = self.st.stack.last_mut().unwrap();
     let tree = &mut self.st.tree;
-    let (id, named) = self
-      .next_id
-      .take()
-      .unwrap_or_else(|| (tree.nodes[*parent as usize].id.nth(*count as usize), false));
+    let place = tree.nodes[*parent as usize].id.nth(*count as usize);
+    let roots = &mut self.st.roots;
+    let (id, named) = self.next_id.take().unwrap_or_else(|| (around(roots, place), false));
+    if named && !roots.is_empty() {
+      roots.retain(|&r| r != id);
+    }
+
     *count += 1;
     let parent = *parent;
     // The modifiers over its style, before what they decide: focus, the pointer, hit testing; a
@@ -1267,6 +1286,16 @@ impl<'a> Ui<'a> {
     self.st.input.ended = None;
     self.st
   }
+}
+
+/// The id of the place `place`: its own, or keyed when it is that of a control's root yet to be
+/// built (`roots`), which takes it by name.
+fn around(roots: &[Id], mut place: Id) -> Id {
+  while roots.contains(&place) {
+    place = place.key("around");
+  }
+
+  place
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! Widgets drawn from the theme ([Ui::theme]): label, link, button styles (an [Icon] too), ⓘ and
-//! "?" buttons, text field, search field and selectable text, check box, switch, slider,
+//! "?" buttons, text field, search field and selectable text, check box, switch, slider style,
 //! segmented control, progress bar and spinner, badge, tooltip, the shortcut recorder, and
 //! images from pixels; each at the control size ([Ui::control_size]). Each control is its behaviour
 //! (`*_behavior`, as [super::behavior] lists) plus drawing from the theme: an app that wants its
@@ -13,6 +13,7 @@
 //! ui.disabled(!self.dirty).button("Revert");
 //! ui.toggle_style(&CheckboxToggleStyle).toggle(&mut self.wrap, "Wrap lines");
 //! Slider::new(&mut self.level, 10.0..=90.0).step(10.0).show(ui);
+//! ui.slider_style(&MySliderStyle).slider(&mut self.zoom, 0.0..=200.0);
 //! ui.id("size").segmented(&mut self.size, &[Tag::new(Size::Small, "Small"), Tag::new(Size::Large, "Large")]);
 //! ui.help("Back to the default").icon_button(Icon::RESET);
 //! ui.control_size(ControlSize::Small).row(Style::new(), |ui| ui.button("Small"));
@@ -45,7 +46,7 @@ mod tooltip;
 pub use button::{BorderedButtonStyle, BorderedProminentButtonStyle, BorderlessButtonStyle};
 pub(crate) use button::{ButtonLook, Face, MarkShift, Variant, draw, look};
 pub use checkbox::CheckboxToggleStyle;
-pub use slider::Slider;
+pub use slider::LinearSliderStyle;
 pub use toggle::{ButtonToggleStyle, SwitchToggleStyle};
 
 // Where apps found them before icons moved into the core.
