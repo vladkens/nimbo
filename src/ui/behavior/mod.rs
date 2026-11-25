@@ -101,6 +101,7 @@ use crate::keys::{Command, Key, Move};
 
 /// What a control got this frame, read before it is built; see the module's docs.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Behavior {
   pub id: Id,
   /// Disabled by [Ui::disabled]: no input was read and the rest is false.

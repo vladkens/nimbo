@@ -52,9 +52,12 @@ pub use self::app::{autostart, desktop, uninstall};
 #[cfg(feature = "system")]
 pub use self::app::{hardware, input_source};
 use crate::app::{Appearance, Clipboard, ColorScheme};
+use crate::clipboard::Sealed;
 
 /// The system clipboard, plain text only.
 pub struct Pasteboard;
+
+impl Sealed for Pasteboard {}
 
 impl Clipboard for Pasteboard {
   fn read(&self) -> Option<String> {

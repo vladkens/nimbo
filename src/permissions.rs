@@ -14,6 +14,7 @@ use crate::platform;
 
 /// A pane of System Settings › Privacy & Security.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Pane {
   /// Controlling the computer: event taps that change events, posting keys, reading other apps'
   /// windows.
@@ -83,6 +84,7 @@ pub fn secure_input() -> bool {
 
 /// What the user decided about a device the app asks for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Access {
   Granted,
   /// The user said no; System Settings changes it ([open_pane]).

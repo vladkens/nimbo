@@ -49,6 +49,7 @@ pub fn start_asks() -> bool {
 
 /// What a hotkey did, on the hotkeys' thread; `which` is its place in [Hotkeys::set].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Edge {
   /// Pressed, or held (`repeat`, the key's autorepeat), `at` when the key moved.
   Down {
@@ -72,6 +73,7 @@ pub enum Edge {
 /// The system-wide key source [Hotkeys::start] starts: macOS's event tap, Windows' low-level
 /// keyboard hook, Linux's X connection or portal session.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Listener {
   /// Not started.
   #[default]
@@ -85,6 +87,7 @@ pub enum Listener {
 
 /// A place of [Hotkeys::set] as it is now.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Slot {
   /// The hotkey armed (or waiting for the pause to end); `None` for an empty place or a refused
   /// one.
@@ -100,6 +103,7 @@ pub struct Slot {
 
 /// What [Hotkeys] does now, for a status line or diagnostics.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Status {
   /// Each place of [Hotkeys::set], in its order.
   pub slots: Vec<Slot>,
@@ -119,6 +123,7 @@ pub struct Status {
 
 /// Events seen since the start.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Counts {
   pub listener: u64,
   pub fallback: u64,

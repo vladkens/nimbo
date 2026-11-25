@@ -94,6 +94,7 @@ impl Instance {
 /// A command from another process, sent as one line: `<name>`, or `<name>\t<token>`, neither
 /// with a tab or a line break in it.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Command {
   /// What it asks: [OPEN], [QUIT] or the app's own.
   pub name: String,

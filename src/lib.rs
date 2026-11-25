@@ -33,6 +33,10 @@
 //! macOS 11 is the least it runs on, rustc's default deployment target, so an app sets none;
 //! newer APIs are used where the system has them (the activation, the display link and menu
 //! section headers on 14+, launch at login on 13+).
+//!
+//! What an app reads and the enums that may grow are `#[non_exhaustive]`, so a minor release can
+//! add to them: a `match` on one keeps a `_` arm, and such a struct is read or changed field by
+//! field, never built whole.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(
   not(all(feature = "full", feature = "harness")),

@@ -49,6 +49,7 @@ pub const CTRL: Modifiers = Os::CURRENT.ctrl();
 /// platform's ([Os::CURRENT]); the harness may take another's
 /// ([crate::Harness::set_os]), so tests check every platform's keys on any host.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Os {
   Mac,
   Windows,
@@ -91,6 +92,7 @@ impl Os {
 /// characters are a `String`: a key press types one character here, and keymaps match keys in
 /// `const` patterns, without an allocation per key and binding.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Key {
   /// A key that types a character: the character on the current layout with Shift applied
   /// but no other modifier (`charactersIgnoringModifiers`): `'a'`, `'A'` with Shift, `'!'` for
@@ -187,6 +189,7 @@ pub fn us_code(c: char) -> Option<(Code, bool)> {
 
 /// A key press or release.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct KeyEvent {
   pub key: Key,
   /// What the key types with every modifier applied (`characters`): `'å'` for Option-A on a US
@@ -266,6 +269,7 @@ const CHAR_NAMES: [(char, &str); 12] = [
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ShortcutError {
   Empty,
   Unknown(String),
@@ -555,6 +559,7 @@ fn lower(c: char) -> char {
 /// `fn` (macOS only: the event tap sees it go down and up, and a key pressed while it is held
 /// makes it a chord of the user's instead).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Hotkey {
   Shortcut(Shortcut),
   /// A modifier key by its place: [Code::AltRight], [Code::Fn].
@@ -716,6 +721,7 @@ pub const SELECT_KEYS: &[Binding] = &[
 
 /// Where a caret move goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Move {
   Left,
   Right,
@@ -737,6 +743,7 @@ pub enum Move {
 
 /// What a delete removes when nothing is selected (a selection is removed as a whole).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Delete {
   Backward,
   Forward,
@@ -768,6 +775,7 @@ impl Extent {
 /// A command from a key: AppKit's text commands (`doCommandBySelector:`), the edit menu's
 /// (from bindings) and the app's own ([Command::Action]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Command {
   /// Moves the caret, or extends the selection (the `…AndModifySelection:` selectors).
   Move(Move, Extent),

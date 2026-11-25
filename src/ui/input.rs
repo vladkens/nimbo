@@ -27,6 +27,7 @@ const WHEEL_TAU: f32 = 0.05;
 
 /// A press and release on the same element.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct Click {
   pub id: Id,
   pub button: MouseButton,
@@ -41,6 +42,7 @@ pub struct Click {
 
 /// A button held down since it was pressed on `id`.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct Press {
   pub id: Id,
   pub button: MouseButton,
@@ -55,6 +57,7 @@ pub struct Press {
 
 /// A scroll container's position, for scrollbars: `offset` of `content` shown in `viewport`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct Scroll {
   pub offset: Point,
   pub content: Size,

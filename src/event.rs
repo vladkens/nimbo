@@ -17,6 +17,7 @@ use crate::system::Change;
 use crate::ui::{Action, Id, Role};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum MouseButton {
   Left,
   Right,
@@ -26,6 +27,7 @@ pub enum MouseButton {
 
 /// A gesture phase, as AppKit reports it for trackpad scrolls and their momentum.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Phase {
   /// A mouse wheel, or no gesture.
   #[default]
@@ -180,6 +182,7 @@ impl std::str::FromStr for ColorScheme {
 /// The OS's look: its [ColorScheme], and the accent colour the user picked, if the OS has one
 /// ([crate::platform::appearance]).
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct Appearance {
   pub scheme: ColorScheme,
   /// sRGB; `None` where the OS has none or the user left it to apps (macOS Multicolor).
@@ -195,6 +198,7 @@ impl Appearance {
 /// IMM32, GTK's input method context). Ranges are UTF-16 code units of the field's text, as
 /// AppKit and IMM32 count.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Ime {
   /// Shows `text` as marked text (the composition: underlined at the caret, not yet part of the
   /// value) in place of the marked text, or `replace` (a range of the field's text), or the

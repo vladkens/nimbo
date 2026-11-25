@@ -16,6 +16,7 @@ use crate::AppInfo;
 use crate::platform::autostart as imp;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum State {
   Enabled,
   /// Registered, but the user has to allow it in the OS's settings ([open_settings]): macOS

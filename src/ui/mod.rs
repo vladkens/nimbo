@@ -460,6 +460,7 @@ impl UiState {
 /// are known before building, from the last frame: query them first with [Ui::hovered] and
 /// [Ui::pressed] to pick the element's style. [Ui::click] has the details of a click.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Response {
   pub id: Id,
   pub hovered: bool,

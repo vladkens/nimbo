@@ -122,6 +122,7 @@ pub struct Theme {
 
 /// Whether a theme's controls have a border ([Theme::control_border]), and how wide in points.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum ControlBorder {
   /// Fills alone, as System Settings' controls.
   None,
@@ -199,6 +200,7 @@ impl Sizes {
 
 /// A colour role for badges ([Theme::tone]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Tone {
   #[default]
   Neutral,

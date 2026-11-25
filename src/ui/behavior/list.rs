@@ -168,6 +168,7 @@ pub struct ListRows<'s> {
 
 /// The header above a row that starts a section ([ListRows::header]).
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct SectionHeader {
   /// The section's place among the list's.
   pub section: usize,

@@ -5,10 +5,10 @@
 //! its cursor; Cmd-C and Cmd-V through the app's bindings and the in-memory clipboard; the focus
 //! bar; and frames built only when the input changed something.
 
-use nimbo::harness::Image;
+use nimbo::harness::{Image, us_key};
 use nimbo::{
-  Appearance, CMD, Code, Color, Command, Cursor, Event, Harness, Key, KeyEvent, Modifiers,
-  NamedKey, Phase, Point, Size,
+  Appearance, CMD, Color, Command, Cursor, Event, Harness, Key, Modifiers, NamedKey, Phase, Point,
+  Size,
 };
 
 use crate::canvas::input::*;
@@ -221,7 +221,7 @@ fn cmd_c_and_cmd_v_copy_and_paste_the_position() {
   assert_eq!(h.app().pos, Point::new(200.0, 120.0));
 
   // A binding's command reaches the app as a command, not as the key.
-  let k = KeyEvent { key: Key::Char('v'), text: None, code: Code::KeyV, mods: CMD, repeat: false };
+  let k = us_key(Key::Char('v'), CMD);
   h.clipboard().write("10,50");
   assert!(h.event(Event::KeyDown(k)));
   assert_eq!(h.app().pos, Point::new(10.0, 50.0));

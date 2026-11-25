@@ -18,6 +18,7 @@ use crate::platform::focus as imp;
 
 /// The app with the keyboard focus, as [current] found it.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct Focused {
   /// Its process id; 0 where the OS doesn't tell (an X11 window without `_NET_WM_PID`).
   pub pid: u32,
@@ -35,6 +36,13 @@ pub struct Focused {
 /// Another app's window, compared by identity.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Window(pub(crate) imp::Window);
+
+/// An app nothing is known of: pid 0, no name, no window, no password field; a test's start.
+impl Default for Focused {
+  fn default() -> Self {
+    Self { pid: 0, name: String::new(), window: Ok(None), secure: Ok(false) }
+  }
+}
 
 impl Focused {
   /// The focus moved from `self` to `now`: another app, or another window of it where the app

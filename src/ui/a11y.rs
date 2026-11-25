@@ -51,6 +51,7 @@ pub type Span = (u32, u32);
 
 /// What an element is, as AppKit's roles (and subroles) name it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Role {
   #[default]
   Group,
@@ -106,6 +107,7 @@ impl Role {
 
 /// A node's value.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub enum Value {
   #[default]
   None,
@@ -126,6 +128,7 @@ pub enum Value {
 
 /// A state a node has or not, a bit of [Props::states].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum State {
   Disabled,
   Focused,
@@ -140,6 +143,7 @@ const STATES: [State; 5] =
 /// What assistive technology asks of a node, sent as [crate::Event::A11y]; the runtime takes it
 /// through the input paths, so it runs the code a click or a key runs.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Action {
   /// A left click at the node's centre, the pointer and the hover left where they are.
   Press,
@@ -488,6 +492,7 @@ impl Ui<'_> {
 
 /// A node of the assembled tree ([A11yTree]).
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct A11yNode {
   pub id: Id,
   pub props: Props,

@@ -56,6 +56,7 @@ use self::input::Input;
 pub use self::settings::{appearance, languages};
 use super::points;
 use crate::app::{App, Clipboard, Clock, Event, Runtime};
+use crate::clipboard::Sealed;
 use crate::cpu::Renderer;
 use crate::scene::{Point, Size};
 use crate::shell::token as activation_token;
@@ -1063,6 +1064,8 @@ unsafe extern "C" fn on_destroy(_: P) -> c_int {
 /// The CLIPBOARD selection as GTK keeps it: GTK serves our text to readers; a paste waits for
 /// the owner in a nested main loop, whose callbacks find the window busy.
 struct Clip(P);
+
+impl Sealed for Clip {}
 
 impl Clipboard for Clip {
   fn read(&self) -> Option<String> {

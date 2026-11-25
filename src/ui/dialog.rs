@@ -37,6 +37,7 @@ use crate::ui::UnitPoint;
 const MODAL_Z: i32 = 1500;
 /// The button a dialog closed with ([Dialog::show]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Answer {
   /// Cancel, Escape, or Return in a destructive dialog.
   Cancel,

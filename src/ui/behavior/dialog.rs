@@ -14,6 +14,7 @@ const DIALOG_IN: Transition = Transition::smooth(1000.0 / 120.0);
 /// A modal dialog ([Ui::dialog_behavior]): how far it has faded in, the button chosen this
 /// frame (it closed then) and the one with focus.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct DialogBehavior {
   pub id: Id,
   /// 0 to 1 as it opens, on the runtime's clock.

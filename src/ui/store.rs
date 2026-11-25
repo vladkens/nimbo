@@ -91,6 +91,7 @@ impl Store {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Ease {
   #[default]
   Linear,

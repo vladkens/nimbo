@@ -12,6 +12,7 @@ use std::path::PathBuf;
 
 /// Which panel a [FileDialog] is, as SwiftUI's `fileImporter` and `fileExporter`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FileDialogKind {
   #[default]
   Open,
