@@ -496,7 +496,7 @@ mod tests {
       }
 
       ui.focusable(true).disabled(true).id("off").button("Off");
-      ui.autofocus().focusable(false).id("field").field(&mut self.text, "");
+      ui.autofocus().focusable(false).id("field").text_field(&mut self.text, "");
     }
   }
 

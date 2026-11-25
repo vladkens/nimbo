@@ -46,6 +46,7 @@ mod tooltip;
 pub use button::{BorderedButtonStyle, BorderedProminentButtonStyle, BorderlessButtonStyle};
 pub(crate) use button::{ButtonLook, Face, MarkShift, Variant, draw, look};
 pub use checkbox::CheckboxToggleStyle;
+pub use field::RoundedBorderTextFieldStyle;
 pub use slider::LinearSliderStyle;
 pub use toggle::{ButtonToggleStyle, SwitchToggleStyle};
 

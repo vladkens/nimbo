@@ -21,7 +21,7 @@
 //! ui.toggle_style(&Dot).col(Style::new(), |ui| ui.toggle(&mut self.live, "Live"));
 //! ```
 
-use super::button::{build_label, plain_text};
+use super::button::{build_label, plain_label};
 use super::{Behavior, Content};
 use crate::ui::{Dim, EnvironmentValue, Id, Response, Role, Style, TextStyle, Ui, Value, px};
 
@@ -106,7 +106,7 @@ pub struct PlainToggleStyle;
 
 impl ToggleStyle for PlainToggleStyle {
   fn make_body(&self, ui: &mut Ui<'_>, mut c: ToggleConfiguration<'_>) {
-    let s = plain_text(ui, c.is_enabled(), c.is_pressed());
+    let s = plain_label(ui, c.is_enabled(), c.is_pressed());
     let d = (s.font.size * 0.9).round();
     let mark = Style::new().w(px(d)).h(px(d)).radius(2.0).border(1.0, s.color);
     let mark = if c.is_on() { mark.bg(s.color) } else { mark };

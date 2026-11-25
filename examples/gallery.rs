@@ -18,9 +18,10 @@ use nimbo::{
   Align, Answer, App, Axes, Axis, Bitmap, BorderedProminentButtonStyle, BorderlessButtonStyle,
   Button, ButtonConfiguration, ButtonRole, ButtonStyle, ButtonToggleStyle, CheckboxToggleStyle,
   Color, Config, Content, ContentMode, ControlSize, Cursor, Dialog, Enabled, EnvironmentValue,
-  Float, Font, FormRow, FormStyle, Hotkey, Icon, Id, Item, LinePattern, List, ListRows, ListStyle,
-  Menu, Picker, PlainSliderStyle, PlainToggleStyle, Quad, Rect, ScrollBar, ScrollerKnob, Section,
-  Selection, Shortcut, Slider, SliderConfiguration, SliderStyle, Split, Style, Tabs, Tag,
+  FieldKind, FieldStyle, Float, Font, FormRow, FormStyle, Hotkey, Icon, Id, Item, LinePattern,
+  List, ListRows, ListStyle, Menu, Picker, PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle,
+  Quad, Rect, ScrollBar, ScrollerKnob, Section, Selection, Shortcut, Slider, SliderConfiguration,
+  SliderStyle, Split, Style, Tabs, Tag, TextField, TextFieldConfiguration, TextFieldStyle,
   TextStyle, ToggleConfiguration, ToggleStyle, Tone, ToolbarItemPlacement, TruncationMode, Ui,
   UnitPoint, WindowToolbarStyle, alpha, grow, mix, px, t, tn,
 };
@@ -88,6 +89,22 @@ impl SliderStyle for Meter {
   }
 }
 
+/// A text field style of the gallery's own: the text over a line, the accent's while focused,
+/// which rings nothing else.
+struct Underline;
+
+impl TextFieldStyle for Underline {
+  fn make_body(&self, ui: &mut Ui, mut c: TextFieldConfiguration) {
+    let t = ui.theme();
+    let line = if c.is_focused() { t.accent } else { t.line };
+    let s = Style::new().w(grow()).h(px(24.0)).pad_xy(2.0, 0.0).borders([0.0, 0.0, 1.0, 0.0], line);
+    let s = s.align(Align::Start, Align::Center).focusable_quiet().scroll(c.axis().into());
+    let s = if c.is_enabled() { s } else { s.opacity(t.disabled) };
+    let text = FieldStyle::new(TextStyle::new(t.font, t.text)).placeholder(t.faint);
+    ui.row(s, |ui| c.text(ui, &text.caret(t.accent)));
+  }
+}
+
 /// A building block: its group, name, SwiftUI's line and nimbo's.
 pub struct Block {
   pub group: &'static str,
@@ -149,9 +166,12 @@ pub const BLOCKS: &[Block] = &[
   b("Controls", "Custom slider style", "struct Meter: ProgressViewStyle { … } (SwiftUI has no slider style)", "impl SliderStyle for Meter { fn make_body(&self, ui: &mut Ui, c: SliderConfiguration) { let k = c.fraction(); c.root(ui).canvas(style, move |f, r| { … }); } } Slider::new(&mut self.level, 10.0..=90.0).step(10.0).show(ui.slider_style(&Meter))"),
   b("Controls", "Picker", "Picker(\"Size\", selection: $size) { …; Divider(); … }", "Picker::new(&mut self.size).options(&A).divider().options(&B).show(ui)"),
   b("Controls", "Segmented picker", "Picker(…) { … }.pickerStyle(.segmented)", "ui.segmented(&mut self.view, &[Tag::new(0, \"List\").count(128), Tag::new(1, \"Grid\")])"),
-  b("Controls", "Text field", "TextField(\"Name\", text: $name)", "ui.field(&mut self.name, \"Name\")"),
-  b("Controls", "Secure field", "SecureField(\"Password\", text: $key)", "ui.password_field(&mut self.key, \"Password\")"),
+  b("Controls", "Text field", "TextField(\"Name\", text: $name)", "ui.text_field(&mut self.name, \"Name\")"),
+  b("Controls", "Multi-line field", "TextField(\"Notes\", text: $notes, axis: .vertical)", "TextField::new(&mut self.notes, \"Notes\").kind(FieldKind::MultiLine).show(ui)"),
+  b("Controls", "Secure field", "SecureField(\"Password\", text: $key)", "ui.secure_field(&mut self.key, \"Password\")"),
   b("Controls", "Search field", ".searchable(text: $query)", "ui.search(&mut self.query, \"Search\")"),
+  b("Controls", "Text field style", "VStack { TextField(\"Name\", text: $name); TextField(\"City\", text: $city) }.textFieldStyle(.plain)", "ui.text_field_style(&PlainTextFieldStyle).col(style, |ui| { ui.text_field(&mut self.name, \"Name\"); ui.text_field(&mut self.city, \"City\"); }); ui.text_field(&mut self.email, \"E-mail\")"),
+  b("Controls", "Custom text field style", "struct Underline: TextFieldStyle { func _body(configuration: TextField<_Label>) -> some View { configuration.padding(…).overlay(alignment: .bottom) { … } } }", "impl TextFieldStyle for Underline { fn make_body(&self, ui: &mut Ui, mut c: TextFieldConfiguration) { ui.row(style.scroll(c.axis().into()), |ui| c.text(ui, &fs)); } } ui.text_field_style(&Underline).text_field(&mut self.city, \"City\")"),
   b("Controls", "Progress", "ProgressView(value: 0.42)", "ui.progress(Some(0.42))"),
   b("Controls", "Spinner", "ProgressView()", "ui.spinner()"),
   b("Controls", "Badge", ".badge(\"New\")", "ui.badge(\"New\", Tone::Accent)"),
@@ -249,6 +269,10 @@ pub struct Gallery {
   pub name: String,
   pub key: String,
   pub query: String,
+  /// The text field blocks' others, empty at first.
+  pub notes: String,
+  pub city: String,
+  pub email: String,
   pub hotkey: Option<Hotkey>,
   pub tab: usize,
   pub side: f32,
@@ -304,6 +328,9 @@ impl Default for Gallery {
       name: "Alex".into(),
       key: "secret".into(),
       query: "Switches".into(),
+      notes: String::new(),
+      city: String::new(),
+      email: String::new(),
       hotkey: Hotkey::parse("ctrl+option+space").ok(),
       tab: 0,
       side: 0.4,
@@ -571,15 +598,38 @@ impl Gallery {
         ];
         ui.segmented(&mut self.view, &views);
       }),
+
       "Text field" => Self::variants(ui, Shown::Plain, |ui| {
-        ui.col(Style::new().w(px(200.0)), |ui| _ = ui.field(&mut self.name, "Name"));
+        ui.col(Style::new().w(px(200.0)), |ui| _ = ui.text_field(&mut self.name, "Name"));
+      }),
+      // A multi-line field fills the height its parent gives it.
+      "Multi-line field" => Self::variants(ui, Shown::Plain, |ui| {
+        ui.col(Style::new().w(px(200.0)).h(px(60.0)), |ui| {
+          _ = TextField::new(&mut self.notes, "Notes").kind(FieldKind::MultiLine).show(ui)
+        });
       }),
       "Secure field" => Self::variants(ui, Shown::Plain, |ui| {
-        ui.col(Style::new().w(px(200.0)), |ui| _ = ui.password_field(&mut self.key, "Password"));
+        ui.col(Style::new().w(px(200.0)), |ui| _ = ui.secure_field(&mut self.key, "Password"));
       }),
       "Search field" => Self::variants(ui, Shown::Plain, |ui| {
         ui.col(Style::new().w(px(200.0)), |ui| _ = ui.search(&mut self.query, "Search"));
       }),
+
+      // Two fields plain by their column, the one after it in the window's style.
+      "Text field style" => Self::variants(ui, Shown::Plain, |ui| {
+        let col = Style::new().w(px(120.0)).gap(6.0);
+        ui.text_field_style(&PlainTextFieldStyle).col(col, |ui| {
+          ui.text_field(&mut self.name, "Name");
+          ui.text_field(&mut self.city, "City");
+        });
+        ui.col(Style::new().w(px(160.0)), |ui| _ = ui.text_field(&mut self.email, "E-mail"));
+      }),
+      "Custom text field style" => Self::variants(ui, Shown::Plain, |ui| {
+        ui.col(Style::new().w(px(200.0)), |ui| {
+          _ = ui.text_field_style(&Underline).text_field(&mut self.city, "City")
+        });
+      }),
+
       "Progress" => Self::variants(ui, Shown::Plain, |ui| {
         ui.col(Style::new().w(px(150.0)), |ui| ui.progress(Some(0.42)));
         ui.col(Style::new().w(px(150.0)), |ui| ui.progress(None));
@@ -972,9 +1022,9 @@ impl Gallery {
         ui.text(block.name, TextStyle::new(Font { size: 20.0, ..t.bold }, t.text));
         ui.col(code, |ui| {
           ui.text("SWIFTUI", t.section());
-          ui.selectable_text(block.swiftui, &nimbo::FieldStyle { text: mono, ..t.field() });
+          ui.selectable_text(block.swiftui, &FieldStyle { text: mono, ..t.field() });
           ui.text("NIMBO", t.section());
-          ui.selectable_text(block.nimbo, &nimbo::FieldStyle { text: mono, ..t.field() });
+          ui.selectable_text(block.nimbo, &FieldStyle { text: mono, ..t.field() });
         });
         self.demo(ui, block.name);
       });

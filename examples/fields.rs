@@ -12,7 +12,7 @@
 // A Windows app, not a console one: no terminal opens with its window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use nimbo::{App, Config, FieldKind, Id, Point, Size, Style, Ui, px};
+use nimbo::{App, Config, FieldKind, Id, Point, Size, Style, TextField, Ui, grow, px};
 
 pub const SIZE: Size = Size::new(460.0, 340.0);
 
@@ -70,8 +70,8 @@ impl App for Fields {
           ui.a11y_label(title);
           let ui = if id == NAME { ui.id(id).autofocus() } else { ui.id(id) };
           let r = match id {
-            PASSWORD => ui.password_field(text, "Required"),
-            _ => ui.field(text, hint),
+            PASSWORD => ui.secure_field(text, "Required"),
+            _ => ui.text_field(text, hint),
           };
 
           if r.changed {
@@ -88,17 +88,18 @@ impl App for Fields {
 
       ui.row(row.align(nimbo::Align::Start, nimbo::Align::Start), |ui| {
         ui.row(label.pads([4.0, 0.0, 0.0, 0.0]), |ui| ui.label("Notes"));
-        let style = t.field().kind(FieldKind::MultiLine).hint("A few lines");
-        let style =
-          style.frame(style.frame.h(px(84.0)).align(nimbo::Align::Start, nimbo::Align::Start));
-        if ui.a11y_label("Notes").id(NOTES).text_field(&mut self.notes, &style).changed {
-          self.changes.push(NOTES);
-        }
+        // A multi-line field fills the height its parent gives it.
+        ui.col(Style::new().w(grow()).h(px(84.0)), |ui| {
+          let notes = TextField::new(&mut self.notes, "A few lines").kind(FieldKind::MultiLine);
+          if notes.show(ui.a11y_label("Notes").id(NOTES)).changed {
+            self.changes.push(NOTES);
+          }
+        });
       });
 
       ui.row(row, |ui| {
         ui.row(label, |ui| ui.label("Disabled"));
-        ui.disabled(true).a11y_label("Disabled").id(OFF).field(&mut self.off, "");
+        ui.disabled(true).a11y_label("Disabled").id(OFF).text_field(&mut self.off, "");
       });
 
       ui.id(ABOUT).selectable(TEXT);

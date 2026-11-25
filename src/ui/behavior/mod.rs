@@ -43,7 +43,9 @@
 //! - [Ui::list_behavior] and [Ui::list_rows]: a virtualized list's selection ([Selection]), keys
 //!   and presses, and its rows in view, which the app draws (`List` draws them from the theme);
 //! - [Ui::text_field_behavior] and [Ui::selectable_behavior]: text editing on the editing model
-//!   ([crate::Editor]), drawn by [Ui::field_text] ([FieldBehavior] has the details);
+//!   ([crate::Editor]), drawn by [Ui::field_text] ([FieldBehavior] has the details), with the edit
+//!   menu ([Ui::edit_menu]); the [TextField] over it, drawn by a [TextFieldStyle]
+//!   ([Ui::text_field_style]);
 //! - [Ui::search_behavior]: a single-line field's, its text cleared by a ⊗ or Escape.
 //!
 //! The looks over them are the widgets' and the containers' ([super::widgets],
@@ -63,11 +65,13 @@ mod search;
 mod shortcut;
 mod slider;
 mod split;
+mod text_field;
 mod toggle;
 
 pub use button::{Button, ButtonConfiguration, ButtonRole, ButtonStyle, PlainButtonStyle};
 pub use content::{Build, Content};
 pub use dialog::DialogBehavior;
+pub(crate) use field::DrawnEditMenu;
 pub use field::{EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, TextInput};
 use keyboard_types::Modifiers;
 pub use list::{ListBehavior, ListRows, SectionHeader, Selection};
@@ -75,6 +79,7 @@ pub use menu::{MenuPlacement, TYPE_SELECT, TypeSelect};
 pub use scroll::{ScrollBar, ScrollBehavior, ScrollerKnob};
 pub use slider::{PlainSliderStyle, Slider, SliderConfiguration, SliderStyle};
 pub use split::SplitBehavior;
+pub use text_field::{PlainTextFieldStyle, TextField, TextFieldConfiguration, TextFieldStyle};
 pub use toggle::{PlainToggleStyle, ToggleConfiguration, ToggleStyle};
 
 use super::{Cursor, Enabled, Id, Role, State, Style, Ui};
@@ -115,15 +120,20 @@ impl Ui<'_> {
   /// the app set its own on the control; disabled, neither, whatever its style or the app asks, so
   /// Tab passes it by.
   pub fn control(&mut self, b: &Behavior) -> &mut Self {
-    let mods = self.take_kept_modifiers(b.id);
-    let (focus, cursor) = match b.disabled {
+    self.control_root(b.id, b.disabled, Cursor::Pointer)
+  }
+
+  /// [Ui::control] for control `id`, `cursor` over it while enabled (a text field's I-beam).
+  fn control_root(&mut self, id: Id, disabled: bool, cursor: Cursor) -> &mut Self {
+    let mods = self.take_kept_modifiers(id);
+    let (focus, pointer) = match disabled {
       true => (Some(false), Some(Cursor::Inherit)),
       false => (self.next_focus.or(mods.0), self.next_cursor.or(mods.1)),
     };
 
     self.next_focus = focus.or(Some(true));
-    self.next_cursor = cursor.or(Some(Cursor::Pointer));
-    self.with_id(b.id)
+    self.next_cursor = pointer.or(Some(cursor));
+    self.with_id(id)
   }
 
   /// Whether Space was pressed on `id` (focused), which flashes it pressed; another key goes on

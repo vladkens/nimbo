@@ -1,91 +1,71 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Text fields and selectable text: the text behaviours ([Ui::text_field_behavior],
-//! [Ui::selectable_behavior]) in a box drawn from a [FieldStyle], the theme's by default
+//! The theme's text field look, as SwiftUI's `.roundedBorder` ([RoundedBorderTextFieldStyle]),
+//! and selectable text: the text behaviours ([Ui::text_field_behavior],
+//! [Ui::selectable_behavior]) in a box drawn from a [FieldStyle], the theme's
 //! ([crate::ui::Theme::field]); the text in it is [Ui::field_text]'s, the edit menu
 //! [Ui::edit_menu]'s.
 //!
 //! ```ignore
-//! let r = ui.id("name").field(&mut self.name, "Your name");
+//! let r = ui.id("name").text_field(&mut self.name, "Your name");
 //! if r.submitted { self.save() }
-//! ui.id("key").password_field(&mut self.key, "API key");
-//! ui.id("notes").text_field(&mut self.notes, &t.field().kind(FieldKind::MultiLine).frame(NOTES));
+//! ui.id("key").secure_field(&mut self.key, "API key");
+//! TextField::new(&mut self.notes, "Notes").kind(FieldKind::MultiLine).show(ui.id("notes"));
 //! ui.id("about").selectable(ABOUT);
 //! ```
 //!
 //! The app owns the text; the field writes edits back and reports them in its
 //! [Response](crate::ui::Response): `changed`, `submitted` (Enter, single line), `cancelled`
 //! (Escape) and `blurred`. A single-line field scrolls sideways to keep the caret in view, a
-//! multi-line one wraps at its width and scrolls down. Focused, the field is ringed and binds
-//! the edit menu's keys ([EDIT_KEYS]); selectable text binds select all and copy
-//! ([SELECT_KEYS]) and shows no ring, its selection dimmed while it has no focus. A right-click
-//! opens the edit menu at the pointer ([Ui::edit_menu]): Cut, Copy, Paste and Select All, or
-//! Copy and Select All in selectable text, the platform's own menu in a window. The focused
-//! field is what input methods ask about ([crate::ui::TextInput]).
+//! multi-line one wraps at its width, fills the height its parent gives it and scrolls down.
+//! Focused, the field is ringed and binds the edit menu's keys
+//! ([EDIT_KEYS](crate::keys::EDIT_KEYS)); selectable text
+//! binds select all and copy ([SELECT_KEYS]) and shows no ring, its selection dimmed while it
+//! has no focus. A right-click opens the edit menu at the pointer ([Ui::edit_menu]): Cut, Copy,
+//! Paste and Select All, or Copy and Select All in selectable text, the platform's own menu in a
+//! window. The focused field is what input methods ask about ([crate::ui::TextInput]).
 
-use crate::keys::{EDIT_KEYS, SELECT_KEYS};
-use crate::scene::Point;
+use crate::keys::SELECT_KEYS;
 use crate::ui::{
-  Axes, FieldBehavior, FieldKind, FieldStyle, NativeMenu, Response, Style, TextStyle, Ui,
+  Align, Axes, Axis, FieldStyle, Response, Style, TextFieldConfiguration, TextFieldStyle,
+  TextStyle, Ui, grow,
 };
 
+/// The theme's text field ([crate::ui::Theme::field]), as SwiftUI's `.roundedBorder`: the
+/// field's ground in a border with the control's corners, its focus border while focused,
+/// dimmed when disabled. The shell's default.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RoundedBorderTextFieldStyle;
+
+impl TextFieldStyle for RoundedBorderTextFieldStyle {
+  fn make_body(&self, ui: &mut Ui<'_>, mut c: TextFieldConfiguration<'_>) {
+    let style = ui.theme().field();
+    let frame = field_frame(ui, &style, c.is_focused(), c.is_enabled());
+    let axis = c.axis();
+    let text = |ui: &mut Ui| c.text(ui, &style);
+    match axis {
+      Axis::Vertical => {
+        let frame = frame.h(grow()).align(Align::Start, Align::Start);
+        ui.col(frame.scroll(Axes::VERTICAL), text)
+      }
+      Axis::Horizontal => ui.row(frame.scroll(Axes::HORIZONTAL), text),
+    };
+  }
+}
+
+/// A field's box in `style`: its border the focus border while `focused`, if it has one; dimmed
+/// unless `enabled`.
+pub(super) fn field_frame(ui: &Ui, style: &FieldStyle, focused: bool, enabled: bool) -> Style {
+  let border = match focused && style.focus_border[3] > 0.0 {
+    true => style.focus_border,
+    false => style.frame.border_color,
+  };
+
+  let frame = Style { border_color: border, ..style.frame };
+  if enabled { frame } else { frame.opacity(ui.theme().disabled) }
+}
+
 impl Ui<'_> {
-  /// A text field over `text` in `style`'s look, as SwiftUI's `TextField` with a
-  /// `textFieldStyle`: one line, many or a password ([FieldKind]); its id from [Ui::id] or
-  /// [Ui::key], else its place.
-  /// [Ui::disabled] dims it and reads no input.
-  pub fn text_field(&mut self, text: &mut String, style: &FieldStyle) -> Response {
-    // The values put for it reach its edit menu too.
-    self.group(|ui| {
-      let id = ui.take_id();
-      let b = ui.text_field_behavior(id, text, style.kind);
-      ui.field_box(&b, style)
-    })
-  }
-
-  /// A text field's box and text in `style`'s look over its behaviour `b`.
-  pub(super) fn field_box(&mut self, b: &FieldBehavior, style: &FieldStyle) -> Response {
-    // Named by its hint when nothing else names it, as a browser names a field.
-    if let Some(a) = self.a11y_of(b.id) {
-      a.name_or(style.hint);
-    }
-
-    let border = match b.focused && style.focus_border[3] > 0.0 {
-      true => style.focus_border,
-      false => style.frame.border_color,
-    };
-
-    let mut frame = b.style(Style { border_color: border, ..style.frame });
-    if b.disabled {
-      frame = frame.opacity(self.theme().disabled);
-    }
-
-    let keys = self.keymap(EDIT_KEYS).with_id(b.id);
-    let text = |ui: &mut Self| ui.field_text(b, style, Style::new());
-    let r = match style.kind {
-      FieldKind::MultiLine => keys.col(frame.scroll(Axes::VERTICAL), text),
-      _ => keys.row(frame.scroll(Axes::HORIZONTAL), text),
-    };
-
-    self.edit_menu(b);
-    let (changed, submitted, cancelled, blurred) = (b.changed, b.submitted, b.cancelled, b.blurred);
-    Response { hovered: b.hovered, changed, submitted, cancelled, blurred, ..r }
-  }
-
-  /// A single-line [Ui::text_field] in the theme's look, `hint` shown while it is empty:
-  /// SwiftUI's `TextField(hint, text:)`.
-  pub fn field(&mut self, text: &mut String, hint: &'static str) -> Response {
-    let style = self.theme().field().hint(hint);
-    self.text_field(text, &style)
-  }
-
-  /// [Ui::field] for a password, as SwiftUI's `SecureField`: a dot per character, no input
-  /// method, nothing copied.
-  pub fn password_field(&mut self, text: &mut String, hint: &'static str) -> Response {
-    let style = self.theme().field().kind(FieldKind::Secure).hint(hint);
-    self.text_field(text, &style)
-  }
-
   /// Text the user can select and copy, as SwiftUI's `.textSelection(.enabled)` on a `Text`, in
   /// `style`'s text and selection colour (its box is not drawn): an I-beam over it, focus
   /// without a ring for the keys, its selection dimmed when the focus goes; its id from
@@ -94,32 +74,11 @@ impl Ui<'_> {
     self.group(|ui| {
       let id = ui.take_id();
       let b = ui.selectable_behavior(id, text);
-      ui.keymap(SELECT_KEYS).field_text(&b, style, b.style(Style::new()));
+      ui.keymap(SELECT_KEYS).field_text(&b, "", style, b.style(Style::new()));
       ui.edit_menu(&b);
       let (hovered, pressed, clicked) = (ui.hovered(id), ui.pressed(id), ui.clicked(id));
       Response { id, hovered, pressed, focused: b.focused, clicked, ..Response::default() }
     })
-  }
-
-  /// The edit menu of a field or selectable text over its behaviour `b`, at the secondary click
-  /// that opened it ([crate::ui::FieldBehavior::menu]): [crate::ui::EditMenu::items] as
-  /// `b.id.key("edit")`'s context menu ([Ui::context_menu_at]), the native one or drawn in the
-  /// theme's look; the one chosen runs in the field ([Ui::field_command]).
-  pub fn edit_menu(&mut self, b: &FieldBehavior) {
-    let (id, m) = (b.id.key("edit"), b.menu);
-    let chosen = match self.native_menu(id, m.at, || m.items()) {
-      NativeMenu::Answered(cmd) => cmd,
-      NativeMenu::Unanswered => None,
-      NativeMenu::Unavailable => {
-        // Disabled while open, a drawn one closes.
-        let off = b.disabled && self.menu_open(id);
-        self.drawn_context_menu(id, m.at.or(off.then(Point::default)), || m.items())
-      }
-    };
-
-    if let Some(cmd) = chosen {
-      self.field_command(b.id, cmd);
-    }
   }
 
   /// [Ui::selectable_text] in the theme's text, wrapping.
@@ -152,7 +111,7 @@ mod tests {
         self.clicks += 1;
       }
 
-      ui.id("f").field(&mut self.text, "");
+      ui.id("f").text_field(&mut self.text, "");
     }
   }
 
@@ -176,8 +135,8 @@ mod tests {
   impl App for Two {
     fn view(&mut self, ui: &mut Ui) {
       let [a, b] = &mut self.texts;
-      ui.disabled(self.off).field(a, "");
-      ui.field(b, "");
+      ui.disabled(self.off).text_field(a, "");
+      ui.text_field(b, "");
     }
   }
 

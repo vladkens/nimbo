@@ -13,7 +13,7 @@
 //! Escape. Keys come as commands ([crate::keys]), typed text and input method events ([Ime]);
 //! the mouse places the caret, drags a selection (scrolling at the edges), double-clicks a word,
 //! triple-clicks a line, and Shift-click extends. A secondary click (the right button) focuses it
-//! and asks for its edit menu ([FieldBehavior::menu], opened by `Ui::edit_menu`), whose choice
+//! and asks for its edit menu ([FieldBehavior::menu], opened by [Ui::edit_menu]), whose choice
 //! comes back as a command ([Ui::field_command]); the field keeps its focus look while the menu
 //! is open. The caret blinks on timers, so a window sleeps between blinks and stops when the
 //! field loses focus.
@@ -39,8 +39,8 @@ use crate::text::edit::{
 use crate::ui::input::ScrollState;
 use crate::ui::textlayout::Hit;
 use crate::ui::{
-  Align, Cursor, Edit, Focus, Id, Role, Style, TextLayout, TextLines, TextStyle, Tree, Ui, UiState,
-  grow,
+  Align, Cursor, Edit, EnvironmentValue, Focus, Id, NativeMenu, Role, Style, TextLayout, TextStyle,
+  Tree, Ui, UiState, grow,
 };
 
 /// The caret shows this long after it moves, then hides as long, and so on.
@@ -110,7 +110,7 @@ pub(super) struct FieldState {
   /// Requests made so far.
   reveals: u32,
   focused: bool,
-  /// The edit menu as last opened (`Ui::edit_menu`).
+  /// The edit menu as last opened ([Ui::edit_menu]).
   pub menu: EditMenu,
   /// A command from the edit menu, run as the field is built next ([Ui::field_command]).
   queued: Option<Command>,
@@ -164,7 +164,7 @@ pub struct FieldBehavior {
 }
 
 /// A text field's or selectable text's edit menu as a secondary click (the right button) opened
-/// it: where, and what it can do then (`Ui::edit_menu` draws it).
+/// it: where, and what it can do then ([Ui::edit_menu] draws it).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct EditMenu {
   /// Where the click was, in the frame it came; `None` after.
@@ -195,7 +195,42 @@ impl EditMenu {
   }
 }
 
+/// Draws edit menu `id` asked for at a point where the platform shows none (the harness), and
+/// returns what was chosen in it: the styled layer's context menu, which the shell puts
+/// ([UiState::set_environment_default]); none without it.
+#[derive(Clone, Copy)]
+pub(crate) struct DrawnEditMenu(pub(crate) DrawMenu);
+
+pub(crate) type DrawMenu = fn(&mut Ui<'_>, Id, Option<Point>, EditMenu) -> Option<Command>;
+
+impl EnvironmentValue for DrawnEditMenu {
+  fn default_value(_: &Ui) -> Self {
+    Self(|_, _, _, _| None)
+  }
+}
+
 impl Ui<'_> {
+  /// The edit menu of a field or selectable text over its behaviour `b` ([FieldBehavior::menu]):
+  /// [EditMenu::items] as `b.id.key("edit")`'s context menu, the platform's ([Ui::native_menu])
+  /// or else drawn in the shell's look; the one chosen runs in the field ([Ui::field_command]).
+  pub fn edit_menu(&mut self, b: &FieldBehavior) {
+    let (id, m) = (b.id.key("edit"), b.menu);
+    let chosen = match self.native_menu(id, m.at, || m.items()) {
+      NativeMenu::Answered(cmd) => cmd,
+      NativeMenu::Unanswered => None,
+      NativeMenu::Unavailable => {
+        // Disabled while open, a drawn one closes.
+        let off = b.disabled && self.menu_open(id);
+        let at = m.at.or(off.then(Point::default));
+        (self.environment_value::<DrawnEditMenu>().0)(self, id, at, m)
+      }
+    };
+
+    if let Some(cmd) = chosen {
+      self.field_command(b.id, cmd);
+    }
+  }
+
   /// Runs `cmd` in the text field or selectable text `id` as it is built next, as if its keys
   /// sent it (an edit menu's item); asks for that frame.
   pub fn field_command(&mut self, id: Id, cmd: Command) {
@@ -736,11 +771,11 @@ fn drag_to(st: &mut FieldState, lay: &TextLayout, p: Point) {
 // MARK: Look
 
 impl Ui<'_> {
-  /// The text element of a field or selectable text, as its behaviour `b` has it: the text (a
-  /// dot per character for a password), or the hint while it is empty, with the selection in
-  /// `style.selection` (half as strong without focus in selectable text, none in a field), the
-  /// caret and the marked text's underline. `node` styles the element itself.
-  pub fn field_text(&mut self, b: &FieldBehavior, style: &FieldStyle, node: Style) {
+  /// The text element of a field or selectable text, as its behaviour `b` has it, `node` its
+  /// style: the text (a dot per character for a password), or `prompt` while it is empty, with
+  /// the selection (half as strong without focus in selectable text, none in a field), the caret
+  /// and the marked text's underline.
+  pub fn field_text(&mut self, b: &FieldBehavior, prompt: &str, style: &FieldStyle, node: Style) {
     let st = std::mem::take(self.st.store.raw::<FieldState>(b.id));
     let mut e = b.edit;
     e.caret_color = style.caret;
@@ -752,12 +787,12 @@ impl Ui<'_> {
     };
 
     let s = st.ed.text();
-    let (ts, empty) = (style.text, s.is_empty() && !style.hint.is_empty());
+    let (ts, empty) = (style.text, s.is_empty() && !prompt.is_empty());
     match (empty, st.secure()) {
       (true, _) => {
         e.placeholder = true;
         let ts = ts.color(style.placeholder);
-        self.text_id(b).edit_text(style.hint, ts, e, node);
+        self.text_id(b).edit_text(prompt, ts, e, node);
       }
       (false, true) => {
         let dots = DOT.repeat(graphemes(s).count());
@@ -847,52 +882,38 @@ impl UiState {
   }
 }
 
-/// How a text field looks: its box, text, placeholder and selection, and what it holds: one
-/// line or many, or a password. `const` builders, like [Style].
+/// How a field's text looks ([Ui::field_text]): the text, the prompt's colour, the selection's
+/// and the caret's; and the box a look draws around it (the theme's: [crate::ui::Theme::field]).
+/// `const` builders, like [Style].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FieldStyle {
-  /// The box: size, padding, background, border, radius. A single-line field lays out as a
-  /// row, a multi-line one as a column; both scroll.
+  /// The box: size, padding, background, border, radius.
   pub frame: Style,
   pub text: TextStyle,
-  /// Shown, in `placeholder`, while the text is empty.
-  pub hint: &'static str,
+  /// The prompt's colour, shown while the text is empty.
   pub placeholder: Color,
   pub selection: Color,
   pub caret: Color,
   /// The border's colour while focused; transparent keeps the frame's.
   pub focus_border: Color,
-  /// One line, many, or a password ([FieldStyle::kind]).
-  pub kind: FieldKind,
 }
 
 impl FieldStyle {
-  /// A single-line field growing along its parent, with `text`'s font and colour.
+  /// A box growing along its parent, with `text`'s font and colour on one line (a multi-line
+  /// field wraps it: [crate::ui::TextFieldConfiguration::text]).
   pub const fn new(text: TextStyle) -> Self {
     Self {
       frame: Style::new().w(grow()).pad_xy(6.0, 4.0).align(Align::Start, Align::Center),
       text: text.nowrap(),
-      hint: "",
       placeholder: alpha(text.color, 0.4),
       selection: [0.25, 0.47, 0.95, 0.45],
       caret: text.color,
       focus_border: [0.0; 4],
-      kind: FieldKind::SingleLine,
     }
   }
 
   pub const fn frame(self, frame: Style) -> Self {
     Self { frame, ..self }
-  }
-
-  /// A field of `kind`: a multi-line one wraps its text, the others keep one line.
-  pub const fn kind(self, kind: FieldKind) -> Self {
-    let lines = if let FieldKind::MultiLine = kind { TextLines::Wrap } else { TextLines::NoWrap };
-    Self { text: TextStyle { lines, ..self.text }, kind, ..self }
-  }
-
-  pub const fn hint(self, hint: &'static str) -> Self {
-    Self { hint, ..self }
   }
 
   pub const fn placeholder(self, placeholder: Color) -> Self {
@@ -939,7 +960,7 @@ mod tests {
       let style = Theme::PLATES_DARK.field();
       let frame =
         b.style(Style::new().w(px(120.0)).h(px(24.0)).bg(if b.focused { OVER } else { REST }));
-      ui.with_id(b.id).row(frame, |ui| ui.field_text(&b, &style, Style::new()));
+      ui.with_id(b.id).row(frame, |ui| ui.field_text(&b, "", &style, Style::new()));
       self.seen.push(b);
     }
   }

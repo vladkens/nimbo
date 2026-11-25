@@ -406,6 +406,16 @@ impl Axes {
   }
 }
 
+/// The one axis.
+impl From<Axis> for Axes {
+  fn from(axis: Axis) -> Self {
+    match axis {
+      Axis::Horizontal => Self::HORIZONTAL,
+      Axis::Vertical => Self::VERTICAL,
+    }
+  }
+}
+
 impl std::ops::BitOr for Axes {
   type Output = Self;
 
