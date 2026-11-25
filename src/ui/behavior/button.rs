@@ -41,7 +41,6 @@ pub struct ButtonConfiguration<'s> {
   icon: Option<Icon>,
   icon_only: bool,
   role: Option<ButtonRole>,
-  selected: bool,
 }
 
 impl ButtonConfiguration<'_> {
@@ -74,11 +73,6 @@ impl ButtonConfiguration<'_> {
     self.role
   }
 
-  /// Shown selected ([Button::selected]).
-  pub fn is_selected(&self) -> bool {
-    self.selected
-  }
-
   /// Its label is an icon alone: a square button, as an icon button's.
   pub fn is_icon_only(&self) -> bool {
     self.icon_only
@@ -88,21 +82,26 @@ impl ButtonConfiguration<'_> {
   /// font plus 2 in its colour, stroked 1.6 unless it has a width of its own; or what a closure
   /// builds in it.
   pub fn label(&mut self, ui: &mut Ui, style: TextStyle) {
-    let icon = |ui: &mut Ui, i: Icon| {
-      let (size, color) = ((style.font.size + 2.0).round(), style.color);
-      let i = i.default_stroke(1.6);
-      ui.canvas(Style::new().w(px(size)).h(px(size)), move |f, r| icon::draw(f, i, r, color))
-    };
-    if let Some(i) = self.icon.take() {
-      icon(ui, i);
-    }
+    build_label(ui, self.icon.take(), std::mem::take(&mut self.label), style);
+  }
+}
 
-    match std::mem::take(&mut self.label) {
-      Content::None | Content::Text("") => {}
-      Content::Text(s) => ui.text(s, style),
-      Content::Icon(i) => _ = icon(ui, i),
-      Content::Built(f) => f(ui, style),
-    }
+/// Builds `label` in `style` after `first`, an icon, as [ButtonConfiguration::label] says.
+pub(super) fn build_label(ui: &mut Ui, first: Option<Icon>, label: Content, style: TextStyle) {
+  let icon = |ui: &mut Ui, i: Icon| {
+    let (size, color) = ((style.font.size + 2.0).round(), style.color);
+    let i = i.default_stroke(1.6);
+    ui.canvas(Style::new().w(px(size)).h(px(size)), move |f, r| icon::draw(f, i, r, color))
+  };
+  if let Some(i) = first {
+    icon(ui, i);
+  }
+
+  match label {
+    Content::None | Content::Text("") => {}
+    Content::Text(s) => ui.text(s, style),
+    Content::Icon(i) => _ = icon(ui, i),
+    Content::Built(f) => f(ui, style),
   }
 }
 
@@ -114,12 +113,11 @@ pub struct Button<'s> {
   label: Content<'s>,
   icon: Option<Icon>,
   role: Option<ButtonRole>,
-  selected: bool,
 }
 
 impl<'s> Button<'s> {
   pub fn new(label: impl Into<Content<'s>>) -> Self {
-    Self { label: label.into(), icon: None, role: None, selected: false }
+    Self { label: label.into(), icon: None, role: None }
   }
 
   /// An icon before the label, as SwiftUI's `Button(_:systemImage:)`; with no label, the icon
@@ -131,12 +129,6 @@ impl<'s> Button<'s> {
   /// What it does, as SwiftUI's `Button(role:)`: the theme's styles draw a destructive one red.
   pub fn role(self, role: ButtonRole) -> Self {
     Self { role: Some(role), ..self }
-  }
-
-  /// Shows it selected or toggled on when `on`: a sidebar's toggle, the current choice among
-  /// buttons.
-  pub fn selected(self, on: bool) -> Self {
-    Self { selected: on, ..self }
   }
 
   /// Builds it under the id set for it: its behaviour, its name to assistive technology (an icon
@@ -155,9 +147,8 @@ impl<'s> Button<'s> {
       a.name_or(n);
     }
 
-    let (label, role, selected) = (self.label, self.role, self.selected);
-    let config =
-      ButtonConfiguration { b, label, icon: self.icon, icon_only: icon.is_some(), role, selected };
+    let (label, role) = (self.label, self.role);
+    let config = ButtonConfiguration { b, label, icon: self.icon, icon_only: icon.is_some(), role };
     let root = ui.st.tree.nodes.len();
     style.make_body(ui.control(&b), config);
     debug_assert!(
@@ -183,24 +174,30 @@ pub struct PlainButtonStyle;
 
 impl ButtonStyle for PlainButtonStyle {
   fn make_body(&self, ui: &mut Ui<'_>, mut c: ButtonConfiguration<'_>) {
-    // macOS's label colours: 85% of black or white, its secondary's 50%, its tertiary's 25%.
-    let ink = if ui.color_scheme().is_dark() { 1.0 } else { 0.0 };
-    let a = match (c.is_enabled(), c.is_pressed()) {
-      (false, _) => 0.25,
-      (true, true) => 0.5,
-      (true, false) => 0.85,
-    };
-
-    let size = match ui.environment_value::<ControlSize>() {
-      ControlSize::Small => 11.0,
-      ControlSize::Regular => 13.0,
-      ControlSize::Large => 15.0,
-    };
-
-    let s = TextStyle::new(Font::ui(size), [ink, ink, ink, a]).line_limit(1);
+    let s = plain_text(ui, c.is_enabled(), c.is_pressed());
     // Rigid, as every control: the text beside it wraps, the label never does.
     ui.row(Style::new().w(Dim::Rigid).gap(5.0).center(), |ui| c.label(ui, s));
   }
+}
+
+/// The plain styles' label: one line of the system font at the control size, in the text colour
+/// of the colour scheme, fainter while `pressed`, dimmed unless `enabled`.
+pub(super) fn plain_text(ui: &Ui, enabled: bool, pressed: bool) -> TextStyle {
+  // macOS's label colours: 85% of black or white, its secondary's 50%, its tertiary's 25%.
+  let ink = if ui.color_scheme().is_dark() { 1.0 } else { 0.0 };
+  let a = match (enabled, pressed) {
+    (false, _) => 0.25,
+    (true, true) => 0.5,
+    (true, false) => 0.85,
+  };
+
+  let size = match ui.environment_value::<ControlSize>() {
+    ControlSize::Small => 11.0,
+    ControlSize::Regular => 13.0,
+    ControlSize::Large => 15.0,
+  };
+
+  TextStyle::new(Font::ui(size), [ink, ink, ink, a]).line_limit(1)
 }
 
 /// [PlainButtonStyle] where neither a container nor the window nor the shell put one.

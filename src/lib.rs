@@ -99,15 +99,16 @@ pub use text::edit::{Editor, Lines, Mono, Sel};
 pub use text::{Design, Font, Weight};
 pub use ui::{
   Align, Answer, Axes, Axis, Behavior, BorderedButtonStyle, BorderedProminentButtonStyle,
-  BorderlessButtonStyle, Button, ButtonConfiguration, ButtonRole, ButtonStyle, Click, Clip,
-  Content, ContentMode, ControlBorder, ControlSize, CoordinateSpace, Cursor, Dialog,
-  DialogBehavior, Dim, Ease, EditMenu, Editing, Enabled, EnvironmentValue, FieldBehavior,
-  FieldKind, FieldStyle, Float, Focus, FocusDirection, FocusRing, FormRow, FormStyle, Icon,
-  IconPaint, Id, ImageSource, LinePattern, List, ListBehavior, ListResponse, ListRows, ListStyle,
-  MenuPlacement, NativeMenu, Picker, PlainButtonStyle, Press, Response, Row, Scroll, ScrollBar,
-  ScrollBehavior, ScrollerKnob, Section, SectionHeader, Selection, Shadow, Sizes, Slider, Split,
-  SplitBehavior, Style, TabItem, Tabs, Tag, TextInput, TextLines, TextStyle, Theme, Tone,
-  ToolbarItemPlacement, Transition, TruncationMode, TypeSelect, Ui, UnitPoint, grow, pct, px,
+  BorderlessButtonStyle, Button, ButtonConfiguration, ButtonRole, ButtonStyle, ButtonToggleStyle,
+  CheckboxToggleStyle, Click, Clip, Content, ContentMode, ControlBorder, ControlSize,
+  CoordinateSpace, Cursor, Dialog, DialogBehavior, Dim, Ease, EditMenu, Editing, Enabled,
+  EnvironmentValue, FieldBehavior, FieldKind, FieldStyle, Float, Focus, FocusDirection, FocusRing,
+  FormRow, FormStyle, Icon, IconPaint, Id, ImageSource, LinePattern, List, ListBehavior,
+  ListResponse, ListRows, ListStyle, MenuPlacement, NativeMenu, Picker, PlainButtonStyle,
+  PlainToggleStyle, Press, Response, Row, Scroll, ScrollBar, ScrollBehavior, ScrollerKnob, Section,
+  SectionHeader, Selection, Shadow, Sizes, Slider, Split, SplitBehavior, Style, SwitchToggleStyle,
+  TabItem, Tabs, Tag, TextInput, TextLines, TextStyle, Theme, ToggleConfiguration, ToggleStyle,
+  Tone, ToolbarItemPlacement, Transition, TruncationMode, TypeSelect, Ui, UnitPoint, grow, pct, px,
   rigid,
 };
 pub use window::{Config, TitleBar, WindowToolbarStyle};

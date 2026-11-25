@@ -11,7 +11,7 @@
 //! if ui.button("Refresh").clicked { self.refresh() }
 //! if ui.button_style(&BorderedProminentButtonStyle).button("Save").clicked { self.save() }
 //! ui.disabled(!self.dirty).button("Revert");
-//! ui.checkbox(&mut self.wrap, "Wrap lines");
+//! ui.toggle_style(&CheckboxToggleStyle).toggle(&mut self.wrap, "Wrap lines");
 //! Slider::new(&mut self.level, 10.0..=90.0).step(10.0).show(ui);
 //! ui.id("size").segmented(&mut self.size, &[Tag::new(Size::Small, "Small"), Tag::new(Size::Large, "Large")]);
 //! ui.help("Back to the default").icon_button(Icon::RESET);
@@ -43,8 +43,10 @@ mod toggle;
 mod tooltip;
 
 pub use button::{BorderedButtonStyle, BorderedProminentButtonStyle, BorderlessButtonStyle};
-pub(crate) use button::{ButtonLook, MarkShift, Variant, draw, look};
+pub(crate) use button::{ButtonLook, Face, MarkShift, Variant, draw, look};
+pub use checkbox::CheckboxToggleStyle;
 pub use slider::Slider;
+pub use toggle::{ButtonToggleStyle, SwitchToggleStyle};
 
 // Where apps found them before icons moved into the core.
 pub use super::icon::{self, Icon, IconPaint};

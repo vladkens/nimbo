@@ -10,8 +10,8 @@ use crate::t;
 use crate::text::{Font, Weight};
 use crate::ui::icon::{self, Icon};
 use crate::ui::{
-  ButtonConfiguration, ButtonRole, ButtonStyle, ControlSize, Dim, Enabled, Float, Response, Role,
-  Style, TextStyle, Theme, Ui, px,
+  ButtonConfiguration, ButtonRole, ButtonStyle, ControlSize, Dim, Enabled, Float, Id, Response,
+  Role, Style, TextStyle, Theme, ToggleConfiguration, Ui, px,
 };
 
 const WHITE: Color = [1.0; 4];
@@ -36,20 +36,46 @@ pub struct BorderedProminentButtonStyle;
 pub struct BorderlessButtonStyle;
 
 impl ButtonStyle for BorderedButtonStyle {
-  fn make_body(&self, ui: &mut Ui<'_>, config: ButtonConfiguration<'_>) {
-    themed(ui, config, Variant::Bordered);
+  fn make_body(&self, ui: &mut Ui<'_>, mut c: ButtonConfiguration<'_>) {
+    themed(ui, Face::of(&c), Variant::Bordered, c.role(), |ui, s| c.label(ui, s));
   }
 }
 
 impl ButtonStyle for BorderedProminentButtonStyle {
-  fn make_body(&self, ui: &mut Ui<'_>, config: ButtonConfiguration<'_>) {
-    themed(ui, config, Variant::Prominent);
+  fn make_body(&self, ui: &mut Ui<'_>, mut c: ButtonConfiguration<'_>) {
+    themed(ui, Face::of(&c), Variant::Prominent, c.role(), |ui, s| c.label(ui, s));
   }
 }
 
 impl ButtonStyle for BorderlessButtonStyle {
-  fn make_body(&self, ui: &mut Ui<'_>, config: ButtonConfiguration<'_>) {
-    themed(ui, config, Variant::Borderless);
+  fn make_body(&self, ui: &mut Ui<'_>, mut c: ButtonConfiguration<'_>) {
+    themed(ui, Face::of(&c), Variant::Borderless, c.role(), |ui, s| c.label(ui, s));
+  }
+}
+
+/// A button's state as the theme's looks draw it: a button's, or a toggle's in the button style
+/// ([crate::ButtonToggleStyle]), selected while on.
+#[derive(Clone, Copy)]
+pub(crate) struct Face {
+  id: Id,
+  hovered: bool,
+  pressed: bool,
+  enabled: bool,
+  icon_only: bool,
+  selected: bool,
+}
+
+impl Face {
+  /// Button `c`'s.
+  pub(crate) fn of(c: &ButtonConfiguration) -> Self {
+    let (id, hovered, pressed, enabled) = (c.id(), c.is_hovered(), c.is_pressed(), c.is_enabled());
+    Self { id, hovered, pressed, enabled, icon_only: c.is_icon_only(), selected: false }
+  }
+
+  /// Toggle `c`'s, selected while on.
+  pub(crate) fn of_toggle(c: &ToggleConfiguration) -> Self {
+    let (id, hovered, pressed, enabled) = (c.id(), c.is_hovered(), c.is_pressed(), c.is_enabled());
+    Self { id, hovered, pressed, enabled, icon_only: c.is_icon_only(), selected: c.is_on() }
   }
 }
 
@@ -117,40 +143,51 @@ pub(crate) fn look(
   ButtonLook { frame, bg, hover, pressed, text }
 }
 
-/// Button `c` in the theme's look `v` at the control size: square for an icon alone, muted
-/// until hovered unless selected; selected, tinted with the accent, the label in it. Borderless
-/// buttons are toolbar buttons, which macOS hovers; the others only where the theme hovers every
-/// control.
-fn themed(ui: &mut Ui, c: ButtonConfiguration, v: Variant) {
+/// Button `c` in the theme's look `v` at the control size and its `role`'s tint: square for an
+/// icon alone, muted until hovered unless selected; selected, the accent's tint and label.
+/// Borderless buttons (toolbar ones) hover; the others where the theme hovers every control.
+pub(crate) fn themed(
+  ui: &mut Ui,
+  c: Face,
+  v: Variant,
+  role: Option<ButtonRole>,
+  label: impl FnOnce(&mut Ui, TextStyle),
+) {
   let t = ui.theme();
-  let mut s = look(&t, v, c.role(), ui.environment_value::<ControlSize>());
-  if c.is_icon_only() {
+  let mut s = look(&t, v, role, ui.environment_value::<ControlSize>());
+  if c.icon_only {
     let h = s.frame.min[0];
     s.frame = s.frame.w(px(h)).pad(0.0);
   }
 
-  if c.is_selected() {
+  if c.selected {
     let a = t.accent;
     (s.bg, s.hover, s.pressed) = (alpha(a, 0.18), alpha(a, 0.25), alpha(a, 0.32));
     s.text = s.text.color(a);
   }
 
   let hot = match v {
-    Variant::Borderless => ui.hot(c.id(), c.is_hovered()),
-    _ => ui.ctl_hot(c.id(), c.is_hovered()),
+    Variant::Borderless => ui.hot(c.id, c.hovered),
+    _ => ui.ctl_hot(c.id, c.hovered),
   };
 
-  let muted = c.is_icon_only() && !c.is_selected();
-  draw(ui, c, s, hot, muted);
+  let muted = c.icon_only && !c.selected;
+  draw(ui, c, s, hot, muted, label);
 }
 
-/// Draws button `c` in `s`, hovered by `hot` (0 to 1): its fill at rest, hovered and held, the
-/// label in its text style, an icon alone in the muted colour until hovered when `muted`.
-/// Disabled, dimmed: the colours fade themselves, as a canvas (an icon) draws past an element's
-/// opacity; an icon alone toward the ground ([Ui::dim]).
-pub(crate) fn draw(ui: &mut Ui, mut c: ButtonConfiguration, s: ButtonLook, hot: f32, muted: bool) {
+/// Draws button `c` in `s`, hovered by `hot` (0 to 1), the `label` in its text style, an icon
+/// alone muted until hovered when `muted`. Disabled, its colours fade themselves, as a canvas
+/// (an icon) draws past an element's opacity; an icon alone toward the ground ([Ui::dim]).
+pub(crate) fn draw(
+  ui: &mut Ui,
+  c: Face,
+  s: ButtonLook,
+  hot: f32,
+  muted: bool,
+  label: impl FnOnce(&mut Ui, TextStyle),
+) {
   let t = ui.theme();
-  let (pressed, off) = (c.is_pressed(), !c.is_enabled());
+  let (pressed, off) = (c.pressed, !c.enabled);
   let bg = if pressed { s.pressed } else { mix(s.bg, s.hover, hot) };
   let ink = match muted {
     true => mix(t.muted, t.text, if pressed { 1.0 } else { hot }),
@@ -158,9 +195,9 @@ pub(crate) fn draw(ui: &mut Ui, mut c: ButtonConfiguration, s: ButtonLook, hot: 
   };
 
   let fade = |c: Color| if off { alpha(c, c[3] * t.disabled) } else { c };
-  let ink = if c.is_icon_only() { ui.dim(ink, off) } else { fade(ink) };
+  let ink = if c.icon_only { ui.dim(ink, off) } else { fade(ink) };
   let frame = Style { bg: fade(bg), border_color: fade(s.frame.border_color), ..s.frame };
-  ui.row(frame, |ui| c.label(ui, s.text.color(ink)));
+  ui.row(frame, |ui| label(ui, s.text.color(ink)));
 }
 
 impl Ui<'_> {
@@ -254,8 +291,8 @@ mod tests {
   use crate::scene::{Rect, Size};
   use crate::text::Font;
   use crate::ui::{
-    Button, ButtonStyle, ControlSize, Cursor, Icon, Id, PlainButtonStyle, Response, Style,
-    TextStyle, Theme, Ui, px,
+    ButtonStyle, ControlSize, Cursor, Icon, Id, PlainButtonStyle, Response, Style, TextStyle,
+    Theme, Ui, px,
   };
   use crate::{Modifiers, NamedKey};
 
@@ -274,33 +311,6 @@ mod tests {
     assert_eq!((large.frame.size[1], large.text.font.size), (px(32.0), 15.0));
     assert_eq!(large.frame.pad[1], t.button_padding(ControlSize::Large));
     assert_eq!(t.button_padding(ControlSize::Regular), 12.0);
-  }
-
-  /// A selected button beside one that isn't, in the light theme.
-  struct Picked;
-
-  impl App for Picked {
-    fn view(&mut self, ui: &mut Ui) {
-      ui.set_theme(Theme::PLATES_LIGHT);
-      ui.row(Style::new().grow().bg(ui.theme().bg), |ui| {
-        Button::new("On").selected(true).show(ui.id("on"));
-        ui.id("off").button("Off");
-      });
-    }
-  }
-
-  /// Selected, it is tinted with the accent.
-  #[test]
-  fn a_selected_button_takes_the_accent() {
-    let mut h = Harness::new(Picked, Size::new(200.0, 60.0), 1.0);
-    h.frame();
-    let img = h.render();
-    let fill = |h: &Harness<Picked>, n: &str| {
-      let r = h.rect(Id::of(n)).unwrap();
-      img.pixel(r.x + 4.0, r.y + r.h / 2.0)
-    };
-    let (on, off) = (fill(&h, "on"), fill(&h, "off"));
-    assert!(on[2] > on[0] + 20 && off[2] == off[0], "{on:?} selected, {off:?} not");
   }
 
   /// A button in the window's style the view put, else in the shell's.

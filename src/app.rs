@@ -17,7 +17,7 @@ use crate::scene::{Frame, Images, Point, Rect, Scene, Size};
 use crate::text::TextSystem;
 use crate::ui::{
   Action, BorderedButtonStyle, ButtonStyle, Click, Cursor, FocusDirection, FrameStats, Id, Role,
-  Sys, TextInput, Ui, UiState, drags_window,
+  SwitchToggleStyle, Sys, TextInput, ToggleStyle, Ui, UiState, drags_window,
 };
 
 /// An application: owns its state, reacts to events and draws the frame from it, as an element
@@ -230,6 +230,7 @@ impl<A: App> Runtime<A> {
     ui.clipboard = clipboard;
     // The window's looks, System Settings': what the core and the headless widgets don't name.
     ui.set_environment_default::<&dyn ButtonStyle>(&BorderedButtonStyle);
+    ui.set_environment_default::<&dyn ToggleStyle>(&SwitchToggleStyle);
     Self {
       app,
       size,
