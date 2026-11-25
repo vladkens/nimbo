@@ -13,9 +13,6 @@ include = ["/src/**/*.rs", "/Cargo.toml", "/Cargo.lock", "/LICENSE", "/readme.md
 keywords = ["gui", "ui", "desktop", "widgets", "toolkit"]
 categories = ["gui"]
 
-[dependencies]
-keyboard-types = { version = "0.8.3", default-features = false }
-
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = { version = "0.6.2", default-features = false, features = ["std"] }
 dispatch2 = { version = "0.3.1", default-features = false, features = ["std", "objc2", "block2"] }

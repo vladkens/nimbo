@@ -13,9 +13,7 @@
 
 use std::ffi::c_void;
 
-use keyboard_types::Code;
-
-use crate::keys;
+use crate::{Code, keys};
 
 pub(super) type CFTypeRef = *const c_void;
 

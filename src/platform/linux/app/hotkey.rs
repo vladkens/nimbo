@@ -30,9 +30,9 @@ use super::super::dbus::{self, Gv, PORTAL, PORTAL_PATH as PATH, V, portal, reque
 use super::super::keys::keysym;
 use super::super::{Fp, P, S, gtk};
 use super::grab::Grab;
-use crate::Modifiers;
 use crate::hotkey::{Edge, Listener, MAX, OnEdge, Status};
 use crate::keys::{Hotkey, Shortcut};
+use crate::{Error, Modifiers};
 
 const SHORTCUTS: &str = "org.freedesktop.portal.GlobalShortcuts";
 /// The first place's shortcut id, the others' after a dash ([id]).
@@ -204,14 +204,17 @@ impl Hotkeys {
   pub fn status(&self, out: &mut Status) {
     let s = &self.0;
     out.listener = s.listener.get();
-    out.listener_error = s.error.borrow().clone();
+    out.listener_error = s.error.borrow().clone().map(Error::System);
     let grab = s.grab.borrow();
     out.counts.listener = s.events.get() + grab.as_ref().map_or(0, Grab::events);
     if s.escape.get() {
+      let portal = "the GlobalShortcuts portal can't take Escape";
       out.escape_error = match x11(s) {
-        true if grab.is_none() => Some("X11's grab takes Escape once a hotkey is set".into()),
-        true => s.grab_escape.borrow().clone(),
-        false => Some("the GlobalShortcuts portal can't take Escape".into()),
+        true if grab.is_none() => {
+          Some(Error::System("X11's grab takes Escape once a hotkey is set".into()))
+        }
+        true => s.grab_escape.borrow().clone().map(Error::System),
+        false => Some(Error::Unsupported(portal.into())),
       };
     }
   }
@@ -479,7 +482,7 @@ mod tests {
     h.escape(true);
     let s = h.status();
     assert!(!s.escape);
-    assert!(s.escape_error.is_some_and(|e| e.contains("Escape")));
+    assert!(s.escape_error.is_some_and(|e| e.to_string().contains("Escape")));
     h.escape(false);
     assert_eq!((h.status().escape, h.status().escape_error), (false, None));
   }

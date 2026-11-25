@@ -40,7 +40,6 @@ pub use app::{activity, attach_console, downloads, focus, open, paste, shell};
 pub use app::{autostart, desktop, uninstall};
 #[cfg(feature = "system")]
 pub use app::{hardware, input_source};
-use keyboard_types::Modifiers;
 pub use settings::{appearance, languages};
 use windows_sys::Win32::Foundation::{
   CloseHandle, FILETIME, HANDLE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
@@ -71,7 +70,7 @@ use crate::cpu::raster::IRect;
 use crate::platform::{Pace, points};
 use crate::scene::{Rect, Size};
 use crate::ui::{Cursor, Id};
-use crate::{Anchor, Config};
+use crate::{Anchor, Config, Modifiers};
 
 /// Posted by the waker: something changed on another thread.
 const WM_WAKE: u32 = WM_APP + 1;

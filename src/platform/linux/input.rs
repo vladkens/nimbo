@@ -16,12 +16,11 @@ use std::ffi::{CStr, c_char, c_int, c_uint};
 use std::ptr::null_mut;
 use std::sync::OnceLock;
 
-use keyboard_types::Modifiers;
-
 use super::dl::fns;
 use super::{
   CURRENT, Fp, P, TRUE, Win, as_window, busy, connect, gtk, keys, lib, point, window_busy, with,
 };
+use crate::Modifiers;
 use crate::app::{Event, Ime, MouseButton, Phase, WHEEL_LINE};
 use crate::keys::{Os, printable};
 use crate::scene::{Point, Rect};

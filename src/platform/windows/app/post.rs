@@ -8,7 +8,6 @@
 //! front (`VkKeyScanExW`). Windows drops input to an app running elevated above this one (UIPI).
 //! The events carry [super::POSTED], so the app's own hotkey hook lets them pass unseen.
 
-use keyboard_types::Modifiers;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
   GetAsyncKeyState, GetKeyboardLayout, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
   KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, MapVirtualKeyW, SendInput, VkKeyScanExW,
@@ -17,6 +16,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindow
 
 use super::super::keyboard;
 use super::{POSTED, lone_vk};
+use crate::Modifiers;
 use crate::keys::{Key, Shortcut, strokes};
 
 /// The key tapped around a held Alt or Win lifted and put back: unassigned, so it does nothing,

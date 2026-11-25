@@ -19,7 +19,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::platform::desktop as imp;
-use crate::{AppInfo, Png};
+use crate::{AppInfo, Error, Png};
 #[cfg(any(all(test, unix), target_os = "linux"))]
 use crate::{autostart, platform, png};
 
@@ -43,13 +43,13 @@ pub const SIDES: [u32; 10] = [16, 22, 24, 32, 48, 64, 96, 128, 256, 512];
 /// AppImage moved): `true` when it wrote. Nothing for an executable outside the home folder
 /// (/usr, /opt, /snap): its package brings its own entry, which one here would outlive. Quiet: an
 /// error is returned, never shown.
-pub fn install(app: &AppInfo, launcher: &Launcher) -> Result<bool, String> {
-  imp::install(app, launcher)
+pub fn install(app: &AppInfo, launcher: &Launcher) -> Result<bool, Error> {
+  imp::install(app, launcher).map_err(Error::System)
 }
 
 /// Removes the entry and its icons; what is missing already is fine.
-pub fn uninstall(app: &AppInfo) -> Result<(), String> {
-  imp::uninstall(app)
+pub fn uninstall(app: &AppInfo) -> Result<(), Error> {
+  imp::uninstall(app).map_err(Error::System)
 }
 
 /// The executable `exe` is a package's: outside the home folder `home`, or with no home to tell.

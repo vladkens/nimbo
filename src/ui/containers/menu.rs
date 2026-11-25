@@ -206,13 +206,12 @@ fn checks(items: &[Item<usize>]) -> bool {
 mod tests {
   use std::time::Duration;
 
-  use keyboard_types::{Modifiers, NamedKey};
-
   use super::*;
   use crate::app::{App, Event, MouseButton, Phase};
   use crate::harness::Harness;
   use crate::scene::Size;
   use crate::ui::{ControlSize, TextStyle};
+  use crate::{Modifiers, NamedKey};
 
   /// A menu inside a scroll area over tall content; its items count their runs.
   #[derive(Default)]

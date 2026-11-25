@@ -226,13 +226,12 @@ impl Ui<'_> {
 
 #[cfg(test)]
 mod tests {
-  use keyboard_types::{Modifiers, NamedKey};
-
   use super::*;
   use crate::app::{App, Cx, Event};
   use crate::harness::Harness;
   use crate::keys::{Binding, CMD, Command, Shortcut, bind};
   use crate::scene::Size;
+  use crate::{Modifiers, NamedKey};
 
   /// A dialog over an app that binds Cmd-Z and hears every key and command.
   #[derive(Default)]

@@ -36,8 +36,6 @@ use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use keyboard_types::Modifiers;
-
 use super::super::dbus::{self, Gv, PORTAL, PORTAL_PATH as PATH, V, portal, request};
 use super::super::dl::fns;
 use super::super::keys::evdev;
@@ -46,7 +44,7 @@ use super::{paste, post};
 use crate::clipboard::Snapshot;
 use crate::keys::{Shortcut, strokes};
 use crate::paste::PORTAL_WAIT;
-use crate::{paths, platform};
+use crate::{Modifiers, paths, platform};
 
 const REMOTE: &str = "org.freedesktop.portal.RemoteDesktop";
 const CLIPBOARD: &str = "org.freedesktop.portal.Clipboard";
@@ -443,9 +441,8 @@ unsafe extern "C" fn on_transfer(_: P, _: S, _: S, _: S, _: S, args: P, data: P)
 
 #[cfg(test)]
 mod tests {
-  use keyboard_types::Code;
-
   use super::*;
+  use crate::Code;
 
   /// The keys by evdev code (<linux/input-event-codes.h>), and a shortcut's presses: Ctrl+V is
   /// the left Ctrl around V (47 on the US layout).

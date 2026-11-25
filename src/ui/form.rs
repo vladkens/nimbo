@@ -810,8 +810,6 @@ fn chevron(f: &mut Frame, r: Rect, turn: f32, color: Color) {
 mod tests {
   use std::time::Duration;
 
-  use keyboard_types::{Modifiers, NamedKey};
-
   use super::*;
   use crate::app::App;
   use crate::harness::{Harness, mac_titlebar};
@@ -819,6 +817,7 @@ mod tests {
   use crate::scene::{Point, Size};
   use crate::ui::layout::Kind;
   use crate::ui::{ControlSize, Id, LinePattern, SegmentedPickerStyle, Tag, Tone};
+  use crate::{Modifiers, NamedKey};
 
   /// A section of one row and a footer with the "?" alone, nothing named.
   #[derive(Default)]

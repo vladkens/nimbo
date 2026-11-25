@@ -272,8 +272,9 @@ pub(crate) use imp::{attach_console, downloads};
 pub(crate) use imp::{autostart, desktop, uninstall};
 #[cfg(feature = "system")]
 pub(crate) use imp::{hardware, input_source};
+
 #[cfg(any(test, target_os = "windows", target_os = "linux"))]
-use keyboard_types::Code;
+use crate::Code;
 
 /// The points of `px` pixels at `scale`: the least that the renderer's pixels (`points × scale`,
 /// cut down: [crate::cpu::Renderer::pixel_size]) give back whole at a fractional scale, where

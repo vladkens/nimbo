@@ -23,7 +23,6 @@ use std::sync::mpsc::{Receiver, Sender, SyncSender, channel, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use keyboard_types::{Code, Modifiers};
 use windows_sys::Win32::Foundation::{GetLastError, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
@@ -34,6 +33,7 @@ use super::lone_vk;
 use crate::hotkey::{Edge, Listener, MAX, OnEdge, Status};
 use crate::keys::Hotkey;
 use crate::platform::scan_code;
+use crate::{Code, Error, Modifiers};
 
 /// How often the held chords' keys are looked at, for their release.
 const POLL: Duration = Duration::from_millis(10);
@@ -158,19 +158,19 @@ impl Hotkeys {
       FAILED => Listener::Failed,
       _ => Listener::Off,
     };
-    s.listener_error = sh.listener_error.lock().ok().and_then(|e| e.clone());
+    s.listener_error = sh.listener_error.lock().ok().and_then(|e| e.clone()).map(Error::System);
     let errors = sh.fallback_error.lock().map(|e| e.clone()).unwrap_or_default();
     for (which, slot) in s.slots.iter_mut().enumerate().take(MAX) {
       slot.fallback = sh.fallback[which].load(Ordering::Acquire);
-      slot.fallback_error = errors[which].clone();
+      slot.fallback_error = errors[which].clone().map(Error::System);
     }
 
     s.counts.listener = n(&sh.listener_events);
     s.counts.fallback = n(&sh.fallback_events);
     s.counts.fallback_repeats = n(&sh.fallback_repeats);
     if sh.escape.load(Ordering::Relaxed) && s.listener != Listener::Active {
-      let why = s.listener_error.clone();
-      s.escape_error = Some(why.unwrap_or_else(|| "the keyboard hook is not installed".into()));
+      let why = || Error::System("the keyboard hook is not installed".into());
+      s.escape_error = Some(s.listener_error.clone().unwrap_or_else(why));
     }
   }
 }

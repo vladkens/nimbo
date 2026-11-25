@@ -10,8 +10,7 @@ use std::fmt;
 use std::hash::BuildHasherDefault;
 use std::ops::Range;
 
-use keyboard_types::Modifiers;
-
+use crate::Modifiers;
 use crate::app::MouseButton;
 use crate::keys::{Binding, CMD, Command, Delete, Extent, Move, Os, Shortcut, bind};
 use crate::scene::{Point, Rect};

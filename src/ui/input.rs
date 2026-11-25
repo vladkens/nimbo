@@ -12,10 +12,9 @@
 use std::cell::Cell;
 use std::time::Duration;
 
-use keyboard_types::Modifiers;
-
 use super::layout::{Node, Tree};
 use super::{Focus, Id, Ui, UiState};
+use crate::Modifiers;
 use crate::app::{Event, MouseButton, Phase};
 use crate::keys::Os;
 use crate::scene::{Point, Rect, Size};

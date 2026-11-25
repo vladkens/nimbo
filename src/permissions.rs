@@ -8,9 +8,9 @@
 //! opens and Secure Input is never on (Windows' microphone switch in Settings › Privacy isn't read
 //! yet).
 
-use crate::open;
 #[cfg(target_os = "macos")]
 use crate::platform;
+use crate::{Error, open};
 
 /// A pane of System Settings › Privacy & Security.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,7 +66,7 @@ pub fn request_accessibility() -> bool {
 }
 
 /// Opens `pane` in System Settings, for the user to allow the app there; nothing elsewhere.
-pub fn open_pane(pane: Pane) -> Result<(), String> {
+pub fn open_pane(pane: Pane) -> Result<(), Error> {
   match cfg!(target_os = "macos") {
     true => open::url(pane.url()),
     false => Ok(()),

@@ -88,9 +88,8 @@ impl ListStyle for InsetGroupedListStyle {
 mod tests {
   use std::time::Duration;
 
-  use keyboard_types::Modifiers;
-
   use super::*;
+  use crate::Modifiers;
   use crate::app::Event;
   use crate::keys::{CMD, Os};
   use crate::scene::{Point, Size};

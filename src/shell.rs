@@ -21,8 +21,6 @@ use std::marker::PhantomData;
 use std::sync::mpsc;
 use std::time::Duration;
 
-#[cfg(feature = "system")]
-use crate::Event;
 pub use crate::info::{AppInfo, Presence};
 #[cfg(feature = "instance")]
 use crate::instance::{Command, Instance, OPEN, QUIT};
@@ -36,6 +34,8 @@ use crate::platform::shell as imp;
 use crate::system::{self, Change};
 pub use crate::window::Anchor;
 use crate::{App, Commands, Config, runloop};
+#[cfg(feature = "system")]
+use crate::{Error, Event};
 
 /// Runs the event loop with no window: `start` opens what the app needs (windows, a
 /// [crate::tray::Tray], [crate::hotkey::Hotkeys]), then the loop runs until [Main::quit].
@@ -437,19 +437,19 @@ impl Main {
 
   /// Watches the system's changes of `kinds` (besides those watched already) until the loop
   /// ends ([crate::system]): each, a burst of one kind coalesced into one, runs `f` on the main
-  /// thread (replacing an earlier one), then reaches every open window as [Event::System]. `Err`
-  /// names the kinds the OS refused; the rest are watched. A kind registered off the main thread
-  /// (macOS's audio, whose first call costs tens of milliseconds) or refused later (a sound
-  /// server's subscription) can't come back here: it goes to stderr and is no longer watched,
-  /// so a later call tries again.
+  /// thread (replacing an earlier one), then reaches every open window as [Event::System].
+  /// [Error::System] names the kinds the OS refused; the rest are watched. A kind registered off
+  /// the main thread (macOS's audio, whose first call costs tens of milliseconds) or refused later
+  /// (a sound server's subscription) can't come back here: it goes to stderr and is no longer
+  /// watched, so a later call tries again.
   #[cfg(feature = "system")]
   pub fn watch(
     &mut self,
     kinds: &[Change],
     f: impl FnMut(&mut Main, Change) + 'static,
-  ) -> Result<(), String> {
+  ) -> Result<(), Error> {
     hooks(|h| h.change = Some(Box::new(f)));
-    system::watch(kinds, |change| changed(&mut Main::here(), change))
+    system::watch(kinds, |change| changed(&mut Main::here(), change)).map_err(Error::System)
   }
 
   pub fn proxy(&self) -> Proxy {

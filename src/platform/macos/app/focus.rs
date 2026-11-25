@@ -12,6 +12,7 @@ use objc2::{class, msg_send};
 use objc2_app_kit::{NSRunningApplication, NSWorkspace};
 use objc2_core_foundation::{CFGetTypeID, CFRetained, CFString, CFType};
 
+use crate::Error;
 use crate::focus::{self, Focused};
 
 /// How long one request may wait for the app: a hung app does not hold the caller longer.
@@ -154,6 +155,6 @@ fn secure_field(app: &CFRetained<CFType>) -> Result<bool, i32> {
   Ok(subrole.is_some_and(|s| s.to_string() == "AXSecureTextField"))
 }
 
-fn why(e: i32) -> String {
-  format!("AXError {e}")
+fn why(e: i32) -> Error {
+  Error::System(format!("AXError {e}"))
 }

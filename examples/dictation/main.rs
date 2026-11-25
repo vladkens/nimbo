@@ -364,7 +364,7 @@ fn start(main: &mut Main, instance: Option<Instance>) {
     }
   });
   let hotkey = Hotkey::parse(HOTKEY).map_err(|e| e.to_string());
-  if let Err(e) = hotkey.and_then(|h| hotkeys.set(&[Some(h)])) {
+  if let Err(e) = hotkey.and_then(|h| hotkeys.set(&[Some(h)]).map_err(|e| e.to_string())) {
     eprintln!("hotkey: {e}");
   }
 
