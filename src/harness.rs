@@ -2,7 +2,7 @@
 
 //! The headless harness: runs an app with no window on the same renderer, offscreen, at a
 //! given size and scale, on virtual time and an in-memory clipboard. Scripted input drives it;
-//! it renders PNG shots ([crate::png]).
+//! it renders PNG shots ([crate::Png]).
 
 use std::path::Path;
 use std::time::Duration;
@@ -17,7 +17,9 @@ use crate::locale::{self, Locale, Localizations};
 use crate::menu::{Item, Menu};
 use crate::scene::{Point, Rect, Size};
 use crate::text::TextSystem;
-use crate::text::edit::{Editor, utf16_len};
+#[cfg(feature = "headless")]
+use crate::text::edit::Editor;
+use crate::text::edit::utf16_len;
 use crate::ui::{A11yTree, Action, Cursor, Id, Kind, Role, Scroll, TextInput};
 use crate::{TitleBar, cpu, png};
 
@@ -332,6 +334,7 @@ impl<A: App> Harness<A> {
   }
 
   /// The editor of a text field or selectable text.
+  #[cfg(feature = "headless")]
   pub fn editor(&self, id: Id) -> Option<&Editor> {
     self.rt.ui.editor(id)
   }

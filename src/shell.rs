@@ -13,21 +13,29 @@
 
 use std::any::TypeId;
 use std::cell::RefCell;
+#[cfg(any(feature = "instance", feature = "system"))]
 use std::collections::VecDeque;
+#[cfg(feature = "instance")]
 use std::io;
 use std::marker::PhantomData;
 use std::sync::mpsc;
 use std::time::Duration;
 
+#[cfg(feature = "system")]
+use crate::Event;
 pub use crate::info::{AppInfo, Presence};
+#[cfg(feature = "instance")]
 use crate::instance::{Command, Instance, OPEN, QUIT};
 use crate::locale::{self, Locale, Localizations};
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(feature = "paste")]
+use crate::paste;
+#[cfg(any(windows, all(target_os = "linux", feature = "instance")))]
 use crate::platform;
 use crate::platform::shell as imp;
+#[cfg(feature = "system")]
 use crate::system::{self, Change};
 pub use crate::window::Anchor;
-use crate::{App, Commands, Config, Event, paste, runloop};
+use crate::{App, Commands, Config, runloop};
 
 /// Runs the event loop with no window: `start` opens what the app needs (windows, a
 /// [crate::tray::Tray], [crate::hotkey::Hotkeys]), then the loop runs until [Main::quit].
@@ -47,6 +55,7 @@ fn running(run: impl FnOnce()) {
   runloop::running(imp::post, || {
     HOOKS.take();
     run();
+    #[cfg(feature = "system")]
     system::unwatch();
     HOOKS.take();
   });
@@ -56,7 +65,9 @@ pub(crate) type OnMain = Box<dyn FnOnce(&mut Main)>;
 /// The app's answer to an item of its own chosen in the menu bar, by the action's number.
 pub(crate) type OnChosen = Box<dyn FnMut(&mut Main, usize)>;
 type OnReopen = Box<dyn FnMut(&mut Main)>;
+#[cfg(feature = "instance")]
 type OnCommand = Box<dyn FnMut(&mut Main, &Command)>;
+#[cfg(feature = "system")]
 type OnChange = Box<dyn FnMut(&mut Main, Change)>;
 
 /// What every platform's loop keeps alike: the open windows by id, each with its app's type and
@@ -68,11 +79,16 @@ struct Hooks {
   windows: Vec<(u64, TypeId, Option<OnMain>)>,
   reopen: Option<OnReopen>,
   quit: Option<OnMain>,
+  #[cfg(feature = "instance")]
   instance: Option<Instance>,
+  #[cfg(feature = "instance")]
   command: Option<OnCommand>,
+  #[cfg(feature = "instance")]
   queued: Option<VecDeque<Command>>,
   token: Option<(String, bool)>,
+  #[cfg(feature = "system")]
   change: Option<OnChange>,
+  #[cfg(feature = "system")]
   changes: Option<VecDeque<Change>>,
 }
 
@@ -127,6 +143,7 @@ pub(crate) fn reopened() {
 /// the handler, the command's activation token kept meanwhile, then [Main::quit] for [QUIT]. One
 /// that comes while another runs (from a nested loop: a dialog, a paste waiting for the portal)
 /// is queued and runs after it. `quit` is [Main::quit], a test's fake in tests.
+#[cfg(feature = "instance")]
 fn command(main: &mut Main, cmd: Command, quit: &dyn Fn(&mut Main)) {
   let busy = hooks(|h| h.queued.as_mut().map(|q| q.push_back(cmd.clone())).is_some());
   if busy {
@@ -144,6 +161,7 @@ fn command(main: &mut Main, cmd: Command, quit: &dyn Fn(&mut Main)) {
 }
 
 /// One command, as [command] says.
+#[cfg(feature = "instance")]
 fn handle(main: &mut Main, cmd: &Command, quit: &dyn Fn(&mut Main)) {
   hooks(|h| h.token = cmd.token.clone().map(|t| (t, false)));
   if cmd.name == OPEN {
@@ -169,13 +187,16 @@ fn handle(main: &mut Main, cmd: &Command, quit: &dyn Fn(&mut Main)) {
 
 /// A watched change of the system ([Main::watch]): the hook, then every open window. One that
 /// comes while the hook runs (a nested loop up the stack) is queued and delivered after it.
+#[cfg(feature = "system")]
 pub(crate) fn changed(main: &mut Main, change: Change) {
   deliver(main, change, imp::send, post);
 }
 
 /// The platform's send of an event to a window: `None` when it is busy up the stack or gone.
+#[cfg(feature = "system")]
 type SendFn = fn(u64, Event) -> Option<bool>;
 /// Work for the main thread after a delay: [Proxy::after], a fake in tests.
+#[cfg(feature = "system")]
 type PostFn = fn(Duration, Later);
 type Later = Box<dyn FnOnce() + Send>;
 
@@ -184,6 +205,7 @@ fn post(delay: Duration, f: Later) {
 }
 
 /// [changed] with the platform's `send` to a window and the loop's `post`.
+#[cfg(feature = "system")]
 fn deliver(main: &mut Main, change: Change, send: SendFn, post: PostFn) {
   let busy = hooks(|h| h.changes.as_mut().map(|q| q.push_back(change)).is_some());
   if busy {
@@ -207,23 +229,27 @@ fn deliver(main: &mut Main, change: Change, send: SendFn, post: PostFn) {
 }
 
 /// Sends `change` to the windows `ids` still open; those busy are tried again after
-/// [system::RETRY], until they take it or close.
+/// [RETRY], until they take it or close.
+#[cfg(feature = "system")]
 fn retry(ids: Vec<u64>, change: Change, send: SendFn, post: PostFn) {
   let open = windows();
   let ids = ids.into_iter().filter(|id| open.contains(id));
   let missed: Vec<_> = ids.filter(|&id| send(id, Event::System(change)).is_none()).collect();
   if !missed.is_empty() {
-    post(system::RETRY, Box::new(move || retry(missed, change, send, post)));
+    post(RETRY, Box::new(move || retry(missed, change, send, post)));
   }
 }
 
-/// Redraws the windows `ids` still open; those busy are tried again after [system::RETRY].
+/// A window busy up the stack is tried again after this.
+const RETRY: Duration = Duration::from_millis(100);
+
+/// Redraws the windows `ids` still open; those busy are tried again after [RETRY].
 fn redraw(ids: Vec<u64>) {
   let open = windows();
   let ids = ids.into_iter().filter(|id| open.contains(id));
   let busy: Vec<_> = ids.filter(|&id| !imp::with_app(id, &mut |_| {})).collect();
   if !busy.is_empty() {
-    post(system::RETRY, Box::new(move || redraw(busy)));
+    post(RETRY, Box::new(move || redraw(busy)));
   }
 }
 
@@ -248,6 +274,7 @@ pub(crate) fn finish(close: impl Fn(u64)) {
     f(&mut Main::here());
   }
 
+  #[cfg(feature = "paste")]
   paste::finish();
 
   for id in windows() {
@@ -344,6 +371,7 @@ impl Main {
   /// is in [Main::on_quit]). While they run, a window [Main::open] shows or [Window::front] brings
   /// forward comes to the front with the command's activation token (Linux; Windows lets it
   /// through the sender). `Err` when its thread can't start.
+  #[cfg(feature = "instance")]
   pub fn serve(
     &mut self,
     mut instance: Instance,
@@ -414,6 +442,7 @@ impl Main {
   /// (macOS's audio, whose first call costs tens of milliseconds) or refused later (a sound
   /// server's subscription) can't come back here: it goes to stderr and is no longer watched,
   /// so a later call tries again.
+  #[cfg(feature = "system")]
   pub fn watch(
     &mut self,
     kinds: &[Change],
@@ -703,9 +732,9 @@ mod tests {
     BUSY.set(2);
     deliver(&mut Main::here(), Change::Lid, send_busy, post_later);
     assert_eq!(SEEN.take(), ["1 System(Lid)", "2 System(Lid)"]);
-    assert_eq!(run_posted(), [system::RETRY]);
+    assert_eq!(run_posted(), [RETRY]);
     assert_eq!(SEEN.take(), ["2 System(Lid)"], "still busy");
-    assert_eq!(run_posted(), [system::RETRY]);
+    assert_eq!(run_posted(), [RETRY]);
     assert_eq!(SEEN.take(), ["2 System(Lid)"], "taken");
     assert!(POSTED.with_borrow(Vec::is_empty));
 

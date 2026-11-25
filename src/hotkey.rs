@@ -142,7 +142,7 @@ struct Place {
 }
 
 /// The app's global hotkeys: one [Hotkeys] per app, made and used on the main thread while
-/// [crate::app] runs. `on` hears their edges on a thread of its own, never the main one, so it
+/// [crate::app()] runs. `on` hears their edges on a thread of its own, never the main one, so it
 /// can hand them to a worker at once (or to the main thread through a [crate::Proxy]). Dropped,
 /// the hotkeys stop; the threads stay for the process.
 pub struct Hotkeys {

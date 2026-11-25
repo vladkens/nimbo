@@ -28,13 +28,21 @@ update:
 clean:
 	cargo clean
 
-.PHONY: check-targets size pace api-shots i18n
+.PHONY: check-targets features size pace api-shots i18n
 
 # The library, its examples and tests build for these too; needs `rustup target add` of each.
 TARGETS := x86_64-pc-windows-msvc x86_64-unknown-linux-gnu
 
 check-targets: # clippy of the library, examples and tests for Windows and Linux
 	@for t in $(TARGETS); do cargo clippy --all-targets --target $$t -- -D warnings || exit 1; done
+
+# Its own target dir: warnings are errors here, and the flag would rebuild the usual one's crates.
+features: # the library with each feature alone, none and the default, on every system; then the base and headless built; needs cargo-hack (`cargo install cargo-hack`)
+	@for t in aarch64-apple-darwin $(TARGETS); do \
+	  RUSTFLAGS="-D warnings" CARGO_TARGET_DIR=target/features cargo hack check --lib --each-feature --target $$t || exit 1; \
+	done
+	RUSTFLAGS="-D warnings" CARGO_TARGET_DIR=target/features cargo build --lib --no-default-features
+	RUSTFLAGS="-D warnings" CARGO_TARGET_DIR=target/features cargo build --lib --no-default-features --features headless
 
 pace: # frame pacing in a window of this session: fps while animating, wakeups when still
 	cargo build --release --example pace

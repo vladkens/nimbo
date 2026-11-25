@@ -14,7 +14,7 @@
 //! harness instead (in the dark appearance unless `--appearance light`, in English unless
 //! `--locale <tag>`).
 //!
-//! An app with no window, or more than one, starts with [app]: windows on demand ([Main::open])
+//! An app with no window, or more than one, starts with [app()]: windows on demand ([Main::open])
 //! and overlays, HUDs over every app ([Config::overlay]), the menu bar's commands
 //! ([Main::set_commands]), work from other threads ([Proxy]), and what a tray app needs besides:
 //! an icon with a menu ([tray]), global hotkeys ([hotkey]), one instance that takes commands from
@@ -33,55 +33,80 @@
 //! macOS 11 is the least it runs on, rustc's default deployment target, so an app sets none;
 //! newer APIs are used where the system has them (the activation, the display link and menu
 //! section headers on 14+, launch at login on 13+).
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(
+  not(all(feature = "full", feature = "harness")),
+  expect(
+    dead_code,
+    reason = "what a feature left off uses; the full build (clippy, tests) checks it"
+  )
+)]
 
 pub mod activity;
 pub mod app;
+#[cfg(feature = "autostart")]
 pub mod autostart;
+#[cfg(feature = "bitmap")]
 mod bitmap;
 pub mod clipboard;
 mod commands;
 pub(crate) mod cpu;
+#[cfg(feature = "autostart")]
 pub mod desktop;
 mod event;
 mod file_dialog;
 pub mod focus;
 pub(crate) mod geom;
+#[cfg(feature = "system")]
 pub mod hardware;
+#[cfg(feature = "harness")]
 pub mod harness;
+#[cfg(feature = "hotkey")]
 pub mod hotkey;
 mod info;
+#[cfg(feature = "system")]
 pub mod input_source;
+#[cfg(feature = "instance")]
 pub mod instance;
 pub mod keys;
 pub mod locale;
 mod menu;
 pub mod open;
+#[cfg(feature = "paste")]
 pub mod paste;
 pub mod paths;
+#[cfg(feature = "permissions")]
 pub mod permissions;
 pub mod platform;
+#[cfg(feature = "png")]
 mod png;
 mod runloop;
 pub mod scene;
 pub mod shell;
 pub mod svg;
+#[cfg(feature = "system")]
 pub mod system;
 pub mod text;
+#[cfg(feature = "tray")]
 pub mod tray;
 pub mod ui;
+#[cfg(feature = "autostart")]
 pub mod uninstall;
 mod window;
 
+#[cfg(feature = "harness")]
 use std::path::PathBuf;
 
 pub use app::{
   App, Appearance, Clipboard, ColorScheme, Cx, Event, Ime, MemClipboard, MouseButton, Phase,
   WHEEL_LINE, Waker,
 };
+#[cfg(feature = "bitmap")]
 pub use bitmap::Bitmap;
 pub use clipboard::SystemClipboard;
 pub use commands::{CommandGroupPlacement, Commands};
 pub use file_dialog::{FileDialog, FileDialogKind};
+#[cfg(feature = "harness")]
 pub use harness::Harness;
 /// Keys' W3C UI Events names: [Code] a key's place, [NamedKey] a key that types nothing,
 /// [Modifiers] the modifier keys held.
@@ -91,35 +116,45 @@ pub use keys::{
   Shortcut, bind, shortcut,
 };
 pub use locale::{Locale, Localizations, Localized};
-pub use menu::{Item, Menu};
+pub use menu::{ButtonRole, Item, Menu};
+#[cfg(feature = "png")]
 pub use png::Png;
 pub use scene::{Color, Frame, ImageId, Images, Point, Quad, Rect, Size, alpha, mix, rgb};
 pub use shell::{Anchor, AppInfo, Main, Presence, Proxy, Window, WindowId, app, attach_console};
 pub use text::edit::{Editor, Lines, Mono, Sel};
 pub use text::{Design, Font, Weight};
 pub use ui::{
-  Align, Answer, Axes, Axis, Behavior, BorderedButtonStyle, BorderedProminentButtonStyle,
-  BorderlessButtonStyle, Button, ButtonConfiguration, ButtonRole, ButtonStyle, ButtonToggleStyle,
-  CheckboxToggleStyle, Click, Clip, Content, ContentMode, ControlBorder, ControlSize,
-  CoordinateSpace, Cursor, Dialog, DialogBehavior, Dim, Ease, EditMenu, Editing, Enabled,
-  EnvironmentValue, FieldBehavior, FieldKind, FieldStyle, Float, Focus, FocusDirection, FocusRing,
-  FormRow, FormStyle, HelpConfiguration, HelpStyle, Icon, IconPaint, Id, ImageSource,
-  InlinePickerStyle, InsetGroupedListStyle, InsetListStyle, LinePattern, LinearSliderStyle, List,
+  Align, Axes, Axis, Click, Clip, ContentMode, ControlSize, CoordinateSpace, Cursor, Dim, Ease,
+  Enabled, EnvironmentValue, Float, Focus, FocusDirection, FocusRing, Icon, IconPaint, Id,
+  ImageSource, LinePattern, NativeMenu, Press, Response, Scroll, Shadow, Style, TextInput,
+  TextLines, TextStyle, Transition, TruncationMode, Ui, UnitPoint, grow, pct, px, rigid,
+};
+#[cfg(feature = "styled")]
+pub use ui::{
+  Answer, BorderedButtonStyle, BorderedProminentButtonStyle, BorderlessButtonStyle,
+  ButtonToggleStyle, CheckboxToggleStyle, ControlBorder, Dialog, FormRow, FormStyle,
+  InsetGroupedListStyle, InsetListStyle, LinearSliderStyle, MenuPickerStyle,
+  RoundedBorderTextFieldStyle, Section, SegmentedPickerStyle, Sizes, Split, SwitchToggleStyle,
+  TabItem, Tabs, Theme, Tone, ToolbarItemPlacement, TooltipHelpStyle,
+};
+#[cfg(feature = "headless")]
+pub use ui::{
+  Behavior, Button, ButtonConfiguration, ButtonStyle, Content, DialogBehavior, EditMenu, Editing,
+  FieldBehavior, FieldKind, FieldStyle, HelpConfiguration, HelpStyle, InlinePickerStyle, List,
   ListBehavior, ListConfiguration, ListLayout, ListResponse, ListRowConfiguration, ListRows,
-  ListStyle, MenuPickerStyle, MenuPlacement, NativeMenu, Picker, PickerConfiguration, PickerStyle,
-  PlainButtonStyle, PlainHelpStyle, PlainListStyle, PlainSliderStyle, PlainTextFieldStyle,
-  PlainToggleStyle, Press, Response, RoundedBorderTextFieldStyle, Row, Scroll, ScrollBar,
-  ScrollBehavior, ScrollerKnob, Section, SectionHeader, SegmentedPickerStyle, Selection, Shadow,
-  Sizes, Slider, SliderConfiguration, SliderStyle, Split, SplitBehavior, Style, SwitchToggleStyle,
-  TabItem, Tabs, Tag, TextField, TextFieldConfiguration, TextFieldStyle, TextInput, TextLines,
-  TextStyle, Theme, ToggleConfiguration, ToggleStyle, Tone, ToolbarItemPlacement, TooltipHelpStyle,
-  Transition, TruncationMode, TypeSelect, Ui, UnitPoint, grow, pct, px, rigid,
+  ListStyle, MenuPlacement, Picker, PickerConfiguration, PickerStyle, PlainButtonStyle,
+  PlainHelpStyle, PlainListStyle, PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle, Row,
+  ScrollBar, ScrollBehavior, ScrollerKnob, SectionHeader, Selection, Slider, SliderConfiguration,
+  SliderStyle, SplitBehavior, Tag, TextField, TextFieldConfiguration, TextFieldStyle,
+  ToggleConfiguration, ToggleStyle, TypeSelect,
 };
 pub use window::{Config, TitleBar, WindowToolbarStyle};
 
+#[cfg(feature = "harness")]
 const USAGE: &str = "usage: [--shot <file.png>] [--scale <n>] [--size <w>x<h>] \
   [--appearance light|dark] [--locale <tag>|pseudo]";
 
+#[cfg(feature = "harness")]
 #[derive(Debug, Default, PartialEq)]
 struct Args {
   shot: Option<PathBuf>,
@@ -132,6 +167,7 @@ struct Args {
   locale: Option<Locale>,
 }
 
+#[cfg(feature = "harness")]
 impl Args {
   fn parse(args: &[String]) -> Result<Self, String> {
     let mut out = Self { scale: 2.0, ..Self::default() };
@@ -176,11 +212,13 @@ impl Args {
   }
 }
 
+#[cfg(feature = "harness")]
 /// A finite number above zero: a scale or a size the harness can render.
 fn positive(n: f32) -> bool {
   n.is_finite() && n > 0.0
 }
 
+#[cfg(feature = "harness")]
 /// The entry point of every example: [run_args] with the process's whole command line, exiting
 /// with the usage on any argument it doesn't know; an app with its own arguments takes them and
 /// passes the rest to [run_args].
@@ -189,6 +227,7 @@ pub fn run_example<A: App + 'static>(cfg: Config, app: A, script: impl FnOnce(&m
   run_args(cfg, app, script, &args);
 }
 
+#[cfg(feature = "harness")]
 /// With no `args` it opens a window and runs until it closes; with `--shot <file.png>` it runs
 /// the app in the [Harness] at `cfg.size` (or `--size`) and `--scale` (default 2), first applying
 /// `script` (the state the shot shows), then writing the PNG. Unknown arguments print the usage
@@ -235,6 +274,7 @@ pub fn run_args<A: App + 'static>(
   println!("{}: wrote {}", cfg.title, path.display());
 }
 
+#[cfg(feature = "harness")]
 /// The harness [run_args] shoots in, at the size and scale of `args`, in its language (English
 /// unless `--locale` says otherwise); the app first hears the appearance, dark unless
 /// `--appearance` says otherwise, as a window tells it the OS's.

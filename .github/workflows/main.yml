@@ -32,6 +32,30 @@ jobs:
       - run: make test
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb xauth
       - run: xvfb-run -a make pace
+      - run: cargo publish --dry-run
+
+  # The Mac: the library's checks and tests, each feature alone on every system, the docs.rs build.
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the merge base with main, for the size check
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.event_name != 'pull_request' }}
+          cache-directories: target/features
+      - run: rustup toolchain install nightly --profile minimal --component rustfmt
+      - run: rustup target add x86_64-pc-windows-msvc x86_64-unknown-linux-gnu
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: taiki-e/install-action@cargo-hack
+      - run: make check
+      - run: make test
+      - run: make features
+      - run: cargo +nightly doc --all-features --no-deps
+        env:
+          RUSTDOCFLAGS: --cfg docsrs -D warnings
 
   build:
     if: "github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch' || startsWith(github.event.pull_request.title, 'release: v')"
@@ -42,7 +66,7 @@ jobs:
 
   publish:
     if: github.ref == 'refs/heads/main'
-    needs: [test, build]
+    needs: [test, macos, build]
     runs-on: ubuntu-latest
     permissions:
       attestations: write

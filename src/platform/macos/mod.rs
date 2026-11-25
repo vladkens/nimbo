@@ -14,6 +14,7 @@ mod a11y;
 mod app;
 mod bar;
 mod files;
+#[cfg(feature = "bitmap")]
 pub mod image;
 mod input;
 mod keyboard;
@@ -37,10 +38,19 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSArray, NSLocale, NSString, NSUserDefaults, ns_string};
 
-pub use self::app::{
-  activity, autostart, desktop, focus, hardware, hotkey, input_source, open, paste, permissions,
-  post, tray, uninstall,
-};
+#[cfg(feature = "hotkey")]
+pub use self::app::hotkey;
+#[cfg(feature = "permissions")]
+pub use self::app::permissions;
+#[cfg(feature = "paste")]
+pub use self::app::post;
+#[cfg(feature = "tray")]
+pub use self::app::tray;
+pub use self::app::{activity, focus, open, paste};
+#[cfg(feature = "autostart")]
+pub use self::app::{autostart, desktop, uninstall};
+#[cfg(feature = "system")]
+pub use self::app::{hardware, input_source};
 use crate::app::{Appearance, Clipboard, ColorScheme};
 
 /// The system clipboard, plain text only.

@@ -25,7 +25,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use keyboard_types::{Code, Modifiers};
+use keyboard_types::Code;
 use objc2_core_foundation::{CFMachPort, CFRetained, CFRunLoop, kCFRunLoopCommonModes};
 use objc2_core_graphics::{
   CGEvent, CGEventField, CGEventFlags, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement,
@@ -33,6 +33,7 @@ use objc2_core_graphics::{
 };
 
 use super::super::keyboard::{code as key_at, device_flag, kvk};
+use super::tap_flags;
 use crate::hotkey::{Edge, Listener, MAX, OnEdge, Status};
 use crate::keys::{Hotkey, is_modifier};
 
@@ -442,7 +443,7 @@ unsafe extern "C-unwind" fn tap_callback(
   // SAFETY: the event is valid for the duration of the callback.
   let event = Some(unsafe { event.as_ref() });
   // The app's own posted keys ([super::post]) are no key of the user's.
-  if CGEvent::integer_value_field(event, CGEventField::EventSourceUserData) == super::post::POSTED {
+  if CGEvent::integer_value_field(event, CGEventField::EventSourceUserData) == super::POSTED {
     return pass;
   }
 
@@ -666,19 +667,10 @@ fn general_flag(key: Code) -> u64 {
   }
 }
 
-/// The event tap's modifier flags for a chord's modifiers.
-pub(super) fn tap_flags(mods: Modifiers) -> u64 {
-  let flags = [
-    (Modifiers::CONTROL, CGEventFlags::MaskControl),
-    (Modifiers::ALT, CGEventFlags::MaskAlternate),
-    (Modifiers::SHIFT, CGEventFlags::MaskShift),
-    (Modifiers::META, CGEventFlags::MaskCommand),
-  ];
-  flags.iter().filter(|(m, _)| mods.contains(*m)).fold(0, |all, (_, f)| all | f.0)
-}
-
 #[cfg(test)]
 mod tests {
+  use keyboard_types::Modifiers;
+
   use super::*;
   use crate::keys::Shortcut;
 

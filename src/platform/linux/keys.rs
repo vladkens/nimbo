@@ -172,9 +172,67 @@ pub fn code(key: u32) -> Code {
   }
 }
 
+/// The evdev code of the key at `place`.
+pub(super) fn evdev(place: Code) -> Option<u32> {
+  (1..256).find(|&k| code(k) == place)
+}
+
+/// The xkb keysym name of `key` (`xkbcommon-keysyms.h` without `XKB_KEY_`): a letter or digit
+/// itself, `space`, `minus`, `Return`, `Page_Up`, `F12`.
+pub fn keysym(key: Key) -> Option<String> {
+  let name = match key {
+    Key::Char(c) if c.is_ascii_alphanumeric() => return Some(c.to_ascii_lowercase().to_string()),
+    Key::Char(c) => match c {
+      ' ' => "space",
+      '-' => "minus",
+      '=' => "equal",
+      '[' => "bracketleft",
+      ']' => "bracketright",
+      '\\' => "backslash",
+      ';' => "semicolon",
+      '\'' => "apostrophe",
+      ',' => "comma",
+      '.' => "period",
+      '/' => "slash",
+      '`' => "grave",
+      _ => return None,
+    },
+    Key::Named(k) => match k {
+      NamedKey::Enter => "Return",
+      NamedKey::Tab => "Tab",
+      NamedKey::Backspace => "BackSpace",
+      NamedKey::Delete => "Delete",
+      NamedKey::Escape => "Escape",
+      NamedKey::ArrowUp => "Up",
+      NamedKey::ArrowDown => "Down",
+      NamedKey::ArrowLeft => "Left",
+      NamedKey::ArrowRight => "Right",
+      NamedKey::Home => "Home",
+      NamedKey::End => "End",
+      NamedKey::PageUp => "Page_Up",
+      NamedKey::PageDown => "Page_Down",
+      NamedKey::Insert => "Insert",
+      k => {
+        let name = k.to_string();
+        let f = name.strip_prefix('F').is_some_and(|n| n.parse::<u8>().is_ok());
+        return f.then_some(name);
+      }
+    },
+  };
+
+  Some(name.into())
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn keysym_names() {
+    assert_eq!(keysym(Key::Char('K')).as_deref(), Some("k"));
+    assert_eq!(keysym(Key::Named(NamedKey::Backspace)).as_deref(), Some("BackSpace"));
+    assert_eq!(keysym(Key::Char('!')), None);
+  }
   use crate::keys::{Command, Delete, Extent, Move, Shortcut};
 
   const A: Code = Code::KeyA;

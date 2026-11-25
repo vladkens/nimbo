@@ -6,20 +6,29 @@
 //! a view shows a logo or a photo without keeping an [ImageId].
 
 use super::{ContentMode, Flow, Id, Kind, Response, Style, Ui, UiState};
+#[cfg(feature = "bitmap")]
 use crate::bitmap::Bitmap;
+#[cfg(feature = "png")]
 use crate::png::Png;
 use crate::scene::{ImageId, Images};
 
 /// What [Ui::image] shows, as SwiftUI's `Image` is made from a name or an `NSImage`: from an
 /// [ImageId], a [Png] or a `&`[Bitmap].
 #[derive(Clone, Copy)]
+#[non_exhaustive]
 pub enum ImageSource<'a> {
   /// An image the app added to [Images] and keeps.
   Id(ImageId),
   /// A PNG the app ships, decoded the first time ([Png::rgba]).
+  #[cfg(feature = "png")]
   Png(Png),
   /// A picture the OS decoded ([Bitmap::decode]).
+  #[cfg(feature = "bitmap")]
   Bitmap(&'a Bitmap),
+  /// None: holds the lifetime a [Bitmap] borrows for.
+  #[cfg(not(feature = "bitmap"))]
+  #[doc(hidden)]
+  Never(std::convert::Infallible, std::marker::PhantomData<&'a ()>),
 }
 
 impl From<ImageId> for ImageSource<'_> {
@@ -28,12 +37,14 @@ impl From<ImageId> for ImageSource<'_> {
   }
 }
 
+#[cfg(feature = "png")]
 impl From<Png> for ImageSource<'_> {
   fn from(png: Png) -> Self {
     Self::Png(png)
   }
 }
 
+#[cfg(feature = "bitmap")]
 impl<'a> From<&'a Bitmap> for ImageSource<'a> {
   fn from(b: &'a Bitmap) -> Self {
     Self::Bitmap(b)
@@ -49,14 +60,18 @@ impl Ui<'_> {
   pub fn image<'b>(&mut self, image: impl Into<ImageSource<'b>>, style: Style) -> Response {
     let id = match image.into() {
       ImageSource::Id(id) => id,
+      #[cfg(feature = "png")]
       ImageSource::Png(png) => {
         let (w, h, px) = png.rgba();
         self.picture(Id::of((w as usize, h as usize, px)).0, |i| i.add(w as usize, h as usize, px))
       }
+      #[cfg(feature = "bitmap")]
       ImageSource::Bitmap(b) => {
         let (w, h) = (b.width() as usize, b.height() as usize);
         self.picture(b.key, |i| i.add_premultiplied(w, h, b.px.clone()))
       }
+      #[cfg(not(feature = "bitmap"))]
+      ImageSource::Never(never, _) => match never {},
     };
 
     let mode = self.set_slot::<ContentMode>(None);

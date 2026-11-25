@@ -2,7 +2,8 @@
 
 //! The app's icon in the menu bar or the tray, with a menu the app describes ([Menu]) and
 //! rebuilds when it changes or as it opens ([Tray::on_open]) and closes ([Tray::on_close]). A click
-//! on an item comes to [Tray::on_item] by the item's id. Main thread only, while [crate::app] runs.
+//! on an item comes to [Tray::on_item] by the item's id. Main thread only, while [crate::app()]
+//! runs.
 //!
 //! | | macOS | Windows | Linux |
 //! |---|---|---|---|

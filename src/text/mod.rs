@@ -2,7 +2,7 @@
 
 //! Text: shaping through the platform's text backend ([crate::platform] `text`: CoreText on
 //! macOS) with a shaped-line cache, glyphs rasterized by it into an R8 atlas and colour glyphs
-//! (emoji) into an RGBA one ([atlas]). Fonts are shaped at their point size; only glyph bitmaps
+//! (emoji) into an RGBA one (`atlas`). Fonts are shaped at their point size; only glyph bitmaps
 //! are made at the pixel size. Everything here but the backend is portable.
 
 mod atlas;

@@ -25,6 +25,7 @@ mod dbus;
 mod display;
 mod dl;
 mod files;
+#[cfg(feature = "bitmap")]
 pub mod image;
 mod input;
 mod keys;
@@ -39,10 +40,17 @@ use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-pub use self::app::{
-  activity, autostart, desktop, focus, hardware, hotkey, input_source, open, paste, post, shell,
-  tray, uninstall,
-};
+#[cfg(feature = "hotkey")]
+pub use self::app::hotkey;
+#[cfg(feature = "paste")]
+pub use self::app::post;
+#[cfg(feature = "tray")]
+pub use self::app::tray;
+pub use self::app::{activity, focus, open, paste, shell};
+#[cfg(feature = "autostart")]
+pub use self::app::{autostart, desktop, uninstall};
+#[cfg(feature = "system")]
+pub use self::app::{hardware, input_source};
 use self::dl::{Lib, fns};
 use self::input::Input;
 pub use self::settings::{appearance, languages};

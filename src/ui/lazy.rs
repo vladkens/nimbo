@@ -64,7 +64,7 @@ struct Lazy {
 
 impl<'a> Ui<'a> {
   /// A column of items `heights` high, each exactly that and clipped to it, built with
-  /// `item(ui, i)` only for those the nearest vertically scrolling area shows and [MARGIN]
+  /// `item(ui, i)` only for those the nearest vertically scrolling area shows and `MARGIN`
   /// around (all of them outside one); returns the items built. An item's box is keyed by
   /// `key(i)`, unique and stable while it is the same thing, so what it builds keeps its ids,
   /// hover and focus as the column scrolls and items come and go before it. The column's id is

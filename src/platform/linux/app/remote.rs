@@ -36,11 +36,12 @@ use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use keyboard_types::{Code, Modifiers};
+use keyboard_types::Modifiers;
 
 use super::super::dbus::{self, Gv, PORTAL, PORTAL_PATH as PATH, V, portal, request};
 use super::super::dl::fns;
-use super::super::{Fp, P, S, gtk, keys, lib};
+use super::super::keys::evdev;
+use super::super::{Fp, P, S, gtk, lib};
 use super::{paste, post};
 use crate::clipboard::Snapshot;
 use crate::keys::{Shortcut, strokes};
@@ -245,11 +246,8 @@ pub(super) fn granted() -> bool {
   SESSION.with_borrow(Option::is_some) || saved
 }
 
-/// The file in the app's config folder that keeps the desktop's approval.
-pub(super) const TOKEN: &str = "remote-desktop.token";
-
 fn token_file() -> PathBuf {
-  paths::config_dir(super::info().id).join(TOKEN)
+  paths::config_dir(super::info().id).join(super::TOKEN)
 }
 
 // MARK: Keys
@@ -268,11 +266,6 @@ pub(super) fn post(k: Shortcut) -> Result<(), String> {
   }
 
   Ok(())
-}
-
-/// The evdev code of the key at `code`.
-pub(super) fn evdev(code: Code) -> Option<u32> {
-  (1..256).find(|&k| keys::code(k) == code)
 }
 
 /// The evdev code of the key that types keysym `sym` in the layout GDK has (its lowest group,
@@ -450,6 +443,8 @@ unsafe extern "C" fn on_transfer(_: P, _: S, _: S, _: S, _: S, args: P, data: P)
 
 #[cfg(test)]
 mod tests {
+  use keyboard_types::Code;
+
   use super::*;
 
   /// The keys by evdev code (<linux/input-event-codes.h>), and a shortcut's presses: Ctrl+V is

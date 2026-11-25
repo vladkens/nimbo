@@ -6,7 +6,7 @@
 //! between them. A letter or digit is its own virtual key on every layout (Ctrl-V is VK `V` on a
 //! Russian one too); another character the key that types it on the layout of the window in
 //! front (`VkKeyScanExW`). Windows drops input to an app running elevated above this one (UIPI).
-//! The events carry [POSTED], so the app's own hotkey hook lets them pass unseen.
+//! The events carry [super::POSTED], so the app's own hotkey hook lets them pass unseen.
 
 use keyboard_types::Modifiers;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
@@ -16,11 +16,9 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
 
 use super::super::keyboard;
-use super::hotkey::lone_vk;
+use super::{POSTED, lone_vk};
 use crate::keys::{Key, Shortcut, strokes};
 
-/// The posted events' `dwExtraInfo`: the hotkey hook leaves them to the app in front.
-pub(super) const POSTED: usize = u32::from_be_bytes(*b"nmbo") as usize;
 /// The key tapped around a held Alt or Win lifted and put back: unassigned, so it does nothing,
 /// but neither key then reads as tapped alone (AutoHotkey's menu mask key).
 const MASK: u16 = 0xE8;

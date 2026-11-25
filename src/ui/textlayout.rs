@@ -11,11 +11,13 @@
 
 use std::ops::Range;
 
+#[cfg(not(feature = "headless"))]
+use super::UiState;
 use super::layout::{Kind, Line, Tree};
 use super::{Id, Response, Style, TextStyle, Ui};
 use crate::app::{Event, Ime};
 use crate::scene::{Color, Point, Rect};
-use crate::text::edit::Lines;
+use crate::text::edit::{Editor, Lines, range_from_utf16, range_to_utf16, to_utf16, utf16_len};
 use crate::ui::{CoordinateSpace, Flow};
 
 /// Width of a selected line break, shown past the end of its line.
@@ -311,6 +313,78 @@ impl Lines for TextLayout<'_> {
 
   fn page(&self) -> usize {
     self.page
+  }
+}
+
+/// The focused text field as an input method sees it: ranges are UTF-16 offsets of its text
+/// (the marked text included), rects are in the window, in points.
+pub struct TextInput<'a> {
+  pub(crate) ed: &'a Editor,
+  /// The last frame's layout of its text, when it shows the text as it is.
+  pub(crate) lay: Option<TextLayout<'a>>,
+}
+
+impl TextInput<'_> {
+  pub fn text(&self) -> &str {
+    self.ed.text()
+  }
+
+  /// The length in UTF-16 code units.
+  pub fn len(&self) -> usize {
+    utf16_len(self.ed.text())
+  }
+
+  pub fn is_empty(&self) -> bool {
+    self.ed.text().is_empty()
+  }
+
+  pub fn marked(&self) -> Option<Range<usize>> {
+    self.ed.marked().map(|r| range_to_utf16(self.ed.text(), r))
+  }
+
+  pub fn selected(&self) -> Range<usize> {
+    range_to_utf16(self.ed.text(), self.ed.sel().range())
+  }
+
+  /// The text of `r`, clamped to the text, and the range it took.
+  pub fn substring(&self, r: Range<usize>) -> (String, Range<usize>) {
+    let s = self.ed.text();
+    let b = range_from_utf16(s, r.start.min(r.end)..r.end);
+    (s[b.clone()].to_owned(), range_to_utf16(s, b))
+  }
+
+  /// Where `r` is on its first line, and the part of it there: the caret's rect when it is
+  /// empty. `None` before the field is laid out with its text.
+  pub fn rect(&self, r: Range<usize>) -> Option<(Rect, Range<usize>)> {
+    let (s, lay) = (self.ed.text(), self.lay.as_ref()?);
+    let b = range_from_utf16(s, r.start.min(r.end)..r.end);
+    let k = lay.line_of(b.start);
+    let end = b.end.min(lay.range(k).end).max(b.start);
+    let (x0, x1) = (lay.x_in(k, b.start), lay.x_in(k, end));
+    let y = lay.rect.y + k as f32 * lay.line_h;
+    let rect = Rect::new(lay.rect.x + x0, y, x1 - x0, lay.line_h);
+    Some((rect, range_to_utf16(s, b.start..end)))
+  }
+
+  /// The caret's rect, or the start of the marked text while composing: where the candidate
+  /// window goes, under it.
+  pub fn caret_rect(&self) -> Option<Rect> {
+    let r = self.marked().unwrap_or_else(|| self.selected());
+    self.rect(r.start..r.start).map(|(rect, _)| rect)
+  }
+
+  /// The offset nearest to `p` in the window.
+  pub fn index(&self, p: Point) -> Option<usize> {
+    let lay = self.lay.as_ref()?;
+    Some(to_utf16(self.ed.text(), lay.hit(p, Hit::Nearest)))
+  }
+}
+
+/// No text field without the headless behaviour: none for an input method.
+#[cfg(not(feature = "headless"))]
+impl UiState {
+  pub fn text_input(&self) -> Option<TextInput<'_>> {
+    None
   }
 }
 
