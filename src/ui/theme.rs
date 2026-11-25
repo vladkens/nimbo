@@ -1,15 +1,15 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The theme the widgets ([super::widgets]) draw with: a palette, sizes and fonts, read from the
-//! [super::Ui] (`ui.theme()`). A theme is a plain value with public fields: an app takes the
-//! default one, changes what it wants and sets it, or builds its own.
+//! [super::Ui] (`ui.theme()`). A theme is a plain value read by its roles (`t.accent()`): an app
+//! takes the default one, changes what it wants (`with_` each role) and sets it.
 //!
 //! An app changes the look in three steps, from the least work to the most:
 //! - a style where the widget has one:
 //!   `ui.button_style(&BorderedProminentButtonStyle).button("Save")` ([super::Ui::button_style]);
 //! - a style derived from the theme, changed for one widget: `t.body().font(mono)` given to
 //!   [super::Ui::selectable_text];
-//! - its own theme: `const MINE: Theme = Theme { accent: rgb(0xe06c75), ..Theme::PLATES_DARK }` and
+//! - its own theme: `const MINE: Theme = Theme::PLATES_DARK.with_accent(rgb(0xe06c75))` and
 //!   `ui.set_theme(MINE)`.
 //!
 //! An app that wants a widget to look different altogether writes a style of its own
@@ -34,90 +34,433 @@ use crate::text::{Font, Weight};
 const WHITE: Color = [1.0; 4];
 const BLACK: Color = [0.0, 0.0, 0.0, 1.0];
 
-/// A palette, sizes and fonts.
+/// A palette, sizes and fonts, each read by its role (`t.accent()`) and changed with `with_` it
+/// (`Theme::PLATES_DARK.with_text(WHITE)`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Theme {
-  pub scheme: ColorScheme,
+  pub(crate) scheme: ColorScheme,
+  pub(crate) bg: Color,
+  pub(crate) panel: Color,
+  pub(crate) raised: Color,
+  pub(crate) hover: Color,
+  pub(crate) pressed: Color,
+  pub(crate) line: Color,
+  pub(crate) text: Color,
+  pub(crate) secondary: Color,
+  pub(crate) accent: Color,
+  pub(crate) on_accent: Color,
+  pub(crate) danger: Color,
+  pub(crate) success: Color,
+  pub(crate) warning: Color,
+  pub(crate) selection: Color,
+  pub(crate) focus: Color,
+  pub(crate) ghost: Color,
+  pub(crate) shadow: Color,
+  pub(crate) menu: Color,
+  pub(crate) menu_line: Color,
+  pub(crate) plate: Color,
+  pub(crate) tertiary: Color,
+  pub(crate) link: Color,
+  pub(crate) track: Color,
+  pub(crate) track_hover: Color,
+  pub(crate) knob: Color,
+  pub(crate) dialog_fill: Color,
+  pub(crate) tip_fill: Color,
+  pub(crate) tip_text: Color,
+  pub(crate) control_border: ControlBorder,
+  pub(crate) radius: f32,
+  pub(crate) sizes: Sizes,
+  pub(crate) font: Font,
+  pub(crate) bold: Font,
+  pub(crate) small: Font,
+  pub(crate) fade: Transition,
+  pub(crate) hover_all: bool,
+  pub(crate) disabled: f32,
+  pub(crate) field_fill: Color,
+  pub(crate) field_line: Color,
+  pub(crate) faint: Color,
+  pub(crate) hotkey_recorder_clear: bool,
+  pub(crate) glass: bool,
+}
+
+impl Theme {
+  pub const fn scheme(&self) -> ColorScheme {
+    self.scheme
+  }
+
+  pub const fn with_scheme(self, scheme: ColorScheme) -> Self {
+    Self { scheme, ..self }
+  }
+
   /// The window's ground.
-  pub bg: Color,
+  pub const fn bg(&self) -> Color {
+    self.bg
+  }
+
+  pub const fn with_bg(self, bg: Color) -> Self {
+    Self { bg, ..self }
+  }
+
   /// Sidebars, toolbars, tab strips.
-  pub panel: Color,
+  pub const fn panel(&self) -> Color {
+    self.panel
+  }
+
+  pub const fn with_panel(self, panel: Color) -> Self {
+    Self { panel, ..self }
+  }
+
   /// Controls: buttons.
-  pub raised: Color,
+  pub const fn raised(&self) -> Color {
+    self.raised
+  }
+
+  pub const fn with_raised(self, raised: Color) -> Self {
+    Self { raised, ..self }
+  }
+
   /// A raised control under the pointer.
-  pub hover: Color,
+  pub const fn hover(&self) -> Color {
+    self.hover
+  }
+
+  pub const fn with_hover(self, hover: Color) -> Self {
+    Self { hover, ..self }
+  }
+
   /// A raised control held down.
-  pub pressed: Color,
+  pub const fn pressed(&self) -> Color {
+    self.pressed
+  }
+
+  pub const fn with_pressed(self, pressed: Color) -> Self {
+    Self { pressed, ..self }
+  }
+
   /// Borders and dividers.
-  pub line: Color,
-  pub text: Color,
+  pub const fn line(&self) -> Color {
+    self.line
+  }
+
+  pub const fn with_line(self, line: Color) -> Self {
+    Self { line, ..self }
+  }
+
+  pub const fn text(&self) -> Color {
+    self.text
+  }
+
+  pub const fn with_text(self, text: Color) -> Self {
+    Self { text, ..self }
+  }
+
   /// Secondary text: hints, counts, section titles.
-  pub muted: Color,
-  pub accent: Color,
+  pub const fn secondary(&self) -> Color {
+    self.secondary
+  }
+
+  pub const fn with_secondary(self, secondary: Color) -> Self {
+    Self { secondary, ..self }
+  }
+
+  pub const fn accent(&self) -> Color {
+    self.accent
+  }
+
   /// Text and marks on the accent (or another tone's fill).
-  pub on_accent: Color,
-  pub danger: Color,
-  pub success: Color,
-  pub warning: Color,
+  pub const fn on_accent(&self) -> Color {
+    self.on_accent
+  }
+
+  pub const fn with_on_accent(self, on_accent: Color) -> Self {
+    Self { on_accent, ..self }
+  }
+
+  pub const fn danger(&self) -> Color {
+    self.danger
+  }
+
+  pub const fn with_danger(self, danger: Color) -> Self {
+    Self { danger, ..self }
+  }
+
+  pub const fn success(&self) -> Color {
+    self.success
+  }
+
+  pub const fn with_success(self, success: Color) -> Self {
+    Self { success, ..self }
+  }
+
+  pub const fn warning(&self) -> Color {
+    self.warning
+  }
+
+  pub const fn with_warning(self, warning: Color) -> Self {
+    Self { warning, ..self }
+  }
+
   /// Selected rows of a list with focus.
-  pub selection: Color,
+  pub const fn selection(&self) -> Color {
+    self.selection
+  }
+
+  pub const fn with_selection(self, selection: Color) -> Self {
+    Self { selection, ..self }
+  }
+
   /// The focus ring.
-  pub focus: Color,
+  pub const fn focus(&self) -> Color {
+    self.focus
+  }
+
+  pub const fn with_focus(self, focus: Color) -> Self {
+    Self { focus, ..self }
+  }
+
   /// A translucent tile under the pointer: ghost buttons.
-  pub ghost: Color,
+  pub const fn ghost(&self) -> Color {
+    self.ghost
+  }
+
+  pub const fn with_ghost(self, ghost: Color) -> Self {
+    Self { ghost, ..self }
+  }
+
   /// Under menus.
-  pub shadow: Color,
+  pub const fn shadow(&self) -> Color {
+    self.shadow
+  }
+
+  pub const fn with_shadow(self, shadow: Color) -> Self {
+    Self { shadow, ..self }
+  }
+
   /// Menus, and their edge ([Sizes::menu_edge] wide).
-  pub menu: Color,
-  pub menu_line: Color,
+  pub const fn menu(&self) -> Color {
+    self.menu
+  }
+
+  pub const fn with_menu(self, menu: Color) -> Self {
+    Self { menu, ..self }
+  }
+
+  pub const fn menu_line(&self) -> Color {
+    self.menu_line
+  }
+
+  pub const fn with_menu_line(self, menu_line: Color) -> Self {
+    Self { menu_line, ..self }
+  }
+
   /// Grouped content on the ground: a form's plates.
-  pub plate: Color,
+  pub const fn plate(&self) -> Color {
+    self.plate
+  }
+
+  pub const fn with_plate(self, plate: Color) -> Self {
+    Self { plate, ..self }
+  }
+
   /// The third tier of text: disabled labels and values, a disabled pop-up's chevrons.
-  pub tertiary: Color,
+  pub const fn tertiary(&self) -> Color {
+    self.tertiary
+  }
+
+  pub const fn with_tertiary(self, tertiary: Color) -> Self {
+    Self { tertiary, ..self }
+  }
+
   /// Links ([super::Ui::link] under the pointer).
-  pub link: Color,
+  pub const fn link(&self) -> Color {
+    self.link
+  }
+
+  pub const fn with_link(self, link: Color) -> Self {
+    Self { link, ..self }
+  }
+
   /// A switch's track when off, a slider's and a progress bar's, and under the pointer.
-  pub track: Color,
-  pub track_hover: Color,
+  pub const fn track(&self) -> Color {
+    self.track
+  }
+
+  pub const fn with_track(self, track: Color) -> Self {
+    Self { track, ..self }
+  }
+
+  pub const fn track_hover(&self) -> Color {
+    self.track_hover
+  }
+
+  pub const fn with_track_hover(self, track_hover: Color) -> Self {
+    Self { track_hover, ..self }
+  }
+
   /// Switch and slider knobs.
-  pub knob: Color,
+  pub const fn knob(&self) -> Color {
+    self.knob
+  }
+
+  pub const fn with_knob(self, knob: Color) -> Self {
+    Self { knob, ..self }
+  }
+
   /// A modal dialog's card ([Theme::dialog]): white on light grounds, a grey a step above the
   /// window on dark ones, as macOS's alerts.
-  pub dialog: Color,
+  pub const fn dialog_fill(&self) -> Color {
+    self.dialog_fill
+  }
+
+  pub const fn with_dialog_fill(self, dialog_fill: Color) -> Self {
+    Self { dialog_fill, ..self }
+  }
+
   /// A tooltip's fill and text.
-  pub tip: Color,
-  pub tip_text: Color,
+  pub const fn tip_fill(&self) -> Color {
+    self.tip_fill
+  }
+
+  pub const fn with_tip_fill(self, tip_fill: Color) -> Self {
+    Self { tip_fill, ..self }
+  }
+
+  pub const fn tip_text(&self) -> Color {
+    self.tip_text
+  }
+
+  pub const fn with_tip_text(self, tip_text: Color) -> Self {
+    Self { tip_text, ..self }
+  }
+
   /// The border of push buttons: none on plates, where a grey fill is the button; a theme with
   /// one draws check boxes and segments bordered too ([Theme::flat]).
-  pub control_border: ControlBorder,
+  pub const fn control_border(&self) -> ControlBorder {
+    self.control_border
+  }
+
+  pub const fn with_control_border(self, control_border: ControlBorder) -> Self {
+    Self { control_border, ..self }
+  }
+
   /// Corners of controls.
-  pub radius: f32,
+  pub const fn radius(&self) -> f32 {
+    self.radius
+  }
+
+  pub const fn with_radius(self, radius: f32) -> Self {
+    Self { radius, ..self }
+  }
+
   /// How big controls are.
-  pub sizes: Sizes,
-  pub font: Font,
+  pub const fn sizes(&self) -> Sizes {
+    self.sizes
+  }
+
+  pub const fn with_sizes(self, sizes: Sizes) -> Self {
+    Self { sizes, ..self }
+  }
+
+  pub const fn font(&self) -> Font {
+    self.font
+  }
+
+  pub const fn with_font(self, font: Font) -> Self {
+    Self { font, ..self }
+  }
+
   /// Section titles, a dialog's title.
-  pub bold: Font,
-  pub small: Font,
+  pub const fn bold(&self) -> Font {
+    self.bold
+  }
+
+  pub const fn with_bold(self, bold: Font) -> Self {
+    Self { bold, ..self }
+  }
+
+  pub const fn small(&self) -> Font {
+    self.small
+  }
+
+  pub const fn with_small(self, small: Font) -> Self {
+    Self { small, ..self }
+  }
+
   /// Hover fades, Sublime's `{"speed": 6.0, "interpolation": "smoothstep"}` (units per
   /// second: 0 to 1 in 170 ms). macOS switches states within a frame; the plates themes keep
   /// the fade.
-  pub fade: Transition,
+  pub const fn fade(&self) -> Transition {
+    self.fade
+  }
+
+  pub const fn with_fade(self, fade: Transition) -> Self {
+    Self { fade, ..self }
+  }
+
   /// Every control shows a hover state. Off, only the hovers macOS draws remain: ghost
   /// (toolbar) buttons. The pointing hand shows either way.
-  pub hover_all: bool,
+  pub const fn hover_all(&self) -> bool {
+    self.hover_all
+  }
+
+  pub const fn with_hover_all(self, hover_all: bool) -> Self {
+    Self { hover_all, ..self }
+  }
+
   /// Opacity of disabled widgets.
-  pub disabled: f32,
+  pub const fn disabled(&self) -> f32 {
+    self.disabled
+  }
+
+  pub const fn with_disabled(self, disabled: f32) -> Self {
+    Self { disabled, ..self }
+  }
+
   /// The ground of text fields, and their edge.
-  pub field: Color,
-  pub field_line: Color,
-  /// Fainter than muted: placeholders.
-  pub faint: Color,
+  pub const fn field_fill(&self) -> Color {
+    self.field_fill
+  }
+
+  pub const fn with_field_fill(self, field_fill: Color) -> Self {
+    Self { field_fill, ..self }
+  }
+
+  pub const fn field_line(&self) -> Color {
+    self.field_line
+  }
+
+  pub const fn with_field_line(self, field_line: Color) -> Self {
+    Self { field_line, ..self }
+  }
+
+  /// Fainter than [Theme::secondary]: placeholders.
+  pub const fn faint(&self) -> Color {
+    self.faint
+  }
+
+  pub const fn with_faint(self, faint: Color) -> Self {
+    Self { faint, ..self }
+  }
+
   /// The hotkey recorder shows a ⊗ that clears it ([super::Ui::hotkey_recorder]); off in the
   /// plates themes, whose recorder sits by a reset button (Backspace clears while recording).
-  pub hotkey_recorder_clear: bool,
+  pub const fn hotkey_recorder_clear(&self) -> bool {
+    self.hotkey_recorder_clear
+  }
+
+  pub const fn with_hotkey_recorder_clear(self, hotkey_recorder_clear: bool) -> Self {
+    Self { hotkey_recorder_clear, ..self }
+  }
+
   /// The selected toolbar tab is macOS 26's Liquid Glass tile in dark appearances
   /// ([super::form::Glass]); off, or in light ones, the raised tile ([Theme::tab_tile]).
-  pub glass: bool,
+  pub const fn glass(&self) -> bool {
+    self.glass
+  }
+
+  pub const fn with_glass(self, glass: bool) -> Self {
+    Self { glass, ..self }
+  }
 }
 
 /// Whether a theme's controls have a border ([Theme::control_border]), and how wide in points.
@@ -136,34 +479,148 @@ impl ControlBorder {
   }
 }
 
-/// A theme's control metrics ([Theme::sizes]) in points.
+/// A theme's control metrics ([Theme::sizes]) in points, read and changed as the theme's roles.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sizes {
+  pub(crate) control_h: f32,
+  pub(crate) small_h: f32,
+  pub(crate) item_h: f32,
+  pub(crate) tab_h: f32,
+  pub(crate) menu_w: f32,
+  pub(crate) menu_radius: f32,
+  pub(crate) menu_edge: f32,
+  pub(crate) check: f32,
+  pub(crate) switch: SwitchSize,
+  pub(crate) switch_large: SwitchSize,
+  pub(crate) knob: [f32; 2],
+  pub(crate) rail: f32,
+  pub(crate) badge: f32,
+  pub(crate) badge_h: f32,
+}
+
+impl Sizes {
   /// Push buttons.
-  pub control_h: f32,
+  pub const fn control_h(&self) -> f32 {
+    self.control_h
+  }
+
+  pub const fn with_control_h(self, control_h: f32) -> Self {
+    Self { control_h, ..self }
+  }
+
   /// Small buttons ([ControlSize::Small]): dense rows, inline actions.
-  pub small_h: f32,
+  pub const fn small_h(&self) -> f32 {
+    self.small_h
+  }
+
+  pub const fn with_small_h(self, small_h: f32) -> Self {
+    Self { small_h, ..self }
+  }
+
   /// A menu's items.
-  pub item_h: f32,
+  pub const fn item_h(&self) -> f32 {
+    self.item_h
+  }
+
+  pub const fn with_item_h(self, item_h: f32) -> Self {
+    Self { item_h, ..self }
+  }
+
   /// A tab strip.
-  pub tab_h: f32,
+  pub const fn tab_h(&self) -> f32 {
+    self.tab_h
+  }
+
+  pub const fn with_tab_h(self, tab_h: f32) -> Self {
+    Self { tab_h, ..self }
+  }
+
   /// The least width of a pop-up button's menu.
-  pub menu_w: f32,
+  pub const fn menu_w(&self) -> f32 {
+    self.menu_w
+  }
+
+  pub const fn with_menu_w(self, menu_w: f32) -> Self {
+    Self { menu_w, ..self }
+  }
+
   /// The corners of menus ([Theme::popup]) and the width of their edge.
-  pub menu_radius: f32,
-  pub menu_edge: f32,
+  pub const fn menu_radius(&self) -> f32 {
+    self.menu_radius
+  }
+
+  pub const fn with_menu_radius(self, menu_radius: f32) -> Self {
+    Self { menu_radius, ..self }
+  }
+
+  pub const fn menu_edge(&self) -> f32 {
+    self.menu_edge
+  }
+
+  pub const fn with_menu_edge(self, menu_edge: f32) -> Self {
+    Self { menu_edge, ..self }
+  }
+
   /// A check box's box.
-  pub check: f32,
+  pub const fn check(&self) -> f32 {
+    self.check
+  }
+
+  pub const fn with_check(self, check: f32) -> Self {
+    Self { check, ..self }
+  }
+
   /// A switch in rows ([ControlSize::Regular]) and the large one ([ControlSize::Large]: a
   /// header row's, by a big icon).
-  pub switch: SwitchSize,
-  pub switch_large: SwitchSize,
+  pub const fn switch(&self) -> SwitchSize {
+    self.switch
+  }
+
+  pub const fn with_switch(self, switch: SwitchSize) -> Self {
+    Self { switch, ..self }
+  }
+
+  pub const fn switch_large(&self) -> SwitchSize {
+    self.switch_large
+  }
+
+  pub const fn with_switch_large(self, switch_large: SwitchSize) -> Self {
+    Self { switch_large, ..self }
+  }
+
   /// A slider's knob, wide and high, and its track's thickness.
-  pub knob: [f32; 2],
-  pub rail: f32,
+  pub const fn knob(&self) -> [f32; 2] {
+    self.knob
+  }
+
+  pub const fn with_knob(self, knob: [f32; 2]) -> Self {
+    Self { knob, ..self }
+  }
+
+  pub const fn rail(&self) -> f32 {
+    self.rail
+  }
+
+  pub const fn with_rail(self, rail: f32) -> Self {
+    Self { rail, ..self }
+  }
+
   /// A badge's text, and its pill's height (padded 7 at the sides).
-  pub badge: f32,
-  pub badge_h: f32,
+  pub const fn badge(&self) -> f32 {
+    self.badge
+  }
+
+  pub const fn with_badge(self, badge: f32) -> Self {
+    Self { badge, ..self }
+  }
+
+  pub const fn badge_h(&self) -> f32 {
+    self.badge_h
+  }
+
+  pub const fn with_badge_h(self, badge_h: f32) -> Self {
+    Self { badge_h, ..self }
+  }
 }
 
 /// A switch's size ([Sizes::switch]): its track and its pill knob, wide and high; the knob
@@ -224,7 +681,7 @@ impl Theme {
     pressed: alpha(BLACK, 0.145),
     line: rgb(0xe5e5e7),
     text: rgb(0x262626),
-    muted: rgb(0x86868b),
+    secondary: rgb(0x86868b),
     accent: rgb(0x007aff),
     on_accent: WHITE,
     danger: rgb(0xd70015),
@@ -242,8 +699,8 @@ impl Theme {
     track: alpha(BLACK, 0.09),
     track_hover: alpha(BLACK, 0.12),
     knob: WHITE,
-    dialog: WHITE,
-    tip: rgb(0xf6f6f6),
+    dialog_fill: WHITE,
+    tip_fill: rgb(0xf6f6f6),
     tip_text: rgb(0x545454),
     control_border: ControlBorder::None,
     radius: 6.0,
@@ -254,7 +711,7 @@ impl Theme {
     fade: Transition::smooth(6.0),
     hover_all: true,
     disabled: 0.4,
-    field: WHITE,
+    field_fill: WHITE,
     field_line: rgb(0xdadade),
     faint: rgb(0xb2b2b7),
     hotkey_recorder_clear: false,
@@ -272,7 +729,7 @@ impl Theme {
     pressed: alpha(WHITE, 0.2),
     line: rgb(0x3a3a3d),
     text: rgb(0xe1e1e1),
-    muted: rgb(0xa6a6a6),
+    secondary: rgb(0xa6a6a6),
     accent: rgb(0x0a84ff),
     danger: rgb(0xff453a),
     success: rgb(0x30d158),
@@ -283,7 +740,7 @@ impl Theme {
     shadow: alpha(BLACK, 0.5),
     menu: rgb(0x1a1a1a),
     menu_line: alpha(WHITE, 0.25),
-    field: rgb(0x252527),
+    field_fill: rgb(0x252527),
     field_line: rgb(0x424245),
     faint: rgb(0x646468),
     plate: rgb(0x272727),
@@ -292,13 +749,14 @@ impl Theme {
     track: alpha(WHITE, 0.12),
     track_hover: alpha(WHITE, 0.15),
     knob: rgb(0xe4e4e4),
-    dialog: rgb(0x2c2c2c),
-    tip: rgb(0x383838),
+    dialog_fill: rgb(0x2c2c2c),
+    tip_fill: rgb(0x383838),
     tip_text: rgb(0xededed),
     ..Self::PLATES_LIGHT
   };
 
-  /// This theme with another accent, and the selection and the focus ring made from it.
+  /// This theme with another accent, and the selection and the focus ring made from it
+  /// ([Theme::with_selection] and [Theme::with_focus] after it set those apart).
   pub const fn with_accent(self, accent: Color) -> Self {
     let (selection, focus) = if self.scheme.is_dark() { (0.30, 0.55) } else { (0.22, 0.45) };
     Self { accent, selection: alpha(accent, selection), focus: alpha(accent, focus), ..self }
@@ -341,7 +799,7 @@ impl Theme {
 
   pub const fn tone(&self, tone: Tone) -> Color {
     match tone {
-      Tone::Neutral => self.muted,
+      Tone::Neutral => self.secondary,
       Tone::Accent => self.accent,
       Tone::Success => self.success,
       Tone::Danger => self.danger,
@@ -372,7 +830,7 @@ impl Theme {
 
   /// Secondary text on one line: an unselected tab, a hint.
   pub const fn muted(&self) -> TextStyle {
-    TextStyle::new(self.font, self.muted).line_limit(1)
+    TextStyle::new(self.font, self.secondary).line_limit(1)
   }
 
   /// A menu's box: the menu fill in its corners and edge, padded 5, over a soft shadow.
@@ -387,7 +845,7 @@ impl Theme {
 
   /// A small semibold section title (write it in capitals): "LOCATIONS".
   pub const fn section(&self) -> TextStyle {
-    TextStyle::new(self.small.weight(Weight::Semibold), self.muted).line_limit(1)
+    TextStyle::new(self.small.weight(Weight::Semibold), self.secondary).line_limit(1)
   }
 
   /// The padding at each side of a push button's label at `size` ([crate::Ui::control_size]):
@@ -405,13 +863,13 @@ impl Theme {
   }
 
   /// A modal dialog's card ([super::Dialog]), a macOS 26 alert's as measured: the
-  /// [Theme::dialog] fill, corners of 25, padded 20 at the top and 16 elsewhere (its text 6
+  /// [Theme::dialog_fill], corners of 25, padded 20 at the top and 16 elsewhere (its text 6
   /// further in), a soft shadow; on dark grounds the menu's edge.
   pub const fn dialog(&self) -> Style {
     let edge = if self.scheme.is_dark() { self.menu_line } else { [0.0; 4] };
     Style::new()
       .pads([20.0, 16.0, 16.0, 16.0])
-      .bg(self.dialog)
+      .bg(self.dialog_fill)
       .radius(25.0)
       .border(self.sizes.menu_edge, edge)
       .shadow(Shadow::new(10.0, 36.0, self.shadow))
@@ -428,7 +886,7 @@ impl Theme {
   pub const fn tip(&self) -> Style {
     Style::new()
       .pad_xy(6.0, 3.0)
-      .bg(self.tip)
+      .bg(self.tip_fill)
       .radius(5.0)
       .border(self.sizes.menu_edge, self.menu_line)
       .shadow(Shadow::new(1.0, 4.0, alpha(self.shadow, self.shadow[3] * 0.6)))
@@ -448,7 +906,7 @@ impl Theme {
       .min_h(self.sizes.control_h)
       .pad_xy((self.sizes.control_h / 3.0).round(), 4.0)
       .align(Align::Start, Align::Center)
-      .bg(self.field)
+      .bg(self.field_fill)
       .radius(self.radius)
       .border(1.0, self.field_line);
     let sel = alpha(self.accent, if self.scheme.is_dark() { 0.4 } else { 0.3 });
@@ -475,7 +933,7 @@ impl Theme {
       false => (alpha(WHITE, 0.3), alpha(BLACK, 0.15)),
     };
 
-    f.frame(frame.bg(fill).border(0.5, edge)).placeholder(self.muted)
+    f.frame(frame.bg(fill).border(0.5, edge)).placeholder(self.secondary)
   }
 }
 
@@ -648,5 +1106,139 @@ mod tests {
     assert_eq!(scheme(&mut h), Some(ColorScheme::Dark));
     h.app_mut().pin = None;
     assert_eq!(scheme(&mut h), Some(ColorScheme::Light));
+  }
+
+  #[test]
+  fn every_with_sets_its_role() {
+    let t = Theme::PLATES_LIGHT
+      .with_scheme(ColorScheme::Dark)
+      .with_bg(rgb(2))
+      .with_panel(rgb(3))
+      .with_raised(rgb(4))
+      .with_hover(rgb(5))
+      .with_pressed(rgb(6))
+      .with_line(rgb(7))
+      .with_text(rgb(8))
+      .with_secondary(rgb(9))
+      .with_accent(rgb(10))
+      .with_on_accent(rgb(11))
+      .with_danger(rgb(12))
+      .with_success(rgb(13))
+      .with_warning(rgb(14))
+      .with_selection(rgb(15))
+      .with_focus(rgb(16))
+      .with_ghost(rgb(17))
+      .with_shadow(rgb(18))
+      .with_menu(rgb(19))
+      .with_menu_line(rgb(20))
+      .with_plate(rgb(21))
+      .with_tertiary(rgb(22))
+      .with_link(rgb(23))
+      .with_track(rgb(24))
+      .with_track_hover(rgb(25))
+      .with_knob(rgb(26))
+      .with_dialog_fill(rgb(27))
+      .with_tip_fill(rgb(28))
+      .with_tip_text(rgb(29))
+      .with_control_border(ControlBorder::Hairline(1.0))
+      .with_radius(30.5)
+      .with_sizes(Sizes::PLATES.with_tab_h(1.0))
+      .with_font(Font::mono(32.0))
+      .with_bold(Font::mono(33.0))
+      .with_small(Font::mono(34.0))
+      .with_fade(Transition::linear(2.0))
+      .with_hover_all(!Theme::PLATES_LIGHT.hover_all)
+      .with_disabled(37.5)
+      .with_field_fill(rgb(39))
+      .with_field_line(rgb(40))
+      .with_faint(rgb(41))
+      .with_hotkey_recorder_clear(!Theme::PLATES_LIGHT.hotkey_recorder_clear)
+      .with_glass(!Theme::PLATES_LIGHT.glass);
+    assert_eq!(
+      t,
+      Theme {
+        scheme: ColorScheme::Dark,
+        bg: rgb(2),
+        panel: rgb(3),
+        raised: rgb(4),
+        hover: rgb(5),
+        pressed: rgb(6),
+        line: rgb(7),
+        text: rgb(8),
+        secondary: rgb(9),
+        accent: rgb(10),
+        on_accent: rgb(11),
+        danger: rgb(12),
+        success: rgb(13),
+        warning: rgb(14),
+        selection: rgb(15),
+        focus: rgb(16),
+        ghost: rgb(17),
+        shadow: rgb(18),
+        menu: rgb(19),
+        menu_line: rgb(20),
+        plate: rgb(21),
+        tertiary: rgb(22),
+        link: rgb(23),
+        track: rgb(24),
+        track_hover: rgb(25),
+        knob: rgb(26),
+        dialog_fill: rgb(27),
+        tip_fill: rgb(28),
+        tip_text: rgb(29),
+        control_border: ControlBorder::Hairline(1.0),
+        radius: 30.5,
+        sizes: Sizes::PLATES.with_tab_h(1.0),
+        font: Font::mono(32.0),
+        bold: Font::mono(33.0),
+        small: Font::mono(34.0),
+        fade: Transition::linear(2.0),
+        hover_all: !Theme::PLATES_LIGHT.hover_all,
+        disabled: 37.5,
+        field_fill: rgb(39),
+        field_line: rgb(40),
+        faint: rgb(41),
+        hotkey_recorder_clear: !Theme::PLATES_LIGHT.hotkey_recorder_clear,
+        glass: !Theme::PLATES_LIGHT.glass
+      }
+    );
+  }
+
+  #[test]
+  fn every_size_sets_its_field() {
+    let t = Sizes::PLATES
+      .with_control_h(0.5)
+      .with_small_h(1.5)
+      .with_item_h(2.5)
+      .with_tab_h(3.5)
+      .with_menu_w(4.5)
+      .with_menu_radius(5.5)
+      .with_menu_edge(6.5)
+      .with_check(7.5)
+      .with_switch(SwitchSize { track: [1.0, 2.0], knob: [3.0, 4.0] })
+      .with_switch_large(SwitchSize { track: [1.0, 2.0], knob: [3.0, 4.0] })
+      .with_knob([10.0, 0.5])
+      .with_rail(11.5)
+      .with_badge(12.5)
+      .with_badge_h(13.5);
+    assert_eq!(
+      t,
+      Sizes {
+        control_h: 0.5,
+        small_h: 1.5,
+        item_h: 2.5,
+        tab_h: 3.5,
+        menu_w: 4.5,
+        menu_radius: 5.5,
+        menu_edge: 6.5,
+        check: 7.5,
+        switch: SwitchSize { track: [1.0, 2.0], knob: [3.0, 4.0] },
+        switch_large: SwitchSize { track: [1.0, 2.0], knob: [3.0, 4.0] },
+        knob: [10.0, 0.5],
+        rail: 11.5,
+        badge: 12.5,
+        badge_h: 13.5
+      }
+    );
   }
 }

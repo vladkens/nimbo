@@ -160,11 +160,11 @@ impl Gallery {
   /// The page of the block shown: its name, SwiftUI's and nimbo's lines, then the block live.
   fn page(&mut self, ui: &mut Ui) {
     let (t, block) = (ui.theme(), &BLOCKS[self.page]);
-    let mono = TextStyle::new(Font::mono(12.0), t.text);
-    let code = Style::new().w(grow()).pad(10.0).gap(4.0).radius(8.0).bg(t.raised);
+    let mono = TextStyle::new(Font::mono(12.0), t.text());
+    let code = Style::new().w(grow()).pad(10.0).gap(4.0).radius(8.0).bg(t.raised());
     ui.id(PAGE).scroll_area(Style::new().grow(), |ui| {
       ui.col(Style::new().w(grow()).pad(20.0).gap(14.0), |ui| {
-        ui.text(block.name, TextStyle::new(Font { size: 20.0, ..t.bold }, t.text));
+        ui.text(block.name, TextStyle::new(t.bold().size(20.0), t.text()));
         ui.col(code, |ui| {
           ui.text("SWIFTUI", t.section());
           ui.selectable_text(block.swiftui, mono);
@@ -183,7 +183,8 @@ impl Gallery {
       GROUPS.iter().filter_map(|g| BLOCKS.iter().position(|b| b.group == *g)).collect();
     let head = |ui: &mut Ui, g: usize| ui.text(GROUPS[g], t.section());
     let list = List::new(BLOCKS.len(), 24.0).sections(&starts, 26.0, &head);
-    let list = list.selection(&mut self.sel).style(Style::new().w(px(200.0)).h(grow()).bg(t.panel));
+    let list =
+      list.selection(&mut self.sel).style(Style::new().w(px(200.0)).h(grow()).bg(t.panel()));
     list.show(ui.id(SIDEBAR), |ui, row| ui.text(BLOCKS[row.index].name, t.label()));
     if let Some(i) = self.sel.cursor_index(BLOCKS.len(), &|i| i as u64) {
       self.page = i;
@@ -200,7 +201,7 @@ impl App for Gallery {
     if self.only {
       ui.fit_window_height(WIDTH, 1.0, 900.0);
       let block = &BLOCKS[self.page];
-      ui.id(BLOCK).col(Style::new().w(grow()).pad(20.0).bg(t.bg), |ui| self.demo(ui, block));
+      ui.id(BLOCK).col(Style::new().w(grow()).pad(20.0).bg(t.bg()), |ui| self.demo(ui, block));
       return;
     }
 
@@ -208,7 +209,7 @@ impl App for Gallery {
       self.sel.select(self.page as u64, self.page);
     }
 
-    ui.row(Style::new().grow().bg(t.bg), |ui| {
+    ui.row(Style::new().grow().bg(t.bg()), |ui| {
       self.sidebar(ui);
       ui.col(Style::new().grow(), |ui| self.page(ui));
     });

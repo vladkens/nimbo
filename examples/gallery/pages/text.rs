@@ -15,7 +15,7 @@ impl Gallery {
     let t = ui.theme();
     match name {
       "Text" => Self::variants(ui, Shown::Alone, |ui| {
-        ui.text("Title", TextStyle::new(t.bold, t.text));
+        ui.text("Title", TextStyle::new(t.bold(), t.text()));
         ui.text("Body", t.label());
         ui.text("Secondary", t.muted());
       }),
@@ -58,7 +58,7 @@ impl Gallery {
       "Link" => Self::variants(ui, Shown::Plain, |ui| _ = ui.link("Learn more…")),
       "Image" => Self::variants(ui, Shown::Alone, |ui| {
         for icon in [Icon::GEAR, Icon::FOLDER, Icon::TRASH, Icon::INFO] {
-          ui.icon(icon.stroke(1.6), 20.0, t.text);
+          ui.icon(icon.stroke(1.6), 20.0, t.text());
         }
       }),
 
@@ -75,7 +75,7 @@ impl Gallery {
         // Stretched to its box, then in its aspect: filling a square, fitting it.
         if let Some(photo) = &self.photo {
           ui.image(photo, Style::new().w(px(120.0)).h(px(80.0)));
-          let square = Style::new().w(px(80.0)).h(px(80.0)).bg(t.panel);
+          let square = Style::new().w(px(80.0)).h(px(80.0)).bg(t.panel());
           ui.aspect_ratio(ContentMode::Fill).image(photo, square);
           ui.aspect_ratio(ContentMode::Fit).image(photo, square);
         }

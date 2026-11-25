@@ -98,7 +98,7 @@ impl Files {
   /// The sidebar: places and tags on the panel's ground, under its toolbar.
   fn sidebar(&mut self, ui: &mut Ui, bar: f32) {
     let t = ui.theme();
-    ui.col(Style::new().grow().bg(t.panel), |ui| {
+    ui.col(Style::new().grow().bg(t.panel()), |ui| {
       self.toggle(ui);
       ui.el(Style::new().h(px(bar)));
 
@@ -110,7 +110,7 @@ impl Files {
       list.show(ui.id(LIST), |ui, r| match r.index.checked_sub(PLACES.len()) {
         None => {
           let (icon, name) = PLACES[r.index];
-          ui.icon(icon, 16.0, t.accent);
+          ui.icon(icon, 16.0, t.accent());
           ui.text(name, t.label().nowrap());
         }
         Some(i) => {
@@ -128,7 +128,7 @@ impl Files {
   fn browser(&mut self, ui: &mut Ui, hidden: bool) {
     self.browser.folder = self.place();
     let t = ui.theme();
-    ui.col(Style::new().grow().bg(t.bg), |ui| {
+    ui.col(Style::new().grow().bg(t.bg()), |ui| {
       let (browser, sidebar) = (&mut self.browser, &mut self.sidebar);
       ui.toolbar(|ui| {
         if hidden {
@@ -171,7 +171,7 @@ impl App for Files {
     let (t, bar) = (ui.theme(), ui.toolbar_height());
     // How far the sidebar is out: it slides in and out in 150 ms.
     let out = ui.animate(Id::of(SPLIT).key("out"), self.sidebar as u8 as f32, SLIDE);
-    ui.col(Style::new().grow().bg(t.bg), |ui| {
+    ui.col(Style::new().grow().bg(t.bg()), |ui| {
       // Hidden, the browser alone, the toggle in its toolbar.
       if out == 0.0 {
         return ui.row(Style::new().grow(), |ui| self.browser(ui, true));

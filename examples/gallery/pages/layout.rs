@@ -12,12 +12,12 @@ impl Gallery {
     let t = ui.theme();
     match name {
       "Stacks" => Self::variants(ui, Shown::Alone, |ui| {
-        ui.row(Style::new().gap(8.0), |ui| (0..3).for_each(|_| _ = ui.el(swatch(t.accent))));
-        ui.col(Style::new().gap(4.0), |ui| (0..2).for_each(|_| _ = ui.el(swatch(t.raised))));
+        ui.row(Style::new().gap(8.0), |ui| (0..3).for_each(|_| _ = ui.el(swatch(t.accent()))));
+        ui.col(Style::new().gap(4.0), |ui| (0..2).for_each(|_| _ = ui.el(swatch(t.raised()))));
       }),
       "Grid" => Self::variants(ui, Shown::Alone, |ui| {
         let grid = Style::new().w(px(120.0)).gap(6.0);
-        ui.grid(3, grid, |ui| (0..6).for_each(|_| _ = ui.el(swatch(t.raised))));
+        ui.grid(3, grid, |ui| (0..6).for_each(|_| _ = ui.el(swatch(t.raised()))));
       }),
 
       "Spacer" => Self::variants(ui, Shown::Alone, |ui| {
@@ -48,9 +48,9 @@ impl Gallery {
       }),
 
       "Overlay" => Self::variants(ui, Shown::Alone, |ui| {
-        ui.row(swatch(t.raised).w(px(80.0)).h(px(48.0)), |ui| {
+        ui.row(swatch(t.raised()).w(px(80.0)).h(px(48.0)), |ui| {
           let at = UnitPoint::TOP_TRAILING;
-          let dot = swatch(t.accent).w(px(12.0)).h(px(12.0));
+          let dot = swatch(t.accent()).w(px(12.0)).h(px(12.0));
           ui.float(Float::parent().attach(at).anchor(at).offset(-4.0, 4.0)).el(dot);
         });
       }),

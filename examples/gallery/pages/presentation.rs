@@ -25,8 +25,8 @@ struct Note;
 impl HelpStyle for Note {
   fn make_body(&self, ui: &mut Ui, c: HelpConfiguration) {
     let t = ui.theme();
-    let s = Style::new().pad_xy(8.0, 4.0).radius(6.0).bg(t.accent).opacity(c.opacity());
-    ui.row(s, |ui| ui.text(c.text(), TextStyle::new(t.small, t.on_accent)));
+    let s = Style::new().pad_xy(8.0, 4.0).radius(6.0).bg(t.accent()).opacity(c.opacity());
+    ui.row(s, |ui| ui.text(c.text(), TextStyle::new(t.small(), t.on_accent())));
   }
 }
 

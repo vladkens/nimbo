@@ -16,7 +16,7 @@ pub struct Tint(pub Color);
 
 impl EnvironmentValue for Tint {
   fn default_value(ui: &Ui) -> Self {
-    Self(ui.theme().raised)
+    Self(ui.theme().raised())
   }
 }
 
@@ -42,7 +42,7 @@ impl Gallery {
       "Environment" => Self::variants(ui, Shown::Alone, |ui| {
         let tile = |ui: &mut Ui| _ = ui.el(swatch(ui.environment_value::<Tint>().0));
         tile(ui);
-        ui.environment(Tint(t.success)).row(line(10.0), |ui| (0..2).for_each(|_| tile(ui)));
+        ui.environment(Tint(t.success())).row(line(10.0), |ui| (0..2).for_each(|_| tile(ui)));
       }),
 
       // Two widgets side by side disabled as one, the button after them enabled.
@@ -56,15 +56,15 @@ impl Gallery {
 
       // Keyed boxes: a key of its own each, the last a ready id.
       "Identity" => Self::variants(ui, Shown::Alone, |ui| {
-        (0..3).for_each(|k| _ = ui.key(k).el(swatch(t.raised)));
-        ui.with_id(Id::of("identity").key("box")).allows_hit_testing(false).el(swatch(t.accent));
+        (0..3).for_each(|k| _ = ui.key(k).el(swatch(t.raised())));
+        ui.with_id(Id::of("identity").key("box")).allows_hit_testing(false).el(swatch(t.accent()));
       }),
 
       // A swatch Tab focuses with the hand over it, and a focusable one Tab passes by.
       "Focus and pointer" => Self::variants(ui, Shown::Alone, |ui| {
         let id = Id::of("focus and pointer");
-        ui.with_id(id).focusable(true).pointer_style(Cursor::Pointer).el(swatch(t.accent));
-        ui.with_id(id.key("not")).focusable(false).el(swatch(t.raised).focusable());
+        ui.with_id(id).focusable(true).pointer_style(Cursor::Pointer).el(swatch(t.accent()));
+        ui.with_id(id.key("not")).focusable(false).el(swatch(t.raised()).focusable());
       }),
 
       // A part enabled in a disabled container, with the tip the widget was given.
@@ -82,7 +82,7 @@ impl Gallery {
       "Frame request" => Self::variants(ui, Shown::Alone, |ui| {
         ui.request_frame();
         let k = ui.now().as_secs_f32() % 1.0;
-        ui.el(swatch(t.accent).w(px(28.0 + 120.0 * k)));
+        ui.el(swatch(t.accent()).w(px(28.0 + 120.0 * k)));
       }),
 
       // The slider named by the text before it; the badge by its own text.
@@ -98,7 +98,7 @@ impl Gallery {
       // The accent while the window is key, a grey while it isn't, as the switch beside it.
       "Controls theme" => Self::variants(ui, Shown::Alone, |ui| {
         let c = ui.controls_theme();
-        ui.el(swatch(c.accent));
+        ui.el(swatch(c.accent()));
         ui.toggle(&mut self.on, ());
       }),
 

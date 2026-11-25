@@ -78,7 +78,7 @@ fn general_switches_select_and_recorder() {
   let mut h = start();
   // The switch that is on is in the accent.
   let r = rect(&h, LOGIN);
-  assert_eq!(h.render().pixel(r.x + 6.0, r.y + r.h / 2.0), px(Theme::PLATES_LIGHT.accent));
+  assert_eq!(h.render().pixel(r.x + 6.0, r.y + r.h / 2.0), px(Theme::PLATES_LIGHT.accent()));
 
   // Switches flip; one disabled by another setting doesn't.
   h.click_id(Id::of(LOGIN));
@@ -163,7 +163,7 @@ fn appearance_row_width_slider_and_look() {
   turn(&mut h, Page::Appearance);
   let (sw, row) = (rect(&h, MOTION), rect(&h, MOTION_ROW));
   let caption = h.rect(Id::of(MOTION_ROW).key("caption")).unwrap();
-  assert_eq!(sw.w, Theme::PLATES_LIGHT.sizes.switch.track[0]);
+  assert_eq!(sw.w, Theme::PLATES_LIGHT.sizes().switch().track[0]);
   assert!((row.x + row.w - 10.0 - (sw.x + sw.w)).abs() < 0.5, "{sw:?} in {row:?}");
   assert!(caption.h >= 28.0 && caption.x + caption.w < sw.x, "{caption:?}");
 
@@ -200,7 +200,7 @@ fn an_inactive_window_greys_the_accent() {
   let (s, auto) = (rect(&h, TEXT_SIZE), h.rect(Id::of(LOOK).key(("item", 0usize))).unwrap());
   let spots = [(s.x + 12.0, s.y + s.h / 2.0), (auto.x + 4.0, auto.y + 4.0)];
   let at = |h: &mut H| spots.map(|(x, y)| h.render().pixel(x, y));
-  let accent = px(Theme::PLATES_LIGHT.accent);
+  let accent = px(Theme::PLATES_LIGHT.accent());
   assert_eq!(at(&mut h), [accent; 2]);
   h.event(Event::Focus(false));
   for [r, g, b, _] in at(&mut h) {
@@ -453,9 +453,9 @@ fn a_warning_marks_its_row_in_the_warning_colour() {
     // In its 24-unit view box: the fill either side of the "!"'s dot, and the ground through
     // the middle of its stem.
     let at = |x: f32, y: f32| img.pixel(r.x + x / 24.0 * r.w, r.y + y / 24.0 * r.h);
-    assert_eq!(at(7.0, 17.0), px(t.warning));
-    assert_eq!(at(17.0, 17.0), px(t.warning));
-    let ground = (-2..=2).any(|i| at(12.0 + i as f32 * 0.2, 11.0) == px(t.plate));
+    assert_eq!(at(7.0, 17.0), px(t.warning()));
+    assert_eq!(at(17.0, 17.0), px(t.warning()));
+    let ground = (-2..=2).any(|i| at(12.0 + i as f32 * 0.2, 11.0) == px(t.plate()));
     assert!(ground, "the plate through the \"!\": {:?}", at(12.0, 11.0));
 
     let info = mark(&h, LAUNCH_ROW);

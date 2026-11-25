@@ -100,7 +100,7 @@ impl App for History {
       ui.spacer();
       ui.text(format!("{} dictations", days[g].1), fs.note);
     };
-    let head_h = ui.metrics(fs.head.font).line_height() + fs.head_pad[2];
+    let head_h = ui.metrics(fs.head.get_font()).line_height() + fs.head_pad[2];
 
     let mut copied = None;
     let mut sel = std::mem::take(&mut self.sel);

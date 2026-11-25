@@ -54,9 +54,9 @@ impl Ui<'_> {
       match (b.on, *value) {
         (true, _) => {
           ui.el(Style::new().w(px(7.0)).h(px(7.0)).radius(3.5).bg(t.danger));
-          ui.text("Type a shortcut…", label.color(t.muted));
+          ui.text("Type a shortcut…", label.color(t.secondary));
         }
-        (_, None) => ui.text("Record Shortcut", label.color(t.muted)),
+        (_, None) => ui.text("Record Shortcut", label.color(t.secondary)),
         (_, Some(v)) => ui.text(v.label(), label.font(t.font.weight(Weight::Medium))),
       }
 
@@ -69,7 +69,7 @@ impl Ui<'_> {
         let s = Style::new().w(px(14.0)).h(px(14.0)).cursor(Cursor::Pointer);
         ui.a11y(clear, Role::Button).name("Clear");
         let hot = ui.ctl_hot(clear, ui.hovered(clear));
-        let mark = mix(t.faint, t.muted, hot);
+        let mark = mix(t.faint, t.secondary, hot);
         ui.with_id(clear).float(at).canvas(s, move |f, r| icon::draw(f, Icon::CLEAR, r, mark));
       }
     });

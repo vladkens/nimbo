@@ -129,7 +129,7 @@ impl App for Text {
 
     // The size of each style, right-aligned in a column.
     for s in &STYLES {
-      f.text_at(SIZES_X, s.y, s.font.size, NOTE, p.dim, 1.0);
+      f.text_at(SIZES_X, s.y, s.font.get_size(), NOTE, p.dim, 1.0);
     }
 
     f.quad(Quad::new(PANEL, p.panel).radius(6.0).border(1.0, p.border));

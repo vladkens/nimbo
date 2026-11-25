@@ -105,8 +105,8 @@ pub enum Ease {
 /// Transition::smooth(6.0)`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Transition {
-  pub speed: f32,
-  pub ease: Ease,
+  pub(crate) speed: f32,
+  pub(crate) ease: Ease,
 }
 
 impl Transition {

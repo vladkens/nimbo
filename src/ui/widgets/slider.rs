@@ -79,7 +79,7 @@ impl SliderStyle for LinearSliderStyle {
       return;
     }
 
-    let style = TextStyle::new(t.small, ui.dim(t.muted, off)).nowrap();
+    let style = TextStyle::new(t.small, ui.dim(t.secondary, off)).nowrap();
     // As much room over the track as the labels take under it: the track stays in the middle,
     // in line with a row's title or the controls beside it.
     let lh = ui.line_height(style);

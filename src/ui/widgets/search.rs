@@ -47,7 +47,7 @@ impl Ui<'_> {
       style.frame.pad[1] = style.frame.pad[1].max(INSET + MARK + 6.0);
     }
 
-    let muted = self.dim(t.muted, b.disabled);
+    let muted = self.dim(t.secondary, b.disabled);
     let mut r = Response::default();
     // Its own id: the field may have taken its place's.
     self.with_id(id.key("wrap")).allows_hit_testing(false).row(wrap, |ui| {
@@ -67,7 +67,7 @@ impl Ui<'_> {
           let s = Style::new().w(px(MARK)).h(px(MARK)).cursor(Cursor::Pointer);
           ui.a11y(x, Role::Button).name("Clear");
           let hot = ui.ctl_hot(x, ui.hovered(x));
-          let mark = mix(t.faint, t.muted, hot);
+          let mark = mix(t.faint, t.secondary, hot);
           ui.with_id(x).canvas(s, move |f, r| icon::draw(f, Icon::CLEAR, r, mark));
         }
       });

@@ -104,7 +104,7 @@ mod tests {
       ui.set_theme(t);
       // Composited over the ground, a dimmed colour is nearer the ground than the colour.
       let over = |c: Color| -> f32 { t.bg[0] * (1.0 - c[3]) + c[0] * c[3] };
-      for c in [t.track, t.accent, t.raised, t.muted] {
+      for c in [t.track, t.accent, t.raised, t.secondary] {
         let d = ui.dim(c, true);
         assert!((over(d) - t.bg[0]).abs() < (over(c) - t.bg[0]).abs(), "{c:?} dims to {d:?}");
       }

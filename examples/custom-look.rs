@@ -84,7 +84,7 @@ impl ButtonStyle for Bean {
     let k = if c.is_pressed() { 0.3 } else { 0.15 * hot(ui, c.id(), c.is_hovered()) };
     let s = Style::new().h(px(30.0)).min_w(76.0).pad_xy(16.0, 0.0).center().radius(15.0);
     let s = s.bg(mix(p.accent, p.ink, k)).opacity(if c.is_enabled() { 1.0 } else { OFF });
-    let label = TextStyle { font: Font::ui(13.0).weight(Weight::Semibold), ..text(13.0, p.card) };
+    let label = text(13.0, p.card).font(Font::ui(13.0).weight(Weight::Semibold));
     ui.row(s, |ui| c.label(ui, label));
   }
 }

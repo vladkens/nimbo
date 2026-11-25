@@ -13,9 +13,9 @@
 use std::time::Duration;
 
 use nimbo::{
-  Align, App, Axis, ButtonRole, Config, Cx, Event, Float, Font, Harness, Icon, Id, Item, List,
-  Menu, Modifiers, Selection, Shortcut, Size, Split, Style, Tabs, Tag, TextStyle,
-  ToolbarItemPlacement, Ui, alpha, grow, px,
+  Align, App, Axis, ButtonRole, Config, Cx, Event, Float, Harness, Icon, Id, Item, List, Menu,
+  Modifiers, Selection, Shortcut, Size, Split, Style, Tabs, Tag, TextStyle, ToolbarItemPlacement,
+  Ui, alpha, grow, px,
 };
 
 /// The rows of the folder, besides those added ([Browser::added]).
@@ -187,7 +187,7 @@ impl Browser {
   pub fn toolbar_items(&mut self, ui: &mut Ui) {
     let t = ui.theme();
     ui.toolbar_item(ToolbarItemPlacement::Navigation, |ui| {
-      ui.text(self.folder, TextStyle::new(Font { size: 15.0, ..t.bold }, t.text).nowrap());
+      ui.text(self.folder, TextStyle::new(t.bold().size(15.0), t.text()).nowrap());
     });
 
     ui.toolbar_item(ToolbarItemPlacement::PrimaryAction, |ui| {
@@ -234,8 +234,8 @@ impl Browser {
     // Padded as the rows are, the heads over the names' and the sizes' edges.
     let head = Style::new().w(grow()).h(px(28.0)).pads([0.0, 14.0, 0.0, 10.0]);
     let head = head.align(Align::Start, Align::Center);
-    ui.row(head.borders([0.0, 0.0, 1.0, 0.0], t.line), |ui| {
-      let s = TextStyle::new(t.small, t.muted).nowrap();
+    ui.row(head.borders([0.0, 0.0, 1.0, 0.0], t.line()), |ui| {
+      let s = TextStyle::new(t.small(), t.secondary()).nowrap();
       ui.text("Name", s);
       ui.spacer();
       if sizes {
@@ -284,14 +284,14 @@ impl Browser {
     // Files dragged over it: a ring in the accent inside the pane, fading in and out.
     let lit = ui.hot(Id::of(LIST).key("drop"), self.over);
     if lit > 0.0 {
-      let ring = Style::new().grow().radius(6.0).border(2.0, alpha(t.accent, lit));
-      ui.float(Float::parent()).el(ring.bg(alpha(t.accent, 0.08 * lit)));
+      let ring = Style::new().grow().radius(6.0).border(2.0, alpha(t.accent(), lit));
+      ui.float(Float::parent()).el(ring.bg(alpha(t.accent(), 0.08 * lit)));
     }
   }
 
   fn info(&self, ui: &mut Ui) {
     let t = ui.theme();
-    let text = TextStyle::new(t.font, t.text);
+    let text = TextStyle::new(t.font(), t.text());
     // Each title over its value, the pairs further apart than a title from its value.
     let pair = Style::new().w(grow()).gap(6.0);
     ui.col(Style::new().grow().pad(16.0).gap(16.0), |ui| {
@@ -320,9 +320,9 @@ impl Browser {
 
   fn notes(&self, ui: &mut Ui) {
     let t = ui.theme();
-    let text = TextStyle::new(t.font, t.text).line_h(19.0);
+    let text = TextStyle::new(t.font(), t.text()).line_h(19.0);
     let area = Style::new().grow().pad(16.0).gap(12.0);
-    ui.id(NOTES).fade_edges(t.bg, 28.0).scroll_area(area, |ui| {
+    ui.id(NOTES).fade_edges(t.bg(), 28.0).scroll_area(area, |ui| {
       for (i, p) in NOTE.iter().cycle().take(12).enumerate() {
         ui.text(format_args!("{}. {p}", i + 1), text);
       }
@@ -332,10 +332,10 @@ impl Browser {
   /// The status bar: how many rows are selected of how many, and the app's note.
   fn status(&self, ui: &mut Ui) {
     let t = ui.theme();
-    let bar = Style::new().w(grow()).h(px(24.0)).center().borders([1.0, 0.0, 0.0, 0.0], t.line);
+    let bar = Style::new().w(grow()).h(px(24.0)).center().borders([1.0, 0.0, 0.0, 0.0], t.line());
     ui.row(bar, |ui| {
       let (n, all) = (thousands(self.sel.len()), thousands(self.count()));
-      let s = TextStyle::new(t.small, t.muted).nowrap();
+      let s = TextStyle::new(t.small(), t.secondary()).nowrap();
       match &self.note {
         Some(note) => ui.text(format_args!("{n} of {all} selected · {note}"), s),
         None => ui.text(format_args!("{n} of {all} selected"), s),
@@ -396,7 +396,7 @@ impl App for Browser {
 
   fn view(&mut self, ui: &mut Ui) {
     let t = ui.theme();
-    ui.col(Style::new().grow().bg(t.bg), |ui| {
+    ui.col(Style::new().grow().bg(t.bg()), |ui| {
       ui.toolbar(|ui| self.toolbar_items(ui));
       self.content(ui);
     });
