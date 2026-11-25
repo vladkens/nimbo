@@ -3,7 +3,6 @@
 //! The app around the windows: an event loop that runs with no window ([app]), windows opened and
 //! closed on demand ([Main::open]), each with its own runtime, where the app shows besides them
 //! ([Presence]), and the way other threads reach the main thread ([Proxy]).
-//! An example's window ([crate::run_example]) is one window on top of it, quitting when it closes.
 //!
 //! Everything here runs on the main thread: [Main] is its token, given to the start closure, to
 //! [Proxy]'s closures and to the callbacks, and never leaves it. Each OS implements it in
@@ -282,23 +281,6 @@ pub(crate) fn finish(close: impl Fn(u64)) {
   }
 }
 
-/// One window running `app` with the loop around it, which ends when the window closes or the
-/// app quits: [crate::run_example] without `--shot`.
-pub(crate) fn window(cfg: &Config, app: Box<dyn App>) {
-  let exe = std::env::current_exe().ok();
-  let stem = exe.as_ref().and_then(|p| Some(p.file_stem()?.to_str()?.to_owned()));
-  // The loop runs once per process: the strings live as long as it.
-  let id: &'static str = Box::leak(stem.unwrap_or_else(|| "nimbo".into()).into_boxed_str());
-  let info = AppInfo { id, name: cfg.title, presence: Presence::Regular };
-  locale::provide(cfg.localizations);
-  running(|| {
-    imp::run(&info, |_| {
-      let id = imp::open(cfg, app, TypeId::of::<()>());
-      on_close(id, Box::new(Main::quit));
-    })
-  });
-}
-
 /// Prints to the console of the command line that started the app, on Windows, where an app
 /// built as a GUI program (`windows_subsystem = "windows"`) has none; nothing elsewhere, where it
 /// prints there anyway. Call it only on the app's command-line paths (a command, `--help`, a
@@ -340,7 +322,7 @@ impl Main {
     imp::set_presence(p);
   }
 
-  /// The language of the app's strings from now on ([crate::locale]), as SwiftUI's
+  /// The language of the app's strings from now on ([crate::t!]), as SwiftUI's
   /// `.environment(\.locale, …)` on every window: each redraws in it, one busy up the stack (the
   /// caller's own) a moment later. [Locale::System] by default. Menus and dialogs the OS draws
   /// keep the language the app started in.
@@ -349,7 +331,7 @@ impl Main {
     redraw(windows());
   }
 
-  /// The app's catalogs ([crate::locale]) from now on, as a window's [Config::localizations]
+  /// The app's catalogs ([crate::t!]) from now on, as a window's [Config::localizations]
   /// gives them: for strings shown before any window opens, a menu-bar app's tray menu. Empty,
   /// the English texts again.
   pub fn set_localizations(&mut self, catalogs: Localizations) {

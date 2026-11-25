@@ -8,7 +8,7 @@
 //!
 //! `cargo run --release --example dictation -- history [--shot <file.png>]` opens it alone.
 
-use nimbo::ui::Role;
+use nimbo::a11y::Role;
 use nimbo::{
   App, Config, FormStyle, Harness, Icon, Id, InsetGroupedListStyle, List, Selection, Size, Style,
   Ui, grow,

@@ -44,11 +44,12 @@ use std::cell::Cell;
 use std::f32::consts::FRAC_PI_2;
 use std::rc::Rc;
 
+use super::a11y::LabeledPairRole;
 use super::theme::Theme;
 use super::widgets::MarkShift;
 use super::{
-  Align, Content, Cursor, Enabled, LabeledPairRole, Response, Role, Shadow, State, Style, Tag,
-  TextStyle, Ui, grow, px, rigid,
+  Align, Content, Cursor, Enabled, Response, Role, Shadow, State, Style, Tag, TextStyle, Ui, grow,
+  px, rigid,
 };
 use crate::locale::Localized;
 use crate::scene::{Color, Frame, Point, Quad, Rect, alpha, mix, rgb};
@@ -1094,12 +1095,12 @@ mod tests {
 
   use super::*;
   use crate::app::App;
-  use crate::harness::{Harness, mac_titlebar};
+  use crate::harness::mac_titlebar;
   use crate::keys::Key;
   use crate::scene::{Point, Size};
   use crate::ui::layout::Kind;
   use crate::ui::{ControlSize, Icon, Id, LinePattern, SegmentedPickerStyle, Tone};
-  use crate::{Modifiers, NamedKey};
+  use crate::{Harness, Modifiers, NamedKey};
 
   /// A section of one row and a footer with the "?" alone, nothing named.
   #[derive(Default)]

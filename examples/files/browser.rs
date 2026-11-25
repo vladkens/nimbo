@@ -405,7 +405,7 @@ impl App for Browser {
 
 /// The browser alone, as `files -- browser` opens it; the shot has rows 3 to 6 selected.
 pub fn run(args: &[String]) {
-  nimbo::run_args(Config::new("Browser", SIZE.w, SIZE.h), Browser::new(), shot, args);
+  super::example::run(Config::new("Browser", SIZE.w, SIZE.h), Browser::new(), args, shot);
 }
 
 /// Rows 3 to 6 selected by a click and a Shift-click.

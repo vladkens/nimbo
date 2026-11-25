@@ -19,10 +19,10 @@ const MENU_Z: i32 = 1000;
 const EDGE: f32 = 6.0;
 /// How long letters typed one after another keep adding to a type-select prefix, as in
 /// AppKit's menus.
-pub const TYPE_SELECT: Duration = Duration::from_millis(1000);
+const TYPE_SELECT: Duration = Duration::from_millis(1000);
 
 /// Type-to-select in a list of labelled items (a menu, a pop-up button): letters typed within
-/// [TYPE_SELECT] of each other make a prefix, and the first item starting with it is chosen.
+/// a second of each other make a prefix, and the first item starting with it is chosen.
 #[derive(Default)]
 pub struct TypeSelect {
   prefix: String,
@@ -30,7 +30,7 @@ pub struct TypeSelect {
 }
 
 impl TypeSelect {
-  /// Adds `c`, typed at `now`; a pause longer than [TYPE_SELECT] starts a new prefix.
+  /// Adds `c`, typed at `now`; a pause longer than a second starts a new prefix.
   pub fn push(&mut self, c: char, now: Duration) -> &mut Self {
     if self.at.is_none_or(|t| now.saturating_sub(t) > TYPE_SELECT) {
       self.prefix.clear();
@@ -446,10 +446,10 @@ impl Ui<'_> {
 mod tests {
   use super::*;
   use crate::app::App;
-  use crate::harness::{Harness, mac_titlebar};
+  use crate::harness::mac_titlebar;
   use crate::scene::Size;
   use crate::ui::px;
-  use crate::{Modifiers, NamedKey};
+  use crate::{Harness, Modifiers, NamedKey};
 
   /// A menu of 30 items, taller than its window, opened by a button the app can disable; the
   /// item run last and what [Ui::menu_popup] returned last.

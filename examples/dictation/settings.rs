@@ -18,7 +18,6 @@
 
 use std::time::Duration;
 
-use nimbo::ui::widgets::icon;
 use nimbo::{
   Align, Answer, App, ButtonRole, ColorScheme, Config, ControlSize, Cx, Dialog, Event, FormRow,
   FormStyle, Harness, Hotkey, Icon, Id, Picker, Rect, Section, SegmentedPickerStyle, Style, Tag,
@@ -413,7 +412,7 @@ fn app_icon(f: &mut nimbo::Frame, r: Rect, accent: nimbo::Color) {
   f.shadow(Rect::new(r.x, r.y + 1.0, r.w, r.h), 15.0, 3.0, [0.0, 0.0, 0.0, 0.2]);
   f.rect(r, accent, 15.0);
   let inner = Rect::new(r.x + 14.0, r.y + 14.0, r.w - 28.0, r.h - 28.0);
-  icon::draw(f, Icon::CHECK.stroke(2.4), inner, [1.0; 4]);
+  Icon::CHECK.stroke(2.4).draw(f, inner, [1.0; 4]);
 }
 
 impl App for Settings {

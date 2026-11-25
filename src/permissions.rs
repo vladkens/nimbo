@@ -23,7 +23,7 @@ pub enum Pane {
   /// Listening to the keyboard while other apps have it (a listen-only event tap).
   InputMonitoring,
   /// Paste from Other Apps (macOS 15.4+): reading the clipboard without asking
-  /// ([crate::SystemClipboard::readable]).
+  /// ([crate::clipboard::SystemClipboard::readable]).
   Pasteboard,
 }
 

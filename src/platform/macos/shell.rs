@@ -124,8 +124,8 @@ define_class!(
       NSApplicationTerminateReply::TerminateLater
     }
 
-    /// Windows close; the app quits only through [quit] (`nimbo::run_example` quits when its
-    /// window closes).
+    /// Windows close; the app quits only through [quit] (an example quits when its window
+    /// closes: `examples/common/example.rs`).
     #[unsafe(method(applicationShouldTerminateAfterLastWindowClosed:))]
     fn should_terminate_after_last(&self, _app: &NSApplication) -> bool {
       false

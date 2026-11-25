@@ -85,8 +85,8 @@ impl Ui<'_> {
 
 #[cfg(test)]
 mod tests {
+  use crate::Harness;
   use crate::app::{App, Event};
-  use crate::harness::Harness;
   use crate::keys::Command;
   use crate::scene::Size;
   use crate::ui::{Axes, Cursor, Id, Style, Ui, px};

@@ -73,10 +73,9 @@ impl PickerStyle for SegmentedPickerStyle {
 mod tests {
   use super::SegmentedPickerStyle;
   use crate::app::App;
-  use crate::harness::Harness;
   use crate::scene::Size;
   use crate::ui::{Id, Style, Tag, Ui, px};
-  use crate::{Modifiers, NamedKey};
+  use crate::{Harness, Modifiers, NamedKey};
 
   struct Seg(u8);
 

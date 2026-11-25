@@ -20,7 +20,7 @@
 use super::{Behavior, Content};
 pub use crate::menu::ButtonRole;
 use crate::text::Font;
-use crate::ui::icon::{self, Icon};
+use crate::ui::icon::Icon;
 use crate::ui::{ControlSize, Dim, EnvironmentValue, Id, Response, Style, TextStyle, Ui, px};
 
 /// How a button looks, as SwiftUI's `ButtonStyle`: [ButtonStyle::make_body] builds the button's
@@ -91,7 +91,7 @@ pub(super) fn build_label(ui: &mut Ui, first: Option<Icon>, label: Content, styl
   let icon = |ui: &mut Ui, i: Icon| {
     let (size, color) = ((style.font.size + 2.0).round(), style.color);
     let i = i.default_stroke(1.6);
-    ui.canvas(Style::new().w(px(size)).h(px(size)), move |f, r| icon::draw(f, i, r, color))
+    ui.canvas(Style::new().w(px(size)).h(px(size)), move |f, r| i.draw(f, r, color))
   };
   if let Some(i) = first {
     icon(ui, i);
@@ -232,11 +232,10 @@ mod tests {
 
   use super::*;
   use crate::app::App;
-  use crate::harness::Harness;
   use crate::keys::Key;
   use crate::scene::{Quad, Size};
   use crate::ui::{Cursor, UiState};
-  use crate::{Modifiers, NamedKey};
+  use crate::{Harness, Modifiers, NamedKey};
 
   const UP: [f32; 4] = [0.0, 0.0, 1.0, 1.0];
   const OVER: [f32; 4] = [0.0, 1.0, 0.0, 1.0];

@@ -289,11 +289,10 @@ mod tests {
 
   use super::*;
   use crate::app::App;
-  use crate::harness::Harness;
   use crate::scene::{Quad, Size};
   use crate::text::Font;
   use crate::ui::{Cursor, TextStyle, UiState};
-  use crate::{Modifiers, NamedKey};
+  use crate::{Harness, Modifiers, NamedKey};
 
   const LEFT: [f32; 4] = [0.0, 1.0, 0.0, 1.0];
   const RIGHT: [f32; 4] = [0.0, 0.0, 1.0, 1.0];

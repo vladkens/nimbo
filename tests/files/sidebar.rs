@@ -9,13 +9,17 @@
 use std::time::Duration;
 
 use nimbo::harness::mac_titlebar;
-use nimbo::ui::containers::toolbar::{AFTER_BUTTONS, LEAD};
 use nimbo::{Appearance, Event, Harness, Id, Point, Rect, Theme};
 
 use crate::common::{diff, px};
 use crate::files::{Files, LIST, NEW, SIZE, TOGGLE};
 
 type H = Harness<Files>;
+
+/// macOS 27's toolbar: from the zoom button to the first leading item, and the leading inset
+/// without the window's buttons (full screen).
+const AFTER_BUTTONS: f32 = 17.0;
+const LEAD: f32 = 10.0;
 
 /// The window under macOS's title bar (`mac`) or none, in the light appearance.
 fn notes(mac: bool) -> H {

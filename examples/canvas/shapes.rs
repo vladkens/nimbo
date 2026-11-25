@@ -125,7 +125,7 @@ impl App for Shapes {
 
   fn paint(&mut self, f: &mut Frame) {
     let p = self.palette();
-    f.rect(Rect::new(0.0, 0.0, f.size.w, f.size.h), p.bg, 0.0);
+    f.rect(Rect::new(0.0, 0.0, f.size().w, f.size().h), p.bg, 0.0);
 
     f.rect(SQUARE, RED, 0.0);
     f.rect(ROUND, BLUE, ROUND_R);

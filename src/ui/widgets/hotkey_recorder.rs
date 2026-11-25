@@ -17,7 +17,7 @@ use crate::hotkey;
 use crate::keys::Hotkey;
 use crate::scene::mix;
 use crate::text::Weight;
-use crate::ui::icon::{self, Icon};
+use crate::ui::icon::Icon;
 use crate::ui::{Cursor, Float, Response, Role, Style, Ui, UnitPoint, px};
 
 /// The recorder's width: the same recording, set or empty.
@@ -70,7 +70,7 @@ impl Ui<'_> {
         ui.a11y(clear, Role::Button).name("Clear");
         let hot = ui.ctl_hot(clear, ui.hovered(clear));
         let mark = mix(t.faint, t.secondary, hot);
-        ui.with_id(clear).float(at).canvas(s, move |f, r| icon::draw(f, Icon::CLEAR, r, mark));
+        ui.with_id(clear).float(at).canvas(s, move |f, r| Icon::CLEAR.draw(f, r, mark));
       }
     });
     (r.clicked, r.changed) = (b.clicked, b.changed);
@@ -81,8 +81,8 @@ impl Ui<'_> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::Harness;
   use crate::app::{App, Cx, Event};
-  use crate::harness::Harness;
   use crate::keys::{Binding, CMD, Command, Key, Shortcut};
   use crate::scene::Size;
   use crate::ui::Id;

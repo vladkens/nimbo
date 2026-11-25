@@ -15,7 +15,7 @@
 //! A Linux panel shows the item only with a StatusNotifierItem host: KDE Plasma, Xfce, LXQt,
 //! Cinnamon and MATE have one, GNOME only with the AppIndicator extension (Ubuntu ships it on).
 //! [available] says whether the session has one; the tray waits for one that starts later.
-//! [Item::button] fits a long name (a device, a file) to an item.
+//! [crate::Item::button] fits a long name (a device, a file) to an item.
 
 #[cfg(any(test, not(target_os = "macos")))]
 mod icon;
@@ -24,9 +24,9 @@ use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::marker::PhantomData;
 
-pub use crate::menu::{Item, LABEL, Menu};
+pub use crate::menu::LABEL;
 use crate::platform::tray as imp;
-use crate::{Error, Main, svg};
+use crate::{Error, Main, Menu, svg};
 
 /// The icon, a template: only its alpha counts, and the OS's colour fills it (macOS tints it
 /// for the menu bar and the highlight; Windows fills it white on a dark taskbar, black on a light
@@ -38,8 +38,8 @@ pub enum TrayIcon {
   /// drawn for Retina): 36 × 36 at 2 fills the menu bar's 18 pt.
   Rgba { w: u32, h: u32, scale: f32, px: Vec<u8> },
   /// SVG path data in a `size` × `size` view box, filled (non-zero, or even-odd), drawn at the
-  /// size the OS shows it, so crisp at every scale. Arcs and curves are flattened
-  /// ([crate::svg::flatten]).
+  /// size the OS shows it, so crisp at every scale: SVG's whole path syntax, arcs and curves
+  /// flattened into pieces of about 2 pixels.
   Path { size: f32, d: String, even_odd: bool },
 }
 
@@ -49,8 +49,10 @@ impl TrayIcon {
     Self::Path { size, d: d.into(), even_odd: false }
   }
 
-  /// An icon file: an SVG of `<path>`s in a square view box ([crate::svg::document] says what
-  /// it reads), drawn as [TrayIcon::Path].
+  /// An icon file, drawn as [TrayIcon::Path]: a square `viewBox` from `0 0` and `<path>`s filled
+  /// by one rule (`fill-rule="evenodd"` on each or on a group around them, or none) that don't
+  /// overlap; groups, titles and comments are passed over. Any other element, a `transform` or
+  /// `style`, an unfilled path or data that doesn't parse is an [Error::Invalid].
   pub fn from_svg(svg: &str) -> Result<Self, Error> {
     let (size, d, even_odd) = svg::document(svg)?;
     Ok(Self::Path { size, d, even_odd })
@@ -234,9 +236,9 @@ impl<A: Clone + PartialEq + 'static> Tray<A> {
   }
 
   /// Replaces the menu, also while it opens ([Tray::on_open]). While it is open, one of the same
-  /// items but for labels, checks and enabled states ([Item]) changes it in place on macOS, its
-  /// submenus staying open (a countdown in it); any other waits until it closes (the last one set
-  /// wins): rebuilt, an open menu would close its submenus.
+  /// items but for labels, checks and enabled states ([crate::Item]) changes it in place on macOS,
+  /// its submenus staying open (a countdown in it); any other waits until it closes (the last one
+  /// set wins): rebuilt, an open menu would close its submenus.
   pub fn set_menu(&self, menu: &Menu<A>) {
     let (menu, actions) = menu.tagged();
     let state = self.0.state();
@@ -288,7 +290,9 @@ pub fn available() -> Result<(), Error> {
 }
 
 /// For the tray scenario (`tests/dictation/detached.rs`): a tray with nothing on screen, the menu
-/// as the OS got it, and its items chosen without opening it.
+/// as the OS got it, and its items chosen without opening it. Hidden, and only with the harness:
+/// a test's hook, not an app's.
+#[cfg(feature = "harness")]
 #[doc(hidden)]
 impl<A: Clone + PartialEq + 'static> Tray<A> {
   pub fn detached(icon: TrayIcon, tooltip: &str) -> Self {
@@ -320,6 +324,7 @@ impl<A: Clone + PartialEq + 'static> Tray<A> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::Item;
 
   /// An SVG file's ring of two paths fills even-odd, as the file draws it.
   #[test]

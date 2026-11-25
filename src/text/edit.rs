@@ -924,7 +924,7 @@ pub fn range_from_utf16(s: &str, r: Range<usize>) -> Range<usize> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::app::MemClipboard;
+  use crate::clipboard::MemClipboard;
 
   /// Cluster boundaries of `s` from the start.
   fn clusters(s: &str) -> Vec<&str> {

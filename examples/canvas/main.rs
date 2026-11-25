@@ -10,6 +10,8 @@
 // A Windows app, not a console one: no terminal opens with its window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[path = "../common/example.rs"]
+mod example;
 pub mod input;
 pub mod pace;
 pub mod shapes;
@@ -34,10 +36,10 @@ fn main() {
 
   let cfg = |title, size: Size| Config::new(title, size.w, size.h);
   match page {
-    "shapes" => nimbo::run_args(cfg("shapes", shapes::SIZE), Shapes::default(), |_| {}, rest),
-    "text" => nimbo::run_args(cfg("text", text::SIZE), Text::default(), |_| {}, rest),
-    "input" => nimbo::run_args(cfg("input", input::SIZE), Input::default(), |_| {}, rest),
-    "pace" => nimbo::run_args(cfg("pace", pace::SIZE).fixed(), Pace::default(), |_| {}, rest),
+    "shapes" => example::run(cfg("shapes", shapes::SIZE), Shapes::default(), rest, |_| {}),
+    "text" => example::run(cfg("text", text::SIZE), Text::default(), rest, |_| {}),
+    "input" => example::run(cfg("input", input::SIZE), Input::default(), rest, |_| {}),
+    "pace" => example::run(cfg("pace", pace::SIZE).fixed(), Pace::default(), rest, |_| {}),
     _ => {
       eprintln!("unknown page {page}\n{USAGE}");
       std::process::exit(2);

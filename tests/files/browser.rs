@@ -13,7 +13,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use nimbo::ui::{Action, Role};
+use nimbo::a11y::{Action, Role};
 use nimbo::{CMD, Event, Harness, Id, Key, Modifiers, MouseButton, NamedKey, Os, Phase, Point};
 
 use crate::common::{mid, reads};

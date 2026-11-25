@@ -151,7 +151,7 @@ mod tests {
 
   #[test]
   fn a_row_revealed_early_a_cancelled_press_and_a_disabled_list() {
-    use crate::harness::Harness;
+    use crate::Harness;
     let mut h = Harness::new(Rows::default(), Size::new(300.0, 300.0), 1.0);
     let row = |k: u64| Id::of("list").key(("row", k));
 
@@ -223,8 +223,7 @@ mod tests {
 
   #[test]
   fn headers_take_no_selection_keys_or_cmd_a() {
-    use crate::NamedKey as K;
-    use crate::harness::Harness;
+    use crate::{Harness, NamedKey as K};
     let mut h = Harness::new(Days::default(), Size::new(300.0, 300.0), 1.0);
     let id = Id::of("list");
     let (row, head) = (|k: u64| id.key(("row", k)), |k: u64| id.key(("head", k)));
@@ -284,8 +283,7 @@ mod tests {
   /// The mode is the build's: a list built again without `.multi()` selects one row at a time.
   #[test]
   fn a_list_selects_one_row_again_without_multi() {
-    use crate::NamedKey as K;
-    use crate::harness::Harness;
+    use crate::{Harness, NamedKey as K};
     let mut h = Harness::new(Modes(true, Selection::default()), Size::new(300.0, 100.0), 1.0);
     h.frame();
     h.app_mut().0 = false;
@@ -321,8 +319,7 @@ mod tests {
 
   #[test]
   fn a_page_is_a_viewport_over_the_headers() {
-    use crate::NamedKey as K;
-    use crate::harness::Harness;
+    use crate::{Harness, NamedKey as K};
     let mut h = Harness::new(Threes::default(), Size::new(300.0, 300.0), 1.0);
     let id = Id::of("list");
     let row = |k: u64| id.key(("row", k));
@@ -348,8 +345,7 @@ mod tests {
 
   #[test]
   fn delete_asks_and_escape_clears() {
-    use crate::NamedKey as K;
-    use crate::harness::Harness;
+    use crate::{Harness, NamedKey as K};
     let mut h = Harness::new(Days::default(), Size::new(300.0, 300.0), 1.0);
     let none = Modifiers::empty();
     h.set_os(Os::Mac);
@@ -385,7 +381,7 @@ mod tests {
 
   #[test]
   fn inset_grouped_rows_lie_on_a_plate_per_section() {
-    use crate::harness::Harness;
+    use crate::Harness;
     let mut h = Harness::new(Plates::default(), Size::new(300.0, 300.0), 1.0);
     let id = Id::of("list");
     let (row, head) = (|k: u64| id.key(("row", k)), |k: u64| id.key(("head", k)));
@@ -437,7 +433,7 @@ mod tests {
 
   #[test]
   fn a_press_near_the_end_finds_its_row_without_a_scan() {
-    use crate::harness::Harness;
+    use crate::Harness;
     let mut h = Harness::new(Counted::default(), Size::new(200.0, 200.0), 1.0);
     h.frame();
     h.rt.ui.store.raw::<ScrollState>(Id::of("list")).offset[1] = 1_999_000.0;
@@ -507,7 +503,7 @@ mod tests {
   /// on a row's text, named for a tooltip, selects the row, Cmd-click adding it.
   #[test]
   fn a_click_on_a_rows_button_is_the_buttons_on_its_text_the_rows() {
-    use crate::harness::Harness;
+    use crate::Harness;
     let mut h = Harness::new(Buttons::default(), Size::new(200.0, 200.0), 1.0);
     h.frame();
     h.click_id(Id::of(("t", 1)));
@@ -528,7 +524,7 @@ mod tests {
 
   #[test]
   fn a_right_click_on_a_rows_element_is_the_rows_unless_it_has_a_menu() {
-    use crate::harness::Harness;
+    use crate::Harness;
     let mut h = Harness::new(Buttons::default(), Size::new(200.0, 200.0), 1.0);
     h.set_native_menus(true);
     h.frame();
@@ -586,7 +582,7 @@ mod tests {
   /// scrollbar or off the list keeps it.
   #[test]
   fn a_press_on_the_lists_ground_clears_the_selection() {
-    use crate::harness::Harness;
+    use crate::Harness;
     let mut h = Harness::new(Ground::default(), Size::new(300.0, 300.0), 1.0);
     let id = Id::of("list");
     let row = |k: u64| id.key(("row", k));
@@ -646,7 +642,7 @@ mod tests {
 
   #[test]
   fn a_list_with_no_menu_leaves_the_press_off_its_rows_to_its_parent() {
-    use crate::harness::Harness;
+    use crate::Harness;
     let mut h = Harness::new(Inside, Size::new(300.0, 300.0), 1.0);
     h.set_native_menus(true);
     h.frame();
@@ -676,7 +672,7 @@ mod tests {
   /// A row style's padding moves the row's content in.
   #[test]
   fn a_row_styles_padding_moves_the_content_in() {
-    use crate::harness::Harness;
+    use crate::Harness;
     let mut h = Harness::new(Bare::default(), Size::new(300.0, 300.0), 1.0);
     h.frame();
     let row = h.rect(Id::of("list").key(("row", 1u64))).unwrap();
@@ -687,7 +683,7 @@ mod tests {
   /// Plain, a selected row keeps the list's ground for the app to paint.
   #[test]
   fn plain_rows_leave_the_selection_to_the_app() {
-    use crate::harness::Harness;
+    use crate::Harness;
     let mut h = Harness::new(Bare::default(), Size::new(300.0, 300.0), 1.0);
     h.frame();
     let row = h.rect(Id::of("list").key(("row", 1u64))).unwrap();

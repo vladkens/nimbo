@@ -34,7 +34,7 @@ mod checkbox;
 mod divider;
 mod field;
 #[cfg(feature = "hotkey")]
-pub mod hotkey_recorder;
+pub(crate) mod hotkey_recorder;
 mod label;
 mod link;
 mod progress;
@@ -53,8 +53,6 @@ pub use slider::LinearSliderStyle;
 pub use toggle::{ButtonToggleStyle, SwitchToggleStyle};
 pub use tooltip::TooltipHelpStyle;
 
-// Where apps found them before icons moved into the core.
-pub use super::icon::{self, Icon, IconPaint};
 use super::{Id, Style, Ui};
 use crate::scene::{Color, alpha, mix};
 

@@ -128,8 +128,8 @@ impl<'s> Split<'s> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::Harness;
   use crate::app::App;
-  use crate::harness::Harness;
   use crate::scene::{Rect, Size};
   use crate::ui::Id;
 

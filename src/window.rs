@@ -120,7 +120,7 @@ impl Config {
     }
   }
 
-  /// The app's translations ([locale]), a gettext `.po` file's text per language tag:
+  /// The app's translations ([crate::t!]), a gettext `.po` file's text per language tag:
   /// `&[("ru", include_str!("../locales/ru.po"))]`. Only the language in use is read, as a
   /// string first shows. Every window shares them: the last window opened with any gives them, or
   /// [Main::set_localizations], which needs no window.
@@ -148,6 +148,16 @@ impl Config {
   /// Where the overlay shows ([Config::overlay]); `None` for a window.
   pub const fn get_overlay(&self) -> Option<Anchor> {
     self.overlay
+  }
+
+  /// The content runs under the title bar ([Config::unified]).
+  pub const fn is_unified(&self) -> bool {
+    self.unified
+  }
+
+  /// The app's translations ([Config::localizations]).
+  pub const fn get_localizations(&self) -> Localizations {
+    self.localizations
   }
 
   /// The least content size the user can resize the window to, [Config::MIN_SIZE] unless set.

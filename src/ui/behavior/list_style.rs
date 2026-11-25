@@ -470,8 +470,8 @@ mod tests {
   use std::time::Duration;
 
   use super::*;
+  use crate::Harness;
   use crate::app::{App, Event};
-  use crate::harness::Harness;
   use crate::scene::{Frame, Quad, Rect, Size};
   use crate::ui::UiState;
 

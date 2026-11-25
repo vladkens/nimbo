@@ -13,7 +13,7 @@
 
 use std::time::Duration;
 
-use nimbo::ui::Action;
+use nimbo::a11y::Action;
 use nimbo::{Command, Event, Harness, Id, Key, Modifiers, NamedKey, Os};
 
 use crate::common::reads;

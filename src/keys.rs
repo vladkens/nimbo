@@ -6,24 +6,7 @@
 //! become ([Command]), named after AppKit's key binding selectors (`moveWordLeft:`,
 //! `deleteBackward:`, `insertNewline:`).
 //!
-//! A key press travels in this order (the runtime routes it, `Runtime::event`):
-//!
-//! 0. A focused element that grabs the keys ([crate::Ui::grab_keys]: a hotkey recorder recording, a
-//!    modal dialog) gets the key itself first.
-//! 1. Bindings of the focused element, then of its ancestors ([crate::Ui::keymap]): a match becomes
-//!    a [Command] for that element, which reads it with [crate::Ui::command].
-//! 2. The app's bindings ([crate::App::keymap]): a match goes to `App::event` as
-//!    [crate::Event::Command].
-//! 3. The key itself: the focused element ([crate::Ui::key_down]), then `App::event` as
-//!    [crate::Event::KeyDown].
-//! 4. Nobody used it: AppKit's `interpretKeyEvents:` turns it into typed text (`insertText:`,
-//!    [crate::Event::Text]) or a command (`doCommandBySelector:`, [crate::Event::Command]), with
-//!    the system's bindings: arrows, Option and Cmd moves, Emacs-style Ctrl keys. Text and commands
-//!    go to the focused element, then the app; an unused Tab or Shift-Tab moves focus. A key with
-//!    Cmd that nobody used goes on to the menu bar (Cmd-Q), then to step 4.
-//!
-//! The menu bar's Edit items ([crate::Commands]) run the command their key would: the focused
-//! element, then those above it that bind the command, then the app.
+//! The order a key press travels in is in the crate's doc (`lib.rs`).
 //!
 //! Windows and Linux have no `interpretKeyEvents:`: their windows get step 4's commands from
 //! [Os::command], the keys their own text fields bind. The harness has no AppKit either: it
@@ -84,7 +67,7 @@ impl Os {
   }
 
   /// The command a key that types nothing runs in a text field when nobody used it, as the
-  /// platform's own text fields bind it: AppKit's ([standard]), or Windows' and GTK's (`pc`).
+  /// platform's own text fields bind it: AppKit's (`standard`), or Windows' and GTK's (`pc`).
   pub fn command(self, k: &KeyEvent) -> Option<Command> {
     if let Os::Mac = self { standard(k) } else { pc(k, self) }
   }
@@ -539,12 +522,6 @@ fn key_label(key: Key, mac: bool) -> String {
   }
 }
 
-/// The modifiers held, as the platform shows them before a key: `⌃⌥` on macOS, `Ctrl+Alt+`
-/// elsewhere.
-pub fn modifiers_label(m: Modifiers) -> String {
-  mods_label(m, cfg!(target_os = "macos"))
-}
-
 fn mods_label(m: Modifiers, mac: bool) -> String {
   let held = MODS.iter().filter(|r| m.contains(r.0));
   held.map(|r| if mac { r.2.to_string() } else { format!("{}+", r.3) }).collect()
@@ -700,11 +677,6 @@ pub fn shortcut(map: &[Binding], cmd: Command) -> Option<Shortcut> {
   map.iter().find(|b| b.command == cmd).map(|b| b.keys)
 }
 
-/// The command of the first binding in `map` that matches `k`, on this platform ([Os::lookup]).
-pub fn lookup(map: &[Binding], k: &KeyEvent) -> Option<Command> {
-  Os::CURRENT.lookup(map, k)
-}
-
 /// The edit menu's keys, which a text field binds on itself: the key goes to it before the menu
 /// bar's items (macOS), which show them ([crate::Commands]), and Windows and Linux have no menu.
 pub const EDIT_KEYS: &[Binding] = &[
@@ -788,7 +760,8 @@ pub(crate) use edit::{Delete, Extent, Move};
 #[non_exhaustive]
 pub enum Command {
   /// Moves the caret, or extends the selection (the `…AndModifySelection:` selectors): the
-  /// editor's, for a field, a list or a menu to take.
+  /// editor's, for a field, a list or a menu to take. Hidden, as [Command::Delete]: a variant
+  /// can't be private, and its payload is the editor's own type, which an app can't name.
   #[doc(hidden)]
   Move(Move, Extent),
   /// Deletes text: the editor's.
@@ -1188,8 +1161,8 @@ mod tests {
       Binding::new(Shortcut::char('z').cmd(), Command::Undo),
       Binding::new(Shortcut::char('z').cmd().shift(), Command::Redo),
     ];
-    assert_eq!(lookup(&map, &ev(Key::Char('Z'), CMD_SHIFT)), Some(Command::Redo));
-    assert_eq!(lookup(&map, &ev(Key::Char('y'), CMD)), None);
+    assert_eq!(Os::CURRENT.lookup(&map, &ev(Key::Char('Z'), CMD_SHIFT)), Some(Command::Redo));
+    assert_eq!(Os::CURRENT.lookup(&map, &ev(Key::Char('y'), CMD)), None);
   }
 
   #[test]
@@ -1359,7 +1332,7 @@ mod tests {
     }
 
     let held = if cfg!(target_os = "macos") { "⌃⌥" } else { "Ctrl+Alt+" };
-    assert_eq!(modifiers_label(Modifiers::CONTROL | Modifiers::ALT), held);
+    assert_eq!(mods_label(Modifiers::CONTROL | Modifiers::ALT, cfg!(target_os = "macos")), held);
   }
 
   #[test]

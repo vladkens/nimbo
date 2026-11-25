@@ -5,13 +5,14 @@
 //! control size ([Ui::control_size]), the icon button; the ⓘ that explains a row, the warning
 //! mark that tells what is wrong with it, and the round "?" that opens a page's help.
 
+use crate::menu::ButtonRole;
 use crate::scene::{Color, Frame, Rect, alpha, mix};
 use crate::t;
 use crate::text::{Font, Weight};
-use crate::ui::icon::{self, Icon};
+use crate::ui::icon::Icon;
 use crate::ui::{
-  ButtonConfiguration, ButtonRole, ButtonStyle, ControlSize, Dim, Enabled, Float, Id, Response,
-  Role, Style, TextStyle, Theme, ToggleConfiguration, Ui, px,
+  ButtonConfiguration, ButtonStyle, ControlSize, Dim, Enabled, Float, Id, Response, Role, Style,
+  TextStyle, Theme, ToggleConfiguration, Ui, px,
 };
 
 const WHITE: Color = [1.0; 4];
@@ -242,7 +243,7 @@ impl Ui<'_> {
     let k = if b.pressed { 1.0 } else { 0.5 * hot };
     let color = self.dim(mix(ink[0], ink[1], k), b.disabled);
     let s = self.dim_style(Style::new().w(px(size)).h(px(size)).radius(size / 2.0), b.disabled);
-    let paint = move |f: &mut Frame, r: Rect| icon::draw(f, icon.default_stroke(1.5), r, color);
+    let paint = move |f: &mut Frame, r: Rect| icon.default_stroke(1.5).draw(f, r, color);
     let Some(&mut MarkShift(dy)) = self.slot::<MarkShift>() else {
       let mut r = self.control(&b).canvas(s, paint);
       r.clicked = b.clicked;
@@ -286,7 +287,6 @@ impl Ui<'_> {
 mod tests {
   use super::{Variant, look};
   use crate::app::App;
-  use crate::harness::Harness;
   use crate::keys::Key;
   use crate::scene::{Rect, Size};
   use crate::text::Font;
@@ -294,7 +294,7 @@ mod tests {
     ButtonStyle, ControlSize, Cursor, Icon, Id, PlainButtonStyle, Response, Style, TextStyle,
     Theme, Ui, px,
   };
-  use crate::{Modifiers, NamedKey};
+  use crate::{Harness, Modifiers, NamedKey};
 
   #[test]
   fn looks_read_the_palette() {

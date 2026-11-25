@@ -69,14 +69,13 @@ mod tests {
   use std::time::Duration;
 
   use crate::app::App;
-  use crate::harness::Harness;
   use crate::keys::Key;
   use crate::scene::Size;
   use crate::ui::{
     ButtonToggleStyle, CheckboxToggleStyle, Icon, Id, PlainToggleStyle, Style, Theme, ToggleStyle,
     Ui,
   };
-  use crate::{Modifiers, NamedKey};
+  use crate::{Harness, Modifiers, NamedKey};
 
   #[derive(Default)]
   struct Switch {

@@ -4,7 +4,7 @@
 //! environment, groups, identity, focus and the pointer, widget parts, frame requests and the
 //! theme.
 
-use nimbo::ui::LabeledPairRole;
+use nimbo::a11y::LabeledPairRole;
 use nimbo::{Color, Cursor, Enabled, EnvironmentValue, Icon, Id, Shortcut, Tone, Ui, px};
 
 use super::{Gallery, Shown, line, swatch};

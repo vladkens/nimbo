@@ -4,71 +4,35 @@
 //! often that is and what a view may change), its flex layout
 //! (`layout`) and the paint pass that turns it into the frame's scene (`paint`).
 //!
-//! ```ignore
-//! ui.row(Style::new().pad(8.0).gap(8.0).bg(PANEL), |ui| {
-//!   ui.text("Title", BOLD);
-//!   ui.spacer();
-//!   ui.id("save").row(BUTTON, |ui| ui.text("Save", LABEL));
-//! });
-//! ```
-//!
-//! Containers take their children in a closure, so the code nests like the tree. Every element
-//! gets an [Id]: its index among its siblings hashed with its parent's id, a key hashed the same
-//! way ([Ui::key], stable when lists change), or a frame-wide name ([Ui::id], found again with
-//! [Id::of]). The last frame's tree with every element's rect is kept for hit testing
-//! ([input]): named elements get hover, press and clicks, which the view reads by id. State the
-//! app should not hold (scroll offsets, animations) lives in a store keyed by id ([store]).
-//!
-//! ```ignore
-//! let plus = Id::of("plus");
-//! let fade = ui.animate(plus, if ui.hovered(plus) { 1.0 } else { 0.0 }, FADE);
-//! if ui.with_id(plus).row(BUTTON.bg(mix(RAISED, HOVER, fade)), |ui| ui.text("+", LABEL)).clicked {
-//!   self.count += 1;
-//! }
-//! ```
-//!
-//! Widgets ([widgets]: label, button, text field, check box, switch, slider and the
-//! like) and containers ([containers]: list, menu, picker, tabs, split; the scroll area they
-//! scroll in is a behaviour's, [Ui::scroll_area]) do this for an app in the look of the theme
-//! the app sets (`Ui::set_theme`):
-//! `if ui.id("plus").button("+").clicked { .. }`; so do a settings form ([form]) and a modal
-//! dialog ([dialog]).
-//! What they read of where they are built, the theme, their size, whether they are enabled, is
-//! the environment: values by type a container puts for what is built in it
-//! ([Ui::environment]: `ui.disabled(true).col(..)`), the window for all ([Ui::set_environment]).
-//!
-//! The rule for every widget: a headless behaviour ([behavior]: `ui.button_behavior(id)` and
-//! the like, hover, press, click, focus, keys and the value edited) plus drawing from the
-//! theme. An app that wants its own look keeps the behaviour and draws the element itself.
-//! Behaviours also record what their element is to assistive technology ([a11y]), so a look of
-//! the app's own reads as the theme's does.
+//! How an app uses it is in the crate's doc (`lib.rs`): ids, the store, widgets and their
+//! behaviours, the environment.
 
-pub mod a11y;
+pub(crate) mod a11y;
 #[cfg(feature = "headless")]
-pub mod behavior;
+pub(crate) mod behavior;
 #[cfg(feature = "styled")]
-pub mod containers;
+pub(crate) mod containers;
 #[cfg(feature = "styled")]
-pub mod dialog;
+pub(crate) mod dialog;
 mod environment;
 #[cfg(feature = "styled")]
-pub mod form;
-pub mod icon;
+pub(crate) mod form;
+pub(crate) mod icon;
 mod id;
 mod image;
-pub mod input;
+pub(crate) mod input;
 mod layout;
 mod lazy;
 mod menus;
 mod paint;
 mod query;
-pub mod store;
+pub(crate) mod store;
 mod style;
 mod textlayout;
 #[cfg(feature = "styled")]
-pub mod theme;
+pub(crate) mod theme;
 #[cfg(feature = "styled")]
-pub mod widgets;
+pub(crate) mod widgets;
 
 use std::any::Any;
 use std::fmt::{Display, Write};
@@ -76,19 +40,21 @@ use std::hash::Hash;
 use std::num::NonZeroU8;
 use std::time::Duration;
 
-pub use a11y::{Action, LabeledPairRole, Role, State, Value};
+pub use a11y::{Action, Role};
+#[cfg(feature = "headless")]
+pub use a11y::{State, Value};
 #[cfg(feature = "styled")]
 pub(crate) use behavior::DrawnEditMenu;
 #[cfg(feature = "headless")]
 pub use behavior::{
-  Behavior, Button, ButtonConfiguration, ButtonRole, ButtonStyle, Content, DialogBehavior,
-  EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, HelpConfiguration, HelpStyle,
-  InlinePickerStyle, List, ListBehavior, ListConfiguration, ListLayout, ListResponse,
-  ListRowConfiguration, ListRows, ListStyle, MenuPlacement, Picker, PickerConfiguration,
-  PickerStyle, PlainButtonStyle, PlainHelpStyle, PlainListStyle, PlainSliderStyle,
-  PlainTextFieldStyle, PlainToggleStyle, Row, ScrollBar, ScrollBehavior, ScrollerKnob,
-  SectionHeader, Selection, Slider, SliderConfiguration, SliderStyle, SplitBehavior, Tag,
-  TextField, TextFieldConfiguration, TextFieldStyle, ToggleConfiguration, ToggleStyle, TypeSelect,
+  Behavior, Button, ButtonConfiguration, ButtonStyle, Content, DialogBehavior, EditMenu, Editing,
+  FieldBehavior, FieldKind, FieldStyle, HelpConfiguration, HelpStyle, InlinePickerStyle, List,
+  ListBehavior, ListConfiguration, ListLayout, ListResponse, ListRowConfiguration, ListRows,
+  ListStyle, MenuPlacement, Picker, PickerConfiguration, PickerStyle, PlainButtonStyle,
+  PlainHelpStyle, PlainListStyle, PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle, Row,
+  ScrollBar, ScrollBehavior, ScrollerKnob, SectionHeader, Selection, Slider, SliderConfiguration,
+  SliderStyle, SplitBehavior, Tag, TextField, TextFieldConfiguration, TextFieldStyle,
+  ToggleConfiguration, ToggleStyle, TypeSelect,
 };
 #[cfg(feature = "styled")]
 pub use containers::{
@@ -844,7 +810,7 @@ impl<'a> Ui<'a> {
     out
   }
 
-  /// Disables the next widget ([widgets]) when `yes`: dimmed, not focusable, and its clicks
+  /// Disables the next widget when `yes`: dimmed, not focusable, and its clicks
   /// do nothing; on a container, every widget built in it, as SwiftUI's `.disabled`. Puts
   /// [Enabled] `false`, so it only disables: `ui.environment(Enabled(true))` enables a part.
   pub fn disabled(&mut self, yes: bool) -> &mut Self {
@@ -1155,8 +1121,8 @@ impl<'a> Ui<'a> {
   // MARK: State
 
   /// The `T` kept for `id` between frames, created with its default. It lives while `id` is
-  /// built or its state used each frame, or an ancestor is retained ([Ui::retain]); see
-  /// [store] for the rule.
+  /// built or its state used each frame, or an ancestor is retained ([Ui::retain]): a
+  /// hidden tab keeps its subtree's state.
   pub fn state<T: Default + 'static>(&mut self, id: Id) -> &mut T {
     let UiState { store, stack, tree, .. } = &mut self.st;
     store.get(id, stack.iter().map(|&(i, _)| tree.nodes[i as usize].id))

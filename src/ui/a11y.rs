@@ -47,6 +47,11 @@ use crate::text::FxHasher;
 /// A byte range of a string arena; empty when unset.
 pub(crate) type Span = (u32, u32);
 
+/// A field's text in its arena ([Value::Text]): an app can neither make nor read one, it sets the
+/// text through [Access::text].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextSpan(pub(crate) Span);
+
 // MARK: Roles, values, actions
 
 /// What an element is, as AppKit's roles (and subroles) name it.
@@ -112,9 +117,9 @@ pub enum Value {
   #[default]
   None,
   /// A field's text, in the arena of the records or the tree that holds it: [Access::text]
-  /// sets it.
+  /// sets it. Hidden: a variant can't be private, and its span is opaque.
   #[doc(hidden)]
-  Text(Span),
+  Text(TextSpan),
   /// A slider's or a progress indicator's number, in its range.
   Number {
     now: f64,
@@ -273,7 +278,7 @@ impl Access<'_> {
 
   /// A field's text as its value.
   pub fn text(mut self, s: &str) -> Self {
-    self.props().value = Value::Text(put(&mut self.recs.text, s));
+    self.props().value = Value::Text(TextSpan(put(&mut self.recs.text, s)));
     self
   }
 
@@ -701,8 +706,8 @@ impl UiState {
         let (name, description) =
           (copy(&mut out, drop(p.name, 0)), copy(&mut out, drop(p.description, 1)));
         let mut props = Props { name, description, ..p };
-        if let Value::Text(s) = p.value {
-          props.value = Value::Text(copy(&mut out, s));
+        if let Value::Text(TextSpan(s)) = p.value {
+          props.value = Value::Text(TextSpan(copy(&mut out, s)));
         }
 
         if name.0 == name.1 && titled(&p) {
@@ -783,7 +788,7 @@ impl Display for A11yTree {
 
       match p.value {
         Value::None => {}
-        Value::Text(s) => write!(f, " value {:?}", self.str(s))?,
+        Value::Text(TextSpan(s)) => write!(f, " value {:?}", self.str(s))?,
         // In f32, as sliders keep them: 0.3, not 0.30000001192092896.
         Value::Number { now, min, max } => {
           write!(f, " {} in {}..{}", now as f32, min as f32, max as f32)?

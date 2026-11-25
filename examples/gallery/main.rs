@@ -16,6 +16,8 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod blocks;
+#[path = "../common/example.rs"]
+mod example;
 mod pages;
 
 use nimbo::{
@@ -261,5 +263,5 @@ fn main() {
   let app = Gallery::on(page.unwrap_or(0), page.is_some());
   let (w, h) = if page.is_some() { (WIDTH, 300.0) } else { (WIDTH + 200.0, 600.0) };
   let cfg = Config::new("Gallery", w, h).localizations(&[("ru", RU)]);
-  nimbo::run_args(cfg, app, |h| _ = h.frame(), rest);
+  example::run(cfg, app, rest, |h| _ = h.frame());
 }

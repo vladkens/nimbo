@@ -3,8 +3,8 @@
 //! `examples/dictation/main.rs`'s tray menu, hotkey and icon, and the detached tray's scenario
 //! (`tests/dictation/detached.rs`) where it needs no main thread: everywhere but macOS.
 
-use nimbo::svg;
 use nimbo::system::Change;
+use nimbo::tray::TrayIcon;
 
 #[cfg(not(target_os = "macos"))]
 use crate::detached;
@@ -46,9 +46,13 @@ fn the_example() {
   assert_eq!((unbound[0].0.as_str(), unbound[0].1), ("No hotkey", false));
 
   assert!(nimbo::Hotkey::parse(dictation::HOTKEY).is_ok());
-  let mut rings = Vec::new();
-  svg::flatten(dictation::ICON, 1.0, &mut rings).unwrap();
-  assert_eq!(rings.len(), 2, "a ring: two circles");
+  // The icon's path data reads, as an icon file of it does.
+  let file = format!(
+    r#"<svg viewBox="0 0 18 18"><path fill-rule="evenodd" d="{}"/></svg>"#,
+    dictation::ICON
+  );
+  let icon = TrayIcon::Path { size: 18.0, d: dictation::ICON.into(), even_odd: true };
+  assert_eq!(TrayIcon::from_svg(&file).unwrap(), icon);
 }
 
 /// The tray's menu: the lid and the audio changes, both kinds counted.

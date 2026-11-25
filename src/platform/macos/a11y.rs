@@ -42,8 +42,8 @@ use super::view::View;
 use crate::app::Event;
 use crate::scene::Point;
 use crate::text::edit::{range_from_utf16, utf16_len};
-use crate::ui::a11y::{A11yNode, A11yTree};
-use crate::ui::{Action, Id, Role, State, UiState, Value};
+use crate::ui::a11y::{A11yNode, A11yTree, State, TextSpan, Value};
+use crate::ui::{Action, Id, Role, UiState};
 
 // MARK: Roles
 
@@ -193,7 +193,7 @@ impl Snapshot {
 
   /// A field's text.
   fn text(&self, n: &A11yNode) -> &str {
-    if let Value::Text(s) = n.props.value { self.tree.str(s) } else { "" }
+    if let Value::Text(TextSpan(s)) = n.props.value { self.tree.str(s) } else { "" }
   }
 
   /// `n` as the focused field.
@@ -204,7 +204,7 @@ impl Snapshot {
   /// A node's value to compare: its text, else the value itself.
   fn val(&self, n: &A11yNode) -> (Value, &str) {
     match n.props.value {
-      Value::Text(s) => (Value::Text((0, 0)), self.tree.str(s)),
+      Value::Text(TextSpan(s)) => (Value::Text(TextSpan((0, 0))), self.tree.str(s)),
       v => (v, ""),
     }
   }
@@ -399,7 +399,7 @@ define_class!(
       self.get(|s, n| {
         let int = |v: isize| Some(any(NSNumber::new_isize(v)));
         match (n.props.value, n.props.role) {
-          (Value::Text(t), _) => Some(any(NSString::from_str(s.tree.str(t)))),
+          (Value::Text(TextSpan(t)), _) => Some(any(NSString::from_str(s.tree.str(t)))),
           (Value::Number { now, .. }, _) => Some(num(now)),
           (Value::Off, _) => int(0),
           (Value::On, _) => int(1),
@@ -761,7 +761,7 @@ mod tests {
   fn text(t: &mut A11yTree, i: u32, s: &str) {
     let start = t.text.len() as u32;
     t.text.push_str(s);
-    t.nodes[i as usize].props.value = Value::Text((start, t.text.len() as u32));
+    t.nodes[i as usize].props.value = Value::Text(TextSpan((start, t.text.len() as u32)));
   }
 
   fn set(t: &mut A11yTree, i: u32, s: State) {

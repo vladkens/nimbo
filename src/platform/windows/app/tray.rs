@@ -20,7 +20,8 @@ use super::super::{hicon, settings, wide};
 use super::host;
 use super::menu::{build, track};
 use super::shell::WM_TRAY;
-use crate::tray::{Menu, Set, State, TrayIcon};
+use crate::Menu;
+use crate::tray::{Set, State, TrayIcon};
 
 /// `NIN_KEYSELECT`: the icon chosen with the keyboard.
 const NIN_KEYSELECT: u32 = NIN_SELECT | 1;
@@ -331,7 +332,8 @@ fn describe(menu: HMENU, depth: usize, out: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::tray::{self, Item, TrayIcon};
+  use crate::Item;
+  use crate::tray::{self, TrayIcon};
 
   /// A menu dismissed (Escape, a click outside) chooses nothing and keeps the callback.
   #[test]

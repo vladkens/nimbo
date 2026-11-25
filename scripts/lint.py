@@ -764,6 +764,7 @@ PLACES = {
     **{f"ui/{x}": "styled" for x in ("containers", "dialog.rs", "form.rs", "theme.rs", "widgets")},
     **{x: "shell" for x in ("app.rs", "shell.rs", "tray", "platform")},
     "harness.rs": "harness",
+    "harness": "harness",
     "lib.rs": "root",
     # The platform's files below the shell, by what they back.
     **{

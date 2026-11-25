@@ -2,10 +2,10 @@
 
 //! A paste of the app's own text where the user types in another app, as a dictation app does:
 //! the text goes on the clipboard as an offer that tells when it is read
-//! ([SystemClipboard::offer]), the paste shortcut goes to the app in focus ([crate::keys::post]),
-//! and the clipboard the user had comes back [RESTORE] after the read (some apps read more than
-//! once), or [CAP] after the paste when nothing reads it; only while the clipboard still holds the
-//! text: what the user copied meanwhile stays. A restore still waiting runs when the app quits.
+//! ([SystemClipboard::offer]), the paste shortcut goes to the app in focus ([post]), and the
+//! clipboard the user had comes back half a second after the read (some apps read more than
+//! once), or 8 seconds after the paste when nothing reads it; only while the clipboard still holds
+//! the text: what the user copied meanwhile stays. A restore still waiting runs when the app quits.
 //! Ported from wavo-app's `src/app.rs` (same author, MIT).
 //!
 //! The shortcut is ⌘V on macOS and Ctrl+V elsewhere, Ctrl+Shift+V into a terminal on Linux (Ctrl+V
@@ -32,15 +32,16 @@ use std::cell::{Cell, RefCell};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use crate::clipboard::{Offer, Snapshot, SystemClipboard};
+use crate::clipboard::{Clipboard, Offer, Snapshot, SystemClipboard};
 use crate::focus::{self, Focused};
 use crate::keys::{CMD, Key, Shortcut};
-use crate::{Clipboard, Error, Modifiers, keys, permissions, platform, runloop};
+pub use crate::keys::{post, ready};
+use crate::{Error, Modifiers, keys, permissions, platform, runloop};
 
 /// How long after the offer's read the clipboard comes back: some apps read it more than once.
-pub const RESTORE: Duration = Duration::from_millis(500);
+pub(crate) const RESTORE: Duration = Duration::from_millis(500);
 /// How long after the paste the clipboard comes back when nothing reads the offer.
-pub const CAP: Duration = Duration::from_secs(8);
+pub(crate) const CAP: Duration = Duration::from_secs(8);
 /// How long a caller off the main thread waits for [text] on Wayland ([crate::focus::hidden]),
 /// where the first paste waits for the user's answer to the desktop's dialog (nimbo gives it 60 s).
 pub const PORTAL_WAIT: Duration = Duration::from_secs(65);

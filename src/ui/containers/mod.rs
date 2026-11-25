@@ -8,12 +8,12 @@
 //! They plug into the [super::Ui] as add-ons: a menu tells its items about itself through
 //! [super::Ui::slot].
 
-pub mod list;
-pub mod menu;
-pub mod popup;
-pub mod split;
-pub mod tabs;
-pub mod toolbar;
+pub(crate) mod list;
+pub(crate) mod menu;
+pub(crate) mod popup;
+pub(crate) mod split;
+pub(crate) mod tabs;
+pub(crate) mod toolbar;
 
 pub use list::{InsetGroupedListStyle, InsetListStyle};
 pub use popup::MenuPickerStyle;

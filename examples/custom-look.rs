@@ -12,6 +12,9 @@
 // A Windows app, not a console one: no terminal opens with its window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[path = "common/example.rs"]
+mod example;
+
 use std::time::Duration;
 
 use nimbo::{
@@ -346,7 +349,8 @@ impl App for Brew {
 fn main() {
   // The shot: a cold brew being named (no bloom to set), a recipe selected, the pointer resting
   // on Save, its tip showing.
-  nimbo::run_example(Config::new("Brew", 600.0, 420.0), Brew::default(), |h| {
+  let args: Vec<String> = std::env::args().skip(1).collect();
+  example::run(Config::new("Brew", 600.0, 420.0), Brew::default(), &args, |h| {
     h.frame();
     h.click_id(Id::of(METHOD).key(("item", 2usize)));
     let r = h.rect(Id::of(SAVED).key(("row", 1u64))).unwrap();

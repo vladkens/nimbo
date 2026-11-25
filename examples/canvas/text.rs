@@ -121,7 +121,7 @@ impl App for Text {
 
   fn paint(&mut self, f: &mut Frame) {
     let p = self.palette();
-    f.rect(Rect::new(0.0, 0.0, f.size.w, f.size.h), p.bg, 0.0);
+    f.rect(Rect::new(0.0, 0.0, f.size().w, f.size().h), p.bg, 0.0);
 
     for s in STYLES.iter().chain(&SCRIPTS) {
       f.text(X, s.y, s.text, s.font, p.ink);
@@ -138,7 +138,7 @@ impl App for Text {
     f.pop_clip();
 
     for (k, y) in SUBPIXEL_Y.into_iter().enumerate() {
-      f.text(subpixel_x(k, f.scale), y, SUBPIXEL, SUBPIXEL_FONT, p.ink);
+      f.text(subpixel_x(k, f.scale()), y, SUBPIXEL, SUBPIXEL_FONT, p.ink);
       f.text_at(SIZES_X, y, SUBPIXEL_NOTES[k], NOTE, p.dim, 1.0);
     }
   }

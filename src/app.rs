@@ -7,7 +7,7 @@
 use std::time::{Duration, Instant};
 
 use crate::TitleBar;
-pub use crate::clipboard::{Clipboard, MemClipboard};
+pub use crate::clipboard::Clipboard;
 pub use crate::event::{
   Appearance, ColorScheme, Event, Ime, MouseButton, Phase, WHEEL_LINE, Waker,
 };
@@ -31,7 +31,7 @@ use crate::ui::{
 pub trait App {
   /// Handles one input event, after the runtime routed it through the last frame's tree:
   /// `cx` tells what is under the pointer and what was clicked ([Cx::clicked]). Keys, text and
-  /// commands come here when the focused element did not use them (see [crate::keys] for the
+  /// commands come here when the focused element did not use them (the crate's doc has the
   /// order). Returns true when the event was used, which redraws the frame; a key with Cmd that
   /// returns false goes on to the menu (Cmd-Q), an unused key on to text input.
   fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
@@ -115,17 +115,42 @@ impl Clock {
 /// What `App::event` gets besides the event: the window, the clock, the clipboard and the
 /// pointer routed through the last frame's tree.
 pub struct Cx<'a> {
-  pub size: Size,
-  pub scale: f32,
-  pub mouse: Option<Point>,
-  pub now: Duration,
-  pub waker: &'a Waker,
+  pub(crate) size: Size,
+  pub(crate) scale: f32,
+  pub(crate) mouse: Option<Point>,
+  pub(crate) now: Duration,
+  pub(crate) waker: &'a Waker,
   quit: &'a mut bool,
   redraw: bool,
   ui: &'a mut UiState,
 }
 
 impl Cx<'_> {
+  /// The view's size in points.
+  pub fn size(&self) -> Size {
+    self.size
+  }
+
+  /// Pixels per point.
+  pub fn scale(&self) -> f32 {
+    self.scale
+  }
+
+  /// The pointer in points, `None` when it is outside the view.
+  pub fn mouse(&self) -> Option<Point> {
+    self.mouse
+  }
+
+  /// Time from the runtime's clock: real in a window, virtual in the harness.
+  pub fn now(&self) -> Duration {
+    self.now
+  }
+
+  /// Wakes the loop from another thread ([Waker]).
+  pub fn waker(&self) -> &Waker {
+    self.waker
+  }
+
   /// Ends the app (the loop stops, the window closes); the harness records it.
   pub fn quit(&mut self) {
     *self.quit = true;
@@ -795,6 +820,7 @@ mod tests {
   use std::sync::mpsc;
 
   use super::*;
+  use crate::clipboard::MemClipboard;
   use crate::keys::{CMD, Key, Shortcut};
   use crate::scene::Rect;
   use crate::ui::{Float, Kind, Style, TextStyle, Theme, Transition, grow, px};

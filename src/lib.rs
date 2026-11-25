@@ -4,15 +4,20 @@
 //! window, input and text behind `platform` (AppKit and CoreText on macOS, Win32 and DirectWrite
 //! on Windows, GTK 3 with fontconfig, FreeType and HarfBuzz on Linux), nothing else.
 //!
-//! An [App] gets [Event]s and builds each frame as an element tree on a [Ui] (laid out and painted
-//! by [ui]; [App::view] says how often a view runs and what it may change) and/or paints shapes,
-//! images and [text] through a [Frame]; the runtime drives it, fed by the window (`platform`) or
-//! by the headless [Harness], both drawing with nimbo's CPU renderer. The scene, the renderer
-//! and the laid-out tree are the crate's own, so they can change without breaking an app.
-//! Its strings show in the user's language from the app's gettext catalogs ([locale], [t!]).
-//! Examples start with [run_example], which opens a window, or with `--shot <file.png>` runs the
-//! harness instead (in the dark appearance unless `--appearance light`, in English unless
-//! `--locale <tag>`).
+//! An [App] gets [Event]s and builds each frame as an element tree on a [Ui] (laid out and
+//! painted by nimbo; [App::view] says how often a view runs and what it may change) and/or paints
+//! shapes, images and text through a [Frame]; the runtime drives it, fed by the window
+//! (`platform`) or by the headless [Harness], both drawing with nimbo's CPU renderer. The scene,
+//! the renderer and the laid-out tree are the crate's own, so they can change without breaking an
+//! app. Its strings show in the user's language from the app's gettext catalogs ([t!], below).
+//! The examples (`examples/`) open a window, or with `--shot <file.png>` render it in the harness
+//! instead (in the dark appearance unless `--appearance light`, in English unless `--locale
+//! <tag>`).
+//!
+//! What an app builds with is at the crate's root, one name each, as SwiftUI's one namespace
+//! (`nimbo::Button`, `nimbo::Icon`). A module is a service of its own that an app names as it
+//! calls it (`tray::Tray`, `hotkey::Hotkeys`, `paste::text`), the clipboard ([clipboard]), what
+//! assistive technology reads ([a11y]) and the test harness's parts ([harness]).
 //!
 //! An app with no window, or more than one, starts with [app()]: windows on demand ([Main::open])
 //! and overlays, HUDs over every app ([Config::overlay]), the menu bar's commands
@@ -24,11 +29,11 @@
 //! ([attach_console]) and an uninstall that undoes what nimbo set up ([uninstall]); and to reach
 //! other apps: links and files opened or shown ([open]), the OS's permissions ([permissions]),
 //! where the user types ([focus]) and with which keyboard layout ([input_source]), keys posted to
-//! the app in focus ([keys::post]), the clipboard, also taken and put back around a paste of the
-//! app's own ([SystemClipboard]), and that paste itself, which gives the clipboard back ([paste]);
-//! photos decoded by the OS at the size they show ([Bitmap]); and the hardware: how a microphone is
-//! attached and the laptop's lid ([hardware]), and the system's changes, such as a microphone
-//! plugged or the lid closed, as they come ([system], [Main::watch]).
+//! the app in focus ([paste::post]), the clipboard, also taken and put back around a paste of the
+//! app's own ([clipboard::SystemClipboard]), and that paste itself, which gives the clipboard back
+//! ([paste]); photos decoded by the OS at the size they show ([Bitmap]); and the hardware: how a
+//! microphone is attached and the laptop's lid ([hardware]), and the system's changes, such as a
+//! microphone plugged or the lid closed, as they come ([system], [Main::watch]).
 //!
 //! macOS 11 is the least it runs on, rustc's default deployment target, so an app sets none;
 //! newer APIs are used where the system has them (the activation, the display link and menu
@@ -42,6 +47,103 @@
 //! reads one back, a getter, `is_` before a flag and `get_` before a name a builder holds
 //! ([TextStyle::get_color]). The theme, its sizes and a form's style, read far more than built,
 //! read by the field's name and change by `with_` it (`Theme::PLATES_DARK.with_text(WHITE)`).
+//!
+//! # Building a frame
+//!
+//! ```ignore
+//! ui.row(Style::new().pad(8.0).gap(8.0).bg(PANEL), |ui| {
+//!   ui.text("Title", BOLD);
+//!   ui.spacer();
+//!   ui.id("save").row(BUTTON, |ui| ui.text("Save", LABEL));
+//! });
+//! ```
+//!
+//! Containers take their children in a closure, so the code nests like the tree. Every element
+//! gets an [Id]: its index among its siblings hashed with its parent's id, a key hashed the same
+//! way ([Ui::key], stable when lists change), or a frame-wide name ([Ui::id], found again with
+//! [Id::of]). The last frame's tree with every element's rect is kept for hit testing
+//! (`input`): named elements get hover, press and clicks, which the view reads by id. State the
+//! app should not hold (scroll offsets, animations) lives in a store keyed by id ([Ui::state]).
+//!
+//! ```ignore
+//! let plus = Id::of("plus");
+//! let fade = ui.animate(plus, if ui.hovered(plus) { 1.0 } else { 0.0 }, FADE);
+//! if ui.with_id(plus).row(BUTTON.bg(mix(RAISED, HOVER, fade)), |ui| ui.text("+", LABEL)).clicked {
+//!   self.count += 1;
+//! }
+//! ```
+//!
+//! Widgets (label, button, text field, check box, switch, slider and the
+//! like) and containers (list, menu, picker, tabs, split; the scroll area they
+//! scroll in is a behaviour's, [Ui::scroll_area]) do this for an app in the look of the theme
+//! the app sets (`Ui::set_theme`):
+//! `if ui.id("plus").button("+").clicked { .. }`; so do a settings form ([FormRow], [Section]) and
+//! a modal dialog ([Dialog]).
+//! What they read of where they are built, the theme, their size, whether they are enabled, is
+//! the environment: values by type a container puts for what is built in it
+//! ([Ui::environment]: `ui.disabled(true).col(..)`), the window for all ([Ui::set_environment]).
+//!
+//! The rule for every widget: a headless behaviour (`ui.button_behavior(id)` and
+//! the like, hover, press, click, focus, keys and the value edited) plus drawing from the
+//! theme. An app that wants its own look keeps the behaviour and draws the element itself.
+//! Behaviours also record what their element is to assistive technology ([a11y]), so a look of
+//! the app's own reads as the theme's does.
+//!
+//! # Keys
+//!
+//! A key press travels in this order:
+//!
+//! 0. A focused element that grabs the keys ([Ui::grab_keys]: a hotkey recorder recording, a modal
+//!    dialog) gets the key itself first.
+//! 1. Bindings of the focused element, then of its ancestors ([Ui::keymap]): a match becomes a
+//!    [Command] for that element, which reads it with [Ui::command].
+//! 2. The app's bindings ([App::keymap]): a match goes to `App::event` as [Event::Command].
+//! 3. The key itself: the focused element ([Ui::key_down]), then `App::event` as [Event::KeyDown].
+//! 4. Nobody used it: AppKit's `interpretKeyEvents:` turns it into typed text (`insertText:`,
+//!    [Event::Text]) or a command (`doCommandBySelector:`, [Event::Command]), with the system's
+//!    bindings: arrows, Option and Cmd moves, Emacs-style Ctrl keys. Text and commands go to the
+//!    focused element, then the app; an unused Tab or Shift-Tab moves focus. A key with Cmd that
+//!    nobody used goes on to the menu bar (Cmd-Q), then to step 4.
+//!
+//! The menu bar's Edit items ([Commands]) run the command their key would: the focused
+//! element, then those above it that bind the command, then the app.
+//!
+//! # Strings in the user's language
+//!
+//! An app marks its strings with [t!] and [tn!]; they are looked up in gettext catalogs the app
+//! ships, keyed by the English text itself, as SwiftUI's `Text("…")` and gettext key them.
+//!
+//! - `t!("Keep the history")` is a [Localized], `const` and `Copy`, translated where it shows: a
+//!   text ([Ui::text]), a [Content], `format!("{KEEP}")`, a label as `&t!("Cancel")` (a `&str`). A
+//!   string not marked never is (SwiftUI's `Text(verbatim:)`): names, paths, what the user typed.
+//! - `t!("{chosen} is not on disk", chosen, size = f.size)` is a `String` translated now, its
+//!   `{name}`s filled (`{{` and `}}` for braces), in the order the translation puts them.
+//! - `tn!("{n} file", "{n} files", count)` is a `String` in the form the catalog's `Plural-Forms`
+//!   picks for `count` (English's without one: 1, else the other), `{n}` the count; more `{name}`s
+//!   follow as in `t!`.
+//!
+//! The catalogs, one `.po` file per language, come with the window's [Config]
+//! ([Config::localizations]), or before any window, for a tray
+//! menu, from [Main::set_localizations]; only the one in use is read. The
+//! language is the system's ([Locale::System]) or the app's choice ([Main::set_locale]),
+//! found as the tag (`pt-BR`), then its language (`pt`); a language alone also finds its first
+//! longer tag (`pt` finds `pt-BR`, as Apple's bundles); with no catalog, the English text.
+//! nimbo's own strings (OK and Cancel, the text menu, an icon button's name) come in its own
+//! catalogs (`locales/`, `make i18n`), in the language the app's give.
+//! `pseudo` is a pseudo language (`--locale pseudo` in an example): every marked string accented
+//! and a third longer, so unmarked and cut strings show. GNU gettext (0.24 or later, for Rust)
+//! keeps the catalogs; a comment `// Translators: …` before a string goes to its translator:
+//!
+//! ```sh
+//! xgettext --language=Rust --keyword='t!:1' --keyword='tn!:1,2' --add-comments=Translators \
+//!   --from-code=UTF-8 -o locales/messages.pot src/*.rs
+//! msginit -l ru_RU.UTF-8 -i locales/messages.pot -o locales/ru.po  # a new language
+//! msgmerge --update locales/ru.po locales/messages.pot              # the code changed
+//! msgfmt -c --statistics -o /dev/null locales/ru.po                 # forms, {placeholders}
+//! ```
+//!
+//! An English string changed becomes fuzzy in the catalogs and shows in English until a
+//! translator confirms it; one removed becomes obsolete (`#~`).
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(
   not(all(feature = "full", feature = "harness")),
@@ -52,7 +154,7 @@
 )]
 
 pub mod activity;
-pub mod app;
+mod app;
 #[cfg(feature = "autostart")]
 pub mod autostart;
 #[cfg(feature = "bitmap")]
@@ -78,8 +180,8 @@ mod info;
 pub mod input_source;
 #[cfg(feature = "instance")]
 pub mod instance;
-pub mod keys;
-pub mod locale;
+mod keys;
+mod locale;
 mod menu;
 pub mod open;
 #[cfg(feature = "paste")]
@@ -91,37 +193,30 @@ pub(crate) mod platform;
 #[cfg(feature = "png")]
 mod png;
 mod runloop;
-pub mod scene;
-pub mod shell;
-pub mod svg;
+mod scene;
+mod shell;
+mod svg;
 #[cfg(feature = "system")]
 pub mod system;
-pub mod text;
+mod text;
 #[cfg(feature = "tray")]
 pub mod tray;
-pub mod ui;
+mod ui;
 #[cfg(feature = "autostart")]
 pub mod uninstall;
 mod window;
 
-#[cfg(feature = "harness")]
-use std::path::PathBuf;
-
-pub use app::{
-  App, Appearance, Clipboard, ColorScheme, Cx, Event, Ime, MemClipboard, MouseButton, Phase,
-  WHEEL_LINE, Waker,
-};
+pub use app::{App, Appearance, ColorScheme, Cx, Event, Ime, MouseButton, Phase, Waker};
 #[cfg(feature = "bitmap")]
 pub use bitmap::Bitmap;
-pub use clipboard::SystemClipboard;
 pub use commands::{CommandGroupPlacement, Commands};
 pub use error::Error;
 pub use file_dialog::{FileDialog, FileDialogKind};
 #[cfg(feature = "harness")]
-pub use harness::Harness;
+pub use harness::run::Harness;
 pub use keys::{
-  Binding, CMD, Code, Command, EDIT_KEYS, Hotkey, Key, KeyEvent, Modifiers, NamedKey, Os,
-  SELECT_KEYS, Shortcut, shortcut,
+  Binding, CMD, CTRL, Code, Command, Hotkey, Key, KeyEvent, Modifiers, NamedKey, Os, Shortcut,
+  ShortcutError,
 };
 pub use locale::{Locale, Localizations, Localized};
 pub use menu::{ButtonRole, Item, Menu};
@@ -129,20 +224,20 @@ pub use menu::{ButtonRole, Item, Menu};
 pub use png::Png;
 pub use scene::{Color, Frame, ImageId, Images, Point, Quad, Rect, Size, alpha, mix, rgb};
 pub use shell::{Anchor, AppInfo, Main, Presence, Proxy, Window, WindowId, app, attach_console};
-pub use text::{Design, Font, Weight};
+pub use text::{Design, Font, Metrics, Weight};
 pub use ui::{
   Align, Axes, Axis, Click, Clip, ContentMode, ControlSize, CoordinateSpace, Cursor, Dim, Ease,
-  Enabled, EnvironmentValue, Float, Focus, FocusDirection, FocusRing, Icon, IconPaint, Id,
-  ImageSource, LinePattern, NativeMenu, Press, Response, Scroll, Shadow, Style, TextInput,
+  Enabled, EnvironmentValue, Float, Focus, FocusDirection, FocusRing, FrameStats, Icon, IconPaint,
+  Id, ImageSource, LinePattern, NativeMenu, Press, Response, Scroll, Shadow, Style, TextInput,
   TextLines, TextStyle, Transition, TruncationMode, Ui, UnitPoint, grow, pct, px, rigid,
 };
 #[cfg(feature = "styled")]
 pub use ui::{
   Answer, BorderedButtonStyle, BorderedProminentButtonStyle, BorderlessButtonStyle,
-  ButtonToggleStyle, CheckboxToggleStyle, ControlBorder, Dialog, FormRow, FormStyle,
+  ButtonToggleStyle, CheckboxToggleStyle, ControlBorder, Dialog, FormRow, FormStyle, Glass,
   InsetGroupedListStyle, InsetListStyle, LinearSliderStyle, MenuPickerStyle,
-  RoundedBorderTextFieldStyle, Section, SegmentedPickerStyle, Sizes, Split, SwitchToggleStyle,
-  Tabs, Theme, Tone, ToolbarItemPlacement, TooltipHelpStyle,
+  RoundedBorderTextFieldStyle, Section, SegmentedPickerStyle, Sizes, Split, SwitchSize,
+  SwitchToggleStyle, Tabs, Theme, Tone, ToolbarItemPlacement, TooltipHelpStyle,
 };
 #[cfg(feature = "headless")]
 pub use ui::{
@@ -157,142 +252,16 @@ pub use ui::{
 };
 pub use window::{Config, TitleBar, WindowToolbarStyle};
 
-#[cfg(feature = "harness")]
-const USAGE: &str = "usage: [--shot <file.png>] [--scale <n>] [--size <w>x<h>] \
-  [--appearance light|dark] [--locale <tag>|pseudo]";
-
-#[cfg(feature = "harness")]
-#[derive(Debug, Default, PartialEq)]
-struct Args {
-  shot: Option<PathBuf>,
-  scale: f32,
-  /// The view size in points instead of the config's.
-  size: Option<Size>,
-  /// The OS appearance the harness reports; dark by default.
-  appearance: Option<Appearance>,
-  /// The language ([Locale]): the system's in a window, English in a shot unless given.
-  locale: Option<Locale>,
+/// What an element is to assistive technology: its role, value, states and actions, which a
+/// behaviour records for its control and a look of the app's own refines ([Ui::a11y]).
+pub mod a11y {
+  pub use crate::ui::a11y::{Access, Action, LabeledPairRole, Role, State, Value};
 }
 
-#[cfg(feature = "harness")]
-impl Args {
-  fn parse(args: &[String]) -> Result<Self, String> {
-    let mut out = Self { scale: 2.0, ..Self::default() };
-    let mut it = args.iter();
-    while let Some(arg) = it.next() {
-      match arg.as_str() {
-        "--shot" => out.shot = Some(it.next().ok_or("--shot needs a path")?.into()),
-        "--scale" => {
-          let v = it.next().ok_or("--scale needs a number")?;
-          out.scale = v.parse().map_err(|e| format!("--scale: {e}"))?;
-          if !positive(out.scale) {
-            return Err(format!("--scale: {v} is not a positive number"));
-          }
-        }
-
-        "--size" => {
-          let v = it.next().ok_or("--size needs <w>x<h>")?;
-          let (w, h) = v.split_once('x').ok_or("--size needs <w>x<h>")?;
-          let num = |s: &str| match s.parse::<f32>() {
-            Ok(n) if positive(n) => Ok(n),
-            Ok(_) => Err(format!("--size: {s} is not a positive number")),
-            Err(e) => Err(format!("--size: {e}")),
-          };
-          out.size = Some(Size::new(num(w)?, num(h)?));
-        }
-
-        "--appearance" => {
-          let scheme = it.next().ok_or("--appearance needs light or dark")?;
-          let scheme = scheme.parse().map_err(|e| format!("--appearance: {e}"))?;
-          out.appearance = Some(Appearance { scheme, accent: None });
-        }
-        "--locale" => {
-          let tag = it.next().ok_or("--locale needs a language tag")?;
-          // Read once per process: it lives as long as it.
-          out.locale = Some(Locale::Tag(Box::leak(tag.clone().into_boxed_str())));
-        }
-        _ => return Err(format!("unknown argument {arg}")),
-      }
-    }
-
-    Ok(out)
-  }
-}
-
-#[cfg(feature = "harness")]
-/// A finite number above zero: a scale or a size the harness can render.
-fn positive(n: f32) -> bool {
-  n.is_finite() && n > 0.0
-}
-
-#[cfg(feature = "harness")]
-/// The entry point of every example: [run_args] with the process's whole command line, exiting
-/// with the usage on any argument it doesn't know; an app with its own arguments takes them and
-/// passes the rest to [run_args].
-pub fn run_example<A: App + 'static>(cfg: Config, app: A, script: impl FnOnce(&mut Harness<A>)) {
-  let args: Vec<String> = std::env::args().skip(1).collect();
-  run_args(cfg, app, script, &args);
-}
-
-#[cfg(feature = "harness")]
-/// With no `args` it opens a window and runs until it closes; with `--shot <file.png>` it runs
-/// the app in the [Harness] at `cfg.size` (or `--size`) and `--scale` (default 2), first applying
-/// `script` (the state the shot shows), then writing the PNG. Unknown arguments print the usage
-/// and exit with status 2. For an app that parses its own command line and passes the rest on:
-///
-/// ```no_run
-/// struct Settings;
-/// impl nimbo::App for Settings {}
-///
-/// // `myapp settings --shot settings.png`: the app takes `settings`, the rest opens the window
-/// // or renders its shot.
-/// let args: Vec<String> = std::env::args().skip(1).collect();
-/// if let Some((command, rest)) = args.split_first()
-///   && command == "settings"
-/// {
-///   nimbo::run_args(nimbo::Config::new("Settings", 640.0, 480.0), Settings, |_| {}, rest);
-/// }
-/// ```
-pub fn run_args<A: App + 'static>(
-  cfg: Config,
-  app: A,
-  script: impl FnOnce(&mut Harness<A>),
-  args: &[String],
-) {
-  let args = Args::parse(args).unwrap_or_else(|e| {
-    eprintln!("{e}\n{USAGE}");
-    std::process::exit(2);
-  });
-  let Some(path) = &args.shot else {
-    if let Some(l) = args.locale {
-      locale::set(l);
-    }
-
-    return shell::window(&cfg, Box::new(app));
-  };
-
-  let mut h = harness(&cfg, app, &args);
-  script(&mut h);
-  if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
-    std::fs::create_dir_all(dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display()));
-  }
-
-  h.shot(path).unwrap_or_else(|e| panic!("{e}"));
-  println!("{}: wrote {}", cfg.title, path.display());
-}
-
-#[cfg(feature = "harness")]
-/// The harness [run_args] shoots in, at the size and scale of `args`, in its language (English
-/// unless `--locale` says otherwise); the app first hears the appearance, dark unless
-/// `--appearance` says otherwise, as a window tells it the OS's.
-fn harness<A: App>(cfg: &Config, app: A, args: &Args) -> Harness<A> {
-  let mut h = Harness::new(app, args.size.unwrap_or(cfg.size), args.scale);
-  h.set_locale(args.locale.unwrap_or(Locale::Tag("en")), cfg.localizations);
-  h.set_transparent(cfg.overlay.is_some());
-  // A unified window's title bar as macOS's.
-  h.set_titlebar(cfg.unified.then(|| harness::mac_titlebar(cfg.title, false)));
-  h.event(Event::Appearance(args.appearance.unwrap_or(Appearance::DARK)));
-  h
+/// What [t!] and [tn!] expand to.
+#[doc(hidden)]
+pub mod __private {
+  pub use crate::locale::{format, plural};
 }
 
 #[cfg(test)]
@@ -304,90 +273,6 @@ mod tests {
   #[should_panic(expected = "side² RGBA")]
   fn an_icon_of_the_wrong_size_is_refused() {
     let _ = Config::new("a", 1.0, 1.0).icon(2, &[0; 4]);
-  }
-
-  #[test]
-  fn shots_tell_the_appearance() {
-    #[derive(Default)]
-    struct Seen(Option<Appearance>);
-    impl App for Seen {
-      fn event(&mut self, _cx: &mut Cx, ev: &Event) -> bool {
-        if let Event::Appearance(a) = ev {
-          self.0 = Some(*a);
-        }
-
-        true
-      }
-    }
-
-    // The app hears the first one, the default dark too, and the theme follows it.
-    let cfg = Config::new("a", 100.0, 100.0);
-    let seen = |s: &str| {
-      let h = harness(&cfg, Seen::default(), &parse(s).unwrap());
-      (h.app().0, h.rt.ui.appearance())
-    };
-    assert_eq!(seen(""), (Some(Appearance::DARK), Appearance::DARK));
-    assert_eq!(seen("--appearance light"), (Some(Appearance::LIGHT), Appearance::LIGHT));
-  }
-
-  /// An overlay's shot is transparent where it draws nothing, a window's black.
-  #[test]
-  fn overlay_shots_are_transparent() {
-    struct Nothing;
-    impl App for Nothing {}
-
-    let args = parse("").unwrap();
-    let cfg = Config::new("a", 10.0, 10.0);
-    let corner = |cfg: &Config| harness(cfg, Nothing, &args).render().pixel(1.0, 1.0);
-    assert_eq!(corner(&cfg), [0, 0, 0, 255]);
-    assert_eq!(corner(&cfg.overlay(Anchor::Center)), [0; 4]);
-  }
-
-  fn parse(s: &str) -> Result<Args, String> {
-    Args::parse(&s.split_whitespace().map(String::from).collect::<Vec<_>>())
-  }
-
-  #[test]
-  fn args() {
-    let a = parse("--shot a.png --scale 1").unwrap();
-    assert_eq!(a, Args { shot: Some("a.png".into()), scale: 1.0, ..Args::default() });
-    assert_eq!(parse("").unwrap(), Args { scale: 2.0, ..Args::default() });
-
-    assert_eq!(parse("--size 1280x800").unwrap().size, Some(Size::new(1280.0, 800.0)));
-    assert_eq!(parse("--appearance light").unwrap().appearance, Some(Appearance::LIGHT));
-    assert!(parse("--appearance blue").is_err());
-    assert_eq!(parse("--locale ru").unwrap().locale, Some(Locale::Tag("ru")));
-    assert!(parse("--locale").is_err());
-    assert!(parse("--size 10").is_err());
-    for bad in ["0", "-1", "inf", "NaN"] {
-      assert!(parse(&format!("--scale {bad}")).is_err(), "--scale {bad}");
-      assert!(parse(&format!("--size {bad}x10")).is_err(), "--size {bad}x10");
-      assert!(parse(&format!("--size 10x{bad}")).is_err(), "--size 10x{bad}");
-    }
-
-    assert!(parse("--shot").is_err());
-    assert!(parse("--what").is_err());
-  }
-
-  /// The arguments given, not the process's (the test runner's), pick the shot.
-  #[test]
-  fn run_args_shoots_with_the_arguments_given() {
-    struct Blank;
-    impl App for Blank {}
-
-    let dir = std::env::temp_dir().join(format!("nimbo-run-args-{}", std::process::id()));
-    let path = dir.join("shot.png");
-    let args = ["--shot", path.to_str().unwrap(), "--scale", "1", "--size", "40x30"];
-    let args: Vec<String> = args.map(String::from).to_vec();
-    let mut scripted = false;
-    run_args(Config::new("a", 100.0, 100.0), Blank, |_| scripted = true, &args);
-    let png = std::fs::read(&path).unwrap();
-    std::fs::remove_dir_all(&dir).unwrap();
-    assert!(scripted);
-    assert_eq!(&png[1..4], b"PNG");
-    // IHDR's width and height, big-endian: `--size` at `--scale`.
-    let size = |at: usize| u32::from_be_bytes(png[at..at + 4].try_into().unwrap());
-    assert_eq!((size(16), size(20)), (40, 30));
   }
 
   #[test]
