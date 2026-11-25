@@ -11,7 +11,9 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 use nimbo::ui::Role;
-use nimbo::{App, Config, FormStyle, Icon, Id, List, ListStyle, Selection, Style, Ui, grow};
+use nimbo::{
+  App, Config, FormStyle, Icon, Id, InsetGroupedListStyle, List, Selection, Style, Ui, grow,
+};
 
 pub const ROWS: usize = 86_000;
 /// Dictations a day: the oldest day has what is left.
@@ -76,10 +78,9 @@ impl App for History {
     let mut copied = None;
     let mut sel = std::mem::take(&mut self.sel);
     let list = List::new(rows, ROW_H).key(&key).selection(&mut sel);
-    let list = list.list_style(ListStyle::Grouped);
     let list = list.sections(starts, head_h, &head);
     ui.col(Style::new().grow().bg(fs.bg), |ui| {
-      list.show(ui.id(LIST), |ui, row| {
+      list.show(ui.list_style(&InsetGroupedListStyle).id(LIST), |ui, row| {
         let i = row.index - starts[starts.partition_point(|&s| s <= row.index) - 1];
         let e = row.key;
         let text = format!("Dictation {e}: what was said, on one line");

@@ -17,9 +17,9 @@ use crate::scene::{Frame, Images, Point, Rect, Scene, Size};
 use crate::text::TextSystem;
 use crate::ui::{
   Action, BorderedButtonStyle, ButtonStyle, Click, Cursor, DrawnEditMenu, FocusDirection,
-  FrameStats, Id, LinearSliderStyle, MenuPickerStyle, PickerStyle, Role,
-  RoundedBorderTextFieldStyle, SliderStyle, SwitchToggleStyle, Sys, TextFieldStyle, TextInput,
-  ToggleStyle, Ui, UiState, drags_window,
+  FrameStats, HelpStyle, Id, InsetListStyle, LinearSliderStyle, ListStyle, MenuPickerStyle,
+  PickerStyle, Role, RoundedBorderTextFieldStyle, SliderStyle, SwitchToggleStyle, Sys,
+  TextFieldStyle, TextInput, ToggleStyle, TooltipHelpStyle, Ui, UiState, drags_window,
 };
 
 /// An application: owns its state, reacts to events and draws the frame from it, as an element
@@ -230,16 +230,20 @@ impl<A: App> Runtime<A> {
     let mut ui = UiState::default();
     ui.waker = waker.clone();
     ui.clipboard = clipboard;
+
     // The window's looks, System Settings': what the core and the headless widgets don't name.
     ui.set_environment_default::<&dyn ButtonStyle>(&BorderedButtonStyle);
     ui.set_environment_default::<&dyn ToggleStyle>(&SwitchToggleStyle);
     ui.set_environment_default::<&dyn SliderStyle>(&LinearSliderStyle);
     ui.set_environment_default::<&dyn TextFieldStyle>(&RoundedBorderTextFieldStyle);
+    ui.set_environment_default::<&dyn PickerStyle>(&MenuPickerStyle);
+    ui.set_environment_default::<&dyn ListStyle>(&InsetListStyle);
+    ui.set_environment_default::<&dyn HelpStyle>(&TooltipHelpStyle);
     // The edit menu drawn where the platform shows none (the harness), in the theme's look.
     ui.set_environment_default(DrawnEditMenu(|ui, id, at, m| {
       ui.drawn_context_menu(id, at, || m.items())
     }));
-    ui.set_environment_default::<&dyn PickerStyle>(&MenuPickerStyle);
+
     Self {
       app,
       size,
@@ -745,7 +749,8 @@ impl<A: App> Runtime<A> {
 
 /// Runs `app`'s view on `ui`, lending it the text system for [Ui::measure] and the images for
 /// [Ui::rgba_image] (moved in and back: an empty one holds its place, which allocates nothing);
-/// then shows the tooltips it asked for ([Ui::help]) and puts the theme's focus ring.
+/// then shows the tooltips it asked for ([Ui::help]), in the window's help style, and puts the
+/// theme's focus ring.
 fn run_view<'a, A: App>(
   app: &'a mut A,
   text: &mut TextSystem,

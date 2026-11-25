@@ -74,15 +74,17 @@ pub use a11y::{A11yNode, A11yTree, Action, LabeledPairRole, Props, Role, State, 
 pub(crate) use behavior::DrawnEditMenu;
 pub use behavior::{
   Behavior, Button, ButtonConfiguration, ButtonRole, ButtonStyle, Content, DialogBehavior,
-  EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, InlinePickerStyle, ListBehavior,
-  ListRows, MenuPlacement, Picker, PickerConfiguration, PickerStyle, PlainButtonStyle,
-  PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle, ScrollBar, ScrollBehavior, ScrollerKnob,
+  EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, HelpConfiguration, HelpStyle,
+  InlinePickerStyle, List, ListBehavior, ListConfiguration, ListLayout, ListResponse,
+  ListRowConfiguration, ListRows, ListStyle, MenuPlacement, Picker, PickerConfiguration,
+  PickerStyle, PlainButtonStyle, PlainHelpStyle, PlainListStyle, PlainSliderStyle,
+  PlainTextFieldStyle, PlainToggleStyle, Row, ScrollBar, ScrollBehavior, ScrollerKnob,
   SectionHeader, Selection, Slider, SliderConfiguration, SliderStyle, SplitBehavior, Tag,
   TextField, TextFieldConfiguration, TextFieldStyle, TextInput, ToggleConfiguration, ToggleStyle,
   TypeSelect,
 };
 pub use containers::{
-  List, ListResponse, ListStyle, MenuPickerStyle, Row, Split, Tabs, ToolbarItemPlacement,
+  InsetGroupedListStyle, InsetListStyle, MenuPickerStyle, Split, Tabs, ToolbarItemPlacement,
 };
 pub use dialog::{Answer, Dialog};
 pub use environment::{Enabled, EnvironmentValue};
@@ -107,7 +109,7 @@ pub use theme::{ControlBorder, Sizes, SwitchSize, Theme, Tone};
 pub use widgets::{
   BorderedButtonStyle, BorderedProminentButtonStyle, BorderlessButtonStyle, ButtonToggleStyle,
   CheckboxToggleStyle, LinearSliderStyle, RoundedBorderTextFieldStyle, SegmentedPickerStyle,
-  SwitchToggleStyle,
+  SwitchToggleStyle, TooltipHelpStyle,
 };
 
 use self::input::{Deliver, Input, ScrollState};
@@ -770,8 +772,9 @@ impl<'a> Ui<'a> {
   }
 
   /// The next element shows `tip` under the pointer resting on it, a tooltip as macOS places one
-  /// (its left edge at the pointer, 19 below it, after `Theme::tip_delay`, at once within
-  /// `Theme::tip_warm` of another), and reads it as its description to assistive technology, as
+  /// (its left edge at the pointer, 19 below it, after a rest of 200 ms, at once within a second
+  /// of another) in the window's help style, and reads it as its description to assistive
+  /// technology, as
   /// SwiftUI's `.help`: any element, a text (read where it stands), a widget, a container or a
   /// canvas (read as a group, its children as ever). It takes the hover for the tip alone: a
   /// primary press on it is the interactive element's around it (a button whose label has a

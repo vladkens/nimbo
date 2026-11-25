@@ -2,7 +2,7 @@
 
 Each building block of nimbo beside its SwiftUI counterpart, as the gallery shows it live (`cargo run --release --example gallery`, a page per block in its variants). A block aims at its SwiftUI counterpart's behaviour and API shape without copying it 1:1. The pictures are the gallery's, in the light appearance, kept on the repo's `assets` branch: `make api-shots` makes them and this file again from the gallery's table (`examples/gallery.rs`), so a block changes there.
 
-On macOS SwiftUI's `List` has neither of the grouped styles (`InsetGroupedListStyle` and `GroupedListStyle` are iOS's), so there is no name to take: nimbo's `ListStyle::Grouped` is named after the grouped `Form` (`.formStyle(.grouped)`), whose plates its sections share.
+On macOS SwiftUI's `List` has neither of the grouped styles (`InsetGroupedListStyle` and `GroupedListStyle` are iOS's): nimbo's `InsetGroupedListStyle` takes the iOS name for the plates of the grouped `Form` (`.formStyle(.grouped)`), which its sections share.
 
 ## Layout
 
@@ -442,9 +442,25 @@ nimbo: `List::new(n, 24.0).selection(&mut sel).show(ui, |ui, row| { … })`
 
 SwiftUI: `Section(header:) in a List; .listStyle(…)`
 
-nimbo: `List::new(n, 32.0).sections(&starts, 24.0, &head).list_style(ListStyle::Grouped)`
+nimbo: `List::new(n, 32.0).sections(&starts, 24.0, &head).show(ui.list_style(&InsetGroupedListStyle), |ui, row| { … })`
 
 ![List sections](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/list-sections.png)
+
+### List style
+
+SwiftUI: `List(items, selection: $sel) { … }.listStyle(.plain)`
+
+nimbo: `list.show(ui.list_style(&PlainListStyle), |ui, row| { … }); InsetListStyle by default, InsetGroupedListStyle`
+
+![List style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/list-style.png)
+
+### Custom list style
+
+SwiftUI: `struct Stripes: ListStyle (SwiftUI's has no public makeBody)`
+
+nimbo: `impl ListStyle for Stripes { fn make_body<'a>(&self, ui: &mut Ui<'a>, mut c: ListConfiguration<'_, 'a>) { ui.scroll_area(c.frame(), |ui| c.rows(ui, |ui, mut r| _ = ui.row(r.frame().bg(fill), |ui| r.content(ui)))); } }`
+
+![Custom list style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/custom-list-style.png)
 
 ### List behavior
 
@@ -566,9 +582,17 @@ nimbo: `main.set_commands(&Commands::new().menu("Track", Menu::new(vec![Item::bu
 
 SwiftUI: `.help("Saves it")`
 
-nimbo: `ui.help("Saves it").button("Save"); for (id, tip) in ui.take_tooltips() { /* a look of its own */ }`
+nimbo: `ui.help("Saves it").button("Save"); ui.help_style(&PlainHelpStyle) for the window, TooltipHelpStyle by default`
 
 ![Tooltip](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/tooltip.png)
+
+### Custom help style
+
+SwiftUI: `.help("Saves it") (SwiftUI has no help style)`
+
+nimbo: `impl HelpStyle for Note { fn make_body(&self, ui: &mut Ui, c: HelpConfiguration) { ui.row(style.opacity(c.opacity()), |ui| ui.text(c.text(), s)); } } ui.help_style(&Note)`
+
+![Custom help style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/custom-help-style.png)
 
 ## Modifiers
 

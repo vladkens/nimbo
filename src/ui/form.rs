@@ -167,7 +167,7 @@ impl Glass {
 }
 
 /// A row's piece of a section's plate, as a grouped form's row and a grouped list's
-/// ([super::ListStyle::Grouped]) draw it: a fill over the whole piece, rounded where the plate
+/// ([super::InsetGroupedListStyle]) draw it: a fill over the whole piece, rounded where the plate
 /// is (`radii`), and the hairline at its top, [FormStyle::inset] in from the plate's sides.
 #[derive(Clone, Copy)]
 pub(crate) struct Piece {

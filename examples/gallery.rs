@@ -18,13 +18,14 @@ use nimbo::{
   Align, Answer, App, Axes, Axis, Bitmap, BorderedProminentButtonStyle, BorderlessButtonStyle,
   Button, ButtonConfiguration, ButtonRole, ButtonStyle, ButtonToggleStyle, CheckboxToggleStyle,
   Color, Config, Content, ContentMode, ControlSize, Cursor, Dialog, Enabled, EnvironmentValue,
-  FieldKind, FieldStyle, Float, Font, FormRow, FormStyle, Hotkey, Icon, Id, InlinePickerStyle,
-  Item, LinePattern, List, ListRows, ListStyle, Menu, Picker, PickerConfiguration, PickerStyle,
-  PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle, Quad, Rect, ScrollBar, ScrollerKnob,
-  Section, SegmentedPickerStyle, Selection, Shortcut, Slider, SliderConfiguration, SliderStyle,
-  Split, Style, Tabs, Tag, TextField, TextFieldConfiguration, TextFieldStyle, TextStyle,
-  ToggleConfiguration, ToggleStyle, Tone, ToolbarItemPlacement, TruncationMode, Ui, UnitPoint,
-  WindowToolbarStyle, alpha, grow, mix, px, t, tn,
+  FieldKind, FieldStyle, Float, Font, FormRow, FormStyle, HelpConfiguration, HelpStyle, Hotkey,
+  Icon, Id, InlinePickerStyle, InsetGroupedListStyle, Item, LinePattern, List, ListConfiguration,
+  ListRows, ListStyle, Menu, Picker, PickerConfiguration, PickerStyle, PlainListStyle,
+  PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle, Quad, Rect, Row, ScrollBar,
+  ScrollerKnob, Section, SegmentedPickerStyle, Selection, Shortcut, Slider, SliderConfiguration,
+  SliderStyle, Split, Style, Tabs, Tag, TextField, TextFieldConfiguration, TextFieldStyle,
+  TextStyle, ToggleConfiguration, ToggleStyle, Tone, ToolbarItemPlacement, TruncationMode, Ui,
+  UnitPoint, WindowToolbarStyle, alpha, grow, mix, px, t, tn,
 };
 
 pub const SIDEBAR: &str = "sidebar";
@@ -134,6 +135,40 @@ impl PickerStyle for Chips {
 /// The views a picker shows.
 const VIEWS: [Tag<u8>; 3] = [Tag::new(0, "List"), Tag::new(1, "Grid"), Tag::new(2, "Columns")];
 
+/// A list style of the gallery's own: on a rounded panel, every other row tinted, the selected one
+/// a rounded tile of the accent, fainter while the list is not focused; faded when disabled.
+struct Stripes;
+
+impl ListStyle for Stripes {
+  fn make_body<'a>(&self, ui: &mut Ui<'a>, mut c: ListConfiguration<'_, 'a>) {
+    let t = ui.theme();
+    let frame = c.frame().radius(8.0).bg(t.panel);
+    let frame = if c.is_enabled() { frame } else { frame.opacity(t.disabled) };
+    ui.scroll_area(frame, |ui| {
+      c.rows(ui, |ui, mut r| {
+        let fill = match (r.is_selected(), r.index() % 2) {
+          (true, _) => alpha(t.accent, if r.is_focused() { 0.35 } else { 0.15 }),
+          (false, 1) => alpha(t.text, 0.04),
+          _ => [0.0; 4],
+        };
+
+        ui.row(r.frame().radius(6.0).bg(fill), |ui| r.content(ui));
+      })
+    });
+  }
+}
+
+/// A help style of the gallery's own: the tip on the accent in small white text.
+struct Note;
+
+impl HelpStyle for Note {
+  fn make_body(&self, ui: &mut Ui, c: HelpConfiguration) {
+    let t = ui.theme();
+    let s = Style::new().pad_xy(8.0, 4.0).radius(6.0).bg(t.accent).opacity(c.opacity());
+    ui.row(s, |ui| ui.text(c.text(), TextStyle::new(t.small, t.on_accent)));
+  }
+}
+
 /// A building block: its group, name, SwiftUI's line and nimbo's.
 pub struct Block {
   pub group: &'static str,
@@ -217,7 +252,9 @@ pub const BLOCKS: &[Block] = &[
   b("Form", "Disclosure", "DisclosureGroup(\"Other models\") { … }", "ui.form_disclosure(&fs, FormRow::new(\"Other models\"), |ui| { … })"),
   b("Form", "Footer", "HelpLink { … } at a pane's end", "ui.help(\"Help\").form_footer(&fs, |ui| _ = ui.button(\"Reset All…\"))"),
   b("List", "List", "List(items, selection: $sel) { … }", "List::new(n, 24.0).selection(&mut sel).show(ui, |ui, row| { … })"),
-  b("List", "List sections", "Section(header:) in a List; .listStyle(…)", "List::new(n, 32.0).sections(&starts, 24.0, &head).list_style(ListStyle::Grouped)"),
+  b("List", "List sections", "Section(header:) in a List; .listStyle(…)", "List::new(n, 32.0).sections(&starts, 24.0, &head).show(ui.list_style(&InsetGroupedListStyle), |ui, row| { … })"),
+  b("List", "List style", "List(items, selection: $sel) { … }.listStyle(.plain)", "list.show(ui.list_style(&PlainListStyle), |ui, row| { … }); InsetListStyle by default, InsetGroupedListStyle"),
+  b("List", "Custom list style", "struct Stripes: ListStyle (SwiftUI's has no public makeBody)", "impl ListStyle for Stripes { fn make_body<'a>(&self, ui: &mut Ui<'a>, mut c: ListConfiguration<'_, 'a>) { ui.scroll_area(c.frame(), |ui| c.rows(ui, |ui, mut r| _ = ui.row(r.frame().bg(fill), |ui| r.content(ui)))); } }"),
   b("List", "List behavior", "List(rows, selection: $sel) { … }.listRowBackground(…)", "let b = ui.list_behavior(id, ListRows::new(n, 22.0), &mut sel, &key); ui.with_id(id).scroll_area(b.style(style), |ui| ui.list_rows(&b, |ui, i, k| { … }))"),
   b("Containers", "Tabs", "TabView { … }", "Tabs::new(&mut self.tab, &[\"One\", \"Two\"]).show(ui, |ui, i| { … })"),
   b("Containers", "Split", "HSplitView { … }", "Split::new(Axis::Horizontal).ratio(&mut self.side).show(ui, |ui, pane| { … })"),
@@ -232,7 +269,8 @@ pub const BLOCKS: &[Block] = &[
   b("Presentation", "Alert", ".alert(\"Delete?\", isPresented: $ask) { Button(\"Delete\", role: .destructive) }", "Dialog::new(\"Delete?\").button(\"Delete\", ButtonRole::Destructive).show(ui, &mut self.ask)"),
   b("Presentation", "Context menu", ".contextMenu { Button(\"Copy\") { … } }", "ui.context_menu(r.id, || Menu::new(vec![Item::button(Action::Copy, \"Copy\")])); match ui.native_menu(id, at, menu) { NativeMenu::Unavailable => /* draw it */, NativeMenu::Unanswered => {}, NativeMenu::Answered(a) => … }"),
   b("Presentation", "Menu bar", ".commands { CommandMenu(\"Track\") { Button(\"Play\") { … } }; CommandGroup(replacing: .newItem) { … } }", "main.set_commands(&Commands::new().menu(\"Track\", Menu::new(vec![Item::button(Act::Play, \"Play\")])).replacing(CommandGroupPlacement::NewItem, items), |main, act| …)"),
-  b("Presentation", "Tooltip", ".help(\"Saves it\")", "ui.help(\"Saves it\").button(\"Save\"); for (id, tip) in ui.take_tooltips() { /* a look of its own */ }"),
+  b("Presentation", "Tooltip", ".help(\"Saves it\")", "ui.help(\"Saves it\").button(\"Save\"); ui.help_style(&PlainHelpStyle) for the window, TooltipHelpStyle by default"),
+  b("Presentation", "Custom help style", ".help(\"Saves it\") (SwiftUI has no help style)", "impl HelpStyle for Note { fn make_body(&self, ui: &mut Ui, c: HelpConfiguration) { ui.row(style.opacity(c.opacity()), |ui| ui.text(c.text(), s)); } } ui.help_style(&Note)"),
   b("Modifiers", "Disabled", ".disabled(true)", "ui.disabled(true).col(Style::new(), |ui| { … })"),
   b("Modifiers", "Control size", ".controlSize(.small)", "ui.control_size(ControlSize::Small).row(Style::new(), |ui| { … })"),
   b("Modifiers", "Accessibility label", ".accessibilityLabel(\"Reset\")", "ui.a11y_label(\"Reset\").icon_button(Icon::RESET)"),
@@ -312,6 +350,8 @@ pub struct Gallery {
   pub rows: Selection,
   /// The list behaviour block's, its second row selected at first.
   pub own_rows: Selection,
+  /// The list style blocks' plain and styled lists', their second row selected at first.
+  pub styled_rows: [Selection; 2],
   pub ask: bool,
   pub deleted: usize,
   pub copied: usize,
@@ -341,6 +381,13 @@ msgstr[2] "{n} файлов"
 /// A sunset drawn for the photo block, 240 × 160.
 pub const SUNSET: &[u8] = include_bytes!("../tests/images/sunset.jpg");
 
+/// A selection of the second row.
+fn second() -> Selection {
+  let mut s = Selection::default();
+  s.select(1, 1);
+  s
+}
+
 impl Default for Gallery {
   fn default() -> Self {
     Self {
@@ -367,11 +414,8 @@ impl Default for Gallery {
       side: 0.4,
       bar_side: 0.4,
       rows: Selection::default(),
-      own_rows: {
-        let mut s = Selection::default();
-        s.select(1, 1);
-        s
-      },
+      own_rows: second(),
+      styled_rows: [second(), second()],
       ask: false,
       deleted: 0,
       copied: 0,
@@ -730,6 +774,31 @@ impl Gallery {
         list.show(ui, |ui, row| ui.text(format_args!("Row {}", row.index + 1), t.label()));
       }),
 
+      // Plain, the app draws the selection: its text in the accent. The same rows in the window's
+      // inset style beside it.
+      "List style" => Self::variants(ui, Shown::Plain, |ui| {
+        let frame = Style::new().w(px(160.0)).h(px(88.0));
+        let text = |row: Row| match row.selected {
+          true => TextStyle::new(t.font, t.accent),
+          false => t.label(),
+        };
+        let [plain_rows, rows] = &mut self.styled_rows;
+        let plain = List::new(40, 22.0).style(frame).selection(plain_rows);
+        plain.show(ui.list_style(&PlainListStyle), |ui, row| {
+          ui.text(format_args!("Row {}", row.index + 1), text(row));
+        });
+
+        let inset = List::new(40, 22.0).style(frame).selection(rows);
+        inset.show(ui, |ui, row| ui.text(format_args!("Row {}", row.index + 1), t.label()));
+      }),
+      "Custom list style" => Self::variants(ui, Shown::Plain, |ui| {
+        // Padded in the list's box, where its keys scroll the rows to.
+        let list = List::new(40, 24.0).style(Style::new().w(px(220.0)).h(px(96.0)).pad(4.0));
+        let list = list.selection(&mut self.styled_rows[1]);
+        let ui = ui.list_style(&Stripes);
+        list.show(ui, |ui, row| ui.text(format_args!("Row {}", row.index + 1), t.label()));
+      }),
+
       // Rows of its own over the list's behaviour: the selected one filled with the accent.
       "List behavior" => Self::variants(ui, Shown::Alone, |ui| {
         let (id, key) = (Id::of("own list"), |i: usize| i as u64);
@@ -754,11 +823,12 @@ impl Gallery {
 
       "List sections" => Self::variants(ui, Shown::Plain, |ui| {
         let head = |ui: &mut Ui, g: usize| ui.text(["Today", "Yesterday"][g], t.section());
-        let list = List::new(6, 30.0).sections(&[0, 3], 24.0, &head);
-        let list = list.list_style(ListStyle::Grouped).selection(&mut self.rows);
+        let list = List::new(6, 30.0).sections(&[0, 3], 24.0, &head).selection(&mut self.rows);
         let list = list.style(Style::new().w(px(320.0)).h(px(290.0)));
+        let ui = ui.list_style(&InsetGroupedListStyle);
         list.show(ui, |ui, row| ui.text(format_args!("Dictation {}", row.index + 1), t.label()));
       }),
+
       "Tabs" => Self::variants(ui, Shown::Plain, |ui| {
         ui.col(Style::new().w(px(260.0)).h(px(70.0)), |ui| {
           Tabs::new(&mut self.tab, &["General", "Advanced"]).show(ui, |ui, i| {
@@ -900,6 +970,12 @@ impl Gallery {
 
       "Menu bar" => Self::variants(ui, Shown::Alone, |ui| ui.text(MENU_BAR, t.label())),
       "Tooltip" => Self::variants(ui, Shown::Plain, |ui| _ = ui.help("Saves it").button("Save")),
+      // The window's tips in the gallery's style while the page shows.
+      "Custom help style" => Self::variants(ui, Shown::Alone, |ui| {
+        ui.help_style(&Note);
+        ui.help("Saves it").button("Save");
+        ui.help("Opens it").button("Open");
+      }),
       "Disabled" => Self::variants(ui, Shown::Plain, |ui| {
         ui.button("Save");
         ui.toggle(&mut self.on, "");
@@ -1090,8 +1166,9 @@ impl Gallery {
 
 impl App for Gallery {
   fn view(&mut self, ui: &mut Ui) {
-    // The system's look, whatever a block set last frame.
+    // The system's look and the shell's tips, whatever a block set last frame.
     ui.follow_system();
+    ui.set_environment::<&dyn HelpStyle>(None);
     let t = ui.theme();
     if self.only {
       ui.fit_window_height(WIDTH, 1.0, 900.0);
@@ -1125,8 +1202,8 @@ pub fn api_md() -> String {
      api-shots` makes them and this file again from the gallery's table (`examples/gallery.rs`), \
      so a block changes there.\n\n\
      On macOS SwiftUI's `List` has neither of the grouped styles (`InsetGroupedListStyle` and \
-     `GroupedListStyle` are iOS's), so there is no name to take: nimbo's `ListStyle::Grouped` is \
-     named after the grouped `Form` (`.formStyle(.grouped)`), whose plates its sections share.\n",
+     `GroupedListStyle` are iOS's): nimbo's `InsetGroupedListStyle` takes the iOS name for the \
+     plates of the grouped `Form` (`.formStyle(.grouped)`), which its sections share.\n",
   );
   for g in GROUPS {
     out += &format!("\n## {g}\n");
