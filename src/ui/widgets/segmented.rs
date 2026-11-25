@@ -1,31 +1,22 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The segmented control: segments side by side, one selected, over the pick behaviour
-//! ([Ui::pick_behavior]).
+//! The picker's segmented look, [SegmentedPickerStyle]: segments side by side, one selected, over
+//! the segments' input ([PickerConfiguration::segments]).
 
 use crate::scene::alpha;
-use crate::ui::{Align, Response, Role, Style, Tag, Ui, Value, grow, px, rigid};
+use crate::ui::{Align, PickerConfiguration, PickerStyle, Style, Ui, grow, px, rigid};
 
-impl Ui<'_> {
-  /// Segments side by side, one selected (`cur`): view modes, zoom levels, filters with counts.
-  /// `options` are [Tag]s, as SwiftUI's `Picker` in the `.segmented` style, a tag's count
-  /// ([Tag::count]) drawn after its label, dimmed. The segments are `id.key(i)`; a click picks one,
-  /// Left and Right step a focused control. Flat ([crate::Theme::flat]), System Settings' look: one
-  /// raised capsule, the selected segment the accent over it, dividers between unselected ones;
-  /// else a bordered box holding inset segments. `changed` when `cur` changed.
-  pub fn segmented<T: PartialEq + Copy>(&mut self, cur: &mut T, options: &[Tag<T>]) -> Response {
-    let t = self.controls_theme();
-    let id = self.take_id();
-    let was = *cur;
-    let mut at = options.iter().position(|o| o.value == *cur);
-    let b = self.pick_behavior(id, options.len(), |i| id.key(i), &mut at);
-    self.a11y(id, Role::RadioGroup);
-    if b.changed
-      && let Some(i) = at
-    {
-      *cur = options[i].value;
-    }
+/// Segments side by side, the selected one in the accent, as SwiftUI's `.segmented`: view modes,
+/// filters with a count after the label ([crate::Tag::count]). Flat ([crate::Theme::flat]), one
+/// raised capsule with dividers between unselected segments, as System Settings; else a bordered
+/// box of inset segments. As wide as its labels.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SegmentedPickerStyle;
 
+impl PickerStyle for SegmentedPickerStyle {
+  fn make_body(&self, ui: &mut Ui<'_>, mut c: PickerConfiguration<'_>) {
+    let t = ui.controls_theme();
+    let b = c.segments(ui);
     let (off, flat, h) = (b.disabled, t.flat(), t.sizes.control_h);
     let frame = match flat {
       true => Style::new().h(px(h)).bg(t.raised).radius(t.radius),
@@ -38,15 +29,15 @@ impl Ui<'_> {
     };
 
     // Its labels' width: text beside it wraps instead.
-    let frame = self.dim_style(frame.w(rigid()), b.disabled);
-    let n = options.len();
-    let on_at = |i: usize| options.get(i).is_some_and(|o| o.value == *cur);
+    let frame = ui.dim_style(frame.w(rigid()), b.disabled);
+    let n = c.len();
+    let on_at = |i: usize| c.selection() == Some(i);
     // macOS's divider, 1 × 14: #bdbdbd on the light capsule, #6d6d6d on the dark one.
     let ink = if t.scheme.is_dark() { [1.0; 4] } else { [0.0, 0.0, 0.0, 1.0] };
     let divider = alpha(ink, if t.scheme.is_dark() { 0.26 } else { 0.18 });
-    let mut r = self.control(&b).row(frame, |ui| {
-      for (i, o) in options.iter().enumerate() {
-        let seg = id.key(i);
+    ui.row(frame, |ui| {
+      for i in 0..n {
+        let seg = c.item_id(i);
         let on = on_at(i);
         let down = !off && !on && ui.pressed(seg);
         let hot = ui.ctl_hot(seg, !off && !on && ui.hovered(seg));
@@ -58,13 +49,12 @@ impl Ui<'_> {
           (false, false) => (alpha(t.text, 0.08 * hot), t.muted()),
         };
 
-        ui.a11y(seg, Role::RadioButton).value(if on { Value::On } else { Value::Off });
         let pad = (h * 0.375).round();
         let s = Style::new().h(grow()).pad_xy(pad, 0.0).gap(5.0).center();
         let radius = if flat { t.radius } else { t.radius - 2.0 };
         ui.with_id(seg).row(b.pointer(s.radius(radius).bg(bg)), |ui| {
-          ui.text(o.label, text);
-          if let Some(n) = o.count {
+          ui.text(c.label(i), text);
+          if let Some(n) = c.count(i) {
             ui.text(n, text.color(alpha(text.color, 0.65)).nowrap());
           }
         });
@@ -76,8 +66,6 @@ impl Ui<'_> {
         }
       }
     });
-    (r.changed, r.clicked) = (*cur != was, *cur != was);
-    r
   }
 }
 
@@ -85,6 +73,7 @@ impl Ui<'_> {
 mod tests {
   use keyboard_types::{Modifiers, NamedKey};
 
+  use super::SegmentedPickerStyle;
   use crate::app::App;
   use crate::harness::Harness;
   use crate::scene::Size;
@@ -94,7 +83,7 @@ mod tests {
 
   impl App for Seg {
     fn view(&mut self, ui: &mut Ui) {
-      ui.id("v").segmented(
+      ui.picker_style(&SegmentedPickerStyle).id("v").picker(
         &mut self.0,
         &[
           Tag::new(1, "List").count(12),
@@ -112,7 +101,9 @@ mod tests {
     fn view(&mut self, ui: &mut Ui) {
       ui.row(Style::new().w(px(self.0)), |ui| {
         ui.label("A note beside the control that wraps");
-        ui.id("v").segmented(&mut 1, &[Tag::new(1, "List"), Tag::new(2, "Grid")]);
+        ui.picker_style(&SegmentedPickerStyle)
+          .id("v")
+          .picker(&mut 1, &[Tag::new(1, "List"), Tag::new(2, "Grid")]);
       });
     }
   }
@@ -132,7 +123,7 @@ mod tests {
   fn segments_pick_by_click_and_arrows() {
     let mut h = Harness::new(Seg(1), Size::new(400.0, 100.0), 1.0);
     h.frame();
-    assert!(h.click_id(Id::of("v").key(2)));
+    assert!(h.click_id(Id::of("v").key(("item", 2usize))));
     assert_eq!(h.app().0, 3);
     h.key(NamedKey::Tab, Modifiers::empty());
     assert_eq!(h.focused(), Some(Id::of("v")));

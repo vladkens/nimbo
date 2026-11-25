@@ -40,6 +40,8 @@
 //! - [Ui::menu_popup] and [Ui::menu_item_behavior]: a menu's open state, placement, keys and items;
 //! - [Ui::pop_up_behavior]: a pop-up button, opened by a click, Space, Enter or the arrows, letters
 //!   typed choosing an option ([TypeSelect]);
+//! - the [Picker] over one of them, drawn by a [PickerStyle] ([Ui::picker_style]) that chooses its
+//!   input: the pop-up's and its menu, or the segments' ([PickerConfiguration]);
 //! - [Ui::list_behavior] and [Ui::list_rows]: a virtualized list's selection ([Selection]), keys
 //!   and presses, and its rows in view, which the app draws (`List` draws them from the theme);
 //! - [Ui::text_field_behavior] and [Ui::selectable_behavior]: text editing on the editing model
@@ -59,6 +61,7 @@ mod field;
 mod list;
 mod menu;
 mod pick;
+mod picker;
 mod pop_up;
 mod scroll;
 mod search;
@@ -76,6 +79,7 @@ pub use field::{EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, TextInp
 use keyboard_types::Modifiers;
 pub use list::{ListBehavior, ListRows, SectionHeader, Selection};
 pub use menu::{MenuPlacement, TYPE_SELECT, TypeSelect};
+pub use picker::{InlinePickerStyle, Picker, PickerConfiguration, PickerStyle, Tag};
 pub use scroll::{ScrollBar, ScrollBehavior, ScrollerKnob};
 pub use slider::{PlainSliderStyle, Slider, SliderConfiguration, SliderStyle};
 pub use split::SplitBehavior;

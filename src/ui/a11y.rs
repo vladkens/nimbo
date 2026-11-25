@@ -1167,13 +1167,13 @@ mod tests {
     assert!(took < Duration::from_millis(400), "{took:?}");
   }
 
-  /// A disabled list's rows and a disabled segmented control's segments read disabled and take
+  /// A disabled list's rows and a disabled picker's segments read disabled and take
   /// no press.
   #[test]
   fn a_disabled_containers_items_are_disabled() {
     let st = frame(UiState::default(), |ui| {
       ui.disabled(true).col(Style::new(), |ui| {
-        ui.id("seg").segmented(&mut 0, &[Tag::new(0, "A"), Tag::new(1, "B")]);
+        ui.id("seg").picker(&mut 0, &[Tag::new(0, "A"), Tag::new(1, "B")]);
         ui.list(Id::of("list"), 1, 20.0, |ui, _| ui.text("One", T));
       });
     });

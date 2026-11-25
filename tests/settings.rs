@@ -191,7 +191,7 @@ fn appearance_row_width_slider_and_look() {
   assert_eq!(h.app().text_size, 19.5);
 
   // The look applies at once.
-  h.click_id(Id::of(LOOK).key(2));
+  h.click_id(Id::of(LOOK).key(("item", 2usize)));
   h.wait(Duration::from_millis(50));
   assert!(h.render().pixel(4.0, h.size().h - 4.0)[0] < 64);
 }
@@ -202,7 +202,7 @@ fn an_inactive_window_greys_the_accent() {
   turn(&mut h, Page::Appearance);
   // The slider's fill and the selected segment: the accent while the window is key, a grey
   // when another window is, as AppKit's controls.
-  let (s, auto) = (rect(&h, TEXT_SIZE), h.rect(Id::of(LOOK).key(0)).unwrap());
+  let (s, auto) = (rect(&h, TEXT_SIZE), h.rect(Id::of(LOOK).key(("item", 0usize))).unwrap());
   let spots = [(s.x + 12.0, s.y + s.h / 2.0), (auto.x + 4.0, auto.y + 4.0)];
   let at = |h: &mut H| spots.map(|(x, y)| h.render().pixel(x, y));
   let accent = px(Theme::PLATES_LIGHT.accent);

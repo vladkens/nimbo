@@ -24,8 +24,8 @@ use std::time::Duration;
 use nimbo::ui::widgets::icon;
 use nimbo::{
   Align, Answer, App, Appearance, ButtonRole, ColorScheme, Config, ControlSize, Dialog, FormRow,
-  FormStyle, Hotkey, Icon, Id, Picker, Rect, Section, Style, TabItem, Tag, TextStyle, Theme, Tone,
-  Ui, grow, px,
+  FormStyle, Hotkey, Icon, Id, Picker, Rect, Section, SegmentedPickerStyle, Style, TabItem, Tag,
+  TextStyle, Theme, Tone, Ui, grow, px,
 };
 
 pub const TABS: &str = "tabs";
@@ -246,7 +246,7 @@ impl Settings {
         .form_row(fs, FormRow::new(label), |ui| ui.id(DOWNLOAD).toggle(&mut self.download, ""));
       let channels = [Tag::new(Channel::Stable, "Stable"), Tag::new(Channel::Beta, "Beta")];
       ui.form_row(fs, FormRow::new("Channel"), |ui| {
-        ui.id(CHANNEL).segmented(&mut self.channel, &channels)
+        ui.picker_style(&SegmentedPickerStyle).id(CHANNEL).picker(&mut self.channel, &channels)
       });
     });
   }
@@ -254,7 +254,7 @@ impl Settings {
   fn appearance(&mut self, ui: &mut Ui, fs: &FormStyle) {
     ui.form_section(fs, "Look", |ui| {
       ui.form_row(fs, FormRow::new("Appearance"), |ui| {
-        ui.id(LOOK).segmented(&mut self.look, &LOOKS)
+        ui.picker_style(&SegmentedPickerStyle).id(LOOK).picker(&mut self.look, &LOOKS)
       });
       ui.form_row(fs, FormRow::new("Text size"), |ui| {
         let t = ui.theme();

@@ -278,6 +278,21 @@ impl Ui<'_> {
     open
   }
 
+  /// Closes the menu of `id` a style left open, the focus back where it was before it opened:
+  /// another style builds the control now.
+  pub(crate) fn dismiss_menu(&mut self, id: Id) {
+    if !self.menu_open(id) {
+      return;
+    }
+
+    let st = std::mem::take(self.state::<Open>(id));
+    if self.focus_id().is_none_or(|f| f == id.key("menu")) {
+      self.focus(st.prev);
+    }
+
+    self.set_menu_open(id, false);
+  }
+
   /// An open menu's keys and pointer: the pointer moving onto an item highlights it, Up and
   /// Down step over the enabled items, letters typed go to the first one they start; whether
   /// to close (Escape), and the item to run (Enter, Space).
