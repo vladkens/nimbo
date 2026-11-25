@@ -1,27 +1,21 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Tests of `examples/files.rs` through the harness: Open… and Save… ask for their panels only
-//! when clicked, a picked path and a cancel come back to the app; files dragged over the zone
-//! light it, dragged away or dropped outside it leave it as it was, dropped on it list there.
-
-#[path = "../examples/files.rs"]
-#[expect(dead_code, reason = "its main and what this file doesn't use")]
-// The example sets the Windows subsystem, an attribute of its own crate, not of this module.
-#[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
-mod files;
-
-#[expect(dead_code, reason = "this file uses a part of the helpers")]
-mod common;
+//! Tests of the files window's panels and drops through the harness: Open… and Save… ask for
+//! their panels only when clicked, a picked path and a cancel come back to the app; files dragged
+//! over the list light it, dragged away or dropped outside it (on the sidebar) leave it as it was,
+//! dropped on it join it at its top.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use common::{diff, mid};
-use files::{Files, OPEN, SAVE, ZONE};
-use nimbo::{Event, FileDialog, Harness, Id, Point, Size};
+use nimbo::{Event, FileDialog, Harness, Id, Point};
+
+use crate::common::{diff, mid};
+use crate::files::browser::LIST as ZONE;
+use crate::files::{Files, LIST as SIDEBAR, OPEN, SAVE, SIZE};
 
 fn files() -> Harness<Files> {
-  let mut h = Harness::new(Files::default(), Size::new(420.0, 300.0), 2.0);
+  let mut h = Harness::new(Files::default(), SIZE, 2.0);
   h.frame();
   h
 }
@@ -53,33 +47,38 @@ fn save_suggests_a_name_and_a_cancel_comes_back() {
   assert_eq!(h.app().picked, Some(None));
 }
 
+/// Rewritten from the drop zone's: the list is the zone, lit by a ring inside its pane.
 #[test]
-fn files_dragged_over_the_zone_light_it_until_they_leave() {
+fn files_dragged_over_the_list_light_it_until_they_leave() {
   let mut h = files();
   let zone = h.rect(Id::of(ZONE)).unwrap();
   let edge = |h: &mut Harness<Files>| h.render().pixel(zone.x + 0.5, zone.y + zone.h / 2.0);
   let idle = edge(&mut h);
 
   drag(&mut h, mid(zone), false);
-  assert!(h.app().over);
+  assert!(h.app().browser.over);
   let lit = edge(&mut h);
-  assert!(diff(lit, idle) > 40, "the zone's border lit: {lit:?} from {idle:?}");
+  assert!(diff(lit, idle) > 40, "the list's ring lit: {lit:?} from {idle:?}");
 
   h.event(Event::DragExit);
   h.wait(Duration::from_millis(300));
-  assert!(!h.app().over);
-  assert!(diff(edge(&mut h), idle) < 4, "the border back");
+  assert!(!h.app().browser.over);
+  assert!(diff(edge(&mut h), idle) < 4, "the ring gone");
 }
 
+/// Rewritten from the drop zone's: dropped on the sidebar, nothing; on the list, the file joins
+/// it at the top.
 #[test]
-fn files_dropped_on_the_zone_list_there_and_elsewhere_not() {
+fn files_dropped_on_the_list_join_it_and_on_the_sidebar_not() {
   let mut h = files();
-  let zone = h.rect(Id::of(ZONE)).unwrap();
-  drag(&mut h, (zone.x + zone.w / 2.0, zone.y - 20.0), true);
-  assert!(h.app().dropped.is_empty(), "dropped above the zone");
+  let (zone, sidebar) = (h.rect(Id::of(ZONE)).unwrap(), h.rect(Id::of(SIDEBAR)).unwrap());
+  drag(&mut h, mid(sidebar), true);
+  assert!(h.app().browser.added.is_empty(), "dropped on the sidebar");
 
   drag(&mut h, mid(zone), false);
   drag(&mut h, mid(zone), true);
-  assert_eq!(h.app().dropped, [PathBuf::from("/tmp/a.txt")]);
-  assert!(!h.app().over);
+  let b = &h.app().browser;
+  assert_eq!(b.added.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["a.txt"]);
+  assert_eq!(b.name(b.key(0)), "a.txt", "at the top");
+  assert!(!h.app().browser.over);
 }

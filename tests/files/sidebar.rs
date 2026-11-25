@@ -1,34 +1,26 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Tests of `examples/notes.rs` through the harness, under macOS's title bar as the harness plays
-//! it and under none (Windows, Linux): the sidebar's toggle at its trailing edge on the traffic
-//! lights' middle, following it as it slides out to right of the lights, and back; the
+//! Tests of the files window's sidebar through the harness, under macOS's title bar as the harness
+//! plays it and under none (Windows, Linux): the sidebar's toggle at its trailing edge on the
+//! traffic lights' middle, following it as it slides out to right of the lights, and back; the
 //! empty bar moves the window and the items don't; the sidebar's ground up to the window's top
-//! and its notes under the bar; the trailing button adds a note.
-
-#[path = "../examples/notes.rs"]
-#[expect(dead_code, reason = "its main and what this file doesn't use")]
-// The example sets the Windows subsystem, an attribute of its own crate, not of this module.
-#[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
-mod notes;
-
-#[expect(dead_code, reason = "this file uses a part of the helpers")]
-mod common;
+//! and its places under the bar; the trailing button adds a folder.
 
 use std::time::Duration;
 
-use common::{diff, px};
 use nimbo::harness::mac_titlebar;
 use nimbo::ui::containers::toolbar::{AFTER_BUTTONS, LEAD};
-use nimbo::{Appearance, Event, Harness, Id, Point, Rect, Size, Theme};
-use notes::{LIST, NEW, Notes, TOGGLE};
+use nimbo::{Appearance, Event, Harness, Id, Point, Rect, Theme};
 
-type H = Harness<Notes>;
+use crate::common::{diff, px};
+use crate::files::{Files, LIST, NEW, SIZE, TOGGLE};
 
-/// The notes under macOS's title bar (`mac`) or none, in the light appearance.
+type H = Harness<Files>;
+
+/// The window under macOS's title bar (`mac`) or none, in the light appearance.
 fn notes(mac: bool) -> H {
-  let mut h = Harness::new(Notes::default(), Size::new(760.0, 480.0), 2.0);
-  h.set_titlebar(mac.then(|| mac_titlebar("Notes", false)));
+  let mut h = Harness::new(Files::default(), SIZE, 2.0);
+  h.set_titlebar(mac.then(|| mac_titlebar("Files", false)));
   h.event(Event::Appearance(Appearance::LIGHT));
   h.frame();
   h
@@ -51,7 +43,7 @@ fn column_end(h: &H) -> f32 {
 #[test]
 fn the_toggle_trails_the_sidebar_and_follows_it_to_the_traffic_lights() {
   let mut h = notes(true);
-  let lights = mac_titlebar("Notes", true).buttons.unwrap();
+  let lights = mac_titlebar("Files", true).buttons.unwrap();
   let after = lights.x + lights.w + AFTER_BUTTONS;
 
   // Shown: at the sidebar's trailing edge, by the divider, on the lights' middle.
@@ -87,7 +79,7 @@ fn the_empty_bar_moves_the_window_and_the_items_do_not() {
   let (t, new) = (mid(toggle(&h)), mid(h.rect(Id::of(NEW)).unwrap()));
   assert!(!h.drags_window(t.x, t.y) && !h.drags_window(new.x, new.y));
   assert!(h.drags_window(400.0, 26.0) && h.drags_window(150.0, 5.0));
-  // The notes start under the bar.
+  // The places start under the bar.
   assert!(h.rect(Id::of(LIST)).unwrap().y >= 52.0);
 }
 
@@ -110,5 +102,7 @@ fn under_the_os_title_bar_the_toolbar_is_the_top_row() {
   let new = mid(h.rect(Id::of(NEW)).unwrap());
   h.click(new.x, new.y);
   h.frame();
-  assert_eq!((h.app().notes.len(), h.app().open()), (4, 3));
+  let b = &h.app().browser;
+  assert_eq!((b.added.len(), b.name(b.key(0)).as_str()), (1, "untitled folder"));
+  assert_eq!(b.sel.keys().collect::<Vec<_>>(), [b.key(0)], "selected");
 }
