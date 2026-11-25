@@ -113,6 +113,7 @@ Each building block beside its SwiftUI counterpart, with a picture: [docs/api.md
 - `counter`: buttons, hover, focus
 - `gallery`: a catalog of every building block, each page its SwiftUI line, its nimbo line and the block in its variants
 - `settings`: a macOS-style settings window
+- `custom-look`: a whole look of its own over the headless styles, light and dark
 - `notes`: a sidebar shown and hidden from a toolbar in the title bar
 - `files`: open and save panels, drag and drop
 - `lists`: a list of 100,000 rows, menus, tabs, a split
