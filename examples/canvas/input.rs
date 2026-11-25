@@ -6,15 +6,12 @@
 //! a position pasted as `x,y`; it turns amber while Shift is held. A bar along the top shows
 //! that the window has the keyboard focus.
 //!
-//! `cargo run --release --example input` opens it in a window; `-- --shot input.png` renders it
-//! without one.
-
-// A Windows app, not a console one: no terminal opens with its window.
-#![cfg_attr(windows, windows_subsystem = "windows")]
+//! `cargo run --release --example canvas -- input` opens it in a window;
+//! `-- input --shot input.png` renders it without one.
 
 use nimbo::{
-  App, Binding, Color, Command, Config, Cursor, Cx, Event, Float, Frame, Key, MouseButton,
-  NamedKey, Point, Quad, Rect, Shortcut, Size, Style, Ui, bind, mix, px, rgb,
+  App, Binding, Color, Command, Cursor, Cx, Event, Float, Frame, Key, MouseButton, NamedKey, Point,
+  Quad, Rect, Shortcut, Size, Style, Ui, bind, mix, px, rgb,
 };
 
 pub const SIZE: Size = Size::new(480.0, 320.0);
@@ -208,8 +205,4 @@ pub fn parse_point(s: &str) -> Option<Point> {
   let (x, y) = s.trim().split_once(',')?;
   let num = |t: &str| t.trim().parse::<f32>().ok().filter(|v| v.is_finite());
   Some(Point::new(num(x)?, num(y)?))
-}
-
-fn main() {
-  nimbo::run_example(Config::new("input", SIZE.w, SIZE.h), Input::default(), |_| {});
 }

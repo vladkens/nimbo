@@ -1,23 +1,15 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Tests of `examples/shapes.rs` through the harness, in the dark and the light appearance: the
-//! colours at known points of every shape, a rounded corner's antialiased edge, a border all
+//! Tests of `examples/canvas/shapes.rs` through the harness, in the dark and the light appearance:
+//! the colours at known points of every shape, a rounded corner's antialiased edge, a border all
 //! round and one on a single side, a shadow fading out, the gradients, the image, the lines and a
 //! clip; and frames built only when something changed.
 
-#[path = "../examples/shapes.rs"]
-#[expect(dead_code, reason = "its main and what this file doesn't use")]
-// The example sets the Windows subsystem, an attribute of its own crate, not of this module.
-#[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
-mod shapes;
-
-#[expect(dead_code, reason = "this file uses a part of the helpers")]
-mod common;
-
-use common::{diff, mid, px};
 use nimbo::harness::Image;
 use nimbo::{Appearance, Event, Harness, mix};
-use shapes::*;
+
+use crate::canvas::shapes::*;
+use crate::common::{diff, mid, px};
 
 fn check(img: &Image, p: &Palette) {
   let at = |x: f32, y: f32| img.pixel(x, y);

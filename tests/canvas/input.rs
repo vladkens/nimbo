@@ -1,26 +1,18 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Tests of `examples/input.rs` through the harness: the square dragged by the mouse and kept
-//! inside the window, moved by the arrow keys, grown by the wheel, amber while Shift is held; its
-//! cursor; Cmd-C and Cmd-V through the app's bindings and the in-memory clipboard; the focus bar;
-//! and frames built only when the input changed something.
+//! Tests of `examples/canvas/input.rs` through the harness: the square dragged by the mouse and
+//! kept inside the window, moved by the arrow keys, grown by the wheel, amber while Shift is held;
+//! its cursor; Cmd-C and Cmd-V through the app's bindings and the in-memory clipboard; the focus
+//! bar; and frames built only when the input changed something.
 
-#[path = "../examples/input.rs"]
-#[expect(dead_code, reason = "its main and what this file doesn't use")]
-// The example sets the Windows subsystem, an attribute of its own crate, not of this module.
-#[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
-mod input;
-
-#[expect(dead_code, reason = "this file uses a part of the helpers")]
-mod common;
-
-use common::{mid, px};
-use input::*;
 use nimbo::harness::Image;
 use nimbo::{
   Appearance, CMD, Code, Color, Command, Cursor, Event, Harness, Key, KeyEvent, Modifiers,
   NamedKey, Phase, Point, Size,
 };
+
+use crate::canvas::input::*;
+use crate::common::{mid, px};
 
 const NONE: Modifiers = Modifiers::empty();
 

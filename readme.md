@@ -121,9 +121,7 @@ Each building block beside its SwiftUI counterpart, with a picture: [docs/api.md
 - `lists`: a list of 100,000 rows, menus, tabs, a split
 - `history`: 86,000 rows a day at a time in a grouped list, built in view only
 - `fields`: text fields and input methods
-- `text`: fonts, scripts, emoji
-- `shapes`: what the renderer draws
-- `input`: mouse, keys, clipboard
+- `canvas`: below the widgets: shapes, text, pointer and keys, frame pacing
 - `tray`: a tray icon, a global hotkey
 - `hud`: an overlay over every app
 
