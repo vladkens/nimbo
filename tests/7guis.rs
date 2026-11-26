@@ -83,6 +83,50 @@ fn text_that_isnt_a_number_leaves_the_other_field() {
   assert_eq!((h.app().temperature.f.as_str(), h.app().temperature.c.as_str()), ("212x", "100"));
 }
 
+#[test]
+fn the_fields_show_their_units() {
+  let h = on(Task::Temperature);
+  let fields = ["text field \"Celsius\" value \"\"", "text field \"Fahrenheit\" value \"\""];
+  reads(&h.a11y(), &fields);
+  reads(&h.a11y(), &["static text \"°C\"", "static text \"°F\""]);
+}
+
+#[test]
+fn a_temperature_shows_to_a_tenth_and_whole_when_large() {
+  let cases =
+    [(99.5, "99.5"), (212.0, "212"), (-0.04, "0"), (37.77, "37.8"), (2234296.4, "2234296")];
+  for (v, s) in cases {
+    assert_eq!(seven::fmt(v), s, "{v}");
+  }
+
+  assert_eq!(seven::fmt(1.8e20), "1.800e20");
+  let mut h = on(Task::Temperature);
+  h.click_id(id("c"));
+  h.type_text("37,5");
+  assert_eq!(h.app().temperature.f, "99.5", "a comma reads as the point");
+  h.click_id(id("f"));
+  h.key(Key::Char('a'), CMD);
+  h.type_text("1000.37");
+  assert_eq!(h.app().temperature.c, "538");
+}
+
+#[test]
+fn infinity_is_no_number_and_turns_its_field_red() {
+  for bad in ["inf", "NaN", "1e999", "", "1.2.3"] {
+    assert_eq!(seven::number(bad), None, "{bad}");
+  }
+
+  let mut h = on(Task::Temperature);
+  let r = h.rect(id("c")).unwrap();
+  let at = (r.x + r.w - 8.0, r.y + r.h / 2.0);
+  let before = h.render().pixel(at.0, at.1);
+  h.click_id(id("c"));
+  h.type_text("inf");
+  assert_eq!(h.app().temperature.f, "", "the other field stays");
+  let after = h.render().pixel(at.0, at.1);
+  assert!(after[0] > after[2] + 20 && diff(before, after) > 20, "{before:?} -> {after:?}");
+}
+
 // MARK: Flight
 
 #[test]

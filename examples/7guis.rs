@@ -52,10 +52,11 @@ pub const TASKS: [Tag<Task>; 6] = [
 
 pub const TABS: &str = "tasks";
 
-/// A text field `w` wide that reads as `name`, its answer out of the column that sizes it: a
-/// container drops what its closure returns.
-fn field(ui: &mut Ui, w: f32, name: &str, id: &str, text: &mut String) -> Response {
+/// A text field `w` wide that reads as `name`, ringed red while `invalid`; its answer out of the
+/// column that sizes it: a container drops what its closure returns.
+fn field(ui: &mut Ui, w: f32, name: &str, id: &str, text: &mut String, invalid: bool) -> Response {
   let mut r = Response::default();
+  let ui = if invalid { ui.text_field_style(&Invalid) } else { ui };
   ui.col(Style::new().w(px(w)), |ui| r = ui.a11y_label(name).id(id).text_field(text, ""));
   r
 }
@@ -65,39 +66,71 @@ fn line(gap: f32) -> Style {
   Style::new().gap(gap).align(Align::Start, Align::Center)
 }
 
+/// A text field ringed and tinted red: text that is no number, no date. The theme's rounded
+/// field takes no tint, so its frame is written again here.
+struct Invalid;
+
+impl TextFieldStyle for Invalid {
+  fn make_body(&self, ui: &mut Ui, mut c: TextFieldConfiguration) {
+    let t = ui.theme();
+    let frame = Style::new().w(grow()).h(px(t.sizes().control_h())).pad_xy(6.0, 0.0);
+    let frame = frame.align(Align::Start, Align::Center).radius(t.radius());
+    let frame = frame.border(1.0, t.danger()).bg(alpha(t.danger(), 0.18));
+    ui.row(frame.scroll(Axes::HORIZONTAL), |ui| c.text(ui, &t.field()));
+  }
+}
+
 // MARK: Temperature
 
 /// Task 2: Celsius and Fahrenheit, each field updating the other while its text is a number;
-/// text that isn't leaves the other as it was.
+/// text that isn't turns its field red and leaves the other as it was.
 #[derive(Default)]
 pub struct Temperature {
   pub c: String,
   pub f: String,
 }
 
-/// A number with at most one decimal, as the fields show it.
-fn fmt(v: f64) -> String {
-  format!("{}", (v * 10.0).round() / 10.0)
+/// A field's text as a number: a decimal point or comma, no infinity or NaN; `None` for empty
+/// text too.
+pub fn number(s: &str) -> Option<f64> {
+  s.trim().replace(',', ".").parse::<f64>().ok().filter(|v| v.is_finite())
+}
+
+/// A temperature as the fields show it: to a tenth, trimmed (`37.5`, `212`), whole from 10,000
+/// up, where a tenth is noise, and in powers of ten past 10^15; never `-0`.
+pub fn fmt(v: f64) -> String {
+  let v = if v.abs() >= 10_000.0 { v.round() } else { (v * 10.0).round() / 10.0 };
+  if v == 0.0 {
+    "0".into()
+  } else if v.abs() >= 1e15 {
+    format!("{v:.3e}")
+  } else {
+    format!("{v}")
+  }
 }
 
 impl Temperature {
   fn view(&mut self, ui: &mut Ui) {
     let t = ui.theme();
-    ui.row(line(8.0), |ui| {
-      if field(ui, 90.0, "Celsius", "c", &mut self.c).changed
-        && let Ok(c) = self.c.trim().parse::<f64>()
+    let unit = t.label();
+    let bad = |s: &str| !s.trim().is_empty() && number(s).is_none();
+    let (bad_c, bad_f) = (bad(&self.c), bad(&self.f));
+    ui.row(line(6.0), |ui| {
+      if field(ui, 100.0, "Celsius", "c", &mut self.c, bad_c).changed
+        && let Some(c) = number(&self.c)
       {
         self.f = fmt(c * 9.0 / 5.0 + 32.0);
       }
 
-      ui.text("Celsius =", t.label());
-      if field(ui, 90.0, "Fahrenheit", "f", &mut self.f).changed
-        && let Ok(f) = self.f.trim().parse::<f64>()
+      ui.text("°C", unit);
+      ui.row(Style::new().pad_xy(10.0, 0.0), |ui| ui.text("=", t.muted()));
+      if field(ui, 100.0, "Fahrenheit", "f", &mut self.f, bad_f).changed
+        && let Some(f) = number(&self.f)
       {
         self.c = fmt((f - 32.0) * 5.0 / 9.0);
       }
 
-      ui.text("Fahrenheit", t.label());
+      ui.text("°F", unit);
     });
   }
 }
@@ -139,20 +172,6 @@ pub fn parse_date(s: &str) -> Option<(u32, u32, u32)> {
   let days = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
   let ok = it.next().is_none() && (1..=12).contains(&m) && d >= 1 && d <= days[m as usize - 1];
   ok.then_some((y, m, d))
-}
-
-/// A text field ringed and tinted red. The theme's rounded field takes no tint, so its frame is
-/// written again here.
-struct Invalid;
-
-impl TextFieldStyle for Invalid {
-  fn make_body(&self, ui: &mut Ui, mut c: TextFieldConfiguration) {
-    let t = ui.theme();
-    let frame = Style::new().w(grow()).h(px(t.sizes().control_h())).pad_xy(6.0, 0.0);
-    let frame = frame.align(Align::Start, Align::Center).radius(t.radius());
-    let frame = frame.border(1.0, t.danger()).bg(alpha(t.danger(), 0.18));
-    ui.row(frame.scroll(Axes::HORIZONTAL), |ui| c.text(ui, &t.field()));
-  }
 }
 
 impl Flight {
@@ -308,7 +327,7 @@ impl Crud {
     ui.col(Style::new().w(px(480.0)).h(px(240.0)).gap(10.0), |ui| {
       ui.row(line(8.0), |ui| {
         ui.row(label, |ui| ui.text("Filter prefix:", t.label().nowrap()));
-        field(ui, 140.0, "Filter prefix", "prefix", &mut self.prefix);
+        field(ui, 140.0, "Filter prefix", "prefix", &mut self.prefix, false);
       });
 
       ui.row(Style::new().w(grow()).h(grow()).gap(12.0), |ui| {
@@ -334,7 +353,7 @@ impl Crud {
           {
             ui.row(line(8.0).w(grow()), |ui| {
               ui.row(label, |ui| ui.text(format_args!("{title}:"), t.label()));
-              field(ui, 130.0, title, id, text);
+              field(ui, 130.0, title, id, text, false);
             });
           }
         });
