@@ -4,7 +4,7 @@
 //! compact card in the middle with an optional icon on top, a title, a message and two capsule
 //! buttons of equal width, Cancel and the action, a primary one or a destructive one in red; they
 //! stack full width, the action on top, when a label doesn't fit half the row. It asks before
-//! something that can't be undone.
+//! something that can't be undone. Given no action, it tells: one OK across the card.
 //!
 //! ```ignore
 //! if ui.icon_button(Icon::TRASH).clicked { self.ask = true }
@@ -52,26 +52,20 @@ pub struct Dialog<'s> {
   title: &'s str,
   message: &'s str,
   icon: Option<Icon>,
-  action: &'s str,
-  cancel: &'s str,
+  /// The buttons given: none is one OK, a cancel alone that one, an action Cancel beside it.
+  action: Option<&'s str>,
+  cancel: Option<&'s str>,
   /// The action's: [ButtonRole::Confirm] or [ButtonRole::Destructive].
   role: ButtonRole,
   width: f32,
 }
 
 impl<'s> Dialog<'s> {
-  /// A dialog titled `title` with Cancel and "OK", the default, as SwiftUI's `.alert(title)`.
+  /// A dialog titled `title` with one "OK", as SwiftUI's `.alert(title)` with no actions; an
+  /// action ([Dialog::button]) puts Cancel beside it.
   pub fn new(title: &'s str) -> Self {
     let (icon, role) = (None, ButtonRole::Confirm);
-    Self {
-      title,
-      message: "",
-      icon,
-      action: t!("OK").as_str(),
-      cancel: t!("Cancel").as_str(),
-      role,
-      width: 260.0,
-    }
+    Self { title, message: "", icon, action: None, cancel: None, role, width: 260.0 }
   }
 
   /// Text under the title, wrapping.
@@ -84,15 +78,13 @@ impl<'s> Dialog<'s> {
     Self { icon: Some(icon), ..self }
   }
 
-  /// A button labelled `label` by its role, as SwiftUI's alert takes `Button(label, role:)`:
-  /// [ButtonRole::Cancel] the button that keeps things, Cancel by default; any other the action,
-  /// "OK" by default: [ButtonRole::Confirm] in the accent, the default button Return chooses;
-  /// [ButtonRole::Destructive] in red ("Delete"), Cancel the default then, so Return keeps what
-  /// is there.
+  /// A button by its role, as SwiftUI's alert's `Button(label, role:)`: [ButtonRole::Cancel]
+  /// keeps things (alone if it is all); any other is the action beside Cancel, Return's in the
+  /// accent ([ButtonRole::Confirm]) or red with Return keeping things ([ButtonRole::Destructive]).
   pub fn button(self, label: &'s str, role: ButtonRole) -> Self {
     match role {
-      ButtonRole::Cancel => Self { cancel: label, ..self },
-      role => Self { action: label, role, ..self },
+      ButtonRole::Cancel => Self { cancel: Some(label), ..self },
+      role => Self { action: Some(label), role, ..self },
     }
   }
 
@@ -102,7 +94,8 @@ impl<'s> Dialog<'s> {
   }
 
   /// Shows it while `open`, as SwiftUI's `isPresented`: the answer once a button closed it
-  /// (`open` is then false). Its buttons are `id.key("cancel")` and `id.key("action")`.
+  /// (`open` is then false). Its buttons are `id.key("cancel")` and `id.key("action")`; a lone
+  /// button answers as itself, Escape and Return alike.
   pub fn show(self, ui: &mut Ui, open: &mut bool) -> Option<Answer> {
     // The values put for it reach its card, and end with it when it is closed.
     ui.group(|ui| self.build(ui, open))
@@ -113,10 +106,24 @@ impl<'s> Dialog<'s> {
     let id = ui.take_id();
     let (cancel, action) = (id.key("cancel"), id.key("action"));
     let destructive = self.role == ButtonRole::Destructive;
-    let default = if destructive { 0 } else { 1 };
-    let b = ui.dialog_behavior(id, open, &[cancel, action], default, 0);
+    // The buttons shown, Cancel first, each with its answer.
+    let ok = t!("OK").as_str();
+    let shown = match (self.action, self.cancel) {
+      (None, None) => vec![(action, Answer::Action, ok)],
+      (None, Some(c)) => vec![(cancel, Answer::Cancel, c)],
+      (Some(a), c) => {
+        vec![
+          (cancel, Answer::Cancel, c.unwrap_or(t!("Cancel").as_str())),
+          (action, Answer::Action, a),
+        ]
+      }
+    };
+
+    let ids: Vec<Id> = shown.iter().map(|b| b.0).collect();
+    let default = if destructive { 0 } else { ids.len() - 1 };
+    let b = ui.dialog_behavior(id, open, &ids, default, 0);
     if let Some(i) = b.chosen {
-      return Some(if i == 1 { Answer::Action } else { Answer::Cancel });
+      return Some(shown[i].1);
     }
 
     if !*open {
@@ -131,7 +138,7 @@ impl<'s> Dialog<'s> {
     // else stacked.
     let half = (w - card.pad[1] - card.pad[3] - 8.0) / 2.0;
     let fits = |ui: &mut Ui, label: &str| ui.measure(label, text) + 2.0 * 16.0 <= half;
-    let stack = !(fits(ui, self.cancel) && fits(ui, self.action));
+    let stack = shown.len() > 1 && !shown.iter().all(|b| fits(ui, b.2));
     ui.a11y_label(self.title).modal(id, b.shown, card, |ui| {
       // The icon at the card's padding: the margin in its view box brings its ink in line
       // with the text, 6 further in.
@@ -150,21 +157,16 @@ impl<'s> Dialog<'s> {
         }
       });
 
-      let cancel_b = Button::new(self.cancel).role(ButtonRole::Cancel);
-      let action_b = Button::new(self.action).role(self.role);
+      let role = |a: Answer| if a == Answer::Cancel { ButtonRole::Cancel } else { self.role };
+      let button = |ui: &mut Ui, &(id, a, label): &(Id, Answer, &str)| {
+        _ = Button::new(label).role(role(a)).show(ui.with_id(id))
+      };
       let s = Style::new().w(grow());
       let ui = ui.button_style(&DialogButton);
+      // Stacked, the action on top.
       match stack {
-        false => {
-          _ = ui.row(s.gap(8.0), |ui| {
-            (cancel_b.show(ui.with_id(cancel)), action_b.show(ui.with_id(action)))
-          })
-        }
-        true => {
-          _ = ui.col(s.gap(6.0), |ui| {
-            (action_b.show(ui.with_id(action)), cancel_b.show(ui.with_id(cancel)))
-          })
-        }
+        false => _ = ui.row(s.gap(8.0), |ui| shown.iter().for_each(|b| button(ui, b))),
+        true => _ = ui.col(s.gap(6.0), |ui| shown.iter().rev().for_each(|b| button(ui, b))),
       }
     });
     None
@@ -253,7 +255,7 @@ mod tests {
     }
 
     fn view(&mut self, ui: &mut Ui) {
-      Dialog::new("Sure?").show(ui.id("d"), &mut self.open);
+      Dialog::new("Sure?").button("OK", ButtonRole::Confirm).show(ui.id("d"), &mut self.open);
     }
   }
 
@@ -311,6 +313,33 @@ mod tests {
     h.key(NamedKey::Enter, Modifiers::empty());
     h.frame();
     assert_eq!(h.app().1, Some(Answer::Cancel), "Return keeps things");
+  }
+
+  /// Given no action, one OK, which Escape and Return both answer.
+  struct Told(bool, Option<Answer>);
+
+  impl App for Told {
+    fn view(&mut self, ui: &mut Ui) {
+      self.1 =
+        Dialog::new("Booked").message("For tomorrow.").show(ui.id("d"), &mut self.0).or(self.1);
+    }
+  }
+
+  #[test]
+  fn a_dialog_with_no_action_tells_with_one_ok() {
+    for key in [NamedKey::Enter, NamedKey::Escape] {
+      let mut h = Harness::new(Told(true, None), Size::new(400.0, 300.0), 1.0);
+      h.frame();
+      h.frame();
+      let tree = h.a11y();
+      assert!(tree.contains(r#"button "OK""#) && !tree.contains("Cancel"), "{tree}");
+      let (ok, card) =
+        (h.rect(Id::of("d").key("action")).unwrap(), h.rect(Id::of("d").key("card")));
+      assert!(ok.w > card.unwrap().w - 40.0, "across the card: {ok:?}");
+      h.key(key, Modifiers::empty());
+      h.frame();
+      assert_eq!((h.app().0, h.app().1), (false, Some(Answer::Action)), "{key:?}");
+    }
   }
 
   /// The values put for a modal reach its card past the backdrop: its size, and enabled in a
