@@ -280,12 +280,33 @@ pub struct Person {
   pub surname: String,
 }
 
-/// Task 5: people as "Surname, Name" in a list filtered by a surname prefix, Name and Surname
-/// fields, Create, and Update and Delete for the one selected, whose names fill the fields.
+impl Person {
+  /// Whether the filter `q` finds this person: the start of the name, the surname, either's
+  /// words, or "Surname, Name" or "Name Surname" as typed, in any case; empty finds everyone.
+  pub fn matches(&self, q: &str) -> bool {
+    let q = q.trim().to_lowercase();
+    let (n, s) = (self.name.to_lowercase(), self.surname.to_lowercase());
+    let whole = [format!("{s}, {n}"), format!("{n} {s}")];
+    let words = n.split_whitespace().chain(s.split_whitespace());
+    q.is_empty()
+      || whole.iter().any(|w| w.starts_with(&q))
+      || words.into_iter().any(|w| w.starts_with(&q))
+  }
+
+  /// Whether this is the person named `name` and `surname`, trimmed, in any case.
+  fn is(&self, name: &str, surname: &str) -> bool {
+    let same = |a: &str, b: &str| a.trim().to_lowercase() == b.trim().to_lowercase();
+    same(&self.name, name) && same(&self.surname, surname)
+  }
+}
+
+/// Task 5: people as "Surname, Name" in a list filtered by name, Name and Surname fields,
+/// Create, and Update and Delete for the one selected, whose names fill the fields. Create and
+/// Update are off for an empty field or someone's names, which a note tells.
 pub struct Crud {
   pub people: Vec<Person>,
   next: u64,
-  pub prefix: String,
+  pub filter: String,
   pub name: String,
   pub surname: String,
   pub sel: Selection,
@@ -293,9 +314,9 @@ pub struct Crud {
 
 impl Default for Crud {
   fn default() -> Self {
-    let (name, surname, prefix) = (String::new(), String::new(), String::new());
+    let (name, surname, filter) = (String::new(), String::new(), String::new());
     let mut app =
-      Self { people: Vec::new(), next: 0, prefix, name, surname, sel: Selection::default() };
+      Self { people: Vec::new(), next: 0, filter, name, surname, sel: Selection::default() };
     for (n, s) in [("Hans", "Emil"), ("Max", "Mustermann"), ("Roman", "Tisch")] {
       app.add(n, s);
     }
@@ -305,78 +326,136 @@ impl Default for Crud {
 }
 
 impl Crud {
-  fn add(&mut self, name: &str, surname: &str) {
+  fn add(&mut self, name: &str, surname: &str) -> u64 {
     self.next += 1;
-    self.people.push(Person { id: self.next, name: name.into(), surname: surname.into() });
+    let p = Person { id: self.next, name: name.trim().into(), surname: surname.trim().into() };
+    self.people.push(p);
+    self.next
+  }
+
+  /// The indices in `people` of those the filter shows.
+  fn shown(&self) -> Vec<usize> {
+    (0..self.people.len()).filter(|&i| self.people[i].matches(&self.filter)).collect()
   }
 
   /// The selected person's index in `people`, while the filter shows them.
   pub fn selected(&self) -> Option<usize> {
     let key = self.sel.cursor().filter(|k| self.sel.contains(*k))?;
     let i = self.people.iter().position(|p| p.id == key)?;
-    self.people[i].surname.starts_with(self.prefix.trim()).then_some(i)
+    self.people[i].matches(&self.filter).then_some(i)
+  }
+
+  /// Selects the person keyed `key` and fills the fields with their names; clears the filter
+  /// first if it hides them.
+  fn select(&mut self, key: u64) {
+    let Some(i) = self.people.iter().position(|p| p.id == key) else { return };
+    if !self.people[i].matches(&self.filter) {
+      self.filter.clear();
+    }
+
+    let row = self.shown().iter().position(|&j| j == i).unwrap_or(0);
+    self.sel.select(key, row);
+    (self.name, self.surname) = (self.people[i].name.clone(), self.people[i].surname.clone());
+  }
+
+  /// Someone other than `but` with the fields' names.
+  fn taken(&self, but: Option<usize>) -> Option<&Person> {
+    let others = self.people.iter().enumerate().filter(|(i, _)| Some(*i) != but);
+    others.map(|(_, p)| p).find(|p| p.is(&self.name, &self.surname))
   }
 
   fn view(&mut self, ui: &mut Ui) {
     let t = ui.theme();
-    let shown: Vec<usize> = (0..self.people.len())
-      .filter(|&i| self.people[i].surname.starts_with(self.prefix.trim()))
-      .collect();
+    let shown = self.shown();
+    let sel = self.selected();
+    let blank = self.name.trim().is_empty() || self.surname.trim().is_empty();
+    let taken =
+      self.taken(sel).map(|p| format!("{} {} is in the list already.", p.name, p.surname));
+    // Nothing to update: the fields hold the selected person's names as they are.
+    let same = sel.is_some_and(|i| {
+      let p = &self.people[i];
+      p.name == self.name.trim() && p.surname == self.surname.trim()
+    });
+    let create = !blank && self.taken(None).is_none();
+    let update = sel.is_some() && !blank && taken.is_none() && !same;
 
-    let label = Style::new().w(px(80.0));
-    ui.col(Style::new().w(px(480.0)).h(px(240.0)).gap(10.0), |ui| {
-      ui.row(line(8.0), |ui| {
-        ui.row(label, |ui| ui.text("Filter prefix:", t.label().nowrap()));
-        field(ui, 140.0, "Filter prefix", "prefix", &mut self.prefix, false);
+    let label = Style::new().w(px(64.0)).align(Align::End, Align::Center);
+    // The filter over the list, the fields beside it from its top.
+    let list_w = 250.0;
+    ui.col(Style::new().grow().gap(10.0), |ui| {
+      ui.col(Style::new().w(px(list_w)), |ui| {
+        ui.a11y_label("Filter").id("filter").search_field(&mut self.filter, "Filter by name")
       });
 
-      ui.row(Style::new().w(grow()).h(grow()).gap(12.0), |ui| {
-        let people = &self.people;
-        let r = List::new(shown.len(), 22.0)
-          .key(&|i| people[shown[i]].id)
-          .selection(&mut self.sel)
-          .style(Style::new().grow().border(1.0, t.line()))
-          .show(ui.a11y_label("People").id("people"), |ui, row| {
-            let p = &people[shown[row.index]];
-            ui.text(format_args!("{}, {}", p.surname, p.name), t.label());
-          });
-        // By a click or the keys: the names fill the fields to edit.
-        if r.changed
-          && let Some(i) = self.selected()
-        {
-          (self.name, self.surname) = (self.people[i].name.clone(), self.people[i].surname.clone());
-        }
+      ui.row(Style::new().grow().gap(20.0), |ui| {
+        ui.col(Style::new().w(px(list_w)).h(grow()), |ui| {
+          let people = &self.people;
+          let r = List::new(shown.len(), 22.0)
+            .key(&|i| people[shown[i]].id)
+            .selection(&mut self.sel)
+            .style(Style::new().grow().border(1.0, t.line()))
+            .show(ui.a11y_label("People").id("people"), |ui, row| {
+              let p = &people[shown[row.index]];
+              ui.text(format_args!("{}, {}", p.surname, p.name), t.label());
+            });
+          // By a click or the keys: the names fill the fields to edit.
+          if r.changed
+            && let Some(i) = self.selected()
+          {
+            (self.name, self.surname) =
+              (self.people[i].name.clone(), self.people[i].surname.clone());
+          }
+        });
 
-        ui.col(Style::new().w(px(220.0)).gap(8.0), |ui| {
+        ui.col(Style::new().w(grow()).gap(8.0), |ui| {
           for (title, id, text) in
             [("Name", "name", &mut self.name), ("Surname", "surname", &mut self.surname)]
           {
             ui.row(line(8.0).w(grow()), |ui| {
               ui.row(label, |ui| ui.text(format_args!("{title}:"), t.label()));
-              field(ui, 130.0, title, id, text, false);
+              ui.col(Style::new().w(grow()).max_w(220.0), |ui| {
+                ui.a11y_label(title).id(id).text_field(text, "")
+              });
+            });
+          }
+
+          // Under the fields, past the labels: the reason Create and Update are off.
+          if let Some(note) = &taken {
+            ui.row(Style::new().pads([0.0, 0.0, 0.0, 72.0]).w(grow()), |ui| {
+              ui.id("taken").text(note, t.body().font(t.small()).color(t.secondary()))
             });
           }
         });
       });
 
-      let sel = self.selected();
       ui.row(line(8.0), |ui| {
-        if ui.id("create").button("Create").clicked {
+        if ui.disabled(!create).id("create").button("Create").clicked {
           let (n, s) = (self.name.clone(), self.surname.clone());
-          self.add(&n, &s);
+          let key = self.add(&n, &s);
+          self.select(key);
         }
 
-        if ui.disabled(sel.is_none()).id("update").button("Update").clicked
+        if ui.disabled(!update).id("update").button("Update").clicked
           && let Some(i) = sel
         {
-          (self.people[i].name, self.people[i].surname) = (self.name.clone(), self.surname.clone());
+          let p = &mut self.people[i];
+          (p.name, p.surname) = (self.name.trim().into(), self.surname.trim().into());
+          (self.name, self.surname) = (p.name.clone(), p.surname.clone());
         }
 
         if ui.disabled(sel.is_none()).id("delete").button("Delete").clicked
           && let Some(i) = sel
         {
+          // The one after it takes the selection, or the one before at the end.
+          let at = shown.iter().position(|&j| j == i).unwrap_or(0);
+          let next = shown.get(at + 1).or(at.checked_sub(1).and_then(|a| shown.get(a)));
+          let next = next.map(|&j| self.people[j].id);
           self.people.remove(i);
           self.sel.clear();
+          match next {
+            Some(key) => self.select(key),
+            None => (self.name, self.surname) = (String::new(), String::new()),
+          }
         }
       });
     });
@@ -871,8 +950,11 @@ fn main() {
       Task::Timer => _ = h.wait(Duration::from_millis(3700)),
 
       Task::Crud => {
-        h.click_id(Id::of("prefix"));
-        h.type_text("M");
+        h.click_id(Id::of("filter"));
+        h.type_text("m");
+        h.frame();
+        let r = h.rect(Id::of("people")).unwrap();
+        h.click(r.x + 30.0, r.y + 11.0);
       }
 
       Task::Circles => {

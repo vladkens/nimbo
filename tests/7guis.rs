@@ -247,14 +247,33 @@ fn a_selected_person_fills_the_fields() {
   assert_eq!(h.app().crud.surname, "Tisch", "the keys select as a click does");
 }
 
-#[test]
-fn the_prefix_filters_by_surname() {
-  let mut h = on(Task::Crud);
-  h.click_id(id("prefix"));
-  h.type_text("M");
+/// The rows the list shows.
+fn rows(h: &H) -> Vec<String> {
+  h.find_all(Role::Row).into_iter().map(|e| e.name).collect()
+}
+
+/// Types `s` into the field `name` in place of its text.
+fn fill(h: &mut H, name: &str, s: &str) {
+  h.click_id(id(name));
+  h.key(Key::Char('a'), CMD);
+  h.type_text(s);
   h.frame();
-  reads(&h.a11y(), &["row \"Mustermann, Max\""]);
-  assert!(h.find(Role::Row, "Emil, Hans").is_none(), "{}", h.a11y());
+}
+
+#[test]
+fn the_filter_finds_a_name_or_surname_as_typed() {
+  let mut h = on(Task::Crud);
+  fill(&mut h, "name", "Emin Emin");
+  fill(&mut h, "surname", "XXX");
+  h.click_id(id("create"));
+  fill(&mut h, "filter", "Em");
+  assert_eq!(rows(&h), ["Emil, Hans", "XXX, Emin Emin"]);
+  fill(&mut h, "filter", "max m");
+  assert_eq!(rows(&h), ["Mustermann, Max"], "the name then the surname");
+  fill(&mut h, "filter", "tisch, r");
+  assert_eq!(rows(&h), ["Tisch, Roman"], "as the list shows it");
+  fill(&mut h, "filter", "ax");
+  assert!(rows(&h).is_empty(), "the start of a word, not its middle");
 }
 
 #[test]
@@ -274,7 +293,63 @@ fn update_and_delete_act_on_the_selected_person() {
   h.click_id(id("delete"));
   let left = h.app().crud.people.iter().map(|p| p.surname.as_str()).collect::<Vec<_>>();
   assert_eq!(left, ["Emil", "Tisch"]);
-  assert!(h.app().crud.selected().is_none());
+  assert_eq!(h.app().crud.selected(), Some(1), "the next one takes the selection");
+  assert_eq!((h.app().crud.name.as_str(), h.app().crud.surname.as_str()), ("Roman", "Tisch"));
+  h.click_id(id("delete"));
+  assert_eq!(h.app().crud.selected(), Some(0), "at the end, the one before");
+  h.click_id(id("delete"));
+  assert!(h.app().crud.people.is_empty() && h.app().crud.selected().is_none());
+  assert_eq!((h.app().crud.name.as_str(), h.app().crud.surname.as_str()), ("", ""));
+}
+
+#[test]
+fn update_is_off_until_the_names_change_and_for_someone_elses() {
+  let mut h = on(Task::Crud);
+  let (x, y) = row(&h, 1);
+  h.click(x, y);
+  h.frame();
+  reads(&h.a11y(), &["button \"Update\" disabled"]);
+
+  fill(&mut h, "name", "Hans");
+  fill(&mut h, "surname", "emil ");
+  reads(
+    &h.a11y(),
+    &["button \"Update\" disabled", "static text \"Hans Emil is in the list already.\""],
+  );
+  h.click_id(id("update"));
+  assert_eq!(h.app().crud.people[1].surname, "Mustermann");
+
+  fill(&mut h, "surname", "Emilia");
+  reads(&h.a11y(), &["button \"Update\""]);
+  assert!(h.rect(id("taken")).is_none(), "no note");
+}
+
+#[test]
+fn create_is_off_for_a_person_in_the_list_or_a_blank_field() {
+  let mut h = on(Task::Crud);
+  reads(&h.a11y(), &["button \"Create\" disabled"]);
+  fill(&mut h, "name", "max");
+  reads(&h.a11y(), &["button \"Create\" disabled"]);
+  fill(&mut h, "surname", " Mustermann");
+  reads(&h.a11y(), &["button \"Create\" disabled"]);
+  assert_eq!(h.text(id("taken")), Some("Max Mustermann is in the list already."));
+  h.click_id(id("create"));
+  assert_eq!(h.app().crud.people.len(), 3);
+}
+
+#[test]
+fn a_new_person_is_selected_and_shown_past_the_filter() {
+  let mut h = on(Task::Crud);
+  fill(&mut h, "filter", "M");
+  fill(&mut h, "name", " Ada");
+  fill(&mut h, "surname", "Lovelace ");
+  h.click_id(id("create"));
+  h.frame();
+  assert_eq!(h.app().crud.filter, "", "the filter hid her");
+  let p = &h.app().crud.people[3];
+  assert_eq!((p.name.as_str(), p.surname.as_str()), ("Ada", "Lovelace"), "trimmed");
+  assert_eq!(h.app().crud.selected(), Some(3));
+  reads(&h.a11y(), &["row \"Lovelace, Ada\" selected"]);
 }
 
 #[test]
@@ -286,7 +361,7 @@ fn create_adds_the_fields_names() {
   h.type_text("Lovelace");
   h.click_id(id("create"));
   h.frame();
-  reads(&h.a11y(), &["row \"Lovelace, Ada\""]);
+  reads(&h.a11y(), &["row \"Lovelace, Ada\" selected"]);
 }
 
 #[test]
@@ -295,7 +370,7 @@ fn a_selection_the_filter_hides_is_none() {
   let (x, y) = row(&h, 0);
   h.click(x, y);
   assert_eq!(h.app().crud.selected(), Some(0));
-  h.click_id(id("prefix"));
+  h.click_id(id("filter"));
   h.type_text("T");
   assert_eq!(h.app().crud.selected(), None);
   h.click_id(id("delete"));
@@ -569,10 +644,17 @@ fn the_tabs_and_the_tasks_read_to_assistive_technology() {
     &h.a11y(),
     &[
       "tab \"CRUD\" selected",
-      "text field \"Filter prefix\" value \"\"",
+      "text field \"Filter\" value \"\"",
       "row \"Emil, Hans\"",
       "button \"Update\" disabled",
       "button \"Delete\" disabled",
     ],
   );
+}
+#[test]
+fn zz_dump() {
+  let mut h = on(Task::Crud);
+  fill(&mut h, "name", "max");
+  fill(&mut h, "surname", "Mustermann");
+  eprintln!("{}", h.a11y());
 }
