@@ -4,13 +4,17 @@
 //! block by group (layout, text, controls, form, list, containers, presentation, modifiers) and a
 //! page for the one chosen, with the SwiftUI line, the nimbo line and the block live in its
 //! variants (enabled and disabled, small and large where it has sizes), in the system's light or
-//! dark. The same table makes `docs/api.md` and its pictures (`make api-shots`).
+//! dark. The same table makes `docs/api.md` and its pictures (`make api-shots`). After the
+//! table, a Canvas page draws into the frame (shapes, text in fonts and scripts) and shows the
+//! raw pointer and keys.
 //!
 //! `cargo run --release --example gallery [-- <block>] [--shot <file.png>]`: with a block's slug
-//! the window is that block's variants alone, as high as they are; `--api` prints `docs/api.md`,
-//! `--list` the slugs.
+//! the window is that block's variants alone, as high as they are; `canvas` opens the Canvas
+//! page; `pace` is the pacing scene `make pace` measures; `--api` prints `docs/api.md`, `--list`
+//! the slugs.
 //!
-//! The table is in [blocks], the blocks built live in a module per group in [pages].
+//! The table is in [blocks], the blocks built live in a module per group in [pages], the Canvas
+//! page and the pacing scene in [canvas].
 
 // A Windows app, not a console one: no terminal opens with its window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
@@ -1208,12 +1212,216 @@ mod pages {
   }
 }
 
+pub mod canvas {
+  //! The Canvas page, out of the table: drawing into the frame (shapes, text in fonts and
+  //! scripts) and raw input (the pointer and keys as [App::event] gets them, before any widget).
+  //! And the pacing scene, `gallery pace`, which `make pace` measures in a window.
+
+  use std::f32::consts::TAU;
+  use std::time::{Duration, Instant};
+
+  use nimbo::{
+    App, Axis, Color, Cx, Event, Font, Frame, Id, Point, Quad, Rect, Shortcut, Size, Style,
+    TextStyle, Ui, Weight, alpha, grow, px, rgb,
+  };
+
+  use super::Gallery;
+
+  /// The pad that shows the raw pointer and keys.
+  pub const PAD: &str = "pad";
+  const RED: Color = rgb(0xe5484d);
+  const BLUE: Color = rgb(0x3b82f6);
+  const GREEN: Color = rgb(0x30a46c);
+  const AMBER: Color = rgb(0xf5a524);
+
+  /// What the pad saw: where the pointer is, the presses and the last drag, the last event.
+  #[derive(Default)]
+  pub struct Pad {
+    pub at: Option<Point>,
+    pub presses: Vec<Point>,
+    pub drag: Vec<Point>,
+    pub held: bool,
+    pub last: String,
+  }
+
+  /// Lines of text: sizes and weights, the monospaced font, then scripts.
+  const LINES: [(&str, Font); 8] = [
+    ("Regular 11 · The quick brown fox jumps over the lazy dog", Font::ui(11.0)),
+    ("Medium 13 · The quick brown fox", Font::ui(13.0).weight(Weight::Medium)),
+    ("Bold 20 · Hamburgefonstiv", Font::ui(20.0).weight(Weight::Bold)),
+    ("Mono 13 · let x = [0O, 1lI];", Font::mono(13.0)),
+    ("Héllo, naïve · Привет, мир · Γειά σου", Font::ui(15.0)),
+    ("cafe\u{301} = café · e\u{301}\u{302} · Q\u{302}", Font::ui(15.0)),
+    ("Emoji 🚀 🎨 👍🏽 ❤️", Font::ui(15.0)),
+    ("漢字 かな カナ 한글", Font::ui(15.0)),
+  ];
+
+  impl Gallery {
+    /// Raw input for the pad, on the Canvas page: the pointer over it or dragging from it, and
+    /// any key no widget used.
+    pub fn pad_event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
+      let r = cx.rect(Id::of(PAD)).unwrap_or_default();
+      let over = |p: Point| r.contains(p);
+      let pad = &mut self.pad;
+      match ev {
+        Event::MouseMove { pos, .. } if pad.held || over(*pos) => {
+          pad.at = Some(*pos);
+          if pad.held {
+            pad.drag.push(*pos);
+          }
+        }
+
+        Event::MouseDown { pos, clicks, .. } if over(*pos) => {
+          (pad.held, pad.drag) = (true, vec![*pos]);
+          pad.presses = [&pad.presses[pad.presses.len().saturating_sub(11)..], &[*pos]].concat();
+          pad.last = format!("press at {:.0}, {:.0} · click {clicks}", pos.x - r.x, pos.y - r.y);
+        }
+
+        Event::MouseUp { .. } if pad.held => pad.held = false,
+        Event::KeyDown(k) => {
+          let mut s = Shortcut::new(k.key);
+          s.mods = k.mods;
+          pad.last = format!("key {}{}", s.label(), if k.repeat { " · repeat" } else { "" });
+        }
+
+        _ => return false,
+      }
+
+      true
+    }
+
+    /// The Canvas page: shapes, text and the pad, each a canvas the page draws into.
+    pub(super) fn canvas(&mut self, ui: &mut Ui) {
+      let t = ui.theme();
+      let (ink, card, edge, ground) = (t.text(), t.raised(), t.line(), t.bg());
+      let title = TextStyle::new(t.bold().size(20.0), t.text());
+      ui.col(Style::new().w(grow()).pad(20.0).gap(10.0), |ui| {
+        ui.text("Canvas", title);
+        ui.text(
+          "ui.canvas(style, |f, r| …): a frame to draw into, at the element's rect",
+          t.muted(),
+        );
+        ui.text("SHAPES", t.section());
+        ui.canvas(Style::new().w(px(480.0)).h(px(96.0)), move |f, r| {
+          shapes(f, r, [ink, card, edge, ground])
+        });
+
+        ui.text("TEXT", t.section());
+        ui.canvas(Style::new().w(px(480.0)).h(px(208.0)), move |f, r| {
+          let mut y = r.y;
+          for (s, font) in LINES {
+            y += f.metrics(font).ascent + 8.0;
+            f.text(r.x, y, s, font, ink);
+            y += f.metrics(font).descent;
+          }
+        });
+
+        ui.text("POINTER AND KEYS", t.section());
+        let pad = &self.pad;
+        let (at, presses, drag) = (pad.at, pad.presses.clone(), pad.drag.clone());
+        let accent = t.accent();
+        ui.id(PAD).canvas(Style::new().w(px(480.0)).h(px(120.0)), move |f, r| {
+          f.quad(Quad::new(r, card).radius(8.0).border(1.0, edge));
+          f.push_clip(r);
+          for (i, p) in presses.iter().enumerate() {
+            let k = (i + 1) as f32 / presses.len() as f32;
+            f.rect(Rect::new(p.x - 4.0, p.y - 4.0, 8.0, 8.0), alpha(accent, k), 4.0);
+          }
+
+          f.polyline(&drag, 2.0, accent);
+          if let Some(p) = at {
+            f.line(Point::new(r.x, p.y), Point::new(r.x + r.w, p.y), 1.0, alpha(ink, 0.3));
+            f.line(Point::new(p.x, r.y), Point::new(p.x, r.y + r.h), 1.0, alpha(ink, 0.3));
+          }
+
+          f.pop_clip();
+        });
+        let last = if pad.last.is_empty() { "Move, press, drag or type" } else { &pad.last };
+        ui.id(PAD.to_owned() + "-last").text(last, t.muted());
+      });
+    }
+  }
+
+  /// Rects plain and rounded, a bordered card, a shadowed one (on the opaque ground, as the
+  /// raised colour lets a shadow through), gradients, lines, a clipped wave.
+  fn shapes(f: &mut Frame, r: Rect, [ink, card, edge, ground]: [Color; 4]) {
+    let at = |i: f32| Rect::new(r.x + 8.0 + i * 68.0, r.y + 8.0, 56.0, 56.0);
+    f.rect(at(0.0), RED, 0.0);
+    f.rect(at(1.0), BLUE, 16.0);
+    f.quad(Quad::new(at(2.0), GREEN).radii([16.0, 0.0, 16.0, 0.0]));
+    f.quad(Quad::new(at(3.0), card).radius(10.0).border(2.0, edge));
+    f.shadow(Rect { y: at(4.0).y + 4.0, ..at(4.0) }, 10.0, 10.0, [0.0, 0.0, 0.0, 0.4]);
+    f.quad(Quad::new(at(4.0), ground).radius(10.0).borders([0.0, 0.0, 0.0, 4.0], AMBER));
+    f.quad(Quad::new(at(5.0), BLUE).radius(10.0).gradient(GREEN, Axis::Vertical));
+    f.quad(Quad::new(at(6.0), RED).radius(10.0).gradient(alpha(RED, 0.0), Axis::Horizontal));
+    for (i, w) in [0.5, 1.0, 2.0, 4.0].into_iter().enumerate() {
+      let y = r.y + 76.0 + i as f32 * 5.0;
+      f.line(Point::new(r.x + 8.0, y), Point::new(r.x + 196.0, y), w, ink);
+    }
+
+    let panel = Rect::new(r.x + 212.0, r.y + 70.0, 260.0, 24.0);
+    f.quad(Quad::new(panel, card).border(1.0, edge));
+    f.push_clip(Rect::new(panel.x + 1.0, panel.y + 1.0, panel.w - 2.0, panel.h - 2.0));
+    let wave: Vec<Point> = (0..=48)
+      .map(|i| {
+        let k = i as f32 / 48.0;
+        Point::new(panel.x + k * panel.w, panel.y + 12.0 - 18.0 * (k * 3.0 * TAU).sin())
+      })
+      .collect();
+    f.polyline(&wave, 2.0, AMBER);
+    f.pop_clip();
+  }
+
+  pub const PACE_SIZE: Size = Size::new(320.0, 80.0);
+  /// How long the bar moves, from the first frame.
+  pub const RUN: Duration = Duration::from_secs(3);
+  /// The CPU time each moving frame spends before it paints.
+  pub const WORK: Duration = Duration::from_millis(8);
+  /// The bar's width; it crosses the window once a second.
+  pub const BAR_W: f32 = 40.0;
+
+  /// The pacing scene: a bar slides for [RUN], each frame spending [WORK] of CPU time first, then
+  /// all stands still and the loop sleeps. Paced from their start, frames come once per refresh
+  /// (60 fps at 60 Hz); from their end, every 16.7 + 8 ms (about 40).
+  #[derive(Default)]
+  pub struct Pace {
+    /// The first frame's time.
+    start: Option<Duration>,
+    /// Frames painted while moving.
+    pub frames: usize,
+  }
+
+  impl App for Pace {
+    fn paint(&mut self, f: &mut Frame) {
+      let start = *self.start.get_or_insert(f.now());
+      let t = f.now().saturating_sub(start);
+      if t < RUN {
+        let busy = Instant::now();
+        while busy.elapsed() < WORK {
+          std::hint::spin_loop();
+        }
+
+        self.frames += 1;
+        f.animate();
+      }
+
+      f.rect(Rect::new(0.0, 0.0, f.size().w, f.size().h), rgb(0x1c1c1e), 0.0);
+      let x = t.min(RUN).as_secs_f32().fract() * (f.size().w - BAR_W);
+      f.rect(Rect::new(x, 0.0, BAR_W, f.size().h), BLUE, 0.0);
+    }
+  }
+}
+
 use nimbo::{
-  App, Bitmap, Config, Font, HelpStyle, Hotkey, List, Selection, Style, Tag, TextStyle, Ui, grow,
-  px,
+  App, Bitmap, CMD, Config, Cx, Event, Font, HelpStyle, Hotkey, Id, Key, List, Selection, Style,
+  Tag, TextStyle, Ui, grow, px,
 };
 
 pub use self::blocks::{BLOCKS, Block, GROUPS};
+pub use self::canvas::{PACE_SIZE, PAD, Pace, Pad};
+
+/// The Canvas page's index, after the table's blocks: out of the table and `docs/api.md`.
+pub const CANVAS: usize = BLOCKS.len();
 
 pub const SIDEBAR: &str = "sidebar";
 pub const PAGE: &str = "page";
@@ -1237,7 +1445,7 @@ pub const SIZES: [Tag<Size>; 3] = [
 ];
 
 pub struct Gallery {
-  /// The block shown, an index into [BLOCKS].
+  /// The block shown, an index into [BLOCKS], or [CANVAS].
   pub page: usize,
   pub sel: Selection,
   /// One block alone, as high as its variants: a picture for `docs/api.md`.
@@ -1274,6 +1482,8 @@ pub struct Gallery {
   pub on: bool,
   /// The photo block's, decoded by the OS at twice its size in points.
   pub photo: Option<Bitmap>,
+  /// The Canvas page's raw input.
+  pub pad: Pad,
 }
 
 /// The localized text block's Russian (`--locale ru`).
@@ -1337,6 +1547,7 @@ impl Default for Gallery {
       copied: 0,
       on: true,
       photo: Bitmap::decode(SUNSET, 240).ok(),
+      pad: Pad::default(),
     }
   }
 }
@@ -1349,6 +1560,11 @@ impl Gallery {
 
   /// The page of the block shown: its name, SwiftUI's and nimbo's lines, then the block live.
   fn page(&mut self, ui: &mut Ui) {
+    if self.page == CANVAS {
+      ui.id(PAGE).scroll_area(Style::new().grow(), |ui| self.canvas(ui));
+      return;
+    }
+
     let (t, block) = (ui.theme(), &BLOCKS[self.page]);
     let mono = TextStyle::new(Font::mono(12.0), t.text());
     let code = Style::new().w(grow()).pad(10.0).gap(4.0).radius(8.0).bg(t.raised());
@@ -1366,23 +1582,31 @@ impl Gallery {
     });
   }
 
-  /// The sidebar: every block by group, the one shown selected.
+  /// The sidebar: every block by group, then the Canvas page; the one shown selected.
   fn sidebar(&mut self, ui: &mut Ui) {
     let t = ui.theme();
-    let starts: Vec<usize> =
+    let mut starts: Vec<usize> =
       GROUPS.iter().filter_map(|g| BLOCKS.iter().position(|b| b.group == *g)).collect();
-    let head = |ui: &mut Ui, g: usize| ui.text(GROUPS[g], t.section());
-    let list = List::new(BLOCKS.len(), 24.0).sections(&starts, 26.0, &head);
+    starts.push(CANVAS);
+    let head =
+      |ui: &mut Ui, g: usize| ui.text(GROUPS.get(g).copied().unwrap_or("Drawing"), t.section());
+    let list = List::new(CANVAS + 1, 24.0).sections(&starts, 26.0, &head);
     let list =
       list.selection(&mut self.sel).style(Style::new().w(px(200.0)).h(grow()).bg(t.panel()));
-    list.show(ui.id(SIDEBAR), |ui, row| ui.text(BLOCKS[row.index].name, t.label()));
-    if let Some(i) = self.sel.cursor_index(BLOCKS.len(), &|i| i as u64) {
+    list.show(ui.id(SIDEBAR), |ui, row| {
+      ui.text(BLOCKS.get(row.index).map_or("Canvas", |b| b.name), t.label())
+    });
+    if let Some(i) = self.sel.cursor_index(CANVAS + 1, &|i| i as u64) {
       self.page = i;
     }
   }
 }
 
 impl App for Gallery {
+  fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
+    self.page == CANVAS && self.pad_event(cx, ev)
+  }
+
   fn view(&mut self, ui: &mut Ui) {
     // The system's look and the shell's tips, whatever a block set last frame.
     ui.follow_system();
@@ -1445,11 +1669,37 @@ fn main() {
     _ => {}
   }
 
-  // A block's slug first: that block alone.
-  let page = args.first().and_then(|a| BLOCKS.iter().position(|b| b.slug() == *a));
-  let rest = &args[page.is_some() as usize..];
-  let app = Gallery::on(page.unwrap_or(0), page.is_some());
+  // The pacing scene alone, for `make pace`.
+  if args.first().is_some_and(|a| a == "pace") {
+    let cfg = Config::new("pace", PACE_SIZE.w, PACE_SIZE.h).fixed();
+    return example::run(cfg, Pace::default(), &args[1..], |_| {});
+  }
+
+  // A block's slug first: that block alone; `canvas`: the gallery on the Canvas page.
+  let first = args.first().map(String::as_str);
+  let page = first.and_then(|a| BLOCKS.iter().position(|b| b.slug() == a));
+  let canvas = first == Some("canvas");
+  let rest = &args[(page.is_some() || canvas) as usize..];
+  let app = Gallery::on(if canvas { CANVAS } else { page.unwrap_or(0) }, page.is_some());
   let (w, h) = if page.is_some() { (WIDTH, 300.0) } else { (WIDTH + 200.0, 600.0) };
   let cfg = Config::new("Gallery", w, h).localizations(&[("ru", RU)]);
-  example::run(cfg, app, rest, |h| _ = h.frame());
+  // The Canvas page's shot: a few presses, a drag across the pad and a key.
+  example::run(cfg, app, rest, |h| {
+    h.frame();
+    let Some(r) = h.rect(Id::of(PAD)).filter(|_| canvas) else { return };
+    for (x, y) in [(40.0, 30.0), (90.0, 80.0), (150.0, 40.0)] {
+      h.click(r.x + x, r.y + y);
+    }
+
+    h.press(r.x + 200.0, r.y + 90.0);
+    for i in 1..=24 {
+      let k = i as f32 / 24.0;
+      h.move_to(r.x + 200.0 + 220.0 * k, r.y + 60.0 + 30.0 * (k * 6.0).cos());
+    }
+
+    h.release(r.x + 420.0, r.y + 60.0 + 30.0 * 6f32.cos());
+    h.move_to(r.x + 330.0, r.y + 40.0);
+    h.key(Key::Char('k'), CMD);
+    h.frame();
+  });
 }

@@ -9,8 +9,10 @@
 //! its theme and clears from its ⊗; a stepped slider lands on its steps from the pointer and the
 //! keys and marks them with dots and labels; a row's footer spans its row; End in a custom list
 //! shows its last row whole; assistive technology reads each widget by its role, the ⊗ marks
-//! beside their controls; and `docs/api.md` is the gallery's, and so are its pictures on the
-//! `assets` branch when its worktree is there.
+//! beside their controls; `docs/api.md` is the gallery's, and so are its pictures on the
+//! `assets` branch when its worktree is there. The Canvas page follows the blocks, draws its
+//! shapes and text and shows the raw pointer and keys on its page only; the pacing scene moves,
+//! then stands still.
 
 #[path = "../examples/gallery.rs"]
 #[expect(dead_code, reason = "its main and what this file doesn't use")]
@@ -23,6 +25,7 @@ mod common;
 use std::time::Duration;
 
 use common::{diff, mid, px, reads};
+use gallery::canvas::{BAR_W, RUN, WORK};
 use gallery::*;
 use nimbo::a11y::{Action, Role};
 use nimbo::{Appearance, Event, Harness, Id, Modifiers, NamedKey, Rect, Size, Theme, alpha, mix};
@@ -557,4 +560,95 @@ fn a_custom_list_ends_on_its_last_row() {
   h.wait(Duration::from_millis(400));
   let (_, last) = node(&h, Role::Row, "Row 40");
   assert!((last.y + last.h - (list.y + list.h - 4.0)).abs() < 0.5, "{last:?} in {list:?}");
+}
+
+// MARK: Canvas
+
+/// The gallery on the Canvas page, high enough for all of it, a frame in.
+fn canvas() -> (H, Rect) {
+  let mut h = Harness::new(Gallery::on(CANVAS, false), Size::new(WIDTH + 200.0, 900.0), 1.0);
+  h.frame();
+  let pad = h.rect(Id::of(PAD)).expect("the pad");
+  (h, pad)
+}
+
+#[test]
+fn the_canvas_page_follows_the_blocks_in_the_sidebar() {
+  let mut h = gallery(0, false);
+  h.set_focus(Some(Id::of(SIDEBAR)));
+  h.key(NamedKey::End, Modifiers::empty());
+  h.frame();
+  assert_eq!(h.app().page, CANVAS);
+  reads(
+    &h.a11y(),
+    &["row \"Canvas\" selected", "static text \"Canvas\"", "static text \"SHAPES\""],
+  );
+}
+
+#[test]
+fn the_canvas_draws_its_shapes_and_text() {
+  let (mut h, pad) = canvas();
+  let img = h.render();
+  // The red square, at the shapes' start, 8 points in.
+  let shapes = h.rect(Id::of(PAGE)).unwrap();
+  let red = (0..400).find_map(|y| {
+    let y = shapes.y + y as f32;
+    (diff(img.pixel(pad.x + 20.0, y), px(nimbo::rgb(0xe5484d))) < 4).then_some(y)
+  });
+  assert!(red.is_some(), "no red square over x {}", pad.x + 20.0);
+  // Text ink between the TEXT heading and the pad.
+  let ink = (0..200).filter(|y| {
+    let p = img.pixel(pad.x + 4.0, pad.y - 60.0 - *y as f32);
+    diff(p, img.pixel(pad.x + 470.0, pad.y - 60.0 - *y as f32)) > 60
+  });
+  assert!(ink.count() > 4, "no text drawn left of the pad");
+}
+
+#[test]
+fn the_pad_shows_raw_presses_drags_and_keys() {
+  let (mut h, pad) = canvas();
+  h.move_to(pad.x + 40.0, pad.y + 30.0);
+  assert_eq!(h.app().pad.at, Some(nimbo::Point::new(pad.x + 40.0, pad.y + 30.0)));
+  h.press(pad.x + 40.0, pad.y + 30.0);
+  h.move_to(pad.x + 80.0, pad.y + 50.0);
+  h.move_to(pad.x + 120.0, pad.y + 60.0);
+  // Dragged out of the pad, the drag goes on.
+  h.move_to(pad.x + 600.0, pad.y + 60.0);
+  h.release(pad.x + 600.0, pad.y + 60.0);
+  let p = &h.app().pad;
+  assert_eq!((p.presses.len(), p.drag.len(), p.held), (1, 4, false));
+  h.frame();
+  reads(&h.a11y(), &["static text \"press at 40, 30 · click 1\""]);
+
+  h.key(nimbo::Key::Char('k'), nimbo::CMD);
+  h.frame();
+  let label = nimbo::Shortcut::char('k').cmd().label();
+  reads(&h.a11y(), &[&format!("static text \"key {label}\"")]);
+}
+
+#[test]
+fn the_pad_ignores_the_pointer_elsewhere_and_other_pages() {
+  let (mut h, pad) = canvas();
+  h.click(pad.x + 10.0, pad.y - 40.0);
+  assert!(h.app().pad.presses.is_empty());
+  let mut h = gallery(0, false);
+  h.key(nimbo::Key::Char('k'), Modifiers::empty());
+  assert!(h.app().pad.last.is_empty(), "keys reach the pad on its page only");
+}
+
+/// The pacing scene paints its bar for RUN, spending WORK on each frame, then stands still: no
+/// frame asked for.
+#[test]
+fn the_pace_scene_moves_then_stands_still() {
+  let mut h = Harness::new(Pace::default(), PACE_SIZE, 1.0);
+  h.frame();
+  assert!(h.needs_frame(), "moving");
+  h.wait(RUN + Duration::from_millis(200));
+  let moving = h.app().frames;
+  assert!(moving > 1 && moving <= (RUN.as_millis() / WORK.as_millis()) as usize + 2, "{moving}");
+  assert!(!h.needs_frame() && h.due_in().is_none(), "still");
+  let img = h.render();
+  // It crosses once a second: after 3 s, back where it set off.
+  assert_eq!(img.pixel(BAR_W / 2.0, 40.0), px(nimbo::rgb(0x3b82f6)), "the bar");
+  assert_eq!(img.pixel(BAR_W + 4.0, 40.0), px(nimbo::rgb(0x1c1c1e)), "the ground");
 }

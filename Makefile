@@ -37,7 +37,7 @@ check-targets: # clippy of the library, examples and tests for Windows and Linux
 	@for t in $(TARGETS); do cargo clippy --all-targets --target $$t -- -D warnings || exit 1; done
 
 pace: # frame pacing in a window of this session: fps while animating, wakeups when still
-	cargo build --release --example pace
+	cargo build --release --example gallery
 	uv run scripts/pace.py
 
 size: # code, docs and tests per module; ARGS="--files", "--map" (each file and what it does), "--check" (a warning past 600 lines of library code added since main) or "--vs main"

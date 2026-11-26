@@ -116,7 +116,7 @@ Every example takes `--shot <file.png>` (with `--appearance light`, `--locale <t
 - `counter`: buttons, hover, focus
 - `7guis`: the 7GUIs tasks 2–7 (converter, booker, timer, CRUD, circles, cells) on tabs
 - `custom-look`: a dense dark-first triage tool in a look of its own over the style traits
-- `gallery`: a catalog of every building block, each page its SwiftUI line, its nimbo line and the block in its variants
+- `gallery`: every building block beside SwiftUI's in its variants; a Canvas page; the pacing scene
 - `settings`: a macOS-style settings window
 - `notes`: a sidebar shown and hidden from a toolbar in the title bar
 - `files`: open and save panels, drag and drop
