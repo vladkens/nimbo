@@ -50,8 +50,9 @@
 //! Cmd-click (Ctrl-click on Windows and Linux) toggles a row and Shift-click selects from the
 //! anchor; a secondary click selects the row alone unless it is selected, for the app's context
 //! menu ([Ui::context_menu]), which one off the rows (the scrollbar, a header) doesn't open. A
-//! plain press on the list's ground (a header, the padding, the room under the rows; not a
-//! control there nor a scrollbar) clears the selection, as a table view's on macOS. Keys,
+//! plain press on the list's ground (the padding, the room under the rows; not a control there
+//! nor a scrollbar) clears the selection, as a table view's on macOS; one on a header keeps it,
+//! as a source list's group row does. Keys,
 //! while the list has focus (a press gives it), come as the platform's commands: Up and Down (Shift
 //! extends), Page Up and Page Down, Home and End or Cmd-Up and Cmd-Down, Cmd-A, and Enter, which
 //! activates the row, as a double click does. Delete or Backspace (Cmd-Backspace too on a Mac) ask

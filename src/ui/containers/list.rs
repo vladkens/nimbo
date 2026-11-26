@@ -551,11 +551,13 @@ mod tests {
   }
 
   /// Six rows 20 high in two sections under headers 30 high, each with a text, a button and a
-  /// disabled one; a box after the list. Scrolls in its 100 high.
+  /// disabled one; a box after the list. Scrolls in its 100 high; `tall`, 300 high, room under
+  /// the rows.
   #[derive(Default)]
   struct Ground {
     sel: Selection,
     clicks: usize,
+    tall: bool,
   }
 
   impl crate::App for Ground {
@@ -567,7 +569,7 @@ mod tests {
         clicks.set(clicks.get() + ui.id(("b", g)).button("B").clicked as usize);
         ui.disabled(true).id(("off", g)).button("Off");
       };
-      ui.col(Style::new().w(px(200.0)).h(px(100.0)), |ui| {
+      ui.col(Style::new().w(px(200.0)).h(px(if self.tall { 300.0 } else { 100.0 })), |ui| {
         let list = List::new(6, 20.0).sections(&[0, 3], 30.0, &head).multi();
         let list = list.selection(&mut self.sel).style(Style::new().grow());
         list.show(ui.id("list"), |ui, _| ui.label("row"));
@@ -577,9 +579,9 @@ mod tests {
     }
   }
 
-  /// As a table view on macOS: a plain press on a header, its text or the room beside it,
-  /// clears the selection; one with Cmd or Shift, on a header's button, enabled or not, on the
-  /// scrollbar or off the list keeps it.
+  /// As a table view on macOS: a plain press on the room under the rows clears the selection;
+  /// one on a header (its text, the room beside it, its button, enabled or not), with Cmd or
+  /// Shift, on the scrollbar or off the list keeps it, as a source list's group row does.
   #[test]
   fn a_press_on_the_lists_ground_clears_the_selection() {
     use crate::Harness;
@@ -617,12 +619,17 @@ mod tests {
     h.frame();
     assert_eq!(sorted(&h.app().sel), [1]);
 
-    // The room beside the header's text clears it; its text too.
+    // The room beside the header's text keeps it; its text too.
     h.click(x, y);
-    h.frame();
-    assert!(h.app().sel.is_empty());
-    pick(&mut h);
     h.click_id(Id::of(("t", 0)));
+    h.frame();
+    assert_eq!(sorted(&h.app().sel), [1]);
+
+    // The room under the rows clears it.
+    h.app_mut().tall = true;
+    h.frame();
+    let v = h.rect(id).unwrap();
+    h.click(v.x + 50.0, v.y + v.h - 10.0);
     h.frame();
     assert!(h.app().sel.is_empty());
   }
