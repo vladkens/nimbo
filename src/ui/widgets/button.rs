@@ -145,7 +145,7 @@ pub(crate) fn look(
 }
 
 /// Button `c` in the theme's look `v` at the control size and its `role`'s tint: square for an
-/// icon alone, muted until hovered unless selected; selected, the accent's tint and label.
+/// icon alone, muted until hovered unless selected or prominent; selected, the accent's tint.
 /// Borderless buttons (toolbar ones) hover; the others where the theme hovers every control.
 pub(crate) fn themed(
   ui: &mut Ui,
@@ -172,7 +172,7 @@ pub(crate) fn themed(
     _ => ui.ctl_hot(c.id, c.hovered),
   };
 
-  let muted = c.icon_only && !c.selected;
+  let muted = c.icon_only && !c.selected && !matches!(v, Variant::Prominent);
   draw(ui, c, s, hot, muted, label);
 }
 
@@ -291,8 +291,8 @@ mod tests {
   use crate::scene::{Rect, Size};
   use crate::text::Font;
   use crate::ui::{
-    ButtonStyle, ControlSize, Cursor, Icon, Id, PlainButtonStyle, Response, Style, TextStyle,
-    Theme, Ui, px,
+    BorderedProminentButtonStyle, ButtonStyle, ControlSize, Cursor, Icon, Id, PlainButtonStyle,
+    Response, Style, TextStyle, Theme, Ui, px,
   };
   use crate::{Harness, Modifiers, NamedKey};
 
@@ -338,6 +338,28 @@ mod tests {
     assert_eq!(height(&mut h, None), push);
     assert_ne!(height(&mut h, Some(&PlainButtonStyle)), push);
     assert_eq!(height(&mut h, None), push, "back to the shell's");
+  }
+
+  /// A prominent button showing an ✕.
+  struct Cross;
+
+  impl App for Cross {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.button_style(&BorderedProminentButtonStyle).id("b").button(Icon::X);
+    }
+  }
+
+  /// An icon alone on the accent is drawn in the accent's label colour, not muted.
+  #[test]
+  fn a_prominent_icon_takes_the_label_colour() {
+    let mut h = Harness::new(Cross, Size::new(100.0, 100.0), 2.0);
+    h.frame();
+    let r = h.rt.ui.last.rect(Id::of("b")).unwrap();
+    let t = Theme::system(h.rt.ui.appearance());
+    let img = h.render();
+    let px = img.pixel(r.x + r.w / 2.0, r.y + r.h / 2.0);
+    let on = t.on_accent.map(|v| (v * 255.0).round() as u8);
+    assert!((0..3).all(|i| px[i].abs_diff(on[i]) < 24), "{px:?}, not {on:?}");
   }
 
   /// A disabled button, its last response kept.
