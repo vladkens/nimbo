@@ -1,16 +1,16 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Harness tests for `examples/gallery.rs`: every block has a page that builds, named by the
-//! block; the sidebar turns the pages; a block's disabled variant reads disabled and its sizes
-//! differ; a block alone is as high as its variants; in each appearance the widgets work and draw
-//! in its theme (a check box checks in its accent, a switch slides, the slider drags, a picker
-//! chooses by letters, a segment picks, a tooltip shows, a recorder records and its ⊗ clears,
-//! the alert asks in its theme, Escape closes it, its action counts), the search field draws in
-//! its theme and clears from its ⊗; a stepped slider lands on its steps from the pointer and the
-//! keys and marks them with dots and labels; a row's footer spans its row; End in a custom list
-//! shows its last row whole; assistive technology reads each widget by its role, the ⊗ marks
-//! beside their controls; and `docs/api.md` is the gallery's, and so are its pictures on the
-//! `assets` branch when its worktree is there.
+//! Harness tests for `examples/gallery.rs`: every block has a page that builds, named by the block;
+//! the sidebar turns the pages and keeps its selection under a header's press; a block's disabled
+//! variant reads disabled and its sizes differ; a block alone is as high as its variants; in each
+//! appearance the widgets work and draw in its theme (a check box checks in its accent, a switch
+//! slides, the slider drags, a picker chooses by letters, a segment picks, a tooltip shows, a
+//! recorder records and its ⊗ clears, the alert asks in its theme, Escape closes it, its action
+//! counts), the search field draws in its theme and clears from its ⊗; a stepped slider lands on
+//! its steps from the pointer and the keys and marks them with dots and labels; a row's footer
+//! spans its row; End in a custom list shows its last row whole; assistive technology reads each
+//! widget by its role, the ⊗ marks beside their controls; and `docs/api.md` is the gallery's, and
+//! so are its pictures on the `assets` branch when its worktree is there.
 
 #[path = "../examples/gallery.rs"]
 #[expect(dead_code, reason = "its main and what this file doesn't use")]
@@ -83,6 +83,29 @@ fn the_sidebar_turns_the_pages() {
     read.contains("static text \"Button\"") && read.contains("button \"Prominent\""),
     "{read}"
   );
+}
+
+/// A press held on the header above the selected row ("Controls" over "Button") keeps the row
+/// filled, frame after frame.
+#[test]
+fn the_sidebar_keeps_its_selection_under_a_header_press() {
+  let mut h = gallery(0, false);
+  let row = h.rect(Id::of(SIDEBAR).key(("row", page("Button") as u64))).unwrap();
+  let (x, y) = mid(row);
+  h.click(x, y);
+  h.wait(Duration::from_millis(100));
+  let filled = h.render().pixel(5.0, y);
+  h.move_to(x, row.y - 8.0);
+  h.wait(Duration::from_millis(100));
+  h.press(x, row.y - 8.0);
+  for _ in 0..6 {
+    h.wait(Duration::from_millis(8));
+    assert_eq!(h.render().pixel(5.0, y), filled, "{:?}", h.app().sel.cursor());
+  }
+
+  h.release(x, row.y - 8.0);
+  h.frame();
+  assert_eq!(h.app().page, page("Button"));
 }
 
 /// The switch reads on in its enabled line, disabled in its disabled one; a large one is wider;

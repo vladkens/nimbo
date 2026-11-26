@@ -343,6 +343,48 @@ mod tests {
     assert!(r6.y >= v.y && r6.y + r6.h <= v.y + v.h + 0.5, "{r6:?} in {v:?}");
   }
 
+  /// A press on a header keeps the selection when a wheel moved the rows after the frame it hit.
+  #[test]
+  fn a_header_pressed_as_the_wheel_moves_keeps_the_selection() {
+    use crate::app::{Event, Phase};
+    use crate::{Harness, Point};
+    let mut h = Harness::new(Threes::default(), Size::new(300.0, 300.0), 1.0);
+    let id = Id::of("list");
+    h.frame();
+    h.click_id(id.key(("row", 0u64)));
+    h.frame();
+
+    // The second header is 90 to 120 down; the wheel takes the rows 30 up before it shows.
+    let list = h.rect(id).unwrap();
+    let (x, y) = (list.x + 50.0, list.y + 100.0);
+    let (pos, delta, mods) = (Point::new(x, y), Point::new(0.0, -30.0), Modifiers::empty());
+    let (phase, momentum) = (Phase::None, Phase::None);
+    h.event(Event::Scroll { pos, delta, precise: true, phase, momentum, mods });
+    h.press(x, y);
+    h.release(x, y);
+    h.frame();
+    assert_eq!(h.app().sel.cursor(), Some(0));
+  }
+
+  /// A quick click that went down on a header keeps the selection wherever it was released.
+  #[test]
+  fn a_quick_click_down_on_a_header_keeps_the_selection() {
+    use crate::Harness;
+    let mut h = Harness::new(Threes::default(), Size::new(300.0, 300.0), 1.0);
+    let id = Id::of("list");
+    h.frame();
+    h.click_id(id.key(("row", 0u64)));
+    h.frame();
+
+    // Down at the second header's foot (90 to 120), up on the row under it.
+    let list = h.rect(id).unwrap();
+    let x = list.x + 50.0;
+    h.press(x, list.y + 118.0);
+    h.release(x, list.y + 122.0);
+    h.frame();
+    assert_eq!(h.app().sel.cursor(), Some(0));
+  }
+
   #[test]
   fn delete_asks_and_escape_clears() {
     use crate::{Harness, NamedKey as K};
@@ -551,11 +593,13 @@ mod tests {
   }
 
   /// Six rows 20 high in two sections under headers 30 high, each with a text, a button and a
-  /// disabled one; a box after the list. Scrolls in its 100 high.
+  /// disabled one; a box after the list. Scrolls in its 100 high; `tall`, 300 high, room under
+  /// the rows.
   #[derive(Default)]
   struct Ground {
     sel: Selection,
     clicks: usize,
+    tall: bool,
   }
 
   impl crate::App for Ground {
@@ -567,7 +611,7 @@ mod tests {
         clicks.set(clicks.get() + ui.id(("b", g)).button("B").clicked as usize);
         ui.disabled(true).id(("off", g)).button("Off");
       };
-      ui.col(Style::new().w(px(200.0)).h(px(100.0)), |ui| {
+      ui.col(Style::new().w(px(200.0)).h(px(if self.tall { 300.0 } else { 100.0 })), |ui| {
         let list = List::new(6, 20.0).sections(&[0, 3], 30.0, &head).multi();
         let list = list.selection(&mut self.sel).style(Style::new().grow());
         list.show(ui.id("list"), |ui, _| ui.label("row"));
@@ -577,9 +621,9 @@ mod tests {
     }
   }
 
-  /// As a table view on macOS: a plain press on a header, its text or the room beside it,
-  /// clears the selection; one with Cmd or Shift, on a header's button, enabled or not, on the
-  /// scrollbar or off the list keeps it.
+  /// As a table view on macOS: a plain press on the room under the rows clears the selection;
+  /// one on a header (its text, the room beside it, its button, enabled or not), with Cmd or
+  /// Shift, on the scrollbar or off the list keeps it, as a source list's group row does.
   #[test]
   fn a_press_on_the_lists_ground_clears_the_selection() {
     use crate::Harness;
@@ -617,12 +661,17 @@ mod tests {
     h.frame();
     assert_eq!(sorted(&h.app().sel), [1]);
 
-    // The room beside the header's text clears it; its text too.
+    // The room beside the header's text keeps it; its text too.
     h.click(x, y);
-    h.frame();
-    assert!(h.app().sel.is_empty());
-    pick(&mut h);
     h.click_id(Id::of(("t", 0)));
+    h.frame();
+    assert_eq!(sorted(&h.app().sel), [1]);
+
+    // The room under the rows clears it.
+    h.app_mut().tall = true;
+    h.frame();
+    let v = h.rect(id).unwrap();
+    h.click(v.x + 50.0, v.y + v.h - 10.0);
     h.frame();
     assert!(h.app().sel.is_empty());
   }
