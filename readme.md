@@ -114,6 +114,7 @@ cargo run --release --example gallery -- --shot gallery.png    # the same, rende
 Every example takes `--shot <file.png>` (with `--appearance light`, `--locale <tag>`) to render its window to a file ([examples/common/example.rs](examples/common/example.rs)). Each building block beside its SwiftUI counterpart, with a picture: [docs/api.md](docs/api.md), made from the gallery's table ([examples/gallery.rs](examples/gallery.rs)) by `make api-shots`.
 
 - `counter`: buttons, hover, focus
+- `7guis`: the 7GUIs tasks 2–7 (converter, booker, timer, CRUD, circles, cells) on tabs
 - `gallery`: a catalog of every building block, each page its SwiftUI line, its nimbo line and the block in its variants
 - `settings`: a macOS-style settings window
 - `notes`: a sidebar shown and hidden from a toolbar in the title bar
