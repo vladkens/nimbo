@@ -129,11 +129,11 @@ define_class!(
       false
     }
 
-    /// Opened again while it runs: LaunchServices starts no second process but tells.
+    /// Opened again while it runs (the Dock icon, Finder, `open`): LaunchServices starts no
+    /// second process but tells ([reopen]).
     #[unsafe(method(applicationShouldHandleReopen:hasVisibleWindows:))]
     fn should_handle_reopen(&self, _app: &NSApplication, _visible: bool) -> bool {
-      defer(shell::reopened);
-      false
+      reopen(defer)
     }
   }
 
@@ -181,6 +181,14 @@ impl Delegate {
     let this = Self::alloc(mtm).set_ivars(());
     unsafe { msg_send![super(this), init] }
   }
+}
+
+/// The answer to a reopen: the app's hook runs from `later` ([shell::reopened]), and AppKit goes
+/// on with its own (yes), as a Mac app does: with no window on screen a minimized one comes back,
+/// hook or not.
+fn reopen(later: impl FnOnce(fn())) -> bool {
+  later(shell::reopened);
+  true
 }
 
 /// The menu bar from `bar` for the app's name: the app's commands ([crate::Main::set_commands]),
@@ -560,5 +568,19 @@ fn release() {
   for gone in shell(|s| std::mem::take(&mut s.gone)) {
     gone.window.setContentView(None);
     drop(gone);
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  /// A Dock click with no hook set still lets AppKit bring a minimized window back; the hook, set
+  /// or not, runs later.
+  #[test]
+  fn reopen_lets_appkit_restore() {
+    let mut hook = None;
+    assert!(reopen(|f| hook = Some(f)));
+    assert_eq!(hook.map(|f| f as usize), Some(shell::reopened as fn() as usize));
   }
 }

@@ -317,7 +317,8 @@ impl Main {
 
   /// `f` runs when the app is opened again while it runs (macOS: the Dock icon, Finder,
   /// Spotlight, `open`) and when a second launch sends [OPEN] to the instance [Main::serve]
-  /// keeps (Windows and Linux start a second process): a menu-bar app shows its settings.
+  /// keeps (Windows and Linux start a second process): a menu-bar app shows its settings. A
+  /// minimized window comes back from the Dock with or without it, as from the taskbar.
   pub fn on_reopen(&mut self, f: impl FnMut(&mut Main) + 'static) {
     hooks(|h| h.reopen = Some(Box::new(f)));
   }
