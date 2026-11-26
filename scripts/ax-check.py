@@ -13,7 +13,7 @@ frames with the controls), quits the example and prints everything.
 The VM is ~/Code/vm's macOS profile, prepared once with `./vm prepare macos --test-host`
 (`./vm exec macos --gui` runs trusted for Accessibility). Nothing opens on this machine.
 
-uv run scripts/ax-check.py [example...]      default: settings gallery
+uv run scripts/ax-check.py [example...]      default: messenger gallery
 """
 
 import subprocess
@@ -30,24 +30,15 @@ GUEST = "nimbo"
 # The ops after the pid, run in order by ax-dump (see its header); at "shot" (else at the end)
 # the script takes the screenshot.
 SCENARIOS = {
-  "settings": [
+  "messenger": [
     "dump", "count", "focused",
-    "hit", "AXCheckBox:Open at login", "hit", "AXRadioButton:Beta",
-    "press", "AXCheckBox:Open at login", "sleep", "1", "count",
-    "press", "AXButton:Reset", "sleep", "0.5",
-    "focus", "AXPopUpButton:Language", "sleep", "0.5", "count", "focused",
-    "dump",
-    "press", "AXPopUpButton:Language", "sleep", "0.5", "count", "dump",
-    "press", "AXMenuItem:English", "sleep", "0.5", "count",
-    "dump",
-    "watch", "AXCheckBox:Open at login",
-    "press", "AXRadioButton:Appearance", "sleep", "0.5", "count",
-    "inc", "AXSlider:Text size", "sleep", "0.5", "count",
-    "dec", "AXSlider:Text size", "dec", "AXSlider:Text size", "sleep", "0.5", "count",
-    "dump",
-    "press", "AXRadioButton:Advanced", "sleep", "0.5", "count",
-    "press", "AXButton:Clear…", "sleep", "0.5", "count", "focused", "dump",
-    "press", "AXButton:Reset All…", "press", "AXButton:Clear", "sleep", "0.5", "count",
+    "hit", "AXButton:Profile", "hit", "AXTextArea:Message",
+    "press", "AXButton:Profile", "sleep", "0.5", "count",
+    "focus", "AXTextArea:Message", "sleep", "0.5", "count", "focused",
+    "set", "AXTextArea:Message", "12 * 7 + 1", "sleep", "0.5", "count",
+    "press", "AXButton:Send", "sleep", "0.3", "count", "dump",
+    "sleep", "1.5", "count", "dump",
+    "focus", "AXTextField:Search", "set", "AXTextField:Search", "frame", "sleep", "0.5", "count",
     "dump",
     "shot",
     "press", "AXCloseButton", "sleep", "0.5", "count",

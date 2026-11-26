@@ -190,8 +190,8 @@ mod pages {
             });
           }),
 
-          // In a window's title bar on macOS ([nimbo::Config::unified]: `examples/files`); here in
-          // a bar of its own, a sidebar's column with its toggle beside the detail's with its
+          // In a window's title bar on macOS ([nimbo::Config::unified]: `examples/messenger`); here
+          // in a bar of its own, a sidebar's column with its toggle beside the detail's with its
           // action.
           "Toolbar" => Self::variants(ui, Shown::Plain, |ui| {
             let bar = Style::new().w(px(360.0)).h(px(52.0)).radius(8.0).pad(1.0).clip().bg(t.bg());
