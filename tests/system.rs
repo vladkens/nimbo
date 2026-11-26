@@ -1,15 +1,131 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Tests of `examples/system.rs` through the harness, with a fake lid: a change of the system
-//! reaches the window as `Event::System`, which reads again and redraws (the count, the last
+//! Tests through the harness of a window that follows the system, with a fake lid: a change of the
+//! system reaches the window as `Event::System`, which reads again and redraws (the count, the last
 //! kind, the lid), the rows keeping their heights; other events change nothing; the tray's menu
 //! from what came.
 
-#[path = "../examples/system.rs"]
-#[expect(dead_code, reason = "its main and what this file doesn't use")]
-// The example sets the Windows subsystem, an attribute of its own crate, not of this module.
-#[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
-mod system;
+mod system {
+  //! A window that follows the system's changes ([nimbo::system]): it reads again on each
+  //! `Event::System` and redraws: the lid, the changes of each kind and the last; and the tray's
+  //! menu a tray app would build from what came.
+
+  use nimbo::system::Change;
+  use nimbo::{App, Cx, Event, FormRow, FormStyle, Item, Menu, Shortcut, Style, Ui, grow};
+
+  pub const KINDS: [Change; 3] = [Change::AudioInputs, Change::DefaultInput, Change::Lid];
+  pub const LID: &str = "lid";
+  pub const COUNT: &str = "count";
+  pub const LAST: &str = "last";
+
+  /// What came: the changes of each kind, the last, and the lid as read after it.
+  #[derive(Clone, Debug, PartialEq)]
+  pub struct Seen {
+    pub counts: [u32; 3],
+    pub last: Option<Change>,
+    pub lid: Option<bool>,
+  }
+
+  impl Seen {
+    pub fn new(lid: Option<bool>) -> Self {
+      Self { counts: [0; 3], last: None, lid }
+    }
+
+    /// `change` came; the lid read again after it is `lid`.
+    pub fn add(&mut self, change: Change, lid: Option<bool>) {
+      if let Some(i) = KINDS.iter().position(|&k| k == change) {
+        self.counts[i] += 1;
+      }
+
+      self.last = Some(change);
+      self.lid = lid;
+    }
+  }
+
+  pub fn lid_label(lid: Option<bool>) -> &'static str {
+    match lid {
+      Some(true) => "Closed",
+      Some(false) => "Open",
+      None => "None",
+    }
+  }
+
+  pub fn kind_label(kind: Change) -> &'static str {
+    match kind {
+      Change::AudioInputs => "Audio inputs",
+      Change::DefaultInput => "Default input",
+      Change::Lid => "Lid",
+      _ => "Other",
+    }
+  }
+
+  /// The tray's menu: the lid and the audio changes, then the window and Quit.
+  pub fn menu(s: &Seen) -> Menu<Action> {
+    let audio = s.counts[0] + s.counts[1];
+    Menu::new(vec![
+      Item::button(Action::None, &format!("Lid: {}", lid_label(s.lid))).enabled(false),
+      Item::button(Action::None, &format!("Audio changes: {audio}")).enabled(false),
+      Item::Divider,
+      Item::button(Action::Show, "Show Window"),
+      Item::Divider,
+      Item::button(Action::Quit, "Quit").key(Shortcut::char('q').cmd()),
+    ])
+  }
+
+  /// What the tray's menu does; its status lines do nothing.
+  #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+  pub enum Action {
+    None,
+    Show,
+    Quit,
+  }
+
+  /// The window: what came, read again on each change.
+  pub struct System {
+    pub seen: Seen,
+    /// How the lid is read: [hardware::lid_closed], a fake in the tests.
+    pub read_lid: fn() -> Option<bool>,
+  }
+
+  impl System {
+    pub fn new(read_lid: fn() -> Option<bool>) -> Self {
+      Self { seen: Seen::new(read_lid()), read_lid }
+    }
+  }
+
+  impl App for System {
+    fn event(&mut self, _: &mut Cx, ev: &Event) -> bool {
+      let Event::System(change) = ev else { return false };
+      self.seen.add(*change, (self.read_lid)());
+      true
+    }
+
+    fn view(&mut self, ui: &mut Ui) {
+      let fs = FormStyle::plates(&ui.theme());
+      let s = &self.seen;
+      ui.col(Style::new().grow().bg(fs.bg()), |ui| {
+        ui.form_scroll(&fs, Style::new().grow(), |ui| {
+          ui.col(fs.page().pads([20.0, 20.0, 20.0, 20.0]).w(grow()), |ui| {
+            ui.form_section(&fs, "Hardware", |ui| {
+              ui.form_row(&fs, FormRow::new("Lid"), |ui| {
+                ui.id(LID).text(lid_label(s.lid), fs.note())
+              });
+            });
+            ui.form_section(&fs, "Changes", |ui| {
+              for (i, &kind) in KINDS.iter().enumerate() {
+                let row = FormRow::new(kind_label(kind));
+                ui.form_row(&fs, row, |ui| ui.id((COUNT, i as u8)).text(s.counts[i], fs.note()));
+              }
+
+              let last = s.last.map_or("None", kind_label);
+              ui.form_row(&fs, FormRow::new("Last"), |ui| ui.id(LAST).text(last, fs.note()));
+            });
+          });
+        });
+      });
+    }
+  }
+}
 
 use nimbo::harness::Image;
 use nimbo::system::Change;

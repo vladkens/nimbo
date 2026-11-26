@@ -118,14 +118,6 @@ Every example takes `--shot <file.png>` (with `--appearance light`, `--locale <t
 - `settings`: a macOS-style settings window
 - `notes`: a sidebar shown and hidden from a toolbar in the title bar
 - `files`: open and save panels, drag and drop
-- `lists`: a list of 100,000 rows, menus, tabs, a split
-- `history`: 86,000 rows a day at a time in a grouped list, built in view only
-- `fields`: text fields and input methods
-- `text`: fonts, scripts, emoji
-- `shapes`: what the renderer draws
-- `input`: mouse, keys, clipboard
-- `tray`: a tray icon, a global hotkey
-- `hud`: an overlay over every app
 
 ## 📏 Size
 

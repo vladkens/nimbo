@@ -1,29 +1,128 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Tests of `examples/fields.rs` through the harness: typing, moves by word and line, selection by
-//! Shift and the mouse (click, drag, double and triple click), the clipboard, undo and redo, Enter
-//! and Tab; an input method's composition kept out of the value until committed, a commit and a new
+//! Tests through the harness of the app below: typing, moves by word and line, selection by Shift
+//! and the mouse (click, drag, double and triple click), the clipboard, undo and redo, Enter and
+//! Tab; an input method's composition kept out of the value until committed, a commit and a new
 //! composition back to back, a value the app sets meanwhile held, Enter completing it; the
 //! password's dots, clipboard and input method; the placeholder, the disabled field, selectable
-//! text, and the caret's blink timers only while a field has focus (the first one from the
-//! start). Assistive technology reads the fields' text as shown, a composition in it, never the
-//! password's, and sets it, over a value the app set while composing. Windows' and Linux's keys
-//! (Ctrl, Insert, Home and End) and macOS's, each played on any host; the edit menu of a
-//! right-click, its items enabled as they can act, and what it runs; the menu bar's Edit items.
+//! text, and the caret's blink timers only while a field has focus (the first one from the start).
+//! Assistive technology reads the fields' text as shown, a composition in it, never the password's,
+//! and sets it, over a value the app set while composing. Windows' and Linux's keys (Ctrl, Insert,
+//! Home and End) and macOS's, each played on any host; the edit menu of a right-click, its items
+//! enabled as they can act, and what it runs; the menu bar's Edit items.
 
-#[path = "../examples/fields.rs"]
-#[expect(dead_code, reason = "its main and what this file doesn't use")]
-// The example sets the Windows subsystem, an attribute of its own crate, not of this module.
-#[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
-mod fields;
+mod app {
 
+  //! Text fields and selectable text: a name, an e-mail with a placeholder, a password, notes over
+  //! several lines, a disabled field and a paragraph to select and copy. Enter in a single-line
+  //! field shows what it submitted; Tab moves between the fields. Input methods compose in place
+  //! (try Pinyin or Japanese).
+
+  use nimbo::{Align, App, Axis, Size, Style, TextField, TextStyle, Ui, grow, px};
+
+  pub const SIZE: Size = Size::new(460.0, 340.0);
+
+  pub const NAME: &str = "name";
+  pub const EMAIL: &str = "email";
+  pub const PASSWORD: &str = "password";
+  pub const NOTES: &str = "notes";
+  pub const OFF: &str = "off";
+  pub const ABOUT: &str = "about";
+
+  /// The paragraph to select.
+  pub const TEXT: &str = "Selectable text takes the pointer and the keys as a field does, but \
+    only selects and copies: double-click a word, triple-click a line, Shift and the arrows.";
+
+  #[derive(Default)]
+  pub struct Fields {
+    pub name: String,
+    pub email: String,
+    pub password: String,
+    pub notes: String,
+    pub off: String,
+    /// What Enter submitted last, and from which field.
+    pub submitted: Option<(&'static str, String)>,
+    /// Fields whose text changed, in order.
+    pub changes: Vec<&'static str>,
+  }
+
+  impl Fields {
+    pub fn new() -> Self {
+      let off = "Read only".to_owned();
+      Self { off, ..Self::default() }
+    }
+  }
+
+  impl App for Fields {
+    fn view(&mut self, ui: &mut Ui) {
+      let t = ui.theme();
+      let row = Style::new().w(grow()).gap(12.0).align(Align::Start, Align::Center);
+      let label = Style::new().w(px(72.0));
+      ui.col(Style::new().grow().pad(20.0).gap(12.0).bg(t.bg()), |ui| {
+        let single: [(&'static str, &str, &'static str); 3] =
+          [(NAME, "Name", ""), (EMAIL, "E-mail", "name@example.com"), (PASSWORD, "Password", "")];
+        for (id, title, hint) in single {
+          ui.row(row, |ui| {
+            ui.row(label, |ui| ui.text(title, t.label()));
+            let text = match id {
+              NAME => &mut self.name,
+              EMAIL => &mut self.email,
+              _ => &mut self.password,
+            };
+
+            // Named by its label for assistive technology; the first field takes the focus as the
+            // window opens.
+            ui.a11y_label(title);
+            let ui = if id == NAME { ui.id(id).autofocus() } else { ui.id(id) };
+            let r = match id {
+              PASSWORD => ui.secure_field(text, "Required"),
+              _ => ui.text_field(text, hint),
+            };
+
+            if r.changed {
+              self.changes.push(id);
+            }
+
+            // A password is not shown back.
+            if r.submitted {
+              let shown = if id == PASSWORD { "•••".to_owned() } else { text.clone() };
+              self.submitted = Some((id, shown));
+            }
+          });
+        }
+
+        ui.row(row.align(Align::Start, Align::Start), |ui| {
+          ui.row(label.pads([4.0, 0.0, 0.0, 0.0]), |ui| ui.text("Notes", t.label()));
+          // A multi-line field fills the height its parent gives it.
+          ui.col(Style::new().w(grow()).h(px(84.0)), |ui| {
+            let notes = TextField::new(&mut self.notes, "A few lines").axis(Axis::Vertical);
+            if notes.show(ui.a11y_label("Notes").id(NOTES)).changed {
+              self.changes.push(NOTES);
+            }
+          });
+        });
+
+        ui.row(row, |ui| {
+          ui.row(label, |ui| ui.text("Disabled", t.label()));
+          ui.disabled(true).a11y_label("Disabled").id(OFF).text_field(&mut self.off, "");
+        });
+
+        ui.id(ABOUT).selectable_text(TEXT, TextStyle::new(t.font(), t.text()));
+        if let Some((id, text)) = &self.submitted {
+          ui.text(format_args!("Submitted {id}: {text}"), t.label().color(t.secondary()));
+        }
+      });
+    }
+  }
+}
+
+use app::*;
 #[expect(dead_code, reason = "this file uses a part of the helpers")]
 mod common;
 
 use std::time::Duration;
 
 use common::reads;
-use fields::*;
 use nimbo::a11y::Action;
 use nimbo::{Command, Event, Harness, Id, Key, Modifiers, NamedKey, Os};
 
