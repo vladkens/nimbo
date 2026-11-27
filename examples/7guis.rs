@@ -21,10 +21,11 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use nimbo::{
-  Align, App, Axes, Binding, BorderedProminentButtonStyle, CMD, Command, Config, Cx, Date,
-  DateFormat, DatePicker, Dialog, Enabled, Event, Float, FormStyle, Frame, Icon, Id, Item, Key,
-  KeyEvent, List, Menu, MouseButton, NamedKey, Point, Quad, Rect, Response, Selection, Shortcut,
-  Style, Tag, TextFieldConfiguration, TextFieldStyle, Transition, Ui, alpha, grow, mix, px,
+  Align, App, Axes, Binding, BorderedProminentButtonStyle, CMD, Command, Config,
+  ContentMarginPlacement, Cx, Date, DateFormat, DatePicker, Dialog, Enabled, Event, Float,
+  FormStyle, Frame, Icon, Id, Item, Key, KeyEvent, List, Menu, MouseButton, NamedKey, Point, Quad,
+  Rect, Response, Selection, Shortcut, Style, Tag, TextFieldConfiguration, TextFieldStyle,
+  Transition, Ui, alpha, grow, mix, px,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1108,8 +1109,13 @@ impl Cells {
     let off = ui.scroll(sheet).map_or(Point::new(0.0, 0.0), |s| s.offset);
     let area = Style::new().grow().scroll(Axes::ALL).bg(t.bg()).border(1.0, t.line());
     let mut click = None;
-    ui.autofocus().with_id(sheet).scroll_area(area.focusable_quiet(), |ui| {
-      ui.col(Style::new().pads([CELL_H, 0.0, 0.0, HEAD_W]), |ui| {
+
+    // The cells and the scrollers clear of the headers.
+    let heads = [CELL_H, 0.0, 0.0, HEAD_W];
+    let ui = ui.autofocus().with_id(sheet);
+    ui.content_margins(heads, ContentMarginPlacement::ScrollIndicators);
+    ui.scroll_area(area.focusable_quiet(), |ui| {
+      ui.col(Style::new().pads(heads), |ui| {
         for r in 0..ROWS {
           ui.row(Style::new(), |ui| {
             for c in 0..COLS {

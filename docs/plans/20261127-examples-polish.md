@@ -43,7 +43,7 @@ The owner ran #123's examples in real windows on 2026-11-27 and found them broke
 - [x] Flight: a real date input; an invalid date (`11.03.12`) is rejected and shown invalid: date pickers, the return's range from the departure, the departure's from today
 - [x] CRUD: the filter and the list make sense to a user (filter by name, as typed); no silent duplicates
 - [x] Cells: a click selects a cell and shows it, arrows move, Return or typing edits, Escape cancels, as in a spreadsheet; double click also edits
-- [ ] Cells: the scrollers cover the headers (the vertical one over the `H` header, the horizontal one over row `10`'s number): insets for scroll indicators, or headers outside the scroll view
+- [x] Cells: the scrollers cover the headers (the vertical one over the `H` header, the horizontal one over row `10`'s number): insets for scroll indicators, or headers outside the scroll view: `ui.content_margins(…, ContentMarginPlacement::ScrollIndicators)`, SwiftUI's `contentMargins(_:_:for:)`
 - [x] Flight: the invalid field's text sat 2 pt left of the valid one's: its frame now has the theme's padding
 - [x] Flight: the two dates need labels (Departure, Return), with the date input: a form in columns, as SwiftUI's `.columns`
 - [x] Timer: the slider's track ends 7 pt inside the gauge above it on each side (AppKit's track runs the control's width): the theme's slider draws it so; the task a form in columns

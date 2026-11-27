@@ -807,6 +807,19 @@ fn a_deeply_nested_formula_is_an_error_not_a_crash() {
 }
 
 #[test]
+fn the_scrollers_keep_off_the_headers() {
+  let mut h = on(Task::Cells);
+  let first = h.rect(cell(0, 0)).unwrap();
+  let sheet = h.rect(id("sheet")).unwrap();
+  h.move_to(sheet.x + 100.0, sheet.y + 100.0);
+  h.wait(Duration::from_millis(300));
+  let thumb = |h: &H, ax: usize| h.rect(id("sheet").key(("thumb", ax))).expect("a thumb");
+  let (across, down) = (thumb(&h, 0), thumb(&h, 1));
+  assert!(across.x >= first.x, "past the row numbers: {across:?}");
+  assert!(down.y >= first.y, "under the column letters: {down:?}");
+}
+
+#[test]
 fn the_sheet_scrolls_to_its_far_corner() {
   let mut h = on(Task::Cells);
   let sheet = h.rect(id("sheet")).unwrap();
