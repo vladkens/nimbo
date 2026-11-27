@@ -1,11 +1,11 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The System Settings lists over the headless [List]: rows edge to edge, the selected one filled
-//! ([InsetListStyle], the window's default, which the shell puts), or each section's rows on a
-//! rounded plate as a grouped form's ([InsetGroupedListStyle]). No hover fill, as SwiftUI's on
-//! macOS; [Row::hovered] is there for an app that draws its own.
+//! The System Settings lists over the headless [List]: the selected rows on a rounded fill inset
+//! from the sides ([InsetListStyle], the window's default, which the shell puts), or each
+//! section's rows on a rounded plate as a grouped form's ([InsetGroupedListStyle]). No hover fill,
+//! as SwiftUI's on macOS; [Row::hovered] is there for an app that draws its own.
 
-use crate::scene::{Color, Frame, Rect, alpha};
+use crate::scene::{Color, Frame, Quad, Rect, alpha};
 use crate::ui::form::Piece;
 use crate::ui::{FormStyle, ListConfiguration, ListLayout, ListStyle, Style, Theme, Ui};
 #[cfg(doc)]
@@ -19,20 +19,36 @@ fn selection(t: &Theme, focused: bool) -> Color {
   }
 }
 
-/// Rows edge to edge, a selected one filled: in the accent while the list has focus, else grey;
-/// dimmed when disabled. The window's default, which the shell puts.
+/// As SwiftUI's `.inset` on macOS: rows padded 16 at their sides, the selection rounded 10 in
+/// from them, one over adjacent rows; in the accent while the list has focus, else grey; dimmed
+/// when disabled. The window's default, which the shell puts.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct InsetListStyle;
 
 impl ListStyle for InsetListStyle {
+  fn layout(&self, _: &Ui<'_>) -> ListLayout {
+    let d = ListLayout::default();
+    ListLayout { row: d.row.pad_xy(16.0, 0.0), ..d }
+  }
+
   fn make_body<'a>(&self, ui: &mut Ui<'a>, mut c: ListConfiguration<'_, 'a>) {
+    const INSET: f32 = 10.0;
+    const RADIUS: f32 = 5.0;
     let t = ui.theme();
     let fill = selection(&t, c.is_focused());
     let frame = if c.is_enabled() { c.frame() } else { c.frame().opacity(t.disabled) };
     ui.scroll_area(frame, |ui| {
       c.rows(ui, |ui, mut r| {
+        // Square where a selected row above or below joins it.
         let bg = if r.is_selected() { fill } else { [0.0; 4] };
-        ui.row(r.frame().bg(bg), |ui| r.content(ui));
+        let top = if r.is_after_selected() && !r.is_first() { 0.0 } else { RADIUS };
+        let end = if r.is_before_selected() { 0.0 } else { RADIUS };
+
+        let paint = move |f: &mut Frame, at: Rect| {
+          let at = Rect::new(at.x + INSET, at.y, at.w - 2.0 * INSET, at.h);
+          f.quad(Quad::new(at, bg).radii([top, top, end, end]));
+        };
+        ui.canvas_row(r.frame(), paint, |ui| r.content(ui));
       })
     });
   }
@@ -707,6 +723,41 @@ mod tests {
     assert_eq!(h.app().sel.cursor(), Some(1));
     assert_ne!(bare, filled);
     assert_eq!(bare, other);
+  }
+
+  /// Inset, as SwiftUI's on macOS: the selection 10 in from the row's sides, rounded, one fill
+  /// over two adjacent rows; the content 16 in.
+  #[test]
+  fn the_inset_selection_is_rounded_and_one_over_adjacent_rows() {
+    use crate::Harness;
+    struct Two(Selection);
+    impl crate::App for Two {
+      fn view(&mut self, ui: &mut Ui) {
+        ui.col(Style::new().w(px(200.0)).h(px(100.0)).bg([1.0; 4]), |ui| {
+          let list = List::new(3, 20.0).multi().selection(&mut self.0).style(Style::new().grow());
+          let inner = Style::new().w(px(10.0)).h(px(4.0));
+          list.show(ui.id("list"), |ui, row| _ = ui.id(("in", row.index)).el(inner));
+        });
+      }
+    }
+
+    let mut sel = Selection::default().multiple(true);
+    sel.select(0, 0);
+    sel.toggle(1, 1);
+    let mut h = Harness::new(Two(sel), Size::new(200.0, 100.0), 1.0);
+    h.frame();
+    let (row, inner) =
+      (h.rect(Id::of("list").key(("row", 0u64))).unwrap(), h.rect(Id::of(("in", 0))));
+    assert_eq!(inner.unwrap().x - row.x, 16.0);
+
+    let img = h.render();
+    let white = [255; 4];
+    let px = |x: f32, y: f32| img.pixel(row.x + x, row.y + y);
+    assert_eq!(px(5.0, 10.0), white, "outside the inset");
+    assert_ne!(px(12.0, 10.0), white, "filled");
+    assert_eq!(px(10.5, 0.5), white, "a rounded corner at the top");
+    assert_ne!(px(10.5, 20.0), white, "none where the two meet");
+    assert_eq!(px(10.5, 39.5), white, "one again at the bottom");
   }
 
   /// The selection's row as a text above the list, which reads it before the list changes it.

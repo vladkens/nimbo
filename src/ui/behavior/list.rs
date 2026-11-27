@@ -301,6 +301,11 @@ impl<'s> ListBehavior<'s> {
     self.sel
   }
 
+  /// Row `i`'s key.
+  pub(super) fn key(&self, i: usize) -> u64 {
+    (self.key.0)(i)
+  }
+
   /// The list's box: takes focus by a press, with no ring of its own (its selection shows it);
   /// disabled, none.
   pub const fn style(&self, s: Style) -> Style {
