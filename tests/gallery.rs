@@ -13,7 +13,10 @@
 //! and marks them with dots and labels; a row's footer spans its row; End in a custom list shows
 //! its last row whole; assistive technology reads each widget by its role, the ⊗ marks beside
 //! their controls; `docs/api.md` is the gallery's, and so are its pictures on the
-//! `assets` branch when its worktree is there. The Canvas page follows the blocks, draws its
+//! `assets` branch when its worktree is there. Each block's code is its own closure, cut from the
+//! source and coloured by kind; the row and column blocks align their boxes as their labels say,
+//! the grid's keys are as far apart across as down, the chat opens at its newest message and the
+//! shortcut block counts ⌘K on its focused box. The Canvas page follows the blocks, draws its
 //! shapes and text and shows the raw pointer and keys on its page only; the pacing scene moves,
 //! then stands still.
 
@@ -29,8 +32,10 @@ use std::time::Duration;
 
 use common::{diff, mid, px, reads};
 use gallery::canvas::{BAR_W, RUN, WORK};
+use gallery::code::Kind;
 use gallery::*;
 use nimbo::a11y::{Action, Role};
+use nimbo::harness::Image;
 use nimbo::{
   Appearance, Event, Harness, Id, Modifiers, NamedKey, Rect, Size, Theme, alpha, character_palette,
   mix,
@@ -659,6 +664,172 @@ fn a_custom_list_ends_on_its_last_row() {
   h.wait(Duration::from_millis(400));
   let (_, last) = node(&h, Role::Row, "Row 40");
   assert!((last.y + last.h - (list.y + list.h - 4.0)).abs() < 0.5, "{last:?} in {list:?}");
+}
+
+// MARK: Code
+
+/// Every arm that builds a block is a block's, and each block shows the body of its arm: whole
+/// code, no `{ … }` standing for some, as wide as rustfmt makes it; the page reads it.
+#[test]
+fn every_block_shows_its_own_code() {
+  let source = include_str!("../examples/gallery.rs");
+  let arms = source.lines().map(str::trim_start);
+  let arms = arms.filter(|l| l.starts_with('"') && l.contains("\" => Self::variants(ui, Shown::"));
+  assert_eq!(arms.count(), BLOCKS.len(), "an arm of each block, of no other");
+  assert_eq!(code::of("No such block"), None);
+  for b in BLOCKS {
+    let code = code::of(b.name).unwrap_or_else(|| panic!("no code of {}", b.name));
+    assert!(!code.is_empty() && !code.contains("{ … }"), "{}: {code}", b.name);
+    assert!(code.lines().all(|l| l.chars().count() <= 88), "{}: {code}", b.name);
+    assert!(!code.starts_with(' ') && !code.ends_with('\n'), "{}: {code:?}", b.name);
+  }
+
+  let grid = code::of("Grid").unwrap();
+  assert!(grid.contains("ui.grid(3, Style::new().w(px(132.0)).gap(6.0), |ui| {"), "{grid}");
+  let h = gallery(page("Grid"), false);
+  let first = grid.lines().next().unwrap();
+  assert!(h.a11y().contains(first), "{first:?} on the page:\n{}", h.a11y());
+}
+
+/// The code's tokens by kind: keywords, calls, types, numbers (not a range's dots), strings past
+/// an escaped quote, characters but not lifetimes, macros and comments.
+#[test]
+fn code_is_coloured_by_kind() {
+  let code = "let n = px(1.5); // a note\nui.el(Style::new()); 0..2 'k' \"a\\\"b\" Ui<'a> t!(x)";
+  let kinds: Vec<(&str, Kind)> = code::tokens(code).filter(|t| t.1 != Kind::Plain).collect();
+  let want = [
+    ("let", Kind::Keyword),
+    ("px", Kind::Call),
+    ("1.5", Kind::Number),
+    ("// a note", Kind::Comment),
+    ("el", Kind::Call),
+    ("Style", Kind::Type),
+    ("new", Kind::Call),
+    ("0", Kind::Number),
+    ("2", Kind::Number),
+    ("'k'", Kind::Str),
+    ("\"a\\\"b\"", Kind::Str),
+    ("Ui", Kind::Type),
+    ("t!", Kind::Macro),
+  ];
+  assert_eq!(kinds, want);
+  assert_eq!(code::tokens(code).map(|t| t.0).collect::<String>(), code, "every byte, in order");
+}
+
+// MARK: Layout
+
+/// The first run of `c` in `at(v)` for `v` from `v0` to `v1`, a point at a time: where it starts
+/// and ends.
+fn first_run(c: [u8; 4], v0: f32, v1: f32, at: impl Fn(f32) -> [u8; 4]) -> Option<(f32, f32)> {
+  let on = |v: &i32| diff(at(*v as f32 + 0.5), c) <= 4;
+  let start = (v0 as i32..v1 as i32).find(on)?;
+  let end = (start..v1 as i32).find(|v| !on(v)).unwrap_or(v1 as i32);
+  Some((start as f32, end as f32))
+}
+
+/// Where the first run of colour `c` down `x` from `y0` to `y1` is: its top and bottom.
+fn down(img: &Image, c: [u8; 4], x: f32, y0: f32, y1: f32) -> (f32, f32) {
+  let run = first_run(c, y0, y1, |y| img.pixel(x, y));
+  run.unwrap_or_else(|| panic!("no {c:?} down {x} from {y0} to {y1}"))
+}
+
+/// Where the first run of colour `c` along `y` from `x0` to `x1` is: its left and right.
+fn across(img: &Image, c: [u8; 4], y: f32, x0: f32, x1: f32) -> (f32, f32) {
+  let run = first_run(c, x0, x1, |x| img.pixel(x, y));
+  run.unwrap_or_else(|| panic!("no {c:?} along {y} from {x0} to {x1}"))
+}
+
+/// Over each label, a row of boxes 16, 40 and 28 high, 8 apart, at its top, centre or bottom.
+#[test]
+fn the_row_block_aligns_its_boxes() {
+  let mut h = on("Row", Appearance::LIGHT);
+  let (img, accent) = (h.render(), px(Theme::PLATES_LIGHT.accent()));
+  for (name, k) in [("Start", 0.0), ("Center", 0.5), ("End", 1.0)] {
+    let label = node(&h, Role::StaticText, name).1;
+    let x = mid(label).0;
+    // The boxes are 24 wide, 8 apart: the tall one over the label's middle.
+    let boxes: Vec<(f32, f32)> = [-32.0, 0.0, 32.0]
+      .iter()
+      .map(|dx| down(&img, accent, x + dx, label.y - 70.0, label.y))
+      .collect();
+    let hs: Vec<f32> = boxes.iter().map(|b| b.1 - b.0).collect();
+    assert_eq!(hs, [16.0, 40.0, 28.0], "{name}: {boxes:?}");
+    let at: Vec<f32> = boxes.iter().map(|b| b.0 + (b.1 - b.0) * k).collect();
+    assert!(at.iter().all(|y| *y == at[0]), "{name}: {boxes:?}");
+  }
+}
+
+/// Over each label, a column of bars 40, 88 and 64 wide, 6 apart, at its start, centre or end.
+#[test]
+fn the_column_block_aligns_its_bars() {
+  let mut h = on("Column", Appearance::LIGHT);
+  let (img, accent) = (h.render(), px(Theme::PLATES_LIGHT.accent()));
+  for (name, k) in [("Start", 0.0), ("Center", 0.5), ("End", 1.0)] {
+    let label = node(&h, Role::StaticText, name).1;
+    let x = mid(label).0;
+    // The bars' middles: the column's bottom 6 over the label, its border and padding 9.
+    let bars: Vec<(f32, f32)> = [62.0, 42.0, 22.0]
+      .iter()
+      .map(|dy| across(&img, accent, label.y - dy, x - 60.0, x + 60.0))
+      .collect();
+    let ws: Vec<f32> = bars.iter().map(|b| b.1 - b.0).collect();
+    assert_eq!(ws, [40.0, 88.0, 64.0], "{name}: {bars:?}");
+    let at: Vec<f32> = bars.iter().map(|b| b.0 + (b.1 - b.0) * k).collect();
+    assert!(at.iter().all(|v| *v == at[0]), "{name}: {bars:?}");
+  }
+}
+
+/// The keypad's keys are 6 apart across and down, and the 0 spans two columns and their gap.
+#[test]
+fn the_grid_block_has_equal_gaps() {
+  let mut h = on("Grid", Appearance::LIGHT);
+  let img = h.render();
+  let at = |name: &str| mid(node(&h, Role::StaticText, name).1);
+  let ((x7, y7), (x8, _), (_, y4)) = (at("7"), at("8"), at("4"));
+  // The keys' fill, the theme's raised colour over the ground, left of the 7.
+  let key = img.pixel(x7 - 12.0, y7);
+  // Measured clear of the digits, along the keys' tops and down their left sides, from a point
+  // outside each key (40 by 32).
+  let seven = across(&img, key, y7 - 12.0, x7 - 21.0, x7 + 30.0);
+  let eight = across(&img, key, y7 - 12.0, x8 - 21.0, x8 + 30.0);
+  let (top7, bottom7) = down(&img, key, x7 - 14.0, y7 - 17.0, y7 + 30.0);
+  let top4 = down(&img, key, x7 - 14.0, y4 - 17.0, y4 + 30.0).0;
+
+  assert_eq!((eight.0 - seven.1, top4 - bottom7), (6.0, 6.0), "across, down");
+  assert_eq!((seven.1 - seven.0, bottom7 - top7), (40.0, 32.0), "a key");
+  let (x0, y0) = at("0");
+  let zero = across(&img, key, y0 - 12.0, x0 - 60.0, x0 + 60.0);
+  assert_eq!(zero.1 - zero.0, 86.0, "two keys and their gap");
+}
+
+/// The chat opens at its newest message, at the bottom; the first ones are above the view.
+#[test]
+fn the_scroll_anchor_opens_at_the_newest() {
+  let mut h = on("Scroll anchor", Appearance::LIGHT);
+  // Assistive technology reads what is in view: the last four.
+  let shown: Vec<usize> =
+    (1..=12).filter(|i| h.find(Role::StaticText, &format!("Message {i}")).is_some()).collect();
+  assert_eq!(shown, [9, 10, 11, 12], "{}", h.a11y());
+  let last = node(&h, Role::StaticText, "Message 12").1;
+  let bubble = h.render().pixel(last.x - 4.0, mid(last).1);
+  assert_eq!(bubble, px(Theme::PLATES_LIGHT.accent()), "the newest, mine, in view");
+}
+
+/// A click focuses the box, and ⌘K then counts on it; not before.
+#[test]
+fn the_keyboard_shortcut_counts_on_its_box() {
+  let mut h = gallery(page("Keyboard shortcut"), false);
+  let keys = nimbo::Shortcut::char('k').cmd().label();
+  let (_, r) = node(&h, Role::StaticText, &format!("{keys} pressed: 0"));
+  h.key(nimbo::Key::Char('k'), nimbo::CMD);
+  h.frame();
+  assert_eq!(h.app().counted, 0, "no box focused");
+  let (x, y) = mid(r);
+  h.click(x, y);
+  h.key(nimbo::Key::Char('k'), nimbo::CMD);
+  h.frame();
+  assert_eq!(h.app().counted, 1);
+  reads(&h.a11y(), &[&format!("static text \"{keys} pressed: 1\"")]);
 }
 
 // MARK: Canvas

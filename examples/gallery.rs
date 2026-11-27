@@ -9,9 +9,9 @@
 //! raw pointer and keys.
 //!
 //! `cargo run --release --example gallery [-- <block>] [--shot <file.png>]`: with a block's slug
-//! the window is that block's variants alone, as high as they are; `canvas` opens the Canvas
-//! page; `pace` is the pacing scene `make pace` measures; `--api` prints `docs/api.md`, `--list`
-//! the slugs.
+//! the window is that block's variants alone, as high as they are; `--page <block>` opens the
+//! gallery on its page, `canvas` on the Canvas page; `pace` is the pacing scene `make pace`
+//! measures; `--api` prints `docs/api.md`, `--list` the slugs.
 //!
 //! The table is in [blocks], the blocks built live in a module per group in [pages], the Canvas
 //! page and the pacing scene in [canvas].
@@ -20,15 +20,15 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod blocks {
-  //! The gallery's table: every building block by group, with SwiftUI's line and nimbo's; the
-  //! sidebar, the pages and `docs/api.md` are made from it.
+  //! The gallery's table: every building block by group, with SwiftUI's line; the sidebar, the
+  //! pages and `docs/api.md` are made from it, with nimbo's code cut from the block's own
+  //! ([super::code]).
 
-  /// A building block: its group, name, SwiftUI's line and nimbo's.
+  /// A building block: its group, name and SwiftUI's line.
   pub struct Block {
     pub group: &'static str,
     pub name: &'static str,
     pub swiftui: &'static str,
-    pub nimbo: &'static str,
   }
 
   impl Block {
@@ -40,13 +40,8 @@ mod blocks {
     }
   }
 
-  const fn b(
-    group: &'static str,
-    name: &'static str,
-    swiftui: &'static str,
-    nimbo: &'static str,
-  ) -> Block {
-    Block { group, name, swiftui, nimbo }
+  const fn b(group: &'static str, name: &'static str, swiftui: &'static str) -> Block {
+    Block { group, name, swiftui }
   }
 
   pub const GROUPS: [&str; 8] =
@@ -54,99 +49,253 @@ mod blocks {
 
   #[rustfmt::skip]
 pub const BLOCKS: &[Block] = &[
-  b("Layout", "Stacks", "HStack(spacing: 8) { … }; VStack { … }", "ui.row(Style::new().gap(8.0), |ui| { … }); ui.col(style, |ui| { … })"),
-  b("Layout", "Grid", "Grid { GridRow { … } }", "ui.grid(3, Style::new().gap(8.0), |ui| { … })"),
-  b("Layout", "Spacer", "Spacer()", "ui.spacer()"),
-  b("Layout", "Divider", "Divider()", "ui.divider()"),
-  b("Layout", "Scroll view", "ScrollView(.vertical) { … }", "ui.scroll_area(Style::new().h(px(80.0)).scroll(Axes::VERTICAL), |ui| { … })"),
-  b("Layout", "Scroll anchor", "ScrollView { … }.defaultScrollAnchor(.bottom)", "ui.default_scroll_anchor(UnitPoint::BOTTOM).scroll_area(style, |ui| { … })"),
-  b("Layout", "Overlay", ".overlay(alignment: .topTrailing) { … }", "ui.float(Float::parent().attach(UnitPoint::TOP_TRAILING).anchor(UnitPoint::TOP_TRAILING)).el(style)"),
-  b("Text", "Text", "Text(\"Title\").font(.headline).foregroundStyle(.secondary)", "ui.text(\"Title\", TextStyle::new(t.bold(), t.secondary()))"),
-  b("Text", "Localized text", "Text(\"Keep the history\"); String(localized: \"\\(name) is not on disk\")", "ui.text(t!(\"Keep the history\"), s); t!(\"{name} is not on disk\", name); tn!(\"{n} file\", \"{n} files\", count)"),
-  b("Text", "Line limit", "Text(path).lineLimit(1).truncationMode(.middle)", "ui.text(path, t.body().line_limit(1).truncation(TruncationMode::Middle))"),
-  b("Text", "Underline", "Text(\"WER\").underline(pattern: .dot)", "ui.text(\"WER\", s.underline(LinePattern::Dot)); s.strikethrough(LinePattern::Solid)"),
-  b("Text", "Styled text", "Text(\"fn \").foregroundStyle(.pink).bold() + Text(\"main\").italic(); Text(attributedString).textSelection(.enabled)", "let mut code = AttributedString::new(); code.push(\"fn \", Attributes::new().color(pink).weight(Weight::Bold)).push(\"main\", Attributes::new().italic()); ui.text(&code, s); ui.selectable_text(&code, s)"),
-  b("Text", "Selectable text", "Text(log).textSelection(.enabled)", "ui.selectable_text(&log, t.body())"),
-  b("Text", "Link", "Link(\"Learn more\", destination: url)", "if ui.link(\"Learn more…\").clicked { nimbo::open::url(URL)? }"),
-  b("Text", "Image", "Image(systemName: \"gear\")", "ui.icon(Icon::GEAR, 20.0, t.text())"),
-  b("Text", "Label content", "Label { Text(title) } icon: { Image(systemName: \"folder\") }; configuration.label in a style", "let label: Content = Icon::FOLDER.into(); label.build(ui.with_id(id.key(\"label\")), t.label())"),
-  b("Text", "Photo", "Image(nsImage: NSImage(data: file)!).resizable().aspectRatio(contentMode: .fill).frame(width: 80, height: 80).clipped()", "let photo = Bitmap::decode(&file, 240)?; ui.aspect_ratio(ContentMode::Fill).image(&photo, Style::new().w(px(80.0)).h(px(80.0)))"),
-  b("Controls", "Button", "Button(\"Save\") { … }.buttonStyle(.borderedProminent)", "ui.button_style(&BorderedProminentButtonStyle).button(\"Save\")"),
-  b("Controls", "Button role", "Button(\"Delete\", role: .destructive) { … }", "Button::new(\"Delete\").role(ButtonRole::Destructive).show(ui)"),
-  b("Controls", "Icon button", "Button { Image(systemName: \"trash\") }.buttonStyle(.borderless)", "ui.icon_button(Icon::TRASH)"),
-  b("Controls", "Button style", "HStack { Button(\"Cut\") { … }; Button(\"Copy\") { … } }.buttonStyle(.borderless)", "ui.button_style(&BorderlessButtonStyle).row(style, |ui| { ui.button(\"Cut\"); ui.button(\"Copy\"); }); ui.button(\"Paste\")"),
-  b("Controls", "Custom button style", "struct Pill: ButtonStyle { func makeBody(configuration: Configuration) -> some View { configuration.label.padding(…).background(…) } }", "impl ButtonStyle for Pill { fn make_body(&self, ui: &mut Ui, mut c: ButtonConfiguration) { ui.row(style, |ui| c.label(ui, s)); } } ui.button_style(&Pill).button(\"Pill\")"),
-  b("Controls", "Switch", "Toggle(\"Live\", isOn: $live)", "ui.toggle(&mut self.live, \"Live\")"),
-  b("Controls", "Check box", "Toggle(\"Wrap\", isOn: $wrap).toggleStyle(.checkbox)", "ui.toggle_style(&CheckboxToggleStyle).toggle(&mut self.wrap, \"Wrap\")"),
-  b("Controls", "Button toggle", "Toggle(\"Bold\", isOn: $bold).toggleStyle(.button)", "ui.toggle_style(&ButtonToggleStyle).toggle(&mut self.bold, \"Bold\")"),
-  b("Controls", "Toggle style", "VStack { Toggle(\"Wrap\", …); Toggle(\"Numbers\", …) }.toggleStyle(.checkbox)", "ui.toggle_style(&CheckboxToggleStyle).col(style, |ui| { ui.toggle(&mut self.wrap, \"Wrap\"); ui.toggle(&mut self.numbers, \"Numbers\"); }); ui.toggle(&mut self.live, \"Live\")"),
-  b("Controls", "Custom toggle style", "struct Dot: ToggleStyle { func makeBody(configuration: Configuration) -> some View { HStack { Circle()…; configuration.label } } }", "impl ToggleStyle for Dot { fn make_body(&self, ui: &mut Ui, mut c: ToggleConfiguration) { ui.row(style, |ui| { ui.el(dot(c.is_on())); c.label(ui, s); }); } } ui.toggle_style(&Dot).toggle(&mut self.live, \"Live\"); ui.toggle_style(&PlainToggleStyle).toggle(&mut self.wrap, \"Plain\")"),
-  b("Controls", "Slider", "Slider(value: $zoom, in: 0...200)", "ui.slider(&mut self.zoom, 0.0..=200.0)"),
-  b("Controls", "Slider steps", "Slider(value: $level, in: 10...90, step: 10) { … } tick: { v in SliderTick(v) { … } }", "Slider::new(&mut self.level, 10.0..=90.0).step(10.0).tick_label(|v| (v == 50.0).then(|| \"50%\".into())).show(ui)"),
-  b("Controls", "Slider style", "Slider(value: $zoom, in: 0...200) (SwiftUI has no slider style)", "ui.slider_style(&PlainSliderStyle).col(style, |ui| { ui.slider(&mut self.zoom, 0.0..=200.0); }); ui.slider(&mut self.zoom, 0.0..=200.0)"),
-  b("Controls", "Custom slider style", "struct Meter: ProgressViewStyle { … } (SwiftUI has no slider style)", "impl SliderStyle for Meter { fn make_body(&self, ui: &mut Ui, c: SliderConfiguration) { let k = c.fraction(); c.root(ui).canvas(style, move |f, r| { … }); } } Slider::new(&mut self.level, 10.0..=90.0).step(10.0).show(ui.slider_style(&Meter))"),
-  b("Controls", "Picker", "Picker(\"Size\", selection: $size) { …; Divider(); … }", "Picker::new(&mut self.size).options(&A).divider().options(&B).show(ui)"),
-  b("Controls", "Segmented picker", "Picker(…) { … }.pickerStyle(.segmented)", "ui.picker_style(&SegmentedPickerStyle).picker(&mut self.view, &[Tag::new(0, \"List\").count(128), Tag::new(1, \"Grid\")])"),
-  b("Controls", "Picker style", "VStack { Picker(…) { … } }.pickerStyle(.inline); Picker(…) { … }", "ui.picker_style(&InlinePickerStyle).row(style, |ui| _ = ui.picker(&mut self.size, &SIZES)); ui.picker(&mut self.size, &SIZES)"),
-  b("Controls", "Custom picker style", "struct Chips: PickerStyle (SwiftUI's is closed: its styles are the system's)", "impl PickerStyle for Chips { fn make_body(&self, ui: &mut Ui, mut c: PickerConfiguration) { let b = c.segments(ui); ui.row(style, |ui| for i in 0..c.len() { ui.with_id(c.item_id(i)).row(b.pointer(chip), |ui| ui.text(c.label(i), s)); }); } } ui.picker_style(&Chips).picker(&mut self.view, &VIEWS)"),
-  b("Controls", "Text field", "TextField(\"Name\", text: $name)", "ui.text_field(&mut self.name, \"Name\")"),
-  b("Controls", "Multi-line field", "TextField(\"Notes\", text: $notes, axis: .vertical)", "TextField::new(&mut self.notes, \"Notes\").axis(Axis::Vertical).show(ui)"),
-  b("Controls", "Secure field", "SecureField(\"Password\", text: $key)", "ui.secure_field(&mut self.key, \"Password\")"),
-  b("Controls", "Search field", ".searchable(text: $query)", "ui.search_field(&mut self.query, \"Search\")"),
-  b("Controls", "Date picker", "DatePicker(\"Start\", selection: $start, in: ...end, displayedComponents: .date)", "DatePicker::new(&mut self.start).range(..=END).show(ui)"),
-  b("Controls", "Date picker style", "DatePicker(…).datePickerStyle(.field)", "ui.date_picker_style(&FieldDatePickerStyle).date_picker(&mut self.start)"),
-  b("Controls", "Character palette", "NSApp.orderFrontCharacterPalette(nil), Edit ▸ Emoji & Symbols (AppKit; SwiftUI has none)", "if character_palette::available().is_ok() && ui.icon_button(Icon::SMILE).clicked { ui.character_palette() }; Emoji & Symbols in a field's edit menu"),
-  b("Controls", "Text field style", "VStack { TextField(\"Name\", text: $name); TextField(\"City\", text: $city) }.textFieldStyle(.plain)", "ui.text_field_style(&PlainTextFieldStyle).col(style, |ui| { ui.text_field(&mut self.name, \"Name\"); ui.text_field(&mut self.city, \"City\"); }); ui.text_field(&mut self.email, \"E-mail\")"),
-  b("Controls", "Custom text field style", "struct Underline: TextFieldStyle { func _body(configuration: TextField<_Label>) -> some View { configuration.padding(…).overlay(alignment: .bottom) { … } } }", "impl TextFieldStyle for Underline { fn make_body(&self, ui: &mut Ui, mut c: TextFieldConfiguration) { ui.row(style.scroll(c.axis().into()), |ui| c.text(ui, &fs)); } } ui.text_field_style(&Underline).text_field(&mut self.city, \"City\")"),
-  b("Controls", "Progress", "ProgressView(value: 0.42)", "ui.progress(Some(0.42))"),
-  b("Controls", "Spinner", "ProgressView()", "ui.spinner()"),
-  b("Controls", "Badge", ".badge(\"New\")", "ui.badge(\"New\", Tone::Accent)"),
-  b("Controls", "Hotkey recorder", "KeyboardShortcut (SwiftUI has no recorder)", "ui.hotkey_recorder(&mut self.hotkey)"),
-  b("Controls", "Control behavior", "Button(action:) { … }.buttonStyle(MyStyle()), a look of the app's own", "let b = ui.button_behavior(id); ui.control(&b).canvas(style, move |f, r| { … }); if b.clicked { … }"),
-  b("Controls", "Help marks", "Image(systemName: \"info.circle\").help(tip); HelpLink { … }", "ui.help(tip).info_button(); ui.help(why).warning_button(); ui.help_button()"),
-  b("Form", "Section", "Section { … } header: { … } footer: { … }", "ui.form_section(&fs, Section::new(header).footer(\"…\"), |ui| { … })"),
-  b("Form", "Form row", "LabeledContent { Toggle(isOn: $on) {} } label: { Text(title); Text(subtitle) }", "ui.form_row(&fs, FormRow::new(\"Open at login\").caption(\"…\"), |ui| ui.toggle(&mut on, ()))"),
-  b("Form", "Composed label", "label: { Text(name); Text(\"New\").badge(…) }", "FormRow::new(|ui: &mut Ui, s: TextStyle| { ui.text(name, s); ui.control_size(ControlSize::Small).badge(\"New\", Tone::Accent); })"),
-  b("Form", "Row tile", "Label { Text(title) } icon: { Image(systemName: \"folder\") }", "FormRow::new(\"Data\").tile(Icon::FOLDER)"),
-  b("Form", "Row footer", "Section { VStack { Toggle(…); Slider(…) } }", "FormRow::new(\"Turn off below 30%\").footer(|ui: &mut Ui, _: TextStyle| _ = ui.slider(&mut level, 10.0..=90.0))"),
-  b("Form", "Disclosure", "DisclosureGroup(\"Other models\") { … }", "ui.form_disclosure(&fs, FormRow::new(\"Other models\"), |ui| { … })"),
-  b("Form", "Toolbar tabs", "TabView(selection: $page) { General().tabItem { Label(\"General\", systemImage: \"gear\") }.tag(Page.general) } in a Settings scene", "ui.toolbar_tabs(&fs, &mut self.page, &[Tag::new(Page::General, \"General\").icon(Icon::GEAR), Tag::new(Page::About, \"About\").icon(Icon::INFO)])"),
-  b("Form", "Footer", "HelpLink { … } at a pane's end", "ui.help(\"Help\").form_footer(&fs, |ui| _ = ui.button(\"Reset All…\"))"),
-  b("List", "List", "List(items, selection: $sel) { … }", "List::new(n, 24.0).selection(&mut sel).show(ui, |ui, row| { … })"),
-  b("List", "List sections", "Section(header:) in a List; .listStyle(…)", "List::new(n, 32.0).sections(&starts, 24.0, &head).show(ui.list_style(&InsetGroupedListStyle), |ui, row| { … })"),
-  b("List", "List style", "List(items, selection: $sel) { … }.listStyle(.plain)", "list.show(ui.list_style(&PlainListStyle), |ui, row| { … }); InsetListStyle by default, InsetGroupedListStyle"),
-  b("List", "Custom list style", "struct Stripes: ListStyle (SwiftUI's has no public makeBody)", "impl ListStyle for Stripes { fn make_body<'a>(&self, ui: &mut Ui<'a>, mut c: ListConfiguration<'_, 'a>) { ui.scroll_area(c.frame(), |ui| c.rows(ui, |ui, mut r| _ = ui.row(r.frame().bg(fill), |ui| r.content(ui)))); } }"),
-  b("List", "List behavior", "List(rows, selection: $sel) { … }.listRowBackground(…)", "let b = ui.list_behavior(id, ListRows::new(n, 22.0), &mut sel, &key); ui.with_id(id).scroll_area(b.style(style), |ui| ui.list_rows(&b, |ui, i, k| { … }))"),
-  b("Containers", "Tabs", "TabView { … }", "Tabs::new(&mut self.tab, &[\"One\", \"Two\"]).show(ui, |ui, i| { … })"),
-  b("Containers", "Split", "HSplitView { … }", "Split::new(Axis::Horizontal).ratio(&mut self.side).show(ui, |ui, pane| { … })"),
-  b("Containers", "Navigation split", "NavigationSplitView { … } detail: { … }", "Split::navigation().ratio(&mut self.side).show(ui, |ui, pane| { … })"),
-  b("Containers", "Toolbar", "Detail().toolbar { ToolbarItem(placement: .principal) { … }; ToolbarItem(placement: .primaryAction) { … } } in a NavigationSplitView", "ui.toolbar(|ui| ui.toolbar_item(ToolbarItemPlacement::PrimaryAction, |ui| _ = ui.icon_button(Icon::DOC))) in a column"),
-  b("Containers", "Unified toolbar", ".windowToolbarStyle(.unified)", "ui.window_toolbar_style(WindowToolbarStyle::Unified); ui.row(band, |ui| { … }) at the window's top"),
-  b("Containers", "Menu", "Menu(\"Actions\") { Button(…) }", "ui.menu(\"Actions\", |ui| { ui.menu_item(\"Copy\"); })"),
-  b("Containers", "Lazy column", "LazyVStack { ForEach(…) }", "ui.lazy_col(n, |i| i, |ui, i| { … })"),
-  b("Containers", "Scroll behavior", "ScrollView { … }.scrollIndicators(.hidden).onScrollGeometryChange(…) { … }", "let b = ui.scroll_behavior(id, Axes::VERTICAL); ui.with_id(id).col(style.scroll(Axes::VERTICAL), |ui| { …; if let Some(bar) = b.bar(Axis::Vertical) { ui.with_id(b.thumb(Axis::Vertical)).float(at).el(knob) } })"),
-  b("Containers", "Scroll indicators", "NSScroller.knobStyle = .light (AppKit; SwiftUI has none)", "ui.set_environment(Some(ScrollerKnob::DARK.color(red))); ui.scroll_area(style, |ui| { … })"),
-  b("Containers", "Stack queries", "Divider() follows its stack's axis (SwiftUI has no API for it)", "let line = match ui.parent_axis() { Some(Axis::Horizontal) => v, _ => h }; ui.child_count() == 0"),
-  b("Presentation", "Alert", ".alert(\"Delete?\", isPresented: $ask) { Button(\"Delete\", role: .destructive) }", "Dialog::new(\"Delete?\").button(\"Delete\", ButtonRole::Destructive).show(ui, &mut self.ask)"),
-  b("Presentation", "Context menu", ".contextMenu { Button(\"Copy\") { … } }", "ui.context_menu(r.id, || Menu::new(vec![Item::button(Action::Copy, \"Copy\")])); match ui.native_menu(id, at, menu) { NativeMenu::Unavailable => /* draw it */, NativeMenu::Unanswered => {}, NativeMenu::Answered(a) => … }"),
-  b("Presentation", "Menu bar", ".commands { CommandMenu(\"Track\") { Button(\"Play\") { … } }; CommandGroup(replacing: .newItem) { … } }", "main.set_commands(&Commands::new().menu(\"Track\", Menu::new(vec![Item::button(Act::Play, \"Play\")])).replacing(CommandGroupPlacement::NewItem, items), |main, act| …)"),
-  b("Presentation", "Tooltip", ".help(\"Saves it\")", "ui.help(\"Saves it\").button(\"Save\"); ui.help_style(&PlainHelpStyle) for the window, TooltipHelpStyle by default"),
-  b("Presentation", "Custom help style", ".help(\"Saves it\") (SwiftUI has no help style)", "impl HelpStyle for Note { fn make_body(&self, ui: &mut Ui, c: HelpConfiguration) { ui.row(style.opacity(c.opacity()), |ui| ui.text(c.text(), s)); } } ui.help_style(&Note)"),
-  b("Modifiers", "Disabled", ".disabled(true)", "ui.disabled(true).col(Style::new(), |ui| { … })"),
-  b("Modifiers", "Control size", ".controlSize(.small)", "ui.control_size(ControlSize::Small).row(Style::new(), |ui| { … })"),
-  b("Modifiers", "Accessibility label", ".accessibilityLabel(\"Reset\")", "ui.a11y_label(\"Reset\").icon_button(Icon::RESET)"),
-  b("Modifiers", "Keyboard shortcut", ".keyboardShortcut(\"z\", modifiers: .command)", "ui.keymap(&[Binding::new(Shortcut::char('z').cmd(), Command::Undo)]).col(…)"),
-  b("Modifiers", "Environment", ".environment(\\.tint, .green) { … }; @Environment(\\.tint) var tint", "ui.environment(Tint(t.success())).row(style, |ui| { … }); ui.set_environment(Some(Tint(t.success()))) for the window; let tint = ui.environment_value::<Tint>()"),
-  b("Modifiers", "Group", "Group { Button(\"Save\"); Toggle(…) }.disabled(true)", "ui.disabled(true).group(|ui| { ui.button(\"Save\"); ui.toggle(&mut on, ()); }); ui.button(\"Open\")"),
-  b("Modifiers", "Identity", "Box().id(item.id); .allowsHitTesting(false)", "ui.key(item.id).row(style, |ui| { … }); ui.with_id(id.key(\"box\")).allows_hit_testing(false).col(style, |ui| { … })"),
-  b("Modifiers", "Focus and pointer", ".focusable(); .pointerStyle(.link)", "ui.focusable(true).pointer_style(Cursor::Pointer).row(style, |ui| { … })"),
-  b("Modifiers", "Widget parts", ".environment(\\.isEnabled, true); .help(tip) on a part", "let tip = ui.take_help(); if let Some(tip) = &tip { ui.help(tip); } ui.environment(Enabled(true)).button(\"Undo\")"),
-  b("Modifiers", "Frame request", "TimelineView(.animation) { context in … }", "ui.request_frame(); let k = ui.now().as_secs_f32() % 1.0"),
-  b("Modifiers", "Accessibility pair", ".accessibilityLabeledPair(role: .label, id: \"volume\", in: ns)", "ui.a11y_labeled_pair(LabeledPairRole::Label, id, |ui| ui.text(\"Volume\", s)); ui.a11y_labeled_pair(LabeledPairRole::Content, id, |ui| ui.slider(&mut v, 0.0..=1.0))"),
-  b("Modifiers", "Controls theme", "@Environment(\\.controlActiveState) var state", "let t = ui.controls_theme(); ui.el(Style::new().bg(t.accent())); let grey = ui.theme().inactive().accent()"),
-  b("Modifiers", "Color scheme", "@Environment(\\.colorScheme) var colorScheme", "let dark = ui.color_scheme().is_dark()"),
+  b("Layout", "Row", "HStack(alignment: .top, spacing: 8) { … }"),
+  b("Layout", "Column", "VStack(alignment: .leading, spacing: 6) { … }"),
+  b("Layout", "Grid", "Grid(horizontalSpacing: 6, verticalSpacing: 6) { GridRow { … } }; .gridCellColumns(2)"),
+  b("Layout", "Spacer", "HStack { Text(\"Notes\"); Spacer(); Button(\"Share\") { … } }"),
+  b("Layout", "Divider", "HStack { Text(\"Cut\"); Divider(); Text(\"Copy\") }; VStack { …; Divider(); … }"),
+  b("Layout", "Scroll view", "ScrollView(.vertical) { … }"),
+  b("Layout", "Scroll anchor", "ScrollView { LazyVStack { … } }.defaultScrollAnchor(.bottom)"),
+  b("Layout", "Overlay", ".overlay(alignment: .topTrailing) { … }"),
+  b("Text", "Text", "Text(\"Title\").font(.headline).foregroundStyle(.secondary)"),
+  b("Text", "Localized text", "Text(\"Keep the history\"); String(localized: \"\\(name) is not on disk\")"),
+  b("Text", "Line limit", "Text(path).lineLimit(1).truncationMode(.middle)"),
+  b("Text", "Underline", "Text(\"WER\").underline(pattern: .dot)"),
+  b("Text", "Styled text", "Text(\"fn \").foregroundStyle(.pink).bold() + Text(\"main\").italic(); Text(attributedString).textSelection(.enabled)"),
+  b("Text", "Selectable text", "Text(log).textSelection(.enabled)"),
+  b("Text", "Link", "Link(\"Learn more\", destination: url)"),
+  b("Text", "Image", "Image(systemName: \"gear\")"),
+  b("Text", "Label content", "Label { Text(title) } icon: { Image(systemName: \"folder\") }; configuration.label in a style"),
+  b("Text", "Photo", "Image(nsImage: NSImage(data: file)!).resizable().aspectRatio(contentMode: .fill).frame(width: 80, height: 80).clipped()"),
+  b("Controls", "Button", "Button(\"Save\") { … }.buttonStyle(.borderedProminent)"),
+  b("Controls", "Button role", "Button(\"Delete\", role: .destructive) { … }"),
+  b("Controls", "Icon button", "Button { Image(systemName: \"trash\") }.buttonStyle(.borderless)"),
+  b("Controls", "Button style", "HStack { Button(\"Cut\") { … }; Button(\"Copy\") { … } }.buttonStyle(.borderless)"),
+  b("Controls", "Custom button style", "struct Pill: ButtonStyle { func makeBody(configuration: Configuration) -> some View { configuration.label.padding(…).background(…) } }"),
+  b("Controls", "Switch", "Toggle(\"Live\", isOn: $live)"),
+  b("Controls", "Check box", "Toggle(\"Wrap\", isOn: $wrap).toggleStyle(.checkbox)"),
+  b("Controls", "Button toggle", "Toggle(\"Bold\", isOn: $bold).toggleStyle(.button)"),
+  b("Controls", "Toggle style", "VStack { Toggle(\"Wrap\", …); Toggle(\"Numbers\", …) }.toggleStyle(.checkbox)"),
+  b("Controls", "Custom toggle style", "struct Dot: ToggleStyle { func makeBody(configuration: Configuration) -> some View { HStack { Circle()…; configuration.label } } }"),
+  b("Controls", "Slider", "Slider(value: $zoom, in: 0...200)"),
+  b("Controls", "Slider steps", "Slider(value: $level, in: 10...90, step: 10) { … } tick: { v in SliderTick(v) { … } }"),
+  b("Controls", "Slider style", "Slider(value: $zoom, in: 0...200) (SwiftUI has no slider style)"),
+  b("Controls", "Custom slider style", "struct Meter: ProgressViewStyle { … } (SwiftUI has no slider style)"),
+  b("Controls", "Picker", "Picker(\"Size\", selection: $size) { …; Divider(); … }"),
+  b("Controls", "Segmented picker", "Picker(…) { … }.pickerStyle(.segmented)"),
+  b("Controls", "Picker style", "VStack { Picker(…) { … } }.pickerStyle(.inline); Picker(…) { … }"),
+  b("Controls", "Custom picker style", "struct Chips: PickerStyle (SwiftUI's is closed: its styles are the system's)"),
+  b("Controls", "Text field", "TextField(\"Name\", text: $name)"),
+  b("Controls", "Multi-line field", "TextField(\"Notes\", text: $notes, axis: .vertical)"),
+  b("Controls", "Secure field", "SecureField(\"Password\", text: $key)"),
+  b("Controls", "Search field", ".searchable(text: $query)"),
+  b("Controls", "Date picker", "DatePicker(\"Start\", selection: $start, in: ...end, displayedComponents: .date)"),
+  b("Controls", "Date picker style", "DatePicker(…).datePickerStyle(.field)"),
+  b("Controls", "Character palette", "NSApp.orderFrontCharacterPalette(nil), Edit ▸ Emoji & Symbols (AppKit; SwiftUI has none)"),
+  b("Controls", "Text field style", "VStack { TextField(\"Name\", text: $name); TextField(\"City\", text: $city) }.textFieldStyle(.plain)"),
+  b("Controls", "Custom text field style", "struct Underline: TextFieldStyle { func _body(configuration: TextField<_Label>) -> some View { configuration.padding(…).overlay(alignment: .bottom) { … } } }"),
+  b("Controls", "Progress", "ProgressView(value: 0.42)"),
+  b("Controls", "Spinner", "ProgressView()"),
+  b("Controls", "Badge", ".badge(\"New\")"),
+  b("Controls", "Hotkey recorder", "KeyboardShortcut (SwiftUI has no recorder)"),
+  b("Controls", "Control behavior", "Button(action:) { … }.buttonStyle(MyStyle()), a look of the app's own"),
+  b("Controls", "Help marks", "Image(systemName: \"info.circle\").help(tip); HelpLink { … }"),
+  b("Form", "Section", "Section { … } header: { … } footer: { … }"),
+  b("Form", "Form row", "LabeledContent { Toggle(isOn: $on) {} } label: { Text(title); Text(subtitle) }"),
+  b("Form", "Composed label", "label: { Text(name); Text(\"New\").badge(…) }"),
+  b("Form", "Row tile", "Label { Text(title) } icon: { Image(systemName: \"folder\") }"),
+  b("Form", "Row footer", "Section { VStack { Toggle(…); Slider(…) } }"),
+  b("Form", "Disclosure", "DisclosureGroup(\"Other models\") { … }"),
+  b("Form", "Toolbar tabs", "TabView(selection: $page) { General().tabItem { Label(\"General\", systemImage: \"gear\") }.tag(Page.general) } in a Settings scene"),
+  b("Form", "Footer", "HelpLink { … } at a pane's end"),
+  b("List", "List", "List(items, selection: $sel) { … }"),
+  b("List", "List sections", "Section(header:) in a List; .listStyle(…)"),
+  b("List", "List style", "List(items, selection: $sel) { … }.listStyle(.plain)"),
+  b("List", "Custom list style", "struct Stripes: ListStyle (SwiftUI's has no public makeBody)"),
+  b("List", "List behavior", "List(rows, selection: $sel) { … }.listRowBackground(…)"),
+  b("Containers", "Tabs", "TabView { … }"),
+  b("Containers", "Split", "HSplitView { … }"),
+  b("Containers", "Navigation split", "NavigationSplitView { … } detail: { … }"),
+  b("Containers", "Toolbar", "Detail().toolbar { ToolbarItem(placement: .principal) { … }; ToolbarItem(placement: .primaryAction) { … } } in a NavigationSplitView"),
+  b("Containers", "Unified toolbar", ".windowToolbarStyle(.unified)"),
+  b("Containers", "Menu", "Menu(\"Actions\") { Button(…) }"),
+  b("Containers", "Lazy column", "ScrollView { LazyVStack { ForEach(0..<1000) { i in … } } }"),
+  b("Containers", "Scroll behavior", "ScrollView { … }.scrollIndicators(.hidden).onScrollGeometryChange(…) { … }"),
+  b("Containers", "Scroll indicators", "NSScroller.knobStyle = .light (AppKit; SwiftUI has none)"),
+  b("Containers", "Stack queries", "Divider() follows its stack's axis (SwiftUI has no API for it)"),
+  b("Presentation", "Alert", ".alert(\"Delete?\", isPresented: $ask) { Button(\"Delete\", role: .destructive) }"),
+  b("Presentation", "Context menu", ".contextMenu { Button(\"Copy\") { … } }"),
+  b("Presentation", "Menu bar", ".commands { CommandMenu(\"Track\") { Button(\"Play\") { … } }; CommandGroup(replacing: .newItem) { … } }"),
+  b("Presentation", "Tooltip", ".help(\"Saves it\")"),
+  b("Presentation", "Custom help style", ".help(\"Saves it\") (SwiftUI has no help style)"),
+  b("Modifiers", "Disabled", ".disabled(true)"),
+  b("Modifiers", "Control size", ".controlSize(.small)"),
+  b("Modifiers", "Accessibility label", ".accessibilityLabel(\"Reset\")"),
+  b("Modifiers", "Keyboard shortcut", "Button(\"Count\") { … }.keyboardShortcut(\"k\", modifiers: .command)"),
+  b("Modifiers", "Environment", ".environment(\\.tint, .green) { … }; @Environment(\\.tint) var tint"),
+  b("Modifiers", "Group", "Group { Button(\"Save\"); Toggle(…) }.disabled(true)"),
+  b("Modifiers", "Identity", "Box().id(item.id); .allowsHitTesting(false)"),
+  b("Modifiers", "Focus and pointer", ".focusable(); .pointerStyle(.link)"),
+  b("Modifiers", "Widget parts", ".environment(\\.isEnabled, true); .help(tip) on a part"),
+  b("Modifiers", "Frame request", "TimelineView(.animation) { context in … }"),
+  b("Modifiers", "Accessibility pair", ".accessibilityLabeledPair(role: .label, id: \"volume\", in: ns)"),
+  b("Modifiers", "Controls theme", "@Environment(\\.controlActiveState) var state"),
+  b("Modifiers", "Color scheme", "@Environment(\\.colorScheme) var colorScheme"),
 ];
 }
+pub mod code {
+  //! The code each block shows, cut from this file so it is the code that runs: the body of the
+  //! block's closure, coloured as Xcode colours Rust, in its light and dark palettes.
+
+  use nimbo::{AttributedString, Attributes, Weight, rgb};
+
+  /// This file, which the code is cut from.
+  const SOURCE: &str = include_str!("gallery.rs");
+
+  /// The code of block `name`: the body of its arm's closure, from the line
+  /// `"<name>" => Self::variants(ui, Shown::…, |ui| {` to the `}),` under it, out of its indent;
+  /// `None` without such an arm.
+  pub fn of(name: &str) -> Option<String> {
+    let head = format!("\"{name}\" => Self::variants(ui, Shown::");
+    let mut lines = SOURCE.lines();
+    let arm = lines.find(|l| l.trim_start().starts_with(&head) && l.ends_with("|ui| {"))?;
+    let indent = arm.len() - arm.trim_start().len();
+    let end = format!("{:indent$}}}),", "");
+    let mut code = String::new();
+    for line in lines {
+      if line == end {
+        return Some(code);
+      }
+
+      if !code.is_empty() {
+        code.push('\n');
+      }
+
+      code += line.get(indent + 2..).unwrap_or("").trim_end();
+    }
+
+    None
+  }
+
+  /// The words Rust keeps, coloured as keywords.
+  const KEYWORDS: &[&str] = &[
+    "as", "break", "const", "continue", "dyn", "else", "enum", "false", "fn", "for", "if", "impl",
+    "in", "let", "loop", "match", "move", "mut", "pub", "ref", "return", "self", "Self", "static",
+    "struct", "trait", "true", "type", "use", "where", "while",
+  ];
+
+  /// What a token is, each coloured its own way.
+  #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+  pub enum Kind {
+    Plain,
+    Keyword,
+    Str,
+    Number,
+    Comment,
+    Type,
+    Call,
+    Macro,
+  }
+
+  /// Xcode's Default (Light) and Default (Dark): keywords, strings, numbers, comments, other type
+  /// names, other function names, macros.
+  const LIGHT: [u32; 7] = [0x9b2393, 0xc41a16, 0x1c00cf, 0x5d6c79, 0x0b4f79, 0x326d74, 0x643820];
+  const DARK: [u32; 7] = [0xfc5fa3, 0xfc6a5d, 0xd0bf69, 0x6c7986, 0x5dd8ff, 0x67b7a4, 0xfd8f3f];
+
+  /// `code` in its tokens, each with its kind.
+  pub fn tokens(code: &str) -> impl Iterator<Item = (&str, Kind)> {
+    let mut rest = code;
+    std::iter::from_fn(move || {
+      if rest.is_empty() {
+        return None;
+      }
+
+      let (len, kind) = token(rest);
+      let (t, after) = rest.split_at(len);
+      rest = after;
+      Some((t, kind))
+    })
+  }
+
+  /// `code` coloured for a light or dark ground; the text's own colour is the plain one.
+  pub fn colour(code: &str, dark: bool) -> AttributedString {
+    let palette = if dark { DARK } else { LIGHT };
+    let ink = |i: usize| Attributes::new().color(rgb(palette[i]));
+    let mut out = AttributedString::new();
+    for (text, kind) in tokens(code) {
+      let a = match kind {
+        Kind::Plain => Attributes::new(),
+        Kind::Keyword => ink(0).weight(Weight::Semibold),
+        Kind::Str => ink(1),
+        Kind::Number => ink(2),
+        Kind::Comment => ink(3),
+        Kind::Type => ink(4),
+        Kind::Call => ink(5),
+        Kind::Macro => ink(6),
+      };
+
+      out.push(text, a);
+    }
+
+    out
+  }
+
+  /// The first token of `s`, which is not empty: its length in bytes and kind.
+  fn token(s: &str) -> (usize, Kind) {
+    let b = s.as_bytes();
+    let run = |from: usize, f: &dyn Fn(u8) -> bool| {
+      from + b[from..].iter().position(|&c| !f(c)).unwrap_or(b.len() - from)
+    };
+    let word = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    match b[0] {
+      b'/' if b.get(1) == Some(&b'/') => (run(0, &|c| c != b'\n'), Kind::Comment),
+      b'"' => {
+        // To the closing quote, past escaped ones.
+        let mut i = 1;
+        while i < b.len() && b[i] != b'"' {
+          i += if b[i] == b'\\' { 2 } else { 1 };
+        }
+
+        ((i + 1).min(b.len()), Kind::Str)
+      }
+
+      // A character ('k', '\n'), not a lifetime ('a).
+      b'\'' => match (b.get(1), b.get(2), b.get(3)) {
+        (Some(b'\\'), _, Some(b'\'')) => (4, Kind::Str),
+        (Some(_), Some(b'\''), _) => (3, Kind::Str),
+        _ => (run(1, &word), Kind::Plain),
+      },
+      c if c.is_ascii_digit() => {
+        // Digits, a fraction's point (not a range's `..`) and a suffix.
+        let mut i = run(0, &word);
+        if b.get(i) == Some(&b'.') && b.get(i + 1).is_some_and(u8::is_ascii_digit) {
+          i = run(i + 1, &word);
+        }
+
+        (i, Kind::Number)
+      }
+
+      c if word(c) => {
+        let n = run(0, &word);
+        let next = s[n..].trim_start().as_bytes().first().copied();
+        let kind = match (&s[..n], next) {
+          (w, _) if KEYWORDS.contains(&w) => Kind::Keyword,
+          (_, Some(b'!')) if b.get(n) == Some(&b'!') => return (n + 1, Kind::Macro),
+          (w, _) if w.starts_with(|c: char| c.is_ascii_uppercase()) => Kind::Type,
+          (_, Some(b'(')) => Kind::Call,
+          _ if s[n..].starts_with("::<") => Kind::Call,
+          _ => Kind::Plain,
+        };
+
+        (n, kind)
+      }
+
+      // One character, UTF-8 whole.
+      _ => (s.chars().next().map_or(1, char::len_utf8), Kind::Plain),
+    }
+  }
+}
+
 #[path = "common/example.rs"]
 mod example;
 mod pages {
@@ -159,17 +308,17 @@ mod pages {
 
     use nimbo::{
       Align, Axes, Axis, Float, Icon, Id, ScrollBar, ScrollerKnob, Split, Style, Tabs,
-      ToolbarItemPlacement, Ui, UnitPoint, WindowToolbarStyle, alpha, px,
+      ToolbarItemPlacement, Ui, UnitPoint, WindowToolbarStyle, alpha, grow, px,
     };
 
-    use super::{Gallery, Shown, line};
+    use super::{Gallery, Shown};
 
     impl Gallery {
       /// The live container block `name`.
       pub(super) fn containers(&mut self, ui: &mut Ui, name: &str) {
-        let t = ui.theme();
         match name {
           "Tabs" => Self::variants(ui, Shown::Plain, |ui| {
+            let t = ui.theme();
             ui.col(Style::new().w(px(260.0)).h(px(70.0)), |ui| {
               Tabs::new(&mut self.tab, &["General", "Advanced"]).show(ui, |ui, i| {
                 ui.text(["The general page", "The advanced page"][i], t.label());
@@ -177,6 +326,7 @@ mod pages {
             });
           }),
           "Split" => Self::variants(ui, Shown::Plain, |ui| {
+            let t = ui.theme();
             ui.row(Style::new().w(px(260.0)).h(px(60.0)), |ui| {
               Split::new(Axis::Horizontal).ratio(&mut self.side).show(ui, |ui, pane| {
                 ui.text(["Sidebar", "Content"][pane], t.label());
@@ -185,6 +335,7 @@ mod pages {
           }),
 
           "Navigation split" => Self::variants(ui, Shown::Plain, |ui| {
+            let t = ui.theme();
             ui.row(Style::new().w(px(260.0)).h(px(60.0)), |ui| {
               Split::navigation().ratio(&mut self.side).show(ui, |ui, pane| {
                 let ground = if pane == 0 { t.panel() } else { t.bg() };
@@ -199,6 +350,7 @@ mod pages {
           // in a bar of its own, a sidebar's column with its toggle beside the detail's with its
           // action.
           "Toolbar" => Self::variants(ui, Shown::Plain, |ui| {
+            let t = ui.theme();
             let bar = Style::new().w(px(360.0)).h(px(52.0)).radius(8.0).pad(1.0).clip().bg(t.bg());
             ui.row(bar.border(1.0, t.line()), |ui| {
               Split::navigation().ratio(&mut self.bar_side).show(ui, |ui, pane| {
@@ -226,10 +378,11 @@ mod pages {
 
           // A band of the app's own: at a window's top it would ask for a toolbar's title bar.
           "Unified toolbar" => Self::variants(ui, Shown::Alone, |ui| {
-            let band =
-              Style::new().w(px(360.0)).h(px(52.0)).radius(8.0).pad_xy(12.0, 0.0).bg(t.panel());
+            let t = ui.theme();
+            let band = Style::new().w(px(360.0)).h(px(52.0)).radius(8.0).pad_xy(12.0, 0.0);
+            let band = band.gap(8.0).align(Align::Start, Align::Center).bg(t.panel());
             ui.window_toolbar_style(WindowToolbarStyle::Unified);
-            ui.row(band.align(Align::Start, Align::Center).gap(8.0), |ui| {
+            ui.row(band, |ui| {
               ui.text("Notes", t.label());
               ui.spacer();
               _ = ui.help("New Note").icon_button(Icon::DOC);
@@ -238,13 +391,14 @@ mod pages {
 
           // Each stack's axis and children so far, read where the text goes.
           "Stack queries" => Self::variants(ui, Shown::Alone, |ui| {
+            let t = ui.theme();
             let read = |ui: &mut Ui| {
               let (axis, n) = (ui.parent_axis(), ui.child_count());
               if let Some(axis) = axis {
                 ui.text(format_args!("{axis:?}, {n} before"), t.label());
               }
             };
-            ui.row(line(8.0), |ui| (0..2).for_each(|_| read(ui)));
+            ui.row(Style::new().gap(8.0), |ui| (0..2).for_each(|_| read(ui)));
             ui.col(Style::new().gap(4.0), |ui| (0..2).for_each(|_| read(ui)));
           }),
 
@@ -254,17 +408,26 @@ mod pages {
               ui.menu_item("Paste");
             });
           }),
-          "Lazy column" => Self::variants(ui, Shown::Plain, |ui| {
-            ui.scroll_area(Style::new().w(px(200.0)).h(px(60.0)), |ui| {
-              let item = |ui: &mut Ui, i: usize| ui.text(format_args!("Item {i}"), t.label());
-              ui.lazy_col(1000, |i| i, item);
-            });
+
+          // A thousand rows, built only for the four in view: 24 points each inside a border of 1.
+          "Lazy column" => Self::variants(ui, Shown::Alone, |ui| {
+            let t = ui.theme();
+            let area = Style::new().w(px(200.0)).h(px(98.0)).radius(8.0).border(1.0, t.line());
+            let row = |ui: &mut Ui, i: usize| {
+              let s = Style::new().w(grow()).h(px(24.0)).pad_xy(10.0, 0.0);
+              ui.row(s.align(Align::Start, Align::Center), |ui| {
+                ui.text(format_args!("Row {} of 1000", i + 1), t.label())
+              });
+            };
+            ui.scroll_area(area.bg(t.panel()), |ui| ui.lazy_col(1000, |i| i, row));
           }),
 
           // A bar of its own over the area's behaviour: a thin accent thumb, always shown.
           "Scroll behavior" => Self::variants(ui, Shown::Alone, |ui| {
+            let t = ui.theme();
             let id = Id::of("own scroll");
             let b = ui.scroll_behavior(id, Axes::VERTICAL);
+
             let area =
               Style::new().w(px(200.0)).h(px(60.0)).pad_xy(8.0, 4.0).radius(6.0).bg(t.panel());
             let area = area.scroll(Axes::VERTICAL);
@@ -281,6 +444,7 @@ mod pages {
 
           // Red knobs in this area, put back after it for the gallery's other areas.
           "Scroll indicators" => Self::variants(ui, Shown::Alone, |ui| {
+            let t = ui.theme();
             let red = ScrollerKnob::DARK.color(alpha(t.danger(), 0.6));
             let old = ui.set_environment(Some(red));
             ui.scroll_area(Style::new().w(px(200.0)).h(px(60.0)), |ui| {
@@ -308,114 +472,11 @@ mod pages {
       ToggleStyle, Tone, Ui, alpha, character_palette, grow, mix, px,
     };
 
-    use super::{Gallery, SIZES, Shown, line};
-
-    /// A button style of the gallery's own: a capsule tinted with the accent, deeper while held,
-    /// faint when disabled.
-    struct Pill;
-
-    impl ButtonStyle for Pill {
-      fn make_body(&self, ui: &mut Ui, mut c: ButtonConfiguration) {
-        let t = ui.theme();
-        let (k, ink) = match (c.is_enabled(), c.is_pressed()) {
-          (false, _) => (0.06, alpha(t.accent(), 0.4)),
-          (true, pressed) => (if pressed { 0.3 } else { 0.15 }, t.accent()),
-        };
-
-        let s = Style::new().h(px(24.0)).pad_xy(12.0, 0.0).gap(5.0).center().radius(12.0);
-        ui.row(s.bg(alpha(t.accent(), k)), |ui| c.label(ui, TextStyle::new(t.font(), ink)));
-      }
-    }
-
-    /// A toggle style of the gallery's own: a dot in the accent before the label, filled while on,
-    /// ringed while off; faint when disabled.
-    struct Dot;
-
-    impl ToggleStyle for Dot {
-      fn make_body(&self, ui: &mut Ui, mut c: ToggleConfiguration) {
-        let t = ui.theme();
-        let k = if c.is_enabled() { 1.0 } else { 0.4 };
-        let dot =
-          Style::new().w(px(12.0)).h(px(12.0)).radius(6.0).border(1.5, alpha(t.accent(), k));
-        let dot = if c.is_on() { dot.bg(alpha(t.accent(), k)) } else { dot };
-        ui.row(Style::new().gap(6.0).center(), |ui| {
-          ui.el(dot);
-          c.label(ui, TextStyle::new(t.font(), alpha(t.text(), k)));
-        });
-      }
-    }
-
-    /// A slider style of the gallery's own: a capsule filled in the accent up to the value, a notch
-    /// at each step between its ends, no knob; faint when disabled.
-    struct Meter;
-
-    impl SliderStyle for Meter {
-      fn make_body(&self, ui: &mut Ui, c: SliderConfiguration) {
-        let t = ui.theme();
-        let a = if c.is_enabled() { 1.0 } else { 0.4 };
-        let (k, track, fill, notch) =
-          (c.fraction(), alpha(t.accent(), 0.15 * a), alpha(t.accent(), a), alpha(t.bg(), 0.8));
-        let notches: Vec<f32> =
-          c.steps().map(|(_, p)| p).filter(|p| *p > 0.0 && *p < 1.0).collect();
-        c.root(ui).canvas(Style::new().w(grow()).h(px(8.0)), move |f, r| {
-          f.rect(r, track, 4.0);
-          f.rect(Rect::new(r.x, r.y, r.w * k, r.h), fill, 4.0);
-          for p in &notches {
-            f.rect(Rect::new(r.x + r.w * p - 0.5, r.y, 1.0, r.h), notch, 0.0);
-          }
-        });
-      }
-    }
-
-    /// A text field style of the gallery's own: the text over a line, the accent's while focused,
-    /// which rings nothing else.
-    struct Underline;
-
-    impl TextFieldStyle for Underline {
-      fn make_body(&self, ui: &mut Ui, mut c: TextFieldConfiguration) {
-        let t = ui.theme();
-        let line = if c.is_focused() { t.accent() } else { t.line() };
-        let s =
-          Style::new().w(grow()).h(px(24.0)).pad_xy(2.0, 0.0).borders([0.0, 0.0, 1.0, 0.0], line);
-        let s = s.align(Align::Start, Align::Center).focusable_quiet().scroll(c.axis().into());
-        let s = if c.is_enabled() { s } else { s.opacity(t.disabled()) };
-        let text = FieldStyle::new(TextStyle::new(t.font(), t.text())).placeholder(t.faint());
-        ui.row(s, |ui| c.text(ui, &text.caret(t.accent())));
-      }
-    }
-
-    /// A picker style of the gallery's own: the options as capsules, the selected one filled with
-    /// the accent, faint when disabled.
-    struct Chips;
-
-    impl PickerStyle for Chips {
-      fn make_body(&self, ui: &mut Ui, mut c: PickerConfiguration) {
-        let t = ui.theme();
-        let b = c.segments(ui);
-        let k = if c.is_enabled() { 1.0 } else { 0.4 };
-        ui.row(Style::new().gap(4.0), |ui| {
-          for i in 0..c.len() {
-            let on = c.selection() == Some(i);
-            let (bg, ink) = match on {
-              true => (alpha(t.accent(), k), alpha(t.on_accent(), k)),
-              false => (alpha(t.accent(), 0.12 * k), alpha(t.accent(), k)),
-            };
-
-            let chip = Style::new().h(px(22.0)).pad_xy(10.0, 0.0).center().radius(11.0).bg(bg);
-            ui.with_id(c.item_id(i))
-              .row(b.pointer(chip), |ui| ui.text(c.label(i), TextStyle::new(t.font(), ink)));
-          }
-        });
-      }
-    }
-
-    /// The views a picker shows.
-    const VIEWS: [Tag<u8>; 3] = [Tag::new(0, "List"), Tag::new(1, "Grid"), Tag::new(2, "Columns")];
+    use super::{Gallery, SIZES, Shown};
 
     impl Gallery {
       /// The live control block `name`.
       pub(super) fn controls(&mut self, ui: &mut Ui, name: &str) {
-        let t = ui.theme();
         match name {
           "Button" => Self::variants(ui, Shown::Sized, |ui| {
             ui.button("Bordered");
@@ -435,20 +496,39 @@ mod pages {
 
           // Two buttons borderless by their row, the one after it in the window's style.
           "Button style" => Self::variants(ui, Shown::Sized, |ui| {
-            ui.button_style(&BorderlessButtonStyle).row(line(10.0), |ui| {
+            let row = Style::new().gap(10.0).align(Align::Start, Align::Center);
+            ui.button_style(&BorderlessButtonStyle).row(row, |ui| {
               ui.button("Cut");
               ui.button("Copy");
             });
             ui.button("Paste");
           }),
           "Custom button style" => Self::variants(ui, Shown::Plain, |ui| {
+            /// A capsule tinted with the accent, deeper while held, faint when disabled.
+            struct Pill;
+
+            impl ButtonStyle for Pill {
+              fn make_body(&self, ui: &mut Ui, mut c: ButtonConfiguration) {
+                let t = ui.theme();
+                let (k, ink) = match (c.is_enabled(), c.is_pressed()) {
+                  (false, _) => (0.06, alpha(t.accent(), 0.4)),
+                  (true, pressed) => (if pressed { 0.3 } else { 0.15 }, t.accent()),
+                };
+
+                let s = Style::new().h(px(24.0)).pad_xy(12.0, 0.0).gap(5.0).center().radius(12.0);
+                ui.row(s.bg(alpha(t.accent(), k)), |ui| c.label(ui, TextStyle::new(t.font(), ink)));
+              }
+            }
+
             ui.button_style(&Pill).button("Pill");
             Button::new("Open").icon(Icon::FOLDER).show(ui.button_style(&Pill));
           }),
 
-          "Switch" => Self::variants(ui, Shown::Sized, |ui| _ = ui.toggle(&mut self.live, "Live")),
+          "Switch" => Self::variants(ui, Shown::Sized, |ui| {
+            ui.toggle(&mut self.live, "Live");
+          }),
           "Check box" => Self::variants(ui, Shown::Plain, |ui| {
-            _ = ui.toggle_style(&CheckboxToggleStyle).toggle(&mut self.wrap, "Wrap")
+            ui.toggle_style(&CheckboxToggleStyle).toggle(&mut self.wrap, "Wrap");
           }),
           "Button toggle" => Self::variants(ui, Shown::Sized, |ui| {
             ui.toggle_style(&ButtonToggleStyle).toggle(&mut self.bold, "Bold");
@@ -464,21 +544,44 @@ mod pages {
             ui.toggle(&mut self.live, "Live");
           }),
           "Custom toggle style" => Self::variants(ui, Shown::Plain, |ui| {
+            /// A dot in the accent before the label, filled while on, ringed while off; faint when
+            /// disabled.
+            struct Dot;
+
+            impl ToggleStyle for Dot {
+              fn make_body(&self, ui: &mut Ui, mut c: ToggleConfiguration) {
+                let t = ui.theme();
+                let k = if c.is_enabled() { 1.0 } else { 0.4 };
+                let dot = Style::new()
+                  .w(px(12.0))
+                  .h(px(12.0))
+                  .radius(6.0)
+                  .border(1.5, alpha(t.accent(), k));
+                let dot = if c.is_on() { dot.bg(alpha(t.accent(), k)) } else { dot };
+                ui.row(Style::new().gap(6.0).center(), |ui| {
+                  ui.el(dot);
+                  c.label(ui, TextStyle::new(t.font(), alpha(t.text(), k)));
+                });
+              }
+            }
+
             ui.toggle_style(&Dot).toggle(&mut self.live, "Live");
             ui.toggle_style(&PlainToggleStyle).toggle(&mut self.wrap, "Plain");
           }),
 
           // A slider fills the width it is offered: 160 here.
           "Slider" => Self::variants(ui, Shown::Plain, |ui| {
+            let t = ui.theme();
             ui.col(Style::new().w(px(160.0)), |ui| {
-              _ = ui.a11y_label("Zoom").slider(&mut self.zoom, 0.0..=200.0)
+              ui.a11y_label("Zoom").slider(&mut self.zoom, 0.0..=200.0);
             });
             ui.text(format_args!("{:.0}%", self.zoom), t.muted().nowrap());
           }),
           "Slider steps" => Self::variants(ui, Shown::Plain, |ui| {
+            let t = ui.theme();
             let label = |v: f32| [10.0, 50.0, 90.0].contains(&v).then(|| format!("{v}%"));
             let s = Slider::new(&mut self.level, 10.0..=90.0).step(10.0).tick_label(label);
-            ui.col(Style::new().w(px(160.0)), |ui| _ = s.show(ui.a11y_label("Level")));
+            ui.col(Style::new().w(px(160.0)), |ui| s.show(ui.a11y_label("Level")));
             ui.text(format_args!("{:.0}%", self.level), t.muted().nowrap());
           }),
 
@@ -486,15 +589,39 @@ mod pages {
           "Slider style" => Self::variants(ui, Shown::Plain, |ui| {
             ui.col(Style::new().w(px(160.0)).gap(8.0), |ui| {
               ui.slider_style(&PlainSliderStyle).col(Style::new().w(grow()), |ui| {
-                _ = ui.a11y_label("Zoom").slider(&mut self.zoom, 0.0..=200.0)
+                ui.a11y_label("Zoom").slider(&mut self.zoom, 0.0..=200.0);
               });
-              _ = ui.a11y_label("Zoom").slider(&mut self.zoom, 0.0..=200.0);
+              ui.a11y_label("Zoom").slider(&mut self.zoom, 0.0..=200.0);
             });
           }),
           "Custom slider style" => Self::variants(ui, Shown::Plain, |ui| {
+            /// A capsule filled in the accent up to the value, a notch at each step between its
+            /// ends, no knob; faint when disabled.
+            struct Meter;
+
+            impl SliderStyle for Meter {
+              fn make_body(&self, ui: &mut Ui, c: SliderConfiguration) {
+                let t = ui.theme();
+                let a = if c.is_enabled() { 1.0 } else { 0.4 };
+                let (k, track, fill) =
+                  (c.fraction(), alpha(t.accent(), 0.15 * a), alpha(t.accent(), a));
+                let notch = alpha(t.bg(), 0.8);
+                let notches: Vec<f32> =
+                  c.steps().map(|(_, p)| p).filter(|p| *p > 0.0 && *p < 1.0).collect();
+                c.root(ui).canvas(Style::new().w(grow()).h(px(8.0)), move |f, r| {
+                  f.rect(r, track, 4.0);
+                  f.rect(Rect::new(r.x, r.y, r.w * k, r.h), fill, 4.0);
+                  for p in &notches {
+                    f.rect(Rect::new(r.x + r.w * p - 0.5, r.y, 1.0, r.h), notch, 0.0);
+                  }
+                });
+              }
+            }
+
+            let t = ui.theme();
             let s = Slider::new(&mut self.level, 10.0..=90.0).step(10.0);
             ui.col(Style::new().w(px(160.0)), |ui| {
-              _ = s.show(ui.slider_style(&Meter).a11y_label("Level"))
+              s.show(ui.slider_style(&Meter).a11y_label("Level"));
             });
             ui.text(format_args!("{:.0}%", self.level), t.muted().nowrap());
           }),
@@ -514,29 +641,58 @@ mod pages {
 
           // Pickers inline by their row, the one after it in the window's style.
           "Picker style" => Self::variants(ui, Shown::Plain, |ui| {
-            ui.picker_style(&InlinePickerStyle).row(line(10.0), |ui| {
-              _ = ui.a11y_label("Size").picker(&mut self.size, &SIZES);
+            let row = Style::new().gap(10.0).align(Align::Start, Align::Center);
+            ui.picker_style(&InlinePickerStyle).row(row, |ui| {
+              ui.a11y_label("Size").picker(&mut self.size, &SIZES);
             });
             ui.a11y_label("Size").picker(&mut self.size, &SIZES);
           }),
           "Custom picker style" => Self::variants(ui, Shown::Plain, |ui| {
-            ui.picker_style(&Chips).picker(&mut self.view, &VIEWS);
+            /// The options as capsules, the selected one filled with the accent, faint when
+            /// disabled.
+            struct Chips;
+
+            impl PickerStyle for Chips {
+              fn make_body(&self, ui: &mut Ui, mut c: PickerConfiguration) {
+                let t = ui.theme();
+                let b = c.segments(ui);
+                let k = if c.is_enabled() { 1.0 } else { 0.4 };
+                ui.row(Style::new().gap(4.0), |ui| {
+                  for i in 0..c.len() {
+                    let on = c.selection() == Some(i);
+                    let (bg, ink) = match on {
+                      true => (alpha(t.accent(), k), alpha(t.on_accent(), k)),
+                      false => (alpha(t.accent(), 0.12 * k), alpha(t.accent(), k)),
+                    };
+
+                    let chip =
+                      Style::new().h(px(22.0)).pad_xy(10.0, 0.0).center().radius(11.0).bg(bg);
+                    ui.with_id(c.item_id(i)).row(b.pointer(chip), |ui| {
+                      ui.text(c.label(i), TextStyle::new(t.font(), ink))
+                    });
+                  }
+                });
+              }
+            }
+
+            let views = [Tag::new(0, "List"), Tag::new(1, "Grid"), Tag::new(2, "Columns")];
+            ui.picker_style(&Chips).picker(&mut self.view, &views);
           }),
 
           "Text field" => Self::variants(ui, Shown::Plain, |ui| {
-            ui.col(Style::new().w(px(200.0)), |ui| _ = ui.text_field(&mut self.name, "Name"));
+            ui.col(Style::new().w(px(200.0)), |ui| ui.text_field(&mut self.name, "Name"));
           }),
           // A multi-line field fills the height its parent gives it.
           "Multi-line field" => Self::variants(ui, Shown::Plain, |ui| {
             ui.col(Style::new().w(px(200.0)).h(px(60.0)), |ui| {
-              _ = TextField::new(&mut self.notes, "Notes").axis(Axis::Vertical).show(ui)
+              TextField::new(&mut self.notes, "Notes").axis(Axis::Vertical).show(ui);
             });
           }),
           "Secure field" => Self::variants(ui, Shown::Plain, |ui| {
-            ui.col(Style::new().w(px(200.0)), |ui| _ = ui.secure_field(&mut self.key, "Password"));
+            ui.col(Style::new().w(px(200.0)), |ui| ui.secure_field(&mut self.key, "Password"));
           }),
           "Search field" => Self::variants(ui, Shown::Plain, |ui| {
-            ui.col(Style::new().w(px(200.0)), |ui| _ = ui.search_field(&mut self.query, "Search"));
+            ui.col(Style::new().w(px(200.0)), |ui| ui.search_field(&mut self.query, "Search"));
           }),
 
           // Day, month and year in the user's order in a window (ISO in the harness); typed, or
@@ -554,7 +710,7 @@ mod pages {
           // A message field and its emoji button where the OS has a picker; a button takes
           // focus by Tab only, so a click leaves it on the field.
           "Character palette" => Self::variants(ui, Shown::Plain, |ui| {
-            ui.col(Style::new().w(px(200.0)), |ui| _ = ui.text_field(&mut self.message, "Message"));
+            ui.col(Style::new().w(px(200.0)), |ui| ui.text_field(&mut self.message, "Message"));
             if character_palette::available().is_ok() && ui.icon_button(Icon::SMILE).clicked {
               ui.character_palette();
             }
@@ -567,11 +723,28 @@ mod pages {
               ui.text_field(&mut self.name, "Name");
               ui.text_field(&mut self.city, "City");
             });
-            ui.col(Style::new().w(px(160.0)), |ui| _ = ui.text_field(&mut self.email, "E-mail"));
+            ui.col(Style::new().w(px(160.0)), |ui| ui.text_field(&mut self.email, "E-mail"));
           }),
           "Custom text field style" => Self::variants(ui, Shown::Plain, |ui| {
+            /// The text over a line, the accent's while focused, which rings nothing else.
+            struct Underline;
+
+            impl TextFieldStyle for Underline {
+              fn make_body(&self, ui: &mut Ui, mut c: TextFieldConfiguration) {
+                let t = ui.theme();
+                let line = if c.is_focused() { t.accent() } else { t.line() };
+                let s = Style::new().w(grow()).h(px(24.0)).pad_xy(2.0, 0.0);
+                let s = s.borders([0.0, 0.0, 1.0, 0.0], line).align(Align::Start, Align::Center);
+                let s = s.focusable_quiet().scroll(c.axis().into());
+                let s = if c.is_enabled() { s } else { s.opacity(t.disabled()) };
+                let text =
+                  FieldStyle::new(TextStyle::new(t.font(), t.text())).placeholder(t.faint());
+                ui.row(s, |ui| c.text(ui, &text.caret(t.accent())));
+              }
+            }
+
             ui.col(Style::new().w(px(200.0)), |ui| {
-              _ = ui.text_field_style(&Underline).text_field(&mut self.city, "City")
+              ui.text_field_style(&Underline).text_field(&mut self.city, "City");
             });
           }),
 
@@ -579,7 +752,9 @@ mod pages {
             ui.col(Style::new().w(px(150.0)), |ui| ui.progress(Some(0.42)));
             ui.col(Style::new().w(px(150.0)), |ui| ui.progress(None));
           }),
-          "Spinner" => Self::variants(ui, Shown::Sized, |ui| _ = ui.spinner()),
+          "Spinner" => Self::variants(ui, Shown::Sized, |ui| {
+            ui.spinner();
+          }),
           "Badge" => Self::variants(ui, Shown::Sized, |ui| {
             ui.badge(128, Tone::Neutral);
             ui.badge("New", Tone::Accent);
@@ -599,6 +774,7 @@ mod pages {
 
           // A round button the app draws on a button's behaviour: Tab focuses it, the hand over it.
           "Control behavior" => Self::variants(ui, Shown::Plain, |ui| {
+            let t = ui.theme();
             let id = ui.take_id();
             let b = ui.button_behavior(id);
             let fill = match (b.pressed, b.hovered) {
@@ -645,142 +821,263 @@ mod pages {
     impl Gallery {
       /// A form block in the form's look, on its ground.
       pub(super) fn form(&mut self, ui: &mut Ui, name: &str) {
-        let fs = FormStyle::plates(&ui.theme());
-        let (on, level, tab) = (&mut self.on, &mut self.level, &mut self.tab);
-        Self::variants(ui, Shown::Plain, |ui| {
-          let row = |ui: &mut Ui, on: &mut bool, level: &mut f32| match name {
-            "Form row" => {
-              let row =
-                FormRow::new("Open at login").caption("Starts with your Mac, in the menu bar.");
-              ui.form_row(&fs, row, |ui| ui.toggle(on, ()))
-            }
-
-            "Composed label" => {
-              let label = |ui: &mut Ui, s: TextStyle| {
-                ui.text("gigaam-v3", s.line_limit(1));
-                let ui = ui.help("Best in Russian").control_size(ControlSize::Small);
-                ui.badge("Recommended", Tone::Accent);
-              };
-              let caption = |ui: &mut Ui, s: TextStyle| {
-                ui.row(Style::new().w(grow()), |ui| {
-                  ui.help("Errors per 100 words").text("WER 4.7%", s.underline(LinePattern::Dot));
-                  ui.text(" · 274 MB", s);
-                });
-              };
-              ui.form_row(&fs, FormRow::new(label).caption(caption), |ui| ui.button("Use"))
-            }
-            "Row tile" => {
-              let row = FormRow::new("Data folder").caption("~/Library/Application Support");
-              ui.form_row(&fs, row.tile(Icon::FOLDER), |ui| ui.button("Show"))
-            }
-
-            "Row footer" => {
-              let (name, off) = (format!("Turn off below {level:.0}%"), !*on);
-              let footer = |ui: &mut Ui, _: TextStyle| {
-                let label = |v: f32| [10.0, 50.0, 90.0].contains(&v).then(|| format!("{v}%"));
-                let s = Slider::new(level, 10.0..=90.0).step(10.0).tick_label(label);
-                s.show(ui.disabled(off).a11y_label("Level"));
-              };
-              let row = FormRow::new(&name).caption("Only on battery.").footer(footer);
-              ui.form_row(&fs, row, |ui| ui.toggle(on, ()))
-            }
-            "Disclosure" => {
-              let row = FormRow::new("Other models").caption("2 more");
-              ui.form_disclosure(&fs, row, |ui| {
-                ui.form_row(&fs, FormRow::new("whisper-tiny"), |_| {})
-              })
-            }
-            _ => ui.form_row(&fs, FormRow::new("Row"), |ui| ui.toggle(on, ())),
-          };
-
-          let page = Style::new().w(grow()).gap(10.0).pad(10.0).radius(12.0).bg(fs.bg());
-          ui.col(page, |ui| match name {
-            "Section" => {
+        match name {
+          "Section" => Self::variants(ui, Shown::Plain, |ui| {
+            let fs = FormStyle::plates(&ui.theme());
+            let form = Style::new().w(grow()).gap(10.0).pad(10.0).radius(12.0).bg(fs.bg());
+            ui.col(form, |ui| {
               let head = |ui: &mut Ui, s: TextStyle| {
                 ui.text("Storage", s);
                 ui.spacer();
                 ui.text("640 MB used", fs.note());
               };
               let section = Section::new(head).footer("Kept until you clear it.");
-              _ = ui.form_section(&fs, section, |ui| row(ui, on, level));
-            }
+              ui.form_section(&fs, section, |ui| {
+                ui.form_row(&fs, FormRow::new("Keep the history"), |ui| ui.toggle(&mut self.on, ()))
+              });
+            });
+          }),
 
-            "Toolbar tabs" => {
-              let tabs =
-                [Tag::new(0, "General").icon(Icon::GEAR), Tag::new(1, "About").icon(Icon::INFO)];
-              _ = ui.toolbar_tabs(&fs, tab, &tabs);
-            }
-            "Footer" => {
-              ui.form_section(&fs, "Section", |ui| row(ui, on, level));
+          "Form row" => Self::variants(ui, Shown::Plain, |ui| {
+            let fs = FormStyle::plates(&ui.theme());
+            let form = Style::new().w(grow()).gap(10.0).pad(10.0).radius(12.0).bg(fs.bg());
+            ui.col(form, |ui| {
+              ui.form_section(&fs, "", |ui| {
+                let row =
+                  FormRow::new("Open at login").caption("Starts with your Mac, in the menu bar.");
+                ui.form_row(&fs, row, |ui| ui.toggle(&mut self.on, ()))
+              });
+            });
+          }),
+
+          "Composed label" => Self::variants(ui, Shown::Plain, |ui| {
+            let fs = FormStyle::plates(&ui.theme());
+            let form = Style::new().w(grow()).gap(10.0).pad(10.0).radius(12.0).bg(fs.bg());
+            let label = |ui: &mut Ui, s: TextStyle| {
+              ui.text("gigaam-v3", s.line_limit(1));
+              let ui = ui.help("Best in Russian").control_size(ControlSize::Small);
+              ui.badge("Recommended", Tone::Accent);
+            };
+
+            let caption = |ui: &mut Ui, s: TextStyle| {
+              ui.row(Style::new().w(grow()), |ui| {
+                ui.help("Errors per 100 words").text("WER 4.7%", s.underline(LinePattern::Dot));
+                ui.text(" · 274 MB", s);
+              });
+            };
+            ui.col(form, |ui| {
+              ui.form_section(&fs, "", |ui| {
+                ui.form_row(&fs, FormRow::new(label).caption(caption), |ui| ui.button("Use"))
+              });
+            });
+          }),
+
+          "Row tile" => Self::variants(ui, Shown::Plain, |ui| {
+            let fs = FormStyle::plates(&ui.theme());
+            let form = Style::new().w(grow()).gap(10.0).pad(10.0).radius(12.0).bg(fs.bg());
+            ui.col(form, |ui| {
+              ui.form_section(&fs, "", |ui| {
+                let row = FormRow::new("Data folder").caption("~/Library/Application Support");
+                ui.form_row(&fs, row.tile(Icon::FOLDER), |ui| ui.button("Show"))
+              });
+            });
+          }),
+
+          "Row footer" => Self::variants(ui, Shown::Plain, |ui| {
+            let fs = FormStyle::plates(&ui.theme());
+            let form = Style::new().w(grow()).gap(10.0).pad(10.0).radius(12.0).bg(fs.bg());
+            let (name, off) = (format!("Turn off below {:.0}%", self.level), !self.on);
+            let footer = |ui: &mut Ui, _: TextStyle| {
+              let label = |v: f32| [10.0, 50.0, 90.0].contains(&v).then(|| format!("{v}%"));
+              let s = Slider::new(&mut self.level, 10.0..=90.0).step(10.0).tick_label(label);
+              s.show(ui.disabled(off).a11y_label("Level"));
+            };
+
+            ui.col(form, |ui| {
+              ui.form_section(&fs, "", |ui| {
+                let row = FormRow::new(&name).caption("Only on battery.").footer(footer);
+                ui.form_row(&fs, row, |ui| ui.toggle(&mut self.on, ()))
+              });
+            });
+          }),
+
+          "Disclosure" => Self::variants(ui, Shown::Plain, |ui| {
+            let fs = FormStyle::plates(&ui.theme());
+            let form = Style::new().w(grow()).gap(10.0).pad(10.0).radius(12.0).bg(fs.bg());
+            ui.col(form, |ui| {
+              ui.form_section(&fs, "", |ui| {
+                let row = FormRow::new("Other models").caption("2 more");
+                ui.form_disclosure(&fs, row, |ui| {
+                  ui.form_row(&fs, FormRow::new("whisper-tiny"), |_| {})
+                })
+              });
+            });
+          }),
+
+          "Toolbar tabs" => Self::variants(ui, Shown::Plain, |ui| {
+            let fs = FormStyle::plates(&ui.theme());
+            let form = Style::new().w(grow()).gap(10.0).pad(10.0).radius(12.0).bg(fs.bg());
+            let tabs =
+              [Tag::new(0, "General").icon(Icon::GEAR), Tag::new(1, "About").icon(Icon::INFO)];
+            ui.col(form, |ui| ui.toolbar_tabs(&fs, &mut self.tab, &tabs));
+          }),
+          "Footer" => Self::variants(ui, Shown::Plain, |ui| {
+            let fs = FormStyle::plates(&ui.theme());
+            let form = Style::new().w(grow()).gap(10.0).pad(10.0).radius(12.0).bg(fs.bg());
+            ui.col(form, |ui| {
+              ui.form_section(&fs, "History", |ui| {
+                ui.form_row(&fs, FormRow::new("Keep the history"), |ui| ui.toggle(&mut self.on, ()))
+              });
               ui.help("Help on these settings").form_footer(&fs, |ui| _ = ui.button("Reset All…"));
-            }
-            _ => _ = ui.form_section(&fs, "", |ui| row(ui, on, level)),
-          });
-        });
+            });
+          }),
+          _ => unreachable!("{name} is not a form block"),
+        }
       }
     }
   }
   mod layout {
-    //! The layout blocks, built live: stacks, a grid, a spacer, dividers, a scroll view and an
-    //! overlay.
+    //! The layout blocks, built live: a row and a column in their alignments, a grid, spacers,
+    //! dividers, a scroll view, a scroll anchor and an overlay.
 
-    use nimbo::{Axes, Float, Style, Ui, UnitPoint, grow, px};
+    use nimbo::{Align, Axes, Float, Style, TextStyle, Ui, UnitPoint, grow, px};
 
-    use super::{Gallery, Shown, line, swatch};
+    use super::{Gallery, Shown};
 
     impl Gallery {
       /// The live layout block `name`.
       pub(super) fn layout(&mut self, ui: &mut Ui, name: &str) {
-        let t = ui.theme();
         match name {
-          "Stacks" => Self::variants(ui, Shown::Alone, |ui| {
-            ui.row(Style::new().gap(8.0), |ui| (0..3).for_each(|_| _ = ui.el(swatch(t.accent()))));
-            ui.col(Style::new().gap(4.0), |ui| (0..2).for_each(|_| _ = ui.el(swatch(t.raised()))));
+          // Boxes of three heights, 8 apart, in a row of each vertical alignment.
+          "Row" => Self::variants(ui, Shown::Alone, |ui| {
+            let t = ui.theme();
+            for y in [Align::Start, Align::Center, Align::End] {
+              ui.col(Style::new().gap(6.0).align(Align::Center, Align::Start), |ui| {
+                let row = Style::new().gap(8.0).align(Align::Start, y).pad(8.0).radius(8.0);
+                ui.row(row.border(1.0, t.line()).bg(t.panel()), |ui| {
+                  for h in [16.0, 40.0, 28.0] {
+                    ui.el(Style::new().w(px(24.0)).h(px(h)).radius(5.0).bg(t.accent()));
+                  }
+                });
+                ui.text(format_args!("{y:?}"), t.muted());
+              });
+            }
           }),
+
+          // Bars of three widths, 6 apart, in a column of each horizontal alignment.
+          "Column" => Self::variants(ui, Shown::Alone, |ui| {
+            let t = ui.theme();
+            for x in [Align::Start, Align::Center, Align::End] {
+              ui.col(Style::new().gap(6.0).align(Align::Center, Align::Start), |ui| {
+                let col = Style::new().gap(6.0).align(x, Align::Start).pad(8.0).radius(8.0);
+                ui.col(col.border(1.0, t.line()).bg(t.panel()), |ui| {
+                  for w in [40.0, 88.0, 64.0] {
+                    ui.el(Style::new().w(px(w)).h(px(14.0)).radius(4.0).bg(t.accent()));
+                  }
+                });
+                ui.text(format_args!("{x:?}"), t.muted());
+              });
+            }
+          }),
+
+          // A keypad: keys fill their cells, 6 apart both ways; the 0 spans two columns.
           "Grid" => Self::variants(ui, Shown::Alone, |ui| {
-            let grid = Style::new().w(px(120.0)).gap(6.0);
-            ui.grid(3, grid, |ui| (0..6).for_each(|_| _ = ui.el(swatch(t.raised()))));
+            let t = ui.theme();
+            let key = Style::new().w(grow()).h(px(32.0)).center().radius(6.0).bg(t.raised());
+            ui.grid(3, Style::new().w(px(132.0)).gap(6.0), |ui| {
+              for k in ["7", "8", "9", "4", "5", "6", "1", "2", "3"] {
+                ui.row(key, |ui| ui.text(k, t.label()));
+              }
+
+              ui.span(2).row(key, |ui| ui.text("0", t.label()));
+              ui.row(key, |ui| ui.text(".", t.label()));
+            });
           }),
 
+          // One spacer pushes the button to the bar's end; one at each side centre the text.
           "Spacer" => Self::variants(ui, Shown::Alone, |ui| {
-            ui.row(Style::new().w(grow()), |ui| {
-              ui.text("Left", t.label());
-              ui.spacer();
-              ui.text("Right", t.label());
+            let t = ui.theme();
+            let bar = Style::new().w(px(300.0)).h(px(40.0)).pad_xy(12.0, 0.0).gap(8.0);
+            let bar = bar.align(Align::Start, Align::Center).radius(8.0).border(1.0, t.line());
+            let bar = bar.bg(t.panel());
+            ui.col(Style::new().gap(8.0), |ui| {
+              ui.row(bar, |ui| {
+                ui.text("Notes", t.label());
+                ui.spacer();
+                ui.button("Share");
+              });
+
+              ui.row(bar, |ui| {
+                ui.spacer();
+                ui.text("In the middle", t.label());
+                ui.spacer();
+              });
             });
           }),
 
+          // A line down a row, between its items, and across a column.
           "Divider" => Self::variants(ui, Shown::Alone, |ui| {
-            ui.row(line(8.0).h(px(24.0)), |ui| {
-              ui.text("One", t.label());
+            let t = ui.theme();
+            let panel = Style::new().pad(10.0).radius(8.0).border(1.0, t.line()).bg(t.panel());
+            ui.row(panel.h(px(44.0)).gap(10.0).align(Align::Start, Align::Center), |ui| {
+              ui.text("Cut", t.label());
               ui.divider();
-              ui.text("Two", t.label());
-            });
-            ui.col(Style::new().w(px(120.0)).gap(4.0), |ui| {
-              ui.text("Above", t.label());
+              ui.text("Copy", t.label());
               ui.divider();
-              ui.text("Below", t.label());
+              ui.text("Paste", t.label());
             });
-          }),
-          "Scroll view" => Self::variants(ui, Shown::Alone, |ui| {
-            let area = Style::new().w(px(200.0)).h(px(60.0)).scroll(Axes::VERTICAL);
-            ui.scroll_area(area, |ui| {
-              (1..=8).for_each(|i| ui.text(format_args!("Line {i}"), t.label()))
+
+            ui.col(panel.w(px(160.0)).gap(8.0), |ui| {
+              ui.text("Wi-Fi", t.label());
+              ui.divider();
+              ui.text("Bluetooth", t.label());
+              ui.divider();
+              ui.text("Network", t.label());
             });
           }),
 
-          // Opens at its end, and stays there as lines come.
+          // Four of twenty lines in view, 24 points each inside a border of 1.
+          "Scroll view" => Self::variants(ui, Shown::Alone, |ui| {
+            let t = ui.theme();
+            let area = Style::new().w(px(200.0)).h(px(98.0)).radius(8.0).border(1.0, t.line());
+            ui.scroll_area(area.bg(t.panel()).scroll(Axes::VERTICAL), |ui| {
+              for i in 1..=20 {
+                let line = Style::new().w(grow()).h(px(24.0)).pad_xy(10.0, 0.0);
+                ui.row(line.align(Align::Start, Align::Center), |ui| {
+                  ui.text(format_args!("Line {i}"), t.label())
+                });
+              }
+            });
+          }),
+
+          // A chat: it opens at the newest message, and stays there as messages come.
           "Scroll anchor" => Self::variants(ui, Shown::Alone, |ui| {
-            let area = Style::new().w(px(200.0)).h(px(60.0));
+            let t = ui.theme();
+            let area = Style::new().w(px(260.0)).h(px(134.0)).pad(8.0).gap(6.0).radius(8.0);
+            let area = area.border(1.0, t.line()).bg(t.panel());
             ui.default_scroll_anchor(UnitPoint::BOTTOM).scroll_area(area, |ui| {
-              (1..=8).for_each(|i| ui.text(format_args!("Line {i}"), t.label()))
+              for i in 1..=12 {
+                let mine = i % 2 == 0;
+                let (side, bg, ink) = match mine {
+                  true => (Align::End, t.accent(), t.on_accent()),
+                  false => (Align::Start, t.raised(), t.text()),
+                };
+
+                let bubble = Style::new().pad_xy(10.0, 5.0).radius(12.0).bg(bg);
+                ui.row(Style::new().w(grow()).align(side, Align::Start), |ui| {
+                  let text = TextStyle::new(t.font(), ink);
+                  ui.row(bubble, |ui| ui.text(format_args!("Message {i}"), text));
+                });
+              }
             });
           }),
 
           "Overlay" => Self::variants(ui, Shown::Alone, |ui| {
-            ui.row(swatch(t.raised()).w(px(80.0)).h(px(48.0)), |ui| {
+            let t = ui.theme();
+            let card = Style::new().w(px(80.0)).h(px(48.0)).radius(6.0).bg(t.raised());
+            ui.row(card, |ui| {
               let at = UnitPoint::TOP_TRAILING;
-              let dot = swatch(t.accent()).w(px(12.0)).h(px(12.0));
+              let dot = Style::new().w(px(12.0)).h(px(12.0)).radius(6.0).bg(t.accent());
               ui.float(Float::parent().attach(at).anchor(at).offset(-4.0, 4.0)).el(dot);
             });
           }),
@@ -800,36 +1097,12 @@ mod pages {
 
     use super::{Gallery, Shown};
 
-    /// A list style of the gallery's own: on a rounded panel, every other row tinted, the selected
-    /// one a rounded tile of the accent, fainter while the list is not focused; faded when
-    /// disabled.
-    struct Stripes;
-
-    impl ListStyle for Stripes {
-      fn make_body<'a>(&self, ui: &mut Ui<'a>, mut c: ListConfiguration<'_, 'a>) {
-        let t = ui.theme();
-        let frame = c.frame().radius(8.0).bg(t.panel());
-        let frame = if c.is_enabled() { frame } else { frame.opacity(t.disabled()) };
-        ui.scroll_area(frame, |ui| {
-          c.rows(ui, |ui, mut r| {
-            let fill = match (r.is_selected(), r.index() % 2) {
-              (true, _) => alpha(t.accent(), if r.is_focused() { 0.35 } else { 0.15 }),
-              (false, 1) => alpha(t.text(), 0.04),
-              _ => [0.0; 4],
-            };
-
-            ui.row(r.frame().radius(6.0).bg(fill), |ui| r.content(ui));
-          })
-        });
-      }
-    }
-
     impl Gallery {
       /// The live list block `name`.
       pub(super) fn list(&mut self, ui: &mut Ui, name: &str) {
-        let t = ui.theme();
         match name {
           "List" => Self::variants(ui, Shown::Plain, |ui| {
+            let t = ui.theme();
             let list = List::new(40, 22.0).selection(&mut self.rows);
             let list = list.style(Style::new().w(px(220.0)).h(px(88.0)));
             list.show(ui, |ui, row| ui.text(format_args!("Row {}", row.index + 1), t.label()));
@@ -838,6 +1111,7 @@ mod pages {
           // Plain, the app draws the selection: its text in the accent. The same rows in the
           // window's inset style beside it.
           "List style" => Self::variants(ui, Shown::Plain, |ui| {
+            let t = ui.theme();
             let frame = Style::new().w(px(160.0)).h(px(88.0));
             let text = |row: Row| match row.selected {
               true => TextStyle::new(t.font(), t.accent()),
@@ -853,6 +1127,30 @@ mod pages {
             inset.show(ui, |ui, row| ui.text(format_args!("Row {}", row.index + 1), t.label()));
           }),
           "Custom list style" => Self::variants(ui, Shown::Plain, |ui| {
+            /// On a rounded panel, every other row tinted, the selected one a rounded tile of the
+            /// accent, fainter while the list is not focused; faded when disabled.
+            struct Stripes;
+
+            impl ListStyle for Stripes {
+              fn make_body<'a>(&self, ui: &mut Ui<'a>, mut c: ListConfiguration<'_, 'a>) {
+                let t = ui.theme();
+                let frame = c.frame().radius(8.0).bg(t.panel());
+                let frame = if c.is_enabled() { frame } else { frame.opacity(t.disabled()) };
+                ui.scroll_area(frame, |ui| {
+                  c.rows(ui, |ui, mut r| {
+                    let fill = match (r.is_selected(), r.index() % 2) {
+                      (true, _) => alpha(t.accent(), if r.is_focused() { 0.35 } else { 0.15 }),
+                      (false, 1) => alpha(t.text(), 0.04),
+                      _ => [0.0; 4],
+                    };
+
+                    ui.row(r.frame().radius(6.0).bg(fill), |ui| r.content(ui));
+                  })
+                });
+              }
+            }
+
+            let t = ui.theme();
             // Padded in the list's box, where its keys scroll the rows to.
             let list = List::new(40, 24.0).style(Style::new().w(px(220.0)).h(px(96.0)).pad(4.0));
             let list = list.selection(&mut self.styled_rows[1]);
@@ -862,6 +1160,7 @@ mod pages {
 
           // Rows of its own over the list's behaviour: the selected one filled with the accent.
           "List behavior" => Self::variants(ui, Shown::Alone, |ui| {
+            let t = ui.theme();
             let (id, key) = (Id::of("own list"), |i: usize| i as u64);
             let b = ui.list_behavior(id, ListRows::new(40, 22.0), &mut self.own_rows, &key);
             let sel = b.selection();
@@ -883,6 +1182,7 @@ mod pages {
           }),
 
           "List sections" => Self::variants(ui, Shown::Plain, |ui| {
+            let t = ui.theme();
             let head = |ui: &mut Ui, g: usize| ui.text(["Today", "Yesterday"][g], t.section());
             let list = List::new(6, 30.0).sections(&[0, 3], 24.0, &head).selection(&mut self.rows);
             let list = list.style(Style::new().w(px(320.0)).h(px(290.0)));
@@ -901,25 +1201,16 @@ mod pages {
     //! theme.
 
     use nimbo::a11y::LabeledPairRole;
-    use nimbo::{Color, Cursor, Enabled, EnvironmentValue, Icon, Id, Shortcut, Tone, Ui, px};
+    use nimbo::{
+      Align, Binding, Color, Command, Cursor, Enabled, EnvironmentValue, Icon, Id, Shortcut, Style,
+      Tone, Ui, px,
+    };
 
-    use super::{Gallery, Shown, line, swatch};
-
-    /// The environment block's value: the tint of the swatches built while it is there, the
-    /// theme's raised colour by default.
-    #[derive(Clone, Copy)]
-    pub struct Tint(pub Color);
-
-    impl EnvironmentValue for Tint {
-      fn default_value(ui: &Ui) -> Self {
-        Self(ui.theme().raised())
-      }
-    }
+    use super::{Gallery, Shown};
 
     impl Gallery {
       /// The live modifier block `name`.
       pub(super) fn modifiers(&mut self, ui: &mut Ui, name: &str) {
-        let t = ui.theme();
         match name {
           "Disabled" => Self::variants(ui, Shown::Plain, |ui| {
             ui.button("Save");
@@ -931,14 +1222,47 @@ mod pages {
             ui.badge("Beta", Tone::Neutral);
           }),
           "Accessibility label" => Self::variants(ui, Shown::Plain, |ui| {
-            _ = ui.a11y_label("Reset").icon_button(Icon::RESET)
+            ui.a11y_label("Reset").icon_button(Icon::RESET);
+          }),
+
+          // A box that counts ⌘K while it has focus: a click or Tab gives it.
+          "Keyboard shortcut" => Self::variants(ui, Shown::Plain, |ui| {
+            const KEYS: &[Binding] =
+              &[Binding::new(Shortcut::char('k').cmd(), Command::Action("count"))];
+            let t = ui.theme();
+            let id = ui.take_id();
+            if ui.command(id) == Some(Command::Action("count")) {
+              self.counted += 1;
+            }
+
+            let keys = Shortcut::char('k').cmd().label();
+            let s = Style::new().h(px(28.0)).pad_xy(10.0, 0.0).center().radius(6.0);
+            ui.keymap(KEYS).with_id(id).row(s.bg(t.raised()).focusable(), |ui| {
+              ui.text(format_args!("{keys} pressed: {}", self.counted), t.label())
+            });
           }),
 
           // Swatches that take their colour from the environment, put for the row of the last two.
           "Environment" => Self::variants(ui, Shown::Alone, |ui| {
-            let tile = |ui: &mut Ui| _ = ui.el(swatch(ui.environment_value::<Tint>().0));
+            /// The tint of the swatches built while it is there, the theme's raised colour by
+            /// default.
+            #[derive(Clone, Copy)]
+            struct Tint(Color);
+
+            impl EnvironmentValue for Tint {
+              fn default_value(ui: &Ui) -> Self {
+                Self(ui.theme().raised())
+              }
+            }
+
+            let t = ui.theme();
+            let tile = |ui: &mut Ui| {
+              let tint = ui.environment_value::<Tint>().0;
+              ui.el(Style::new().w(px(28.0)).h(px(28.0)).radius(6.0).bg(tint));
+            };
             tile(ui);
-            ui.environment(Tint(t.success())).row(line(10.0), |ui| (0..2).for_each(|_| tile(ui)));
+            let row = Style::new().gap(10.0).align(Align::Start, Align::Center);
+            ui.environment(Tint(t.success())).row(row, |ui| (0..2).for_each(|_| tile(ui)));
           }),
 
           // Two widgets side by side disabled as one, the button after them enabled.
@@ -952,17 +1276,21 @@ mod pages {
 
           // Keyed boxes: a key of its own each, the last a ready id.
           "Identity" => Self::variants(ui, Shown::Alone, |ui| {
-            (0..3).for_each(|k| _ = ui.key(k).el(swatch(t.raised())));
+            let t = ui.theme();
+            let square = Style::new().w(px(28.0)).h(px(28.0)).radius(6.0);
+            (0..3).for_each(|k| _ = ui.key(k).el(square.bg(t.raised())));
             ui.with_id(Id::of("identity").key("box"))
               .allows_hit_testing(false)
-              .el(swatch(t.accent()));
+              .el(square.bg(t.accent()));
           }),
 
           // A swatch Tab focuses with the hand over it, and a focusable one Tab passes by.
           "Focus and pointer" => Self::variants(ui, Shown::Alone, |ui| {
+            let t = ui.theme();
             let id = Id::of("focus and pointer");
-            ui.with_id(id).focusable(true).pointer_style(Cursor::Pointer).el(swatch(t.accent()));
-            ui.with_id(id.key("not")).focusable(false).el(swatch(t.raised()).focusable());
+            let square = Style::new().w(px(28.0)).h(px(28.0)).radius(6.0);
+            ui.with_id(id).focusable(true).pointer_style(Cursor::Pointer).el(square.bg(t.accent()));
+            ui.with_id(id.key("not")).focusable(false).el(square.bg(t.raised()).focusable());
           }),
 
           // A part enabled in a disabled container, with the tip the widget was given.
@@ -978,17 +1306,20 @@ mod pages {
 
           // A bar that moves every frame.
           "Frame request" => Self::variants(ui, Shown::Alone, |ui| {
+            let t = ui.theme();
             ui.request_frame();
             let k = ui.now().as_secs_f32() % 1.0;
-            ui.el(swatch(t.accent()).w(px(28.0 + 120.0 * k)));
+            let bar = Style::new().w(px(28.0 + 120.0 * k)).h(px(28.0)).radius(6.0);
+            ui.el(bar.bg(t.accent()));
           }),
 
           // The slider named by the text before it; the badge by its own text.
           "Accessibility pair" => Self::variants(ui, Shown::Plain, |ui| {
+            let t = ui.theme();
             let pair = Id::of("volume");
             ui.a11y_labeled_pair(LabeledPairRole::Label, pair, |ui| ui.text("Volume", t.label()));
             ui.a11y_labeled_pair(LabeledPairRole::Content, pair, |ui| {
-              _ = ui.slider(&mut self.level, 0.0..=100.0);
+              ui.slider(&mut self.level, 0.0..=100.0);
             });
             ui.badge("New", Tone::Accent);
           }),
@@ -996,20 +1327,17 @@ mod pages {
           // The accent while the window is key, a grey while it isn't, as the switch beside it.
           "Controls theme" => Self::variants(ui, Shown::Alone, |ui| {
             let c = ui.controls_theme();
-            ui.el(swatch(c.accent()));
+            ui.el(Style::new().w(px(28.0)).h(px(28.0)).radius(6.0).bg(c.accent()));
             ui.toggle(&mut self.on, ());
           }),
 
           // Light or dark as drawn: the theme's when the app set one, else the OS's.
           "Color scheme" => Self::variants(ui, Shown::Alone, |ui| {
+            let t = ui.theme();
             let name = if ui.color_scheme().is_dark() { "Dark" } else { "Light" };
             ui.text(name, t.label());
           }),
-
-          _ => Self::variants(ui, Shown::Plain, |ui| {
-            let keys = Shortcut::char('z').cmd().label();
-            ui.text(format_args!("{keys} undoes, in the window's keymap"), t.label());
-          }),
+          _ => unreachable!("{name} is not a modifier block"),
         }
       }
     }
@@ -1025,9 +1353,6 @@ mod pages {
 
     use super::{DIALOG, Gallery, Shown};
 
-    /// The menu bar the "Menu bar" block's line makes.
-    const MENU_BAR: &str = "File, Edit, View, Track, Window and Help in the menu bar (macOS)";
-
     /// What the context menu does.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum Action {
@@ -1035,37 +1360,25 @@ mod pages {
       Delete,
     }
 
-    /// A help style of the gallery's own: the tip on the accent in small white text.
-    struct Note;
-
-    impl HelpStyle for Note {
-      fn make_body(&self, ui: &mut Ui, c: HelpConfiguration) {
-        let t = ui.theme();
-        let s = Style::new().pad_xy(8.0, 4.0).radius(6.0).bg(t.accent()).opacity(c.opacity());
-        ui.row(s, |ui| ui.text(c.text(), TextStyle::new(t.small(), t.on_accent())));
-      }
-    }
-
     impl Gallery {
       /// The live presentation block `name`.
       pub(super) fn presentation(&mut self, ui: &mut Ui, name: &str) {
-        let t = ui.theme();
         match name {
-          "Alert" => {
-            Self::variants(ui, Shown::Plain, |ui| {
-              if ui.button("Delete…").clicked {
-                self.ask = true;
-              }
+          // The alert over the window while `ask`; one line, as it is one alert.
+          "Alert" => Self::variants(ui, Shown::Alone, |ui| {
+            let t = ui.theme();
+            if ui.button("Delete…").clicked {
+              self.ask = true;
+            }
 
-              ui.text(format_args!("Deleted {} times", self.deleted), t.muted().nowrap());
-            });
+            ui.text(format_args!("Deleted {} times", self.deleted), t.muted().nowrap());
             let d =
               Dialog::new("Delete the file?").message("It moves to the Trash.").icon(Icon::TRASH);
             let d = d.button("Delete", ButtonRole::Destructive);
             if d.show(ui.id(DIALOG), &mut self.ask) == Some(Answer::Action) {
               self.deleted += 1;
             }
-          }
+          }),
           "Context menu" => Self::variants(ui, Shown::Plain, |ui| {
             let r = ui.button("Right-click me");
             let menu = || {
@@ -1077,12 +1390,29 @@ mod pages {
             }
           }),
 
-          "Menu bar" => Self::variants(ui, Shown::Alone, |ui| ui.text(MENU_BAR, t.label())),
-          "Tooltip" => {
-            Self::variants(ui, Shown::Plain, |ui| _ = ui.help("Saves it").button("Save"))
-          }
+          // The menu bar is the app's, set as it starts, not a view's.
+          "Menu bar" => Self::variants(ui, Shown::Alone, |ui| {
+            let t = ui.theme();
+            ui.text("File, Edit, View, Track, Window and Help in the menu bar (macOS)", t.label());
+          }),
+          "Tooltip" => Self::variants(ui, Shown::Plain, |ui| {
+            ui.help("Saves it").button("Save");
+          }),
+
           // The window's tips in the gallery's style while the page shows.
           "Custom help style" => Self::variants(ui, Shown::Alone, |ui| {
+            /// The tip on the accent in small white text.
+            struct Note;
+
+            impl HelpStyle for Note {
+              fn make_body(&self, ui: &mut Ui, c: HelpConfiguration) {
+                let t = ui.theme();
+                let s =
+                  Style::new().pad_xy(8.0, 4.0).radius(6.0).bg(t.accent()).opacity(c.opacity());
+                ui.row(s, |ui| ui.text(c.text(), TextStyle::new(t.small(), t.on_accent())));
+              }
+            }
+
             ui.help_style(&Note);
             ui.help("Saves it").button("Save");
             ui.help("Opens it").button("Open");
@@ -1106,14 +1436,16 @@ mod pages {
     impl Gallery {
       /// The live text block `name`.
       pub(super) fn text(&mut self, ui: &mut Ui, name: &str) {
-        let t = ui.theme();
         match name {
           "Text" => Self::variants(ui, Shown::Alone, |ui| {
+            let t = ui.theme();
             ui.text("Title", TextStyle::new(t.bold(), t.text()));
             ui.text("Body", t.label());
             ui.text("Secondary", t.muted());
           }),
+
           "Localized text" => Self::variants(ui, Shown::Alone, |ui| {
+            let t = ui.theme();
             let name = "parakeet";
             ui.col(Style::new().gap(4.0), |ui| {
               ui.text(t!("Keep the history"), t.label());
@@ -1123,6 +1455,7 @@ mod pages {
           }),
 
           "Line limit" => Self::variants(ui, Shown::Alone, |ui| {
+            let t = ui.theme();
             let path = "/Users/alex/Library/Application Support/Example/cache.db";
             ui.col(Style::new().w(px(300.0)).gap(4.0), |ui| {
               for mode in [TruncationMode::Head, TruncationMode::Middle, TruncationMode::Tail] {
@@ -1131,6 +1464,7 @@ mod pages {
             });
           }),
           "Underline" => Self::variants(ui, Shown::Alone, |ui| {
+            let t = ui.theme();
             let patterns = [
               (LinePattern::Solid, "solid"),
               (LinePattern::Dot, "dot"),
@@ -1147,6 +1481,7 @@ mod pages {
           // A paragraph of runs, wrapping as one; code coloured as a highlighter would and a
           // diff's lines on their grounds, selectable.
           "Styled text" => Self::variants(ui, Shown::Alone, |ui| {
+            let t = ui.theme();
             let a = Attributes::new();
             let mut prose = AttributedString::new();
             prose.push("Runs ", a).push("in bold", a.weight(Weight::Bold)).push(", ", a);
@@ -1177,13 +1512,19 @@ mod pages {
               ui.text(&diff, mono);
             });
           }),
+
           "Selectable text" => Self::variants(ui, Shown::Plain, |ui| {
+            let t = ui.theme();
             ui.col(Style::new().w(px(300.0)), |ui| {
               _ = ui.selectable_text("Select this text and copy it.", t.body())
             });
           }),
-          "Link" => Self::variants(ui, Shown::Plain, |ui| _ = ui.link("Learn more…")),
+
+          "Link" => Self::variants(ui, Shown::Plain, |ui| {
+            ui.link("Learn more…");
+          }),
           "Image" => Self::variants(ui, Shown::Alone, |ui| {
+            let t = ui.theme();
             for icon in [Icon::GEAR, Icon::FOLDER, Icon::TRASH, Icon::INFO] {
               ui.icon(icon.stroke(1.6), 20.0, t.text());
             }
@@ -1191,6 +1532,7 @@ mod pages {
 
           // What a label shows, a text and an icon, built in a text style as a look would.
           "Label content" => Self::variants(ui, Shown::Alone, |ui| {
+            let t = ui.theme();
             let id = Id::of("label content");
             let labels: [Content; 3] =
               [Icon::FOLDER.into(), "Data folder".into(), Icon::INFO.into()];
@@ -1200,6 +1542,7 @@ mod pages {
           }),
 
           "Photo" => Self::variants(ui, Shown::Alone, |ui| {
+            let t = ui.theme();
             // Stretched to its box, then in its aspect: filling a square, fitting it.
             if let Some(photo) = &self.photo {
               ui.image(photo, Style::new().w(px(120.0)).h(px(80.0)));
@@ -1214,7 +1557,7 @@ mod pages {
     }
   }
 
-  use nimbo::{Align, Color, ControlSize, Style, Ui, grow, px};
+  use nimbo::{Align, ControlSize, Style, Ui, grow, px};
 
   use super::{Block, DIALOG, Gallery, SIZES};
 
@@ -1230,11 +1573,6 @@ mod pages {
   /// A line of widgets, `gap` apart, centred on each other.
   fn line(gap: f32) -> Style {
     Style::new().gap(gap).align(Align::Start, Align::Center)
-  }
-
-  /// A square swatch of `c`.
-  fn swatch(c: Color) -> Style {
-    Style::new().w(px(28.0)).h(px(28.0)).radius(6.0).bg(c)
   }
 
   impl Gallery {
@@ -1482,8 +1820,8 @@ pub mod canvas {
 }
 
 use nimbo::{
-  App, Bitmap, CMD, Config, Cx, Date, Event, Font, HelpStyle, Hotkey, Id, Key, List, Selection,
-  Style, Tag, TextStyle, Ui, grow, px,
+  App, Axes, Bitmap, CMD, Config, Cx, Date, Event, Font, HelpStyle, Hotkey, Id, Key, List,
+  Selection, Style, Tag, TextStyle, Ui, grow, px,
 };
 
 pub use self::blocks::{BLOCKS, Block, GROUPS};
@@ -1497,8 +1835,11 @@ pub const PAGE: &str = "page";
 pub const DIALOG: &str = "dialog";
 /// A block alone ([Gallery::only]).
 pub const BLOCK: &str = "block";
-/// The width of a page, and of a block's picture.
+/// The width of a block's picture.
 pub const WIDTH: f32 = 520.0;
+/// The gallery's window: the sidebar and a page as wide as the blocks' code, rustfmt's 100
+/// columns less the 12 of its indent.
+pub const WINDOW: (f32, f32) = (920.0, 640.0);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Size {
@@ -1552,6 +1893,8 @@ pub struct Gallery {
   pub ask: bool,
   pub deleted: usize,
   pub copied: usize,
+  /// The keyboard shortcut block's ⌘K presses.
+  pub counted: usize,
   pub on: bool,
   /// The photo block's, decoded by the OS at twice its size in points.
   pub photo: Option<Bitmap>,
@@ -1620,6 +1963,7 @@ impl Default for Gallery {
       ask: false,
       deleted: 0,
       copied: 0,
+      counted: 0,
       on: true,
       photo: Bitmap::decode(SUNSET, 240).ok(),
       pad: Pad::default(),
@@ -1642,15 +1986,20 @@ impl Gallery {
 
     let (t, block) = (ui.theme(), &BLOCKS[self.page]);
     let mono = TextStyle::new(Font::mono(12.0), t.text());
-    let code = Style::new().w(grow()).pad(10.0).gap(4.0).radius(8.0).bg(t.raised());
+    let nimbo = code::colour(&code::of(block.name).unwrap_or_default(), t.scheme().is_dark());
+    let boxed = Style::new().w(grow()).pad(10.0).gap(4.0).radius(8.0).bg(t.raised());
+
     ui.id(PAGE).scroll_area(Style::new().grow(), |ui| {
       ui.col(Style::new().w(grow()).pad(20.0).gap(14.0), |ui| {
         ui.text(block.name, TextStyle::new(t.bold().size(20.0), t.text()));
-        ui.col(code, |ui| {
+        ui.col(boxed, |ui| {
           ui.text("SWIFTUI", t.section());
           ui.selectable_text(block.swiftui, mono);
+          ui.el(Style::new().h(px(6.0)));
           ui.text("NIMBO", t.section());
-          ui.selectable_text(block.nimbo, mono);
+          // Its lines as rustfmt wrote them, scrolled sideways on a page narrower than they are.
+          let lines = Style::new().w(grow()).scroll(Axes::HORIZONTAL);
+          ui.scroll_area(lines, |ui| ui.selectable_text(&nimbo, mono.nowrap()));
         });
         self.demo(ui, block);
       });
@@ -1708,14 +2057,15 @@ impl App for Gallery {
 /// Where `docs/api.md`'s pictures are: the repo's `assets` branch, which `make api-shots` fills.
 pub const PICTURES: &str = "https://raw.githubusercontent.com/vladkens/nimbo/assets/api";
 
-/// `docs/api.md`: per group, each block's SwiftUI line, nimbo's and its picture.
+/// `docs/api.md`: per group, each block's SwiftUI line, nimbo's code and its picture.
 pub fn api_md() -> String {
   let mut out = String::from(
     "# nimbo and SwiftUI\n\n\
      Each building block of nimbo beside its SwiftUI counterpart, as the gallery shows it live \
      (`cargo run --release --example gallery`, a page per block in its variants). A block aims \
-     at its SwiftUI counterpart's behaviour and API shape without copying it 1:1. The pictures \
-     are the gallery's, in the light appearance, kept on the repo's `assets` branch: `make \
+     at its SwiftUI counterpart's behaviour and API shape without copying it 1:1. Its code is \
+     the gallery's for the block, cut from the block's own, so it builds what the picture shows. \
+     The pictures are the gallery's, in the light appearance, kept on the repo's `assets` branch: `make \
      api-shots` makes them and this file again from the gallery's table \
      (`examples/gallery.rs`), so a block changes there.\n\n\
      On macOS SwiftUI's `List` has neither of the grouped styles (`InsetGroupedListStyle` and \
@@ -1726,9 +2076,10 @@ pub fn api_md() -> String {
     out += &format!("\n## {g}\n");
     for b in BLOCKS.iter().filter(|b| b.group == g) {
       let (name, slug) = (b.name, b.slug());
+      let code = code::of(name).unwrap_or_default();
       out += &format!(
-        "\n### {name}\n\nSwiftUI: `{}`\n\nnimbo: `{}`\n\n![{name}]({PICTURES}/{slug}.png)\n",
-        b.swiftui, b.nimbo
+        "\n### {name}\n\nSwiftUI: `{}`\n\n```rust\n{code}\n```\n\n![{name}]({PICTURES}/{slug}.png)\n",
+        b.swiftui
       );
     }
   }
@@ -1750,13 +2101,21 @@ fn main() {
     return example::run(cfg, Pace::default(), &args[1..], |_| {});
   }
 
-  // A block's slug first: that block alone; `canvas`: the gallery on the Canvas page.
-  let first = args.first().map(String::as_str);
-  let page = first.and_then(|a| BLOCKS.iter().position(|b| b.slug() == a));
-  let canvas = first == Some("canvas");
-  let rest = &args[(page.is_some() || canvas) as usize..];
-  let app = Gallery::on(if canvas { CANVAS } else { page.unwrap_or(0) }, page.is_some());
-  let (w, h) = if page.is_some() { (WIDTH, 300.0) } else { (WIDTH + 200.0, 600.0) };
+  // A block's slug first: that block alone; `--page <slug>`: the gallery on its page; `canvas`:
+  // on the Canvas page.
+  let slug = |a: Option<&String>| a.and_then(|a| BLOCKS.iter().position(|b| b.slug() == *a));
+  let (page, only, rest) = match args.first().map(String::as_str) {
+    Some("canvas") => (Some(CANVAS), false, &args[1..]),
+    Some("--page") => (slug(args.get(1)), false, args.get(2..).unwrap_or_default()),
+    _ => match slug(args.first()) {
+      Some(i) => (Some(i), true, &args[1..]),
+      None => (None, false, &args[..]),
+    },
+  };
+
+  let canvas = page == Some(CANVAS);
+  let app = Gallery::on(page.unwrap_or(0), only);
+  let (w, h) = if only { (WIDTH, 300.0) } else { WINDOW };
   let cfg = Config::new("Gallery", w, h).localizations(&[("ru", RU)]);
   // The Canvas page's shot: a few presses, a drag across the pad and a key.
   example::run(cfg, app, rest, |h| {
