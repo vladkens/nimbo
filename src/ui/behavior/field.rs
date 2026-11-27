@@ -32,7 +32,6 @@ use crate::app::{Ime, MouseButton};
 use crate::keys::{Command, Delete, Move};
 use crate::menu::{Item, Menu};
 use crate::scene::{Color, Point, Rect, alpha};
-use crate::t;
 use crate::text::edit::{
   Editor, Lines, Mono, Sel, graphemes, para_range, range_from_utf16, snap, word_range,
 };
@@ -42,6 +41,7 @@ use crate::ui::{
   Align, Cursor, EnvironmentValue, Focus, Id, NativeMenu, Role, Run, Selectable, Style, TextInput,
   TextLayout, TextStyle, Tree, Ui, UiState, grow,
 };
+use crate::{character_palette, t};
 
 /// The caret shows this long after it moves, then hides as long, and so on.
 const BLINK: Duration = Duration::from_millis(500);
@@ -184,12 +184,15 @@ pub struct EditMenu {
   pub paste: bool,
   /// There is text.
   pub select_all: bool,
+  /// The OS has an emoji picker ([crate::character_palette]) and the field takes it (not a
+  /// password).
+  pub emoji: bool,
 }
 
 impl EditMenu {
   /// The menu: Cut, Copy, Paste (Copy alone in selectable text), a line, Select All, each
-  /// enabled when it can act, running its command; no shortcut labels, as AppKit's, Win32's
-  /// and GTK's text menus show none.
+  /// enabled when it can act, running its command; then Emoji & Symbols where a field takes it.
+  /// No shortcut labels, as AppKit's, Win32's and GTK's text menus show none.
   pub fn items(&self) -> Menu<Command> {
     let item = |cmd: Command, label: &str, on: bool| Item::button(cmd, label).enabled(on);
     let cut = item(Command::Cut, &t!("Cut"), self.cut);
@@ -197,6 +200,11 @@ impl EditMenu {
     let copy = item(Command::Copy, &t!("Copy"), self.copy);
     let mut items = if self.editable { vec![cut, copy, paste] } else { vec![copy] };
     items.extend([Item::Divider, item(Command::SelectAll, &t!("Select All"), self.select_all)]);
+    if self.emoji {
+      let emoji = item(Command::CharacterPalette, &t!("Emoji & Symbols"), true);
+      items.extend([Item::Divider, emoji]);
+    }
+
     Menu::new(items)
   }
 }
@@ -462,6 +470,10 @@ impl Ui<'_> {
 
           true
         }
+        Command::CharacterPalette if st.editable() && !st.secure() => {
+          self.st.palette = character_palette::available().is_ok();
+          true
+        }
         Command::Copy | Command::Cut if st.secure() => false,
         Command::Copy | Command::SelectAll | Command::Move(..) if !st.editable() => {
           st.ed.apply(c, lines, &mut *self.st.clipboard)
@@ -515,8 +527,9 @@ impl Ui<'_> {
       let (editable, copy) = (st.editable(), !st.ed.sel().is_empty() && !st.secure());
       let (paste, select_all) =
         (editable && self.st.clipboard.has_text(), !st.ed.text().is_empty());
-      st.menu =
-        EditMenu { at: Some(pos), editable, cut: copy && editable, copy, paste, select_all };
+      let emoji = editable && !st.secure() && character_palette::available().is_ok();
+      let cut = copy && editable;
+      st.menu = EditMenu { at: Some(pos), editable, cut, copy, paste, select_all, emoji };
     }
 
     (submitted, cancelled)

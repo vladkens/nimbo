@@ -132,6 +132,12 @@ pub fn appearance() -> Appearance {
   Appearance { scheme: ColorScheme::of(dark), accent: accent.get() }
 }
 
+/// The emoji picker ([crate::character_palette]): `orderFrontCharacterPalette:`, in AppKit since
+/// 10.3, opened by the view ([view]).
+pub fn character_palette() -> Result<(), String> {
+  Ok(())
+}
+
 /// The user's preferred languages, the most preferred first, as tags (`ru-RU`):
 /// `NSLocale.preferredLanguages`, the app's own language from System Settings (its
 /// `AppleLanguages` default) first.

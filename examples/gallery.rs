@@ -93,6 +93,7 @@ pub const BLOCKS: &[Block] = &[
   b("Controls", "Multi-line field", "TextField(\"Notes\", text: $notes, axis: .vertical)", "TextField::new(&mut self.notes, \"Notes\").axis(Axis::Vertical).show(ui)"),
   b("Controls", "Secure field", "SecureField(\"Password\", text: $key)", "ui.secure_field(&mut self.key, \"Password\")"),
   b("Controls", "Search field", ".searchable(text: $query)", "ui.search_field(&mut self.query, \"Search\")"),
+  b("Controls", "Character palette", "NSApp.orderFrontCharacterPalette(nil), Edit ▸ Emoji & Symbols (AppKit; SwiftUI has none)", "if character_palette::available().is_ok() && ui.icon_button(Icon::SMILE).clicked { ui.character_palette() }; Emoji & Symbols in a field's edit menu"),
   b("Controls", "Text field style", "VStack { TextField(\"Name\", text: $name); TextField(\"City\", text: $city) }.textFieldStyle(.plain)", "ui.text_field_style(&PlainTextFieldStyle).col(style, |ui| { ui.text_field(&mut self.name, \"Name\"); ui.text_field(&mut self.city, \"City\"); }); ui.text_field(&mut self.email, \"E-mail\")"),
   b("Controls", "Custom text field style", "struct Underline: TextFieldStyle { func _body(configuration: TextField<_Label>) -> some View { configuration.padding(…).overlay(alignment: .bottom) { … } } }", "impl TextFieldStyle for Underline { fn make_body(&self, ui: &mut Ui, mut c: TextFieldConfiguration) { ui.row(style.scroll(c.axis().into()), |ui| c.text(ui, &fs)); } } ui.text_field_style(&Underline).text_field(&mut self.city, \"City\")"),
   b("Controls", "Progress", "ProgressView(value: 0.42)", "ui.progress(Some(0.42))"),
@@ -301,7 +302,8 @@ mod pages {
       FieldStyle, Icon, InlinePickerStyle, Picker, PickerConfiguration, PickerStyle,
       PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle, Quad, Rect, SegmentedPickerStyle,
       Slider, SliderConfiguration, SliderStyle, Style, Tag, TextField, TextFieldConfiguration,
-      TextFieldStyle, TextStyle, ToggleConfiguration, ToggleStyle, Tone, Ui, alpha, grow, mix, px,
+      TextFieldStyle, TextStyle, ToggleConfiguration, ToggleStyle, Tone, Ui, alpha,
+      character_palette, grow, mix, px,
     };
 
     use super::{Gallery, SIZES, Shown, line};
@@ -533,6 +535,15 @@ mod pages {
           }),
           "Search field" => Self::variants(ui, Shown::Plain, |ui| {
             ui.col(Style::new().w(px(200.0)), |ui| _ = ui.search_field(&mut self.query, "Search"));
+          }),
+
+          // A message field and its emoji button where the OS has a picker; a button takes
+          // focus by Tab only, so a click leaves it on the field.
+          "Character palette" => Self::variants(ui, Shown::Plain, |ui| {
+            ui.col(Style::new().w(px(200.0)), |ui| _ = ui.text_field(&mut self.message, "Message"));
+            if character_palette::available().is_ok() && ui.icon_button(Icon::SMILE).clicked {
+              ui.character_palette();
+            }
           }),
 
           // Two fields plain by their column, the one after it in the window's style.
@@ -1506,6 +1517,8 @@ pub struct Gallery {
   pub name: String,
   pub key: String,
   pub query: String,
+  /// The character palette's field.
+  pub message: String,
   /// The text field blocks' others, empty at first.
   pub notes: String,
   pub city: String,
@@ -1576,6 +1589,7 @@ impl Default for Gallery {
       name: "Alex".into(),
       key: "secret".into(),
       query: "Switches".into(),
+      message: "Lunch at noon?".into(),
       notes: String::new(),
       city: String::new(),
       email: String::new(),

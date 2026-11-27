@@ -124,7 +124,7 @@ use std::time::Duration;
 
 use common::reads;
 use nimbo::a11y::Action;
-use nimbo::{Command, Event, Harness, Id, Key, Modifiers, NamedKey, Os};
+use nimbo::{Command, Event, Harness, Id, Key, Modifiers, NamedKey, Os, character_palette};
 
 const NONE: Modifiers = Modifiers::empty();
 const CTRL: Modifiers = Modifiers::CONTROL;
@@ -655,6 +655,13 @@ fn menu(h: &Harness<Fields>) -> Vec<String> {
   items.collect()
 }
 
+/// A field's edit menu as [menu] reads it: `items`, then Emoji & Symbols where the system has a
+/// character palette.
+fn field_menu(items: &[&str]) -> Vec<String> {
+  let emoji = character_palette::available().is_ok().then_some("Emoji & Symbols");
+  items.iter().copied().chain(emoji).map(String::from).collect()
+}
+
 /// Chooses the item labelled `item` in the open edit menu: Cut, Copy, Paste and Select All in a
 /// field, Copy and Select All in selectable text; the field runs it as it is built next.
 fn choose(h: &mut Harness<Fields>, item: &str) {
@@ -669,7 +676,7 @@ fn a_right_click_opens_the_edit_menu() {
   let h = &mut fields_on(Os::Windows, "hello", "moon");
   h.click_id(Id::of(EMAIL));
   right_click(h, NAME);
-  assert_eq!(menu(h), ["Cut disabled", "Copy disabled", "Paste", "Select All"]);
+  assert_eq!(menu(h), field_menu(&["Cut disabled", "Copy disabled", "Paste", "Select All"]));
   let (m, r) = (h.rect(Id::of(NAME).key("edit").key("menu")).unwrap(), h.rect(Id::of(NAME)));
   assert_eq!((m.x, m.y), (r.unwrap().x + 12.0, r.unwrap().y + 8.0), "at the pointer");
   // The ring stays on the field.
@@ -684,7 +691,7 @@ fn a_right_click_opens_the_edit_menu() {
   choose(h, "Select All");
   assert_eq!(sel(h, NAME), (0, 5));
   right_click(h, NAME);
-  assert_eq!(menu(h), ["Cut", "Copy", "Paste", "Select All"]);
+  assert_eq!(menu(h), field_menu(&["Cut", "Copy", "Paste", "Select All"]));
   choose(h, "Cut");
   assert_eq!((clipboard(h).as_deref(), h.app().name.as_str()), (Some("hello"), ""));
   assert_eq!(h.app().changes.last(), Some(&NAME));
@@ -705,7 +712,12 @@ fn a_native_edit_menu_is_asked_for_and_answered() {
   let (at, asked) = h.context_menu(Some("Copy")).expect("a menu asked for");
   assert_eq!((at.x, at.y), (r.x + 12.0, r.y + 8.0), "at the pointer");
   let items: Vec<_> = asked.items().iter().map(|i| (i.label(), i.is_enabled())).collect();
-  let want = [("Cut", true), ("Copy", true), ("Paste", true), ("", false), ("Select All", true)];
+  let mut want = vec![("Cut", true), ("Copy", true), ("Paste", true), ("", false)];
+  want.push(("Select All", true));
+  if character_palette::available().is_ok() {
+    want.extend([("", false), ("Emoji & Symbols", true)]);
+  }
+
   assert_eq!(items, want);
   assert!(matches!(asked.items()[3], nimbo::Item::Divider));
 
@@ -719,7 +731,7 @@ fn a_native_edit_menu_is_asked_for_and_answered() {
   assert!(h.menu_open(Id::of(NAME).key("edit")));
   let (_, asked) = h.context_menu(None).unwrap();
   let on = asked.items().iter().filter(|i| i.action().is_some()).map(|i| i.is_enabled());
-  let on: Vec<_> = on.collect();
+  let on: Vec<_> = on.take(4).collect();
   assert_eq!(on, [false, false, false, true], "nothing selected, nothing to paste");
   h.frame();
   assert!(!h.menu_open(Id::of(NAME).key("edit")));
@@ -760,7 +772,8 @@ fn the_edit_menus_paste_pastes() {
 
   h.clipboard().write("");
   right_click(h, NAME);
-  assert_eq!(menu(h), ["Cut disabled", "Copy disabled", "Paste disabled", "Select All"]);
+  let want = field_menu(&["Cut disabled", "Copy disabled", "Paste disabled", "Select All"]);
+  assert_eq!(menu(h), want);
 }
 
 /// A password's edit menu copies and cuts nothing, its text selected or not.

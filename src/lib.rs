@@ -31,7 +31,8 @@
 //! where the user types ([focus]) and with which keyboard layout ([input_source]), keys posted to
 //! the app in focus ([paste::post]), the clipboard, also taken and put back around a paste of the
 //! app's own ([clipboard::SystemClipboard]), and that paste itself, which gives the clipboard back
-//! ([paste]); photos decoded by the OS at the size they show ([Bitmap]); and the hardware: how a
+//! ([paste]); photos decoded by the OS at the size they show ([Bitmap]); the system's emoji
+//! picker for a field ([character_palette]); and the hardware: how a
 //! microphone is attached and the laptop's lid ([hardware]), and the system's changes, such as a
 //! microphone plugged or the lid closed, as they come ([system], [Main::watch]).
 //!
@@ -152,6 +153,7 @@ pub mod activity;
 mod app;
 pub mod autostart;
 mod bitmap;
+pub mod character_palette;
 pub mod clipboard;
 mod commands;
 pub(crate) mod cpu;

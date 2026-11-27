@@ -322,6 +322,14 @@ nimbo: `ui.search_field(&mut self.query, "Search")`
 
 ![Search field](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/search-field.png)
 
+### Character palette
+
+SwiftUI: `NSApp.orderFrontCharacterPalette(nil), Edit ▸ Emoji & Symbols (AppKit; SwiftUI has none)`
+
+nimbo: `if character_palette::available().is_ok() && ui.icon_button(Icon::SMILE).clicked { ui.character_palette() }; Emoji & Symbols in a field's edit menu`
+
+![Character palette](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/character-palette.png)
+
 ### Text field style
 
 SwiftUI: `VStack { TextField("Name", text: $name); TextField("City", text: $city) }.textFieldStyle(.plain)`

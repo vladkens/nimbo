@@ -83,7 +83,7 @@ use crate::app::{Appearance, Clipboard, ColorScheme, Event, MouseButton, Waker};
 use crate::keys::{Binding, Os};
 use crate::scene::{Frame, ImageId, Images, Point, Rect, Size};
 use crate::text::{Font, Metrics, TextSystem};
-use crate::{FileDialog, TitleBar, WindowToolbarStyle};
+use crate::{FileDialog, TitleBar, WindowToolbarStyle, character_palette};
 
 /// Which way focus moves among the focusable elements ([Ui::focus_next]): Tab and Shift-Tab,
 /// as SwiftUI's `FocusDirection`.
@@ -150,6 +150,9 @@ pub(crate) struct UiState {
   asked: Option<Size>,
   /// The file panel asked for ([Ui::file_dialog]), until the platform takes it.
   pub(crate) file_dialog: Option<crate::FileDialog>,
+  /// The system's emoji picker was asked for ([Ui::character_palette]), until the platform
+  /// takes it.
+  pub(crate) palette: bool,
   /// The platform shows context menus ([crate::Runtime::set_native_menus]); the one asked for
   /// ([Ui::native_menu]) until it takes it; the press that opened one last.
   pub(crate) native_menus: bool,
@@ -222,6 +225,7 @@ impl Default for UiState {
       resize: None,
       asked: None,
       file_dialog: None,
+      palette: false,
       native_menus: false,
       context_menu: None,
       menu_seq: 0,
@@ -1147,6 +1151,15 @@ impl<'a> Ui<'a> {
   /// portal that went away never answers.
   pub fn file_dialog(&mut self, dialog: FileDialog) {
     self.st.file_dialog = Some(dialog);
+  }
+
+  /// Shows the system's emoji picker for the focused text field once this frame is built, from
+  /// the person's click, never by itself: an emoji button beside the field, which leaves the
+  /// focus on it (a button takes focus by Tab only). Nothing where the OS has none
+  /// ([crate::character_palette::available]) or no editable field (a password takes no emoji)
+  /// has focus.
+  pub fn character_palette(&mut self) {
+    self.st.palette = character_palette::available().is_ok();
   }
 
   // MARK: Frame

@@ -362,6 +362,12 @@ impl<A: App> Runtime<A> {
     self.ui.file_dialog.take()
   }
 
+  /// Whether the app asked for the system's emoji picker ([Ui::character_palette]) with a field
+  /// to type into focused, once: the platform shows it after an event or a frame.
+  pub fn take_character_palette(&mut self) -> bool {
+    std::mem::take(&mut self.ui.palette) && self.text_input().is_some()
+  }
+
   /// The platform shows context menus itself ([Ui::context_menu]): the view asks for them
   /// ([Runtime::take_context_menu]) instead of drawing them.
   pub fn set_native_menus(&mut self, on: bool) {

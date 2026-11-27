@@ -153,6 +153,11 @@ impl Icon {
     "M7.8 10.2 12 11l4.2-.8M12 11v3.2l-2.3 3.6M12 14.2l2.3 3.6"
   ));
 
+  /// A smiling face: emoji ([crate::Ui::character_palette]).
+  pub const SMILE: Self = Self::new(
+    "M3.5 12a8.5 8.5 0 1 0 17 0a8.5 8.5 0 1 0-17 0M8.5 14.5a4.2 4.2 0 0 0 7 0M9 9.5v.5M15 9.5v.5",
+  );
+
   /// Every built-in icon, for the tests, with what a button showing it alone does ([Icon::name]).
   pub(crate) const ALL: &[(&'static str, Self, Localized)] = &[
     ("gear", Self::GEAR, t!("Settings")),
@@ -177,6 +182,7 @@ impl Icon {
     ("sidebar", Self::SIDEBAR, t!("Sidebar")),
     ("x", Self::X, t!("Close")),
     ("accessibility", Self::ACCESSIBILITY, t!("Accessibility")),
+    ("smile", Self::SMILE, t!("Emoji & Symbols")),
   ];
 
   /// What a button showing a built-in icon alone does, read when nothing names it: "Copy" for

@@ -193,6 +193,13 @@
 //!   preferred languages, the most preferred first, as BCP 47 tags (`ru-RU`; macOS
 //!   `NSLocale.preferredLanguages`, with the app's own language first; Windows
 //!   `GetUserPreferredUILanguages`; Linux gettext's `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, `LANG`).
+//! - `pub fn character_palette() -> Result<(), String>` ([crate::character_palette]): whether the
+//!   OS has an emoji picker for a field of ours, `Err` with why not (Linux: GTK 3 keeps its own
+//!   private; Windows: below 10 1709). A window shows it after an event or a frame, outside the
+//!   window's borrow, when `Runtime::take_character_palette()` says the app asked with a field
+//!   focused, for the view's text input (macOS `orderFrontCharacterPalette:`, anchored at
+//!   `firstRectForCharacterRange:` of the selection; Windows Win+. through `SendInput` while the
+//!   window is in front, the IME's windows at the caret first); the pick comes as typed text.
 //! - `pub fn perf_cores() -> Option<usize>`: the performance cores, to size the CPU renderer's
 //!   threads (`cpu::pool`); `None` falls back to `available_parallelism` capped at 4.
 //! - `pub mod text`, the text backend under [crate::text] (its atlas and line cache are portable):
@@ -256,8 +263,8 @@ pub(crate) use imp::permissions;
 #[cfg(target_os = "linux")]
 pub(crate) use imp::startup_complete;
 pub(crate) use imp::{
-  activity, autostart, clipboard, desktop, focus, hardware, hotkey, image, input_source, languages,
-  open, paste, perf_cores, post, shell, text, tray, uninstall,
+  activity, autostart, character_palette, clipboard, desktop, focus, hardware, hotkey, image,
+  input_source, languages, open, paste, perf_cores, post, shell, text, tray, uninstall,
 };
 #[cfg(target_os = "windows")]
 pub(crate) use imp::{attach_console, downloads};

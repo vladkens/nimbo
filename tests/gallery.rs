@@ -6,13 +6,15 @@
 //! in each appearance the widgets work and draw in its theme (a check box checks in its accent, a
 //! switch slides, the slider drags, a picker chooses by letters, a segment picks, a tooltip shows,
 //! a recorder records and its ⊗ clears, the alert asks in its theme, Escape closes it, its action
-//! counts), the search field draws in its theme and clears from its ⊗; a stepped slider lands on
-//! its steps from the pointer and the keys and marks them with dots and labels; a row's footer
-//! spans its row; End in a custom list shows its last row whole; assistive technology reads each
-//! widget by its role, the ⊗ marks beside their controls; `docs/api.md` is the gallery's, and so
-//! are its pictures on the `assets` branch when its worktree is there. The Canvas page follows the
-//! blocks, draws its shapes and text and shows the raw pointer and keys on its page only; the
-//! pacing scene moves, then stands still.
+//! counts), the search field draws in its theme and clears from its ⊗, the emoji button (only
+//! where the OS has a picker) and the field's edit menu ask for the system's picker for the
+//! focused field, whose pick comes in at the caret; a stepped slider lands on its steps from the
+//! pointer and the keys and marks them with dots and labels; a row's footer spans its row; End in
+//! a custom list shows its last row whole; assistive technology reads each widget by its role, the
+//! ⊗ marks beside their controls; `docs/api.md` is the gallery's, and so are its pictures on the
+//! `assets` branch when its worktree is there. The Canvas page follows the blocks, draws its
+//! shapes and text and shows the raw pointer and keys on its page only; the pacing scene moves,
+//! then stands still.
 
 #[path = "../examples/gallery.rs"]
 #[expect(dead_code, reason = "its main and what this file doesn't use")]
@@ -28,7 +30,10 @@ use common::{diff, mid, px, reads};
 use gallery::canvas::{BAR_W, RUN, WORK};
 use gallery::*;
 use nimbo::a11y::{Action, Role};
-use nimbo::{Appearance, Event, Harness, Id, Modifiers, NamedKey, Rect, Size, Theme, alpha, mix};
+use nimbo::{
+  Appearance, Event, Harness, Id, Modifiers, NamedKey, Rect, Size, Theme, alpha, character_palette,
+  mix,
+};
 
 type H = Harness<Gallery>;
 
@@ -272,6 +277,46 @@ fn the_search_field_in_both_themes() {
   assert_eq!(h.app().query, "icons");
   let field = find(&h, Role::TextField, "Search");
   assert!(h.rect(field.key("clear")).is_some(), "its ⊗ back in the dark");
+}
+
+/// The emoji button shows only where the OS has a picker; clicked with the field focused it asks
+/// for it and leaves the focus on the field, where the emoji picked comes at the caret. The
+/// field's edit menu asks for it too, as Emoji & Symbols.
+#[test]
+fn the_character_palette_types_into_the_field() {
+  let mut h = on("Character palette", Appearance::LIGHT);
+  let button = h.find(Role::Button, "Emoji & Symbols");
+  assert_eq!(button.is_some(), character_palette::available().is_ok(), "{}", h.a11y());
+  let Some(button) = button.map(|n| n.id) else { return };
+
+  let (field, r) = node(&h, Role::TextField, "Message");
+  h.click(r.x + r.w - 4.0, r.y + r.h / 2.0);
+  h.click_id(button);
+  h.frame();
+  assert!(h.character_palette(Some("😀")), "asked with the field focused");
+  h.frame();
+  assert_eq!((h.app().message.as_str(), h.focus_id()), ("Lunch at noon?😀", Some(field)));
+  assert!(!h.character_palette(None), "asked once");
+
+  h.right_click(r.x + 10.0, r.y + r.h / 2.0);
+  h.frame();
+  h.frame();
+  assert!(h.click_menu_item("Emoji & Symbols"));
+  h.frame();
+  assert!(h.character_palette(Some("🎉")), "asked from the edit menu");
+  h.frame();
+  assert!(h.app().message.contains('🎉'), "{}", h.app().message);
+}
+
+/// With no field focused there is nothing to type into: the emoji button asks for nothing.
+#[test]
+fn the_character_palette_needs_a_focused_field() {
+  let mut h = on("Character palette", Appearance::LIGHT);
+  let Some(button) = h.find(Role::Button, "Emoji & Symbols") else { return };
+  h.click_id(button.id);
+  h.frame();
+  assert!(!h.character_palette(Some("😀")));
+  assert_eq!(h.app().message, "Lunch at noon?");
 }
 
 /// Each kind of widget is what it is to assistive technology: its role, name, value and states.

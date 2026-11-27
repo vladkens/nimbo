@@ -191,6 +191,14 @@ unsafe fn connect_id(obj: P, signal: &CStr, cb: Fp, flags: c_int, id: u64) -> c_
   unsafe { (gtk().g_signal_connect_data)(obj, signal.as_ptr(), cb, data, null(), flags) }
 }
 
+/// The emoji picker ([crate::character_palette]): none. GTK 3's emoji chooser belongs to its own
+/// text widgets (GtkEntry's and GtkTextView's `insert-emoji`), not to a view of an app's own;
+/// IBus's emoji typing (Ctrl+Shift+E) reaches a field through the input method as any
+/// composition does, but no call opens it.
+pub fn character_palette() -> Result<(), String> {
+  Err("GTK 3 has no emoji picker for a view of an app's own".into())
+}
+
 /// The performance cores: Intel hybrid CPUs list theirs in `/sys/devices/cpu_core/cpus`
 /// (`0-7`); elsewhere `None`, all cores alike.
 pub fn perf_cores() -> Option<usize> {

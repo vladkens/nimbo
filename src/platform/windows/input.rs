@@ -23,7 +23,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
-use super::{Window, keyboard, with};
+use super::{Window, keyboard, post, with};
 use crate::app::{Event, Ime, MouseButton, Phase, WHEEL_LINE};
 use crate::keys::{KeyEvent, Os, printable};
 use crate::scene::{Point, Rect};
@@ -69,13 +69,28 @@ impl Window {
     (0..w).contains(&x) && (0..h).contains(&y)
   }
 
-  /// Feeds an event to the runtime, then shows its cursor and turns the input method on or
-  /// off with the field's focus.
+  /// Feeds an event to the runtime, then shows its cursor, turns the input method on or off
+  /// with the field's focus and opens the emoji panel the app asked for.
   pub(super) fn send(&mut self, ev: Event) -> bool {
     let used = self.rt.event(ev);
     self.sync_cursor(false);
     self.sync_ime();
+    self.emoji_panel();
     used
+  }
+
+  /// Opens the emoji panel the app asked for ([crate::app::Runtime::take_character_palette]),
+  /// after an event or a frame, while this window is in front (the keys go to the window in
+  /// front): the input method's windows go to the caret first, where the panel opens.
+  pub(super) fn emoji_panel(&mut self) {
+    if !self.rt.take_character_palette() || unsafe { GetForegroundWindow() } != self.hwnd {
+      return;
+    }
+
+    self.place_ime();
+    if let Err(e) = post::emoji_panel() {
+      eprintln!("nimbo: the emoji panel: {e}");
+    }
   }
 
   /// Sets the runtime's cursor when it changed and the pointer is in the window, or when
