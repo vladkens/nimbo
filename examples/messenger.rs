@@ -35,11 +35,11 @@ use nimbo::instance::{self, Claim, Instance};
 use nimbo::tray::{Tray, TrayIcon};
 use nimbo::{
   Align, App, AppInfo, Axes, Axis, Binding, Bitmap, BorderedProminentButtonStyle,
-  BorderlessButtonStyle, ButtonRole, Color, Command, Commands, Config, ContentMode, Cx, Dialog,
-  Event, FileDialog, Float, FormRow, FormStyle, Hotkey, Icon, Id, Item, Key, List, Locale,
-  Localized, Main, Menu, NamedKey, Picker, Point, Proxy, Selection, Shadow, Shortcut, Split, Style,
-  Tag, TextField, TextStyle, ToolbarItemPlacement, Transition, Ui, UnitPoint, Window, alpha,
-  autostart, grow, pct, px, rgb, t, tn,
+  BorderlessButtonStyle, ButtonRole, Color, Command, Commands, Config, ContentMode, ControlSize,
+  Cx, Dialog, Event, FileDialog, Float, FormRow, FormStyle, Hotkey, Icon, Id, Item, Key, List,
+  Locale, Localized, Main, Menu, NamedKey, Picker, Point, Proxy, Selection, Shadow, Shortcut,
+  Split, Style, Tag, TextField, TextStyle, ToolbarItemPlacement, Transition, Ui, UnitPoint, Window,
+  alpha, autostart, grow, pct, px, rgb, t, tn,
 };
 
 pub const INFO: AppInfo = AppInfo::new("com.example.nimbo-messenger", "Messenger");
@@ -788,7 +788,8 @@ impl Messenger {
       self.toggle(ui);
       ui.el(Style::new().h(px(bar)));
       ui.col(Style::new().w(grow()).pads([0.0, 10.0, 8.0, 10.0]), |ui| {
-        ui.id(SEARCH).search_field(&mut self.query, &t!("Search"))
+        // System Settings' sidebar field, the large one.
+        ui.control_size(ControlSize::Large).id(SEARCH).search_field(&mut self.query, &t!("Search"))
       });
       match self.query.trim().is_empty() {
         true => self.chat_list(ui),
