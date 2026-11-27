@@ -5,9 +5,10 @@
 //! children, clipped when it clips. Overlays follow, each in a new layer, by z. Elements outside
 //! the window or their clip are skipped; text by where its ink reaches, not its box.
 
-use super::layout::{ELLIPSIS, Elide, Kind, Tree};
+use super::attributed::{Attributes, pieces};
+use super::layout::{ELLIPSIS, Elide, Kind, Line, Tree};
 use super::textlayout::{Edit, TextLayout};
-use super::{Axis, Canvas, Clip, ContentMode, FocusRing, Style, TextStyle};
+use super::{Axis, Canvas, Clip, ContentMode, FocusRing, Run, Style, TextStyle};
 use crate::scene::{Color, Frame, Quad, Rect};
 use crate::text::Ink;
 
@@ -137,12 +138,9 @@ fn node(
 
   match n.kind {
     Kind::Box => {}
-    Kind::Text { style, lines, baseline, line_h, .. } => {
+    Kind::Text { style, lines, baseline, line_h, range } => {
       let edit = t.edit(i as u32).map(|k| &t.edits[k]);
-      if let Some(e) = edit {
-        selection(t, i, e, alpha, f);
-      }
-
+      let runs = t.runs(i as u32);
       let color = fade(style.color, alpha);
       let (mut first, mut last) = lines;
       if last - first > 1 {
@@ -154,9 +152,37 @@ fn node(
           lines.0 + ((clip.y + clip.h + ink.up - top) / line_h + 1.0).floor().clamp(0.0, n) as u32;
       }
 
+      // A styled text's grounds under its selection, and its runs.
+      let styled = Styled { t, base: range.0, runs, style };
+      for k in (first..last).filter(|_| !runs.is_empty()) {
+        let top = r.y + (k - lines.0) as f32 * line_h;
+        styled.walk(&t.lines[k as usize], f, |f, x, s, st, ground| {
+          let w = f.text.measure(s, st.font);
+          if let Some(g) = ground {
+            f.rect(Rect::new(r.x + x, top, w, line_h), fade(g, alpha), 0.0);
+          }
+
+          w
+        });
+      }
+
+      if let Some(e) = edit {
+        selection(t, i, e, alpha, f);
+      }
+
       for k in first..last {
         let l = &t.lines[k as usize];
         let y = r.y + (k - lines.0) as f32 * line_h + baseline;
+        if !runs.is_empty() {
+          styled.walk(l, f, |f, x, s, st, _| {
+            let (x, color) = (r.x + x, fade(st.color, alpha));
+            let w = f.text(x, y, s, st.font, color);
+            rule(x, y, w, st, color, f);
+            w
+          });
+          continue;
+        }
+
         let body = t.str(l.start, l.end);
         let parts = match l.elide {
           Elide::None => [body, "", ""],
@@ -216,6 +242,55 @@ fn node(
 
   if s.clip != Clip::None {
     f.pop_clip();
+  }
+}
+
+/// A styled text's lines drawn by its runs ([super::AttributedString]): each piece in its run's
+/// style over the text's.
+struct Styled<'t> {
+  t: &'t Tree,
+  /// Where its text starts in the tree's, which its runs' ends are from.
+  base: u32,
+  runs: &'t [Run],
+  style: TextStyle,
+}
+
+impl Styled<'_> {
+  /// Calls `each(f, x, text, style, ground)` for each piece of line `l` in order, `x` from its
+  /// start, the ellipsis of a line cut to fit in the run where it is cut; `each` gives the width.
+  fn walk(
+    &self,
+    l: &Line,
+    f: &mut Frame,
+    mut each: impl FnMut(&mut Frame, f32, &str, TextStyle, Option<Color>) -> f32,
+  ) {
+    let rel = |at: u32| (at - self.base) as usize;
+    let dots = |at: u32| {
+      let k = self.runs.partition_point(|r| r.end as usize <= rel(at));
+      self.runs.get(k).map_or(Attributes::new(), |r| r.attrs)
+    };
+    let (text, cut) = (|a, b| Some((rel(a), rel(b))), |at| (None, Some(dots(at))));
+    let parts = match l.elide {
+      Elide::None => [(text(l.start, l.end), None), (None, None), (None, None)],
+      Elide::Tail => [(text(l.start, l.end), None), cut(l.end), (None, None)],
+      Elide::Head => [cut(l.start), (text(l.start, l.end), None), (None, None)],
+      Elide::Middle(a, b) => [(text(l.start, a), None), cut(a), (text(b, l.end), None)],
+    };
+
+    let mut x = 0.0;
+    for part in parts {
+      match part {
+        (Some(range), _) => {
+          for (a, b, attrs) in pieces(self.runs, range) {
+            let (st, ground) = attrs.style(self.style);
+            let s = &self.t.text[self.base as usize + a..self.base as usize + b];
+            x += each(f, x, s, st, ground);
+          }
+        }
+        (None, Some(attrs)) => x += each(f, x, ELLIPSIS, attrs.style(self.style).0, None),
+        (None, None) => {}
+      }
+    }
   }
 }
 

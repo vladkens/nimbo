@@ -52,6 +52,8 @@ const FC_MATCH_PATTERN: c_int = 0;
 const FC_RESULT_MATCH: c_int = 0;
 /// `FC_WEIGHT_REGULAR`, `_MEDIUM`, `_DEMIBOLD`, `_BOLD`, by [crate::text::Weight].
 const FC_WEIGHTS: [c_int; 4] = [80, 100, 180, 200];
+/// `FC_SLANT_ITALIC`.
+const FC_SLANT_ITALIC: c_int = 100;
 
 fns!(#[expect(non_snake_case, reason = "FreeType's names")] Ft {
   fn FT_Init_FreeType(lib: *mut P) -> c_int;
@@ -429,6 +431,10 @@ impl Cache {
       let pat = (fc.FcPatternCreate)();
       (fc.FcPatternAddString)(pat, c"family".as_ptr(), family.as_ptr());
       (fc.FcPatternAddInteger)(pat, c"weight".as_ptr(), FC_WEIGHTS[font.weight as usize]);
+      if font.italic {
+        (fc.FcPatternAddInteger)(pat, c"slant".as_ptr(), FC_SLANT_ITALIC);
+      }
+
       (fc.FcConfigSubstitute)(s.config, pat, FC_MATCH_PATTERN);
       (fc.FcDefaultSubstitute)(pat);
       let mut res = 0;
@@ -625,7 +631,7 @@ impl PartialEq for Face {
 }
 
 /// The system UI font (fontconfig's `sans-serif`), or its monospaced one, at the size and
-/// weight.
+/// weight, upright or italic (the family's italic face, upright where it has none).
 pub fn face(font: Font) -> Face {
   let mut c = cache();
   let chain = c.chain(font);

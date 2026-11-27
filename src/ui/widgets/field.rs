@@ -27,8 +27,8 @@
 
 use crate::keys::SELECT_KEYS;
 use crate::ui::{
-  Align, Axes, Axis, FieldStyle, Response, Style, TextFieldConfiguration, TextFieldStyle,
-  TextStyle, Ui, grow,
+  Align, Axes, Axis, FieldStyle, Response, Selectable, Style, TextFieldConfiguration,
+  TextFieldStyle, TextStyle, Ui, grow,
 };
 
 /// The theme's text field ([crate::ui::Theme::field]), as SwiftUI's `.roundedBorder`: the
@@ -69,8 +69,13 @@ impl Ui<'_> {
   /// Text the user can select and copy in `style`, as SwiftUI's `.textSelection(.enabled)` on a
   /// `Text`, selected in the theme's field colour ([crate::ui::Theme::field]): an I-beam over it,
   /// focus without a ring for the keys, its selection dimmed when the focus goes; its id from
-  /// [Ui::id] or [Ui::key], else its place. [Ui::disabled] makes it plain text.
-  pub fn selectable_text(&mut self, text: &str, style: TextStyle) -> Response {
+  /// [Ui::id] or [Ui::key], else its place. A `&str` or an [AttributedString] (`&code`), whose
+  /// characters it copies. [Ui::disabled] makes it plain text.
+  pub fn selectable_text<'s>(
+    &mut self,
+    text: impl Into<Selectable<'s>>,
+    style: TextStyle,
+  ) -> Response {
     let style = FieldStyle { text: style, ..self.theme().field() };
     self.group(|ui| {
       let id = ui.take_id();

@@ -8,6 +8,7 @@
 //! behaviours, the environment.
 
 pub(crate) mod a11y;
+mod attributed;
 pub(crate) mod behavior;
 pub(crate) mod containers;
 pub(crate) mod dialog;
@@ -29,12 +30,13 @@ pub(crate) mod theme;
 pub(crate) mod widgets;
 
 use std::any::Any;
-use std::fmt::{Display, Write};
 use std::hash::Hash;
 use std::num::NonZeroU8;
 use std::time::Duration;
 
 pub use a11y::{Action, Role, State, Value};
+pub(crate) use attributed::Run;
+pub use attributed::{AttributedString, Attributes, IntoText, Selectable};
 pub(crate) use behavior::DrawnEditMenu;
 pub use behavior::{
   Behavior, Button, ButtonConfiguration, ButtonStyle, Content, DialogBehavior, EditMenu, Editing,
@@ -918,16 +920,18 @@ impl<'a> Ui<'a> {
   }
 
   /// Text, measured and wrapped by the layout. Takes anything `Display`, so
-  /// `format_args!("{n}")` formats straight into the frame's text buffer. Returns nothing, so it
-  /// fits `match` arms beside other statements; named text (`ui.id("x").text(..)`) still takes
-  /// the pointer: read it with [Ui::clicked] and the like.
-  pub fn text(&mut self, s: impl Display, style: TextStyle) {
-    let text = &mut self.st.tree.text;
-    let start = text.len() as u32;
-    let _ = write!(text, "{s}");
-    let range = (start, text.len() as u32);
+  /// `format_args!("{n}")` formats straight into the frame's text buffer, or an
+  /// [AttributedString] (`&code`), its runs styled over `style`. Returns nothing, so it fits
+  /// `match` arms beside other statements; named text (`ui.id("x").text(..)`) still takes the
+  /// pointer: read it with [Ui::clicked] and the like.
+  pub fn text(&mut self, s: impl IntoText, style: TextStyle) {
+    let tree = &mut self.st.tree;
+    let (start, runs) = (tree.text.len() as u32, tree.runs.len() as u32);
+    s.write(attributed::Sink { text: &mut tree.text, runs: &mut tree.runs });
+    let range = (start, tree.text.len() as u32);
     let kind = Kind::Text { range, style, lines: (0, 0), baseline: 0.0, line_h: 0.0 };
-    self.push(kind, Style::new(), Flow::Row);
+    let i = self.push(kind, Style::new(), Flow::Row).0;
+    self.st.tree.styled(i, runs);
   }
 
   /// A box whose `paint` draws into the frame within its laid-out rect (a plot). It draws in

@@ -198,7 +198,7 @@
 //! - `pub mod text`, the text backend under [crate::text] (its atlas and line cache are portable):
 //!   - `pub struct Face: Clone + PartialEq`: a font at a point size; equal faces are one.
 //!   - `pub fn face(font: Font) -> Face`: the system UI font or its monospaced one, at the size and
-//!     weight.
+//!     weight, its italic face for an italic font (upright where it has none).
 //!   - `pub fn metrics(face: &Face) -> Metrics`: ascent, descent, leading in points.
 //!   - `pub fn is_color(face: &Face) -> bool`: colour glyphs (emoji), drawn as RGBA.
 //!   - `pub fn color_glyph(face: &Face, id: u16) -> Option<bool>`: how a colour face's glyph draws:

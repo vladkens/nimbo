@@ -39,8 +39,8 @@ use crate::text::edit::{
 use crate::ui::input::ScrollState;
 use crate::ui::textlayout::{Edit, Hit};
 use crate::ui::{
-  Align, Cursor, EnvironmentValue, Focus, Id, NativeMenu, Role, Style, TextInput, TextLayout,
-  TextStyle, Tree, Ui, UiState, grow,
+  Align, Cursor, EnvironmentValue, Focus, Id, NativeMenu, Role, Run, Selectable, Style, TextInput,
+  TextLayout, TextStyle, Tree, Ui, UiState, grow,
 };
 
 /// The caret shows this long after it moves, then hides as long, and so on.
@@ -101,6 +101,8 @@ pub(super) struct FieldState {
   synced: String,
   /// A value the app set while an input method composed, applied when the composition ends.
   held: Option<String>,
+  /// Selectable text's runs ([super::super::AttributedString]), ends from its start.
+  runs: Vec<Run>,
   /// Drag-selecting since a press: what the press selected (a word or a line for double and
   /// triple clicks), and its clicks.
   drag: Option<(Range<usize>, u32)>,
@@ -324,8 +326,18 @@ impl Ui<'_> {
 
   /// Text the user selects with the mouse and the keyboard (Shift-arrows) and copies: a double
   /// click selects a word, a triple click a line; Cmd-A and Cmd-C come from its bindings
-  /// (`SELECT_KEYS`). Build it under `id` with [Ui::field_text].
-  pub fn selectable_behavior(&mut self, id: Id, text: &str) -> FieldBehavior {
+  /// (`SELECT_KEYS`). A `&str` or an [AttributedString](super::super::AttributedString), drawn
+  /// in its runs. Build it under `id` with [Ui::field_text].
+  pub fn selectable_behavior<'s>(
+    &mut self,
+    id: Id,
+    text: impl Into<Selectable<'s>>,
+  ) -> FieldBehavior {
+    let (text, runs) = match text.into() {
+      Selectable::Plain(s) => (s, &[][..]),
+      Selectable::Styled(a) => (a.as_str(), a.runs()),
+    };
+
     let disabled = self.begin(id, Role::StaticText).is_some();
     let mut st = std::mem::take(self.state::<FieldState>(id));
     (st.text_id, st.editing, st.ed.multiline) = (id, Editing::Selectable, true);
@@ -333,6 +345,13 @@ impl Ui<'_> {
       st.ed.set_text(text);
       st.ed.select(Sel::caret(0));
       synced(&mut st, text);
+    }
+
+    // Kept while its text is the one shown.
+    let shown = st.ed.text() == text;
+    if st.runs != runs {
+      st.runs.clear();
+      st.runs.extend(runs.iter().filter(|_| shown));
     }
 
     self.revealed(&mut st);
@@ -814,13 +833,14 @@ impl Ui<'_> {
       (true, _) => {
         e.placeholder = true;
         let ts = ts.color(style.placeholder);
-        self.text_id(b).edit_text(prompt, ts, e, node);
+        self.text_id(b).edit_text(prompt, ts, e, node, &[]);
       }
       (false, true) => {
         let dots = DOT.repeat(graphemes(s).count());
-        self.text_id(b).edit_text(&dots, ts, e, node);
+        self.text_id(b).edit_text(&dots, ts, e, node, &[]);
       }
-      (false, false) => _ = self.text_id(b).edit_text(s, ts, e, node),
+      // Selectable styled text in its runs.
+      (false, false) => _ = self.text_id(b).edit_text(s, ts, e, node, &st.runs),
     }
 
     *self.st.store.raw::<FieldState>(b.id) = st;

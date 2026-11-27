@@ -13,8 +13,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 mod wrap;
 
 pub(crate) use self::wrap::{Kept, wrapped_size};
-use self::wrap::{text_width, wrap};
+use self::wrap::{Span, text_width, wrap};
 use super::a11y::Records;
+use super::attributed::Run;
 use super::textlayout::{Edit, Stop, reveal};
 use super::{Align, Axes, Clip, Dim, Float, Id, Style, TextLines, TextStyle, TruncationMode};
 use crate::keys::Binding;
@@ -230,6 +231,10 @@ pub(crate) struct Tree {
   /// Elements whose last-frame box and content the view drew from, as it saw them
   /// ([super::Ui::settle]).
   pub settle: Vec<(Id, Option<Seen>)>,
+  /// The runs of styled texts ([super::AttributedString]), their ends from their text's start.
+  pub runs: Vec<Run>,
+  /// The styled texts, in tree order: each one's node and its runs in `runs`.
+  pub styled: Vec<(u32, u32, u32)>,
   /// The selections of editable and selectable text elements, in tree order.
   pub edits: Vec<Edit>,
   /// Caret stops of the editable texts' lines.
@@ -259,6 +264,8 @@ impl Tree {
 
     self.partial.clear();
     self.settle.clear();
+    self.runs.clear();
+    self.styled.clear();
     self.edits.clear();
     self.stops.clear();
     self.a11y.clear();
@@ -308,6 +315,22 @@ impl Tree {
     }
 
     self.edits.binary_search_by_key(&i, |e| e.node).ok()
+  }
+
+  /// Marks text node `i` styled by the runs pushed since `first`, if any.
+  pub fn styled(&mut self, i: u32, first: u32) {
+    let last = self.runs.len() as u32;
+    if last > first {
+      self.styled.push((i, first, last));
+    }
+  }
+
+  /// The runs of text node `i`; none when it is plain.
+  pub fn runs(&self, i: u32) -> &[Run] {
+    match self.styled.binary_search_by_key(&i, |s| s.0) {
+      Ok(k) => &self.runs[self.styled[k].1 as usize..self.styled[k].2 as usize],
+      Err(_) => &[],
+    }
   }
 
   /// The key bindings of node `i`.
@@ -450,7 +473,8 @@ fn fit(t: &mut Tree, ax: usize, m: &mut dyn Measure, kept: &mut Kept) {
   for i in (0..t.nodes.len()).rev() {
     let (content, least) = match t.nodes[i].kind {
       Kind::Text { range, style, .. } if ax == 0 => {
-        let (w, least) = text_width(&t.text[range.0 as usize..range.1 as usize], style, m, kept);
+        let s = &t.text[range.0 as usize..range.1 as usize];
+        let (w, least) = text_width(Span::new(s, style, t.runs(i as u32)), m, kept);
         (w.into(), least.into())
       }
       Kind::Text { lines, line_h, .. } => {
@@ -1250,7 +1274,7 @@ pub(crate) mod tests {
       let text = "a".repeat(n);
       let (mut m, mut out) = (Counted(0), Vec::new());
       let kept = &mut Memo::default();
-      wrap_text(&text, (0, n as u32), T, 60.0, false, &mut m, kept, &mut out);
+      wrap_text(Span::plain(&text, T), 0, 60.0, false, &mut m, kept, &mut out);
       assert_eq!(out.len(), n.div_ceil(10));
       assert!(out.iter().all(|l| l.end - l.start == 10 || l.end == n as u32));
       m.0
@@ -1290,7 +1314,10 @@ pub(crate) mod tests {
   #[test]
   fn wrapped_text_is_never_narrower_than_its_widest_character() {
     // The widest word is "iiiiiiii" (16), its widest character 2; "W" is 12.
-    assert_eq!(text_width("iiiiiiii W", T, &mut Narrow, &mut Kept::default()), (34.0, 12.0));
+    assert_eq!(
+      text_width(Span::plain("iiiiiiii W", T), &mut Narrow, &mut Kept::default()),
+      (34.0, 12.0)
+    );
   }
 
   /// Texts with what the wrap and the least width look at: long words, runs of spaces, line
@@ -1322,12 +1349,12 @@ pub(crate) mod tests {
 
     let kept = &mut Kept::default();
     for s in TEXTS {
-      let first = text_width(s, T, &mut Narrow, kept);
-      assert_eq!(first, text_width(s, T, &mut Narrow, &mut Kept::default()), "{s:?}");
+      let first = text_width(Span::plain(s, T), &mut Narrow, kept);
+      assert_eq!(first, text_width(Span::plain(s, T), &mut Narrow, &mut Kept::default()), "{s:?}");
       assert_eq!(first.1, measured(s, &mut Narrow), "{s:?}");
       // Kept: the same, measuring only the lines' widths.
       let mut m = Counted(0);
-      assert_eq!(text_width(s, T, &mut m, kept).1, first.1, "{s:?}");
+      assert_eq!(text_width(Span::plain(s, T), &mut m, kept).1, first.1, "{s:?}");
       assert_eq!(m.0, s.chars().filter(|&c| c != '\n').count(), "{s:?}");
     }
   }
@@ -1336,7 +1363,7 @@ pub(crate) mod tests {
   fn kept_lines_are_those_wrapped() {
     let wrapped = |s: &str, w: f32, cover: bool, m: &mut dyn Measure, kept: &mut _| {
       let mut out = Vec::new();
-      wrap_text(s, (0, s.len() as u32), T, w, cover, m, kept, &mut out);
+      wrap_text(Span::plain(s, T), 0, w, cover, m, kept, &mut out);
       out
     };
 
@@ -1373,8 +1400,8 @@ pub(crate) mod tests {
     for w in [400.0, 120.0, 37.5, 9.0, 120.0, 400.0, 121.0] {
       let at = |m: &mut Sys, kept: &mut Kept| {
         let mut out = Vec::new();
-        wrap_text(para, (0, para.len() as u32), style, w, false, m, &mut kept.lines, &mut out);
-        (text_width(para, style, m, kept), out)
+        wrap_text(Span::plain(para, style), 0, w, false, m, &mut kept.lines, &mut out);
+        (text_width(Span::plain(para, style), m, kept), out)
       };
       assert_eq!(at(&mut m, kept), at(&mut m, &mut Kept::default()), "at {w}");
     }
@@ -1452,7 +1479,7 @@ pub(crate) mod tests {
   fn an_ellipsis_keeps_graphemes_whole() {
     // "ae" and the ellipsis fit 18, but the accent belongs to the "e": only "a" stays.
     let tail = |w: f32| {
-      let l = elide("ae\u{301}bc", T.font, w, TruncationMode::Tail, &mut Fake);
+      let l = elide(Span::plain("ae\u{301}bc", T), (0, 6), w, TruncationMode::Tail, &mut Fake);
       (l.end as usize, l.width)
     };
     assert_eq!(tail(18.0), (1, 12.0));

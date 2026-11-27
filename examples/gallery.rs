@@ -65,6 +65,7 @@ pub const BLOCKS: &[Block] = &[
   b("Text", "Localized text", "Text(\"Keep the history\"); String(localized: \"\\(name) is not on disk\")", "ui.text(t!(\"Keep the history\"), s); t!(\"{name} is not on disk\", name); tn!(\"{n} file\", \"{n} files\", count)"),
   b("Text", "Line limit", "Text(path).lineLimit(1).truncationMode(.middle)", "ui.text(path, t.body().line_limit(1).truncation(TruncationMode::Middle))"),
   b("Text", "Underline", "Text(\"WER\").underline(pattern: .dot)", "ui.text(\"WER\", s.underline(LinePattern::Dot)); s.strikethrough(LinePattern::Solid)"),
+  b("Text", "Styled text", "Text(\"fn \").foregroundStyle(.pink).bold() + Text(\"main\").italic(); Text(attributedString).textSelection(.enabled)", "let mut code = AttributedString::new(); code.push(\"fn \", Attributes::new().color(pink).weight(Weight::Bold)).push(\"main\", Attributes::new().italic()); ui.text(&code, s); ui.selectable_text(&code, s)"),
   b("Text", "Selectable text", "Text(log).textSelection(.enabled)", "ui.selectable_text(&log, t.body())"),
   b("Text", "Link", "Link(\"Learn more\", destination: url)", "if ui.link(\"Learn more…\").clicked { nimbo::open::url(URL)? }"),
   b("Text", "Image", "Image(systemName: \"gear\")", "ui.icon(Icon::GEAR, 20.0, t.text())"),
@@ -1067,11 +1068,12 @@ mod pages {
     }
   }
   mod text {
-    //! The text blocks, built live: text styles, localized lines, truncation, underlines,
-    //! selectable text, a link, icons, a label's content and a photo.
+    //! The text blocks, built live: text styles, localized lines, truncation, underlines, styled
+    //! text, selectable text, a link, icons, a label's content and a photo.
 
     use nimbo::{
-      Content, ContentMode, Icon, Id, LinePattern, Style, TextStyle, TruncationMode, Ui, px, t, tn,
+      AttributedString, Attributes, Content, ContentMode, Design, Font, Icon, Id, LinePattern,
+      Style, TextStyle, TruncationMode, Ui, Weight, alpha, px, t, tn,
     };
 
     use super::{Gallery, Shown};
@@ -1116,6 +1118,39 @@ mod pages {
             }
 
             ui.text("struck", t.label().strikethrough(LinePattern::Solid));
+          }),
+          // A paragraph of runs, wrapping as one; code coloured as a highlighter would and a
+          // diff's lines on their grounds, selectable.
+          "Styled text" => Self::variants(ui, Shown::Alone, |ui| {
+            let a = Attributes::new();
+            let mut prose = AttributedString::new();
+            prose.push("Runs ", a).push("in bold", a.weight(Weight::Bold)).push(", ", a);
+            prose.push("italic", a.italic()).push(", ", a).push("colour", a.color(t.accent()));
+            prose.push(", ", a).push("code", a.design(Design::Monospaced)).push(", ", a);
+            prose.push("lines", a.underline(LinePattern::Solid)).push(" and ", a);
+            prose.push("grounds", a.background(alpha(t.warning(), 0.3)));
+            prose.push(" wrap as one paragraph.", a);
+
+            let (kw, name, lit) = (a.color(t.danger()), a.color(t.accent()), a.color(t.success()));
+            let mut code = AttributedString::new();
+            code.push("fn ", kw.weight(Weight::Bold)).push("main", name).push("() {\n  ", a);
+            code.push("let ", kw.weight(Weight::Bold)).push("n = ", a).push("42", lit);
+            code.push(";  ", a).push("// the answer", a.color(t.secondary()).italic());
+            code.push("\n}", a);
+
+            let (gone, added) =
+              (a.background(alpha(t.danger(), 0.18)), a.background(alpha(t.success(), 0.18)));
+            let mut diff = AttributedString::new();
+            diff.push("- let n = ", gone).push("41", a.background(alpha(t.danger(), 0.4)));
+            diff.push(";\n", gone).push("+ let n = ", added);
+            diff.push("42", a.background(alpha(t.success(), 0.4))).push(";", added);
+
+            let mono = TextStyle::new(Font::mono(12.0), t.text());
+            ui.col(Style::new().w(px(300.0)).gap(10.0), |ui| {
+              ui.text(&prose, t.body());
+              _ = ui.selectable_text(&code, mono);
+              ui.text(&diff, mono);
+            });
           }),
           "Selectable text" => Self::variants(ui, Shown::Plain, |ui| {
             ui.col(Style::new().w(px(300.0)), |ui| {

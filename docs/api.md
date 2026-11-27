@@ -96,6 +96,14 @@ nimbo: `ui.text("WER", s.underline(LinePattern::Dot)); s.strikethrough(LinePatte
 
 ![Underline](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/underline.png)
 
+### Styled text
+
+SwiftUI: `Text("fn ").foregroundStyle(.pink).bold() + Text("main").italic(); Text(attributedString).textSelection(.enabled)`
+
+nimbo: `let mut code = AttributedString::new(); code.push("fn ", Attributes::new().color(pink).weight(Weight::Bold)).push("main", Attributes::new().italic()); ui.text(&code, s); ui.selectable_text(&code, s)`
+
+![Styled text](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/styled-text.png)
+
 ### Selectable text
 
 SwiftUI: `Text(log).textSelection(.enabled)`

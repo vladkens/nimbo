@@ -58,6 +58,9 @@
 //! });
 //! ```
 //!
+//! A text styled in runs (colours, weights, italic, code, lines, grounds) is an
+//! [AttributedString], shown and wrapped as one paragraph by the same [Ui::text].
+//!
 //! Containers take their children in a closure, so the code nests like the tree. Every element
 //! gets an [Id]: its index among its siblings hashed with its parent's id, a key hashed the same
 //! way ([Ui::key], stable when lists change), or a frame-wide name ([Ui::id], found again with
@@ -201,23 +204,23 @@ pub use scene::{Color, Frame, ImageId, Images, Point, Quad, Rect, Size, alpha, m
 pub use shell::{Anchor, AppInfo, Main, Presence, Proxy, Window, WindowId, app, attach_console};
 pub use text::{Design, Font, Metrics, Weight};
 pub use ui::{
-  Align, Answer, Axes, Axis, Behavior, BorderedButtonStyle, BorderedProminentButtonStyle,
-  BorderlessButtonStyle, Button, ButtonConfiguration, ButtonStyle, ButtonToggleStyle,
-  CheckboxToggleStyle, Click, Clip, Content, ContentMode, ControlBorder, ControlSize,
-  CoordinateSpace, Cursor, Dialog, DialogBehavior, Dim, Ease, EditMenu, Editing, Enabled,
-  EnvironmentValue, FieldBehavior, FieldKind, FieldStyle, Float, Focus, FocusDirection, FocusRing,
-  FormRow, FormStyle, FrameStats, Glass, HelpConfiguration, HelpStyle, Icon, IconPaint, Id,
-  ImageSource, InlinePickerStyle, InsetGroupedListStyle, InsetListStyle, LinePattern,
+  Align, Answer, AttributedString, Attributes, Axes, Axis, Behavior, BorderedButtonStyle,
+  BorderedProminentButtonStyle, BorderlessButtonStyle, Button, ButtonConfiguration, ButtonStyle,
+  ButtonToggleStyle, CheckboxToggleStyle, Click, Clip, Content, ContentMode, ControlBorder,
+  ControlSize, CoordinateSpace, Cursor, Dialog, DialogBehavior, Dim, Ease, EditMenu, Editing,
+  Enabled, EnvironmentValue, FieldBehavior, FieldKind, FieldStyle, Float, Focus, FocusDirection,
+  FocusRing, FormRow, FormStyle, FrameStats, Glass, HelpConfiguration, HelpStyle, Icon, IconPaint,
+  Id, ImageSource, InlinePickerStyle, InsetGroupedListStyle, InsetListStyle, IntoText, LinePattern,
   LinearSliderStyle, List, ListBehavior, ListConfiguration, ListLayout, ListResponse,
   ListRowConfiguration, ListRows, ListStyle, MenuPickerStyle, MenuPlacement, NativeMenu, Picker,
   PickerConfiguration, PickerStyle, PlainButtonStyle, PlainHelpStyle, PlainListStyle,
   PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle, Press, Response,
   RoundedBorderTextFieldStyle, Row, Scroll, ScrollBar, ScrollBehavior, ScrollerKnob, Section,
-  SectionHeader, SegmentedPickerStyle, Selection, Shadow, Sizes, Slider, SliderConfiguration,
-  SliderStyle, Split, SplitBehavior, Style, SwitchSize, SwitchToggleStyle, Tabs, Tag, TextField,
-  TextFieldConfiguration, TextFieldStyle, TextInput, TextLines, TextStyle, Theme,
-  ToggleConfiguration, ToggleStyle, Tone, ToolbarItemPlacement, TooltipHelpStyle, Transition,
-  TruncationMode, TypeSelect, Ui, UnitPoint, grow, pct, px, rigid,
+  SectionHeader, SegmentedPickerStyle, Selectable, Selection, Shadow, Sizes, Slider,
+  SliderConfiguration, SliderStyle, Split, SplitBehavior, Style, SwitchSize, SwitchToggleStyle,
+  Tabs, Tag, TextField, TextFieldConfiguration, TextFieldStyle, TextInput, TextLines, TextStyle,
+  Theme, ToggleConfiguration, ToggleStyle, Tone, ToolbarItemPlacement, TooltipHelpStyle,
+  Transition, TruncationMode, TypeSelect, Ui, UnitPoint, grow, pct, px, rigid,
 };
 pub use window::{Config, TitleBar, WindowToolbarStyle};
 
