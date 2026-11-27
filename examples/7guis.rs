@@ -164,13 +164,22 @@ impl Default for Flight {
   }
 }
 
-/// `DD.MM.YYYY` as (year, month, day), comparable; `None` unless a real date.
+/// `DD.MM.YYYY` as (year, month, day), comparable; `None` unless a real date written so: the day
+/// and month in one or two digits, the year in four (`11.03.12` is none).
 pub fn parse_date(s: &str) -> Option<(u32, u32, u32)> {
-  let mut it = s.trim().split('.').map(|p| p.parse::<u32>().ok());
-  let (d, m, y) = (it.next()??, it.next()??, it.next()??);
+  let parts: Vec<&str> = s.trim().split('.').collect();
+  let digits = |p: &str, n: std::ops::RangeInclusive<usize>| {
+    p.bytes().all(|c| c.is_ascii_digit()) && n.contains(&p.len())
+  };
+  let &[d, m, y] = parts.as_slice() else { return None };
+  if !(digits(d, 1..=2) && digits(m, 1..=2) && digits(y, 4..=4)) {
+    return None;
+  }
+
+  let (d, m, y) = (d.parse::<u32>().ok()?, m.parse::<u32>().ok()?, y.parse::<u32>().ok()?);
   let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
   let days = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  let ok = it.next().is_none() && (1..=12).contains(&m) && d >= 1 && d <= days[m as usize - 1];
+  let ok = (1..=12).contains(&m) && d >= 1 && d <= days[m as usize - 1];
   ok.then_some((y, m, d))
 }
 

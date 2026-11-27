@@ -133,7 +133,13 @@ fn infinity_is_no_number_and_turns_its_field_red() {
 fn a_date_reads_only_when_it_is_one() {
   assert_eq!(seven::parse_date("27.03.2014"), Some((2014, 3, 27)));
   assert_eq!(seven::parse_date(" 29.02.2016 "), Some((2016, 2, 29)));
+  assert_eq!(seven::parse_date("1.3.2014"), Some((2014, 3, 1)));
   for bad in ["29.02.2014", "31.04.2014", "1.13.2014", "27.03", "27.03.2014.1", "a.b.c", ""] {
+    assert_eq!(seven::parse_date(bad), None, "{bad}");
+  }
+
+  // dd.mm.yyyy: a year in four digits, no signs or spaces inside.
+  for bad in ["11.03.12", "11.03.012", "11.03.20140", "+1.03.2014", "011.03.2014", "1 .03.2014"] {
     assert_eq!(seven::parse_date(bad), None, "{bad}");
   }
 }
@@ -190,6 +196,20 @@ fn a_bad_date_turns_its_field_red() {
   h.type_text("x");
   let after = h.render().pixel(at.0, at.1);
   assert!(after[0] > after[2] + 20 && diff(before, after) > 20, "{before:?} -> {after:?}");
+}
+
+#[test]
+fn a_two_digit_year_is_no_date_and_books_nothing() {
+  let mut h = on(Task::Flight);
+  h.click_id(id("start"));
+  h.key(Key::Char('a'), CMD);
+  h.type_text("11.03.12");
+  h.frame();
+  let r = h.rect(id("start")).unwrap();
+  let red = h.render().pixel(r.x + r.w - 8.0, r.y + r.h / 2.0);
+  assert!(red[0] > red[2] + 20, "{red:?}");
+  h.click_id(id("book"));
+  assert!(!h.app().flight.booked);
 }
 
 // MARK: Timer
