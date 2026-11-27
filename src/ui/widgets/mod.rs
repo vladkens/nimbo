@@ -50,6 +50,7 @@ pub use checkbox::CheckboxToggleStyle;
 pub use date_picker::{FieldDatePickerStyle, StepperFieldDatePickerStyle};
 pub use field::RoundedBorderTextFieldStyle;
 pub use segmented::SegmentedPickerStyle;
+pub(crate) use segmented::{segmented_frame, segments};
 pub use slider::LinearSliderStyle;
 pub use toggle::{ButtonToggleStyle, SwitchToggleStyle};
 pub use tooltip::TooltipHelpStyle;
@@ -86,7 +87,7 @@ impl Ui<'_> {
 
   /// A control's box, dimmed when `off`: what a disabled control looks like, its root built
   /// with [Ui::control].
-  fn dim_style(&self, s: Style, off: bool) -> Style {
+  pub(crate) fn dim_style(&self, s: Style, off: bool) -> Style {
     if off { s.opacity(self.theme().disabled) } else { s }
   }
 }

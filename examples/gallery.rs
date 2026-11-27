@@ -319,10 +319,9 @@ mod pages {
       pub(super) fn containers(&mut self, ui: &mut Ui, name: &str) {
         match name {
           "Tabs" => Self::variants(ui, Shown::Plain, |ui| {
-            let t = ui.theme();
-            ui.col(Style::new().w(px(260.0)).h(px(70.0)), |ui| {
+            ui.col(Style::new().w(px(300.0)).h(px(90.0)), |ui| {
               Tabs::new(&mut self.tab, &["General", "Advanced"]).show(ui, |ui, i| {
-                ui.text(["The general page", "The advanced page"][i], t.label());
+                ui.label(["The general page", "The advanced page"][i]);
               });
             });
           }),

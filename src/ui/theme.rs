@@ -101,7 +101,7 @@ impl Theme {
     Self { bg, ..self }
   }
 
-  /// Sidebars, toolbars, tab strips.
+  /// Sidebars and toolbars.
   pub const fn panel(&self) -> Color {
     self.panel
   }
@@ -485,7 +485,6 @@ pub struct Sizes {
   pub(crate) control_h: f32,
   pub(crate) small_h: f32,
   pub(crate) item_h: f32,
-  pub(crate) tab_h: f32,
   pub(crate) menu_w: f32,
   pub(crate) menu_radius: f32,
   pub(crate) menu_edge: f32,
@@ -525,15 +524,6 @@ impl Sizes {
 
   pub const fn with_item_h(self, item_h: f32) -> Self {
     Self { item_h, ..self }
-  }
-
-  /// A tab strip.
-  pub const fn tab_h(&self) -> f32 {
-    self.tab_h
-  }
-
-  pub const fn with_tab_h(self, tab_h: f32) -> Self {
-    Self { tab_h, ..self }
   }
 
   /// The least width of a pop-up button's menu.
@@ -651,7 +641,6 @@ impl Sizes {
     control_h: 24.0,
     small_h: 20.0,
     item_h: 24.0,
-    tab_h: 30.0,
     menu_w: 220.0,
     menu_radius: 13.0,
     menu_edge: 0.5,
@@ -1152,7 +1141,7 @@ mod tests {
       .with_tip_text(rgb(29))
       .with_control_border(ControlBorder::Hairline(1.0))
       .with_radius(30.5)
-      .with_sizes(Sizes::PLATES.with_tab_h(1.0))
+      .with_sizes(Sizes::PLATES.with_item_h(1.0))
       .with_font(Font::mono(32.0))
       .with_bold(Font::mono(33.0))
       .with_small(Font::mono(34.0))
@@ -1198,7 +1187,7 @@ mod tests {
         tip_text: rgb(29),
         control_border: ControlBorder::Hairline(1.0),
         radius: 30.5,
-        sizes: Sizes::PLATES.with_tab_h(1.0),
+        sizes: Sizes::PLATES.with_item_h(1.0),
         font: Font::mono(32.0),
         bold: Font::mono(33.0),
         small: Font::mono(34.0),
@@ -1220,7 +1209,6 @@ mod tests {
       .with_control_h(0.5)
       .with_small_h(1.5)
       .with_item_h(2.5)
-      .with_tab_h(3.5)
       .with_menu_w(4.5)
       .with_menu_radius(5.5)
       .with_menu_edge(6.5)
@@ -1238,7 +1226,6 @@ mod tests {
         control_h: 0.5,
         small_h: 1.5,
         item_h: 2.5,
-        tab_h: 3.5,
         menu_w: 4.5,
         menu_radius: 5.5,
         menu_edge: 6.5,
