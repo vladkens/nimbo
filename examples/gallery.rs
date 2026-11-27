@@ -1250,10 +1250,12 @@ mod pages {
     //! environment, groups, identity, focus and the pointer, widget parts, frame requests and the
     //! theme.
 
+    use std::f32::consts::TAU;
+
     use nimbo::a11y::LabeledPairRole;
     use nimbo::{
-      Align, Binding, Color, Command, Cursor, Enabled, EnvironmentValue, Icon, Id, Shortcut, Style,
-      Tone, Ui, px,
+      Align, Binding, Color, Command, Cursor, Enabled, EnvironmentValue, Icon, Id, Point, Shortcut,
+      Style, Tone, Ui, px,
     };
 
     use super::{Gallery, Shown};
@@ -1324,23 +1326,44 @@ mod pages {
             ui.button("Open");
           }),
 
-          // Keyed boxes: a key of its own each, the last a ready id.
+          // Tiles named by their item, each counting its clicks in state kept by that id: rotated,
+          // a tile keeps its count. The count is a part named off the tile that leaves it the
+          // click.
           "Identity" => Self::variants(ui, Shown::Alone, |ui| {
             let t = ui.theme();
-            let square = Style::new().w(px(28.0)).h(px(28.0)).radius(6.0);
-            (0..3).for_each(|k| _ = ui.key(k).el(square.bg(t.raised())));
-            ui.with_id(Id::of("identity").key("box"))
-              .allows_hit_testing(false)
-              .el(square.bg(t.accent()));
+            for name in self.tiles {
+              let id = Id::of("identity").key(name);
+              if ui.clicked(id) {
+                *ui.state::<u32>(id) += 1;
+              }
+
+              let clicks = *ui.state::<u32>(id);
+              let tile = Style::new().h(px(28.0)).pad_xy(10.0, 0.0).gap(6.0).center().radius(6.0);
+              let tile = tile.border(1.0, t.line()).bg(t.bg());
+              ui.with_id(id).pointer_style(Cursor::Pointer).row(tile, |ui| {
+                ui.text(name, t.label());
+                ui.with_id(id.key("clicks")).allows_hit_testing(false).text(clicks, t.muted());
+              });
+            }
+
+            if ui.button("Rotate").clicked {
+              self.tiles.rotate_left(1);
+            }
           }),
 
-          // A swatch Tab focuses with the hand over it, and a focusable one Tab passes by.
+          // A tile Tab focuses, ringed then, with the hand over it; one Tab passes by.
           "Focus and pointer" => Self::variants(ui, Shown::Alone, |ui| {
             let t = ui.theme();
             let id = Id::of("focus and pointer");
-            let square = Style::new().w(px(28.0)).h(px(28.0)).radius(6.0);
-            ui.with_id(id).focusable(true).pointer_style(Cursor::Pointer).el(square.bg(t.accent()));
-            ui.with_id(id.key("not")).focusable(false).el(square.bg(t.raised()).focusable());
+            let tile =
+              Style::new().h(px(28.0)).pad_xy(10.0, 0.0).center().radius(6.0).bg(t.raised());
+            ui.with_id(id)
+              .focusable(true)
+              .pointer_style(Cursor::Pointer)
+              .row(tile, |ui| ui.text("Tab stops here, the hand over it", t.label()));
+            ui.with_id(id.key("not"))
+              .focusable(false)
+              .row(tile.focusable(), |ui| ui.text("Tab passes by", t.label()));
           }),
 
           // A part enabled in a disabled container, with the tip the widget was given.
@@ -1354,13 +1377,22 @@ mod pages {
             ui.environment(Enabled(true)).button("Undo");
           }),
 
-          // A bar that moves every frame.
+          // A wave drawn where it is at the time of the frame, and that time: it moves every frame.
           "Frame request" => Self::variants(ui, Shown::Alone, |ui| {
             let t = ui.theme();
             ui.request_frame();
-            let k = ui.now().as_secs_f32() % 1.0;
-            let bar = Style::new().w(px(28.0 + 120.0 * k)).h(px(28.0)).radius(6.0);
-            ui.el(bar.bg(t.accent()));
+            let now = ui.now().as_secs_f32();
+            let (ink, axis) = (t.accent(), t.line());
+            ui.canvas(Style::new().w(px(160.0)).h(px(28.0)), move |f, r| {
+              let mid = r.y + r.h / 2.0;
+              f.line(Point::new(r.x, mid), Point::new(r.x + r.w, mid), 1.0, axis);
+              let at = |i: usize| {
+                let k = i as f32 / 64.0;
+                Point::new(r.x + k * r.w, mid - 0.4 * r.h * ((2.0 * k - now) * TAU).sin())
+              };
+              f.polyline(&(0..=64).map(at).collect::<Vec<_>>(), 2.0, ink);
+            });
+            ui.text(format_args!("{now:.2} s"), t.muted().nowrap());
           }),
 
           // The slider named by the text before it; the badge by its own text.
@@ -1868,9 +1900,12 @@ pub mod canvas {
   }
 }
 
+use std::time::Duration;
+
+use nimbo::a11y::Role;
 use nimbo::{
-  App, Axes, Bitmap, CMD, Config, Cx, Date, Event, Font, HelpStyle, Hotkey, Id, Key, List,
-  Selection, Style, Tag, TextStyle, Ui, grow, px,
+  App, Axes, Bitmap, CMD, Config, Cx, Date, Event, Font, Harness, HelpStyle, Hotkey, Id, Key, List,
+  Modifiers, Phase, Point, Selection, Style, Tag, TextStyle, Ui, grow, px,
 };
 
 pub use self::blocks::{BLOCKS, Block, GROUPS};
@@ -1931,6 +1966,8 @@ pub struct Gallery {
   pub email: String,
   pub hotkey: Option<Hotkey>,
   pub tab: usize,
+  /// The identity block's tiles, in their order.
+  pub tiles: [&'static str; 3],
   pub side: f32,
   /// The toolbar's sidebar share.
   pub bar_side: f32,
@@ -2004,6 +2041,7 @@ impl Default for Gallery {
       email: String::new(),
       hotkey: Hotkey::parse("ctrl+option+space").ok(),
       tab: 0,
+      tiles: ["Inbox", "Drafts", "Sent"],
       side: 0.4,
       bar_side: 0.4,
       rows: Selection::default(),
@@ -2162,27 +2200,63 @@ fn main() {
     },
   };
 
-  let canvas = page == Some(CANVAS);
   let app = Gallery::on(page.unwrap_or(0), only);
   let (w, h) = if only { (WIDTH, 300.0) } else { WINDOW };
   let cfg = Config::new("Gallery", w, h).localizations(&[("ru", RU)]);
-  // The Canvas page's shot: a few presses, a drag across the pad and a key.
-  example::run(cfg, app, rest, |h| {
-    h.frame();
-    let Some(r) = h.rect(Id::of(PAD)).filter(|_| canvas) else { return };
-    for (x, y) in [(40.0, 30.0), (90.0, 80.0), (150.0, 40.0)] {
-      h.click(r.x + x, r.y + y);
+  example::run(cfg, app, rest, stage);
+}
+
+/// The state a shot of the page shown, or of its block alone, shows, made by input as a person
+/// would: on the Canvas page a few presses, a drag across the pad and a key; the identity block's
+/// tiles clicked and rotated; the focus on the focus block's tile; the scroll indicators block
+/// scrolled, the pointer in it; the frame request block 1.25 seconds on.
+pub fn stage(h: &mut Harness<Gallery>) {
+  h.frame();
+  match BLOCKS.get(h.app().page).map(|b| b.name) {
+    None => {
+      let Some(r) = h.rect(Id::of(PAD)) else { return };
+      for (x, y) in [(40.0, 30.0), (90.0, 80.0), (150.0, 40.0)] {
+        h.click(r.x + x, r.y + y);
+      }
+
+      h.press(r.x + 200.0, r.y + 90.0);
+      for i in 1..=24 {
+        let k = i as f32 / 24.0;
+        h.move_to(r.x + 200.0 + 220.0 * k, r.y + 60.0 + 30.0 * (k * 6.0).cos());
+      }
+
+      h.release(r.x + 420.0, r.y + 60.0 + 30.0 * 6f32.cos());
+      h.move_to(r.x + 330.0, r.y + 40.0);
+      h.key(Key::Char('k'), CMD);
     }
 
-    h.press(r.x + 200.0, r.y + 90.0);
-    for i in 1..=24 {
-      let k = i as f32 / 24.0;
-      h.move_to(r.x + 200.0 + 220.0 * k, r.y + 60.0 + 30.0 * (k * 6.0).cos());
+    Some("Identity") => {
+      for name in ["Drafts", "Drafts", "Sent"] {
+        h.click_id(Id::of("identity").key(name));
+      }
+
+      if let Some(rotate) = h.find(Role::Button, "Rotate") {
+        h.click_id(rotate.id);
+      }
+
+      h.leave();
     }
 
-    h.release(r.x + 420.0, r.y + 60.0 + 30.0 * 6f32.cos());
-    h.move_to(r.x + 330.0, r.y + 40.0);
-    h.key(Key::Char('k'), CMD);
-    h.frame();
-  });
+    Some("Focus and pointer") => h.set_focus(Some(Id::of("focus and pointer"))),
+    Some("Scroll indicators") => {
+      let Some(line) = h.find(Role::StaticText, "Line 1") else { return };
+      let pos = Point::new(line.rect.x + 40.0, line.rect.y + 10.0);
+      h.move_to(pos.x, pos.y);
+      // Two lines down; the knobs fade in.
+      let (delta, mods) = (Point::new(0.0, -48.0), Modifiers::empty());
+      let (phase, momentum) = (Phase::Changed, Phase::None);
+      h.event(Event::Scroll { pos, delta, precise: true, phase, momentum, mods });
+      h.wait(Duration::from_millis(300));
+    }
+
+    Some("Frame request") => _ = h.wait(Duration::from_millis(1250)),
+    _ => {}
+  }
+
+  h.frame();
 }

@@ -2,7 +2,8 @@
 
 //! Harness tests for `examples/gallery.rs`: every block has a page that builds, named by the
 //! block; the sidebar turns the pages and keeps its selection under a header's press; a block's
-//! disabled variant reads disabled and its sizes differ; a block alone is as high as its variants;
+//! disabled variant reads disabled, its texts dimmed, and its sizes differ; a block alone is as
+//! high as its variants;
 //! in each appearance the widgets work and draw in its theme (a check box checks in its accent, a
 //! switch slides, the slider drags, a picker chooses by letters, a segment picks, a tooltip shows,
 //! a recorder records and its ⊗ clears, the alert asks in its theme, Escape closes it, its action
@@ -16,7 +17,10 @@
 //! `assets` branch when its worktree is there. Each block's code is its own closure, cut from the
 //! source and coloured by kind; the row and column blocks align their boxes as their labels say,
 //! the grid's keys are as far apart across as down, the chat opens at its newest message and the
-//! shortcut block counts ⌘K on its focused box. The Canvas page follows the blocks, draws its
+//! shortcut block counts ⌘K on its focused box; the split's line drags its panes' shares, the
+//! identity tiles keep their counts as they rotate, Tab focuses the focus block's tile, the frame
+//! request block draws every frame and the staged scroll indicators show their knob. The Canvas
+//! page follows the blocks, draws its
 //! shapes and text and shows the raw pointer and keys on its page only; the pacing scene moves,
 //! then stands still.
 
@@ -629,10 +633,10 @@ fn the_api_doc_is_the_gallerys() {
     let png = path.display();
     let kept = std::fs::read(&path).unwrap_or_else(|_| panic!("no {png}: make api-shots"));
 
-    // As `gallery <slug> --shot` draws it.
+    // As `gallery <slug> --shot` draws it, staged.
     let mut h = Harness::new(Gallery::on(i, true), Size::new(WIDTH, 300.0), 2.0);
     h.event(Event::Appearance(Appearance::LIGHT));
-    h.frame();
+    stage(&mut h);
     let shot = fresh.join(format!("{}.png", b.slug()));
     h.shot(&shot).unwrap();
     if strict {
@@ -975,4 +979,72 @@ fn the_split_blocks_line_drags() {
   assert!(side > 0.45, "{side}");
   let label = format!("Sidebar · {:.0}%", side * 100.0);
   assert!(h.find(Role::StaticText, &label).is_some(), "no {label:?} in\n{}", h.a11y());
+}
+
+/// The identity block's tiles count their clicks by their names' ids: rotated, each tile keeps
+/// its count, the count's part leaving the click to its tile.
+#[test]
+fn identity_keeps_each_tiles_count_as_they_rotate() {
+  let mut h = gallery(page("Identity"), true);
+  // A tile's id and its count's.
+  let tile =
+    |name: &str| (Id::of("identity").key(name), Id::of("identity").key(name).key("clicks"));
+  let drafts = tile("Drafts");
+  h.click_id(drafts.0);
+  let (x, y) = mid(h.rect(drafts.1).unwrap());
+  h.click(x, y);
+  h.frame();
+  assert_eq!(h.text(drafts.1), Some("2"));
+  let before = h.rect(drafts.0).unwrap().x;
+
+  let rotate = h.find(Role::Button, "Rotate").unwrap().id;
+  h.click_id(rotate);
+  h.frame();
+  assert_eq!(h.app().tiles, ["Drafts", "Sent", "Inbox"]);
+  assert!(h.rect(drafts.0).unwrap().x < before, "moved first");
+  assert_eq!((h.text(drafts.1), h.text(tile("Inbox").1)), (Some("2"), Some("0")));
+}
+
+/// Tab focuses the focus block's tile, which shows the pointing hand, and passes the other by.
+#[test]
+fn focus_and_pointer_take_tab_and_the_hand() {
+  let mut h = gallery(page("Focus and pointer"), true);
+  let tile = Id::of("focus and pointer");
+  h.key(NamedKey::Tab, Modifiers::empty());
+  assert_eq!(h.focus_id(), Some(tile));
+  h.key(NamedKey::Tab, Modifiers::empty());
+  assert_ne!(h.focus_id(), Some(tile.key("not")));
+  let (x, y) = mid(h.rect(tile).unwrap());
+  h.move_to(x, y);
+  assert_eq!(h.cursor(), nimbo::Cursor::Pointer);
+}
+
+/// The frame request block asks for every frame and draws the time of each.
+#[test]
+fn frame_request_draws_every_frame() {
+  let mut h = gallery(page("Frame request"), true);
+  assert!(h.needs_frame());
+  let at =
+    |h: &H| h.find_all(Role::StaticText).into_iter().map(|n| n.name).find(|n| n.ends_with(" s"));
+  let before = at(&h);
+  h.wait(Duration::from_millis(100));
+  assert_ne!(at(&h), before);
+}
+
+/// Staged, the scroll indicators block shows its knob in its red, scrolled two lines.
+#[test]
+fn the_scroll_indicators_show_their_red_knob_staged() {
+  for (look, t) in LOOKS {
+    let mut h =
+      Harness::new(Gallery::on(page("Scroll indicators"), true), Size::new(WIDTH, 300.0), 1.0);
+    h.event(Event::Appearance(look));
+    stage(&mut h);
+    let line = h.find(Role::StaticText, "Line 3").unwrap().rect;
+    let img = h.render();
+    let red = (0..260).any(|x| {
+      let p = img.pixel(line.x - 20.0 + x as f32, line.y + 20.0);
+      p[0] as i32 > p[1] as i32 + 60 && p[0] as i32 > p[2] as i32 + 60
+    });
+    assert!(red, "{look:?}: no red knob, {:?}", t.danger());
+  }
 }

@@ -1563,11 +1563,24 @@ SwiftUI: `Box().id(item.id); .allowsHitTesting(false)`
 
 ```rust
 let t = ui.theme();
-let square = Style::new().w(px(28.0)).h(px(28.0)).radius(6.0);
-(0..3).for_each(|k| _ = ui.key(k).el(square.bg(t.raised())));
-ui.with_id(Id::of("identity").key("box"))
-  .allows_hit_testing(false)
-  .el(square.bg(t.accent()));
+for name in self.tiles {
+  let id = Id::of("identity").key(name);
+  if ui.clicked(id) {
+    *ui.state::<u32>(id) += 1;
+  }
+
+  let clicks = *ui.state::<u32>(id);
+  let tile = Style::new().h(px(28.0)).pad_xy(10.0, 0.0).gap(6.0).center().radius(6.0);
+  let tile = tile.border(1.0, t.line()).bg(t.bg());
+  ui.with_id(id).pointer_style(Cursor::Pointer).row(tile, |ui| {
+    ui.text(name, t.label());
+    ui.with_id(id.key("clicks")).allows_hit_testing(false).text(clicks, t.muted());
+  });
+}
+
+if ui.button("Rotate").clicked {
+  self.tiles.rotate_left(1);
+}
 ```
 
 ![Identity](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/identity.png)
@@ -1579,9 +1592,15 @@ SwiftUI: `.focusable(); .pointerStyle(.link)`
 ```rust
 let t = ui.theme();
 let id = Id::of("focus and pointer");
-let square = Style::new().w(px(28.0)).h(px(28.0)).radius(6.0);
-ui.with_id(id).focusable(true).pointer_style(Cursor::Pointer).el(square.bg(t.accent()));
-ui.with_id(id.key("not")).focusable(false).el(square.bg(t.raised()).focusable());
+let tile =
+  Style::new().h(px(28.0)).pad_xy(10.0, 0.0).center().radius(6.0).bg(t.raised());
+ui.with_id(id)
+  .focusable(true)
+  .pointer_style(Cursor::Pointer)
+  .row(tile, |ui| ui.text("Tab stops here, the hand over it", t.label()));
+ui.with_id(id.key("not"))
+  .focusable(false)
+  .row(tile.focusable(), |ui| ui.text("Tab passes by", t.label()));
 ```
 
 ![Focus and pointer](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/focus-and-pointer.png)
@@ -1609,9 +1628,18 @@ SwiftUI: `TimelineView(.animation) { context in … }`
 ```rust
 let t = ui.theme();
 ui.request_frame();
-let k = ui.now().as_secs_f32() % 1.0;
-let bar = Style::new().w(px(28.0 + 120.0 * k)).h(px(28.0)).radius(6.0);
-ui.el(bar.bg(t.accent()));
+let now = ui.now().as_secs_f32();
+let (ink, axis) = (t.accent(), t.line());
+ui.canvas(Style::new().w(px(160.0)).h(px(28.0)), move |f, r| {
+  let mid = r.y + r.h / 2.0;
+  f.line(Point::new(r.x, mid), Point::new(r.x + r.w, mid), 1.0, axis);
+  let at = |i: usize| {
+    let k = i as f32 / 64.0;
+    Point::new(r.x + k * r.w, mid - 0.4 * r.h * ((2.0 * k - now) * TAU).sin())
+  };
+  f.polyline(&(0..=64).map(at).collect::<Vec<_>>(), 2.0, ink);
+});
+ui.text(format_args!("{now:.2} s"), t.muted().nowrap());
 ```
 
 ![Frame request](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/frame-request.png)
