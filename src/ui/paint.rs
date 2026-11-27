@@ -346,10 +346,20 @@ fn extents(line: &Shaped, ends: &[u32], runs: &[(u32, u32)]) -> Vec<[f32; 2]> {
     return Vec::new();
   }
 
+  // A glyph's pen ends where the next one right of it starts: Core Text lists right-to-left
+  // glyphs left to right, DirectWrite in their text's order.
+  let g = &line.glyphs;
+  let mut order: Vec<usize> = (0..g.len()).collect();
+  order.sort_by(|&i, &j| g[i].x.total_cmp(&g[j].x));
+  let mut right = vec![line.width; g.len()];
+  for w in order.windows(2) {
+    right[w[0]] = g[w[1]].x;
+  }
+
   let mut spans = vec![[f32::INFINITY, f32::NEG_INFINITY]; runs.len()];
-  for (i, (g, &c)) in line.glyphs.iter().zip(&line.clusters).enumerate() {
+  for (i, &c) in line.clusters.iter().enumerate() {
     let e = ends[ends.partition_point(|&v| v <= c)];
-    let (x0, x1) = (g.x, line.glyphs.get(i + 1).map_or(line.width, |g| g.x));
+    let (x0, x1) = (g[i].x, right[i]);
     let at = |v: u32| x0 + (x1 - x0) * (v.clamp(c, e) - c) as f32 / (e - c) as f32;
     let first = runs.partition_point(|r| r.1 <= c);
     for (span, &(a, b)) in spans[first..].iter_mut().zip(&runs[first..]) {
@@ -519,6 +529,14 @@ mod tests {
   #[test]
   fn a_run_right_to_left_spans_its_glyphs() {
     let line = shaped(&[0.0, 10.0, 20.0, 30.0], &[6, 4, 2, 0], 40.0);
+    let ends = [2, 4, 6, 8];
+    assert_eq!(extents(&line, &ends, &[(0, 4), (4, 8)]), [[20.0, 40.0], [0.0, 20.0]]);
+  }
+
+  /// The same with the glyphs in the text's order, right to left, as DirectWrite lists them.
+  #[test]
+  fn a_run_right_to_left_in_text_order_spans_its_glyphs() {
+    let line = shaped(&[30.0, 20.0, 10.0, 0.0], &[0, 2, 4, 6], 40.0);
     let ends = [2, 4, 6, 8];
     assert_eq!(extents(&line, &ends, &[(0, 4), (4, 8)]), [[20.0, 40.0], [0.0, 20.0]]);
   }

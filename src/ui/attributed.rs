@@ -432,6 +432,25 @@ mod tests {
     assert_eq!(h.render().pixel(r.x + 2.0, 10.0), [255, 0, 0, 255]);
   }
 
+  /// A ground on the first two of four Hebrew letters covers their half, at the right: the
+  /// shaper lists right-to-left glyphs in either order.
+  #[test]
+  fn a_ground_right_to_left_covers_its_letters() {
+    let style = TextStyle::new(Font::ui(40.0), [0.0, 0.0, 0.0, 1.0]).nowrap();
+    let mut s = AttributedString::new();
+    s.push("\u{5d0}\u{5d1}", Attributes::new().background(GREEN))
+      .push("\u{5d2}\u{5d3}", Attributes::new());
+    let mut h = para(400.0, s, style, false);
+    let (r, img) = (h.rect(Id::of("t")).unwrap(), h.render());
+    let green: Vec<_> = (r.x as usize..(r.x + r.w) as usize)
+      .filter(|&x| img.pixel(x as f32, r.y + 2.0) == [0, 255, 0, 255])
+      .map(|x| x as f32 - r.x)
+      .collect();
+    let (a, b) = (green[0], green[green.len() - 1]);
+    assert!(green.len() as f32 > r.w * 0.3, "{green:?} of {r:?}");
+    assert!(a > r.w * 0.3 && b > r.w * 0.9, "{a}..{b} of {r:?}");
+  }
+
   /// Selectable styled text copies its characters, and a double click on its bold word selects
   /// that word: its caret stops follow the runs' fonts.
   #[test]
