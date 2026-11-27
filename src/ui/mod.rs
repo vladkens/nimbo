@@ -37,14 +37,14 @@ use std::time::Duration;
 pub use a11y::{Action, Role, State, Value};
 pub(crate) use behavior::DrawnEditMenu;
 pub use behavior::{
-  Behavior, Button, ButtonConfiguration, ButtonStyle, Content, DialogBehavior, EditMenu, Editing,
-  FieldBehavior, FieldKind, FieldStyle, HelpConfiguration, HelpStyle, InlinePickerStyle, List,
-  ListBehavior, ListConfiguration, ListLayout, ListResponse, ListRowConfiguration, ListRows,
-  ListStyle, MenuPlacement, Picker, PickerConfiguration, PickerStyle, PlainButtonStyle,
-  PlainHelpStyle, PlainListStyle, PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle, Row,
-  ScrollBar, ScrollBehavior, ScrollerKnob, SectionHeader, Selection, Slider, SliderConfiguration,
-  SliderStyle, SplitBehavior, Tag, TextField, TextFieldConfiguration, TextFieldStyle,
-  ToggleConfiguration, ToggleStyle, TypeSelect,
+  Behavior, Button, ButtonConfiguration, ButtonStyle, Content, ContentMarginPlacement,
+  DialogBehavior, EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, HelpConfiguration,
+  HelpStyle, InlinePickerStyle, List, ListBehavior, ListConfiguration, ListLayout, ListResponse,
+  ListRowConfiguration, ListRows, ListStyle, MenuPlacement, Picker, PickerConfiguration,
+  PickerStyle, PlainButtonStyle, PlainHelpStyle, PlainListStyle, PlainSliderStyle,
+  PlainTextFieldStyle, PlainToggleStyle, Row, ScrollBar, ScrollBehavior, ScrollerKnob,
+  SectionHeader, Selection, Slider, SliderConfiguration, SliderStyle, SplitBehavior, Tag,
+  TextField, TextFieldConfiguration, TextFieldStyle, ToggleConfiguration, ToggleStyle, TypeSelect,
 };
 pub use containers::{
   InsetGroupedListStyle, InsetListStyle, MenuPickerStyle, Split, Tabs, ToolbarItemPlacement,

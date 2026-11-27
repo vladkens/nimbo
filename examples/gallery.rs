@@ -56,6 +56,7 @@ pub const BLOCKS: &[Block] = &[
   b("Layout", "Divider", "Divider()", "ui.divider()"),
   b("Layout", "Scroll view", "ScrollView(.vertical) { … }", "ui.scroll_area(Style::new().h(px(80.0)).scroll(Axes::VERTICAL), |ui| { … })"),
   b("Layout", "Scroll anchor", "ScrollView { … }.defaultScrollAnchor(.bottom)", "ui.default_scroll_anchor(UnitPoint::BOTTOM).scroll_area(style, |ui| { … })"),
+  b("Layout", "Content margins", "ScrollView { … }.contentMargins(.top, 28).contentMargins(.bottom, 8)", "ui.content_margins([28.0, 0.0, 8.0, 0.0], ContentMarginPlacement::Automatic).scroll_area(style, |ui| { … })"),
   b("Layout", "Overlay", ".overlay(alignment: .topTrailing) { … }", "ui.float(Float::parent().attach(UnitPoint::TOP_TRAILING).anchor(UnitPoint::TOP_TRAILING)).el(style)"),
   b("Text", "Text", "Text(\"Title\").font(.headline).foregroundStyle(.secondary)", "ui.text(\"Title\", TextStyle::new(t.bold(), t.secondary()))"),
   b("Text", "Localized text", "Text(\"Keep the history\"); String(localized: \"\\(name) is not on disk\")", "ui.text(t!(\"Keep the history\"), s); t!(\"{name} is not on disk\", name); tn!(\"{n} file\", \"{n} files\", count)"),
@@ -694,7 +695,7 @@ mod pages {
     //! The layout blocks, built live: stacks, a grid, a spacer, dividers, a scroll view and an
     //! overlay.
 
-    use nimbo::{Axes, Float, Style, Ui, UnitPoint, grow, px};
+    use nimbo::{Align, Axes, ContentMarginPlacement, Float, Style, Ui, UnitPoint, grow, pct, px};
 
     use super::{Gallery, Shown, line, swatch};
 
@@ -744,6 +745,20 @@ mod pages {
             let area = Style::new().w(px(200.0)).h(px(60.0));
             ui.default_scroll_anchor(UnitPoint::BOTTOM).scroll_area(area, |ui| {
               (1..=8).for_each(|i| ui.text(format_args!("Line {i}"), t.label()))
+            });
+          }),
+
+          "Content margins" => Self::variants(ui, Shown::Alone, |ui| {
+            let area = Style::new().w(px(260.0)).h(px(110.0)).pad_xy(8.0, 0.0);
+            let area = area.border(1.0, t.line()).bg(t.panel());
+            let ui = ui.content_margins([28.0, 0.0, 8.0, 0.0], ContentMarginPlacement::Automatic);
+            ui.scroll_area(area, |ui| {
+              (1..=8).for_each(|i| ui.text(format_args!("Line {i}"), t.label()));
+
+              let head = Style::new().w(pct(100.0)).h(px(28.0)).pad_xy(8.0, 0.0);
+              let head =
+                head.align(Align::Start, Align::Center).border(1.0, t.line()).bg(t.raised());
+              ui.float(Float::parent()).row(head, |ui| ui.text("Header", t.section()));
             });
           }),
 

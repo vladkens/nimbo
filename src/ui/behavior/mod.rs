@@ -88,7 +88,7 @@ pub use list_style::{
 };
 pub use menu::{MenuPlacement, TypeSelect};
 pub use picker::{InlinePickerStyle, Picker, PickerConfiguration, PickerStyle, Tag};
-pub use scroll::{ScrollBar, ScrollBehavior, ScrollerKnob};
+pub use scroll::{ContentMarginPlacement, ScrollBar, ScrollBehavior, ScrollerKnob};
 pub use slider::{PlainSliderStyle, Slider, SliderConfiguration, SliderStyle};
 pub use split::SplitBehavior;
 pub use text_field::{PlainTextFieldStyle, TextField, TextFieldConfiguration, TextFieldStyle};

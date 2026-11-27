@@ -413,6 +413,39 @@ mod tests {
     assert_eq!(h.app().sel.cursor(), Some(0));
   }
 
+  /// Rows under content margins: End shows the last one whole.
+  #[test]
+  fn rows_under_content_margins_show_the_last_one() {
+    use crate::ui::ContentMarginPlacement;
+    use crate::{Harness, NamedKey};
+    #[derive(Default)]
+    struct Margined(Selection);
+    impl crate::App for Margined {
+      fn view(&mut self, ui: &mut Ui) {
+        ui.col(Style::new().w(px(200.0)).h(px(200.0)), |ui| {
+          let list = List::new(30, 20.0).selection(&mut self.0).style(Style::new().grow());
+          let m = ContentMarginPlacement::ScrollContent;
+          list.show(ui.content_margins([28.0, 0.0, 12.0, 0.0], m).id("list"), |ui, _| {
+            ui.label("row");
+          });
+        });
+      }
+    }
+
+    let mut h = Harness::new(Margined::default(), Size::new(300.0, 300.0), 1.0);
+    let id = Id::of("list");
+    h.frame();
+    let first = h.rect(id.key(("row", 0u64))).unwrap();
+    assert_eq!(first.y - h.rect(id).unwrap().y, 28.0);
+
+    h.click_id(id.key(("row", 0u64)));
+    h.key(NamedKey::End, Modifiers::empty());
+    h.frame();
+    h.frame();
+    let (v, last) = (h.rect(id).unwrap(), h.rect(id.key(("row", 29u64))).unwrap());
+    assert!(last.y >= v.y && last.y + last.h <= v.y + v.h - 12.0 + 0.5, "{last:?} in {v:?}");
+  }
+
   /// In a short list at the bottom anchor, a press on a header keeps the selection and one on
   /// the room above the rows clears it.
   #[test]

@@ -3,7 +3,8 @@
 //! The scroll area ([Ui::scroll_area]): a container scrolling its children under overlay
 //! scrollbars as macOS draws them, thin, shown while the content moves or the pointer comes in,
 //! then fading out; a thumb dragged, a track clicked to page ([Ui::scroll_behavior], for an app
-//! that draws its own); its content fading under its edges ([Ui::fade_edges]). Headless but
+//! that draws its own); its content fading under its edges ([Ui::fade_edges]), its margins
+//! ([Ui::content_margins]). Headless but
 //! drawn: menus and lists scroll in it, so its knobs are the environment's ([ScrollerKnob]), by
 //! default the color scheme's ([Ui::color_scheme]).
 //!
@@ -63,6 +64,26 @@ struct ScrollAnchor(UnitPoint);
 
 /// The fade the next scroll area draws under its edges ([Ui::fade_edges]): colour and length.
 struct EdgeFade(Color, f32);
+
+/// Where [Ui::content_margins] puts its margins, as SwiftUI's `ContentMarginPlacement`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContentMarginPlacement {
+  /// Around the content and the scroll indicators both.
+  Automatic,
+  /// Around the content alone: padding that scrolls with it.
+  ScrollContent,
+  /// Around the scroll indicators alone: their tracks kept off what stays over the content's
+  /// edges (a sheet's headers), as AppKit's `NSScrollView.scrollerInsets`.
+  ScrollIndicators,
+}
+
+/// The next scroll area's margins ([Ui::content_margins]), top, right, bottom and left: around its
+/// content and around its scroll indicators.
+#[derive(Default)]
+struct Margins {
+  content: [f32; 4],
+  indicators: [f32; 4],
+}
 
 /// A scroll area's scrollbars between frames.
 #[derive(Default)]
@@ -147,9 +168,14 @@ fn with_axis(mut p: Point, ax: usize, v: f32) -> Point {
   p
 }
 
+/// Margin `m`'s (top, right, bottom, left) at the start and the end of axis `ax`.
+fn ends(m: [f32; 4], ax: usize) -> (f32, f32) {
+  if ax == 0 { (m[3], m[1]) } else { (m[0], m[2]) }
+}
+
 /// The bar of axis `ax` at `off`, when the content overflows; `both` when the other axis has
-/// one too, which takes the corner.
-fn geo(sc: &Scroll, ax: usize, off: f32, both: bool) -> Option<ScrollBar> {
+/// one too, which takes the corner; its track inside the indicators' margins `m`.
+fn geo(sc: &Scroll, ax: usize, off: f32, both: bool, m: [f32; 4]) -> Option<ScrollBar> {
   let (view, content) = match ax {
     0 => (sc.viewport.w, sc.content.w),
     _ => (sc.viewport.h, sc.content.h),
@@ -159,7 +185,9 @@ fn geo(sc: &Scroll, ax: usize, off: f32, both: bool) -> Option<ScrollBar> {
     return None;
   }
 
-  let track = view - 2.0 * ScrollBar::INSET - if both { ScrollBar::BREADTH } else { 0.0 };
+  let (start, end) = ends(m, ax);
+  let corner = if both { ScrollBar::BREADTH } else { 0.0 };
+  let track = view - 2.0 * ScrollBar::INSET - corner - start - end;
   let thumb = (track * view / content).max(MIN_THUMB).min(track);
   let (max, travel) = (content - view, (track - thumb).max(1.0));
   Some(ScrollBar { track, thumb, pos: (off / max).clamp(0.0, 1.0) * travel, ratio: max / travel })
@@ -178,12 +206,13 @@ impl Ui<'_> {
       self.settle(id);
     }
 
-    self.scroll_bars(id, axes)
+    self.scroll_bars(id, axes, [0.0; 4])
   }
 
   /// [Ui::scroll_behavior] with no run of its own for an area not laid out yet: a bar hidden
-  /// until something moves has nothing to show on its first frame.
-  fn scroll_bars(&mut self, id: Id, axes: Axes) -> ScrollBehavior {
+  /// until something moves has nothing to show on its first frame. The tracks inside the
+  /// indicators' margins `m`.
+  fn scroll_bars(&mut self, id: Id, axes: Axes, m: [f32; 4]) -> ScrollBehavior {
     let now = self.now();
     let mut bars = std::mem::take(self.state::<Bars>(id));
     let mut geos: [Option<ScrollBar>; 2] = [None, None];
@@ -201,14 +230,14 @@ impl Ui<'_> {
       // layout clamps it exactly, the bars draw it in `f32`.
       let exact = self.st.scroll_exact(id).map_or([0.0; 2], |(o, _)| o);
       let (mut off, mut ex, mut moved) = (sc.offset, exact, false);
-      let scrolls = |ax: usize| axes.at(ax) && geo(&sc, ax, 0.0, false).is_some();
+      let scrolls = |ax: usize| axes.at(ax) && geo(&sc, ax, 0.0, false, m).is_some();
       let both = scrolls(0) && scrolls(1);
       for (ax, g) in geos.iter_mut().enumerate() {
         if !axes.at(ax) {
           continue;
         }
 
-        let Some(first) = geo(&sc, ax, axis(off, ax), both) else { continue };
+        let Some(first) = geo(&sc, ax, axis(off, ax), both, m) else { continue };
         let (thumb, track) = (id.key(("thumb", ax)), id.key(("track", ax)));
         // Held, or released since the view last ran: its last move counts.
         let held = self.held(thumb);
@@ -226,8 +255,8 @@ impl Ui<'_> {
         pinned |= held;
 
         if let Some(c) = self.click(track).filter(|c| c.button == MouseButton::Left) {
-          let start =
-            axis(Point::new(sc.viewport.x, sc.viewport.y), ax) + ScrollBar::INSET + first.pos;
+          let start = axis(Point::new(sc.viewport.x, sc.viewport.y), ax) + ends(m, ax).0;
+          let start = start + ScrollBar::INSET + first.pos;
           let page = axis(Point::new(sc.viewport.w, sc.viewport.h), ax) * 0.9;
           let dir = if axis(c.pos, ax) < start { -1.0 } else { 1.0 };
           ex[ax] += f64::from(dir * page);
@@ -237,9 +266,9 @@ impl Ui<'_> {
         // The pointer moving in the track's strip shows the bars, though hidden ones take no
         // clicks.
         let vp = sc.viewport;
-        let strip = |m: Point| match ax {
-          0 => m.y >= vp.y + vp.h - ScrollBar::BREADTH,
-          _ => m.x >= vp.x + vp.w - ScrollBar::BREADTH,
+        let strip = |p: Point| match ax {
+          0 => (0.0..=ScrollBar::BREADTH).contains(&(vp.y + vp.h - m[2] - p.y)),
+          _ => (0.0..=ScrollBar::BREADTH).contains(&(vp.x + vp.w - m[1] - p.x)),
         };
         if over && mouse != bars.mouse && mouse.is_some_and(strip) {
           bars.shown = Some(now);
@@ -249,7 +278,7 @@ impl Ui<'_> {
         off = with_axis(off, ax, ex[ax] as f32);
         let max = sc.max();
         off = Point::new(off.x.clamp(0.0, max.x), off.y.clamp(0.0, max.y));
-        *g = geo(&sc, ax, axis(off, ax), both);
+        *g = geo(&sc, ax, axis(off, ax), both, m);
       }
 
       if moved && ex != exact {
@@ -291,6 +320,33 @@ impl Ui<'_> {
     self
   }
 
+  /// The next [Ui::scroll_area]'s margins `insets` (top, right, bottom, left) around its content,
+  /// its scroll indicators or both, as `placement` says ([ContentMarginPlacement]) and SwiftUI's
+  /// `contentMargins(_:_:for:)`; a call for each sets both.
+  pub fn content_margins(
+    &mut self,
+    insets: [f32; 4],
+    placement: ContentMarginPlacement,
+  ) -> &mut Self {
+    let mut m = self.set_slot::<Margins>(None).unwrap_or_default();
+    if placement != ContentMarginPlacement::ScrollIndicators {
+      m.content = insets;
+    }
+
+    if placement != ContentMarginPlacement::ScrollContent {
+      m.indicators = insets;
+    }
+
+    self.set_slot(Some(m));
+    self
+  }
+
+  /// The margins around its content the next [Ui::scroll_area] puts ([Ui::content_margins]),
+  /// for what lays its content out itself (a list's rows).
+  pub(crate) fn next_content_margins(&mut self) -> [f32; 4] {
+    self.slot::<Margins>().map_or([0.0; 4], |m| m.content)
+  }
+
   /// The next [Ui::scroll_area] keeps its content at `anchor`, as SwiftUI's
   /// `defaultScrollAnchor(_:)`: it opens there (unless [Ui::scroll_to] said where first),
   /// content smaller than the viewport sits at its start, centre or end, whichever the anchor
@@ -310,10 +366,13 @@ impl Ui<'_> {
     let knob = self.environment_value::<ScrollerKnob>();
     let id = self.take_id();
     let mask = self.set_slot::<EdgeFade>(None);
+    let Margins { content, indicators: m } = self.set_slot::<Margins>(None).unwrap_or_default();
     let mut style = match style.scroll.is_empty() {
       true => style.scroll(Axes::VERTICAL),
       false => style.clip(),
     };
+
+    style.pad = [0, 1, 2, 3].map(|i| style.pad[i] + content[i]);
 
     // The layout keeps the offset at the anchor; content smaller than the viewport sits there
     // along the axes that scroll.
@@ -329,7 +388,7 @@ impl Ui<'_> {
       }
     }
 
-    let b = self.scroll_bars(id, style.scroll);
+    let b = self.scroll_bars(id, style.scroll, m);
     let (opacity, shown) = (b.opacity, b.shown);
     self.with_id(id).container(Flow::Column, style, |ui| {
       f(ui);
@@ -353,7 +412,7 @@ impl Ui<'_> {
             let at = Float::parent()
               .attach(UnitPoint::BOTTOM_LEADING)
               .anchor(UnitPoint::BOTTOM_LEADING)
-              .offset(ScrollBar::INSET, 0.0);
+              .offset(ScrollBar::INSET + m[3], -m[2]);
             let s =
               Style::new().w(px(g.track)).h(px(ScrollBar::BREADTH)).align(Align::Start, Align::End);
             (at, s, [0.0, 0.0, 2.0, 0.0])
@@ -362,7 +421,7 @@ impl Ui<'_> {
             let at = Float::parent()
               .attach(UnitPoint::TOP_TRAILING)
               .anchor(UnitPoint::TOP_TRAILING)
-              .offset(0.0, ScrollBar::INSET);
+              .offset(-m[1], ScrollBar::INSET + m[0]);
             let s =
               Style::new().w(px(ScrollBar::BREADTH)).h(px(g.track)).align(Align::End, Align::Start);
             (at, s, [0.0, 2.0, 0.0, 0.0])
@@ -399,7 +458,10 @@ mod tests {
   use crate::app::{App, Event, Phase};
   use crate::scene::{Point, Size, rgb};
   use crate::ui::input::ScrollState;
-  use crate::ui::{Axes, Axis, Float, Id, ScrollerKnob, Style, Ui, UnitPoint, px};
+  use crate::ui::{
+    Axes, Axis, ContentMarginPlacement, Float, Id, ScrollBar, ScrollerKnob, Style, Ui, UnitPoint,
+    px,
+  };
   use crate::{Harness, Modifiers};
 
   /// A scroll area 200 high over 1000 points of content, fading into red.
@@ -588,6 +650,43 @@ mod tests {
     let thumb = h.rect(Id::of("area").key(("thumb", 1usize))).expect("a thumb");
     let p = h.render().pixel(thumb.x + thumb.w / 2.0, thumb.y + thumb.h / 2.0);
     assert!(p[0] > 200 && p[1] < 60 && p[2] < 60, "{p:?}");
+  }
+
+  /// A sheet 200 square over 1000 square, with headers 20 high and 30 wide over its top and left
+  /// edges: its scrollers' tracks start past them; its content padded where the app says.
+  #[test]
+  fn content_margins_keep_the_scrollers_off_the_headers() {
+    struct Sheet(ContentMarginPlacement);
+    impl App for Sheet {
+      fn view(&mut self, ui: &mut Ui) {
+        let s = Style::new().w(px(200.0)).h(px(200.0)).scroll(Axes::ALL);
+        ui.id("area").content_margins([20.0, 0.0, 0.0, 30.0], self.0).scroll_area(s, |ui| {
+          ui.id("cells").el(Style::new().w(px(1000.0)).h(px(1000.0)));
+        });
+      }
+    }
+
+    let at = |p: ContentMarginPlacement| {
+      let mut h = Harness::new(Sheet(p), Size::new(200.0, 200.0), 1.0);
+      h.frame();
+      h.move_to(100.0, 100.0);
+      h.wait(Duration::from_millis(300));
+      let thumb = |ax: usize| h.rect(Id::of("area").key(("thumb", ax)));
+      (thumb(0), thumb(1), h.rect(Id::of("cells")).unwrap())
+    };
+
+    let (x, y, cells) = at(ContentMarginPlacement::ScrollIndicators);
+    let (x, y) = (x.expect("a horizontal thumb"), y.expect("a vertical one"));
+    assert_eq!((x.x, y.y), (30.0 + ScrollBar::INSET, 20.0 + ScrollBar::INSET));
+    // The tracks less the headers, the corner and the insets: 1000 over 200 in each.
+    assert!((x.w - (200.0 - 30.0 - 12.0 - 4.0) / 5.0).abs() < 0.5, "{x:?}");
+    assert!((y.h - (200.0 - 20.0 - 12.0 - 4.0) / 5.0).abs() < 0.5, "{y:?}");
+    assert_eq!((cells.x, cells.y), (0.0, 0.0), "the content where it was");
+
+    let (x, _, cells) = at(ContentMarginPlacement::ScrollContent);
+    assert_eq!((x.unwrap().x, cells.x, cells.y), (ScrollBar::INSET, 30.0, 20.0));
+    let (x, _, cells) = at(ContentMarginPlacement::Automatic);
+    assert_eq!((x.unwrap().x, cells.x, cells.y), (30.0 + ScrollBar::INSET, 30.0, 20.0));
   }
 
   /// A scroll area 200 high at the bottom anchor over `n` rows 30 high.
