@@ -1,13 +1,13 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The System Settings lists over the headless [List]: rows edge to edge, the selected one filled
-//! ([InsetListStyle], the window's default, which the shell puts), or each section's rows on a
-//! rounded plate as a grouped form's ([InsetGroupedListStyle]). No hover fill, as SwiftUI's on
-//! macOS; [Row::hovered] is there for an app that draws its own.
+//! The System Settings lists over the headless [List]: the selected rows on a rounded fill inset
+//! from the sides ([InsetListStyle], the window's default, which the shell puts), or each
+//! section's rows on a rounded plate as a grouped form's ([InsetGroupedListStyle]). No hover fill,
+//! as SwiftUI's on macOS; [Row::hovered] is there for an app that draws its own.
 
 use crate::scene::{Color, Frame, Rect, alpha};
 use crate::ui::form::Piece;
-use crate::ui::{FormStyle, ListConfiguration, ListLayout, ListStyle, Style, Theme, Ui};
+use crate::ui::{Clip, FormStyle, ListConfiguration, ListLayout, ListStyle, Style, Theme, Ui, pct};
 #[cfg(doc)]
 use crate::ui::{List, Row};
 
@@ -19,20 +19,48 @@ fn selection(t: &Theme, focused: bool) -> Color {
   }
 }
 
-/// Rows edge to edge, a selected one filled: in the accent while the list has focus, else grey;
-/// dimmed when disabled. The window's default, which the shell puts.
+/// As SwiftUI's `.inset` on macOS: rows padded 16 at their sides, the selection rounded 10 in
+/// from them, one over adjacent rows; in the accent while the list has focus, else grey; dimmed
+/// when disabled. The window's default, which the shell puts.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct InsetListStyle;
 
 impl ListStyle for InsetListStyle {
+  fn layout(&self, _: &Ui<'_>) -> ListLayout {
+    let d = ListLayout::default();
+    ListLayout { row: d.row.pad_xy(16.0, 0.0), ..d }
+  }
+
   fn make_body<'a>(&self, ui: &mut Ui<'a>, mut c: ListConfiguration<'_, 'a>) {
+    const INSET: f32 = 10.0;
+    const RADIUS: f32 = 5.0;
     let t = ui.theme();
     let fill = selection(&t, c.is_focused());
     let frame = if c.is_enabled() { c.frame() } else { c.frame().opacity(t.disabled) };
     ui.scroll_area(frame, |ui| {
       c.rows(ui, |ui, mut r| {
+        // Square where a selected row above or below joins it.
         let bg = if r.is_selected() { fill } else { [0.0; 4] };
-        ui.row(r.frame().bg(bg), |ui| r.content(ui));
+        let top = if r.is_after_selected() && !r.is_first() { 0.0 } else { RADIUS };
+        let end = if r.is_before_selected() { 0.0 } else { RADIUS };
+
+        // The fill, an element of its own in the row so that it fades with it, takes the row's
+        // whole box, whatever its content.
+        let frame = r.frame();
+        let [t, right, b, left] = frame.pad;
+        let (ir, il) = (INSET.min(right), INSET.min(left));
+
+        // A clip inside the padding goes with the padding, onto the fill.
+        let (clip, inside) = match frame.clip {
+          Clip::Content => (Clip::None, Clip::Content),
+          c => (c, Clip::None),
+        };
+
+        let (gap, align) = (frame.gap, frame.align);
+        let inner = Style { size: [pct(100.0); 2], gap, align, clip: inside, ..Style::new() };
+        let inner = inner.pads([t, right - ir, b, left - il]).bg(bg).radii([top, top, end, end]);
+        let outer = Style { clip, ..frame.pads([0.0, ir, 0.0, il]) };
+        ui.row(outer, |ui| ui.row(inner, |ui| r.content(ui)));
       })
     });
   }
@@ -749,6 +777,120 @@ mod tests {
     assert_eq!(h.app().sel.cursor(), Some(1));
     assert_ne!(bare, filled);
     assert_eq!(bare, other);
+  }
+
+  /// Inset, as SwiftUI's on macOS: the selection 10 in from the row's sides, rounded, one fill
+  /// over two adjacent rows; the content 16 in.
+  #[test]
+  fn the_inset_selection_is_rounded_and_one_over_adjacent_rows() {
+    use crate::Harness;
+    struct Two(Selection);
+    impl crate::App for Two {
+      fn view(&mut self, ui: &mut Ui) {
+        ui.col(Style::new().w(px(200.0)).h(px(100.0)).bg([1.0; 4]), |ui| {
+          let list = List::new(3, 20.0).multi().selection(&mut self.0).style(Style::new().grow());
+          let inner = Style::new().w(px(10.0)).h(px(4.0));
+          list.show(ui.id("list"), |ui, row| _ = ui.id(("in", row.index)).el(inner));
+        });
+      }
+    }
+
+    let mut sel = Selection::default().multiple(true);
+    sel.select(0, 0);
+    sel.toggle(1, 1);
+    let mut h = Harness::new(Two(sel), Size::new(200.0, 100.0), 1.0);
+    h.frame();
+    let (row, inner) =
+      (h.rect(Id::of("list").key(("row", 0u64))).unwrap(), h.rect(Id::of(("in", 0))));
+    assert_eq!(inner.unwrap().x - row.x, 16.0);
+
+    let img = h.render();
+    let white = [255; 4];
+    let px = |x: f32, y: f32| img.pixel(row.x + x, row.y + y);
+    assert_eq!(px(5.0, 10.0), white, "outside the inset");
+    assert_ne!(px(12.0, 10.0), white, "filled");
+    assert_eq!(px(10.5, 0.5), white, "a rounded corner at the top");
+    assert_ne!(px(10.5, 20.0), white, "none where the two meet");
+    assert_eq!(px(10.5, 39.5), white, "one again at the bottom");
+  }
+
+  /// Content taller than its row overflows the inset fill, which keeps to the row.
+  #[test]
+  fn the_inset_selection_keeps_to_its_row() {
+    use crate::Harness;
+    struct Tall(Selection);
+    impl crate::App for Tall {
+      fn view(&mut self, ui: &mut Ui) {
+        ui.col(Style::new().w(px(200.0)).h(px(100.0)).bg([1.0; 4]), |ui| {
+          let list = List::new(3, 20.0).selection(&mut self.0).style(Style::new().grow());
+          let tall = Style::new().w(px(10.0)).h(px(30.0));
+          list.show(ui.id("list"), |ui, row| _ = ui.id(("in", row.index)).el(tall));
+        });
+      }
+    }
+
+    let mut sel = Selection::default();
+    sel.select(0, 0);
+    let mut h = Harness::new(Tall(sel), Size::new(200.0, 100.0), 1.0);
+    h.frame();
+    let row = |k: u64| h.rect(Id::of("list").key(("row", k))).unwrap();
+    let (r0, r1) = (row(0), row(1));
+    assert_eq!((r0.h, r1.y), (20.0, r0.y + 20.0));
+    assert_eq!(h.render().pixel(r1.x + 12.0, r1.y + 5.0), [255; 4], "no fill under row 1");
+  }
+
+  /// A row clipped inside its padding still is, the fill holding the padding.
+  #[test]
+  fn an_inset_row_clipped_inside_its_padding_still_is() {
+    use crate::Harness;
+    struct Clipped;
+    impl crate::App for Clipped {
+      fn view(&mut self, ui: &mut Ui) {
+        ui.col(Style::new().w(px(200.0)).h(px(100.0)).bg([1.0; 4]), |ui| {
+          let row = Style::new().pad(10.0).clip_content();
+          let list = List::new(2, 40.0).row_style(row).style(Style::new().grow());
+          let tall = Style::new().w(px(50.0)).h(px(40.0)).bg([0.0, 0.0, 0.0, 1.0]);
+          list.show(ui.id("list"), |ui, _| _ = ui.el(tall));
+        });
+      }
+    }
+
+    let mut h = Harness::new(Clipped, Size::new(200.0, 100.0), 1.0);
+    h.frame();
+    let row = h.rect(Id::of("list").key(("row", 0u64))).unwrap();
+    let img = h.render();
+    assert_eq!(img.pixel(row.x + 20.0, row.y + 20.0), [0, 0, 0, 255], "the content");
+    assert_eq!(img.pixel(row.x + 20.0, row.y + 35.0), [255; 4], "clipped in the padding");
+  }
+
+  /// The inset selection dims with a disabled list and fades with what holds it, as its rows do.
+  #[test]
+  fn the_inset_selection_fades_with_the_list() {
+    use crate::Harness;
+    struct Faded(Selection, bool, f32);
+    impl crate::App for Faded {
+      fn view(&mut self, ui: &mut Ui) {
+        ui.col(Style::new().w(px(200.0)).h(px(100.0)).bg([1.0; 4]), |ui| {
+          ui.col(Style::new().grow().opacity(self.2), |ui| {
+            let list = List::new(3, 20.0).selection(&mut self.0).style(Style::new().grow());
+            list.show(ui.disabled(self.1).id("list"), |ui, _| ui.label("row"));
+          });
+        });
+      }
+    }
+
+    let fill = |off: bool, opacity: f32| {
+      let mut sel = Selection::default();
+      sel.select(0, 0);
+      let mut h = Harness::new(Faded(sel, off, opacity), Size::new(200.0, 100.0), 1.0);
+      h.frame();
+      let row = h.rect(Id::of("list").key(("row", 0u64))).unwrap();
+      h.render().pixel(row.x + 12.0, row.y + 10.0)
+    };
+    let shown = fill(false, 1.0);
+    for faded in [fill(true, 1.0), fill(false, 0.4)] {
+      assert!(faded[0] > shown[0] && faded[2] > shown[2], "{faded:?} lighter than {shown:?}");
+    }
   }
 
   /// The selection's row as a text above the list, which reads it before the list changes it.
