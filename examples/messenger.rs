@@ -802,47 +802,44 @@ impl Messenger {
     let t = ui.theme();
     let chats = &self.chats;
     let list = List::new(chats.len(), 56.0).selection(&mut self.sel);
-    let r = list.style(Style::new().grow().pad_xy(8.0, 0.0)).show(
-      ui.a11y_label(&t!("Chats")).id(CHATS),
-      |ui, row| {
-        let c = &chats[row.index];
-        // Read as "Oracle, A frame you never…, 2 unread", not letter by letter.
-        let what = if c.pending > 0 { t!("typing…").as_str().to_owned() } else { c.snippet() };
-        let mut name = format!("{}, {what}", c.name);
-        if c.unread > 0 {
-          name += &format!(", {}", tn!("{n} unread", "{n} unread", c.unread));
-        }
+    let r = list.show(ui.a11y_label(&t!("Chats")).id(CHATS), |ui, row| {
+      let c = &chats[row.index];
+      // Read as "Oracle, A frame you never…, 2 unread", not letter by letter.
+      let what = if c.pending > 0 { t!("typing…").as_str().to_owned() } else { c.snippet() };
+      let mut name = format!("{}, {what}", c.name);
+      if c.unread > 0 {
+        name += &format!(", {}", tn!("{n} unread", "{n} unread", c.unread));
+      }
 
-        if let Some(a) = ui.a11y_of(row.id) {
-          a.name(&name);
-        }
+      if let Some(a) = ui.a11y_of(row.id) {
+        a.name(&name);
+      }
 
-        ui.row(Style::new().w(grow()).gap(10.0).align(Align::Start, Align::Center), |ui| {
-          avatar(ui, c.name, c.tint, 36.0);
-          ui.col(Style::new().w(grow()).gap(2.0), |ui| {
-            ui.row(Style::new().w(grow()), |ui| {
-              ui.text(c.name, TextStyle::new(t.bold(), t.text()).line_limit(1));
+      ui.row(Style::new().w(grow()).gap(10.0).align(Align::Start, Align::Center), |ui| {
+        avatar(ui, c.name, c.tint, 36.0);
+        ui.col(Style::new().w(grow()).gap(2.0), |ui| {
+          ui.row(Style::new().w(grow()), |ui| {
+            ui.text(c.name, TextStyle::new(t.bold(), t.text()).line_limit(1));
+            ui.spacer();
+            ui.text(c.msgs.last().map_or(String::new(), |m| clock(m.at)), t.muted().nowrap());
+          });
+          ui.row(Style::new().w(grow()).gap(6.0), |ui| {
+            if c.pending > 0 {
+              ui.text(t!("typing…"), TextStyle::new(t.font(), t.accent()).line_limit(1));
+            } else {
+              ui.row(Style::new().w(grow()).clip(), |ui| {
+                ui.text(c.snippet(), t.muted().line_limit(1))
+              });
+            }
+
+            if c.unread > 0 {
               ui.spacer();
-              ui.text(c.msgs.last().map_or(String::new(), |m| clock(m.at)), t.muted().nowrap());
-            });
-            ui.row(Style::new().w(grow()).gap(6.0), |ui| {
-              if c.pending > 0 {
-                ui.text(t!("typing…"), TextStyle::new(t.font(), t.accent()).line_limit(1));
-              } else {
-                ui.row(Style::new().w(grow()).clip(), |ui| {
-                  ui.text(c.snippet(), t.muted().line_limit(1))
-                });
-              }
-
-              if c.unread > 0 {
-                ui.spacer();
-                ui.badge(c.unread, nimbo::Tone::Accent);
-              }
-            });
+              ui.badge(c.unread, nimbo::Tone::Accent);
+            }
           });
         });
-      },
-    );
+      });
+    });
     if r.changed
       && let Some(i) = self.sel.cursor_index(self.chats.len(), &|i| i as u64)
     {
@@ -860,21 +857,18 @@ impl Messenger {
 
     let chats = &self.chats;
     let list = List::new(hits.len(), 48.0).selection(&mut self.hit);
-    let r = list.style(Style::new().grow().pad_xy(8.0, 0.0)).show(
-      ui.a11y_label(&t!("Found")).id(HITS),
-      |ui, row| {
-        let (c, i) = hits[row.index];
-        ui.col(Style::new().w(grow()).gap(2.0), |ui| {
-          ui.text(
-            format_args!("{} · {}", chats[c].name, clock(chats[c].msgs[i].at)),
-            t.muted().nowrap(),
-          );
-          ui.row(Style::new().w(grow()).clip(), |ui| {
-            ui.text(&chats[c].msgs[i].text, t.label().line_limit(1))
-          });
+    let r = list.show(ui.a11y_label(&t!("Found")).id(HITS), |ui, row| {
+      let (c, i) = hits[row.index];
+      ui.col(Style::new().w(grow()).gap(2.0), |ui| {
+        ui.text(
+          format_args!("{} · {}", chats[c].name, clock(chats[c].msgs[i].at)),
+          t.muted().nowrap(),
+        );
+        ui.row(Style::new().w(grow()).clip(), |ui| {
+          ui.text(&chats[c].msgs[i].text, t.label().line_limit(1))
         });
-      },
-    );
+      });
+    });
     if r.changed
       && let Some(k) = self.hit.cursor_index(hits.len(), &|i| i as u64)
     {
