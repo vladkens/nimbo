@@ -30,7 +30,7 @@ Work deferred to the main loop's idle (the portal's rebind) runs after the event
 
 ## Tested on the platform
 
-A unit test of a state machine proves the machine, not the OS. None of the cases above showed in nimbo's tests until a test was written for it, and a grab's, a tap's or a portal's timing shows only on the real system. A change to a platform's input runs on that platform (`~/Code/vm`) before it is called done, and the PR says what was not run.
+A unit test of a state machine proves the machine, not the OS. None of the cases above showed in nimbo's tests until a test was written for it, and a grab's, a tap's or a portal's timing shows only on the real system. A change to a platform's input runs on that platform (a trivm VM) before it is called done, and the PR says what was not run.
 
 ## A cache checked by a stand-in
 

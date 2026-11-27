@@ -2,30 +2,33 @@
 # /// script
 # requires-python = ">=3.11"
 # ///
-"""Checks what assistive technology sees of the examples in the macOS test VM.
+"""Checks what assistive technology sees of the examples in a macOS test VM.
 
 Builds the examples (release) and the AX dumper (scripts/ax-dump.swift, Swift: the AX client API
-is C and Objective-C, and the guest has no toolchain), copies them to the VM, starts each example
-in the desktop session, then runs its scenario through the dumper: a dump, actions (press, step,
-set a value, focus), the notifications seen, a dump again; takes a screenshot (to compare the
-frames with the controls), quits the example and prints everything.
+is C and Objective-C, and the guest has no toolchain), copies them to the VM, grants the dumper
+Accessibility, starts each example on the guest's desktop, then runs its scenario through the
+dumper: a dump, actions (press, step, set a value, focus), the notifications seen, a dump again;
+takes a screenshot (to compare the frames with the controls), quits the example and prints
+everything.
 
-The VM is ~/Code/vm's macOS profile, prepared once with `./vm prepare macos --test-host`
-(`./vm exec macos --gui` runs trusted for Accessibility). Nothing opens on this machine.
+The VM is trivm's (https://github.com/vladkens/trivm, `trivm` on PATH): the one named in
+TRIVM_VM, else `macos-27`, made with `trivm create macos-27`. The grant turns its SIP off once.
+`trivm run macos-27 -- uv run scripts/ax-check.py` runs it on a clone deleted after. Nothing opens
+on this machine.
 
 uv run scripts/ax-check.py [example...]      default: messenger gallery (each scenario of theirs)
 """
 
+import os
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-VM = Path.home() / "Code/vm/vm"
+VM = os.environ.get("TRIVM_VM", "macos-27")
 OUT = ROOT / "target/ax"
-GUEST = "nimbo"
+GUEST = "/Users/user/nimbo"
 
 # By the example and its arguments: the ops after the pid, run in order by ax-dump (see its
 # header); at "shot" (else at the end) the script takes the screenshot.
@@ -75,21 +78,21 @@ def run(*cmd: str, check: bool = True) -> str:
   return rs.stdout
 
 
-def gui(*cmd: str) -> list[str]:
-  """`cmd` run in the guest's desktop session."""
-  return [str(VM), "exec", "macos", "--gui", "--", *cmd]
+def guest(*cmd: str, check: bool = True) -> str:
+  """`cmd` run in the guest; `desktop <program>` starts it on its desktop (see `trivm exec`)."""
+  return run("trivm", "exec", VM, "--", *cmd, check=check)
 
 
-def started(ssh: list[str], example: str) -> str:
-  """The example's pid in the guest once it runs, waiting up to 10 s."""
+def started(name: str) -> str:
+  """The pid of the guest's process `name` once it runs, waiting up to 10 s."""
   for _ in range(40):
-    pid = run(*ssh, "pgrep", "-nx", example, check=False).strip()
+    pid = guest("pgrep", "-nx", name, check=False).strip()
     if pid:
       return pid
 
     time.sleep(0.25)
 
-  raise SystemExit(f"ax-check: {example} did not start")
+  raise SystemExit(f"ax-check: {name} did not start")
 
 
 def drive(pid: str, ops: list[str]) -> None:
@@ -97,15 +100,26 @@ def drive(pid: str, ops: list[str]) -> None:
   if not ops:
     return
 
-  rs = subprocess.run(gui(f"{GUEST}/ax-dump", pid, *ops), capture_output=True, text=True)
-  print(rs.stdout + rs.stderr, flush=True)
+  # Started by launchd, so that its own grant applies, which drops its output.
+  out = f"{GUEST}/ax-dump.txt"
+  guest("rm", "-f", out)
+  guest("desktop", f"{GUEST}/ax-dump", "--out", out, pid, *ops)
+  for _ in range(240):
+    if not guest("pgrep", "-x", "ax-dump", check=False):
+      break
+
+    time.sleep(0.25)
+  else:
+    guest("pkill", "-x", "ax-dump", check=False)
+    raise SystemExit(f"ax-check: ax-dump still runs after 60 s:\n{guest('cat', out)}")
+
+  print(guest("cat", out), flush=True)
 
 
-def shoot(config: Path, example: str) -> None:
-  """A screenshot of the guest's screen, to target/ax/<example>.png."""
-  shot, out = f"{GUEST}/{example}.png", OUT / f"{example}.png"
-  run(*gui("screencapture", "-x", shot))
-  run("scp", "-F", str(config), f"vm-macos:{shot}", str(out))
+def shoot(name: str) -> None:
+  """A screenshot of the guest's screen, to target/ax/<name>.png."""
+  out = OUT / f"{name}.png"
+  run("trivm", "shot", VM, str(out))
   print(f"screenshot: {out}")
 
 
@@ -123,30 +137,28 @@ def main() -> None:
   if not dumper.exists() or dumper.stat().st_mtime < src.stat().st_mtime:
     run("xcrun", "swiftc", "-target", "arm64-apple-macos14", "-O", str(src), "-o", str(dumper))
 
-  config = Path(tempfile.mkdtemp()) / "ssh_config"
-  config.write_text(run(str(VM), "ssh-config", "macos"))
-  ssh = ["ssh", "-F", str(config), "vm-macos"]
-  run(*ssh, "mkdir", "-p", GUEST)
-  bins = [str(ROOT / "target/release/examples" / e) for e in examples] + [str(dumper)]
-  rsync = ["rsync", "-a", "-e", f"ssh -F {config}", "--rsync-path=/usr/bin/rsync"]
-  run(*rsync, *bins, f"vm-macos:{GUEST}/")
+  guest("mkdir", "-p", GUEST)
+  for b in [ROOT / "target/release/examples" / e for e in examples] + [dumper]:
+    run("trivm", "cp", str(b), f"{VM}:{GUEST}/")
+
+  # A grant is to the binary's signature, so a new build needs its own.
+  run("trivm", "os", "grant", VM, f"{GUEST}/ax-dump", "accessibility")
 
   for key in runs:
     example, *argv = key.split()
     print(f"== {key}", flush=True)
-    run(*ssh, "pkill", "-x", example, check=False)
-    app = subprocess.Popen(gui(f"{GUEST}/{example}", *argv))
+    guest("pkill", "-x", example, check=False)
     try:
-      pid = started(ssh, example)
+      guest("desktop", f"{GUEST}/{example}", *argv)
+      pid = started(example)
       time.sleep(1.5)
       ops = SCENARIOS.get(key, ["dump"])
       cut = ops.index("shot") if "shot" in ops else len(ops)
       drive(pid, ops[:cut])
-      shoot(config, "-".join(key.split()))
+      shoot("-".join(key.split()))
       drive(pid, ops[cut + 1 :])
     finally:
-      run(*ssh, "pkill", "-x", example, check=False)
-      app.wait(timeout=10)
+      guest("pkill", "-x", example, check=False)
 
 
 if __name__ == "__main__":

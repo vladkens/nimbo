@@ -3,7 +3,9 @@
 // Dumps and drives an app's accessibility tree, as VoiceOver sees it (built and run by
 // scripts/ax-check.py; it needs the Accessibility grant of its responsible process).
 //
-//   ax-dump <pid> <op>...
+//   ax-dump [--out <file>] <pid> <op>...
+//
+// `--out` prints to the file: started on the guest's desktop by launchd, its output is dropped.
 //
 // Ops run in order: `dump` prints the app's windows and their elements, one indented line each
 // (retried once when a window has no children yet); `press | inc | dec | scroll | focus <sel>`
@@ -146,9 +148,19 @@ let callback: AXObserverCallback = { _, e, name, _ in
   seen["\(name as String)(\(role.replacingOccurrences(of: "AX", with: "")))", default: 0] += 1
 }
 
-let args = Array(CommandLine.arguments.dropFirst())
+var args = Array(CommandLine.arguments.dropFirst())
+if args.first == "--out", args.count > 1 {
+  guard freopen(args[1], "w", stdout) != nil else {
+    FileHandle.standardError.write("ax-dump: can't write \(args[1])\n".data(using: .utf8)!)
+    exit(2)
+  }
+
+  dup2(fileno(stdout), fileno(stderr))
+  args.removeFirst(2)
+}
+
 guard let pid = args.first.flatMap({ pid_t($0) }) else {
-  FileHandle.standardError.write("usage: ax-dump <pid> <op>...\n".data(using: .utf8)!)
+  FileHandle.standardError.write("usage: ax-dump [--out <file>] <pid> <op>...\n".data(using: .utf8)!)
   exit(2)
 }
 
