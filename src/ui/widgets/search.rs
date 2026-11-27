@@ -34,7 +34,8 @@ impl Ui<'_> {
     let (t, id) = (self.theme(), self.take_id());
     let mut style = t.search();
     if self.environment_value::<ControlSize>() == ControlSize::Large {
-      style.frame = style.frame.h(px(t.sizes().control_h() + 4.0));
+      let [_, right, _, left] = style.frame.pad;
+      style.frame = style.frame.min_h(t.sizes().control_h() + 4.0).pads([6.0, right, 6.0, left]);
     }
 
     let b = self.search_behavior(id, text);

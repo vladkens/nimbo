@@ -24,9 +24,7 @@
 
 pub use super::ControlSize;
 use super::store::Transition;
-use super::{
-  Align, EnvironmentValue, FieldStyle, FocusRing, Shadow, Style, TextStyle, Ui, grow, px,
-};
+use super::{Align, EnvironmentValue, FieldStyle, FocusRing, Shadow, Style, TextStyle, Ui, grow};
 use crate::app::{Appearance, ColorScheme};
 use crate::scene::{Color, alpha, mix, rgb};
 use crate::text::{Font, Weight};
@@ -922,7 +920,7 @@ impl Theme {
   /// sidebar field: the ground a touch lighter, a half-point edge, the prompt muted.
   pub const fn search(&self) -> FieldStyle {
     let f = self.field();
-    let frame = f.frame.h(px(self.sizes.control_h)).pads([0.0, 10.0, 0.0, 30.0]);
+    let frame = f.frame.pads([4.0, 10.0, 4.0, 30.0]);
     if !self.flat() {
       return f.frame(frame);
     }
