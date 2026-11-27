@@ -6,7 +6,7 @@ The owner ran #123's examples in real windows on 2026-11-27 and found them broke
 
 - [x] Dock: a click on the Dock icon brings back a minimized or closed window when the app set no `on_reopen` (`applicationShouldHandleReopen` answers `false` always, `src/platform/macos/shell.rs`); counter can't be restored after minimizing
 - [x] Selection: a click elsewhere in the window clears a field's or selectable text's selection; the window losing focus keeps it (seen in the gallery's code box)
-- [ ] Grid: one `gap(8.0)` gives ~28 px between columns and ~12 px between rows; find why; SwiftUI's `Grid(horizontalSpacing:verticalSpacing:)` takes both. Cause: the gallery's grid is 120 wide, its equal columns wider than the 28-pt swatches; the code text says `gap(8.0)`, the block uses `6.0` (fixed with the gallery's code)
+- [x] Grid: one `gap(8.0)` gives ~28 px between columns and ~12 px between rows; find why; SwiftUI's `Grid(horizontalSpacing:verticalSpacing:)` takes both. Cause: the gallery's grid is 120 wide, its equal columns wider than the 28-pt swatches; the code text says `gap(8.0)`, the block uses `6.0` (fixed with the gallery's code)
 - [x] The gallery's sidebar list: clicking items ("Button", "Controls") makes the selected row's fill vanish for a few frames every few seconds
 - [x] Text field: pasting a huge text must not stall the app: caret stops kept across frames, 1 MB multi-line ~11 → ~1 ms a frame (release)
 - [ ] Text field: a 1 MB single line still reshapes whole on each key (~17 ms release); shaping only the visible part is left (AppKit lays out a paragraph whole too)
@@ -25,10 +25,10 @@ The owner ran #123's examples in real windows on 2026-11-27 and found them broke
 
 ## Gallery
 
-- [ ] Each block's code is real, multi-line, formatted Rust that builds what the page shows, syntax-coloured, not a one-liner with `…`; `docs/api.md` follows
-- [ ] Stacks: HStack and VStack as two blocks, each showing its own thing
-- [ ] Lazy column: the picture cuts a row in half; Scroll anchor: the picture doesn't show what anchors
-- [ ] Spacer and Divider: show what they do (a spacer pushing items apart, dividers between items in a row and a column)
+- [x] Each block's code is real, multi-line, formatted Rust that builds what the page shows, syntax-coloured, not a one-liner with `…`; `docs/api.md` follows
+- [x] Stacks: HStack and VStack as two blocks, each showing its own thing
+- [x] Lazy column: the picture cuts a row in half; Scroll anchor: the picture doesn't show what anchors
+- [x] Spacer and Divider: show what they do (a spacer pushing items apart, dividers between items in a row and a column)
 
 ## 7GUIs
 
