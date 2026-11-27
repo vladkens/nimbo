@@ -235,4 +235,87 @@ mod tests {
     h.type_text("on");
     assert_eq!(h.app().text, "on");
   }
+
+  /// Two selectable texts and a field over room to click in.
+  #[derive(Default)]
+  struct Texts {
+    text: String,
+  }
+
+  impl App for Texts {
+    fn view(&mut self, ui: &mut Ui) {
+      let body = ui.theme().body();
+      ui.col(Style::new().w(px(300.0)).h(px(200.0)).gap(10.0), |ui| {
+        ui.id("a").selectable_text("Hello world", body);
+        ui.id("b").selectable_text("Other words", body);
+        ui.id("f").text_field(&mut self.text, "");
+      });
+    }
+  }
+
+  /// Selects all of `id` with a click and Cmd-A.
+  fn select_all(h: &mut Harness<Texts>, id: Id) {
+    h.click_id(id);
+    h.key('a', crate::CMD);
+    h.frame();
+    let len = h.text(id).unwrap().len();
+    assert_eq!(h.selection(id), Some((0, len)));
+  }
+
+  /// A click elsewhere in the window (on room, on other text) clears a selectable text's or a
+  /// field's selection, the field losing its focus; the window losing its focus keeps them,
+  /// shown.
+  #[test]
+  fn a_click_elsewhere_clears_the_selection_the_window_keeps_it() {
+    let mut h = Harness::new(Texts { text: "typed".into() }, Size::new(300.0, 200.0), 1.0);
+    h.frame();
+    let (a, b, f) = (Id::of("a"), Id::of("b"), Id::of("f"));
+    let collapsed = |h: &Harness<Texts>, id| h.selection(id).is_some_and(|(x, y)| x == y);
+    let r = h.rect(a).unwrap();
+    // Under the baseline, off the glyphs.
+    let at = (r.x + 10.0, r.y + r.h - 2.0);
+
+    select_all(&mut h, a);
+    let shown = h.render().pixel(at.0, at.1);
+    h.event(Event::Focus(false));
+    h.frame();
+    assert_eq!(h.selection(a), Some((0, 11)));
+    let inactive = h.render().pixel(at.0, at.1);
+
+    h.event(Event::Focus(true));
+    h.frame();
+    assert_eq!(h.render().pixel(at.0, at.1), shown);
+    h.click(250.0, 190.0);
+    h.frame();
+    assert!(collapsed(&h, a) && h.focus_id().is_none());
+    let plain = h.render().pixel(at.0, at.1);
+    assert!(plain != inactive && inactive != shown, "{plain:?} {inactive:?} {shown:?}");
+
+    select_all(&mut h, a);
+    h.click_id(b);
+    h.frame();
+    assert!(collapsed(&h, a));
+
+    // The field's text, every pixel of it.
+    let fr = h.rect(f).unwrap();
+    let look = |h: &mut Harness<Texts>| {
+      let img = h.render();
+      let xs = (0..fr.w as usize).map(|x| fr.x + x as f32);
+      xs.flat_map(|x| (4..fr.h as usize - 4).map(move |y| (x, fr.y + y as f32)))
+        .map(|(x, y)| img.pixel(x, y))
+        .collect::<Vec<_>>()
+    };
+    select_all(&mut h, f);
+    h.event(Event::Focus(false));
+    h.frame();
+    let inactive = look(&mut h);
+
+    h.event(Event::Focus(true));
+    h.frame();
+    assert_eq!((h.selection(f), h.focus_id()), (Some((0, 5)), Some(f)));
+    h.click(250.0, 190.0);
+    h.frame();
+    assert!(collapsed(&h, f) && h.focus_id().is_none());
+    assert_ne!(look(&mut h), inactive, "the inactive window shows the field's selection");
+  }
 }
