@@ -1,22 +1,24 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The layout's text: a text's preferred and least widths, its lines wrapped at its final width
-//! or cut to fit with an ellipsis, and what of them is kept across frames per font and text
-//! ([Kept]).
+//! or cut to fit with an ellipsis, an editable one's caret stops, and what of them is kept
+//! across frames per font and text ([Kept]).
 
 use super::{
-  ELLIPSIS, EPS, Elide, Kind, Line, Measure, TextLines, TextStyle, Tree, TruncationMode,
+  ELLIPSIS, EPS, Elide, Kind, Line, Measure, Stop, TextLines, TextStyle, Tree, TruncationMode,
 };
 use crate::scene::Size;
 use crate::text::edit::graphemes;
 use crate::text::{Font, Memo};
 
 /// What the layout keeps across frames per font and text ([Memo]): a wrapping text's least
-/// width, and the lines of each line of text by the width it wraps at, offsets from its start.
+/// width, the lines of each line of text by the width it wraps at, and an editable line's caret
+/// stops, offsets from its start: a megabyte pasted is measured once, not every frame.
 #[derive(Default)]
 pub(crate) struct Kept {
   pub least: Memo<f32>,
   pub lines: Memo<Vec<Line>>,
+  pub stops: Memo<Vec<Stop>>,
 }
 
 /// The preferred width of a text (its widest line) and its least: when it wraps, its widest
@@ -111,8 +113,13 @@ pub fn wrap(t: &mut Tree, m: &mut dyn Measure, kept: &mut Kept) {
       let first = t.stops.len() as u32;
       for l in &mut t.lines[start as usize..] {
         l.stop = t.stops.len() as u32;
-        let s = &t.text[l.start as usize..l.end as usize];
-        m.stops(s, style.font, l.start - range.0, &mut t.stops);
+        let (s, base) = (&t.text[l.start as usize..l.end as usize], l.start - range.0);
+        let stops = kept.stops.get(style.font, s, 0, || {
+          let mut v = Vec::new();
+          m.stops(s, style.font, 0, &mut v);
+          v
+        });
+        t.stops.extend(stops.iter().map(|s| Stop { at: base + s.at, ..*s }));
       }
 
       e.stops = (first, t.stops.len() as u32);
