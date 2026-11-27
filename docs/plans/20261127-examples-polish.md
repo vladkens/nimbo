@@ -20,6 +20,9 @@ The owner ran #123's examples in real windows on 2026-11-27 and found them broke
 - [ ] `lazy_col` has no spacing (SwiftUI `LazyVStack(spacing:)`); messages pad themselves
 - [ ] Date picker: the separators are spaced (`2026 - 11 - 27`); AppKit's are tight
 
+- [x] Checked on a macOS 27 VM (trivm): the Dock brings back a minimized counter; the emoji picker opens at the caret and its pick lands there; a click elsewhere clears the gallery's selected code
+- [x] `character_palette::available` returns `nimbo::Error` as `autostart::available` does, not a `String`
+
 ## Gallery
 
 - [ ] Each block's code is real, multi-line, formatted Rust that builds what the page shows, syntax-coloured, not a one-liner with `…`; `docs/api.md` follows
