@@ -14,12 +14,13 @@ const DENSE: f32 = 4.0;
 const LABEL_GAP: f32 = 4.0;
 
 /// The theme's slider, as macOS's: a knob ([crate::Sizes::knob], a capsule when wider than high)
-/// on a track [crate::Sizes::rail] thick, filled in the accent up to it, the knob's shadow deeper
-/// under the pointer where the theme hovers controls; a dot under the track at each step
-/// ([crate::Slider::step]), as macOS's tick marks, none where steps are closer than 4 points. It
-/// fills the width it is offered, as SwiftUI's, and is at least 160 points wide: that much among
-/// a form row's controls, which keep their width, the row's whole width in its footer
-/// ([crate::FormRow::footer]). The shell's default.
+/// on a track [crate::Sizes::rail] thick across its width, filled in the accent up to the knob,
+/// whose centre stops half a knob in from either end; the knob's shadow deeper under the pointer
+/// where the theme hovers controls; a dot under the track at each step ([crate::Slider::step]),
+/// as macOS's tick marks, none where steps are closer than 4 points. It fills the width it is
+/// offered, as SwiftUI's, and is at least 160 points wide: that much among a form row's controls,
+/// which keep their width, the row's whole width in its footer ([crate::FormRow::footer]). The
+/// shell's default.
 ///
 /// Tick labels ([crate::Slider::tick_label]) are in the theme's small muted text, centred on
 /// their step's dot and kept within the slider's width; one that would run into the label before
@@ -56,12 +57,13 @@ impl SliderStyle for LinearSliderStyle {
 
     let dots: Vec<f32> = steps.iter().map(|&(_, k)| k).collect();
     let width = Style::new().w(grow()).min_w(MIN_W);
-    // The track half a knob in from either end, where the knob's centre stops.
+    // The knob's centre stops half a knob in from either end, the track runs the whole width, as
+    // AppKit's: in line with a gauge above it.
     let s = width.h(px(kh + 4.0)).pad_xy(kw / 2.0, 0.0);
     let paint = move |f: &mut Frame, r: Rect| {
       let (x0, w, cy) = (r.x + kw / 2.0, r.w - kw, r.y + r.h / 2.0);
-      f.rect(Rect::new(x0 - rh / 2.0, cy - rh / 2.0, w + rh, rh), rail, rh / 2.0);
-      f.rect(Rect::new(x0 - rh / 2.0, cy - rh / 2.0, w * k + rh, rh), fill, rh / 2.0);
+      f.rect(Rect::new(r.x, cy - rh / 2.0, r.w, rh), rail, rh / 2.0);
+      f.rect(Rect::new(r.x, cy - rh / 2.0, kw / 2.0 + w * k, rh), fill, rh / 2.0);
       // 2-point dots, their bottoms at the knob's, which hides the one under it.
       for d in &dots {
         f.rect(Rect::new(x0 + w * d - 1.0, cy + kh / 2.0 - 2.0, 2.0, 2.0), dot, 1.0);
@@ -110,9 +112,9 @@ impl SliderStyle for LinearSliderStyle {
 #[cfg(test)]
 mod tests {
   use crate::Harness;
-  use crate::app::App;
+  use crate::app::{App, Appearance, Event};
   use crate::scene::Size;
-  use crate::ui::{Id, Theme, Ui};
+  use crate::ui::{Id, Style, Theme, Ui, px};
 
   struct One;
 
@@ -130,5 +132,29 @@ mod tests {
     let r = h.rect(Id::of("s")).unwrap();
     let kh = Theme::PLATES_DARK.sizes.knob[1];
     assert_eq!((r.w, r.h), (160.0, kh + 4.0));
+  }
+
+  /// As AppKit's, the track runs its whole width, as a gauge's does: filled in the accent from
+  /// its left end, unfilled to its right one.
+  #[test]
+  fn the_track_runs_the_whole_width() {
+    struct OnWhite;
+    impl App for OnWhite {
+      fn view(&mut self, ui: &mut Ui) {
+        let ground = Style::new().w(px(200.0)).h(px(100.0)).pad(10.0).bg([1.0; 4]);
+        ui.col(ground, |ui| _ = ui.id("s").slider(&mut 0.5, 0.0..=1.0));
+      }
+    }
+
+    let mut h = Harness::new(OnWhite, Size::new(200.0, 100.0), 1.0);
+    h.event(Event::Appearance(Appearance::LIGHT));
+    h.frame();
+    let r = h.rect(Id::of("s")).unwrap();
+    let (y, img) = (r.y + r.h / 2.0, h.render());
+    let ground = img.pixel(r.x + r.w + 4.0, y);
+    let (start, end) = (img.pixel(r.x + 2.0, y), img.pixel(r.x + r.w - 2.0, y));
+    assert!(start[2] > 200 && start[0] < 100, "the accent: {start:?}");
+    let darker = (0..3).all(|i| end[i] + 8 < ground[i]);
+    assert!(darker, "the track: {end:?} on {ground:?}");
   }
 }
