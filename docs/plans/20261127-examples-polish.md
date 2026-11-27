@@ -45,7 +45,7 @@ The owner ran #123's examples in real windows on 2026-11-27 and found them broke
 
 ## Custom look
 
-- [ ] A copy of Sublime Merge's look: a small git client (commit list, a coloured diff, a file list), dense and dark, its own palette and styles
+- [x] A copy of Sublime Merge's look: a small git client (commit list, a coloured diff, a file list), dense and dark, its own palette and styles
 
 ## Messenger
 
