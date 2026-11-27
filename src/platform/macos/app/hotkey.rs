@@ -508,7 +508,7 @@ fn judge(
   let mut hits: Hits = [None; 2];
   for (which, &chord) in chords.iter().enumerate() {
     if alone(chord) {
-      push(&mut hits, lone(shared, which, kind, code, flags, at, &repeat));
+      push(&mut hits, lone(shared, &chords, which, kind, code, flags, at, &repeat));
     }
   }
 
@@ -591,8 +591,10 @@ fn owned(
 /// is its release, also when the release itself was not seen (the Globe key's may come with
 /// another code); Escape as that event drops the press instead. `at`: the event's time, in ns.
 /// The edge to tell, if any.
+#[expect(clippy::too_many_arguments, reason = "the places as judged, the place and the event")]
 fn lone(
   shared: &Shared,
+  chords: &[u64; MAX],
   which: usize,
   kind: KeyKind,
   code: u64,
@@ -600,7 +602,7 @@ fn lone(
   at: u64,
   repeat: &impl Fn() -> bool,
 ) -> Option<Hit> {
-  let chord = shared.chords[which].load(Ordering::Acquire);
+  let chord = chords[which];
   let key = mod_key((chord & 0xffff) as u16)?;
   let own = device_flag(key)?;
 
@@ -642,7 +644,17 @@ fn lone(
     KeyKind::Up => false,
   };
 
-  if pressed && chord_started {
+  // But another place's chord without this key's modifier: fn, then F6 of another place.
+  let theirs = kind == KeyKind::Down
+    && (0..MAX).filter(|&w| w != which).any(|w| {
+      let chord = chords[w];
+      let mods = (chord >> 16) & MODIFIERS;
+      chord & (SET | LONE) == SET
+        && code == chord & 0xffff
+        && flags & MODIFIERS == mods
+        && mods & general_flag(key) == 0
+    });
+  if pressed && chord_started && !theirs {
     held.store(false, Ordering::Relaxed);
     return Some(Hit::Abort { which });
   }
@@ -1046,6 +1058,27 @@ mod tests {
     assert_eq!(key_at(&s, 2_000, true, SPACE, opt, false), swallow(Some(down_1)));
     assert_eq!(key_at(&s, 2_100, false, SPACE, opt, false), swallow(Some(up_1)));
     assert_eq!(flags_at(&s, 2_200, Code::AltRight, 0), tell(UP));
+  }
+
+  /// fn alone in place 0, F6 in place 1: F6 right after fn is the other's press and fn stays held;
+  /// another key in the window is still the user's chord.
+  #[test]
+  fn a_chord_without_the_modifier_alone_keeps_it_held() {
+    let s = lone_shared(Code::Fn);
+    let f6 = u64::from(kvk(Code::F6).unwrap());
+    s.chords[1].store(SET | f6, Ordering::Release);
+    let fn_flag = CGEventFlags::MaskSecondaryFn.0;
+    let with_fn = CGEventFlags(fn_flag);
+    let (down_1, up_1) = (Hit::Down { which: 1, repeat: false }, Hit::Up { which: 1 });
+    assert_eq!(flags_at(&s, 0, Code::Fn, fn_flag), tell(DOWN));
+    assert_eq!(key_at(&s, 50, true, f6, with_fn, false), swallow(Some(down_1)));
+    assert_eq!(key_at(&s, 100, false, f6, with_fn, false), swallow(Some(up_1)));
+    assert_eq!(flags_at(&s, 2_000, Code::Fn, 0), tell(UP));
+
+    assert_eq!(flags_at(&s, 3_000, Code::Fn, fn_flag), tell(DOWN));
+    assert_eq!(key_at(&s, 3_050, true, f6, with_fn, false), swallow(Some(down_1)));
+    assert_eq!(key_at(&s, 3_100, true, E, with_fn, false), tell(ABORT));
+    assert_eq!(flags_at(&s, 3_200, Code::Fn, 0), Verdict::Pass, "no release owed");
   }
 
   /// Right ⌥ alone in place 0, fn alone in place 1: each its own; one pressed while the other is
