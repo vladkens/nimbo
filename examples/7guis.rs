@@ -4,9 +4,9 @@
 //! nimbo sits beside other toolkits on the same programs (task 1, the counter, is
 //! `examples/counter.rs`): a temperature converter, a flight booker, a timer, CRUD, a circle
 //! drawer and cells. Each task is a struct of its state and a view over it: fields bound to
-//! strings, a picker, `ui.disabled`, a dialog that tells and one of the app's own, time from the
-//! clock, a filtered list, a canvas with a context menu and undo, and a sheet that scrolls both
-//! ways with formulas.
+//! strings, a picker, date pickers in a range, `ui.disabled`, a dialog that tells and one of the
+//! app's own, time from the clock, a filtered list, a canvas with a context menu and undo, and a
+//! sheet that scrolls both ways with formulas.
 //!
 //! `cargo run --release --example 7guis [-- <task>] [--shot <file.png>]`: a task's slug
 //! (`temperature`, `flight`, `timer`, `crud`, `circles`, `cells`) opens on its tab.
@@ -21,10 +21,10 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use nimbo::{
-  Align, App, Axes, Binding, BorderedProminentButtonStyle, CMD, Command, Config, Cx, Dialog, Event,
-  Float, FormStyle, Frame, Icon, Id, Item, Key, KeyEvent, List, Menu, MouseButton, NamedKey, Point,
-  Quad, Rect, Response, Selection, Shortcut, Style, Tag, TextFieldConfiguration, TextFieldStyle,
-  Transition, Ui, alpha, grow, mix, px,
+  Align, App, Axes, Binding, BorderedProminentButtonStyle, CMD, Command, Config, Cx, Date,
+  DateFormat, DatePicker, Dialog, Enabled, Event, Float, FormStyle, Frame, Icon, Id, Item, Key,
+  KeyEvent, List, Menu, MouseButton, NamedKey, Point, Quad, Rect, Response, Selection, Shortcut,
+  Style, Tag, TextFieldConfiguration, TextFieldStyle, Transition, Ui, alpha, grow, mix, px,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -64,6 +64,24 @@ fn field(ui: &mut Ui, w: f32, name: &str, id: &str, text: &mut String, invalid: 
 /// A row of controls centred on each other, `gap` apart.
 fn line(gap: f32) -> Style {
   Style::new().gap(gap).align(Align::Start, Align::Center)
+}
+
+/// A row of a form in columns, as SwiftUI's `.formStyle(.columns)` on the Mac: `title` and a
+/// colon at the right of a column `w` wide, dimmed when the row is disabled, and what `control`
+/// builds 8 after it; an empty title leaves the column empty, for a button under the controls.
+fn labeled<R>(ui: &mut Ui, w: f32, title: &str, control: impl FnOnce(&mut Ui) -> R) {
+  let t = ui.theme();
+  ui.row(line(8.0), |ui| {
+    let on = ui.environment_value::<Enabled>().0;
+    let text = if on { t.label() } else { t.label().color(t.tertiary()) };
+    let column = Style::new().w(px(w)).align(Align::End, Align::Center);
+    ui.row(column, |ui| {
+      if !title.is_empty() {
+        ui.text(format_args!("{title}:"), text.nowrap());
+      }
+    });
+    _ = control(ui);
+  });
 }
 
 /// A text field ringed and tinted red: text that is no number, no date. The theme's rounded
@@ -148,73 +166,56 @@ pub enum Kind {
 const KINDS: [Tag<Kind>; 2] =
   [Tag::new(Kind::OneWay, "one-way flight"), Tag::new(Kind::Return, "return flight")];
 
-/// Task 3: a one-way or return flight, its dates as DD.MM.YYYY. A date that doesn't parse turns
-/// its field red; the return date is off for a one-way flight; Book is off while a date is bad or
-/// the return is before the start, and tells what was booked.
+/// Task 3: a one-way or return flight from today on, its dates in date pickers; the return date
+/// is off for a one-way flight and never before the departure, as 7GUIs asks, and comes along
+/// as the departure moves past it. Book tells what was booked.
 pub struct Flight {
   pub kind: Kind,
-  pub start: String,
-  pub back: String,
+  pub start: Date,
+  pub back: Date,
   pub booked: bool,
 }
 
 impl Default for Flight {
   fn default() -> Self {
-    let today = "27.03.2014".to_string();
-    Self { kind: Kind::OneWay, start: today.clone(), back: today, booked: false }
+    let today = Date::today();
+    Self { kind: Kind::OneWay, start: today, back: today, booked: false }
   }
-}
-
-/// `DD.MM.YYYY` as (year, month, day), comparable; `None` unless a real date written so: the day
-/// and month in one or two digits, the year in four (`11.03.12` is none).
-pub fn parse_date(s: &str) -> Option<(u32, u32, u32)> {
-  let parts: Vec<&str> = s.trim().split('.').collect();
-  let digits = |p: &str, n: std::ops::RangeInclusive<usize>| {
-    p.bytes().all(|c| c.is_ascii_digit()) && n.contains(&p.len())
-  };
-  let &[d, m, y] = parts.as_slice() else { return None };
-  if !(digits(d, 1..=2) && digits(m, 1..=2) && digits(y, 4..=4)) {
-    return None;
-  }
-
-  let (d, m, y) = (d.parse::<u32>().ok()?, m.parse::<u32>().ok()?, y.parse::<u32>().ok()?);
-  let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
-  let days = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  let ok = (1..=12).contains(&m) && d >= 1 && d <= days[m as usize - 1];
-  ok.then_some((y, m, d))
 }
 
 impl Flight {
-  /// A date's field, red while its text is no date; the date as it was before this pass's edit,
-  /// which the next pass sees.
-  fn date(ui: &mut Ui, name: &str, id: &str, text: &mut String) -> Option<(u32, u32, u32)> {
-    let date = parse_date(text);
-    let ui = if date.is_none() { ui.text_field_style(&Invalid) } else { ui };
-    ui.a11y_label(name).id(id).text_field(text, "DD.MM.YYYY");
-    date
-  }
-
   fn view(&mut self, ui: &mut Ui) {
-    ui.col(Style::new().w(px(220.0)).gap(8.0), |ui| {
-      ui.a11y_label("Flight").id("kind").picker(&mut self.kind, &KINDS);
-      let start = Self::date(ui, "Start", "start", &mut self.start);
-      let one_way = self.kind == Kind::OneWay;
-      let back = ui.disabled(one_way).group(|ui| Self::date(ui, "Return", "back", &mut self.back));
-      let ok = match (start, back) {
-        (Some(_), _) if one_way => true,
-        (Some(s), Some(b)) => b >= s,
-        _ => false,
-      };
+    const W: f32 = 80.0;
+    let one_way = self.kind == Kind::OneWay;
+    ui.col(Style::new().gap(10.0), |ui| {
+      labeled(ui, W, "Flight", |ui| {
+        ui.a11y_label("Flight").id("kind").picker(&mut self.kind, &KINDS)
+      });
+      labeled(ui, W, "Departure", |ui| {
+        let date = DatePicker::new(&mut self.start).range(Date::today()..);
+        date.show(ui.a11y_label("Departure").id("start"))
+      });
 
-      if ui.disabled(!ok).id("book").button("Book").clicked {
-        self.booked = true;
-      }
+      let start = self.start;
+      labeled(ui.disabled(one_way), W, "Return", |ui| {
+        DatePicker::new(&mut self.back).range(start..).show(ui.a11y_label("Return").id("back"))
+      });
+
+      // The spec's rule, though the return's range keeps it.
+      let ok = one_way || self.back >= self.start;
+      labeled(ui, W, "", |ui| {
+        if ui.disabled(!ok).id("book").button("Book").clicked {
+          self.booked = true;
+        }
+      });
     });
 
+    let f = ui.environment_value::<DateFormat>();
     let told = match self.kind {
-      Kind::OneWay => format!("You have booked a one-way flight on {}.", self.start.trim()),
+      Kind::OneWay => format!("You have booked a one-way flight on {}.", f.format(self.start)),
       Kind::Return => {
-        format!("You have booked a flight on {}, back on {}.", self.start.trim(), self.back.trim())
+        let (start, back) = (f.format(self.start), f.format(self.back));
+        format!("You have booked a flight on {start}, back on {back}.")
       }
     };
 
@@ -711,9 +712,14 @@ fn main() {
         h.type_text("100");
       }
 
+      // A return flight, its return's day being stepped.
       Task::Flight => {
-        let f = &mut h.app_mut().flight;
-        (f.kind, f.start, f.back) = (Kind::Return, "31.02.2014".into(), "26.03.2014".into());
+        h.app_mut().flight.kind = Kind::Return;
+        h.frame();
+        h.click_id(Id::of("back").key(("segment", 2usize)));
+        for _ in 0..3 {
+          h.key(Key::Named(NamedKey::ArrowUp), Default::default());
+        }
       }
       Task::Timer => _ = h.wait(Duration::from_millis(3700)),
 

@@ -1,8 +1,8 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! Tests of `examples/7guis.rs` through the harness, one per thing each task asks for: the
-//! converter both ways and past bad text, the booker's red field, its rules and lone OK, the
-//! timer stopping and going on, CRUD's filter, fields, update and delete, the circle drawer's
+//! converter both ways and past bad text, the booker's labelled dates, their ranges and lone OK,
+//! the timer stopping and going on, CRUD's filter, fields, update and delete, the circle drawer's
 //! hover, menu, dialog and undo, and the sheet's formulas, selection, keys and edits. The tabs
 //! switch by a click and read to assistive technology.
 
@@ -19,7 +19,9 @@ use std::time::Duration;
 
 use common::{diff, mid, reads};
 use nimbo::a11y::Role;
-use nimbo::{CMD, Event, Harness, Id, Key, Modifiers, NamedKey, Phase, Point, Size};
+use nimbo::{
+  CMD, Date, DateFormat, Event, Harness, Id, Key, Modifiers, NamedKey, Phase, Point, Size,
+};
 use seven::{Kind, NEW_D, Seven, Task};
 
 type H = Harness<Seven>;
@@ -129,28 +131,24 @@ fn infinity_is_no_number_and_turns_its_field_red() {
 
 // MARK: Flight
 
-#[test]
-fn a_date_reads_only_when_it_is_one() {
-  assert_eq!(seven::parse_date("27.03.2014"), Some((2014, 3, 27)));
-  assert_eq!(seven::parse_date(" 29.02.2016 "), Some((2016, 2, 29)));
-  assert_eq!(seven::parse_date("1.3.2014"), Some((2014, 3, 1)));
-  for bad in ["29.02.2014", "31.04.2014", "1.13.2014", "27.03", "27.03.2014.1", "a.b.c", ""] {
-    assert_eq!(seven::parse_date(bad), None, "{bad}");
-  }
+fn date(y: u32, m: u32, d: u32) -> Date {
+  Date::new(y, m, d).unwrap()
+}
 
-  // dd.mm.yyyy: a year in four digits, no signs or spaces inside.
-  for bad in ["11.03.12", "11.03.012", "11.03.20140", "+1.03.2014", "011.03.2014", "1 .03.2014"] {
-    assert_eq!(seven::parse_date(bad), None, "{bad}");
-  }
+/// The `i`th segment of the date picker `name`: year, month and day in the harness's ISO order.
+fn segment(name: &str, i: usize) -> Id {
+  id(name).key(("segment", i))
 }
 
 #[test]
-fn a_one_way_flight_books_and_tells_with_one_ok() {
+fn a_one_way_flight_books_today_and_tells_with_one_ok() {
   let mut h = on(Task::Flight);
   assert!(h.click_id(id("book")));
   assert!(h.app().flight.booked);
   h.wait(Duration::from_millis(300));
-  reads(&h.a11y(), &["static text \"You have booked a one-way flight on 27.03.2014.\""]);
+  let today = DateFormat::ISO.format(Date::today());
+  let told = format!("static text \"You have booked a one-way flight on {today}.\"");
+  reads(&h.a11y(), &[&told]);
   assert!(h.find(Role::Button, "Cancel").is_none(), "{}", h.a11y());
   key(&mut h, NamedKey::Enter);
   h.wait(Duration::from_millis(300));
@@ -158,58 +156,55 @@ fn a_one_way_flight_books_and_tells_with_one_ok() {
 }
 
 #[test]
+fn the_dates_are_labelled_pickers() {
+  let h = on(Task::Flight);
+  let a = h.a11y();
+  reads(&a, &["static text \"Departure:\"", "static text \"Return:\""]);
+  assert!(
+    h.find(Role::TextField, "Departure").is_some() && h.find(Role::TextField, "Return").is_some(),
+    "{a}"
+  );
+}
+
+#[test]
 fn the_return_date_is_off_for_a_one_way_flight() {
   let mut h = on(Task::Flight);
-  h.click_id(id("back"));
-  h.type_text("1");
-  assert_eq!(h.app().flight.back, "27.03.2014", "a disabled field takes no text");
+  let back = h.app().flight.back;
+  h.click_id(segment("back", 2));
+  key(&mut h, NamedKey::ArrowUp);
+  assert_eq!(h.app().flight.back, back, "a disabled picker takes no keys");
+  assert_ne!(h.focus_id(), Some(id("back")));
 }
 
 #[test]
-fn book_is_off_for_a_return_before_the_start_or_a_bad_date() {
+fn the_departure_is_never_before_today() {
   let mut h = on(Task::Flight);
-  h.app_mut().flight.kind = Kind::Return;
-  h.app_mut().flight.back = "26.03.2014".into();
-  h.frame();
-  h.click_id(id("book"));
-  assert!(!h.app().flight.booked, "back before the start");
+  h.click_id(segment("start", 0));
+  key(&mut h, NamedKey::ArrowDown);
+  assert_eq!(h.app().flight.start, Date::today());
+}
 
-  h.app_mut().flight.back = "28.03.2014".into();
-  h.app_mut().flight.start = "31.02.2014".into();
+#[test]
+fn the_return_is_never_before_the_departure_and_follows_it() {
+  let mut h = on(Task::Flight);
+  let f = &mut h.app_mut().flight;
+  (f.kind, f.start, f.back) = (Kind::Return, date(2099, 6, 15), date(2099, 6, 15));
   h.frame();
-  h.click_id(id("book"));
-  assert!(!h.app().flight.booked, "no such start date");
+  h.click_id(segment("back", 2));
+  key(&mut h, NamedKey::ArrowDown);
+  assert_eq!(h.app().flight.back, date(2099, 6, 15), "a day before the departure");
 
-  h.app_mut().flight.start = "27.03.2014".into();
-  h.frame();
+  // The departure a month on: the return comes along, and Book books both.
+  h.click_id(segment("start", 1));
+  key(&mut h, NamedKey::ArrowUp);
+  assert_eq!((h.app().flight.start, h.app().flight.back), (date(2099, 7, 15), date(2099, 7, 15)));
   h.click_id(id("book"));
   assert!(h.app().flight.booked);
-}
-
-#[test]
-fn a_bad_date_turns_its_field_red() {
-  let mut h = on(Task::Flight);
-  let r = h.rect(id("start")).unwrap();
-  let at = (r.x + r.w - 8.0, r.y + r.h / 2.0);
-  let before = h.render().pixel(at.0, at.1);
-  h.click_id(id("start"));
-  h.type_text("x");
-  let after = h.render().pixel(at.0, at.1);
-  assert!(after[0] > after[2] + 20 && diff(before, after) > 20, "{before:?} -> {after:?}");
-}
-
-#[test]
-fn a_two_digit_year_is_no_date_and_books_nothing() {
-  let mut h = on(Task::Flight);
-  h.click_id(id("start"));
-  h.key(Key::Char('a'), CMD);
-  h.type_text("11.03.12");
-  h.frame();
-  let r = h.rect(id("start")).unwrap();
-  let red = h.render().pixel(r.x + r.w - 8.0, r.y + r.h / 2.0);
-  assert!(red[0] > red[2] + 20, "{red:?}");
-  h.click_id(id("book"));
-  assert!(!h.app().flight.booked);
+  h.wait(Duration::from_millis(300));
+  reads(
+    &h.a11y(),
+    &["static text \"You have booked a flight on 2099-07-15, back on 2099-07-15.\""],
+  );
 }
 
 // MARK: Timer
@@ -814,15 +809,10 @@ fn the_sheet_scrolls_to_its_far_corner() {
 #[test]
 fn the_tabs_and_the_tasks_read_to_assistive_technology() {
   let h = on(Task::Flight);
-  let dump = h.a11y();
-  reads(
-    &dump,
-    &[
-      "pop up button \"Flight\" value \"one-way flight\"",
-      "text field \"Start\" value \"27.03.2014\"",
-    ],
-  );
-  reads(&dump, &["text field \"Return\" value \"27.03.2014\" disabled"]);
+  let today = DateFormat::ISO.format(Date::today());
+  let start = format!("text field \"Departure\" value \"{today}\"");
+  let back = format!("text field \"Return\" value \"{today}\" disabled");
+  reads(&h.a11y(), &["pop up button \"Flight\" value \"one-way flight\"", &start, &back]);
   let h = on(Task::Timer);
   reads(
     &h.a11y(),
@@ -839,11 +829,4 @@ fn the_tabs_and_the_tasks_read_to_assistive_technology() {
       "button \"Delete\" disabled",
     ],
   );
-}
-#[test]
-fn zz_dump() {
-  let mut h = on(Task::Crud);
-  fill(&mut h, "name", "max");
-  fill(&mut h, "surname", "Mustermann");
-  eprintln!("{}", h.a11y());
 }
