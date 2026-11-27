@@ -31,3 +31,16 @@ Work deferred to the main loop's idle (the portal's rebind) runs after the event
 ## Tested on the platform
 
 A unit test of a state machine proves the machine, not the OS. None of the cases above showed in nimbo's tests until a test was written for it, and a grab's, a tap's or a portal's timing shows only on the real system. A change to a platform's input runs on that platform (`~/Code/vm`) before it is called done, and the PR says what was not run.
+
+## A cache checked by a stand-in
+
+A cache kept while a cheap stand-in for its input is unchanged goes stale when the input changes behind it (#123):
+
+- The lazy column kept its heights by index while the first and last item ids and the count held: two rows swapped inside left each measured height on the other's place, and the content height and scroll positions were off.
+- Selectable text kept its runs while they were equal to the app's, but the editor had turned the app's `\r\n` into `\n`: the runs' offsets fell inside a character and the layout panicked.
+
+Check what the cache's key leaves out, and that the cache is dropped when the value it was built from is not the one shown.
+
+## Measured one way, drawn another
+
+Two paths that should agree, the layout's measure and the paint, drifted apart: styled text measured runs of one font as one shaped string but drew each colour run shaped alone, losing the kerning across their edges, so `AVAV` in alternating colours drew 10% wider than its box (#123). Measure and draw from one result (one shaping, positions from its glyphs), and test the drawn ink against the measured box.
