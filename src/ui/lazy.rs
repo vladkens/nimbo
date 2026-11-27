@@ -59,9 +59,9 @@ struct Lazy {
   /// after it.
   heights: Vec<f64>,
   ends: Vec<f64>,
-  /// The ids of the first and last items when `heights` was indexed: other ones mean the items
-  /// changed, not only grew.
-  edges: (Id, Id),
+  /// The indices measured in `heights` and their items' ids: another item at one means the
+  /// items changed, not only grew.
+  measured: Vec<(usize, Id)>,
   /// The items built last pass, and the one at the viewport's top then: its index, id and
   /// top.
   built: Range<usize>,
@@ -93,22 +93,30 @@ impl Lazy {
   }
 
   /// Indexes the heights for the `n` items `item` names: grown at the end, the old indices
-  /// hold; else each is looked up by its id. Returns whether they changed.
+  /// hold; else each is looked up by its id. Returns whether they changed, which the measured
+  /// ones tell, each still at its item or not: what shows and has shown, not every item.
   fn index(&mut self, n: usize, item: &impl Fn(usize) -> Id) -> bool {
-    let edges = if n == 0 { (Id::ROOT, Id::ROOT) } else { (item(0), item(n - 1)) };
     let old = self.heights.len();
-    if edges == self.edges && n == old {
+    let held = n >= old && self.measured.iter().all(|&(i, id)| item(i) == id);
+    if held && n == old {
       return false;
     }
 
-    let grew = n > old && old > 0 && item(0) == self.edges.0 && item(old - 1) == self.edges.1;
-    if !grew {
+    if !held {
       self.heights.clear();
+      self.measured.clear();
     }
 
-    let from = self.heights.len();
-    self.heights.extend((from..n).map(|i| self.seen.get(&item(i)).copied().unwrap_or(f64::NAN)));
-    self.edges = edges;
+    for i in self.heights.len()..n {
+      let id = item(i);
+      let h = self.seen.get(&id).copied();
+      if h.is_some() {
+        self.measured.push((i, id));
+      }
+
+      self.heights.push(h.unwrap_or(f64::NAN));
+    }
+
     true
   }
 
@@ -173,6 +181,7 @@ impl<'a> Ui<'a> {
       lz.width = c.size[0];
       lz.seen.clear();
       lz.heights.fill(f64::NAN);
+      lz.measured.clear();
       (lz.fresh, changed) = (true, true);
     }
 
@@ -181,6 +190,10 @@ impl<'a> Ui<'a> {
       let Some(r) = last.get(item_id(i)) else { continue };
       let h = r.size[1];
       (sum, k) = (sum + h, k + 1);
+      if lz.heights[i].is_nan() {
+        lz.measured.push((i, r.id));
+      }
+
       if lz.heights[i] != h {
         lz.heights[i] = h;
         lz.seen.insert(r.id, h);
@@ -352,11 +365,12 @@ mod tests {
     20.0 + (i * 37 % 100) as f32
   }
 
-  /// A scroll area 300 high over a prefix `pre` high and a column of `n` items of mixed heights
-  /// (`wide` makes each half as high) in a box of `col`, the item `reveal` asked for in the next
-  /// view; at the bottom anchor when `bottom`. Counts the items it builds.
+  /// A scroll area 300 high over a prefix `pre` high and a column of `n` items keyed `order`, of
+  /// mixed heights (`wide`: half as high), in a box of `col`, the item `reveal` asked for in the
+  /// next view; at the bottom anchor when `bottom`. Counts the items it builds.
   struct Mixed {
     n: usize,
+    order: Vec<usize>,
     pre: f32,
     col: Style,
     bottom: bool,
@@ -368,7 +382,8 @@ mod tests {
   impl Mixed {
     fn new(n: usize) -> Self {
       let col = Style::new().w(grow());
-      Self { n, pre: 0.0, col, bottom: false, wide: false, reveal: None, built: 0 }
+      let order = (0..n).collect();
+      Self { n, order, pre: 0.0, col, bottom: false, wide: false, reveal: None, built: 0 }
     }
 
     /// Items 10 apart in a box padded 12 above and 20 below.
@@ -383,7 +398,7 @@ mod tests {
         ui.reveal_item(Id::of("col"), i);
       }
 
-      let wide = self.wide;
+      let (wide, order) = (self.wide, &self.order);
       let area = Style::new().w(grow()).h(px(300.0));
       let ui = if self.bottom { ui.default_scroll_anchor(UnitPoint::BOTTOM) } else { ui };
       let built = &mut self.built;
@@ -392,10 +407,11 @@ mod tests {
         ui.id("col").lazy_col(
           self.col,
           self.n,
-          |i| i,
+          |i| order[i],
           |ui, i| {
             *built += 1;
-            let h = if wide { height(i) / 2.0 } else { height(i) };
+            let h = height(order[i]);
+            let h = if wide { h / 2.0 } else { h };
             ui.el(Style::new().h(px(h)));
           },
         );
@@ -555,6 +571,22 @@ mod tests {
     settle(&mut h);
     let (top, end) = shown(&h, 5).expect("built");
     assert!(top >= 0.0 && end <= 300.0, "{top}..{end}");
+  }
+
+  /// Two measured items of other heights swapped inside the column, the first and last kept: the
+  /// one out of view takes the other's height, and the column's stays.
+  #[test]
+  fn items_swapped_inside_keep_their_heights() {
+    let mut h = Harness::new(Mixed::new(3000), Size::new(200.0, 300.0), 1.0);
+    h.frame();
+    h.app_mut().reveal = Some(1500);
+    settle(&mut h);
+    assert_ne!(height(2), height(1500));
+    let was = h.rect(Id::of("col")).unwrap().h;
+    h.app_mut().order.swap(2, 1500);
+    settle(&mut h);
+    assert_eq!(shown(&h, 2).map(|s| s.1 - s.0), Some(height(2)), "item 2, at 1500");
+    assert_eq!(h.rect(Id::of("col")).unwrap().h, was);
   }
 
   /// At the top, the first item is under the padding; the column is as high as its items, the
