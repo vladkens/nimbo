@@ -325,24 +325,41 @@ mod pages {
               });
             });
           }),
+
+          // Two panes in a frame, each with its share, the line between them to drag.
           "Split" => Self::variants(ui, Shown::Plain, |ui| {
             let t = ui.theme();
-            ui.row(Style::new().w(px(260.0)).h(px(60.0)), |ui| {
+            let frame = Style::new().w(px(300.0)).h(px(72.0)).radius(8.0).pad(1.0).clip();
+            let side = self.side;
+            ui.row(frame.border(1.0, t.line()).bg(t.bg()), |ui| {
               Split::new(Axis::Horizontal).ratio(&mut self.side).show(ui, |ui, pane| {
-                ui.text(["Sidebar", "Content"][pane], t.label());
+                let (name, share) = [("Sidebar", side), ("Content", 1.0 - side)][pane];
+                // Rounded as the frame, whose clip is square.
+                let ground = match pane {
+                  0 => Style::new().radii([7.0, 0.0, 0.0, 7.0]).bg(t.panel()),
+                  _ => Style::new().radii([0.0, 7.0, 7.0, 0.0]).bg(t.bg()),
+                };
+
+                ui.col(ground.grow().pad(10.0), |ui| {
+                  ui.label(format_args!("{name} · {:.0}%", share * 100.0))
+                });
               });
             });
           }),
 
           "Navigation split" => Self::variants(ui, Shown::Plain, |ui| {
             let t = ui.theme();
-            ui.row(Style::new().w(px(260.0)).h(px(60.0)), |ui| {
+            let frame = Style::new().w(px(300.0)).h(px(72.0)).radius(8.0).pad(1.0).clip();
+            ui.row(frame.border(1.0, t.line()).bg(t.bg()), |ui| {
               let split = Split::navigation().ratio(&mut self.side).min(80.0, 80.0);
               split.max(180.0, f32::INFINITY).show(ui, |ui, pane| {
-                let ground = if pane == 0 { t.panel() } else { t.bg() };
-                ui.col(Style::new().grow().pad(8.0).bg(ground), |ui| {
-                  ui.text(["Sidebar", "Detail"][pane], t.label())
-                });
+                // Rounded as the frame, whose clip is square.
+                let ground = match pane {
+                  0 => Style::new().radii([7.0, 0.0, 0.0, 7.0]).bg(t.panel()),
+                  _ => Style::new().radii([0.0, 7.0, 7.0, 0.0]).bg(t.bg()),
+                };
+
+                ui.col(ground.grow().pad(10.0), |ui| ui.label(["Sidebar", "Detail"][pane]));
               });
             });
           }),
@@ -355,8 +372,13 @@ mod pages {
             let bar = Style::new().w(px(360.0)).h(px(52.0)).radius(8.0).pad(1.0).clip().bg(t.bg());
             ui.row(bar.border(1.0, t.line()), |ui| {
               Split::navigation().ratio(&mut self.bar_side).show(ui, |ui, pane| {
-                let ground = if pane == 0 { t.panel() } else { t.bg() };
-                ui.col(Style::new().grow().bg(ground), |ui| {
+                // Rounded as the frame, whose clip is square.
+                let ground = match pane {
+                  0 => Style::new().radii([7.0, 0.0, 0.0, 7.0]).bg(t.panel()),
+                  _ => Style::new().radii([0.0, 7.0, 7.0, 0.0]).bg(t.bg()),
+                };
+
+                ui.col(ground.grow(), |ui| {
                   // The sidebar's toggle at its trailing edge; the detail's title in its centre and
                   // its action at its end.
                   ui.toolbar(|ui| match pane {

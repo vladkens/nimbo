@@ -165,29 +165,6 @@ ui.default_scroll_anchor(UnitPoint::BOTTOM).scroll_area(area, |ui| {
 
 ![Scroll anchor](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/scroll-anchor.png)
 
-### Content margins
-
-SwiftUI: `ScrollView { … }.contentMargins(.top, 28).contentMargins(.bottom, 8)`
-
-```rust
-let t = ui.theme();
-let area = Style::new().w(px(260.0)).h(px(110.0)).pad_xy(8.0, 0.0);
-let area = area.border(1.0, t.line()).bg(t.panel());
-let ui = ui.content_margins([28.0, 0.0, 8.0, 0.0], ContentMarginPlacement::Automatic);
-ui.scroll_area(area, |ui| {
-  for i in 1..=8 {
-    ui.text(format_args!("Line {i}"), t.label());
-  }
-
-  let head = Style::new().w(pct(100.0)).h(px(28.0)).pad_xy(8.0, 0.0);
-  let head =
-    head.align(Align::Start, Align::Center).border(1.0, t.line()).bg(t.raised());
-  ui.float(Float::parent()).row(head, |ui| ui.text("Header", t.section()));
-});
-```
-
-![Content margins](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/content-margins.png)
-
 ### Overlay
 
 SwiftUI: `.overlay(alignment: .topTrailing) { … }`
@@ -1212,9 +1189,15 @@ SwiftUI: `HSplitView { … }`
 
 ```rust
 let t = ui.theme();
-ui.row(Style::new().w(px(260.0)).h(px(60.0)), |ui| {
+let frame = Style::new().w(px(300.0)).h(px(72.0)).radius(8.0).pad(1.0).clip();
+let side = self.side;
+ui.row(frame.border(1.0, t.line()).bg(t.bg()), |ui| {
   Split::new(Axis::Horizontal).ratio(&mut self.side).show(ui, |ui, pane| {
-    ui.text(["Sidebar", "Content"][pane], t.label());
+    let (name, share) = [("Sidebar", side), ("Content", 1.0 - side)][pane];
+    let ground = if pane == 0 { t.panel() } else { t.bg() };
+    ui.col(Style::new().grow().pad(10.0).bg(ground), |ui| {
+      ui.label(format_args!("{name} · {:.0}%", share * 100.0))
+    });
   });
 });
 ```
@@ -1223,16 +1206,16 @@ ui.row(Style::new().w(px(260.0)).h(px(60.0)), |ui| {
 
 ### Navigation split
 
-SwiftUI: `NavigationSplitView { Sidebar().navigationSplitViewColumnWidth(min: 80, ideal: 104, max: 180) } detail: { … }`
+SwiftUI: `NavigationSplitView { … } detail: { … }`
 
 ```rust
 let t = ui.theme();
-ui.row(Style::new().w(px(260.0)).h(px(60.0)), |ui| {
-  let split = Split::navigation().ratio(&mut self.side).min(80.0, 80.0);
-  split.max(180.0, f32::INFINITY).show(ui, |ui, pane| {
+let frame = Style::new().w(px(300.0)).h(px(72.0)).radius(8.0).pad(1.0).clip();
+ui.row(frame.border(1.0, t.line()).bg(t.bg()), |ui| {
+  Split::navigation().ratio(&mut self.side).show(ui, |ui, pane| {
     let ground = if pane == 0 { t.panel() } else { t.bg() };
-    ui.col(Style::new().grow().pad(8.0).bg(ground), |ui| {
-      ui.text(["Sidebar", "Detail"][pane], t.label())
+    ui.col(Style::new().grow().pad(10.0).bg(ground), |ui| {
+      ui.label(["Sidebar", "Detail"][pane])
     });
   });
 });
@@ -1315,7 +1298,7 @@ let row = |ui: &mut Ui, i: usize| {
     ui.text(format_args!("Row {} of 1000", i + 1), t.label())
   });
 };
-ui.scroll_area(area.bg(t.panel()), |ui| ui.lazy_col(Style::new(), 1000, |i| i, row));
+ui.scroll_area(area.bg(t.panel()), |ui| ui.lazy_col(1000, |i| i, row));
 ```
 
 ![Lazy column](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/lazy-column.png)

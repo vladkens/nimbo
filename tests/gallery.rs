@@ -933,6 +933,7 @@ fn disabled_lines_dim_their_texts() {
     ("Slider steps", Role::StaticText, "30%"),
     ("Toolbar", Role::StaticText, "Notes"),
     ("Tabs", Role::StaticText, "The general page"),
+    ("Split", Role::StaticText, "Content · 60%"),
     ("Section", Role::StaticText, "640 MB used"),
     ("Help marks", Role::Button, "Info"),
     ("Help marks", Role::Button, "Warning"),
@@ -959,4 +960,19 @@ fn disabled_lines_dim_their_texts() {
       assert!(off + 40 < on, "{block} {name:?} {look:?}: {on} enabled, {off} disabled");
     }
   }
+}
+
+/// The split block's line drags: the panes' shares follow it, as their labels say.
+#[test]
+fn the_split_blocks_line_drags() {
+  let mut h = gallery(page("Split"), true);
+  let (x, y) = mid(h.find_all(Role::Splitter)[0].rect);
+  h.press(x, y);
+  h.move_to(x + 30.0, y);
+  h.release(x + 30.0, y);
+  h.frame();
+  let side = h.app().side;
+  assert!(side > 0.45, "{side}");
+  let label = format!("Sidebar · {:.0}%", side * 100.0);
+  assert!(h.find(Role::StaticText, &label).is_some(), "no {label:?} in\n{}", h.a11y());
 }
