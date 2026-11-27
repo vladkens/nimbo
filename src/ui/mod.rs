@@ -39,14 +39,15 @@ pub(crate) use attributed::Run;
 pub use attributed::{AttributedString, Attributes, IntoText, Selectable};
 pub(crate) use behavior::DrawnEditMenu;
 pub use behavior::{
-  Behavior, Button, ButtonConfiguration, ButtonStyle, Content, DialogBehavior, EditMenu, Editing,
+  Behavior, Button, ButtonConfiguration, ButtonStyle, Content, DatePicker, DatePickerBehavior,
+  DatePickerConfiguration, DatePickerStyle, DateSegment, DialogBehavior, EditMenu, Editing,
   FieldBehavior, FieldKind, FieldStyle, HelpConfiguration, HelpStyle, InlinePickerStyle, List,
   ListBehavior, ListConfiguration, ListLayout, ListResponse, ListRowConfiguration, ListRows,
   ListStyle, MenuPlacement, Picker, PickerConfiguration, PickerStyle, PlainButtonStyle,
-  PlainHelpStyle, PlainListStyle, PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle, Row,
-  ScrollBar, ScrollBehavior, ScrollerKnob, SectionHeader, Selection, Slider, SliderConfiguration,
-  SliderStyle, SplitBehavior, Tag, TextField, TextFieldConfiguration, TextFieldStyle,
-  ToggleConfiguration, ToggleStyle, TypeSelect,
+  PlainDatePickerStyle, PlainHelpStyle, PlainListStyle, PlainSliderStyle, PlainTextFieldStyle,
+  PlainToggleStyle, Row, ScrollBar, ScrollBehavior, ScrollerKnob, SectionHeader, Selection, Slider,
+  SliderConfiguration, SliderStyle, SplitBehavior, Tag, TextField, TextFieldConfiguration,
+  TextFieldStyle, ToggleConfiguration, ToggleStyle, TypeSelect,
 };
 pub use containers::{
   InsetGroupedListStyle, InsetListStyle, MenuPickerStyle, Split, Tabs, ToolbarItemPlacement,
@@ -73,8 +74,8 @@ pub(crate) use textlayout::TextLayout;
 pub use theme::{ControlBorder, Sizes, SwitchSize, Theme, Tone};
 pub use widgets::{
   BorderedButtonStyle, BorderedProminentButtonStyle, BorderlessButtonStyle, ButtonToggleStyle,
-  CheckboxToggleStyle, LinearSliderStyle, RoundedBorderTextFieldStyle, SegmentedPickerStyle,
-  SwitchToggleStyle, TooltipHelpStyle,
+  CheckboxToggleStyle, FieldDatePickerStyle, LinearSliderStyle, RoundedBorderTextFieldStyle,
+  SegmentedPickerStyle, StepperFieldDatePickerStyle, SwitchToggleStyle, TooltipHelpStyle,
 };
 
 use self::input::{Deliver, Input, ScrollState};

@@ -193,6 +193,12 @@
 //!   preferred languages, the most preferred first, as BCP 47 tags (`ru-RU`; macOS
 //!   `NSLocale.preferredLanguages`, with the app's own language first; Windows
 //!   `GetUserPreferredUILanguages`; Linux gettext's `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, `LANG`).
+//! - `pub fn date_pattern() -> Option<String>` ([crate::DateFormat::system]): the user's short date
+//!   as a pattern, read for its order of day, month and year and the separator between them (macOS
+//!   `dateFormatFromTemplate:` of `yMd`, `d.M.y`; Windows `LOCALE_SSHORTDATE`, `dd.MM.yyyy`; Linux
+//!   `nl_langinfo(D_FMT)`, `%d.%m.%Y`); `None` where it has none.
+//! - `pub fn today() -> (u32, u32, u32)` ([crate::Date::today]): the year, month and day now in the
+//!   user's time zone.
 //! - `pub fn character_palette() -> Result<(), String>` ([crate::character_palette]): whether the
 //!   OS has an emoji picker for a field of ours, `Err` with why not (Linux: GTK 3 keeps its own
 //!   private; Windows: below 10 1709). A window shows it after an event or a frame, outside the
@@ -263,8 +269,9 @@ pub(crate) use imp::permissions;
 #[cfg(target_os = "linux")]
 pub(crate) use imp::startup_complete;
 pub(crate) use imp::{
-  activity, autostart, character_palette, clipboard, desktop, focus, hardware, hotkey, image,
-  input_source, languages, open, paste, perf_cores, post, shell, text, tray, uninstall,
+  activity, autostart, character_palette, clipboard, date_pattern, desktop, focus, hardware,
+  hotkey, image, input_source, languages, open, paste, perf_cores, post, shell, text, today, tray,
+  uninstall,
 };
 #[cfg(target_os = "windows")]
 pub(crate) use imp::{attach_console, downloads};

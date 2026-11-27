@@ -8,10 +8,11 @@
 //! a recorder records and its ⊗ clears, the alert asks in its theme, Escape closes it, its action
 //! counts), the search field draws in its theme and clears from its ⊗, the emoji button (only
 //! where the OS has a picker) and the field's edit menu ask for the system's picker for the
-//! focused field, whose pick comes in at the caret; a stepped slider lands on its steps from the
-//! pointer and the keys and marks them with dots and labels; a row's footer spans its row; End in
-//! a custom list shows its last row whole; assistive technology reads each widget by its role, the
-//! ⊗ marks beside their controls; `docs/api.md` is the gallery's, and so are its pictures on the
+//! focused field, whose pick comes in at the caret; the date picker takes digits, the arrows and
+//! its stepper within its range; a stepped slider lands on its steps from the pointer and the keys
+//! and marks them with dots and labels; a row's footer spans its row; End in a custom list shows
+//! its last row whole; assistive technology reads each widget by its role, the ⊗ marks beside
+//! their controls; `docs/api.md` is the gallery's, and so are its pictures on the
 //! `assets` branch when its worktree is there. The Canvas page follows the blocks, draws its
 //! shapes and text and shows the raw pointer and keys on its page only; the pacing scene moves,
 //! then stands still.
@@ -306,6 +307,36 @@ fn the_character_palette_types_into_the_field() {
   assert!(h.character_palette(Some("🎉")), "asked from the edit menu");
   h.frame();
   assert!(h.app().message.contains('🎉'), "{}", h.app().message);
+}
+
+/// The date picker, clicked on its year, takes typed digits, the arrows and the stepper, within
+/// its range; its selected segment is on the accent in either look, and its width stays.
+#[test]
+fn the_date_picker_edits_its_segments() {
+  for (look, theme) in LOOKS {
+    let mut h = on("Date picker", look);
+    let (id, r) = node(&h, Role::TextField, "Start");
+    h.click(r.x + 12.0, r.y + r.h / 2.0);
+    h.type_text("26");
+    h.frame();
+    let year = h.rect(id.key(("segment", 0))).unwrap();
+    let on_accent = h.render().pixel(year.x + 2.0, year.y + year.h / 2.0);
+    assert!(diff(on_accent, px(theme.accent())) < 4, "{on_accent:?}");
+
+    // 26 is this century's; a step on the month, the day typed.
+    h.key(NamedKey::ArrowRight, Modifiers::empty());
+    h.click_id(id.key("increment"));
+    h.key(NamedKey::ArrowRight, Modifiers::empty());
+    h.type_text("31");
+    assert_eq!(h.app().start.to_string(), "2026-12-31");
+    h.key(NamedKey::ArrowLeft, Modifiers::empty());
+    h.key(NamedKey::ArrowLeft, Modifiers::empty());
+    h.key(NamedKey::ArrowUp, Modifiers::empty());
+    h.key(NamedKey::ArrowUp, Modifiers::empty());
+    h.frame();
+    assert_eq!(h.app().start.to_string(), "2027-12-31", "the range ends with 2027");
+    assert_eq!(h.rect(id).unwrap().w, r.w);
+  }
 }
 
 /// With no field focused there is nothing to type into: the emoji button asks for nothing.

@@ -157,6 +157,7 @@ pub mod character_palette;
 pub mod clipboard;
 mod commands;
 pub(crate) mod cpu;
+mod date;
 pub mod desktop;
 mod error;
 mod event;
@@ -192,6 +193,7 @@ mod window;
 pub use app::{App, Appearance, ColorScheme, Cx, Event, Ime, MouseButton, Phase, Waker};
 pub use bitmap::Bitmap;
 pub use commands::{CommandGroupPlacement, Commands};
+pub use date::{Date, DateFormat, DateOrder};
 pub use error::Error;
 pub use file_dialog::{FileDialog, FileDialogKind};
 pub use harness::run::Harness;
@@ -209,20 +211,22 @@ pub use ui::{
   Align, Answer, AttributedString, Attributes, Axes, Axis, Behavior, BorderedButtonStyle,
   BorderedProminentButtonStyle, BorderlessButtonStyle, Button, ButtonConfiguration, ButtonStyle,
   ButtonToggleStyle, CheckboxToggleStyle, Click, Clip, Content, ContentMode, ControlBorder,
-  ControlSize, CoordinateSpace, Cursor, Dialog, DialogBehavior, Dim, Ease, EditMenu, Editing,
-  Enabled, EnvironmentValue, FieldBehavior, FieldKind, FieldStyle, Float, Focus, FocusDirection,
-  FocusRing, FormRow, FormStyle, FrameStats, Glass, HelpConfiguration, HelpStyle, Icon, IconPaint,
-  Id, ImageSource, InlinePickerStyle, InsetGroupedListStyle, InsetListStyle, IntoText, LinePattern,
-  LinearSliderStyle, List, ListBehavior, ListConfiguration, ListLayout, ListResponse,
-  ListRowConfiguration, ListRows, ListStyle, MenuPickerStyle, MenuPlacement, NativeMenu, Picker,
-  PickerConfiguration, PickerStyle, PlainButtonStyle, PlainHelpStyle, PlainListStyle,
-  PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle, Press, Response,
-  RoundedBorderTextFieldStyle, Row, Scroll, ScrollBar, ScrollBehavior, ScrollerKnob, Section,
-  SectionHeader, SegmentedPickerStyle, Selectable, Selection, Shadow, Sizes, Slider,
-  SliderConfiguration, SliderStyle, Split, SplitBehavior, Style, SwitchSize, SwitchToggleStyle,
-  Tabs, Tag, TextField, TextFieldConfiguration, TextFieldStyle, TextInput, TextLines, TextStyle,
-  Theme, ToggleConfiguration, ToggleStyle, Tone, ToolbarItemPlacement, TooltipHelpStyle,
-  Transition, TruncationMode, TypeSelect, Ui, UnitPoint, grow, pct, px, rigid,
+  ControlSize, CoordinateSpace, Cursor, DatePicker, DatePickerBehavior, DatePickerConfiguration,
+  DatePickerStyle, DateSegment, Dialog, DialogBehavior, Dim, Ease, EditMenu, Editing, Enabled,
+  EnvironmentValue, FieldBehavior, FieldDatePickerStyle, FieldKind, FieldStyle, Float, Focus,
+  FocusDirection, FocusRing, FormRow, FormStyle, FrameStats, Glass, HelpConfiguration, HelpStyle,
+  Icon, IconPaint, Id, ImageSource, InlinePickerStyle, InsetGroupedListStyle, InsetListStyle,
+  IntoText, LinePattern, LinearSliderStyle, List, ListBehavior, ListConfiguration, ListLayout,
+  ListResponse, ListRowConfiguration, ListRows, ListStyle, MenuPickerStyle, MenuPlacement,
+  NativeMenu, Picker, PickerConfiguration, PickerStyle, PlainButtonStyle, PlainDatePickerStyle,
+  PlainHelpStyle, PlainListStyle, PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle, Press,
+  Response, RoundedBorderTextFieldStyle, Row, Scroll, ScrollBar, ScrollBehavior, ScrollerKnob,
+  Section, SectionHeader, SegmentedPickerStyle, Selectable, Selection, Shadow, Sizes, Slider,
+  SliderConfiguration, SliderStyle, Split, SplitBehavior, StepperFieldDatePickerStyle, Style,
+  SwitchSize, SwitchToggleStyle, Tabs, Tag, TextField, TextFieldConfiguration, TextFieldStyle,
+  TextInput, TextLines, TextStyle, Theme, ToggleConfiguration, ToggleStyle, Tone,
+  ToolbarItemPlacement, TooltipHelpStyle, Transition, TruncationMode, TypeSelect, Ui, UnitPoint,
+  grow, pct, px, rigid,
 };
 pub use window::{Config, TitleBar, WindowToolbarStyle};
 

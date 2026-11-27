@@ -93,6 +93,8 @@ pub const BLOCKS: &[Block] = &[
   b("Controls", "Multi-line field", "TextField(\"Notes\", text: $notes, axis: .vertical)", "TextField::new(&mut self.notes, \"Notes\").axis(Axis::Vertical).show(ui)"),
   b("Controls", "Secure field", "SecureField(\"Password\", text: $key)", "ui.secure_field(&mut self.key, \"Password\")"),
   b("Controls", "Search field", ".searchable(text: $query)", "ui.search_field(&mut self.query, \"Search\")"),
+  b("Controls", "Date picker", "DatePicker(\"Start\", selection: $start, in: ...end, displayedComponents: .date)", "DatePicker::new(&mut self.start).range(..=END).show(ui)"),
+  b("Controls", "Date picker style", "DatePicker(…).datePickerStyle(.field)", "ui.date_picker_style(&FieldDatePickerStyle).date_picker(&mut self.start)"),
   b("Controls", "Character palette", "NSApp.orderFrontCharacterPalette(nil), Edit ▸ Emoji & Symbols (AppKit; SwiftUI has none)", "if character_palette::available().is_ok() && ui.icon_button(Icon::SMILE).clicked { ui.character_palette() }; Emoji & Symbols in a field's edit menu"),
   b("Controls", "Text field style", "VStack { TextField(\"Name\", text: $name); TextField(\"City\", text: $city) }.textFieldStyle(.plain)", "ui.text_field_style(&PlainTextFieldStyle).col(style, |ui| { ui.text_field(&mut self.name, \"Name\"); ui.text_field(&mut self.city, \"City\"); }); ui.text_field(&mut self.email, \"E-mail\")"),
   b("Controls", "Custom text field style", "struct Underline: TextFieldStyle { func _body(configuration: TextField<_Label>) -> some View { configuration.padding(…).overlay(alignment: .bottom) { … } } }", "impl TextFieldStyle for Underline { fn make_body(&self, ui: &mut Ui, mut c: TextFieldConfiguration) { ui.row(style.scroll(c.axis().into()), |ui| c.text(ui, &fs)); } } ui.text_field_style(&Underline).text_field(&mut self.city, \"City\")"),
@@ -292,18 +294,18 @@ mod pages {
     }
   }
   mod controls {
-    //! The control blocks, built live: buttons, toggles, sliders, pickers and text fields in the
-    //! system's styles and in the gallery's own, progress, a badge, a hotkey recorder, a control
-    //! drawn on a button's behaviour and help marks.
+    //! The control blocks, built live: buttons, toggles, sliders, pickers, text fields and dates in
+    //! the system's styles and in the gallery's own, progress, a badge, a hotkey recorder, a
+    //! control drawn on a button's behaviour and help marks.
 
     use nimbo::{
       Align, Axis, BorderedProminentButtonStyle, BorderlessButtonStyle, Button,
-      ButtonConfiguration, ButtonRole, ButtonStyle, ButtonToggleStyle, CheckboxToggleStyle,
-      FieldStyle, Icon, InlinePickerStyle, Picker, PickerConfiguration, PickerStyle,
-      PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle, Quad, Rect, SegmentedPickerStyle,
-      Slider, SliderConfiguration, SliderStyle, Style, Tag, TextField, TextFieldConfiguration,
-      TextFieldStyle, TextStyle, ToggleConfiguration, ToggleStyle, Tone, Ui, alpha,
-      character_palette, grow, mix, px,
+      ButtonConfiguration, ButtonRole, ButtonStyle, ButtonToggleStyle, CheckboxToggleStyle, Date,
+      DatePicker, FieldDatePickerStyle, FieldStyle, Icon, InlinePickerStyle, Picker,
+      PickerConfiguration, PickerStyle, PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle,
+      Quad, Rect, SegmentedPickerStyle, Slider, SliderConfiguration, SliderStyle, Style, Tag,
+      TextField, TextFieldConfiguration, TextFieldStyle, TextStyle, ToggleConfiguration,
+      ToggleStyle, Tone, Ui, alpha, character_palette, grow, mix, px,
     };
 
     use super::{Gallery, SIZES, Shown, line};
@@ -535,6 +537,18 @@ mod pages {
           }),
           "Search field" => Self::variants(ui, Shown::Plain, |ui| {
             ui.col(Style::new().w(px(200.0)), |ui| _ = ui.search_field(&mut self.query, "Search"));
+          }),
+
+          // Day, month and year in the user's order in a window (ISO in the harness); typed, or
+          // stepped by the arrows and the stepper, up to the end of next year.
+          "Date picker" => Self::variants(ui, Shown::Plain, |ui| {
+            let end = Date::new(2027, 12, 31).unwrap();
+            DatePicker::new(&mut self.start).range(..=end).show(ui.a11y_label("Start"));
+          }),
+          "Date picker style" => Self::variants(ui, Shown::Plain, |ui| {
+            ui.date_picker_style(&FieldDatePickerStyle)
+              .a11y_label("Start")
+              .date_picker(&mut self.start);
           }),
 
           // A message field and its emoji button where the OS has a picker; a button takes
@@ -1468,8 +1482,8 @@ pub mod canvas {
 }
 
 use nimbo::{
-  App, Bitmap, CMD, Config, Cx, Event, Font, HelpStyle, Hotkey, Id, Key, List, Selection, Style,
-  Tag, TextStyle, Ui, grow, px,
+  App, Bitmap, CMD, Config, Cx, Date, Event, Font, HelpStyle, Hotkey, Id, Key, List, Selection,
+  Style, Tag, TextStyle, Ui, grow, px,
 };
 
 pub use self::blocks::{BLOCKS, Block, GROUPS};
@@ -1519,6 +1533,8 @@ pub struct Gallery {
   pub query: String,
   /// The character palette's field.
   pub message: String,
+  /// The date pickers' date.
+  pub start: Date,
   /// The text field blocks' others, empty at first.
   pub notes: String,
   pub city: String,
@@ -1590,6 +1606,7 @@ impl Default for Gallery {
       key: "secret".into(),
       query: "Switches".into(),
       message: "Lunch at noon?".into(),
+      start: Date::new(2026, 11, 27).unwrap(),
       notes: String::new(),
       city: String::new(),
       email: String::new(),

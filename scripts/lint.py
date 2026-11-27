@@ -744,7 +744,7 @@ def tangles(top: Path, since: str | None, scope: dict | None, scans: "Scans") ->
 LAYERS = ("base", "text", "render", "service", "ui", "headless", "styled", "shell", "harness")
 LAYERS += ("root",)
 SERVICES = (
-    *("activity", "autostart", "character_palette", "desktop", "file_dialog", "focus"),
+    *("activity", "autostart", "character_palette", "date", "desktop", "file_dialog", "focus"),
     *("hardware", "hotkey"),
     *("input_source", "instance", "open", "paste", "paths", "permissions", "runloop", "system"),
     "uninstall",

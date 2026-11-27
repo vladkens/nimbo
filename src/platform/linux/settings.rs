@@ -7,7 +7,8 @@
 //! as of 2026-10). Without a portal or a preference, GtkSettings: its dark preference (Plasma
 //! sets it with its dark colours, its theme staying `Breeze`) or a dark theme's name
 //! (`Adwaita-dark`, `Breeze-Dark`, from XSETTINGS or GSettings), followed as they change. The
-//! user's languages are gettext's variables.
+//! user's languages are gettext's variables; the short date's pattern and today's date are the C
+//! library's, in the locale GTK set up (`setlocale(LC_ALL, "")` as it starts).
 //!
 //! The text scale ([zoom]) is GtkSettings' too, followed the same way.
 
@@ -73,6 +74,44 @@ pub fn languages() -> Vec<String> {
   let var = |k| std::env::var(k).ok().filter(|v: &String| !v.is_empty());
   let locale = ["LC_ALL", "LC_MESSAGES", "LANG"].into_iter().find_map(var);
   tags(&var("LANGUAGE").unwrap_or_default(), locale.as_deref())
+}
+
+/// The user's short date as a `strftime` pattern (`%d.%m.%Y`, `%m/%d/%y`): the C library's
+/// `nl_langinfo(D_FMT)` for `LC_TIME`; `None` in the `C` locale (`%m/%d/%y`, which is no one's).
+pub fn date_pattern() -> Option<String> {
+  // glibc's and musl's `D_FMT`, <langinfo.h>.
+  const D_FMT: c_int = 0x20029;
+  unsafe extern "C" {
+    fn nl_langinfo(item: c_int) -> *const c_char;
+  }
+
+  // SAFETY: a string the C library keeps, read before another call can change it.
+  let p = unsafe { nl_langinfo(D_FMT) };
+  let s = (!p.is_null()).then(|| unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned())?;
+  (s != "%m/%d/%y").then_some(s)
+}
+
+/// Today in the user's time zone as (year, month, day): the C library's `localtime_r`.
+pub fn today() -> (u32, u32, u32) {
+  /// <time.h>'s `struct tm`.
+  #[repr(C)]
+  struct Tm {
+    sec_to_isdst: [c_int; 9],
+    gmtoff: std::ffi::c_long,
+    zone: *const c_char,
+  }
+
+  unsafe extern "C" {
+    fn time(t: *mut i64) -> i64;
+    fn localtime_r(t: *const i64, tm: *mut Tm) -> *mut Tm;
+  }
+
+  let mut tm = Tm { sec_to_isdst: [0; 9], gmtoff: 0, zone: null() };
+  // SAFETY: a null for `time`'s output, and a `struct tm` to fill.
+  let now = unsafe { time(null_mut()) };
+  unsafe { localtime_r(&now, &mut tm) };
+  let [_, _, _, day, month, year, ..] = tm.sec_to_isdst;
+  ((year + 1900) as u32, (month + 1) as u32, day as u32)
 }
 
 /// The tags of a `LANGUAGE` list, or of the locale's name without one; none when the locale is

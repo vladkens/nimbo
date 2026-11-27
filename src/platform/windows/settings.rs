@@ -10,14 +10,19 @@
 //! gets a light one otherwise:
 //! [Support Dark and Light themes in Win32 apps](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/ui/apply-windows-themes),
 //! [DWMWINDOWATTRIBUTE](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/ne-dwmapi-dwmwindowattribute)
-//! (as of 2026-10). The user's languages come from `GetUserPreferredUILanguages`.
+//! (as of 2026-10). The user's languages come from `GetUserPreferredUILanguages`, the short date's
+//! pattern from `GetLocaleInfoEx` and today from `GetLocalTime`.
 
-use std::ptr::null_mut;
+use std::mem::zeroed;
+use std::ptr::{null, null_mut};
 
-use windows_sys::Win32::Foundation::{HWND, LPARAM};
-use windows_sys::Win32::Globalization::{GetUserPreferredUILanguages, MUI_LANGUAGE_NAME};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, SYSTEMTIME};
+use windows_sys::Win32::Globalization::{
+  GetLocaleInfoEx, GetUserPreferredUILanguages, LOCALE_SSHORTDATE, MUI_LANGUAGE_NAME,
+};
 use windows_sys::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
 use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
+use windows_sys::Win32::System::SystemInformation::GetLocalTime;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
   WM_DWMCOLORIZATIONCOLORCHANGED, WM_SETTINGCHANGE,
 };
@@ -57,6 +62,24 @@ pub fn languages() -> Vec<String> {
   }
 
   buf.split(|&c| c == 0).filter(|s| !s.is_empty()).map(String::from_utf16_lossy).collect()
+}
+
+/// The user's short date as a pattern (`dd.MM.yyyy`, `M/d/yyyy`): the user's locale's
+/// `LOCALE_SSHORTDATE`, which Settings › Time & language › Region › Regional format sets.
+pub fn date_pattern() -> Option<String> {
+  let mut buf = [0u16; 80];
+  // SAFETY: the user's default locale (a null name), into `buf`, its length in units.
+  let n = unsafe { GetLocaleInfoEx(null(), LOCALE_SSHORTDATE, buf.as_mut_ptr(), buf.len() as i32) };
+  // The length counts the null at the end.
+  (n > 1).then(|| String::from_utf16_lossy(&buf[..n as usize - 1]))
+}
+
+/// Today in the user's time zone as (year, month, day): `GetLocalTime`.
+pub fn today() -> (u32, u32, u32) {
+  // SAFETY: a SYSTEMTIME to fill, all integers.
+  let mut t: SYSTEMTIME = unsafe { zeroed() };
+  unsafe { GetLocalTime(&mut t) };
+  (t.wYear.into(), t.wMonth.into(), t.wDay.into())
 }
 
 /// The appearance from `AppsUseLightTheme` (0 dark, else light; none, as before 1809, light) and

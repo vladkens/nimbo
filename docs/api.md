@@ -322,6 +322,22 @@ nimbo: `ui.search_field(&mut self.query, "Search")`
 
 ![Search field](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/search-field.png)
 
+### Date picker
+
+SwiftUI: `DatePicker("Start", selection: $start, in: ...end, displayedComponents: .date)`
+
+nimbo: `DatePicker::new(&mut self.start).range(..=END).show(ui)`
+
+![Date picker](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/date-picker.png)
+
+### Date picker style
+
+SwiftUI: `DatePicker(…).datePickerStyle(.field)`
+
+nimbo: `ui.date_picker_style(&FieldDatePickerStyle).date_picker(&mut self.start)`
+
+![Date picker style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/date-picker-style.png)
+
 ### Character palette
 
 SwiftUI: `NSApp.orderFrontCharacterPalette(nil), Edit ▸ Emoji & Symbols (AppKit; SwiftUI has none)`

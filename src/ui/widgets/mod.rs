@@ -2,10 +2,10 @@
 
 //! Widgets drawn from the theme ([Ui::theme]): label, link, button styles (an [Icon] too), ⓘ and
 //! "?" buttons, text field, search field and selectable text, check box, switch, slider style,
-//! segmented picker style, progress bar and spinner, badge, tooltip, the hotkey recorder, and
-//! images from pixels; each at the control size ([Ui::control_size]). Each control is its behaviour
-//! (`*_behavior`, as [super::behavior] lists) plus drawing from the theme: an app that wants its
-//! own look draws over the same behaviour.
+//! segmented picker style, date picker styles, progress bar and spinner, badge, tooltip, the hotkey
+//! recorder, and images from pixels; each at the control size ([Ui::control_size]). Each control is
+//! its behaviour (`*_behavior`, as [super::behavior] lists) plus drawing from the theme: an app
+//! that wants its own look draws over the same behaviour.
 //!
 //! ```ignore
 //! if ui.button("Refresh").clicked { self.refresh() }
@@ -31,6 +31,7 @@
 mod badge;
 mod button;
 mod checkbox;
+mod date_picker;
 mod divider;
 mod field;
 pub(crate) mod hotkey_recorder;
@@ -46,6 +47,7 @@ mod tooltip;
 pub use button::{BorderedButtonStyle, BorderedProminentButtonStyle, BorderlessButtonStyle};
 pub(crate) use button::{ButtonLook, Face, MarkShift, Variant, draw, look};
 pub use checkbox::CheckboxToggleStyle;
+pub use date_picker::{FieldDatePickerStyle, StepperFieldDatePickerStyle};
 pub use field::RoundedBorderTextFieldStyle;
 pub use segmented::SegmentedPickerStyle;
 pub use slider::LinearSliderStyle;

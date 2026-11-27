@@ -33,7 +33,7 @@ pub use app::{
   activity, attach_console, autostart, desktop, downloads, focus, hardware, hotkey, input_source,
   open, paste, post, shell, tray, uninstall,
 };
-pub use settings::{appearance, languages};
+pub use settings::{appearance, date_pattern, languages, today};
 use windows_sys::Win32::Foundation::{
   CloseHandle, FILETIME, HANDLE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
 };

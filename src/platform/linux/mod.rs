@@ -45,7 +45,7 @@ pub use self::app::{
 };
 use self::dl::{Lib, fns};
 use self::input::Input;
-pub use self::settings::{appearance, languages};
+pub use self::settings::{appearance, date_pattern, languages, today};
 use super::points;
 use crate::app::{App, Clipboard, Clock, Event, Runtime};
 use crate::clipboard::Sealed;
