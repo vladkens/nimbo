@@ -165,6 +165,29 @@ ui.default_scroll_anchor(UnitPoint::BOTTOM).scroll_area(area, |ui| {
 
 ![Scroll anchor](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/scroll-anchor.png)
 
+### Content margins
+
+SwiftUI: `ScrollView { … }.contentMargins(.top, 28).contentMargins(.bottom, 8)`
+
+```rust
+let t = ui.theme();
+let area = Style::new().w(px(260.0)).h(px(110.0)).pad_xy(8.0, 0.0);
+let area = area.border(1.0, t.line()).bg(t.panel());
+let ui = ui.content_margins([28.0, 0.0, 8.0, 0.0], ContentMarginPlacement::Automatic);
+ui.scroll_area(area, |ui| {
+  for i in 1..=8 {
+    ui.text(format_args!("Line {i}"), t.label());
+  }
+
+  let head = Style::new().w(pct(100.0)).h(px(28.0)).pad_xy(8.0, 0.0);
+  let head =
+    head.align(Align::Start, Align::Center).border(1.0, t.line()).bg(t.raised());
+  ui.float(Float::parent()).row(head, |ui| ui.text("Header", t.section()));
+});
+```
+
+![Content margins](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/content-margins.png)
+
 ### Overlay
 
 SwiftUI: `.overlay(alignment: .topTrailing) { … }`

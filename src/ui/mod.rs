@@ -39,15 +39,16 @@ pub(crate) use attributed::Run;
 pub use attributed::{AttributedString, Attributes, IntoText, Selectable};
 pub(crate) use behavior::DrawnEditMenu;
 pub use behavior::{
-  Behavior, Button, ButtonConfiguration, ButtonStyle, Content, DatePicker, DatePickerBehavior,
-  DatePickerConfiguration, DatePickerStyle, DateSegment, DialogBehavior, EditMenu, Editing,
-  FieldBehavior, FieldKind, FieldStyle, HelpConfiguration, HelpStyle, InlinePickerStyle, List,
-  ListBehavior, ListConfiguration, ListLayout, ListResponse, ListRowConfiguration, ListRows,
-  ListStyle, MenuPlacement, Picker, PickerConfiguration, PickerStyle, PlainButtonStyle,
-  PlainDatePickerStyle, PlainHelpStyle, PlainListStyle, PlainSliderStyle, PlainTextFieldStyle,
-  PlainToggleStyle, Row, ScrollBar, ScrollBehavior, ScrollerKnob, SectionHeader, Selection, Slider,
-  SliderConfiguration, SliderStyle, SplitBehavior, Tag, TextField, TextFieldConfiguration,
-  TextFieldStyle, ToggleConfiguration, ToggleStyle, TypeSelect,
+  Behavior, Button, ButtonConfiguration, ButtonStyle, Content, ContentMarginPlacement, DatePicker,
+  DatePickerBehavior, DatePickerConfiguration, DatePickerStyle, DateSegment, DialogBehavior,
+  EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, HelpConfiguration, HelpStyle,
+  InlinePickerStyle, List, ListBehavior, ListConfiguration, ListLayout, ListResponse,
+  ListRowConfiguration, ListRows, ListStyle, MenuPlacement, Picker, PickerConfiguration,
+  PickerStyle, PlainButtonStyle, PlainDatePickerStyle, PlainHelpStyle, PlainListStyle,
+  PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle, Row, ScrollBar, ScrollBehavior,
+  ScrollerKnob, SectionHeader, Selection, Slider, SliderConfiguration, SliderStyle, SplitBehavior,
+  Tag, TextField, TextFieldConfiguration, TextFieldStyle, ToggleConfiguration, ToggleStyle,
+  TypeSelect,
 };
 pub use containers::{
   InsetGroupedListStyle, InsetListStyle, MenuPickerStyle, Split, Tabs, ToolbarItemPlacement,

@@ -56,6 +56,7 @@ pub const BLOCKS: &[Block] = &[
   b("Layout", "Divider", "HStack { Text(\"Cut\"); Divider(); Text(\"Copy\") }; VStack { …; Divider(); … }"),
   b("Layout", "Scroll view", "ScrollView(.vertical) { … }"),
   b("Layout", "Scroll anchor", "ScrollView { LazyVStack { … } }.defaultScrollAnchor(.bottom)"),
+  b("Layout", "Content margins", "ScrollView { … }.contentMargins(.top, 28).contentMargins(.bottom, 8)"),
   b("Layout", "Overlay", ".overlay(alignment: .topTrailing) { … }"),
   b("Text", "Text", "Text(\"Title\").font(.headline).foregroundStyle(.secondary)"),
   b("Text", "Localized text", "Text(\"Keep the history\"); String(localized: \"\\(name) is not on disk\")"),
@@ -949,9 +950,11 @@ mod pages {
   }
   mod layout {
     //! The layout blocks, built live: a row and a column in their alignments, a grid, spacers,
-    //! dividers, a scroll view, a scroll anchor and an overlay.
+    //! dividers, a scroll view, its anchor and margins, and an overlay.
 
-    use nimbo::{Align, Axes, Float, Style, TextStyle, Ui, UnitPoint, grow, px};
+    use nimbo::{
+      Align, Axes, ContentMarginPlacement, Float, Style, TextStyle, Ui, UnitPoint, grow, pct, px,
+    };
 
     use super::{Gallery, Shown};
 
@@ -1080,6 +1083,23 @@ mod pages {
                   ui.row(bubble, |ui| ui.text(format_args!("Message {i}"), text));
                 });
               }
+            });
+          }),
+
+          "Content margins" => Self::variants(ui, Shown::Alone, |ui| {
+            let t = ui.theme();
+            let area = Style::new().w(px(260.0)).h(px(110.0)).pad_xy(8.0, 0.0);
+            let area = area.border(1.0, t.line()).bg(t.panel());
+            let ui = ui.content_margins([28.0, 0.0, 8.0, 0.0], ContentMarginPlacement::Automatic);
+            ui.scroll_area(area, |ui| {
+              for i in 1..=8 {
+                ui.text(format_args!("Line {i}"), t.label());
+              }
+
+              let head = Style::new().w(pct(100.0)).h(px(28.0)).pad_xy(8.0, 0.0);
+              let head =
+                head.align(Align::Start, Align::Center).border(1.0, t.line()).bg(t.raised());
+              ui.float(Float::parent()).row(head, |ui| ui.text("Header", t.section()));
             });
           }),
 
