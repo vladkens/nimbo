@@ -105,6 +105,11 @@ impl ScrollState {
     })
   }
 
+  /// Whether the next layout puts the vertical offset where the anchor says ([Self::pin]).
+  pub fn held(&self) -> bool {
+    self.pin()[1].is_some()
+  }
+
   /// After a layout that left the offset at `off` of at most `max`, from `pin`: it sticks at
   /// the end (within a pixel's snap) pinned or moved down there, not clamped there as the
   /// content shrank under it (a lazy column's guesses replaced, which moves it back itself).

@@ -618,8 +618,7 @@ impl<'a> Ui<'a> {
 
   /// The size of `s` in `style` wrapped at `width`, as the layout breaks and lays it out: its
   /// widest line, to fit a box to its wrapped text (a tooltip), as the layout sizes one by the
-  /// text's width before it wraps; and its lines' height, for items of known heights
-  /// ([Ui::virtual_col]) that are paragraphs. Zero in a [Ui] the runtime didn't build.
+  /// text's width before it wraps; and its lines' height. Zero in a [Ui] the runtime didn't build.
   pub fn measure_wrapped(&mut self, s: &str, style: TextStyle, width: f32) -> Size {
     let Some(text) = self.text.as_mut() else { return Size::default() };
     let mut m = Sys { text, images: &self.images, scale: 1.0 };

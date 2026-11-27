@@ -540,7 +540,7 @@ nimbo: `ui.menu("Actions", |ui| { ui.menu_item("Copy"); })`
 
 SwiftUI: `LazyVStack { ForEach(…) }`
 
-nimbo: `ui.virtual_col(heights, |i| i, |ui, i| { … })`
+nimbo: `ui.lazy_col(n, |i| i, |ui, i| { … })`
 
 ![Lazy column](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/lazy-column.png)
 

@@ -157,7 +157,7 @@ pub(crate) struct Node {
   /// Width and height of the content (children, gaps and padding, or text lines); more than
   /// the box when it overflows.
   pub content: [f64; 2],
-  size: [f64; 2],
+  pub(super) size: [f64; 2],
   /// The least the box can shrink to: the content's minimum (the longest word of a text).
   min: [f64; 2],
   pub(super) pos: [f64; 2],
