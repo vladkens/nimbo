@@ -15,6 +15,8 @@ The owner ran #123's examples in real windows on 2026-11-27 and found them broke
 - [x] Styled text: runs of different colours and weights in one paragraph (SwiftUI `AttributedString` / `Text` concatenation), enough for syntax-coloured code in the gallery and a coloured diff in custom-look
 - [x] Emoji: the system's emoji and symbols palette (macOS `orderFrontCharacterPalette:`, Windows Win+. panel) instead of a hand-made menu
 - [x] Dates: a date input (SwiftUI `DatePicker`) so the flight booker isn't free text
+- [x] pr-gate's review of the branch: a lazy column's heights after a reorder inside, the date picker's two digits and a mark after a full segment, colour runs measured as one but drawn apart (kerning), a run's edges in a ligature and right to left, spaces in a wider run's font, grounds culled by ink, a cut line's ellipsis ink, runs over a text the editor changed (a panic)
+- [ ] Styled text left for later: font runs right to left are placed in logical order (no bidi reordering, as before); a glyph over two colour runs (a ligature, Arabic lam-alef) takes its first one's colour (no clip per glyph)
 
 - [x] Messenger runs its view 3 times every frame: nodes the view reads aren't found in the previous frame (near the toolbar). Cause: the toolbar centred its title on the width the last frame snapped to pixels; half a point off snapped it to the other width, back and forth, so its `settle` re-ran the view to the cap each frame. The title's offset is on whole points now
 - [x] `lazy_col` has no spacing (SwiftUI `LazyVStack(spacing:)`); messages pad themselves: it takes a `Style`, its gap the spacing
