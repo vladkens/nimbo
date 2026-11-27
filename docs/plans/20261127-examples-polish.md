@@ -17,7 +17,7 @@ The owner ran #123's examples in real windows on 2026-11-27 and found them broke
 - [x] Dates: a date input (SwiftUI `DatePicker`) so the flight booker isn't free text
 
 - [x] Messenger runs its view 3 times every frame: nodes the view reads aren't found in the previous frame (near the toolbar). Cause: the toolbar centred its title on the width the last frame snapped to pixels; half a point off snapped it to the other width, back and forth, so its `settle` re-ran the view to the cap each frame. The title's offset is on whole points now
-- [ ] `lazy_col` has no spacing (SwiftUI `LazyVStack(spacing:)`); messages pad themselves
+- [x] `lazy_col` has no spacing (SwiftUI `LazyVStack(spacing:)`); messages pad themselves: it takes a `Style`, its gap the spacing
 - [x] Date picker: the separators are spaced (`2026 - 11 - 27`); AppKit's are tight, its digits tabular
 
 - [x] Checked on a macOS 27 VM (trivm): the Dock brings back a minimized counter; the emoji picker opens at the caret and its pick lands there; a click elsewhere clears the gallery's selected code
@@ -29,12 +29,12 @@ The owner ran #123's examples in real windows on 2026-11-27 and found them broke
 - [x] Stacks: HStack and VStack as two blocks, each showing its own thing
 - [x] Lazy column: the picture cuts a row in half; Scroll anchor: the picture doesn't show what anchors
 - [x] Spacer and Divider: show what they do (a spacer pushing items apart, dividers between items in a row and a column)
-- [ ] Disabled variants that don't dim: help marks, the slider's value, a section's header and footer, selectable text, the toolbar's title, the custom picker's chip (dark), tabs, split
-- [ ] Small switch as large as the regular one; small badges not capsules
-- [ ] Tabs and Split blocks look crude; the accessibility pair's slider spans the page
-- [ ] Identity, Focus and pointer, Frame request: swatches that explain nothing; Scroll indicators: the picture shows no knobs
-- [ ] Menu bar block isn't live: the gallery sets no menu bar
-- [ ] Styled text's sample in the theme's colours, not the code boxes' palette
+- [x] Disabled variants that don't dim: help marks, the slider's value, a section's header and footer, selectable text, the toolbar's title, the custom picker's chip (dark), tabs, split. The ⓘ now dims with its row and still shows its tip, reversing the earlier "stays as dark" choice (`tests/settings.rs`)
+- [x] Small switch as large as the regular one; small badges not capsules: `Sizes::switch_small`, 30 × 13, AppKit's mini
+- [x] Tabs and Split blocks look crude; the accessibility pair's slider spans the page: tabs are AppKit's tab view (segments on a box's top edge; `Sizes::tab_h` is gone), splits framed with their shares, the panes' grounds rounded with the frame
+- [x] Identity, Focus and pointer, Frame request: swatches that explain nothing; Scroll indicators: the picture shows no knobs: tiles that keep their click counts through a rotation, labelled focus tiles, a wave and its time; each shot staged by input (`stage`)
+- [x] Menu bar block isn't live: the gallery sets no menu bar: Track ▸ Play ⌘P and File ▸ New Track ⌘N, counted in the block; checked on the VM by menu and by key
+- [x] Styled text's sample in the theme's colours, not the code boxes' palette
 - [ ] The `assets` branch serves main too: `make api-shots` deletes and redraws pictures main's `docs/api.md` still shows (`stacks.png`, `shortcut-recorder.png` kept by hand; `grid.png` and others now show the new blocks)
 
 ## 7GUIs
@@ -55,6 +55,7 @@ The owner ran #123's examples in real windows on 2026-11-27 and found them broke
 - [x] A copy of Sublime Merge's look: a small git client (commit list, a coloured diff, a file list), dense and dark, its own palette and styles
 
 - [x] Reviewed on shots: text on a selected row reads, a search selects its first match and gives the old one back, the graph column keeps its place
+- [x] Checked on the VM: the system's title bar showed above its own tabs; the window is unified now, the tabs right of the traffic lights, the empty band moving the window (a double click zooms it)
 - [ ] Library gaps it worked around: `Split` and the search field have no style; a field style has no slot beside the text; nothing scrolls an item to the top (SwiftUI `scrollTo(id, anchor: .top)`); menus have no style; a custom-icon button has no accessible name; a disclosure reads as a check box
 
 ## Messenger
@@ -69,4 +70,5 @@ The owner ran #123's examples in real windows on 2026-11-27 and found them broke
 
 ## Other
 
+- [ ] A disabled segmented picker keeps a dimmed accent while the gallery's custom chips go grey; one rule for both is open
 - [ ] `cargo` warns that `package.homepage` is redundant: from the main checkout's Cargo.toml (#122 removes it); nothing to do once #122 is merged
