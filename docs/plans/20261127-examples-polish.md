@@ -16,7 +16,7 @@ The owner ran #123's examples in real windows on 2026-11-27 and found them broke
 - [x] Emoji: the system's emoji and symbols palette (macOS `orderFrontCharacterPalette:`, Windows Win+. panel) instead of a hand-made menu
 - [x] Dates: a date input (SwiftUI `DatePicker`) so the flight booker isn't free text
 
-- [ ] Messenger runs its view 3 times every frame: nodes the view reads aren't found in the previous frame (near the toolbar)
+- [x] Messenger runs its view 3 times every frame: nodes the view reads aren't found in the previous frame (near the toolbar). Cause: the toolbar centred its title on the width the last frame snapped to pixels; half a point off snapped it to the other width, back and forth, so its `settle` re-ran the view to the cap each frame. The title's offset is on whole points now
 - [ ] `lazy_col` has no spacing (SwiftUI `LazyVStack(spacing:)`); messages pad themselves
 - [x] Date picker: the separators are spaced (`2026 - 11 - 27`); AppKit's are tight, its digits tabular
 
