@@ -3,13 +3,14 @@
 //! Tests of `examples/messenger.rs` through the harness, the bots answering at once on their
 //! thread: Return sends and the bot answers ("typing…" meanwhile), Shift-Return breaks the line
 //! and the composer grows; a chat not open counts its answers unread, a muted one doesn't; the
-//! archive's thousands of messages build lazily and stay at the bottom until scrolled up; the
-//! search opens a chat at the message found; a message's menu copies and deletes; emoji, IME,
-//! files from the open panel and dropped on the chat (lit while dragged over) go into the
-//! composer; the profile exports the chat through the save panel and clears it after asking;
-//! the window's keys; the sidebar's toggle in macOS's title bar, its slide and the bar that
-//! moves the window; a closed window's chats for the next. The tray's and the menu bar's menus,
-//! the settings window, Russian and what assistive technology reads.
+//! archive's thousands of messages open at once, build lazily, scroll with the wheel and the
+//! trackpad and stay at the bottom until scrolled up; the search opens a chat at the message
+//! found; a message's menu copies and deletes; emoji, IME, files from the open panel and
+//! dropped on the chat (lit while dragged over) go into the composer; the profile exports the chat
+//! through the save panel and clears it after asking; the window's keys; the sidebar's toggle in
+//! macOS's title bar, its slide and the bar that moves the window; a closed window's chats for the
+//! next. The tray's and the menu bar's menus, the settings window, Russian and what assistive
+//! technology reads.
 
 #[path = "../examples/messenger.rs"]
 #[expect(dead_code, reason = "its main and what this file doesn't use")]
@@ -215,6 +216,69 @@ fn the_archive_builds_lazily_at_its_bottom() {
   let id = Id::of(BUBBLE).key(last(&h, 3).id);
   let (r, a) = (rect(&h, id), rect(&h, area(&h)));
   assert!(r.y + r.h <= a.y + a.h + 0.5 && r.y >= a.y, "the last message shows");
+}
+
+/// The archive's 3,000 messages open about as fast as a chat of a few, measuring only those it
+/// shows (all of them took over a second here, against 4 ms): relative, as tests in parallel
+/// slow both alike, after a first window loads the fonts, which is slow the first time.
+#[test]
+fn the_archive_opens_as_fast_as_a_short_chat() {
+  let mut warm = messenger();
+  warm.app_mut().open_chat(3);
+  warm.frame();
+
+  let mut h = messenger();
+  let mut open = |c: usize| {
+    let t = std::time::Instant::now();
+    h.app_mut().open_chat(c);
+    h.frame();
+    t.elapsed()
+  };
+  let (short, archive) = (open(2), open(3));
+  assert!(archive < short * 5 + Duration::from_millis(30), "{archive:?} against {short:?}");
+  let s = h.scroll(area(&h)).unwrap();
+  assert!(s.offset.y >= s.max().y - 1.0, "at the bottom: {s:?}");
+}
+
+/// A mouse wheel's notch: the chat glides up by it.
+fn wheel(h: &mut H, dy: f32) {
+  let (x, y) = mid(rect(h, area(h)));
+  let (pos, delta, mods) = (Point::new(x, y), Point::new(0.0, dy), Modifiers::empty());
+  let (phase, momentum) = (Phase::None, Phase::None);
+  h.event(Event::Scroll { pos, delta, precise: false, phase, momentum, mods });
+  h.wait(Duration::from_millis(500));
+}
+
+/// From its bottom, a wheel's notch and a trackpad's slow start in steps of 2 points each
+/// scroll the chat up, the last message moving down by just that; a message coming then
+/// leaves it there.
+#[test]
+fn the_wheel_and_the_trackpad_scroll_the_chat_up_from_its_bottom() {
+  let mut h = messenger();
+  h.app_mut().open_chat(3);
+  h.frame();
+  let last = Id::of(BUBBLE).key(last(&h, 3).id);
+  let y = rect(&h, last).y;
+  wheel(&mut h, 40.0);
+  assert_eq!(rect(&h, last).y, y + 40.0, "the wheel");
+
+  for _ in 0..10 {
+    let (x, y) = mid(rect(&h, area(&h)));
+    let (pos, delta, mods) = (Point::new(x, y), Point::new(0.0, 2.0), Modifiers::empty());
+    let (phase, momentum) = (Phase::Changed, Phase::None);
+    h.event(Event::Scroll { pos, delta, precise: true, phase, momentum, mods });
+    h.frame();
+  }
+
+  assert_eq!(rect(&h, last).y, y + 60.0, "the trackpad");
+
+  // Scrolled up so little, a message coming leaves what shows where it is.
+  let mut m = h.app().chats[3].msgs[0].clone();
+  (m.id, m.mine) = (u64::MAX, false);
+  h.app_mut().chats[3].msgs.push(m);
+  h.redraw();
+  h.frame();
+  assert_eq!(rect(&h, last).y, y + 60.0, "a message came");
 }
 
 /// A trackpad's scroll of `dy` points over the messages.

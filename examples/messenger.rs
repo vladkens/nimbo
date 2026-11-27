@@ -391,13 +391,6 @@ pub struct Chat {
   pub muted: bool,
   pub draft: String,
   pub files: Vec<Attachment>,
-  /// Each message's height at `heights_w`, measured once per width.
-  heights: Vec<f32>,
-  heights_w: f32,
-  /// Kept at its bottom: as it opens, and while the user leaves it there.
-  stuck: bool,
-  /// The content's height last frame: a scroll decides `stuck` only while it holds.
-  content: f32,
   /// The messages last frame: one sent brings the chat to its bottom.
   seen: usize,
 }
@@ -405,7 +398,6 @@ pub struct Chat {
 impl Chat {
   fn new(name: &'static str, about: Localized, bot: Bot, tint: Color) -> Self {
     let (msgs, draft, files) = (Vec::new(), String::new(), Vec::new());
-    let (heights, heights_w, stuck, content, seen) = (Vec::new(), 0.0, true, 0.0, 0);
     Self {
       name,
       about,
@@ -417,11 +409,7 @@ impl Chat {
       muted: false,
       draft,
       files,
-      heights,
-      heights_w,
-      stuck,
-      content,
-      seen,
+      seen: 0,
     }
   }
 
@@ -623,10 +611,6 @@ pub struct Shown(pub Rc<RefCell<Messenger>>);
 
 impl Shown {
   pub fn new(m: Rc<RefCell<Messenger>>) -> Self {
-    if let Ok(mut m) = m.try_borrow_mut() {
-      m.chats.iter_mut().for_each(|c| (c.stuck, c.content) = (true, 0.0));
-    }
-
     Self(m)
   }
 }
@@ -902,63 +886,31 @@ impl Messenger {
 
 // MARK: Chat
 
-/// A message's height in a bubble at most `max` wide: its text, its files, the gap under it.
-fn height(ui: &mut Ui, m: &Msg, max: f32) -> f32 {
-  let t = ui.theme();
-  let text = match m.text.is_empty() {
-    true => 0.0,
-    false => ui.measure_wrapped(&m.text, t.body(), max - 2.0 * PAD).h,
-  };
-
-  let files: f32 =
-    m.files.iter().map(|f| if f.image.is_some() { THUMB.1 } else { CHIP_H } + 4.0).sum();
-  text + files + 2.0 * PAD + 6.0
-}
-
 impl Messenger {
-  /// The open chat's messages, lazily, the column kept at its bottom as new ones come while it
-  /// is there; a bubble's menu copies or deletes it.
+  /// The open chat's messages, lazily, opening at the bottom and kept there as new ones come
+  /// while it is there; a bubble's menu copies or deletes it.
   fn messages(&mut self, ui: &mut Ui) {
     let t = ui.theme();
     let (area, column) = (Id::of(MESSAGES).key(self.open), Id::of(COLUMN).key(self.open));
     let w = ui.rect(area).map_or(BUBBLE_W, |r| r.w - 32.0);
     let max = (w * 0.75).min(BUBBLE_W);
     let c = &mut self.chats[self.open];
-    if c.heights_w != max || c.heights.len() != c.msgs.len() {
-      let from = if c.heights_w == max { c.heights.len() } else { 0 };
-      c.heights.truncate(from);
-      let more: Vec<f32> = c.msgs[from..].iter().map(|m| height(ui, m, max)).collect();
-      c.heights.extend(more);
-      c.heights_w = max;
-    }
-
-    // Kept at the bottom while it is there: new messages and a new width keep it so, a scroll
-    // up (the content as it was) lets it go, a message sent brings it back.
-    if let Some(s) = ui.scroll(area) {
-      if s.content.h == c.content {
-        c.stuck = s.offset.y >= s.max().y - 4.0;
-      }
-
-      c.content = s.content.h;
-    }
-
-    c.stuck |= c.msgs.len() > c.seen && c.msgs.last().is_some_and(|m| m.mine);
-    c.seen = c.msgs.len();
-    if let Some(i) = self.reveal.take() {
-      c.stuck = false;
-      ui.reveal_item(column, i);
-    }
-
-    if c.stuck {
+    // A message sent brings it back to the bottom.
+    if c.msgs.len() > c.seen && c.msgs.last().is_some_and(|m| m.mine) {
       ui.scroll_to(area, Point::new(0.0, f32::MAX));
     }
 
+    c.seen = c.msgs.len();
+    if let Some(i) = self.reveal.take() {
+      ui.reveal_item(column, i);
+    }
+
     let mut act = None;
-    let (msgs, heights) = (&c.msgs, &c.heights);
+    let msgs = &c.msgs;
     let scroll = Style::new().grow().pad_xy(16.0, 8.0).scroll(Axes::VERTICAL);
-    ui.with_id(area).scroll_area(scroll, |ui| {
+    ui.with_id(area).default_scroll_anchor(UnitPoint::BOTTOM).scroll_area(scroll, |ui| {
       ui.with_id(column).lazy_col(
-        heights.len(),
+        msgs.len(),
         |i| msgs[i].id,
         |ui, i| {
           let m = &msgs[i];
@@ -966,10 +918,13 @@ impl Messenger {
           let side = if m.mine { Align::End } else { Align::Start };
           let (bg, ink) = if m.mine { (t.accent(), [1.0; 4]) } else { (t.raised(), t.text()) };
 
-          ui.row(Style::new().w(grow()).align(side, Align::Start), |ui| {
+          // 6 points under each message.
+          let row = Style::new().w(grow()).pads([0.0, 0.0, 6.0, 0.0]);
+          ui.row(row.align(side, Align::Start), |ui| {
             let bubble = Style::new().max_w(max).pad(PAD).gap(4.0).radius(12.0).bg(bg);
             let who = if m.mine { t!("You").to_string() } else { c.name.to_owned() };
             ui.a11y(id, Role::Group).name(&format!("{who}, {}", clock(m.at)));
+
             ui.with_id(id).col(bubble, |ui| {
               for f in &m.files {
                 match &f.image {
@@ -995,6 +950,7 @@ impl Messenger {
               }
             });
           });
+
           let menu = || {
             let copy = Item::button(MsgAction::Copy, &t!("Copy"));
             Menu::new(vec![
@@ -1017,7 +973,6 @@ impl Messenger {
       Some((i, MsgAction::Delete)) => {
         let c = &mut self.chats[self.open];
         c.msgs.remove(i);
-        c.heights.remove(i);
         c.seen = c.msgs.len();
       }
       None => {}
@@ -1151,7 +1106,7 @@ impl Messenger {
     let d = d.button(t!("Clear").as_str(), ButtonRole::Destructive);
     if d.show(ui.id(CONFIRM), &mut self.confirm) == Some(nimbo::Answer::Action) {
       let c = &mut self.chats[self.open];
-      (c.msgs, c.heights, c.seen, c.stuck) = (Vec::new(), Vec::new(), 0, true);
+      (c.msgs, c.seen) = (Vec::new(), 0);
     }
   }
 
