@@ -1623,7 +1623,8 @@ impl Rill {
 
       ui.id(DIFF).scroll_area(Style::new().grow().bg(p.view), |ui| {
         let key = |i: usize| (c, file, i);
-        ui.id(LINES).lazy_col(lines.len(), key, |ui, i| line(ui, &lines[i], i == 0, diff, p));
+        ui.id(LINES)
+          .lazy_col(Style::new(), lines.len(), key, |ui, i| line(ui, &lines[i], i == 0, diff, p));
       });
     });
 

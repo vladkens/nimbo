@@ -420,7 +420,7 @@ mod pages {
                 ui.text(format_args!("Row {} of 1000", i + 1), t.label())
               });
             };
-            ui.scroll_area(area.bg(t.panel()), |ui| ui.lazy_col(1000, |i| i, row));
+            ui.scroll_area(area.bg(t.panel()), |ui| ui.lazy_col(Style::new(), 1000, |i| i, row));
           }),
 
           // A bar of its own over the area's behaviour: a thin accent thumb, always shown.

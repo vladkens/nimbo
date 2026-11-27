@@ -1,15 +1,17 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Columns built in view only ([Ui::lazy_col], SwiftUI's `LazyVStack`): items of any height
-//! inside the nearest scroll area, of which only those it shows, and [MARGIN] around, are built,
-//! between two spacers that keep the whole column's height. An item is as high as it lays out;
+//! Columns built in view only ([Ui::lazy_col], SwiftUI's `LazyVStack`): items of any height,
+//! their style's gap apart, inside the nearest scroll area, of which only those it shows, and
+//! [MARGIN] around, are built, between two spacers that keep the whole column's height. An item
+//! is as high as it lays out;
 //! one not built yet counts as high as the first measured were on average, so a column of
 //! 100k items costs what those on screen do, and the scrollbar, the wheel, paging,
 //! [Ui::scroll_to] and [Ui::reveal_item] are those of the whole.
 //!
 //! ```ignore
 //! ui.default_scroll_anchor(UnitPoint::BOTTOM).scroll_area(Style::new().grow(), |ui| {
-//!   ui.id("history").lazy_col(self.msgs.len(), |i| self.msgs[i].id, |ui, i| bubble(ui, i));
+//!   let col = Style::new().w(grow()).gap(6.0);
+//!   ui.id("history").lazy_col(col, self.msgs.len(), |i| self.msgs[i].id, |ui, i| bubble(ui, i));
 //! });
 //! ```
 //!
@@ -44,6 +46,8 @@ const GUESS: f64 = 32.0;
 /// the items built last, and an item to reveal with the frames it may still take.
 #[derive(Default)]
 struct Lazy {
+  /// The space between items, as `ends` counts it.
+  gap: f64,
   /// Measured heights by item id, at `width`.
   seen: HashMap<Id, f64, BuildHasherDefault<FxHasher>>,
   width: f64,
@@ -51,7 +55,8 @@ struct Lazy {
   /// the last width's until then.
   guess: Option<f64>,
   fresh: bool,
-  /// By index: the height measured, NaN where none is; and where each item ends.
+  /// By index: the height measured, NaN where none is; and where each item ends, with the gap
+  /// after it.
   heights: Vec<f64>,
   ends: Vec<f64>,
   /// The ids of the first and last items when `heights` was indexed: other ones mean the items
@@ -67,9 +72,19 @@ struct Lazy {
 }
 
 impl Lazy {
-  /// The top of item `i`; the column's height for `i == len`.
+  /// The top of item `i`; for `i == len`, the column's height and a gap.
   fn top(&self, i: usize) -> f64 {
     if i == 0 { 0.0 } else { self.ends[i - 1] }
+  }
+
+  /// The end of item `i`, the gap after it not counted.
+  fn end(&self, i: usize) -> f64 {
+    self.ends[i] - self.gap
+  }
+
+  /// The items' height, from the first one's top to the last one's end.
+  fn total(&self) -> f64 {
+    self.ends.len().checked_sub(1).map_or(0.0, |i| self.end(i))
   }
 
   /// The item at depth `y`: the first that ends below it, `len` past the end.
@@ -97,27 +112,30 @@ impl Lazy {
     true
   }
 
-  /// Where each item ends, by the heights measured and the guess for the rest.
+  /// Where each item ends, with the gap after it, by the heights measured and the guess for
+  /// the rest.
   fn sum(&mut self) {
-    let guess = self.guess.unwrap_or(GUESS);
+    let (guess, gap) = (self.guess.unwrap_or(GUESS), self.gap);
     let mut end = 0.0;
     self.ends.clear();
     self.ends.extend(self.heights.iter().map(|&h| {
-      end += if h.is_nan() { guess } else { h };
+      end += if h.is_nan() { guess } else { h } + gap;
       end
     }));
   }
 }
 
 impl<'a> Ui<'a> {
-  /// A column of `count` items, as SwiftUI's `LazyVStack`, each as high as `item(ui, i)` lays
-  /// it out, built only for those the nearest vertically scrolling area shows and `MARGIN`
-  /// around (all outside one); returns the items built. An item's box is keyed by `key(i)`,
-  /// unique and stable while it is the same thing: it keeps its ids, hover, focus and measured
-  /// height as the column scrolls and items come and go before it. The column's id is the one
-  /// set ([Ui::id], [Ui::key]) or its place among its siblings, not taking input.
+  /// A column of `count` items in a box of `style`, as SwiftUI's `LazyVStack(spacing:)`, each
+  /// as high as `item(ui, i)` lays it out and `style.gap` apart, as [Ui::col] puts them; built
+  /// only for those the nearest vertically scrolling area shows and `MARGIN` around (all outside
+  /// one); returns the items built. An item's box is keyed by `key(i)`, unique and stable while
+  /// it is the same thing: it keeps its ids, hover, focus and measured height as the column
+  /// scrolls and items come and go before it. The column's id is the one set ([Ui::id],
+  /// [Ui::key]) or its place among its siblings, not taking input.
   pub fn lazy_col<K: Hash>(
     &mut self,
+    style: Style,
     count: usize,
     key: impl Fn(usize) -> K,
     mut item: impl FnMut(&mut Ui<'a>, usize),
@@ -126,6 +144,11 @@ impl<'a> Ui<'a> {
     let item_id = |i: usize| id.key(key(i));
     let mut lz = std::mem::take(self.state::<Lazy>(id));
     let mut changed = lz.index(count, &item_id);
+    // The items are placed from the box's padding, which the box's height adds to theirs.
+    let (gap, pad) = (f64::from(style.gap), [f64::from(style.pad[0]), f64::from(style.pad[2])]);
+    if lz.gap != gap {
+      (lz.gap, changed) = (gap, true);
+    }
 
     // The scroll area around it.
     let t = &self.st.tree;
@@ -140,7 +163,7 @@ impl<'a> Ui<'a> {
       (Some(k), ..) if !lz.held => Some(k),
       (_, Some(a), Some(c)) if lz.held => (lz.built.start..lz.built.end.min(count)).find_map(|i| {
         let r = last.get(item_id(i))?;
-        (r.pos[1] + r.size[1] > a.pos[1]).then_some((i, r.id, r.pos[1] - c.pos[1]))
+        (r.pos[1] + r.size[1] > a.pos[1]).then_some((i, r.id, r.pos[1] - c.pos[1] - pad[0]))
       }),
       _ => None,
     };
@@ -195,8 +218,8 @@ impl<'a> Ui<'a> {
     // Placed by the offset it was laid out at, seen through the offset the input set since.
     let laid = area_id.and_then(|a| self.st.last.get(a));
     let top = match (laid, self.st.last.get(id)) {
-      (Some(a), Some(c)) => c.pos[1] - a.pos[1] + a.scroll[1],
-      _ => 0.0,
+      (Some(a), Some(c)) => c.pos[1] + pad[0] - a.pos[1] + a.scroll[1],
+      _ => pad[0],
     };
 
     // An item to reveal is scrolled to until a layout after the request shows it as the scroll
@@ -212,7 +235,7 @@ impl<'a> Ui<'a> {
         });
       lz.reveal = (!shows).then_some((i, tries - 1));
       if let (false, Some((off, _))) = (shows, sc) {
-        let (from, to) = (lz.top(i), lz.top(i + 1));
+        let (from, to) = (lz.top(i), lz.end(i));
         self.reveal_exact(area_id.unwrap(), [off[0], top + from, 1.0, to - from]);
       }
 
@@ -222,12 +245,12 @@ impl<'a> Ui<'a> {
     // The offset the layout will take: the one asked within the last frame's content, grown or
     // shrunk by the column, or the end the anchor holds it at. Before the area is laid out, a
     // window's height where its anchor opens it; outside one, everything.
-    let total = lz.top(n);
+    let total = lz.total();
     let sc = area_id.and_then(|a| self.st.scroll_exact(a));
     let st = area_id.and_then(|a| self.st.store.peek::<ScrollState>(a));
     let (off, view) = match (sc, area_id.and_then(|a| self.st.last.get(a)), st) {
       (Some((_, vp)), Some(a), Some(s)) => {
-        let col = self.st.last.get(id).map_or(total, |c| c.size[1]);
+        let col = self.st.last.get(id).map_or(total, |c| c.size[1] - pad[0] - pad[1]);
         let max = (input::max_scroll(a)[1] + total - col).max(0.0);
         let off = if s.held() { max } else { s.offset[1].clamp(0.0, max) };
         (off, f64::from(vp.h))
@@ -236,7 +259,7 @@ impl<'a> Ui<'a> {
       (None, _, st) if area.is_some() => {
         let view = f64::from(self.size().h);
         let y = st.and_then(|s| s.anchor).map_or(0.0, |a| f64::from(a.y));
-        (y * (total - view).max(0.0), view)
+        (y * (total + pad[0] + pad[1] - view).max(0.0), view)
       }
       _ => (0.0, f64::INFINITY),
     };
@@ -250,7 +273,8 @@ impl<'a> Ui<'a> {
     };
 
     let shown = first..(lz.at(y + view + MARGIN) + 1).min(n).max(first);
-    let (from, to) = (lz.top(shown.start), lz.top(shown.end));
+    let from = lz.top(shown.start);
+    let to = if shown.is_empty() { from } else { lz.end(shown.end - 1) };
 
     // The item at the viewport's top, kept there as what is above it is measured.
     let anchor = area.is_some().then(|| lz.at(y)).filter(|&i| i < n);
@@ -258,19 +282,22 @@ impl<'a> Ui<'a> {
     let anchor = anchor.filter(|_| !lz.held);
 
     self.next_id = Some((id, false));
-    self.col(Style::new().w(grow()), |ui| {
+    self.col(Style { gap: 0.0, ..style }, |ui| {
       spacer(ui, from);
       // The built items' edges and the kept item: the view runs again if the layout shows past
       // the edges (open where the column's are) or moved the kept item (new ones above it).
       let (head, _) = ui.push(Kind::Box, Style::new(), Flow::Row);
       let mut kept = None;
-      for i in shown.clone() {
-        if anchor == Some(i) {
-          kept = Some(ui.st.tree.nodes.len() as u32);
-        }
+      ui.col(Style::new().w(grow()).gap(gap as f32), |ui| {
+        for i in shown.clone() {
+          if anchor == Some(i) {
+            kept = Some(ui.st.tree.nodes.len() as u32);
+          }
 
-        ui.key(key(i)).col(Style::new().w(grow()), |ui| item(ui, i));
-      }
+          ui.next_id = Some((item_id(i), false));
+          ui.col(Style::new().w(grow()), |ui| item(ui, i));
+        }
+      });
 
       let (tail, _) = ui.push(Kind::Box, Style::new(), Flow::Row);
       spacer(ui, total - to);
@@ -326,11 +353,12 @@ mod tests {
   }
 
   /// A scroll area 300 high over a prefix `pre` high and a column of `n` items of mixed heights
-  /// (`wide` makes each half as high), the item `reveal` asked for in the next view; at the
-  /// bottom anchor when `bottom`. Counts the items it builds.
+  /// (`wide` makes each half as high) in a box of `col`, the item `reveal` asked for in the next
+  /// view; at the bottom anchor when `bottom`. Counts the items it builds.
   struct Mixed {
     n: usize,
     pre: f32,
+    col: Style,
     bottom: bool,
     wide: bool,
     reveal: Option<usize>,
@@ -339,7 +367,13 @@ mod tests {
 
   impl Mixed {
     fn new(n: usize) -> Self {
-      Self { n, pre: 0.0, bottom: false, wide: false, reveal: None, built: 0 }
+      let col = Style::new().w(grow());
+      Self { n, pre: 0.0, col, bottom: false, wide: false, reveal: None, built: 0 }
+    }
+
+    /// Items 10 apart in a box padded 12 above and 20 below.
+    fn spaced(self) -> Self {
+      Self { col: self.col.gap(10.0).pads([12.0, 0.0, 20.0, 0.0]), ..self }
     }
   }
 
@@ -356,6 +390,7 @@ mod tests {
       ui.id("area").scroll_area(area, |ui| {
         ui.el(Style::new().h(px(self.pre)));
         ui.id("col").lazy_col(
+          self.col,
           self.n,
           |i| i,
           |ui, i| {
@@ -484,7 +519,9 @@ mod tests {
         }
 
         ui.id("area").scroll_area(Style::new().w(grow()).h(px(300.0)), |ui| {
-          ui.id("col").lazy_col(50, |i| i, |ui, _| _ = ui.el(Style::new().h(px(400.0))));
+          let (col, item) =
+            (Style::new().w(grow()), |ui: &mut Ui, _| _ = ui.el(Style::new().h(px(400.0))));
+          ui.id("col").lazy_col(col, 50, |i| i, item);
         });
       }
     }
@@ -495,6 +532,40 @@ mod tests {
     settle(&mut h);
     let (vp, r) = (h.rect(Id::of("area")).unwrap(), h.rect(Id::of("col").key(1usize)).unwrap());
     assert_eq!(r.y, vp.y);
+  }
+
+  /// Items `gap` apart from the box's padding, opened at the bottom: the last ends the padding's
+  /// height above the viewport's end; scrolled up through items never measured, what shows moves
+  /// by the scroll alone, the items still the gap apart; and a far one is revealed.
+  #[test]
+  fn items_are_their_gap_apart_from_the_padding() {
+    let app = Mixed { bottom: true, ..Mixed::new(3000).spaced() };
+    let mut h = Harness::new(app, Size::new(200.0, 300.0), 1.0);
+    h.frame();
+    assert_eq!(shown(&h, 2999).map(|s| s.1), Some(280.0), "the bottom padding under it");
+    for _ in 0..100 {
+      let (i, y) = at_top(&h);
+      swipe(&mut h, 37.0);
+      assert_eq!(shown(&h, i).expect("still built").0, y + 37.0, "item {i}");
+      let (a, b) = (shown(&h, i).unwrap(), shown(&h, i + 1).unwrap());
+      assert_eq!(b.0 - a.1, 10.0, "items {i} and {}", i + 1);
+    }
+
+    h.app_mut().reveal = Some(5);
+    settle(&mut h);
+    let (top, end) = shown(&h, 5).expect("built");
+    assert!(top >= 0.0 && end <= 300.0, "{top}..{end}");
+  }
+
+  /// At the top, the first item is under the padding; the column is as high as its items, the
+  /// gaps between them and its padding.
+  #[test]
+  fn a_spaced_column_is_its_items_gaps_and_padding_high() {
+    let mut h = Harness::new(Mixed::new(5).spaced(), Size::new(200.0, 300.0), 1.0);
+    settle(&mut h);
+    assert_eq!(shown(&h, 0).map(|s| s.0), Some(12.0));
+    let items: f32 = (0..5).map(height).sum();
+    assert_eq!(h.rect(Id::of("col")).unwrap().h, 12.0 + items + 4.0 * 10.0 + 20.0);
   }
 
   /// Paragraphs of 1 to 8 sentences, the last two lines at most, in a column 120 wide; and a

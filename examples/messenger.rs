@@ -905,6 +905,7 @@ impl Messenger {
     let scroll = Style::new().grow().pad_xy(16.0, 8.0).scroll(Axes::VERTICAL);
     ui.with_id(area).default_scroll_anchor(UnitPoint::BOTTOM).scroll_area(scroll, |ui| {
       ui.with_id(column).lazy_col(
+        Style::new().w(grow()),
         msgs.len(),
         |i| msgs[i].id,
         |ui, i| {
