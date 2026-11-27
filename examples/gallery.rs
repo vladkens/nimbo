@@ -428,11 +428,16 @@ mod pages {
             let id = Id::of("own scroll");
             let b = ui.scroll_behavior(id, Axes::VERTICAL);
 
-            let area =
-              Style::new().w(px(200.0)).h(px(60.0)).pad_xy(8.0, 4.0).radius(6.0).bg(t.panel());
-            let area = area.scroll(Axes::VERTICAL);
-            ui.with_id(id).col(area, |ui| {
-              (1..=8).for_each(|i| ui.text(format_args!("Line {i}"), t.label()));
+            // Four of twenty lines in view, 24 points each inside a border of 1.
+            let area = Style::new().w(px(200.0)).h(px(98.0)).radius(8.0).border(1.0, t.line());
+            ui.with_id(id).col(area.bg(t.panel()).scroll(Axes::VERTICAL), |ui| {
+              for i in 1..=20 {
+                let line = Style::new().w(grow()).h(px(24.0)).pad_xy(10.0, 0.0);
+                ui.row(line.align(Align::Start, Align::Center), |ui| {
+                  ui.text(format_args!("Line {i}"), t.label())
+                });
+              }
+
               let Some(bar) = b.bar(Axis::Vertical) else { return };
               let at =
                 Float::parent().attach(UnitPoint::TOP_TRAILING).anchor(UnitPoint::TOP_TRAILING);
@@ -447,8 +452,14 @@ mod pages {
             let t = ui.theme();
             let red = ScrollerKnob::DARK.color(alpha(t.danger(), 0.6));
             let old = ui.set_environment(Some(red));
-            ui.scroll_area(Style::new().w(px(200.0)).h(px(60.0)), |ui| {
-              (1..=8).for_each(|i| ui.text(format_args!("Line {i}"), t.label()))
+            let area = Style::new().w(px(200.0)).h(px(98.0)).radius(8.0).border(1.0, t.line());
+            ui.scroll_area(area.bg(t.panel()), |ui| {
+              for i in 1..=20 {
+                let line = Style::new().w(grow()).h(px(24.0)).pad_xy(10.0, 0.0);
+                ui.row(line.align(Align::Start, Align::Center), |ui| {
+                  ui.text(format_args!("Line {i}"), t.label())
+                });
+              }
             });
             ui.set_environment(old);
           }),
@@ -1151,8 +1162,8 @@ mod pages {
             }
 
             let t = ui.theme();
-            // Padded in the list's box, where its keys scroll the rows to.
-            let list = List::new(40, 24.0).style(Style::new().w(px(220.0)).h(px(96.0)).pad(4.0));
+            // Padded in the list's box, where its keys scroll the rows to: four whole rows.
+            let list = List::new(40, 24.0).style(Style::new().w(px(220.0)).h(px(104.0)).pad(4.0));
             let list = list.selection(&mut self.styled_rows[1]);
             let ui = ui.list_style(&Stripes);
             list.show(ui, |ui, row| ui.text(format_args!("Row {}", row.index + 1), t.label()));
@@ -1226,7 +1237,7 @@ mod pages {
           }),
 
           // A box that counts ⌘K while it has focus: a click or Tab gives it.
-          "Keyboard shortcut" => Self::variants(ui, Shown::Plain, |ui| {
+          "Keyboard shortcut" => Self::variants(ui, Shown::Alone, |ui| {
             const KEYS: &[Binding] =
               &[Binding::new(Shortcut::char('k').cmd(), Command::Action("count"))];
             let t = ui.theme();
