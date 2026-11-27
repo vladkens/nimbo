@@ -708,4 +708,40 @@ mod tests {
     assert_ne!(bare, filled);
     assert_eq!(bare, other);
   }
+
+  /// The selection's row as a text above the list, which reads it before the list changes it.
+  #[derive(Default)]
+  struct Above {
+    sel: Selection,
+    shown: Option<u64>,
+  }
+
+  impl crate::App for Above {
+    fn view(&mut self, ui: &mut Ui) {
+      self.shown = self.sel.cursor();
+      ui.col(Style::new().w(px(200.0)).h(px(100.0)), |ui| {
+        let list = List::new(3, 20.0).selection(&mut self.sel).style(Style::new().grow());
+        list.show(ui.id("list"), |ui, _| ui.label("row"));
+      });
+    }
+  }
+
+  /// A press that changes the selection asks for the next frame: what the view built before the
+  /// list catches up while the button is still held.
+  #[test]
+  fn a_changed_selection_shows_in_the_next_frame() {
+    use crate::Harness;
+    let mut h = Harness::new(Above::default(), Size::new(300.0, 300.0), 1.0);
+    h.frame();
+    // Focused by a first click, so the press changes only the selection.
+    h.click_id(Id::of("list").key(("row", 0u64)));
+    h.wait(Duration::from_millis(500));
+    let row = h.rect(Id::of("list").key(("row", 1u64))).unwrap();
+    let (x, y) = (row.x + 20.0, row.y + 10.0);
+    h.move_to(x, y);
+    h.wait(Duration::from_millis(50));
+    h.press(x, y);
+    h.wait(Duration::from_millis(50));
+    assert_eq!((h.app().sel.cursor(), h.app().shown), (Some(1), Some(1)));
+  }
 }

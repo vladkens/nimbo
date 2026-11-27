@@ -9,6 +9,7 @@ use std::collections::HashSet;
 use std::fmt;
 use std::hash::BuildHasherDefault;
 use std::ops::Range;
+use std::time::Duration;
 
 use crate::Modifiers;
 use crate::app::MouseButton;
@@ -368,6 +369,12 @@ impl<'a> Ui<'a> {
     self.a11y(id, Role::List).state(State::Disabled, disabled).active(active);
     *self.state::<ListState>(id) = st;
     let Events { changed, pressed, activated, delete } = out;
+    // What the view built before the list from the selection shows the change in the next
+    // frame, at once rather than at the next input.
+    if changed {
+      self.request_frame_in(Duration::ZERO);
+    }
+
     let key = RowKeys(key);
     ListBehavior { id, disabled, focused, changed, pressed, activated, delete, rows, sel, key }
   }
