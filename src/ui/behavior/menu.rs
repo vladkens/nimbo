@@ -174,6 +174,7 @@ impl Ui<'_> {
         true => close = true,
         false => {
           let prev = self.focus_id();
+          self.st.lent.extend(prev.map(|p| (p, menu)));
           st = Open { cur: start, prev, reveal: true, start, point, ..Open::default() };
           self.set_menu_open(id, true);
           open = true;
@@ -190,8 +191,8 @@ impl Ui<'_> {
     // The window losing the focus closes it too, as AppKit's menus close with the app's.
     close |= !self.window_focused();
     if !open || close {
-      if open && self.focus_id().is_none_or(|f| f == menu) {
-        self.focus(st.prev);
+      if open {
+        self.give_focus_back(id, st.prev);
       }
 
       self.set_menu_open(id, false);
@@ -266,9 +267,7 @@ impl Ui<'_> {
     let clicked = self.st.input.click.is_some_and(|c| c.id == away || on_item(c.id));
     (st.items, st.labels) = (cx.items, cx.labels);
     if clicked || cx.ran {
-      if self.focus_id().is_none_or(|f| f == menu) {
-        self.focus(st.prev);
-      }
+      self.give_focus_back(id, st.prev);
 
       (st, open) = (Open::default(), false);
     }
@@ -286,11 +285,19 @@ impl Ui<'_> {
     }
 
     let st = std::mem::take(self.state::<Open>(id));
-    if self.focus_id().is_none_or(|f| f == id.key("menu")) {
-      self.focus(st.prev);
+    self.give_focus_back(id, st.prev);
+    self.set_menu_open(id, false);
+  }
+
+  /// The focus back from `id`'s menu (or a menu in it) where it was before it opened, unless it
+  /// moved on meanwhile; lent no more.
+  fn give_focus_back(&mut self, id: Id, prev: Option<Id>) {
+    let menu = id.key("menu");
+    if self.focus_id().is_none_or(|f| f == menu || self.st.last.within(f, menu)) {
+      self.focus(prev);
     }
 
-    self.set_menu_open(id, false);
+    self.st.lent.retain(|&(_, m)| m != menu);
   }
 
   /// An open menu's keys and pointer: the pointer moving onto an item highlights it, Up and

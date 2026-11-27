@@ -99,6 +99,10 @@ const FLASH: Duration = Duration::from_millis(120);
 /// Paints a canvas element: gets the frame and the element's laid-out rect.
 pub(crate) type Canvas<'a> = Box<dyn FnOnce(&mut Frame, Rect) + 'a>;
 
+/// Ends the selection of an element in [UiState::selecting] once the focus left it; whether it
+/// did.
+pub(crate) type EndSelection = fn(&mut UiState, Id) -> bool;
+
 /// What a [Ui] keeps between frames: the tree being built and the last one laid out, pointer
 /// state, the per-id store and timers, so a steady frame allocates nothing.
 pub(crate) struct UiState {
@@ -153,6 +157,12 @@ pub(crate) struct UiState {
   pub(crate) native_menus: bool,
   pub(crate) context_menu: Option<(Id, Point, crate::Menu<usize>)>,
   pub(crate) menu_seq: u32,
+  /// The elements menus took the focus from ([Ui::menu]), each with the menu, while it shows: a
+  /// field keeps its selection meanwhile, for an item to cut.
+  pub(crate) lent: Vec<(Id, Id)>,
+  /// The elements that had the focus and select in it (a field, selectable text; one in a menu
+  /// over another), each with what ends its selection as a frame ends, the focus settled.
+  pub(crate) selecting: Vec<(Id, EndSelection)>,
   /// The title bar over the content ([Ui::titlebar]).
   pub(crate) titlebar: Option<TitleBar>,
   /// The view asked for a toolbar's title bar ([Ui::window_toolbar_style]): the platform gives
@@ -223,6 +233,8 @@ impl Default for UiState {
       native_menus: false,
       context_menu: None,
       menu_seq: 0,
+      lent: Vec::new(),
+      selecting: Vec::new(),
       titlebar: None,
       toolbar: false,
       pictures: Vec::new(),
@@ -1239,6 +1251,12 @@ impl<'a> Ui<'a> {
     if self.st.input.focus.is_some_and(|f| self.st.last.find(f).is_none()) {
       self.st.input.focus = None;
     }
+
+    let last = &self.st.last;
+    self.st.lent.retain(|&(_, menu)| last.find(menu).is_some());
+    let mut selecting = std::mem::take(&mut self.st.selecting);
+    selecting.retain(|&(e, end)| !end(&mut self.st, e));
+    self.st.selecting = selecting;
 
     self.st
   }
