@@ -211,6 +211,9 @@ pub(crate) struct Tree {
   pub hits: Vec<u32>,
   /// Scroll containers, in tree order.
   pub scrolls: Vec<u32>,
+  /// Scroll containers whose offset goes, along an axis, to a fraction of the overflow instead
+  /// ([super::Ui::layout]): a scroll anchor's.
+  pub pins: Vec<(u32, [Option<f32>; 2])>,
   /// Elements that move the window when pressed ([super::Ui::drags_window]), in tree order.
   pub drags: Vec<u32>,
   /// Elements hit for their tip alone ([super::Ui::help]), in tree order: hovered, but a press
@@ -248,6 +251,7 @@ impl Tree {
     self.floats.clear();
     self.hits.clear();
     self.scrolls.clear();
+    self.pins.clear();
     self.drags.clear();
     self.tips.clear();
     self.keymaps.clear();
@@ -267,6 +271,11 @@ impl Tree {
   /// A node by id, once laid out.
   pub fn get(&self, id: Id) -> Option<&Node> {
     self.index.get(&id).map(|&i| &self.nodes[i as usize])
+  }
+
+  /// Node `i`'s pin ([Self::pins]).
+  pub fn pin(&self, i: u32) -> [Option<f32>; 2] {
+    self.pins.iter().find(|p| p.0 == i).map_or([None; 2], |p| p.1)
   }
 
   pub fn rect(&self, id: Id) -> Option<Rect> {
@@ -703,11 +712,12 @@ impl Measure for Sys<'_> {
 fn place(t: &mut Tree, win: Size, scale: f32) {
   t.nodes[0].pos = [0.0; 2];
   for i in 0..t.nodes.len() {
+    let pin = if t.nodes[i].style.scroll.is_empty() { [None; 2] } else { t.pin(i as u32) };
     let n = &mut t.nodes[i];
     if n.end as usize == i + 1 {
       // No children (a list emptied): its offset is clamped to what it has, and kept so.
       let (content, size) = (n.content, n.size);
-      n.scroll = clamp_scroll(n.scroll, n.style.scroll, content, size);
+      n.scroll = clamp_scroll(n.scroll, pin, n.style.scroll, content, size);
       continue;
     }
 
@@ -737,7 +747,7 @@ fn place(t: &mut Tree, win: Size, scale: f32) {
     // The content at its final size; a scroll container's offset is clamped to it.
     let n = &mut t.nodes[i];
     (n.content[ax], n.content[cr]) = (used + a + b, across + ca + cb);
-    n.scroll = clamp_scroll(n.scroll, style.scroll, n.content, size);
+    n.scroll = clamp_scroll(n.scroll, pin, style.scroll, n.content, size);
     let scroll = n.scroll;
     let mut cur = pos[ax] + a + offset(align[ax], inner.0 - used) - scroll[ax];
     each(t, i, |c| {
@@ -762,11 +772,22 @@ fn place(t: &mut Tree, win: Size, scale: f32) {
   }
 }
 
-/// A scroll offset within `content` seen through `size`, 0 along an axis that doesn't scroll.
-fn clamp_scroll(off: [f64; 2], scrolls: Axes, content: [f64; 2], size: [f64; 2]) -> [f64; 2] {
-  let at = |k: usize| match scrolls.at(k) {
-    true => off[k].clamp(0.0, (content[k] - size[k]).max(0.0)),
-    false => 0.0,
+/// A scroll offset within `content` seen through `size`, 0 along an axis that doesn't scroll;
+/// `pin`'s fraction of the overflow along an axis that has one.
+fn clamp_scroll(
+  off: [f64; 2],
+  pin: [Option<f32>; 2],
+  scrolls: Axes,
+  content: [f64; 2],
+  size: [f64; 2],
+) -> [f64; 2] {
+  let at = |k: usize| {
+    let max = (content[k] - size[k]).max(0.0);
+    match (scrolls.at(k), pin[k]) {
+      (true, Some(f)) => max * f64::from(f),
+      (true, None) => off[k].clamp(0.0, max),
+      (false, _) => 0.0,
+    }
   };
   [at(0), at(1)]
 }
@@ -907,9 +928,10 @@ fn grid_place(t: &mut Tree, i: usize, win: Size) {
   });
 
   // The offset is clamped to the content.
+  let pin = t.pin(i as u32);
   let n = &mut t.nodes[i];
   n.content = [right + a + b, bottom + ca + cb];
-  n.scroll = clamp_scroll(n.scroll, n.style.scroll, n.content, size);
+  n.scroll = clamp_scroll(n.scroll, pin, n.style.scroll, n.content, size);
   let [dx, dy] = n.scroll;
   each_cell(t, i, |c, col, _, s| {
     let (h, top) = (c.pos[0], c.pos[1]);

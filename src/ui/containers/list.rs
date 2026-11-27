@@ -413,6 +413,43 @@ mod tests {
     assert_eq!(h.app().sel.cursor(), Some(0));
   }
 
+  /// In a short list at the bottom anchor, a press on a header keeps the selection and one on
+  /// the room above the rows clears it.
+  #[test]
+  fn headers_at_the_anchor_keep_the_selection() {
+    use crate::Harness;
+    use crate::ui::UnitPoint;
+    #[derive(Default)]
+    struct Low(Selection);
+    impl crate::App for Low {
+      fn view(&mut self, ui: &mut Ui) {
+        let head = |ui: &mut Ui, _: usize| ui.label("head");
+        ui.col(Style::new().w(px(200.0)).h(px(200.0)), |ui| {
+          let list = List::new(4, 20.0).sections(&[0, 2], 20.0, &head).selection(&mut self.0);
+          let list = list.style(Style::new().grow());
+          list.show(ui.default_scroll_anchor(UnitPoint::BOTTOM).id("list"), |ui, _| {
+            ui.label("row");
+          });
+        });
+      }
+    }
+
+    let mut h = Harness::new(Low::default(), Size::new(300.0, 300.0), 1.0);
+    let id = Id::of("list");
+    h.frame();
+    h.click_id(id.key(("row", 1u64)));
+    h.frame();
+    let head = h.rect(id.key(("head", 0u64))).unwrap();
+    assert!(head.y > 50.0, "at the bottom: {head:?}");
+
+    h.click(head.x + 50.0, head.y + head.h / 2.0);
+    h.frame();
+    assert_eq!(h.app().0.cursor(), Some(1), "a header keeps it");
+    h.click(head.x + 50.0, 10.0);
+    h.frame();
+    assert!(h.app().0.is_empty(), "the room above clears it");
+  }
+
   #[test]
   fn delete_asks_and_escape_clears() {
     use crate::{Harness, NamedKey as K};

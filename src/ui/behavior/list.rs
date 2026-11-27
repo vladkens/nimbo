@@ -17,7 +17,6 @@ use crate::keys::{Binding, CMD, Command, Delete, Extent, Move, Os, Shortcut};
 use crate::scene::{Point, Rect};
 use crate::text::FxHasher;
 use crate::ui::input::{Click, ScrollState};
-use crate::ui::layout::Node;
 use crate::ui::{Enabled, Focus, Id, Role, State, Style, Ui, px};
 
 /// Rows built past each edge of the viewport.
@@ -624,9 +623,11 @@ impl<'a> Ui<'a> {
       // A plain press on its ground clears the selection, as a table view's on macOS; one on a
       // section's header keeps it, as a source list's group row does (Finder's sidebar).
       let plain = !mods.contains(CMD) && !mods.shift();
-      // At the offset of the layout it hit, which a wheel may have moved on since.
-      let depth = |n: &Node| pos.y - n.rect.y + n.scroll[1] as f32 - rows.pad[0];
-      let head = self.st.last.get(id).is_some_and(|n| rows.on_header(depth(n)));
+      // Its depth from a row as the layout it hit put it: scrolled (a wheel may have moved it
+      // on since), aligned at a scroll anchor.
+      let row = st.shown.first().and_then(|&k| self.st.last.rect(id.key(("row", k))));
+      let own = |i: usize| i as f32 * rows.h + rows.above(rows.heads(i + 1));
+      let head = row.is_some_and(|r| rows.on_header(own(st.from) + pos.y - r.y));
       if !right && plain && !head && !sel.is_empty() && self.list_ground(on, id) {
         sel.clear();
         out.changed = true;

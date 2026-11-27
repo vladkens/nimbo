@@ -46,6 +46,14 @@ nimbo: `ui.scroll_area(Style::new().h(px(80.0)).scroll(Axes::VERTICAL), |ui| { �
 
 ![Scroll view](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/scroll-view.png)
 
+### Scroll anchor
+
+SwiftUI: `ScrollView { … }.defaultScrollAnchor(.bottom)`
+
+nimbo: `ui.default_scroll_anchor(UnitPoint::BOTTOM).scroll_area(style, |ui| { … })`
+
+![Scroll anchor](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/scroll-anchor.png)
+
 ### Overlay
 
 SwiftUI: `.overlay(alignment: .topTrailing) { … }`

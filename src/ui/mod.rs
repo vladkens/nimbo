@@ -1167,7 +1167,11 @@ impl<'a> Ui<'a> {
     let UiState { tree, store, kept, .. } = &mut self.st;
     for &i in &tree.scrolls {
       let n = &mut tree.nodes[i as usize];
-      n.scroll = store.peek::<ScrollState>(n.id).map_or([0.0; 2], |s| s.offset);
+      let s = store.peek::<ScrollState>(n.id);
+      n.scroll = s.map_or([0.0; 2], |s| s.offset);
+      if let Some(pin) = s.map(ScrollState::pin).filter(|p| p.iter().any(Option::is_some)) {
+        tree.pins.push((i, pin));
+      }
     }
 
     let fit_h = layout::layout(tree, self.size, scale, m, kept);
@@ -1180,7 +1184,8 @@ impl<'a> Ui<'a> {
         ((off + f64::from(pend)).clamp(0.0, max[ax]) - off) as f32
       };
       let (x, y) = (to(0, s.pending.x), to(1, s.pending.y));
-      (s.offset, s.pending) = (n.scroll, Point::new(x, y));
+      s.pending = Point::new(x, y);
+      s.laid_out(n.scroll, max, tree.pin(i));
     }
 
     if let Some([w, lo, hi]) = self.fit {

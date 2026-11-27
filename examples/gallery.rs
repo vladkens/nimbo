@@ -55,6 +55,7 @@ pub const BLOCKS: &[Block] = &[
   b("Layout", "Spacer", "Spacer()", "ui.spacer()"),
   b("Layout", "Divider", "Divider()", "ui.divider()"),
   b("Layout", "Scroll view", "ScrollView(.vertical) { … }", "ui.scroll_area(Style::new().h(px(80.0)).scroll(Axes::VERTICAL), |ui| { … })"),
+  b("Layout", "Scroll anchor", "ScrollView { … }.defaultScrollAnchor(.bottom)", "ui.default_scroll_anchor(UnitPoint::BOTTOM).scroll_area(style, |ui| { … })"),
   b("Layout", "Overlay", ".overlay(alignment: .topTrailing) { … }", "ui.float(Float::parent().attach(UnitPoint::TOP_TRAILING).anchor(UnitPoint::TOP_TRAILING)).el(style)"),
   b("Text", "Text", "Text(\"Title\").font(.headline).foregroundStyle(.secondary)", "ui.text(\"Title\", TextStyle::new(t.bold(), t.secondary()))"),
   b("Text", "Localized text", "Text(\"Keep the history\"); String(localized: \"\\(name) is not on disk\")", "ui.text(t!(\"Keep the history\"), s); t!(\"{name} is not on disk\", name); tn!(\"{n} file\", \"{n} files\", count)"),
@@ -734,6 +735,14 @@ mod pages {
           "Scroll view" => Self::variants(ui, Shown::Alone, |ui| {
             let area = Style::new().w(px(200.0)).h(px(60.0)).scroll(Axes::VERTICAL);
             ui.scroll_area(area, |ui| {
+              (1..=8).for_each(|i| ui.text(format_args!("Line {i}"), t.label()))
+            });
+          }),
+
+          // Opens at its end, and stays there as lines come.
+          "Scroll anchor" => Self::variants(ui, Shown::Alone, |ui| {
+            let area = Style::new().w(px(200.0)).h(px(60.0));
+            ui.default_scroll_anchor(UnitPoint::BOTTOM).scroll_area(area, |ui| {
               (1..=8).for_each(|i| ui.text(format_args!("Line {i}"), t.label()))
             });
           }),

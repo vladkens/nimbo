@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use crate::app::MouseButton;
 use crate::scene::{Color, Point, alpha};
+use crate::ui::input::ScrollState;
 use crate::ui::{
   Align, Axes, Axis, EnvironmentValue, Float, Flow, Id, Kind, Response, Scroll, Style, Transition,
   Ui, UnitPoint, pct, px,
@@ -56,6 +57,9 @@ impl EnvironmentValue for ScrollerKnob {
 
 /// The knobs' change on a track's hover, as the theme's hover fades (`Theme::fade`).
 const HOVER: Transition = Transition::smooth(6.0);
+
+/// The anchor the next scroll area keeps its content at ([Ui::default_scroll_anchor]).
+struct ScrollAnchor(UnitPoint);
 
 /// The fade the next scroll area draws under its edges ([Ui::fade_edges]): colour and length.
 struct EdgeFade(Color, f32);
@@ -287,6 +291,16 @@ impl Ui<'_> {
     self
   }
 
+  /// The next [Ui::scroll_area] keeps its content at `anchor`, as SwiftUI's
+  /// `defaultScrollAnchor(_:)`: it opens there (unless [Ui::scroll_to] said where first),
+  /// content smaller than the viewport sits at its start, centre or end, whichever the anchor
+  /// is nearest, and at an end ([UnitPoint::BOTTOM], a chat) it stays there as the content
+  /// changes until scrolled away, and again once scrolled (or [Ui::scroll_to]) back.
+  pub fn default_scroll_anchor(&mut self, anchor: UnitPoint) -> &mut Self {
+    self.set_slot(Some(ScrollAnchor(anchor)));
+    self
+  }
+
   /// A container scrolling its children, with overlay scrollbars, their knobs the
   /// environment's ([ScrollerKnob]). `style` sets its size and padding, and the axes with
   /// [Style::scroll] (vertical by default), as SwiftUI's `ScrollView`. Its id is the scroll
@@ -296,10 +310,24 @@ impl Ui<'_> {
     let knob = self.environment_value::<ScrollerKnob>();
     let id = self.take_id();
     let mask = self.set_slot::<EdgeFade>(None);
-    let style = match style.scroll.is_empty() {
+    let mut style = match style.scroll.is_empty() {
       true => style.scroll(Axes::VERTICAL),
       false => style.clip(),
     };
+
+    // The layout keeps the offset at the anchor; content smaller than the viewport sits there
+    // along the axes that scroll.
+    let anchor = self.set_slot::<ScrollAnchor>(None).map(|a| a.0);
+    self.state::<ScrollState>(id).anchor = anchor;
+    for ax in (0..2).filter(|&ax| style.scroll.at(ax)) {
+      if let Some(f) = anchor.map(|a| a.at(ax)) {
+        style.align[ax] = match f {
+          _ if f > 0.75 => Align::End,
+          _ if f >= 0.25 => Align::Center,
+          _ => Align::Start,
+        };
+      }
+    }
 
     let b = self.scroll_bars(id, style.scroll);
     let (opacity, shown) = (b.opacity, b.shown);
@@ -368,11 +396,11 @@ impl Ui<'_> {
 mod tests {
   use std::time::Duration;
 
-  use crate::Harness;
-  use crate::app::App;
-  use crate::scene::{Size, rgb};
+  use crate::app::{App, Event, Phase};
+  use crate::scene::{Point, Size, rgb};
   use crate::ui::input::ScrollState;
-  use crate::ui::{Axes, Axis, Float, Id, ScrollerKnob, Style, Ui, px};
+  use crate::ui::{Axes, Axis, Float, Id, ScrollerKnob, Style, Ui, UnitPoint, px};
+  use crate::{Harness, Modifiers};
 
   /// A scroll area 200 high over 1000 points of content, fading into red.
   struct Tall(f32);
@@ -560,5 +588,130 @@ mod tests {
     let thumb = h.rect(Id::of("area").key(("thumb", 1usize))).expect("a thumb");
     let p = h.render().pixel(thumb.x + thumb.w / 2.0, thumb.y + thumb.h / 2.0);
     assert!(p[0] > 200 && p[1] < 60 && p[2] < 60, "{p:?}");
+  }
+
+  /// A scroll area 200 high at the bottom anchor over `n` rows 30 high.
+  struct Chat(usize);
+
+  impl App for Chat {
+    fn view(&mut self, ui: &mut Ui) {
+      let s = Style::new().w(px(200.0)).h(px(200.0));
+      ui.id("area").default_scroll_anchor(UnitPoint::BOTTOM).scroll_area(s, |ui| {
+        (0..self.0).for_each(|i| _ = ui.key(i).el(Style::new().h(px(30.0))));
+      });
+    }
+  }
+
+  fn offset(h: &Harness<Chat>) -> f32 {
+    h.scroll(Id::of("area")).unwrap().offset.y
+  }
+
+  /// A trackpad's scroll of `dy` points, the content moving down, over the area.
+  fn swipe<A: App>(h: &mut Harness<A>, dy: f32) {
+    let (pos, delta, mods) = (Point::new(100.0, 100.0), Point::new(0.0, dy), Modifiers::empty());
+    let (phase, momentum) = (Phase::Changed, Phase::None);
+    h.event(Event::Scroll { pos, delta, precise: true, phase, momentum, mods });
+    h.frame();
+  }
+
+  /// At the bottom anchor it opens at the end and stays there as rows come; scrolled up, the
+  /// content stays put as they do; scrolled back down, it holds again.
+  #[test]
+  fn the_bottom_anchor_follows_the_end_until_scrolled_away() {
+    let mut h = Harness::new(Chat(20), Size::new(200.0, 200.0), 1.0);
+    h.frame();
+    assert_eq!(offset(&h), 400.0, "opens at the end");
+
+    h.app_mut().0 = 21;
+    h.redraw();
+    h.frame();
+    assert_eq!(offset(&h), 430.0, "a row more, still at the end");
+
+    swipe(&mut h, 100.0);
+    assert_eq!(offset(&h), 330.0);
+    h.app_mut().0 = 22;
+    h.redraw();
+    h.frame();
+    assert_eq!(offset(&h), 330.0, "scrolled up, it stays");
+
+    swipe(&mut h, -1000.0);
+    assert_eq!(offset(&h), 460.0, "back at the end");
+    h.app_mut().0 = 23;
+    h.redraw();
+    h.frame();
+    assert_eq!(offset(&h), 490.0, "held again");
+  }
+
+  /// Steps smaller than a point, a trackpad's slow start, and a mouse wheel's notch each move it
+  /// off the end, one after the other.
+  #[test]
+  fn small_steps_and_the_wheel_leave_the_end() {
+    let mut h = Harness::new(Chat(20), Size::new(200.0, 200.0), 1.0);
+    h.frame();
+    for _ in 0..4 {
+      swipe(&mut h, 0.5);
+    }
+
+    assert_eq!(offset(&h), 398.0);
+
+    let mut h = Harness::new(Chat(20), Size::new(200.0, 200.0), 1.0);
+    h.frame();
+    let (pos, delta, mods) = (Point::new(100.0, 100.0), Point::new(0.0, 10.0), Modifiers::empty());
+    let (phase, momentum) = (Phase::None, Phase::None);
+    h.event(Event::Scroll { pos, delta, precise: false, phase, momentum, mods });
+    h.wait(Duration::from_millis(500));
+    assert_eq!(offset(&h), 390.0, "the wheel's momentum ran out");
+  }
+
+  /// Rows fewer than fill it sit at the bottom, as a chat's first messages.
+  #[test]
+  fn short_content_sits_at_the_anchor() {
+    let mut h = Harness::new(Chat(2), Size::new(200.0, 200.0), 1.0);
+    h.frame();
+    let area = h.rect(Id::of("area")).unwrap();
+    let row = h.rect(Id::of("area").key(1usize)).unwrap();
+    assert_eq!(row.y + row.h, area.y + area.h);
+  }
+
+  /// `n` rows 30 high in a scroll area 200 high at `anchor`, scrolled to `ask` as it first
+  /// shows.
+  struct Anchored {
+    n: usize,
+    anchor: UnitPoint,
+    ask: Option<f32>,
+  }
+
+  impl App for Anchored {
+    fn view(&mut self, ui: &mut Ui) {
+      if let Some(y) = self.ask.take() {
+        ui.scroll_to(Id::of("area"), Point::new(0.0, y));
+      }
+
+      let s = Style::new().w(px(200.0)).h(px(200.0));
+      ui.id("area").default_scroll_anchor(self.anchor).scroll_area(s, |ui| {
+        (0..self.n).for_each(|i| _ = ui.key(i).el(Style::new().h(px(30.0))));
+      });
+    }
+  }
+
+  /// Scrolled to before it first shows, it opens there, not at its anchor.
+  #[test]
+  fn a_scroll_asked_first_wins_over_the_anchor() {
+    let app = Anchored { n: 20, anchor: UnitPoint::BOTTOM, ask: Some(100.0) };
+    let mut h = Harness::new(app, Size::new(200.0, 200.0), 1.0);
+    h.frame();
+    assert_eq!(h.scroll(Id::of("area")).unwrap().offset.y, 100.0);
+  }
+
+  /// Short content sits at the start, centre or end the anchor is nearest.
+  #[test]
+  fn short_content_sits_where_the_anchor_is_nearest() {
+    for (y, top) in [(0.2, 0.0), (0.3, 70.0), (0.7, 70.0), (0.8, 140.0)] {
+      let app = Anchored { n: 2, anchor: UnitPoint::new(0.0, y), ask: None };
+      let mut h = Harness::new(app, Size::new(200.0, 200.0), 1.0);
+      h.frame();
+      let (area, row) = (h.rect(Id::of("area")).unwrap(), h.rect(Id::of("area").key(0usize)));
+      assert_eq!(row.unwrap().y - area.y, top, "at {y}");
+    }
   }
 }
