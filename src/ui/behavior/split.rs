@@ -1,7 +1,7 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! A split's behaviour ([Ui::split_behavior]): its divider dragged within both panes'
-//! minimums, fitted to the split's size; `Split` draws it.
+//! minimums and maximums, fitted to the split's size; `Split` draws it.
 
 use crate::scene::Point;
 use crate::ui::{Axis, Behavior, Id, Role, Ui, Value};
@@ -19,16 +19,17 @@ pub struct SplitBehavior {
 impl Ui<'_> {
   /// A split `id` along `axis` (0: panes side by side) with its divider's handle `handle`:
   /// dragging the handle sets `ratio`, the first pane's share, keeping the pane under the
-  /// pointer where it was grabbed, to where it was released. The fitted share and minimums come
-  /// from the last frame's size, the view running again when the layout changes it ([Ui::settle]):
-  /// narrower than both minimums, each pane gets its share of what there is.
+  /// pointer where it was grabbed, to where it was released, each pane within its `min` and
+  /// `max` size. The fitted share and minimums come from the last frame's size, the view running
+  /// again when the layout changes it ([Ui::settle]): narrower than both minimums, each pane gets
+  /// its share of what there is; a maximum gives way to the other pane's minimum.
   pub fn split_behavior(
     &mut self,
     id: Id,
     handle: Id,
     axis: Axis,
     ratio: &mut f32,
-    min: [f32; 2],
+    [min, max]: [[f32; 2]; 2],
   ) -> SplitBehavior {
     /// The pointer's distance from the divider when the drag began.
     #[derive(Default)]
@@ -50,11 +51,13 @@ impl Ui<'_> {
 
     let fit = |r: f32| match span {
       Some((_, len)) if len > 0.0 => {
-        let lo = min[0] / len;
-        r.clamp(lo, ((len - 1.0 - min[1]) / len).max(lo))
+        let room = len - 1.0;
+        let lo = min[0].max(room - max[1]) / len;
+        r.clamp(lo, ((room - min[1]).min(max[0]) / len).max(lo))
       }
       _ => r,
     };
+
     let was = *ratio;
     let mut grab = std::mem::take(&mut self.state::<Grab>(id).0);
     let along = |p: Point| if ax == 0 { p.x } else { p.y };

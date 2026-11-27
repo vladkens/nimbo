@@ -11,7 +11,7 @@
 //! ```
 //!
 //! The split keeps its ratio in the app or in its own state; dragging the divider honours both
-//! panes' minimum sizes. The behaviour is [Ui::split_behavior].
+//! panes' minimum and maximum sizes. The behaviour is [Ui::split_behavior].
 
 use super::toolbar::Sidebar;
 use crate::scene::mix;
@@ -25,6 +25,7 @@ pub struct Split<'s> {
   ratio: Option<&'s mut f32>,
   init: f32,
   min: [f32; 2],
+  max: [f32; 2],
   /// The first pane is a sidebar column ([Split::navigation]).
   sidebar: bool,
 }
@@ -33,7 +34,8 @@ impl<'s> Split<'s> {
   /// Panes along `axis`: [Axis::Horizontal] left and right of a vertical divider, Vertical
   /// above and below a horizontal one.
   pub fn new(axis: Axis) -> Self {
-    Self { axis, ratio: None, init: 0.5, min: [0.0; 2], sidebar: false }
+    let max = [f32::INFINITY; 2];
+    Self { axis, ratio: None, init: 0.5, min: [0.0; 2], max, sidebar: false }
   }
 
   /// A sidebar column left of its detail, as SwiftUI's `NavigationSplitView`: a toolbar built
@@ -59,6 +61,12 @@ impl<'s> Split<'s> {
     Self { min: [first, second], ..self }
   }
 
+  /// The most size of each pane along the split, in points, `f32::INFINITY` for none (the
+  /// default), as SwiftUI's `navigationSplitViewColumnWidth(min:ideal:max:)` bounds a sidebar.
+  pub fn max(self, first: f32, second: f32) -> Self {
+    Self { max: [first, second], ..self }
+  }
+
   /// Builds the panes with `pane(ui, 0)` and `pane(ui, 1)`; `changed` when a drag moved the
   /// divider.
   pub fn show<'a>(self, ui: &mut Ui<'a>, mut pane: impl FnMut(&mut Ui<'a>, usize)) -> Response {
@@ -71,7 +79,7 @@ impl<'s> Split<'s> {
     let handle = id.key("handle");
     let own = ui.state::<Own>(id).0;
     let mut r = self.ratio.as_deref().copied().unwrap_or(own.unwrap_or(self.init));
-    let b = ui.split_behavior(id, handle, self.axis, &mut r, self.min);
+    let b = ui.split_behavior(id, handle, self.axis, &mut r, [self.min, self.max]);
     let (held, min) = (b.handle.held, b.min);
     match self.ratio {
       Some(x) => *x = r,
@@ -197,6 +205,47 @@ mod tests {
     h.move_to(x + 120.0, y);
     h.frame();
     assert!((h.app().0 - 0.46).abs() < 0.005, "{}", h.app().0);
+  }
+
+  /// A split of a first pane 100 to 200 wide and a second one 150 wide at least.
+  struct Bounded(f32);
+
+  impl App for Bounded {
+    fn view(&mut self, ui: &mut Ui) {
+      let split =
+        Split::navigation().ratio(&mut self.0).min(100.0, 150.0).max(200.0, f32::INFINITY);
+      split.show(ui.id("split"), |ui, _| _ = ui.el(Style::new().grow()));
+    }
+  }
+
+  /// Dragged past its maximum or its minimum, the first pane stops there; the second pane's
+  /// minimum wins over the first's maximum where the window has no room for both.
+  #[test]
+  fn a_drag_stops_at_the_panes_bounds() {
+    let mut h = Harness::new(Bounded(0.3), Size::new(500.0, 200.0), 1.0);
+    h.frame();
+    let first = |h: &Harness<Bounded>| h.rect(Id::of("split").key("handle")).unwrap().x + 3.0;
+    assert_eq!(first(&h), 150.0);
+
+    let drag = |h: &mut Harness<Bounded>, by: f32| {
+      let x = first(h) + 0.5;
+      h.move_to(x, 100.0);
+      h.press(x, 100.0);
+      h.move_to(x + by, 100.0);
+      h.frame();
+      h.release(x + by, 100.0);
+      h.frame();
+    };
+    drag(&mut h, 300.0);
+    assert_eq!(first(&h), 200.0, "at its maximum");
+    drag(&mut h, -300.0);
+    assert_eq!(first(&h), 100.0, "at its minimum");
+
+    h.app_mut().0 = 0.6;
+    h.resize(Size::new(300.0, 200.0), 1.0);
+    h.frame();
+    h.frame();
+    assert_eq!(first(&h), 149.0, "the second pane keeps its 150");
   }
 
   /// A split asked for 10% with a first pane of 200 at least, in a box the app sizes.

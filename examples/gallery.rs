@@ -116,7 +116,7 @@ pub const BLOCKS: &[Block] = &[
   b("List", "List behavior", "List(rows, selection: $sel) { … }.listRowBackground(…)"),
   b("Containers", "Tabs", "TabView { … }"),
   b("Containers", "Split", "HSplitView { … }"),
-  b("Containers", "Navigation split", "NavigationSplitView { … } detail: { … }"),
+  b("Containers", "Navigation split", "NavigationSplitView { Sidebar().navigationSplitViewColumnWidth(min: 80, ideal: 104, max: 180) } detail: { … }"),
   b("Containers", "Toolbar", "Detail().toolbar { ToolbarItem(placement: .principal) { … }; ToolbarItem(placement: .primaryAction) { … } } in a NavigationSplitView"),
   b("Containers", "Unified toolbar", ".windowToolbarStyle(.unified)"),
   b("Containers", "Menu", "Menu(\"Actions\") { Button(…) }"),
@@ -338,7 +338,8 @@ mod pages {
           "Navigation split" => Self::variants(ui, Shown::Plain, |ui| {
             let t = ui.theme();
             ui.row(Style::new().w(px(260.0)).h(px(60.0)), |ui| {
-              Split::navigation().ratio(&mut self.side).show(ui, |ui, pane| {
+              let split = Split::navigation().ratio(&mut self.side).min(80.0, 80.0);
+              split.max(180.0, f32::INFINITY).show(ui, |ui, pane| {
                 let ground = if pane == 0 { t.panel() } else { t.bg() };
                 ui.col(Style::new().grow().pad(8.0).bg(ground), |ui| {
                   ui.text(["Sidebar", "Detail"][pane], t.label())

@@ -362,7 +362,7 @@ fn split<'a>(
 ) {
   let p = ui.environment_value::<Palette>();
   let handle = id.key("handle");
-  let b = ui.split_behavior(id, handle, Axis::Horizontal, ratio, min);
+  let b = ui.split_behavior(id, handle, Axis::Horizontal, ratio, [min, [f32::INFINITY; 2]]);
   let h = hot(ui, handle, b.handle.hovered || b.handle.held);
   ui.with_id(id).row(Style::new().grow().clip(), |ui| {
     let first = Style::new().w(pct(b.shown * 100.0)).min_w(b.min[0]).h(grow()).clip();
