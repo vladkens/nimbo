@@ -15,7 +15,8 @@
 //! A run sets what its [Attributes] say; the rest is the text's [TextStyle] (its font's size, its
 //! colour, its lines), as SwiftUI's runs take the `Text`'s font and foreground where they set
 //! none. A run in another font measures in it, and the paragraph's lines are as high as its
-//! tallest font; runs that change only colours, lines or grounds wrap as the plain text does.
+//! tallest font; runs side by side in one font are shaped as one, kerned across their edges as
+//! AppKit's, so runs that change only colours, lines or grounds wrap and draw as the plain text.
 
 use std::fmt::{Display, Write};
 
@@ -247,6 +248,24 @@ pub(crate) fn pieces(
   })
 }
 
+/// The pieces of `range` as [pieces] splits it, in a text of `base`, those side by side in one
+/// font joined: each one's range and font, shaped as one.
+pub(crate) fn fonts(
+  runs: &[Run],
+  range: (usize, usize),
+  base: Font,
+) -> impl Iterator<Item = (usize, usize, Font)> + '_ {
+  let mut it = pieces(runs, range).map(move |(a, b, at)| (a, b, at.font(base))).peekable();
+  std::iter::from_fn(move || {
+    let (a, mut b, font) = it.next()?;
+    while let Some((_, end, _)) = it.next_if(|p| p.2 == font) {
+      b = end;
+    }
+
+    Some((a, b, font))
+  })
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -349,6 +368,70 @@ mod tests {
     assert_eq!(img.pixel(r.x + m / 2.0, r.y + 2.0), [255; 4]);
   }
 
+  /// Runs in colours alone draw where the text measured them, kerned across their edges as the
+  /// plain text is: their ink ends where the plain text's does, within the box.
+  #[test]
+  fn colour_runs_draw_kerned_as_measured() {
+    let style = TextStyle::new(Font::ui(40.0), [0.0, 0.0, 0.0, 1.0]).nowrap();
+    let ink = |text: AttributedString| {
+      let mut h = para(400.0, text, style, false);
+      let (r, img) = (h.rect(Id::of("t")).unwrap(), h.render());
+      let inked = |x: usize| {
+        (r.y as usize..(r.y + r.h) as usize).any(|y| img.pixel(x as f32, y as f32) != [255; 4])
+      };
+      ((0..400).rev().find(|&x| inked(x)).unwrap() as f32, r)
+    };
+    let mut s = AttributedString::new();
+    for _ in 0..5 {
+      s.push("A", Attributes::new().color(RED)).push("V", Attributes::new().color(BLUE));
+    }
+
+    let (plain, r) = ink(AttributedString::from("AVAVAVAVAV"));
+    let (runs, rr) = ink(s);
+    assert_eq!(rr.w, r.w);
+    assert!(plain <= r.x + r.w + 1.0, "{plain} past {r:?}");
+    assert_eq!(runs, plain, "measured {r:?}");
+  }
+
+  /// Spaces in a wider font count as wide: a line breaks where they don't fit, none past the box.
+  #[test]
+  fn spaces_in_a_wider_font_wrap_as_wide() {
+    let style = TextStyle::new(Font::ui(13.0), [0.0, 0.0, 0.0, 1.0]);
+    let mut s = AttributedString::from("A ");
+    s.push("       ", Attributes::new().design(Design::Monospaced)).push("B CC", Attributes::new());
+    let h = para(60.0, s, style, false);
+    let t = &h.rt.ui.last;
+    let n = t.get(Id::of("t")).unwrap();
+    let Kind::Text { lines: (a, b), .. } = n.kind else { panic!() };
+    for l in &t.lines[a as usize..b as usize] {
+      eprintln!("LINE {} {} {}", l.start, l.end, l.width);
+      assert!(l.width <= n.rect.w + 0.01, "a line {} wide in {}", l.width, n.rect.w);
+    }
+  }
+
+  /// A clip 20 high over a line 100 high: its glyphs out of the clip.
+  struct Tall;
+
+  impl App for Tall {
+    fn view(&mut self, ui: &mut Ui) {
+      let mut s = AttributedString::new();
+      s.push("A", Attributes::new().background(RED)).push("\nB", Attributes::new());
+      let style = TextStyle::new(Font::ui(13.0), [0.0, 0.0, 0.0, 1.0]).line_h(100.0);
+      ui.col(Style::new().w(px(100.0)).h(px(20.0)).clip().bg([1.0; 4]), |ui| {
+        ui.id("t").text(&s, style)
+      });
+    }
+  }
+
+  /// A run's ground fills its line's box: it shows in a clip its glyphs are out of.
+  #[test]
+  fn a_ground_shows_where_its_line_box_does() {
+    let mut h = Harness::new(Tall, Size::new(100.0, 100.0), 1.0);
+    h.frame();
+    let r = h.rect(Id::of("t")).unwrap();
+    assert_eq!(h.render().pixel(r.x + 2.0, 10.0), [255, 0, 0, 255]);
+  }
+
   /// Selectable styled text copies its characters, and a double click on its bold word selects
   /// that word: its caret stops follow the runs' fonts.
   #[test]
@@ -382,6 +465,24 @@ mod tests {
     assert!(l.width <= n.rect.w + 0.01, "{} in {}", l.width, n.rect.w);
   }
 
+  /// Styled text cut to its ellipsis alone inks it: the line's ink reaches above the baseline,
+  /// as far as the plain text's.
+  #[test]
+  fn a_styled_line_cut_to_its_ellipsis_inks_it() {
+    let style = TextStyle::new(Font::ui(13.0), [0.0, 0.0, 0.0, 1.0]).line_limit(1);
+    let ink = |text: AttributedString| {
+      let h = para(22.0, text, style, false);
+      let t = &h.rt.ui.last;
+      let Kind::Text { lines: (a, _), .. } = t.get(Id::of("t")).unwrap().kind else { panic!() };
+      let l = t.lines[a as usize];
+      assert_eq!((l.start, l.end), (0, 0), "the ellipsis alone");
+      l.ink
+    };
+    let styled = ink(hello("WWWW", Attributes::new().weight(Weight::Bold)));
+    let plain = ink(AttributedString::from("Hello WWWW World"));
+    assert!(styled.up > 0.0 && styled.up == plain.up, "{styled:?}, plain {plain:?}");
+  }
+
   #[test]
   fn pushes_merge_alike_runs_and_skip_empty_ones() {
     let red = Attributes::new().color([1.0, 0.0, 0.0, 1.0]);
@@ -401,6 +502,16 @@ mod tests {
     // Past the runs, and with none: the base's.
     assert_eq!(pieces(&[], (0, 3)).count(), 1);
     assert_eq!(pieces(s.runs(), (6, 8)).map(|p| (p.0, p.1)).collect::<Vec<_>>(), [(6, 8)]);
+  }
+
+  #[test]
+  fn fonts_join_the_pieces_in_one_font() {
+    let (red, bold) = (Attributes::new().color(RED), Attributes::new().weight(Weight::Bold));
+    let mut s = AttributedString::from("ab");
+    s.push("cd", red).push("ef", bold).push("gh", bold.color(BLUE)).push("ij", Attributes::new());
+    let base = Font::ui(13.0);
+    let f: Vec<_> = fonts(s.runs(), (1, 10), base).map(|(a, b, f)| (a, b, f == base)).collect();
+    assert_eq!(f, [(1, 4, true), (4, 8, false), (8, 10, true)]);
   }
 
   #[test]

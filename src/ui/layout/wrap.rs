@@ -3,7 +3,8 @@
 //! The layout's text: a text's preferred and least widths, its lines wrapped at its final width
 //! or cut to fit with an ellipsis, an editable one's caret stops, and what of them is kept
 //! across frames per font and text ([Kept]). A styled text whose runs change its font ([Span])
-//! measures each piece in its run's font and wraps as one text.
+//! measures each piece in one font as one (the runs side by side in it together) and wraps as
+//! one text.
 
 use std::hash::{Hash, Hasher};
 
@@ -14,7 +15,7 @@ use crate::scene::Size;
 use crate::text::edit::graphemes;
 use crate::text::{Font, FxHasher, Ink, Memo, Metrics};
 use crate::ui::Run;
-use crate::ui::attributed::pieces;
+use crate::ui::attributed::fonts;
 
 /// What the layout keeps across frames per font and text ([Memo]): a wrapping text's least
 /// width, the lines of each line of text by the width it wraps at, and an editable line's caret
@@ -49,10 +50,9 @@ impl<'t> Span<'t> {
     Self { s, style, runs }
   }
 
-  /// Its pieces in `a..b`: each one's range and font.
+  /// Its pieces in `a..b`, each in one font ([fonts]): each one's range and font.
   fn pieces(&self, a: usize, b: usize) -> impl Iterator<Item = (usize, usize, Font)> + '_ {
-    let base = self.style.font;
-    pieces(self.runs, (a, b)).map(move |(a, b, at)| (a, b, at.font(base)))
+    fonts(self.runs, (a, b), self.style.font)
   }
 
   /// The advance width of `a..b`.
@@ -315,10 +315,18 @@ pub fn elide(
   let (w, ink) = match sp.runs.is_empty() {
     true => m.line(&format!("{}{ELLIPSIS}{}", &s[..x], &s[y..]), sp.style.font),
     false => {
-      let ((wa, ia), (wb, ib)) = (sp.line(m, a, a + x), sp.line(m, a + y, b));
-      let ink =
-        Ink { left: ia.left, right: ib.right, up: ia.up.max(ib.up), down: ia.down.max(ib.down) };
-      (wa + m.width(ELLIPSIS, cut(x, y)) + wb, ink)
+      // The kept pieces and the ellipsis between, side by side: their ink from the line's ends.
+      let (wa, ia) = sp.line(m, a, a + x);
+      let (we, ie) = m.line(ELLIPSIS, cut(x, y));
+      let (wb, ib) = sp.line(m, a + y, b);
+      let w = wa + we + wb;
+      let ink = Ink {
+        left: ia.left.max(ie.left - wa).max(ib.left - wa - we),
+        right: (ia.right - we - wb).max(ie.right - wb).max(ib.right),
+        up: ia.up.max(ie.up).max(ib.up),
+        down: ia.down.max(ie.down).max(ib.down),
+      };
+      (w, ink)
     }
   };
 
@@ -416,8 +424,13 @@ fn wrap_line(
 
     let ww = wide(m, a, b);
     if let Some((start, end, cw)) = cur {
-      // The spaces between, each as wide as the first.
-      let next = cw + wide(m, end, end + 1) * (a - end) as f32 + ww;
+      // The spaces between: each as wide as the first in one font, else as their runs set.
+      let gap = match sp.runs.is_empty() {
+        true => wide(m, end, end + 1) * (a - end) as f32,
+        false => wide(m, end, a),
+      };
+
+      let next = cw + gap + ww;
       if next <= width + EPS {
         cur = Some((start, b, next));
         continue;

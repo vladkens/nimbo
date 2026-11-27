@@ -5,12 +5,12 @@
 //! children, clipped when it clips. Overlays follow, each in a new layer, by z. Elements outside
 //! the window or their clip are skipped; text by where its ink reaches, not its box.
 
-use super::attributed::{Attributes, pieces};
+use super::attributed::{Attributes, fonts, pieces};
 use super::layout::{ELLIPSIS, Elide, Kind, Line, Tree};
 use super::textlayout::{Edit, TextLayout};
 use super::{Axis, Canvas, Clip, ContentMode, FocusRing, Run, Style, TextStyle};
 use crate::scene::{Color, Frame, Quad, Rect};
-use crate::text::Ink;
+use crate::text::{Ink, Line as Shaped};
 
 /// Paints `t`; `ring` rings node `.0`, the focused one.
 pub(super) fn paint(
@@ -152,17 +152,20 @@ fn node(
           lines.0 + ((clip.y + clip.h + ink.up - top) / line_h + 1.0).floor().clamp(0.0, n) as u32;
       }
 
-      // A styled text's grounds under its selection, and its runs.
+      // A styled text's grounds under its selection, and its runs: the lines whose box, not
+      // ink, reaches into the clip.
       let styled = Styled { t, base: range.0, runs, style };
-      for k in (first..last).filter(|_| !runs.is_empty()) {
+      let n = (lines.1 - lines.0) as f32;
+      let boxed = |y: f32| lines.0 + ((y - r.y) / line_h).clamp(0.0, n) as u32;
+      let (top, end) = (boxed(clip.y), boxed(clip.y + clip.h + line_h - 0.001));
+      for k in (top..end).filter(|_| !runs.is_empty()) {
         let top = r.y + (k - lines.0) as f32 * line_h;
-        styled.walk(&t.lines[k as usize], f, |f, x, s, st, ground| {
-          let w = f.text.measure(s, st.font);
-          if let Some(g) = ground {
-            f.rect(Rect::new(r.x + x, top, w, line_h), fade(g, alpha), 0.0);
+        styled.walk(&t.lines[k as usize], f, |f, p| {
+          for (x0, x1, _, ground) in styled.runs(p) {
+            if let Some(g) = ground {
+              f.rect(Rect::new(r.x + x0, top, x1 - x0, line_h), fade(g, alpha), 0.0);
+            }
           }
-
-          w
         });
       }
 
@@ -174,11 +177,11 @@ fn node(
         let l = &t.lines[k as usize];
         let y = r.y + (k - lines.0) as f32 * line_h + baseline;
         if !runs.is_empty() {
-          styled.walk(l, f, |f, x, s, st, _| {
-            let (x, color) = (r.x + x, fade(st.color, alpha));
-            let w = f.text(x, y, s, st.font, color);
-            rule(x, y, w, st, color, f);
-            w
+          styled.walk(l, f, |f, p| {
+            f.glyphs(r.x + p.x, y, p.line, |at| fade(styled.color(p, at), alpha));
+            for (x0, x1, st, _) in styled.runs(p) {
+              rule(r.x + x0, y, x1 - x0, st, fade(st.color, alpha), f);
+            }
           });
           continue;
         }
@@ -246,7 +249,7 @@ fn node(
 }
 
 /// A styled text's lines drawn by its runs ([super::AttributedString]): each piece in its run's
-/// style over the text's.
+/// style over the text's, the runs side by side in one font shaped as one.
 struct Styled<'t> {
   t: &'t Tree,
   /// Where its text starts in the tree's, which its runs' ends are from.
@@ -255,21 +258,27 @@ struct Styled<'t> {
   style: TextStyle,
 }
 
+/// A piece of a styled line shaped as one, in one font: `line`, drawn `x` from the line's start,
+/// of `range` of the text; or the ellipsis, in the attributes `dots` where it cuts.
+struct Piece<'l> {
+  line: &'l Shaped,
+  x: f32,
+  range: (usize, usize),
+  dots: Option<Attributes>,
+}
+
 impl Styled<'_> {
-  /// Calls `each(f, x, text, style, ground)` for each piece of line `l` in order, `x` from its
-  /// start, the ellipsis of a line cut to fit in the run where it is cut; `each` gives the width.
-  fn walk(
-    &self,
-    l: &Line,
-    f: &mut Frame,
-    mut each: impl FnMut(&mut Frame, f32, &str, TextStyle, Option<Color>) -> f32,
-  ) {
+  /// The attributes at `at` of its text: its run's, the text's own past the last.
+  fn attrs(&self, at: usize) -> Attributes {
+    let k = self.runs.partition_point(|r| r.end as usize <= at);
+    self.runs.get(k).map_or(Attributes::new(), |r| r.attrs)
+  }
+
+  /// Calls `each(f, piece)` for each piece of line `l` in order, the ellipsis of a line cut to
+  /// fit in the run where it is cut.
+  fn walk(&self, l: &Line, f: &mut Frame, mut each: impl FnMut(&mut Frame, &Piece)) {
     let rel = |at: u32| (at - self.base) as usize;
-    let dots = |at: u32| {
-      let k = self.runs.partition_point(|r| r.end as usize <= rel(at));
-      self.runs.get(k).map_or(Attributes::new(), |r| r.attrs)
-    };
-    let (text, cut) = (|a, b| Some((rel(a), rel(b))), |at| (None, Some(dots(at))));
+    let (text, cut) = (|a, b| Some((rel(a), rel(b))), |at| (None, Some(self.attrs(rel(at)))));
     let parts = match l.elide {
       Elide::None => [(text(l.start, l.end), None), (None, None), (None, None)],
       Elide::Tail => [(text(l.start, l.end), None), cut(l.end), (None, None)],
@@ -277,21 +286,72 @@ impl Styled<'_> {
       Elide::Middle(a, b) => [(text(l.start, a), None), cut(a), (text(b, l.end), None)],
     };
 
-    let mut x = 0.0;
+    let (base, mut x) = (self.base as usize, 0.0);
     for part in parts {
       match part {
         (Some(range), _) => {
-          for (a, b, attrs) in pieces(self.runs, range) {
-            let (st, ground) = attrs.style(self.style);
-            let s = &self.t.text[self.base as usize + a..self.base as usize + b];
-            x += each(f, x, s, st, ground);
+          for (a, b, font) in fonts(self.runs, range, self.style.font) {
+            let line = f.text.layout(&self.t.text[base + a..base + b], font);
+            each(f, &Piece { line: &line, x, range: (a, b), dots: None });
+            x += line.width;
           }
         }
-        (None, Some(attrs)) => x += each(f, x, ELLIPSIS, attrs.style(self.style).0, None),
+        (None, Some(attrs)) => {
+          let line = f.text.layout(ELLIPSIS, attrs.font(self.style.font));
+          each(f, &Piece { line: &line, x, range: (0, 0), dots: Some(attrs) });
+          x += line.width;
+        }
         (None, None) => {}
       }
     }
   }
+
+  /// The runs in piece `p`: where each starts and ends from the line's start, as it was shaped
+  /// (left to right, as the caret stops), its style and its ground.
+  fn runs<'p>(
+    &'p self,
+    p: &'p Piece,
+  ) -> impl Iterator<Item = (f32, f32, TextStyle, Option<Color>)> + 'p {
+    let len = (p.range.1 - p.range.0) as u32;
+    // Where each cluster ends: the next one's start in the text.
+    let mut ends = p.line.clusters.clone();
+    ends.push(len);
+    ends.sort_unstable();
+    ends.dedup();
+    let rel = move |k: usize| (k - p.range.0) as u32;
+    let span = move |a, b| extent(p.line, &ends, (rel(a), rel(b))).map(|x| p.x + x);
+    let dots = p.dots.map(|at| ([p.x, p.x + p.line.width], at));
+    let runs = pieces(self.runs, p.range).map(move |(a, b, at)| (span(a, b), at));
+    dots.into_iter().chain(runs).map(|([x0, x1], at)| {
+      let (st, ground) = at.style(self.style);
+      (x0, x1, st, ground)
+    })
+  }
+
+  /// The colour of the glyph of piece `p` whose cluster starts at `at` of it.
+  fn color(&self, p: &Piece, at: u32) -> Color {
+    let attrs = p.dots.unwrap_or_else(|| self.attrs(p.range.0 + at as usize));
+    attrs.style(self.style).0.color
+  }
+}
+
+/// From the leftmost to the rightmost pen of bytes `a..b` of `line` in either direction (RTL
+/// shapes them right to left), `ends` where its clusters end, from its start; in a ligature
+/// (`fi`), its share by bytes, as AppKit's caret goes.
+fn extent(line: &Shaped, ends: &[u32], (a, b): (u32, u32)) -> [f32; 2] {
+  let mut span = [f32::INFINITY, f32::NEG_INFINITY];
+  for (i, (g, &c)) in line.glyphs.iter().zip(&line.clusters).enumerate() {
+    let e = ends[ends.partition_point(|&v| v <= c)];
+    if e <= a || c >= b {
+      continue;
+    }
+
+    let (x0, x1) = (g.x, line.glyphs.get(i + 1).map_or(line.width, |g| g.x));
+    let at = |v: u32| x0 + (x1 - x0) * (v.clamp(c, e) - c) as f32 / (e - c) as f32;
+    span = [span[0].min(at(a)), span[1].max(at(b))];
+  }
+
+  if span[0] > span[1] { [0.0; 2] } else { span }
 }
 
 /// The farthest the ink of lines `lines` of [Tree::lines] reaches past their pens: `right` past
@@ -425,10 +485,35 @@ mod tests {
 
   use super::*;
   use crate::scene::{Images, Point, Scene, Size};
-  use crate::text::{Font, TextSystem};
+  use crate::text::{Font, Glyph, TextSystem};
   use crate::ui::{
     Float, Id, LinePattern, Shadow, Sys, TextStyle, Ui, UiState, UnitPoint, grow, input, px,
   };
+
+  /// A shaped line of glyphs at `x`, each starting the cluster at `clusters`, `width` wide.
+  fn shaped(x: &[f32], clusters: &[u32], width: f32) -> Shaped {
+    let glyphs = x.iter().map(|&x| Glyph { face: 0, id: 0, x, y: 0.0 }).collect();
+    Shaped { glyphs, clusters: clusters.to_vec(), width, ink: Ink::default() }
+  }
+
+  /// A run inside a ligature takes its share of it: `f` and `i` as one glyph `fi`, then `x`.
+  #[test]
+  fn a_run_inside_a_ligature_is_its_share() {
+    let line = shaped(&[0.0, 10.0], &[0, 2], 16.0);
+    let ends = [2, 3];
+    assert_eq!(extent(&line, &ends, (0, 1)), [0.0, 5.0]);
+    assert_eq!(extent(&line, &ends, (1, 3)), [5.0, 16.0]);
+  }
+
+  /// Right to left, a run spans its own glyphs: the first two of four letters, two bytes each,
+  /// drawn at the right.
+  #[test]
+  fn a_run_right_to_left_spans_its_glyphs() {
+    let line = shaped(&[0.0, 10.0, 20.0, 30.0], &[6, 4, 2, 0], 40.0);
+    let ends = [2, 4, 6, 8];
+    assert_eq!(extent(&line, &ends, (0, 4)), [20.0, 40.0]);
+    assert_eq!(extent(&line, &ends, (4, 8)), [0.0, 20.0]);
+  }
 
   #[test]
   fn paints_tree_then_overlays() {
