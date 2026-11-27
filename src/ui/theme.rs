@@ -491,6 +491,7 @@ pub struct Sizes {
   pub(crate) menu_edge: f32,
   pub(crate) check: f32,
   pub(crate) switch: SwitchSize,
+  pub(crate) switch_small: SwitchSize,
   pub(crate) switch_large: SwitchSize,
   pub(crate) knob: [f32; 2],
   pub(crate) rail: f32,
@@ -570,14 +571,22 @@ impl Sizes {
     Self { check, ..self }
   }
 
-  /// A switch in rows ([ControlSize::Regular]) and the large one ([ControlSize::Large]: a
-  /// header row's, by a big icon).
+  /// A switch in rows ([ControlSize::Regular]), the small one ([ControlSize::Small]: dense rows,
+  /// AppKit's mini) and the large one ([ControlSize::Large]: a header row's, by a big icon).
   pub const fn switch(&self) -> SwitchSize {
     self.switch
   }
 
   pub const fn with_switch(self, switch: SwitchSize) -> Self {
     Self { switch, ..self }
+  }
+
+  pub const fn switch_small(&self) -> SwitchSize {
+    self.switch_small
+  }
+
+  pub const fn with_switch_small(self, switch_small: SwitchSize) -> Self {
+    Self { switch_small, ..self }
   }
 
   pub const fn switch_large(&self) -> SwitchSize {
@@ -634,8 +643,9 @@ pub struct SwitchSize {
 impl Sizes {
   /// macOS 26 System Settings': 24-point buttons in 13-point text, small ones 20 high; menus
   /// of 24-point items in corners of 13 with a half-point edge, a pop-up's 220 wide at least;
-  /// 16-point check boxes, the small switch (36 × 16, a 21 × 13 knob) in rows and the regular
-  /// one (44 × 20) by a big icon, a slider's 20 × 16 knob on a 6-point track, 18-point badges
+  /// 16-point check boxes, the small switch (36 × 16, a 21 × 13 knob) in rows, the mini one
+  /// (30 × 13, scaled as the small one is from the regular) in dense ones and the regular one
+  /// (44 × 20) by a big icon, a slider's 20 × 16 knob on a 6-point track, 18-point badges
   /// in 11-point text.
   pub const PLATES: Self = Self {
     control_h: 24.0,
@@ -647,6 +657,7 @@ impl Sizes {
     menu_edge: 0.5,
     check: 16.0,
     switch: SwitchSize { track: [36.0, 16.0], knob: [21.0, 13.0] },
+    switch_small: SwitchSize { track: [30.0, 13.0], knob: [16.0, 10.0] },
     switch_large: SwitchSize { track: [44.0, 20.0], knob: [26.0, 16.0] },
     knob: [20.0, 16.0],
     rail: 6.0,
@@ -1215,6 +1226,7 @@ mod tests {
       .with_menu_edge(6.5)
       .with_check(7.5)
       .with_switch(SwitchSize { track: [1.0, 2.0], knob: [3.0, 4.0] })
+      .with_switch_small(SwitchSize { track: [5.0, 6.0], knob: [7.0, 8.0] })
       .with_switch_large(SwitchSize { track: [1.0, 2.0], knob: [3.0, 4.0] })
       .with_knob([10.0, 0.5])
       .with_rail(11.5)
@@ -1232,6 +1244,7 @@ mod tests {
         menu_edge: 6.5,
         check: 7.5,
         switch: SwitchSize { track: [1.0, 2.0], knob: [3.0, 4.0] },
+        switch_small: SwitchSize { track: [5.0, 6.0], knob: [7.0, 8.0] },
         switch_large: SwitchSize { track: [1.0, 2.0], knob: [3.0, 4.0] },
         knob: [10.0, 0.5],
         rail: 11.5,
