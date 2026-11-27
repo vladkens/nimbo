@@ -81,6 +81,8 @@ pub struct DateSegment {
 struct Edit {
   at: usize,
   typed: String,
+  /// The digits typed filled the segment before and moved on, nothing typed since: a mark stays.
+  moved: bool,
   focused: bool,
 }
 
@@ -90,12 +92,12 @@ impl Ui<'_> {
   /// segments is selected (the first as focus comes in; a press on a segment selects it): Left and
   /// Right move the selection, Up and Down step its number (the day and the month round within the
   /// month and the year, the year on), and digits typed set it, moving on once no other digit fits
-  /// (`4` in a day, `12` in a month, four in a year), as does a mark (`.`, `/`); Backspace takes
-  /// the last digit typed back. A year of one or two digits is in this century as the segment is
-  /// left. A click on [DatePickerBehavior::increment] or [DatePickerBehavior::decrement] steps the
-  /// selected segment. The date stays real (the day within its month) and in `range`, a date
-  /// outside it brought in; `changed` when it moved. Assistive technology reads it as a text field
-  /// with the date in the format, and sets it so.
+  /// (`4` in a day, `12` or `01` in a month, four in a year), as does a mark (`.`, `/`) unless they
+  /// just did; Backspace takes the last digit typed back. A year of one or two digits is in this
+  /// century as the segment is left. A click on [DatePickerBehavior::increment] or
+  /// [DatePickerBehavior::decrement] steps the selected segment. The date stays real (the day
+  /// within its month) and in `range`, a date outside it brought in; `changed` when it moved.
+  /// Assistive technology reads it as a text field with the date in the format, and sets it so.
   pub fn date_picker_behavior(
     &mut self,
     id: Id,
@@ -192,6 +194,7 @@ impl Edit {
   /// Ends what was typed into the selected segment: a year of one or two digits in this
   /// century, the rest already set as it was typed.
   fn commit(&mut self, date: &mut Date, f: DateFormat, (lo, hi): (Date, Date)) {
+    self.moved = false;
     let typed = std::mem::take(&mut self.typed);
     let Ok(n) = typed.parse::<u32>() else { return };
     if f.parts()[self.at] == Part::Year {
@@ -206,14 +209,21 @@ impl Edit {
     self.at = (self.at as i32 + by).clamp(0, 2) as usize;
   }
 
-  /// Text typed into the selected segment: digits set it, a mark moves on. Whether it used any.
+  /// Text typed into the selected segment: digits set it, a mark moves on (unless the digits
+  /// before it just did, as AppKit's). Whether it used any.
   fn type_in(&mut self, s: &str, date: &mut Date, f: DateFormat, range: (Date, Date)) -> bool {
     let mut used = false;
     for c in s.chars() {
+      let moved = std::mem::take(&mut self.moved);
       if c.is_ascii_digit() {
         self.typed.push(c);
         used = true;
       } else if c.is_ascii_punctuation() || c == f.separator {
+        if moved {
+          used = true;
+          continue;
+        }
+
         used |= !self.typed.is_empty() || self.at < 2;
         self.go(date, f, range, 1);
         continue;
@@ -223,14 +233,16 @@ impl Edit {
 
       let part = f.parts()[self.at];
       let n: u32 = self.typed.parse().unwrap_or(0);
-      // The most the segment takes, and whether a digit more could still fit.
+      // The most the segment takes, and whether a digit more could still fit: not past two in a
+      // day or a month.
       let max = match part {
         Part::Day => date.days_in_month(),
         Part::Month => 12,
         Part::Year => 9999,
       };
 
-      let full = if part == Part::Year { self.typed.len() >= 4 } else { n * 10 > max };
+      let digits = self.typed.len();
+      let full = if part == Part::Year { digits >= 4 } else { digits >= 2 || n * 10 > max };
       if part != Part::Year && n > 0 {
         let (y, m, d) = (date.year(), date.month(), date.day());
         let (m, d) = if part == Part::Day { (m, n) } else { (n, d) };
@@ -239,6 +251,7 @@ impl Edit {
 
       if full {
         self.commit(date, f, range);
+        self.moved = self.at < 2;
         self.at = (self.at + 1).min(2);
       }
     }
@@ -481,6 +494,32 @@ mod tests {
     h.type_text("12");
     h.type_text("31");
     assert_eq!(h.app().date, d(2027, 12, 31));
+  }
+
+  /// A mark right after the digits moved on stays in the segment they moved to.
+  #[test]
+  fn a_mark_after_a_full_segment_does_not_skip_the_next() {
+    let mut h = harness(Day::new(d(2026, 11, 27)));
+    h.key(NamedKey::Tab, NONE);
+    h.type_text("2027-02-03");
+    assert_eq!(h.app().date, d(2027, 2, 3));
+    // Each its own key, as typed.
+    h.key(NamedKey::ArrowLeft, NONE);
+    h.key(NamedKey::ArrowLeft, NONE);
+    for c in "2028-03-04".chars() {
+      h.type_text(&c.to_string());
+    }
+
+    assert_eq!(h.app().date, d(2028, 3, 4));
+  }
+
+  /// Two digits fill a day or a month whatever they are: `01` is January, not the start of 10.
+  #[test]
+  fn two_digits_fill_a_segment() {
+    let mut h = harness(Day::new(d(2026, 11, 27)));
+    h.key(NamedKey::Tab, NONE);
+    h.type_text("20270102");
+    assert_eq!(h.app().date, d(2027, 1, 2));
   }
 
   #[test]
