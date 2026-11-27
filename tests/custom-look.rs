@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use common::{diff, mid, px, reads};
 use custom_look::*;
 use nimbo::a11y::Role;
-use nimbo::harness::Image;
+use nimbo::harness::{Image, mac_titlebar};
 use nimbo::{
   Appearance, Cursor, Event, Font, Harness, Id, Modifiers, NamedKey, Phase, Point, Rect, Size,
 };
@@ -240,6 +240,40 @@ fn text_on_a_selected_or_hovered_row_reads() {
       }
     }
   }
+}
+
+/// In a window that draws its title bar (macOS's, played here) the tabs are in it: right of
+/// the window's buttons, centred on them, the band as high as the bar; its empty part moves the
+/// window, a tab clicks.
+#[test]
+fn the_tabs_sit_in_the_title_bar_right_of_its_buttons() {
+  let mut h = rill(Appearance::DARK);
+  let bar = mac_titlebar("Rill", false);
+  let lights = bar.buttons.unwrap();
+  h.set_titlebar(Some(bar));
+  h.frame();
+  let (band, tab) = (rect(&h, Id::of(BAND)), rect(&h, Id::of(TABS).key(("item", 0usize))));
+  assert_eq!((band.y, band.h), (0.0, bar.height));
+  assert!(tab.x >= lights.x + lights.w + 8.0, "{tab:?} clear of {lights:?}");
+  assert_eq!(mid(tab).1, mid(lights).1, "centred on the buttons");
+
+  let other = rect(&h, Id::of(TABS).key(("item", 1usize)));
+  let free = (other.x + other.w + 200.0, band.h / 2.0);
+  assert!(h.drags_window(free.0, free.1), "the empty band");
+  assert!(h.drags_window(lights.x + lights.w + 4.0, 4.0), "beside the buttons");
+  assert!(!h.drags_window(mid(tab).0, mid(tab).1), "a tab");
+  assert!(!h.drags_window(free.0, band.h + 10.0), "the toolbar under it");
+  click(&mut h, Id::of(TABS).key(("item", 1usize)));
+  assert_eq!(h.app().repo, 1);
+}
+
+/// Without one (Windows, Linux) the tabs' strip starts at the window's edge and moves nothing.
+#[test]
+fn under_the_os_title_bar_the_tabs_start_at_the_edge() {
+  let h = rill(Appearance::DARK);
+  let (band, tab) = (rect(&h, Id::of(BAND)), rect(&h, Id::of(TABS).key(("item", 0usize))));
+  assert_eq!((band.y, band.h, tab.x), (0.0, 30.0, 0.0));
+  assert!(!h.drags_window(1000.0, 15.0));
 }
 
 #[test]

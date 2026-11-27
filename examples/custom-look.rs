@@ -9,7 +9,8 @@
 //! the app's (button, toggle, picker, text field, list, tooltip, split) from a palette of its own,
 //! dark first and light beside it; focus, the pointing hand, keys, selection and what assistive
 //! technology reads are the behaviours', as under nimbo's look. The history and its diffs are
-//! made up from a seed, the same each run.
+//! made up from a seed, the same each run. On macOS the tabs are in the title bar, right of the
+//! window's buttons, as a merge tool's are.
 //!
 //! `cargo run --release --example custom-look [-- big|file|search] [--shot <file.png>]`: `big`
 //! shows a commit of a 2,400-line diff scrolled, `file` one file of a commit, `search` a search.
@@ -279,10 +280,13 @@ impl PickerStyle for Tabs {
       for i in 0..c.len() {
         let (id, on) = (c.item_id(i), c.selection() == Some(i));
         let h = hot(ui, id, !on && ui.hovered(id));
+
         let bg = if on { p.bar } else { mix(p.chrome, p.bar, 0.45 * h) };
         let ink = if on { p.ink } else { mix(p.muted, p.ink, h) };
+        // A hairline either side: the first tab's left one parts it from the strip.
+        let edges = [0.0, 1.0, 0.0, if i == 0 { 1.0 } else { 0.0 }];
         let seg = Style::new().h(grow()).pad_xy(16.0, 0.0).gap(7.0).center().bg(bg);
-        ui.with_id(id).row(b.pointer(seg.borders([0.0, 1.0, 0.0, 0.0], p.edge)), |ui| {
+        ui.with_id(id).row(b.pointer(seg.borders(edges, p.edge)), |ui| {
           ui.icon(REPO, 13.0, if on { p.accent } else { ink });
           ui.text(c.label(i), if on { bold(12.0, ink) } else { text(12.0, ink) });
         });
@@ -1252,6 +1256,8 @@ const DIFFS: [&str; 6] = [
 // MARK: The app
 
 pub const TABS: &str = "tabs";
+/// The tabs' strip: the title bar in a unified window.
+pub const BAND: &str = "band";
 pub const BRANCH_BUTTON: &str = "branch";
 pub const SEARCH: &str = "search";
 pub const FETCH_BUTTON: &str = "fetch";
@@ -1399,8 +1405,20 @@ impl Rill {
       .collect();
   }
 
+  /// The repositories' tabs on a strip of their own; in a window that draws its title bar
+  /// (macOS), the strip is the bar: as high, the tabs right of the window's buttons, its empty
+  /// rest moving the window.
   fn tabs(&mut self, ui: &mut Ui, p: Palette) {
-    ui.row(Style::new().w(grow()).h(px(30.0)).bg(p.chrome), |ui| {
+    let (h, lead) = match ui.titlebar() {
+      Some(t) => {
+        ui.drags_window();
+        (t.height, t.buttons.map_or(0.0, |b| b.x + b.w + 14.0))
+      }
+      None => (30.0, 0.0),
+    };
+
+    let s = Style::new().w(grow()).h(px(h)).pads([0.0, 0.0, 0.0, lead]).bg(p.chrome);
+    ui.id(BAND).row(s, |ui| {
       let was = self.repo;
       ui.id(TABS).a11y_label("Repositories").picker(&mut self.repo, &REPOS);
       if self.repo != was {
@@ -1832,7 +1850,7 @@ fn main() {
     args.remove(0);
   }
 
-  example::run(Config::new("Rill", 1240.0, 760.0), Rill::default(), &args, |h| {
+  example::run(Config::new("Rill", 1240.0, 760.0).unified(), Rill::default(), &args, |h| {
     h.frame();
     match state.as_str() {
       "big" => {
