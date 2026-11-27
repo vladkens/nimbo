@@ -29,6 +29,13 @@ The owner ran #123's examples in real windows on 2026-11-27 and found them broke
 - [x] Stacks: HStack and VStack as two blocks, each showing its own thing
 - [x] Lazy column: the picture cuts a row in half; Scroll anchor: the picture doesn't show what anchors
 - [x] Spacer and Divider: show what they do (a spacer pushing items apart, dividers between items in a row and a column)
+- [ ] Disabled variants that don't dim: help marks, the slider's value, a section's header and footer, selectable text, the toolbar's title, the custom picker's chip (dark), tabs, split
+- [ ] Small switch as large as the regular one; small badges not capsules
+- [ ] Tabs and Split blocks look crude; the accessibility pair's slider spans the page
+- [ ] Identity, Focus and pointer, Frame request: swatches that explain nothing; Scroll indicators: the picture shows no knobs
+- [ ] Menu bar block isn't live: the gallery sets no menu bar
+- [ ] Styled text's sample in the theme's colours, not the code boxes' palette
+- [ ] The `assets` branch serves main too: `make api-shots` deletes and redraws pictures main's `docs/api.md` still shows (`stacks.png`, `shortcut-recorder.png` kept by hand; `grid.png` and others now show the new blocks)
 
 ## 7GUIs
 
@@ -46,6 +53,9 @@ The owner ran #123's examples in real windows on 2026-11-27 and found them broke
 ## Custom look
 
 - [x] A copy of Sublime Merge's look: a small git client (commit list, a coloured diff, a file list), dense and dark, its own palette and styles
+
+- [x] Reviewed on shots: text on a selected row reads, a search selects its first match and gives the old one back, the graph column keeps its place
+- [ ] Library gaps it worked around: `Split` and the search field have no style; a field style has no slot beside the text; nothing scrolls an item to the top (SwiftUI `scrollTo(id, anchor: .top)`); menus have no style; a custom-icon button has no accessible name; a disclosure reads as a check box
 
 ## Messenger
 
