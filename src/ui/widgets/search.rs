@@ -18,7 +18,8 @@ use crate::keys::EDIT_KEYS;
 use crate::scene::mix;
 use crate::ui::icon::Icon;
 use crate::ui::{
-  Align, Axes, Cursor, FieldBehavior, FieldStyle, Float, Response, Role, Style, Ui, grow, px,
+  Align, Axes, ControlSize, Cursor, FieldBehavior, FieldStyle, Float, Response, Role, Style, Ui,
+  grow, px,
 };
 
 /// The ⊗'s side, and how far in it is from the field's right edge.
@@ -26,14 +27,16 @@ const MARK: f32 = 14.0;
 const INSET: f32 = 8.0;
 
 impl Ui<'_> {
-  /// A search field over `text` ([Ui::search_behavior]) in the theme's look
-  /// ([crate::ui::Theme::search]), `prompt` shown while empty, as SwiftUI's `.searchable` field:
-  /// a magnifier at the left in the muted colour and, while there is text, a ⊗ at the right
-  /// (darker under the pointer), the text kept clear of it; as wide as its parent gives it, its
-  /// id from [Ui::id] or [Ui::key], else its place. [Ui::disabled] dims it, with no ⊗.
+  /// A search field over `text` ([Ui::search_behavior]), as SwiftUI's `.searchable`: a magnifier,
+  /// `prompt` while empty, a ⊗ while not; as high as a text field, 4 higher when
+  /// [ControlSize::Large], as AppKit's; in [crate::ui::Theme::search], dimmed when disabled.
   pub fn search_field(&mut self, text: &mut String, prompt: &str) -> Response {
     let (t, id) = (self.theme(), self.take_id());
-    let style = t.search();
+    let mut style = t.search();
+    if self.environment_value::<ControlSize>() == ControlSize::Large {
+      style.frame = style.frame.h(px(t.sizes().control_h() + 4.0));
+    }
+
     let b = self.search_behavior(id, text);
     let clear = !text.is_empty() && !b.disabled;
     // The frame's size goes to the box the marks sit in, which the field fills, its text
@@ -98,7 +101,7 @@ mod tests {
   use crate::app::{App, Cx, Event, MouseButton};
   use crate::keys::{Binding, Command, Key, Shortcut};
   use crate::scene::{Rect, Size};
-  use crate::ui::{Cursor, Id, Style, Ui, grow, pct};
+  use crate::ui::{ControlSize, Cursor, Id, Style, Ui, grow, pct};
   use crate::{Harness, Modifiers, NamedKey};
 
   const NONE: Modifiers = Modifiers::empty();
@@ -494,5 +497,24 @@ mod tests {
     assert_eq!(h.focus_id(), None);
     h.key(NamedKey::Escape, NONE);
     assert_eq!((h.app().text.as_str(), h.app().changes), ("moon", 0));
+  }
+
+  /// As AppKit's, as high as a text field beside it, and 4 higher at the large size.
+  #[test]
+  fn as_high_as_a_text_field_and_higher_when_large() {
+    struct Fields(String);
+    impl App for Fields {
+      fn view(&mut self, ui: &mut Ui) {
+        ui.id("text").text_field(&mut self.0, "Name");
+        ui.id("search").search_field(&mut self.0, "Search");
+        ui.control_size(ControlSize::Large).id("large").search_field(&mut self.0, "Search");
+      }
+    }
+
+    let mut h = Harness::new(Fields(String::new()), Size::new(300.0, 200.0), 1.0);
+    h.frame();
+    let height = |name: &str| h.rect(Id::of(name)).unwrap().h;
+    assert_eq!(height("search"), height("text"));
+    assert_eq!(height("large"), height("text") + 4.0);
   }
 }
