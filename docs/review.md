@@ -44,3 +44,7 @@ Check what the cache's key leaves out, and that the cache is dropped when the va
 ## Measured one way, drawn another
 
 Two paths that should agree, the layout's measure and the paint, drifted apart: styled text measured runs of one font as one shaped string but drew each colour run shaped alone, losing the kerning across their edges, so `AVAV` in alternating colours drew 10% wider than its box (#123). Measure and draw from one result (one shaping, positions from its glyphs), and test the drawn ink against the measured box.
+
+## Each part scans the whole
+
+A loop over the parts of a thing that scans the whole thing for each is quadratic, and a test's few parts don't show it (#123): styled text found each run's extent by walking every glyph of its line, so a line of 8,000 characters in alternating colours took 750 ms a frame against 1 ms in one colour. Find all the parts' answers in one pass over the whole, and time it at a size a real app reaches (a minified file, a long log line).

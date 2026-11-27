@@ -308,24 +308,27 @@ impl Styled<'_> {
 
   /// The runs in piece `p`: where each starts and ends from the line's start, as it was shaped
   /// (left to right, as the caret stops), its style and its ground.
-  fn runs<'p>(
-    &'p self,
-    p: &'p Piece,
-  ) -> impl Iterator<Item = (f32, f32, TextStyle, Option<Color>)> + 'p {
+  fn runs(&self, p: &Piece) -> Vec<(f32, f32, TextStyle, Option<Color>)> {
     let len = (p.range.1 - p.range.0) as u32;
     // Where each cluster ends: the next one's start in the text.
     let mut ends = p.line.clusters.clone();
     ends.push(len);
     ends.sort_unstable();
     ends.dedup();
-    let rel = move |k: usize| (k - p.range.0) as u32;
-    let span = move |a, b| extent(p.line, &ends, (rel(a), rel(b))).map(|x| p.x + x);
-    let dots = p.dots.map(|at| ([p.x, p.x + p.line.width], at));
-    let runs = pieces(self.runs, p.range).map(move |(a, b, at)| (span(a, b), at));
-    dots.into_iter().chain(runs).map(|([x0, x1], at)| {
+
+    let rel = |k: usize| (k - p.range.0) as u32;
+    let runs: Vec<_> =
+      pieces(self.runs, p.range).map(|(a, b, at)| ((rel(a), rel(b)), at)).collect();
+    let bounds: Vec<_> = runs.iter().map(|r| r.0).collect();
+    let spans = extents(p.line, &ends, &bounds);
+
+    let dots = p.dots.map(|at| ([0.0, p.line.width], at));
+    let runs = spans.into_iter().zip(runs).map(|(span, (_, at))| (span, at));
+    let at_x = |([x0, x1], at): ([f32; 2], Attributes)| {
       let (st, ground) = at.style(self.style);
-      (x0, x1, st, ground)
-    })
+      (p.x + x0, p.x + x1, st, ground)
+    };
+    dots.into_iter().chain(runs).map(at_x).collect()
   }
 
   /// The colour of the glyph of piece `p` whose cluster starts at `at` of it.
@@ -335,23 +338,30 @@ impl Styled<'_> {
   }
 }
 
-/// From the leftmost to the rightmost pen of bytes `a..b` of `line` in either direction (RTL
-/// shapes them right to left), `ends` where its clusters end, from its start; in a ligature
-/// (`fi`), its share by bytes, as AppKit's caret goes.
-fn extent(line: &Shaped, ends: &[u32], (a, b): (u32, u32)) -> [f32; 2] {
-  let mut span = [f32::INFINITY, f32::NEG_INFINITY];
-  for (i, (g, &c)) in line.glyphs.iter().zip(&line.clusters).enumerate() {
-    let e = ends[ends.partition_point(|&v| v <= c)];
-    if e <= a || c >= b {
-      continue;
-    }
-
-    let (x0, x1) = (g.x, line.glyphs.get(i + 1).map_or(line.width, |g| g.x));
-    let at = |v: u32| x0 + (x1 - x0) * (v.clamp(c, e) - c) as f32 / (e - c) as f32;
-    span = [span[0].min(at(a)), span[1].max(at(b))];
+/// For each of `runs`, bytes `a..b` of `line` in order, its leftmost to rightmost pen either way
+/// (RTL shapes right to left), `ends` where its clusters end; in a ligature (`fi`), its share by
+/// bytes, as AppKit's caret goes. One pass over the glyphs, however many runs.
+fn extents(line: &Shaped, ends: &[u32], runs: &[(u32, u32)]) -> Vec<[f32; 2]> {
+  if runs.is_empty() {
+    return Vec::new();
   }
 
-  if span[0] > span[1] { [0.0; 2] } else { span }
+  let mut spans = vec![[f32::INFINITY, f32::NEG_INFINITY]; runs.len()];
+  for (i, (g, &c)) in line.glyphs.iter().zip(&line.clusters).enumerate() {
+    let e = ends[ends.partition_point(|&v| v <= c)];
+    let (x0, x1) = (g.x, line.glyphs.get(i + 1).map_or(line.width, |g| g.x));
+    let at = |v: u32| x0 + (x1 - x0) * (v.clamp(c, e) - c) as f32 / (e - c) as f32;
+    let first = runs.partition_point(|r| r.1 <= c);
+    for (span, &(a, b)) in spans[first..].iter_mut().zip(&runs[first..]) {
+      if a >= e {
+        break;
+      }
+
+      *span = [span[0].min(at(a)), span[1].max(at(b))];
+    }
+  }
+
+  spans.into_iter().map(|s| if s[0] > s[1] { [0.0; 2] } else { s }).collect()
 }
 
 /// The farthest the ink of lines `lines` of [Tree::lines] reaches past their pens: `right` past
@@ -501,8 +511,7 @@ mod tests {
   fn a_run_inside_a_ligature_is_its_share() {
     let line = shaped(&[0.0, 10.0], &[0, 2], 16.0);
     let ends = [2, 3];
-    assert_eq!(extent(&line, &ends, (0, 1)), [0.0, 5.0]);
-    assert_eq!(extent(&line, &ends, (1, 3)), [5.0, 16.0]);
+    assert_eq!(extents(&line, &ends, &[(0, 1), (1, 3)]), [[0.0, 5.0], [5.0, 16.0]]);
   }
 
   /// Right to left, a run spans its own glyphs: the first two of four letters, two bytes each,
@@ -511,8 +520,7 @@ mod tests {
   fn a_run_right_to_left_spans_its_glyphs() {
     let line = shaped(&[0.0, 10.0, 20.0, 30.0], &[6, 4, 2, 0], 40.0);
     let ends = [2, 4, 6, 8];
-    assert_eq!(extent(&line, &ends, (0, 4)), [20.0, 40.0]);
-    assert_eq!(extent(&line, &ends, (4, 8)), [0.0, 20.0]);
+    assert_eq!(extents(&line, &ends, &[(0, 4), (4, 8)]), [[20.0, 40.0], [0.0, 20.0]]);
   }
 
   #[test]
