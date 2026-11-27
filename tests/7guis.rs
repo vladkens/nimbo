@@ -3,8 +3,8 @@
 //! Tests of `examples/7guis.rs` through the harness, one per thing each task asks for: the
 //! converter both ways and past bad text, the booker's red field, its rules and lone OK, the
 //! timer stopping and going on, CRUD's filter, fields, update and delete, the circle drawer's
-//! hover, menu, dialog and undo, and the sheet's formulas and editing. The tabs switch by a
-//! click and read to assistive technology.
+//! hover, menu, dialog and undo, and the sheet's formulas, selection, keys and edits. The tabs
+//! switch by a click and read to assistive technology.
 
 #[path = "../examples/7guis.rs"]
 #[expect(dead_code, reason = "its main and what this file doesn't use")]
@@ -532,6 +532,17 @@ fn edit(h: &mut H, r: usize, c: usize) {
   h.frame();
 }
 
+/// Clicks a cell, which selects it.
+fn select(h: &mut H, r: usize, c: usize) {
+  let (x, y) = mid(h.rect(cell(r, c)).unwrap());
+  h.click(x, y);
+  h.frame();
+}
+
+fn sheet(h: &H) -> &seven::Cells {
+  &h.app().cells
+}
+
 #[test]
 fn formulas_show_their_values() {
   let h = on(Task::Cells);
@@ -541,10 +552,178 @@ fn formulas_show_their_values() {
 }
 
 #[test]
-fn an_edit_commits_on_enter_and_recomputes() {
+fn a_click_selects_a_cell_and_the_bar_shows_its_formula() {
+  let mut h = on(Task::Cells);
+  assert_eq!(h.focus_id(), Some(id("sheet")), "the sheet takes the keys from the start");
+  select(&mut h, 1, 1);
+  assert_eq!((sheet(&h).sel, sheet(&h).editing.as_ref()), ((1, 1), None));
+  assert_eq!(h.focus_id(), Some(id("sheet")));
+  assert_eq!(h.text(id("name")), Some("B1"));
+  reads(&h.a11y(), &["text field \"Formula\" value \"=mul(A3, 2)\""]);
+}
+
+#[test]
+fn the_selection_is_outlined_and_its_headers_lit() {
+  let mut h = on(Task::Cells);
+  select(&mut h, 2, 1);
+  let img = h.render();
+  let r = h.rect(cell(2, 1)).unwrap();
+  let (edge, inside) = (img.pixel(r.x + 1.0, r.y + r.h / 2.0), img.pixel(r.x + 8.0, r.y + 8.0));
+  assert!(edge[2] > edge[0] + 60 && diff(edge, inside) > 60, "{edge:?} inside {inside:?}");
+
+  // Beside the label, off its glyphs.
+  let at = |k: Id| {
+    let r = h.rect(k).unwrap();
+    img.pixel(r.x + 4.0, r.y + 4.0)
+  };
+  let (cols, rows) = (id("cols"), id("rows"));
+  let (on, off) = (at(cols.key(("col", 1usize))), at(cols.key(("col", 0usize))));
+  assert!(on[2] > on[0] + 20 && diff(on, off) > 20, "column {on:?} vs {off:?}");
+  let (on, off) = (at(rows.key(("row", 2usize))), at(rows.key(("row", 0usize))));
+  assert!(diff(on, off) > 20, "row {on:?} vs {off:?}");
+}
+
+#[test]
+fn the_arrows_move_the_selection_and_scroll_it_into_view() {
+  let mut h = on(Task::Cells);
+  key(&mut h, NamedKey::ArrowLeft);
+  key(&mut h, NamedKey::ArrowUp);
+  assert_eq!(sheet(&h).sel, (0, 0), "kept on the sheet");
+  for _ in 0..40 {
+    key(&mut h, NamedKey::ArrowDown);
+  }
+
+  key(&mut h, NamedKey::ArrowRight);
+  assert_eq!(sheet(&h).sel, (40, 1));
+  h.frame();
+  let (area, r) = (h.rect(id("sheet")).unwrap(), h.rect(cell(40, 1)).unwrap());
+  assert!(r.y >= area.y + 22.0 && r.y + r.h <= area.y + area.h + 1.0, "{r:?} in {area:?}");
+
+  h.key(NamedKey::ArrowRight, CMD);
+  h.key(NamedKey::ArrowUp, CMD);
+  assert_eq!(sheet(&h).sel, (0, seven::COLS - 1), "Cmd goes to the edge");
+  h.frame();
+  let r = h.rect(cell(0, seven::COLS - 1)).unwrap();
+  assert!(r.y >= area.y + 22.0 && r.x + r.w <= area.x + area.w + 1.0, "{r:?} in {area:?}");
+  assert!(r.x >= area.x + 36.0, "clear of the row numbers: {r:?}");
+}
+
+#[test]
+fn the_headers_stay_in_view_as_the_sheet_scrolls() {
+  let mut h = on(Task::Cells);
+  let area = h.rect(id("sheet")).unwrap();
+  let (cols, rows) = (h.rect(id("cols")).unwrap(), h.rect(id("rows")).unwrap());
+  let (pos, delta) = (Point::new(area.x + 100.0, area.y + 100.0), Point::new(-300.0, -500.0));
+  let (phase, momentum, mods) = (Phase::Changed, Phase::None, Modifiers::empty());
+  h.event(Event::Scroll { pos, delta, precise: true, phase, momentum, mods });
+  h.frame();
+  let off = h.scroll(id("sheet")).unwrap().offset;
+  assert!(off.x > 100.0 && off.y > 100.0, "{off:?}");
+
+  let (c, r) = (h.rect(id("cols")).unwrap(), h.rect(id("rows")).unwrap());
+  assert_eq!((c.y, r.x), (cols.y, rows.x), "the letters at the top, the numbers at the left");
+  let (row, col) =
+    (h.rect(id("rows").key(("row", 30usize))), h.rect(id("cols").key(("col", 9usize))));
+  let (row, col, at) = (row.unwrap(), col.unwrap(), h.rect(cell(30, 9)).unwrap());
+  assert_eq!((row.y, row.h, col.x, col.w), (at.y, at.h, at.x, at.w), "each along with the cells");
+}
+
+#[test]
+fn typing_replaces_a_cell_and_return_keeps_it_and_goes_down() {
+  let mut h = on(Task::Cells);
+  h.key(Key::Char('4'), Modifiers::empty());
+  assert_eq!(sheet(&h).editing.as_deref(), Some("4"));
+  h.frame();
+  assert_eq!(h.focus_id(), Some(id("edit")));
+  h.type_text("2");
+  key(&mut h, NamedKey::Enter);
+  assert_eq!((sheet(&h).cells[&(0, 0)].as_str(), sheet(&h).sel), ("42", (1, 0)));
+  assert_eq!(sheet(&h).editing, None);
+  assert_eq!(h.focus_id(), Some(id("sheet")));
+  assert_eq!(sheet(&h).shown((3, 0)), "98");
+}
+
+#[test]
+fn return_edits_the_formula_and_escape_drops_the_edit() {
+  let mut h = on(Task::Cells);
+  select(&mut h, 1, 1);
+  key(&mut h, NamedKey::Enter);
+  h.frame();
+  assert_eq!(h.focus_id(), Some(id("edit")));
+  assert_eq!(h.text(id("edit")), Some("=mul(A3, 2)"));
+  assert_eq!(h.selection(id("edit")), Some((11, 11)), "the caret at the end");
+
+  key(&mut h, NamedKey::Backspace);
+  key(&mut h, NamedKey::Escape);
+  assert_eq!((sheet(&h).editing.as_ref(), sheet(&h).sel), (None, (1, 1)));
+  assert_eq!(sheet(&h).cells[&(1, 1)], "=mul(A3, 2)");
+  assert_eq!(h.focus_id(), Some(id("sheet")));
+}
+
+#[test]
+fn tab_keeps_an_edit_and_goes_right() {
+  let mut h = on(Task::Cells);
+  select(&mut h, 5, 2);
+  h.key(Key::Char('x'), Modifiers::empty());
+  h.frame();
+  key(&mut h, NamedKey::Tab);
+  assert_eq!((sheet(&h).cells[&(5, 2)].as_str(), sheet(&h).sel), ("x", (5, 3)));
+  assert_eq!(h.focus_id(), Some(id("sheet")), "not the next control");
+
+  key(&mut h, NamedKey::Tab);
+  h.key(NamedKey::Tab, Modifiers::SHIFT);
+  h.key(NamedKey::Tab, Modifiers::SHIFT);
+  assert_eq!(sheet(&h).sel, (5, 2), "Tab and Shift-Tab move on the sheet too");
+}
+
+#[test]
+fn delete_clears_the_selected_cell() {
+  let mut h = on(Task::Cells);
+  key(&mut h, NamedKey::Backspace);
+  assert!(!sheet(&h).cells.contains_key(&(0, 0)));
+  assert_eq!(sheet(&h).shown((2, 0)), "7");
+}
+
+#[test]
+fn a_click_on_another_cell_keeps_the_edit_and_selects_it() {
+  let mut h = on(Task::Cells);
+  h.key(Key::Char('9'), Modifiers::empty());
+  h.frame();
+  select(&mut h, 4, 3);
+  assert_eq!((sheet(&h).cells[&(0, 0)].as_str(), sheet(&h).sel), ("9", (4, 3)));
+  assert_eq!(sheet(&h).editing, None);
+  assert_eq!(h.focus_id(), Some(id("sheet")));
+}
+
+#[test]
+fn the_bar_edits_the_selected_cell() {
+  let mut h = on(Task::Cells);
+  select(&mut h, 1, 1);
+  h.click_id(id("formula"));
+  h.key(Key::Char('a'), CMD);
+  h.type_text("=add(A0, 1)");
+  h.frame();
+  assert_eq!(h.text(id("edit")), Some("=add(A0, 1)"), "the cell shows the edit");
+  key(&mut h, NamedKey::Enter);
+  assert_eq!((sheet(&h).shown((1, 1)), sheet(&h).sel), ("6".into(), (2, 1)));
+  assert_eq!(h.focus_id(), Some(id("sheet")));
+}
+
+#[test]
+fn values_show_without_float_noise() {
+  let mut s = seven::Cells::default();
+  s.cells.insert((0, 0), "=add(0.1, 0.2)".into());
+  s.cells.insert((1, 0), "=sub(0, 0)".into());
+  s.cells.insert((2, 0), "=div(1, 3)".into());
+  let shown = (0..3).map(|r| s.shown((r, 0))).collect::<Vec<_>>();
+  assert_eq!(shown, ["0.3", "0", "0.333333333"]);
+}
+
+#[test]
+fn a_double_click_edits_and_return_recomputes() {
   let mut h = on(Task::Cells);
   edit(&mut h, 0, 0);
-  assert_eq!(h.focus_id(), Some(Id::of(("edit", 0usize, 0usize))));
+  assert_eq!(h.focus_id(), Some(id("edit")));
   h.key(Key::Char('a'), CMD);
   h.type_text("10");
   key(&mut h, NamedKey::Enter);
@@ -552,16 +731,6 @@ fn an_edit_commits_on_enter_and_recomputes() {
   assert_eq!(h.app().cells.shown((3, 0)), "34");
   h.frame();
   assert!(h.find(Role::StaticText, "68").is_some(), "{}", h.a11y());
-}
-
-#[test]
-fn escape_drops_an_edit() {
-  let mut h = on(Task::Cells);
-  edit(&mut h, 0, 0);
-  h.type_text("99");
-  key(&mut h, NamedKey::Escape);
-  assert!(h.app().cells.editing.is_none());
-  assert_eq!(h.app().cells.shown((0, 0)), "5");
 }
 
 #[test]

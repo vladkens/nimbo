@@ -21,10 +21,10 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use nimbo::{
-  Align, App, Axes, Binding, BorderedProminentButtonStyle, Command, Config, Cx, Dialog, Event,
-  FormStyle, Frame, Icon, Id, Item, Key, List, Menu, MouseButton, NamedKey, Point, Quad, Rect,
-  Response, Selection, Shortcut, Style, Tag, TextFieldConfiguration, TextFieldStyle, Transition,
-  Ui, alpha, grow, px,
+  Align, App, Axes, Binding, BorderedProminentButtonStyle, CMD, Command, Config, Cx, Dialog, Event,
+  Float, FormStyle, Frame, Icon, Id, Item, Key, KeyEvent, List, Menu, MouseButton, NamedKey, Point,
+  Quad, Rect, Response, Selection, Shortcut, Style, Tag, TextFieldConfiguration, TextFieldStyle,
+  Transition, Ui, alpha, grow, mix, px,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -647,23 +647,178 @@ impl Circles {
   }
 }
 
+// MARK: The app
+
+/// The six tasks, each on its tab.
+#[derive(Default)]
+pub struct Seven {
+  pub task: Task,
+  pub temperature: Temperature,
+  pub flight: Flight,
+  pub timer: Timer,
+  pub crud: Crud,
+  pub circles: Circles,
+  pub cells: Cells,
+}
+
+impl App for Seven {
+  /// A move over the canvas redraws: the circle nearest the pointer changes inside one element.
+  fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
+    matches!(ev, Event::MouseMove { .. }) && cx.hovered(Id::of("canvas"))
+  }
+
+  fn view<'a>(&'a mut self, ui: &mut Ui<'a>) {
+    ui.follow_system();
+    let fs = FormStyle::plates(&ui.theme());
+    ui.col(Style::new().grow().bg(fs.bg()), |ui| {
+      ui.id(TABS).toolbar_tabs(&fs, &mut self.task, &TASKS);
+      let page = Style::new().grow().pad(20.0).gap(12.0);
+      ui.key(self.task as u8).col(page, |ui| match self.task {
+        Task::Temperature => self.temperature.view(ui),
+        Task::Flight => self.flight.view(ui),
+        Task::Timer => self.timer.view(ui),
+        Task::Crud => self.crud.view(ui),
+        Task::Circles => self.circles.view(ui),
+        Task::Cells => self.cells.view(ui),
+      });
+    });
+  }
+}
+
+/// A task's slug, its tab's label in lowercase: `crud`.
+pub fn slug(task: Task) -> String {
+  let tag = TASKS.iter().find(|t| t.value() == task);
+  tag.map(|t| t.label().to_lowercase()).unwrap_or_default()
+}
+
+fn main() {
+  let mut args: Vec<String> = std::env::args().skip(1).collect();
+  let task = TASKS.iter().map(|t| t.value()).find(|&t| args.first() == Some(&slug(t)));
+  if task.is_some() {
+    args.remove(0);
+  }
+
+  let app = Seven { task: task.unwrap_or_default(), cells: sheet(), ..Seven::default() };
+  let cfg = Config::new("7GUIs", 620.0, 420.0).min_size(520.0, 360.0).unified();
+
+  // The shot: each task part way through, as a person would leave it.
+  example::run(cfg, app, &args, |h| {
+    h.frame();
+    match h.app().task {
+      Task::Temperature => {
+        h.click_id(Id::of("c"));
+        h.type_text("100");
+      }
+
+      Task::Flight => {
+        let f = &mut h.app_mut().flight;
+        (f.kind, f.start, f.back) = (Kind::Return, "31.02.2014".into(), "26.03.2014".into());
+      }
+      Task::Timer => _ = h.wait(Duration::from_millis(3700)),
+
+      Task::Crud => {
+        h.click_id(Id::of("filter"));
+        h.type_text("m");
+        h.frame();
+        let r = h.rect(Id::of("people")).unwrap();
+        h.click(r.x + 30.0, r.y + 11.0);
+      }
+
+      Task::Circles => {
+        let r = h.rect(Id::of("canvas")).unwrap();
+        for (x, y) in [(70.0, 70.0), (150.0, 110.0), (260.0, 150.0), (160.0, 120.0)] {
+          h.click(r.x + x, r.y + y);
+        }
+
+        h.move_to(r.x + 152.0, r.y + 112.0);
+      }
+
+      Task::Cells => {
+        let r = h.rect(Id::of(("cell", 1usize, 1usize))).unwrap();
+        h.click(r.x + 10.0, r.y + 10.0);
+      }
+    }
+
+    h.frame();
+    h.wait(Duration::from_millis(300));
+  });
+}
+
 // MARK: Cells
+
+// A spreadsheet of formulas over the cells they read, worked out as each cell shows, with a
+// selection the keys move, edits in place and in a formula bar, and headers that stay in view as
+// the sheet scrolls.
 
 pub const COLS: usize = 26;
 pub const ROWS: usize = 100;
 const CELL_W: f32 = 72.0;
 const CELL_H: f32 = 22.0;
+/// The row numbers' column.
+const HEAD_W: f32 = 36.0;
 
-/// Task 7: a sheet of 26 columns A–Z by 100 rows that scrolls both ways; a double click edits a
-/// cell in a field (Enter or leaving it keeps the text, Escape drops it). A cell holds text, a
-/// number or a formula: `=A1`, `=add(A1, 2)`, `=sum(A1:B3)` (add, sub, mul, div, sum, prod),
-/// worked out as it shows from the cells it reads, so a change shows everywhere at once.
+/// Task 7: a spreadsheet of 26 columns A–Z by 100 rows, each cell text, a number or a formula:
+/// `=A1`, `=add(A1, 2)`, `=sum(A1:B3)` (add, sub, mul, div, sum, prod), worked out as it shows,
+/// so a change shows everywhere at once.
 #[derive(Default)]
 pub struct Cells {
   /// By (row, column).
   pub cells: HashMap<(usize, usize), String>,
-  /// The cell in a field, and the text being edited.
-  pub editing: Option<((usize, usize), String)>,
+  /// The selected cell.
+  pub sel: (usize, usize),
+  /// The selected cell's text while it is edited, in the cell or in the bar.
+  pub editing: Option<String>,
+}
+
+/// A cell's name: `B12`.
+pub fn cell_name((r, c): (usize, usize)) -> String {
+  format!("{}{r}", (b'A' + c as u8) as char)
+}
+
+/// The sheet, the field in the edited cell, and the formula bar.
+const SHEET: &str = "sheet";
+const EDIT: &str = "edit";
+const BAR: &str = "formula";
+
+/// Tab and Shift-Tab in a cell's field keep the text and move, as Return does down.
+const EDIT_KEYS: &[Binding] = &[
+  Binding::new(Shortcut::new(Key::Named(NamedKey::Tab)), Command::Action("right")),
+  Binding::new(Shortcut::new(Key::Named(NamedKey::Tab)).shift(), Command::Action("left")),
+];
+
+/// How an edit ends: kept, the selection moving by (rows, columns) and the sheet taking the
+/// keys again, or kept where the focus went (a click elsewhere), or dropped.
+enum End {
+  Keep(Option<(isize, isize)>),
+  Drop,
+}
+
+/// The step the selection takes for a key on the sheet: the arrows, Tab and Shift-Tab; with
+/// Cmd, the arrows go to the sheet's edge.
+fn step(k: &KeyEvent) -> Option<(isize, isize)> {
+  let far = if k.mods.contains(CMD) { ROWS.max(COLS) as isize } else { 1 };
+  Some(match k.key {
+    Key::Named(NamedKey::ArrowUp) => (-far, 0),
+    Key::Named(NamedKey::ArrowDown) => (far, 0),
+    Key::Named(NamedKey::ArrowLeft) => (0, -far),
+    Key::Named(NamedKey::ArrowRight) => (0, far),
+    Key::Named(NamedKey::Tab) if k.mods.shift() => (0, -1),
+    Key::Named(NamedKey::Tab) => (0, 1),
+    _ => return None,
+  })
+}
+
+/// A cell's field: the text on the cell's ground, the selection's outline around it drawn by
+/// the cell.
+struct CellField;
+
+impl TextFieldStyle for CellField {
+  fn make_body(&self, ui: &mut Ui, mut c: TextFieldConfiguration) {
+    let t = ui.theme();
+    let frame = Style::new().w(grow()).h(grow()).pad_xy(3.0, 0.0).focusable_quiet();
+    let frame = frame.align(Align::Start, Align::Center).scroll(Axes::HORIZONTAL);
+    ui.row(frame, |ui| c.text(ui, &t.field()));
+  }
 }
 
 /// A formula's text and how far it is read.
@@ -805,6 +960,13 @@ impl Eval<'_> {
   }
 }
 
+/// A cell's number as it shows: whole, or to nine decimals, trimmed (`0.3`, not
+/// `0.30000000000000004`).
+fn num(v: f64) -> String {
+  let v = (v * 1e9).round() / 1e9;
+  if v == 0.0 { "0".into() } else { v.to_string() }
+}
+
 impl Cells {
   fn value(&self, at: (usize, usize)) -> Option<f64> {
     Eval { cells: self, memo: HashMap::new(), stack: Vec::new(), depth: 0 }.value(at)
@@ -813,113 +975,250 @@ impl Cells {
   /// What a cell shows: its value, its text, or `#ERR`.
   pub fn shown(&self, at: (usize, usize)) -> String {
     match self.cells.get(&at) {
-      Some(t) if t.starts_with('=') => self.value(at).map_or("#ERR".into(), |v| v.to_string()),
+      Some(t) if t.starts_with('=') => self.value(at).map_or("#ERR".into(), num),
       Some(t) => t.clone(),
       None => String::new(),
     }
   }
 
-  fn view(&mut self, ui: &mut Ui) {
-    let t = ui.theme();
-    let head =
-      Style::new().w(px(CELL_W)).h(px(CELL_H)).center().bg(t.panel()).border(0.5, t.line());
-    let cell = Style::new().w(px(CELL_W)).h(px(CELL_H)).pad_xy(4.0, 0.0).border(0.5, t.line());
-    let cell = cell.align(Align::End, Align::Center).clip();
-    let sheet = Style::new().grow().scroll(Axes::ALL).bg(t.bg()).border(1.0, t.line());
+  /// The selected cell's text as typed.
+  fn text(&self) -> String {
+    self.cells.get(&self.sel).cloned().unwrap_or_default()
+  }
 
-    let mut done = None;
-    ui.id("sheet").scroll_area(sheet, |ui| {
-      ui.row(Style::new(), |ui| {
-        ui.el(head.w(px(36.0)));
-        for c in 0..COLS {
-          ui.row(head, |ui| ui.text((b'A' + c as u8) as char, t.label()));
+  /// Moves the selection by (rows, columns), kept on the sheet, and scrolls it into view clear
+  /// of the headers.
+  fn go(&mut self, ui: &mut Ui, (dr, dc): (isize, isize)) {
+    let r = self.sel.0.saturating_add_signed(dr).min(ROWS - 1);
+    let c = self.sel.1.saturating_add_signed(dc).min(COLS - 1);
+    self.sel = (r, c);
+    let at = Rect::new(c as f32 * CELL_W, r as f32 * CELL_H, CELL_W + HEAD_W, CELL_H * 2.0);
+    ui.reveal(Id::of(SHEET), at);
+  }
+
+  /// Starts editing the selected cell from `text` in its field.
+  fn edit(&mut self, ui: &mut Ui, text: String) {
+    self.editing = Some(text);
+    ui.focus(Some(Id::of(EDIT)));
+  }
+
+  /// The keys on the sheet while no cell is edited: moves, Return to edit, Delete to clear, and
+  /// text typed to start an edit with.
+  fn keys(&mut self, ui: &mut Ui) {
+    let sheet = Id::of(SHEET);
+    if let Some(k) = ui.key_down(sheet) {
+      match k.key {
+        Key::Named(NamedKey::Enter) if k.mods.is_empty() => self.edit(ui, self.text()),
+        Key::Named(NamedKey::Backspace | NamedKey::Delete) if k.mods.is_empty() => {
+          _ = self.cells.remove(&self.sel)
         }
-      });
+        _ => match step(&k) {
+          Some(d) => self.go(ui, d),
+          None => ui.pass(sheet),
+        },
+      }
+    }
 
-      for r in 0..ROWS {
-        ui.row(Style::new(), |ui| {
-          ui.row(head.w(px(36.0)), |ui| ui.text(r, t.label()));
-          for c in 0..COLS {
-            match &mut self.editing {
-              Some((at, text)) if *at == (r, c) => {
-                let mut f = Response::default();
-                ui.col(Style::new().w(px(CELL_W)).h(px(CELL_H)), |ui| {
-                  let name = format!("{}{r}", (b'A' + c as u8) as char);
-                  f = ui.autofocus().a11y_label(&name).id(("edit", r, c)).text_field(text, "");
-                });
+    if let Some(s) = ui.typed(sheet).map(str::to_owned) {
+      self.edit(ui, s);
+    }
+  }
 
-                if f.submitted || f.blurred {
-                  done = Some(true);
-                } else if f.cancelled {
-                  done = Some(false);
-                }
-              }
+  pub fn view(&mut self, ui: &mut Ui) {
+    if self.editing.is_none() {
+      self.keys(ui);
+    }
 
-              _ => {
-                let id = Id::of(("cell", r, c));
-                ui.with_id(id).row(cell, |ui| ui.text(self.shown((r, c)), t.body().nowrap()));
-                if ui.click(id).is_some_and(|k| k.clicks == 2) {
-                  let text = self.cells.get(&(r, c)).cloned().unwrap_or_default();
-                  self.editing = Some(((r, c), text));
-                }
-              }
-            }
-          }
-        });
+    let mut end = None;
+    ui.col(Style::new().grow().gap(8.0), |ui| {
+      end = self.bar(ui);
+      let click = self.sheet(ui, &mut end);
+
+      // A click elsewhere keeps the edit, then selects; a second click edits.
+      if let Some((at, clicks)) = click {
+        if self.editing.is_some() {
+          end = end.take().or(Some(End::Keep(None)));
+        }
+
+        self.finish(ui, end.take());
+        self.sel = at;
+        ui.focus(Some(Id::of(SHEET)));
+        if clicks >= 2 {
+          self.edit(ui, self.text());
+        }
       }
     });
 
-    if let Some(keep) = done
-      && let Some((at, text)) = self.editing.take()
-      && keep
-    {
-      self.cells.insert(at, text);
-    }
-  }
-}
-
-// MARK: The app
-
-/// The six tasks, each on its tab.
-#[derive(Default)]
-pub struct Seven {
-  pub task: Task,
-  pub temperature: Temperature,
-  pub flight: Flight,
-  pub timer: Timer,
-  pub crud: Crud,
-  pub circles: Circles,
-  pub cells: Cells,
-}
-
-impl App for Seven {
-  /// A move over the canvas redraws: the circle nearest the pointer changes inside one element.
-  fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
-    matches!(ev, Event::MouseMove { .. }) && cx.hovered(Id::of("canvas"))
+    self.finish(ui, end);
   }
 
-  fn view<'a>(&'a mut self, ui: &mut Ui<'a>) {
-    ui.follow_system();
-    let fs = FormStyle::plates(&ui.theme());
-    ui.col(Style::new().grow().bg(fs.bg()), |ui| {
-      ui.id(TABS).toolbar_tabs(&fs, &mut self.task, &TASKS);
-      let page = Style::new().grow().pad(20.0).gap(12.0);
-      ui.key(self.task as u8).col(page, |ui| match self.task {
-        Task::Temperature => self.temperature.view(ui),
-        Task::Flight => self.flight.view(ui),
-        Task::Timer => self.timer.view(ui),
-        Task::Crud => self.crud.view(ui),
-        Task::Circles => self.circles.view(ui),
-        Task::Cells => self.cells.view(ui),
+  /// The formula bar: the cell's name and its text, which an edit there changes; how that edit
+  /// ended.
+  fn bar(&mut self, ui: &mut Ui) -> Option<End> {
+    let t = ui.theme();
+    let keys = Id::of(BAR).key("keys");
+    let mut r = Response::default();
+    ui.row(line(8.0).w(grow()), |ui| {
+      let name = Style::new().w(px(52.0)).h(px(t.sizes().control_h())).center();
+      let name = name.radius(t.radius()).border(1.0, t.line());
+      ui.row(name, |ui| ui.id("name").text(cell_name(self.sel), t.muted()));
+
+      ui.keymap(EDIT_KEYS).with_id(keys).col(Style::new().w(grow()), |ui| {
+        let field = ui.a11y_label("Formula").id(BAR);
+        match &mut self.editing {
+          Some(text) => r = field.text_field(text, ""),
+          None => {
+            let mut text = self.text();
+            r = field.text_field(&mut text, "");
+            if r.changed {
+              self.editing = Some(text);
+            }
+          }
+        }
       });
     });
-  }
-}
 
-/// A task's slug, its tab's label in lowercase: `crud`.
-pub fn slug(task: Task) -> String {
-  let tag = TASKS.iter().find(|t| t.value() == task);
-  tag.map(|t| t.label().to_lowercase()).unwrap_or_default()
+    self.ended(ui, &r, keys, Id::of(EDIT))
+  }
+
+  /// The sheet: the cells in a column clear of the headers, which stay over it as it scrolls,
+  /// placed by its offset; the cell clicked, and how many times.
+  fn sheet(&mut self, ui: &mut Ui, end: &mut Option<End>) -> Option<((usize, usize), u32)> {
+    let t = ui.theme();
+    let sheet = Id::of(SHEET);
+    let off = ui.scroll(sheet).map_or(Point::new(0.0, 0.0), |s| s.offset);
+    let area = Style::new().grow().scroll(Axes::ALL).bg(t.bg()).border(1.0, t.line());
+    let mut click = None;
+    ui.autofocus().with_id(sheet).scroll_area(area.focusable_quiet(), |ui| {
+      ui.col(Style::new().pads([CELL_H, 0.0, 0.0, HEAD_W]), |ui| {
+        for r in 0..ROWS {
+          ui.row(Style::new(), |ui| {
+            for c in 0..COLS {
+              if let Some(k) = self.cell(ui, (r, c), end) {
+                click = Some(((r, c), k));
+              }
+            }
+          });
+        }
+      });
+
+      self.headers(ui, off);
+    });
+
+    click
+  }
+
+  /// A cell: its value, or its field while it is edited, outlined while selected; a left click
+  /// on it, by its count.
+  fn cell(&mut self, ui: &mut Ui, at: (usize, usize), end: &mut Option<End>) -> Option<u32> {
+    let t = ui.theme();
+    let style = Style::new().w(px(CELL_W)).h(px(CELL_H)).border(0.5, t.line()).clip();
+    let selected = at == self.sel;
+    let style = if selected { style.border(2.0, t.accent()) } else { style };
+    let id = Id::of(("cell", at.0, at.1));
+    if selected && self.editing.is_some() {
+      *end = end.take().or(self.editor(ui, id));
+      return None;
+    }
+
+    // Numbers and values at the right, text at the left.
+    let shown = self.shown(at);
+    let text = self.cells.get(&at).is_some_and(|s| !s.starts_with('=') && number(s).is_none());
+    let align = if text { Align::Start } else { Align::End };
+    let style = style.pad_xy(4.0, 0.0).align(align, Align::Center);
+    let color = if shown == "#ERR" { t.danger() } else { t.text() };
+    ui.with_id(id).row(style, |ui| ui.text(shown, t.body().nowrap().color(color)));
+    ui.click(id).filter(|k| k.button == MouseButton::Left).map(|k| k.clicks)
+  }
+
+  /// The selected cell's field, `id` the cell's, over the cells to its right as its text grows,
+  /// up to three more; how its edit ended.
+  fn editor(&mut self, ui: &mut Ui, id: Id) -> Option<End> {
+    let t = ui.theme();
+    let (keys, name) = (id.key("keys"), cell_name(self.sel));
+    let over = Style::new().min_w(CELL_W).max_w(CELL_W * 4.0).h(px(CELL_H)).pad(1.0);
+    let over = over.bg(t.bg()).border(2.0, t.accent());
+    let mut r = Response::default();
+    let text = self.editing.as_mut()?;
+    ui.with_id(id).row(Style::new().w(px(CELL_W)).h(px(CELL_H)), |ui| {
+      let ui = ui.float(Float::parent().clip()).keymap(EDIT_KEYS).with_id(keys);
+      ui.row(over, |ui| {
+        let ui = ui.text_field_style(&CellField).a11y_label(&name).id(EDIT);
+        r = ui.text_field(text, "");
+      });
+    });
+
+    self.ended(ui, &r, keys, Id::of(BAR))
+  }
+
+  /// How the edit in a field ends: Return keeps it and goes down, Tab and Shift-Tab across (the
+  /// commands of `keys`, its keymap), Escape drops it, and leaving the field keeps it unless
+  /// the focus went to `other`, the edit's other field.
+  fn ended(&self, ui: &mut Ui, r: &Response, keys: Id, other: Id) -> Option<End> {
+    self.editing.as_ref()?;
+    match ui.command(keys) {
+      Some(Command::Action("right")) => return Some(End::Keep(Some((0, 1)))),
+      Some(Command::Action("left")) => return Some(End::Keep(Some((0, -1)))),
+      Some(_) => ui.pass(keys),
+      None => {}
+    }
+
+    match () {
+      _ if r.submitted => Some(End::Keep(Some((1, 0)))),
+      _ if r.cancelled => Some(End::Drop),
+      _ if r.blurred && !ui.focused(other) => Some(End::Keep(None)),
+      _ => None,
+    }
+  }
+
+  /// Ends the edit: keeps its text in the cell (an empty one clears it) or drops it; the sheet
+  /// takes the keys again unless the focus went elsewhere.
+  fn finish(&mut self, ui: &mut Ui, end: Option<End>) {
+    let Some(end) = end else { return };
+    let Some(text) = self.editing.take() else { return };
+    if let End::Keep(_) = end {
+      match text.trim().is_empty() {
+        true => _ = self.cells.remove(&self.sel),
+        false => _ = self.cells.insert(self.sel, text),
+      }
+    }
+
+    match end {
+      End::Keep(Some(d)) => self.go(ui, d),
+      End::Keep(None) => return,
+      End::Drop => {}
+    }
+
+    ui.focus(Some(Id::of(SHEET)));
+  }
+
+  /// The column letters and row numbers over the sheet, placed against its offset `off` so they
+  /// stay in view, the selection's highlighted; the corner over both.
+  fn headers(&self, ui: &mut Ui, off: Point) {
+    let t = ui.theme();
+    let head = Style::new().center().bg(t.panel()).border(0.5, t.line());
+    let lit = head.bg(mix(t.panel(), t.accent(), 0.22));
+    let label = |on: bool| if on { t.label().color(t.accent()) } else { t.muted() };
+    let float = |x: f32, y: f32| Float::parent().offset(x, y).clip();
+    ui.float(float(0.0, CELL_H - off.y)).id("rows").col(Style::new(), |ui| {
+      for r in 0..ROWS {
+        let on = r == self.sel.0;
+        let s = if on { lit } else { head };
+        ui.key(("row", r)).row(s.w(px(HEAD_W)).h(px(CELL_H)), |ui| ui.text(r, label(on)));
+      }
+    });
+
+    ui.float(float(HEAD_W - off.x, 0.0)).id("cols").row(Style::new(), |ui| {
+      for c in 0..COLS {
+        let on = c == self.sel.1;
+        let s = if on { lit } else { head };
+        let s = s.w(px(CELL_W)).h(px(CELL_H));
+        ui.key(("col", c)).row(s, |ui| ui.text((b'A' + c as u8) as char, label(on)));
+      }
+    });
+
+    ui.float(float(0.0, 0.0)).el(head.w(px(HEAD_W)).h(px(CELL_H)));
+  }
 }
 
 /// The sheet the cells task shows at first: a few numbers and formulas over them.
@@ -931,58 +1230,4 @@ pub fn sheet() -> Cells {
   }
 
   c
-}
-
-fn main() {
-  let mut args: Vec<String> = std::env::args().skip(1).collect();
-  let task = TASKS.iter().map(|t| t.value()).find(|&t| args.first() == Some(&slug(t)));
-  if task.is_some() {
-    args.remove(0);
-  }
-
-  let app = Seven { task: task.unwrap_or_default(), cells: sheet(), ..Seven::default() };
-  let cfg = Config::new("7GUIs", 620.0, 420.0).min_size(520.0, 360.0).unified();
-
-  // The shot: each task part way through, as a person would leave it.
-  example::run(cfg, app, &args, |h| {
-    h.frame();
-    match h.app().task {
-      Task::Temperature => {
-        h.click_id(Id::of("c"));
-        h.type_text("100");
-      }
-
-      Task::Flight => {
-        let f = &mut h.app_mut().flight;
-        (f.kind, f.start, f.back) = (Kind::Return, "31.02.2014".into(), "26.03.2014".into());
-      }
-      Task::Timer => _ = h.wait(Duration::from_millis(3700)),
-
-      Task::Crud => {
-        h.click_id(Id::of("filter"));
-        h.type_text("m");
-        h.frame();
-        let r = h.rect(Id::of("people")).unwrap();
-        h.click(r.x + 30.0, r.y + 11.0);
-      }
-
-      Task::Circles => {
-        let r = h.rect(Id::of("canvas")).unwrap();
-        for (x, y) in [(70.0, 70.0), (150.0, 110.0), (260.0, 150.0), (160.0, 120.0)] {
-          h.click(r.x + x, r.y + y);
-        }
-
-        h.move_to(r.x + 152.0, r.y + 112.0);
-      }
-
-      Task::Cells => {
-        let r = h.rect(Id::of(("cell", 1usize, 0usize))).unwrap();
-        h.press_with(r.x + 10.0, r.y + 10.0, 2, Default::default());
-        h.release(r.x + 10.0, r.y + 10.0);
-      }
-    }
-
-    h.frame();
-    h.wait(Duration::from_millis(300));
-  });
 }
