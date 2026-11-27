@@ -642,7 +642,17 @@ fn lone(
     KeyKind::Up => false,
   };
 
-  if pressed && chord_started {
+  // But another place's chord without this key's modifier: fn, then F6 of another place.
+  let theirs = kind == KeyKind::Down
+    && (0..MAX).filter(|&w| w != which).any(|w| {
+      let chord = shared.chords[w].load(Ordering::Acquire);
+      let mods = (chord >> 16) & MODIFIERS;
+      chord & (SET | LONE) == SET
+        && code == chord & 0xffff
+        && flags & MODIFIERS == mods
+        && mods & general_flag(key) == 0
+    });
+  if pressed && chord_started && !theirs {
     held.store(false, Ordering::Relaxed);
     return Some(Hit::Abort { which });
   }
@@ -1046,6 +1056,27 @@ mod tests {
     assert_eq!(key_at(&s, 2_000, true, SPACE, opt, false), swallow(Some(down_1)));
     assert_eq!(key_at(&s, 2_100, false, SPACE, opt, false), swallow(Some(up_1)));
     assert_eq!(flags_at(&s, 2_200, Code::AltRight, 0), tell(UP));
+  }
+
+  /// fn alone in place 0, F6 in place 1: F6 right after fn is the other's press and fn stays held;
+  /// another key in the window is still the user's chord.
+  #[test]
+  fn a_chord_without_the_modifier_alone_keeps_it_held() {
+    let s = lone_shared(Code::Fn);
+    let f6 = u64::from(kvk(Code::F6).unwrap());
+    s.chords[1].store(SET | f6, Ordering::Release);
+    let fn_flag = CGEventFlags::MaskSecondaryFn.0;
+    let with_fn = CGEventFlags(fn_flag);
+    let (down_1, up_1) = (Hit::Down { which: 1, repeat: false }, Hit::Up { which: 1 });
+    assert_eq!(flags_at(&s, 0, Code::Fn, fn_flag), tell(DOWN));
+    assert_eq!(key_at(&s, 50, true, f6, with_fn, false), swallow(Some(down_1)));
+    assert_eq!(key_at(&s, 100, false, f6, with_fn, false), swallow(Some(up_1)));
+    assert_eq!(flags_at(&s, 2_000, Code::Fn, 0), tell(UP));
+
+    assert_eq!(flags_at(&s, 3_000, Code::Fn, fn_flag), tell(DOWN));
+    assert_eq!(key_at(&s, 3_050, true, f6, with_fn, false), swallow(Some(down_1)));
+    assert_eq!(key_at(&s, 3_100, true, E, with_fn, false), tell(ABORT));
+    assert_eq!(flags_at(&s, 3_200, Code::Fn, 0), Verdict::Pass, "no release owed");
   }
 
   /// Right ⌥ alone in place 0, fn alone in place 1: each its own; one pressed while the other is
