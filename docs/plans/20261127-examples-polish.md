@@ -46,8 +46,8 @@ The owner ran #123's examples in real windows on 2026-11-27 and found them broke
 - [ ] Cells: the scrollers cover the headers (the vertical one over the `H` header, the horizontal one over row `10`'s number): insets for scroll indicators, or headers outside the scroll view
 - [x] Flight: the invalid field's text sat 2 pt left of the valid one's: its frame now has the theme's padding
 - [x] Flight: the two dates need labels (Departure, Return), with the date input: a form in columns, as SwiftUI's `.columns`
-- [ ] Timer: the slider's track ends 7 pt inside the gauge above it on each side (AppKit's track runs the control's width)
-- [ ] CRUD: the list is a square-cornered box beside a rounded search field; its selection runs into the border
+- [x] Timer: the slider's track ends 7 pt inside the gauge above it on each side (AppKit's track runs the control's width): the theme's slider draws it so; the task a form in columns
+- [x] CRUD: the list is a square-cornered box beside a rounded search field; its selection runs into the border: a text field's box, the inset style's selection rounded and in from the sides (SwiftUI's `.inset`), the search field as high as the text fields (AppKit's are, 24 at the regular size)
 - [x] One file per example: cells went into `examples/7guis/`, folded back into `7guis.rs`
 
 ## Custom look

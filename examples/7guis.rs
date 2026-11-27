@@ -66,12 +66,19 @@ fn line(gap: f32) -> Style {
   Style::new().gap(gap).align(Align::Start, Align::Center)
 }
 
+/// The labels' column of a form in columns ([labeled]): as wide as the widest of `titles` with
+/// its colon.
+fn column(ui: &mut Ui, titles: &[&str]) -> f32 {
+  let t = ui.theme();
+  titles.iter().map(|s| ui.measure(&format!("{s}:"), t.label())).fold(0.0, f32::max).ceil()
+}
+
 /// A row of a form in columns, as SwiftUI's `.formStyle(.columns)` on the Mac: `title` and a
 /// colon at the right of a column `w` wide, dimmed when the row is disabled, and what `control`
 /// builds 8 after it; an empty title leaves the column empty, for a button under the controls.
 fn labeled<R>(ui: &mut Ui, w: f32, title: &str, control: impl FnOnce(&mut Ui) -> R) {
   let t = ui.theme();
-  ui.row(line(8.0), |ui| {
+  ui.row(line(8.0).w(grow()), |ui| {
     let on = ui.environment_value::<Enabled>().0;
     let text = if on { t.label() } else { t.label().color(t.tertiary()) };
     let column = Style::new().w(px(w)).align(Align::End, Align::Center);
@@ -185,25 +192,25 @@ impl Default for Flight {
 
 impl Flight {
   fn view(&mut self, ui: &mut Ui) {
-    const W: f32 = 80.0;
+    let w = column(ui, &["Flight", "Departure", "Return"]);
     let one_way = self.kind == Kind::OneWay;
     ui.col(Style::new().gap(10.0), |ui| {
-      labeled(ui, W, "Flight", |ui| {
+      labeled(ui, w, "Flight", |ui| {
         ui.a11y_label("Flight").id("kind").picker(&mut self.kind, &KINDS)
       });
-      labeled(ui, W, "Departure", |ui| {
+      labeled(ui, w, "Departure", |ui| {
         let date = DatePicker::new(&mut self.start).range(Date::today()..);
         date.show(ui.a11y_label("Departure").id("start"))
       });
 
       let start = self.start;
-      labeled(ui.disabled(one_way), W, "Return", |ui| {
+      labeled(ui.disabled(one_way), w, "Return", |ui| {
         DatePicker::new(&mut self.back).range(start..).show(ui.a11y_label("Return").id("back"))
       });
 
       // The spec's rule, though the return's range keeps it.
       let ok = one_way || self.back >= self.start;
-      labeled(ui, W, "", |ui| {
+      labeled(ui, w, "", |ui| {
         if ui.disabled(!ok).id("book").button("Book").clicked {
           self.booked = true;
         }
@@ -253,26 +260,27 @@ impl Timer {
 
     self.last = now;
 
-    let t = ui.theme();
-    let label = Style::new().w(px(110.0));
-    ui.col(Style::new().w(px(320.0)).gap(10.0), |ui| {
-      ui.row(line(8.0).w(grow()), |ui| {
-        ui.row(label, |ui| ui.text("Elapsed Time:", t.label().nowrap()));
-        ui.col(Style::new().w(grow()), |ui| {
-          ui.a11y_label("Elapsed Time").id("gauge").progress(Some(self.elapsed / self.duration))
-        });
+    // The gauge and the slider as wide, their ends in line.
+    let w = column(ui, &["Elapsed Time", "Duration"]);
+    let (t, wide) = (ui.theme(), Style::new().w(px(240.0)));
+    ui.col(Style::new().gap(10.0), |ui| {
+      let done = self.elapsed / self.duration;
+      labeled(ui, w, "Elapsed Time", |ui| {
+        ui.col(wide, |ui| ui.a11y_label("Elapsed Time").id("gauge").progress(Some(done)))
       });
-
-      ui.id("elapsed").text(format_args!("{:.1}s", self.elapsed), t.label());
-      ui.row(line(8.0).w(grow()), |ui| {
-        ui.row(label, |ui| ui.text("Duration:", t.label().nowrap()));
-        ui.col(Style::new().w(grow()), |ui| {
+      labeled(ui, w, "", |ui| {
+        ui.id("elapsed").text(format_args!("{:.1}s", self.elapsed), t.label())
+      });
+      labeled(ui, w, "Duration", |ui| {
+        ui.col(wide, |ui| {
           ui.a11y_label("Duration").id("duration").slider(&mut self.duration, 1.0..=30.0)
-        });
+        })
       });
-      if ui.id("reset").button("Reset").clicked {
-        self.elapsed = 0.0;
-      }
+      labeled(ui, w, "", |ui| {
+        if ui.id("reset").button("Reset").clicked {
+          self.elapsed = 0.0;
+        }
+      });
     });
 
     // After the slider and the reset: either starts it again.
@@ -390,9 +398,12 @@ impl Crud {
     let create = !blank && self.taken(None).is_none();
     let update = sel.is_some() && !blank && taken.is_none() && !same;
 
-    let label = Style::new().w(px(64.0)).align(Align::End, Align::Center);
     // The filter over the list, the fields beside it from its top.
+    let w = column(ui, &["Name", "Surname"]);
     let list_w = 250.0;
+    // A text field's box: its ground, edge and corners; the rows a little in from its ends.
+    let boxed = Style::new().grow().pad_xy(0.0, 5.0).radius(t.radius());
+    let boxed = boxed.bg(t.field_fill()).border(1.0, t.field_line());
     ui.col(Style::new().grow().gap(10.0), |ui| {
       ui.col(Style::new().w(px(list_w)), |ui| {
         ui.a11y_label("Filter").id("filter").search_field(&mut self.filter, "Filter by name")
@@ -401,10 +412,10 @@ impl Crud {
       ui.row(Style::new().grow().gap(20.0), |ui| {
         ui.col(Style::new().w(px(list_w)).h(grow()), |ui| {
           let people = &self.people;
-          let r = List::new(shown.len(), 22.0)
+          let r = List::new(shown.len(), 24.0)
             .key(&|i| people[shown[i]].id)
             .selection(&mut self.sel)
-            .style(Style::new().grow().border(1.0, t.line()))
+            .style(boxed)
             .show(ui.a11y_label("People").id("people"), |ui, row| {
               let p = &people[shown[row.index]];
               ui.text(format_args!("{}, {}", p.surname, p.name), t.label());
@@ -418,22 +429,23 @@ impl Crud {
           }
         });
 
-        ui.col(Style::new().w(grow()).gap(8.0), |ui| {
+        ui.col(Style::new().w(grow()).gap(10.0), |ui| {
           for (title, id, text) in
             [("Name", "name", &mut self.name), ("Surname", "surname", &mut self.surname)]
           {
-            ui.row(line(8.0).w(grow()), |ui| {
-              ui.row(label, |ui| ui.text(format_args!("{title}:"), t.label()));
-              ui.col(Style::new().w(grow()).max_w(220.0), |ui| {
-                ui.a11y_label(title).id(id).text_field(text, "")
-              });
+            labeled(ui, w, title, |ui| {
+              let field = Style::new().w(grow()).max_w(220.0);
+              ui.col(field, |ui| ui.a11y_label(title).id(id).text_field(text, ""))
             });
           }
 
-          // Under the fields, past the labels: the reason Create and Update are off.
+          // Under the fields: the reason Create and Update are off.
           if let Some(note) = &taken {
-            ui.row(Style::new().pads([0.0, 0.0, 0.0, 72.0]).w(grow()), |ui| {
-              ui.id("taken").text(note, t.body().font(t.small()).color(t.secondary()))
+            labeled(ui, w, "", |ui| {
+              let note_style = t.body().font(t.small()).color(t.secondary());
+              ui.col(Style::new().w(grow()).max_w(220.0), |ui| {
+                ui.id("taken").text(note, note_style)
+              })
             });
           }
         });
@@ -728,7 +740,7 @@ fn main() {
         h.type_text("m");
         h.frame();
         let r = h.rect(Id::of("people")).unwrap();
-        h.click(r.x + 30.0, r.y + 11.0);
+        h.click(r.x + 30.0, r.y + 17.0);
       }
 
       Task::Circles => {

@@ -236,6 +236,13 @@ fn reset_starts_the_timer_from_zero() {
 }
 
 #[test]
+fn the_gauge_and_the_slider_line_up() {
+  let h = on(Task::Timer);
+  let (gauge, slider) = (h.rect(id("gauge")).unwrap(), h.rect(id("duration")).unwrap());
+  assert_eq!((gauge.x, gauge.w), (slider.x, slider.w));
+}
+
+#[test]
 fn the_duration_slider_moves_with_the_arrows() {
   let mut h = on(Task::Timer);
   let d = h.app().timer.duration;
@@ -249,7 +256,7 @@ fn the_duration_slider_moves_with_the_arrows() {
 /// The point of the `n`th row of the people list.
 fn row(h: &H, n: usize) -> (f32, f32) {
   let r = h.rect(id("people")).unwrap();
-  (r.x + 30.0, r.y + 11.0 + 22.0 * n as f32)
+  (r.x + 30.0, r.y + 5.0 + 12.0 + 24.0 * n as f32)
 }
 
 #[test]
@@ -260,6 +267,13 @@ fn a_selected_person_fills_the_fields() {
   assert_eq!((h.app().crud.name.as_str(), h.app().crud.surname.as_str()), ("Max", "Mustermann"));
   key(&mut h, NamedKey::ArrowDown);
   assert_eq!(h.app().crud.surname, "Tisch", "the keys select as a click does");
+}
+
+#[test]
+fn the_filter_is_as_high_as_the_fields() {
+  let h = on(Task::Crud);
+  let (filter, name) = (h.rect(id("filter")).unwrap(), h.rect(id("name")).unwrap());
+  assert_eq!(filter.h, name.h);
 }
 
 /// The rows the list shows.
