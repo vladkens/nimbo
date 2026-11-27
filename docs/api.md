@@ -165,6 +165,29 @@ ui.default_scroll_anchor(UnitPoint::BOTTOM).scroll_area(area, |ui| {
 
 ![Scroll anchor](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/scroll-anchor.png)
 
+### Content margins
+
+SwiftUI: `ScrollView { … }.contentMargins(.top, 28).contentMargins(.bottom, 8)`
+
+```rust
+let t = ui.theme();
+let area = Style::new().w(px(260.0)).h(px(110.0)).pad_xy(8.0, 0.0);
+let area = area.border(1.0, t.line()).bg(t.panel());
+let ui = ui.content_margins([28.0, 0.0, 8.0, 0.0], ContentMarginPlacement::Automatic);
+ui.scroll_area(area, |ui| {
+  for i in 1..=8 {
+    ui.text(format_args!("Line {i}"), t.label());
+  }
+
+  let head = Style::new().w(pct(100.0)).h(px(28.0)).pad_xy(8.0, 0.0);
+  let head =
+    head.align(Align::Start, Align::Center).border(1.0, t.line()).bg(t.raised());
+  ui.float(Float::parent()).row(head, |ui| ui.text("Header", t.section()));
+});
+```
+
+![Content margins](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/content-margins.png)
+
 ### Overlay
 
 SwiftUI: `.overlay(alignment: .topTrailing) { … }`
@@ -262,15 +285,19 @@ prose.push("Runs ", a).push("in bold", a.weight(Weight::Bold)).push(", ", a);
 prose.push("italic", a.italic()).push(", ", a).push("colour", a.color(t.accent()));
 prose.push(", ", a).push("code", a.design(Design::Monospaced)).push(", ", a);
 prose.push("lines", a.underline(LinePattern::Solid)).push(" and ", a);
-prose.push("grounds", a.background(alpha(t.warning(), 0.3)));
+prose.push("grounds", a.background(alpha(rgb(0xffcc00), 0.4)));
 prose.push(" wrap as one paragraph.", a);
 
-let (kw, name, lit) = (a.color(t.danger()), a.color(t.accent()), a.color(t.success()));
+// Keywords, declarations, numbers and comments.
+let ink =
+  |light: u32, dark: u32| a.color(rgb(if t.scheme().is_dark() { dark } else { light }));
+let kw = ink(0x9b2393, 0xfc5fa3).weight(Weight::Semibold);
+let (name, lit, note) =
+  (ink(0x0f68a0, 0x41a1c0), ink(0x1c00cf, 0xd0bf69), ink(0x5d6c79, 0x6c7986));
 let mut code = AttributedString::new();
-code.push("fn ", kw.weight(Weight::Bold)).push("main", name).push("() {\n  ", a);
-code.push("let ", kw.weight(Weight::Bold)).push("n = ", a).push("42", lit);
-code.push(";  ", a).push("// the answer", a.color(t.secondary()).italic());
-code.push("\n}", a);
+code.push("fn ", kw).push("main", name).push("() {\n  ", a);
+code.push("let ", kw).push("n = ", a).push("42", lit);
+code.push(";  ", a).push("// the answer", note).push("\n}", a);
 
 let (gone, added) =
   (a.background(alpha(t.danger(), 0.18)), a.background(alpha(t.success(), 0.18)));
@@ -1194,8 +1221,13 @@ let side = self.side;
 ui.row(frame.border(1.0, t.line()).bg(t.bg()), |ui| {
   Split::new(Axis::Horizontal).ratio(&mut self.side).show(ui, |ui, pane| {
     let (name, share) = [("Sidebar", side), ("Content", 1.0 - side)][pane];
-    let ground = if pane == 0 { t.panel() } else { t.bg() };
-    ui.col(Style::new().grow().pad(10.0).bg(ground), |ui| {
+    // Rounded as the frame, whose clip is square.
+    let ground = match pane {
+      0 => Style::new().radii([7.0, 0.0, 0.0, 7.0]).bg(t.panel()),
+      _ => Style::new().radii([0.0, 7.0, 7.0, 0.0]).bg(t.bg()),
+    };
+
+    ui.col(ground.grow().pad(10.0), |ui| {
       ui.label(format_args!("{name} · {:.0}%", share * 100.0))
     });
   });
@@ -1206,17 +1238,21 @@ ui.row(frame.border(1.0, t.line()).bg(t.bg()), |ui| {
 
 ### Navigation split
 
-SwiftUI: `NavigationSplitView { … } detail: { … }`
+SwiftUI: `NavigationSplitView { Sidebar().navigationSplitViewColumnWidth(min: 80, ideal: 104, max: 180) } detail: { … }`
 
 ```rust
 let t = ui.theme();
 let frame = Style::new().w(px(300.0)).h(px(72.0)).radius(8.0).pad(1.0).clip();
 ui.row(frame.border(1.0, t.line()).bg(t.bg()), |ui| {
-  Split::navigation().ratio(&mut self.side).show(ui, |ui, pane| {
-    let ground = if pane == 0 { t.panel() } else { t.bg() };
-    ui.col(Style::new().grow().pad(10.0).bg(ground), |ui| {
-      ui.label(["Sidebar", "Detail"][pane])
-    });
+  let split = Split::navigation().ratio(&mut self.side).min(80.0, 80.0);
+  split.max(180.0, f32::INFINITY).show(ui, |ui, pane| {
+    // Rounded as the frame, whose clip is square.
+    let ground = match pane {
+      0 => Style::new().radii([7.0, 0.0, 0.0, 7.0]).bg(t.panel()),
+      _ => Style::new().radii([0.0, 7.0, 7.0, 0.0]).bg(t.bg()),
+    };
+
+    ui.col(ground.grow().pad(10.0), |ui| ui.label(["Sidebar", "Detail"][pane]));
   });
 });
 ```
@@ -1232,8 +1268,13 @@ let t = ui.theme();
 let bar = Style::new().w(px(360.0)).h(px(52.0)).radius(8.0).pad(1.0).clip().bg(t.bg());
 ui.row(bar.border(1.0, t.line()), |ui| {
   Split::navigation().ratio(&mut self.bar_side).show(ui, |ui, pane| {
-    let ground = if pane == 0 { t.panel() } else { t.bg() };
-    ui.col(Style::new().grow().bg(ground), |ui| {
+    // Rounded as the frame, whose clip is square.
+    let ground = match pane {
+      0 => Style::new().radii([7.0, 0.0, 0.0, 7.0]).bg(t.panel()),
+      _ => Style::new().radii([0.0, 7.0, 7.0, 0.0]).bg(t.bg()),
+    };
+
+    ui.col(ground.grow(), |ui| {
       // The sidebar's toggle at its trailing edge; the detail's title in its centre and
       // its action at its end.
       ui.toolbar(|ui| match pane {
@@ -1298,7 +1339,7 @@ let row = |ui: &mut Ui, i: usize| {
     ui.text(format_args!("Row {} of 1000", i + 1), t.label())
   });
 };
-ui.scroll_area(area.bg(t.panel()), |ui| ui.lazy_col(1000, |i| i, row));
+ui.scroll_area(area.bg(t.panel()), |ui| ui.lazy_col(Style::new(), 1000, |i| i, row));
 ```
 
 ![Lazy column](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/lazy-column.png)

@@ -1536,7 +1536,7 @@ mod pages {
 
     use nimbo::{
       AttributedString, Attributes, Content, ContentMode, Design, Font, Icon, Id, LinePattern,
-      Style, TextStyle, TruncationMode, Ui, Weight, alpha, px, t, tn,
+      Style, TextStyle, TruncationMode, Ui, Weight, alpha, px, rgb, t, tn,
     };
 
     use super::{Gallery, Shown};
@@ -1586,8 +1586,8 @@ mod pages {
 
             ui.text("struck", t.label().strikethrough(LinePattern::Solid));
           }),
-          // A paragraph of runs, wrapping as one; code coloured as a highlighter would and a
-          // diff's lines on their grounds, selectable.
+          // A paragraph of runs, wrapping as one; code coloured as Xcode colours it, in its light
+          // or dark palette, and a diff's lines on their grounds, selectable.
           "Styled text" => Self::variants(ui, Shown::Alone, |ui| {
             let t = ui.theme();
             let a = Attributes::new();
@@ -1596,15 +1596,19 @@ mod pages {
             prose.push("italic", a.italic()).push(", ", a).push("colour", a.color(t.accent()));
             prose.push(", ", a).push("code", a.design(Design::Monospaced)).push(", ", a);
             prose.push("lines", a.underline(LinePattern::Solid)).push(" and ", a);
-            prose.push("grounds", a.background(alpha(t.warning(), 0.3)));
+            prose.push("grounds", a.background(alpha(rgb(0xffcc00), 0.4)));
             prose.push(" wrap as one paragraph.", a);
 
-            let (kw, name, lit) = (a.color(t.danger()), a.color(t.accent()), a.color(t.success()));
+            // Keywords, declarations, numbers and comments.
+            let ink =
+              |light: u32, dark: u32| a.color(rgb(if t.scheme().is_dark() { dark } else { light }));
+            let kw = ink(0x9b2393, 0xfc5fa3).weight(Weight::Semibold);
+            let (name, lit, note) =
+              (ink(0x0f68a0, 0x41a1c0), ink(0x1c00cf, 0xd0bf69), ink(0x5d6c79, 0x6c7986));
             let mut code = AttributedString::new();
-            code.push("fn ", kw.weight(Weight::Bold)).push("main", name).push("() {\n  ", a);
-            code.push("let ", kw.weight(Weight::Bold)).push("n = ", a).push("42", lit);
-            code.push(";  ", a).push("// the answer", a.color(t.secondary()).italic());
-            code.push("\n}", a);
+            code.push("fn ", kw).push("main", name).push("() {\n  ", a);
+            code.push("let ", kw).push("n = ", a).push("42", lit);
+            code.push(";  ", a).push("// the answer", note).push("\n}", a);
 
             let (gone, added) =
               (a.background(alpha(t.danger(), 0.18)), a.background(alpha(t.success(), 0.18)));
