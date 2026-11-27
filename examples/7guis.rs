@@ -73,7 +73,8 @@ struct Invalid;
 impl TextFieldStyle for Invalid {
   fn make_body(&self, ui: &mut Ui, mut c: TextFieldConfiguration) {
     let t = ui.theme();
-    let frame = Style::new().w(grow()).h(px(t.sizes().control_h())).pad_xy(6.0, 0.0);
+    let h = t.sizes().control_h();
+    let frame = Style::new().w(grow()).min_h(h).pad_xy((h / 3.0).round(), 4.0);
     let frame = frame.align(Align::Start, Align::Center).radius(t.radius());
     let frame = frame.border(1.0, t.danger()).bg(alpha(t.danger(), 0.18));
     ui.row(frame.scroll(Axes::HORIZONTAL), |ui| c.text(ui, &t.field()));
