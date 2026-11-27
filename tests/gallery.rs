@@ -122,8 +122,8 @@ fn the_sidebar_keeps_its_selection_under_a_header_press() {
   assert_eq!(h.app().page, page("Button"));
 }
 
-/// The switch reads on in its enabled line, disabled in its disabled one; a large one is wider;
-/// a small button is lower than the regular one, a large one higher.
+/// The switch reads on in its enabled line, disabled in its disabled one; a small one is
+/// narrower, a large one wider; a small button is lower than the regular one, a large one higher.
 #[test]
 fn variants_are_disabled_and_sized() {
   let h = gallery(page("Switch"), false);
@@ -133,7 +133,7 @@ fn variants_are_disabled_and_sized() {
   assert_eq!(switches.len(), 4, "enabled, disabled, small, large: {tree}");
   assert!(!switches[0].contains("disabled") && switches[1].contains("disabled"), "{switches:?}");
   let widths: Vec<f32> = h.find_all(Role::Switch).iter().map(|n| n.rect.w).collect();
-  assert!(widths[3] > widths[0], "large wider: {widths:?}");
+  assert!(widths[2] < widths[0] && widths[3] > widths[0], "small, large: {widths:?}");
   let h = gallery(page("Button"), false);
   let buttons = h.find_all(Role::Button);
   let hs: Vec<f32> = buttons.iter().filter(|n| n.name == "Bordered").map(|n| n.rect.h).collect();
@@ -921,4 +921,42 @@ fn the_pace_scene_moves_then_stands_still() {
   // It crosses once a second: after 3 s, back where it set off.
   assert_eq!(img.pixel(BAR_W / 2.0, 40.0), px(nimbo::rgb(0x3b82f6)), "the bar");
   assert_eq!(img.pixel(BAR_W + 4.0, 40.0), px(nimbo::rgb(0x1c1c1e)), "the ground");
+}
+
+/// A block's disabled line dims what it shows, as AppKit dims a disabled control's labels: each
+/// text (or mark) drawn fainter on the ground than in the enabled line above it, in both
+/// appearances.
+#[test]
+fn disabled_lines_dim_their_texts() {
+  let cases = [
+    ("Slider", Role::StaticText, "60%"),
+    ("Slider steps", Role::StaticText, "30%"),
+    ("Toolbar", Role::StaticText, "Notes"),
+    ("Tabs", Role::StaticText, "The general page"),
+    ("Section", Role::StaticText, "640 MB used"),
+    ("Help marks", Role::Button, "Info"),
+    ("Help marks", Role::Button, "Warning"),
+  ];
+  for (look, t) in LOOKS {
+    for (block, role, name) in cases {
+      let mut h = Harness::new(Gallery::on(page(block), true), Size::new(WIDTH, 300.0), 2.0);
+      h.event(Event::Appearance(look));
+      h.frame();
+
+      let img = h.render();
+      // How far the farthest pixel of `r` is from the ground.
+      let ground = px(t.bg());
+      let ink = |r: Rect| {
+        let all =
+          (0..(r.w * 2.0) as i32).flat_map(|x| (0..(r.h * 2.0) as i32).map(move |y| (x, y)));
+        let at = |(x, y): (i32, i32)| img.pixel(r.x + x as f32 / 2.0, r.y + y as f32 / 2.0);
+        all.map(|p| diff(at(p), ground)).max().unwrap()
+      };
+      let all = h.find_all(role);
+      let lines: Vec<Rect> = all.iter().filter(|n| n.name == name).map(|n| n.rect).collect();
+      assert!(lines.len() >= 2, "{block}: {name:?} in {} lines", lines.len());
+      let (on, off) = (ink(lines[0]), ink(lines[1]));
+      assert!(off + 40 < on, "{block} {name:?} {look:?}: {on} enabled, {off} disabled");
+    }
+  }
 }

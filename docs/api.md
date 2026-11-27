@@ -542,11 +542,10 @@ ui.toggle_style(&PlainToggleStyle).toggle(&mut self.wrap, "Plain");
 SwiftUI: `Slider(value: $zoom, in: 0...200)`
 
 ```rust
-let t = ui.theme();
 ui.col(Style::new().w(px(160.0)), |ui| {
   ui.a11y_label("Zoom").slider(&mut self.zoom, 0.0..=200.0);
 });
-ui.text(format_args!("{:.0}%", self.zoom), t.muted().nowrap());
+ui.label(format_args!("{:.0}%", self.zoom));
 ```
 
 ![Slider](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/slider.png)
@@ -556,11 +555,10 @@ ui.text(format_args!("{:.0}%", self.zoom), t.muted().nowrap());
 SwiftUI: `Slider(value: $level, in: 10...90, step: 10) { … } tick: { v in SliderTick(v) { … } }`
 
 ```rust
-let t = ui.theme();
 let label = |v: f32| [10.0, 50.0, 90.0].contains(&v).then(|| format!("{v}%"));
 let s = Slider::new(&mut self.level, 10.0..=90.0).step(10.0).tick_label(label);
 ui.col(Style::new().w(px(160.0)), |ui| s.show(ui.a11y_label("Level")));
-ui.text(format_args!("{:.0}%", self.level), t.muted().nowrap());
+ui.label(format_args!("{:.0}%", self.level));
 ```
 
 ![Slider steps](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/slider-steps.png)
@@ -663,21 +661,22 @@ ui.a11y_label("Size").picker(&mut self.size, &SIZES);
 SwiftUI: `struct Chips: PickerStyle (SwiftUI's is closed: its styles are the system's)`
 
 ```rust
-/// The options as capsules, the selected one filled with the accent, faint when
-/// disabled.
+/// The options as capsules, the selected one filled with the accent; disabled, grey,
+/// as AppKit's disabled controls lose the accent.
 struct Chips;
 
 impl PickerStyle for Chips {
   fn make_body(&self, ui: &mut Ui, mut c: PickerConfiguration) {
     let t = ui.theme();
     let b = c.segments(ui);
-    let k = if c.is_enabled() { 1.0 } else { 0.4 };
     ui.row(Style::new().gap(4.0), |ui| {
       for i in 0..c.len() {
         let on = c.selection() == Some(i);
-        let (bg, ink) = match on {
-          true => (alpha(t.accent(), k), alpha(t.on_accent(), k)),
-          false => (alpha(t.accent(), 0.12 * k), alpha(t.accent(), k)),
+        let (bg, ink) = match (c.is_enabled(), on) {
+          (true, true) => (t.accent(), t.on_accent()),
+          (true, false) => (alpha(t.accent(), 0.12), t.accent()),
+          (false, true) => (t.raised(), t.tertiary()),
+          (false, false) => ([0.0; 4], t.tertiary()),
         };
 
         let chip =
@@ -1259,9 +1258,7 @@ ui.row(bar.border(1.0, t.line()), |ui| {
           _ = ui.help("Hide Sidebar").icon_button(Icon::SIDEBAR)
         }),
         _ => {
-          ui.toolbar_item(ToolbarItemPlacement::Principal, |ui| {
-            ui.text("Notes", t.label())
-          });
+          ui.toolbar_item(ToolbarItemPlacement::Principal, |ui| ui.label("Notes"));
           ui.toolbar_item(ToolbarItemPlacement::PrimaryAction, |ui| {
             _ = ui.help("New Note").icon_button(Icon::DOC)
           });
@@ -1641,11 +1638,10 @@ ui.el(bar.bg(t.accent()));
 SwiftUI: `.accessibilityLabeledPair(role: .label, id: "volume", in: ns)`
 
 ```rust
-let t = ui.theme();
 let pair = Id::of("volume");
-ui.a11y_labeled_pair(LabeledPairRole::Label, pair, |ui| ui.text("Volume", t.label()));
+ui.a11y_labeled_pair(LabeledPairRole::Label, pair, |ui| ui.label("Volume"));
 ui.a11y_labeled_pair(LabeledPairRole::Content, pair, |ui| {
-  ui.slider(&mut self.level, 0.0..=100.0);
+  ui.col(Style::new().w(px(160.0)), |ui| ui.slider(&mut self.level, 0.0..=100.0));
 });
 ui.badge("New", Tone::Accent);
 ```
