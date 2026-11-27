@@ -13,7 +13,7 @@ frames with the controls), quits the example and prints everything.
 The VM is ~/Code/vm's macOS profile, prepared once with `./vm prepare macos --test-host`
 (`./vm exec macos --gui` runs trusted for Accessibility). Nothing opens on this machine.
 
-uv run scripts/ax-check.py [example...]      default: messenger gallery
+uv run scripts/ax-check.py [example...]      default: messenger gallery (each scenario of theirs)
 """
 
 import subprocess
@@ -27,8 +27,8 @@ VM = Path.home() / "Code/vm/vm"
 OUT = ROOT / "target/ax"
 GUEST = "nimbo"
 
-# The ops after the pid, run in order by ax-dump (see its header); at "shot" (else at the end)
-# the script takes the screenshot.
+# By the example and its arguments: the ops after the pid, run in order by ax-dump (see its
+# header); at "shot" (else at the end) the script takes the screenshot.
 SCENARIOS = {
   "messenger": [
     "dump", "count", "focused",
@@ -43,14 +43,25 @@ SCENARIOS = {
     "shot",
     "press", "AXCloseButton", "sleep", "0.5", "count",
   ],
-  "gallery": [
+  # The gallery's blocks alone (`gallery <slug>`), each enabled then disabled.
+  "gallery switch": [
     "dump", "count",
-    "press", "AXCheckBox:Off", "sleep", "0.5", "count",
-    "press", "AXCheckBox:Live", "sleep", "1", "count",
-    "hit", "AXSlider", "hit", "AXTextField:Search widgets",
-    "inc", "AXSlider", "sleep", "0.5", "count",
-    "focus", "AXTextField:Search widgets", "sleep", "0.5", "count", "focused",
-    "set", "AXTextField:Search widgets", "Sliders", "sleep", "0.5", "count",
+    "press", "AXCheckBox:Live", "sleep", "0.5", "count",
+    "dump",
+  ],
+  "gallery slider": [
+    "hit", "AXSlider", "inc", "AXSlider", "sleep", "0.5", "count",
+    "dump",
+  ],
+  "gallery search-field": [
+    "focus", "AXTextField:Search", "sleep", "0.5", "count", "focused",
+    "set", "AXTextField:Search", "Sliders", "sleep", "0.5", "count",
+    "dump",
+  ],
+  "gallery date-picker": [
+    "dump",
+    "focus", "AXTextField:Start", "sleep", "0.5", "count", "focused",
+    "set", "AXTextField:Start", "1/2/2027", "sleep", "0.5", "count",
     "dump",
   ],
 }
@@ -99,7 +110,10 @@ def shoot(config: Path, example: str) -> None:
 
 
 def main() -> None:
-  examples = sys.argv[1:] or list(SCENARIOS)
+  # An example with no scenario of its own gets a dump.
+  asked = sys.argv[1:] or list(dict.fromkeys(k.split()[0] for k in SCENARIOS))
+  runs = [k for e in asked for k in [k for k in SCENARIOS if k.split()[0] == e] or [e]]
+  examples = list(dict.fromkeys(k.split()[0] for k in runs))
   OUT.mkdir(parents=True, exist_ok=True)
   args = [a for e in examples for a in ("--example", e)]
   subprocess.run(["cargo", "build", "--release", *args], cwd=ROOT, check=True)
@@ -117,17 +131,18 @@ def main() -> None:
   rsync = ["rsync", "-a", "-e", f"ssh -F {config}", "--rsync-path=/usr/bin/rsync"]
   run(*rsync, *bins, f"vm-macos:{GUEST}/")
 
-  for example in examples:
-    print(f"== {example}", flush=True)
+  for key in runs:
+    example, *argv = key.split()
+    print(f"== {key}", flush=True)
     run(*ssh, "pkill", "-x", example, check=False)
-    app = subprocess.Popen(gui(f"{GUEST}/{example}"))
+    app = subprocess.Popen(gui(f"{GUEST}/{example}", *argv))
     try:
       pid = started(ssh, example)
       time.sleep(1.5)
-      ops = SCENARIOS.get(example, ["dump"])
+      ops = SCENARIOS.get(key, ["dump"])
       cut = ops.index("shot") if "shot" in ops else len(ops)
       drive(pid, ops[:cut])
-      shoot(config, example)
+      shoot(config, "-".join(key.split()))
       drive(pid, ops[cut + 1 :])
     finally:
       run(*ssh, "pkill", "-x", example, check=False)
