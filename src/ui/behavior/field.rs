@@ -355,11 +355,12 @@ impl Ui<'_> {
       synced(&mut st, text);
     }
 
-    // Kept while its text is the one shown.
+    // Kept while its text is the one shown: none when the editor changed it (`\r\n` to `\n`).
     let shown = st.ed.text() == text;
+    let runs = if shown { runs } else { &[] };
     if st.runs != runs {
       st.runs.clear();
-      st.runs.extend(runs.iter().filter(|_| shown));
+      st.runs.extend(runs);
     }
 
     self.revealed(&mut st);
@@ -929,7 +930,8 @@ mod tests {
   use super::*;
   use crate::app::App;
   use crate::scene::Size;
-  use crate::ui::{Theme, px};
+  use crate::text::Weight;
+  use crate::ui::{AttributedString, Attributes, Theme, px};
   use crate::{Harness, Modifiers, NamedKey};
 
   const REST: Color = [0.2, 0.2, 0.2, 1.0];
@@ -951,6 +953,34 @@ mod tests {
       ui.with_id(b.id).row(frame, |ui| ui.field_text(&b, "", &style, Style::new()));
       self.seen.push(b);
     }
+  }
+
+  /// Selectable styled text, the app's value.
+  struct Styled(AttributedString);
+
+  impl App for Styled {
+    fn view(&mut self, ui: &mut Ui) {
+      let style = Theme::PLATES_LIGHT.field().text;
+      ui.id("t").selectable_text(&self.0, style);
+    }
+  }
+
+  /// Runs alike in their ends over a text the editor changes (`\r\n` to `\n`) are dropped, not
+  /// laid over the changed text: it draws plain, no slice inside a character.
+  #[test]
+  fn runs_over_a_text_the_editor_changed_are_dropped() {
+    let (bold, plain) = (Attributes::new().weight(Weight::Bold), Attributes::new());
+    let text = |a: &str, b: &str| {
+      let mut s = AttributedString::new();
+      s.push(a, bold).push(b, plain);
+      s
+    };
+    let mut h = Harness::new(Styled(text("abc", "de")), Size::new(200.0, 100.0), 1.0);
+    h.frame();
+    h.app_mut().0 = text("a\r\n", "é");
+    assert_eq!(h.app().0.runs().iter().map(|r| r.end).collect::<Vec<_>>(), [3, 5]);
+    h.frame();
+    assert_eq!(h.editor(Id::of("t")).unwrap().text(), "a\né");
   }
 
   #[test]
