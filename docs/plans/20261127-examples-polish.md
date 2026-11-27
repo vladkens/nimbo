@@ -61,11 +61,11 @@ The owner ran #123's examples in real windows on 2026-11-27 and found them broke
 
 - [x] Opening the archive chat is instant (see the lazy column)
 - [x] The chat scrolls with the mouse wheel and trackpad
-- [ ] The chat list looks like a modern messenger: rounded selection, sane gaps, no focus-dependent selection colour
-- [ ] The sidebar's top (traffic lights, toggle, search) sits right, and the sidebar's width can be dragged
-- [ ] The profile panel: proper layout, gaps and shapes
-- [ ] Bots and people: some contacts are people, some bots; at least one bot posts by itself now and then, so the app is visibly alive
-- [ ] Emoji from the system palette, not a plain menu
+- [x] The chat list looks like a modern messenger: rounded selection, sane gaps, no focus-dependent selection colour: a 44-pt avatar, the name, two lines of the last message, the time and an unread pill in 64-pt rows inset 10, the selection a rounded plate in the accent whichever control has focus (a `ListStyle` of the example's own)
+- [x] The sidebar's top (traffic lights, toggle, search) sits right, and the sidebar's width can be dragged: the search inset as the rows, the sidebar dragged between 220 and 380 (`Split::max`); the traffic lights aren't drawn in the harness, so their row is left for a real window
+- [x] The profile panel: proper layout, gaps and shapes: a centred avatar, name and status, then plates in System Settings' look (about, username, messages; mute; export and clear)
+- [x] Bots and people: some contacts are people, some bots; at least one bot posts by itself now and then, so the app is visibly alive: two people (round avatars, online or last seen) and five bots (square avatars, a `bot` tag); Herald posts every 20 s through the proxy, on the window's clock in the harness
+- [x] Emoji from the system palette, not a plain menu: no button where the OS has none
 
 ## Other
 

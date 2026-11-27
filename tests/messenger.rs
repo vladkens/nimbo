@@ -1,16 +1,18 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Tests of `examples/messenger.rs` through the harness, the bots answering at once on their
-//! thread: Return sends and the bot answers ("typing…" meanwhile), Shift-Return breaks the line
-//! and the composer grows; a chat not open counts its answers unread, a muted one doesn't; the
-//! archive's thousands of messages open at once, build lazily, scroll with the wheel and the
-//! trackpad and stay at the bottom until scrolled up; the search opens a chat at the message
-//! found; a message's menu copies and deletes; emoji, IME, files from the open panel and
-//! dropped on the chat (lit while dragged over) go into the composer; the profile exports the chat
-//! through the save panel and clears it after asking; the window's keys; the sidebar's toggle in
-//! macOS's title bar, its slide and the bar that moves the window; a closed window's chats for the
-//! next. The tray's and the menu bar's menus, the settings window, Russian and what assistive
-//! technology reads.
+//! Tests of `examples/messenger.rs` through the harness, the contacts answering at once on
+//! their thread: Return sends and the bot answers ("typing…" meanwhile), Shift-Return breaks the
+//! line and the composer grows; a chat not open counts its answers unread, a muted one doesn't;
+//! Herald posts by itself on the window's clock, unread until its chat is read; people and bots
+//! marked apart; the archive's thousands of messages open at once, build lazily, scroll with the
+//! wheel and the trackpad and stay at the bottom until scrolled up; the search opens a chat at the
+//! message found; a message's menu copies and deletes; emoji from the system's picker, IME, files
+//! from the open panel and dropped on the chat (lit while dragged over) go into the composer; the
+//! contact's card exports the chat through the save panel and clears it after asking; the
+//! window's keys; the chat list's selection in the accent wherever the focus is; the sidebar's
+//! toggle in macOS's title bar, its slide, its drag between its bounds and the bar that moves the
+//! window; a closed window's chats for the next. The tray's and the menu bar's menus, the settings
+//! window, Russian and what assistive technology reads.
 
 #[path = "../examples/messenger.rs"]
 #[expect(dead_code, reason = "its main and what this file doesn't use")]
@@ -32,7 +34,7 @@ use nimbo::a11y::Role;
 use nimbo::harness::mac_titlebar;
 use nimbo::{
   Appearance, CMD, CTRL, Event, FileDialogKind, Harness, Id, Key, Locale, Modifiers, NamedKey,
-  Phase, Point, Rect, Size, Theme,
+  Phase, Point, Rect, Size, Theme, character_palette,
 };
 
 type H = Harness<Messenger>;
@@ -44,7 +46,8 @@ fn reads(dump: &str, lines: &[&str]) {
   }
 }
 
-/// The messenger with bots that answer at once, under no title bar, in the light appearance.
+/// The messenger with contacts that answer at once, under no title bar, in the light
+/// appearance, Alice's chat open.
 fn messenger() -> H {
   answering_in(Duration::ZERO)
 }
@@ -104,17 +107,29 @@ fn area(h: &H) -> Id {
 #[test]
 fn return_sends_and_the_bot_answers_typing_meanwhile() {
   let mut h = answering_in(Duration::from_millis(200));
-  h.app_mut().open_chat(2);
+  h.app_mut().open_chat(ABACUS_AT);
   h.frame();
   say(&mut h, "12 * 7 + 1");
-  let c = &h.app().chats[2];
+  let c = &h.app().chats[ABACUS_AT];
   assert_eq!((c.draft.as_str(), c.msgs.last().unwrap().text.as_str()), ("", "12 * 7 + 1"));
   assert!(c.msgs.last().unwrap().mine);
   reads(&h.a11y(), &["static text \"typing…\""]);
 
   settle(&mut h);
-  assert_eq!((last(&h, 2).text.as_str(), last(&h, 2).mine), ("= 85", false));
+  assert_eq!((last(&h, ABACUS_AT).text.as_str(), last(&h, ABACUS_AT).mine), ("= 85", false));
   reads(&h.a11y(), &["static text \"bot\""]);
+}
+
+/// A person answers in a few words, "typing…" meanwhile, and shows online.
+#[test]
+fn a_person_answers_too() {
+  let mut h = answering_in(Duration::from_millis(200));
+  reads(&h.a11y(), &["static text \"online\""]);
+  say(&mut h, "Sending it now");
+  reads(&h.a11y(), &["static text \"typing…\""]);
+  settle(&mut h);
+  let m = last(&h, ALICE_AT);
+  assert!(!m.mine && answer(Contact::Person, "Sending it now", 7) == m.text, "{}", m.text);
 }
 
 #[test]
@@ -142,7 +157,7 @@ fn shift_return_breaks_the_line_and_the_composer_grows() {
   h.frame();
   let most = rect(&h, field(0)).h;
   assert!(most < one * 6.0 && most > four, "{most}");
-  assert_eq!(h.app().chats[0].msgs.len(), 4, "nothing sent");
+  assert_eq!(h.app().chats[0].msgs.len(), 6, "nothing sent");
 }
 
 #[test]
@@ -167,23 +182,23 @@ fn an_answer_to_a_chat_not_open_counts_unread_unless_muted() {
   let mut h = messenger();
   // Sent, and another chat opened before the answer comes.
   let ask = |h: &mut H, text: &str| {
-    h.app_mut().open_chat(0);
-    h.app_mut().chats[0].draft = text.into();
+    h.app_mut().open_chat(ECHO_AT);
+    h.app_mut().chats[ECHO_AT].draft = text.into();
     h.app_mut().send();
-    h.app_mut().open_chat(2);
+    h.app_mut().open_chat(ABACUS_AT);
     settle(h);
   };
   ask(&mut h, "olleh");
-  assert_eq!((last(&h, 0).text.as_str(), h.app().chats[0].unread), ("hello", 1));
-  reads(&h.a11y(), &["row \"Echo, hello, 1 unread\""]);
+  assert_eq!((last(&h, ECHO_AT).text.as_str(), h.app().chats[ECHO_AT].unread), ("hello", 1));
+  reads(&h.a11y(), &["row \"Echo, bot, hello, 1 unread\""]);
 
   // Opened, it is read.
-  h.app_mut().open_chat(0);
-  assert_eq!(h.app().chats[0].unread, 0);
+  h.app_mut().open_chat(ECHO_AT);
+  assert_eq!(h.app().chats[ECHO_AT].unread, 0);
 
-  h.app_mut().chats[0].muted = true;
+  h.app_mut().chats[ECHO_AT].muted = true;
   ask(&mut h, "abc");
-  assert_eq!(h.app().chats[0].unread, 0, "muted");
+  assert_eq!(h.app().chats[ECHO_AT].unread, 0, "muted");
 }
 
 #[test]
@@ -198,7 +213,131 @@ fn an_answer_in_the_background_is_unread_until_the_window_comes_back() {
 
   h.event(Event::Focus(true));
   h.frame();
-  assert_eq!((h.app().chats[0].unread, h.app().unread()), (0, 2), "Oracle's two left");
+  let left = h.app().chats[HERALD_AT].unread + h.app().chats[ORACLE_AT].unread;
+  assert_eq!((h.app().chats[0].unread, h.app().unread()), (0, left), "Herald's and Oracle's left");
+}
+
+// MARK: Herald
+
+/// Herald posts its news by itself every [NEWS_EVERY] on the window's clock: unread, counted in
+/// its row and in the app's count, until its chat is open in the focused window; muted, it
+/// counts nothing.
+#[test]
+fn herald_posts_by_itself_and_counts_unread() {
+  let mut h = messenger();
+  let (n, unread) = (h.app().chats[HERALD_AT].msgs.len(), h.app().unread());
+  h.advance(NEWS_EVERY - Duration::from_millis(10));
+  h.frame();
+  assert_eq!(h.app().chats[HERALD_AT].msgs.len(), n, "not yet");
+
+  h.advance(Duration::from_millis(10));
+  h.frame();
+  let c = &h.app().chats[HERALD_AT];
+  assert_eq!((c.msgs.len(), c.unread, h.app().unread()), (n + 1, 2, unread + 1));
+  assert_eq!(last(&h, HERALD_AT).text, NEWS[3]);
+  let row = format!("row \"Herald, bot, {}, 2 unread\"", NEWS[3]);
+  reads(&h.a11y(), &[&row]);
+
+  // Read as it opens, and what comes while it is open is read.
+  h.app_mut().open_chat(HERALD_AT);
+  h.wait(NEWS_EVERY);
+  let c = &h.app().chats[HERALD_AT];
+  assert_eq!((c.msgs.len(), c.unread), (n + 2, 0));
+
+  h.app_mut().open_chat(ALICE_AT);
+  h.app_mut().chats[HERALD_AT].muted = true;
+  h.advance(NEWS_EVERY);
+  h.frame();
+  let c = &h.app().chats[HERALD_AT];
+  assert_eq!((c.msgs.len(), c.unread), (n + 3, 0), "muted");
+}
+
+// MARK: People and bots
+
+/// Item `i`'s row in the chat list.
+fn row(i: usize) -> Id {
+  Id::of(CHATS).key(("row", i as u64))
+}
+
+/// A bot is marked in its row (read as one too) and its card; a person isn't, and shows
+/// whether they are online. A bot's avatar is a rounded square, a person's a circle: the corner
+/// of its box is the bot's colour, the ground's for a person.
+#[test]
+fn people_and_bots_are_marked_apart() {
+  let mut h = messenger();
+  reads(
+    &h.a11y(),
+    &["row \"Echo, bot, reward\"", "row \"Ken Tanaka, Will do after the tests pass.\""],
+  );
+  let img = h.render();
+  let corner = |i: usize| {
+    let r = rect(&h, row(i));
+    img.pixel(r.x + 10.0 + 4.0, r.y + r.h / 2.0 - 22.0 + 4.0)
+  };
+  let tint = |i: usize| px(h.app().chats[i].tint);
+  assert!(diff(corner(ECHO_AT), tint(ECHO_AT)) < 8, "a rounded square: {:?}", corner(ECHO_AT));
+  assert!(diff(corner(KEN_AT), tint(KEN_AT)) > 60, "a circle: {:?}", corner(KEN_AT));
+
+  h.app_mut().profile = true;
+  h.frame();
+  reads(&h.a11y(), &["static text \"online\"", "static text \"@alice\"", "static text \"Bio\""]);
+  h.app_mut().open_chat(KEN_AT);
+  h.frame();
+  reads(&h.a11y(), &["static text \"last seen recently\""]);
+  h.app_mut().open_chat(ECHO_AT);
+  h.frame();
+  reads(&h.a11y(), &["static text \"bot\"", "static text \"Description\""]);
+}
+
+/// The selected chat's row is in the accent wherever the focus is, the list's or the
+/// composer's, as Messages' and Mail's: the colour doesn't flicker as you type.
+#[test]
+fn the_selection_keeps_its_colour_as_the_focus_moves() {
+  let mut h = messenger();
+  let at = |h: &mut H| {
+    let r = rect(h, row(ALICE_AT));
+    h.render().pixel(r.x + r.w / 2.0, r.y + 3.0)
+  };
+  h.click_id(row(ALICE_AT));
+  h.frame();
+  assert_eq!(h.focus_id().map(|f| f == field(ALICE_AT)), Some(false), "the list's");
+  let listed = at(&mut h);
+  assert!(diff(listed, px(Theme::system(Appearance::LIGHT).accent())) < 8, "{listed:?}");
+
+  h.click_id(field(ALICE_AT));
+  h.wait(Duration::from_millis(300));
+  assert_eq!(h.focus_id(), Some(field(ALICE_AT)));
+  assert_eq!(at(&mut h), listed);
+}
+
+/// The sidebar's edge drags it wider and narrower between its bounds, as Messages': the chat
+/// beside it takes the rest.
+#[test]
+fn the_sidebar_drags_between_its_bounds() {
+  let mut h = messenger();
+  let edge = |h: &H| rect(h, Id::of(SPLIT).key("handle"));
+  let side = |h: &H| rect(h, row(ALICE_AT)).w;
+  let drag = |h: &mut H, by: f32| {
+    let (x, y) = mid(edge(h));
+    h.move_to(x, y);
+    h.press(x, y);
+    h.move_to(x + by, y);
+    h.frame();
+    h.release(x + by, y);
+    h.frame();
+  };
+
+  let (x, w) = (mid(edge(&h)).0, side(&h));
+  drag(&mut h, 40.0);
+  assert_eq!((mid(edge(&h)).0, side(&h)), (x + 40.0, w + 40.0), "dragged");
+
+  drag(&mut h, 500.0);
+  let most = mid(edge(&h)).0;
+  assert!((most - SIDE_MAX).abs() <= 4.0, "at its widest: {most}");
+  drag(&mut h, -500.0);
+  let least = mid(edge(&h)).0;
+  assert!((least - SIDE_MIN).abs() <= 4.0, "at its narrowest: {least}");
+  assert!(h.app().side > 0.0 && h.app().side * 900.0 < SIDE_MIN + 4.0, "kept: {}", h.app().side);
 }
 
 // MARK: The lazy column
@@ -206,25 +345,25 @@ fn an_answer_in_the_background_is_unread_until_the_window_comes_back() {
 #[test]
 fn the_archive_builds_lazily_at_its_bottom() {
   let mut h = messenger();
-  h.app_mut().open_chat(3);
+  h.app_mut().open_chat(ARCHIVE_AT);
   h.frame();
   h.frame();
   let bubbles = h.find_all(Role::Group).len();
   assert!(bubbles > 3 && bubbles < 60, "{bubbles} of {ARCHIVE} built");
   let s = h.scroll(area(&h)).unwrap();
   assert!(s.offset.y > 0.0 && s.offset.y >= s.max().y - 1.0, "at the bottom: {s:?}");
-  let id = Id::of(BUBBLE).key(last(&h, 3).id);
+  let id = Id::of(BUBBLE).key(last(&h, ARCHIVE_AT).id);
   let (r, a) = (rect(&h, id), rect(&h, area(&h)));
   assert!(r.y + r.h <= a.y + a.h + 0.5 && r.y >= a.y, "the last message shows");
 }
 
-/// The archive's 3,000 messages open about as fast as a chat of a few, measuring only those it
-/// shows (all of them took over a second here, against 4 ms): relative, as tests in parallel
-/// slow both alike, after a first window loads the fonts, which is slow the first time.
+/// The archive's 3,000 messages open about as fast as a chat of a few (all of them took over a
+/// second, against 4 ms): relative, as tests in parallel slow both alike, the best of three,
+/// after a first window loads the fonts.
 #[test]
 fn the_archive_opens_as_fast_as_a_short_chat() {
   let mut warm = messenger();
-  warm.app_mut().open_chat(3);
+  warm.app_mut().open_chat(ARCHIVE_AT);
   warm.frame();
 
   let mut h = messenger();
@@ -234,7 +373,12 @@ fn the_archive_opens_as_fast_as_a_short_chat() {
     h.frame();
     t.elapsed()
   };
-  let (short, archive) = (open(2), open(3));
+  let (mut short, mut archive) = (Duration::MAX, Duration::MAX);
+  for _ in 0..3 {
+    short = short.min(open(ABACUS_AT));
+    archive = archive.min(open(ARCHIVE_AT));
+  }
+
   assert!(archive < short * 5 + Duration::from_millis(30), "{archive:?} against {short:?}");
   let s = h.scroll(area(&h)).unwrap();
   assert!(s.offset.y >= s.max().y - 1.0, "at the bottom: {s:?}");
@@ -255,9 +399,9 @@ fn wheel(h: &mut H, dy: f32) {
 #[test]
 fn the_wheel_and_the_trackpad_scroll_the_chat_up_from_its_bottom() {
   let mut h = messenger();
-  h.app_mut().open_chat(3);
+  h.app_mut().open_chat(ARCHIVE_AT);
   h.frame();
-  let last = Id::of(BUBBLE).key(last(&h, 3).id);
+  let last = Id::of(BUBBLE).key(last(&h, ARCHIVE_AT).id);
   let y = rect(&h, last).y;
   wheel(&mut h, 40.0);
   assert_eq!(rect(&h, last).y, y + 40.0, "the wheel");
@@ -273,9 +417,9 @@ fn the_wheel_and_the_trackpad_scroll_the_chat_up_from_its_bottom() {
   assert_eq!(rect(&h, last).y, y + 60.0, "the trackpad");
 
   // Scrolled up so little, a message coming leaves what shows where it is.
-  let mut m = h.app().chats[3].msgs[0].clone();
+  let mut m = h.app().chats[ARCHIVE_AT].msgs[0].clone();
   (m.id, m.mine) = (u64::MAX, false);
-  h.app_mut().chats[3].msgs.push(m);
+  h.app_mut().chats[ARCHIVE_AT].msgs.push(m);
   h.redraw();
   h.frame();
   assert_eq!(rect(&h, last).y, y + 60.0, "a message came");
@@ -294,7 +438,7 @@ fn swipe(h: &mut H, dy: f32) {
 #[test]
 fn an_answer_keeps_the_bottom_unless_scrolled_up_and_a_message_sent_brings_it_back() {
   let mut h = answering_in(Duration::from_millis(100));
-  h.app_mut().open_chat(3);
+  h.app_mut().open_chat(ARCHIVE_AT);
   h.frame();
   let bottom = |h: &H| {
     let s = h.scroll(area(h)).unwrap();
@@ -312,7 +456,7 @@ fn an_answer_keeps_the_bottom_unless_scrolled_up_and_a_message_sent_brings_it_ba
   assert!(!bottom(&h));
   settle(&mut h);
   h.frame();
-  assert_eq!(last(&h, 3).text, "Kept. That makes 3004 messages here.");
+  assert_eq!(last(&h, ARCHIVE_AT).text, "Kept. That makes 3004 messages here.");
   assert_eq!(h.scroll(area(&h)).unwrap().offset.y, up, "scrolled up, it stays");
 
   // A message sent brings it back.
@@ -326,12 +470,12 @@ fn an_answer_keeps_the_bottom_unless_scrolled_up_and_a_message_sent_brings_it_ba
 #[test]
 fn the_search_finds_across_chats_and_opens_the_message() {
   let mut h = messenger();
-  h.app_mut().chats[3].msgs[100].text = "a needle in the archive".into();
-  h.app_mut().chats[1].msgs[2].text = "another needle".into();
+  h.app_mut().chats[ARCHIVE_AT].msgs[100].text = "a needle in the archive".into();
+  h.app_mut().chats[ORACLE_AT].msgs[2].text = "another needle".into();
   h.click_id(Id::of(SEARCH));
   h.type_text("NEEDLE");
   h.frame();
-  assert_eq!(h.app().hits(), [(1, 2), (3, 100)]);
+  assert_eq!(h.app().hits(), [(ORACLE_AT, 2), (ARCHIVE_AT, 100)]);
   reads(&h.a11y(), &["list \"Found\""]);
   assert!(h.find(Role::List, "Chats").is_none());
 
@@ -339,8 +483,8 @@ fn the_search_finds_across_chats_and_opens_the_message() {
   h.click_id(row);
   h.frame();
   h.frame();
-  assert_eq!(h.app().open, 3);
-  let id = Id::of(BUBBLE).key(h.app().chats[3].msgs[100].id);
+  assert_eq!(h.app().open, ARCHIVE_AT);
+  let id = Id::of(BUBBLE).key(h.app().chats[ARCHIVE_AT].msgs[100].id);
   let (r, a) = (rect(&h, id), rect(&h, area(&h)));
   assert!(r.y >= a.y - 0.5 && r.y + r.h <= a.y + a.h + 0.5, "{r:?} in {a:?}");
 
@@ -368,7 +512,7 @@ fn a_message_menu_copies_and_deletes() {
   h.frame();
   let c = &h.app().chats[0];
   assert!(c.msgs.iter().all(|k| k.id != m.id));
-  assert_eq!(c.msgs.len(), 3);
+  assert_eq!(c.msgs.len(), 5);
 }
 
 #[test]
@@ -388,21 +532,29 @@ fn an_undo_in_one_chat_never_brings_another_chats_text() {
   assert_eq!(h.app().chats[1].draft, "", "nothing of the first chat's");
 }
 
+/// The emoji button asks for the system's picker for the composer, focused or not, and what is
+/// picked comes into it; where the OS has no picker there is no button. IME's text comes too.
 #[test]
-fn emoji_and_ime_go_into_the_composer() {
+fn emoji_from_the_system_picker_and_ime_go_into_the_composer() {
   let mut h = messenger();
+  if character_palette::available().is_err() {
+    assert!(h.rect(Id::of(EMOJI)).is_none(), "no button without a picker");
+    return;
+  }
+
+  reads(&h.a11y(), &["button \"Emoji\""]);
+  assert!(!h.character_palette(None), "not asked before a click");
   h.click_id(Id::of(EMOJI));
   h.frame();
-  h.click_menu_item("🚀");
+  assert!(h.character_palette(Some("😀")), "asked, with the field to type into");
   h.frame();
-  assert_eq!(h.app().chats[0].draft, "🚀");
+  assert_eq!((h.app().chats[0].draft.as_str(), h.focus_id()), ("😀", Some(field(0))));
 
-  h.click_id(field(0));
   h.ime_mark("ni");
   h.frame();
   h.ime_commit("你");
   h.frame();
-  assert_eq!(h.app().chats[0].draft, "🚀你");
+  assert_eq!(h.app().chats[0].draft, "😀你");
 }
 
 // MARK: Files
@@ -478,16 +630,16 @@ fn the_profile_exports_the_chat_through_the_save_panel() {
   h.frame();
   reads(
     &h.a11y(),
-    &["static text \"Repeats what you say, backwards.\"", "static text \"4 messages\""],
+    &["static text \"Designs the windows you look at.\"", "static text \"Messages\""],
   );
   h.click_id(Id::of(EXPORT));
   let out = std::env::temp_dir().join(format!("nimbo-messenger-{}.txt", std::process::id()));
   let asked = h.file_dialog(Some(&out)).expect("the save panel");
-  assert_eq!((asked.kind(), asked.get_name()), (FileDialogKind::Save, Some("Echo.txt")));
+  assert_eq!((asked.kind(), asked.get_name()), (FileDialogKind::Save, Some("Alice Moreau.txt")));
   let text = std::fs::read_to_string(&out).unwrap();
   _ = std::fs::remove_file(&out);
-  assert_eq!(text.lines().count(), 4);
-  assert!(text.starts_with("[9:00] "), "{text}");
+  assert_eq!(text.lines().count(), 6);
+  assert!(text.starts_with("[9:00] Alice Moreau: "), "{text}");
 }
 
 /// The menu bar's commands reach the window past its dialog: while it asks, they do nothing, so
@@ -507,7 +659,7 @@ fn the_menu_waits_while_the_clear_dialog_asks() {
   h.click_id(clear);
   h.wait(Duration::from_millis(300));
   assert!(h.app().chats[0].msgs.is_empty());
-  assert_eq!(h.app().chats[1].msgs.len(), 6, "the next chat's kept");
+  assert_eq!(h.app().chats[1].msgs.len(), 3, "the next chat's kept");
 }
 
 /// A panel answers for the chat it was asked from, though another opened meanwhile (Wayland's
@@ -545,8 +697,15 @@ fn a_narrow_window_lays_the_profile_over_the_chat() {
   h.frame();
   h.frame();
   let p = rect(&h, Id::of(PANEL));
-  assert!(p.x + p.w <= 560.0 && p.w == 240.0, "{p:?}");
+  assert!(p.x + p.w <= 560.0 && p.w == PANEL_W, "{p:?}");
   assert_eq!(rect(&h, field(0)).w, w);
+
+  // Scrolled down to its buttons, below the window's bottom.
+  let (pos, delta, mods) =
+    (Point::new(mid(p).0, 300.0), Point::new(0.0, -400.0), Modifiers::empty());
+  let (phase, momentum) = (Phase::None, Phase::None);
+  h.event(Event::Scroll { pos, delta, precise: true, phase, momentum, mods });
+  h.wait(Duration::from_millis(300));
   h.click_id(Id::of(EXPORT));
   assert!(h.file_dialog(None).is_some(), "its buttons work over the chat");
 }
@@ -561,7 +720,7 @@ fn clear_history_asks_first() {
   reads(&h.a11y(), &["static text \"Clear the history?\""]);
   key(&mut h, NamedKey::Escape, Modifiers::empty());
   h.wait(Duration::from_millis(300));
-  assert_eq!(h.app().chats[0].msgs.len(), 4, "cancelled");
+  assert_eq!(h.app().chats[0].msgs.len(), 6, "cancelled");
 
   h.click_id(Id::of(CLEAR));
   h.wait(Duration::from_millis(300));
@@ -659,9 +818,10 @@ fn a_closed_window_leaves_everything_to_the_next() {
   h.frame();
   {
     let mut m = m.borrow_mut();
-    m.chats[0].draft = "olleh".into();
+    m.open_chat(ECHO_AT);
+    m.chats[ECHO_AT].draft = "olleh".into();
     m.send();
-    m.chats[1].draft = "a draft".into();
+    m.chats[ORACLE_AT].draft = "a draft".into();
   }
 
   let mut next = Harness::new(Shown::new(m.clone()), Size::new(900.0, 600.0), 1.0);
@@ -677,11 +837,11 @@ fn a_closed_window_leaves_everything_to_the_next() {
   }
 
   next.frame();
-  let s = next.scroll(Id::of(MESSAGES).key(0usize)).unwrap();
+  let s = next.scroll(Id::of(MESSAGES).key(ECHO_AT)).unwrap();
   assert!(s.offset.y >= s.max().y - 1.0, "at the bottom: {s:?}");
   let m = m.borrow();
-  assert_eq!((m.chats[0].msgs.last().unwrap().text.as_str(), m.pending()), ("hello", 0));
-  assert_eq!(m.chats[1].draft, "a draft");
+  assert_eq!((m.chats[ECHO_AT].msgs.last().unwrap().text.as_str(), m.pending()), ("hello", 0));
+  assert_eq!(m.chats[ORACLE_AT].draft, "a draft");
 }
 
 /// With no window open, the app takes an answer in (as the bots' wake has it do): unread.
@@ -692,8 +852,10 @@ fn an_answer_with_no_window_open_is_taken_in_unread() {
   let m = Rc::new(RefCell::new(app));
   let mut h = Harness::new(Shown::new(m.clone()), Size::new(900.0, 600.0), 1.0);
   h.frame();
-  m.borrow_mut().chats[0].draft = "olleh".into();
+  m.borrow_mut().open_chat(ECHO_AT);
+  m.borrow_mut().chats[ECHO_AT].draft = "olleh".into();
   m.borrow_mut().send();
+
   drop(h);
   for _ in 0..500 {
     m.borrow_mut().take_answers(false);
@@ -705,7 +867,8 @@ fn an_answer_with_no_window_open_is_taken_in_unread() {
   }
 
   let m = m.borrow();
-  assert_eq!((m.chats[0].msgs.last().unwrap().text.as_str(), m.chats[0].unread), ("hello", 1));
+  let echo = &m.chats[ECHO_AT];
+  assert_eq!((echo.msgs.last().unwrap().text.as_str(), echo.unread), ("hello", 1));
 }
 
 #[test]
@@ -715,19 +878,21 @@ fn the_seeded_chats_are_the_same_each_run() {
     c.iter().map(|c| c.msgs.iter().map(|m| m.text.len()).sum::<usize>()).sum::<usize>()
   };
   assert_eq!(sum(&a), sum(&b));
-  assert_eq!(a[3].msgs.len(), ARCHIVE);
-  let lens: Vec<usize> = a[3].msgs.iter().map(|m| m.text.len()).collect();
+  assert_eq!(a[ARCHIVE_AT].msgs.len(), ARCHIVE);
+  let lens: Vec<usize> = a[ARCHIVE_AT].msgs.iter().map(|m| m.text.len()).collect();
   assert!(lens.iter().min().unwrap() * 5 < *lens.iter().max().unwrap(), "mixed heights");
 }
 
 #[test]
 fn the_bots_answer_in_their_ways() {
-  assert_eq!(answer(Bot::Echo, "abc", 0), "cba");
-  assert_eq!(answer(Bot::Abacus, "2+3*4", 0), "= 20");
-  assert_eq!(answer(Bot::Abacus, "hi", 0), "Send me a sum, like 2 + 2.");
+  let bot = |b: Bot, text: &str, n: usize| answer(Contact::Bot(b), text, n);
+  assert_eq!(bot(Bot::Echo, "abc", 0), "cba");
+  assert_eq!(bot(Bot::Abacus, "2+3*4", 0), "= 20");
+  assert_eq!(bot(Bot::Abacus, "hi", 0), "Send me a sum, like 2 + 2.");
   assert_eq!(sum("10 / 4 - 1"), Some(1.5));
   assert_eq!(sum("1 +"), None);
-  assert_ne!(answer(Bot::Oracle, "a", 0), answer(Bot::Oracle, "a", 1));
+  assert_ne!(bot(Bot::Oracle, "a", 0), bot(Bot::Oracle, "a", 1));
+  assert_ne!(answer(Contact::Person, "a", 0), answer(Contact::Person, "a", 1));
 }
 
 #[test]
@@ -759,18 +924,18 @@ fn it_reads_to_assistive_technology() {
     &[
       "text field \"Search\" value \"\"",
       "list \"Chats\"",
-      "row \"Echo, reward\" selected",
-      "row \"Oracle, A small binary brings great joy., 2 unread\"",
+      "row \"Alice Moreau, The one with the profile open, if you have it 🙏\" selected",
+      "row \"Oracle, bot, A small binary brings great joy., 2 unread\"",
       "button \"Sidebar\" desc \"Hide Sidebar\"",
       "button \"Profile\"",
       "button \"Attach Files\"",
-      "button \"Emoji\"",
       "text area \"Message\" value \"\"",
       "button \"Send\" disabled",
     ],
   );
   let first = &h.app().chats[0].msgs[3];
-  let name = format!("group \"{}, {}\"", if first.mine { "You" } else { "Echo" }, clock(first.at));
+  let who = if first.mine { "You" } else { "Alice Moreau" };
+  let name = format!("group \"{who}, {}\"", clock(first.at));
   reads(&h.a11y(), &[&name]);
   h.frame();
 }

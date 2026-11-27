@@ -1,13 +1,15 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! A messenger with bots, the window app in breadth: a unified window with a sidebar of chats
-//! and toolbars in the title bar, the sidebar sliding in and out from its toggle; search across
-//! every chat; a lazy column of thousands of messages of mixed heights that stays at the bottom
-//! as new ones come; a composer that grows with its text, sends on Return, takes emoji, IME and
-//! files picked in the open panel or dropped on the chat; a context menu on a message; a
-//! contact's profile beside the chat, which exports the chat through the save panel and clears
-//! it after asking. Bots answer from a thread of their own, the chat showing "typing…" meanwhile;
-//! the data is seeded, the same each run.
+//! A messenger with people and bots, the window app in breadth: a unified window with a sidebar
+//! of chats (each with its avatar, last message, time and unread count, a bot marked so) and
+//! toolbars in the title bar, the sidebar sliding in and out from its toggle and dragged wider
+//! or narrower between its bounds; search across every chat; a lazy column of thousands of
+//! messages of mixed heights that stays at the bottom as new ones come; a composer that grows
+//! with its text, sends on Return, takes emoji from the system's picker, IME and files picked in
+//! the open panel or dropped on the chat; a context menu on a message; a contact's card beside
+//! the chat, which exports the chat through the save panel and clears it after asking. People
+//! and bots answer from a thread of their own, the chat showing "typing…" meanwhile, and Herald
+//! posts the news by itself now and then; the data is seeded, the same each run.
 //!
 //! Around the window: the menu bar's commands and their keys, a tray icon with the unread count
 //! and a menu, a settings window in System Settings' look (open at login, a global shortcut that
@@ -15,7 +17,9 @@
 //! English and Russian (`t!`), and names for every control to assistive technology.
 //!
 //! `cargo run --release --example messenger [-- settings] [--shot <file.png>]`: `settings` shots
-//! the settings window.
+//! the settings window; a shot of the messenger takes `--chat <n>` (the chat open, Alice's by
+//! default), `--profile` (the contact's card beside it), `--draft <text>` (typed in the
+//! composer) and `--search <text>` (in the sidebar's field).
 
 // A Windows app, not a console one: no terminal opens with its window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
@@ -34,12 +38,12 @@ use nimbo::hotkey::{self, Edge, Hotkeys};
 use nimbo::instance::{self, Claim, Instance};
 use nimbo::tray::{Tray, TrayIcon};
 use nimbo::{
-  Align, App, AppInfo, Axes, Axis, Binding, Bitmap, BorderedProminentButtonStyle,
-  BorderlessButtonStyle, ButtonRole, Color, Command, Commands, Config, ContentMode, ControlSize,
-  Cx, Dialog, Event, FileDialog, Float, FormRow, FormStyle, Hotkey, Icon, Id, Item, Key, List,
-  Locale, Localized, Main, Menu, NamedKey, Picker, Point, Proxy, Selection, Shadow, Shortcut,
-  Split, Style, Tag, TextField, TextStyle, ToolbarItemPlacement, Transition, Ui, UnitPoint, Window,
-  alpha, autostart, grow, pct, px, rgb, t, tn,
+  Align, App, AppInfo, Axes, Axis, Binding, Bitmap, Button, ButtonConfiguration, ButtonRole,
+  ButtonStyle, Color, Command, Commands, Config, ContentMode, ControlSize, Cx, Dialog, Event,
+  FileDialog, Float, FormRow, FormStyle, Hotkey, Icon, Id, Item, Key, List, ListConfiguration,
+  ListStyle, Locale, Localized, Main, Menu, NamedKey, Picker, Point, Proxy, Row, Selection, Shadow,
+  Shortcut, Split, Style, Tag, TextField, TextStyle, ToolbarItemPlacement, Transition, Ui,
+  UnitPoint, Weight, Window, alpha, autostart, character_palette, grow, mix, pct, px, rgb, t, tn,
 };
 
 pub const INFO: AppInfo = AppInfo::new("com.example.nimbo-messenger", "Messenger");
@@ -54,8 +58,9 @@ pub const COLUMN: &str = "column";
 pub const DROP: &str = "drop";
 pub const COMPOSER: &str = "composer";
 pub const FIELD: &str = "field";
-/// The profile's width, and the least the chat beside it keeps; narrower, the profile goes over.
-const PANEL_W: f32 = 240.0;
+/// The contact's card's width, and the least the chat beside it keeps; narrower, the card goes
+/// over the chat.
+pub const PANEL_W: f32 = 260.0;
 const CHAT_MIN: f32 = 320.0;
 
 /// Chat `i`'s composer field.
@@ -76,21 +81,37 @@ pub const BUBBLE: &str = "bubble";
 
 /// The sidebar's slide, 150 ms from in to out.
 const SLIDE: Transition = Transition::smooth(1000.0 / 150.0);
-/// The widest a bubble gets, and its padding.
+/// The sidebar's least and most width, as Messages' on macOS 15, and its share at first.
+pub const SIDE_MIN: f32 = 220.0;
+pub const SIDE_MAX: f32 = 380.0;
+const SIDE: f32 = 0.32;
+/// A chat's row in the sidebar: a 44-point avatar beside the name and two lines of the last
+/// message; the rows and the search field inset 10 from the sidebar's edges, as Messages'.
+pub const ROW_H: f32 = 64.0;
+const AVATAR: f32 = 44.0;
+const INSET: f32 = 10.0;
+/// The selected row's corners.
+const ROW_RADIUS: f32 = 10.0;
+/// The widest a bubble gets, its padding and its corners, and the space between bubbles.
 const BUBBLE_W: f32 = 380.0;
-const PAD: f32 = 8.0;
+const PAD: [f32; 2] = [12.0, 7.0];
+const BUBBLE_RADIUS: f32 = 15.0;
+const SPACING: f32 = 6.0;
 /// A file's chip and an image's thumbnail in a bubble.
 const CHIP_H: f32 = 26.0;
 const THUMB: (f32, f32) = (200.0, 130.0);
 /// How many messages the archive chat holds.
 pub const ARCHIVE: usize = 3000;
+/// How often Herald posts the news by itself.
+pub const NEWS_EVERY: Duration = Duration::from_secs(20);
 
-pub const EMOJIS: [&str; 8] = ["👍", "😀", "🎉", "❤️", "🤔", "🙏", "🚀", "☕"];
 pub const PAPERCLIP: Icon =
   Icon::new("M20 11l-8 8a5 5 0 0 1-7-7l8-8a3.5 3.5 0 0 1 5 5l-8 8a2 2 0 0 1-3-3l7-7");
 pub const ARROW_UP: Icon = Icon::new("M12 19V5M6 11l6-6 6 6");
-pub const SMILE: Icon = Icon::new(
-  "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM8.5 14.5a4.5 4.5 0 0 0 7 0M9 9.5h.01M15 9.5h.01",
+/// A bell struck through: a muted chat.
+pub const MUTED: Icon = Icon::new(
+  "M18 16.5H5.5c1.2-1.2 1.8-2.8 1.8-4.5V10a4.7 4.7 0 0 1 7.6-3.7M18 11v1c0 1.7.6 3.3 1.8 4.5M10 \
+   19.5a2.2 2.2 0 0 0 4 0M4 4l16 16",
 );
 /// The tray's icon: a speech bubble.
 pub const BUBBLE_ICON: &str =
@@ -253,6 +274,39 @@ msgstr "Сбросить"
 
 msgid "Chats with bots, made with nimbo."
 msgstr "Чаты с ботами, сделано на nimbo."
+
+msgid "online"
+msgstr "в сети"
+
+msgid "last seen recently"
+msgstr "был(а) недавно"
+
+msgid "Bio"
+msgstr "О себе"
+
+msgid "Description"
+msgstr "Описание"
+
+msgid "Username"
+msgstr "Имя пользователя"
+
+msgid "Messages"
+msgstr "Сообщения"
+
+msgid "Emoji & Symbols"
+msgstr "Эмодзи и символы"
+
+msgid "No messages here yet"
+msgstr "Здесь пока нет сообщений"
+
+msgid "Designs the windows you look at."
+msgstr "Рисует окна, на которые вы смотрите."
+
+msgid "Ports it all to Windows, one key at a time."
+msgstr "Переносит всё на Windows, клавишу за клавишей."
+
+msgid "Posts the build's news now and then."
+msgstr "Время от времени пишет новости сборки."
 "#;
 
 // MARK: Data
@@ -302,6 +356,15 @@ pub enum Bot {
   Oracle,
   Abacus,
   Archive,
+  /// Posts the news by itself ([Messenger::post_news]).
+  Herald,
+}
+
+/// Who a chat is with: a person, who answers in a few words, or a bot, in its own way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Contact {
+  Person,
+  Bot(Bot),
 }
 
 /// What you said to Echo before.
@@ -317,13 +380,56 @@ const FORTUNES: [&str; 6] = [
   "A small binary brings great joy.",
 ];
 
-/// A bot's answer to `text`, the `n`th it gives.
-pub fn answer(bot: Bot, text: &str, n: usize) -> String {
+/// What a person says back.
+const REPLIES: [&str; 6] = [
+  "Sounds good!",
+  "Ha, nice 😄",
+  "Let me check and get back to you.",
+  "👍",
+  "On it.",
+  "Can we talk after lunch?",
+];
+
+/// Herald's news, in turn.
+pub const NEWS: [&str; 6] = [
+  "Build 1.4.2 passed on macOS, Windows and Linux.",
+  "Scrolling the archive now takes 0.2 ms a frame.",
+  "New in the gallery: a date picker in segments.",
+  "Cold start is down to 38 ms on an M1.",
+  "The emoji button opens the system's picker now.",
+  "Dark mode follows the system's accent colour.",
+];
+
+/// What you and Alice said, and you and Ken: (yours, the text).
+const ALICE: [(bool, &str); 6] = [
+  (false, "Morning! Did the new build land?"),
+  (true, "It did, and it's 2 MB smaller."),
+  (false, "Nice. The sidebar feels snappier too."),
+  (true, "Lazy column: thousands of rows, no wait."),
+  (false, "Can you send me the shot of the dark mode?"),
+  (false, "The one with the profile open, if you have it 🙏"),
+];
+
+const KEN: [(bool, &str); 4] = [
+  (true, "How's the Windows port going?"),
+  (false, "The emoji panel opens now. Win+. was the trick."),
+  (true, "Great, ship it."),
+  (false, "Will do after the tests pass."),
+];
+
+/// A contact's answer to `text`, the `n`th it gives.
+pub fn answer(who: Contact, text: &str, n: usize) -> String {
+  let bot = match who {
+    Contact::Person => return REPLIES[(text.len() + n) % REPLIES.len()].into(),
+    Contact::Bot(bot) => bot,
+  };
+
   match bot {
     Bot::Echo => text.chars().rev().collect(),
     Bot::Oracle => FORTUNES[(text.len() + n) % FORTUNES.len()].into(),
     Bot::Abacus => sum(text).map_or("Send me a sum, like 2 + 2.".into(), |v| format!("= {v}")),
     Bot::Archive => format!("Kept. That makes {} messages here.", n + 1),
+    Bot::Herald => "I post the news by myself: stay tuned.".into(),
   }
 }
 
@@ -381,8 +487,11 @@ pub struct Msg {
 
 pub struct Chat {
   pub name: &'static str,
+  pub handle: &'static str,
   pub about: Localized,
-  pub bot: Bot,
+  pub contact: Contact,
+  /// A person seen online now; a bot always answers.
+  pub online: bool,
   pub tint: Color,
   pub msgs: Vec<Msg>,
   pub unread: usize,
@@ -396,12 +505,20 @@ pub struct Chat {
 }
 
 impl Chat {
-  fn new(name: &'static str, about: Localized, bot: Bot, tint: Color) -> Self {
+  fn new(
+    name: &'static str,
+    handle: &'static str,
+    about: Localized,
+    contact: Contact,
+    tint: Color,
+  ) -> Self {
     let (msgs, draft, files) = (Vec::new(), String::new(), Vec::new());
     Self {
       name,
+      handle,
       about,
-      bot,
+      contact,
+      online: false,
       tint,
       msgs,
       unread: 0,
@@ -413,22 +530,36 @@ impl Chat {
     }
   }
 
+  pub fn is_bot(&self) -> bool {
+    matches!(self.contact, Contact::Bot(_))
+  }
+
   fn push(&mut self, next: &mut u64, mine: bool, text: String, files: Vec<Attachment>) {
     let at = self.msgs.last().map_or(0, |m| m.at + 1);
     *next += 1;
     self.msgs.push(Msg { id: *next, mine, text, files, at });
   }
 
-  /// The last message's text in a line, for the sidebar.
+  /// The last message's text, its lines joined, for the sidebar: "You: " before yours.
   fn snippet(&self) -> String {
     let m = self.msgs.last();
     let text = m.map_or(String::new(), |m| match m.text.is_empty() {
       true => m.files.first().map_or(String::new(), Attachment::name),
-      false => m.text.lines().next().unwrap_or("").to_owned(),
+      false => m.text.split_whitespace().collect::<Vec<_>>().join(" "),
     });
     match m.is_some_and(|m| m.mine) {
       true => format!("{}: {text}", t!("You")),
       false => text,
+    }
+  }
+
+  /// Under the name: "typing…", "bot", "online" or "last seen recently".
+  fn status(&self) -> Localized {
+    match (self.pending > 0, self.is_bot(), self.online) {
+      (true, ..) => t!("typing…"),
+      (_, true, _) => t!("bot"),
+      (_, _, true) => t!("online"),
+      _ => t!("last seen recently"),
     }
   }
 }
@@ -439,49 +570,115 @@ pub fn clock(at: u32) -> String {
   format!("{}:{:02}", m / 60 % 24, m % 60)
 }
 
-/// The seeded chats: a few short ones and the archive's thousands.
+/// The seeded chats, people and bots: a few short ones and the archive's thousands.
 pub fn chats() -> (Vec<Chat>, u64) {
   let mut next = 0;
   let mut seed = Seed(0x9e37_79b9_7f4a_7c15);
-  let mut list = vec![
-    Chat::new("Echo", t!("Repeats what you say, backwards."), Bot::Echo, rgb(0x3b82f6)),
-    Chat::new("Oracle", t!("Tells your fortune, one line at a time."), Bot::Oracle, rgb(0xa855f7)),
-    Chat::new("Abacus", t!("Adds, subtracts, multiplies and divides."), Bot::Abacus, rgb(0x30a46c)),
-    Chat::new(
+  let bot =
+    |name, handle, about, bot, tint| Chat::new(name, handle, about, Contact::Bot(bot), tint);
+  let mut bots = [
+    bot("Echo", "@echo_bot", t!("Repeats what you say, backwards."), Bot::Echo, rgb(0x3b82f6)),
+    bot(
+      "Oracle",
+      "@oracle_bot",
+      t!("Tells your fortune, one line at a time."),
+      Bot::Oracle,
+      rgb(0xa855f7),
+    ),
+    bot(
+      "Abacus",
+      "@abacus_bot",
+      t!("Adds, subtracts, multiplies and divides."),
+      Bot::Abacus,
+      rgb(0x30a46c),
+    ),
+    bot(
       "Archive",
+      "@archive_bot",
       t!("Keeps everything, thousands of messages."),
       Bot::Archive,
       rgb(0xf5a524),
     ),
   ];
-  for (i, c) in list.iter_mut().enumerate() {
-    let n = if c.bot == Bot::Archive { ARCHIVE } else { 4 + 2 * i };
+  for (i, c) in bots.iter_mut().enumerate() {
+    let Contact::Bot(bot) = c.contact else { continue };
+    let n = if bot == Bot::Archive { ARCHIVE } else { 4 + 2 * i };
     // You ask, the bot answers you; the archive keeps both.
     for k in 0..n {
-      let mine = if c.bot == Bot::Archive { seed.below(3) == 0 } else { k % 2 == 0 };
-      let text = match (c.bot, mine) {
+      let mine = if bot == Bot::Archive { seed.below(3) == 0 } else { k % 2 == 0 };
+      let text = match (bot, mine) {
         (Bot::Archive, _) => prose(&mut seed),
         (Bot::Abacus, true) => {
           format!("{} * {} + {}", 2 + seed.below(20), seed.below(10), seed.below(100))
         }
         (Bot::Echo, true) => ECHOES[seed.below(ECHOES.len())].into(),
         (_, true) => prose(&mut seed),
-        (bot, false) => answer(bot, &c.msgs.last().map_or(String::new(), |m| m.text.clone()), k),
+        (_, false) => {
+          answer(c.contact, &c.msgs.last().map_or(String::new(), |m| m.text.clone()), k)
+        }
       };
 
       c.push(&mut next, mine, text, Vec::new());
     }
   }
 
-  list[1].unread = 2;
-  (list, next)
+  let person = |name, handle, about, tint, said: &[(bool, &str)], next: &mut u64| {
+    let mut c = Chat::new(name, handle, about, Contact::Person, tint);
+    for &(mine, text) in said {
+      c.push(next, mine, text.into(), Vec::new());
+    }
+
+    c
+  };
+  let mut alice = person(
+    "Alice Moreau",
+    "@alice",
+    t!("Designs the windows you look at."),
+    rgb(0xec4899),
+    &ALICE,
+    &mut next,
+  );
+  alice.online = true;
+  let mut ken = person(
+    "Ken Tanaka",
+    "@ken",
+    t!("Ports it all to Windows, one key at a time."),
+    rgb(0x0ea5e9),
+    &KEN,
+    &mut next,
+  );
+  ken.muted = true;
+
+  let mut herald = bot(
+    "Herald",
+    "@herald_bot",
+    t!("Posts the build's news now and then."),
+    Bot::Herald,
+    rgb(0xef4444),
+  );
+  for news in &NEWS[..3] {
+    herald.push(&mut next, false, (*news).into(), Vec::new());
+  }
+
+  let [echo, mut oracle, abacus, archive] = bots;
+  (herald.unread, oracle.unread) = (1, 2);
+  (vec![alice, herald, echo, oracle, abacus, ken, archive], next)
 }
+
+/// Where each contact is in the seeded chats.
+pub const ALICE_AT: usize = 0;
+pub const HERALD_AT: usize = 1;
+pub const ECHO_AT: usize = 2;
+pub const ORACLE_AT: usize = 3;
+pub const ABACUS_AT: usize = 4;
+pub const KEN_AT: usize = 5;
+pub const ARCHIVE_AT: usize = 6;
 
 // MARK: Bots
 
 struct Ask {
   chat: usize,
-  bot: Bot,
+  who: Contact,
   text: String,
   n: usize,
 }
@@ -491,7 +688,7 @@ pub struct Reply {
   pub text: String,
 }
 
-/// The bots' thread: it answers each question after `delay`, in order, and wakes the window.
+/// The contacts' thread: it answers each question after `delay`, in order, and wakes the window.
 struct Bots {
   asks: Sender<Ask>,
   replies: Receiver<Reply>,
@@ -505,7 +702,7 @@ impl Bots {
     let run = move || {
       for a in questions {
         std::thread::sleep(delay);
-        let text = answer(a.bot, &a.text, a.n);
+        let text = answer(a.who, &a.text, a.n);
         if answers.send(Reply { chat: a.chat, text }).is_err() {
           break;
         }
@@ -554,15 +751,21 @@ pub struct Messenger {
   pub query: String,
   pub hit: Selection,
   pub sidebar: bool,
+  /// The sidebar's share of the window, dragged between [SIDE_MIN] and [SIDE_MAX] wide.
   pub side: f32,
   pub profile: bool,
   /// Files dragged over the chat.
   pub dragging: bool,
   pub confirm: bool,
-  /// How long a bot takes to answer.
+  /// How long a contact takes to answer.
   pub delay: Duration,
-  /// The window's proxy to the main thread: the tray's count follows the unread.
+  /// The window's proxy to the main thread: the tray's count follows the unread, and Herald
+  /// posts on the app's loop ([news]); without one (the harness), on the window's clock.
   pub proxy: Option<Proxy>,
+  /// The news Herald posted since the app started.
+  pub news: usize,
+  /// When Herald posts next on the window's clock.
+  due: Option<Duration>,
   next: u64,
   bots: Option<Bots>,
   asked: Option<Asked>,
@@ -588,12 +791,14 @@ impl Default for Messenger {
       query: String::new(),
       hit: Selection::default(),
       sidebar: true,
-      side: 0.32,
+      side: SIDE,
       profile: false,
       dragging: false,
       confirm: false,
       delay: Duration::from_millis(900),
       proxy: None,
+      news: 0,
+      due: None,
       next,
       bots: None,
       asked: None,
@@ -666,7 +871,7 @@ impl Messenger {
     }
   }
 
-  /// Sends the composer's text and files, and asks the bot.
+  /// Sends the composer's text and files, and asks the contact.
   pub fn send(&mut self) {
     let c = &mut self.chats[self.open];
     let text = c.draft.trim().to_owned();
@@ -680,7 +885,7 @@ impl Messenger {
     c.pending += 1;
     let n = c.msgs.len();
     if let Some(b) = &self.bots {
-      _ = b.asks.send(Ask { chat: self.open, bot: c.bot, text, n });
+      _ = b.asks.send(Ask { chat: self.open, who: c.contact, text, n });
     }
   }
 
@@ -713,9 +918,9 @@ impl Messenger {
     all.take(200).collect()
   }
 
-  /// Starts the bots with the first build. In the app an answer goes to the main loop
-  /// ([answered]), drawn or not; with no app around it (the harness) it wakes this window, whose
-  /// build takes it in. Either way a focused window reads the open chat.
+  /// Starts the contacts with the first build. In the app an answer goes to the main loop
+  /// ([answered]), drawn or not; in the harness it wakes this window, whose build takes it in,
+  /// and Herald posts on the window's clock. A focused window reads the open chat.
   fn receive(&mut self, ui: &mut Ui) {
     if self.bots.is_none() {
       let waker = ui.waker().clone();
@@ -725,21 +930,30 @@ impl Messenger {
       });
     }
 
-    self.take_answers(ui.window_focused());
+    let shown = ui.window_focused();
+    if self.proxy.is_none() {
+      let now = ui.now();
+      let due = *self.due.get_or_insert(now + NEWS_EVERY);
+      if now >= due {
+        self.post_news(shown);
+        self.due = Some(now + NEWS_EVERY);
+      }
+
+      ui.request_frame_in(self.due.map_or(NEWS_EVERY, |d| d - now));
+    }
+
+    self.take_answers(shown);
   }
 
-  /// Takes the bots' answers in (`shown`: the window has focus, so the open chat is read): a
-  /// chat not shown counts them unread unless muted.
+  /// Takes the contacts' answers in (`shown`: the window has focus, so the open chat is read):
+  /// a chat not shown counts them unread unless muted.
   pub fn take_answers(&mut self, shown: bool) {
     let replies: Vec<Reply> =
       self.bots.as_ref().map_or(Vec::new(), |b| b.replies.try_iter().collect());
     for r in replies {
       let c = &mut self.chats[r.chat];
       c.pending = c.pending.saturating_sub(1);
-      c.push(&mut self.next, false, r.text, Vec::new());
-      if r.chat != self.open || !shown {
-        c.unread += !c.muted as usize;
-      }
+      self.came(r.chat, r.text, shown);
     }
 
     // What the focused window shows is read, also what came while it was in the background.
@@ -747,7 +961,28 @@ impl Messenger {
       self.chats[self.open].unread = 0;
     }
 
-    // The tray's count, when it changed.
+    self.tell();
+  }
+
+  /// Herald posts its next news, unasked (`shown`: the window has focus).
+  pub fn post_news(&mut self, shown: bool) {
+    let text = NEWS[(3 + self.news) % NEWS.len()];
+    self.news += 1;
+    self.came(HERALD_AT, text.into(), shown);
+    self.tell();
+  }
+
+  /// A message came to chat `i`: unread unless the focused window shows it, or it is muted.
+  fn came(&mut self, i: usize, text: String, shown: bool) {
+    let c = &mut self.chats[i];
+    c.push(&mut self.next, false, text, Vec::new());
+    if i != self.open || !shown {
+      c.unread += !c.muted as usize;
+    }
+  }
+
+  /// The tray's count, when it changed.
+  fn tell(&mut self) {
     let unread = self.unread();
     if unread != self.told {
       self.told = unread;
@@ -760,12 +995,65 @@ impl Messenger {
 
 // MARK: Sidebar
 
-/// A round avatar with the name's first letter.
-fn avatar(ui: &mut Ui, name: &str, tint: Color, d: f32) {
-  let s = Style::new().w(px(d)).h(px(d)).radius(d / 2.0).bg(tint).center();
-  let letter = name.chars().next().unwrap_or('?').to_string();
+/// A contact's picture: a person's initials in a circle, a bot's first letter in a rounded
+/// square, as an app's icon.
+fn avatar(ui: &mut Ui, name: &str, tint: Color, bot: bool, d: f32) {
+  let radius = if bot { (d * 0.28).round() } else { d / 2.0 };
+  let s = Style::new().w(px(d)).h(px(d)).radius(radius).bg(tint).center();
+  let letters = name.split_whitespace().filter_map(|w| w.chars().next());
+  let letters: String = letters.take(if bot { 1 } else { 2 }).collect();
   let t = ui.theme();
-  ui.row(s, |ui| ui.text(&letter, TextStyle::new(t.bold().size(d * 0.42), [1.0; 4])));
+  let size = if bot { d * 0.46 } else { d * 0.38 };
+  ui.row(s, |ui| ui.text(&letters, TextStyle::new(t.bold().size(size), [1.0; 4]).nowrap()));
+}
+
+/// "bot" in a small tag after a bot's name, in `ink` on a tint of it.
+fn bot_tag(ui: &mut Ui, ink: Color) {
+  let t = ui.theme();
+  let font = t.small().size(10.0).weight(Weight::Semibold);
+  let tag = Style::new().h(px(15.0)).pad_xy(4.0, 0.0).radius(4.0).center().bg(alpha(ink, 0.16));
+  ui.row(tag, |ui| ui.text(t!("bot"), TextStyle::new(font, ink).nowrap()));
+}
+
+/// The unread count in a pill: the accent's, grey for a muted chat; inverted on the selection.
+fn count(ui: &mut Ui, n: usize, muted: bool, selected: bool) {
+  let (t, ct) = (ui.theme(), ui.controls_theme());
+  let (bg, ink) = match (selected, muted) {
+    (true, _) => (ct.on_accent(), ct.accent()),
+    (false, true) => (t.tertiary(), [1.0; 4]),
+    (false, false) => (t.accent(), [1.0; 4]),
+  };
+
+  let font = t.small().weight(Weight::Semibold);
+  let pill = Style::new().h(px(20.0)).min_w(20.0).pad_xy(6.0, 0.0).radius(10.0).center().bg(bg);
+  ui.row(pill, |ui| ui.text(n.to_string(), TextStyle::new(font, ink).nowrap()));
+}
+
+/// The chat list's look: rows on the sidebar's ground, the selected one in the accent in
+/// rounded corners wherever the focus is (grey only while the window is in the background, as
+/// macOS's selections are), a light fill fading in under the pointer.
+struct ChatRows;
+
+impl ListStyle for ChatRows {
+  fn make_body<'a>(&self, ui: &mut Ui<'a>, mut c: ListConfiguration<'_, 'a>) {
+    let (t, accent) = (ui.theme(), ui.controls_theme().accent());
+    ui.scroll_area(c.frame(), |ui| {
+      c.rows(ui, |ui, mut r| {
+        let hot = ui.hot(r.id(), r.is_hovered() && !r.is_selected());
+        let bg = if r.is_selected() { accent } else { alpha(t.text(), 0.05 * hot) };
+        ui.row(r.frame().radius(ROW_RADIUS).bg(bg), |ui| r.content(ui));
+      })
+    });
+  }
+}
+
+/// The text colours of a row: its own and the secondary, white on the selection.
+fn inks(ui: &Ui, row: Row) -> (Color, Color) {
+  let (t, ct) = (ui.theme(), ui.controls_theme());
+  match row.selected {
+    true => (ct.on_accent(), alpha(ct.on_accent(), 0.8)),
+    false => (t.text(), t.secondary()),
+  }
 }
 
 impl Messenger {
@@ -787,7 +1075,7 @@ impl Messenger {
     ui.col(Style::new().grow().bg(t.panel()), |ui| {
       self.toggle(ui);
       ui.el(Style::new().h(px(bar)));
-      ui.col(Style::new().w(grow()).pads([0.0, 10.0, 8.0, 10.0]), |ui| {
+      ui.col(Style::new().w(grow()).pads([0.0, INSET, 8.0, INSET]), |ui| {
         // System Settings' sidebar field, the large one.
         ui.control_size(ControlSize::Large).id(SEARCH).search_field(&mut self.query, &t!("Search"))
       });
@@ -801,12 +1089,23 @@ impl Messenger {
   fn chat_list(&mut self, ui: &mut Ui) {
     let t = ui.theme();
     let chats = &self.chats;
-    let list = List::new(chats.len(), 56.0).selection(&mut self.sel);
-    let r = list.show(ui.a11y_label(&t!("Chats")).id(CHATS), |ui, row| {
+    let list = List::new(chats.len(), ROW_H).selection(&mut self.sel);
+
+    let frame = Style::new().grow().pads([0.0, INSET, 8.0, INSET]);
+    let row = Style::new().w(grow()).pad_xy(10.0, 0.0).gap(10.0).align(Align::Start, Align::Center);
+    let ui = ui.list_style(&ChatRows).a11y_label(&t!("Chats")).id(CHATS);
+    let r = list.style(frame).row_style(row).show(ui, |ui, row| {
       let c = &chats[row.index];
-      // Read as "Oracle, A frame you never…, 2 unread", not letter by letter.
-      let what = if c.pending > 0 { t!("typing…").as_str().to_owned() } else { c.snippet() };
-      let mut name = format!("{}, {what}", c.name);
+      let typing = c.pending > 0;
+      let what = if typing { t!("typing…").as_str().to_owned() } else { c.snippet() };
+
+      // Read as "Oracle, bot, A frame you never…, 2 unread", not letter by letter.
+      let mut name = c.name.to_owned();
+      if c.is_bot() {
+        name += &format!(", {}", t!("bot"));
+      }
+
+      name += &format!(", {what}");
       if c.unread > 0 {
         name += &format!(", {}", tn!("{n} unread", "{n} unread", c.unread));
       }
@@ -815,28 +1114,35 @@ impl Messenger {
         a.name(&name);
       }
 
-      ui.row(Style::new().w(grow()).gap(10.0).align(Align::Start, Align::Center), |ui| {
-        avatar(ui, c.name, c.tint, 36.0);
-        ui.col(Style::new().w(grow()).gap(2.0), |ui| {
-          ui.row(Style::new().w(grow()), |ui| {
-            ui.text(c.name, TextStyle::new(t.bold(), t.text()).line_limit(1));
-            ui.spacer();
-            ui.text(c.msgs.last().map_or(String::new(), |m| clock(m.at)), t.muted().nowrap());
+      let (ink, dim) = inks(ui, row);
+      avatar(ui, c.name, c.tint, c.is_bot(), AVATAR);
+      // As high as the name and two lines whatever the message's are: the names line up.
+      let line = ui.line_height(t.body());
+      ui.col(Style::new().w(grow()).h(px(3.0 * line + 2.0)).gap(2.0), |ui| {
+        ui.row(Style::new().w(grow()).gap(5.0).align(Align::Start, Align::Center), |ui| {
+          ui.row(Style::new().clip(), |ui| {
+            ui.text(c.name, TextStyle::new(t.bold(), ink).line_limit(1))
           });
-          ui.row(Style::new().w(grow()).gap(6.0), |ui| {
-            if c.pending > 0 {
-              ui.text(t!("typing…"), TextStyle::new(t.font(), t.accent()).line_limit(1));
-            } else {
-              ui.row(Style::new().w(grow()).clip(), |ui| {
-                ui.text(c.snippet(), t.muted().line_limit(1))
-              });
-            }
+          if c.is_bot() {
+            bot_tag(ui, dim);
+          }
 
-            if c.unread > 0 {
-              ui.spacer();
-              ui.badge(c.unread, nimbo::Tone::Accent);
-            }
+          if c.muted {
+            ui.icon(MUTED, 13.0, dim);
+          }
+
+          ui.spacer();
+          let at = c.msgs.last().map_or(String::new(), |m| clock(m.at));
+          ui.text(at, TextStyle::new(t.font().size(12.0), dim).nowrap());
+        });
+        ui.row(Style::new().w(grow()).gap(8.0).align(Align::Start, Align::Start), |ui| {
+          let ink = if typing && !row.selected { t.accent() } else { dim };
+          ui.row(Style::new().w(grow()).clip(), |ui| {
+            ui.text(&what, TextStyle::new(t.font(), ink).line_limit(2))
           });
+          if c.unread > 0 {
+            count(ui, c.unread, c.muted, row.selected);
+          }
         });
       });
     });
@@ -851,21 +1157,30 @@ impl Messenger {
     let t = ui.theme();
     let hits = self.hits();
     if hits.is_empty() {
-      ui.col(Style::new().grow().pad(16.0), |ui| ui.text(t!("No messages found"), t.muted()));
+      let empty = Style::new().w(grow()).pads([16.0, INSET + 10.0, 0.0, INSET + 10.0]);
+      ui.col(empty, |ui| ui.text(t!("No messages found"), t.muted()));
       return;
     }
 
     let chats = &self.chats;
-    let list = List::new(hits.len(), 48.0).selection(&mut self.hit);
-    let r = list.show(ui.a11y_label(&t!("Found")).id(HITS), |ui, row| {
+    let list = List::new(hits.len(), 52.0).selection(&mut self.hit);
+
+    let frame = Style::new().grow().pads([0.0, INSET, 8.0, INSET]);
+    let row = Style::new().w(grow()).pad_xy(10.0, 0.0).align(Align::Start, Align::Center);
+    let ui = ui.list_style(&ChatRows).a11y_label(&t!("Found")).id(HITS);
+    let r = list.style(frame).row_style(row).show(ui, |ui, row| {
       let (c, i) = hits[row.index];
+      let (ink, dim) = inks(ui, row);
+
       ui.col(Style::new().w(grow()).gap(2.0), |ui| {
-        ui.text(
-          format_args!("{} · {}", chats[c].name, clock(chats[c].msgs[i].at)),
-          t.muted().nowrap(),
-        );
+        ui.row(Style::new().w(grow()).gap(8.0), |ui| {
+          ui.row(Style::new().w(grow()).clip(), |ui| {
+            ui.text(chats[c].name, TextStyle::new(t.bold(), ink).line_limit(1))
+          });
+          ui.text(clock(chats[c].msgs[i].at), TextStyle::new(t.font().size(12.0), dim).nowrap());
+        });
         ui.row(Style::new().w(grow()).clip(), |ui| {
-          ui.text(&chats[c].msgs[i].text, t.label().line_limit(1))
+          ui.text(&chats[c].msgs[i].text, TextStyle::new(t.font(), dim).line_limit(1))
         });
       });
     });
@@ -880,6 +1195,50 @@ impl Messenger {
 }
 
 // MARK: Chat
+
+/// The send button: a circle of the accent with a white arrow, as Messages' is; grey with
+/// nothing to send.
+struct Round;
+
+impl ButtonStyle for Round {
+  fn make_body(&self, ui: &mut Ui<'_>, mut c: ButtonConfiguration<'_>) {
+    let t = ui.theme();
+    let hot = ui.hot(c.id(), c.is_hovered());
+    let bg = match (c.is_enabled(), c.is_pressed()) {
+      (false, _) => t.raised(),
+      (true, true) => mix(t.accent(), [0.0, 0.0, 0.0, 1.0], 0.2),
+      (true, false) => mix(t.accent(), t.accent_hover(), hot),
+    };
+
+    let ink = if c.is_enabled() { [1.0; 4] } else { t.tertiary() };
+    let d = t.sizes().control_h() + 4.0;
+    let s = Style::new().w(px(d)).h(px(d)).radius(d / 2.0).center().bg(bg);
+    ui.row(s, |ui| c.label(ui, TextStyle::new(t.bold().size(13.0), ink)));
+  }
+}
+
+/// A row of a plate that acts, as a grouped form's buttons are: its label at the leading edge in
+/// the accent, red for a destructive one, a fill fading in under the pointer.
+struct PlateButton;
+
+impl ButtonStyle for PlateButton {
+  fn make_body(&self, ui: &mut Ui<'_>, mut c: ButtonConfiguration<'_>) {
+    let (t, fs) = (ui.theme(), FormStyle::plates(&ui.theme()));
+    let hot = ui.hot(c.id(), c.is_hovered());
+    let k = if c.is_pressed() { 0.1 } else { 0.05 * hot };
+    let ink = if c.role() == Some(ButtonRole::Destructive) { t.danger() } else { t.accent() };
+    let s = fs.row().align(Align::Start, Align::Center).bg(alpha(t.text(), k));
+    let s = if c.is_enabled() { s } else { s.opacity(t.disabled()) };
+    ui.row(s, |ui| c.label(ui, fs.label().color(ink).line_limit(1)));
+  }
+}
+
+/// A hairline between two rows of a plate, inset as a grouped form's.
+fn hairline(ui: &mut Ui, fs: &FormStyle) {
+  let [l, r] = fs.inset();
+  let line = Style::new().w(grow()).h(px(fs.hairline())).pads([0.0, r, 0.0, l]);
+  ui.row(line, |ui| ui.el(Style::new().grow().bg(fs.divider())));
+}
 
 impl Messenger {
   /// The open chat's messages, lazily, opening at the bottom and kept there as new ones come
@@ -902,10 +1261,16 @@ impl Messenger {
 
     let mut act = None;
     let msgs = &c.msgs;
-    let scroll = Style::new().grow().pad_xy(16.0, 8.0).scroll(Axes::VERTICAL);
+    let scroll = Style::new().grow().pad_xy(16.0, 12.0).scroll(Axes::VERTICAL);
+    if msgs.is_empty() {
+      let empty = Style::new().grow().center();
+      ui.with_id(area).col(empty, |ui| ui.text(t!("No messages here yet"), t.muted()));
+      return;
+    }
+
     ui.with_id(area).default_scroll_anchor(UnitPoint::BOTTOM).scroll_area(scroll, |ui| {
       ui.with_id(column).lazy_col(
-        Style::new().w(grow()),
+        Style::new().w(grow()).gap(SPACING),
         msgs.len(),
         |i| msgs[i].id,
         |ui, i| {
@@ -913,21 +1278,18 @@ impl Messenger {
           let id = Id::of(BUBBLE).key(m.id);
           let side = if m.mine { Align::End } else { Align::Start };
           let (bg, ink) = if m.mine { (t.accent(), [1.0; 4]) } else { (t.raised(), t.text()) };
-
-          // 6 points under each message.
-          let row = Style::new().w(grow()).pads([0.0, 0.0, 6.0, 0.0]);
-          ui.row(row.align(side, Align::Start), |ui| {
-            let bubble = Style::new().max_w(max).pad(PAD).gap(4.0).radius(12.0).bg(bg);
+          ui.row(Style::new().w(grow()).align(side, Align::Start), |ui| {
+            let bubble = Style::new().max_w(max).pad_xy(PAD[0], PAD[1]).gap(6.0);
             let who = if m.mine { t!("You").to_string() } else { c.name.to_owned() };
             ui.a11y(id, Role::Group).name(&format!("{who}, {}", clock(m.at)));
 
-            ui.with_id(id).col(bubble, |ui| {
+            ui.with_id(id).col(bubble.radius(BUBBLE_RADIUS).bg(bg), |ui| {
               for f in &m.files {
                 match &f.image {
                   Some(b) => {
                     _ = ui
                       .aspect_ratio(ContentMode::Fill)
-                      .image(b, Style::new().w(px(THUMB.0)).h(px(THUMB.1)).radius(8.0))
+                      .image(b, Style::new().w(px(THUMB.0)).h(px(THUMB.1)).radius(10.0))
                   }
                   None => {
                     _ = ui.row(
@@ -941,9 +1303,16 @@ impl Messenger {
                 }
               }
 
-              if !m.text.is_empty() {
-                ui.text(&m.text, t.body().color(ink));
-              }
+              // The time at the end of the last line, as Telegram puts it.
+              let line = Style::new().gap(8.0).align(Align::End, Align::End);
+              ui.row(if m.text.is_empty() { line.w(grow()) } else { line }, |ui| {
+                if !m.text.is_empty() {
+                  ui.text(&m.text, t.body().color(ink));
+                }
+
+                let small = TextStyle::new(t.font().size(11.0), alpha(ink, 0.65));
+                ui.text(clock(m.at), small.nowrap());
+              });
             });
           });
 
@@ -975,8 +1344,8 @@ impl Messenger {
     }
   }
 
-  /// The composer: the files to send, then the attach and emoji buttons, the field that grows
-  /// up to six lines and the send button.
+  /// The composer: the files to send, then the attach button, the field that grows up to six
+  /// lines, the emoji button (where the OS has a picker) and the send button.
   fn composer(&mut self, ui: &mut Ui) {
     let t = ui.theme();
     // Each chat's field keeps its own edits and undo; the focus follows to the chat opened.
@@ -991,10 +1360,12 @@ impl Messenger {
     let line = ui.line_height(style);
     let text_h =
       ui.measure_wrapped(if c.draft.is_empty() { " " } else { &c.draft }, style, w - 16.0).h;
-    let h = (text_h + 10.0).clamp(t.sizes().control_h(), 6.0 * line + 10.0);
+    // As high as the send button at least.
+    let least = t.sizes().control_h() + 4.0;
+    let h = (text_h + 10.0).clamp(least, 6.0 * line + 10.0);
 
     let mut send = false;
-    let bar = Style::new().w(grow()).pads([6.0, 12.0, 12.0, 12.0]).gap(6.0);
+    let bar = Style::new().w(grow()).pads([10.0, 12.0, 12.0, 12.0]).gap(8.0);
 
     ui.keymap(SEND_KEYS).id(COMPOSER).col(bar, |ui| {
       if !c.files.is_empty() {
@@ -1008,7 +1379,7 @@ impl Messenger {
               .radius(6.0)
               .bg(t.raised());
             ui.key(i).row(chip.align(Align::Start, Align::Center), |ui| {
-              ui.text(f.name(), t.label().line_limit(1));
+              ui.text(f.name(), t.label());
               if ui.a11y_label(&t!("Delete")).key("x").icon_button(Icon::X).clicked {
                 gone = Some(i);
               }
@@ -1020,40 +1391,34 @@ impl Messenger {
         }
       }
 
+      // The buttons sit on the middle of the field's last line, as it grows.
+      let slot = Style::new().h(px(least)).center();
       ui.row(Style::new().w(grow()).gap(6.0).align(Align::Start, Align::End), |ui| {
-        if ui
-          .a11y_label(&t!("Attach Files"))
-          .help(&t!("Attach Files"))
-          .id(ATTACH)
-          .icon_button(PAPERCLIP)
-          .clicked
-        {
-          self.asked = Some(Asked::Attach(self.open));
-          ui.file_dialog(FileDialog::open(&t!("Attach Files")));
-        }
+        ui.row(slot, |ui| {
+          let ui = ui.a11y_label(&t!("Attach Files")).help(&t!("Attach Files")).id(ATTACH);
+          if ui.icon_button(PAPERCLIP).clicked {
+            self.asked = Some(Asked::Attach(self.open));
+            ui.file_dialog(FileDialog::open(&t!("Attach Files")));
+          }
+        });
 
-        ui.button_style(&BorderlessButtonStyle).a11y_label(&t!("Emoji")).id(EMOJI).menu(
-          "🙂",
-          |ui| {
-            for e in EMOJIS {
-              if ui.key(e).menu_item(e).clicked {
-                c.draft.push_str(e);
-              }
-            }
-          },
-        );
         ui.col(Style::new().w(grow()).h(px(h)), |ui| {
           TextField::new(&mut c.draft, &t!("Message")).axis(Axis::Vertical).show(ui.with_id(field))
         });
+        // The system's picker, for the field: none where the OS has none (Linux).
+        if character_palette::available().is_ok() {
+          ui.row(slot, |ui| {
+            let ui = ui.a11y_label(&t!("Emoji")).help(&t!("Emoji & Symbols")).id(EMOJI);
+            if ui.icon_button(Icon::SMILE).clicked {
+              ui.focus(Some(field));
+              ui.character_palette();
+            }
+          });
+        }
+
         let empty = c.draft.trim().is_empty() && c.files.is_empty();
-        send |= ui
-          .disabled(empty)
-          .a11y_label(&t!("Send"))
-          .help(&t!("Send"))
-          .id(SEND)
-          .button_style(&BorderedProminentButtonStyle)
-          .button(ARROW_UP)
-          .clicked;
+        let ui = ui.disabled(empty).a11y_label(&t!("Send")).help(&t!("Send")).id(SEND);
+        send |= ui.button_style(&Round).button(ARROW_UP).clicked;
       });
     });
     send |= ui.command(Id::of(COMPOSER)) == Some(Command::Action("send"));
@@ -1062,40 +1427,67 @@ impl Messenger {
     }
   }
 
-  /// The contact's card beside the chat: who it is, mute, export and clear.
-  /// Beside the chat, or over its trailing edge (`over`) where the window is too narrow for both.
+  /// The contact's card, as in Messages and Telegram: the avatar, name and status in the
+  /// middle, then plates of who it is, mute, and what to do with the chat; over the chat's
+  /// trailing edge (`over`) where the window is too narrow for both.
   fn panel(&mut self, ui: &mut Ui, over: bool) {
-    let t = ui.theme();
+    let (t, fs) = (ui.theme(), FormStyle::plates(&ui.theme()));
     let c = &mut self.chats[self.open];
-    let card =
-      Style::new().w(px(PANEL_W)).h(grow()).pad(16.0).gap(10.0).align(Align::Center, Align::Start);
     if over {
       let at = Float::parent().attach(UnitPoint::TOP_TRAILING).anchor(UnitPoint::TOP_TRAILING);
       ui.float(at.z(5));
     }
 
+    let card = Style::new().w(px(PANEL_W)).h(grow()).bg(t.bg());
     let card =
       if over { card.h(pct(100.0)).shadow(Shadow::new(0.0, 12.0, t.shadow())) } else { card };
-    ui.id(PANEL).col(card.bg(t.panel()), |ui| {
-      avatar(ui, c.name, c.tint, 72.0);
-      ui.text(c.name, TextStyle::new(t.bold().size(17.0), t.text()));
-      ui.text(c.about, t.body().color(t.secondary()));
-      ui.text(tn!("{n} message", "{n} messages", c.msgs.len()), t.muted());
+    let page = Style::new().w(grow()).pads([24.0, 12.0, 16.0, 12.0]).gap(12.0);
+    let mut export = false;
 
-      ui.row(Style::new().w(grow()).align(Align::Start, Align::Center), |ui| {
-        ui.text(t!("Mute"), t.label());
-        ui.spacer();
-        ui.id(MUTE).toggle(&mut c.muted, ())
+    ui.id(PANEL).col(card, |ui| {
+      ui.scroll_area(Style::new().grow(), |ui| {
+        ui.col(page.align(Align::Center, Align::Start), |ui| {
+          ui.col(Style::new().w(grow()).gap(4.0).align(Align::Center, Align::Start), |ui| {
+            avatar(ui, c.name, c.tint, c.is_bot(), 80.0);
+            ui.el(Style::new().h(px(6.0)));
+            ui.text(c.name, TextStyle::new(t.bold().size(17.0), t.text()).line_limit(2));
+            let ink = if c.pending > 0 || c.online { t.accent() } else { t.secondary() };
+            ui.text(c.status(), TextStyle::new(t.font(), ink).line_limit(1));
+          });
+          ui.el(Style::new().h(px(4.0)));
+
+          let about = if c.is_bot() { t!("Description") } else { t!("Bio") };
+          ui.form_section(&fs, "", |ui| {
+            ui.form_row(&fs, FormRow::new(c.about.as_str()).caption(about), |_| {});
+            ui.form_row(&fs, FormRow::new(c.handle).caption(t!("Username")), |_| {});
+            ui.form_row(&fs, FormRow::new(t!("Messages")), |ui| {
+              ui.text(c.msgs.len().to_string(), TextStyle::new(t.font(), t.secondary()).nowrap())
+            });
+          });
+          ui.form_section(&fs, "", |ui| {
+            ui.form_row(&fs, FormRow::new(t!("Mute")), |ui| ui.id(MUTE).toggle(&mut c.muted, ()))
+          });
+
+          ui.col(fs.group().clip(), |ui| {
+            let ui_ = ui.button_style(&PlateButton).id(EXPORT);
+            export = Button::new(t!("Export Chat…")).show(ui_).clicked;
+            hairline(ui, &fs);
+
+            let clear = Button::new(t!("Clear History…")).role(ButtonRole::Destructive);
+            let ui = ui.disabled(c.msgs.is_empty()).button_style(&PlateButton).id(CLEAR);
+            if clear.show(ui).clicked {
+              self.confirm = true;
+            }
+          });
+        });
       });
-      if ui.id(EXPORT).button(t!("Export Chat…")).clicked {
-        self.asked = Some(Asked::Export(self.open));
-        ui.file_dialog(FileDialog::save(&t!("Export Chat…")).name(&format!("{}.txt", c.name)));
-      }
-
-      if ui.disabled(c.msgs.is_empty()).id(CLEAR).button(t!("Clear History…")).clicked {
-        self.confirm = true;
-      }
     });
+
+    if export {
+      self.asked = Some(Asked::Export(self.open));
+      let name = format!("{}.txt", self.chats[self.open].name);
+      ui.file_dialog(FileDialog::save(&t!("Export Chat…")).name(&name));
+    }
 
     let d = Dialog::new(t!("Clear the history?").as_str());
     let d = d.message(t!("Every message in this chat goes, for good.").as_str());
@@ -1110,16 +1502,15 @@ impl Messenger {
   fn chat(&mut self, ui: &mut Ui, bar: f32) {
     let t = ui.theme();
     let c = &self.chats[self.open];
-    let (name, typing) = (c.name, c.pending > 0);
+    let (name, status, lit) = (c.name, c.status(), c.pending > 0 || c.online);
+
     ui.col(Style::new().grow().pads([bar, 0.0, 0.0, 0.0]), |ui| {
       ui.toolbar(|ui| {
         ui.toolbar_item(ToolbarItemPlacement::Principal, |ui| {
           ui.col(Style::new().align(Align::Center, Align::Center), |ui| {
-            ui.text(name, TextStyle::new(t.bold(), t.text()));
-            match typing {
-              true => ui.text(t!("typing…"), TextStyle::new(t.font().size(11.0), t.accent())),
-              false => ui.text(t!("bot"), TextStyle::new(t.font().size(11.0), t.secondary())),
-            }
+            ui.text(name, TextStyle::new(t.bold(), t.text()).line_limit(1));
+            let ink = if lit { t.accent() } else { t.secondary() };
+            ui.text(status, TextStyle::new(t.font().size(11.0), ink).line_limit(1));
           });
         });
         ui.toolbar_item(ToolbarItemPlacement::PrimaryAction, |ui| {
@@ -1227,12 +1618,13 @@ impl Messenger {
         });
       }
 
-      // Sliding, the sidebar takes that part of its share, the share kept for when it is out.
+      // Sliding, the sidebar takes that part of its share, the share kept for when it is out;
+      // dragged, it stays between its bounds, the chat keeping its least width.
       let mut side = std::mem::take(&mut self.side);
       let mut sliding = side * out;
       let ratio = if out < 1.0 { &mut sliding } else { &mut side };
-      let split = Split::navigation().ratio(ratio).min(220.0 * out, 360.0);
-      let r = split.show(ui.id(SPLIT), |ui, pane| match pane {
+      let split = Split::navigation().ratio(ratio).min(SIDE_MIN * out, CHAT_MIN);
+      let r = split.max(SIDE_MAX, f32::INFINITY).show(ui.id(SPLIT), |ui, pane| match pane {
         0 => self.sidebar(ui, bar),
         _ => self.chat(ui, bar),
       });
@@ -1345,7 +1737,7 @@ impl Settings {
     let t = ui.theme();
     let head = Style::new().w(grow()).pad(24.0).gap(8.0).align(Align::Center, Align::Start);
     ui.col(head, |ui| {
-      avatar(ui, "Messenger", t.accent(), 64.0);
+      avatar(ui, "Messenger", t.accent(), true, 64.0);
       ui.text("Messenger", TextStyle::new(t.bold().size(20.0), t.text()));
       ui.text("1.0.0", t.muted());
       ui.text(t!("Chats with bots, made with nimbo."), t.label());
@@ -1549,6 +1941,29 @@ fn answered(_: &mut Main) {
   }
 }
 
+/// Herald posts the news, every [NEWS_EVERY] while the app runs, a window open or not, and the
+/// tray counts it; an open window redraws.
+fn news(_: &mut Main) {
+  let after = |d| _ = PROXY.with(|p| p.get().map(|p| p.after(d, news)));
+  // Busy (a nested loop): again a moment later.
+  let busy = Duration::from_millis(100);
+  let Ok((m, w)) = STATE.with(|s| s.try_borrow().map(|s| (s.messenger.clone(), s.window.clone())))
+  else {
+    return after(busy);
+  };
+  let w = w.filter(|w| w.is_open());
+  let Some(m) = m else { return };
+  let Ok(mut m) = m.try_borrow_mut() else { return after(busy) };
+  let shown = w.is_some() && m.focused;
+  m.post_news(shown);
+  drop(m);
+  if let Some(w) = w {
+    w.redraw();
+  }
+
+  after(NEWS_EVERY);
+}
+
 /// Shows the window, opening it when closed.
 fn show(main: &mut Main) {
   let open = STATE.with(|s| s.borrow().window.clone()).filter(|w| w.is_open());
@@ -1620,6 +2035,7 @@ fn start(main: &mut Main, instance: Option<Instance>) {
   }
 
   main.on_quit(|_| STATE.with(|s| *s.borrow_mut() = State::default()));
+  main.proxy().after(NEWS_EVERY, news);
   show(main);
 }
 
@@ -1632,14 +2048,32 @@ fn main() {
   }
 
   if args.iter().any(|a| a == "--shot") {
-    // The shot: the archive open, a question to Abacus typed, the profile beside the chat.
+    // The shot's state: the chat open (Alice's), the card beside it, a draft and a search.
+    let mut value = |flag: &str| {
+      let at = args.iter().position(|a| a == flag)?;
+      let v = args.get(at + 1).cloned();
+      args.drain(at..(at + 2).min(args.len()));
+      v
+    };
+    let chat = value("--chat").and_then(|v| v.parse().ok()).unwrap_or(ALICE_AT);
+    let (draft, search) = (value("--draft"), value("--search"));
+    let profile = args.iter().position(|a| a == "--profile").map(|at| args.remove(at)).is_some();
+
     return example::run(config(), Messenger::default(), &args, |h| {
       h.frame();
-      h.app_mut().open_chat(2);
-      h.app_mut().profile = true;
+      h.app_mut().open_chat(chat);
+      h.app_mut().profile = profile;
       h.frame();
-      h.click_id(field(2));
-      h.type_text("12 * 7 + 1");
+      if let Some(d) = draft {
+        h.click_id(field(chat));
+        h.type_text(&d);
+      }
+
+      if let Some(q) = search {
+        h.click_id(Id::of(SEARCH));
+        h.type_text(&q);
+      }
+
       h.wait(Duration::from_millis(300));
     });
   }
