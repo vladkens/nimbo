@@ -12,9 +12,8 @@ use crate::scene::{Frame, Point, Rect, alpha};
 use crate::ui::{Align, ControlSize, DatePickerConfiguration, DatePickerStyle, Dim, Style, Ui, px};
 
 /// The theme's date field, as SwiftUI's `.field`: day, month and year in a text field's box
-/// ([crate::RoundedBorderTextFieldStyle]'s ground, edge and ring), as wide as they are, each
-/// segment as wide as its widest number so the box keeps its width; the selected one on the
-/// accent while focused, as AppKit selects a segment.
+/// ([crate::RoundedBorderTextFieldStyle]'s) as AppKit's, the separators tight, the digits
+/// tabular; the selected one on the accent while focused.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FieldDatePickerStyle;
 
@@ -45,10 +44,11 @@ fn field(ui: &mut Ui, c: &DatePickerConfiguration) {
   let t = ui.theme();
   let style = t.field();
   let frame = field_frame(ui, &style, c.is_focused(), c.is_enabled());
-  let frame = frame.w(Dim::Fit).h(px(t.sizes().control_h())).pad_xy(6.0, 0.0);
-  // A segment as wide as its digits at their widest, so a change keeps the box's width.
+  let frame = frame.w(Dim::Fit).h(px(t.sizes().control_h())).pad_xy(4.0, 0.0);
+  // Each digit in a cell as wide as the widest: a segment keeps its width as its number changes.
   let text = t.label();
   let digit = (0..10).map(|d| ui.measure(&d.to_string(), text)).fold(0.0, f32::max);
+  let cell = Style::new().w(px(digit)).center();
   c.root(ui).row(frame, |ui| {
     for (i, s) in c.segments().iter().enumerate() {
       if i > 0 {
@@ -60,9 +60,12 @@ fn field(ui: &mut Ui, c: &DatePickerConfiguration) {
         false => ([0.0; 4], text.get_color()),
       };
 
-      let w = (digit * s.digits as f32).ceil() + 2.0;
-      let seg = Style::new().w(px(w)).align(Align::Center, Align::Center).bg(ground).radius(3.0);
-      ui.with_id(s.id).row(seg, |ui| ui.text(&s.text, text.color(ink)));
+      let seg = Style::new().w(px(digit * s.digits as f32)).align(Align::Center, Align::Center);
+      ui.with_id(s.id).row(seg.bg(ground).radius(3.0), |ui| {
+        for ch in s.text.chars() {
+          ui.row(cell, |ui| ui.text(ch, text.color(ink)));
+        }
+      });
     }
   });
 }
@@ -105,7 +108,7 @@ mod tests {
   use crate::app::App;
   use crate::scene::Size;
   use crate::ui::{Id, Ui};
-  use crate::{Date, Harness};
+  use crate::{Date, Harness, Theme};
 
   struct One(Date);
 
@@ -131,5 +134,22 @@ mod tests {
     assert_eq!(h.app().0, Date::new(2027, 9, 27).unwrap());
     h.frame();
     assert_eq!(h.rect(id).unwrap().w, w);
+  }
+
+  /// As AppKit's: the separators tight between the segments, each digit as wide as the widest,
+  /// so `11` takes the room `27` does (within the pixel the layout rounds to).
+  #[test]
+  fn the_separators_sit_tight_and_the_digits_tabular() {
+    let mut h = Harness::new(One(Date::new(2026, 11, 27).unwrap()), Size::new(300.0, 100.0), 1.0);
+    h.frame();
+    let seg = |h: &Harness<One>, i: usize| h.rect(Id::of("day").key(("segment", i))).unwrap();
+    let (year, month, day) = (seg(&h, 0), seg(&h, 1), seg(&h, 2));
+    let font = Theme::PLATES_LIGHT.font();
+    let sep = h.measure("-", font);
+    let near = |a: f32, b: f32| (a - b).abs() <= 1.0;
+    assert!(near(month.x - year.x - year.w, sep), "{year:?} {month:?} {sep}");
+    assert!(near(day.x - month.x - month.w, sep), "{month:?} {day:?} {sep}");
+    let digit = (0..10).map(|d| h.measure(&d.to_string(), font)).fold(0.0, f32::max);
+    assert!(near(month.w, digit * 2.0) && near(day.w, digit * 2.0) && near(year.w, digit * 4.0));
   }
 }
