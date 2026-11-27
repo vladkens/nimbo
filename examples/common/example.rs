@@ -1,12 +1,15 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! How every example starts: [run] opens its window, or with `--shot <file.png>` renders it in
-//! the harness instead (in the dark appearance unless `--appearance light`, in English unless
-//! `--locale <tag>`). Each example includes it with `#[path]`; `tests/example.rs` tests it.
+//! How every example starts: [run] opens its window ([run_with] then sets what the app sets on
+//! [Main] for it, its menu bar), or with `--shot <file.png>` renders it in the harness instead
+//! (in the dark appearance unless `--appearance light`, in English unless `--locale <tag>`).
+//! Each example includes it with `#[path]`; `tests/example.rs` tests it.
 
 use std::path::PathBuf;
 
-use nimbo::{App, AppInfo, Appearance, Config, Event, Harness, Locale, Main, Size, harness};
+use nimbo::{
+  App, AppInfo, Appearance, Config, Event, Harness, Locale, Main, Size, Window, harness,
+};
 
 const USAGE: &str = "usage: [--shot <file.png>] [--scale <n>] [--size <w>x<h>] \
   [--appearance light|dark] [--locale <tag>|pseudo]";
@@ -85,12 +88,24 @@ pub fn run<A: App + 'static>(
   args: &[String],
   script: impl FnOnce(&mut Harness<A>),
 ) {
+  run_with(cfg, app, args, script, |_, _| {});
+}
+
+/// [run], with `start` running once the window opens (not in a shot): what the app sets on
+/// [Main] for its window, as its menu bar ([Main::set_commands]).
+pub fn run_with<A: App + 'static>(
+  cfg: Config,
+  app: A,
+  args: &[String],
+  script: impl FnOnce(&mut Harness<A>),
+  start: impl FnOnce(&mut Main, &Window<A>),
+) {
   let args = Args::parse(args).unwrap_or_else(|e| {
     eprintln!("{e}\n{USAGE}");
     std::process::exit(2);
   });
   let Some(path) = &args.shot else {
-    return window(cfg, app, args.locale);
+    return window(cfg, app, args.locale, start);
   };
 
   let mut h = shot(&cfg, app, &args);
@@ -103,8 +118,14 @@ pub fn run<A: App + 'static>(
   println!("{}: wrote {}", cfg.title(), path.display());
 }
 
-/// One window running `app`, the app named after the executable, quitting when it closes.
-fn window<A: App + 'static>(cfg: Config, app: A, locale: Option<Locale>) {
+/// One window running `app`, the app named after the executable, quitting when it closes;
+/// `start` runs once it is open.
+fn window<A: App + 'static>(
+  cfg: Config,
+  app: A,
+  locale: Option<Locale>,
+  start: impl FnOnce(&mut Main, &Window<A>),
+) {
   let exe = std::env::current_exe().ok();
   let stem = exe.as_ref().and_then(|p| Some(p.file_stem()?.to_str()?.to_owned()));
   // The loop runs once per process: the strings live as long as it.
@@ -114,7 +135,9 @@ fn window<A: App + 'static>(cfg: Config, app: A, locale: Option<Locale>) {
       main.set_locale(l);
     }
 
-    main.open(&cfg, app).on_close(Main::quit);
+    let w = main.open(&cfg, app);
+    w.on_close(Main::quit);
+    start(main, &w);
   });
 }
 

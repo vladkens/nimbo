@@ -19,7 +19,8 @@
 //! the grid's keys are as far apart across as down, the chat opens at its newest message and the
 //! shortcut block counts ⌘K on its focused box; the split's line drags its panes' shares, the
 //! identity tiles keep their counts as they rotate, Tab focuses the focus block's tile, the frame
-//! request block draws every frame and the staged scroll indicators show their knob. The Canvas
+//! request block draws every frame, the staged scroll indicators show their knob and the menu
+//! bar's actions count in its block. The Canvas
 //! page follows the blocks, draws its
 //! shapes and text and shows the raw pointer and keys on its page only; the pacing scene moves,
 //! then stands still.
@@ -1047,4 +1048,18 @@ fn the_scroll_indicators_show_their_red_knob_staged() {
     });
     assert!(red, "{look:?}: no red knob, {:?}", t.danger());
   }
+}
+
+/// The menu bar's actions, as its items run them, count in the menu bar block.
+#[test]
+fn the_menu_bars_actions_count_in_its_block() {
+  let mut h = gallery(page("Menu bar"), true);
+  for a in [Track::Play, Track::Play, Track::New] {
+    h.app_mut().chose(a);
+  }
+
+  h.redraw();
+  h.frame();
+  let line = "Track ▸ Play: 2 · File ▸ New Track: 1";
+  assert!(h.find(Role::StaticText, line).is_some(), "no {line:?} in\n{}", h.a11y());
 }

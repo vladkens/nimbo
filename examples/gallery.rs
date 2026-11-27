@@ -4,7 +4,8 @@
 //! block by group (layout, text, controls, form, list, containers, presentation, modifiers) and a
 //! page for the one chosen, with the SwiftUI line, the nimbo line and the block live in its
 //! variants (enabled and disabled, small and large where it has sizes), in the system's light or
-//! dark. The same table makes `docs/api.md` and its pictures (`make api-shots`). After the
+//! dark; in a window, the menu bar the menu bar block counts. The same table makes `docs/api.md`
+//! and its pictures (`make api-shots`), each shot staged as a person would ([stage]). After the
 //! table, a Canvas page draws into the frame (shapes, text in fonts and scripts) and shows the
 //! raw pointer and keys.
 //!
@@ -1428,8 +1429,8 @@ mod pages {
     //! help style of the gallery's own.
 
     use nimbo::{
-      Answer, ButtonRole, Dialog, HelpConfiguration, HelpStyle, Icon, Item, Menu, Style, TextStyle,
-      Ui,
+      Answer, ButtonRole, CommandGroupPlacement, Commands, Dialog, HelpConfiguration, HelpStyle,
+      Icon, Item, Menu, Shortcut, Style, TextStyle, Ui,
     };
 
     use super::{DIALOG, Gallery, Shown};
@@ -1441,7 +1442,31 @@ mod pages {
       Delete,
     }
 
+    /// What the gallery's menu bar runs.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum Track {
+      Play,
+      New,
+    }
+
     impl Gallery {
+      /// The gallery's menu bar, as SwiftUI's `.commands`: the standard menus with a Track menu
+      /// after View, and New Track in place of File's first group.
+      pub fn menu_bar() -> Commands<Track> {
+        let play = Item::button(Track::Play, "Play").key(Shortcut::char('p').cmd());
+        let new = Item::button(Track::New, "New Track").key(Shortcut::char('n').cmd());
+        let bar = Commands::new().menu("Track", Menu::new(vec![play]));
+        bar.replacing(CommandGroupPlacement::NewItem, vec![new])
+      }
+
+      /// Runs the menu bar's action `a`: counted, as the menu bar block shows.
+      pub fn chose(&mut self, a: Track) {
+        match a {
+          Track::Play => self.plays += 1,
+          Track::New => self.tracks += 1,
+        }
+      }
+
       /// The live presentation block `name`.
       pub(super) fn presentation(&mut self, ui: &mut Ui, name: &str) {
         match name {
@@ -1471,10 +1496,12 @@ mod pages {
             }
           }),
 
-          // The menu bar is the app's, set as it starts, not a view's.
+          // The menu bar is the app's, not a view's: what its items ran, counted.
           "Menu bar" => Self::variants(ui, Shown::Alone, |ui| {
+            // Set as the gallery starts, on macOS: `main.set_commands(&Gallery::menu_bar(), …)`.
             let t = ui.theme();
-            ui.text("File, Edit, View, Track, Window and Help in the menu bar (macOS)", t.label());
+            let (plays, tracks) = (self.plays, self.tracks);
+            ui.text(format_args!("Track ▸ Play: {plays} · File ▸ New Track: {tracks}"), t.label());
           }),
           "Tooltip" => Self::variants(ui, Shown::Plain, |ui| {
             ui.help("Saves it").button("Save");
@@ -1640,6 +1667,7 @@ mod pages {
 
   use nimbo::{Align, ControlSize, Style, Ui, grow, px};
 
+  pub use self::presentation::Track;
   use super::{Block, DIALOG, Gallery, SIZES};
 
   /// The variants a block shows: itself alone (layout and text, which nothing disables); as it is
@@ -1905,11 +1933,12 @@ use std::time::Duration;
 use nimbo::a11y::Role;
 use nimbo::{
   App, Axes, Bitmap, CMD, Config, Cx, Date, Event, Font, Harness, HelpStyle, Hotkey, Id, Key, List,
-  Modifiers, Phase, Point, Selection, Style, Tag, TextStyle, Ui, grow, px,
+  Main, Modifiers, Phase, Point, Selection, Style, Tag, TextStyle, Ui, WindowId, grow, px,
 };
 
 pub use self::blocks::{BLOCKS, Block, GROUPS};
 pub use self::canvas::{PACE_SIZE, PAD, Pace, Pad};
+pub use self::pages::Track;
 
 /// The Canvas page's index, after the table's blocks: out of the table and `docs/api.md`.
 pub const CANVAS: usize = BLOCKS.len();
@@ -1976,6 +2005,9 @@ pub struct Gallery {
   pub own_rows: Selection,
   /// The list style blocks' plain and styled lists', their second row selected at first.
   pub styled_rows: [Selection; 2],
+  /// The menu bar's Track ▸ Play and File ▸ New Track, run so many times.
+  pub plays: usize,
+  pub tracks: usize,
   pub ask: bool,
   pub deleted: usize,
   pub copied: usize,
@@ -2047,6 +2079,8 @@ impl Default for Gallery {
       rows: Selection::default(),
       own_rows: second(),
       styled_rows: [second(), second()],
+      plays: 0,
+      tracks: 0,
       ask: false,
       deleted: 0,
       copied: 0,
@@ -2203,7 +2237,19 @@ fn main() {
   let app = Gallery::on(page.unwrap_or(0), only);
   let (w, h) = if only { (WIDTH, 300.0) } else { WINDOW };
   let cfg = Config::new("Gallery", w, h).localizations(&[("ru", RU)]);
-  example::run(cfg, app, rest, stage);
+  example::run_with(cfg, app, rest, stage, |main, w| {
+    let id = w.id();
+    main.set_commands(&Gallery::menu_bar(), move |main, a| chosen(main, id, a));
+  });
+}
+
+/// Runs the menu bar's action `a` on the gallery in window `id`; while the window is busy (a
+/// nested loop), from the main loop once it is free.
+fn chosen(main: &mut Main, id: WindowId, a: Track) {
+  let Some(w) = main.window::<Gallery>(id) else { return };
+  if w.with(|g| g.chose(a)).is_none() {
+    main.proxy().post(move |main| chosen(main, id, a));
+  }
 }
 
 /// The state a shot of the page shown, or of its block alone, shows, made by input as a person

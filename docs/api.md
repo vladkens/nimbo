@@ -1418,8 +1418,10 @@ if ui.context_menu(r.id, menu) == Some(Action::Copy) {
 SwiftUI: `.commands { CommandMenu("Track") { Button("Play") { … } }; CommandGroup(replacing: .newItem) { … } }`
 
 ```rust
+// Set as the gallery starts, on macOS: `main.set_commands(&Gallery::menu_bar(), …)`.
 let t = ui.theme();
-ui.text("File, Edit, View, Track, Window and Help in the menu bar (macOS)", t.label());
+let (plays, tracks) = (self.plays, self.tracks);
+ui.text(format_args!("Track ▸ Play: {plays} · File ▸ New Track: {tracks}"), t.label());
 ```
 
 ![Menu bar](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/menu-bar.png)
