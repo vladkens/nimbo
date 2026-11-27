@@ -508,7 +508,7 @@ fn judge(
   let mut hits: Hits = [None; 2];
   for (which, &chord) in chords.iter().enumerate() {
     if alone(chord) {
-      push(&mut hits, lone(shared, which, kind, code, flags, at, &repeat));
+      push(&mut hits, lone(shared, &chords, which, kind, code, flags, at, &repeat));
     }
   }
 
@@ -591,8 +591,10 @@ fn owned(
 /// is its release, also when the release itself was not seen (the Globe key's may come with
 /// another code); Escape as that event drops the press instead. `at`: the event's time, in ns.
 /// The edge to tell, if any.
+#[expect(clippy::too_many_arguments, reason = "the places as judged, the place and the event")]
 fn lone(
   shared: &Shared,
+  chords: &[u64; MAX],
   which: usize,
   kind: KeyKind,
   code: u64,
@@ -600,7 +602,7 @@ fn lone(
   at: u64,
   repeat: &impl Fn() -> bool,
 ) -> Option<Hit> {
-  let chord = shared.chords[which].load(Ordering::Acquire);
+  let chord = chords[which];
   let key = mod_key((chord & 0xffff) as u16)?;
   let own = device_flag(key)?;
 
@@ -645,7 +647,7 @@ fn lone(
   // But another place's chord without this key's modifier: fn, then F6 of another place.
   let theirs = kind == KeyKind::Down
     && (0..MAX).filter(|&w| w != which).any(|w| {
-      let chord = shared.chords[w].load(Ordering::Acquire);
+      let chord = chords[w];
       let mods = (chord >> 16) & MODIFIERS;
       chord & (SET | LONE) == SET
         && code == chord & 0xffff
