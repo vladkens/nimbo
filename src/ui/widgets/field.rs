@@ -27,7 +27,7 @@
 
 use crate::keys::SELECT_KEYS;
 use crate::ui::{
-  Align, Axes, Axis, FieldStyle, Response, Selectable, Style, TextFieldConfiguration,
+  Align, Axes, Axis, Enabled, FieldStyle, Response, Selectable, Style, TextFieldConfiguration,
   TextFieldStyle, TextStyle, Ui, grow,
 };
 
@@ -70,17 +70,20 @@ impl Ui<'_> {
   /// `Text`, selected in the theme's field colour ([crate::ui::Theme::field]): an I-beam over it,
   /// focus without a ring for the keys, its selection dimmed when the focus goes; its id from
   /// [Ui::id] or [Ui::key], else its place. A `&str` or an [AttributedString] (`&code`), whose
-  /// characters it copies. [Ui::disabled] makes it plain text.
+  /// characters it copies. [Ui::disabled] makes it plain text, dimmed as a disabled label.
   pub fn selectable_text<'s>(
     &mut self,
     text: impl Into<Selectable<'s>>,
     style: TextStyle,
   ) -> Response {
     let style = FieldStyle { text: style, ..self.theme().field() };
+    // Disabled, dimmed as a disabled control, runs of their own colours too.
+    let off = !self.environment_value::<Enabled>().0;
+    let dim = if off { self.theme().disabled } else { 1.0 };
     self.group(|ui| {
       let id = ui.take_id();
       let b = ui.selectable_behavior(id, text);
-      ui.keymap(SELECT_KEYS).field_text(&b, "", &style, b.style(Style::new()));
+      ui.keymap(SELECT_KEYS).field_text(&b, "", &style, b.style(Style::new().opacity(dim)));
       ui.edit_menu(&b);
       let (hovered, pressed, clicked) = (ui.hovered(id), ui.pressed(id), ui.clicked(id));
       Response { id, hovered, pressed, focused: b.focused, clicked, ..Response::default() }
@@ -94,7 +97,7 @@ mod tests {
   use crate::app::{App, Event};
   use crate::keys::Command;
   use crate::scene::Size;
-  use crate::ui::{Axes, Cursor, Id, Style, Ui, px};
+  use crate::ui::{Axes, Cursor, Id, Style, Theme, Ui, px};
 
   /// Disabled selectable text, then a button and a field.
   #[derive(Default)]
@@ -230,6 +233,10 @@ mod tests {
     let mut h = Harness::new(Off::default(), Size::new(300.0, 200.0), 1.0);
     h.frame();
     let note = h.rect(Id::of("note")).unwrap();
+    // Dimmed as a disabled control.
+    let node = h.rt.ui.last.get(Id::of("note")).unwrap();
+    assert_eq!(node.style.opacity, Theme::system(h.rt.ui.appearance()).disabled);
+
     h.move_to(note.x + 5.0, note.y + 5.0);
     assert_eq!(h.cursor(), Cursor::Arrow);
     h.click(note.x + 5.0, note.y + 5.0);

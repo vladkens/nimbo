@@ -212,8 +212,9 @@ impl Ui<'_> {
   /// where the theme hovers controls ([crate::Theme::hover_all]): with [Ui::help] on it, an
   /// explanation longer than a line, as SwiftUI's `Image(systemName: "info.circle").help(…)`.
   /// A button by its behaviour, named "Info". A mark is there for its tip: [Ui::disabled], on it
-  /// or on a container around, leaves it enabled. In a form row's label ([crate::FormRow::new]) it
-  /// sits on the middle of the label's capitals, the line keeping its height.
+  /// or on a container around, dims it as a disabled control but leaves it enabled, its tip
+  /// showing all the same. In a form row's label ([crate::FormRow::new]) it sits on the middle of
+  /// the label's capitals, the line keeping its height.
   pub fn info_button(&mut self) -> Response {
     let t = self.theme();
     self.mark_button(Icon::INFO, [t.secondary, t.text])
@@ -222,7 +223,7 @@ impl Ui<'_> {
   /// A warning mark in the ⓘ's size and place ([Ui::info_button]): a triangle with a "!" cut out
   /// of it ([Icon::WARNING]) in the theme's warning colour ([crate::Theme::warning]), a third of
   /// the way to the label colour while held: with [Ui::help] on it, what is wrong. A button by
-  /// its behaviour, named "Warning", enabled and placed as the ⓘ.
+  /// its behaviour, named "Warning", dimmed, enabled and placed as the ⓘ.
   pub fn warning_button(&mut self) -> Response {
     let t = self.theme();
     self.mark_button(Icon::WARNING, [t.warning, mix(t.warning, t.text, 0.33)])
@@ -230,19 +231,20 @@ impl Ui<'_> {
 
   /// A mark 16 points square over the button behaviour, named by its icon ([Icon::name]): in
   /// `ink[0]`, `ink[1]` while held, halfway there under the pointer where the theme hovers
-  /// controls.
+  /// controls; dimmed where disabled.
   fn mark_button(&mut self, icon: Icon, ink: [Color; 2]) -> Response {
     let t = self.theme();
     let id = self.take_id();
-    // Enabled whatever disabled it: its tip reads all the same.
+    // Dimmed as what disabled it, but enabled: its tip reads all the same.
+    let off = !self.environment_value::<Enabled>().0;
     let b = self.environment(Enabled(true)).button_behavior(id);
     self.a11y(id, Role::Button).name_or(icon.name().unwrap_or_default());
 
     let hot = self.ctl_hot(id, b.hovered);
     let size = (t.font.size + 3.0).round();
     let k = if b.pressed { 1.0 } else { 0.5 * hot };
-    let color = self.dim(mix(ink[0], ink[1], k), b.disabled);
-    let s = self.dim_style(Style::new().w(px(size)).h(px(size)).radius(size / 2.0), b.disabled);
+    let color = self.dim(mix(ink[0], ink[1], k), off);
+    let s = Style::new().w(px(size)).h(px(size)).radius(size / 2.0);
     let paint = move |f: &mut Frame, r: Rect| icon.default_stroke(1.5).draw(f, r, color);
     let Some(&mut MarkShift(dy)) = self.slot::<MarkShift>() else {
       let mut r = self.control(&b).canvas(s, paint);

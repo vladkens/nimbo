@@ -912,8 +912,8 @@ fn a_warning_and_a_tip_show_in_one_tooltip() {
   reads(&h.a11y(), &[&format!("button \"Info\" desc {TIP_HOTKEY:?}")]);
 }
 
-/// A disabled row's ⓘ stays enabled: as dark as an enabled row's, it reads enabled beside the
-/// row's disabled switch and shows its tip on a rest.
+/// A disabled row's ⓘ dims with the row but stays enabled: it reads enabled beside the row's
+/// disabled switch and shows its tip on a rest.
 #[test]
 fn a_disabled_rows_info_shows_its_tip() {
   let mut h = start();
@@ -926,7 +926,7 @@ fn a_disabled_rows_info_shows_its_tip() {
     px.map(|(x, y)| img.pixel(r.x + x as f32 / 2.0, r.y + y as f32 / 2.0)[0]).min().unwrap()
   };
   let (off, on) = (darkest(mark(&h, DOWNLOAD_ROW)), darkest(mark(&h, LAUNCH_ROW)));
-  assert!(off.abs_diff(on) <= 8, "the ⓘ at {off} in a disabled row, {on} in an enabled one");
+  assert!(off > on + 40, "the ⓘ at {off} in a disabled row, {on} in an enabled one");
   let info = format!("button \"Info\" desc {TIP_DOWNLOAD:?}");
   reads(&h.a11y(), &[&info, "switch \"Download them in the background\" off disabled"]);
   assert_eq!(tip(&mut h, DOWNLOAD_ROW), TIP_DOWNLOAD);
