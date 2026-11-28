@@ -27,6 +27,7 @@ fns!(Wl {
 
 fns!(GdkWayland {
   fn gdk_wayland_display_get_wl_display(display: P) -> P;
+  fn g_main_context_is_owner(context: P) -> c_int;
 });
 
 /// `wl_interface`.
@@ -122,13 +123,22 @@ thread_local! {
   static GLOBALS: RefCell<Vec<(String, u32, u32)>> = const { RefCell::new(Vec::new()) };
 }
 
-/// The client, made once on GTK's display: `None` off Wayland or before GTK runs.
+/// The client, made once on GTK's display: `None` off Wayland, before GTK runs, or off its main
+/// thread, where GTK's display is not to be used.
 pub(super) fn client() -> Option<&'static Client> {
-  if !super::running() {
+  if !super::running() || !main() {
     return None;
   }
 
   CLIENT.with_borrow_mut(|c| *c.get_or_insert_with(|| connect().map(|c| &*Box::leak(Box::new(c)))))
+}
+
+/// The thread runs GTK's loop (it owns GLib's default context), the only one that may use GTK's
+/// display.
+pub(super) fn main() -> bool {
+  static GDK: OnceLock<Option<GdkWayland>> = OnceLock::new();
+  let g = GDK.get_or_init(|| GdkWayland::load(&lib()?)).as_ref();
+  g.is_some_and(|g| unsafe { (g.g_main_context_is_owner)(null_mut()) } != 0)
 }
 
 fn connect() -> Option<Client> {
