@@ -34,8 +34,9 @@
 //!     the key window (`Event::Command`, enabled while `Runtime::can`); the window is offered a key
 //!     first, so the menu runs only what nobody used. Windows and Linux have no menu bar: nothing;
 //!   - `set_presence(Presence)`, `terminating() -> bool`, `quit()`; a second launch, where the OS
-//!     tells (macOS), runs `crate::shell::reopened`; a window shown or brought to the front comes
-//!     with `crate::shell::token()`, the activation token of the command being served, where the OS
+//!     tells (macOS), runs `crate::shell::reopened`, and the OS's own reopen goes on (a minimized
+//!     window comes back when none is on screen); a window shown or brought to the front comes with
+//!     `crate::shell::token()`, the activation token of the command being served, where the OS
 //!     takes one (Linux: `gtk_window_set_startup_id`);
 //!   - `post(delay: Duration, f: Box<dyn FnOnce() + Send>)` from any thread, run by the loop also
 //!     in modal loops (a menu open, a live resize); `is_main() -> bool`.
