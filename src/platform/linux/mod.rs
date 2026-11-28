@@ -1070,6 +1070,11 @@ impl Clipboard for Clip {
   }
 
   fn write(&mut self, s: &str) {
+    // A compositor with data control takes it without the focus, which GTK's write needs there.
+    if app::paste::write_text(s) {
+      return;
+    }
+
     let len = s.len().min(c_int::MAX as usize) as c_int;
     unsafe { (gtk().gtk_clipboard_set_text)(self.0, s.as_ptr().cast(), len) };
   }

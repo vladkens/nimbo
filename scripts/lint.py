@@ -776,9 +776,9 @@ PLACES = {
         for os, names in (
             (
                 "linux",
-                "activity autostart desktop focus grab hardware hotkey input_source instance",
+                "activity autostart datactl desktop focus grab hardware hotkey input_source instance",
             ),
-            ("linux", "open paste post remote uninstall write"),
+            ("linux", "open paste post remote uninstall vkbd wl write"),
             ("macos", "activity autostart desktop focus hardware hotkey hotkey/carbon"),
             ("macos", "input_source open paste permissions post uninstall"),
             ("windows", "activity autostart desktop focus hardware hotkey input_source instance"),

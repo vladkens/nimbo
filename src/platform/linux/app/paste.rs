@@ -8,7 +8,8 @@
 //! RemoteDesktop session's clipboard does all of it ([super::remote]) once the desktop gave it,
 //! its targets the MIME types; else XWayland's CLIPBOARD, which the compositor shares with the
 //! Wayland apps (GNOME 42 has no Clipboard portal, and takes XWayland's selection without the
-//! focus) once it read the targets: an offer waits for that ([taken]). None without XWayland.
+//! focus) once it read the targets: an offer waits for that ([taken]); before XWayland, the
+//! compositor's data control, where it has it (wlroots', Hyprland: [datactl]). None without either.
 //! X11 and Wayland keep no change count. On the main thread while the app runs.
 
 use std::cell::{Cell, RefCell};
@@ -19,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use super::super::dl::fns;
 use super::super::{CLIPBOARD, Fp, Gtk, P, display, lib, load};
-use super::{remote, running};
+use super::{datactl, remote, running};
 use crate::clipboard::Snapshot;
 
 // What the plain-text clipboard ([super::super::clipboard]) doesn't need.
@@ -131,6 +132,10 @@ pub fn snapshot() -> Option<Snapshot> {
     return Some(remote::snapshot(&r));
   }
 
+  if datactl::available() {
+    return Some(datactl::snapshot());
+  }
+
   let (s, g, c) = clip()?;
   let (mut atoms, mut n) = (null_mut(), 0);
   let mut snapshot = Snapshot::default();
@@ -192,6 +197,15 @@ fn contents(s: &Selection, c: P, target: P) -> Option<Vec<u8>> {
 /// clipboard manager stores it.
 pub fn restore(snapshot: Snapshot) -> bool {
   let types: Vec<_> = snapshot.items.into_iter().flatten().collect();
+  if remote::clipboard().is_none() && datactl::available() {
+    if types.is_empty() {
+      SERVED.set(None);
+      return datactl::clear();
+    }
+
+    return serve(types, None).is_some();
+  }
+
   if remote::clipboard().is_some() {
     // The portal can't empty the clipboard: what it asks for of the app's own is not there.
     if types.is_empty() {
@@ -217,13 +231,21 @@ pub fn restore(snapshot: Snapshot) -> bool {
   served
 }
 
+/// Plain text as if copied, through data control where the compositor has it ([datactl]): GTK's
+/// own Wayland clipboard needs the keyboard focus there; false elsewhere.
+pub fn write_text(text: &str) -> bool {
+  let types = TEXT.iter().map(|t| (t.to_string(), text.as_bytes().to_vec())).collect();
+  remote::clipboard().is_none() && datactl::available() && serve(types, None).is_some()
+}
+
 pub fn offer(text: &str, on_read: Option<OnRead>) -> Option<u64> {
   let mut types: Vec<_> = TEXT.iter().map(|t| (t.to_string(), text.as_bytes().to_vec())).collect();
   types.push((MARKER.0.into(), MARKER.1.to_vec()));
   let id = serve(types, on_read)?;
   // Not the Wayland apps' (KWin takes XWayland's selection only from an X window in focus), or
   // another owner's since.
-  if display::wayland() && remote::clipboard().is_none() && !(taken() && holds(id)) {
+  let xwayland = display::wayland() && remote::clipboard().is_none() && !datactl::available();
+  if xwayland && !(taken() && holds(id)) {
     UNREACHED.set(id);
   }
 
@@ -288,6 +310,18 @@ fn serve(types: Vec<(String, Vec<u8>)>, on_read: Option<OnRead>) -> Option<u64> 
 
   if portal {
     return None;
+  }
+
+  if datactl::available() {
+    let names: Vec<String> = types.iter().map(|t| t.0.clone()).collect();
+    // Set before it serves: a read comes only once the compositor has it.
+    SERVED.set(Some(Served { id, types, on_read }));
+    if !datactl::offer(&names) {
+      SERVED.set(None);
+      return None;
+    }
+
+    return Some(id);
   }
 
   let (s, _, c) = clip()?;

@@ -5,12 +5,14 @@
 //! the GlobalShortcuts portal on Wayland ([hotkey]), a window's context menus ([gtk_menu]), an XDG
 //! autostart entry ([autostart]) and launcher entry ([desktop]), links and files opened ([open]),
 //! shortcuts posted to the app in focus ([post]) and where the user types on X11 ([focus]), and the
-//! clipboard for a paste ([paste]), both through the RemoteDesktop portal on Wayland ([remote]);
+//! clipboard for a paste ([paste]), both through the RemoteDesktop portal on Wayland ([remote]),
+//! the keys through the compositor's virtual keyboard where it has one ([vkbd]);
 //! the tray, the portals and the file manager speak D-Bus through GIO ([super::dbus]); what an
 //! uninstall removes ([uninstall]); the lid and the audio inputs' changes ([hardware]).
 
 pub mod activity;
 pub mod autostart;
+mod datactl;
 pub mod desktop;
 pub mod focus;
 mod grab;
@@ -26,6 +28,8 @@ mod remote;
 pub mod shell;
 pub mod tray;
 pub mod uninstall;
+mod vkbd;
+mod wl;
 
 use std::cell::Cell;
 use std::ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void};
