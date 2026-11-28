@@ -33,6 +33,7 @@ mod gallery;
 
 mod common;
 
+use std::collections::HashSet;
 use std::time::Duration;
 
 use common::{diff, mid, px, reads};
@@ -691,9 +692,44 @@ fn every_block_shows_its_own_code() {
 
   let grid = code::of("Grid").unwrap();
   assert!(grid.contains("ui.grid(3, Style::new().w(px(132.0)).gap(6.0), |ui| {"), "{grid}");
-  let h = gallery(page("Grid"), false);
-  let first = grid.lines().next().unwrap();
-  assert!(h.a11y().contains(first), "{first:?} on the page:\n{}", h.a11y());
+}
+
+/// Each block's call is written with its code's words, and those of the variants it is shown in
+/// (`ui.disabled`, `ui.control_size`): an API renamed in the block and not in its call fails here.
+#[test]
+fn every_call_is_in_its_codes_words() {
+  let source = include_str!("../examples/gallery.rs");
+  let variants = &source[source.find("fn variants(").unwrap()..];
+  let variants = &variants[..variants.find("\n  }\n").unwrap()];
+  let words = |s: &str| -> Vec<String> {
+    let s = s.split(|c: char| !c.is_alphanumeric() && c != '_');
+    s.filter(|w| w.starts_with(|c: char| c.is_alphabetic() || c == '_'))
+      .map(str::to_owned)
+      .collect()
+  };
+  for b in BLOCKS {
+    let code = code::of(b.name).unwrap();
+    let known: HashSet<String> = words(&code).into_iter().chain(words(variants)).collect();
+    assert!(!b.call.is_empty() && b.call.lines().count() <= 3, "{}: {:?}", b.name, b.call);
+    let unknown: Vec<_> = words(b.call).into_iter().filter(|w| !known.contains(w)).collect();
+    assert!(unknown.is_empty(), "{}: {unknown:?} of {:?} not in its code:\n{code}", b.name, b.call);
+  }
+}
+
+/// The page shows the block's call; its link shows the whole code under it, and hides it again.
+#[test]
+fn the_page_opens_the_whole_code() {
+  let mut h = gallery(page("Grid"), false);
+  let (call, whole) = (BLOCKS[page("Grid")].call, code::of("Grid").unwrap());
+  let line = whole.lines().map(str::trim).find(|l| l.len() > 10 && !call.contains(l)).unwrap();
+  let shown = |h: &H| h.a11y().contains(line);
+  assert!(h.a11y().contains(call.lines().next().unwrap()), "{}", h.a11y());
+  assert!(!shown(&h));
+  for open in [true, false] {
+    h.click_id(Id::of(CODE));
+    h.frame();
+    assert_eq!(shown(&h), open, "{}", h.a11y());
+  }
 }
 
 /// The code's tokens by kind: keywords, calls, types, numbers (not a range's dots), strings past

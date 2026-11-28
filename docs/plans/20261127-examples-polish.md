@@ -26,6 +26,8 @@ The owner ran #123's examples in real windows on 2026-11-27 and found them broke
 - [x] Checked on a macOS 27 VM (trivm): the Dock brings back a minimized counter; the emoji picker opens at the caret and its pick lands there; a click elsewhere clears the gallery's selected code
 - [x] `character_palette::available` returns `nimbo::Error` as `autostart::available` does, not a `String`
 
+- [ ] A count on the app's icon, as Telegram's unread count (macOS `NSDockTile.badgeLabel`, Windows `ITaskbarList3::SetOverlayIcon`, Linux Unity's `LauncherEntry`), missed in the first pass; for 1.0
+
 ## Gallery
 
 - [x] Each block's code is real, multi-line, formatted Rust that builds what the page shows, syntax-coloured, not a one-liner with `…`; `docs/api.md` follows
@@ -38,6 +40,7 @@ The owner ran #123's examples in real windows on 2026-11-27 and found them broke
 - [x] Identity, Focus and pointer, Frame request: swatches that explain nothing; Scroll indicators: the picture shows no knobs: tiles that keep their click counts through a rotation, labelled focus tiles, a wave and its time; each shot staged by input (`stage`)
 - [x] Menu bar block isn't live: the gallery sets no menu bar: Track ▸ Play ⌘P and File ▸ New Track ⌘N, counted in the block; checked on the VM by menu and by key
 - [x] Styled text's sample in the theme's colours, not the code boxes' palette
+- [x] The blocks' whole code dwarfed SwiftUI's one line: each block shows nimbo's call beside it (written with its code's words, a test checks), the whole code a click away in place; `docs/api.md` links it on main by its lines, which the gallery's test keeps fresh
 - [ ] The `assets` branch serves main too: `make api-shots` deletes and redraws pictures main's `docs/api.md` still shows (`stacks.png`, `shortcut-recorder.png` kept by hand; `grid.png` and others now show the new blocks)
 
 ## 7GUIs

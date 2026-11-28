@@ -21,15 +21,17 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod blocks {
-  //! The gallery's table: every building block by group, with SwiftUI's line; the sidebar, the
-  //! pages and `docs/api.md` are made from it, with nimbo's code cut from the block's own
-  //! ([super::code]).
+  //! The gallery's table: every building block by group, with SwiftUI's line and nimbo's call;
+  //! the sidebar, the pages and `docs/api.md` are made from it, with the block's whole code cut
+  //! from its own ([super::code]).
 
-  /// A building block: its group, name and SwiftUI's line.
+  /// A building block: its group, name, SwiftUI's line and nimbo's call, taken from its code with
+  /// `…` for what it leaves out.
   pub struct Block {
     pub group: &'static str,
     pub name: &'static str,
     pub swiftui: &'static str,
+    pub call: &'static str,
   }
 
   impl Block {
@@ -41,8 +43,13 @@ mod blocks {
     }
   }
 
-  const fn b(group: &'static str, name: &'static str, swiftui: &'static str) -> Block {
-    Block { group, name, swiftui }
+  const fn b(
+    group: &'static str,
+    name: &'static str,
+    swiftui: &'static str,
+    call: &'static str,
+  ) -> Block {
+    Block { group, name, swiftui, call }
   }
 
   pub const GROUPS: [&str; 8] =
@@ -50,99 +57,99 @@ mod blocks {
 
   #[rustfmt::skip]
 pub const BLOCKS: &[Block] = &[
-  b("Layout", "Row", "HStack(alignment: .top, spacing: 8) { … }"),
-  b("Layout", "Column", "VStack(alignment: .leading, spacing: 6) { … }"),
-  b("Layout", "Grid", "Grid(horizontalSpacing: 6, verticalSpacing: 6) { GridRow { … } }; .gridCellColumns(2)"),
-  b("Layout", "Spacer", "HStack { Text(\"Notes\"); Spacer(); Button(\"Share\") { … } }"),
-  b("Layout", "Divider", "HStack { Text(\"Cut\"); Divider(); Text(\"Copy\") }; VStack { …; Divider(); … }"),
-  b("Layout", "Scroll view", "ScrollView(.vertical) { … }"),
-  b("Layout", "Scroll anchor", "ScrollView { LazyVStack { … } }.defaultScrollAnchor(.bottom)"),
-  b("Layout", "Content margins", "ScrollView { … }.contentMargins(.top, 28).contentMargins(.bottom, 8)"),
-  b("Layout", "Overlay", ".overlay(alignment: .topTrailing) { … }"),
-  b("Text", "Text", "Text(\"Title\").font(.headline).foregroundStyle(.secondary)"),
-  b("Text", "Localized text", "Text(\"Keep the history\"); String(localized: \"\\(name) is not on disk\")"),
-  b("Text", "Line limit", "Text(path).lineLimit(1).truncationMode(.middle)"),
-  b("Text", "Underline", "Text(\"WER\").underline(pattern: .dot)"),
-  b("Text", "Styled text", "Text(\"fn \").foregroundStyle(.pink).bold() + Text(\"main\").italic(); Text(attributedString).textSelection(.enabled)"),
-  b("Text", "Selectable text", "Text(log).textSelection(.enabled)"),
-  b("Text", "Link", "Link(\"Learn more\", destination: url)"),
-  b("Text", "Image", "Image(systemName: \"gear\")"),
-  b("Text", "Label content", "Label { Text(title) } icon: { Image(systemName: \"folder\") }; configuration.label in a style"),
-  b("Text", "Photo", "Image(nsImage: NSImage(data: file)!).resizable().aspectRatio(contentMode: .fill).frame(width: 80, height: 80).clipped()"),
-  b("Controls", "Button", "Button(\"Save\") { … }.buttonStyle(.borderedProminent)"),
-  b("Controls", "Button role", "Button(\"Delete\", role: .destructive) { … }"),
-  b("Controls", "Icon button", "Button { Image(systemName: \"trash\") }.buttonStyle(.borderless)"),
-  b("Controls", "Button style", "HStack { Button(\"Cut\") { … }; Button(\"Copy\") { … } }.buttonStyle(.borderless)"),
-  b("Controls", "Custom button style", "struct Pill: ButtonStyle { func makeBody(configuration: Configuration) -> some View { configuration.label.padding(…).background(…) } }"),
-  b("Controls", "Switch", "Toggle(\"Live\", isOn: $live)"),
-  b("Controls", "Check box", "Toggle(\"Wrap\", isOn: $wrap).toggleStyle(.checkbox)"),
-  b("Controls", "Button toggle", "Toggle(\"Bold\", isOn: $bold).toggleStyle(.button)"),
-  b("Controls", "Toggle style", "VStack { Toggle(\"Wrap\", …); Toggle(\"Numbers\", …) }.toggleStyle(.checkbox)"),
-  b("Controls", "Custom toggle style", "struct Dot: ToggleStyle { func makeBody(configuration: Configuration) -> some View { HStack { Circle()…; configuration.label } } }"),
-  b("Controls", "Slider", "Slider(value: $zoom, in: 0...200)"),
-  b("Controls", "Slider steps", "Slider(value: $level, in: 10...90, step: 10) { … } tick: { v in SliderTick(v) { … } }"),
-  b("Controls", "Slider style", "Slider(value: $zoom, in: 0...200) (SwiftUI has no slider style)"),
-  b("Controls", "Custom slider style", "struct Meter: ProgressViewStyle { … } (SwiftUI has no slider style)"),
-  b("Controls", "Picker", "Picker(\"Size\", selection: $size) { …; Divider(); … }"),
-  b("Controls", "Segmented picker", "Picker(…) { … }.pickerStyle(.segmented)"),
-  b("Controls", "Picker style", "VStack { Picker(…) { … } }.pickerStyle(.inline); Picker(…) { … }"),
-  b("Controls", "Custom picker style", "struct Chips: PickerStyle (SwiftUI's is closed: its styles are the system's)"),
-  b("Controls", "Text field", "TextField(\"Name\", text: $name)"),
-  b("Controls", "Multi-line field", "TextField(\"Notes\", text: $notes, axis: .vertical)"),
-  b("Controls", "Secure field", "SecureField(\"Password\", text: $key)"),
-  b("Controls", "Search field", ".searchable(text: $query)"),
-  b("Controls", "Date picker", "DatePicker(\"Start\", selection: $start, in: ...end, displayedComponents: .date)"),
-  b("Controls", "Date picker style", "DatePicker(…).datePickerStyle(.field)"),
-  b("Controls", "Character palette", "NSApp.orderFrontCharacterPalette(nil), Edit ▸ Emoji & Symbols (AppKit; SwiftUI has none)"),
-  b("Controls", "Text field style", "VStack { TextField(\"Name\", text: $name); TextField(\"City\", text: $city) }.textFieldStyle(.plain)"),
-  b("Controls", "Custom text field style", "struct Underline: TextFieldStyle { func _body(configuration: TextField<_Label>) -> some View { configuration.padding(…).overlay(alignment: .bottom) { … } } }"),
-  b("Controls", "Progress", "ProgressView(value: 0.42)"),
-  b("Controls", "Spinner", "ProgressView()"),
-  b("Controls", "Badge", ".badge(\"New\")"),
-  b("Controls", "Hotkey recorder", "KeyboardShortcut (SwiftUI has no recorder)"),
-  b("Controls", "Control behavior", "Button(action:) { … }.buttonStyle(MyStyle()), a look of the app's own"),
-  b("Controls", "Help marks", "Image(systemName: \"info.circle\").help(tip); HelpLink { … }"),
-  b("Form", "Section", "Section { … } header: { … } footer: { … }"),
-  b("Form", "Form row", "LabeledContent { Toggle(isOn: $on) {} } label: { Text(title); Text(subtitle) }"),
-  b("Form", "Composed label", "label: { Text(name); Text(\"New\").badge(…) }"),
-  b("Form", "Row tile", "Label { Text(title) } icon: { Image(systemName: \"folder\") }"),
-  b("Form", "Row footer", "Section { VStack { Toggle(…); Slider(…) } }"),
-  b("Form", "Disclosure", "DisclosureGroup(\"Other models\") { … }"),
-  b("Form", "Toolbar tabs", "TabView(selection: $page) { General().tabItem { Label(\"General\", systemImage: \"gear\") }.tag(Page.general) } in a Settings scene"),
-  b("Form", "Footer", "HelpLink { … } at a pane's end"),
-  b("List", "List", "List(items, selection: $sel) { … }"),
-  b("List", "List sections", "Section(header:) in a List; .listStyle(…)"),
-  b("List", "List style", "List(items, selection: $sel) { … }.listStyle(.plain)"),
-  b("List", "Custom list style", "struct Stripes: ListStyle (SwiftUI's has no public makeBody)"),
-  b("List", "List behavior", "List(rows, selection: $sel) { … }.listRowBackground(…)"),
-  b("Containers", "Tabs", "TabView { … }"),
-  b("Containers", "Split", "HSplitView { … }"),
-  b("Containers", "Navigation split", "NavigationSplitView { Sidebar().navigationSplitViewColumnWidth(min: 80, ideal: 104, max: 180) } detail: { … }"),
-  b("Containers", "Toolbar", "Detail().toolbar { ToolbarItem(placement: .principal) { … }; ToolbarItem(placement: .primaryAction) { … } } in a NavigationSplitView"),
-  b("Containers", "Unified toolbar", ".windowToolbarStyle(.unified)"),
-  b("Containers", "Menu", "Menu(\"Actions\") { Button(…) }"),
-  b("Containers", "Lazy column", "ScrollView { LazyVStack { ForEach(0..<1000) { i in … } } }"),
-  b("Containers", "Scroll behavior", "ScrollView { … }.scrollIndicators(.hidden).onScrollGeometryChange(…) { … }"),
-  b("Containers", "Scroll indicators", "NSScroller.knobStyle = .light (AppKit; SwiftUI has none)"),
-  b("Containers", "Stack queries", "Divider() follows its stack's axis (SwiftUI has no API for it)"),
-  b("Presentation", "Alert", ".alert(\"Delete?\", isPresented: $ask) { Button(\"Delete\", role: .destructive) }"),
-  b("Presentation", "Context menu", ".contextMenu { Button(\"Copy\") { … } }"),
-  b("Presentation", "Menu bar", ".commands { CommandMenu(\"Track\") { Button(\"Play\") { … } }; CommandGroup(replacing: .newItem) { … } }"),
-  b("Presentation", "Tooltip", ".help(\"Saves it\")"),
-  b("Presentation", "Custom help style", ".help(\"Saves it\") (SwiftUI has no help style)"),
-  b("Modifiers", "Disabled", ".disabled(true)"),
-  b("Modifiers", "Control size", ".controlSize(.small)"),
-  b("Modifiers", "Accessibility label", ".accessibilityLabel(\"Reset\")"),
-  b("Modifiers", "Keyboard shortcut", "Button(\"Count\") { … }.keyboardShortcut(\"k\", modifiers: .command)"),
-  b("Modifiers", "Environment", ".environment(\\.tint, .green) { … }; @Environment(\\.tint) var tint"),
-  b("Modifiers", "Group", "Group { Button(\"Save\"); Toggle(…) }.disabled(true)"),
-  b("Modifiers", "Identity", "Box().id(item.id); .allowsHitTesting(false)"),
-  b("Modifiers", "Focus and pointer", ".focusable(); .pointerStyle(.link)"),
-  b("Modifiers", "Widget parts", ".environment(\\.isEnabled, true); .help(tip) on a part"),
-  b("Modifiers", "Frame request", "TimelineView(.animation) { context in … }"),
-  b("Modifiers", "Accessibility pair", ".accessibilityLabeledPair(role: .label, id: \"volume\", in: ns)"),
-  b("Modifiers", "Controls theme", "@Environment(\\.controlActiveState) var state"),
-  b("Modifiers", "Color scheme", "@Environment(\\.colorScheme) var colorScheme"),
+  b("Layout", "Row", "HStack(alignment: .top, spacing: 8) { … }", "ui.row(Style::new().gap(8.0).align(Align::Start, Align::Start), |ui| { … })"),
+  b("Layout", "Column", "VStack(alignment: .leading, spacing: 6) { … }", "ui.col(Style::new().gap(6.0).align(Align::Start, Align::Start), |ui| { … })"),
+  b("Layout", "Grid", "Grid(horizontalSpacing: 6, verticalSpacing: 6) { GridRow { … } }; .gridCellColumns(2)", "ui.grid(3, Style::new().w(px(132.0)).gap(6.0), |ui| {\n  ui.span(2).row(key, |ui| …);\n})"),
+  b("Layout", "Spacer", "HStack { Text(\"Notes\"); Spacer(); Button(\"Share\") { … } }", "ui.text(\"Notes\", t.label());\nui.spacer();\nui.button(\"Share\");"),
+  b("Layout", "Divider", "HStack { Text(\"Cut\"); Divider(); Text(\"Copy\") }; VStack { …; Divider(); … }", "ui.row(…, |ui| { … ui.divider(); … })\nui.col(…, |ui| { … ui.divider(); … })"),
+  b("Layout", "Scroll view", "ScrollView(.vertical) { … }", "ui.scroll_area(Style::new().scroll(Axes::VERTICAL), |ui| { … })"),
+  b("Layout", "Scroll anchor", "ScrollView { LazyVStack { … } }.defaultScrollAnchor(.bottom)", "ui.default_scroll_anchor(UnitPoint::BOTTOM).scroll_area(area, |ui| { … })"),
+  b("Layout", "Content margins", "ScrollView { … }.contentMargins(.top, 28).contentMargins(.bottom, 8)", "ui.content_margins([28.0, 0.0, 8.0, 0.0], ContentMarginPlacement::Automatic)\n  .scroll_area(area, |ui| { … })"),
+  b("Layout", "Overlay", ".overlay(alignment: .topTrailing) { … }", "ui.float(Float::parent().attach(at).anchor(at).offset(-4.0, 4.0)).el(dot)"),
+  b("Text", "Text", "Text(\"Title\").font(.headline).foregroundStyle(.secondary)", "ui.text(\"Title\", TextStyle::new(t.bold(), t.text()))"),
+  b("Text", "Localized text", "Text(\"Keep the history\"); String(localized: \"\\(name) is not on disk\")", "ui.text(t!(\"Keep the history\"), …)\nui.text(t!(\"{name} is not on disk\", name), …)"),
+  b("Text", "Line limit", "Text(path).lineLimit(1).truncationMode(.middle)", "ui.text(path, t.body().truncation(TruncationMode::Middle))"),
+  b("Text", "Underline", "Text(\"WER\").underline(pattern: .dot)", "ui.text(n, t.label().underline(LinePattern::Dot))"),
+  b("Text", "Styled text", "Text(\"fn \").foregroundStyle(.pink).bold() + Text(\"main\").italic(); Text(attributedString).textSelection(.enabled)", "prose.push(\"in bold\", a.weight(Weight::Bold)).push(\"italic\", a.italic());\nui.text(&prose, t.body())"),
+  b("Text", "Selectable text", "Text(log).textSelection(.enabled)", "ui.selectable_text(\"Select this text and copy it.\", t.body())"),
+  b("Text", "Link", "Link(\"Learn more\", destination: url)", "ui.link(\"Learn more…\")"),
+  b("Text", "Image", "Image(systemName: \"gear\")", "ui.icon(icon.stroke(1.6), 20.0, t.text())"),
+  b("Text", "Label content", "Label { Text(title) } icon: { Image(systemName: \"folder\") }; configuration.label in a style", "let labels: [Content; 3] = [Icon::FOLDER.into(), \"Data folder\".into(), Icon::INFO.into()];\nlabel.build(ui, t.label())"),
+  b("Text", "Photo", "Image(nsImage: NSImage(data: file)!).resizable().aspectRatio(contentMode: .fill).frame(width: 80, height: 80).clipped()", "ui.aspect_ratio(ContentMode::Fill).image(photo, square)"),
+  b("Controls", "Button", "Button(\"Save\") { … }.buttonStyle(.borderedProminent)", "ui.button_style(&BorderedProminentButtonStyle).button(\"Prominent\")"),
+  b("Controls", "Button role", "Button(\"Delete\", role: .destructive) { … }", "Button::new(\"Delete\").role(ButtonRole::Destructive).show(ui)"),
+  b("Controls", "Icon button", "Button { Image(systemName: \"trash\") }.buttonStyle(.borderless)", "ui.icon_button(Icon::TRASH)"),
+  b("Controls", "Button style", "HStack { Button(\"Cut\") { … }; Button(\"Copy\") { … } }.buttonStyle(.borderless)", "ui.button_style(&BorderlessButtonStyle).row(row, |ui| { … })"),
+  b("Controls", "Custom button style", "struct Pill: ButtonStyle { func makeBody(configuration: Configuration) -> some View { configuration.label.padding(…).background(…) } }", "impl ButtonStyle for Pill {\n  fn make_body(&self, ui: &mut Ui, mut c: ButtonConfiguration) { … }\n}"),
+  b("Controls", "Switch", "Toggle(\"Live\", isOn: $live)", "ui.toggle(&mut self.live, \"Live\")"),
+  b("Controls", "Check box", "Toggle(\"Wrap\", isOn: $wrap).toggleStyle(.checkbox)", "ui.toggle_style(&CheckboxToggleStyle).toggle(&mut self.wrap, \"Wrap\")"),
+  b("Controls", "Button toggle", "Toggle(\"Bold\", isOn: $bold).toggleStyle(.button)", "ui.toggle_style(&ButtonToggleStyle).toggle(&mut self.bold, \"Bold\")"),
+  b("Controls", "Toggle style", "VStack { Toggle(\"Wrap\", …); Toggle(\"Numbers\", …) }.toggleStyle(.checkbox)", "ui.toggle_style(&CheckboxToggleStyle).col(Style::new().gap(6.0), |ui| { … })"),
+  b("Controls", "Custom toggle style", "struct Dot: ToggleStyle { func makeBody(configuration: Configuration) -> some View { HStack { Circle()…; configuration.label } } }", "impl ToggleStyle for Dot {\n  fn make_body(&self, ui: &mut Ui, mut c: ToggleConfiguration) { … }\n}"),
+  b("Controls", "Slider", "Slider(value: $zoom, in: 0...200)", "ui.slider(&mut self.zoom, 0.0..=200.0)"),
+  b("Controls", "Slider steps", "Slider(value: $level, in: 10...90, step: 10) { … } tick: { v in SliderTick(v) { … } }", "Slider::new(&mut self.level, 10.0..=90.0).step(10.0).show(ui)"),
+  b("Controls", "Slider style", "Slider(value: $zoom, in: 0...200) (SwiftUI has no slider style)", "ui.slider_style(&PlainSliderStyle).col(Style::new().w(grow()), |ui| { … })"),
+  b("Controls", "Custom slider style", "struct Meter: ProgressViewStyle { … } (SwiftUI has no slider style)", "impl SliderStyle for Meter {\n  fn make_body(&self, ui: &mut Ui, c: SliderConfiguration) { … }\n}"),
+  b("Controls", "Picker", "Picker(\"Size\", selection: $size) { …; Divider(); … }", "Picker::new(&mut self.size).options(&SIZES).show(ui)"),
+  b("Controls", "Segmented picker", "Picker(…) { … }.pickerStyle(.segmented)", "ui.picker_style(&SegmentedPickerStyle).picker(&mut self.view, &views)"),
+  b("Controls", "Picker style", "VStack { Picker(…) { … } }.pickerStyle(.inline); Picker(…) { … }", "ui.picker_style(&InlinePickerStyle).row(row, |ui| { … })"),
+  b("Controls", "Custom picker style", "struct Chips: PickerStyle (SwiftUI's is closed: its styles are the system's)", "impl PickerStyle for Chips {\n  fn make_body(&self, ui: &mut Ui, mut c: PickerConfiguration) { … }\n}"),
+  b("Controls", "Text field", "TextField(\"Name\", text: $name)", "ui.text_field(&mut self.name, \"Name\")"),
+  b("Controls", "Multi-line field", "TextField(\"Notes\", text: $notes, axis: .vertical)", "TextField::new(&mut self.notes, \"Notes\").axis(Axis::Vertical).show(ui)"),
+  b("Controls", "Secure field", "SecureField(\"Password\", text: $key)", "ui.secure_field(&mut self.key, \"Password\")"),
+  b("Controls", "Search field", ".searchable(text: $query)", "ui.search_field(&mut self.query, \"Search\")"),
+  b("Controls", "Date picker", "DatePicker(\"Start\", selection: $start, in: ...end, displayedComponents: .date)", "DatePicker::new(&mut self.start).range(..=end).show(ui)"),
+  b("Controls", "Date picker style", "DatePicker(…).datePickerStyle(.field)", "ui.date_picker_style(&FieldDatePickerStyle).date_picker(&mut self.start)"),
+  b("Controls", "Character palette", "NSApp.orderFrontCharacterPalette(nil), Edit ▸ Emoji & Symbols (AppKit; SwiftUI has none)", "ui.character_palette()"),
+  b("Controls", "Text field style", "VStack { TextField(\"Name\", text: $name); TextField(\"City\", text: $city) }.textFieldStyle(.plain)", "ui.text_field_style(&PlainTextFieldStyle).col(col, |ui| { … })"),
+  b("Controls", "Custom text field style", "struct Underline: TextFieldStyle { func _body(configuration: TextField<_Label>) -> some View { configuration.padding(…).overlay(alignment: .bottom) { … } } }", "impl TextFieldStyle for Underline {\n  fn make_body(&self, ui: &mut Ui, mut c: TextFieldConfiguration) { … }\n}"),
+  b("Controls", "Progress", "ProgressView(value: 0.42)", "ui.progress(Some(0.42))"),
+  b("Controls", "Spinner", "ProgressView()", "ui.spinner()"),
+  b("Controls", "Badge", ".badge(\"New\")", "ui.badge(\"New\", Tone::Accent)"),
+  b("Controls", "Hotkey recorder", "KeyboardShortcut (SwiftUI has no recorder)", "ui.hotkey_recorder(&mut self.hotkey)"),
+  b("Controls", "Control behavior", "Button(action:) { … }.buttonStyle(MyStyle()), a look of the app's own", "let b = ui.button_behavior(id);\nui.control(&b).canvas(s, move |f, r| { … })"),
+  b("Controls", "Help marks", "Image(systemName: \"info.circle\").help(tip); HelpLink { … }", "ui.help(…).info_button()\nui.help(…).help_button()"),
+  b("Form", "Section", "Section { … } header: { … } footer: { … }", "let section = Section::new(head).footer(\"Kept until you clear it.\");\nui.form_section(&fs, section, |ui| { … })"),
+  b("Form", "Form row", "LabeledContent { Toggle(isOn: $on) {} } label: { Text(title); Text(subtitle) }", "FormRow::new(\"Open at login\").caption(\"Starts with your Mac, in the menu bar.\")\nui.form_row(&fs, row, |ui| ui.toggle(&mut self.on, ()))"),
+  b("Form", "Composed label", "label: { Text(name); Text(\"New\").badge(…) }", "let label = |ui: &mut Ui, s: TextStyle| {\n  ui.text(\"gigaam-v3\", s.line_limit(1)); … ui.badge(\"Recommended\", Tone::Accent);\n};"),
+  b("Form", "Row tile", "Label { Text(title) } icon: { Image(systemName: \"folder\") }", "let row = FormRow::new(\"Data folder\").caption(\"~/Library/Application Support\");\nui.form_row(&fs, row.tile(Icon::FOLDER), |ui| ui.button(\"Show\"))"),
+  b("Form", "Row footer", "Section { VStack { Toggle(…); Slider(…) } }", "let footer = |ui: &mut Ui, _: TextStyle| { … };\nlet row = FormRow::new(&name).caption(\"Only on battery.\").footer(footer);\nui.form_row(&fs, row, |ui| ui.toggle(&mut self.on, ()))"),
+  b("Form", "Disclosure", "DisclosureGroup(\"Other models\") { … }", "let row = FormRow::new(\"Other models\").caption(\"2 more\");\nui.form_disclosure(&fs, row, |ui| { … })"),
+  b("Form", "Toolbar tabs", "TabView(selection: $page) { General().tabItem { Label(\"General\", systemImage: \"gear\") }.tag(Page.general) } in a Settings scene", "let tabs = [Tag::new(0, \"General\").icon(Icon::GEAR), …];\nui.toolbar_tabs(&fs, &mut self.tab, &tabs)"),
+  b("Form", "Footer", "HelpLink { … } at a pane's end", "ui.help(\"Help on these settings\").form_footer(&fs, |ui| _ = ui.button(\"Reset All…\"))"),
+  b("List", "List", "List(items, selection: $sel) { … }", "let list = List::new(40, 22.0).selection(&mut self.rows);\nlist.show(ui, |ui, row| …)"),
+  b("List", "List sections", "Section(header:) in a List; .listStyle(…)", "let list = List::new(6, 30.0).sections(&[0, 3], 24.0, &head);\nlist.show(ui.list_style(&InsetGroupedListStyle), |ui, row| { … })"),
+  b("List", "List style", "List(items, selection: $sel) { … }.listStyle(.plain)", "let plain = List::new(40, 22.0).style(frame).selection(plain_rows);\nplain.show(ui.list_style(&PlainListStyle), |ui, row| { … })"),
+  b("List", "Custom list style", "struct Stripes: ListStyle (SwiftUI's has no public makeBody)", "impl ListStyle for Stripes {\n  fn make_body<'a>(&self, ui: &mut Ui<'a>, mut c: ListConfiguration<'_, 'a>) { … }\n}"),
+  b("List", "List behavior", "List(rows, selection: $sel) { … }.listRowBackground(…)", "let b = ui.list_behavior(id, ListRows::new(40, 22.0), &mut self.own_rows, &key);\nui.list_rows(&b, |ui, i, k| { … })"),
+  b("Containers", "Tabs", "TabView { … }", "Tabs::new(&mut self.tab, &[\"General\", \"Advanced\"]).show(ui, |ui, i| { … })"),
+  b("Containers", "Split", "HSplitView { … }", "Split::new(Axis::Horizontal).ratio(&mut self.side).show(ui, |ui, pane| { … })"),
+  b("Containers", "Navigation split", "NavigationSplitView { Sidebar().navigationSplitViewColumnWidth(min: 80, ideal: 104, max: 180) } detail: { … }", "let split = Split::navigation().ratio(&mut self.side).min(80.0, 80.0);\nsplit.max(180.0, f32::INFINITY).show(ui, |ui, pane| { … })"),
+  b("Containers", "Toolbar", "Detail().toolbar { ToolbarItem(placement: .principal) { … }; ToolbarItem(placement: .primaryAction) { … } } in a NavigationSplitView", "ui.toolbar(|ui| …)\nui.toolbar_item(ToolbarItemPlacement::Principal, |ui| ui.label(\"Notes\"))\nui.toolbar_item(ToolbarItemPlacement::PrimaryAction, |ui| { … })"),
+  b("Containers", "Unified toolbar", ".windowToolbarStyle(.unified)", "ui.window_toolbar_style(WindowToolbarStyle::Unified)"),
+  b("Containers", "Menu", "Menu(\"Actions\") { Button(…) }", "ui.menu(\"Actions\", |ui| {\n  ui.menu_item(\"Copy\");\n})"),
+  b("Containers", "Lazy column", "ScrollView { LazyVStack { ForEach(0..<1000) { i in … } } }", "ui.lazy_col(Style::new(), 1000, |i| i, row)"),
+  b("Containers", "Scroll behavior", "ScrollView { … }.scrollIndicators(.hidden).onScrollGeometryChange(…) { … }", "let b = ui.scroll_behavior(id, Axes::VERTICAL);\nui.with_id(b.thumb(Axis::Vertical)).float(at).el(thumb)"),
+  b("Containers", "Scroll indicators", "NSScroller.knobStyle = .light (AppKit; SwiftUI has none)", "let red = ScrollerKnob::DARK.color(alpha(t.danger(), 0.6));\nui.set_environment(Some(red))"),
+  b("Containers", "Stack queries", "Divider() follows its stack's axis (SwiftUI has no API for it)", "let (axis, n) = (ui.parent_axis(), ui.child_count());"),
+  b("Presentation", "Alert", ".alert(\"Delete?\", isPresented: $ask) { Button(\"Delete\", role: .destructive) }", "Dialog::new(\"Delete the file?\").button(\"Delete\", ButtonRole::Destructive).show(ui, &mut self.ask)"),
+  b("Presentation", "Context menu", ".contextMenu { Button(\"Copy\") { … } }", "let menu = Menu::new(vec![Item::button(Action::Copy, \"Copy\"), …]);\nui.context_menu(r.id, menu)"),
+  b("Presentation", "Menu bar", ".commands { CommandMenu(\"Track\") { Button(\"Play\") { … } }; CommandGroup(replacing: .newItem) { … } }", "main.set_commands(&Gallery::menu_bar(), …)"),
+  b("Presentation", "Tooltip", ".help(\"Saves it\")", "ui.help(\"Saves it\").button(\"Save\")"),
+  b("Presentation", "Custom help style", ".help(\"Saves it\") (SwiftUI has no help style)", "impl HelpStyle for Note { … }\nui.help_style(&Note);\nui.help(\"Saves it\").button(\"Save\")"),
+  b("Modifiers", "Disabled", ".disabled(true)", "ui.disabled(true).button(\"Save\")"),
+  b("Modifiers", "Control size", ".controlSize(.small)", "ui.control_size(ControlSize::Small).button(\"Save\")"),
+  b("Modifiers", "Accessibility label", ".accessibilityLabel(\"Reset\")", "ui.a11y_label(\"Reset\").icon_button(Icon::RESET)"),
+  b("Modifiers", "Keyboard shortcut", "Button(\"Count\") { … }.keyboardShortcut(\"k\", modifiers: .command)", "Binding::new(Shortcut::char('k').cmd(), Command::Action(\"count\"))\nui.keymap(KEYS).with_id(id).row(…)\nif ui.command(id) == Some(Command::Action(\"count\")) { … }"),
+  b("Modifiers", "Environment", ".environment(\\.tint, .green) { … }; @Environment(\\.tint) var tint", "impl EnvironmentValue for Tint { … }\nui.environment(Tint(t.success())).row(row, |ui| …)\nui.environment_value::<Tint>().0"),
+  b("Modifiers", "Group", "Group { Button(\"Save\"); Toggle(…) }.disabled(true)", "ui.disabled(true).group(|ui| { … })"),
+  b("Modifiers", "Identity", "Box().id(item.id); .allowsHitTesting(false)", "ui.with_id(id).row(tile, |ui| { … })"),
+  b("Modifiers", "Focus and pointer", ".focusable(); .pointerStyle(.link)", "ui.focusable(true).pointer_style(Cursor::Pointer).row(tile, |ui| { … })"),
+  b("Modifiers", "Widget parts", ".environment(\\.isEnabled, true); .help(tip) on a part", "ui.environment(Enabled(true)).button(\"Undo\")\nlet tip = ui.help(\"Always enabled\").take_help();"),
+  b("Modifiers", "Frame request", "TimelineView(.animation) { context in … }", "ui.request_frame();\nlet now = ui.now().as_secs_f32();"),
+  b("Modifiers", "Accessibility pair", ".accessibilityLabeledPair(role: .label, id: \"volume\", in: ns)", "ui.a11y_labeled_pair(LabeledPairRole::Label, pair, |ui| ui.label(\"Volume\"))\nui.a11y_labeled_pair(LabeledPairRole::Content, pair, |ui| { … })"),
+  b("Modifiers", "Controls theme", "@Environment(\\.controlActiveState) var state", "let c = ui.controls_theme();"),
+  b("Modifiers", "Color scheme", "@Environment(\\.colorScheme) var colorScheme", "ui.color_scheme().is_dark()"),
 ];
 }
 pub mod code {
@@ -154,29 +161,32 @@ pub mod code {
   /// This file, which the code is cut from.
   const SOURCE: &str = include_str!("gallery.rs");
 
+  /// Where block `name`'s arm is in this file: its first and last lines, counted from 1, and its
+  /// indent; `None` without such an arm.
+  fn arm(name: &str) -> Option<(usize, usize, usize)> {
+    let head = format!("\"{name}\" => Self::variants(ui, Shown::");
+    let lines: Vec<&str> = SOURCE.lines().collect();
+    let at =
+      lines.iter().position(|l| l.trim_start().starts_with(&head) && l.ends_with("|ui| {"))?;
+    let indent = lines[at].len() - lines[at].trim_start().len();
+    let end = format!("{:indent$}}}),", "");
+    let last = at + lines[at..].iter().position(|l| *l == end)?;
+    Some((at + 1, last + 1, indent))
+  }
+
+  /// The lines of block `name`'s arm in this file, from 1: what the page's link shows.
+  pub fn lines(name: &str) -> Option<(usize, usize)> {
+    arm(name).map(|(a, b, _)| (a, b))
+  }
+
   /// The code of block `name`: the body of its arm's closure, from the line
   /// `"<name>" => Self::variants(ui, Shown::…, |ui| {` to the `}),` under it, out of its indent;
   /// `None` without such an arm.
   pub fn of(name: &str) -> Option<String> {
-    let head = format!("\"{name}\" => Self::variants(ui, Shown::");
-    let mut lines = SOURCE.lines();
-    let arm = lines.find(|l| l.trim_start().starts_with(&head) && l.ends_with("|ui| {"))?;
-    let indent = arm.len() - arm.trim_start().len();
-    let end = format!("{:indent$}}}),", "");
-    let mut code = String::new();
-    for line in lines {
-      if line == end {
-        return Some(code);
-      }
-
-      if !code.is_empty() {
-        code.push('\n');
-      }
-
-      code += line.get(indent + 2..).unwrap_or("").trim_end();
-    }
-
-    None
+    let (first, last, indent) = arm(name)?;
+    let body = SOURCE.lines().skip(first).take(last - first - 1);
+    let body: Vec<_> = body.map(|l| l.get(indent + 2..).unwrap_or("").trim_end()).collect();
+    Some(body.join("\n"))
   }
 
   /// The words Rust keeps, coloured as keywords.
@@ -1949,6 +1959,8 @@ pub const CANVAS: usize = BLOCKS.len();
 
 pub const SIDEBAR: &str = "sidebar";
 pub const PAGE: &str = "page";
+/// The page's link that shows the block's whole code.
+pub const CODE: &str = "code";
 pub const DIALOG: &str = "dialog";
 /// A block alone ([Gallery::only]).
 pub const BLOCK: &str = "block";
@@ -1983,6 +1995,8 @@ pub struct Gallery {
   pub bold: bool,
   pub italic: bool,
   pub zoom: f32,
+  /// The page's whole code shown under nimbo's call.
+  pub code_open: bool,
   pub level: f32,
   pub size: Size,
   pub view: u8,
@@ -2064,6 +2078,7 @@ impl Default for Gallery {
       bold: true,
       italic: false,
       zoom: 60.0,
+      code_open: false,
       level: 30.0,
       size: Size::Medium,
       view: 0,
@@ -2111,7 +2126,8 @@ impl Gallery {
 
     let (t, block) = (ui.theme(), &BLOCKS[self.page]);
     let mono = TextStyle::new(Font::mono(12.0), t.text());
-    let nimbo = code::colour(&code::of(block.name).unwrap_or_default(), t.scheme().is_dark());
+    let dark = t.scheme().is_dark();
+    let call = code::colour(block.call, dark);
     let boxed = Style::new().w(grow()).pad(10.0).gap(4.0).radius(8.0).bg(t.raised());
 
     ui.id(PAGE).scroll_area(Style::new().grow(), |ui| {
@@ -2121,10 +2137,21 @@ impl Gallery {
           ui.text("SWIFTUI", t.section());
           ui.selectable_text(block.swiftui, mono);
           ui.el(Style::new().h(px(6.0)));
+
           ui.text("NIMBO", t.section());
-          // Its lines as rustfmt wrote them, scrolled sideways on a page narrower than they are.
-          let lines = Style::new().w(grow()).scroll(Axes::HORIZONTAL);
-          ui.scroll_area(lines, |ui| ui.selectable_text(&nimbo, mono.nowrap()));
+          ui.selectable_text(&call, mono);
+          ui.el(Style::new().h(px(2.0)));
+          let label = if self.code_open { "Hide the code" } else { "The block's code" };
+          if ui.id(CODE).link(label).clicked {
+            self.code_open = !self.code_open;
+          }
+
+          if self.code_open {
+            // Its lines as rustfmt wrote them, scrolled sideways on a page narrower than they are.
+            let code = code::colour(&code::of(block.name).unwrap_or_default(), dark);
+            let lines = Style::new().w(grow()).scroll(Axes::HORIZONTAL);
+            ui.scroll_area(lines, |ui| ui.selectable_text(&code, mono.nowrap()));
+          }
         });
         self.demo(ui, block);
       });
@@ -2179,18 +2206,22 @@ impl App for Gallery {
   }
 }
 
+/// The gallery's source on main, which `docs/api.md` links each block's code in.
+const ON_MAIN: &str = "https://github.com/vladkens/nimbo/blob/main/examples/gallery.rs";
+
 /// Where `docs/api.md`'s pictures are: the repo's `assets` branch, which `make api-shots` fills.
 pub const PICTURES: &str = "https://raw.githubusercontent.com/vladkens/nimbo/assets/api";
 
-/// `docs/api.md`: per group, each block's SwiftUI line, nimbo's code and its picture.
+/// `docs/api.md`: per group, each block's SwiftUI line, nimbo's call, a link to its code on main
+/// and its picture.
 pub fn api_md() -> String {
   let mut out = String::from(
     "# nimbo and SwiftUI\n\n\
      Each building block of nimbo beside its SwiftUI counterpart, as the gallery shows it live \
      (`cargo run --release --example gallery`, a page per block in its variants). A block aims \
-     at its SwiftUI counterpart's behaviour and API shape without copying it 1:1. Its code is \
-     the gallery's for the block, cut from the block's own, so it builds what the picture shows. \
-     The pictures are the gallery's, in the light appearance, kept on the repo's `assets` branch: `make \
+     at its SwiftUI counterpart's behaviour and API shape without copying it 1:1. Its line is \
+     the call that makes it, taken from the gallery's code for the block, which builds what the \
+     picture shows and is a link away. The pictures are the gallery's, in the light appearance, kept on the repo's `assets` branch: `make \
      api-shots` makes them and this file again from the gallery's table \
      (`examples/gallery.rs`), so a block changes there.\n\n\
      On macOS SwiftUI's `List` has neither of the grouped styles (`InsetGroupedListStyle` and \
@@ -2200,10 +2231,12 @@ pub fn api_md() -> String {
   for g in GROUPS {
     out += &format!("\n## {g}\n");
     for b in BLOCKS.iter().filter(|b| b.group == g) {
-      let (name, slug) = (b.name, b.slug());
-      let code = code::of(name).unwrap_or_default();
+      let (name, slug, call) = (b.name, b.slug(), b.call);
+      // On main, where this file is, the lines are main's: the gallery's test keeps it fresh.
+      let (first, last) = code::lines(name).unwrap_or_default();
+      let link = format!("{ON_MAIN}#L{first}-L{last}");
       out += &format!(
-        "\n### {name}\n\nSwiftUI: `{}`\n\n```rust\n{code}\n```\n\n![{name}]({PICTURES}/{slug}.png)\n",
+        "\n### {name}\n\nSwiftUI: `{}`\n\n```rust\n{call}\n```\n\n[The block's code]({link})\n\n![{name}]({PICTURES}/{slug}.png)\n",
         b.swiftui
       );
     }
