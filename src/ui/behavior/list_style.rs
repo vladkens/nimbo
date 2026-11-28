@@ -50,8 +50,9 @@
 //! Cmd-click (Ctrl-click on Windows and Linux) toggles a row and Shift-click selects from the
 //! anchor; a secondary click selects the row alone unless it is selected, for the app's context
 //! menu ([Ui::context_menu]), which one off the rows (the scrollbar, a header) doesn't open. A
-//! plain press on the list's ground (a header, the padding, the room under the rows; not a
-//! control there nor a scrollbar) clears the selection, as a table view's on macOS. Keys,
+//! plain press on the list's ground (the padding, the room under the rows; not a control there
+//! nor a scrollbar) clears the selection, as a table view's on macOS; one on a header keeps it,
+//! as a source list's group row does. Keys,
 //! while the list has focus (a press gives it), come as the platform's commands: Up and Down (Shift
 //! extends), Page Up and Page Down, Home and End or Cmd-Up and Cmd-Down, Cmd-A, and Enter, which
 //! activates the row, as a double click does. Delete or Backspace (Cmd-Backspace too on a Mac) ask
@@ -179,10 +180,12 @@ impl<'a> ListConfiguration<'_, 'a> {
       let hovered = !disabled && ui.hovered(rid);
       let r = Row { index: i, key: k, id: rid, selected, hovered, focused };
       let (first, last) = (i == 0 || header.is_some(), i + 1 == *n || rows.header(i + 1).is_some());
+      let before = !last && sel.contains(b.key(i + 1));
       let frame = rs.h(px(*height));
       let content = &mut **content;
+      let enabled = !disabled;
       let config =
-        ListRowConfiguration { r, enabled: !disabled, first, last, after: above, frame, content };
+        ListRowConfiguration { r, enabled, first, last, after: above, before, frame, content };
       above = selected;
 
       // Disabled, the same id (keyed in the list) taking no input.
@@ -203,6 +206,7 @@ pub struct ListRowConfiguration<'r, 'a> {
   first: bool,
   last: bool,
   after: bool,
+  before: bool,
   frame: Style,
   content: RowContent<'r, 'a>,
 }
@@ -249,6 +253,11 @@ impl<'a> ListRowConfiguration<'_, 'a> {
   /// The row above it, built this frame, is selected: no hairline between them.
   pub fn is_after_selected(&self) -> bool {
     self.after
+  }
+
+  /// The row below it, in its section, is selected: one selection over both.
+  pub fn is_before_selected(&self) -> bool {
+    self.before
   }
 
   /// The row's box: the app's ([List::row_style]) or the layout's, the list's rows' height.
