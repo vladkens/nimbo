@@ -7,8 +7,9 @@
 //! layout), Shift added at its second level; a key with no symbols is the mask tapped around a
 //! held Alt or Super lifted and put back, so neither reads as tapped alone. Wayland has no
 //! protocol for one app to type into another: there the RemoteDesktop portal's keyboard presses
-//! the keys ([super::remote]), the desktop asking the user the first time; it fails without the
-//! portal, as on X11 without the libraries.
+//! the keys ([super::remote]), the desktop asking the user the first time, or where the compositor
+//! has a virtual keyboard (wlroots', Hyprland, whose portals have no RemoteDesktop) that keyboard
+//! ([super::vkbd]), with no question; it fails with neither, as on X11 without the libraries.
 
 use std::ffi::{c_int, c_uint, c_ulong};
 use std::ptr::null;
@@ -44,14 +45,16 @@ fn gdk() -> Option<&'static Gdk> {
 
 pub fn ready() -> bool {
   match super::wayland() {
-    true => super::remote::granted(),
+    true => super::vkbd::available() || super::remote::granted(),
     false => x11().zip(xtst()).is_some(),
   }
 }
 
 pub fn post(s: Shortcut) -> Result<(), String> {
   if super::wayland() {
-    return super::remote::post(s);
+    // The compositor's virtual keyboard, where it has one (wlroots', Hyprland: their portals have
+    // no RemoteDesktop), else the portal's.
+    return super::vkbd::post(s).unwrap_or_else(|| super::remote::post(s));
   }
 
   let (x, t) = x11().zip(xtst()).ok_or("no libX11 or libXtst")?;
