@@ -15,8 +15,10 @@
 //! triple-clicks a line, and Shift-click extends. A secondary click (the right button) focuses it
 //! and asks for its edit menu ([FieldBehavior::menu], opened by [Ui::edit_menu]), whose choice
 //! comes back as a command ([Ui::field_command]); the field keeps its focus look while the menu
-//! is open. The caret blinks on timers, so a window sleeps between blinks and stops when the
-//! field loses focus.
+//! is open. The focus moving away (a click elsewhere in the window, Tab) ends the selection at
+//! its head as the frame ends ([end_selection]); a menu holding it (its item may cut)
+//! and the window losing its focus keep it, the window's half as strong. The caret blinks on
+//! timers, so a window sleeps between blinks and stops when the field loses focus.
 //!
 //! An input method's composition is marked text at the caret, apart from the value: the app's
 //! text changes only when it is committed, and a value the app sets meanwhile waits until the
@@ -109,7 +111,10 @@ pub(super) struct FieldState {
   reveal: u32,
   /// Requests made so far.
   reveals: u32,
+  /// It has the focus (its edit menu's while open), the window's or not.
   focused: bool,
+  /// Built since the last frame ended ([end_selection]).
+  built: bool,
   /// The edit menu as last opened ([Ui::edit_menu]).
   pub menu: EditMenu,
   /// A command from the edit menu, run as the field is built next ([Ui::field_command]).
@@ -296,6 +301,11 @@ impl Ui<'_> {
 
     let changed = write_back(&mut st, text);
     let blurred = st.focused && !focused;
+    st.built = true;
+    if focused {
+      self.st.select_in(id);
+    }
+
     if changed || set || st.ed.sel() != sel || focused && !st.focused {
       st.blink = self.now;
       reveal(&mut st);
@@ -339,6 +349,11 @@ impl Ui<'_> {
     // The selection's head in view, as it moves (Shift-Down in a scrolled page).
     if st.ed.sel() != sel {
       reveal(&mut st);
+    }
+
+    (st.focused, st.built) = (self.focused(id) || self.menu_open(id.key("edit")), true);
+    if st.focused {
+      self.st.select_in(id);
     }
 
     let mut b = self.field_state(id, &mut st, disabled);
@@ -516,6 +531,45 @@ impl UiState {
   pub fn editor(&self, id: Id) -> Option<&Editor> {
     self.store.peek::<FieldState>(id).map(|s| &s.ed)
   }
+
+  /// `id` has the focus: its selection ends as the focus leaves it ([end_selection]).
+  fn select_in(&mut self, id: Id) {
+    if !self.selecting.iter().any(|s| s.0 == id) {
+      self.selecting.push((id, end_selection));
+    }
+  }
+}
+
+/// At the end of a frame, the focus settled: the selection of the field or selectable text `id`
+/// that had the focus ends at its head once the focus moved away (a click elsewhere, Tab, an
+/// element taking it as it shows), as AppKit's does when its field resigns; not while a menu
+/// built in the frame holds the focus it lent (an item there may cut it, a field there may
+/// have it); nor, while it shows, while its edit menu is open, nor before it was built without
+/// the focus (the app told it blurred) and a command queued for it then ([Ui::field_command])
+/// ran, a frame later. Whether it ended; the next frame shows it.
+fn end_selection(st: &mut UiState, id: Id) -> bool {
+  // Built in the frame, its edit menu keeps it, and it is built again first; not (hidden, its
+  // state kept, or another element in its place), it ends now.
+  let Some(f) = st.store.peek_mut::<FieldState>(id) else { return true };
+  let (built, waits) = (std::mem::take(&mut f.built), f.focused || f.queued.is_some());
+  let lent = st.lent.iter().any(|&(e, _)| e == id);
+  if st.input.focus == Some(id) || lent || built && st.menu_open(id.key("edit")) {
+    return false;
+  }
+
+  if built && waits {
+    st.animating = true;
+    return false;
+  }
+
+  let Some(f) = st.store.peek_mut::<FieldState>(id) else { return true };
+  let sel = f.ed.sel();
+  if !sel.is_empty() {
+    f.ed.select(Sel::caret(sel.head));
+    st.animating = true;
+  }
+
+  true
 }
 
 /// Asks the next layout to show the caret, as a new request.
@@ -775,17 +829,17 @@ fn drag_to(st: &mut FieldState, lay: &TextLayout, p: Point) {
 impl Ui<'_> {
   /// The text element of a field or selectable text, as its behaviour `b` has it, `node` its
   /// style: the text (a dot per character for a password), or `prompt` while it is empty, with
-  /// the selection (half as strong without focus in selectable text, none in a field), the caret
-  /// and the marked text's underline.
+  /// the selection (half as strong in a window that isn't key and in unfocused selectable text,
+  /// none in an unfocused field), the caret and the marked text's underline.
   pub fn field_text(&mut self, b: &FieldBehavior, prompt: &str, style: &FieldStyle, node: Style) {
     let st = std::mem::take(self.st.store.raw::<FieldState>(b.id));
     let mut e = b.edit;
     e.caret_color = style.caret;
-    e.sel_color = match (b.focused, st.editable()) {
+    e.sel_color = match (b.focused, st.focused || !st.editable()) {
       _ if b.disabled => [0.0; 4],
       (true, _) => style.selection,
-      (false, false) => alpha(style.selection, style.selection[3] * 0.5),
-      (false, true) => [0.0; 4],
+      (false, true) => alpha(style.selection, style.selection[3] * 0.5),
+      (false, false) => [0.0; 4],
     };
 
     let s = st.ed.text();

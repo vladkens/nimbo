@@ -85,11 +85,11 @@ impl Ui<'_> {
 
 #[cfg(test)]
 mod tests {
-  use crate::Harness;
-  use crate::app::{App, Event};
-  use crate::keys::Command;
-  use crate::scene::Size;
+  use crate::app::{App, Event, Phase};
+  use crate::keys::{CMD, Command};
+  use crate::scene::{Point, Size};
   use crate::ui::{Axes, Cursor, Id, Style, Ui, px};
+  use crate::{Harness, Modifiers, NamedKey};
 
   /// Disabled selectable text, then a button and a field.
   #[derive(Default)]
@@ -234,5 +234,430 @@ mod tests {
     h.click_id(Id::of("f"));
     h.type_text("on");
     assert_eq!(h.app().text, "on");
+  }
+
+  /// Two selectable texts and a field over room to click in; a button that takes the focus as
+  /// it shows, `ok`.
+  #[derive(Default)]
+  struct Texts {
+    text: String,
+    ok: bool,
+  }
+
+  impl App for Texts {
+    fn view(&mut self, ui: &mut Ui) {
+      let body = ui.theme().body();
+      ui.col(Style::new().w(px(300.0)).h(px(200.0)).gap(10.0), |ui| {
+        ui.id("a").selectable_text("Hello world", body);
+        ui.id("b").selectable_text("Other words", body);
+        ui.id("f").text_field(&mut self.text, "");
+        if self.ok {
+          ui.id("ok").autofocus().button("OK");
+        }
+      });
+    }
+  }
+
+  /// Selects all of `id` with a click and Cmd-A.
+  fn select_all(h: &mut Harness<Texts>, id: Id) {
+    h.click_id(id);
+    h.key('a', CMD);
+    h.frame();
+    let len = h.text(id).unwrap().len();
+    assert_eq!(h.selection(id), Some((0, len)));
+  }
+
+  /// A click elsewhere in the window (on room, on other text) clears a selectable text's or a
+  /// field's selection, the field losing its focus; the window losing its focus keeps them,
+  /// shown.
+  #[test]
+  fn a_click_elsewhere_clears_the_selection_the_window_keeps_it() {
+    let mut h =
+      Harness::new(Texts { text: "typed".into(), ok: false }, Size::new(300.0, 200.0), 1.0);
+    h.frame();
+    let (a, b, f) = (Id::of("a"), Id::of("b"), Id::of("f"));
+    let collapsed = |h: &Harness<Texts>, id| h.selection(id).is_some_and(|(x, y)| x == y);
+    let r = h.rect(a).unwrap();
+    // Under the baseline, off the glyphs.
+    let at = (r.x + 10.0, r.y + r.h - 2.0);
+
+    select_all(&mut h, a);
+    let shown = h.render().pixel(at.0, at.1);
+    h.event(Event::Focus(false));
+    h.frame();
+    assert_eq!(h.selection(a), Some((0, 11)));
+    let inactive = h.render().pixel(at.0, at.1);
+
+    h.event(Event::Focus(true));
+    h.frame();
+    assert_eq!(h.render().pixel(at.0, at.1), shown);
+    h.click(250.0, 190.0);
+    h.frame();
+    assert!(collapsed(&h, a) && h.focus_id().is_none());
+    let plain = h.render().pixel(at.0, at.1);
+    assert!(plain != inactive && inactive != shown, "{plain:?} {inactive:?} {shown:?}");
+
+    select_all(&mut h, a);
+    h.click_id(b);
+    h.frame();
+    assert!(collapsed(&h, a));
+
+    // The field's text, every pixel of it.
+    let fr = h.rect(f).unwrap();
+    let look = |h: &mut Harness<Texts>| {
+      let img = h.render();
+      let xs = (0..fr.w as usize).map(|x| fr.x + x as f32);
+      xs.flat_map(|x| (4..fr.h as usize - 4).map(move |y| (x, fr.y + y as f32)))
+        .map(|(x, y)| img.pixel(x, y))
+        .collect::<Vec<_>>()
+    };
+    select_all(&mut h, f);
+    h.event(Event::Focus(false));
+    h.frame();
+    let inactive = look(&mut h);
+
+    h.event(Event::Focus(true));
+    h.frame();
+    assert_eq!((h.selection(f), h.focus_id()), (Some((0, 5)), Some(f)));
+    h.click(250.0, 190.0);
+    h.frame();
+    assert!(collapsed(&h, f) && h.focus_id().is_none());
+    assert_ne!(look(&mut h), inactive, "the inactive window shows the field's selection");
+  }
+
+  /// A click elsewhere ends the selection where the page is, not at its head.
+  #[test]
+  fn a_selection_ended_elsewhere_leaves_the_page_where_it_is() {
+    let mut h = Harness::new(Page, Size::new(300.0, 200.0), 1.0);
+    let page = Id::of("page");
+    let offset = |h: &Harness<Page>| h.scroll(page).unwrap().offset.y;
+    h.frame();
+    h.click(20.0, 10.0);
+    h.key('a', CMD);
+    h.frame();
+    h.frame();
+    assert!(offset(&h) > 0.0, "Cmd-A shows the head");
+
+    let (pos, delta, mods) = (Point::new(20.0, 20.0), Point::new(0.0, 5000.0), Modifiers::empty());
+    let (phase, momentum) = (Phase::None, Phase::None);
+    h.event(Event::Scroll { pos, delta, precise: true, phase, momentum, mods });
+    h.frame();
+    assert_eq!(offset(&h), 0.0);
+    h.click(150.0, 150.0);
+    h.frame();
+    h.frame();
+    assert_eq!(offset(&h), 0.0);
+  }
+
+  /// Two fields and, unless `hidden` (its state `kept`), a menu whose item cuts the selection of
+  /// the one `to`, and a menu in it; a field to `find` in it that takes the focus as it shows.
+  struct Cuts {
+    text: [String; 2],
+    to: &'static str,
+    hidden: bool,
+    kept: bool,
+    find: Option<String>,
+  }
+
+  impl Default for Cuts {
+    fn default() -> Self {
+      let text = ["hello world".into(), "other words".into()];
+      Self { text, to: "f", hidden: false, kept: false, find: None }
+    }
+  }
+
+  impl App for Cuts {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.col(Style::new().w(px(300.0)).h(px(200.0)).gap(10.0), |ui| {
+        let [a, b] = &mut self.text;
+        ui.id("f").text_field(a, "");
+        ui.id("g").text_field(b, "");
+        if self.hidden {
+          if self.kept {
+            ui.retain(Id::of("actions"));
+          }
+
+          return;
+        }
+
+        let (to, find) = (Id::of(self.to), &mut self.find);
+        ui.id("actions").menu("Actions", |ui| {
+          if let Some(find) = find {
+            ui.id("find").autofocus().text_field(find, "");
+          }
+
+          if ui.menu_item("Cut").clicked {
+            ui.field_command(to, Command::Cut);
+          }
+
+          ui.id("more").menu("More", |ui| _ = ui.menu_item("Nothing"));
+        });
+      });
+    }
+  }
+
+  /// A menu holding the focus keeps the field's selection for its item to cut, and gives the
+  /// focus back.
+  #[test]
+  fn a_menus_item_cuts_the_selection_it_found() {
+    let mut h = Harness::new(Cuts::default(), Size::new(300.0, 200.0), 1.0);
+    let f = Id::of("f");
+    h.frame();
+    h.click_id(f);
+    h.key('a', CMD);
+    h.click_id(Id::of("actions"));
+    h.frame();
+    h.frame();
+    assert!(h.click_menu_item("Cut"));
+    h.frame();
+    h.frame();
+    assert_eq!((h.app().text[0].as_str(), h.focus_id()), ("", Some(f)));
+  }
+
+  /// A button taking the focus as it shows ends the selection before it, in the frames after.
+  #[test]
+  fn an_element_taking_the_focus_as_it_shows_ends_the_selection() {
+    let mut h = Harness::new(Texts::default(), Size::new(300.0, 200.0), 1.0);
+    let a = Id::of("a");
+    h.frame();
+    select_all(&mut h, a);
+    h.app_mut().ok = true;
+    h.redraw();
+    let frames = (0..5).take_while(|_| h.frame()).count();
+    assert_eq!((h.focus_id(), h.selection(a)), (Some(Id::of("ok")), Some((11, 11))));
+    assert!(frames < 5, "the frames after show it, then stop");
+  }
+
+  /// A field in a menu taking the focus as it shows keeps the selection the menu's item cuts.
+  #[test]
+  fn a_field_in_a_menu_keeps_the_selection_for_its_item() {
+    let cuts = Cuts { find: Some(String::new()), ..Cuts::default() };
+    let mut h = Harness::new(cuts, Size::new(300.0, 200.0), 1.0);
+    let f = Id::of("f");
+    h.frame();
+    h.click_id(f);
+    h.key('a', CMD);
+    h.click_id(Id::of("actions"));
+    h.frame();
+    h.frame();
+    assert_eq!(h.focus_id(), Some(Id::of("find")));
+
+    // A menu opened from that field and closed lends no more than it took.
+    h.click_id(Id::of("more"));
+    h.frame();
+    h.frame();
+    h.key(NamedKey::Escape, Modifiers::empty());
+    h.frame();
+    h.frame();
+    assert_eq!(h.focus_id(), Some(Id::of("find")));
+
+    assert!(h.click_menu_item("Cut"));
+    h.frame();
+    h.frame();
+    assert_eq!(h.app().text[0], "");
+  }
+
+  /// A field that copies its selection as it loses the focus (unless `hidden`, its state kept;
+  /// a label in its place when `swapped`), room to click in, and a button after it that takes
+  /// the focus as it shows, `ok`.
+  #[derive(Default)]
+  struct Leaves {
+    text: String,
+    ok: bool,
+    hidden: bool,
+    swapped: bool,
+  }
+
+  impl App for Leaves {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.col(Style::new().w(px(300.0)).h(px(200.0)), |ui| {
+        if self.swapped {
+          ui.id("f").label("Label");
+          return;
+        }
+
+        if self.hidden {
+          ui.retain(Id::of("f"));
+          ui.retain(Id::of("f").key("edit"));
+          return;
+        }
+
+        if ui.id("f").text_field(&mut self.text, "").blurred {
+          ui.field_command(Id::of("f"), Command::Copy);
+        }
+
+        if self.ok {
+          ui.id("ok").autofocus().button("OK");
+        }
+      });
+    }
+  }
+
+  /// A command queued for a field as it loses the focus runs on its selection: the press held
+  /// across frames, an element after it taking the focus.
+  #[test]
+  fn a_command_queued_on_blur_runs_on_the_selection() {
+    let leaves = Leaves { text: "hello".into(), ..Leaves::default() };
+    let mut h = Harness::new(leaves, Size::new(300.0, 200.0), 1.0);
+    let f = Id::of("f");
+    h.frame();
+    h.click_id(f);
+    h.key('a', CMD);
+    h.frame();
+
+    // A press held across frames.
+    h.press(250.0, 190.0);
+    h.frame();
+    h.frame();
+    h.release(250.0, 190.0);
+    h.frame();
+    assert_eq!(h.clipboard().read().as_deref(), Some("hello"));
+
+    // A button after it taking the focus as it shows.
+    h.clipboard().write("");
+    h.click_id(f);
+    h.key('a', CMD);
+    h.app_mut().ok = true;
+    h.redraw();
+    while h.frame() {}
+    assert_eq!(h.clipboard().read().as_deref(), Some("hello"));
+    assert_eq!((h.focus_id(), h.selection(f)), (Some(Id::of("ok")), Some((5, 5))));
+  }
+
+  /// A focused field hidden, its state kept, or a label built in its place and a click
+  /// elsewhere, ends its selection and the frames stop.
+  #[test]
+  fn a_field_hidden_with_the_focus_ends_its_selection() {
+    for swapped in [false, true] {
+      let leaves = Leaves { text: "hello".into(), ..Leaves::default() };
+      let mut h = Harness::new(leaves, Size::new(300.0, 200.0), 1.0);
+      let f = Id::of("f");
+      h.frame();
+      h.click_id(f);
+      h.key('a', CMD);
+      h.frame();
+
+      // The label keeps the focus, which a click elsewhere takes.
+      (h.app_mut().hidden, h.app_mut().swapped) = (!swapped, swapped);
+      h.redraw();
+      if swapped {
+        h.frame();
+        h.click(250.0, 190.0);
+      }
+
+      let frames = (0..5).take_while(|_| h.frame()).count();
+      assert!(frames < 5, "the frames stop");
+
+      (h.app_mut().hidden, h.app_mut().swapped) = (false, false);
+      h.redraw();
+      h.frame();
+      assert_eq!(h.selection(f), Some((5, 5)), "swapped: {swapped}");
+    }
+  }
+
+  /// A field hidden with its edit menu open, their states kept, ends its selection.
+  #[test]
+  fn a_field_hidden_with_its_edit_menu_ends_its_selection() {
+    let leaves = Leaves { text: "hello".into(), ..Leaves::default() };
+    let mut h = Harness::new(leaves, Size::new(300.0, 200.0), 1.0);
+    let f = Id::of("f");
+    h.frame();
+    h.click_id(f);
+    h.key('a', CMD);
+    let r = h.rect(f).unwrap();
+    h.right_click(r.x + 10.0, r.y + 5.0);
+    h.frame();
+    h.frame();
+    assert!(h.menu_open(f.key("edit")));
+
+    h.app_mut().hidden = true;
+    h.redraw();
+    let frames = (0..5).take_while(|_| h.frame()).count();
+    assert!(frames < 5, "the frames stop");
+
+    h.app_mut().hidden = false;
+    h.redraw();
+    h.frame();
+    assert_eq!(h.selection(f), Some((5, 5)));
+  }
+
+  /// A click around an open menu closes it and keeps the field's selection.
+  #[test]
+  fn a_click_around_a_menu_keeps_the_selection() {
+    let mut h = Harness::new(Cuts::default(), Size::new(300.0, 200.0), 1.0);
+    let f = Id::of("f");
+    h.frame();
+    h.click_id(f);
+    h.key('a', CMD);
+    h.click_id(Id::of("actions"));
+    h.frame();
+    h.frame();
+
+    h.click(250.0, 190.0);
+    h.frame();
+    h.frame();
+    assert_eq!((h.selection(f), h.focus_id()), (Some((0, 11)), Some(f)));
+    assert!(!h.menu_open(Id::of("actions")));
+  }
+
+  /// The window losing its focus with a menu open in a menu gives the focus back, the
+  /// selection kept.
+  #[test]
+  fn a_menu_in_a_menu_gives_the_focus_back() {
+    let mut h = Harness::new(Cuts::default(), Size::new(300.0, 200.0), 1.0);
+    let f = Id::of("f");
+    h.frame();
+    h.click_id(f);
+    h.key('a', CMD);
+    h.click_id(Id::of("actions"));
+    h.frame();
+    h.frame();
+    h.click_id(Id::of("more"));
+    h.frame();
+    h.frame();
+    assert_eq!(h.focus_id(), Some(Id::of("more").key("menu")));
+
+    h.event(Event::Focus(false));
+    h.frame();
+    h.frame();
+    assert_eq!((h.selection(f), h.focus_id()), (Some((0, 11)), Some(f)));
+  }
+
+  /// A menu gone while open (its state kept) holds the focus no more: a click elsewhere ends
+  /// the selection, and the next menu keeps another field's.
+  #[test]
+  fn a_menu_gone_while_open_lends_nothing() {
+    let mut h = Harness::new(Cuts::default(), Size::new(300.0, 200.0), 1.0);
+    let (f, g) = (Id::of("f"), Id::of("g"));
+    h.frame();
+    h.click_id(f);
+    h.key('a', CMD);
+    h.click_id(Id::of("actions"));
+    h.frame();
+
+    // The menu gone, the click elsewhere is the field's focus moving away.
+    (h.app_mut().hidden, h.app_mut().kept) = (true, true);
+    h.frame();
+    h.frame();
+    h.click(250.0, 190.0);
+    h.frame();
+    assert_eq!(h.selection(f), Some((11, 11)));
+
+    // Back once its state is gone, it lends the other field's focus.
+    h.app_mut().kept = false;
+    h.frame();
+    h.frame();
+    (h.app_mut().hidden, h.app_mut().to) = (false, "g");
+    h.frame();
+
+    h.click_id(g);
+    h.key('a', CMD);
+    h.click_id(Id::of("actions"));
+    h.frame();
+    h.frame();
+    assert!(h.click_menu_item("Cut"));
+    h.frame();
+    h.frame();
+    assert_eq!(h.app().text, ["hello world", ""]);
   }
 }

@@ -371,6 +371,7 @@ pub fn layout(t: &mut Tree, win: Size, scale: f32, m: &mut dyn Measure, kept: &m
   t.floats.sort_unstable_by_key(|&i| (float_z(nodes, i), i));
   kept.least.end();
   kept.lines.end();
+  kept.stops.end();
   t.index.clear();
   for (i, n) in t.nodes.iter().enumerate() {
     if t.index.insert(n.id, i as u32).is_some() {
@@ -1401,6 +1402,28 @@ pub(crate) mod tests {
 
     // The preferred width's: the text's lines, once.
     assert_eq!(steady, text.len() - 1);
+  }
+
+  /// Selectable text's caret stops are kept too: a steady layout measures what plain text's
+  /// does, and the stops are those measured first.
+  #[test]
+  fn a_steady_layout_keeps_the_caret_stops() {
+    let text = "a quick brown fox jumps over the lazy dog\nand a second line of it";
+    let frame = |st: UiState| {
+      let mut ui = Ui::new(st, Size::new(400.0, 300.0), None, Duration::ZERO);
+      ui.col(Style::new().w(px(60.0)), |ui| ui.id("t").selectable_text(text, T));
+      let mut m = Counted(0);
+      ui.layout(&mut m, 1.0);
+      let st = ui.finish();
+      (st.last.stops.clone(), m.0, st)
+    };
+
+    let (stops, first, st) = frame(UiState::default());
+    let (again, steady, _) = frame(st);
+    assert_eq!(again, stops);
+    // The lines' widths, as plain text's, and the field's own measure of a character.
+    assert!(stops.len() > text.len() / 2, "{stops:?}");
+    assert!(steady <= text.len() && first > 5 * steady, "{first} then {steady}");
   }
 
   #[test]
