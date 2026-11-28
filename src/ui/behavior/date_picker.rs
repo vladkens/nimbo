@@ -84,6 +84,9 @@ struct Edit {
   /// The digits typed filled the segment before and moved on, nothing typed since: a mark stays.
   moved: bool,
   focused: bool,
+  /// The date as typed while focused, real but not yet in the range, so a day typed before its
+  /// month isn't lost to the range (`01` of November under a 28 November minimum, then `12`).
+  draft: Option<Date>,
 }
 
 impl Ui<'_> {
@@ -115,13 +118,16 @@ impl Ui<'_> {
     self.a11y(id, Role::TextField).text(&f.format(*date));
     let e = self.state::<Edit>(id);
     let (at, typed, on) = (e.at, e.typed.clone(), control.focused && !control.disabled);
+    // While typed, the date as typed: the app's is the range's nearest.
+    let shown = e.draft.filter(|_| on).unwrap_or(*date);
     let segments = [0, 1, 2].map(|i| {
       let part = f.parts()[i];
       let selected = on && i == at;
-      let text = if selected && !typed.is_empty() { typed.clone() } else { number(*date, part) };
+      let text = if selected && !typed.is_empty() { typed.clone() } else { number(shown, part) };
       let digits = if part == Part::Year { 4 } else { 2 };
       DateSegment { id: id.key(("segment", i)), text, digits, selected }
     });
+
     let (up, down) = (id.key("increment"), id.key("decrement"));
     let on = !control.disabled;
     let (incrementing, decrementing) = (on && self.pressed(up), on && self.pressed(down));
@@ -142,11 +148,19 @@ impl Ui<'_> {
       self.focus(Some(id));
     }
 
+    // A date the app changed meanwhile ends the draft, before anything goes on from it.
+    if e.draft.is_some_and(|d| d.clamp(range.0, range.1) != *date) {
+      e.draft = None;
+    }
+
     let focused = self.focused(id);
-    // Focus coming in selects the first segment; going, it ends what was typed.
+    // Focus coming in selects the first segment; going, it ends what was typed, and the draft.
     match (focused, e.focused) {
       (true, false) => e.at = 0,
-      (false, true) => e.commit(date, f, range),
+      (false, true) => {
+        e.commit(date, f, range);
+        e.draft = None;
+      }
       _ => {}
     }
 
@@ -171,6 +185,7 @@ impl Ui<'_> {
 
     if step != 0 {
       e.commit(date, f, range);
+      e.draft = None;
       *date = stepped(*date, f.parts()[e.at], step).clamp(range.0, range.1);
     }
 
@@ -181,7 +196,7 @@ impl Ui<'_> {
     }
 
     if let Some(d) = self.a11y_value(id).and_then(|s| f.parse(s)) {
-      e.typed.clear();
+      (e.typed, e.draft) = (String::new(), None);
       *date = d.clamp(range.0, range.1);
     }
 
@@ -199,8 +214,15 @@ impl Edit {
     let Ok(n) = typed.parse::<u32>() else { return };
     if f.parts()[self.at] == Part::Year {
       let year = if typed.len() <= 2 { 2000 + n } else { n };
-      *date = Date::clamped(year, date.month(), date.day()).clamp(lo, hi);
+      let d = self.draft.unwrap_or(*date);
+      self.set(date, Date::clamped(year, d.month(), d.day()), (lo, hi));
     }
+  }
+
+  /// `date` the range's nearest to `draft`, which typing goes on from.
+  fn set(&mut self, date: &mut Date, draft: Date, (lo, hi): (Date, Date)) {
+    self.draft = Some(draft);
+    *date = draft.clamp(lo, hi);
   }
 
   /// Selects the segment `by` from the selected one, if there is one, ending what was typed.
@@ -235,8 +257,9 @@ impl Edit {
       let n: u32 = self.typed.parse().unwrap_or(0);
       // The most the segment takes, and whether a digit more could still fit: not past two in a
       // day or a month.
+      let base = self.draft.unwrap_or(*date);
       let max = match part {
-        Part::Day => date.days_in_month(),
+        Part::Day => base.days_in_month(),
         Part::Month => 12,
         Part::Year => 9999,
       };
@@ -244,9 +267,9 @@ impl Edit {
       let digits = self.typed.len();
       let full = if part == Part::Year { digits >= 4 } else { digits >= 2 || n * 10 > max };
       if part != Part::Year && n > 0 {
-        let (y, m, d) = (date.year(), date.month(), date.day());
+        let (y, m, d) = (base.year(), base.month(), base.day());
         let (m, d) = if part == Part::Day { (m, n) } else { (n, d) };
-        *date = Date::clamped(y, m, d).clamp(range.0, range.1);
+        self.set(date, Date::clamped(y, m, d), range);
       }
 
       if full {
@@ -520,6 +543,36 @@ mod tests {
     h.key(NamedKey::Tab, NONE);
     h.type_text("20270102");
     assert_eq!(h.app().date, d(2027, 1, 2));
+  }
+
+  /// A day typed before its month is kept as typed while the range holds the date: `01` of
+  /// November under a 28 November minimum, then `12`, is the first of December.
+  #[test]
+  fn a_day_typed_before_its_month_outlives_the_range() {
+    let start = d(2026, 11, 28);
+    let format = DateFormat::new(DateOrder::DayMonthYear, '.');
+    let mut h = harness(Day { format, range: (start, Date::MAX), ..Day::new(start) });
+    h.key(NamedKey::Tab, NONE);
+    h.type_text("01");
+    assert_eq!(h.app().date, start, "the range's nearest meanwhile");
+    h.type_text(".12.2026");
+    assert_eq!(h.app().date, d(2026, 12, 1));
+    h.key(NamedKey::Tab, NONE);
+    assert_eq!(h.app().date, d(2026, 12, 1));
+  }
+
+  /// A date the app changes while one is typed wins over what was typed before the change.
+  #[test]
+  fn the_apps_date_ends_what_was_typed_before_it() {
+    let format = DateFormat::new(DateOrder::DayMonthYear, '.');
+    let mut h = harness(Day { format, ..Day::new(d(2026, 11, 27)) });
+    h.key(NamedKey::Tab, NONE);
+    h.type_text("0506");
+    h.type_text("27");
+    h.app_mut().date = d(2030, 1, 9);
+    h.frame();
+    h.type_text(".");
+    assert_eq!(h.app().date, d(2027, 1, 9));
   }
 
   #[test]

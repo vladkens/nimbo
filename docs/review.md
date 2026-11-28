@@ -23,6 +23,7 @@ Applying a list of changes in order can collide with itself (all #90):
 - A swap `[a, b]` → `[b, a]` registered place 0's new hotkey while place 1 still held it. Carbon refused the duplicate, `set` returned `Ok`, and one hotkey was gone. Let every old binding go first, then take the new ones.
 - A shorter list: the diff walked the old length, and an index into the new list panicked.
 - A place left as it was but refused now, because an earlier place took its hotkey: a diff by "changed or not" alone skipped it.
+- A date typed a segment at a time was held to its range after each one: `01` of November under a 28 November minimum became the 28th before `12` made it December, and the day was lost (#123). Hold what is typed as typed, and the range on what the app sees.
 
 ## Work deferred to later
 
