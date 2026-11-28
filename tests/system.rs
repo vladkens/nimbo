@@ -9,12 +9,12 @@
 #[expect(dead_code, reason = "its main and what this file doesn't use")]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
 #[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
-mod example;
+mod system;
 
-use example::{COUNT, KINDS, LAST, LID, Seen, System};
 use nimbo::harness::Image;
 use nimbo::system::Change;
 use nimbo::{Event, Harness, Id, Rect, Size};
+use system::{COUNT, KINDS, LAST, LID, Seen, System};
 
 fn closed() -> Option<bool> {
   Some(true)
@@ -89,7 +89,7 @@ fn other_events_change_nothing() {
 fn the_tray_menu() {
   let mut s = Seen::new(None);
   let labels =
-    |s: &Seen| example::menu(s).items.iter().map(|i| i.label().to_owned()).collect::<Vec<_>>();
+    |s: &Seen| system::menu(s).items().iter().map(|i| i.label().to_owned()).collect::<Vec<_>>();
   assert_eq!(labels(&s)[..2], ["Lid: None", "Audio changes: 0"]);
   s.add(Change::AudioInputs, Some(false));
   s.add(Change::DefaultInput, Some(false));

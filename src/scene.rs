@@ -8,7 +8,6 @@ use std::fmt::{Display, Write};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::bitmap::premultiply;
 pub use crate::geom::{Axis, Color, Point, Rect, Size, alpha, mix, rgb};
 use crate::text::{Font, Metrics, TextSystem};
 
@@ -164,6 +163,16 @@ impl Layer {
 }
 
 /// Instance counts of a frame.
+/// `rgba`'s straight pixels premultiplied, in place.
+pub(crate) fn premultiply(rgba: &mut [u8]) {
+  for p in rgba.as_chunks_mut::<4>().0 {
+    let a = p[3] as u32;
+    for c in &mut p[..3] {
+      *c = ((*c as u32 * a + 127) / 255) as u8;
+    }
+  }
+}
+
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Counts {
@@ -339,13 +348,10 @@ impl Images {
 /// What `App::paint` draws with: the frame's inputs, and its draw list, text and images
 /// behind the paint API.
 pub struct Frame<'a> {
-  pub size: Size,
-  /// Pixels per point.
-  pub scale: f32,
-  /// The pointer in points, `None` when it is outside the view.
-  pub mouse: Option<Point>,
-  /// Time from the runtime's clock: real in a window, virtual in the harness.
-  pub now: Duration,
+  pub(crate) size: Size,
+  pub(crate) scale: f32,
+  pub(crate) mouse: Option<Point>,
+  pub(crate) now: Duration,
   pub(crate) scene: &'a mut Scene,
   pub(crate) text: &'a mut TextSystem,
   pub(crate) images: &'a mut Images,
@@ -353,6 +359,26 @@ pub struct Frame<'a> {
 }
 
 impl Frame<'_> {
+  /// The view's size in points.
+  pub fn size(&self) -> Size {
+    self.size
+  }
+
+  /// Pixels per point.
+  pub fn scale(&self) -> f32 {
+    self.scale
+  }
+
+  /// The pointer in points, `None` when it is outside the view.
+  pub fn mouse(&self) -> Option<Point> {
+    self.mouse
+  }
+
+  /// Time from the runtime's clock: real in a window, virtual in the harness.
+  pub fn now(&self) -> Duration {
+    self.now
+  }
+
   /// Asks for another frame after this one (a running animation).
   pub fn animate(&mut self) {
     self.animate = true;
@@ -428,14 +454,6 @@ impl Frame<'_> {
   /// The images [Frame::image] draws: add one once and keep its id, they last across frames.
   pub fn images(&mut self) -> &mut Images {
     self.images
-  }
-
-  /// The shaping API for custom paint, such as a text widget of the app's own: shaped lines and
-  /// their glyphs ([TextSystem::layout]), caret positions ([TextSystem::carets]), measures and
-  /// metrics, in points; also whether a kept line is still current, whether a glyph draws in
-  /// colour, the scale and whether glyphs are smoothed.
-  pub fn text_system(&mut self) -> &mut TextSystem {
-    self.text
   }
 
   /// Draws `s`, anything `Display` (formatted into a buffer the frame keeps), with its baseline

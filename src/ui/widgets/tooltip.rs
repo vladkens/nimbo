@@ -1,82 +1,25 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The tooltip: a line or two of small text under the pointer resting on an element.
+//! The System Settings tooltip ([TooltipHelpStyle]) over the headless one's timing and placement
+//! ([HelpStyle]): a line or two of small text in a rounded box with a small shadow.
 
-use std::time::Duration;
+use crate::ui::{HelpConfiguration, HelpStyle, TextStyle, Ui, px};
 
-use crate::scene::Point;
-use crate::ui::{Float, Id, TextStyle, Transition, Ui, UnitPoint, px};
+/// macOS's tooltip: the theme's tip fill and text, small, padded 6 by 3 (20 high for a line),
+/// corners of 5, the menu's edge and a small shadow, as wide as its widest line up to 260. The
+/// window's default, which the shell puts.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TooltipHelpStyle;
 
-/// Paint order of tooltips among overlays: above menus and dialogs.
-const TIP_Z: i32 = 2000;
-/// A tooltip fades in and out over 125 ms.
-const TIP_FADE: Transition = Transition::linear(8.0);
-
-/// When a tooltip shows, from the pointer coming onto its target, and where the pointer was
-/// then.
-#[derive(Default)]
-struct Tip {
-  due: Option<Duration>,
-  at: Option<Point>,
-}
-
-/// Until when the next tooltip shows at once ([crate::Theme::tip_warm]), across targets.
-#[derive(Default)]
-struct Warm(Duration);
-
-impl Ui<'_> {
-  /// Shows `text` under the pointer once it has rested on `target` for
-  /// [crate::Theme::tip_delay], or at once within [crate::Theme::tip_warm] of another tooltip
-  /// showing, until it leaves or a button goes down. As macOS places one: its left edge at the
-  /// pointer, its top 19 below it, where the pointer was when it showed; moved into the window
-  /// near its edges. Run for each element [Ui::take_tooltips] hands out, which made `text` the
-  /// target's description for assistive technology; the tip is `target.key("tip")`, an overlay
-  /// that doesn't take the pointer.
-  pub(crate) fn tooltip(&mut self, target: Id, text: &str) {
-    let t = self.theme();
-    let tip = target.key("tip");
-    let over = self.hovered(target) && self.press().is_none();
-    let (now, mouse, size) = (self.now(), self.mouse(), self.size());
-    let warm = now < self.state::<Warm>(Id::of("nimbo.tip")).0;
-    let st = self.state::<Tip>(tip);
-    if !over {
-      (st.due, st.at) = (None, None);
-      return;
-    }
-
-    let due = *st.due.get_or_insert(if warm { now } else { now + t.tip_delay });
-    if now < due {
-      self.animate(tip, 0.0, TIP_FADE);
-      self.request_frame_in(due - now);
-      return;
-    }
-
-    let Some(p) = st.at.or(mouse) else { return };
-    st.at = Some(p);
-    self.state::<Warm>(Id::of("nimbo.tip")).0 = now + t.tip_warm;
-    let fade = self.animate(tip, 1.0, TIP_FADE);
-    // Placed by its size, measured last frame: built again before painting when it showed
-    // only now, or its size changed.
-    self.settle(tip);
-    // Measured last frame: moved left to fit the window, above the pointer near the bottom.
-    let (w, h) = self.rect(tip).map_or((0.0, 0.0), |r| (r.w, r.h));
-    let x = p.x.min(size.w - 4.0 - w).max(4.0);
-    let (y, ay) = match p.y + 19.0 + h.max(20.0) + 4.0 > size.h {
-      true => (p.y - 4.0, 1.0),
-      false => (p.y + 19.0, 0.0),
-    };
-
-    let at = Float::window().anchor(UnitPoint::new(0.0, ay)).offset(x, y).z(TIP_Z);
+impl HelpStyle for TooltipHelpStyle {
+  fn make_body(&self, ui: &mut Ui<'_>, c: HelpConfiguration<'_>) {
+    let t = ui.theme();
     let text_style = TextStyle::new(t.small, t.tip_text).line_h((t.small.size * 1.3).round());
     // As wide as its widest line, as macOS's: the layout would keep the width before wrapping.
     let (boxed, pads) = (t.tip(), t.tip().pad[1] + t.tip().pad[3]);
-    let widest = self.measure_wrapped(text, text_style, boxed.max[0] - pads).w;
+    let widest = ui.measure_wrapped(c.text(), text_style, boxed.max[0] - pads).w;
     let boxed = if widest > 0.0 { boxed.w(px(widest.ceil() + pads)) } else { boxed };
-    self
-      .with_id(tip)
-      .allows_hit_testing(false)
-      .float(at)
-      .row(boxed.opacity(fade), |ui| ui.text(text, text_style));
+    ui.row(boxed.opacity(c.opacity()), |ui| ui.text(c.text(), text_style));
   }
 }
 
@@ -84,8 +27,8 @@ impl Ui<'_> {
 mod tests {
   use std::time::Duration;
 
+  use crate::Harness;
   use crate::app::App;
-  use crate::harness::Harness;
   use crate::scene::{Frame, Rect, Size};
   use crate::ui::{FormRow, FormStyle, Id, LinePattern, Style, Theme, Tone, Ui, grow, px};
 

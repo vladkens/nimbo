@@ -26,9 +26,18 @@
 
 mod system;
 
+pub(crate) use sealed::Sealed;
 pub use system::{Offer, Snapshot, SystemClipboard};
 
-pub trait Clipboard {
+mod sealed {
+  /// Keeps [super::Clipboard] to the crate's own clipboards: public in a private module.
+  pub trait Sealed {}
+}
+
+/// A clipboard text edits use, as [crate::Ui::clipboard] hands it: the window's system clipboard,
+/// or an in-memory one in the harness. Sealed: nimbo's own are the only ones, so it may gain
+/// methods.
+pub trait Clipboard: Sealed {
   fn read(&self) -> Option<String>;
   fn write(&mut self, s: &str);
 
@@ -42,6 +51,8 @@ pub trait Clipboard {
 /// An in-memory clipboard: the harness uses it so tests never touch the real pasteboard.
 #[derive(Default)]
 pub struct MemClipboard(pub Option<String>);
+
+impl Sealed for MemClipboard {}
 
 impl Clipboard for MemClipboard {
   fn read(&self) -> Option<String> {

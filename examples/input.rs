@@ -12,9 +12,12 @@
 // A Windows app, not a console one: no terminal opens with its window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[path = "common/example.rs"]
+mod example;
+
 use nimbo::{
   App, Binding, Color, Command, Config, Cursor, Cx, Event, Float, Frame, Key, MouseButton,
-  NamedKey, Point, Quad, Rect, Shortcut, Size, Style, Ui, bind, mix, px, rgb,
+  NamedKey, Point, Quad, Rect, Shortcut, Size, Style, Ui, mix, px, rgb,
 };
 
 pub const SIZE: Size = Size::new(480.0, 320.0);
@@ -40,8 +43,8 @@ pub const WHITE: Color = rgb(0xffffff);
 
 /// Copy and paste, as the edit menu binds them: Cmd on macOS, Ctrl elsewhere.
 const KEYS: &[Binding] = &[
-  bind(Shortcut::char('c').cmd(), Command::Copy),
-  bind(Shortcut::char('v').cmd(), Command::Paste),
+  Binding::new(Shortcut::char('c').cmd(), Command::Copy),
+  Binding::new(Shortcut::char('v').cmd(), Command::Paste),
 ];
 
 pub struct Input {
@@ -98,7 +101,7 @@ impl Input {
           _ => return false,
         };
 
-        self.move_to(Point::new(self.pos.x + dx, self.pos.y + dy), cx.size);
+        self.move_to(Point::new(self.pos.x + dx, self.pos.y + dy), cx.size());
       }
       Event::Command(Command::Copy) => {
         let text = format!("{},{}", self.pos.x.round(), self.pos.y.round());
@@ -107,7 +110,7 @@ impl Input {
       Event::Command(Command::Paste) => {
         let Some(text) = cx.clipboard().read() else { return false };
         let Some(p) = parse_point(&text) else { return false };
-        self.move_to(p, cx.size);
+        self.move_to(p, cx.size());
       }
       Event::Mods(m) => {
         let was = std::mem::replace(&mut self.shift, m.shift());
@@ -125,7 +128,7 @@ impl Input {
   /// under a pointer that stays (arrows, a paste, the wheel). Returns whether it changed.
   fn track(&mut self, cx: &mut Cx) -> bool {
     let was = self.hover;
-    self.hover = cx.mouse.is_some_and(|p| self.square().contains(p));
+    self.hover = cx.mouse().is_some_and(|p| self.square().contains(p));
     self.hover != was
   }
 
@@ -133,7 +136,7 @@ impl Input {
     match *ev {
       Event::MouseMove { pos, .. } => match self.grab {
         Some(g) => {
-          self.move_to(Point::new(pos.x - g.x, pos.y - g.y), cx.size);
+          self.move_to(Point::new(pos.x - g.x, pos.y - g.y), cx.size());
           true
         }
         None => false,
@@ -153,7 +156,7 @@ impl Input {
 
         // Grown or shrunk about its centre.
         let corner = Point::new(self.pos.x - grow / 2.0, self.pos.y - grow / 2.0);
-        self.move_to(corner, cx.size);
+        self.move_to(corner, cx.size());
         grow != 0.0
       }
       _ => false,
@@ -168,7 +171,7 @@ impl App for Input {
 
   fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
     // Back inside a window that shrank since, before the event sees it.
-    self.move_to(self.pos, cx.size);
+    self.move_to(self.pos, cx.size());
     let used = self.handle(cx, ev);
     self.track(cx) || used
   }
@@ -185,11 +188,11 @@ impl App for Input {
   fn paint(&mut self, f: &mut Frame) {
     // Kept inside a window that shrank, its hover from where the pointer is now; the cursor
     // follows at the next event.
-    self.move_to(self.pos, f.size);
+    self.move_to(self.pos, f.size());
     self.hover = f.hover(self.square());
-    f.rect(Rect::new(0.0, 0.0, f.size.w, f.size.h), self.bg(), 0.0);
+    f.rect(Rect::new(0.0, 0.0, f.size().w, f.size().h), self.bg(), 0.0);
     if self.focused {
-      f.rect(Rect::new(0.0, 0.0, f.size.w, BAR), GREEN, 0.0);
+      f.rect(Rect::new(0.0, 0.0, f.size().w, BAR), GREEN, 0.0);
     }
 
     let sq = self.square();
@@ -211,5 +214,6 @@ pub fn parse_point(s: &str) -> Option<Point> {
 }
 
 fn main() {
-  nimbo::run_example(Config::new("input", SIZE.w, SIZE.h), Input::default(), |_| {});
+  let args: Vec<String> = std::env::args().skip(1).collect();
+  example::run(Config::new("input", SIZE.w, SIZE.h), Input::default(), &args, |_| {});
 }

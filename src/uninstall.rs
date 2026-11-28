@@ -19,16 +19,16 @@
 //! ```no_run
 //! use std::time::Duration;
 //!
-//! use nimbo::{AppInfo, Presence, instance, paths, uninstall};
+//! use nimbo::{AppInfo, instance, paths, uninstall};
 //!
-//! const INFO: AppInfo =
-//!   AppInfo { id: "com.example.app", name: "App", presence: Presence::Regular };
+//! const INFO: AppInfo = AppInfo::new("com.example.app", "App");
 //! instance::quit_and_wait(&INFO, Duration::from_secs(5))?;
 //! for step in uninstall::system(&INFO) {
 //!   println!("{step}");
 //! }
 //!
-//! let dirs = [paths::data_dir(INFO.id), paths::config_dir(INFO.id), paths::cache_dir(INFO.id)];
+//! let id = INFO.id();
+//! let dirs = [paths::data_dir(id), paths::config_dir(id), paths::cache_dir(id)];
 //! for path in uninstall::outermost(dirs).into_iter().chain(uninstall::app_path()) {
 //!   if let Err(e) = uninstall::remove(&path) {
 //!     println!("could not remove {}: {e}", path.display());
@@ -46,14 +46,15 @@ use std::{fmt, fs, io, thread};
 
 use crate::paths::{OS, Os};
 use crate::platform::uninstall as imp;
-use crate::{AppInfo, autostart};
+use crate::{AppInfo, Error, autostart};
 
 /// One thing [system] undid, or why it couldn't; shown as `<what>` or `<what> failed: <why>`.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct Step {
   /// What was undone: `launch at login off`.
   pub what: &'static str,
-  pub result: Result<(), String>,
+  pub result: Result<(), Error>,
 }
 
 impl fmt::Display for Step {
@@ -206,7 +207,8 @@ mod tests {
   #[test]
   fn steps_read_as_what_was_done() {
     let done = Step { what: "launch at login off", result: Ok(()) };
-    let failed = Step { what: "permissions reset", result: Err("no such app".into()) };
+    let failed =
+      Step { what: "permissions reset", result: Err(Error::System("no such app".into())) };
     assert_eq!(done.to_string(), "launch at login off");
     assert_eq!(failed.to_string(), "permissions reset failed: no such app");
   }

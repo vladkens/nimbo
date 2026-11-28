@@ -26,14 +26,13 @@ use std::rc::{Rc, Weak};
 use std::sync::mpsc::{Sender, channel};
 use std::time::Instant;
 
-use keyboard_types::NamedKey;
-
 use super::super::dbus::{self, Gv, PORTAL, PORTAL_PATH as PATH, V, portal, request};
+use super::super::keys::keysym;
 use super::super::{Fp, P, S, gtk};
 use super::grab::Grab;
-use crate::Modifiers;
 use crate::hotkey::{Edge, Listener, MAX, OnEdge, Status};
-use crate::keys::{Hotkey, Key, Shortcut};
+use crate::keys::{Hotkey, Shortcut};
+use crate::{Error, Modifiers};
 
 const SHORTCUTS: &str = "org.freedesktop.portal.GlobalShortcuts";
 /// The first place's shortcut id, the others' after a dash ([id]).
@@ -205,14 +204,17 @@ impl Hotkeys {
   pub fn status(&self, out: &mut Status) {
     let s = &self.0;
     out.listener = s.listener.get();
-    out.listener_error = s.error.borrow().clone();
+    out.listener_error = s.error.borrow().clone().map(Error::System);
     let grab = s.grab.borrow();
     out.counts.listener = s.events.get() + grab.as_ref().map_or(0, Grab::events);
     if s.escape.get() {
+      let portal = "the GlobalShortcuts portal can't take Escape";
       out.escape_error = match x11(s) {
-        true if grab.is_none() => Some("X11's grab takes Escape once a hotkey is set".into()),
-        true => s.grab_escape.borrow().clone(),
-        false => Some("the GlobalShortcuts portal can't take Escape".into()),
+        true if grab.is_none() => {
+          Some(Error::System("X11's grab takes Escape once a hotkey is set".into()))
+        }
+        true => s.grab_escape.borrow().clone().map(Error::System),
+        false => Some(Error::Unsupported(portal.into())),
       };
     }
   }
@@ -374,52 +376,6 @@ pub fn trigger(k: &Shortcut) -> Option<String> {
   Some(held.collect::<String>() + &keysym(k.key)?)
 }
 
-/// The xkb keysym name of `key` (`xkbcommon-keysyms.h` without `XKB_KEY_`): a letter or digit
-/// itself, `space`, `minus`, `Return`, `Page_Up`, `F12`.
-pub fn keysym(key: Key) -> Option<String> {
-  let name = match key {
-    Key::Char(c) if c.is_ascii_alphanumeric() => return Some(c.to_ascii_lowercase().to_string()),
-    Key::Char(c) => match c {
-      ' ' => "space",
-      '-' => "minus",
-      '=' => "equal",
-      '[' => "bracketleft",
-      ']' => "bracketright",
-      '\\' => "backslash",
-      ';' => "semicolon",
-      '\'' => "apostrophe",
-      ',' => "comma",
-      '.' => "period",
-      '/' => "slash",
-      '`' => "grave",
-      _ => return None,
-    },
-    Key::Named(k) => match k {
-      NamedKey::Enter => "Return",
-      NamedKey::Tab => "Tab",
-      NamedKey::Backspace => "BackSpace",
-      NamedKey::Delete => "Delete",
-      NamedKey::Escape => "Escape",
-      NamedKey::ArrowUp => "Up",
-      NamedKey::ArrowDown => "Down",
-      NamedKey::ArrowLeft => "Left",
-      NamedKey::ArrowRight => "Right",
-      NamedKey::Home => "Home",
-      NamedKey::End => "End",
-      NamedKey::PageUp => "Page_Up",
-      NamedKey::PageDown => "Page_Down",
-      NamedKey::Insert => "Insert",
-      k => {
-        let name = k.to_string();
-        let f = name.strip_prefix('F').is_some_and(|n| n.parse::<u8>().is_ok());
-        return f.then_some(name);
-      }
-    },
-  };
-
-  Some(name.into())
-}
-
 // MARK: Callbacks
 
 /// `GSourceFunc`: the places set since the idle was added bind together.
@@ -526,7 +482,7 @@ mod tests {
     h.escape(true);
     let s = h.status();
     assert!(!s.escape);
-    assert!(s.escape_error.is_some_and(|e| e.contains("Escape")));
+    assert!(s.escape_error.is_some_and(|e| e.to_string().contains("Escape")));
     h.escape(false);
     assert_eq!((h.status().escape, h.status().escape_error), (false, None));
   }
@@ -571,7 +527,5 @@ mod tests {
     assert_eq!(trigger(&chord("ctrl+pagedown")).as_deref(), Some("CTRL+Page_Down"));
     assert_eq!(trigger(&chord("alt+'")).as_deref(), Some("ALT+apostrophe"));
     assert_eq!(trigger(&chord("ctrl+K")).as_deref(), Some("CTRL+k"));
-    assert_eq!(keysym(Key::Named(NamedKey::Backspace)).as_deref(), Some("BackSpace"));
-    assert_eq!(keysym(Key::Char('!')), None);
   }
 }

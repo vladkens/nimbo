@@ -10,11 +10,14 @@
 // A Windows app, not a console one: no terminal opens with its window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[path = "common/example.rs"]
+mod example;
+
 use std::time::Duration;
 
 use nimbo::{
-  Align, App, Axis, ButtonRole, Config, Id, Item, List, Menu, Modifiers, Selection, Shortcut,
-  Split, Style, Tabs, Tag, TextStyle, Ui, grow,
+  Align, App, Axis, ButtonRole, Config, Harness, Id, Item, List, Menu, Modifiers, Selection,
+  Shortcut, Split, Style, Tabs, Tag, TextStyle, Ui, grow,
 };
 
 pub const ROWS: usize = 100_000;
@@ -105,7 +108,7 @@ impl Lists {
   fn toolbar(&mut self, ui: &mut Ui) {
     let t = ui.theme();
     let bar = Style::new().w(grow()).pad_xy(12.0, 8.0).gap(10.0).align(Align::Start, Align::Center);
-    ui.row(bar.bg(t.panel).borders([0.0, 0.0, 1.0, 0.0], t.line), |ui| {
+    ui.row(bar.bg(t.panel()).borders([0.0, 0.0, 1.0, 0.0], t.line()), |ui| {
       let none = self.sel.is_empty();
       let mut run = None;
       ui.id(MENU).menu("Actions", |ui| {
@@ -174,7 +177,7 @@ impl Lists {
 
   fn details(&self, ui: &mut Ui) {
     let t = ui.theme();
-    let text = TextStyle::new(t.font, t.text);
+    let text = TextStyle::new(t.font(), t.text());
     // Each title over its value, the pairs further apart than a title from its value.
     let pair = Style::new().w(grow()).gap(6.0);
     ui.col(Style::new().grow().pad(16.0).gap(16.0), |ui| {
@@ -203,9 +206,9 @@ impl Lists {
 
   fn notes(&self, ui: &mut Ui) {
     let t = ui.theme();
-    let text = TextStyle::new(t.font, t.text).line_h(19.0);
+    let text = TextStyle::new(t.font(), t.text()).line_h(19.0);
     let area = Style::new().grow().pad(16.0).gap(12.0);
-    ui.id(NOTES).fade_edges(t.bg, 28.0).scroll_area(area, |ui| {
+    ui.id(NOTES).fade_edges(t.bg(), 28.0).scroll_area(area, |ui| {
       for (i, p) in NOTE.iter().cycle().take(12).enumerate() {
         ui.text(format_args!("{}. {p}", i + 1), text);
       }
@@ -224,7 +227,7 @@ const NOTE: [&str; 3] = [
 impl App for Lists {
   fn view(&mut self, ui: &mut Ui) {
     let t = ui.theme();
-    ui.col(Style::new().grow().bg(t.bg), |ui| {
+    ui.col(Style::new().grow().bg(t.bg()), |ui| {
       self.toolbar(ui);
 
       // The split and the tabs edit copies: their panes borrow the app.
@@ -248,9 +251,10 @@ impl App for Lists {
 
 fn main() {
   // The shot: rows 3 to 6 selected, the list scrolled a little, the pointer on the menu.
-  nimbo::run_example(Config::new("lists", 760.0, 480.0), Lists::new(), |h| {
+  let args: Vec<String> = std::env::args().skip(1).collect();
+  example::run(Config::new("lists", 760.0, 480.0), Lists::new(), &args, |h| {
     h.frame();
-    let row = |h: &nimbo::Harness<Lists>, k: u64| h.rect(Id::of(LIST).key(("row", k))).unwrap();
+    let row = |h: &Harness<Lists>, k: u64| h.rect(Id::of(LIST).key(("row", k))).unwrap();
     let r = row(h, 2);
     h.click(r.x + 20.0, r.y + r.h / 2.0);
     let r = row(h, 5);

@@ -12,33 +12,34 @@
 
 use std::path::Path;
 
+use crate::Error;
 use crate::platform::open as imp;
 
 /// Opens `url` (`https://…`, `mailto:…`, a settings pane's scheme) in the app the OS has for it;
-/// `Err` when it is no URL or nothing could be started.
-pub fn url(url: &str) -> Result<(), String> {
+/// [Error::Invalid] when it is no URL, [Error::System] when nothing could be started.
+pub fn url(url: &str) -> Result<(), Error> {
   if !url.contains(':') {
-    return Err(format!("{url:?} is not a URL"));
+    return Err(Error::Invalid(format!("{url:?} is not a URL")));
   }
 
-  imp::url(url)
+  imp::url(url).map_err(Error::System)
 }
 
 /// Opens the file or folder at `path` in its app: a folder in the file manager, a document in
 /// its editor.
-pub fn path(path: &Path) -> Result<(), String> {
-  imp::path(&absolute(path)?)
+pub fn path(path: &Path) -> Result<(), Error> {
+  imp::path(&absolute(path)?).map_err(Error::System)
 }
 
 /// Shows the file or folder at `path` in the file manager, selected in its folder where the file
 /// manager can (Finder, Explorer, the file managers of GNOME and KDE); else its folder opens.
-pub fn reveal(path: &Path) -> Result<(), String> {
+pub fn reveal(path: &Path) -> Result<(), Error> {
   let path = absolute(path)?;
   if !path.exists() {
-    return Err(format!("{} does not exist", path.display()));
+    return Err(Error::Invalid(format!("{} does not exist", path.display())));
   }
 
-  imp::reveal(&path)
+  imp::reveal(&path).map_err(Error::System)
 }
 
 /// The file manager's name as the user knows it, for a button: `format!("Show in {}",
@@ -48,8 +49,8 @@ pub fn file_manager() -> &'static str {
   imp::file_manager()
 }
 
-fn absolute(path: &Path) -> Result<std::path::PathBuf, String> {
-  std::path::absolute(path).map_err(|e| format!("{}: {e}", path.display()))
+fn absolute(path: &Path) -> Result<std::path::PathBuf, Error> {
+  std::path::absolute(path).map_err(|e| Error::System(format!("{}: {e}", path.display())))
 }
 
 /// `path` as a `file://` URI, each byte outside the unreserved ones and `/` escaped (RFC 3986):

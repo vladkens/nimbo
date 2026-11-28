@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use common::{diff, mid};
 use files::{Files, OPEN, SAVE, ZONE};
-use nimbo::{Event, FileDialog, Harness, Id, Point, Size};
+use nimbo::{Event, FileDialog, FileDialogKind, Harness, Id, Point, Size};
 
 fn files() -> Harness<Files> {
   let mut h = Harness::new(Files::default(), Size::new(420.0, 300.0), 2.0);
@@ -48,8 +48,8 @@ fn save_suggests_a_name_and_a_cancel_comes_back() {
   let mut h = files();
   h.click_id(Id::of(SAVE));
   let asked = h.file_dialog(None).expect("the save panel");
-  assert_eq!(asked.kind, nimbo::FileDialogKind::Save);
-  assert_eq!(asked.name.as_deref(), Some("notes.txt"));
+  assert_eq!(asked.kind(), FileDialogKind::Save);
+  assert_eq!(asked.get_name(), Some("notes.txt"));
   assert_eq!(h.app().picked, Some(None));
 }
 

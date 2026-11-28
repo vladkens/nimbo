@@ -10,6 +10,9 @@
 // A Windows app, not a console one: no terminal opens with its window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[path = "common/example.rs"]
+mod example;
+
 use std::path::PathBuf;
 
 use nimbo::{App, Config, Cx, Event, FileDialog, Id, Point, Style, Ui, alpha, mix};
@@ -49,7 +52,7 @@ impl App for Files {
 
   fn view(&mut self, ui: &mut Ui) {
     let t = ui.theme();
-    ui.col(Style::new().grow().pad(20.0).gap(12.0).bg(t.bg), |ui| {
+    ui.col(Style::new().grow().pad(20.0).gap(12.0).bg(t.bg()), |ui| {
       ui.row(Style::new().gap(8.0), |ui| {
         if ui.id(OPEN).button("Open…").clicked {
           ui.file_dialog(FileDialog::open("Pick a text file").types(&["txt", "md"]));
@@ -66,7 +69,7 @@ impl App for Files {
       }
 
       let lit = ui.hot(Id::of(ZONE), self.over);
-      let (line, fill) = (mix(t.line, t.accent, lit), alpha(t.accent, 0.12 * lit));
+      let (line, fill) = (mix(t.line(), t.accent(), lit), alpha(t.accent(), 0.12 * lit));
       let zone = Style::new().grow().center().gap(4.0).radius(10.0).border(1.5, line).bg(fill);
       ui.id(ZONE).col(zone, |ui| match self.dropped.is_empty() {
         true => ui.label("Drop files here"),
@@ -78,7 +81,8 @@ impl App for Files {
 
 fn main() {
   // The shot: two files dragged over the zone.
-  nimbo::run_example(Config::new("Files", 420.0, 300.0), Files::default(), |h| {
+  let args: Vec<String> = std::env::args().skip(1).collect();
+  example::run(Config::new("Files", 420.0, 300.0), Files::default(), &args, |h| {
     h.frame();
     let paths = vec![PathBuf::from("/tmp/notes.txt"), PathBuf::from("/tmp/todo.md")];
     h.event(Event::DragOver { pos: Point::new(210.0, 200.0), paths });

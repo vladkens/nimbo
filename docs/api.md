@@ -2,7 +2,7 @@
 
 Each building block of nimbo beside its SwiftUI counterpart, as the gallery shows it live (`cargo run --release --example gallery`, a page per block in its variants). A block aims at its SwiftUI counterpart's behaviour and API shape without copying it 1:1. The pictures are the gallery's, in the light appearance, kept on the repo's `assets` branch: `make api-shots` makes them and this file again from the gallery's table (`examples/gallery.rs`), so a block changes there.
 
-On macOS SwiftUI's `List` has neither of the grouped styles (`InsetGroupedListStyle` and `GroupedListStyle` are iOS's), so there is no name to take: nimbo's `ListStyle::Grouped` is named after the grouped `Form` (`.formStyle(.grouped)`), whose plates its sections share.
+On macOS SwiftUI's `List` has neither of the grouped styles (`InsetGroupedListStyle` and `GroupedListStyle` are iOS's): nimbo's `InsetGroupedListStyle` takes the iOS name for the plates of the grouped `Form` (`.formStyle(.grouped)`), which its sections share.
 
 ## Layout
 
@@ -60,7 +60,7 @@ nimbo: `ui.float(Float::parent().attach(UnitPoint::TOP_TRAILING).anchor(UnitPoin
 
 SwiftUI: `Text("Title").font(.headline).foregroundStyle(.secondary)`
 
-nimbo: `ui.text("Title", TextStyle::new(t.bold, t.muted))`
+nimbo: `ui.text("Title", TextStyle::new(t.bold(), t.secondary()))`
 
 ![Text](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/text.png)
 
@@ -92,7 +92,7 @@ nimbo: `ui.text("WER", s.underline(LinePattern::Dot)); s.strikethrough(LinePatte
 
 SwiftUI: `Text(log).textSelection(.enabled)`
 
-nimbo: `ui.selectable(&log)`
+nimbo: `ui.selectable_text(&log, t.body())`
 
 ![Selectable text](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/selectable-text.png)
 
@@ -108,7 +108,7 @@ nimbo: `if ui.link("Learn more…").clicked { nimbo::open::url(URL)? }`
 
 SwiftUI: `Image(systemName: "gear")`
 
-nimbo: `ui.icon(Icon::GEAR, 20.0, t.text)`
+nimbo: `ui.icon(Icon::GEAR, 20.0, t.text())`
 
 ![Image](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/image.png)
 
@@ -134,7 +134,7 @@ nimbo: `let photo = Bitmap::decode(&file, 240)?; ui.aspect_ratio(ContentMode::Fi
 
 SwiftUI: `Button("Save") { … }.buttonStyle(.borderedProminent)`
 
-nimbo: `Button::new("Save").style(ButtonStyle::BorderedProminent).show(ui)`
+nimbo: `ui.button_style(&BorderedProminentButtonStyle).button("Save")`
 
 ![Button](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/button.png)
 
@@ -154,6 +154,22 @@ nimbo: `ui.icon_button(Icon::TRASH)`
 
 ![Icon button](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/icon-button.png)
 
+### Button style
+
+SwiftUI: `HStack { Button("Cut") { … }; Button("Copy") { … } }.buttonStyle(.borderless)`
+
+nimbo: `ui.button_style(&BorderlessButtonStyle).row(style, |ui| { ui.button("Cut"); ui.button("Copy"); }); ui.button("Paste")`
+
+![Button style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/button-style.png)
+
+### Custom button style
+
+SwiftUI: `struct Pill: ButtonStyle { func makeBody(configuration: Configuration) -> some View { configuration.label.padding(…).background(…) } }`
+
+nimbo: `impl ButtonStyle for Pill { fn make_body(&self, ui: &mut Ui, mut c: ButtonConfiguration) { ui.row(style, |ui| c.label(ui, s)); } } ui.button_style(&Pill).button("Pill")`
+
+![Custom button style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/custom-button-style.png)
+
 ### Switch
 
 SwiftUI: `Toggle("Live", isOn: $live)`
@@ -166,9 +182,33 @@ nimbo: `ui.toggle(&mut self.live, "Live")`
 
 SwiftUI: `Toggle("Wrap", isOn: $wrap).toggleStyle(.checkbox)`
 
-nimbo: `ui.checkbox(&mut self.wrap, "Wrap")`
+nimbo: `ui.toggle_style(&CheckboxToggleStyle).toggle(&mut self.wrap, "Wrap")`
 
 ![Check box](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/check-box.png)
+
+### Button toggle
+
+SwiftUI: `Toggle("Bold", isOn: $bold).toggleStyle(.button)`
+
+nimbo: `ui.toggle_style(&ButtonToggleStyle).toggle(&mut self.bold, "Bold")`
+
+![Button toggle](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/button-toggle.png)
+
+### Toggle style
+
+SwiftUI: `VStack { Toggle("Wrap", …); Toggle("Numbers", …) }.toggleStyle(.checkbox)`
+
+nimbo: `ui.toggle_style(&CheckboxToggleStyle).col(style, |ui| { ui.toggle(&mut self.wrap, "Wrap"); ui.toggle(&mut self.numbers, "Numbers"); }); ui.toggle(&mut self.live, "Live")`
+
+![Toggle style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/toggle-style.png)
+
+### Custom toggle style
+
+SwiftUI: `struct Dot: ToggleStyle { func makeBody(configuration: Configuration) -> some View { HStack { Circle()…; configuration.label } } }`
+
+nimbo: `impl ToggleStyle for Dot { fn make_body(&self, ui: &mut Ui, mut c: ToggleConfiguration) { ui.row(style, |ui| { ui.el(dot(c.is_on())); c.label(ui, s); }); } } ui.toggle_style(&Dot).toggle(&mut self.live, "Live"); ui.toggle_style(&PlainToggleStyle).toggle(&mut self.wrap, "Plain")`
+
+![Custom toggle style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/custom-toggle-style.png)
 
 ### Slider
 
@@ -186,6 +226,22 @@ nimbo: `Slider::new(&mut self.level, 10.0..=90.0).step(10.0).tick_label(|v| (v =
 
 ![Slider steps](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/slider-steps.png)
 
+### Slider style
+
+SwiftUI: `Slider(value: $zoom, in: 0...200) (SwiftUI has no slider style)`
+
+nimbo: `ui.slider_style(&PlainSliderStyle).col(style, |ui| { ui.slider(&mut self.zoom, 0.0..=200.0); }); ui.slider(&mut self.zoom, 0.0..=200.0)`
+
+![Slider style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/slider-style.png)
+
+### Custom slider style
+
+SwiftUI: `struct Meter: ProgressViewStyle { … } (SwiftUI has no slider style)`
+
+nimbo: `impl SliderStyle for Meter { fn make_body(&self, ui: &mut Ui, c: SliderConfiguration) { let k = c.fraction(); c.root(ui).canvas(style, move |f, r| { … }); } } Slider::new(&mut self.level, 10.0..=90.0).step(10.0).show(ui.slider_style(&Meter))`
+
+![Custom slider style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/custom-slider-style.png)
+
 ### Picker
 
 SwiftUI: `Picker("Size", selection: $size) { …; Divider(); … }`
@@ -198,23 +254,47 @@ nimbo: `Picker::new(&mut self.size).options(&A).divider().options(&B).show(ui)`
 
 SwiftUI: `Picker(…) { … }.pickerStyle(.segmented)`
 
-nimbo: `ui.segmented(&mut self.view, &[Tag::new(0, "List").count(128), Tag::new(1, "Grid")])`
+nimbo: `ui.picker_style(&SegmentedPickerStyle).picker(&mut self.view, &[Tag::new(0, "List").count(128), Tag::new(1, "Grid")])`
 
 ![Segmented picker](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/segmented-picker.png)
+
+### Picker style
+
+SwiftUI: `VStack { Picker(…) { … } }.pickerStyle(.inline); Picker(…) { … }`
+
+nimbo: `ui.picker_style(&InlinePickerStyle).row(style, |ui| _ = ui.picker(&mut self.size, &SIZES)); ui.picker(&mut self.size, &SIZES)`
+
+![Picker style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/picker-style.png)
+
+### Custom picker style
+
+SwiftUI: `struct Chips: PickerStyle (SwiftUI's is closed: its styles are the system's)`
+
+nimbo: `impl PickerStyle for Chips { fn make_body(&self, ui: &mut Ui, mut c: PickerConfiguration) { let b = c.segments(ui); ui.row(style, |ui| for i in 0..c.len() { ui.with_id(c.item_id(i)).row(b.pointer(chip), |ui| ui.text(c.label(i), s)); }); } } ui.picker_style(&Chips).picker(&mut self.view, &VIEWS)`
+
+![Custom picker style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/custom-picker-style.png)
 
 ### Text field
 
 SwiftUI: `TextField("Name", text: $name)`
 
-nimbo: `ui.field(&mut self.name, "Name")`
+nimbo: `ui.text_field(&mut self.name, "Name")`
 
 ![Text field](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/text-field.png)
+
+### Multi-line field
+
+SwiftUI: `TextField("Notes", text: $notes, axis: .vertical)`
+
+nimbo: `TextField::new(&mut self.notes, "Notes").axis(Axis::Vertical).show(ui)`
+
+![Multi-line field](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/multi-line-field.png)
 
 ### Secure field
 
 SwiftUI: `SecureField("Password", text: $key)`
 
-nimbo: `ui.password_field(&mut self.key, "Password")`
+nimbo: `ui.secure_field(&mut self.key, "Password")`
 
 ![Secure field](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/secure-field.png)
 
@@ -222,9 +302,25 @@ nimbo: `ui.password_field(&mut self.key, "Password")`
 
 SwiftUI: `.searchable(text: $query)`
 
-nimbo: `ui.search(&mut self.query, "Search")`
+nimbo: `ui.search_field(&mut self.query, "Search")`
 
 ![Search field](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/search-field.png)
+
+### Text field style
+
+SwiftUI: `VStack { TextField("Name", text: $name); TextField("City", text: $city) }.textFieldStyle(.plain)`
+
+nimbo: `ui.text_field_style(&PlainTextFieldStyle).col(style, |ui| { ui.text_field(&mut self.name, "Name"); ui.text_field(&mut self.city, "City"); }); ui.text_field(&mut self.email, "E-mail")`
+
+![Text field style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/text-field-style.png)
+
+### Custom text field style
+
+SwiftUI: `struct Underline: TextFieldStyle { func _body(configuration: TextField<_Label>) -> some View { configuration.padding(…).overlay(alignment: .bottom) { … } } }`
+
+nimbo: `impl TextFieldStyle for Underline { fn make_body(&self, ui: &mut Ui, mut c: TextFieldConfiguration) { ui.row(style.scroll(c.axis().into()), |ui| c.text(ui, &fs)); } } ui.text_field_style(&Underline).text_field(&mut self.city, "City")`
+
+![Custom text field style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/custom-text-field-style.png)
 
 ### Progress
 
@@ -250,13 +346,13 @@ nimbo: `ui.badge("New", Tone::Accent)`
 
 ![Badge](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/badge.png)
 
-### Shortcut recorder
+### Hotkey recorder
 
 SwiftUI: `KeyboardShortcut (SwiftUI has no recorder)`
 
-nimbo: `ui.shortcut(&mut self.hotkey)`
+nimbo: `ui.hotkey_recorder(&mut self.hotkey)`
 
-![Shortcut recorder](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/shortcut-recorder.png)
+![Hotkey recorder](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/hotkey-recorder.png)
 
 ### Control behavior
 
@@ -286,9 +382,9 @@ nimbo: `ui.form_section(&fs, Section::new(header).footer("…"), |ui| { … })`
 
 ### Form row
 
-SwiftUI: `LabeledContent { Toggle(…) } label: { Text(title); Text(subtitle) }`
+SwiftUI: `LabeledContent { Toggle(isOn: $on) {} } label: { Text(title); Text(subtitle) }`
 
-nimbo: `ui.form_row(&fs, FormRow::new("Open at login").caption("…"), |ui| ui.toggle(&mut on, ""))`
+nimbo: `ui.form_row(&fs, FormRow::new("Open at login").caption("…"), |ui| ui.toggle(&mut on, ()))`
 
 ![Form row](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/form-row.png)
 
@@ -324,6 +420,14 @@ nimbo: `ui.form_disclosure(&fs, FormRow::new("Other models"), |ui| { … })`
 
 ![Disclosure](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/disclosure.png)
 
+### Toolbar tabs
+
+SwiftUI: `TabView(selection: $page) { General().tabItem { Label("General", systemImage: "gear") }.tag(Page.general) } in a Settings scene`
+
+nimbo: `ui.toolbar_tabs(&fs, &mut self.page, &[Tag::new(Page::General, "General").icon(Icon::GEAR), Tag::new(Page::About, "About").icon(Icon::INFO)])`
+
+![Toolbar tabs](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/toolbar-tabs.png)
+
 ### Footer
 
 SwiftUI: `HelpLink { … } at a pane's end`
@@ -346,9 +450,25 @@ nimbo: `List::new(n, 24.0).selection(&mut sel).show(ui, |ui, row| { … })`
 
 SwiftUI: `Section(header:) in a List; .listStyle(…)`
 
-nimbo: `List::new(n, 32.0).sections(&starts, 24.0, &head).list_style(ListStyle::Grouped)`
+nimbo: `List::new(n, 32.0).sections(&starts, 24.0, &head).show(ui.list_style(&InsetGroupedListStyle), |ui, row| { … })`
 
 ![List sections](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/list-sections.png)
+
+### List style
+
+SwiftUI: `List(items, selection: $sel) { … }.listStyle(.plain)`
+
+nimbo: `list.show(ui.list_style(&PlainListStyle), |ui, row| { … }); InsetListStyle by default, InsetGroupedListStyle`
+
+![List style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/list-style.png)
+
+### Custom list style
+
+SwiftUI: `struct Stripes: ListStyle (SwiftUI's has no public makeBody)`
+
+nimbo: `impl ListStyle for Stripes { fn make_body<'a>(&self, ui: &mut Ui<'a>, mut c: ListConfiguration<'_, 'a>) { ui.scroll_area(c.frame(), |ui| c.rows(ui, |ui, mut r| _ = ui.row(r.frame().bg(fill), |ui| r.content(ui)))); } }`
+
+![Custom list style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/custom-list-style.png)
 
 ### List behavior
 
@@ -428,7 +548,7 @@ nimbo: `let b = ui.scroll_behavior(id, Axes::VERTICAL); ui.with_id(id).col(style
 
 SwiftUI: `NSScroller.knobStyle = .light (AppKit; SwiftUI has none)`
 
-nimbo: `ui.set_environment(Some(ScrollerKnob { color: red, ..ScrollerKnob::DARK })); ui.scroll_area(style, |ui| { … })`
+nimbo: `ui.set_environment(Some(ScrollerKnob::DARK.color(red))); ui.scroll_area(style, |ui| { … })`
 
 ![Scroll indicators](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/scroll-indicators.png)
 
@@ -470,9 +590,17 @@ nimbo: `main.set_commands(&Commands::new().menu("Track", Menu::new(vec![Item::bu
 
 SwiftUI: `.help("Saves it")`
 
-nimbo: `ui.help("Saves it").button("Save"); for (id, tip) in ui.take_tooltips() { /* a look of its own */ }`
+nimbo: `ui.help("Saves it").button("Save"); ui.help_style(&PlainHelpStyle) for the window, TooltipHelpStyle by default`
 
 ![Tooltip](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/tooltip.png)
+
+### Custom help style
+
+SwiftUI: `.help("Saves it") (SwiftUI has no help style)`
+
+nimbo: `impl HelpStyle for Note { fn make_body(&self, ui: &mut Ui, c: HelpConfiguration) { ui.row(style.opacity(c.opacity()), |ui| ui.text(c.text(), s)); } } ui.help_style(&Note)`
+
+![Custom help style](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/custom-help-style.png)
 
 ## Modifiers
 
@@ -504,7 +632,7 @@ nimbo: `ui.a11y_label("Reset").icon_button(Icon::RESET)`
 
 SwiftUI: `.keyboardShortcut("z", modifiers: .command)`
 
-nimbo: `ui.keymap(&[bind(Shortcut::char('z').cmd(), Command::Undo)]).col(…)`
+nimbo: `ui.keymap(&[Binding::new(Shortcut::char('z').cmd(), Command::Undo)]).col(…)`
 
 ![Keyboard shortcut](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/keyboard-shortcut.png)
 
@@ -512,7 +640,7 @@ nimbo: `ui.keymap(&[bind(Shortcut::char('z').cmd(), Command::Undo)]).col(…)`
 
 SwiftUI: `.environment(\.tint, .green) { … }; @Environment(\.tint) var tint`
 
-nimbo: `ui.environment(Tint(t.success)).row(style, |ui| { … }); ui.set_environment(Some(Tint(t.success))) for the window; let tint = ui.environment_value::<Tint>()`
+nimbo: `ui.environment(Tint(t.success())).row(style, |ui| { … }); ui.set_environment(Some(Tint(t.success()))) for the window; let tint = ui.environment_value::<Tint>()`
 
 ![Environment](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/environment.png)
 
@@ -520,7 +648,7 @@ nimbo: `ui.environment(Tint(t.success)).row(style, |ui| { … }); ui.set_environ
 
 SwiftUI: `Group { Button("Save"); Toggle(…) }.disabled(true)`
 
-nimbo: `ui.disabled(true).group(|ui| { ui.button("Save"); ui.toggle(&mut on, ""); }); ui.button("Open")`
+nimbo: `ui.disabled(true).group(|ui| { ui.button("Save"); ui.toggle(&mut on, ()); }); ui.button("Open")`
 
 ![Group](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/group.png)
 
@@ -568,7 +696,7 @@ nimbo: `ui.a11y_labeled_pair(LabeledPairRole::Label, id, |ui| ui.text("Volume", 
 
 SwiftUI: `@Environment(\.controlActiveState) var state`
 
-nimbo: `let t = ui.controls_theme(); ui.el(Style::new().bg(t.accent)); let grey = ui.theme().inactive().accent`
+nimbo: `let t = ui.controls_theme(); ui.el(Style::new().bg(t.accent())); let grey = ui.theme().inactive().accent()`
 
 ![Controls theme](https://raw.githubusercontent.com/vladkens/nimbo/assets/api/controls-theme.png)
 

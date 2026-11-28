@@ -16,6 +16,7 @@ use crate::t;
 /// [Commands::after], [Commands::replacing]), as SwiftUI's `CommandGroupPlacement`. A group with
 /// no standard items stays empty until the app adds some.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CommandGroupPlacement {
   /// The app menu's About {name}.
   AppInfo,

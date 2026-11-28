@@ -39,8 +39,7 @@
 //!   }
 //! }
 //!
-//! const INFO: AppInfo =
-//!   AppInfo { id: "com.example.rec", name: "Rec", presence: Presence::Accessory };
+//! const INFO: AppInfo = AppInfo::new("com.example.rec", "Rec").presence(Presence::Accessory);
 //! nimbo::app(INFO, |main| {
 //!   let kinds = [Change::AudioInputs, Change::DefaultInput, Change::Lid];
 //!   // The tray's menu built again here; the windows hear it after.
@@ -98,8 +97,6 @@ impl Change {
 const SETTLE: Duration = Duration::from_millis(250);
 /// …or this long after it began.
 const CAP: Duration = Duration::from_secs(1);
-/// A window busy up the stack is tried again after this.
-pub(crate) const RETRY: Duration = Duration::from_millis(100);
 
 /// Whether a burst that began at `first` and was last told at `last` is delivered at `now`
 /// (nanoseconds), else how long it waits.

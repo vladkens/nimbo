@@ -13,6 +13,9 @@
 
 use std::f32::consts::TAU;
 
+#[path = "common/example.rs"]
+mod example;
+
 use nimbo::{
   App, Axis, Color, Config, Cx, Event, Frame, ImageId, Point, Quad, Rect, Size, alpha, mix, rgb,
 };
@@ -128,7 +131,7 @@ impl App for Shapes {
 
   fn paint(&mut self, f: &mut Frame) {
     let p = self.palette();
-    f.rect(Rect::new(0.0, 0.0, f.size.w, f.size.h), p.bg, 0.0);
+    f.rect(Rect::new(0.0, 0.0, f.size().w, f.size().h), p.bg, 0.0);
 
     f.rect(SQUARE, RED, 0.0);
     f.rect(ROUND, BLUE, ROUND_R);
@@ -164,5 +167,6 @@ impl App for Shapes {
 }
 
 fn main() {
-  nimbo::run_example(Config::new("shapes", SIZE.w, SIZE.h), Shapes::default(), |_| {});
+  let args: Vec<String> = std::env::args().skip(1).collect();
+  example::run(Config::new("shapes", SIZE.w, SIZE.h), Shapes::default(), &args, |_| {});
 }

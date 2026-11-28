@@ -30,10 +30,11 @@ use std::time::Duration;
 use dispatch2::{DispatchQueue, DispatchTime};
 use objc2::MainThreadMarker;
 use objc2_app_kit::{NSAlert, NSApplication, NSApplicationActivationPolicy};
+use objc2_core_graphics::CGEventFlags;
 use objc2_foundation::NSString;
 
-use crate::Event;
 use crate::shell::Presence;
+use crate::{Event, Modifiers};
 
 thread_local! {
   static PRESENCE: Cell<Presence> = const { Cell::new(Presence::Regular) };
@@ -85,4 +86,18 @@ pub fn alert(title: &str, message: &str) {
   alert.setInformativeText(&NSString::from_str(message));
   super::activate(mtm);
   alert.runModal();
+}
+
+/// The posted events' source user data: the hotkey tap passes them on unjudged.
+const POSTED: i64 = u32::from_be_bytes(*b"nmbo") as i64;
+
+/// The event tap's modifier flags for a chord's modifiers.
+fn tap_flags(mods: Modifiers) -> u64 {
+  let flags = [
+    (Modifiers::CONTROL, CGEventFlags::MaskControl),
+    (Modifiers::ALT, CGEventFlags::MaskAlternate),
+    (Modifiers::SHIFT, CGEventFlags::MaskShift),
+    (Modifiers::META, CGEventFlags::MaskCommand),
+  ];
+  flags.iter().filter(|(m, _)| mods.contains(*m)).fold(0, |all, (_, f)| all | f.0)
 }

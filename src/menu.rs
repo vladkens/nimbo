@@ -10,6 +10,7 @@ use crate::keys::Shortcut;
 /// What a button or a menu item does, as SwiftUI's `ButtonRole`: a [crate::Dialog]'s buttons are
 /// told apart by it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ButtonRole {
   /// The action that goes ahead, the default one.
   Confirm,
@@ -23,7 +24,7 @@ pub enum ButtonRole {
 /// type `A` (an enum of what its menus do), as SwiftUI's menus run a button's action.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Menu<A> {
-  pub items: Vec<Item<A>>,
+  pub(crate) items: Vec<Item<A>>,
 }
 
 impl<A> Default for Menu<A> {
@@ -35,6 +36,11 @@ impl<A> Default for Menu<A> {
 impl<A> Menu<A> {
   pub fn new(items: Vec<Item<A>>) -> Self {
     Self { items }
+  }
+
+  /// Its items, in the order they show.
+  pub fn items(&self) -> &[Item<A>] {
+    &self.items
   }
 
   /// The menu with each action replaced by its number, depth first in the order they show,
@@ -75,6 +81,7 @@ impl<A> Menu<A> {
 /// ([crate::tray::Tray::on_item], [crate::Ui::context_menu]), a submenu, a section's title, or a
 /// divider. A label longer than [LABEL] is shortened to fit ([Item::button]).
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub enum Item<A> {
   Button {
     action: A,

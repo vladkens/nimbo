@@ -11,7 +11,7 @@
 //! roles titled by their text (a button, a tab), the text inside it. A control with text of its
 //! own (a button's label) keeps it, or a name and a description set before or since, over the
 //! pair's, whose label and description are then read as they are; one whose text is its value
-//! (a shortcut recorder) is not named by it.
+//! (a hotkey recorder) is not named by it.
 //! Only the focused window's focus reads as focused. Leaf roles (a button, a field) hide the
 //! text inside them; plain text anywhere else is static text, with no record.
 //!
@@ -26,12 +26,12 @@
 //! under its own parent), its rect in window points clipped to the scroll areas around it, and
 //! a node clipped away entirely left out; an open modal dialog leaves out what is behind it. A
 //! leaf has no children (a record inside it, a recorder's ⊗, is beside it), what is inside a
-//! disabled node is disabled, and a hit ([A11yTree::at]) finds the topmost overlay as a click
+//! disabled node is disabled, and a hit (the adapter's) finds the topmost overlay as a click
 //! does.
 //!
 //! Assistive technology acts on a node by [crate::Event::A11y], which the runtime takes through
 //! the input paths ([Action]), so a click, Space and VoiceOver's press run the same code. A node
-//! takes the actions its role and states allow ([A11yNode::can]); others are refused.
+//! takes the actions its role and states allow (`A11yNode::can`); others are refused.
 
 use std::collections::HashMap;
 use std::fmt::{self, Display};
@@ -41,16 +41,22 @@ use std::ops::Range;
 
 use super::{Focus, Id, Kind, Tree, Ui, UiState};
 use crate::app::Event;
-use crate::scene::{Point, Rect};
+use crate::scene::Rect;
 use crate::text::FxHasher;
 
 /// A byte range of a string arena; empty when unset.
-pub type Span = (u32, u32);
+pub(crate) type Span = (u32, u32);
+
+/// A field's text in its arena ([Value::Text]): an app can neither make nor read one, it sets the
+/// text through [Access::text].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextSpan(pub(crate) Span);
 
 // MARK: Roles, values, actions
 
 /// What an element is, as AppKit's roles (and subroles) name it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Role {
   #[default]
   Group,
@@ -106,11 +112,14 @@ impl Role {
 
 /// A node's value.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub enum Value {
   #[default]
   None,
-  /// A field's text, in the arena of the records or the tree that holds it.
-  Text(Span),
+  /// A field's text, in the arena of the records or the tree that holds it: [Access::text]
+  /// sets it. Hidden: a variant can't be private, and its span is opaque.
+  #[doc(hidden)]
+  Text(TextSpan),
   /// A slider's or a progress indicator's number, in its range.
   Number {
     now: f64,
@@ -124,8 +133,9 @@ pub enum Value {
   Mixed,
 }
 
-/// A state a node has or not, a bit of [Props::states].
+/// A state a node has or not.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum State {
   Disabled,
   Focused,
@@ -140,6 +150,7 @@ const STATES: [State; 5] =
 /// What assistive technology asks of a node, sent as [crate::Event::A11y]; the runtime takes it
 /// through the input paths, so it runs the code a click or a key runs.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Action {
   /// A left click at the node's centre, the pointer and the hover left where they are.
   Press,
@@ -157,7 +168,7 @@ pub enum Action {
 
 impl Action {
   /// Its bit in [A11yNode::actions].
-  pub fn bit(&self) -> u8 {
+  pub(crate) fn bit(&self) -> u8 {
     use Action::*;
     1 << match self {
       Press => 0,
@@ -173,7 +184,7 @@ impl Action {
 /// What an element is to assistive technology; its strings are in the arena of the records or
 /// the tree that holds it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Props {
+pub(crate) struct Props {
   pub role: Role,
   pub name: Span,
   pub description: Span,
@@ -259,9 +270,15 @@ impl Access<'_> {
     self
   }
 
+  /// A description when nothing described it: a tip inside a control.
+  pub(crate) fn description_or(mut self, s: &str) -> Self {
+    let d = self.props().description;
+    if d.0 == d.1 { self.description(s) } else { self }
+  }
+
   /// A field's text as its value.
   pub fn text(mut self, s: &str) -> Self {
-    self.props().value = Value::Text(put(&mut self.recs.text, s));
+    self.props().value = Value::Text(TextSpan(put(&mut self.recs.text, s)));
     self
   }
 
@@ -277,7 +294,7 @@ impl Access<'_> {
     self
   }
 
-  /// The descendant with the cursor ([Props::active]).
+  /// The descendant with the cursor: a list's cursor row, a menu's highlighted item.
   pub fn active(mut self, id: Option<Id>) -> Self {
     self.props().active = id;
     self
@@ -354,6 +371,26 @@ impl Ui<'_> {
     let recs = &mut self.st.tree.a11y;
     let i = *recs.index.get(&id)?;
     Some(Access { recs, i })
+  }
+
+  /// The record of the control node `i` is in: its nearest recorded ancestor, when that is a
+  /// leaf (a button whose label `i` is part of).
+  pub(super) fn a11y_control_around(&mut self, i: u32) -> Option<Access<'_>> {
+    let t = &self.st.tree;
+    let mut k = i;
+    let at = loop {
+      if k == 0 {
+        return None;
+      }
+
+      k = t.nodes[k as usize].parent;
+      if let Some(&r) = t.a11y.index.get(&t.nodes[k as usize].id) {
+        break r;
+      }
+    };
+
+    let recs = &mut self.st.tree.a11y;
+    recs.list[at].1.role.leaf().then_some(Access { recs, i: at })
   }
 
   /// The text assistive technology sets on `id` ([Action::SetValue]), seen once: a text
@@ -462,7 +499,7 @@ impl Ui<'_> {
 
 /// A node of the assembled tree ([A11yTree]).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct A11yNode {
+pub(crate) struct A11yNode {
   pub id: Id,
   pub props: Props,
   /// In window points, clipped to the scroll areas around it.
@@ -470,10 +507,10 @@ pub struct A11yNode {
   pub parent: Option<u32>,
   /// One past the last node inside it: the nodes are in pre-order.
   pub end: u32,
-  /// The [Action]s it takes, as [Action::bit]s ([A11yNode::can]).
+  /// The [Action]s it takes, as [Action::bit]s (`A11yNode::can`).
   pub actions: u8,
   /// The overlay it shows in, by z: 0 the window's tree, else one past its place in
-  /// `Tree::floats` ([A11yTree::at]).
+  /// `Tree::floats`: a hit finds the topmost.
   pub layer: u16,
 }
 
@@ -502,7 +539,7 @@ fn actions(p: &Props, focusable: bool) -> u8 {
 /// The last frame as assistive technology sees it (`UiState::a11y_tree`). Its [Display] is one
 /// line per node, indented by depth: `switch "Open at login" off`.
 #[derive(Clone, Debug, Default)]
-pub struct A11yTree {
+pub(crate) struct A11yTree {
   pub nodes: Vec<A11yNode>,
   /// The nodes' strings, back to back.
   pub text: String,
@@ -516,13 +553,6 @@ impl A11yTree {
   /// The first node of `id`.
   pub fn get(&self, id: Id) -> Option<&A11yNode> {
     self.nodes.iter().find(|n| n.id == id)
-  }
-
-  /// The node at `p` in window points, as a click finds it: the deepest in the topmost overlay
-  /// there (an open menu's item, not the row under it).
-  pub fn at(&self, p: Point) -> Option<u32> {
-    let on = self.nodes.iter().zip(0..).filter(|(n, _)| n.rect.contains(p));
-    on.max_by_key(|&(n, i)| (n.layer, i)).map(|(_, i)| i)
   }
 
   /// Adds a node inside the `open` ones but the leaves, which have no children (a recorder's
@@ -570,7 +600,7 @@ impl UiState {
     let mut later: Vec<(u32, u32)> = Vec::new();
     for (f, k) in recs.pairs.iter().filter_map(|f| Some((f, f.k?))) {
       let (id, p) = recs.list[k];
-      let named = |i: u32| titled(&p) && !inner_text(t, &at, i as usize, &f.texts).is_empty();
+      let named = |i: u32| titled(&p) && !inner_text(t, recs, &at, i as usize, &f.parts).is_empty();
       let node = t.find(id);
       let mine = node.is_some_and(named);
       own[k] = if mine { f.names } else { own[k] };
@@ -676,12 +706,12 @@ impl UiState {
         let (name, description) =
           (copy(&mut out, drop(p.name, 0)), copy(&mut out, drop(p.description, 1)));
         let mut props = Props { name, description, ..p };
-        if let Value::Text(s) = p.value {
-          props.value = Value::Text(copy(&mut out, s));
+        if let Value::Text(TextSpan(s)) = p.value {
+          props.value = Value::Text(TextSpan(copy(&mut out, s)));
         }
 
         if name.0 == name.1 && titled(&p) {
-          props.name = put(&mut out.text, &inner_text(t, &at, i, &[]));
+          props.name = put(&mut out.text, &inner_text(t, recs, &at, i, &[]));
         }
 
         props.states |= u8::from(focus == Some(id)) << State::Focused as u8;
@@ -707,12 +737,19 @@ fn titled(p: &Props) -> bool {
 }
 
 /// The text inside node `i` of `t`, the texts joined by spaces, leaving out the records inside
-/// it, the hidden texts and those of ids `not`.
-fn inner_text(t: &Tree, at: &[u32], i: usize, not: &[Id]) -> String {
+/// it but a text's own and an unnamed group (what a tip makes, [Ui::help]), the hidden texts and
+/// the nodes `not` (a labeled pair's label and description).
+fn inner_text(t: &Tree, recs: &Records, at: &[u32], i: usize, not: &[Range<u32>]) -> String {
   let (mut out, mut k) = (String::new(), i);
   while k < t.nodes[i].end as usize {
     let n = &t.nodes[k];
-    let skip = k != i && (at[k] != NONE || not.contains(&n.id));
+    let through = |(_, p): &(Id, Props)| match p.role {
+      Role::StaticText => matches!(n.kind, Kind::Text { .. }),
+      Role::Group => p.name.0 == p.name.1,
+      _ => false,
+    };
+    let other = at[k] != NONE && !recs.list.get(at[k] as usize).is_some_and(through);
+    let skip = k != i && (other || not.iter().any(|r| r.contains(&(k as u32))));
     if !skip && let Kind::Text { range, .. } = n.kind {
       let s = t.str(range.0, range.1).trim();
       if !out.is_empty() && !s.is_empty() {
@@ -751,7 +788,7 @@ impl Display for A11yTree {
 
       match p.value {
         Value::None => {}
-        Value::Text(s) => write!(f, " value {:?}", self.str(s))?,
+        Value::Text(TextSpan(s)) => write!(f, " value {:?}", self.str(s))?,
         // In f32, as sliders keep them: 0.3, not 0.30000001192092896.
         Value::Number { now, min, max } => {
           write!(f, " {} in {}..{}", now as f32, min as f32, max as f32)?
@@ -943,8 +980,40 @@ mod tests {
     assert_eq!(s, want);
   }
 
+  /// A row a click selects is named by its form row's label and caption, a term with a tip among
+  /// them too: they aren't text of its own; a button's label with a tip is.
+  #[test]
+  fn a_tip_in_a_caption_leaves_a_selectable_row_named_by_it() {
+    let s = dump(|ui| {
+      let mut fs = FormStyle::plates(&ui.theme());
+      fs.row = fs.row.hit();
+      let caption = |ui: &mut Ui, s: TextStyle| {
+        ui.help("Errors per 100 words").text("WER 4.5%", s);
+        ui.text(" · 274 MB", s);
+      };
+      ui.form_row(&fs, FormRow::new("Model").caption(caption), |_| {});
+
+      // A button's tipped label is its own text, in a row of the default style.
+      let fs = FormStyle::plates(&ui.theme());
+      ui.form_row(&fs, FormRow::new("Account"), |ui| {
+        _ = ui.button(|ui: &mut Ui, s: TextStyle| ui.help("Signs out").text("Out", s));
+        // A tip on a container of the label: a group.
+        _ = ui.button(|ui: &mut Ui, s: TextStyle| {
+          ui.help("Saves it").row(Style::new(), |ui| ui.text("Save", s))
+        });
+      });
+
+      _ = ui.take_tooltips();
+    });
+    assert!(s.starts_with("row \"Model\" desc"), "{s}");
+    // The tips describe the buttons: no node inside takes their hits.
+    assert!(s.contains("button \"Out\" desc \"Signs out\"\n"), "{s}");
+    assert!(s.contains("button \"Save\" desc \"Saves it\"\n"), "{s}");
+    assert!(!s.contains("static text \"Out\"") && !s.contains("group"), "{s}");
+  }
+
   /// A button keeps its own text, and the row's label is read; a text that is the value (a
-  /// shortcut recorder's) names nothing.
+  /// hotkey recorder's) names nothing.
   #[test]
   fn a_control_with_text_of_its_own_keeps_it_in_a_form_row() {
     let s = dump(|ui| {
@@ -1042,10 +1111,10 @@ mod tests {
     assert_eq!(shape, want);
   }
 
-  /// An open menu over the rows under it, built inside the first: a hit there finds its item,
-  /// not the row it covers.
+  /// An open menu over the rows under it, built inside the first: its item is in an overlay above
+  /// the row it covers, so a hit there finds it.
   #[test]
-  fn a_hit_finds_the_overlay_on_top() {
+  fn an_overlay_is_above_the_rows_it_covers() {
     let row = Style::new().w(px(100.0)).h(px(20.0));
     let st = frame(UiState::default(), |ui| {
       ui.a11y(Id::of("r0"), Role::Row);
@@ -1060,10 +1129,9 @@ mod tests {
     });
 
     let t = st.a11y_tree();
-    let at = |x, y| t.at(Point::new(x, y)).map(|i| t.nodes[i as usize].id);
-    assert_eq!(at(2.0, 25.0), Some(Id::of("go")));
-    assert_eq!(at(50.0, 25.0), Some(Id::of("r1")));
-    assert_eq!(at(50.0, 5.0), Some(Id::of("r0")));
+    let (go, r1) = (t.get(Id::of("go")).unwrap(), t.get(Id::of("r1")).unwrap());
+    assert!(r1.rect.contains(Point::new(go.rect.x + 1.0, go.rect.y + 1.0)), "{go:?} over {r1:?}");
+    assert!(go.layer > r1.layer && r1.layer == t.get(Id::of("r0")).unwrap().layer);
   }
 
   /// A record inside a leaf (a recorder's ⊗) is beside it; what is inside a disabled node is
@@ -1102,13 +1170,13 @@ mod tests {
     assert!(took < Duration::from_millis(400), "{took:?}");
   }
 
-  /// A disabled list's rows and a disabled segmented control's segments read disabled and take
+  /// A disabled list's rows and a disabled picker's segments read disabled and take
   /// no press.
   #[test]
   fn a_disabled_containers_items_are_disabled() {
     let st = frame(UiState::default(), |ui| {
       ui.disabled(true).col(Style::new(), |ui| {
-        ui.id("seg").segmented(&mut 0, &[Tag::new(0, "A"), Tag::new(1, "B")]);
+        ui.id("seg").picker(&mut 0, &[Tag::new(0, "A"), Tag::new(1, "B")]);
         ui.list(Id::of("list"), 1, 20.0, |ui, _| ui.text("One", T));
       });
     });

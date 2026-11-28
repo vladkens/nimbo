@@ -13,18 +13,21 @@
 // A Windows app, not a console one: no terminal opens with it.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[path = "common/example.rs"]
+mod example;
+
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use nimbo::system::Change;
-use nimbo::tray::{Item, Menu, Tray, TrayIcon};
+use nimbo::tray::{Tray, TrayIcon};
 use nimbo::{
-  App, AppInfo, Config, Cx, Event, FormRow, FormStyle, Main, Presence, Shortcut, Style, Ui, Window,
-  grow, hardware, tray,
+  App, AppInfo, Config, Cx, Event, FormRow, FormStyle, Item, Main, Menu, Presence, Shortcut, Style,
+  Ui, Window, grow, hardware, tray,
 };
 
 pub const INFO: AppInfo =
-  AppInfo { id: "com.example.nimbo-system", name: "Nimbo System", presence: Presence::Accessory };
+  AppInfo::new("com.example.nimbo-system", "Nimbo System").presence(Presence::Accessory);
 pub const KINDS: [Change; 3] = [Change::AudioInputs, Change::DefaultInput, Change::Lid];
 pub const LID: &str = "lid";
 pub const COUNT: &str = "count";
@@ -117,20 +120,22 @@ impl App for System {
   fn view(&mut self, ui: &mut Ui) {
     let fs = FormStyle::plates(&ui.theme());
     let s = &self.seen;
-    ui.col(Style::new().grow().bg(fs.bg), |ui| {
+    ui.col(Style::new().grow().bg(fs.bg()), |ui| {
       ui.form_scroll(&fs, Style::new().grow(), |ui| {
-        ui.col(fs.page.pads([20.0, 20.0, 20.0, 20.0]).w(grow()), |ui| {
+        ui.col(fs.page().pads([20.0, 20.0, 20.0, 20.0]).w(grow()), |ui| {
           ui.form_section(&fs, "Hardware", |ui| {
-            ui.form_row(&fs, FormRow::new("Lid"), |ui| ui.id(LID).text(lid_label(s.lid), fs.note));
+            ui.form_row(&fs, FormRow::new("Lid"), |ui| {
+              ui.id(LID).text(lid_label(s.lid), fs.note())
+            });
           });
           ui.form_section(&fs, "Changes", |ui| {
             for (i, &kind) in KINDS.iter().enumerate() {
               let row = FormRow::new(kind_label(kind));
-              ui.form_row(&fs, row, |ui| ui.id((COUNT, i as u8)).text(s.counts[i], fs.note));
+              ui.form_row(&fs, row, |ui| ui.id((COUNT, i as u8)).text(s.counts[i], fs.note()));
             }
 
             let last = s.last.map_or("None", kind_label);
-            ui.form_row(&fs, FormRow::new("Last"), |ui| ui.id(LAST).text(last, fs.note));
+            ui.form_row(&fs, FormRow::new("Last"), |ui| ui.id(LAST).text(last, fs.note()));
           });
         });
       });
@@ -166,7 +171,7 @@ fn show(main: &mut Main) {
 }
 
 fn start(main: &mut Main) {
-  let tray = Tray::new(TrayIcon::Path { size: 18.0, d: ICON.into(), even_odd: false }, INFO.name);
+  let tray = Tray::new(TrayIcon::Path { size: 18.0, d: ICON.into(), even_odd: false }, INFO.name());
   if let Err(e) = tray::available() {
     eprintln!("tray: {e}");
   }
@@ -203,12 +208,13 @@ fn start(main: &mut Main) {
 }
 
 fn main() {
-  if std::env::args().any(|a| a == "--shot") {
+  let args: Vec<String> = std::env::args().skip(1).collect();
+  if args.iter().any(|a| a == "--shot") {
     // The lid closed a moment ago, after two audio changes.
     let mut app = System::new(|| Some(true));
     app.seen.add(Change::AudioInputs, Some(false));
     app.seen.add(Change::DefaultInput, Some(false));
-    return nimbo::run_example(config(), app, |h| {
+    return example::run(config(), app, &args, |h| {
       h.event(Event::System(Change::Lid));
       h.frame();
     });

@@ -13,6 +13,7 @@ use crate::scene::{ImageId, Images};
 /// What [Ui::image] shows, as SwiftUI's `Image` is made from a name or an `NSImage`: from an
 /// [ImageId], a [Png] or a `&`[Bitmap].
 #[derive(Clone, Copy)]
+#[non_exhaustive]
 pub enum ImageSource<'a> {
   /// An image the app added to [Images] and keeps.
   Id(ImageId),

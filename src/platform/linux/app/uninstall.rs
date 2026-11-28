@@ -8,13 +8,13 @@
 use std::{fs, io};
 
 use crate::uninstall::{Step, remove_file};
-use crate::{AppInfo, paths};
+use crate::{AppInfo, Error, paths};
 
 pub fn steps(app: &AppInfo) -> Vec<Step> {
   let off = super::autostart::set(app, false).map(drop);
-  let entry = super::desktop::uninstall(app).and(off);
+  let entry = super::desktop::uninstall(app).and(off).map_err(Error::System);
   let dir = paths::config_dir(app.id);
-  let token = remove_file(&dir.join(super::remote::TOKEN));
+  let token = remove_file(&dir.join(super::TOKEN)).map_err(Error::System);
   // The folder made for the token, unless the app keeps more in it.
   _ = fs::remove_dir(&dir);
   vec![

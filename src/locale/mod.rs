@@ -4,38 +4,7 @@
 //! looked up in gettext catalogs the app ships, keyed by the English text itself, as SwiftUI's
 //! `Text("…")` and gettext key them.
 //!
-//! - `t!("Keep the history")` is a [Localized], `const` and `Copy`, translated where it shows: a
-//!   text ([crate::Ui::text]), a [crate::Content], `format!("{KEEP}")`, a label as `&t!("Cancel")`
-//!   (a `&str`). A string not marked never is (SwiftUI's `Text(verbatim:)`): names, paths, what the
-//!   user typed.
-//! - `t!("{chosen} is not on disk", chosen, size = f.size)` is a `String` translated now, its
-//!   `{name}`s filled (`{{` and `}}` for braces), in the order the translation puts them.
-//! - `tn!("{n} file", "{n} files", count)` is a `String` in the form the catalog's `Plural-Forms`
-//!   picks for `count` (English's without one: 1, else the other), `{n}` the count; more `{name}`s
-//!   follow as in `t!`.
-//!
-//! The catalogs, one `.po` file per language, come with the window's [crate::Config]
-//! ([Config::localizations](crate::Config::localizations)), or before any window, for a tray
-//! menu, from [crate::Main::set_localizations]; only the one in use is read. The
-//! language is the system's ([Locale::System]) or the app's choice ([crate::Main::set_locale]),
-//! found as the tag (`pt-BR`), then its language (`pt`); a language alone also finds its first
-//! longer tag (`pt` finds `pt-BR`, as Apple's bundles); with no catalog, the English text.
-//! nimbo's own strings (OK and Cancel, the text menu, an icon button's name) come in its own
-//! catalogs (`locales/`, `make i18n`), in the language the app's give.
-//! `pseudo` is a pseudo language (`--locale pseudo` in an example): every marked string accented
-//! and a third longer, so unmarked and cut strings show. GNU gettext (0.24 or later, for Rust)
-//! keeps the catalogs; a comment `// Translators: …` before a string goes to its translator:
-//!
-//! ```sh
-//! xgettext --language=Rust --keyword='t!:1' --keyword='tn!:1,2' --add-comments=Translators \
-//!   --from-code=UTF-8 -o locales/messages.pot src/*.rs
-//! msginit -l ru_RU.UTF-8 -i locales/messages.pot -o locales/ru.po  # a new language
-//! msgmerge --update locales/ru.po locales/messages.pot              # the code changed
-//! msgfmt -c --statistics -o /dev/null locales/ru.po                 # forms, {placeholders}
-//! ```
-//!
-//! An English string changed becomes fuzzy in the catalogs and shows in English until a
-//! translator confirms it; one removed becomes obsolete (`#~`).
+//! How an app marks its strings and ships the catalogs is in the crate's doc (`lib.rs`).
 
 mod po;
 
@@ -382,20 +351,20 @@ fn pseudo(s: &str) -> String {
 
 // MARK: Macros
 
-/// A string of the app's to translate ([crate::locale]): `t!("Keep the history")` is a
+/// A string of the app's to translate (the crate's doc has how): `t!("Keep the history")` is a
 /// [Localized], translated where it shows; with arguments, `t!("{name} is gone", name, size =
 /// f.size)` is a `String` translated now, each `{name}` filled by its `Display`.
 #[macro_export]
 macro_rules! t {
   ($key:literal $(,)?) => {
-    $crate::locale::Localized::new($key)
+    $crate::Localized::new($key)
   };
   ($key:literal, $($args:tt)+) => {
-    $crate::locale::format($key, &$crate::__t_args!([] $($args)+))
+    $crate::__private::format($key, &$crate::__t_args!([] $($args)+))
   };
 }
 
-/// A string with a count, translated now ([crate::locale]): `tn!("{n} file", "{n} files",
+/// A string with a count, translated now ([t!](crate::t)): `tn!("{n} file", "{n} files",
 /// count)`, the English singular and plural, the form the language's `Plural-Forms` picks for
 /// `count` (any integer), `{n}` filled with it; more arguments as [t!](crate::t) takes them.
 #[macro_export]
@@ -403,7 +372,7 @@ macro_rules! tn {
   ($one:literal, $other:literal, $n:expr $(, $($args:tt)*)?) => {{
     let n = $n;
     let args = $crate::__t_args!([("n", &n as &dyn ::core::fmt::Display),] $($($args)*)?);
-    $crate::locale::plural($one, $other, n as u64, &args)
+    $crate::__private::plural($one, $other, n as u64, &args)
   }};
 }
 

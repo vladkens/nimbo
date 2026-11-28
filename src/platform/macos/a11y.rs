@@ -42,7 +42,8 @@ use super::view::View;
 use crate::app::Event;
 use crate::scene::Point;
 use crate::text::edit::{range_from_utf16, utf16_len};
-use crate::ui::{A11yNode, A11yTree, Action, Id, Role, State, UiState, Value};
+use crate::ui::a11y::{A11yNode, A11yTree, State, TextSpan, Value};
+use crate::ui::{Action, Id, Role, UiState};
 
 // MARK: Roles
 
@@ -192,7 +193,7 @@ impl Snapshot {
 
   /// A field's text.
   fn text(&self, n: &A11yNode) -> &str {
-    if let Value::Text(s) = n.props.value { self.tree.str(s) } else { "" }
+    if let Value::Text(TextSpan(s)) = n.props.value { self.tree.str(s) } else { "" }
   }
 
   /// `n` as the focused field.
@@ -203,7 +204,7 @@ impl Snapshot {
   /// A node's value to compare: its text, else the value itself.
   fn val(&self, n: &A11yNode) -> (Value, &str) {
     match n.props.value {
-      Value::Text(s) => (Value::Text((0, 0)), self.tree.str(s)),
+      Value::Text(TextSpan(s)) => (Value::Text(TextSpan((0, 0))), self.tree.str(s)),
       v => (v, ""),
     }
   }
@@ -398,7 +399,7 @@ define_class!(
       self.get(|s, n| {
         let int = |v: isize| Some(any(NSNumber::new_isize(v)));
         match (n.props.value, n.props.role) {
-          (Value::Text(t), _) => Some(any(NSString::from_str(s.tree.str(t)))),
+          (Value::Text(TextSpan(t)), _) => Some(any(NSString::from_str(s.tree.str(t)))),
           (Value::Number { now, .. }, _) => Some(num(now)),
           (Value::Off, _) => int(0),
           (Value::On, _) => int(1),
@@ -665,13 +666,20 @@ pub(super) fn focused(view: &View) -> Option<Retained<AnyObject>> {
   sh.element(k)
 }
 
+/// The node at `p` in window points, as a click finds it: the deepest in the topmost overlay
+/// there (an open menu's item, not the row under it).
+fn node_at(t: &A11yTree, p: Point) -> Option<u32> {
+  let on = t.nodes.iter().zip(0..).filter(|(n, _)| n.rect.contains(p));
+  on.max_by_key(|&(n, i)| (n.layer, i)).map(|(_, i)| i)
+}
+
 /// The view's `accessibilityHitTest:` at `p` on screen; `None` where no node is.
 pub(super) fn hit_test(view: &View, p: NSPoint) -> Option<Retained<AnyObject>> {
   let sh = shared(view)?;
   let p = view.window().map_or(p, |w| w.convertPointFromScreen(p));
   let p = view.convertPoint_fromView(p, None);
   let at = Point::new(p.x as f32, p.y as f32);
-  let k = sh.snap.try_borrow().ok().and_then(|s| Some(key(s.node(s.tree.at(at)?))))?;
+  let k = sh.snap.try_borrow().ok().and_then(|s| Some(key(s.node(node_at(&s.tree, at)?))))?;
   sh.element(k)
 }
 
@@ -725,7 +733,7 @@ pub(super) fn close(view: &View) {
 mod tests {
   use super::*;
   use crate::scene::Rect;
-  use crate::ui::Props;
+  use crate::ui::a11y::Props;
 
   const LIST: Key = (Id(1), Role::List);
   const ROW1: Key = (Id(2), Role::Row);
@@ -753,7 +761,7 @@ mod tests {
   fn text(t: &mut A11yTree, i: u32, s: &str) {
     let start = t.text.len() as u32;
     t.text.push_str(s);
-    t.nodes[i as usize].props.value = Value::Text((start, t.text.len() as u32));
+    t.nodes[i as usize].props.value = Value::Text(TextSpan((start, t.text.len() as u32)));
   }
 
   fn set(t: &mut A11yTree, i: u32, s: State) {
@@ -820,8 +828,8 @@ mod tests {
     assert_eq!(s.children(Some(0)), [1, 2]);
     assert_eq!(s.selected(0), [ROW1]);
     assert_eq!(s.focused(), Some(4));
-    assert_eq!(s.tree.at(Point::new(5.0, 25.0)), Some(2));
-    assert_eq!(s.tree.at(Point::new(5.0, 95.0)), None);
+    assert_eq!(node_at(&s.tree, Point::new(5.0, 25.0)), Some(2));
+    assert_eq!(node_at(&s.tree, Point::new(5.0, 95.0)), None);
 
     // The list focused with its cursor on a row: the row has the focus.
     let s = snap(

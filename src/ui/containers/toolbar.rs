@@ -47,6 +47,7 @@ use crate::ui::{Align, ControlSize, Float, Id, Response, Style, Ui, grow, px};
 
 /// Where a toolbar item sits ([Ui::toolbar_item]), as SwiftUI's `ToolbarItemPlacement`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ToolbarItemPlacement {
   /// At the leading end, beside the window's buttons: a sidebar toggle, back and forward.
   Navigation,
@@ -80,7 +81,7 @@ pub(crate) struct Sidebar;
 impl Ui<'_> {
   /// A toolbar of the items `content` builds ([Ui::toolbar_item]), in a band
   /// [Ui::toolbar_height] high over the top of its parent: the title bar of a unified window, or
-  /// a column's part of it (see [crate::ui::containers::toolbar]). Its widgets are
+  /// a column's part of it. Its widgets are
   /// [ControlSize::Large], as a toolbar's controls are (36-point tiles on macOS 27). `content` runs
   /// once per placement, building that placement's items; it reads their clicks as anywhere. The
   /// leading items are in `id.key(0)`, the trailing ones in `id.key(1)`, the principal ones in
@@ -183,7 +184,7 @@ impl Ui<'_> {
   }
 
   /// The height of the band a toolbar takes over the top of the window ([Ui::toolbar]): the title
-  /// bar's under a unified window's, at least [TOOLBAR_HEIGHT]. Content leaves it free at its
+  /// bar's under a unified window's, at least 52 (macOS 27's). Content leaves it free at its
   /// top, or draws only its ground there.
   pub fn toolbar_height(&self) -> f32 {
     self.titlebar().map_or(TOOLBAR_HEIGHT, |b| b.height.max(TOOLBAR_HEIGHT))
@@ -194,10 +195,10 @@ impl Ui<'_> {
 mod tests {
   use super::*;
   use crate::app::App;
-  use crate::harness::{Harness, mac_titlebar};
+  use crate::harness::mac_titlebar;
   use crate::scene::{Point, Rect, Size};
   use crate::ui::{Axis, Cursor, Float, Id, List, Split, Style, grow, px};
-  use crate::{Event, Icon, Modifiers, Phase, TitleBar};
+  use crate::{Event, Harness, Icon, Modifiers, Phase, TitleBar};
 
   /// A toolbar of a toggle at the leading end and a button at the trailing one, built in the
   /// other order, and a count of the toggle's clicks.
@@ -285,7 +286,7 @@ mod tests {
     assert!(!h.rt.drags_window(Point::new(320.0, 60.0)), "under the bar, the content");
     h.move_to(toggle.x, toggle.y);
     h.frame();
-    assert_eq!(h.rt.cursor(), Cursor::Pointer);
+    assert_eq!(h.cursor(), Cursor::Pointer);
     h.click(toggle.x, toggle.y);
     assert_eq!(h.app().0, 1);
   }
@@ -336,7 +337,7 @@ mod tests {
           });
           ui.toolbar_item(ToolbarItemPlacement::PrimaryAction, |ui| {
             ui.col(Style::new().w(px(120.0)), |ui| {
-              _ = ui.id("find").search(&mut self.query, "Search")
+              _ = ui.id("find").search_field(&mut self.query, "Search")
             });
           });
           ui.toolbar_item(ToolbarItemPlacement::PrimaryAction, |ui| {
@@ -532,7 +533,7 @@ mod tests {
       assert!(!h.drags_window(end.x, end.y));
       h.click(end.x, end.y);
       h.frame();
-      assert_eq!(h.focused(), Some(Id::of("find")), "{w}");
+      assert_eq!(h.focus_id(), Some(Id::of("find")), "{w}");
     }
   }
 
@@ -549,7 +550,7 @@ mod tests {
     assert!(!h.drags_window(f.x, f.y));
     h.click(f.x, f.y);
     h.frame();
-    assert_eq!(h.focused(), Some(Id::of("find")));
+    assert_eq!(h.focus_id(), Some(Id::of("find")));
     h.move_to(f.x, f.y);
     h.frame();
     assert_eq!(h.cursor(), Cursor::Text);

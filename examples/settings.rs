@@ -21,11 +21,13 @@
 
 use std::time::Duration;
 
-use nimbo::ui::widgets::icon;
+#[path = "common/example.rs"]
+mod example;
+
 use nimbo::{
-  Align, Answer, App, Appearance, ButtonRole, ColorScheme, Config, ControlSize, Dialog, FormRow,
-  FormStyle, Hotkey, Icon, Id, Picker, Rect, Section, Style, TabItem, Tag, TextStyle, Theme, Tone,
-  Ui, grow, px,
+  Align, Answer, App, ButtonRole, Color, ColorScheme, Config, ControlSize, Dialog, FormRow,
+  FormStyle, Frame, Hotkey, Icon, Id, Picker, Rect, Section, SegmentedPickerStyle, Style, Tag,
+  TextStyle, Theme, Tone, Ui, grow, px,
 };
 
 pub const TABS: &str = "tabs";
@@ -64,11 +66,11 @@ pub enum Page {
   About,
 }
 
-pub const PAGES: [TabItem<Page>; 4] = [
-  TabItem::new(Page::General, Icon::GEAR, "General"),
-  TabItem::new(Page::Appearance, Icon::CONTRAST, "Appearance"),
-  TabItem::new(Page::Advanced, Icon::SLIDERS, "Advanced"),
-  TabItem::new(Page::About, Icon::INFO, "About"),
+pub const PAGES: [Tag<Page>; 4] = [
+  Tag::new(Page::General, "General").icon(Icon::GEAR),
+  Tag::new(Page::Appearance, "Appearance").icon(Icon::CONTRAST),
+  Tag::new(Page::Advanced, "Advanced").icon(Icon::SLIDERS),
+  Tag::new(Page::About, "About").icon(Icon::INFO),
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -201,7 +203,7 @@ impl Settings {
     ui.form_section(fs, "Startup", |ui| {
       let warning = self.login.then_some(LOGIN_WARNING);
       let row = FormRow::new(marked("Open at login", LOGIN_ROW, warning, None));
-      ui.id(LOGIN_ROW).form_row(fs, row, |ui| ui.id(LOGIN).toggle(&mut self.login, ""));
+      ui.id(LOGIN_ROW).form_row(fs, row, |ui| ui.id(LOGIN).toggle(&mut self.login, ()));
       let row = FormRow::new(marked("On launch", LAUNCH_ROW, None, Some(TIP_LAUNCH)));
       ui.id(LAUNCH_ROW).form_row(fs, row, |ui| ui.id(LAUNCH).picker(&mut self.launch, &LAUNCHES));
       let row = FormRow::new("Language").caption("Applies the next time the app starts.");
@@ -212,9 +214,9 @@ impl Settings {
     });
 
     let shortcuts = |ui: &mut Ui, s: TextStyle| {
-      ui.col(Style::new().w(grow()).gap(fs.subtitle_gap), |ui| {
+      ui.col(Style::new().w(grow()).gap(fs.subtitle_gap()), |ui| {
         ui.text("Shortcuts", s);
-        ui.text("Work in every app, while this one runs.", fs.subtitle);
+        ui.text("Work in every app, while this one runs.", fs.subtitle());
       });
     };
     ui.form_section(fs, Section::new(shortcuts), |ui| {
@@ -222,7 +224,7 @@ impl Settings {
       let warning = (self.hotkey == default).then_some(HOTKEY_WARNING);
       let row = FormRow::new(marked("Show the app", HOTKEY_ROW, warning, Some(TIP_HOTKEY)));
       ui.id(HOTKEY_ROW).form_row(fs, row, |ui| {
-        ui.id(HOTKEY).shortcut(&mut self.hotkey);
+        ui.id(HOTKEY).hotkey_recorder(&mut self.hotkey);
 
         // An icon names itself to assistive technology only by a label.
         let ui = ui.disabled(self.hotkey == default).a11y_label("Reset");
@@ -235,7 +237,7 @@ impl Settings {
 
     ui.form_section(fs, "Updates", |ui| {
       let row = FormRow::new("Check for updates automatically");
-      ui.form_row(fs, row, |ui| ui.id(UPDATES).toggle(&mut self.updates, ""));
+      ui.form_row(fs, row, |ui| ui.id(UPDATES).toggle(&mut self.updates, ()));
       let label = |ui: &mut Ui, s: TextStyle| {
         ui.text("Download them in the background", s);
         ui.control_size(ControlSize::Small).badge("Beta", Tone::Neutral);
@@ -243,10 +245,10 @@ impl Settings {
       };
       ui.disabled(!self.updates)
         .id(DOWNLOAD_ROW)
-        .form_row(fs, FormRow::new(label), |ui| ui.id(DOWNLOAD).toggle(&mut self.download, ""));
+        .form_row(fs, FormRow::new(label), |ui| ui.id(DOWNLOAD).toggle(&mut self.download, ()));
       let channels = [Tag::new(Channel::Stable, "Stable"), Tag::new(Channel::Beta, "Beta")];
       ui.form_row(fs, FormRow::new("Channel"), |ui| {
-        ui.id(CHANNEL).segmented(&mut self.channel, &channels)
+        ui.picker_style(&SegmentedPickerStyle).id(CHANNEL).picker(&mut self.channel, &channels)
       });
     });
   }
@@ -254,18 +256,18 @@ impl Settings {
   fn appearance(&mut self, ui: &mut Ui, fs: &FormStyle) {
     ui.form_section(fs, "Look", |ui| {
       ui.form_row(fs, FormRow::new("Appearance"), |ui| {
-        ui.id(LOOK).segmented(&mut self.look, &LOOKS)
+        ui.picker_style(&SegmentedPickerStyle).id(LOOK).picker(&mut self.look, &LOOKS)
       });
       ui.form_row(fs, FormRow::new("Text size"), |ui| {
         let t = ui.theme();
-        ui.text("A", t.label().font(nimbo::Font { size: 10.0, ..t.font }));
+        ui.text("A", t.label().font(t.font().size(10.0)));
         ui.id(TEXT_SIZE).slider(&mut self.text_size, 10.0..=20.0);
-        ui.text("A", t.label().font(nimbo::Font { size: 16.0, ..t.font }));
+        ui.text("A", t.label().font(t.font().size(16.0)));
       });
     });
     ui.form_section(fs, "Motion", |ui| {
       let row = FormRow::new("Reduce motion").caption(MOTION_NOTE);
-      ui.id(MOTION_ROW).form_row(fs, row, |ui| ui.id(MOTION).toggle(&mut self.motion, ""));
+      ui.id(MOTION_ROW).form_row(fs, row, |ui| ui.id(MOTION).toggle(&mut self.motion, ()));
     });
   }
 
@@ -279,7 +281,7 @@ impl Settings {
     let storage = |ui: &mut Ui, s: TextStyle| {
       ui.text("Storage", s);
       ui.spacer();
-      ui.text(&used, fs.note);
+      ui.text(&used, fs.note());
     };
     ui.form_section(fs, Section::new(storage), |ui| {
       let folder = |ui: &mut Ui, s: TextStyle| ui.text("Data folder", s.line_limit(1));
@@ -313,7 +315,7 @@ impl Settings {
           false => ui.badge("Off", Tone::Warning),
         };
 
-        ui.toggle(&mut self.reports, "")
+        ui.toggle(&mut self.reports, ())
       });
       ui.form_row(fs, FormRow::new("Logging"), |ui| ui.picker(&mut self.logging, &LOGGING));
     });
@@ -332,12 +334,12 @@ impl Settings {
       Style::new().w(grow()).pads([22.0, 20.0, 0.0, 20.0]).align(Align::Center, Align::Start);
 
     ui.col(head, |ui| {
-      let accent = t.accent;
+      let accent = t.accent();
       ui.canvas(Style::new().w(px(64.0)).h(px(64.0)), move |f, r| app_icon(f, r, accent));
       ui.el(Style::new().h(px(10.0)));
-      ui.text("Example", t.label().font(nimbo::Font { size: 20.0, ..t.bold }));
+      ui.text("Example", t.label().font(t.bold().size(20.0)));
       ui.el(Style::new().h(px(2.0)));
-      ui.text("Version 1.0.0", fs.note);
+      ui.text("Version 1.0.0", fs.note());
       ui.el(Style::new().h(px(8.0)));
       ui.text("A demo of nimbo's settings form, dialog and widgets.", t.label());
       ui.el(Style::new().h(px(10.0)));
@@ -347,7 +349,7 @@ impl Settings {
 
   fn about(&mut self, ui: &mut Ui, fs: &FormStyle) {
     ui.form_section(fs, "Licenses", |ui| {
-      for (name, what) in [("nimbo", "MIT License"), ("keyboard-types", "MIT or Apache-2.0")] {
+      for (name, what) in [("nimbo", "MIT License"), ("objc2", "MIT License")] {
         ui.form_row(fs, FormRow::new(name).caption(what), |ui| ui.icon_button(Icon::EXTERNAL));
       }
     });
@@ -358,9 +360,9 @@ impl Settings {
     let page = match self.page {
       Page::About => {
         self.about_head(ui, fs);
-        fs.page.pads([20.0, 20.0, 20.0, 20.0])
+        fs.page().pads([20.0, 20.0, 20.0, 20.0])
       }
-      _ => fs.page,
+      _ => fs.page(),
     };
 
     ui.col(page, |ui| match self.page {
@@ -402,26 +404,28 @@ impl Settings {
 }
 
 /// The demo app's icon: a white check on a rounded square in the accent.
-fn app_icon(f: &mut nimbo::Frame, r: Rect, accent: nimbo::Color) {
+fn app_icon(f: &mut Frame, r: Rect, accent: Color) {
   f.shadow(Rect::new(r.x, r.y + 1.0, r.w, r.h), 15.0, 3.0, [0.0, 0.0, 0.0, 0.2]);
   f.rect(r, accent, 15.0);
   let inner = Rect::new(r.x + 14.0, r.y + 14.0, r.w - 28.0, r.h - 28.0);
-  icon::draw(f, Icon::CHECK.stroke(2.4), inner, [1.0; 4]);
+  Icon::CHECK.stroke(2.4).draw(f, inner, [1.0; 4]);
 }
 
 impl App for Settings {
   fn view(&mut self, ui: &mut Ui) {
-    let a = ui.appearance();
+    let mut a = ui.appearance();
     match self.look {
       Look::System => ui.follow_system(),
-      Look::Light => ui.set_theme(Theme::system(Appearance { scheme: ColorScheme::Light, ..a })),
-      Look::Dark => ui.set_theme(Theme::system(Appearance { scheme: ColorScheme::Dark, ..a })),
+      Look::Light | Look::Dark => {
+        a.scheme = if self.look == Look::Light { ColorScheme::Light } else { ColorScheme::Dark };
+        ui.set_theme(Theme::system(a));
+      }
     }
 
     // The window as high as the page, in the OS's font.
     ui.fit_window_height(WIDTH, 300.0, 720.0);
     let fs = FormStyle::plates(&ui.theme());
-    ui.col(Style::new().grow().bg(fs.bg), |ui| {
+    ui.col(Style::new().grow().bg(fs.bg()), |ui| {
       ui.id(TABS).toolbar_tabs(&fs, &mut self.page, &PAGES);
       ui.id(("page", self.page as u8)).form_scroll(&fs, Style::new().grow(), |ui| {
         ui.col(Style::new().w(grow()), |ui| self.page(ui, &fs));
@@ -432,9 +436,11 @@ impl App for Settings {
 }
 
 fn main() {
-  nimbo::run_example(
+  let args: Vec<String> = std::env::args().skip(1).collect();
+  example::run(
     Config::new("Settings", WIDTH, 560.0).fixed().unified(),
     Settings::default(),
+    &args,
     |h| {
       h.frame();
       h.frame();

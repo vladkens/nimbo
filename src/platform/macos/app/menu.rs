@@ -6,7 +6,6 @@
 
 use std::cell::Cell;
 
-use keyboard_types::{Modifiers, NamedKey};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
@@ -19,6 +18,7 @@ use objc2_foundation::{NSObject, NSObjectProtocol, NSPoint, NSString};
 use crate::keys::{Key, Shortcut, f_key};
 use crate::menu::{Item, Menu};
 use crate::scene::Point;
+use crate::{Modifiers, NamedKey};
 
 thread_local! {
   /// A context menu is tracking: AppKit tracks one menu at a time.

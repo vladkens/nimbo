@@ -12,6 +12,9 @@
 // A Windows app, not a console one: no terminal opens with its window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[path = "common/example.rs"]
+mod example;
+
 use nimbo::{App, Color, Config, Cx, Event, Font, Frame, Quad, Rect, Size, Weight, rgb};
 
 pub const SIZE: Size = Size::new(520.0, 400.0);
@@ -123,7 +126,7 @@ impl App for Text {
 
   fn paint(&mut self, f: &mut Frame) {
     let p = self.palette();
-    f.rect(Rect::new(0.0, 0.0, f.size.w, f.size.h), p.bg, 0.0);
+    f.rect(Rect::new(0.0, 0.0, f.size().w, f.size().h), p.bg, 0.0);
 
     for s in STYLES.iter().chain(&SCRIPTS) {
       f.text(X, s.y, s.text, s.font, p.ink);
@@ -131,7 +134,7 @@ impl App for Text {
 
     // The size of each style, right-aligned in a column.
     for s in &STYLES {
-      f.text_at(SIZES_X, s.y, s.font.size, NOTE, p.dim, 1.0);
+      f.text_at(SIZES_X, s.y, s.font.get_size(), NOTE, p.dim, 1.0);
     }
 
     f.quad(Quad::new(PANEL, p.panel).radius(6.0).border(1.0, p.border));
@@ -140,12 +143,13 @@ impl App for Text {
     f.pop_clip();
 
     for (k, y) in SUBPIXEL_Y.into_iter().enumerate() {
-      f.text(subpixel_x(k, f.scale), y, SUBPIXEL, SUBPIXEL_FONT, p.ink);
+      f.text(subpixel_x(k, f.scale()), y, SUBPIXEL, SUBPIXEL_FONT, p.ink);
       f.text_at(SIZES_X, y, SUBPIXEL_NOTES[k], NOTE, p.dim, 1.0);
     }
   }
 }
 
 fn main() {
-  nimbo::run_example(Config::new("text", SIZE.w, SIZE.h), Text::default(), |_| {});
+  let args: Vec<String> = std::env::args().skip(1).collect();
+  example::run(Config::new("text", SIZE.w, SIZE.h), Text::default(), &args, |_| {});
 }

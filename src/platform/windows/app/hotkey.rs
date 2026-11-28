@@ -23,16 +23,17 @@ use std::sync::mpsc::{Receiver, Sender, SyncSender, channel, sync_channel};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use keyboard_types::{Code, Modifiers};
 use windows_sys::Win32::Foundation::{GetLastError, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
+use super::lone_vk;
 use crate::hotkey::{Edge, Listener, MAX, OnEdge, Status};
 use crate::keys::Hotkey;
 use crate::platform::scan_code;
+use crate::{Code, Error, Modifiers};
 
 /// How often the held chords' keys are looked at, for their release.
 const POLL: Duration = Duration::from_millis(10);
@@ -157,19 +158,19 @@ impl Hotkeys {
       FAILED => Listener::Failed,
       _ => Listener::Off,
     };
-    s.listener_error = sh.listener_error.lock().ok().and_then(|e| e.clone());
+    s.listener_error = sh.listener_error.lock().ok().and_then(|e| e.clone()).map(Error::System);
     let errors = sh.fallback_error.lock().map(|e| e.clone()).unwrap_or_default();
     for (which, slot) in s.slots.iter_mut().enumerate().take(MAX) {
       slot.fallback = sh.fallback[which].load(Ordering::Acquire);
-      slot.fallback_error = errors[which].clone();
+      slot.fallback_error = errors[which].clone().map(Error::System);
     }
 
     s.counts.listener = n(&sh.listener_events);
     s.counts.fallback = n(&sh.fallback_events);
     s.counts.fallback_repeats = n(&sh.fallback_repeats);
     if sh.escape.load(Ordering::Relaxed) && s.listener != Listener::Active {
-      let why = s.listener_error.clone();
-      s.escape_error = Some(why.unwrap_or_else(|| "the keyboard hook is not installed".into()));
+      let why = || Error::System("the keyboard hook is not installed".into());
+      s.escape_error = Some(s.listener_error.clone().unwrap_or_else(why));
     }
   }
 }
@@ -350,7 +351,7 @@ unsafe extern "system" fn hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
   // SAFETY: for HC_ACTION, lParam points to the event's KBDLLHOOKSTRUCT.
   let k = (code == HC_ACTION as i32).then(|| unsafe { &*(lp as *const KBDLLHOOKSTRUCT) });
   let fake = k.is_some_and(|k| k.vkCode == VK_LCONTROL as u32 && k.scanCode == ALTGR_CTRL);
-  let posted = k.is_some_and(|k| k.dwExtraInfo == super::post::POSTED);
+  let posted = k.is_some_and(|k| k.dwExtraInfo == super::POSTED);
   if let Some(k) = k.filter(|_| !fake && !posted) {
     // AltGr's Left Ctrl, filtered, is no key of the user's: Right Alt stays alone. Nor are the
     // app's own posted keys: a held hotkey lifted and put back for them is still held.
@@ -506,23 +507,6 @@ fn mods_of(m: Modifiers) -> u32 {
     (Modifiers::META, MOD_WIN),
   ];
   bits.iter().filter(|(k, _)| m.contains(*k)).fold(0, |all, (_, b)| all | b)
-}
-
-/// The left or right modifier key at `code`.
-pub(super) fn lone_vk(code: Code) -> Option<u32> {
-  let vk = match code {
-    Code::ControlLeft => VK_LCONTROL,
-    Code::ControlRight => VK_RCONTROL,
-    Code::ShiftLeft => VK_LSHIFT,
-    Code::ShiftRight => VK_RSHIFT,
-    Code::AltLeft => VK_LMENU,
-    Code::AltRight => VK_RMENU,
-    Code::MetaLeft => VK_LWIN,
-    Code::MetaRight => VK_RWIN,
-    _ => return None,
-  };
-
-  Some(vk as u32)
 }
 
 /// A named key's virtual key, the same on every layout.

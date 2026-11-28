@@ -12,6 +12,9 @@
 // A Windows app, not a console one: no terminal opens with its window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[path = "common/example.rs"]
+mod example;
+
 use std::time::{Duration, Instant};
 
 use nimbo::{App, Config, Frame, Rect, Size, rgb};
@@ -34,8 +37,8 @@ pub struct Pace {
 
 impl App for Pace {
   fn paint(&mut self, f: &mut Frame) {
-    let start = *self.start.get_or_insert(f.now);
-    let t = f.now.saturating_sub(start);
+    let start = *self.start.get_or_insert(f.now());
+    let t = f.now().saturating_sub(start);
     let moving = t < RUN;
     if moving {
       let busy = Instant::now();
@@ -47,12 +50,14 @@ impl App for Pace {
       f.animate();
     }
 
-    f.rect(Rect::new(0.0, 0.0, f.size.w, f.size.h), rgb(0x1c1c1e), 0.0);
-    let x = t.min(RUN).as_secs_f32().fract() * (f.size.w - BAR_W);
-    f.rect(Rect::new(x, 0.0, BAR_W, f.size.h), rgb(0x3b82f6), 0.0);
+    f.rect(Rect::new(0.0, 0.0, f.size().w, f.size().h), rgb(0x1c1c1e), 0.0);
+    let x = t.min(RUN).as_secs_f32().fract() * (f.size().w - BAR_W);
+    f.rect(Rect::new(x, 0.0, BAR_W, f.size().h), rgb(0x3b82f6), 0.0);
   }
 }
 
 fn main() {
-  nimbo::run_example(Config::new("pace", SIZE.w, SIZE.h).fixed(), Pace::default(), |_| {});
+  let cfg = Config::new("pace", SIZE.w, SIZE.h).fixed();
+  let args: Vec<String> = std::env::args().skip(1).collect();
+  example::run(cfg, Pace::default(), &args, |_| {});
 }

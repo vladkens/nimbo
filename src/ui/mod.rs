@@ -2,67 +2,31 @@
 
 //! The element tree an app builds each frame it redraws ([crate::App::view], which says how
 //! often that is and what a view may change), its flex layout
-//! ([layout]) and the paint pass that turns it into the frame's scene ([paint]).
+//! (`layout`) and the paint pass that turns it into the frame's scene (`paint`).
 //!
-//! ```ignore
-//! ui.row(Style::new().pad(8.0).gap(8.0).bg(PANEL), |ui| {
-//!   ui.text("Title", BOLD);
-//!   ui.spacer();
-//!   ui.id("save").row(BUTTON, |ui| ui.text("Save", LABEL));
-//! });
-//! ```
-//!
-//! Containers take their children in a closure, so the code nests like the tree. Every element
-//! gets an [Id]: its index among its siblings hashed with its parent's id, a key hashed the same
-//! way ([Ui::key], stable when lists change), or a frame-wide name ([Ui::id], found again with
-//! [Id::of]). The last frame's tree with every element's rect is kept for hit testing
-//! ([input]): named elements get hover, press and clicks, which the view reads by id. State the
-//! app should not hold (scroll offsets, animations) lives in a store keyed by id ([store]).
-//!
-//! ```ignore
-//! let plus = Id::of("plus");
-//! let fade = ui.animate(plus, if ui.hovered(plus) { 1.0 } else { 0.0 }, FADE);
-//! if ui.with_id(plus).row(BUTTON.bg(mix(RAISED, HOVER, fade)), |ui| ui.text("+", LABEL)).clicked {
-//!   self.count += 1;
-//! }
-//! ```
-//!
-//! Widgets ([widgets]: label, button, text field, check box, switch, slider and the
-//! like) and containers ([containers]: list, menu, picker, tabs, split; the scroll area they
-//! scroll in is a behaviour's, [Ui::scroll_area]) do this for an app in the look of the theme
-//! the app sets (`Ui::set_theme`):
-//! `if ui.id("plus").button("+").clicked { .. }`; so do a settings form ([form]) and a modal
-//! dialog ([dialog]).
-//! What they read of where they are built, the theme, their size, whether they are enabled, is
-//! the environment: values by type a container puts for what is built in it
-//! ([Ui::environment]: `ui.disabled(true).col(..)`), the window for all ([Ui::set_environment]).
-//!
-//! The rule for every widget: a headless behaviour ([behavior]: `ui.button_behavior(id)` and
-//! the like, hover, press, click, focus, keys and the value edited) plus drawing from the
-//! theme. An app that wants its own look keeps the behaviour and draws the element itself.
-//! Behaviours also record what their element is to assistive technology ([a11y]), so a look of
-//! the app's own reads as the theme's does.
+//! How an app uses it is in the crate's doc (`lib.rs`): ids, the store, widgets and their
+//! behaviours, the environment.
 
-pub mod a11y;
-pub mod behavior;
-pub mod containers;
-pub mod dialog;
+pub(crate) mod a11y;
+pub(crate) mod behavior;
+pub(crate) mod containers;
+pub(crate) mod dialog;
 mod environment;
-pub mod form;
-pub mod icon;
+pub(crate) mod form;
+pub(crate) mod icon;
 mod id;
 mod image;
-pub mod input;
+pub(crate) mod input;
 mod layout;
 mod lazy;
 mod menus;
 mod paint;
 mod query;
-pub mod store;
+pub(crate) mod store;
 mod style;
 mod textlayout;
-pub mod theme;
-pub mod widgets;
+pub(crate) mod theme;
+pub(crate) mod widgets;
 
 use std::any::Any;
 use std::fmt::{Display, Write};
@@ -70,18 +34,24 @@ use std::hash::Hash;
 use std::num::NonZeroU8;
 use std::time::Duration;
 
-pub use a11y::{A11yNode, A11yTree, Action, LabeledPairRole, Props, Role, State, Value};
+pub use a11y::{Action, Role, State, Value};
+pub(crate) use behavior::DrawnEditMenu;
 pub use behavior::{
-  Behavior, Content, DialogBehavior, EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle,
-  ListBehavior, ListRows, MenuPlacement, ScrollBar, ScrollBehavior, ScrollerKnob, SectionHeader,
-  Selection, SplitBehavior, TextInput, TypeSelect,
+  Behavior, Button, ButtonConfiguration, ButtonStyle, Content, DialogBehavior, EditMenu, Editing,
+  FieldBehavior, FieldKind, FieldStyle, HelpConfiguration, HelpStyle, InlinePickerStyle, List,
+  ListBehavior, ListConfiguration, ListLayout, ListResponse, ListRowConfiguration, ListRows,
+  ListStyle, MenuPlacement, Picker, PickerConfiguration, PickerStyle, PlainButtonStyle,
+  PlainHelpStyle, PlainListStyle, PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle, Row,
+  ScrollBar, ScrollBehavior, ScrollerKnob, SectionHeader, Selection, Slider, SliderConfiguration,
+  SliderStyle, SplitBehavior, Tag, TextField, TextFieldConfiguration, TextFieldStyle,
+  ToggleConfiguration, ToggleStyle, TypeSelect,
 };
 pub use containers::{
-  List, ListResponse, ListStyle, Picker, Row, Split, Tabs, Tag, ToolbarItemPlacement,
+  InsetGroupedListStyle, InsetListStyle, MenuPickerStyle, Split, Tabs, ToolbarItemPlacement,
 };
 pub use dialog::{Answer, Dialog};
 pub use environment::{Enabled, EnvironmentValue};
-pub use form::{FormRow, FormStyle, Glass, Section, TabItem};
+pub use form::{FormRow, FormStyle, Glass, Section};
 pub use icon::{Icon, IconPaint};
 pub use id::Id;
 pub use image::ImageSource;
@@ -96,10 +66,14 @@ pub use style::{
   LinePattern, Shadow, Style, TextLines, TextStyle, TruncationMode, UnitPoint, grow, pct, px,
   rigid,
 };
-pub use textlayout::Edit;
+pub use textlayout::TextInput;
 pub(crate) use textlayout::TextLayout;
-pub use theme::{ButtonLook, ButtonStyle, ControlBorder, Sizes, SwitchSize, Theme, Tone};
-pub use widgets::{Button, ButtonRole, Slider};
+pub use theme::{ControlBorder, Sizes, SwitchSize, Theme, Tone};
+pub use widgets::{
+  BorderedButtonStyle, BorderedProminentButtonStyle, BorderlessButtonStyle, ButtonToggleStyle,
+  CheckboxToggleStyle, LinearSliderStyle, RoundedBorderTextFieldStyle, SegmentedPickerStyle,
+  SwitchToggleStyle, TooltipHelpStyle,
+};
 
 use self::input::{Deliver, Input, ScrollState};
 use self::store::{Anim, Store};
@@ -148,6 +122,9 @@ pub(crate) struct UiState {
   pub(crate) clipboard: Box<dyn Clipboard>,
   /// Values the whole window shares, one per type ([Ui::set_environment]).
   env: Vec<Box<dyn Any>>,
+  /// The shell's defaults under the window's values, one per type
+  /// ([UiState::set_environment_default]).
+  env_defaults: Vec<Box<dyn Any>>,
   /// Values scoped to the elements being built ([Ui::environment]).
   scoped: environment::Scoped,
   /// The focus ring the view set this frame ([Ui::set_focus_ring]), over the default, which the
@@ -157,6 +134,9 @@ pub(crate) struct UiState {
   /// The focus and pointer the app set on controls whose behaviours have read them, by the id of
   /// the root each is for, until it is built ([Ui::take_control_modifiers]); cleared each frame.
   control_mods: Vec<(Id, Option<bool>, Option<Cursor>)>,
+  /// The ids of controls whose roots are yet to be built, inside what their styles build around
+  /// them ([Ui::control_body]): an element there never takes one by its place; cleared each frame.
+  roots: Vec<Id>,
   /// The OS's look ([Ui::appearance]).
   appearance: Appearance,
   /// What the last frame cost ([Ui::last_frame]).
@@ -229,10 +209,12 @@ impl Default for UiState {
       waker: Waker::default(),
       clipboard: Box::default(),
       env: Vec::new(),
+      env_defaults: Vec::new(),
       scoped: environment::Scoped::default(),
       own_ring: None,
       ring: None,
       control_mods: Vec::new(),
+      roots: Vec::new(),
       appearance: Appearance::DARK,
       stats: FrameStats::default(),
       resize: None,
@@ -428,6 +410,7 @@ impl UiState {
 /// are known before building, from the last frame: query them first with [Ui::hovered] and
 /// [Ui::pressed] to pick the element's style. [Ui::click] has the details of a click.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Response {
   pub id: Id,
   pub hovered: bool,
@@ -497,6 +480,8 @@ impl<'a> Ui<'a> {
     st.stack.clear();
     st.stack.push((0, 0));
     st.control_mods.clear();
+    st.roots.clear();
+
     st.animating = false;
     st.input.moves = false;
     (st.grab, st.ring_on, st.toolbar, st.own_ring) = (None, None, false, None);
@@ -751,11 +736,14 @@ impl<'a> Ui<'a> {
   }
 
   /// The next element shows `tip` under the pointer resting on it, a tooltip as macOS places one
-  /// (its left edge at the pointer, 19 below it, after `Theme::tip_delay`, at once within
-  /// `Theme::tip_warm` of another), and reads it as its description to assistive technology, as
+  /// (its left edge at the pointer, 19 below it, after a rest of 200 ms, at once within a second
+  /// of another) in the window's help style, and reads it as its description to assistive
+  /// technology, as
   /// SwiftUI's `.help`: any element, a text (read where it stands), a widget, a container or a
-  /// canvas (read as a group, its children as ever). It takes the pointer, so a click on it is
-  /// its own, not its parent's. The tip is `id.key("tip")` of the element's id.
+  /// canvas (read as a group, its children as ever). It takes the hover for the tip alone: a
+  /// primary press on it is the interactive element's around it (a button whose label has a
+  /// tip), a secondary one opens its own context menu if it has one. The tip is `id.key("tip")`
+  /// of the element's id.
   pub fn help(&mut self, tip: &str) -> &mut Self {
     self.next_help = Some(tip.to_owned());
     self
@@ -772,7 +760,8 @@ impl<'a> Ui<'a> {
   /// the view. Taken: the shell shows those left after the view (nimbo's styled tooltip), so
   /// a view that takes them draws them all. Each tip is its element's description for assistive
   /// technology, set here, so it is read however it is drawn; one with no record gets one to
-  /// carry it: a text as itself, any other a group, whose children are read as ever.
+  /// carry it: in a control (a button's label), the control's, unless it has one; else a text
+  /// as itself, any other a group, whose children are read as ever.
   pub fn take_tooltips(&mut self) -> Vec<(Id, String)> {
     let mut out = Vec::with_capacity(self.helps.len());
     for (i, tip) in std::mem::take(&mut self.helps) {
@@ -781,6 +770,15 @@ impl<'a> Ui<'a> {
         Kind::Text { range, .. } => (n.id, Some(self.st.tree.str(range.0, range.1).to_owned())),
         _ => (n.id, None),
       };
+
+      // A node of its own in a control would take its hits from assistive technology.
+      if self.a11y_of(id).is_none()
+        && let Some(c) = self.a11y_control_around(i)
+      {
+        _ = c.description_or(&tip);
+        out.push((id, tip));
+        continue;
+      }
 
       match (self.a11y_of(id), text) {
         (Some(a), _) => _ = a.description(&tip),
@@ -796,7 +794,7 @@ impl<'a> Ui<'a> {
     out
   }
 
-  /// Disables the next widget ([widgets]) when `yes`: dimmed, not focusable, and its clicks
+  /// Disables the next widget when `yes`: dimmed, not focusable, and its clicks
   /// do nothing; on a container, every widget built in it, as SwiftUI's `.disabled`. Puts
   /// [Enabled] `false`, so it only disables: `ui.environment(Enabled(true))` enables a part.
   pub fn disabled(&mut self, yes: bool) -> &mut Self {
@@ -833,6 +831,15 @@ impl<'a> Ui<'a> {
     self
   }
 
+  /// Builds the body of the control `id` with `f` in a [Ui::group], its root anywhere in it:
+  /// what is built around the root never takes its id by its place.
+  pub(crate) fn control_body<R>(&mut self, id: Id, f: impl FnOnce(&mut Self) -> R) -> R {
+    self.st.roots.push(id);
+    let r = self.group(f);
+    self.st.roots.retain(|&k| k != id);
+    r
+  }
+
   /// The id the next element gets, taken for a widget to name its element with: the one set
   /// by [Ui::id] or [Ui::key], else its position among its siblings.
   pub fn take_id(&mut self) -> Id {
@@ -840,7 +847,7 @@ impl<'a> Ui<'a> {
       Some((id, _)) => id,
       None => {
         let &(parent, count) = self.st.stack.last().unwrap();
-        self.st.tree.nodes[parent as usize].id.nth(count as usize)
+        around(&self.st.roots, self.st.tree.nodes[parent as usize].id.nth(count as usize))
       }
     };
 
@@ -1004,10 +1011,13 @@ impl<'a> Ui<'a> {
   fn node(&mut self, kind: Kind, mut style: Style, flow: Flow) -> (u32, Response) {
     let (parent, count) = self.st.stack.last_mut().unwrap();
     let tree = &mut self.st.tree;
-    let (id, named) = self
-      .next_id
-      .take()
-      .unwrap_or_else(|| (tree.nodes[*parent as usize].id.nth(*count as usize), false));
+    let place = tree.nodes[*parent as usize].id.nth(*count as usize);
+    let roots = &mut self.st.roots;
+    let (id, named) = self.next_id.take().unwrap_or_else(|| (around(roots, place), false));
+    if named && !roots.is_empty() {
+      roots.retain(|&r| r != id);
+    }
+
     *count += 1;
     let parent = *parent;
     // The modifiers over its style, before what they decide: focus, the pointer, hit testing; a
@@ -1048,13 +1058,15 @@ impl<'a> Ui<'a> {
     // pointer to work, a scroll container, a focusable element, a tip, takes it anyway.
     let off = std::mem::take(&mut self.next_no_hit);
     let hit = style.hit || named || style.cursor != Cursor::Inherit;
-    let hit = (hit && !off) || scrolls || focus || help.is_some();
+    let own = (hit && !off) || scrolls || focus;
+    let hit = own || help.is_some();
     // Its style's `hit` turned off too: no hover as an interactive child's ancestor.
     style.hit = hit;
     let tree = &mut self.st.tree;
     let i = tree.nodes.len() as u32;
     self.helps.extend(help.map(|tip| (i, tip)));
     tree.drags.extend(drag.then_some(i));
+    tree.tips.extend((hit && !own).then_some(i));
 
     let float = self.next_float.take();
     if float.is_some() {
@@ -1093,8 +1105,8 @@ impl<'a> Ui<'a> {
   // MARK: State
 
   /// The `T` kept for `id` between frames, created with its default. It lives while `id` is
-  /// built or its state used each frame, or an ancestor is retained ([Ui::retain]); see
-  /// [store] for the rule.
+  /// built or its state used each frame, or an ancestor is retained ([Ui::retain]): a
+  /// hidden tab keeps its subtree's state.
   pub fn state<T: Default + 'static>(&mut self, id: Id) -> &mut T {
     let UiState { store, stack, tree, .. } = &mut self.st;
     store.get(id, stack.iter().map(|&(i, _)| tree.nodes[i as usize].id))
@@ -1245,6 +1257,16 @@ impl<'a> Ui<'a> {
     self.st.input.ended = None;
     self.st
   }
+}
+
+/// The id of the place `place`: its own, or keyed when it is that of a control's root yet to be
+/// built (`roots`), which takes it by name.
+fn around(roots: &[Id], mut place: Id) -> Id {
+  while roots.contains(&place) {
+    place = place.key("around");
+  }
+
+  place
 }
 
 #[cfg(test)]

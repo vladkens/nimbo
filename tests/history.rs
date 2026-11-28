@@ -17,7 +17,7 @@ mod common;
 
 use common::{mid, reads};
 use history::{History, LIST, PER_DAY, ROW_H, ROWS};
-use nimbo::ui::{Action, Role};
+use nimbo::a11y::{Action, Role};
 use nimbo::{Event, Harness, Id, Modifiers, Phase, Point, Rect, Size};
 
 type H = Harness<History>;
@@ -195,10 +195,8 @@ fn rows_read_and_press_as_rows() {
   let mut h = history();
   let name = |g, i| format!("Dictation {}: what was said, on one line", entry(g, i));
   reads(&h.a11y(), &[&format!("row {:?} desc \"23:59 · 7.0 s\"", name(0, 0)), "button \"Copy\""]);
-  let t = h.a11y_tree();
-  let third =
-    t.nodes.iter().find(|n| n.props.role == Role::Row && t.str(n.props.name) == name(0, 2));
-  assert!(h.act(third.unwrap().id, Action::Press));
+  let third = h.find(Role::Row, &name(0, 2)).unwrap();
+  assert!(h.act(third.id, Action::Press));
   assert!(h.app().sel.contains(entry(0, 2)));
   reads(&h.a11y(), &[&format!("row {:?} selected desc \"23:57 · 5.8 s\"", name(0, 2))]);
 }

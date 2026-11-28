@@ -11,8 +11,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use nimbo::tray::{Item, Menu, Tray, TrayIcon};
-use nimbo::{ButtonRole, Shortcut};
+use nimbo::tray::{Tray, TrayIcon};
+use nimbo::{ButtonRole, Item, Menu, Shortcut};
 
 fn menu(n: u32) -> Menu<&'static str> {
   let sizes = Menu::new(vec![Item::toggle("small", "Small", true), Item::button("large", "Large")]);

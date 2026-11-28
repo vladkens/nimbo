@@ -35,7 +35,12 @@ use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::System::Com::CoTaskMemFree;
 use windows_sys::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
 use windows_sys::Win32::System::Ole::OleInitialize;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+  VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN,
+};
 use windows_sys::Win32::UI::Shell::{FOLDERID_Downloads, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
+
+use crate::Code;
 
 /// The shell's window ([shell::run]'s), as a number for other threads; 0 when there is none. An
 /// atomic, not a lock: [shell::post] runs in callbacks that must never wait (Windows' audio
@@ -78,4 +83,24 @@ pub fn downloads() -> Option<PathBuf> {
 pub fn attach_console() {
   // SAFETY: no preconditions; it fails harmlessly without a parent console.
   unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
+}
+
+/// The posted events' `dwExtraInfo`: the hotkey hook leaves them to the app in front.
+const POSTED: usize = u32::from_be_bytes(*b"nmbo") as usize;
+
+/// The left or right modifier key at `code`.
+fn lone_vk(code: Code) -> Option<u32> {
+  let vk = match code {
+    Code::ControlLeft => VK_LCONTROL,
+    Code::ControlRight => VK_RCONTROL,
+    Code::ShiftLeft => VK_LSHIFT,
+    Code::ShiftRight => VK_RSHIFT,
+    Code::AltLeft => VK_LMENU,
+    Code::AltRight => VK_RMENU,
+    Code::MetaLeft => VK_LWIN,
+    Code::MetaRight => VK_RWIN,
+    _ => return None,
+  };
+
+  Some(vk as u32)
 }

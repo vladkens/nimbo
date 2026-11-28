@@ -19,11 +19,15 @@ use std::time::Duration;
 
 use common::{diff, px};
 use nimbo::harness::mac_titlebar;
-use nimbo::ui::containers::toolbar::{AFTER_BUTTONS, LEAD};
 use nimbo::{Appearance, Event, Harness, Id, Point, Rect, Size, Theme};
 use notes::{LIST, NEW, Notes, TOGGLE};
 
 type H = Harness<Notes>;
+
+/// macOS 27's toolbar: from the zoom button to the first leading item, and the leading inset
+/// without the window's buttons (full screen).
+const AFTER_BUTTONS: f32 = 17.0;
+const LEAD: f32 = 10.0;
 
 /// The notes under macOS's title bar (`mac`) or none, in the light appearance.
 fn notes(mac: bool) -> H {
@@ -95,7 +99,7 @@ fn the_empty_bar_moves_the_window_and_the_items_do_not() {
 fn the_sidebar_ground_goes_up_to_the_window_top() {
   let mut h = notes(true);
   let img = h.render();
-  let panel = Theme::PLATES_LIGHT.panel;
+  let panel = Theme::PLATES_LIGHT.panel();
   assert!(diff(img.pixel(5.0, 5.0), px(panel)) < 3, "{:?}", img.pixel(5.0, 5.0));
   assert!(diff(img.pixel(5.0, 40.0), px(panel)) < 3);
 }

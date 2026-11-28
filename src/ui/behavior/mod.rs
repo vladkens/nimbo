@@ -22,13 +22,16 @@
 //! [super::Ui::disabled] before the call disables it: no input is read, no hand. Hover fades are
 //! the look's (`Ui::hot`). What each one covers, each in a module of its own here:
 //!
-//! - [Ui::button_behavior]: click, Space while focused (flashes it pressed);
-//! - [Ui::toggle_behavior] (check box, switch): a button that flips a `bool`;
+//! - [Ui::button_behavior]: click, Space while focused (flashes it pressed); the [Button] over it,
+//!   drawn by a [ButtonStyle] ([Ui::button_style]);
+//! - [Ui::toggle_behavior]: a button that flips a `bool`; [Ui::toggle] over it, drawn by a
+//!   [ToggleStyle] ([Ui::toggle_style]);
 //! - [Ui::slider_behavior]: a drag along the element onto the nearest step if it has one, the
-//!   arrows move a step or a twentieth;
+//!   arrows move a step or a twentieth; the [Slider] over it, drawn by a [SliderStyle]
+//!   ([Ui::slider_style]);
 //! - [Ui::pick_behavior] (tabs, segmented control, toolbar tabs): one of `n` items by a click, the
 //!   arrows step;
-//! - [Ui::shortcut_behavior]: a shortcut recorder over a global hotkey ([crate::Hotkey]);
+//! - [Ui::hotkey_recorder_behavior]: a recorder of a global hotkey ([crate::Hotkey]);
 //! - [Ui::dialog_behavior]: a modal dialog's keys, focus trap and fade ([super::dialog]);
 //! - [Ui::split_behavior]: a divider's drag within both panes' minimums;
 //! - [Ui::scroll_behavior]: a scroll area's bars, a thumb dragged and a track clicked, shown while
@@ -37,44 +40,67 @@
 //! - [Ui::menu_popup] and [Ui::menu_item_behavior]: a menu's open state, placement, keys and items;
 //! - [Ui::pop_up_behavior]: a pop-up button, opened by a click, Space, Enter or the arrows, letters
 //!   typed choosing an option ([TypeSelect]);
+//! - the [Picker] over one of them, drawn by a [PickerStyle] ([Ui::picker_style]) that chooses its
+//!   input: the pop-up's and its menu, or the segments' ([PickerConfiguration]);
 //! - [Ui::list_behavior] and [Ui::list_rows]: a virtualized list's selection ([Selection]), keys
-//!   and presses, and its rows in view, which the app draws (`List` draws them from the theme);
+//!   and presses, and its rows in view, which the app draws; the [List] over them, drawn by a
+//!   [ListStyle] ([Ui::list_style]);
+//! - [Ui::help]'s tooltip: when it shows and where, drawn by a [HelpStyle] ([Ui::help_style]);
 //! - [Ui::text_field_behavior] and [Ui::selectable_behavior]: text editing on the editing model
-//!   ([crate::Editor]), drawn by [Ui::field_text] ([FieldBehavior] has the details);
+//!   (`Editor`), drawn by [Ui::field_text] ([FieldBehavior] has the details), with the edit menu
+//!   ([Ui::edit_menu]); the [TextField] over it, drawn by a [TextFieldStyle]
+//!   ([Ui::text_field_style]);
 //! - [Ui::search_behavior]: a single-line field's, its text cleared by a ⊗ or Escape.
 //!
 //! The looks over them are the widgets' and the containers' ([super::widgets],
 //! [super::containers]), which build on what is public here and in the core; but the scroll
 //! area's, which is here.
 
+mod button;
 mod content;
 mod dialog;
 mod field;
+mod help;
+mod hotkey_recorder;
 mod list;
+mod list_style;
 mod menu;
 mod pick;
+mod picker;
 mod pop_up;
 mod scroll;
 mod search;
-mod shortcut;
 mod slider;
 mod split;
+mod text_field;
 mod toggle;
 
-pub use content::{Build, Content};
+pub use button::{Button, ButtonConfiguration, ButtonStyle, PlainButtonStyle};
+pub use content::Content;
 pub use dialog::DialogBehavior;
-pub use field::{EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, TextInput};
-use keyboard_types::Modifiers;
+pub(crate) use field::DrawnEditMenu;
+pub use field::{EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle};
+pub use help::{HelpConfiguration, HelpStyle, PlainHelpStyle};
 pub use list::{ListBehavior, ListRows, SectionHeader, Selection};
-pub use menu::{MenuPlacement, TYPE_SELECT, TypeSelect};
+pub use list_style::{
+  List, ListConfiguration, ListLayout, ListResponse, ListRowConfiguration, ListStyle,
+  PlainListStyle, Row,
+};
+pub use menu::{MenuPlacement, TypeSelect};
+pub use picker::{InlinePickerStyle, Picker, PickerConfiguration, PickerStyle, Tag};
 pub use scroll::{ScrollBar, ScrollBehavior, ScrollerKnob};
+pub use slider::{PlainSliderStyle, Slider, SliderConfiguration, SliderStyle};
 pub use split::SplitBehavior;
+pub use text_field::{PlainTextFieldStyle, TextField, TextFieldConfiguration, TextFieldStyle};
+pub use toggle::{PlainToggleStyle, ToggleConfiguration, ToggleStyle};
 
 use super::{Cursor, Enabled, Id, Role, State, Style, Ui};
+use crate::Modifiers;
 use crate::keys::{Command, Key, Move};
 
 /// What a control got this frame, read before it is built; see the module's docs.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Behavior {
   pub id: Id,
   /// Disabled by [Ui::disabled]: no input was read and the rest is false.
@@ -108,15 +134,20 @@ impl Ui<'_> {
   /// the app set its own on the control; disabled, neither, whatever its style or the app asks, so
   /// Tab passes it by.
   pub fn control(&mut self, b: &Behavior) -> &mut Self {
-    let mods = self.take_kept_modifiers(b.id);
-    let (focus, cursor) = match b.disabled {
+    self.control_root(b.id, b.disabled, Cursor::Pointer)
+  }
+
+  /// [Ui::control] for control `id`, `cursor` over it while enabled (a text field's I-beam).
+  fn control_root(&mut self, id: Id, disabled: bool, cursor: Cursor) -> &mut Self {
+    let mods = self.take_kept_modifiers(id);
+    let (focus, pointer) = match disabled {
       true => (Some(false), Some(Cursor::Inherit)),
       false => (self.next_focus.or(mods.0), self.next_cursor.or(mods.1)),
     };
 
     self.next_focus = focus.or(Some(true));
-    self.next_cursor = cursor.or(Some(Cursor::Pointer));
-    self.with_id(b.id)
+    self.next_cursor = pointer.or(Some(cursor));
+    self.with_id(id)
   }
 
   /// Whether Space was pressed on `id` (focused), which flashes it pressed; another key goes on
@@ -167,7 +198,7 @@ impl Ui<'_> {
   }
 
   /// Gives `id` the key presses while it has focus before any binding of its own, of its
-  /// ancestors or of the app ([crate::keys] has the order), this frame: a shortcut recorder
+  /// ancestors or of the app (the crate's doc has the order), this frame: a hotkey recorder
   /// recording, a modal dialog. A key it doesn't use goes on as usual.
   pub fn grab_keys(&mut self, id: Id) {
     self.st.grab = Some(id);
@@ -207,11 +238,10 @@ mod tests {
   use std::time::Duration;
 
   use super::*;
-  use crate::NamedKey;
   use crate::app::{App, Cx, Event};
-  use crate::harness::Harness;
   use crate::scene::{Color, Quad, Size};
   use crate::ui::px;
+  use crate::{Harness, NamedKey};
 
   const REST: Color = [0.2, 0.2, 0.2, 1.0];
   const OVER: Color = [0.0, 0.0, 1.0, 1.0];
@@ -250,7 +280,7 @@ mod tests {
     // Hovered, held, clicked: the app's colours under the pointing hand, one play.
     h.move_to(20.0, 20.0);
     assert_eq!(px(&mut h), [0, 0, 255, 255]);
-    assert_eq!(h.rt.cursor(), Cursor::Pointer);
+    assert_eq!(h.cursor(), Cursor::Pointer);
     h.press(20.0, 20.0);
     assert_eq!(px(&mut h), [255, 0, 0, 255]);
     h.release(20.0, 20.0);
@@ -259,7 +289,7 @@ mod tests {
     // Tab focuses it, Space plays and flashes it pressed.
     h.leave();
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!(h.focused(), Some(Id::of("play")));
+    assert_eq!(h.focus_id(), Some(Id::of("play")));
     h.key(Key::Char(' '), Modifiers::empty());
     assert_eq!(h.app().plays, 2);
     assert_eq!(px(&mut h), [255, 0, 0, 255]);
@@ -278,15 +308,15 @@ mod tests {
 
     // Disabled while focused: focus goes, no input, no hand, and Tab passes it by.
     h.app_mut().off = true;
-    h.rt.redraw();
+    h.redraw();
     h.frame();
-    assert_eq!(h.focused(), None);
+    assert_eq!(h.focus_id(), None);
     h.move_to(21.0, 20.0);
-    assert_eq!(h.rt.cursor(), Cursor::Arrow);
+    assert_eq!(h.cursor(), Cursor::Arrow);
     h.click(20.0, 20.0);
     assert_eq!(h.app().plays, 3);
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!(h.focused(), None);
+    assert_eq!(h.focus_id(), None);
   }
 
   /// A button, and a timer a second away that the app sets on T.
@@ -317,11 +347,11 @@ mod tests {
     h.key(Key::Char('t'), Modifiers::empty());
     h.key(Key::Char(' '), Modifiers::empty());
     // The flash's frame comes first, then the timer's, which it did not replace.
-    assert_eq!(h.rt.due_in(), Some(Duration::from_millis(120)));
+    assert_eq!(h.due_in(), Some(Duration::from_millis(120)));
     h.wait(Duration::from_millis(200));
-    assert_eq!(h.rt.due_in(), Some(Duration::from_millis(800)));
+    assert_eq!(h.due_in(), Some(Duration::from_millis(800)));
     assert!(h.wait(Duration::from_millis(800)) > 0);
-    assert!(!h.rt.needs_frame() && h.rt.due_in().is_none());
+    assert!(!h.needs_frame() && h.due_in().is_none());
   }
 
   /// A disabled control whose own style asks for focus, then an enabled one.
@@ -361,13 +391,13 @@ mod tests {
     let mut h = Harness::new(Ahead, Size::new(100.0, 100.0), 1.0);
     h.frame();
     h.move_to(10.0, 10.0);
-    assert_eq!(h.rt.cursor(), Cursor::Pointer);
+    assert_eq!(h.cursor(), Cursor::Pointer);
     h.move_to(30.0, 10.0);
-    assert_eq!(h.rt.cursor(), Cursor::Crosshair);
+    assert_eq!(h.cursor(), Cursor::Crosshair);
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!(h.focused(), Some(Id::of("b")));
+    assert_eq!(h.focus_id(), Some(Id::of("b")));
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!(h.focused(), Some(Id::of("b")), "a is not in Tab order");
+    assert_eq!(h.focus_id(), Some(Id::of("b")), "a is not in Tab order");
   }
 
   #[test]
@@ -375,10 +405,10 @@ mod tests {
     let mut h = Harness::new(Pair, Size::new(100.0, 100.0), 1.0);
     h.frame();
     h.move_to(10.0, 10.0);
-    assert_eq!(h.rt.cursor(), Cursor::Arrow);
+    assert_eq!(h.cursor(), Cursor::Arrow);
     h.move_to(10.0, 30.0);
-    assert_eq!(h.rt.cursor(), Cursor::Arrow);
+    assert_eq!(h.cursor(), Cursor::Arrow);
     h.key(NamedKey::Tab, Modifiers::empty());
-    assert_eq!(h.focused(), Some(Id::of("c")));
+    assert_eq!(h.focus_id(), Some(Id::of("c")));
   }
 }

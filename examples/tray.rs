@@ -15,6 +15,11 @@
 // A Windows app, not a console one: no terminal opens with it.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+// The counter includes it too, for its own main.
+#[path = "common/example.rs"]
+#[expect(clippy::duplicate_mod, reason = "the counter's is private to it")]
+mod example;
+
 #[path = "counter.rs"]
 #[expect(dead_code, reason = "its main and what this file doesn't use")]
 // The counter sets the Windows subsystem, an attribute of its own crate, not of this module.
@@ -30,14 +35,14 @@ use nimbo::desktop::Launcher;
 use nimbo::hotkey::{Edge, Hotkeys};
 use nimbo::instance::{self, Claim, Instance};
 use nimbo::paste::Paste;
-use nimbo::tray::{Item, Menu, Tray, TrayIcon};
+use nimbo::tray::{Tray, TrayIcon};
 use nimbo::{
-  AppInfo, Config, Hotkey, Main, Png, Presence, Shortcut, Window, autostart, desktop, focus, paste,
-  tray,
+  AppInfo, Config, Hotkey, Item, Main, Menu, Png, Presence, Shortcut, Window, autostart, desktop,
+  focus, paste, tray,
 };
 
 pub const INFO: AppInfo =
-  AppInfo { id: "com.example.nimbo-tray", name: "Nimbo Tray", presence: Presence::Accessory };
+  AppInfo::new("com.example.nimbo-tray", "Nimbo Tray").presence(Presence::Accessory);
 pub const HOTKEY: &str = "ctrl+option+space";
 /// A ring, filled even-odd.
 pub const ICON: &str = "M9 1a8 8 0 1 0 0 16A8 8 0 1 0 9 1Zm0 4a4 4 0 1 1 0 8 4 4 0 1 1 0-8Z";
@@ -134,8 +139,7 @@ fn show(main: &mut Main, state: &Shared) {
 /// Pastes `text` where the user types now: the clipboard comes back after the paste, unless
 /// something else was copied meanwhile.
 fn paste(text: &str) {
-  let opts = Paste { restore: true, target: focus::current(), deadline: None };
-  if let Err(e) = paste::text(text, opts) {
+  if let Err(e) = paste::text(text, Paste::new(focus::current())) {
     eprintln!("paste: {e}");
   }
 }
@@ -167,13 +171,13 @@ fn start(main: &mut Main, instance: Option<Instance>) {
   // Nothing off Linux; there the entry is written once, again when the executable moves, and
   // only then is the icon decoded.
   let icon = Png::icon(include_bytes!("../docs/brand/mark-iris.png"));
-  let launcher = Launcher { comment: "A tray app made with nimbo", categories: &["Utility"], icon };
+  let launcher = Launcher::new(icon).comment("A tray app made with nimbo").categories(&["Utility"]);
   if let Err(e) = desktop::install(&INFO, &launcher) {
     eprintln!("desktop: {e}");
   }
 
   let state = STATE.with(Rc::clone);
-  let tray = Tray::new(TrayIcon::Path { size: 18.0, d: ICON.into(), even_odd: true }, INFO.name);
+  let tray = Tray::new(TrayIcon::Path { size: 18.0, d: ICON.into(), even_odd: true }, INFO.name());
   if let Err(e) = tray::available() {
     eprintln!("tray: {e}");
   }
@@ -186,7 +190,7 @@ fn start(main: &mut Main, instance: Option<Instance>) {
     }
   });
   let hotkey = Hotkey::parse(HOTKEY).map_err(|e| e.to_string());
-  if let Err(e) = hotkey.and_then(|h| hotkeys.set(&[Some(h)])) {
+  if let Err(e) = hotkey.and_then(|h| hotkeys.set(&[Some(h)]).map_err(|e| e.to_string())) {
     eprintln!("hotkey: {e}");
   }
 
@@ -244,9 +248,9 @@ fn start(main: &mut Main, instance: Option<Instance>) {
 
 fn main() {
   if std::env::args().any(|a| a == "--shot") {
-    return nimbo::run_example(Config::new("Counter", 360.0, 300.0), Counter::default(), |h| {
-      _ = h.frame()
-    });
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let cfg = Config::new("Counter", 360.0, 300.0);
+    return example::run(cfg, Counter::default(), &args, |h| _ = h.frame());
   }
 
   // One instance: a second launch asks the first to show the counter, and ends.

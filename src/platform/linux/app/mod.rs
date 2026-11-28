@@ -86,6 +86,9 @@ fn x11() -> Option<&'static X11> {
   X11.get_or_init(|| X11::load(&Lib::open(&[c"libX11.so.6"])?)).as_ref()
 }
 
+/// The file in the app's config folder that keeps the RemoteDesktop portal's approval ([remote]).
+const TOKEN: &str = "remote-desktop.token";
+
 thread_local! {
   /// The app running, which [shell::run] sets.
   static INFO: Cell<Option<AppInfo>> = const { Cell::new(None) };

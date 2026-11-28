@@ -1,12 +1,12 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Text: shaping through the platform's text backend ([crate::platform] `text`: CoreText on
+//! Text: shaping through the platform's text backend (`platform::text`: CoreText on
 //! macOS) with a shaped-line cache, glyphs rasterized by it into an R8 atlas and colour glyphs
-//! (emoji) into an RGBA one ([atlas]). Fonts are shaped at their point size; only glyph bitmaps
+//! (emoji) into an RGBA one (`atlas`). Fonts are shaped at their point size; only glyph bitmaps
 //! are made at the pixel size. Everything here but the backend is portable.
 
 mod atlas;
-pub mod edit;
+pub(crate) mod edit;
 mod memo;
 
 use std::collections::HashMap;
@@ -29,6 +29,7 @@ const FACE_CAP: usize = 256;
 pub(crate) const SMOOTH: bool = true;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Weight {
   Regular,
   Medium,
@@ -38,6 +39,7 @@ pub enum Weight {
 
 /// The system font's design, as SwiftUI's `Font.Design`: SF Pro or SF Mono on macOS.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Design {
   #[default]
   Default,
@@ -47,9 +49,9 @@ pub enum Design {
 /// The system UI font in a [Design]; `size` in points.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Font {
-  pub size: f32,
-  pub weight: Weight,
-  pub design: Design,
+  pub(crate) size: f32,
+  pub(crate) weight: Weight,
+  pub(crate) design: Design,
 }
 
 impl Font {
@@ -65,10 +67,20 @@ impl Font {
   pub const fn weight(self, weight: Weight) -> Self {
     Self { weight, ..self }
   }
+
+  /// The same font in `size` points: a title from the bold body font.
+  pub const fn size(self, size: f32) -> Self {
+    Self { size, ..self }
+  }
+
+  pub const fn get_size(&self) -> f32 {
+    self.size
+  }
 }
 
 /// Vertical metrics of a font in points.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct Metrics {
   pub ascent: f32,
   pub descent: f32,
@@ -118,7 +130,7 @@ pub(crate) struct Raster {
 /// is the pen position in points from the line start, `y` how far the shaper raised it above
 /// the baseline (a mark on a capital, or on another mark).
 #[derive(Clone, Copy, Debug)]
-pub struct Glyph {
+pub(crate) struct Glyph {
   pub face: u16,
   pub id: u16,
   pub x: f32,
@@ -129,7 +141,7 @@ pub struct Glyph {
 /// positions, `up` above and `down` below the baseline (a glyph the shaper raised included).
 /// Drawing culls the glyphs out of view by it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Ink {
+pub(crate) struct Ink {
   pub left: f32,
   pub right: f32,
   pub up: f32,
@@ -137,7 +149,7 @@ pub struct Ink {
 }
 
 #[derive(Debug)]
-pub struct Line {
+pub(crate) struct Line {
   pub glyphs: Vec<Glyph>,
   /// Per glyph, the byte offset in the line's text where its cluster starts (apart from the
   /// glyphs, which drawing walks).
@@ -146,9 +158,6 @@ pub struct Line {
   pub width: f32,
   /// Its glyphs' ink bounds: [TextSystem::layout] fills them in.
   pub ink: Ink,
-  /// The faces its glyphs index: they start over past [FACE_CAP], and a line kept from before
-  /// is no longer [TextSystem::is_current].
-  pub(crate) epoch: u32,
 }
 
 struct Entry {
@@ -159,7 +168,7 @@ struct Entry {
   frame: u64,
 }
 
-pub struct TextSystem {
+pub(crate) struct TextSystem {
   scale: f32,
   /// Requested fonts and the face each resolved to: a few, searched in order (a hash lookup
   /// cost more per text element); bounded by [FACE_CAP].
@@ -189,8 +198,6 @@ pub struct TextSystem {
   /// Text formatted for drawing ([crate::Frame::text_at]), kept so a steady frame allocates
   /// nothing.
   pub(crate) scratch: String,
-  /// Bumped each time the faces start over: [Line::epoch].
-  epoch: u32,
 }
 
 impl TextSystem {
@@ -212,11 +219,10 @@ impl TextSystem {
       frame: 0,
       refilled: false,
       scratch: String::new(),
-      epoch: 0,
     }
   }
 
-  pub fn scale(&self) -> f32 {
+  pub(crate) fn scale(&self) -> f32 {
     self.scale
   }
 
@@ -232,7 +238,8 @@ impl TextSystem {
     self.color_atlas.reset();
   }
 
-  pub fn smoothing(&self) -> bool {
+  #[cfg(test)]
+  pub(crate) fn smoothing(&self) -> bool {
     self.smooth
   }
 
@@ -270,9 +277,7 @@ impl TextSystem {
 
     self.frame += 1;
     if self.faces.len() > FACE_CAP {
-      // Lines and atlas slots name faces by index: they go too, and lines kept elsewhere are
-      // stale.
-      self.epoch += 1;
+      // Lines and atlas slots name faces by index: they go too.
       self.fonts.clear();
       self.faces.clear();
       self.metrics.clear();
@@ -303,7 +308,7 @@ impl TextSystem {
     dropped
   }
 
-  pub fn measure(&mut self, s: &str, font: Font) -> f32 {
+  pub(crate) fn measure(&mut self, s: &str, font: Font) -> f32 {
     self.layout(s, font).width
   }
 
@@ -311,7 +316,7 @@ impl TextSystem {
   /// included: where a caret goes, in points from the line start. A boundary inside a glyph
   /// (a ligature) is placed in proportion to its bytes. Left-to-right text only: the
   /// positions of right-to-left runs come out in logical order, not visual.
-  pub fn carets(&mut self, s: &str, font: Font, mut f: impl FnMut(usize, f32)) {
+  pub(crate) fn carets(&mut self, s: &str, font: Font, mut f: impl FnMut(usize, f32)) {
     let line = self.layout(s, font);
     let (g, at) = (&line.glyphs, &line.clusters);
     // The first glyph of the cluster after glyph `k`.
@@ -343,15 +348,14 @@ impl TextSystem {
   }
 
   /// Ascent, descent, leading, cap and x-height of `font` (its primary face, before fallback).
-  pub fn metrics(&mut self, font: Font) -> Metrics {
+  pub(crate) fn metrics(&mut self, font: Font) -> Metrics {
     let face = self.face(font);
     self.metrics[face as usize]
   }
 
-  /// Shapes `s` (kerning, ligatures, font fallback), cached per (font, text). A line kept past
-  /// the frame's end is laid out again when it is no longer [Self::is_current]: its faces
-  /// may have started over.
-  pub fn layout(&mut self, s: &str, font: Font) -> Rc<Line> {
+  /// Shapes `s` (kerning, ligatures, font fallback), cached per (font, text). Its glyphs index
+  /// the faces of this frame: a line is not kept past the frame's end, when they may start over.
+  pub(crate) fn layout(&mut self, s: &str, font: Font) -> Rc<Line> {
     let face = self.face(font);
     let mut h = FxHasher::default();
     (face, s).hash(&mut h);
@@ -369,17 +373,12 @@ impl TextSystem {
     line
   }
 
-  /// Whether `line`'s glyphs index the faces there are now.
-  pub fn is_current(&self, line: &Line) -> bool {
-    line.epoch == self.epoch
-  }
-
   /// The atlas slot of a glyph at one of 4 horizontal subpixel offsets, `sub` (colour glyphs have
   /// one), rasterized on first use for text of `color`: dark text (on a light background) or
   /// light gets its own coverage, and a colour glyph with layers in the text's colour its own
   /// bitmap per colour. A colour face's monochrome glyph is a coverage one, tinted like text.
   /// `None` for glyphs with no pixels (spaces), when the atlas is full, or for a face there is
-  /// no more (a stale line's: [Self::is_current]).
+  /// no more (a line kept from before the faces started over).
   pub(crate) fn glyph(&mut self, face: u16, id: u16, sub: u8, color: Color) -> Option<AtlasGlyph> {
     let paint = self.paint(face, id);
     let font = self.faces.get(face as usize)?;
@@ -411,11 +410,6 @@ impl TextSystem {
     *self.color_glyphs.entry((face, id)).or_insert_with(|| sys::color_glyph(font, id))
   }
 
-  /// Whether a shaped glyph draws in its own colours (an emoji), not in the text's.
-  pub fn is_color(&mut self, g: Glyph) -> bool {
-    self.paint(g.face, g.id).is_some()
-  }
-
   fn face(&mut self, font: Font) -> u16 {
     if let Some(&(_, face)) = self.fonts.iter().find(|(f, _)| *f == font) {
       return face;
@@ -442,7 +436,7 @@ impl TextSystem {
     let base = self.faces[face as usize].clone();
     let line = sys::shape(&base, s, |f| self.face_index(f));
     let ink = self.ink_of(&line.glyphs);
-    Line { epoch: self.epoch, ink, ..line }
+    Line { ink, ..line }
   }
 
   /// The ink bounds of `glyphs` from each one's box, their shaping offsets applied.
@@ -578,6 +572,19 @@ mod tests {
     // SF Pro's ascent is 0.95 em, Segoe UI's 1.08.
     assert!(m.ascent > 11.0 && m.ascent < 14.5 && m.descent > 2.0 && m.descent < 5.0, "{m:?}");
     assert_eq!(m.line_height(), (m.ascent + m.descent + m.leading).ceil());
+  }
+
+  /// Glyphs start at the clusters of the text: the accent's cluster is the e's or its own. A mark
+  /// on a capital is raised above the baseline, unlike the base.
+  #[test]
+  fn clusters_and_raised_marks() {
+    let mut ts = TextSystem::new(2.0);
+    let font = Font::ui(13.0);
+    let line = ts.layout("cafe\u{301}", font);
+    assert!(line.clusters.iter().all(|&c| "cafe\u{301}".is_char_boundary(c as usize)));
+    let q = ts.layout("Q\u{302}", font);
+    assert_eq!(q.glyphs[0].y, 0.0);
+    assert!(q.glyphs.len() == 1 || q.glyphs[1].y > 1.0, "{:?}", q.glyphs);
   }
 
   #[test]
@@ -719,7 +726,7 @@ mod tests {
   }
 
   #[test]
-  fn kept_lines_go_stale_when_faces_start_over() {
+  fn kept_lines_draw_nothing_once_faces_start_over() {
     let mut ts = TextSystem::new(2.0);
     // A line far into the faces, kept by its caller.
     for i in 0..FACE_CAP {
@@ -727,14 +734,11 @@ mod tests {
     }
 
     let kept = ts.layout("kept", Font::ui(100.0));
-    assert!(ts.is_current(&kept));
     ts.metrics(Font::ui(101.0));
     assert!(ts.end_frame(), "past the cap: the faces start over");
-    assert!(!ts.is_current(&kept));
     let g = kept.glyphs[0];
     assert!(ts.glyph(g.face, g.id, 0, [1.0; 4]).is_none(), "no panic on a face gone");
     let fresh = ts.layout("kept", Font::ui(100.0));
-    assert!(ts.is_current(&fresh));
     let g = fresh.glyphs[0];
     assert!(ts.glyph(g.face, g.id, 0, [1.0; 4]).is_some());
   }

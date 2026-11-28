@@ -8,12 +8,13 @@
 //! opens and Secure Input is never on (Windows' microphone switch in Settings › Privacy isn't read
 //! yet).
 
-use crate::open;
 #[cfg(target_os = "macos")]
 use crate::platform;
+use crate::{Error, open};
 
 /// A pane of System Settings › Privacy & Security.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Pane {
   /// Controlling the computer: event taps that change events, posting keys, reading other apps'
   /// windows.
@@ -22,7 +23,7 @@ pub enum Pane {
   /// Listening to the keyboard while other apps have it (a listen-only event tap).
   InputMonitoring,
   /// Paste from Other Apps (macOS 15.4+): reading the clipboard without asking
-  /// ([crate::SystemClipboard::readable]).
+  /// ([crate::clipboard::SystemClipboard::readable]).
   Pasteboard,
 }
 
@@ -65,7 +66,7 @@ pub fn request_accessibility() -> bool {
 }
 
 /// Opens `pane` in System Settings, for the user to allow the app there; nothing elsewhere.
-pub fn open_pane(pane: Pane) -> Result<(), String> {
+pub fn open_pane(pane: Pane) -> Result<(), Error> {
   match cfg!(target_os = "macos") {
     true => open::url(pane.url()),
     false => Ok(()),
@@ -83,6 +84,7 @@ pub fn secure_input() -> bool {
 
 /// What the user decided about a device the app asks for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Access {
   Granted,
   /// The user said no; System Settings changes it ([open_pane]).

@@ -7,14 +7,14 @@
 #[expect(dead_code, reason = "its main and what this file doesn't use")]
 // The example sets the Windows subsystem, an attribute of its own crate, not of this module.
 #[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
-mod example;
+mod tray;
 
 #[cfg(not(target_os = "macos"))]
 #[path = "tray/detached.rs"]
 mod detached;
 
-use example::Shown;
-use nimbo::svg;
+use nimbo::tray::TrayIcon;
+use tray::Shown;
 
 #[cfg(not(target_os = "macos"))]
 #[test]
@@ -27,8 +27,8 @@ fn detached_tray() {
 #[test]
 fn the_example() {
   let labels = |s: &Shown| {
-    let m = example::menu(s);
-    let items = m.items.iter().map(|i| (i.label().to_owned(), i.is_enabled(), i.is_on()));
+    let m = tray::menu(s);
+    let items = m.items().iter().map(|i| (i.label().to_owned(), i.is_enabled(), i.is_on()));
     items.collect::<Vec<_>>()
   };
 
@@ -42,17 +42,19 @@ fn the_example() {
   assert_eq!((l[0].0.as_str(), l[1].0.as_str()), ("Count: 3", "Close Counter"));
   assert_eq!(l[3], ("Launch at Login".into(), true, true));
 
-  assert!(nimbo::Hotkey::parse(example::HOTKEY).is_ok());
-  let mut rings = Vec::new();
-  svg::flatten(example::ICON, 1.0, &mut rings).unwrap();
-  assert_eq!(rings.len(), 2, "a ring: two circles");
+  assert!(nimbo::Hotkey::parse(tray::HOTKEY).is_ok());
+  // The icon's path data reads, as an icon file of it does.
+  let file =
+    format!(r#"<svg viewBox="0 0 18 18"><path fill-rule="evenodd" d="{}"/></svg>"#, tray::ICON);
+  let icon = TrayIcon::Path { size: 18.0, d: tray::ICON.into(), even_odd: true };
+  assert_eq!(TrayIcon::from_svg(&file).unwrap(), icon);
 }
 
 /// Showing the counter when it is closed (a second launch's "open", a reopen) opens it, which
 /// borrows the state again: the lookup lets its borrow go first.
 #[test]
 fn a_closed_counter_is_looked_up_without_holding_the_state() {
-  let state = example::Shared::default();
-  assert!(example::open_counter(&state).is_none());
+  let state = tray::Shared::default();
+  assert!(tray::open_counter(&state).is_none());
   assert!(state.try_borrow_mut().is_ok(), "the state is free to open the counter");
 }

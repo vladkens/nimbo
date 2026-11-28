@@ -10,10 +10,9 @@ use std::fmt;
 use std::hash::BuildHasherDefault;
 use std::ops::Range;
 
-use keyboard_types::Modifiers;
-
+use crate::Modifiers;
 use crate::app::MouseButton;
-use crate::keys::{Binding, CMD, Command, Delete, Extent, Move, Os, Shortcut, bind};
+use crate::keys::{Binding, CMD, Command, Delete, Extent, Move, Os, Shortcut};
 use crate::scene::{Point, Rect};
 use crate::text::FxHasher;
 use crate::ui::input::ScrollState;
@@ -23,7 +22,7 @@ use crate::ui::{Enabled, Focus, Id, Role, State, Style, Ui, px};
 const OVERSCAN: usize = 2;
 
 /// Cmd-A selects every row of a multi-select list.
-const MULTI_KEYS: &[Binding] = &[bind(Shortcut::char('a').cmd(), Command::SelectAll)];
+const MULTI_KEYS: &[Binding] = &[Binding::new(Shortcut::char('a').cmd(), Command::SelectAll)];
 
 type KeySet = HashSet<u64, BuildHasherDefault<FxHasher>>;
 
@@ -168,6 +167,7 @@ pub struct ListRows<'s> {
 
 /// The header above a row that starts a section ([ListRows::header]).
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct SectionHeader {
   /// The section's place among the list's.
   pub section: usize,

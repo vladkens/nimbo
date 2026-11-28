@@ -12,10 +12,9 @@
 use std::cell::Cell;
 use std::time::Duration;
 
-use keyboard_types::Modifiers;
-
 use super::layout::{Node, Tree};
 use super::{Focus, Id, Ui, UiState};
+use crate::Modifiers;
 use crate::app::{Event, MouseButton, Phase};
 use crate::keys::Os;
 use crate::scene::{Point, Rect, Size};
@@ -27,6 +26,7 @@ const WHEEL_TAU: f32 = 0.05;
 
 /// A press and release on the same element.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct Click {
   pub id: Id,
   pub button: MouseButton,
@@ -41,6 +41,7 @@ pub struct Click {
 
 /// A button held down since it was pressed on `id`.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct Press {
   pub id: Id,
   pub button: MouseButton,
@@ -55,6 +56,7 @@ pub struct Press {
 
 /// A scroll container's position, for scrollbars: `offset` of `content` shown in `viewport`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct Scroll {
   pub offset: Point,
   pub content: Size,
@@ -407,7 +409,14 @@ impl UiState {
       Event::MouseExit | Event::DragExit => self.hover_at(None, false),
       Event::MouseDown { pos, button, clicks, mods } => {
         let mut changed = self.hover_at(Some(pos), false);
-        let top = self.input.hover.first().copied();
+        // A tip's element only shows its tip: the left press is the element's around it, its
+        // own with none (which hides the tip). Other buttons keep the innermost, where a
+        // context menu's owner is found up its parents.
+        let tip = |id| self.last.find(id).is_some_and(|i| self.last.tips.binary_search(&i).is_ok());
+        let left = button == MouseButton::Left;
+        let hover = &self.input.hover;
+        let top = hover.iter().copied().find(|&id| !(left && tip(id))).or(hover.first().copied());
+
         // Another button pressed meanwhile leaves the press to the first one's release.
         if self.input.press.is_none_or(|p| p.button == button) {
           self.input.presses += 1;

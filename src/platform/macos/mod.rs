@@ -42,9 +42,12 @@ pub use self::app::{
   post, tray, uninstall,
 };
 use crate::app::{Appearance, Clipboard, ColorScheme};
+use crate::clipboard::Sealed;
 
 /// The system clipboard, plain text only.
 pub struct Pasteboard;
+
+impl Sealed for Pasteboard {}
 
 impl Clipboard for Pasteboard {
   fn read(&self) -> Option<String> {

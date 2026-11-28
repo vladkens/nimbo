@@ -16,6 +16,7 @@ use crate::system::Change;
 
 /// How an audio device is attached.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Transport {
   /// The computer's own microphone, not a headset on its jack: a closed lid cuts it off on Apple's
   /// laptops.

@@ -1,29 +1,12 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Keys: what a key press reports ([KeyEvent]: our [Key], and the W3C UI Events [Code] and
-//! [Modifiers] of the `keyboard-types` crate), shortcuts as keymaps and settings write them
+//! Keys: what a key press reports ([KeyEvent]: its [Key], [Code] and [Modifiers], by their W3C
+//! UI Events names), shortcuts as keymaps and settings write them
 //! ([Shortcut], global [Hotkey]s) and their labels, bindings ([Binding]), and the commands keys
 //! become ([Command]), named after AppKit's key binding selectors (`moveWordLeft:`,
 //! `deleteBackward:`, `insertNewline:`).
 //!
-//! A key press travels in this order (the runtime routes it, `Runtime::event`):
-//!
-//! 0. A focused element that grabs the keys ([crate::Ui::grab_keys]: a shortcut recorder recording,
-//!    a modal dialog) gets the key itself first.
-//! 1. Bindings of the focused element, then of its ancestors ([crate::Ui::keymap]): a match becomes
-//!    a [Command] for that element, which reads it with [crate::Ui::command].
-//! 2. The app's bindings ([crate::App::keymap]): a match goes to `App::event` as
-//!    [crate::Event::Command].
-//! 3. The key itself: the focused element ([crate::Ui::key_down]), then `App::event` as
-//!    [crate::Event::KeyDown].
-//! 4. Nobody used it: AppKit's `interpretKeyEvents:` turns it into typed text (`insertText:`,
-//!    [crate::Event::Text]) or a command (`doCommandBySelector:`, [crate::Event::Command]), with
-//!    the system's bindings: arrows, Option and Cmd moves, Emacs-style Ctrl keys. Text and commands
-//!    go to the focused element, then the app; an unused Tab or Shift-Tab moves focus. A key with
-//!    Cmd that nobody used goes on to the menu bar (Cmd-Q), then to step 4.
-//!
-//! The menu bar's Edit items ([crate::Commands]) run the command their key would: the focused
-//! element, then those above it that bind the command, then the app.
+//! The order a key press travels in is in the crate's doc (`lib.rs`).
 //!
 //! Windows and Linux have no `interpretKeyEvents:`: their windows get step 4's commands from
 //! [Os::command], the keys their own text fields bind. The harness has no AppKit either: it
@@ -31,9 +14,11 @@
 //! platform it plays ([crate::Harness::set_os]), for macOS [standard], the part of AppKit's
 //! standard bindings we model.
 
-use keyboard_types::{Code, Modifiers, NamedKey};
+mod w3c;
 
-use crate::platform;
+pub use w3c::{Code, Modifiers, NamedKey};
+
+use crate::{Error, platform};
 
 /// The command key, `cmd` in a shortcut in the app: ⌘ ([Modifiers::META]) on macOS, Ctrl
 /// ([Modifiers::CONTROL]) on Windows and Linux, as their shortcuts use them.
@@ -48,6 +33,7 @@ pub const CTRL: Modifiers = Os::CURRENT.ctrl();
 /// platform's ([Os::CURRENT]); the harness may take another's
 /// ([crate::Harness::set_os]), so tests check every platform's keys on any host.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Os {
   Mac,
   Windows,
@@ -80,16 +66,17 @@ impl Os {
   }
 
   /// The command a key that types nothing runs in a text field when nobody used it, as the
-  /// platform's own text fields bind it: AppKit's ([standard]), or Windows' and GTK's ([pc]).
+  /// platform's own text fields bind it: AppKit's (`standard`), or Windows' and GTK's (`pc`).
   pub fn command(self, k: &KeyEvent) -> Option<Command> {
     if let Os::Mac = self { standard(k) } else { pc(k, self) }
   }
 }
 
-/// A key: the character it types, or its name. A [Copy] twin of `keyboard_types::Key`, whose
-/// characters are a `String`: a key press types one character here, and keymaps match keys in
-/// `const` patterns, without an allocation per key and binding.
+/// A key: the character it types, or its name. [Copy], unlike W3C's `key` string: a key press
+/// types one character here, and keymaps match keys in `const` patterns, without an allocation
+/// per key and binding.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Key {
   /// A key that types a character: the character on the current layout with Shift applied
   /// but no other modifier (`charactersIgnoringModifiers`): `'a'`, `'A'` with Shift, `'!'` for
@@ -186,6 +173,7 @@ pub fn us_code(c: char) -> Option<(Code, bool)> {
 
 /// A key press or release.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct KeyEvent {
   pub key: Key,
   /// What the key types with every modifier applied (`characters`): `'å'` for Option-A on a US
@@ -265,6 +253,7 @@ const CHAR_NAMES: [(char, &str); 12] = [
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ShortcutError {
   Empty,
   Unknown(String),
@@ -532,12 +521,6 @@ fn key_label(key: Key, mac: bool) -> String {
   }
 }
 
-/// The modifiers held, as the platform shows them before a key: `⌃⌥` on macOS, `Ctrl+Alt+`
-/// elsewhere.
-pub fn modifiers_label(m: Modifiers) -> String {
-  mods_label(m, cfg!(target_os = "macos"))
-}
-
 fn mods_label(m: Modifiers, mac: bool) -> String {
   let held = MODS.iter().filter(|r| m.contains(r.0));
   held.map(|r| if mac { r.2.to_string() } else { format!("{}+", r.3) }).collect()
@@ -554,6 +537,7 @@ fn lower(c: char) -> char {
 /// `fn` (macOS only: the event tap sees it go down and up, and a key pressed while it is held
 /// makes it a chord of the user's instead).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Hotkey {
   Shortcut(Shortcut),
   /// A modifier key by its place: [Code::AltRight], [Code::Fn].
@@ -672,15 +656,18 @@ impl std::fmt::Display for Hotkey {
 
 /// A shortcut in the app and the command it runs, as SwiftUI's `.keyboardShortcut` on a command.
 /// `const`, so a keymap is a constant:
-/// `const KEYS: &[Binding] = &[bind(Shortcut::char('z').cmd(), Command::Undo)]`.
+/// `const KEYS: &[Binding] = &[Binding::new(Shortcut::char('z').cmd(), Command::Undo)]`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Binding {
   pub keys: Shortcut,
   pub command: Command,
 }
 
-pub const fn bind(keys: Shortcut, command: Command) -> Binding {
-  Binding { keys, command }
+impl Binding {
+  /// `keys` running `command`.
+  pub const fn new(keys: Shortcut, command: Command) -> Self {
+    Self { keys, command }
+  }
 }
 
 /// The shortcut of the first binding in `map` that runs `cmd`: to show it beside the command,
@@ -689,87 +676,95 @@ pub fn shortcut(map: &[Binding], cmd: Command) -> Option<Shortcut> {
   map.iter().find(|b| b.command == cmd).map(|b| b.keys)
 }
 
-/// The command of the first binding in `map` that matches `k`, on this platform ([Os::lookup]).
-pub fn lookup(map: &[Binding], k: &KeyEvent) -> Option<Command> {
-  Os::CURRENT.lookup(map, k)
-}
-
 /// The edit menu's keys, which a text field binds on itself: the key goes to it before the menu
 /// bar's items (macOS), which show them ([crate::Commands]), and Windows and Linux have no menu.
 pub const EDIT_KEYS: &[Binding] = &[
-  bind(Shortcut::char('a').cmd(), Command::SelectAll),
-  bind(Shortcut::char('c').cmd(), Command::Copy),
-  bind(Shortcut::char('x').cmd(), Command::Cut),
-  bind(Shortcut::char('v').cmd(), Command::Paste),
-  bind(Shortcut::char('z').cmd(), Command::Undo),
-  bind(Shortcut::char('z').cmd().shift(), Command::Redo),
+  Binding::new(Shortcut::char('a').cmd(), Command::SelectAll),
+  Binding::new(Shortcut::char('c').cmd(), Command::Copy),
+  Binding::new(Shortcut::char('x').cmd(), Command::Cut),
+  Binding::new(Shortcut::char('v').cmd(), Command::Paste),
+  Binding::new(Shortcut::char('z').cmd(), Command::Undo),
+  Binding::new(Shortcut::char('z').cmd().shift(), Command::Redo),
 ];
 
 /// The keys of selectable text: select all and copy.
 pub const SELECT_KEYS: &[Binding] = &[
-  bind(Shortcut::char('a').cmd(), Command::SelectAll),
-  bind(Shortcut::char('c').cmd(), Command::Copy),
+  Binding::new(Shortcut::char('a').cmd(), Command::SelectAll),
+  Binding::new(Shortcut::char('c').cmd(), Command::Copy),
 ];
 
 // MARK: Commands
 
-/// Where a caret move goes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Move {
-  Left,
-  Right,
-  WordLeft,
-  WordRight,
-  /// To the start of the visual line (Cmd-Left).
-  LineStart,
-  LineEnd,
-  /// To the start of the line between line breaks (Ctrl-A).
-  ParagraphStart,
-  ParagraphEnd,
-  Up,
-  Down,
-  PageUp,
-  PageDown,
-  DocStart,
-  DocEnd,
-}
+/// The editor's moves and deletes, which [Command::Move] and [Command::Delete] carry from the
+/// platform's keys to a text field: `pub` in a private module, so the commands can carry them
+/// while an app can't name them.
+mod edit {
+  /// Where a caret move goes.
+  #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+  pub enum Move {
+    Left,
+    Right,
+    WordLeft,
+    WordRight,
+    /// To the start of the visual line (Cmd-Left).
+    LineStart,
+    LineEnd,
+    /// To the start of the line between line breaks (Ctrl-A).
+    ParagraphStart,
+    ParagraphEnd,
+    Up,
+    Down,
+    PageUp,
+    PageDown,
+    DocStart,
+    DocEnd,
+  }
 
-/// What a delete removes when nothing is selected (a selection is removed as a whole).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Delete {
-  Backward,
-  Forward,
-  WordBackward,
-  WordForward,
-  /// To the start of the visual line (Cmd-Backspace).
-  ToLineStart,
-  ToLineEnd,
-  ToParagraphStart,
-  /// To the end of the line between line breaks (Ctrl-K).
-  ToParagraphEnd,
-}
+  /// What a delete removes when nothing is selected (a selection is removed as a whole).
+  #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+  pub enum Delete {
+    Backward,
+    Forward,
+    WordBackward,
+    WordForward,
+    /// To the start of the visual line (Cmd-Backspace).
+    ToLineStart,
+    ToLineEnd,
+    ToParagraphStart,
+    /// To the end of the line between line breaks (Ctrl-K).
+    ToParagraphEnd,
+  }
 
-/// What a move does ([Command::Move]): moves the caret, or extends the selection from its
-/// anchor, as Shift does.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Extent {
-  Caret,
-  Selection,
-}
+  /// What a move does ([super::Command::Move]): moves the caret, or extends the selection
+  /// from its anchor, as Shift does.
+  #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+  pub enum Extent {
+    Caret,
+    Selection,
+  }
 
-impl Extent {
-  /// [Extent::Selection] with Shift held, else Caret.
-  pub const fn by(shift: bool) -> Self {
-    if shift { Extent::Selection } else { Extent::Caret }
+  impl Extent {
+    /// [Extent::Selection] with Shift held, else Caret.
+    pub const fn by(shift: bool) -> Self {
+      if shift { Extent::Selection } else { Extent::Caret }
+    }
   }
 }
+
+pub(crate) use edit::{Delete, Extent, Move};
 
 /// A command from a key: AppKit's text commands (`doCommandBySelector:`), the edit menu's
 /// (from bindings) and the app's own ([Command::Action]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Command {
-  /// Moves the caret, or extends the selection (the `…AndModifySelection:` selectors).
+  /// Moves the caret, or extends the selection (the `…AndModifySelection:` selectors): the
+  /// editor's, for a field, a list or a menu to take. Hidden, as [Command::Delete]: a variant
+  /// can't be private, and its payload is the editor's own type, which an app can't name.
+  #[doc(hidden)]
   Move(Move, Extent),
+  /// Deletes text: the editor's.
+  #[doc(hidden)]
   Delete(Delete),
   InsertNewline,
   InsertTab,
@@ -787,7 +782,7 @@ pub enum Command {
   ScrollPageDown,
   ScrollToTop,
   ScrollToBottom,
-  /// The app's own command, by name: `bind(Shortcut::char('n').cmd(), Command::Action("new"))`.
+  /// The app's own command, by name: `Command::Action("new")` in a [Binding].
   Action(&'static str),
 }
 
@@ -1007,13 +1002,13 @@ pub fn ready() -> bool {
 /// | macOS | `CGEvent`s posted at the HID level, the modifiers as their flags | Accessibility ([crate::permissions::accessibility]); Secure Input may swallow them |
 /// | Windows | `SendInput`: the modifier keys down, the key, the modifiers up | an app in focus that does not run elevated above this one |
 /// | Linux | XTest (`libXtst`, loaded at run time) on X11; on Wayland the RemoteDesktop portal's keyboard | Wayland: the user's approval, asked once (the desktop's dialog) |
-pub fn post(s: Shortcut) -> Result<(), String> {
+pub fn post(s: Shortcut) -> Result<(), Error> {
   let key = match s.key {
     Key::Char(c) => Key::Char(lower(c)),
     k => k,
   };
 
-  platform::post::post(Shortcut { key, ..s })
+  platform::post::post(Shortcut { key, ..s }).map_err(Error::System)
 }
 
 /// The presses that send `key` with modifiers `want` where modifier keys are pressed (Windows,
@@ -1083,7 +1078,7 @@ mod tests {
   #[test]
   fn posted_keys_hold_the_modifiers_around_the_key() {
     use Code::{
-      AltRight as RAlt, ControlLeft as LCtrl, ControlRight as RCtrl, F24 as Mask, KeyA, KeyV,
+      AltRight as RAlt, ControlLeft as LCtrl, ControlRight as RCtrl, F20 as Mask, KeyA, KeyV,
       MetaRight as RWin, ShiftRight as RShift,
     };
     let s = |want, held: &[Code], key| strokes(want, key, Some, |c| held.contains(&c), Some(Mask));
@@ -1160,11 +1155,11 @@ mod tests {
     assert!(ev(Key::Char('='), CMD).is(Shortcut::char('=').cmd()));
     assert!(!ev(Key::Named(ArrowLeft), Modifiers::SHIFT).is(Shortcut::new(Key::Named(ArrowLeft))));
     let map = [
-      bind(Shortcut::char('z').cmd(), Command::Undo),
-      bind(Shortcut::char('z').cmd().shift(), Command::Redo),
+      Binding::new(Shortcut::char('z').cmd(), Command::Undo),
+      Binding::new(Shortcut::char('z').cmd().shift(), Command::Redo),
     ];
-    assert_eq!(lookup(&map, &ev(Key::Char('Z'), CMD_SHIFT)), Some(Command::Redo));
-    assert_eq!(lookup(&map, &ev(Key::Char('y'), CMD)), None);
+    assert_eq!(Os::CURRENT.lookup(&map, &ev(Key::Char('Z'), CMD_SHIFT)), Some(Command::Redo));
+    assert_eq!(Os::CURRENT.lookup(&map, &ev(Key::Char('y'), CMD)), None);
   }
 
   #[test]
@@ -1187,8 +1182,8 @@ mod tests {
 
     // In the app, the command key: ⌘ on macOS, Ctrl elsewhere.
     let map = [
-      bind(Shortcut::char('z').cmd(), Command::Undo),
-      bind(Shortcut::char('z').cmd().shift(), Command::Redo),
+      Binding::new(Shortcut::char('z').cmd(), Command::Undo),
+      Binding::new(Shortcut::char('z').cmd().shift(), Command::Redo),
     ];
     let redo = shortcut(&map, Command::Redo).map(|k| k.label());
     let want = if cfg!(target_os = "macos") { "⇧⌘Z" } else { "Ctrl+Shift+Z" };
@@ -1334,7 +1329,7 @@ mod tests {
     }
 
     let held = if cfg!(target_os = "macos") { "⌃⌥" } else { "Ctrl+Alt+" };
-    assert_eq!(modifiers_label(Modifiers::CONTROL | Modifiers::ALT), held);
+    assert_eq!(mods_label(Modifiers::CONTROL | Modifiers::ALT, cfg!(target_os = "macos")), held);
   }
 
   #[test]
@@ -1490,8 +1485,8 @@ mod tests {
   #[test]
   fn bindings_follow_the_platform() {
     let map = [
-      bind(Shortcut::char('v').cmd(), Command::Paste),
-      bind(Shortcut::char('a').ctrl(), Command::SelectAll),
+      Binding::new(Shortcut::char('v').cmd(), Command::Paste),
+      Binding::new(Shortcut::char('a').ctrl(), Command::SelectAll),
     ];
     let (ctrl, meta) = (Modifiers::CONTROL, Modifiers::META);
     for (os, cmd, other) in

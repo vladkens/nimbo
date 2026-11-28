@@ -3,7 +3,6 @@
 //! The app around the windows: an event loop that runs with no window ([app]), windows opened and
 //! closed on demand ([Main::open]), each with its own runtime, where the app shows besides them
 //! ([Presence]), and the way other threads reach the main thread ([Proxy]).
-//! An example's window ([crate::run_example]) is one window on top of it, quitting when it closes.
 //!
 //! Everything here runs on the main thread: [Main] is its token, given to the start closure, to
 //! [Proxy]'s closures and to the callbacks, and never leaves it. Each OS implements it in
@@ -20,14 +19,14 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 pub use crate::info::{AppInfo, Presence};
-use crate::instance::{Command, Instance, OPEN, QUIT};
+use crate::instance::{Instance, Message, OPEN, QUIT};
 use crate::locale::{self, Locale, Localizations};
 #[cfg(any(windows, target_os = "linux"))]
 use crate::platform;
 use crate::platform::shell as imp;
 use crate::system::{self, Change};
 pub use crate::window::Anchor;
-use crate::{App, Commands, Config, Event, paste, runloop};
+use crate::{App, Commands, Config, Error, Event, paste, runloop};
 
 /// Runs the event loop with no window: `start` opens what the app needs (windows, a
 /// [crate::tray::Tray], [crate::hotkey::Hotkeys]), then the loop runs until [Main::quit].
@@ -56,12 +55,12 @@ pub(crate) type OnMain = Box<dyn FnOnce(&mut Main)>;
 /// The app's answer to an item of its own chosen in the menu bar, by the action's number.
 pub(crate) type OnChosen = Box<dyn FnMut(&mut Main, usize)>;
 type OnReopen = Box<dyn FnMut(&mut Main)>;
-type OnCommand = Box<dyn FnMut(&mut Main, &Command)>;
+type OnMessage = Box<dyn FnMut(&mut Main, &Message)>;
 type OnChange = Box<dyn FnMut(&mut Main, Change)>;
 
 /// What every platform's loop keeps alike: the open windows by id, each with its app's type and
 /// close callback, the reopen and quit hooks, and the instance served with its handler, the
-/// commands that came while one runs, the activation token of the one it handles (and whether a
+/// messages that came while one runs, the activation token of the one it handles (and whether a
 /// window used it), and the hook of the system's changes with those that came while it runs.
 #[derive(Default)]
 struct Hooks {
@@ -69,8 +68,8 @@ struct Hooks {
   reopen: Option<OnReopen>,
   quit: Option<OnMain>,
   instance: Option<Instance>,
-  command: Option<OnCommand>,
-  queued: Option<VecDeque<Command>>,
+  command: Option<OnMessage>,
+  queued: Option<VecDeque<Message>>,
   token: Option<(String, bool)>,
   change: Option<OnChange>,
   changes: Option<VecDeque<Change>>,
@@ -123,11 +122,11 @@ pub(crate) fn reopened() {
   hooks(|h| _ = h.reopen.get_or_insert(f));
 }
 
-/// A command came to the instance [Main::serve] keeps: the reopen hook for a bare [OPEN], then
-/// the handler, the command's activation token kept meanwhile, then [Main::quit] for [QUIT]. One
+/// A message came to the instance [Main::serve] keeps: the reopen hook for a bare [OPEN], then
+/// the handler, the message's activation token kept meanwhile, then [Main::quit] for [QUIT]. One
 /// that comes while another runs (from a nested loop: a dialog, a paste waiting for the portal)
 /// is queued and runs after it. `quit` is [Main::quit], a test's fake in tests.
-fn command(main: &mut Main, cmd: Command, quit: &dyn Fn(&mut Main)) {
+fn command(main: &mut Main, cmd: Message, quit: &dyn Fn(&mut Main)) {
   let busy = hooks(|h| h.queued.as_mut().map(|q| q.push_back(cmd.clone())).is_some());
   if busy {
     return;
@@ -143,8 +142,8 @@ fn command(main: &mut Main, cmd: Command, quit: &dyn Fn(&mut Main)) {
   hooks(|h| h.queued = None);
 }
 
-/// One command, as [command] says.
-fn handle(main: &mut Main, cmd: &Command, quit: &dyn Fn(&mut Main)) {
+/// One message, as [command] says.
+fn handle(main: &mut Main, cmd: &Message, quit: &dyn Fn(&mut Main)) {
   hooks(|h| h.token = cmd.token.clone().map(|t| (t, false)));
   if cmd.name == OPEN {
     reopened();
@@ -207,27 +206,30 @@ fn deliver(main: &mut Main, change: Change, send: SendFn, post: PostFn) {
 }
 
 /// Sends `change` to the windows `ids` still open; those busy are tried again after
-/// [system::RETRY], until they take it or close.
+/// [RETRY], until they take it or close.
 fn retry(ids: Vec<u64>, change: Change, send: SendFn, post: PostFn) {
   let open = windows();
   let ids = ids.into_iter().filter(|id| open.contains(id));
   let missed: Vec<_> = ids.filter(|&id| send(id, Event::System(change)).is_none()).collect();
   if !missed.is_empty() {
-    post(system::RETRY, Box::new(move || retry(missed, change, send, post)));
+    post(RETRY, Box::new(move || retry(missed, change, send, post)));
   }
 }
 
-/// Redraws the windows `ids` still open; those busy are tried again after [system::RETRY].
+/// A window busy up the stack is tried again after this.
+const RETRY: Duration = Duration::from_millis(100);
+
+/// Redraws the windows `ids` still open; those busy are tried again after [RETRY].
 fn redraw(ids: Vec<u64>) {
   let open = windows();
   let ids = ids.into_iter().filter(|id| open.contains(id));
   let busy: Vec<_> = ids.filter(|&id| !imp::with_app(id, &mut |_| {})).collect();
   if !busy.is_empty() {
-    post(system::RETRY, Box::new(move || redraw(busy)));
+    post(RETRY, Box::new(move || redraw(busy)));
   }
 }
 
-/// The activation token of the command being handled, for a window that shows or comes to the
+/// The activation token of the message being handled, for a window that shows or comes to the
 /// front meanwhile: used by it.
 #[cfg_attr(
   not(any(test, target_os = "linux")),
@@ -253,23 +255,6 @@ pub(crate) fn finish(close: impl Fn(u64)) {
   for id in windows() {
     close(id);
   }
-}
-
-/// One window running `app` with the loop around it, which ends when the window closes or the
-/// app quits: [crate::run_example] without `--shot`.
-pub(crate) fn window(cfg: &Config, app: Box<dyn App>) {
-  let exe = std::env::current_exe().ok();
-  let stem = exe.as_ref().and_then(|p| Some(p.file_stem()?.to_str()?.to_owned()));
-  // The loop runs once per process: the strings live as long as it.
-  let id: &'static str = Box::leak(stem.unwrap_or_else(|| "nimbo".into()).into_boxed_str());
-  let info = AppInfo { id, name: cfg.title, presence: Presence::Regular };
-  locale::provide(cfg.localizations);
-  running(|| {
-    imp::run(&info, |_| {
-      let id = imp::open(cfg, app, TypeId::of::<()>());
-      on_close(id, Box::new(Main::quit));
-    })
-  });
 }
 
 /// Prints to the console of the command line that started the app, on Windows, where an app
@@ -313,7 +298,7 @@ impl Main {
     imp::set_presence(p);
   }
 
-  /// The language of the app's strings from now on ([crate::locale]), as SwiftUI's
+  /// The language of the app's strings from now on ([crate::t!]), as SwiftUI's
   /// `.environment(\.locale, …)` on every window: each redraws in it, one busy up the stack (the
   /// caller's own) a moment later. [Locale::System] by default. Menus and dialogs the OS draws
   /// keep the language the app started in.
@@ -322,7 +307,7 @@ impl Main {
     redraw(windows());
   }
 
-  /// The app's catalogs ([crate::locale]) from now on, as a window's [Config::localizations]
+  /// The app's catalogs ([crate::t!]) from now on, as a window's [Config::localizations]
   /// gives them: for strings shown before any window opens, a menu-bar app's tray menu. Empty,
   /// the English texts again.
   pub fn set_localizations(&mut self, catalogs: Localizations) {
@@ -338,20 +323,20 @@ impl Main {
   }
 
   /// Serves the app's one instance ([crate::instance::claim]) until the loop ends, keeping it
-  /// and its lock (replacing an earlier one): `f` runs on the main thread with each command
+  /// and its lock (replacing an earlier one): `f` runs on the main thread with each message
   /// another process sends ([crate::instance::send]), one at a time; a bare [OPEN] runs
   /// [Main::on_reopen]'s hook first, and [QUIT] quits after it ([Main::quit]: the app's cleanup
   /// is in [Main::on_quit]). While they run, a window [Main::open] shows or [Window::front] brings
-  /// forward comes to the front with the command's activation token (Linux; Windows lets it
+  /// forward comes to the front with the message's activation token (Linux; Windows lets it
   /// through the sender). `Err` when its thread can't start.
   pub fn serve(
     &mut self,
     mut instance: Instance,
-    f: impl FnMut(&mut Main, &Command) + 'static,
+    f: impl FnMut(&mut Main, &Message) + 'static,
   ) -> io::Result<()> {
     let proxy = self.proxy();
     instance.listen(move |cmd| proxy.post(move |main| command(main, cmd, &Main::quit)))?;
-    let f: OnCommand = Box::new(f);
+    let f: OnMessage = Box::new(f);
     hooks(|h| (h.instance, h.command) = (Some(instance), Some(f)));
     Ok(())
   }
@@ -409,18 +394,18 @@ impl Main {
 
   /// Watches the system's changes of `kinds` (besides those watched already) until the loop
   /// ends ([crate::system]): each, a burst of one kind coalesced into one, runs `f` on the main
-  /// thread (replacing an earlier one), then reaches every open window as [Event::System]. `Err`
-  /// names the kinds the OS refused; the rest are watched. A kind registered off the main thread
-  /// (macOS's audio, whose first call costs tens of milliseconds) or refused later (a sound
-  /// server's subscription) can't come back here: it goes to stderr and is no longer watched,
-  /// so a later call tries again.
+  /// thread (replacing an earlier one), then reaches every open window as [Event::System].
+  /// [Error::System] names the kinds the OS refused; the rest are watched. A kind registered off
+  /// the main thread (macOS's audio, whose first call costs tens of milliseconds) or refused later
+  /// (a sound server's subscription) can't come back here: it goes to stderr and is no longer
+  /// watched, so a later call tries again.
   pub fn watch(
     &mut self,
     kinds: &[Change],
     f: impl FnMut(&mut Main, Change) + 'static,
-  ) -> Result<(), String> {
+  ) -> Result<(), Error> {
     hooks(|h| h.change = Some(Box::new(f)));
-    system::watch(kinds, |change| changed(&mut Main::here(), change))
+    system::watch(kinds, |change| changed(&mut Main::here(), change)).map_err(Error::System)
   }
 
   pub fn proxy(&self) -> Proxy {
@@ -584,7 +569,7 @@ mod tests {
     assert_eq!(ran.get(), 3);
   }
 
-  /// A command runs the handler with its token kept meanwhile; a bare "open" the reopen hook
+  /// A message runs the handler with its token kept meanwhile; a bare "open" the reopen hook
   /// first, with the token too; "quit" quits after the handler.
   #[test]
   fn commands_run_their_handler_with_the_token() {
@@ -593,7 +578,7 @@ mod tests {
     Main::here().on_reopen(move |_| s.borrow_mut().push(format!("reopen {:?}", token())));
     let s = seen.clone();
     let f =
-      move |_: &mut Main, c: &Command| s.borrow_mut().push(format!("{} {:?}", c.name, token()));
+      move |_: &mut Main, c: &Message| s.borrow_mut().push(format!("{} {:?}", c.name, token()));
     hooks(|h| h.command = Some(Box::new(f)));
     let s = seen.clone();
     let quit = move |_: &mut Main| s.borrow_mut().push("quits".into());
@@ -613,13 +598,13 @@ mod tests {
     HOOKS.take();
   }
 
-  /// A command that comes while the handler runs (a nested loop dispatches it) waits for it,
+  /// A message that comes while the handler runs (a nested loop dispatches it) waits for it,
   /// then runs with its own token; the first keeps its token meanwhile.
   #[test]
   fn a_command_during_the_handler_runs_after_it() {
     let seen = Rc::new(RefCell::new(Vec::new()));
     let s = seen.clone();
-    let f = move |main: &mut Main, c: &Command| {
+    let f = move |main: &mut Main, c: &Message| {
       if c.name == "first" {
         command(main, cmd("second", Some("t2")), &|_| {});
       }
@@ -703,9 +688,9 @@ mod tests {
     BUSY.set(2);
     deliver(&mut Main::here(), Change::Lid, send_busy, post_later);
     assert_eq!(SEEN.take(), ["1 System(Lid)", "2 System(Lid)"]);
-    assert_eq!(run_posted(), [system::RETRY]);
+    assert_eq!(run_posted(), [RETRY]);
     assert_eq!(SEEN.take(), ["2 System(Lid)"], "still busy");
-    assert_eq!(run_posted(), [system::RETRY]);
+    assert_eq!(run_posted(), [RETRY]);
     assert_eq!(SEEN.take(), ["2 System(Lid)"], "taken");
     assert!(POSTED.with_borrow(Vec::is_empty));
 
@@ -730,7 +715,7 @@ mod tests {
     HOOKS.take();
   }
 
-  fn cmd(name: &str, token: Option<&str>) -> Command {
-    Command { name: name.into(), token: token.map(Into::into) }
+  fn cmd(name: &str, token: Option<&str>) -> Message {
+    Message { name: name.into(), token: token.map(Into::into) }
   }
 }

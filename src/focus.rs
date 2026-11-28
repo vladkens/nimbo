@@ -14,10 +14,12 @@
 //! `_NET_WM_PID` (`libX11`, loaded at run time; X11 has no password fields to tell); on Wayland,
 //! where no app may see another's windows, there is none.
 
+use crate::Error;
 use crate::platform::focus as imp;
 
 /// The app with the keyboard focus, as [current] found it.
 #[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
 pub struct Focused {
   /// Its process id; 0 where the OS doesn't tell (an X11 window without `_NET_WM_PID`).
   pub pid: u32,
@@ -26,15 +28,22 @@ pub struct Focused {
   pub name: String,
   /// Its focused window, `Ok(None)` when it has none in focus; `Err` when the OS could not get
   /// it (why: the app did not answer, macOS without Accessibility access).
-  pub window: Result<Option<Window>, String>,
+  pub window: Result<Option<Window>, Error>,
   /// A password field has the focus; `Ok(false)` also where the OS has no way to tell (see the
   /// module docs); `Err` as for `window`.
-  pub secure: Result<bool, String>,
+  pub secure: Result<bool, Error>,
 }
 
 /// Another app's window, compared by identity.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Window(pub(crate) imp::Window);
+
+/// An app nothing is known of: pid 0, no name, no window, no password field; a test's start.
+impl Default for Focused {
+  fn default() -> Self {
+    Self { pid: 0, name: String::new(), window: Ok(None), secure: Ok(false) }
+  }
+}
 
 impl Focused {
   /// The focus moved from `self` to `now`: another app, or another window of it where the app
@@ -63,7 +72,7 @@ mod tests {
   #[test]
   fn moved_compares_what_both_told() {
     let window = current().and_then(|f| f.window.ok().flatten());
-    let at = |pid: u32, window: Result<Option<Window>, String>| Focused {
+    let at = |pid: u32, window: Result<Option<Window>, Error>| Focused {
       pid,
       name: "app".into(),
       window,
@@ -72,8 +81,8 @@ mod tests {
     let start = at(7, Ok(None));
     assert!(!start.moved(&at(7, Ok(None))));
     assert!(start.moved(&at(8, Ok(None))), "another app");
-    assert!(!start.moved(&at(7, Err("busy".into()))), "the app did not say");
-    assert!(!at(7, Err("busy".into())).moved(&start));
+    assert!(!start.moved(&at(7, Err(Error::System("busy".into())))), "the app did not say");
+    assert!(!at(7, Err(Error::System("busy".into()))).moved(&start));
     if let Some(window) = window {
       assert!(start.moved(&at(7, Ok(Some(window.clone())))), "a window now");
       assert!(!at(7, Ok(Some(window.clone()))).moved(&at(7, Ok(Some(window)))));

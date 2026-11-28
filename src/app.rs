@@ -1,13 +1,13 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! The seams between an app and the world: events in, a scene out, with the clock, clipboard
-//! and waker injected, so one app runs the same in a window ([crate::platform]) and in the
+//! and waker injected, so one app runs the same in a window (`platform`) and in the
 //! headless harness ([crate::harness]).
 
 use std::time::{Duration, Instant};
 
 use crate::TitleBar;
-pub use crate::clipboard::{Clipboard, MemClipboard};
+pub use crate::clipboard::Clipboard;
 pub use crate::event::{
   Appearance, ColorScheme, Event, Ime, MouseButton, Phase, WHEEL_LINE, Waker,
 };
@@ -16,8 +16,10 @@ use crate::keys::{Binding, Command, Extent, KeyEvent, Move};
 use crate::scene::{Frame, Images, Point, Rect, Scene, Size};
 use crate::text::TextSystem;
 use crate::ui::{
-  Action, Click, Cursor, FocusDirection, FrameStats, Id, Role, Sys, TextInput, Ui, UiState,
-  drags_window,
+  Action, BorderedButtonStyle, ButtonStyle, Click, Cursor, DrawnEditMenu, FocusDirection,
+  FrameStats, HelpStyle, Id, InsetListStyle, LinearSliderStyle, ListStyle, MenuPickerStyle,
+  PickerStyle, Role, RoundedBorderTextFieldStyle, SliderStyle, SwitchToggleStyle, Sys,
+  TextFieldStyle, TextInput, ToggleStyle, TooltipHelpStyle, Ui, UiState, drags_window,
 };
 
 /// An application: owns its state, reacts to events and draws the frame from it, as an element
@@ -25,7 +27,7 @@ use crate::ui::{
 pub trait App {
   /// Handles one input event, after the runtime routed it through the last frame's tree:
   /// `cx` tells what is under the pointer and what was clicked ([Cx::clicked]). Keys, text and
-  /// commands come here when the focused element did not use them (see [crate::keys] for the
+  /// commands come here when the focused element did not use them (the crate's doc has the
   /// order). Returns true when the event was used, which redraws the frame; a key with Cmd that
   /// returns false goes on to the menu (Cmd-Q), an unused key on to text input.
   fn event(&mut self, cx: &mut Cx, ev: &Event) -> bool {
@@ -109,17 +111,42 @@ impl Clock {
 /// What `App::event` gets besides the event: the window, the clock, the clipboard and the
 /// pointer routed through the last frame's tree.
 pub struct Cx<'a> {
-  pub size: Size,
-  pub scale: f32,
-  pub mouse: Option<Point>,
-  pub now: Duration,
-  pub waker: &'a Waker,
+  pub(crate) size: Size,
+  pub(crate) scale: f32,
+  pub(crate) mouse: Option<Point>,
+  pub(crate) now: Duration,
+  pub(crate) waker: &'a Waker,
   quit: &'a mut bool,
   redraw: bool,
   ui: &'a mut UiState,
 }
 
 impl Cx<'_> {
+  /// The view's size in points.
+  pub fn size(&self) -> Size {
+    self.size
+  }
+
+  /// Pixels per point.
+  pub fn scale(&self) -> f32 {
+    self.scale
+  }
+
+  /// The pointer in points, `None` when it is outside the view.
+  pub fn mouse(&self) -> Option<Point> {
+    self.mouse
+  }
+
+  /// Time from the runtime's clock: real in a window, virtual in the harness.
+  pub fn now(&self) -> Duration {
+    self.now
+  }
+
+  /// Wakes the loop from another thread ([Waker]).
+  pub fn waker(&self) -> &Waker {
+    self.waker
+  }
+
   /// Ends the app (the loop stops, the window closes); the harness records it.
   pub fn quit(&mut self) {
     *self.quit = true;
@@ -228,6 +255,9 @@ impl<A: App> Runtime<A> {
     let mut ui = UiState::default();
     ui.waker = waker.clone();
     ui.clipboard = clipboard;
+
+    styled_defaults(&mut ui);
+
     Self {
       app,
       size,
@@ -731,9 +761,25 @@ impl<A: App> Runtime<A> {
   }
 }
 
+/// The window's looks, System Settings': what the core and the headless widgets don't name.
+fn styled_defaults(ui: &mut UiState) {
+  ui.set_environment_default::<&dyn ButtonStyle>(&BorderedButtonStyle);
+  ui.set_environment_default::<&dyn ToggleStyle>(&SwitchToggleStyle);
+  ui.set_environment_default::<&dyn SliderStyle>(&LinearSliderStyle);
+  ui.set_environment_default::<&dyn TextFieldStyle>(&RoundedBorderTextFieldStyle);
+  ui.set_environment_default::<&dyn PickerStyle>(&MenuPickerStyle);
+  ui.set_environment_default::<&dyn ListStyle>(&InsetListStyle);
+  ui.set_environment_default::<&dyn HelpStyle>(&TooltipHelpStyle);
+  // The edit menu drawn where the platform shows none (the harness), in the theme's look.
+  ui.set_environment_default(DrawnEditMenu(|ui, id, at, m| {
+    ui.drawn_context_menu(id, at, || m.items())
+  }));
+}
+
 /// Runs `app`'s view on `ui`, lending it the text system for [Ui::measure] and the images for
 /// [Ui::rgba_image] (moved in and back: an empty one holds its place, which allocates nothing);
-/// then shows the tooltips it asked for ([Ui::help]) and puts the theme's focus ring.
+/// then shows the tooltips it asked for ([Ui::help]), in the window's help style, and puts the
+/// theme's focus ring.
 fn run_view<'a, A: App>(
   app: &'a mut A,
   text: &mut TextSystem,
@@ -744,7 +790,9 @@ fn run_view<'a, A: App>(
   ui.text = Some(std::mem::replace(text, TextSystem::new(scale)));
   std::mem::swap(images, &mut ui.images);
   app.view(ui);
-  for (id, tip) in ui.take_tooltips() {
+  // Taken in every build: taking them gives assistive technology their descriptions.
+  let tips = ui.take_tooltips();
+  for (id, tip) in tips {
     ui.tooltip(id, &tip);
   }
 
@@ -760,12 +808,12 @@ fn run_view<'a, A: App>(
 mod tests {
   use std::sync::mpsc;
 
-  use keyboard_types::{Code, Modifiers};
-
   use super::*;
-  use crate::keys::{self, CMD, Key, Shortcut};
+  use crate::clipboard::MemClipboard;
+  use crate::keys::{CMD, Key, Shortcut};
   use crate::scene::Rect;
   use crate::ui::{Float, Kind, Style, TextStyle, Theme, Transition, grow, px};
+  use crate::{Code, Modifiers};
 
   #[derive(Default)]
   struct Probe {
@@ -966,7 +1014,7 @@ mod tests {
 
     // The OS turns light: the next frame is light, from the view up.
     assert!(h.event(Event::Appearance(Appearance::LIGHT)));
-    assert!(h.rt.needs_frame());
+    assert!(h.needs_frame());
     assert_eq!(ground(&mut h), px(Theme::PLATES_LIGHT.bg));
     assert_eq!(h.app().seen.last(), Some(&(ColorScheme::Light, Theme::PLATES_LIGHT.accent)));
 
@@ -1003,10 +1051,10 @@ mod tests {
     let mut h = crate::Harness::new(Lid::default(), Size::new(40.0, 40.0), 1.0);
     h.frame();
     assert!(h.event(Event::System(Change::Lid)));
-    assert!(h.rt.needs_frame());
+    assert!(h.needs_frame());
     h.frame();
     assert!(!h.event(Event::System(Change::AudioInputs)));
-    assert!(!h.rt.needs_frame());
+    assert!(!h.needs_frame());
     assert_eq!(h.app().0, 1);
   }
 
@@ -1050,7 +1098,7 @@ mod tests {
 
     // Another page: the frame is built at the new size.
     h.app_mut().0 = 60.0;
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     assert_eq!(h.rt.size, Size::new(100.0, 60.0));
     assert_eq!(h.rt.ui.last.nodes[1].rect.h, 60.0);
@@ -1105,14 +1153,14 @@ mod tests {
 
     // More than the most: the rest scrolls.
     h.app_mut().rows = 30;
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     let list = h.rt.ui.last.get(crate::Id::of("list")).unwrap();
     assert_eq!((h.rt.size, list.rect.h, list.content[1]), (Size::new(200.0, 500.0), 460.0, 900.0));
 
     // Nothing in it: the least.
     h.app_mut().rows = 0;
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     assert_eq!(h.rt.size, Size::new(200.0, 50.0));
   }
@@ -1140,11 +1188,11 @@ mod tests {
     );
 
     // Built again: kept; not built: dropped.
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     assert_eq!(h.rt.images.size(images[0]), Some((2, 2)));
     h.app_mut().0 = 0;
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     assert_eq!((h.rt.images.size(images[0]), h.rt.ui.pictures.len()), (None, 0));
   }
@@ -1177,11 +1225,11 @@ mod tests {
     let kept = h.cpu.image_pixels(images[0]).unwrap();
     assert!(std::sync::Arc::ptr_eq(kept, &h.app().0[0].px));
 
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     assert_eq!(h.rt.ui.pictures.len(), 2);
     h.app_mut().0.clear();
-    h.rt.redraw();
+    h.redraw();
     h.frame();
     assert_eq!((h.rt.images.size(images[0]), h.rt.ui.pictures.len()), (None, 0));
   }
@@ -1367,14 +1415,14 @@ mod tests {
     item_takes: bool,
   }
 
-  const ITEM_KEYS: &[Binding] = &[keys::bind(Shortcut::char('z').cmd(), Command::Undo)];
+  const ITEM_KEYS: &[Binding] = &[Binding::new(Shortcut::char('z').cmd(), Command::Undo)];
   const PANEL_KEYS: &[Binding] = &[
-    keys::bind(Shortcut::char('z').cmd(), Command::Action("panel undo")),
-    keys::bind(Shortcut::char('p').cmd(), Command::Action("panel")),
+    Binding::new(Shortcut::char('z').cmd(), Command::Action("panel undo")),
+    Binding::new(Shortcut::char('p').cmd(), Command::Action("panel")),
   ];
   const APP_KEYS: &[Binding] = &[
-    keys::bind(Shortcut::char('p').cmd(), Command::Action("app")),
-    keys::bind(Shortcut::char('n').cmd(), Command::Action("new")),
+    Binding::new(Shortcut::char('p').cmd(), Command::Action("app")),
+    Binding::new(Shortcut::char('n').cmd(), Command::Action("new")),
   ];
 
   impl App for Keyed {

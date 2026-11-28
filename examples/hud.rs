@@ -12,14 +12,18 @@
 // A Windows app, not a console one: no terminal opens with it.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[path = "common/example.rs"]
+mod example;
+
 use std::time::Duration;
 
 use nimbo::{
-  Anchor, App, AppInfo, Color, Config, Font, Frame, Main, Presence, Rect, Weight, alpha, rgb,
+  Anchor, App, AppInfo, Color, Config, Font, Frame, Harness, Main, Presence, Rect, Weight, alpha,
+  rgb,
 };
 
 pub const INFO: AppInfo =
-  AppInfo { id: "com.example.nimbo-hud", name: "Nimbo HUD", presence: Presence::Accessory };
+  AppInfo::new("com.example.nimbo-hud", "Nimbo HUD").presence(Presence::Accessory);
 /// The overlay: the pill and a margin around it for its shadow, 44 points above the Dock or the
 /// taskbar.
 pub const CONFIG: Config = Config::new("HUD", PILL_W + 2.0 * MARGIN, PILL_H + 2.0 * MARGIN)
@@ -56,7 +60,7 @@ pub struct Hud {
 
 impl App for Hud {
   fn paint(&mut self, f: &mut Frame) {
-    let t = f.now.saturating_sub(*self.start.get_or_insert(f.now));
+    let t = f.now().saturating_sub(*self.start.get_or_insert(f.now()));
     let p = pill();
     let r = p.h / 2.0;
     f.shadow(Rect::new(p.x, p.y + 2.0, p.w, p.h), r, 6.0, alpha([0.0, 0.0, 0.0, 1.0], 0.35));
@@ -90,14 +94,15 @@ fn start(main: &mut Main) {
 }
 
 /// The shot: a second and a half into the recording.
-pub fn shot(h: &mut nimbo::Harness<Hud>) {
+pub fn shot(h: &mut Harness<Hud>) {
   h.frame();
   h.wait(Duration::from_millis(1500));
 }
 
 fn main() {
-  if std::env::args().any(|a| a == "--shot") {
-    return nimbo::run_example(CONFIG, Hud::default(), shot);
+  let args: Vec<String> = std::env::args().skip(1).collect();
+  if args.iter().any(|a| a == "--shot") {
+    return example::run(CONFIG, Hud::default(), &args, shot);
   }
 
   nimbo::app(INFO, start);

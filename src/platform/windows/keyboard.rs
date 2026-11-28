@@ -7,7 +7,6 @@
 //! Ctrl is the command key ([crate::keys::CMD]): bindings written `cmd+c` are Ctrl-C here, and
 //! `ctrl` is the Windows key. Alt is Alt.
 
-use keyboard_types::{Code, Modifiers, NamedKey};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
   GetAsyncKeyState, GetKeyState, GetKeyboardLayout, GetKeyboardState, ToUnicodeEx, VK_APPS,
   VK_BACK, VK_CONTROL, VK_DELETE, VK_DIVIDE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_F20, VK_HOME,
@@ -17,6 +16,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 
 use crate::keys::{self, Key, KeyEvent};
 use crate::platform::scan_code;
+use crate::{Code, Modifiers, NamedKey};
 
 /// The keypad's scan codes that send navigation virtual keys with Num Lock off (7 8 9, 4 5 6,
 /// 1 2 3, 0 and .), never with the extended bit the dedicated keys have.

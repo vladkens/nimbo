@@ -7,9 +7,10 @@
 //! chooses by letters, a segment picks, a tooltip shows, a recorder records and its ⊗ clears,
 //! the alert asks in its theme, Escape closes it, its action counts), the search field draws in
 //! its theme and clears from its ⊗; a stepped slider lands on its steps from the pointer and the
-//! keys and marks them with dots and labels; a row's footer spans its row; assistive technology
-//! reads each widget by its role, the ⊗ marks beside their controls; and `docs/api.md` is the
-//! gallery's, and so are its pictures on the `assets` branch when its worktree is there.
+//! keys and marks them with dots and labels; a row's footer spans its row; End in a custom list
+//! shows its last row whole; assistive technology reads each widget by its role, the ⊗ marks
+//! beside their controls; and `docs/api.md` is the gallery's, and so are its pictures on the
+//! `assets` branch when its worktree is there.
 
 #[path = "../examples/gallery.rs"]
 #[expect(dead_code, reason = "its main and what this file doesn't use")]
@@ -23,7 +24,7 @@ use std::time::Duration;
 
 use common::{diff, mid, px, reads};
 use gallery::*;
-use nimbo::ui::{Action, Role};
+use nimbo::a11y::{Action, Role};
 use nimbo::{Appearance, Event, Harness, Id, Modifiers, NamedKey, Rect, Size, Theme, alpha, mix};
 
 type H = Harness<Gallery>;
@@ -41,9 +42,7 @@ fn page(name: &str) -> usize {
 /// The first node assistive technology reads as `role` named `name`, in the enabled line: its
 /// id and rect.
 fn node(h: &H, role: Role, name: &str) -> (Id, Rect) {
-  let t = h.a11y_tree();
-  let n = t.nodes.iter().find(|n| n.props.role == role && t.str(n.props.name) == name);
-  let n = n.unwrap_or_else(|| panic!("no {role:?} {name:?} in\n{}", h.a11y()));
+  let n = h.find(role, name).unwrap_or_else(|| panic!("no {role:?} {name:?} in\n{}", h.a11y()));
   (n.id, n.rect)
 }
 
@@ -96,16 +95,11 @@ fn variants_are_disabled_and_sized() {
     tree.lines().map(str::trim).filter(|l| l.starts_with("switch")).collect();
   assert_eq!(switches.len(), 4, "enabled, disabled, small, large: {tree}");
   assert!(!switches[0].contains("disabled") && switches[1].contains("disabled"), "{switches:?}");
-  let t = h.a11y_tree();
-  let widths: Vec<f32> =
-    t.nodes.iter().filter(|n| n.props.role == Role::Switch).map(|n| n.rect.w).collect();
+  let widths: Vec<f32> = h.find_all(Role::Switch).iter().map(|n| n.rect.w).collect();
   assert!(widths[3] > widths[0], "large wider: {widths:?}");
   let h = gallery(page("Button"), false);
-  let t = h.a11y_tree();
-  let hs: Vec<f32> = (t.nodes.iter())
-    .filter(|n| n.props.role == Role::Button && t.str(n.props.name) == "Bordered")
-    .map(|n| n.rect.h)
-    .collect();
+  let buttons = h.find_all(Role::Button);
+  let hs: Vec<f32> = buttons.iter().filter(|n| n.name == "Bordered").map(|n| n.rect.h).collect();
   assert!(hs.len() == 4 && hs[2] < hs[0] && hs[3] > hs[0], "small, large: {hs:?}");
 }
 
@@ -153,16 +147,16 @@ fn every_widget_in_both_themes() {
     h.leave();
     h.wait(Duration::from_millis(300));
     assert!(h.app().wrap);
-    assert_eq!(h.render().pixel(r.x + 8.0, r.y + r.h / 2.0 - 6.0), px(t.accent), "{look:?}");
+    assert_eq!(h.render().pixel(r.x + 8.0, r.y + r.h / 2.0 - 6.0), px(t.accent()), "{look:?}");
 
     let mut h = on("Switch", look);
     let (switch, r) = node(&h, Role::Switch, "Live");
     let at = |h: &mut H| h.render().pixel(r.x + 6.0, r.y + r.h / 2.0);
-    assert_eq!(at(&mut h), px(t.accent), "on, in the accent");
+    assert_eq!(at(&mut h), px(t.accent()), "on, in the accent");
     h.click_id(switch);
     h.leave();
     h.wait(Duration::from_millis(200));
-    assert!(!h.app().live && at(&mut h) != px(t.accent), "{look:?}");
+    assert!(!h.app().live && at(&mut h) != px(t.accent()), "{look:?}");
 
     let mut h = on("Slider", look);
     let s = node(&h, Role::Slider, "Zoom").1;
@@ -195,12 +189,10 @@ fn every_widget_in_both_themes() {
     h.wait(Duration::from_millis(400));
     assert!(h.rect(save.key("tip")).is_some(), "the tip after a rest");
 
-    let mut h = on("Shortcut recorder", look);
+    let mut h = on("Hotkey recorder", look);
     // The recorder: a button with no name, its shortcut its value.
-    let t2 = h.a11y_tree();
-    let rec =
-      t2.nodes.iter().find(|n| n.props.role == Role::Button && t2.str(n.props.name).is_empty());
-    h.click_id(rec.expect("a recorder").id);
+    let rec = h.find(Role::Button, "").expect("a recorder");
+    h.click_id(rec.id);
     h.key(NamedKey::F5, Modifiers::ALT);
     assert_eq!(h.app().hotkey.map(|k| k.to_string()).as_deref(), Some("option+f5"));
     h.frame();
@@ -213,7 +205,7 @@ fn every_widget_in_both_themes() {
     let dialog = Id::of(DIALOG);
     let card = h.rect(dialog.key("card")).expect("the dialog");
     let fill = h.render().pixel(card.x + card.w / 2.0, card.y + 8.0);
-    assert_eq!(fill, px(t.dialog), "{look:?}");
+    assert_eq!(fill, px(t.dialog_fill()), "{look:?}");
 
     h.key(NamedKey::Escape, Modifiers::empty());
     h.frame();
@@ -235,8 +227,9 @@ fn the_search_field_in_both_themes() {
     h.event(Event::Appearance(look));
     h.frame();
     let (field, r) = node(&h, Role::TextField, "Search");
-    let fill = t.search().frame.bg;
-    let want = px(mix(t.bg, alpha(fill, 1.0), fill[3]));
+    // White over the ground, as macOS's search fields: 30% in light, 12% in dark.
+    let fill = alpha([1.0; 4], if look == Appearance::LIGHT { 0.3 } else { 0.12 });
+    let want = px(mix(t.bg(), alpha(fill, 1.0), fill[3]));
     let got = h.render().pixel(r.x + r.w / 2.0, r.y + 4.0);
     assert!(diff(got, want) <= 1, "{look:?}: {got:?}, not {want:?}");
 
@@ -302,8 +295,7 @@ fn every_widget_has_its_role() {
 #[test]
 fn segments_step_down_and_up() {
   let mut h = gallery(page("Segmented picker"), false);
-  let t = h.a11y_tree();
-  let group = t.nodes.iter().find(|n| n.props.role == Role::RadioGroup).expect("a radio group");
+  let group = h.find_all(Role::RadioGroup).into_iter().next().expect("a radio group");
   h.set_focus(Some(group.id));
   let key = |h: &mut H, k: NamedKey| {
     h.key(k, Modifiers::empty());
@@ -330,7 +322,7 @@ fn steps(look: Appearance) -> (H, Id, Rect) {
 /// Where `v` of the stepped slider's 10..=90 sits along it, its track half a knob in from either
 /// end.
 fn level_x(r: Rect, v: f32) -> f32 {
-  let inset = Theme::PLATES_LIGHT.sizes.knob[0] / 2.0;
+  let inset = Theme::PLATES_LIGHT.sizes().knob()[0] / 2.0;
   r.x + inset + (r.w - 2.0 * inset) * (v - 10.0) / 80.0
 }
 
@@ -346,7 +338,7 @@ fn a_stepped_slider_snaps_drags_and_clicks() {
   h.move_to(level_x(r, 47.0), y);
   h.frame();
   assert_eq!(h.app().level, 50.0);
-  let knob = px(Theme::PLATES_LIGHT.knob);
+  let knob = px(Theme::PLATES_LIGHT.knob());
   assert_eq!(h.render().pixel(level_x(r, 50.0), y), knob, "the knob jumped to the step");
 
   h.release(level_x(r, 47.0), y);
@@ -397,8 +389,8 @@ fn a_stepped_slider_marks_its_steps() {
   for (look, t) in LOOKS {
     let (mut h, _, r) = steps(look);
     // A quarter point above and left of a dot's middle: inside it, off its rim.
-    let y = r.y + r.h / 2.0 + t.sizes.knob[1] / 2.0 - 1.25;
-    let dot = px(t.tertiary);
+    let y = r.y + r.h / 2.0 + t.sizes().knob()[1] / 2.0 - 1.25;
+    let dot = px(t.tertiary());
     let img = h.render();
     for v in [10.0, 20.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0] {
       let got = img.pixel(level_x(r, v) - 0.25, y);
@@ -412,12 +404,8 @@ fn a_stepped_slider_marks_its_steps() {
       assert!(diff(got, dot) > 40, "{look:?}: no dot {what}: {got:?}");
     }
 
-    let tree = h.a11y_tree();
     let label = |name: &str| {
-      let n = tree
-        .nodes
-        .iter()
-        .find(|n| n.props.role == Role::StaticText && tree.str(n.props.name) == name);
+      let n = h.find(Role::StaticText, name);
       n.unwrap_or_else(|| panic!("no {name:?} in\n{}", h.a11y())).rect
     };
     let (first, mid50, last) = (label("10%"), label("50%"), label("90%"));
@@ -439,7 +427,7 @@ fn a_row_footer_spans_its_row() {
     let ends = (slider.x + slider.w - toggle.x - toggle.w).abs();
     assert!(ends < 0.5 && slider.y >= toggle.y + toggle.h, "{look:?}: {slider:?}, {toggle:?}");
 
-    let (img, plate) = (h.render(), px(t.plate));
+    let (img, plate) = (h.render(), px(t.plate()));
     let on_plate = |x: f32, y: f32| diff(img.pixel(x, y), plate) <= 2;
     let y = slider.y + slider.h - 2.0;
     let pad = (1..40).find(|&d| !on_plate(slider.x - d as f32 + 0.5, y));
@@ -464,7 +452,7 @@ fn a_row_footer_spans_its_row() {
 #[test]
 fn clear_marks_are_beside_their_controls() {
   for (name, first) in
-    [("Shortcut recorder", "button value "), ("Search field", "text field \"Search\" value")]
+    [("Hotkey recorder", "button value "), ("Search field", "text field \"Search\" value")]
   {
     let h = gallery(page(name), false);
     let dump = h.a11y();
@@ -556,4 +544,17 @@ fn the_api_doc_is_the_gallerys() {
   }
 
   _ = std::fs::remove_dir_all(&fresh);
+}
+
+/// End in the custom list style shows its last row whole, inside the box's padding.
+#[test]
+fn a_custom_list_ends_on_its_last_row() {
+  let mut h = gallery(page("Custom list style"), true);
+  let (_, list) = node(&h, Role::List, "");
+  let (x, y) = mid(node(&h, Role::Row, "Row 1").1);
+  h.click(x, y);
+  h.key(NamedKey::End, Modifiers::empty());
+  h.wait(Duration::from_millis(400));
+  let (_, last) = node(&h, Role::Row, "Row 40");
+  assert!((last.y + last.h - (list.y + list.h - 4.0)).abs() < 0.5, "{last:?} in {list:?}");
 }

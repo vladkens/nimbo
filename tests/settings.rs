@@ -27,7 +27,7 @@ mod common;
 use std::time::Duration;
 
 use common::{mid, px, reads};
-use nimbo::ui::Action;
+use nimbo::a11y::Action;
 use nimbo::{
   Appearance, Code, Event, Harness, Hotkey, Id, Key, Modifiers, NamedKey, Rect, Size, Theme, hotkey,
 };
@@ -45,7 +45,7 @@ fn key(h: &mut H, k: impl Into<Key>) {
 
 /// Turns to `page` by a click on its tab, laid out and resized.
 fn turn(h: &mut H, page: Page) {
-  let i = PAGES.iter().position(|p| p.value == page).unwrap();
+  let i = PAGES.iter().position(|p| p.value() == page).unwrap();
   h.click_id(Id::of(TABS).key(i));
   h.wait(Duration::from_millis(50));
   assert_eq!(h.app().page, page);
@@ -83,7 +83,7 @@ fn general_switches_select_and_recorder() {
   let mut h = start();
   // The switch that is on is in the accent.
   let r = rect(&h, LOGIN);
-  assert_eq!(h.render().pixel(r.x + 6.0, r.y + r.h / 2.0), px(Theme::PLATES_LIGHT.accent));
+  assert_eq!(h.render().pixel(r.x + 6.0, r.y + r.h / 2.0), px(Theme::PLATES_LIGHT.accent()));
 
   // Switches flip; one disabled by another setting doesn't.
   h.click_id(Id::of(LOGIN));
@@ -114,10 +114,10 @@ fn general_switches_select_and_recorder() {
   // The recorder: a click records the next chord, then a modifier alone.
   let rec = Id::of(HOTKEY);
   h.click_id(rec);
-  assert_eq!(h.focused(), Some(rec));
+  assert_eq!(h.focus_id(), Some(rec));
   h.key('k', Modifiers::CONTROL | Modifiers::SHIFT);
   assert_eq!(hotkey(&h).as_deref(), Some("ctrl+shift+k"));
-  assert_ne!(h.focused(), Some(rec));
+  assert_ne!(h.focus_id(), Some(rec));
   h.click_id(rec);
   h.event(Event::Modifier { key: Code::AltRight, down: true });
   h.event(Event::Modifier { key: Code::AltRight, down: false });
@@ -145,7 +145,7 @@ fn general_switches_select_and_recorder() {
   // Escape stops it unchanged, Backspace clears it.
   key(&mut h, NamedKey::Escape);
   assert_eq!(hotkey(&h).as_deref(), Some(lone));
-  assert_ne!(h.focused(), Some(rec));
+  assert_ne!(h.focus_id(), Some(rec));
   h.click_id(rec);
   key(&mut h, NamedKey::Backspace);
   assert_eq!(h.app().hotkey, None);
@@ -168,7 +168,7 @@ fn appearance_row_width_slider_and_look() {
   turn(&mut h, Page::Appearance);
   let (sw, row) = (rect(&h, MOTION), rect(&h, MOTION_ROW));
   let caption = h.rect(Id::of(MOTION_ROW).key("caption")).unwrap();
-  assert_eq!(sw.w, Theme::PLATES_LIGHT.sizes.switch.track[0]);
+  assert_eq!(sw.w, Theme::PLATES_LIGHT.sizes().switch().track[0]);
   assert!((row.x + row.w - 10.0 - (sw.x + sw.w)).abs() < 0.5, "{sw:?} in {row:?}");
   assert!(caption.h >= 28.0 && caption.x + caption.w < sw.x, "{caption:?}");
 
@@ -191,7 +191,7 @@ fn appearance_row_width_slider_and_look() {
   assert_eq!(h.app().text_size, 19.5);
 
   // The look applies at once.
-  h.click_id(Id::of(LOOK).key(2));
+  h.click_id(Id::of(LOOK).key(("item", 2usize)));
   h.wait(Duration::from_millis(50));
   assert!(h.render().pixel(4.0, h.size().h - 4.0)[0] < 64);
 }
@@ -202,10 +202,10 @@ fn an_inactive_window_greys_the_accent() {
   turn(&mut h, Page::Appearance);
   // The slider's fill and the selected segment: the accent while the window is key, a grey
   // when another window is, as AppKit's controls.
-  let (s, auto) = (rect(&h, TEXT_SIZE), h.rect(Id::of(LOOK).key(0)).unwrap());
+  let (s, auto) = (rect(&h, TEXT_SIZE), h.rect(Id::of(LOOK).key(("item", 0usize))).unwrap());
   let spots = [(s.x + 12.0, s.y + s.h / 2.0), (auto.x + 4.0, auto.y + 4.0)];
   let at = |h: &mut H| spots.map(|(x, y)| h.render().pixel(x, y));
-  let accent = px(Theme::PLATES_LIGHT.accent);
+  let accent = px(Theme::PLATES_LIGHT.accent());
   assert_eq!(at(&mut h), [accent; 2]);
   h.event(Event::Focus(false));
   for [r, g, b, _] in at(&mut h) {
@@ -247,11 +247,11 @@ fn advanced_asks_in_a_dialog() {
   h.click_id(Id::of(CLEAR_CACHE));
   h.frame();
   key(&mut h, NamedKey::Tab);
-  assert_eq!(h.focused(), Some(confirm.key("action")));
+  assert_eq!(h.focus_id(), Some(confirm.key("action")));
   key(&mut h, NamedKey::Tab);
-  assert_eq!(h.focused(), Some(confirm.key("cancel")));
+  assert_eq!(h.focus_id(), Some(confirm.key("cancel")));
   key(&mut h, NamedKey::Tab);
-  assert_eq!(h.focused(), Some(confirm.key("action")));
+  assert_eq!(h.focus_id(), Some(confirm.key("action")));
 
   h.key(' ', Modifiers::ALT);
   assert_eq!(h.app().ask, Some(Ask::ClearCache));
@@ -354,12 +354,12 @@ fn the_dialog_takes_the_focus_and_gives_it_back() {
   key(&mut h, ' ');
   h.frame();
   assert_eq!(h.app().ask, Some(Ask::ClearCache));
-  assert_eq!(h.focused(), Some(confirm.key("backdrop")));
+  assert_eq!(h.focus_id(), Some(confirm.key("backdrop")));
   reads(&h.a11y(), &["button \"Cancel\" focused"]);
 
   key(&mut h, NamedKey::Escape);
   h.frame();
-  assert_eq!((h.app().ask, h.focused()), (None, Some(clear)));
+  assert_eq!((h.app().ask, h.focus_id()), (None, Some(clear)));
   reads(&h.a11y(), &["button \"Clear…\" focused"]);
 }
 
@@ -407,9 +407,9 @@ fn assistive_presses_choose_in_a_select() {
 fn an_assistive_focus_moves_the_focus() {
   let mut h = start();
   assert!(h.act(Id::of(LANG), Action::Focus));
-  assert_eq!(h.focused(), Some(Id::of(LANG)));
+  assert_eq!(h.focus_id(), Some(Id::of(LANG)));
   assert!(!h.act(Id::of(RESET), Action::Focus));
-  assert_eq!(h.focused(), Some(Id::of(LANG)));
+  assert_eq!(h.focus_id(), Some(Id::of(LANG)));
 }
 
 /// The focus reads only while the window has it: leaving and coming back change the tree, so
@@ -458,9 +458,9 @@ fn a_warning_marks_its_row_in_the_warning_colour() {
     // In its 24-unit view box: the fill either side of the "!"'s dot, and the ground through
     // the middle of its stem.
     let at = |x: f32, y: f32| img.pixel(r.x + x / 24.0 * r.w, r.y + y / 24.0 * r.h);
-    assert_eq!(at(7.0, 17.0), px(t.warning));
-    assert_eq!(at(17.0, 17.0), px(t.warning));
-    let ground = (-2..=2).any(|i| at(12.0 + i as f32 * 0.2, 11.0) == px(t.plate));
+    assert_eq!(at(7.0, 17.0), px(t.warning()));
+    assert_eq!(at(17.0, 17.0), px(t.warning()));
+    let ground = (-2..=2).any(|i| at(12.0 + i as f32 * 0.2, 11.0) == px(t.plate()));
     assert!(ground, "the plate through the \"!\": {:?}", at(12.0, 11.0));
 
     let info = mark(&h, LAUNCH_ROW);

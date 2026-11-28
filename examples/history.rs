@@ -10,8 +10,13 @@
 // A Windows app, not a console one: no terminal opens with its window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use nimbo::ui::Role;
-use nimbo::{App, Config, FormStyle, Icon, Id, List, ListStyle, Selection, Style, Ui, grow};
+#[path = "common/example.rs"]
+mod example;
+
+use nimbo::a11y::Role;
+use nimbo::{
+  App, Config, FormStyle, Icon, Id, InsetGroupedListStyle, List, Selection, Style, Ui, grow,
+};
 
 pub const ROWS: usize = 86_000;
 /// Dictations a day: the oldest day has what is left.
@@ -67,19 +72,18 @@ impl App for History {
     let (rows, days, starts) = (self.rows, &self.days, &self.starts);
     let key = |i: usize| (rows - i) as u64;
     let head = |ui: &mut Ui, g: usize| {
-      ui.text(&days[g].0, fs.head);
+      ui.text(&days[g].0, fs.head());
       ui.spacer();
-      ui.text(format!("{} dictations", days[g].1), fs.note);
+      ui.text(format!("{} dictations", days[g].1), fs.note());
     };
-    let head_h = ui.metrics(fs.head.font).line_height() + fs.head_pad[2];
+    let head_h = ui.metrics(fs.head().get_font()).line_height() + fs.head_pad()[2];
 
     let mut copied = None;
     let mut sel = std::mem::take(&mut self.sel);
     let list = List::new(rows, ROW_H).key(&key).selection(&mut sel);
-    let list = list.list_style(ListStyle::Grouped);
     let list = list.sections(starts, head_h, &head);
-    ui.col(Style::new().grow().bg(fs.bg), |ui| {
-      list.show(ui.id(LIST), |ui, row| {
+    ui.col(Style::new().grow().bg(fs.bg()), |ui| {
+      list.show(ui.list_style(&InsetGroupedListStyle).id(LIST), |ui, row| {
         let i = row.index - starts[starts.partition_point(|&s| s <= row.index) - 1];
         let e = row.key;
         let text = format!("Dictation {e}: what was said, on one line");
@@ -87,8 +91,8 @@ impl App for History {
           format!("{:02}:{:02} · {}.{} s", 23 - i / 7 % 24, 59 - i % 60, 2 + e % 9, e % 10);
 
         ui.col(Style::new().w(grow()).gap(2.0), |ui| {
-          ui.text(&text, fs.label.line_limit(1));
-          ui.text(&caption, fs.caption.line_limit(1));
+          ui.text(&text, fs.label().line_limit(1));
+          ui.text(&caption, fs.caption().line_limit(1));
         });
         if ui.key("copy").icon_button(Icon::COPY).clicked {
           copied = Some(e);
@@ -105,7 +109,8 @@ impl App for History {
 
 fn main() {
   // The shot: the page's top, the second row selected.
-  nimbo::run_example(Config::new("History", 560.0, 520.0), History::default(), |h| {
+  let args: Vec<String> = std::env::args().skip(1).collect();
+  example::run(Config::new("History", 560.0, 520.0), History::default(), &args, |h| {
     h.frame();
     let e = h.app().entry(0, 1);
     h.app_mut().sel.select(e, 1);

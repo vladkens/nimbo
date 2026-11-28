@@ -32,7 +32,6 @@ pub use app::{
   activity, attach_console, autostart, desktop, downloads, focus, hardware, hotkey, input_source,
   open, paste, post, shell, tray, uninstall,
 };
-use keyboard_types::Modifiers;
 pub use settings::{appearance, languages};
 use windows_sys::Win32::Foundation::{
   CloseHandle, FILETIME, HANDLE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
@@ -57,12 +56,13 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetFocus;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 use crate::app::{App, Appearance, Clipboard, Clock, Event, MouseButton, Runtime};
+use crate::clipboard::Sealed;
 use crate::cpu::Renderer;
 use crate::cpu::raster::IRect;
 use crate::platform::{Pace, points};
 use crate::scene::{Rect, Size};
 use crate::ui::{Cursor, Id};
-use crate::{Anchor, Config};
+use crate::{Anchor, Config, Modifiers};
 
 /// Posted by the waker: something changed on another thread.
 const WM_WAKE: u32 = WM_APP + 1;
@@ -735,7 +735,7 @@ fn create(cfg: &Config, app: Box<dyn App>) -> HWND {
         return icon;
       }
 
-      let icon = app::tray::hicon(side as i32, px);
+      let icon = hicon(side as i32, px);
       all.push((key, icon));
       icon
     }) as LPARAM;
@@ -950,6 +950,8 @@ impl WinClipboard {
   }
 }
 
+impl Sealed for WinClipboard {}
+
 impl Clipboard for WinClipboard {
   fn read(&self) -> Option<String> {
     let _open = Open::by(self.owner as HWND)?;
@@ -1014,6 +1016,43 @@ pub fn perf_cores() -> Option<usize> {
 
   let top = *classes.iter().max()?;
   Some(classes.iter().filter(|&&c| c == top).count().min(4))
+}
+
+/// An icon of straight RGBA `px`, `side` pixels square: a 32-bit colour bitmap with its alpha,
+/// and an empty mask.
+pub(crate) fn hicon(side: i32, px: &[u8]) -> HICON {
+  let mut info: BITMAPINFO = unsafe { std::mem::zeroed() };
+  info.bmiHeader = BITMAPINFOHEADER {
+    biSize: size_of::<BITMAPINFOHEADER>() as u32,
+    biWidth: side,
+    biHeight: -side,
+    biPlanes: 1,
+    biBitCount: 32,
+    biCompression: BI_RGB,
+    ..unsafe { std::mem::zeroed() }
+  };
+  let mut bits = null_mut();
+  // SAFETY: a new section of `side²` pixels, filled before it is used.
+  unsafe {
+    let color = CreateDIBSection(null_mut(), &info, DIB_RGB_COLORS, &mut bits, null_mut(), 0);
+    if color.is_null() {
+      return null_mut();
+    }
+
+    let dst = std::slice::from_raw_parts_mut(bits.cast::<u8>(), px.len());
+    for (d, s) in dst.as_chunks_mut::<4>().0.iter_mut().zip(px.as_chunks::<4>().0) {
+      *d = [s[2], s[1], s[0], s[3]];
+    }
+
+    // The mask is unused with an alpha channel, but must hold defined bits: rows of whole words.
+    let mask_bits = vec![0u8; (side as usize).div_ceil(16) * 2 * side as usize];
+    let mask = CreateBitmap(side, side, 1, 1, mask_bits.as_ptr().cast());
+    let ii = ICONINFO { fIcon: 1, xHotspot: 0, yHotspot: 0, hbmMask: mask, hbmColor: color };
+    let icon = CreateIconIndirect(&ii);
+    DeleteObject(mask);
+    DeleteObject(color);
+    icon
+  }
 }
 
 #[cfg(test)]

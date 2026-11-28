@@ -22,7 +22,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use dispatch2::{DispatchQueue, MainThreadBound};
-use keyboard_types::Modifiers;
 use objc2::rc::{Retained, Weak};
 use objc2::runtime::{AnyObject, ProtocolObject, Sel};
 use objc2::{
@@ -46,6 +45,7 @@ use super::input::*;
 use super::link::{Link, Wake, refresh};
 use super::surface::Presenter;
 use super::{a11y, keyboard, titlebar};
+use crate::Modifiers;
 use crate::app::{App, Event, Ime, Runtime, WHEEL_LINE};
 use crate::keys::{self, Command, KeyEvent};
 use crate::scene::{Point, Rect, Size};

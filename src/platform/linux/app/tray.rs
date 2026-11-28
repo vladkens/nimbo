@@ -9,7 +9,7 @@
 //! The icon is a template, served by name (`IconName`) as an SVG the panel fills with its own
 //! text colour ([TrayIcon::svg]), so it follows the panel and not the app's appearance (Kubuntu's
 //! panel is dark over light apps): Plasma by its colour scheme stylesheet, GNOME's AppIndicator
-//! by the `-symbolic` name. The SVG goes in the user's icons ([crate::desktop::tray_icon]) with
+//! by the `-symbolic` name. The SVG goes in the user's icons (`platform::write::tray_icon`) with
 //! no `IconThemePath`: Plasma 5 colours an icon from that path with the apps' colours, one it
 //! finds itself with the panel's. Plasma draws an item's icon once, so it is sent again a moment
 //! after Plasma's settings change ([follow_plasma]). `IconPixmap` (ARGB in network order, at 22
@@ -32,10 +32,10 @@ use std::sync::OnceLock;
 
 use super::super::dbus::{self, Gv, V, VTable};
 use super::super::dl::fns;
-use super::super::{Fp, P, S, connect, lib, load};
+use super::super::{Fp, P, S, appearance, connect, lib, load};
 use super::menu::{self, nodes};
-use crate::tray::{Menu, Set, State, TrayIcon};
-use crate::{desktop, paths, platform};
+use crate::tray::{Set, State, TrayIcon};
+use crate::{Menu, paths, platform};
 
 const SNI: &str = "org.kde.StatusNotifierItem";
 const SNI_PATH: &str = "/StatusNotifierItem";
@@ -220,7 +220,7 @@ impl Tray {
   fn paint(&self, icon: &TrayIcon) {
     let gnome = std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| d.contains("GNOME"));
     let boxed = ["FLATPAK_ID", "SNAP"].iter().any(|v| std::env::var_os(v).is_some());
-    let tint = if gnome || platform::appearance().scheme.is_dark() { [255; 3] } else { [0; 3] };
+    let tint = if gnome || appearance().scheme.is_dark() { [255; 3] } else { [0; 3] };
     let pixmap = |side: u32| {
       let rgba = icon.pixels(side, tint);
       let argb = rgba.chunks(4).flat_map(|p| [p[3], p[0], p[1], p[2]]).collect();
@@ -235,7 +235,7 @@ impl Tray {
     static FIRST: std::sync::Once = std::sync::Once::new();
     let (data, id, mut first) = (paths::data_dir(""), super::info().id, false);
     FIRST.call_once(|| first = true);
-    let name = desktop::tray_icon(&data, id, &icon.svg(SIDES[1], tint), first);
+    let name = platform::write::tray_icon(&data, id, &icon.svg(SIDES[1], tint), first);
     if let (Err(e), true) = (&name, first) {
       eprintln!("nimbo: the tray icon goes as pixels, its file was not written: {e}");
     }

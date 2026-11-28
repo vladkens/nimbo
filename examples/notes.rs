@@ -14,6 +14,9 @@
 // A Windows app, not a console one: no terminal opens with its window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[path = "common/example.rs"]
+mod example;
+
 use nimbo::{
   App, Config, Icon, Id, List, Selection, Split, Style, TextStyle, ToolbarItemPlacement,
   Transition, Ui, grow, px,
@@ -70,7 +73,7 @@ impl Notes {
   /// The sidebar: the notes on the panel's ground, under its toolbar.
   fn sidebar(&mut self, ui: &mut Ui, bar: f32) {
     let t = ui.theme();
-    ui.col(Style::new().grow().bg(t.panel), |ui| {
+    ui.col(Style::new().grow().bg(t.panel()), |ui| {
       self.toggle(ui);
       ui.el(Style::new().h(px(bar)));
       let notes = &self.notes;
@@ -86,7 +89,7 @@ impl Notes {
     let page = Style::new().grow().pads([bar, 24.0, 24.0, 24.0]).gap(10.0);
     ui.col(page, |ui| {
       let (title, body) = &self.notes[self.open()];
-      ui.text(title, TextStyle::new(t.bold, t.text));
+      ui.text(title, TextStyle::new(t.bold(), t.text()));
       ui.text(body, t.label());
       ui.toolbar(|ui| {
         ui.toolbar_item(ToolbarItemPlacement::PrimaryAction, |ui| {
@@ -107,7 +110,7 @@ impl App for Notes {
     let (t, bar) = (ui.theme(), ui.toolbar_height());
     // How far the sidebar is out: it slides in and out in 150 ms.
     let out = ui.animate(Id::of(SPLIT).key("out"), self.sidebar as u8 as f32, SLIDE);
-    ui.col(Style::new().grow().bg(t.bg), |ui| {
+    ui.col(Style::new().grow().bg(t.bg()), |ui| {
       // Hidden, the sidebar's column is no wider than nothing, its toolbar there all the same.
       if out == 0.0 {
         return ui.row(Style::new().grow(), |ui| {
@@ -136,5 +139,5 @@ fn main() {
   let hidden = args.iter().position(|a| a == "--no-sidebar").map(|i| args.remove(i));
   let app = Notes { sidebar: hidden.is_none(), ..Notes::default() };
   let cfg = Config::new("Notes", 760.0, 480.0).min_size(480.0, 300.0).unified();
-  nimbo::run_args(cfg, app, |h| _ = h.frame(), &args);
+  example::run(cfg, app, &args, |h| _ = h.frame());
 }

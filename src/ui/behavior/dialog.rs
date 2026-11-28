@@ -3,10 +3,9 @@
 //! A modal dialog's behaviour ([Ui::dialog_behavior]): its keys, its focus kept among its
 //! buttons and its fade; `Dialog` draws one, `Ui::modal` is its backdrop and card.
 
-use keyboard_types::{Modifiers, NamedKey};
-
 use crate::keys::Key;
 use crate::ui::{Id, Transition, Ui};
+use crate::{Modifiers, NamedKey};
 
 /// How fast a dialog fades in: 0 to 1 in 120 ms.
 const DIALOG_IN: Transition = Transition::smooth(1000.0 / 120.0);
@@ -14,6 +13,7 @@ const DIALOG_IN: Transition = Transition::smooth(1000.0 / 120.0);
 /// A modal dialog ([Ui::dialog_behavior]): how far it has faded in, the button chosen this
 /// frame (it closed then) and the one with focus.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[non_exhaustive]
 pub struct DialogBehavior {
   pub id: Id,
   /// 0 to 1 as it opens, on the runtime's clock.

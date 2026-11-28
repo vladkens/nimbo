@@ -20,8 +20,8 @@ impl Ui<'_> {
 
 #[cfg(test)]
 mod tests {
+  use crate::Harness;
   use crate::app::App;
-  use crate::harness::Harness;
   use crate::scene::Size;
   use crate::ui::{Id, Style, Ui, px};
 
