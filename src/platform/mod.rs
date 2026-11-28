@@ -34,8 +34,9 @@
 //!     the key window (`Event::Command`, enabled while `Runtime::can`); the window is offered a key
 //!     first, so the menu runs only what nobody used. Windows and Linux have no menu bar: nothing;
 //!   - `set_presence(Presence)`, `terminating() -> bool`, `quit()`; a second launch, where the OS
-//!     tells (macOS), runs `crate::shell::reopened`; a window shown or brought to the front comes
-//!     with `crate::shell::token()`, the activation token of the command being served, where the OS
+//!     tells (macOS), runs `crate::shell::reopened`, and the OS's own reopen goes on (a minimized
+//!     window comes back when none is on screen); a window shown or brought to the front comes with
+//!     `crate::shell::token()`, the activation token of the command being served, where the OS
 //!     takes one (Linux: `gtk_window_set_startup_id`);
 //!   - `post(delay: Duration, f: Box<dyn FnOnce() + Send>)` from any thread, run by the loop also
 //!     in modal loops (a menu open, a live resize); `is_main() -> bool`.
@@ -192,12 +193,25 @@
 //!   preferred languages, the most preferred first, as BCP 47 tags (`ru-RU`; macOS
 //!   `NSLocale.preferredLanguages`, with the app's own language first; Windows
 //!   `GetUserPreferredUILanguages`; Linux gettext's `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, `LANG`).
+//! - `pub fn date_pattern() -> Option<String>` ([crate::DateFormat::system]): the user's short date
+//!   as a pattern, read for its order of day, month and year and the separator between them (macOS
+//!   `dateFormatFromTemplate:` of `yMd`, `d.M.y`; Windows `LOCALE_SSHORTDATE`, `dd.MM.yyyy`; Linux
+//!   `nl_langinfo(D_FMT)`, `%d.%m.%Y`); `None` where it has none.
+//! - `pub fn today() -> (u32, u32, u32)` ([crate::Date::today]): the year, month and day now in the
+//!   user's time zone.
+//! - `pub fn character_palette() -> Result<(), String>` ([crate::character_palette]): whether the
+//!   OS has an emoji picker for a field of ours, `Err` with why not (Linux: GTK 3 keeps its own
+//!   private; Windows: below 10 1709). A window shows it after an event or a frame, outside the
+//!   window's borrow, when `Runtime::take_character_palette()` says the app asked with a field
+//!   focused, for the view's text input (macOS `orderFrontCharacterPalette:`, anchored at
+//!   `firstRectForCharacterRange:` of the selection; Windows Win+. through `SendInput` while the
+//!   window is in front, the IME's windows at the caret first); the pick comes as typed text.
 //! - `pub fn perf_cores() -> Option<usize>`: the performance cores, to size the CPU renderer's
 //!   threads (`cpu::pool`); `None` falls back to `available_parallelism` capped at 4.
 //! - `pub mod text`, the text backend under [crate::text] (its atlas and line cache are portable):
 //!   - `pub struct Face: Clone + PartialEq`: a font at a point size; equal faces are one.
 //!   - `pub fn face(font: Font) -> Face`: the system UI font or its monospaced one, at the size and
-//!     weight.
+//!     weight, its italic face for an italic font (upright where it has none).
 //!   - `pub fn metrics(face: &Face) -> Metrics`: ascent, descent, leading in points.
 //!   - `pub fn is_color(face: &Face) -> bool`: colour glyphs (emoji), drawn as RGBA.
 //!   - `pub fn color_glyph(face: &Face, id: u16) -> Option<bool>`: how a colour face's glyph draws:
@@ -255,8 +269,9 @@ pub(crate) use imp::permissions;
 #[cfg(target_os = "linux")]
 pub(crate) use imp::startup_complete;
 pub(crate) use imp::{
-  activity, autostart, clipboard, desktop, focus, hardware, hotkey, image, input_source, languages,
-  open, paste, perf_cores, post, shell, text, tray, uninstall,
+  activity, autostart, character_palette, clipboard, date_pattern, desktop, focus, hardware,
+  hotkey, image, input_source, languages, open, paste, perf_cores, post, shell, text, today, tray,
+  uninstall,
 };
 #[cfg(target_os = "windows")]
 pub(crate) use imp::{attach_console, downloads};

@@ -6,15 +6,21 @@
 //! between them. A letter or digit is its own virtual key on every layout (Ctrl-V is VK `V` on a
 //! Russian one too); another character the key that types it on the layout of the window in
 //! front (`VkKeyScanExW`). Windows drops input to an app running elevated above this one (UIPI).
-//! The events carry [super::POSTED], so the app's own hotkey hook lets them pass unseen.
+//! The events carry [super::POSTED], so the app's own hotkey hook lets them pass unseen. Win+.
+//! opens the emoji panel for the app's own field ([emoji_panel]).
 
+use std::ptr::null_mut;
+use std::sync::OnceLock;
+
+use windows_sys::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
   GetAsyncKeyState, GetKeyboardLayout, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
-  KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, MapVirtualKeyW, SendInput, VkKeyScanExW,
+  KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, MapVirtualKeyW, SendInput,
+  VK_OEM_PERIOD, VkKeyScanExW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
 
-use super::super::keyboard;
+use super::super::{keyboard, wide};
 use super::{POSTED, lone_vk};
 use crate::Modifiers;
 use crate::keys::{Key, Shortcut, strokes};
@@ -34,6 +40,44 @@ pub fn post(s: Shortcut) -> Result<(), String> {
   };
 
   let mods = if shift { s.mods | Modifiers::SHIFT } else { s.mods };
+  press(mods, vk)
+}
+
+/// Opens the emoji panel for the focused field with Win+., as Chromium's `ShowEmojiPanel` does
+/// (`ui/base/emoji/emoji_panel_helper_win.cc`): Windows has no Win32 API for it, only WinRT's
+/// `CoreInputView`. The panel types the emoji into the window as text (`WM_CHAR`, or the input
+/// method's result string).
+pub(crate) fn emoji_panel() -> Result<(), String> {
+  press(Modifiers::META, VK_OEM_PERIOD)
+}
+
+/// Whether the emoji panel opens here ([crate::character_palette]): from Windows 10 1709 (build
+/// 16299).
+pub fn character_palette() -> Result<(), String> {
+  static BUILD: OnceLock<Option<u32>> = OnceLock::new();
+  match *BUILD.get_or_init(build) {
+    Some(b) if b < 16299 => Err(format!("Windows build {b} has no emoji panel (1709+)")),
+    _ => Ok(()),
+  }
+}
+
+/// The Windows build, the registry's `CurrentBuildNumber`: the version functions report the
+/// version the app's manifest declares. `None` when it can't be read.
+fn build() -> Option<u32> {
+  let key = wide(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion");
+  let name = wide("CurrentBuildNumber");
+  let (mut buf, mut len) = ([0u16; 16], 32u32);
+  let p = buf.as_mut_ptr().cast();
+  let flags = RRF_RT_REG_SZ;
+  let err = unsafe {
+    RegGetValueW(HKEY_LOCAL_MACHINE, key.as_ptr(), name.as_ptr(), flags, null_mut(), p, &mut len)
+  };
+  let s = String::from_utf16_lossy(&buf[..(len as usize / 2).min(buf.len())]);
+  (err == 0).then(|| s.trim_end_matches('\0').parse().ok()).flatten()
+}
+
+/// Sends virtual key `vk` with modifiers `mods` in one `SendInput` ([strokes]).
+fn press(mods: Modifiers, vk: u16) -> Result<(), String> {
   let of = |code| lone_vk(code).map(|vk| vk as u16);
   let down = |vk: u16| unsafe { GetAsyncKeyState(vk.into()) as u16 & 0x8000 != 0 };
   let presses = strokes(mods, vk, of, down, Some(MASK)).ok_or("no modifier key")?;

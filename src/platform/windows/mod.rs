@@ -28,11 +28,12 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use app::paste::Open;
+pub use app::post::character_palette;
 pub use app::{
   activity, attach_console, autostart, desktop, downloads, focus, hardware, hotkey, input_source,
   open, paste, post, shell, tray, uninstall,
 };
-pub use settings::{appearance, languages};
+pub use settings::{appearance, date_pattern, languages, today};
 use windows_sys::Win32::Foundation::{
   CloseHandle, FILETIME, HANDLE, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
 };
@@ -328,6 +329,7 @@ impl Window {
     // focused as it shows) the input method.
     self.sync_cursor(false);
     self.sync_ime();
+    self.emoji_panel();
     let r = &mut self.renderer;
     r.sync(&mut self.rt.text, &mut self.rt.images);
     r.prepare(&self.rt.scene, self.rt.size, self.scale);

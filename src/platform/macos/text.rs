@@ -35,7 +35,8 @@ impl PartialEq for Face {
   }
 }
 
-/// The system font (SF Pro, or SF Mono for [Design::Monospaced]) at its size and weight.
+/// The system font (SF Pro, or SF Mono for [Design::Monospaced]) at its size and weight, its
+/// italic face when asked (upright if CoreText finds none).
 pub fn face(font: Font) -> Face {
   let weight = unsafe {
     match font.weight {
@@ -50,7 +51,13 @@ pub fn face(font: Font) -> Face {
     Design::Default => NSFont::systemFontOfSize_weight(font.size as f64, weight),
   };
 
-  Face(ns_font(ns))
+  let upright = ns_font(ns);
+  let italic = CTFontSymbolicTraits::TraitItalic;
+  let size = font.size as f64;
+  let slanted = font
+    .italic
+    .then(|| unsafe { upright.copy_with_symbolic_traits(size, std::ptr::null(), italic, italic) });
+  Face(slanted.flatten().unwrap_or(upright))
 }
 
 pub fn metrics(face: &Face) -> Metrics {

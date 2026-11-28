@@ -37,7 +37,7 @@
 //! ```
 //!
 //! A disabled row ([Ui::disabled] on it) dims its label and disables every widget in it but its
-//! ⓘ or warning mark, whose tooltip reads all the same. The toolbar is a pick
+//! ⓘ or warning mark, dimmed with it, whose tooltip reads all the same. The toolbar is a pick
 //! ([Ui::pick_behavior]): a click, or the arrows while it has focus (Tab), choose a tab.
 
 use std::cell::Cell;
@@ -712,7 +712,8 @@ impl Ui<'_> {
 
   /// A section: its header ([Section], or a title) over a plate of the rows `rows` builds
   /// ([Ui::form_row]), its footer under it, as SwiftUI's `Section { } header: { } footer: { }`
-  /// in a grouped form. An empty header shows none.
+  /// in a grouped form. An empty header shows none. [Ui::disabled] on it dims its header and
+  /// footer as a disabled control, and disables its rows ([Ui::form_row]).
   pub fn form_section<'s, R>(
     &mut self,
     fs: &FormStyle,
@@ -723,11 +724,13 @@ impl Ui<'_> {
     // The page's first section starts at the page's top; the others 30 under the plate above.
     let first = self.child_count() == 0;
     let id = self.take_id();
+    let off = !self.environment_value::<Enabled>().0;
+    let dim = if off { self.theme().disabled } else { 1.0 };
     self.with_id(id).col(Style::new().w(grow()), |ui| {
       if !header.is_empty() {
         let [top, r, b, l] = fs.head_pad;
         let head = Style::new().w(grow()).pads([if first { 0.0 } else { top }, r, b, l]);
-        let head = head.gap(12.0).align(Align::Start, Align::Center);
+        let head = head.gap(12.0).align(Align::Start, Align::Center).opacity(dim);
         let line = ui.head_line(&fs);
         ui.row(head.min_h(line), |ui| header.build(ui.with_id(id.key("header")), fs.head));
       }
@@ -745,7 +748,7 @@ impl Ui<'_> {
       }
 
       if !footer.is_empty() {
-        let pad = Style::new().w(grow()).pads(fs.foot_pad);
+        let pad = Style::new().w(grow()).pads(fs.foot_pad).opacity(dim);
         ui.col(pad, |ui| footer.build(ui.with_id(id.key("footer")), fs.caption));
       }
     })
@@ -1610,23 +1613,24 @@ mod tests {
     }
   }
 
-  /// A section titled by a string, one with a header built of a title and a note and a footer,
-  /// and one with an empty title.
-  struct Sections;
+  /// A section titled by a string, one with a header built of a title and a note and a footer
+  /// (disabled when `.0`), and one with an empty title.
+  struct Sections(bool);
 
   impl App for Sections {
     fn view(&mut self, ui: &mut Ui) {
       ui.set_theme(Theme::PLATES_LIGHT);
       let fs = FormStyle::plates(&ui.theme());
-      ui.col(fs.page, |ui| {
+      ui.col(fs.page.bg(fs.bg), |ui| {
         ui.id("a").form_section(&fs, "Startup", |ui| ui.form_row(&fs, FormRow::new("A"), |_| {}));
         let head = |ui: &mut Ui, s: TextStyle| {
-          ui.text("Storage", s);
+          ui.id("title").text("Storage", s);
           ui.spacer();
           ui.id("note").text("640 MB used", fs.note);
         };
         let section = Section::new(head).footer("Kept until you clear it.");
-        ui.id("b").form_section(&fs, section, |ui| ui.form_row(&fs, FormRow::new("B"), |_| {}));
+        let b = ui.disabled(self.0).id("b");
+        b.form_section(&fs, section, |ui| ui.form_row(&fs, FormRow::new("B"), |_| {}));
         ui.id("c")
           .form_section(&fs, "", |ui| ui.id("row").form_row(&fs, FormRow::new("C"), |_| {}));
       });
@@ -1637,7 +1641,7 @@ mod tests {
   /// plate in the caption's style; an empty title shows no header.
   #[test]
   fn a_section_has_a_header_and_a_footer() {
-    let mut h = Harness::new(Sections, Size::new(400.0, 400.0), 1.0);
+    let mut h = Harness::new(Sections(false), Size::new(400.0, 400.0), 1.0);
     h.frame();
     let (title, note) = (h.rect(Id::of("b").key("header")), h.rect(Id::of("note")).unwrap());
     assert!(title.is_none(), "a built header has no text of its own");
@@ -1654,6 +1658,23 @@ mod tests {
     let (c, row) = (h.rect(Id::of("c")).unwrap(), h.rect(Id::of("row")).unwrap());
     assert_eq!(c.y, row.y, "no header");
     assert!(h.rect(Id::of("a").key("header")).is_some());
+  }
+
+  /// A disabled section dims its header, title and note alike, and its footer, as a disabled
+  /// control: each lighter on the page than enabled.
+  #[test]
+  fn a_disabled_section_dims_its_header_and_footer() {
+    let darkest = |off: bool, id: Id| {
+      let mut h = Harness::new(Sections(off), Size::new(400.0, 400.0), 2.0);
+      h.frame();
+      let (r, img) = (h.rect(id).unwrap(), h.render());
+      let px = (0..(r.w * 2.0) as i32).flat_map(|x| (0..(r.h * 2.0) as i32).map(move |y| (x, y)));
+      px.map(|(x, y)| img.pixel(r.x + x as f32 / 2.0, r.y + y as f32 / 2.0)[0]).min().unwrap()
+    };
+    for id in [Id::of("title"), Id::of("note"), Id::of("b").key("footer")] {
+      let (on, off) = (darkest(false, id), darkest(true, id));
+      assert!(off > on + 30, "{id:?}: {on} enabled, {off} disabled");
+    }
   }
 
   #[test]

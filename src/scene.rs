@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub use crate::geom::{Axis, Color, Point, Rect, Size, alpha, mix, rgb};
-use crate::text::{Font, Metrics, TextSystem};
+use crate::text::{Font, Line, Metrics, TextSystem};
 
 // MARK: Instances
 
@@ -483,22 +483,31 @@ impl Frame<'_> {
   /// the clip are skipped before they take an atlas slot (a long line scrolled sideways), as is
   /// fully transparent text.
   pub fn text(&mut self, x: f32, y: f32, s: &str, font: Font, color: Color) -> f32 {
-    let scale = self.scale;
     let line = self.text.layout(s, font);
+    self.glyphs(x, y, &line, |_| color);
+    line.width
+  }
+
+  /// Draws `line`, shaped by the text system, as [Frame::text] draws its text: each glyph in the
+  /// colour `color` gives for the offset in the text where its cluster starts (styled runs shaped
+  /// as one).
+  pub(crate) fn glyphs(&mut self, x: f32, y: f32, line: &Line, color: impl Fn(u32) -> Color) {
+    let scale = self.scale;
     let baseline = (y * scale).round();
     // The line's ink bounds, and a pixel more each way for the snapping below.
     let frame = Rect::new(0.0, 0.0, self.size.w, self.size.h);
     let view = self.scene.clip().map_or(frame, |c| c.intersect(frame));
     let (ink, pad) = (line.ink, 1.0 / scale);
-    // Fully transparent text draws nothing: no atlas slots either.
-    let empty = view.w <= 0.0 || view.h <= 0.0 || color[3] <= 0.0;
+    let empty = view.w <= 0.0 || view.h <= 0.0;
     if empty || y + ink.down + pad < view.y || y - ink.up - pad > view.y + view.h {
-      return line.width;
+      return;
     }
 
-    for g in &line.glyphs {
-      let pen = x + g.x;
-      if pen + ink.right + pad < view.x || pen - ink.left - pad > view.x + view.w {
+    for (g, &at) in line.glyphs.iter().zip(&line.clusters) {
+      let (pen, color) = (x + g.x, color(at));
+      // Fully transparent text draws nothing: no atlas slots either.
+      let out = pen + ink.right + pad < view.x || pen - ink.left - pad > view.x + view.w;
+      if out || color[3] <= 0.0 {
         continue;
       }
 
@@ -515,8 +524,6 @@ impl Frame<'_> {
         false => self.scene.glyph(Sprite { rect, uv: a.uv, color }),
       }
     }
-
-    line.width
   }
 }
 

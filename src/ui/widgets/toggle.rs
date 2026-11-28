@@ -15,10 +15,10 @@ use crate::ui::{
 /// How fast the knob slides: across in 140 ms, eased.
 const SLIDE: Transition = Transition::smooth(1000.0 / 140.0);
 
-/// The switch, as SwiftUI's `.switch`, the shell's default: in the rows' size
-/// ([crate::Sizes::switch]), or the large one at [ControlSize::Large]. A pill knob, as far in
-/// from the track's end as from its top, with a soft ring and a drop shadow, slides over the
-/// track, grey off and the accent on. A switch to assistive technology.
+/// The switch, as SwiftUI's `.switch`, the shell's default: sized by [ControlSize]
+/// ([crate::Sizes::switch]). A pill knob, as far in from the track's end as from its top, with a
+/// soft ring and a drop shadow, slides over the track, grey off and the accent on. A switch to
+/// assistive technology.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SwitchToggleStyle;
 
@@ -37,7 +37,12 @@ impl ToggleStyle for SwitchToggleStyle {
     let hot = ui.ctl_hot(id, c.is_hovered());
     let rest = mix(t.track, t.track_hover, hot);
 
-    let sw = if size == ControlSize::Large { t.sizes.switch_large } else { t.sizes.switch };
+    let sw = match size {
+      ControlSize::Small => t.sizes.switch_small,
+      ControlSize::Large => t.sizes.switch_large,
+      _ => t.sizes.switch,
+    };
+
     let ([w, h], [kw, kh]) = (sw.track, sw.knob);
     let inset = (h - kh) / 2.0;
     let row = Style::new().w(rigid()).gap((h / 3.0).round()).align(Align::Start, Align::Center);
@@ -72,8 +77,8 @@ mod tests {
   use crate::keys::Key;
   use crate::scene::Size;
   use crate::ui::{
-    ButtonToggleStyle, CheckboxToggleStyle, Icon, Id, PlainToggleStyle, Style, Theme, ToggleStyle,
-    Ui,
+    ButtonToggleStyle, CheckboxToggleStyle, ControlSize, Icon, Id, PlainToggleStyle, Sizes, Style,
+    Theme, ToggleStyle, Ui,
   };
   use crate::{Harness, Modifiers, NamedKey};
 
@@ -161,6 +166,32 @@ mod tests {
     let (on, off) = (fill(&h, "on"), fill(&h, "off"));
     assert!(on[2] > on[0] + 20 && off[2] == off[0], "{on:?} on, {off:?} off");
     assert!(h.a11y().contains("check box \"On\" on"), "{}", h.a11y());
+  }
+
+  /// A switch with no label at a control size.
+  struct AtSize(ControlSize);
+
+  impl App for AtSize {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.control_size(self.0).id("s").toggle(&mut true, ());
+    }
+  }
+
+  /// Each control size has its switch, as AppKit's mini, small and regular: Small the smallest.
+  #[test]
+  fn a_switch_takes_the_control_size() {
+    let track = |c: ControlSize| {
+      let mut h = Harness::new(AtSize(c), Size::new(200.0, 100.0), 1.0);
+      h.frame();
+      let r = h.rect(Id::of("s")).unwrap();
+      [r.w, r.h]
+    };
+    let s = Sizes::PLATES;
+    assert_eq!(track(ControlSize::Small), s.switch_small().track);
+    assert_eq!(track(ControlSize::Regular), s.switch().track);
+    assert_eq!(track(ControlSize::Large), s.switch_large().track);
+    assert!(s.switch_small().track[0] < s.switch().track[0]);
+    assert!(s.switch_small().track[1] < s.switch().track[1]);
   }
 
   /// A switch and a check box with an icon label, enabled or not.

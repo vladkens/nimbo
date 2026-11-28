@@ -52,20 +52,27 @@ pub struct Font {
   pub(crate) size: f32,
   pub(crate) weight: Weight,
   pub(crate) design: Design,
+  pub(crate) italic: bool,
 }
 
 impl Font {
   pub const fn ui(size: f32) -> Self {
-    Self { size, weight: Weight::Regular, design: Design::Default }
+    Self { size, weight: Weight::Regular, design: Design::Default, italic: false }
   }
 
   /// The monospaced system font, as SwiftUI's `.monospaced()`.
   pub const fn mono(size: f32) -> Self {
-    Self { size, weight: Weight::Regular, design: Design::Monospaced }
+    Self { design: Design::Monospaced, ..Self::ui(size) }
   }
 
   pub const fn weight(self, weight: Weight) -> Self {
     Self { weight, ..self }
+  }
+
+  /// The font's italic, as SwiftUI's `.italic()`: SF Pro's and SF Mono's own, Segoe UI's, the
+  /// family's italic face fontconfig finds on Linux (upright where it has none).
+  pub const fn italic(self) -> Self {
+    Self { italic: true, ..self }
   }
 
   /// The same font in `size` points: a title from the bold body font.
@@ -585,6 +592,22 @@ mod tests {
     let q = ts.layout("Q\u{302}", font);
     assert_eq!(q.glyphs[0].y, 0.0);
     assert!(q.glyphs.len() == 1 || q.glyphs[1].y > 1.0, "{:?}", q.glyphs);
+  }
+
+  /// Italic is the font's own italic face, where the system has one (Linux's fonts may not).
+  #[test]
+  fn italic_is_a_face_of_its_own() {
+    let mut ts = TextSystem::new(2.0);
+    let up = ts.layout("a", Font::ui(13.0)).glyphs[0];
+    let it = ts.layout("a", Font::ui(13.0).italic()).glyphs[0];
+    if cfg!(target_os = "linux") && up.face == it.face {
+      eprintln!("no italic face for sans-serif: skipped");
+      return;
+    }
+
+    assert_ne!(up.face, it.face);
+    let mono = ts.layout("a", Font::mono(13.0).italic()).glyphs[0];
+    assert_ne!(mono.face, it.face);
   }
 
   #[test]

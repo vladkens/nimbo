@@ -1,11 +1,11 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! The System Settings lists over the headless [List]: rows edge to edge, the selected one filled
-//! ([InsetListStyle], the window's default, which the shell puts), or each section's rows on a
-//! rounded plate as a grouped form's ([InsetGroupedListStyle]). No hover fill, as SwiftUI's on
-//! macOS; [Row::hovered] is there for an app that draws its own.
+//! The System Settings lists over the headless [List]: the selected rows on a rounded fill inset
+//! from the sides ([InsetListStyle], the window's default, which the shell puts), or each
+//! section's rows on a rounded plate as a grouped form's ([InsetGroupedListStyle]). No hover fill,
+//! as SwiftUI's on macOS; [Row::hovered] is there for an app that draws its own.
 
-use crate::scene::{Color, Frame, Rect, alpha};
+use crate::scene::{Color, Frame, Quad, Rect, alpha};
 use crate::ui::form::Piece;
 use crate::ui::{FormStyle, ListConfiguration, ListLayout, ListStyle, Style, Theme, Ui};
 #[cfg(doc)]
@@ -19,20 +19,36 @@ fn selection(t: &Theme, focused: bool) -> Color {
   }
 }
 
-/// Rows edge to edge, a selected one filled: in the accent while the list has focus, else grey;
-/// dimmed when disabled. The window's default, which the shell puts.
+/// As SwiftUI's `.inset` on macOS: rows padded 16 at their sides, the selection rounded 10 in
+/// from them, one over adjacent rows; in the accent while the list has focus, else grey; dimmed
+/// when disabled. The window's default, which the shell puts.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct InsetListStyle;
 
 impl ListStyle for InsetListStyle {
+  fn layout(&self, _: &Ui<'_>) -> ListLayout {
+    let d = ListLayout::default();
+    ListLayout { row: d.row.pad_xy(16.0, 0.0), ..d }
+  }
+
   fn make_body<'a>(&self, ui: &mut Ui<'a>, mut c: ListConfiguration<'_, 'a>) {
+    const INSET: f32 = 10.0;
+    const RADIUS: f32 = 5.0;
     let t = ui.theme();
     let fill = selection(&t, c.is_focused());
     let frame = if c.is_enabled() { c.frame() } else { c.frame().opacity(t.disabled) };
     ui.scroll_area(frame, |ui| {
       c.rows(ui, |ui, mut r| {
+        // Square where a selected row above or below joins it.
         let bg = if r.is_selected() { fill } else { [0.0; 4] };
-        ui.row(r.frame().bg(bg), |ui| r.content(ui));
+        let top = if r.is_after_selected() && !r.is_first() { 0.0 } else { RADIUS };
+        let end = if r.is_before_selected() { 0.0 } else { RADIUS };
+
+        let paint = move |f: &mut Frame, at: Rect| {
+          let at = Rect::new(at.x + INSET, at.y, at.w - 2.0 * INSET, at.h);
+          f.quad(Quad::new(at, bg).radii([top, top, end, end]));
+        };
+        ui.canvas_row(r.frame(), paint, |ui| r.content(ui));
       })
     });
   }
@@ -551,11 +567,13 @@ mod tests {
   }
 
   /// Six rows 20 high in two sections under headers 30 high, each with a text, a button and a
-  /// disabled one; a box after the list. Scrolls in its 100 high.
+  /// disabled one; a box after the list. Scrolls in its 100 high; `tall`, 300 high, room under
+  /// the rows.
   #[derive(Default)]
   struct Ground {
     sel: Selection,
     clicks: usize,
+    tall: bool,
   }
 
   impl crate::App for Ground {
@@ -567,7 +585,7 @@ mod tests {
         clicks.set(clicks.get() + ui.id(("b", g)).button("B").clicked as usize);
         ui.disabled(true).id(("off", g)).button("Off");
       };
-      ui.col(Style::new().w(px(200.0)).h(px(100.0)), |ui| {
+      ui.col(Style::new().w(px(200.0)).h(px(if self.tall { 300.0 } else { 100.0 })), |ui| {
         let list = List::new(6, 20.0).sections(&[0, 3], 30.0, &head).multi();
         let list = list.selection(&mut self.sel).style(Style::new().grow());
         list.show(ui.id("list"), |ui, _| ui.label("row"));
@@ -577,9 +595,9 @@ mod tests {
     }
   }
 
-  /// As a table view on macOS: a plain press on a header, its text or the room beside it,
-  /// clears the selection; one with Cmd or Shift, on a header's button, enabled or not, on the
-  /// scrollbar or off the list keeps it.
+  /// As a table view on macOS: a plain press on the room under the rows clears the selection;
+  /// one on a header (its text, the room beside it, its button, enabled or not), with Cmd or
+  /// Shift, on the scrollbar or off the list keeps it, as a source list's group row does.
   #[test]
   fn a_press_on_the_lists_ground_clears_the_selection() {
     use crate::Harness;
@@ -617,12 +635,17 @@ mod tests {
     h.frame();
     assert_eq!(sorted(&h.app().sel), [1]);
 
-    // The room beside the header's text clears it; its text too.
+    // The room beside the header's text keeps it; its text too.
     h.click(x, y);
-    h.frame();
-    assert!(h.app().sel.is_empty());
-    pick(&mut h);
     h.click_id(Id::of(("t", 0)));
+    h.frame();
+    assert_eq!(sorted(&h.app().sel), [1]);
+
+    // The room under the rows clears it.
+    h.app_mut().tall = true;
+    h.frame();
+    let v = h.rect(id).unwrap();
+    h.click(v.x + 50.0, v.y + v.h - 10.0);
     h.frame();
     assert!(h.app().sel.is_empty());
   }
@@ -700,5 +723,76 @@ mod tests {
     assert_eq!(h.app().sel.cursor(), Some(1));
     assert_ne!(bare, filled);
     assert_eq!(bare, other);
+  }
+
+  /// Inset, as SwiftUI's on macOS: the selection 10 in from the row's sides, rounded, one fill
+  /// over two adjacent rows; the content 16 in.
+  #[test]
+  fn the_inset_selection_is_rounded_and_one_over_adjacent_rows() {
+    use crate::Harness;
+    struct Two(Selection);
+    impl crate::App for Two {
+      fn view(&mut self, ui: &mut Ui) {
+        ui.col(Style::new().w(px(200.0)).h(px(100.0)).bg([1.0; 4]), |ui| {
+          let list = List::new(3, 20.0).multi().selection(&mut self.0).style(Style::new().grow());
+          let inner = Style::new().w(px(10.0)).h(px(4.0));
+          list.show(ui.id("list"), |ui, row| _ = ui.id(("in", row.index)).el(inner));
+        });
+      }
+    }
+
+    let mut sel = Selection::default().multiple(true);
+    sel.select(0, 0);
+    sel.toggle(1, 1);
+    let mut h = Harness::new(Two(sel), Size::new(200.0, 100.0), 1.0);
+    h.frame();
+    let (row, inner) =
+      (h.rect(Id::of("list").key(("row", 0u64))).unwrap(), h.rect(Id::of(("in", 0))));
+    assert_eq!(inner.unwrap().x - row.x, 16.0);
+
+    let img = h.render();
+    let white = [255; 4];
+    let px = |x: f32, y: f32| img.pixel(row.x + x, row.y + y);
+    assert_eq!(px(5.0, 10.0), white, "outside the inset");
+    assert_ne!(px(12.0, 10.0), white, "filled");
+    assert_eq!(px(10.5, 0.5), white, "a rounded corner at the top");
+    assert_ne!(px(10.5, 20.0), white, "none where the two meet");
+    assert_eq!(px(10.5, 39.5), white, "one again at the bottom");
+  }
+
+  /// The selection's row as a text above the list, which reads it before the list changes it.
+  #[derive(Default)]
+  struct Above {
+    sel: Selection,
+    shown: Option<u64>,
+  }
+
+  impl crate::App for Above {
+    fn view(&mut self, ui: &mut Ui) {
+      self.shown = self.sel.cursor();
+      ui.col(Style::new().w(px(200.0)).h(px(100.0)), |ui| {
+        let list = List::new(3, 20.0).selection(&mut self.sel).style(Style::new().grow());
+        list.show(ui.id("list"), |ui, _| ui.label("row"));
+      });
+    }
+  }
+
+  /// A press that changes the selection asks for the next frame: what the view built before the
+  /// list catches up while the button is still held.
+  #[test]
+  fn a_changed_selection_shows_in_the_next_frame() {
+    use crate::Harness;
+    let mut h = Harness::new(Above::default(), Size::new(300.0, 300.0), 1.0);
+    h.frame();
+    // Focused by a first click, so the press changes only the selection.
+    h.click_id(Id::of("list").key(("row", 0u64)));
+    h.wait(Duration::from_millis(500));
+    let row = h.rect(Id::of("list").key(("row", 1u64))).unwrap();
+    let (x, y) = (row.x + 20.0, row.y + 10.0);
+    h.move_to(x, y);
+    h.wait(Duration::from_millis(50));
+    h.press(x, y);
+    h.wait(Duration::from_millis(50));
+    assert_eq!((h.app().sel.cursor(), h.app().shown), (Some(1), Some(1)));
   }
 }

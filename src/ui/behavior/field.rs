@@ -15,8 +15,9 @@
 //! triple-clicks a line, and Shift-click extends. A secondary click (the right button) focuses it
 //! and asks for its edit menu ([FieldBehavior::menu], opened by [Ui::edit_menu]), whose choice
 //! comes back as a command ([Ui::field_command]); the field keeps its focus look while the menu
-//! is open. The caret blinks on timers, so a window sleeps between blinks and stops when the
-//! field loses focus.
+//! is open. The focus moving away (a click elsewhere in the window, Tab) ends the selection at
+//! its head; the window losing its focus keeps it, half as strong. The caret blinks on timers, so a
+//! window sleeps between blinks and stops when the field loses focus.
 //!
 //! An input method's composition is marked text at the caret, apart from the value: the app's
 //! text changes only when it is committed, and a value the app sets meanwhile waits until the
@@ -31,16 +32,16 @@ use crate::app::{Ime, MouseButton};
 use crate::keys::{Command, Delete, Move};
 use crate::menu::{Item, Menu};
 use crate::scene::{Color, Point, Rect, alpha};
-use crate::t;
 use crate::text::edit::{
   Editor, Lines, Mono, Sel, graphemes, para_range, range_from_utf16, snap, word_range,
 };
 use crate::ui::input::ScrollState;
 use crate::ui::textlayout::{Edit, Hit};
 use crate::ui::{
-  Align, Cursor, EnvironmentValue, Focus, Id, NativeMenu, Role, Style, TextInput, TextLayout,
-  TextStyle, Tree, Ui, UiState, grow,
+  Align, Cursor, EnvironmentValue, Focus, Id, NativeMenu, Role, Run, Selectable, Style, TextInput,
+  TextLayout, TextStyle, Tree, Ui, UiState, grow,
 };
+use crate::{character_palette, t};
 
 /// The caret shows this long after it moves, then hides as long, and so on.
 const BLINK: Duration = Duration::from_millis(500);
@@ -100,6 +101,8 @@ pub(super) struct FieldState {
   synced: String,
   /// A value the app set while an input method composed, applied when the composition ends.
   held: Option<String>,
+  /// Selectable text's runs ([super::super::AttributedString]), ends from its start.
+  runs: Vec<Run>,
   /// Drag-selecting since a press: what the press selected (a word or a line for double and
   /// triple clicks), and its clicks.
   drag: Option<(Range<usize>, u32)>,
@@ -109,6 +112,7 @@ pub(super) struct FieldState {
   reveal: u32,
   /// Requests made so far.
   reveals: u32,
+  /// It has the focus (its edit menu's while open), the window's or not.
   focused: bool,
   /// The edit menu as last opened ([Ui::edit_menu]).
   pub menu: EditMenu,
@@ -180,12 +184,15 @@ pub struct EditMenu {
   pub paste: bool,
   /// There is text.
   pub select_all: bool,
+  /// The OS has an emoji picker ([crate::character_palette]) and the field takes it (not a
+  /// password).
+  pub emoji: bool,
 }
 
 impl EditMenu {
   /// The menu: Cut, Copy, Paste (Copy alone in selectable text), a line, Select All, each
-  /// enabled when it can act, running its command; no shortcut labels, as AppKit's, Win32's
-  /// and GTK's text menus show none.
+  /// enabled when it can act, running its command; then Emoji & Symbols where a field takes it.
+  /// No shortcut labels, as AppKit's, Win32's and GTK's text menus show none.
   pub fn items(&self) -> Menu<Command> {
     let item = |cmd: Command, label: &str, on: bool| Item::button(cmd, label).enabled(on);
     let cut = item(Command::Cut, &t!("Cut"), self.cut);
@@ -193,6 +200,11 @@ impl EditMenu {
     let copy = item(Command::Copy, &t!("Copy"), self.copy);
     let mut items = if self.editable { vec![cut, copy, paste] } else { vec![copy] };
     items.extend([Item::Divider, item(Command::SelectAll, &t!("Select All"), self.select_all)]);
+    if self.emoji {
+      let emoji = item(Command::CharacterPalette, &t!("Emoji & Symbols"), true);
+      items.extend([Item::Divider, emoji]);
+    }
+
     Menu::new(items)
   }
 }
@@ -296,6 +308,10 @@ impl Ui<'_> {
 
     let changed = write_back(&mut st, text);
     let blurred = st.focused && !focused;
+    if blurred {
+      collapse(&mut st);
+    }
+
     if changed || set || st.ed.sel() != sel || focused && !st.focused {
       st.blink = self.now;
       reveal(&mut st);
@@ -318,8 +334,18 @@ impl Ui<'_> {
 
   /// Text the user selects with the mouse and the keyboard (Shift-arrows) and copies: a double
   /// click selects a word, a triple click a line; Cmd-A and Cmd-C come from its bindings
-  /// (`SELECT_KEYS`). Build it under `id` with [Ui::field_text].
-  pub fn selectable_behavior(&mut self, id: Id, text: &str) -> FieldBehavior {
+  /// (`SELECT_KEYS`). A `&str` or an [AttributedString](super::super::AttributedString), drawn
+  /// in its runs. Build it under `id` with [Ui::field_text].
+  pub fn selectable_behavior<'s>(
+    &mut self,
+    id: Id,
+    text: impl Into<Selectable<'s>>,
+  ) -> FieldBehavior {
+    let (text, runs) = match text.into() {
+      Selectable::Plain(s) => (s, &[][..]),
+      Selectable::Styled(a) => (a.as_str(), a.runs()),
+    };
+
     let disabled = self.begin(id, Role::StaticText).is_some();
     let mut st = std::mem::take(self.state::<FieldState>(id));
     (st.text_id, st.editing, st.ed.multiline) = (id, Editing::Selectable, true);
@@ -329,12 +355,27 @@ impl Ui<'_> {
       synced(&mut st, text);
     }
 
+    // Kept while its text is the one shown: none when the editor changed it (`\r\n` to `\n`).
+    let shown = st.ed.text() == text;
+    let runs = if shown { runs } else { &[] };
+    if st.runs != runs {
+      st.runs.clear();
+      st.runs.extend(runs);
+    }
+
     self.revealed(&mut st);
     let sel = st.ed.sel();
     let (submitted, cancelled) = match disabled {
       true => (false, false),
       false => self.edit_input(id, &mut st),
     };
+
+    let focused = self.focused(id) || self.menu_open(id.key("edit"));
+    if st.focused && !focused {
+      collapse(&mut st);
+    }
+
+    st.focused = focused;
 
     // The selection's head in view, as it moves (Shift-Down in a scrolled page).
     if st.ed.sel() != sel {
@@ -430,6 +471,10 @@ impl Ui<'_> {
 
           true
         }
+        Command::CharacterPalette if st.editable() && !st.secure() => {
+          self.st.palette = character_palette::available().is_ok();
+          true
+        }
         Command::Copy | Command::Cut if st.secure() => false,
         Command::Copy | Command::SelectAll | Command::Move(..) if !st.editable() => {
           st.ed.apply(c, lines, &mut *self.st.clipboard)
@@ -483,8 +528,9 @@ impl Ui<'_> {
       let (editable, copy) = (st.editable(), !st.ed.sel().is_empty() && !st.secure());
       let (paste, select_all) =
         (editable && self.st.clipboard.has_text(), !st.ed.text().is_empty());
-      st.menu =
-        EditMenu { at: Some(pos), editable, cut: copy && editable, copy, paste, select_all };
+      let emoji = editable && !st.secure() && character_palette::available().is_ok();
+      let cut = copy && editable;
+      st.menu = EditMenu { at: Some(pos), editable, cut, copy, paste, select_all, emoji };
     }
 
     (submitted, cancelled)
@@ -516,6 +562,13 @@ impl UiState {
   pub fn editor(&self, id: Id) -> Option<&Editor> {
     self.store.peek::<FieldState>(id).map(|s| &s.ed)
   }
+}
+
+/// The focus moved away (a click elsewhere, Tab), not the window's: the selection ends at its
+/// head, as AppKit's does when its field resigns.
+fn collapse(st: &mut FieldState) {
+  let head = st.ed.sel().head;
+  st.ed.select(Sel::caret(head));
 }
 
 /// Asks the next layout to show the caret, as a new request.
@@ -775,17 +828,17 @@ fn drag_to(st: &mut FieldState, lay: &TextLayout, p: Point) {
 impl Ui<'_> {
   /// The text element of a field or selectable text, as its behaviour `b` has it, `node` its
   /// style: the text (a dot per character for a password), or `prompt` while it is empty, with
-  /// the selection (half as strong without focus in selectable text, none in a field), the caret
-  /// and the marked text's underline.
+  /// the selection (half as strong in a window that isn't key and in unfocused selectable text,
+  /// none in an unfocused field), the caret and the marked text's underline.
   pub fn field_text(&mut self, b: &FieldBehavior, prompt: &str, style: &FieldStyle, node: Style) {
     let st = std::mem::take(self.st.store.raw::<FieldState>(b.id));
     let mut e = b.edit;
     e.caret_color = style.caret;
-    e.sel_color = match (b.focused, st.editable()) {
+    e.sel_color = match (b.focused, st.focused || !st.editable()) {
       _ if b.disabled => [0.0; 4],
       (true, _) => style.selection,
-      (false, false) => alpha(style.selection, style.selection[3] * 0.5),
-      (false, true) => [0.0; 4],
+      (false, true) => alpha(style.selection, style.selection[3] * 0.5),
+      (false, false) => [0.0; 4],
     };
 
     let s = st.ed.text();
@@ -794,13 +847,14 @@ impl Ui<'_> {
       (true, _) => {
         e.placeholder = true;
         let ts = ts.color(style.placeholder);
-        self.text_id(b).edit_text(prompt, ts, e, node);
+        self.text_id(b).edit_text(prompt, ts, e, node, &[]);
       }
       (false, true) => {
         let dots = DOT.repeat(graphemes(s).count());
-        self.text_id(b).edit_text(&dots, ts, e, node);
+        self.text_id(b).edit_text(&dots, ts, e, node, &[]);
       }
-      (false, false) => _ = self.text_id(b).edit_text(s, ts, e, node),
+      // Selectable styled text in its runs.
+      (false, false) => _ = self.text_id(b).edit_text(s, ts, e, node, &st.runs),
     }
 
     *self.st.store.raw::<FieldState>(b.id) = st;
@@ -876,7 +930,8 @@ mod tests {
   use super::*;
   use crate::app::App;
   use crate::scene::Size;
-  use crate::ui::{Theme, px};
+  use crate::text::Weight;
+  use crate::ui::{AttributedString, Attributes, Theme, px};
   use crate::{Harness, Modifiers, NamedKey};
 
   const REST: Color = [0.2, 0.2, 0.2, 1.0];
@@ -898,6 +953,34 @@ mod tests {
       ui.with_id(b.id).row(frame, |ui| ui.field_text(&b, "", &style, Style::new()));
       self.seen.push(b);
     }
+  }
+
+  /// Selectable styled text, the app's value.
+  struct Styled(AttributedString);
+
+  impl App for Styled {
+    fn view(&mut self, ui: &mut Ui) {
+      let style = Theme::PLATES_LIGHT.field().text;
+      ui.id("t").selectable_text(&self.0, style);
+    }
+  }
+
+  /// Runs alike in their ends over a text the editor changes (`\r\n` to `\n`) are dropped, not
+  /// laid over the changed text: it draws plain, no slice inside a character.
+  #[test]
+  fn runs_over_a_text_the_editor_changed_are_dropped() {
+    let (bold, plain) = (Attributes::new().weight(Weight::Bold), Attributes::new());
+    let text = |a: &str, b: &str| {
+      let mut s = AttributedString::new();
+      s.push(a, bold).push(b, plain);
+      s
+    };
+    let mut h = Harness::new(Styled(text("abc", "de")), Size::new(200.0, 100.0), 1.0);
+    h.frame();
+    h.app_mut().0 = text("a\r\n", "é");
+    assert_eq!(h.app().0.runs().iter().map(|r| r.end).collect::<Vec<_>>(), [3, 5]);
+    h.frame();
+    assert_eq!(h.editor(Id::of("t")).unwrap().text(), "a\né");
   }
 
   #[test]

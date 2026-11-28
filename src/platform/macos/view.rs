@@ -718,7 +718,7 @@ impl View {
     }
 
     self.apply_resize();
-    self.apply_file_dialog();
+    self.apply_panels();
     self.show_menu();
     if self.ivars().rewake.take() {
       self.wake();
@@ -924,7 +924,7 @@ impl View {
     a11y::sync(self);
     self.sync_ime();
     self.apply_resize();
-    self.apply_file_dialog();
+    self.apply_panels();
     self.show_menu();
     if self.ivars().rewake.take() {
       self.wake();

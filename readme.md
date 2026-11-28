@@ -26,7 +26,7 @@
 - 📦 **13 crates on macOS, 2 on Windows, none on Linux**: GTK is loaded at run time, nothing to link
 
 <div align="center">
-  <img src="docs/settings.png" alt="the settings example on macOS" width="700" />
+  <img src="docs/settings.png" alt="a settings window drawn by nimbo on macOS" width="700" />
 </div>
 
 ## 🧭 Why nimbo
@@ -114,18 +114,10 @@ cargo run --release --example gallery -- --shot gallery.png    # the same, rende
 Every example takes `--shot <file.png>` (with `--appearance light`, `--locale <tag>`) to render its window to a file ([examples/common/example.rs](examples/common/example.rs)). Each building block beside its SwiftUI counterpart, with a picture: [docs/api.md](docs/api.md), made from the gallery's table ([examples/gallery.rs](examples/gallery.rs)) by `make api-shots`.
 
 - `counter`: buttons, hover, focus
-- `gallery`: a catalog of every building block, each page its SwiftUI line, its nimbo line and the block in its variants
-- `settings`: a macOS-style settings window
-- `notes`: a sidebar shown and hidden from a toolbar in the title bar
-- `files`: open and save panels, drag and drop
-- `lists`: a list of 100,000 rows, menus, tabs, a split
-- `history`: 86,000 rows a day at a time in a grouped list, built in view only
-- `fields`: text fields and input methods
-- `text`: fonts, scripts, emoji
-- `shapes`: what the renderer draws
-- `input`: mouse, keys, clipboard
-- `tray`: a tray icon, a global hotkey
-- `hud`: an overlay over every app
+- `7guis`: the 7GUIs tasks 2–7 (converter, booker, timer, CRUD, circles, cells) on tabs
+- `custom-look`: a dense dark-first triage tool in a look of its own over the style traits
+- `gallery`: every building block beside SwiftUI's in its variants; a Canvas page; the pacing scene
+- `messenger`: chats with bots, a lazy list of 3,000, files, a tray icon, settings, ru/en
 
 ## 📏 Size
 

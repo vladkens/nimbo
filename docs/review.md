@@ -23,6 +23,7 @@ Applying a list of changes in order can collide with itself (all #90):
 - A swap `[a, b]` → `[b, a]` registered place 0's new hotkey while place 1 still held it. Carbon refused the duplicate, `set` returned `Ok`, and one hotkey was gone. Let every old binding go first, then take the new ones.
 - A shorter list: the diff walked the old length, and an index into the new list panicked.
 - A place left as it was but refused now, because an earlier place took its hotkey: a diff by "changed or not" alone skipped it.
+- A date typed a segment at a time was held to its range after each one: `01` of November under a 28 November minimum became the 28th before `12` made it December, and the day was lost (#123). Hold what is typed as typed, and the range on what the app sees.
 
 ## Work deferred to later
 
@@ -30,4 +31,21 @@ Work deferred to the main loop's idle (the portal's rebind) runs after the event
 
 ## Tested on the platform
 
-A unit test of a state machine proves the machine, not the OS. None of the cases above showed in nimbo's tests until a test was written for it, and a grab's, a tap's or a portal's timing shows only on the real system. A change to a platform's input runs on that platform (`~/Code/vm`) before it is called done, and the PR says what was not run.
+A unit test of a state machine proves the machine, not the OS. None of the cases above showed in nimbo's tests until a test was written for it, and a grab's, a tap's or a portal's timing shows only on the real system. A change to a platform's input runs on that platform (a trivm VM) before it is called done, and the PR says what was not run.
+
+## A cache checked by a stand-in
+
+A cache kept while a cheap stand-in for its input is unchanged goes stale when the input changes behind it (#123):
+
+- The lazy column kept its heights by index while the first and last item ids and the count held: two rows swapped inside left each measured height on the other's place, and the content height and scroll positions were off.
+- Selectable text kept its runs while they were equal to the app's, but the editor had turned the app's `\r\n` into `\n`: the runs' offsets fell inside a character and the layout panicked.
+
+Check what the cache's key leaves out, and that the cache is dropped when the value it was built from is not the one shown.
+
+## Measured one way, drawn another
+
+Two paths that should agree, the layout's measure and the paint, drifted apart: styled text measured runs of one font as one shaped string but drew each colour run shaped alone, losing the kerning across their edges, so `AVAV` in alternating colours drew 10% wider than its box (#123). Measure and draw from one result (one shaping, positions from its glyphs), and test the drawn ink against the measured box.
+
+## Each part scans the whole
+
+A loop over the parts of a thing that scans the whole thing for each is quadratic, and a test's few parts don't show it (#123): styled text found each run's extent by walking every glyph of its line, so a line of 8,000 characters in alternating colours took 750 ms a frame against 1 ms in one colour. Find all the parts' answers in one pass over the whole, and time it at a size a real app reaches (a minified file, a long log line).

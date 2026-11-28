@@ -24,9 +24,7 @@
 
 pub use super::ControlSize;
 use super::store::Transition;
-use super::{
-  Align, EnvironmentValue, FieldStyle, FocusRing, Shadow, Style, TextStyle, Ui, grow, px,
-};
+use super::{Align, EnvironmentValue, FieldStyle, FocusRing, Shadow, Style, TextStyle, Ui, grow};
 use crate::app::{Appearance, ColorScheme};
 use crate::scene::{Color, alpha, mix, rgb};
 use crate::text::{Font, Weight};
@@ -101,7 +99,7 @@ impl Theme {
     Self { bg, ..self }
   }
 
-  /// Sidebars, toolbars, tab strips.
+  /// Sidebars and toolbars.
   pub const fn panel(&self) -> Color {
     self.panel
   }
@@ -485,12 +483,12 @@ pub struct Sizes {
   pub(crate) control_h: f32,
   pub(crate) small_h: f32,
   pub(crate) item_h: f32,
-  pub(crate) tab_h: f32,
   pub(crate) menu_w: f32,
   pub(crate) menu_radius: f32,
   pub(crate) menu_edge: f32,
   pub(crate) check: f32,
   pub(crate) switch: SwitchSize,
+  pub(crate) switch_small: SwitchSize,
   pub(crate) switch_large: SwitchSize,
   pub(crate) knob: [f32; 2],
   pub(crate) rail: f32,
@@ -524,15 +522,6 @@ impl Sizes {
 
   pub const fn with_item_h(self, item_h: f32) -> Self {
     Self { item_h, ..self }
-  }
-
-  /// A tab strip.
-  pub const fn tab_h(&self) -> f32 {
-    self.tab_h
-  }
-
-  pub const fn with_tab_h(self, tab_h: f32) -> Self {
-    Self { tab_h, ..self }
   }
 
   /// The least width of a pop-up button's menu.
@@ -570,14 +559,22 @@ impl Sizes {
     Self { check, ..self }
   }
 
-  /// A switch in rows ([ControlSize::Regular]) and the large one ([ControlSize::Large]: a
-  /// header row's, by a big icon).
+  /// A switch in rows ([ControlSize::Regular]), the small one ([ControlSize::Small]: dense rows,
+  /// AppKit's mini) and the large one ([ControlSize::Large]: a header row's, by a big icon).
   pub const fn switch(&self) -> SwitchSize {
     self.switch
   }
 
   pub const fn with_switch(self, switch: SwitchSize) -> Self {
     Self { switch, ..self }
+  }
+
+  pub const fn switch_small(&self) -> SwitchSize {
+    self.switch_small
+  }
+
+  pub const fn with_switch_small(self, switch_small: SwitchSize) -> Self {
+    Self { switch_small, ..self }
   }
 
   pub const fn switch_large(&self) -> SwitchSize {
@@ -634,19 +631,20 @@ pub struct SwitchSize {
 impl Sizes {
   /// macOS 26 System Settings': 24-point buttons in 13-point text, small ones 20 high; menus
   /// of 24-point items in corners of 13 with a half-point edge, a pop-up's 220 wide at least;
-  /// 16-point check boxes, the small switch (36 × 16, a 21 × 13 knob) in rows and the regular
-  /// one (44 × 20) by a big icon, a slider's 20 × 16 knob on a 6-point track, 18-point badges
+  /// 16-point check boxes, the small switch (36 × 16, a 21 × 13 knob) in rows, the mini one
+  /// (30 × 13, scaled as the small one is from the regular) in dense ones and the regular one
+  /// (44 × 20) by a big icon, a slider's 20 × 16 knob on a 6-point track, 18-point badges
   /// in 11-point text.
   pub const PLATES: Self = Self {
     control_h: 24.0,
     small_h: 20.0,
     item_h: 24.0,
-    tab_h: 30.0,
     menu_w: 220.0,
     menu_radius: 13.0,
     menu_edge: 0.5,
     check: 16.0,
     switch: SwitchSize { track: [36.0, 16.0], knob: [21.0, 13.0] },
+    switch_small: SwitchSize { track: [30.0, 13.0], knob: [16.0, 10.0] },
     switch_large: SwitchSize { track: [44.0, 20.0], knob: [26.0, 16.0] },
     knob: [20.0, 16.0],
     rail: 6.0,
@@ -917,13 +915,12 @@ impl Theme {
       .caret(self.accent)
   }
 
-  /// A search field ([super::Ui::search_field]): [Theme::field]'s box [Sizes::control_h] + 4 high,
-  /// padded 30 at the left for the magnifier and 10 at the right. Where controls are flat
-  /// ([Theme::flat]), System Settings' sidebar field: the ground a touch lighter, a half-point
-  /// edge, the prompt in the muted colour.
+  /// A search field ([super::Ui::search_field]): [Theme::field]'s box padded 30 at the left for
+  /// the magnifier and 10 at the right. Where controls are flat ([Theme::flat]), System Settings'
+  /// sidebar field: the ground a touch lighter, a half-point edge, the prompt muted.
   pub const fn search(&self) -> FieldStyle {
     let f = self.field();
-    let frame = f.frame.h(px(self.sizes.control_h + 4.0)).pads([0.0, 10.0, 0.0, 30.0]);
+    let frame = f.frame.pads([4.0, 10.0, 4.0, 30.0]);
     if !self.flat() {
       return f.frame(frame);
     }
@@ -1142,7 +1139,7 @@ mod tests {
       .with_tip_text(rgb(29))
       .with_control_border(ControlBorder::Hairline(1.0))
       .with_radius(30.5)
-      .with_sizes(Sizes::PLATES.with_tab_h(1.0))
+      .with_sizes(Sizes::PLATES.with_item_h(1.0))
       .with_font(Font::mono(32.0))
       .with_bold(Font::mono(33.0))
       .with_small(Font::mono(34.0))
@@ -1188,7 +1185,7 @@ mod tests {
         tip_text: rgb(29),
         control_border: ControlBorder::Hairline(1.0),
         radius: 30.5,
-        sizes: Sizes::PLATES.with_tab_h(1.0),
+        sizes: Sizes::PLATES.with_item_h(1.0),
         font: Font::mono(32.0),
         bold: Font::mono(33.0),
         small: Font::mono(34.0),
@@ -1210,12 +1207,12 @@ mod tests {
       .with_control_h(0.5)
       .with_small_h(1.5)
       .with_item_h(2.5)
-      .with_tab_h(3.5)
       .with_menu_w(4.5)
       .with_menu_radius(5.5)
       .with_menu_edge(6.5)
       .with_check(7.5)
       .with_switch(SwitchSize { track: [1.0, 2.0], knob: [3.0, 4.0] })
+      .with_switch_small(SwitchSize { track: [5.0, 6.0], knob: [7.0, 8.0] })
       .with_switch_large(SwitchSize { track: [1.0, 2.0], knob: [3.0, 4.0] })
       .with_knob([10.0, 0.5])
       .with_rail(11.5)
@@ -1227,12 +1224,12 @@ mod tests {
         control_h: 0.5,
         small_h: 1.5,
         item_h: 2.5,
-        tab_h: 3.5,
         menu_w: 4.5,
         menu_radius: 5.5,
         menu_edge: 6.5,
         check: 7.5,
         switch: SwitchSize { track: [1.0, 2.0], knob: [3.0, 4.0] },
+        switch_small: SwitchSize { track: [5.0, 6.0], knob: [7.0, 8.0] },
         switch_large: SwitchSize { track: [1.0, 2.0], knob: [3.0, 4.0] },
         knob: [10.0, 0.5],
         rail: 11.5,

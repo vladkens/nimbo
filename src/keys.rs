@@ -777,6 +777,9 @@ pub enum Command {
   Paste,
   Undo,
   Redo,
+  /// Edit ▸ Emoji & Symbols: the system's emoji picker for the focused field
+  /// ([crate::character_palette]).
+  CharacterPalette,
   /// Scrolls without moving the caret (Page Up / Down, Home / End on a Mac).
   ScrollPageUp,
   ScrollPageDown,

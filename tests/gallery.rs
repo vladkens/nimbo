@@ -1,16 +1,29 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! Harness tests for `examples/gallery.rs`: every block has a page that builds, named by the
-//! block; the sidebar turns the pages; a block's disabled variant reads disabled and its sizes
-//! differ; a block alone is as high as its variants; in each appearance the widgets work and draw
-//! in its theme (a check box checks in its accent, a switch slides, the slider drags, a picker
-//! chooses by letters, a segment picks, a tooltip shows, a recorder records and its ⊗ clears,
-//! the alert asks in its theme, Escape closes it, its action counts), the search field draws in
-//! its theme and clears from its ⊗; a stepped slider lands on its steps from the pointer and the
-//! keys and marks them with dots and labels; a row's footer spans its row; End in a custom list
-//! shows its last row whole; assistive technology reads each widget by its role, the ⊗ marks
-//! beside their controls; and `docs/api.md` is the gallery's, and so are its pictures on the
-//! `assets` branch when its worktree is there.
+//! block; the sidebar turns the pages and keeps its selection under a header's press; a block's
+//! disabled variant reads disabled, its texts dimmed, and its sizes differ; a block alone is as
+//! high as its variants;
+//! in each appearance the widgets work and draw in its theme (a check box checks in its accent, a
+//! switch slides, the slider drags, a picker chooses by letters, a segment picks, a tooltip shows,
+//! a recorder records and its ⊗ clears, the alert asks in its theme, Escape closes it, its action
+//! counts), the search field draws in its theme and clears from its ⊗, the emoji button (only
+//! where the OS has a picker) and the field's edit menu ask for the system's picker for the
+//! focused field, whose pick comes in at the caret; the date picker takes digits, the arrows and
+//! its stepper within its range; a stepped slider lands on its steps from the pointer and the keys
+//! and marks them with dots and labels; a row's footer spans its row; End in a custom list shows
+//! its last row whole; assistive technology reads each widget by its role, the ⊗ marks beside
+//! their controls; `docs/api.md` is the gallery's, and so are its pictures on the
+//! `assets` branch when its worktree is there. Each block's code is its own closure, cut from the
+//! source and coloured by kind; the row and column blocks align their boxes as their labels say,
+//! the grid's keys are as far apart across as down, the chat opens at its newest message and the
+//! shortcut block counts ⌘K on its focused box; the split's line drags its panes' shares, the
+//! identity tiles keep their counts as they rotate, Tab focuses the focus block's tile, the frame
+//! request block draws every frame, the staged scroll indicators show their knob and the menu
+//! bar's actions count in its block. The Canvas
+//! page follows the blocks, draws its
+//! shapes and text and shows the raw pointer and keys on its page only; the pacing scene moves,
+//! then stands still.
 
 #[path = "../examples/gallery.rs"]
 #[expect(dead_code, reason = "its main and what this file doesn't use")]
@@ -20,12 +33,19 @@ mod gallery;
 
 mod common;
 
+use std::collections::HashSet;
 use std::time::Duration;
 
 use common::{diff, mid, px, reads};
+use gallery::canvas::{BAR_W, RUN, WORK};
+use gallery::code::Kind;
 use gallery::*;
 use nimbo::a11y::{Action, Role};
-use nimbo::{Appearance, Event, Harness, Id, Modifiers, NamedKey, Rect, Size, Theme, alpha, mix};
+use nimbo::harness::Image;
+use nimbo::{
+  Appearance, Event, Harness, Id, Modifiers, NamedKey, Rect, Size, Theme, alpha, character_palette,
+  mix,
+};
 
 type H = Harness<Gallery>;
 
@@ -85,8 +105,31 @@ fn the_sidebar_turns_the_pages() {
   );
 }
 
-/// The switch reads on in its enabled line, disabled in its disabled one; a large one is wider;
-/// a small button is lower than the regular one, a large one higher.
+/// A press held on the header above the selected row ("Controls" over "Button") keeps the row
+/// filled, frame after frame.
+#[test]
+fn the_sidebar_keeps_its_selection_under_a_header_press() {
+  let mut h = gallery(0, false);
+  let row = h.rect(Id::of(SIDEBAR).key(("row", page("Button") as u64))).unwrap();
+  let (x, y) = mid(row);
+  h.click(x, y);
+  h.wait(Duration::from_millis(100));
+  let filled = h.render().pixel(5.0, y);
+  h.move_to(x, row.y - 8.0);
+  h.wait(Duration::from_millis(100));
+  h.press(x, row.y - 8.0);
+  for _ in 0..6 {
+    h.wait(Duration::from_millis(8));
+    assert_eq!(h.render().pixel(5.0, y), filled, "{:?}", h.app().sel.cursor());
+  }
+
+  h.release(x, row.y - 8.0);
+  h.frame();
+  assert_eq!(h.app().page, page("Button"));
+}
+
+/// The switch reads on in its enabled line, disabled in its disabled one; a small one is
+/// narrower, a large one wider; a small button is lower than the regular one, a large one higher.
 #[test]
 fn variants_are_disabled_and_sized() {
   let h = gallery(page("Switch"), false);
@@ -96,7 +139,7 @@ fn variants_are_disabled_and_sized() {
   assert_eq!(switches.len(), 4, "enabled, disabled, small, large: {tree}");
   assert!(!switches[0].contains("disabled") && switches[1].contains("disabled"), "{switches:?}");
   let widths: Vec<f32> = h.find_all(Role::Switch).iter().map(|n| n.rect.w).collect();
-  assert!(widths[3] > widths[0], "large wider: {widths:?}");
+  assert!(widths[2] < widths[0] && widths[3] > widths[0], "small, large: {widths:?}");
   let h = gallery(page("Button"), false);
   let buttons = h.find_all(Role::Button);
   let hs: Vec<f32> = buttons.iter().filter(|n| n.name == "Bordered").map(|n| n.rect.h).collect();
@@ -246,6 +289,76 @@ fn the_search_field_in_both_themes() {
   assert_eq!(h.app().query, "icons");
   let field = find(&h, Role::TextField, "Search");
   assert!(h.rect(field.key("clear")).is_some(), "its ⊗ back in the dark");
+}
+
+/// The emoji button shows only where the OS has a picker; clicked with the field focused it asks
+/// for it and leaves the focus on the field, where the emoji picked comes at the caret. The
+/// field's edit menu asks for it too, as Emoji & Symbols.
+#[test]
+fn the_character_palette_types_into_the_field() {
+  let mut h = on("Character palette", Appearance::LIGHT);
+  let button = h.find(Role::Button, "Emoji & Symbols");
+  assert_eq!(button.is_some(), character_palette::available().is_ok(), "{}", h.a11y());
+  let Some(button) = button.map(|n| n.id) else { return };
+
+  let (field, r) = node(&h, Role::TextField, "Message");
+  h.click(r.x + r.w - 4.0, r.y + r.h / 2.0);
+  h.click_id(button);
+  h.frame();
+  assert!(h.character_palette(Some("😀")), "asked with the field focused");
+  h.frame();
+  assert_eq!((h.app().message.as_str(), h.focus_id()), ("Lunch at noon?😀", Some(field)));
+  assert!(!h.character_palette(None), "asked once");
+
+  h.right_click(r.x + 10.0, r.y + r.h / 2.0);
+  h.frame();
+  h.frame();
+  assert!(h.click_menu_item("Emoji & Symbols"));
+  h.frame();
+  assert!(h.character_palette(Some("🎉")), "asked from the edit menu");
+  h.frame();
+  assert!(h.app().message.contains('🎉'), "{}", h.app().message);
+}
+
+/// The date picker, clicked on its year, takes typed digits, the arrows and the stepper, within
+/// its range; its selected segment is on the accent in either look, and its width stays.
+#[test]
+fn the_date_picker_edits_its_segments() {
+  for (look, theme) in LOOKS {
+    let mut h = on("Date picker", look);
+    let (id, r) = node(&h, Role::TextField, "Start");
+    h.click(r.x + 12.0, r.y + r.h / 2.0);
+    h.type_text("26");
+    h.frame();
+    let year = h.rect(id.key(("segment", 0))).unwrap();
+    let on_accent = h.render().pixel(year.x + 2.0, year.y + year.h / 2.0);
+    assert!(diff(on_accent, px(theme.accent())) < 4, "{on_accent:?}");
+
+    // 26 is this century's; a step on the month, the day typed.
+    h.key(NamedKey::ArrowRight, Modifiers::empty());
+    h.click_id(id.key("increment"));
+    h.key(NamedKey::ArrowRight, Modifiers::empty());
+    h.type_text("31");
+    assert_eq!(h.app().start.to_string(), "2026-12-31");
+    h.key(NamedKey::ArrowLeft, Modifiers::empty());
+    h.key(NamedKey::ArrowLeft, Modifiers::empty());
+    h.key(NamedKey::ArrowUp, Modifiers::empty());
+    h.key(NamedKey::ArrowUp, Modifiers::empty());
+    h.frame();
+    assert_eq!(h.app().start.to_string(), "2027-12-31", "the range ends with 2027");
+    assert_eq!(h.rect(id).unwrap().w, r.w);
+  }
+}
+
+/// With no field focused there is nothing to type into: the emoji button asks for nothing.
+#[test]
+fn the_character_palette_needs_a_focused_field() {
+  let mut h = on("Character palette", Appearance::LIGHT);
+  let Some(button) = h.find(Role::Button, "Emoji & Symbols") else { return };
+  h.click_id(button.id);
+  h.frame();
+  assert!(!h.character_palette(Some("😀")));
+  assert_eq!(h.app().message, "Lunch at noon?");
 }
 
 /// Each kind of widget is what it is to assistive technology: its role, name, value and states.
@@ -522,10 +635,10 @@ fn the_api_doc_is_the_gallerys() {
     let png = path.display();
     let kept = std::fs::read(&path).unwrap_or_else(|_| panic!("no {png}: make api-shots"));
 
-    // As `gallery <slug> --shot` draws it.
+    // As `gallery <slug> --shot` draws it, staged.
     let mut h = Harness::new(Gallery::on(i, true), Size::new(WIDTH, 300.0), 2.0);
     h.event(Event::Appearance(Appearance::LIGHT));
-    h.frame();
+    stage(&mut h);
     let shot = fresh.join(format!("{}.png", b.slug()));
     h.shot(&shot).unwrap();
     if strict {
@@ -557,4 +670,432 @@ fn a_custom_list_ends_on_its_last_row() {
   h.wait(Duration::from_millis(400));
   let (_, last) = node(&h, Role::Row, "Row 40");
   assert!((last.y + last.h - (list.y + list.h - 4.0)).abs() < 0.5, "{last:?} in {list:?}");
+}
+
+// MARK: Code
+
+/// Every arm that builds a block is a block's, and each block shows the body of its arm: whole
+/// code, no `{ … }` standing for some, as wide as rustfmt makes it; the page reads it.
+#[test]
+fn every_block_shows_its_own_code() {
+  let source = include_str!("../examples/gallery.rs");
+  let arms = source.lines().map(str::trim_start);
+  let arms = arms.filter(|l| l.starts_with('"') && l.contains("\" => Self::variants(ui, Shown::"));
+  assert_eq!(arms.count(), BLOCKS.len(), "an arm of each block, of no other");
+  assert_eq!(code::of("No such block"), None);
+  for b in BLOCKS {
+    let code = code::of(b.name).unwrap_or_else(|| panic!("no code of {}", b.name));
+    assert!(!code.is_empty() && !code.contains("{ … }"), "{}: {code}", b.name);
+    assert!(code.lines().all(|l| l.chars().count() <= 88), "{}: {code}", b.name);
+    assert!(!code.starts_with(' ') && !code.ends_with('\n'), "{}: {code:?}", b.name);
+  }
+
+  let grid = code::of("Grid").unwrap();
+  assert!(grid.contains("ui.grid(3, Style::new().w(px(132.0)).gap(6.0), |ui| {"), "{grid}");
+}
+
+/// Each block's call is written with its code's words, and those of the variants it is shown in
+/// (`ui.disabled`, `ui.control_size`): an API renamed in the block and not in its call fails here.
+#[test]
+fn every_call_is_in_its_codes_words() {
+  let source = include_str!("../examples/gallery.rs");
+  let variants = &source[source.find("fn variants(").unwrap()..];
+  let variants = &variants[..variants.find("\n  }\n").unwrap()];
+  let words = |s: &str| -> Vec<String> {
+    let s = s.split(|c: char| !c.is_alphanumeric() && c != '_');
+    s.filter(|w| w.starts_with(|c: char| c.is_alphabetic() || c == '_'))
+      .map(str::to_owned)
+      .collect()
+  };
+  for b in BLOCKS {
+    let code = code::of(b.name).unwrap();
+    let known: HashSet<String> = words(&code).into_iter().chain(words(variants)).collect();
+    assert!(!b.call.is_empty() && b.call.lines().count() <= 3, "{}: {:?}", b.name, b.call);
+    let unknown: Vec<_> = words(b.call).into_iter().filter(|w| !known.contains(w)).collect();
+    assert!(unknown.is_empty(), "{}: {unknown:?} of {:?} not in its code:\n{code}", b.name, b.call);
+  }
+}
+
+/// The page shows the block's call; its link shows the whole code under it, and hides it again.
+#[test]
+fn the_page_opens_the_whole_code() {
+  let mut h = gallery(page("Grid"), false);
+  let (call, whole) = (BLOCKS[page("Grid")].call, code::of("Grid").unwrap());
+  let line = whole.lines().map(str::trim).find(|l| l.len() > 10 && !call.contains(l)).unwrap();
+  let shown = |h: &H| h.a11y().contains(line);
+  assert!(h.a11y().contains(call.lines().next().unwrap()), "{}", h.a11y());
+  assert!(!shown(&h));
+  for open in [true, false] {
+    h.click_id(Id::of(CODE));
+    h.frame();
+    assert_eq!(shown(&h), open, "{}", h.a11y());
+  }
+}
+
+/// The code's tokens by kind: keywords, calls, types, numbers (not a range's dots), strings past
+/// an escaped quote, characters but not lifetimes, macros and comments.
+#[test]
+fn code_is_coloured_by_kind() {
+  let code = "let n = px(1.5); // a note\nui.el(Style::new()); 0..2 'k' \"a\\\"b\" Ui<'a> t!(x)";
+  let kinds: Vec<(&str, Kind)> = code::tokens(code).filter(|t| t.1 != Kind::Plain).collect();
+  let want = [
+    ("let", Kind::Keyword),
+    ("px", Kind::Call),
+    ("1.5", Kind::Number),
+    ("// a note", Kind::Comment),
+    ("el", Kind::Call),
+    ("Style", Kind::Type),
+    ("new", Kind::Call),
+    ("0", Kind::Number),
+    ("2", Kind::Number),
+    ("'k'", Kind::Str),
+    ("\"a\\\"b\"", Kind::Str),
+    ("Ui", Kind::Type),
+    ("t!", Kind::Macro),
+  ];
+  assert_eq!(kinds, want);
+  assert_eq!(code::tokens(code).map(|t| t.0).collect::<String>(), code, "every byte, in order");
+}
+
+// MARK: Layout
+
+/// The first run of `c` in `at(v)` for `v` from `v0` to `v1`, a point at a time: where it starts
+/// and ends.
+fn first_run(c: [u8; 4], v0: f32, v1: f32, at: impl Fn(f32) -> [u8; 4]) -> Option<(f32, f32)> {
+  let on = |v: &i32| diff(at(*v as f32 + 0.5), c) <= 4;
+  let start = (v0 as i32..v1 as i32).find(on)?;
+  let end = (start..v1 as i32).find(|v| !on(v)).unwrap_or(v1 as i32);
+  Some((start as f32, end as f32))
+}
+
+/// Where the first run of colour `c` down `x` from `y0` to `y1` is: its top and bottom.
+fn down(img: &Image, c: [u8; 4], x: f32, y0: f32, y1: f32) -> (f32, f32) {
+  let run = first_run(c, y0, y1, |y| img.pixel(x, y));
+  run.unwrap_or_else(|| panic!("no {c:?} down {x} from {y0} to {y1}"))
+}
+
+/// Where the first run of colour `c` along `y` from `x0` to `x1` is: its left and right.
+fn across(img: &Image, c: [u8; 4], y: f32, x0: f32, x1: f32) -> (f32, f32) {
+  let run = first_run(c, x0, x1, |x| img.pixel(x, y));
+  run.unwrap_or_else(|| panic!("no {c:?} along {y} from {x0} to {x1}"))
+}
+
+/// Over each label, a row of boxes 16, 40 and 28 high, 8 apart, at its top, centre or bottom.
+#[test]
+fn the_row_block_aligns_its_boxes() {
+  let mut h = on("Row", Appearance::LIGHT);
+  let (img, accent) = (h.render(), px(Theme::PLATES_LIGHT.accent()));
+  for (name, k) in [("Start", 0.0), ("Center", 0.5), ("End", 1.0)] {
+    let label = node(&h, Role::StaticText, name).1;
+    let x = mid(label).0;
+    // The boxes are 24 wide, 8 apart: the tall one over the label's middle.
+    let boxes: Vec<(f32, f32)> = [-32.0, 0.0, 32.0]
+      .iter()
+      .map(|dx| down(&img, accent, x + dx, label.y - 70.0, label.y))
+      .collect();
+    let hs: Vec<f32> = boxes.iter().map(|b| b.1 - b.0).collect();
+    assert_eq!(hs, [16.0, 40.0, 28.0], "{name}: {boxes:?}");
+    let at: Vec<f32> = boxes.iter().map(|b| b.0 + (b.1 - b.0) * k).collect();
+    assert!(at.iter().all(|y| *y == at[0]), "{name}: {boxes:?}");
+  }
+}
+
+/// Over each label, a column of bars 40, 88 and 64 wide, 6 apart, at its start, centre or end.
+#[test]
+fn the_column_block_aligns_its_bars() {
+  let mut h = on("Column", Appearance::LIGHT);
+  let (img, accent) = (h.render(), px(Theme::PLATES_LIGHT.accent()));
+  for (name, k) in [("Start", 0.0), ("Center", 0.5), ("End", 1.0)] {
+    let label = node(&h, Role::StaticText, name).1;
+    let x = mid(label).0;
+    // The bars' middles: the column's bottom 6 over the label, its border and padding 9.
+    let bars: Vec<(f32, f32)> = [62.0, 42.0, 22.0]
+      .iter()
+      .map(|dy| across(&img, accent, label.y - dy, x - 60.0, x + 60.0))
+      .collect();
+    let ws: Vec<f32> = bars.iter().map(|b| b.1 - b.0).collect();
+    assert_eq!(ws, [40.0, 88.0, 64.0], "{name}: {bars:?}");
+    let at: Vec<f32> = bars.iter().map(|b| b.0 + (b.1 - b.0) * k).collect();
+    assert!(at.iter().all(|v| *v == at[0]), "{name}: {bars:?}");
+  }
+}
+
+/// The keypad's keys are 6 apart across and down, and the 0 spans two columns and their gap.
+#[test]
+fn the_grid_block_has_equal_gaps() {
+  let mut h = on("Grid", Appearance::LIGHT);
+  let img = h.render();
+  let at = |name: &str| mid(node(&h, Role::StaticText, name).1);
+  let ((x7, y7), (x8, _), (_, y4)) = (at("7"), at("8"), at("4"));
+  // The keys' fill, the theme's raised colour over the ground, left of the 7.
+  let key = img.pixel(x7 - 12.0, y7);
+  // Measured clear of the digits, along the keys' tops and down their left sides, from a point
+  // outside each key (40 by 32).
+  let seven = across(&img, key, y7 - 12.0, x7 - 21.0, x7 + 30.0);
+  let eight = across(&img, key, y7 - 12.0, x8 - 21.0, x8 + 30.0);
+  let (top7, bottom7) = down(&img, key, x7 - 14.0, y7 - 17.0, y7 + 30.0);
+  let top4 = down(&img, key, x7 - 14.0, y4 - 17.0, y4 + 30.0).0;
+
+  assert_eq!((eight.0 - seven.1, top4 - bottom7), (6.0, 6.0), "across, down");
+  assert_eq!((seven.1 - seven.0, bottom7 - top7), (40.0, 32.0), "a key");
+  let (x0, y0) = at("0");
+  let zero = across(&img, key, y0 - 12.0, x0 - 60.0, x0 + 60.0);
+  assert_eq!(zero.1 - zero.0, 86.0, "two keys and their gap");
+}
+
+/// The chat opens at its newest message, at the bottom; the first ones are above the view.
+#[test]
+fn the_scroll_anchor_opens_at_the_newest() {
+  let mut h = on("Scroll anchor", Appearance::LIGHT);
+  // Assistive technology reads what is in view: the last four.
+  let shown: Vec<usize> =
+    (1..=12).filter(|i| h.find(Role::StaticText, &format!("Message {i}")).is_some()).collect();
+  assert_eq!(shown, [9, 10, 11, 12], "{}", h.a11y());
+  let last = node(&h, Role::StaticText, "Message 12").1;
+  let bubble = h.render().pixel(last.x - 4.0, mid(last).1);
+  assert_eq!(bubble, px(Theme::PLATES_LIGHT.accent()), "the newest, mine, in view");
+}
+
+/// A click focuses the box, and ⌘K then counts on it; not before.
+#[test]
+fn the_keyboard_shortcut_counts_on_its_box() {
+  let mut h = gallery(page("Keyboard shortcut"), false);
+  let keys = nimbo::Shortcut::char('k').cmd().label();
+  let (_, r) = node(&h, Role::StaticText, &format!("{keys} pressed: 0"));
+  h.key(nimbo::Key::Char('k'), nimbo::CMD);
+  h.frame();
+  assert_eq!(h.app().counted, 0, "no box focused");
+  let (x, y) = mid(r);
+  h.click(x, y);
+  h.key(nimbo::Key::Char('k'), nimbo::CMD);
+  h.frame();
+  assert_eq!(h.app().counted, 1);
+  reads(&h.a11y(), &[&format!("static text \"{keys} pressed: 1\"")]);
+}
+
+// MARK: Canvas
+
+/// The gallery on the Canvas page, high enough for all of it, a frame in.
+fn canvas() -> (H, Rect) {
+  let mut h = Harness::new(Gallery::on(CANVAS, false), Size::new(WIDTH + 200.0, 900.0), 1.0);
+  h.frame();
+  let pad = h.rect(Id::of(PAD)).expect("the pad");
+  (h, pad)
+}
+
+#[test]
+fn the_canvas_page_follows_the_blocks_in_the_sidebar() {
+  let mut h = gallery(0, false);
+  h.set_focus(Some(Id::of(SIDEBAR)));
+  h.key(NamedKey::End, Modifiers::empty());
+  h.frame();
+  assert_eq!(h.app().page, CANVAS);
+  reads(
+    &h.a11y(),
+    &["row \"Canvas\" selected", "static text \"Canvas\"", "static text \"SHAPES\""],
+  );
+}
+
+#[test]
+fn the_canvas_draws_its_shapes_and_text() {
+  let (mut h, pad) = canvas();
+  let img = h.render();
+  // The red square, at the shapes' start, 8 points in.
+  let shapes = h.rect(Id::of(PAGE)).unwrap();
+  let red = (0..400).find_map(|y| {
+    let y = shapes.y + y as f32;
+    (diff(img.pixel(pad.x + 20.0, y), px(nimbo::rgb(0xe5484d))) < 4).then_some(y)
+  });
+  assert!(red.is_some(), "no red square over x {}", pad.x + 20.0);
+  // Text ink between the TEXT heading and the pad.
+  let ink = (0..200).filter(|y| {
+    let p = img.pixel(pad.x + 4.0, pad.y - 60.0 - *y as f32);
+    diff(p, img.pixel(pad.x + 470.0, pad.y - 60.0 - *y as f32)) > 60
+  });
+  assert!(ink.count() > 4, "no text drawn left of the pad");
+}
+
+#[test]
+fn the_pad_shows_raw_presses_drags_and_keys() {
+  let (mut h, pad) = canvas();
+  h.move_to(pad.x + 40.0, pad.y + 30.0);
+  assert_eq!(h.app().pad.at, Some(nimbo::Point::new(pad.x + 40.0, pad.y + 30.0)));
+  h.press(pad.x + 40.0, pad.y + 30.0);
+  h.move_to(pad.x + 80.0, pad.y + 50.0);
+  h.move_to(pad.x + 120.0, pad.y + 60.0);
+  // Dragged out of the pad, the drag goes on.
+  h.move_to(pad.x + 600.0, pad.y + 60.0);
+  h.release(pad.x + 600.0, pad.y + 60.0);
+  let p = &h.app().pad;
+  assert_eq!((p.presses.len(), p.drag.len(), p.held), (1, 4, false));
+  h.frame();
+  reads(&h.a11y(), &["static text \"press at 40, 30 · click 1\""]);
+
+  h.key(nimbo::Key::Char('k'), nimbo::CMD);
+  h.frame();
+  let label = nimbo::Shortcut::char('k').cmd().label();
+  reads(&h.a11y(), &[&format!("static text \"key {label}\"")]);
+}
+
+#[test]
+fn the_pad_ignores_the_pointer_elsewhere_and_other_pages() {
+  let (mut h, pad) = canvas();
+  h.click(pad.x + 10.0, pad.y - 40.0);
+  assert!(h.app().pad.presses.is_empty());
+  let mut h = gallery(0, false);
+  h.key(nimbo::Key::Char('k'), Modifiers::empty());
+  assert!(h.app().pad.last.is_empty(), "keys reach the pad on its page only");
+}
+
+/// The pacing scene paints its bar for RUN, spending WORK on each frame, then stands still: no
+/// frame asked for.
+#[test]
+fn the_pace_scene_moves_then_stands_still() {
+  let mut h = Harness::new(Pace::default(), PACE_SIZE, 1.0);
+  h.frame();
+  assert!(h.needs_frame(), "moving");
+  h.wait(RUN + Duration::from_millis(200));
+  let moving = h.app().frames;
+  assert!(moving > 1 && moving <= (RUN.as_millis() / WORK.as_millis()) as usize + 2, "{moving}");
+  assert!(!h.needs_frame() && h.due_in().is_none(), "still");
+  let img = h.render();
+  // It crosses once a second: after 3 s, back where it set off.
+  assert_eq!(img.pixel(BAR_W / 2.0, 40.0), px(nimbo::rgb(0x3b82f6)), "the bar");
+  assert_eq!(img.pixel(BAR_W + 4.0, 40.0), px(nimbo::rgb(0x1c1c1e)), "the ground");
+}
+
+/// A block's disabled line dims what it shows, as AppKit dims a disabled control's labels: each
+/// text (or mark) drawn fainter on the ground than in the enabled line above it, in both
+/// appearances.
+#[test]
+fn disabled_lines_dim_their_texts() {
+  let cases = [
+    ("Slider", Role::StaticText, "60%"),
+    ("Slider steps", Role::StaticText, "30%"),
+    ("Toolbar", Role::StaticText, "Notes"),
+    ("Tabs", Role::StaticText, "The general page"),
+    ("Split", Role::StaticText, "Content · 60%"),
+    ("Section", Role::StaticText, "640 MB used"),
+    ("Help marks", Role::Button, "Info"),
+    ("Help marks", Role::Button, "Warning"),
+  ];
+  for (look, t) in LOOKS {
+    for (block, role, name) in cases {
+      let mut h = Harness::new(Gallery::on(page(block), true), Size::new(WIDTH, 300.0), 2.0);
+      h.event(Event::Appearance(look));
+      h.frame();
+
+      let img = h.render();
+      // How far the farthest pixel of `r` is from the ground.
+      let ground = px(t.bg());
+      let ink = |r: Rect| {
+        let all =
+          (0..(r.w * 2.0) as i32).flat_map(|x| (0..(r.h * 2.0) as i32).map(move |y| (x, y)));
+        let at = |(x, y): (i32, i32)| img.pixel(r.x + x as f32 / 2.0, r.y + y as f32 / 2.0);
+        all.map(|p| diff(at(p), ground)).max().unwrap()
+      };
+      let all = h.find_all(role);
+      let lines: Vec<Rect> = all.iter().filter(|n| n.name == name).map(|n| n.rect).collect();
+      assert!(lines.len() >= 2, "{block}: {name:?} in {} lines", lines.len());
+      let (on, off) = (ink(lines[0]), ink(lines[1]));
+      assert!(off + 40 < on, "{block} {name:?} {look:?}: {on} enabled, {off} disabled");
+    }
+  }
+}
+
+/// The split block's line drags: the panes' shares follow it, as their labels say.
+#[test]
+fn the_split_blocks_line_drags() {
+  let mut h = gallery(page("Split"), true);
+  let (x, y) = mid(h.find_all(Role::Splitter)[0].rect);
+  h.press(x, y);
+  h.move_to(x + 30.0, y);
+  h.release(x + 30.0, y);
+  h.frame();
+  let side = h.app().side;
+  assert!(side > 0.45, "{side}");
+  let label = format!("Sidebar · {:.0}%", side * 100.0);
+  assert!(h.find(Role::StaticText, &label).is_some(), "no {label:?} in\n{}", h.a11y());
+}
+
+/// The identity block's tiles count their clicks by their names' ids: rotated, each tile keeps
+/// its count, the count's part leaving the click to its tile.
+#[test]
+fn identity_keeps_each_tiles_count_as_they_rotate() {
+  let mut h = gallery(page("Identity"), true);
+  // A tile's id and its count's.
+  let tile =
+    |name: &str| (Id::of("identity").key(name), Id::of("identity").key(name).key("clicks"));
+  let drafts = tile("Drafts");
+  h.click_id(drafts.0);
+  let (x, y) = mid(h.rect(drafts.1).unwrap());
+  h.click(x, y);
+  h.frame();
+  assert_eq!(h.text(drafts.1), Some("2"));
+  let before = h.rect(drafts.0).unwrap().x;
+
+  let rotate = h.find(Role::Button, "Rotate").unwrap().id;
+  h.click_id(rotate);
+  h.frame();
+  assert_eq!(h.app().tiles, ["Drafts", "Sent", "Inbox"]);
+  assert!(h.rect(drafts.0).unwrap().x < before, "moved first");
+  assert_eq!((h.text(drafts.1), h.text(tile("Inbox").1)), (Some("2"), Some("0")));
+}
+
+/// Tab focuses the focus block's tile, which shows the pointing hand, and passes the other by.
+#[test]
+fn focus_and_pointer_take_tab_and_the_hand() {
+  let mut h = gallery(page("Focus and pointer"), true);
+  let tile = Id::of("focus and pointer");
+  h.key(NamedKey::Tab, Modifiers::empty());
+  assert_eq!(h.focus_id(), Some(tile));
+  h.key(NamedKey::Tab, Modifiers::empty());
+  assert_ne!(h.focus_id(), Some(tile.key("not")));
+  let (x, y) = mid(h.rect(tile).unwrap());
+  h.move_to(x, y);
+  assert_eq!(h.cursor(), nimbo::Cursor::Pointer);
+}
+
+/// The frame request block asks for every frame and draws the time of each.
+#[test]
+fn frame_request_draws_every_frame() {
+  let mut h = gallery(page("Frame request"), true);
+  assert!(h.needs_frame());
+  let at =
+    |h: &H| h.find_all(Role::StaticText).into_iter().map(|n| n.name).find(|n| n.ends_with(" s"));
+  let before = at(&h);
+  h.wait(Duration::from_millis(100));
+  assert_ne!(at(&h), before);
+}
+
+/// Staged, the scroll indicators block shows its knob in its red, scrolled two lines.
+#[test]
+fn the_scroll_indicators_show_their_red_knob_staged() {
+  for (look, t) in LOOKS {
+    let mut h =
+      Harness::new(Gallery::on(page("Scroll indicators"), true), Size::new(WIDTH, 300.0), 1.0);
+    h.event(Event::Appearance(look));
+    stage(&mut h);
+    let line = h.find(Role::StaticText, "Line 3").unwrap().rect;
+    let img = h.render();
+    let red = (0..260).any(|x| {
+      let p = img.pixel(line.x - 20.0 + x as f32, line.y + 20.0);
+      p[0] as i32 > p[1] as i32 + 60 && p[0] as i32 > p[2] as i32 + 60
+    });
+    assert!(red, "{look:?}: no red knob, {:?}", t.danger());
+  }
+}
+
+/// The menu bar's actions, as its items run them, count in the menu bar block.
+#[test]
+fn the_menu_bars_actions_count_in_its_block() {
+  let mut h = gallery(page("Menu bar"), true);
+  for a in [Track::Play, Track::Play, Track::New] {
+    h.app_mut().chose(a);
+  }
+
+  h.redraw();
+  h.frame();
+  let line = "Track ▸ Play: 2 · File ▸ New Track: 1";
+  assert!(h.find(Role::StaticText, line).is_some(), "no {line:?} in\n{}", h.a11y());
 }

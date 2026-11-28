@@ -33,6 +33,9 @@
 //!   arrows step;
 //! - [Ui::hotkey_recorder_behavior]: a recorder of a global hotkey ([crate::Hotkey]);
 //! - [Ui::dialog_behavior]: a modal dialog's keys, focus trap and fade ([super::dialog]);
+//! - [Ui::date_picker_behavior]: a date in segments, one selected and edited by its digits or the
+//!   arrows, within a range; the [DatePicker] over it, drawn by a [DatePickerStyle]
+//!   ([Ui::date_picker_style]);
 //! - [Ui::split_behavior]: a divider's drag within both panes' minimums;
 //! - [Ui::scroll_behavior]: a scroll area's bars, a thumb dragged and a track clicked, shown while
 //!   the content moves or the pointer comes in ([ScrollBehavior]); [Ui::scroll_area] draws them
@@ -58,6 +61,7 @@
 
 mod button;
 mod content;
+mod date_picker;
 mod dialog;
 mod field;
 mod help;
@@ -77,6 +81,10 @@ mod toggle;
 
 pub use button::{Button, ButtonConfiguration, ButtonStyle, PlainButtonStyle};
 pub use content::Content;
+pub use date_picker::{
+  DatePicker, DatePickerBehavior, DatePickerConfiguration, DatePickerStyle, DateSegment,
+  PlainDatePickerStyle,
+};
 pub use dialog::DialogBehavior;
 pub(crate) use field::DrawnEditMenu;
 pub use field::{EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle};
@@ -88,7 +96,7 @@ pub use list_style::{
 };
 pub use menu::{MenuPlacement, TypeSelect};
 pub use picker::{InlinePickerStyle, Picker, PickerConfiguration, PickerStyle, Tag};
-pub use scroll::{ScrollBar, ScrollBehavior, ScrollerKnob};
+pub use scroll::{ContentMarginPlacement, ScrollBar, ScrollBehavior, ScrollerKnob};
 pub use slider::{PlainSliderStyle, Slider, SliderConfiguration, SliderStyle};
 pub use split::SplitBehavior;
 pub use text_field::{PlainTextFieldStyle, TextField, TextFieldConfiguration, TextFieldStyle};

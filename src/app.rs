@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use crate::TitleBar;
 pub use crate::clipboard::Clipboard;
+use crate::date::DateFormat;
 pub use crate::event::{
   Appearance, ColorScheme, Event, Ime, MouseButton, Phase, WHEEL_LINE, Waker,
 };
@@ -16,10 +17,11 @@ use crate::keys::{Binding, Command, Extent, KeyEvent, Move};
 use crate::scene::{Frame, Images, Point, Rect, Scene, Size};
 use crate::text::TextSystem;
 use crate::ui::{
-  Action, BorderedButtonStyle, ButtonStyle, Click, Cursor, DrawnEditMenu, FocusDirection,
-  FrameStats, HelpStyle, Id, InsetListStyle, LinearSliderStyle, ListStyle, MenuPickerStyle,
-  PickerStyle, Role, RoundedBorderTextFieldStyle, SliderStyle, SwitchToggleStyle, Sys,
-  TextFieldStyle, TextInput, ToggleStyle, TooltipHelpStyle, Ui, UiState, drags_window,
+  Action, BorderedButtonStyle, ButtonStyle, Click, Cursor, DatePickerStyle, DrawnEditMenu,
+  FocusDirection, FrameStats, HelpStyle, Id, InsetListStyle, LinearSliderStyle, ListStyle,
+  MenuPickerStyle, PickerStyle, Role, RoundedBorderTextFieldStyle, SliderStyle,
+  StepperFieldDatePickerStyle, SwitchToggleStyle, Sys, TextFieldStyle, TextInput, ToggleStyle,
+  TooltipHelpStyle, Ui, UiState, drags_window,
 };
 
 /// An application: owns its state, reacts to events and draws the frame from it, as an element
@@ -257,6 +259,10 @@ impl<A: App> Runtime<A> {
     ui.clipboard = clipboard;
 
     styled_defaults(&mut ui);
+    // A window writes dates the user's way; the harness as ISO does, the same on every host.
+    if matches!(clock, Clock::Real(_)) {
+      ui.set_environment_default(DateFormat::system());
+    }
 
     Self {
       app,
@@ -360,6 +366,12 @@ impl<A: App> Runtime<A> {
   /// window after an event or a frame and sends the answer as [Event::FileDialog].
   pub fn take_file_dialog(&mut self) -> Option<FileDialog> {
     self.ui.file_dialog.take()
+  }
+
+  /// Whether the app asked for the system's emoji picker ([Ui::character_palette]) with a field
+  /// to type into focused, once: the platform shows it after an event or a frame.
+  pub fn take_character_palette(&mut self) -> bool {
+    std::mem::take(&mut self.ui.palette) && self.text_input().is_some()
   }
 
   /// The platform shows context menus itself ([Ui::context_menu]): the view asks for them
@@ -770,6 +782,7 @@ fn styled_defaults(ui: &mut UiState) {
   ui.set_environment_default::<&dyn PickerStyle>(&MenuPickerStyle);
   ui.set_environment_default::<&dyn ListStyle>(&InsetListStyle);
   ui.set_environment_default::<&dyn HelpStyle>(&TooltipHelpStyle);
+  ui.set_environment_default::<&dyn DatePickerStyle>(&StepperFieldDatePickerStyle);
   // The edit menu drawn where the platform shows none (the harness), in the theme's look.
   ui.set_environment_default(DrawnEditMenu(|ui, id, at, m| {
     ui.drawn_context_menu(id, at, || m.items())

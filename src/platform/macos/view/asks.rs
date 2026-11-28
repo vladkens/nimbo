@@ -1,11 +1,12 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
 //! What the app asked of its window in an event or a frame, done after it, outside the
-//! runtime's borrow: the file panel ([crate::Ui::file_dialog]), a context menu
-//! ([crate::Ui::context_menu]) and a new content size ([crate::Ui::set_window_size]).
+//! runtime's borrow: the file panel ([crate::Ui::file_dialog]), the emoji picker
+//! ([crate::Ui::character_palette]), a context menu ([crate::Ui::context_menu]) and a new content
+//! size ([crate::Ui::set_window_size]).
 
-use objc2::DefinedClass;
-use objc2_app_kit::NSEvent;
+use objc2::{DefinedClass, MainThreadOnly};
+use objc2_app_kit::{NSApplication, NSEvent};
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 
 use super::super::app::menu::popup;
@@ -16,12 +17,19 @@ use crate::app::Event;
 use crate::scene::Point;
 
 impl View {
-  /// Shows the file panel the app asked for ([crate::Runtime::take_file_dialog]).
-  pub(super) fn apply_file_dialog(&self) {
-    let d = match self.ivars().state.try_borrow_mut().as_deref_mut() {
-      Ok(Some(st)) => st.rt.take_file_dialog(),
-      _ => None,
+  /// Shows the file panel ([crate::Runtime::take_file_dialog]) and the emoji picker
+  /// ([crate::Runtime::take_character_palette]) the app asked for. The picker works on the first
+  /// responder, this view: it opens at `firstRectForCharacterRange:` of the selection and sends
+  /// the emoji to `insertText:replacementRange:`, as typing does.
+  pub(super) fn apply_panels(&self) {
+    let (d, palette) = match self.ivars().state.try_borrow_mut().as_deref_mut() {
+      Ok(Some(st)) => (st.rt.take_file_dialog(), st.rt.take_character_palette()),
+      _ => (None, false),
     };
+
+    if palette {
+      NSApplication::sharedApplication(self.mtm()).orderFrontCharacterPalette(None);
+    }
 
     if let (Some(d), Some(window)) = (d, self.window()) {
       files::show(self, &window, d);

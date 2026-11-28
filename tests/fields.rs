@@ -1,31 +1,130 @@
 // Copyright (c) vladkens | MIT License | https://github.com/vladkens/nimbo
 
-//! Tests of `examples/fields.rs` through the harness: typing, moves by word and line, selection by
-//! Shift and the mouse (click, drag, double and triple click), the clipboard, undo and redo, Enter
-//! and Tab; an input method's composition kept out of the value until committed, a commit and a new
+//! Tests through the harness of the app below: typing, moves by word and line, selection by Shift
+//! and the mouse (click, drag, double and triple click), the clipboard, undo and redo, Enter and
+//! Tab; an input method's composition kept out of the value until committed, a commit and a new
 //! composition back to back, a value the app sets meanwhile held, Enter completing it; the
 //! password's dots, clipboard and input method; the placeholder, the disabled field, selectable
-//! text, and the caret's blink timers only while a field has focus (the first one from the
-//! start). Assistive technology reads the fields' text as shown, a composition in it, never the
-//! password's, and sets it, over a value the app set while composing. Windows' and Linux's keys
-//! (Ctrl, Insert, Home and End) and macOS's, each played on any host; the edit menu of a
-//! right-click, its items enabled as they can act, and what it runs; the menu bar's Edit items.
+//! text, and the caret's blink timers only while a field has focus (the first one from the start).
+//! Assistive technology reads the fields' text as shown, a composition in it, never the password's,
+//! and sets it, over a value the app set while composing. Windows' and Linux's keys (Ctrl, Insert,
+//! Home and End) and macOS's, each played on any host; the edit menu of a right-click, its items
+//! enabled as they can act, and what it runs; the menu bar's Edit items.
 
-#[path = "../examples/fields.rs"]
-#[expect(dead_code, reason = "its main and what this file doesn't use")]
-// The example sets the Windows subsystem, an attribute of its own crate, not of this module.
-#[cfg_attr(windows, expect(unused_attributes, reason = "its windows_subsystem"))]
-mod fields;
+mod app {
 
+  //! Text fields and selectable text: a name, an e-mail with a placeholder, a password, notes over
+  //! several lines, a disabled field and a paragraph to select and copy. Enter in a single-line
+  //! field shows what it submitted; Tab moves between the fields. Input methods compose in place
+  //! (try Pinyin or Japanese).
+
+  use nimbo::{Align, App, Axis, Size, Style, TextField, TextStyle, Ui, grow, px};
+
+  pub const SIZE: Size = Size::new(460.0, 340.0);
+
+  pub const NAME: &str = "name";
+  pub const EMAIL: &str = "email";
+  pub const PASSWORD: &str = "password";
+  pub const NOTES: &str = "notes";
+  pub const OFF: &str = "off";
+  pub const ABOUT: &str = "about";
+
+  /// The paragraph to select.
+  pub const TEXT: &str = "Selectable text takes the pointer and the keys as a field does, but \
+    only selects and copies: double-click a word, triple-click a line, Shift and the arrows.";
+
+  #[derive(Default)]
+  pub struct Fields {
+    pub name: String,
+    pub email: String,
+    pub password: String,
+    pub notes: String,
+    pub off: String,
+    /// What Enter submitted last, and from which field.
+    pub submitted: Option<(&'static str, String)>,
+    /// Fields whose text changed, in order.
+    pub changes: Vec<&'static str>,
+  }
+
+  impl Fields {
+    pub fn new() -> Self {
+      let off = "Read only".to_owned();
+      Self { off, ..Self::default() }
+    }
+  }
+
+  impl App for Fields {
+    fn view(&mut self, ui: &mut Ui) {
+      let t = ui.theme();
+      let row = Style::new().w(grow()).gap(12.0).align(Align::Start, Align::Center);
+      let label = Style::new().w(px(72.0));
+      ui.col(Style::new().grow().pad(20.0).gap(12.0).bg(t.bg()), |ui| {
+        let single: [(&'static str, &str, &'static str); 3] =
+          [(NAME, "Name", ""), (EMAIL, "E-mail", "name@example.com"), (PASSWORD, "Password", "")];
+        for (id, title, hint) in single {
+          ui.row(row, |ui| {
+            ui.row(label, |ui| ui.text(title, t.label()));
+            let text = match id {
+              NAME => &mut self.name,
+              EMAIL => &mut self.email,
+              _ => &mut self.password,
+            };
+
+            // Named by its label for assistive technology; the first field takes the focus as the
+            // window opens.
+            ui.a11y_label(title);
+            let ui = if id == NAME { ui.id(id).autofocus() } else { ui.id(id) };
+            let r = match id {
+              PASSWORD => ui.secure_field(text, "Required"),
+              _ => ui.text_field(text, hint),
+            };
+
+            if r.changed {
+              self.changes.push(id);
+            }
+
+            // A password is not shown back.
+            if r.submitted {
+              let shown = if id == PASSWORD { "•••".to_owned() } else { text.clone() };
+              self.submitted = Some((id, shown));
+            }
+          });
+        }
+
+        ui.row(row.align(Align::Start, Align::Start), |ui| {
+          ui.row(label.pads([4.0, 0.0, 0.0, 0.0]), |ui| ui.text("Notes", t.label()));
+          // A multi-line field fills the height its parent gives it.
+          ui.col(Style::new().w(grow()).h(px(84.0)), |ui| {
+            let notes = TextField::new(&mut self.notes, "A few lines").axis(Axis::Vertical);
+            if notes.show(ui.a11y_label("Notes").id(NOTES)).changed {
+              self.changes.push(NOTES);
+            }
+          });
+        });
+
+        ui.row(row, |ui| {
+          ui.row(label, |ui| ui.text("Disabled", t.label()));
+          ui.disabled(true).a11y_label("Disabled").id(OFF).text_field(&mut self.off, "");
+        });
+
+        ui.id(ABOUT).selectable_text(TEXT, TextStyle::new(t.font(), t.text()));
+        if let Some((id, text)) = &self.submitted {
+          ui.text(format_args!("Submitted {id}: {text}"), t.label().color(t.secondary()));
+        }
+      });
+    }
+  }
+}
+
+use app::*;
 #[expect(dead_code, reason = "this file uses a part of the helpers")]
 mod common;
 
 use std::time::Duration;
 
 use common::reads;
-use fields::*;
 use nimbo::a11y::Action;
-use nimbo::{Command, Event, Harness, Id, Key, Modifiers, NamedKey, Os};
+use nimbo::{Command, Event, Harness, Id, Key, Modifiers, NamedKey, Os, character_palette};
 
 const NONE: Modifiers = Modifiers::empty();
 const CTRL: Modifiers = Modifiers::CONTROL;
@@ -556,6 +655,13 @@ fn menu(h: &Harness<Fields>) -> Vec<String> {
   items.collect()
 }
 
+/// A field's edit menu as [menu] reads it: `items`, then Emoji & Symbols where the system has a
+/// character palette.
+fn field_menu(items: &[&str]) -> Vec<String> {
+  let emoji = character_palette::available().is_ok().then_some("Emoji & Symbols");
+  items.iter().copied().chain(emoji).map(String::from).collect()
+}
+
 /// Chooses the item labelled `item` in the open edit menu: Cut, Copy, Paste and Select All in a
 /// field, Copy and Select All in selectable text; the field runs it as it is built next.
 fn choose(h: &mut Harness<Fields>, item: &str) {
@@ -570,7 +676,7 @@ fn a_right_click_opens_the_edit_menu() {
   let h = &mut fields_on(Os::Windows, "hello", "moon");
   h.click_id(Id::of(EMAIL));
   right_click(h, NAME);
-  assert_eq!(menu(h), ["Cut disabled", "Copy disabled", "Paste", "Select All"]);
+  assert_eq!(menu(h), field_menu(&["Cut disabled", "Copy disabled", "Paste", "Select All"]));
   let (m, r) = (h.rect(Id::of(NAME).key("edit").key("menu")).unwrap(), h.rect(Id::of(NAME)));
   assert_eq!((m.x, m.y), (r.unwrap().x + 12.0, r.unwrap().y + 8.0), "at the pointer");
   // The ring stays on the field.
@@ -585,7 +691,7 @@ fn a_right_click_opens_the_edit_menu() {
   choose(h, "Select All");
   assert_eq!(sel(h, NAME), (0, 5));
   right_click(h, NAME);
-  assert_eq!(menu(h), ["Cut", "Copy", "Paste", "Select All"]);
+  assert_eq!(menu(h), field_menu(&["Cut", "Copy", "Paste", "Select All"]));
   choose(h, "Cut");
   assert_eq!((clipboard(h).as_deref(), h.app().name.as_str()), (Some("hello"), ""));
   assert_eq!(h.app().changes.last(), Some(&NAME));
@@ -606,7 +712,12 @@ fn a_native_edit_menu_is_asked_for_and_answered() {
   let (at, asked) = h.context_menu(Some("Copy")).expect("a menu asked for");
   assert_eq!((at.x, at.y), (r.x + 12.0, r.y + 8.0), "at the pointer");
   let items: Vec<_> = asked.items().iter().map(|i| (i.label(), i.is_enabled())).collect();
-  let want = [("Cut", true), ("Copy", true), ("Paste", true), ("", false), ("Select All", true)];
+  let mut want = vec![("Cut", true), ("Copy", true), ("Paste", true), ("", false)];
+  want.push(("Select All", true));
+  if character_palette::available().is_ok() {
+    want.extend([("", false), ("Emoji & Symbols", true)]);
+  }
+
   assert_eq!(items, want);
   assert!(matches!(asked.items()[3], nimbo::Item::Divider));
 
@@ -620,7 +731,7 @@ fn a_native_edit_menu_is_asked_for_and_answered() {
   assert!(h.menu_open(Id::of(NAME).key("edit")));
   let (_, asked) = h.context_menu(None).unwrap();
   let on = asked.items().iter().filter(|i| i.action().is_some()).map(|i| i.is_enabled());
-  let on: Vec<_> = on.collect();
+  let on: Vec<_> = on.take(4).collect();
   assert_eq!(on, [false, false, false, true], "nothing selected, nothing to paste");
   h.frame();
   assert!(!h.menu_open(Id::of(NAME).key("edit")));
@@ -661,7 +772,8 @@ fn the_edit_menus_paste_pastes() {
 
   h.clipboard().write("");
   right_click(h, NAME);
-  assert_eq!(menu(h), ["Cut disabled", "Copy disabled", "Paste disabled", "Select All"]);
+  let want = field_menu(&["Cut disabled", "Copy disabled", "Paste disabled", "Select All"]);
+  assert_eq!(menu(h), want);
 }
 
 /// A password's edit menu copies and cuts nothing, its text selected or not.

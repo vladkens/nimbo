@@ -151,10 +151,12 @@ impl Ui<'_> {
     group: Style,
     content: impl FnMut(&mut Self),
   ) {
+    // On whole points: the items' width is the last frame's, snapped to pixels, and half a
+    // point off would snap them to the other width, moving them back each frame.
     let w = self.rect(slot.key(0)).map_or(0.0, |r| r.w);
     let off = self.rect(slot).map_or(GAP, |s| {
       let centre = band.x + band.w / 2.0 - s.x - w / 2.0;
-      centre.min(s.w - w).max(GAP)
+      centre.min(s.w - w).max(GAP).round()
     });
 
     // Laid out elsewhere (the window resized), the view runs again on where it is now.
@@ -639,6 +641,43 @@ mod tests {
     h.event(Event::Scroll { pos: back, delta, precise: true, phase, momentum, mods });
     h.frame();
     assert!(h.scroll(Id::of("list")).unwrap().offset.y > 0.0);
+  }
+
+  /// A toolbar with a principal item of a width between whole points, and the view's runs.
+  struct Title(u32);
+
+  impl App for Title {
+    fn view(&mut self, ui: &mut Ui) {
+      self.0 += 1;
+      ui.toolbar(|ui| {
+        ui.toolbar_item(ToolbarItemPlacement::Principal, |ui| {
+          _ = ui.id("title").el(Style::new().w(px(47.77)).h(px(29.0)))
+        });
+      });
+    }
+  }
+
+  /// Centred on its width as the last frame snapped it, the title would move half a point and
+  /// snap to the other width, back and forth: the view ran three times every frame. Placed on
+  /// whole points, it holds still and a frame runs the view once.
+  #[test]
+  fn a_principal_item_between_whole_points_settles() {
+    for (w, scale) in [(611.0, 1.0), (612.0, 1.0), (611.0, 2.0)] {
+      let mut h = Harness::new(Title(0), Size::new(w, 400.0), scale);
+      h.set_titlebar(Some(mac_titlebar("", false)));
+      h.frame();
+      h.frame();
+      let at = h.rect(Id::of("title")).unwrap();
+      for _ in 0..3 {
+        h.app_mut().0 = 0;
+        h.redraw();
+        h.frame();
+        assert_eq!(h.app().0, 1, "{w} at {scale}: the view's runs");
+        assert_eq!(h.rect(Id::of("title")).unwrap(), at, "{w} at {scale}: still");
+      }
+
+      assert!((mid(at).x - w / 2.0).abs() <= 1.0, "{w} at {scale}: centred, {at:?}");
+    }
   }
 
   /// A 100-point header, then a column with a toolbar in it, lower in the window.

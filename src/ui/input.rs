@@ -18,7 +18,7 @@ use crate::Modifiers;
 use crate::app::{Event, MouseButton, Phase};
 use crate::keys::Os;
 use crate::scene::{Point, Rect, Size};
-use crate::ui::{Axes, CoordinateSpace};
+use crate::ui::{Axes, CoordinateSpace, UnitPoint};
 
 /// Time constant of wheel momentum: a wheel step's distance is covered exponentially, 95% of it
 /// in three of these.
@@ -79,6 +79,48 @@ pub(super) struct ScrollState {
   pub pending: Point,
   /// When `pending` last moved.
   pub t: Duration,
+  /// Where the content keeps its place ([Ui::default_scroll_anchor]), as its last build said.
+  pub anchor: Option<UnitPoint>,
+  /// Laid out once: the anchor's initial offset is behind it.
+  pub laid: bool,
+  /// The offset the last layout left, which input and the view move on from.
+  pub at: [f64; 2],
+  /// Per axis, the last layout left the offset at the content's end and nothing moved it back:
+  /// an anchor at that end keeps it there.
+  pub stuck: [bool; 2],
+}
+
+impl ScrollState {
+  /// Per axis, the fraction of the overflow the layout puts the offset at, if the anchor says:
+  /// its own before the first layout; the end while the offset is stuck there and has not
+  /// moved since, so the content can grow or shrink under it.
+  pub fn pin(&self) -> [Option<f32>; 2] {
+    let Some(a) = self.anchor else { return [None; 2] };
+    [0, 1].map(|ax| match self.laid {
+      false => Some(a.at(ax)).filter(|&f| f > 0.0),
+      true => {
+        let held = a.at(ax) >= 1.0 && self.stuck[ax] && self.offset[ax] == self.at[ax];
+        held.then_some(1.0)
+      }
+    })
+  }
+
+  /// Whether the next layout puts the vertical offset where the anchor says ([Self::pin]).
+  pub fn held(&self) -> bool {
+    self.pin()[1].is_some()
+  }
+
+  /// After a layout that left the offset at `off` of at most `max`, from `pin`: it sticks at
+  /// the end (within a pixel's snap) pinned or moved down there, not clamped there as the
+  /// content shrank under it (a lazy column's guesses replaced, which moves it back itself).
+  pub fn laid_out(&mut self, off: [f64; 2], max: [f64; 2], pin: [Option<f32>; 2]) {
+    for ax in 0..2 {
+      let (req, end) = (self.offset[ax], off[ax] >= max[ax] - 1.0);
+      self.stuck[ax] = end && (pin[ax].is_some() || req > self.at[ax]);
+    }
+
+    (self.offset, self.at, self.laid) = (off, off, true);
+  }
 }
 
 /// A key, text or command being delivered to an element in a view pass.

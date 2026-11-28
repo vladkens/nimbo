@@ -129,6 +129,18 @@ impl<A: App> Harness<A> {
     Some(asked)
   }
 
+  /// Answers the system's emoji picker the app asked for ([crate::Ui::character_palette]) as
+  /// the person would: `pick` comes to the focused field as typed text, as the OS sends it.
+  /// Whether it was asked, with a field to type into.
+  pub fn character_palette(&mut self, pick: Option<&str>) -> bool {
+    let asked = self.rt.take_character_palette();
+    if let Some(s) = pick.filter(|_| asked) {
+      self.event(Event::Text(s.into()));
+    }
+
+    asked
+  }
+
   /// Plays a platform that shows context menus itself, when `on`: they are asked for, not drawn
   /// ([crate::Ui::native_menu]), and [Harness::context_menu] answers them. Off by default: the
   /// harness draws them.

@@ -45,7 +45,7 @@ pub use self::app::{
 };
 use self::dl::{Lib, fns};
 use self::input::Input;
-pub use self::settings::{appearance, languages};
+pub use self::settings::{appearance, date_pattern, languages, today};
 use super::points;
 use crate::app::{App, Clipboard, Clock, Event, Runtime};
 use crate::clipboard::Sealed;
@@ -189,6 +189,14 @@ unsafe fn connect(obj: P, signal: &CStr, cb: Fp, flags: c_int) -> c_ulong {
 unsafe fn connect_id(obj: P, signal: &CStr, cb: Fp, flags: c_int, id: u64) -> c_ulong {
   let data = id as usize as P;
   unsafe { (gtk().g_signal_connect_data)(obj, signal.as_ptr(), cb, data, null(), flags) }
+}
+
+/// The emoji picker ([crate::character_palette]): none. GTK 3's emoji chooser belongs to its own
+/// text widgets (GtkEntry's and GtkTextView's `insert-emoji`), not to a view of an app's own;
+/// IBus's emoji typing (Ctrl+Shift+E) reaches a field through the input method as any
+/// composition does, but no call opens it.
+pub fn character_palette() -> Result<(), String> {
+  Err("GTK 3 has no emoji picker for a view of an app's own".into())
 }
 
 /// The performance cores: Intel hybrid CPUs list theirs in `/sys/devices/cpu_core/cpus`

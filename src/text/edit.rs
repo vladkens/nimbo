@@ -79,6 +79,13 @@ fn boundary(s: &str, i: usize, run: impl FnOnce() -> usize) -> bool {
     return i <= s.len();
   }
 
+  // Between two ASCII characters only `\r\n` holds together: what the rules below join is
+  // not ASCII. A long plain text is walked at this pace.
+  let (a, b) = (s.as_bytes()[i - 1], s.as_bytes()[i]);
+  if a.is_ascii() && b.is_ascii() {
+    return (a, b) != (b'\r', b'\n');
+  }
+
   if !s.is_char_boundary(i) {
     return false;
   }

@@ -145,7 +145,7 @@ pub(crate) fn look(
 }
 
 /// Button `c` in the theme's look `v` at the control size and its `role`'s tint: square for an
-/// icon alone, muted until hovered unless selected; selected, the accent's tint and label.
+/// icon alone, muted until hovered unless selected or prominent; selected, the accent's tint.
 /// Borderless buttons (toolbar ones) hover; the others where the theme hovers every control.
 pub(crate) fn themed(
   ui: &mut Ui,
@@ -172,7 +172,7 @@ pub(crate) fn themed(
     _ => ui.ctl_hot(c.id, c.hovered),
   };
 
-  let muted = c.icon_only && !c.selected;
+  let muted = c.icon_only && !c.selected && !matches!(v, Variant::Prominent);
   draw(ui, c, s, hot, muted, label);
 }
 
@@ -212,8 +212,9 @@ impl Ui<'_> {
   /// where the theme hovers controls ([crate::Theme::hover_all]): with [Ui::help] on it, an
   /// explanation longer than a line, as SwiftUI's `Image(systemName: "info.circle").help(…)`.
   /// A button by its behaviour, named "Info". A mark is there for its tip: [Ui::disabled], on it
-  /// or on a container around, leaves it enabled. In a form row's label ([crate::FormRow::new]) it
-  /// sits on the middle of the label's capitals, the line keeping its height.
+  /// or on a container around, dims it as a disabled control but leaves it enabled, its tip
+  /// showing all the same. In a form row's label ([crate::FormRow::new]) it sits on the middle of
+  /// the label's capitals, the line keeping its height.
   pub fn info_button(&mut self) -> Response {
     let t = self.theme();
     self.mark_button(Icon::INFO, [t.secondary, t.text])
@@ -222,7 +223,7 @@ impl Ui<'_> {
   /// A warning mark in the ⓘ's size and place ([Ui::info_button]): a triangle with a "!" cut out
   /// of it ([Icon::WARNING]) in the theme's warning colour ([crate::Theme::warning]), a third of
   /// the way to the label colour while held: with [Ui::help] on it, what is wrong. A button by
-  /// its behaviour, named "Warning", enabled and placed as the ⓘ.
+  /// its behaviour, named "Warning", dimmed, enabled and placed as the ⓘ.
   pub fn warning_button(&mut self) -> Response {
     let t = self.theme();
     self.mark_button(Icon::WARNING, [t.warning, mix(t.warning, t.text, 0.33)])
@@ -230,19 +231,20 @@ impl Ui<'_> {
 
   /// A mark 16 points square over the button behaviour, named by its icon ([Icon::name]): in
   /// `ink[0]`, `ink[1]` while held, halfway there under the pointer where the theme hovers
-  /// controls.
+  /// controls; dimmed where disabled.
   fn mark_button(&mut self, icon: Icon, ink: [Color; 2]) -> Response {
     let t = self.theme();
     let id = self.take_id();
-    // Enabled whatever disabled it: its tip reads all the same.
+    // Dimmed as what disabled it, but enabled: its tip reads all the same.
+    let off = !self.environment_value::<Enabled>().0;
     let b = self.environment(Enabled(true)).button_behavior(id);
     self.a11y(id, Role::Button).name_or(icon.name().unwrap_or_default());
 
     let hot = self.ctl_hot(id, b.hovered);
     let size = (t.font.size + 3.0).round();
     let k = if b.pressed { 1.0 } else { 0.5 * hot };
-    let color = self.dim(mix(ink[0], ink[1], k), b.disabled);
-    let s = self.dim_style(Style::new().w(px(size)).h(px(size)).radius(size / 2.0), b.disabled);
+    let color = self.dim(mix(ink[0], ink[1], k), off);
+    let s = Style::new().w(px(size)).h(px(size)).radius(size / 2.0);
     let paint = move |f: &mut Frame, r: Rect| icon.default_stroke(1.5).draw(f, r, color);
     let Some(&mut MarkShift(dy)) = self.slot::<MarkShift>() else {
       let mut r = self.control(&b).canvas(s, paint);
@@ -291,8 +293,8 @@ mod tests {
   use crate::scene::{Rect, Size};
   use crate::text::Font;
   use crate::ui::{
-    ButtonStyle, ControlSize, Cursor, Icon, Id, PlainButtonStyle, Response, Style, TextStyle,
-    Theme, Ui, px,
+    BorderedProminentButtonStyle, ButtonStyle, ControlSize, Cursor, Icon, Id, PlainButtonStyle,
+    Response, Style, TextStyle, Theme, Ui, px,
   };
   use crate::{Harness, Modifiers, NamedKey};
 
@@ -338,6 +340,28 @@ mod tests {
     assert_eq!(height(&mut h, None), push);
     assert_ne!(height(&mut h, Some(&PlainButtonStyle)), push);
     assert_eq!(height(&mut h, None), push, "back to the shell's");
+  }
+
+  /// A prominent button showing an ✕.
+  struct Cross;
+
+  impl App for Cross {
+    fn view(&mut self, ui: &mut Ui) {
+      ui.button_style(&BorderedProminentButtonStyle).id("b").button(Icon::X);
+    }
+  }
+
+  /// An icon alone on the accent is drawn in the accent's label colour, not muted.
+  #[test]
+  fn a_prominent_icon_takes_the_label_colour() {
+    let mut h = Harness::new(Cross, Size::new(100.0, 100.0), 2.0);
+    h.frame();
+    let r = h.rt.ui.last.rect(Id::of("b")).unwrap();
+    let t = Theme::system(h.rt.ui.appearance());
+    let img = h.render();
+    let px = img.pixel(r.x + r.w / 2.0, r.y + r.h / 2.0);
+    let on = t.on_accent.map(|v| (v * 255.0).round() as u8);
+    assert!((0..3).all(|i| px[i].abs_diff(on[i]) < 24), "{px:?}, not {on:?}");
   }
 
   /// A disabled button, its last response kept.

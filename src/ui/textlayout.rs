@@ -12,7 +12,7 @@
 use std::ops::Range;
 
 use super::layout::{Kind, Line, Tree};
-use super::{Id, Response, Style, TextStyle, Ui};
+use super::{Id, Response, Run, Style, TextStyle, Ui};
 use crate::app::{Event, Ime};
 use crate::scene::{Color, Point, Rect};
 use crate::text::edit::{Editor, Lines, range_from_utf16, range_to_utf16, to_utf16, utf16_len};
@@ -54,22 +54,25 @@ pub(crate) struct Edit {
 
 impl Ui<'_> {
   /// Text with a selection, caret and marked text ([Edit]), laid out over its whole text with
-  /// caret stops; `node` styles the element (cursor, focus, input). What text fields and
-  /// selectable text build on.
+  /// caret stops, styled by `runs` ([super::AttributedString]); `node` styles the element
+  /// (cursor, focus, input). What text fields and selectable text build on.
   pub(crate) fn edit_text(
     &mut self,
     s: &str,
     style: TextStyle,
     edit: Edit,
     node: Style,
+    runs: &[Run],
   ) -> Response {
-    let text = &mut self.st.tree.text;
-    let start = text.len() as u32;
-    text.push_str(s);
-    let range = (start, text.len() as u32);
+    let tree = &mut self.st.tree;
+    let (start, first) = (tree.text.len() as u32, tree.runs.len() as u32);
+    tree.text.push_str(s);
+    tree.runs.extend_from_slice(runs);
+    let range = (start, tree.text.len() as u32);
     let kind = Kind::Text { range, style, lines: (0, 0), baseline: 0.0, line_h: 0.0 };
     let (i, r) = self.push(kind, node, Flow::Row);
     self.st.tree.edits.push(Edit { node: i, ..edit });
+    self.st.tree.styled(i, first);
     r
   }
 
@@ -403,7 +406,7 @@ mod tests {
     ui.col(Style::new().pad(10.0).pads([20.0, 0.0, 0.0, 10.0]), |ui| {
       ui.col(Style::new().w(px(w)), |ui| {
         let edit = Edit::default();
-        ui.id("t").edit_text(s, T, edit, Style::new());
+        ui.id("t").edit_text(s, T, edit, Style::new(), &[]);
       });
     });
     ui.layout(&mut Fake, 1.0);

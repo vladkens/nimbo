@@ -125,6 +125,7 @@ const COLOR_RUNS_CURRENT: usize = 4;
 
 const STRETCH_NORMAL: u32 = 5;
 const STYLE_NORMAL: u32 = 0;
+const STYLE_ITALIC: u32 = 2;
 const NO_WRAP: u32 = 1;
 const MEASURING_NATURAL: u32 = 0;
 const RENDERING_NATURAL_SYMMETRIC: u32 = 5;
@@ -266,15 +267,16 @@ fn find_family(fonts: &Com, name: &str) -> Option<u32> {
   (hr >= 0 && found != 0).then_some(i)
 }
 
-/// The font face of `family` closest to `weight`.
-fn match_face(dw: &Dwrite, family: &str, weight: u32) -> Option<Com> {
+/// The font face of `family` closest to `weight` in `style` (DirectWrite slants the upright one
+/// where the family has no italic).
+fn match_face(dw: &Dwrite, family: &str, weight: u32, style: u32) -> Option<Com> {
   let i = find_family(&dw.fonts, family)?;
   let fam = out(|p| unsafe {
     call!(dw.fonts, COLLECTION_FAMILY, (u32, *mut *mut c_void) -> HRESULT; i, p)
   })?;
   let font = out(|p| unsafe {
     call!(fam, FAMILY_MATCH, (u32, u32, u32, *mut *mut c_void) -> HRESULT;
-      weight, STRETCH_NORMAL, STYLE_NORMAL, p)
+      weight, STRETCH_NORMAL, style, p)
   })?;
   out(|p| unsafe { call!(font, FONT_CREATE_FACE, (*mut *mut c_void) -> HRESULT; p) })
 }
@@ -381,7 +383,7 @@ fn has_table(face: &Com, tag: [u8; 4]) -> bool {
 }
 
 /// The system font (Segoe UI Variable Text, Display from 20 pt; or Cascadia Mono) at its size
-/// and weight.
+/// and weight, upright or italic.
 pub fn face(font: Font) -> Face {
   let dw = dwrite();
   let weight = match font.weight {
@@ -396,12 +398,13 @@ pub fn face(font: Font) -> Face {
     false => dw.ui[(font.size >= 20.0) as usize],
   };
 
-  let face = match_face(dw, family, weight).expect("no system font");
+  let style = if font.italic { STYLE_ITALIC } else { STYLE_NORMAL };
+  let face = match_face(dw, family, weight, style).expect("no system font");
   let (name, locale) = (wide(family), wide("en-us"));
   let format = out(|p| unsafe {
     call!(dw.factory, FACTORY_TEXT_FORMAT,
       (*const u16, *mut c_void, u32, u32, u32, f32, *const u16, *mut *mut c_void) -> HRESULT;
-      name.as_ptr(), dw.fonts.ptr(), weight, STYLE_NORMAL, STRETCH_NORMAL, font.size,
+      name.as_ptr(), dw.fonts.ptr(), weight, style, STRETCH_NORMAL, font.size,
       locale.as_ptr(), p)
   })
   .expect("text format");

@@ -8,6 +8,7 @@
 //! behaviours, the environment.
 
 pub(crate) mod a11y;
+mod attributed;
 pub(crate) mod behavior;
 pub(crate) mod containers;
 pub(crate) mod dialog;
@@ -29,22 +30,25 @@ pub(crate) mod theme;
 pub(crate) mod widgets;
 
 use std::any::Any;
-use std::fmt::{Display, Write};
 use std::hash::Hash;
 use std::num::NonZeroU8;
 use std::time::Duration;
 
 pub use a11y::{Action, Role, State, Value};
+pub(crate) use attributed::Run;
+pub use attributed::{AttributedString, Attributes, IntoText, Selectable};
 pub(crate) use behavior::DrawnEditMenu;
 pub use behavior::{
-  Behavior, Button, ButtonConfiguration, ButtonStyle, Content, DialogBehavior, EditMenu, Editing,
-  FieldBehavior, FieldKind, FieldStyle, HelpConfiguration, HelpStyle, InlinePickerStyle, List,
-  ListBehavior, ListConfiguration, ListLayout, ListResponse, ListRowConfiguration, ListRows,
-  ListStyle, MenuPlacement, Picker, PickerConfiguration, PickerStyle, PlainButtonStyle,
-  PlainHelpStyle, PlainListStyle, PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle, Row,
-  ScrollBar, ScrollBehavior, ScrollerKnob, SectionHeader, Selection, Slider, SliderConfiguration,
-  SliderStyle, SplitBehavior, Tag, TextField, TextFieldConfiguration, TextFieldStyle,
-  ToggleConfiguration, ToggleStyle, TypeSelect,
+  Behavior, Button, ButtonConfiguration, ButtonStyle, Content, ContentMarginPlacement, DatePicker,
+  DatePickerBehavior, DatePickerConfiguration, DatePickerStyle, DateSegment, DialogBehavior,
+  EditMenu, Editing, FieldBehavior, FieldKind, FieldStyle, HelpConfiguration, HelpStyle,
+  InlinePickerStyle, List, ListBehavior, ListConfiguration, ListLayout, ListResponse,
+  ListRowConfiguration, ListRows, ListStyle, MenuPlacement, Picker, PickerConfiguration,
+  PickerStyle, PlainButtonStyle, PlainDatePickerStyle, PlainHelpStyle, PlainListStyle,
+  PlainSliderStyle, PlainTextFieldStyle, PlainToggleStyle, Row, ScrollBar, ScrollBehavior,
+  ScrollerKnob, SectionHeader, Selection, Slider, SliderConfiguration, SliderStyle, SplitBehavior,
+  Tag, TextField, TextFieldConfiguration, TextFieldStyle, ToggleConfiguration, ToggleStyle,
+  TypeSelect,
 };
 pub use containers::{
   InsetGroupedListStyle, InsetListStyle, MenuPickerStyle, Split, Tabs, ToolbarItemPlacement,
@@ -71,8 +75,8 @@ pub(crate) use textlayout::TextLayout;
 pub use theme::{ControlBorder, Sizes, SwitchSize, Theme, Tone};
 pub use widgets::{
   BorderedButtonStyle, BorderedProminentButtonStyle, BorderlessButtonStyle, ButtonToggleStyle,
-  CheckboxToggleStyle, LinearSliderStyle, RoundedBorderTextFieldStyle, SegmentedPickerStyle,
-  SwitchToggleStyle, TooltipHelpStyle,
+  CheckboxToggleStyle, FieldDatePickerStyle, LinearSliderStyle, RoundedBorderTextFieldStyle,
+  SegmentedPickerStyle, StepperFieldDatePickerStyle, SwitchToggleStyle, TooltipHelpStyle,
 };
 
 use self::input::{Deliver, Input, ScrollState};
@@ -81,7 +85,7 @@ use crate::app::{Appearance, Clipboard, ColorScheme, Event, MouseButton, Waker};
 use crate::keys::{Binding, Os};
 use crate::scene::{Frame, ImageId, Images, Point, Rect, Size};
 use crate::text::{Font, Metrics, TextSystem};
-use crate::{FileDialog, TitleBar, WindowToolbarStyle};
+use crate::{FileDialog, TitleBar, WindowToolbarStyle, character_palette};
 
 /// Which way focus moves among the focusable elements ([Ui::focus_next]): Tab and Shift-Tab,
 /// as SwiftUI's `FocusDirection`.
@@ -148,6 +152,9 @@ pub(crate) struct UiState {
   asked: Option<Size>,
   /// The file panel asked for ([Ui::file_dialog]), until the platform takes it.
   pub(crate) file_dialog: Option<crate::FileDialog>,
+  /// The system's emoji picker was asked for ([Ui::character_palette]), until the platform
+  /// takes it.
+  pub(crate) palette: bool,
   /// The platform shows context menus ([crate::Runtime::set_native_menus]); the one asked for
   /// ([Ui::native_menu]) until it takes it; the press that opened one last.
   pub(crate) native_menus: bool,
@@ -220,6 +227,7 @@ impl Default for UiState {
       resize: None,
       asked: None,
       file_dialog: None,
+      palette: false,
       native_menus: false,
       context_menu: None,
       menu_seq: 0,
@@ -618,8 +626,7 @@ impl<'a> Ui<'a> {
 
   /// The size of `s` in `style` wrapped at `width`, as the layout breaks and lays it out: its
   /// widest line, to fit a box to its wrapped text (a tooltip), as the layout sizes one by the
-  /// text's width before it wraps; and its lines' height, for items of known heights
-  /// ([Ui::virtual_col]) that are paragraphs. Zero in a [Ui] the runtime didn't build.
+  /// text's width before it wraps; and its lines' height. Zero in a [Ui] the runtime didn't build.
   pub fn measure_wrapped(&mut self, s: &str, style: TextStyle, width: f32) -> Size {
     let Some(text) = self.text.as_mut() else { return Size::default() };
     let mut m = Sys { text, images: &self.images, scale: 1.0 };
@@ -919,16 +926,18 @@ impl<'a> Ui<'a> {
   }
 
   /// Text, measured and wrapped by the layout. Takes anything `Display`, so
-  /// `format_args!("{n}")` formats straight into the frame's text buffer. Returns nothing, so it
-  /// fits `match` arms beside other statements; named text (`ui.id("x").text(..)`) still takes
-  /// the pointer: read it with [Ui::clicked] and the like.
-  pub fn text(&mut self, s: impl Display, style: TextStyle) {
-    let text = &mut self.st.tree.text;
-    let start = text.len() as u32;
-    let _ = write!(text, "{s}");
-    let range = (start, text.len() as u32);
+  /// `format_args!("{n}")` formats straight into the frame's text buffer, or an
+  /// [AttributedString] (`&code`), its runs styled over `style`. Returns nothing, so it fits
+  /// `match` arms beside other statements; named text (`ui.id("x").text(..)`) still takes the
+  /// pointer: read it with [Ui::clicked] and the like.
+  pub fn text(&mut self, s: impl IntoText, style: TextStyle) {
+    let tree = &mut self.st.tree;
+    let (start, runs) = (tree.text.len() as u32, tree.runs.len() as u32);
+    s.write(attributed::Sink { text: &mut tree.text, runs: &mut tree.runs });
+    let range = (start, tree.text.len() as u32);
     let kind = Kind::Text { range, style, lines: (0, 0), baseline: 0.0, line_h: 0.0 };
-    self.push(kind, Style::new(), Flow::Row);
+    let i = self.push(kind, Style::new(), Flow::Row).0;
+    self.st.tree.styled(i, runs);
   }
 
   /// A box whose `paint` draws into the frame within its laid-out rect (a plot). It draws in
@@ -1146,6 +1155,15 @@ impl<'a> Ui<'a> {
     self.st.file_dialog = Some(dialog);
   }
 
+  /// Shows the system's emoji picker for the focused text field once this frame is built, from
+  /// the person's click, never by itself: an emoji button beside the field, which leaves the
+  /// focus on it (a button takes focus by Tab only). Nothing where the OS has none
+  /// ([crate::character_palette::available]) or no editable field (a password takes no emoji)
+  /// has focus.
+  pub fn character_palette(&mut self) {
+    self.st.palette = character_palette::available().is_ok();
+  }
+
   // MARK: Frame
 
   /// Lays the tree out for the window, rects snapped to pixels at `scale`, with scroll
@@ -1155,7 +1173,11 @@ impl<'a> Ui<'a> {
     let UiState { tree, store, kept, .. } = &mut self.st;
     for &i in &tree.scrolls {
       let n = &mut tree.nodes[i as usize];
-      n.scroll = store.peek::<ScrollState>(n.id).map_or([0.0; 2], |s| s.offset);
+      let s = store.peek::<ScrollState>(n.id);
+      n.scroll = s.map_or([0.0; 2], |s| s.offset);
+      if let Some(pin) = s.map(ScrollState::pin).filter(|p| p.iter().any(Option::is_some)) {
+        tree.pins.push((i, pin));
+      }
     }
 
     let fit_h = layout::layout(tree, self.size, scale, m, kept);
@@ -1168,7 +1190,8 @@ impl<'a> Ui<'a> {
         ((off + f64::from(pend)).clamp(0.0, max[ax]) - off) as f32
       };
       let (x, y) = (to(0, s.pending.x), to(1, s.pending.y));
-      (s.offset, s.pending) = (n.scroll, Point::new(x, y));
+      s.pending = Point::new(x, y);
+      s.laid_out(n.scroll, max, tree.pin(i));
     }
 
     if let Some([w, lo, hi]) = self.fit {

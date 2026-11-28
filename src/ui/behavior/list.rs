@@ -9,13 +9,14 @@ use std::collections::HashSet;
 use std::fmt;
 use std::hash::BuildHasherDefault;
 use std::ops::Range;
+use std::time::Duration;
 
 use crate::Modifiers;
 use crate::app::MouseButton;
 use crate::keys::{Binding, CMD, Command, Delete, Extent, Move, Os, Shortcut};
 use crate::scene::{Point, Rect};
 use crate::text::FxHasher;
-use crate::ui::input::ScrollState;
+use crate::ui::input::{Scroll, ScrollState};
 use crate::ui::{Enabled, Focus, Id, Role, State, Style, Ui, px};
 
 /// Rows built past each edge of the viewport.
@@ -221,6 +222,12 @@ impl<'s> ListRows<'s> {
     k as f32 * self.head_h + k.saturating_sub(top) as f32 * self.gap
   }
 
+  /// Whether depth `y` is on a section's header, the spacing above it included.
+  fn on_header(&self, y: f32) -> bool {
+    let g = self.starts.partition_point(|&s| self.top(s) <= y);
+    g > 0 && y < self.starts[g - 1] as f32 * self.h + self.above(g)
+  }
+
   /// The row at depth `y`, or under the header there, clamped to the rows.
   fn at(&self, y: f32) -> usize {
     let g = self.starts.partition_point(|&s| self.top(s) <= y);
@@ -294,6 +301,11 @@ impl<'s> ListBehavior<'s> {
     self.sel
   }
 
+  /// Row `i`'s key.
+  pub(super) fn key(&self, i: usize) -> u64 {
+    (self.key.0)(i)
+  }
+
   /// The list's box: takes focus by a press, with no ring of its own (its selection shows it);
   /// disabled, none.
   pub const fn style(&self, s: Style) -> Style {
@@ -333,7 +345,7 @@ impl<'a> Ui<'a> {
     }
 
     if !disabled {
-      self.list_press(id, &mut st, sel, &mut out, rows.n, multi, key);
+      self.list_press(id, &mut st, sel, &mut out, rows, multi, key);
     }
 
     // Scroll a row into view, by the last frame's viewport; the first and the last with the
@@ -362,6 +374,12 @@ impl<'a> Ui<'a> {
     self.a11y(id, Role::List).state(State::Disabled, disabled).active(active);
     *self.state::<ListState>(id) = st;
     let Events { changed, pressed, activated, delete } = out;
+    // What the view built before the list from the selection shows the change in the next
+    // frame, at once rather than at the next input.
+    if changed {
+      self.request_frame_in(Duration::ZERO);
+    }
+
     let key = RowKeys(key);
     ListBehavior { id, disabled, focused, changed, pressed, activated, delete, rows, sel, key }
   }
@@ -539,10 +557,11 @@ impl<'a> Ui<'a> {
     st: &mut ListState,
     sel: &mut Selection,
     out: &mut Events,
-    n: usize,
+    rows: ListRows,
     multi: bool,
     key: &dyn Fn(usize) -> u64,
   ) {
+    let n = rows.n;
     // The secondary button's press, on Windows its release (a Control-click is the Mac's).
     let win = self.st.os == Os::Windows;
     let press = self
@@ -552,15 +571,17 @@ impl<'a> Ui<'a> {
     let both = |b| matches!(b, MouseButton::Left | MouseButton::Right);
     let click = self.st.input.click.filter(|c| both(c.button));
     let hit = match (press, click) {
-      (Some(p), _) if st.pressed != Some(p.seq) => Some((p.id, p.mods, p.clicks, p.button, p.seq)),
+      (Some(p), _) if st.pressed != Some(p.seq) => {
+        Some((p.id, p.mods, p.clicks, p.button, p.seq, p.pos))
+      }
       (None, Some(c)) if st.pressed != Some(c.seq) => {
-        Some((c.id, c.mods, c.clicks, c.button, c.seq))
+        Some((c.id, c.mods, c.clicks, c.button, c.seq, c.pos))
       }
       _ => None,
     };
 
     st.pressed = press.map(|p| p.seq).or(click.map(|c| c.seq)).or(st.pressed);
-    let Some((on, mods, clicks, button, seq)) = hit else { return };
+    let Some((on, mods, clicks, button, seq, pos)) = hit else { return };
     let right = button == MouseButton::Right;
     // Its index as built, a hint that saves a scan unless the rows moved since; a press on an
     // element in a row is the row's (text with a tooltip), unless that element is a control
@@ -596,9 +617,12 @@ impl<'a> Ui<'a> {
         self.st.menu_seq = seq;
       }
 
-      // A plain press on its ground clears the selection, as a table view's on macOS.
+      // A plain press on its ground clears the selection, as a table view's on macOS; one on a
+      // section's header keeps it, as a source list's group row does (Finder's sidebar).
       let plain = !mods.contains(CMD) && !mods.shift();
-      if !right && plain && !sel.is_empty() && self.list_ground(on, id) {
+      let depth = |s: Scroll| pos.y - s.viewport.y + s.offset.y - rows.pad[0];
+      let head = self.scroll(id).is_some_and(|s| rows.on_header(depth(s)));
+      if !right && plain && !head && !sel.is_empty() && self.list_ground(on, id) {
         sel.clear();
         out.changed = true;
       }
@@ -733,6 +757,12 @@ mod tests {
       assert_eq!(sp.at(y), i, "at {y}");
     }
 
+    let heads =
+      [(0.0, true), (4.9, true), (5.0, false), (34.9, false), (35.0, true), (40.0, false)];
+    for (y, on) in heads {
+      assert_eq!(sp.on_header(y), on, "on a header at {y}");
+    }
+
     // Rows before the first section have no header; with none, rows only.
     let sp = ListRows { starts: &[2], ..sp };
     assert_eq!((sp.top(2), sp.top(3), sp.at(26.0)), (20.0, 35.0, 2));
@@ -742,6 +772,8 @@ mod tests {
     let sp = ListRows { starts: &[0, 3], gap: 20.0, ..sp };
     assert_eq!((sp.top(1), sp.top(3), sp.top(4), sp.top(6)), (15.0, 35.0, 70.0, 90.0));
     assert_eq!((sp.at(50.0), sp.at(64.0), sp.at(75.0)), (3, 3, 4));
+    // The gap above a header is the header's.
+    assert_eq!((sp.on_header(34.9), sp.on_header(36.0), sp.on_header(60.0)), (false, true, false));
     let sp = ListRows { starts: &[2], ..sp };
     assert_eq!((sp.top(2), sp.top(3), sp.at(30.0)), (20.0, 55.0, 2));
   }

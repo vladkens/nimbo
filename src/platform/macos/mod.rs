@@ -4,7 +4,8 @@
 //! window's content our NSView ([view]: input, cursors, timers, occlusion, present through
 //! [surface]; its display link in [link]) and its nodes for assistive clients ([a11y]), the
 //! keyboard layout ([keyboard]), overlay panels ([overlay]), the clipboard on NSPasteboard, the
-//! CoreText text backend ([text]) and the performance cores and the preferred languages; the tray,
+//! CoreText text backend ([text]), the performance cores, the preferred languages, the short date's
+//! pattern and today's date; the tray,
 //! global hotkeys and launch at login in [app]. macOS 11 or later, with the newer APIs behind
 //! run-time checks.
 
@@ -35,7 +36,7 @@ use objc2_app_kit::{
   NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSApplication, NSColor, NSColorSpace,
   NSPasteboard, NSPasteboardTypeString,
 };
-use objc2_foundation::{NSArray, NSLocale, NSString, NSUserDefaults, ns_string};
+use objc2_foundation::{NSArray, NSDateFormatter, NSLocale, NSString, NSUserDefaults, ns_string};
 
 pub use self::app::{
   activity, autostart, desktop, focus, hardware, hotkey, input_source, open, paste, permissions,
@@ -132,11 +133,52 @@ pub fn appearance() -> Appearance {
   Appearance { scheme: ColorScheme::of(dark), accent: accent.get() }
 }
 
+/// The emoji picker ([crate::character_palette]): `orderFrontCharacterPalette:`, in AppKit since
+/// 10.3, opened by the view ([view]).
+pub fn character_palette() -> Result<(), String> {
+  Ok(())
+}
+
 /// The user's preferred languages, the most preferred first, as tags (`ru-RU`):
 /// `NSLocale.preferredLanguages`, the app's own language from System Settings (its
 /// `AppleLanguages` default) first.
 pub fn languages() -> Vec<String> {
   NSLocale::preferredLanguages().iter().map(|s| s.to_string()).collect()
+}
+
+/// The user's short date as a pattern of Unicode's date symbols (`d.M.y`, `M/d/y`): the format
+/// `NSDateFormatter` makes of the template `yMd` for the current locale (macOS 10.6), which follows
+/// the region and the date format of System Settings › General › Language & Region.
+pub fn date_pattern() -> Option<String> {
+  let locale = NSLocale::currentLocale();
+  let f =
+    NSDateFormatter::dateFormatFromTemplate_options_locale(ns_string!("yMd"), 0, Some(&locale));
+  f.map(|s| s.to_string())
+}
+
+/// Today in the user's time zone as (year, month, day): libSystem's `localtime_r`.
+pub fn today() -> (u32, u32, u32) {
+  use std::ffi::{c_char, c_int, c_long};
+
+  /// <time.h>'s `struct tm`.
+  #[repr(C)]
+  struct Tm {
+    sec_to_isdst: [c_int; 9],
+    gmtoff: c_long,
+    zone: *const c_char,
+  }
+
+  unsafe extern "C" {
+    fn time(t: *mut i64) -> i64;
+    fn localtime_r(t: *const i64, tm: *mut Tm) -> *mut Tm;
+  }
+
+  let mut tm = Tm { sec_to_isdst: [0; 9], gmtoff: 0, zone: std::ptr::null() };
+  // SAFETY: a null for `time`'s output, and a `struct tm` to fill.
+  let now = unsafe { time(std::ptr::null_mut()) };
+  unsafe { localtime_r(&now, &mut tm) };
+  let [_, _, _, day, month, year, ..] = tm.sec_to_isdst;
+  ((year + 1900) as u32, (month + 1) as u32, day as u32)
 }
 
 /// The performance cores of an Apple Silicon Mac (`hw.perflevel0.physicalcpu`); `None` on macOS
