@@ -3,7 +3,8 @@
 //! Where the user types on Linux ([crate::focus]): on X11 the window manager's
 //! `_NET_ACTIVE_WINDOW` and its `_NET_WM_PID` (EWMH, `libX11` loaded at run time), the name from
 //! `/proc`; Wayland shows no app another's windows, nor does an X server under it (XWayland sees
-//! only X clients): there is none.
+//! only X clients): there is none, but where the compositor tells its windows ([super::toplevel]:
+//! wlroots', Hyprland).
 
 use std::ffi::{CStr, c_ulong};
 use std::ptr::{null, null_mut};
@@ -12,18 +13,22 @@ use super::super::P;
 use super::{X11, trap, x11};
 use crate::focus::{self, Focused};
 
-/// An X window's id.
+/// An X window's id, or the number [super::toplevel] gave a Wayland window.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Window(c_ulong);
+pub struct Window(pub(super) c_ulong);
 
-/// Wayland: no app sees where the user types in another.
+/// Wayland, unless the compositor tells its windows ([super::toplevel]).
 pub fn hidden() -> bool {
+  wayland() && !super::toplevel::known()
+}
+
+fn wayland() -> bool {
   std::env::var_os("WAYLAND_DISPLAY").is_some()
 }
 
 pub fn current() -> Option<Focused> {
-  if hidden() {
-    return None;
+  if wayland() {
+    return super::toplevel::current();
   }
 
   let x = x11()?;

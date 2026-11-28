@@ -778,7 +778,7 @@ PLACES = {
                 "linux",
                 "activity autostart datactl desktop focus grab hardware hotkey input_source instance",
             ),
-            ("linux", "open paste post remote uninstall vkbd wl write"),
+            ("linux", "open paste post remote toplevel uninstall vkbd wl write"),
             ("macos", "activity autostart desktop focus hardware hotkey hotkey/carbon"),
             ("macos", "input_source open paste permissions post uninstall"),
             ("windows", "activity autostart desktop focus hardware hotkey input_source instance"),

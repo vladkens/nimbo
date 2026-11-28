@@ -26,6 +26,7 @@ pub mod paste;
 pub mod post;
 mod remote;
 pub mod shell;
+mod toplevel;
 pub mod tray;
 pub mod uninstall;
 mod vkbd;
