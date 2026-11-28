@@ -387,7 +387,11 @@ impl<'s> List<'s> {
     let (frame, row) = (self.style.unwrap_or(layout.frame), self.row.unwrap_or(layout.row));
     let (starts, head_h, head) = self.sections.unwrap_or((&[], 0.0, &|_, _| {}));
     let rows = ListRows::new(n, h).sections(starts, head_h);
-    let rows = rows.section_spacing(layout.section_spacing).padding(frame.pad[0], frame.pad[2]);
+
+    // The rows under the scroll area's own padding and its content margins.
+    let m = ui.next_content_margins();
+    let rows = rows.section_spacing(layout.section_spacing);
+    let rows = rows.padding(frame.pad[0] + m[0], frame.pad[2] + m[2]);
     let keyf = self.key;
     let key = move |i: usize| keyf.map_or(i as u64, |k| k(i));
     let mut own = None;
